@@ -36,9 +36,10 @@ describe('right panel tab content', () => {
 
   test('renders a pane-shaped loading fallback', () => {
     const html = renderToStaticMarkup(React.createElement(RightPanelPaneLoadingFallback, { tab: 'files' }));
-    expect(html).toContain('Loading files...');
+    expect(html).toContain('Loading files…');
     expect(html).toContain('bg-[var(--panel-alt)]');
-    expect(html).toContain('border-[var(--border-subtle)]');
+    expect(html).toContain('animate-spin');
+    expect(html).toContain('role="status"');
   });
 
   test('uses the standard pane timeout message', () => {

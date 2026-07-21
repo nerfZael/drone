@@ -11,6 +11,25 @@ const WORKSPACE_EXEC_COMMAND_MAX_BYTES = 128 * 1024;
 const WORKSPACE_EXEC_OUTPUT_MAX_BYTES = 4 * 1024 * 1024;
 const WORKSPACE_EXEC_MAX_TIMEOUT_MS = 10 * 60 * 1000;
 const WORKSPACE_BATCH_MAX_OPERATIONS = 500;
+const WORKSPACE_GIT_HASH_MAX_PATHS = 5_000;
+const WORKSPACE_GIT_HASH_CACHE_MAX_ENTRIES = 20_000;
+
+type WorkspaceGitHashCacheEntry = {
+  fingerprint: string;
+  hash: string;
+};
+
+const workspaceGitHashCache = new Map<string, WorkspaceGitHashCacheEntry>();
+
+function rememberWorkspaceGitHash(filePath: string, entry: WorkspaceGitHashCacheEntry): void {
+  workspaceGitHashCache.delete(filePath);
+  workspaceGitHashCache.set(filePath, entry);
+  while (workspaceGitHashCache.size > WORKSPACE_GIT_HASH_CACHE_MAX_ENTRIES) {
+    const oldestPath = workspaceGitHashCache.keys().next().value;
+    if (typeof oldestPath !== 'string') break;
+    workspaceGitHashCache.delete(oldestPath);
+  }
+}
 
 export class DaemonHttpError extends Error {
   readonly statusCode: number;
@@ -321,6 +340,146 @@ async function runWorkspaceCommand(body: any): Promise<any> {
   });
 }
 
+function pathInsideRoot(root: string, relativePath: string): string {
+  if (!relativePath || relativePath.includes('\0') || path.isAbsolute(relativePath)) {
+    throw new DaemonHttpError(400, 'Git hash paths must be non-empty relative paths');
+  }
+  const resolved = path.resolve(root, relativePath);
+  const rootWithSeparator = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+  if (resolved !== root && !resolved.startsWith(rootWithSeparator)) {
+    throw new DaemonHttpError(400, `Git hash path leaves repository: ${relativePath}`);
+  }
+  return resolved;
+}
+
+function gitHashPathChunks(repoRoot: string, relativePaths: string[]): string[][] {
+  const fixedArgs = ['-C', repoRoot, 'hash-object', '--no-filters', '--'];
+  const fixedBytes =
+    Buffer.byteLength('git', 'utf8') +
+    fixedArgs.reduce((total, value) => total + Buffer.byteLength(value, 'utf8'), 0);
+  const chunks: string[][] = [];
+  let chunk: string[] = [];
+  let chunkBytes = fixedBytes;
+
+  for (const relativePath of relativePaths) {
+    const pathBytes = Buffer.byteLength(relativePath, 'utf8');
+    if (fixedBytes + pathBytes > WORKSPACE_EXEC_COMMAND_MAX_BYTES) {
+      throw new DaemonHttpError(413, `Git hash path is too long: ${relativePath}`);
+    }
+    if (
+      chunk.length > 0 &&
+      (chunk.length >= 400 || chunkBytes + pathBytes > WORKSPACE_EXEC_COMMAND_MAX_BYTES)
+    ) {
+      chunks.push(chunk);
+      chunk = [];
+      chunkBytes = fixedBytes;
+    }
+    chunk.push(relativePath);
+    chunkBytes += pathBytes;
+  }
+  if (chunk.length > 0) chunks.push(chunk);
+  return chunks;
+}
+
+async function hashWorkspaceGitFiles(body: any): Promise<{
+  hashes: Array<{ path: string; hash: string }>;
+  cacheHits: number;
+  hashed: number;
+  durationMs: number;
+}> {
+  const startedAt = performance.now();
+  const repoRoot = requiredAbsolutePath(body?.repoRoot, 'repoRoot');
+  const rawPaths: unknown[] = Array.isArray(body?.paths) ? body.paths : [];
+  if (rawPaths.length > WORKSPACE_GIT_HASH_MAX_PATHS) {
+    throw new DaemonHttpError(413, `too many Git hash paths (max ${WORKSPACE_GIT_HASH_MAX_PATHS})`);
+  }
+  if (!rawPaths.every((value) => typeof value === 'string')) {
+    throw new DaemonHttpError(400, 'Git hash paths must be strings');
+  }
+  const stringPaths = rawPaths as string[];
+  const relativePaths: string[] = Array.from(
+    new Set(stringPaths.map((value) => value.trim())),
+  );
+  const states = new Map<string, { absolutePath: string; fingerprint: string }>();
+  for (let offset = 0; offset < relativePaths.length; offset += 200) {
+    const chunk = relativePaths.slice(offset, offset + 200);
+    const chunkStates = await Promise.all(
+      chunk.map(async (relativePath) => {
+        const absolutePath = pathInsideRoot(repoRoot, relativePath);
+        try {
+          const stat = await fs.stat(absolutePath, { bigint: true });
+          if (!stat.isFile()) return null;
+          return {
+            relativePath,
+            absolutePath,
+            fingerprint: `${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.ino}`,
+          };
+        } catch (error: any) {
+          const code = String(error?.code ?? '');
+          if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+          throw error;
+        }
+      }),
+    );
+    for (const state of chunkStates) {
+      if (state) states.set(state.relativePath, state);
+    }
+  }
+
+  const hashes = new Map<string, string>();
+  const misses: string[] = [];
+  let cacheHits = 0;
+  for (const relativePath of relativePaths) {
+    const state = states.get(relativePath);
+    if (!state) continue;
+    const cached = workspaceGitHashCache.get(state.absolutePath);
+    if (cached?.fingerprint === state.fingerprint) {
+      hashes.set(relativePath, cached.hash);
+      rememberWorkspaceGitHash(state.absolutePath, cached);
+      cacheHits += 1;
+    } else {
+      misses.push(relativePath);
+    }
+  }
+
+  for (const chunk of gitHashPathChunks(repoRoot, misses)) {
+    const result = await runWorkspaceCommand({
+      cmd: 'git',
+      args: ['-C', repoRoot, 'hash-object', '--no-filters', '--', ...chunk],
+      timeoutMs: 30_000,
+      maxOutputBytes: WORKSPACE_EXEC_OUTPUT_MAX_BYTES,
+    });
+    if (result.code !== 0 || result.stdoutTruncated || result.stderrTruncated) {
+      throw new DaemonHttpError(
+        500,
+        String(result.stderr || result.stdout || 'git hash-object failed').trim(),
+      );
+    }
+    const outputHashes = String(result.stdout ?? '')
+      .trim()
+      .split(/\r?\n/);
+    chunk.forEach((relativePath, index) => {
+      const hash = String(outputHashes[index] ?? '')
+        .trim()
+        .toLowerCase();
+      const state = states.get(relativePath);
+      if (!state || !/^[0-9a-f]{40}$/.test(hash)) return;
+      hashes.set(relativePath, hash);
+      rememberWorkspaceGitHash(state.absolutePath, { fingerprint: state.fingerprint, hash });
+    });
+  }
+
+  return {
+    hashes: relativePaths.flatMap((relativePath) => {
+      const hash = hashes.get(relativePath);
+      return hash ? [{ path: relativePath, hash }] : [];
+    }),
+    cacheHits,
+    hashed: misses.length,
+    durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+  };
+}
+
 async function applyWorkspaceBatch(body: any): Promise<{ applied: number }> {
   const operations = Array.isArray(body?.operations) ? body.operations : [];
   if (operations.length === 0) throw new DaemonHttpError(400, 'missing operations');
@@ -487,6 +646,11 @@ export async function handleDaemonWorkspaceRequest(input: {
 
   if (pathname === '/v1/workspace/exec' && method === 'POST') {
     sendJson(res, 200, { ok: true, ...(await runWorkspaceCommand(await readLimitedJson(req))) });
+    return true;
+  }
+
+  if (pathname === '/v1/workspace/git/hashes' && method === 'POST') {
+    sendJson(res, 200, { ok: true, ...(await hashWorkspaceGitFiles(await readLimitedJson(req))) });
     return true;
   }
 

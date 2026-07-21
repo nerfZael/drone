@@ -3,6 +3,29 @@ export type DroneClient = {
   token: string;
 };
 
+export type DroneDaemonConnection = {
+  hostPort?: number | null;
+  token?: string | null;
+};
+
+export class DroneDaemonUnavailableError extends Error {
+  readonly code = 'daemon_unavailable';
+
+  constructor(message = 'container drone daemon is unavailable') {
+    super(message);
+    this.name = 'DroneDaemonUnavailableError';
+  }
+}
+
+export function daemonClientForDrone(drone: DroneDaemonConnection): DroneClient {
+  const hostPort = Number(drone?.hostPort);
+  const token = String(drone?.token ?? '').trim();
+  if (!Number.isFinite(hostPort) || hostPort <= 0 || !token) {
+    throw new DroneDaemonUnavailableError();
+  }
+  return { baseUrl: `http://127.0.0.1:${Math.floor(hostPort)}`, token };
+}
+
 export class DroneApiRequestError extends Error {
   readonly statusCode: number;
 
@@ -224,6 +247,28 @@ export async function workspaceExec(
       body: JSON.stringify(input),
       contentType: 'application/json',
       timeoutMs,
+    },
+    async (response) => (await response.json()) as any,
+  );
+}
+
+export async function workspaceGitHashes(
+  client: DroneClient,
+  input: { repoRoot: string; paths: string[] },
+): Promise<{
+  hashes: Array<{ path: string; hash: string }>;
+  cacheHits: number;
+  hashed: number;
+  durationMs: number;
+}> {
+  return await consumeResponse(
+    client,
+    'POST',
+    '/v1/workspace/git/hashes',
+    {
+      body: JSON.stringify(input),
+      contentType: 'application/json',
+      timeoutMs: 35_000,
     },
     async (response) => (await response.json()) as any,
   );

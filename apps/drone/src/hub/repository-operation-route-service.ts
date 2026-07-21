@@ -97,6 +97,8 @@ function createRepositoryOperationServiceHandler(
     resolveDroneOrRespond,
     resolveLanguageDefinition,
     resolveLanguageReferences,
+    createDroneDaemonGitRunner,
+    createDroneDaemonWorktreeHasher,
     runGitInDrone,
     runGitInDroneOrThrow,
     runHostCommand,
@@ -106,8 +108,51 @@ function createRepositoryOperationServiceHandler(
     updateHostRef,
     withLockedDroneContainer,
     withLockedDroneContainers,
-    withReadonlyDroneContainer,
   } = deps;
+  const containerNameForDrone = (drone: any, fallback: string) =>
+    String(drone?.containerName ?? drone?.name ?? fallback).trim() || fallback;
+  const daemonError = (error: any) =>
+    error?.code === 'daemon_unavailable'
+      ? {
+          status: 503,
+          error: 'Drone daemon is unavailable. Check that the drone is running and try again.',
+          code: 'daemon_unavailable',
+        }
+      : null;
+  const repositoryReadFailure = (error: any, runtime: 'host' | 'container') => {
+    const daemonFailure = runtime === 'host' ? null : daemonError(error);
+    const message = error?.message ?? String(error);
+    const missingContainer = looksLikeMissingContainerError(message);
+    const repoUnavailable = looksLikeRepoUnavailableError(message);
+    const rawStatus = Number(error?.statusCode);
+    const explicitStatus =
+      Number.isFinite(rawStatus) && rawStatus >= 400 && rawStatus <= 599
+        ? Math.floor(rawStatus)
+        : null;
+    const status =
+      daemonFailure?.status ??
+      explicitStatus ??
+      (runtime === 'host'
+        ? repoUnavailable
+          ? 409
+          : 500
+        : missingContainer
+          ? 404
+          : repoUnavailable
+            ? 409
+            : 500);
+    return {
+      status,
+      response: {
+        error: daemonFailure?.error ?? (repoUnavailable ? 'repository is not ready yet' : message),
+        ...(daemonFailure
+          ? { code: daemonFailure.code }
+          : repoUnavailable
+            ? { code: 'repo_unavailable' }
+            : {}),
+      },
+    };
+  };
   return async ({ req, res, url: u, method, parts }) => {
     const handled = await (async (): Promise<false | void> => {
       // GET /api/drones/:name/repo/changes
@@ -167,18 +212,21 @@ function createRepositoryOperationServiceHandler(
             return;
           } else {
             const repoPathInContainer = droneRepoPathInContainer(d);
-            const { repoRoot, summary } = await withReadonlyDroneContainer(
-              { requestedDroneName: droneName, droneEntry: d },
-              async ({ containerName }: any) => {
-                return await repoChangesScanCache.getOrLoad(
-                  `container\0${containerName}\0${repoPathInContainer}`,
-                  () =>
-                    droneRepoChangesSummary({
-                      container: containerName,
-                      repoPathInContainer,
-                    }),
-                );
-              },
+            const containerName = containerNameForDrone(d, droneName);
+            const startedAt = performance.now();
+            const { repoRoot, summary } = await repoChangesScanCache.getOrLoad(
+              `container\0${droneId}\0${repoPathInContainer}`,
+              () =>
+                droneRepoChangesSummary({
+                  container: containerName,
+                  repoPathInContainer,
+                  runGit: createDroneDaemonGitRunner(d),
+                  hashWorktreeFiles: createDroneDaemonWorktreeHasher(d),
+                }),
+            );
+            res.setHeader(
+              'server-timing',
+              `repo-changes;dur=${(performance.now() - startedAt).toFixed(1)}`,
             );
             json(res, 200, {
               ok: true,
@@ -193,23 +241,10 @@ function createRepositoryOperationServiceHandler(
             return;
           }
         } catch (e: any) {
-          const msg = e?.message ?? String(e);
-          const missingContainer = looksLikeMissingContainerError(msg);
-          const repoUnavailable = looksLikeRepoUnavailableError(msg);
-          const status =
-            runtime === 'host'
-              ? repoUnavailable
-                ? 409
-                : 500
-              : missingContainer
-                ? 404
-                : repoUnavailable
-                  ? 409
-                  : 500;
-          json(res, status, {
+          const failure = repositoryReadFailure(e, runtime);
+          json(res, failure.status, {
             ok: false,
-            error: repoUnavailable ? 'repository is not ready yet' : msg,
-            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            ...failure.response,
             id: droneId,
             name: droneName,
           });
@@ -367,34 +402,32 @@ function createRepositoryOperationServiceHandler(
         }
 
         try {
-          const source = await withLockedDroneContainer(
-            { requestedDroneName: droneName, droneEntry: d },
-            async ({ containerName }: any) => {
-              const repoRootRaw = await runGitInDroneOrThrow({
-                container: containerName,
-                repoPathInContainer,
-                args: ['rev-parse', '--show-toplevel'],
-              });
-              const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
-              const file = await runGitInDrone({
-                container: containerName,
-                repoPathInContainer,
-                args: ['show', objectish],
-              });
-              if (file.code === 128) {
-                return { repoRoot, source: '', exists: false };
-              }
-              const text = String(file.stdout ?? '');
-              const maxChars = 1_000_000;
-              const truncated = text.length > maxChars;
-              return {
-                repoRoot,
-                source: truncated ? text.slice(0, maxChars) : text,
-                exists: true,
-                truncated,
-              };
-            },
-          );
+          const containerName = containerNameForDrone(d, droneName);
+          const runGit = createDroneDaemonGitRunner(d);
+          const repoRootRaw = await runGitInDroneOrThrow({
+            container: containerName,
+            repoPathInContainer,
+            args: ['rev-parse', '--show-toplevel'],
+            runGit,
+          });
+          const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
+          const file = await runGit({
+            container: containerName,
+            repoPathInContainer,
+            args: ['show', objectish],
+          });
+          const text = String(file.stdout ?? '');
+          const maxChars = 1_000_000;
+          const truncated = text.length > maxChars;
+          const source =
+            file.code === 128
+              ? { repoRoot, source: '', exists: false, truncated: false }
+              : {
+                  repoRoot,
+                  source: truncated ? text.slice(0, maxChars) : text,
+                  exists: true,
+                  truncated,
+                };
           json(res, 200, {
             ok: true,
             id: droneId,
@@ -407,14 +440,10 @@ function createRepositoryOperationServiceHandler(
           });
           return;
         } catch (e: any) {
-          const msg = e?.message ?? String(e);
-          const missingContainer = looksLikeMissingContainerError(msg);
-          const repoUnavailable = looksLikeRepoUnavailableError(msg);
-          const status = missingContainer ? 404 : repoUnavailable ? 409 : 500;
-          json(res, status, {
+          const failure = repositoryReadFailure(e, 'container');
+          json(res, failure.status, {
             ok: false,
-            error: repoUnavailable ? 'repository is not ready yet' : msg,
-            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            ...failure.response,
             id: droneId,
             name: droneName,
           });
@@ -487,55 +516,41 @@ function createRepositoryOperationServiceHandler(
             });
           } else {
             const repoPathInContainer = droneRepoPathInContainer(d);
-            await withLockedDroneContainer(
-              { requestedDroneName: droneName, droneEntry: d },
-              async ({ containerName }: any) => {
-                const repoRootRaw = await runGitInDroneOrThrow({
-                  container: containerName,
-                  repoPathInContainer,
-                  args: ['rev-parse', '--show-toplevel'],
-                });
-                const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
-                const diff = await droneRepoDiffForPath({
-                  container: containerName,
-                  repoPathInContainer,
-                  filePath,
-                  kind,
-                  contextLines: 3,
-                });
-                json(res, 200, {
-                  ok: true,
-                  id: droneId,
-                  name: droneName,
-                  repoRoot,
-                  path: diff.path,
-                  kind: diff.kind,
-                  diff: diff.diff,
-                  truncated: diff.truncated,
-                  fromUntracked: diff.fromUntracked,
-                });
-              },
-            );
+            const containerName = containerNameForDrone(d, droneName);
+            const runGit = createDroneDaemonGitRunner(d);
+            const repoRootRaw = await runGitInDroneOrThrow({
+              container: containerName,
+              repoPathInContainer,
+              args: ['rev-parse', '--show-toplevel'],
+              runGit,
+            });
+            const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
+            const diff = await droneRepoDiffForPath({
+              container: containerName,
+              repoPathInContainer,
+              filePath,
+              kind,
+              contextLines,
+              runGit,
+            });
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              repoRoot,
+              path: diff.path,
+              kind: diff.kind,
+              diff: diff.diff,
+              truncated: diff.truncated,
+              fromUntracked: diff.fromUntracked,
+            });
           }
           return;
         } catch (e: any) {
-          const msg = e?.message ?? String(e);
-          const missingContainer = looksLikeMissingContainerError(msg);
-          const repoUnavailable = looksLikeRepoUnavailableError(msg);
-          const status =
-            runtime === 'host'
-              ? repoUnavailable
-                ? 409
-                : 500
-              : missingContainer
-                ? 404
-                : repoUnavailable
-                  ? 409
-                  : 500;
-          json(res, status, {
+          const failure = repositoryReadFailure(e, runtime);
+          json(res, failure.status, {
             ok: false,
-            error: repoUnavailable ? 'repository is not ready yet' : msg,
-            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            ...failure.response,
             id: droneId,
             name: droneName,
           });
@@ -595,32 +610,31 @@ function createRepositoryOperationServiceHandler(
             return;
           }
           const repoPathInContainer = droneRepoPathInContainer(d);
-          const listed = await withLockedDroneContainer(
-            { requestedDroneName: droneName, droneEntry: d },
-            async ({ containerName }: any) => {
-              const baseRef = await droneRepoBaseSha({
-                container: containerName,
-                repoPathInContainer,
-              });
-              const summary = await droneRepoChangesSummary({
-                container: containerName,
-                repoPathInContainer,
-              });
-              const commits = await droneRepoCommitList({
-                container: containerName,
-                repoPathInContainer,
-                headRef: 'HEAD',
-                baseRef,
-                limit,
-              });
-              return {
-                repoRoot: commits.repoRoot,
-                branch: summary.summary.branch,
-                baseRef,
-                commits: commits.commits,
-              };
-            },
-          );
+          const containerName = containerNameForDrone(d, droneName);
+          const runGit = createDroneDaemonGitRunner(d);
+          const [baseRef, summary] = await Promise.all([
+            droneRepoBaseSha({ container: containerName, repoPathInContainer, runGit }),
+            droneRepoChangesSummary({
+              container: containerName,
+              repoPathInContainer,
+              runGit,
+              hashWorktreeFiles: createDroneDaemonWorktreeHasher(d),
+            }),
+          ]);
+          const commits = await droneRepoCommitList({
+            container: containerName,
+            repoPathInContainer,
+            headRef: 'HEAD',
+            baseRef,
+            limit,
+            runGit,
+          });
+          const listed = {
+            repoRoot: commits.repoRoot,
+            branch: summary.summary.branch,
+            baseRef,
+            commits: commits.commits,
+          };
           json(res, 200, {
             ok: true,
             id: droneId,
@@ -632,23 +646,10 @@ function createRepositoryOperationServiceHandler(
           });
           return;
         } catch (e: any) {
-          const msg = e?.message ?? String(e);
-          const missingContainer = looksLikeMissingContainerError(msg);
-          const repoUnavailable = looksLikeRepoUnavailableError(msg);
-          const status =
-            runtime === 'host'
-              ? repoUnavailable
-                ? 409
-                : 500
-              : missingContainer
-                ? 404
-                : repoUnavailable
-                  ? 409
-                  : 500;
-          json(res, status, {
+          const failure = repositoryReadFailure(e, runtime);
+          json(res, failure.status, {
             ok: false,
-            error: repoUnavailable ? 'repository is not ready yet' : msg,
-            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            ...failure.response,
             id: droneId,
             name: droneName,
           });
@@ -704,36 +705,19 @@ function createRepositoryOperationServiceHandler(
             return;
           }
           const repoPathInContainer = droneRepoPathInContainer(d);
-          const detail = await withLockedDroneContainer(
-            { requestedDroneName: droneName, droneEntry: d },
-            async ({ containerName }: any) => {
-              return await droneRepoCommitDetails({
-                container: containerName,
-                repoPathInContainer,
-                sha,
-              });
-            },
-          );
+          const detail = await droneRepoCommitDetails({
+            container: containerNameForDrone(d, droneName),
+            repoPathInContainer,
+            sha,
+            runGit: createDroneDaemonGitRunner(d),
+          });
           json(res, 200, { ok: true, id: droneId, name: droneName, ...detail });
           return;
         } catch (e: any) {
-          const msg = e?.message ?? String(e);
-          const missingContainer = looksLikeMissingContainerError(msg);
-          const repoUnavailable = looksLikeRepoUnavailableError(msg);
-          const status =
-            runtime === 'host'
-              ? repoUnavailable
-                ? 409
-                : 500
-              : missingContainer
-                ? 404
-                : repoUnavailable
-                  ? 409
-                  : 500;
-          json(res, status, {
+          const failure = repositoryReadFailure(e, runtime);
+          json(res, failure.status, {
             ok: false,
-            error: repoUnavailable ? 'repository is not ready yet' : msg,
-            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            ...failure.response,
             id: droneId,
             name: droneName,
           });
@@ -809,18 +793,14 @@ function createRepositoryOperationServiceHandler(
             return;
           }
           const repoPathInContainer = droneRepoPathInContainer(d);
-          const diff = await withLockedDroneContainer(
-            { requestedDroneName: droneName, droneEntry: d },
-            async ({ containerName }: any) => {
-              return await droneRepoCommitDiffForPath({
-                container: containerName,
-                repoPathInContainer,
-                sha,
-                filePath,
-                contextLines,
-              });
-            },
-          );
+          const diff = await droneRepoCommitDiffForPath({
+            container: containerNameForDrone(d, droneName),
+            repoPathInContainer,
+            sha,
+            filePath,
+            contextLines,
+            runGit: createDroneDaemonGitRunner(d),
+          });
           json(res, 200, {
             ok: true,
             id: droneId,
@@ -834,23 +814,10 @@ function createRepositoryOperationServiceHandler(
           });
           return;
         } catch (e: any) {
-          const msg = e?.message ?? String(e);
-          const missingContainer = looksLikeMissingContainerError(msg);
-          const repoUnavailable = looksLikeRepoUnavailableError(msg);
-          const status =
-            runtime === 'host'
-              ? repoUnavailable
-                ? 409
-                : 500
-              : missingContainer
-                ? 404
-                : repoUnavailable
-                  ? 409
-                  : 500;
-          json(res, status, {
+          const failure = repositoryReadFailure(e, runtime);
+          json(res, failure.status, {
             ok: false,
-            error: repoUnavailable ? 'repository is not ready yet' : msg,
-            ...(repoUnavailable ? { code: 'repo_unavailable' } : {}),
+            ...failure.response,
             id: droneId,
             name: droneName,
           });
@@ -935,6 +902,8 @@ function createRepositoryOperationServiceHandler(
           }
         }
         const repoPathInContainer = droneRepoPathInContainer(d);
+        const containerName = containerNameForDrone(d, droneName);
+        const runGit = createDroneDaemonGitRunner(d);
         const repoPathRaw = String(d?.repoPath ?? '').trim();
         let hostBranchHead: string | null = null;
         let hostHeadShaForReview: string | null = null;
@@ -1002,16 +971,12 @@ function createRepositoryOperationServiceHandler(
               );
             }
           }
-          let summary = await withLockedDroneContainer(
-            { requestedDroneName: droneName, droneEntry: d },
-            async ({ containerName }: any) => {
-              return await droneRepoPullChangesSummary({
-                container: containerName,
-                repoPathInContainer,
-                baseSha: pullPreviewBaseSha,
-              });
-            },
-          );
+          let summary = await droneRepoPullChangesSummary({
+            container: containerName,
+            repoPathInContainer,
+            baseSha: pullPreviewBaseSha,
+            runGit,
+          });
           if (repoPathRaw) {
             try {
               const lastPullAny =
@@ -1049,16 +1014,12 @@ function createRepositoryOperationServiceHandler(
                       lastExportedHeadSha,
                     );
                     if (recoveryBaseSha && recoveryBaseSha !== summary.baseSha) {
-                      summary = await withLockedDroneContainer(
-                        { requestedDroneName: droneName, droneEntry: d },
-                        async ({ containerName }: any) => {
-                          return await droneRepoPullChangesSummary({
-                            container: containerName,
-                            repoPathInContainer,
-                            baseSha: recoveryBaseSha,
-                          });
-                        },
-                      );
+                      summary = await droneRepoPullChangesSummary({
+                        container: containerName,
+                        repoPathInContainer,
+                        baseSha: recoveryBaseSha,
+                        runGit,
+                      });
                     }
                   }
                 }
@@ -1266,14 +1227,21 @@ function createRepositoryOperationServiceHandler(
           });
           return;
         } catch (e: any) {
+          const daemonFailure = daemonError(e);
           const msg = e?.message ?? String(e);
           const missingBase = /missing dvm\.baseSha/i.test(msg);
-          json(res, missingBase ? 409 : 500, {
+          json(res, daemonFailure?.status ?? (missingBase ? 409 : 500), {
             ok: false,
-            error: missingBase
-              ? 'Drone repo is missing its base SHA. Re-seed the drone to enable pull preview.'
-              : msg,
-            ...(missingBase ? { code: 'missing_base' } : {}),
+            error:
+              daemonFailure?.error ??
+              (missingBase
+                ? 'Drone repo is missing its base SHA. Re-seed the drone to enable pull preview.'
+                : msg),
+            ...(daemonFailure
+              ? { code: daemonFailure.code }
+              : missingBase
+                ? { code: 'missing_base' }
+                : {}),
           });
           return;
         }
@@ -1362,19 +1330,15 @@ function createRepositoryOperationServiceHandler(
         const repoPathInContainer = droneRepoPathInContainer(d);
 
         try {
-          const diff = await withLockedDroneContainer(
-            { requestedDroneName: droneName, droneEntry: d },
-            async ({ containerName }: any) => {
-              return await droneRepoPullDiffForPath({
-                container: containerName,
-                repoPathInContainer,
-                filePath,
-                baseSha: /^[0-9a-f]{40}$/.test(baseSha) ? baseSha : undefined,
-                headSha: /^[0-9a-f]{40}$/.test(headSha) ? headSha : undefined,
-                contextLines,
-              });
-            },
-          );
+          const diff = await droneRepoPullDiffForPath({
+            container: containerNameForDrone(d, droneName),
+            repoPathInContainer,
+            filePath,
+            baseSha: /^[0-9a-f]{40}$/.test(baseSha) ? baseSha : undefined,
+            headSha: /^[0-9a-f]{40}$/.test(headSha) ? headSha : undefined,
+            contextLines,
+            runGit: createDroneDaemonGitRunner(d),
+          });
           json(res, 200, {
             ok: true,
             id: droneId,
@@ -1388,14 +1352,21 @@ function createRepositoryOperationServiceHandler(
           });
           return;
         } catch (e: any) {
+          const daemonFailure = daemonError(e);
           const msg = e?.message ?? String(e);
           const missingBase = /missing dvm\.baseSha/i.test(msg);
-          json(res, missingBase ? 409 : 500, {
+          json(res, daemonFailure?.status ?? (missingBase ? 409 : 500), {
             ok: false,
-            error: missingBase
-              ? 'Drone repo is missing its base SHA. Re-seed the drone to enable pull preview.'
-              : msg,
-            ...(missingBase ? { code: 'missing_base' } : {}),
+            error:
+              daemonFailure?.error ??
+              (missingBase
+                ? 'Drone repo is missing its base SHA. Re-seed the drone to enable pull preview.'
+                : msg),
+            ...(daemonFailure
+              ? { code: daemonFailure.code }
+              : missingBase
+                ? { code: 'missing_base' }
+                : {}),
           });
           return;
         }
