@@ -202,7 +202,6 @@ export function ChatInput({
   const voiceRecordButtonDisabled =
     composerLocked ||
     sending ||
-    (showStopAction && !allowSendWhileWaiting) ||
     voiceActionInFlight;
   const voicePauseButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const voiceStopButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
@@ -237,12 +236,12 @@ export function ChatInput({
 
   React.useEffect(() => {
     if (!voiceRecordingActive) return;
-    if (!composerLocked && !showStopAction) return;
+    if (!composerLocked) return;
     voiceActionTokenRef.current += 1;
     voiceActionInFlightRef.current = false;
     setVoiceActionInFlight(false);
     void discardVoiceRecording();
-  }, [composerLocked, discardVoiceRecording, showStopAction, voiceRecordingActive]);
+  }, [composerLocked, discardVoiceRecording, voiceRecordingActive]);
 
   React.useEffect(() => {
     if (voiceRecordingActive) return;
