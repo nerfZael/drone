@@ -113,6 +113,9 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('accept="image/*"');
     expect(html).toContain('data-chat-composer-expanded="false"');
     expect(html).toContain('aria-label="Record voice message"');
+    const microphoneButton = html.match(/<button[^>]*aria-label="Record voice message"[^>]*>/)?.[0];
+    expect(microphoneButton).toBeDefined();
+    expect(microphoneButton).not.toContain('disabled=""');
     expect(html).toContain('aria-label="Stop response"');
     expect(html).not.toContain('aria-label="Send"');
   });
