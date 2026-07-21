@@ -1,11 +1,12 @@
 import React from 'react';
-import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import Check from 'lucide-react-native/icons/check';
 import ExternalLink from 'lucide-react-native/icons/external-link';
 import LogIn from 'lucide-react-native/icons/log-in';
 import Trash2 from 'lucide-react-native/icons/trash-2';
 import { Button, ErrorBanner, Label, textStyles } from '../components/Ui';
+import { ThemedTextInput } from '../components/ThemedTextInput';
 import { ProviderCredentialImport } from '../provider-credentials/ProviderCredentialImport';
 import { colors } from '../theme';
 import { assistantReasoningName, compactAssistantModelName } from './AssistantComposer';
@@ -208,7 +209,7 @@ export function LocalAssistantSettingsCard() {
           <ChevronDown color={colors.accent} size={18} strokeWidth={2.2} />
         </Pressable>
         {provider === 'openai' ? (
-          <TextInput
+          <ThemedTextInput
             value={apiKey}
             onChangeText={setApiKey}
             autoCapitalize="none"
@@ -216,8 +217,6 @@ export function LocalAssistantSettingsCard() {
             secureTextEntry
             placeholder={hasApiKey ? 'API key saved — enter to replace' : 'OpenAI API key'}
             placeholderTextColor={colors.muted}
-            selectionColor={colors.accent}
-            cursorColor={colors.accent}
             style={styles.input}
           />
         ) : null}

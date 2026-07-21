@@ -32,7 +32,7 @@ export function PullRequestListView({
                 href={pr.htmlUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center justify-center min-w-[44px] h-6 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] hover:brightness-110"
+                className="inline-flex items-center justify-center min-w-[44px] h-6 rounded border border-[var(--info-border)] bg-[var(--info-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--link)] hover:text-[var(--link-hover)] hover:brightness-110"
                 title={pr.htmlUrl || `#${pr.number}`}
               >
                 #{pr.number}

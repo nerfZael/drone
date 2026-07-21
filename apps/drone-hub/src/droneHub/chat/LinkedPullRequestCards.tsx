@@ -200,7 +200,7 @@ function LinkedPullRequestCard({
               event.preventDefault();
               openRequest(link, onOpenLink);
             }}
-            className="min-w-0 max-w-full truncate text-left text-[var(--text-12)] font-medium text-[var(--fg-secondary)] outline-none transition-colors hover:text-[var(--fg)] hover:underline focus-visible:text-[var(--fg)] focus-visible:underline"
+            className="min-w-0 max-w-full truncate text-left text-[var(--text-12)] font-medium text-[var(--link)] outline-none transition-colors hover:text-[var(--link-hover)] hover:underline focus-visible:text-[var(--link-hover)] focus-visible:underline"
             title={pullRequest?.title ?? `Open ${link.owner}/${link.repo} PR #${link.pullNumber}`}
           >
             {pullRequest?.title ?? `${link.owner}/${link.repo} pull request #${link.pullNumber}`}

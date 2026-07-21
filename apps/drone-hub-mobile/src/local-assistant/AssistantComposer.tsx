@@ -1,5 +1,5 @@
 import React from 'react';
-import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, Pressable, StyleSheet, Text, type TextInput, View } from 'react-native';
 import ArrowUp from 'lucide-react-native/icons/arrow-up';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import Mic from 'lucide-react-native/icons/mic';
@@ -8,6 +8,7 @@ import Play from 'lucide-react-native/icons/play';
 import Plus from 'lucide-react-native/icons/plus';
 import Square from 'lucide-react-native/icons/square';
 import X from 'lucide-react-native/icons/x';
+import { ThemedTextInput } from '../components/ThemedTextInput';
 import { colors } from '../theme';
 import {
   formatMobileVoiceDuration,
@@ -352,7 +353,7 @@ export function AssistantComposer({
   return (
     <View style={styles.frame}>
       <View style={[styles.composer, expanded && styles.composerExpanded]}>
-        <TextInput
+        <ThemedTextInput
           ref={inputRef}
           value={value}
           onChangeText={changeText}
@@ -375,8 +376,6 @@ export function AssistantComposer({
           maxLength={maxLength}
           placeholder={placeholder}
           placeholderTextColor={colors.secondary}
-          selectionColor={colors.accent}
-          cursorColor={colors.accent}
           textAlignVertical="top"
           style={[
             styles.input,

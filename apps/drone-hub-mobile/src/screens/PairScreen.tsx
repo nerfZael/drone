@@ -1,9 +1,10 @@
 import React from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import QrCode from 'lucide-react-native/icons/qr-code';
 import ShieldCheck from 'lucide-react-native/icons/shield-check';
 import { Button, Card, ErrorBanner, Label, textStyles } from '../components/Ui';
+import { ThemedTextInput } from '../components/ThemedTextInput';
 import { useMesh } from '../mesh/MeshContext';
 import { readPairingCode } from '../mesh/pair-device';
 import { colors } from '../theme';
@@ -112,13 +113,11 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
             <Text style={styles.or}>OR PASTE</Text>
             <View style={styles.line} />
           </View>
-          <TextInput
+          <ThemedTextInput
             value={code}
             onChangeText={setCode}
             placeholder={updatingConnection ? 'Paste connection JSON' : 'Paste pairing JSON'}
             placeholderTextColor={colors.subtle}
-            selectionColor={colors.accent}
-            cursorColor={colors.accent}
             multiline
             autoCapitalize="none"
             autoCorrect={false}

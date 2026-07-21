@@ -799,7 +799,7 @@ export function ChatInput({
               }}
               rows={1}
               placeholder="Ask the agent"
-              className={`min-w-[11.25rem] max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-[var(--chat-text-size)] leading-[1.25rem] text-[var(--chat-composer-fg)] caret-[var(--accent)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
+              className={`min-w-[11.25rem] max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-[var(--chat-text-size)] leading-[1.25rem] text-[var(--chat-composer-fg)] caret-[var(--cursor)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
                 composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] px-[.6875rem] pb-[.6875rem] pt-[.9375rem]'
               }`}
               disabled={composerLocked || voiceRecordingActive}

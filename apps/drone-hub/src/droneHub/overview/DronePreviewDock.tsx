@@ -213,7 +213,7 @@ export function DronePreviewDock({
                 href={selectedOpenUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-[var(--text-10)] text-[var(--accent)] hover:text-[var(--fg)] transition-colors font-mono whitespace-nowrap"
+                className="text-[var(--text-10)] text-[var(--link)] hover:text-[var(--link-hover)] transition-colors font-mono whitespace-nowrap"
                 title={`Open ${selectedOpenUrl} in a new tab`}
               >
                 Open tab →

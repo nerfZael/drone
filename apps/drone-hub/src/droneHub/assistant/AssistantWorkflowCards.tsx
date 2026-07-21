@@ -156,7 +156,7 @@ export function ApprovalCard({
             type="button"
             disabled={busy}
             onClick={onApprove}
-            className="h-7 rounded border border-[var(--accent-muted)] bg-[var(--accent)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-black disabled:opacity-50"
+            className="h-7 rounded border border-[var(--accent-muted)] bg-[var(--accent)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent-fg)] disabled:opacity-50"
             style={{ fontFamily: 'var(--display)' }}
           >
             Approve

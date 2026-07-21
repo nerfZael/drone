@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import Activity from 'lucide-react-native/icons/activity';
 import Bot from 'lucide-react-native/icons/bot';
 import Check from 'lucide-react-native/icons/check';
@@ -8,6 +8,7 @@ import Star from 'lucide-react-native/icons/star';
 import Smartphone from 'lucide-react-native/icons/smartphone';
 import Trash2 from 'lucide-react-native/icons/trash-2';
 import { TopTabs, type TopTabOption } from '../components/TopTabs';
+import { ThemedTextInput } from '../components/ThemedTextInput';
 import { Button, ConfirmDialog, ErrorBanner, Label, textStyles } from '../components/Ui';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
@@ -95,13 +96,11 @@ export function SettingsScreen({
           <>
             <View style={styles.section}>
               <Label>This phone</Label>
-              <TextInput
+              <ThemedTextInput
                 value={phoneName}
                 onChangeText={setPhoneName}
                 placeholder="Android phone"
                 placeholderTextColor={colors.subtle}
-                selectionColor={colors.accent}
-                cursorColor={colors.accent}
                 autoCapitalize="words"
                 autoCorrect={false}
                 maxLength={80}

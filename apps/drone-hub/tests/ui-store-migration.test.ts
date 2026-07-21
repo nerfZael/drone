@@ -57,8 +57,11 @@ describe('drone hub ui store migration', () => {
     expect(migrateDroneHubUiPersistedState({ themeId: 'catppuccin-mocha' }, 14)).toMatchObject({
       themeId: 'catppuccin-mocha',
     });
-    expect(migrateDroneHubUiPersistedState({ themeId: 'unknown' }, 14)).toMatchObject({
+    expect(migrateDroneHubUiPersistedState({ themeId: 'monolith' }, 14)).toMatchObject({
       themeId: 'monolith',
+    });
+    expect(migrateDroneHubUiPersistedState({ themeId: 'unknown' }, 14)).toMatchObject({
+      themeId: 'catppuccin-mocha',
     });
   });
 

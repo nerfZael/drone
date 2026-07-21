@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
+  DEFAULT_DESKTOP_THEME_ID,
   DESKTOP_THEMES,
   applyDesktopTheme,
   desktopMonacoTheme,
@@ -8,16 +9,27 @@ import {
   normalizeDesktopThemeId,
 } from '../src/theme';
 
+function cssCustomProperties(block: string): Record<string, string> {
+  return Object.fromEntries(
+    Array.from(block.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g), ([, name, value]) => [
+      name,
+      value.trim(),
+    ]),
+  );
+}
+
 describe('desktop themes', () => {
   test('exposes the two supported dark themes', () => {
     expect(DESKTOP_THEMES.map((theme) => theme.id)).toEqual(['monolith', 'catppuccin-mocha']);
     expect(DESKTOP_THEMES.every((theme) => theme.swatches.length === 4)).toBe(true);
+    expect(DEFAULT_DESKTOP_THEME_ID).toBe('catppuccin-mocha');
   });
 
   test('falls back safely when a persisted theme is unknown', () => {
     expect(normalizeDesktopThemeId('catppuccin-mocha')).toBe('catppuccin-mocha');
-    expect(normalizeDesktopThemeId('future-light-theme')).toBe('monolith');
-    expect(desktopThemeDefinition(null).id).toBe('monolith');
+    expect(normalizeDesktopThemeId('monolith')).toBe('monolith');
+    expect(normalizeDesktopThemeId('future-light-theme')).toBe('catppuccin-mocha');
+    expect(desktopThemeDefinition(null).id).toBe('catppuccin-mocha');
   });
 
   test('can resolve a theme when the DOM is unavailable', () => {
@@ -28,20 +40,25 @@ describe('desktop themes', () => {
     expect(desktopThemeDefinition('catppuccin-mocha').terminal).toMatchObject({
       background: '#1e1e2e',
       foreground: '#cdd6f4',
-      cursor: '#cba6f7',
+      cursor: '#f5e0dc',
+      cursorAccent: '#11111b',
+      selectionBackground: 'rgba(147,153,178,.25)',
+      black: '#45475a',
       red: '#f38ba8',
       green: '#a6e3a1',
       yellow: '#f9e2af',
       blue: '#89b4fa',
-      magenta: '#cba6f7',
+      magenta: '#f5c2e7',
       cyan: '#94e2d5',
-      brightRed: '#eba0ac',
-      brightGreen: '#94e2d5',
-      brightYellow: '#fab387',
-      brightBlue: '#74c7ec',
-      brightMagenta: '#f5c2e7',
-      brightCyan: '#89dceb',
-      brightWhite: '#cdd6f4',
+      white: '#a6adc8',
+      brightBlack: '#585b70',
+      brightRed: '#f37799',
+      brightGreen: '#89d88b',
+      brightYellow: '#ebd391',
+      brightBlue: '#74a8fc',
+      brightMagenta: '#f2aede',
+      brightCyan: '#6bd7ca',
+      brightWhite: '#bac2de',
     });
   });
 
@@ -52,9 +69,21 @@ describe('desktop themes', () => {
     expect(catppuccin.definition.colors).toMatchObject({
       'editor.background': '#1E1E2E',
       'editor.foreground': '#CDD6F4',
-      'editorCursor.foreground': '#CBA6F7',
+      'editorCursor.foreground': '#F5E0DC',
+      'editor.selectionBackground': '#9399B240',
+      'editor.lineHighlightBackground': '#CDD6F41A',
+      'editorLineNumber.foreground': '#7F849C',
+      'editorLineNumber.activeForeground': '#B4BEFE',
       'editorWidget.background': '#181825',
     });
+    expect(catppuccin.definition.rules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ token: 'operator', foreground: '89DCEB' }),
+        expect.objectContaining({ token: 'variable.parameter', foreground: 'EBA0AC' }),
+        expect.objectContaining({ token: 'annotation', foreground: 'F9E2AF' }),
+        expect.objectContaining({ token: 'macro', foreground: 'F5E0DC' }),
+      ]),
+    );
   });
 
   test('maps Catppuccin desktop surfaces into a quiet visual hierarchy', () => {
@@ -62,65 +91,81 @@ describe('desktop themes', () => {
     const catppuccinStart = css.indexOf(":root[data-theme='catppuccin-mocha']");
     const catppuccinEnd = css.indexOf('/* Excalidraw owns', catppuccinStart);
     const catppuccinCss = css.slice(catppuccinStart, catppuccinEnd);
+    const tokens = cssCustomProperties(catppuccinCss);
 
-    expect(catppuccinCss).toContain('--workspace: #1e1e2e');
-    expect(catppuccinCss).toContain('--panel: #181825');
-    expect(catppuccinCss).toContain('--panel-raised: #313244');
-    expect(catppuccinCss).toContain('--border: rgba(69, 71, 90, .56)');
-    expect(catppuccinCss).toContain('--fg-strong: #cdd6f4');
-    expect(catppuccinCss).toContain('--muted: #a6adc8');
-    expect(catppuccinCss).toContain('--muted-dim: #7f849c');
-    expect(catppuccinCss).toContain('--border-subtle: rgba(49, 50, 68, .78)');
-    expect(catppuccinCss).toContain('--assistant-message-fg: #bac2de');
-    expect(catppuccinCss).toContain('--chat-list-marker: #7f849c');
-    expect(catppuccinCss).toContain('--user-bubble: #313244');
-    expect(catppuccinCss).toContain('--user-bubble-border: rgba(69, 71, 90, .48)');
-    expect(catppuccinCss).toContain('--user-bubble-fg: #cdd6f4');
-    expect(catppuccinCss).toContain('--chat-background: #1e1e2e');
-    expect(catppuccinCss).toContain('--chat-user-message-time: #a6adc8');
-    expect(catppuccinCss).toContain('--chat-composer-border: rgba(69, 71, 90, .56)');
-    expect(catppuccinCss).toContain('--chat-composer-focus-border: rgba(203, 166, 247, .26)');
-    expect(catppuccinCss).toContain('--chat-composer-surface: #313244');
-    expect(catppuccinCss).toContain('--chat-composer-fg: #cdd6f4');
-    expect(catppuccinCss).toContain('--chat-composer-placeholder: #7f849c');
-    expect(catppuccinCss).toContain('--chat-composer-control-bg: rgba(69, 71, 90, .34)');
-    expect(catppuccinCss).toContain('--chat-composer-control-border: transparent');
-    expect(catppuccinCss).toContain('--chat-composer-control-fg: #a6adc8');
-    expect(catppuccinCss).toContain('--chat-composer-model-fg: #9399b2');
-    expect(catppuccinCss).toContain('--chat-composer-font: system-ui, -apple-system, sans-serif');
-    expect(catppuccinCss).toContain('--chat-composer-radius: .4375rem');
-    expect(catppuccinCss).toContain('--chat-composer-control-radius: .3125rem');
-    expect(catppuccinCss).toContain('--chat-composer-shadow: 0 .25rem .875rem rgba(17, 17, 27, .18)');
-    expect(catppuccinCss).toContain('--chat-composer-input: #313244');
-    expect(catppuccinCss).toContain('--app-header-bg: #181825');
-    expect(catppuccinCss).toContain('--app-header-border: rgba(69, 71, 90, .52)');
-    expect(catppuccinCss).toContain('--workspace-header-title-fg: #cdd6f4');
-    expect(catppuccinCss).toContain('--sidebar-bg: #181825');
-    expect(catppuccinCss).toContain('--sidebar-section-bg: #181825');
-    expect(catppuccinCss).toContain('--sidebar-section-border: rgba(49, 50, 68, .78)');
-    expect(catppuccinCss).toContain('--sidebar-tab-active-bg: transparent');
-    expect(catppuccinCss).toContain('--sidebar-create-bg: transparent');
-    expect(catppuccinCss).toContain('--sidebar-create-border: transparent');
-    expect(catppuccinCss).toContain('--sidebar-create-hover-bg: #313244');
-    expect(catppuccinCss).toContain('--toolbar-control-bg: transparent');
-    expect(catppuccinCss).toContain('--toolbar-control-border: transparent');
-    expect(catppuccinCss).toContain('--toolbar-control-hover-border: rgba(69, 71, 90, .68)');
-    expect(catppuccinCss).toContain('--sidebar-brand-fg: #cdd6f4');
-    expect(catppuccinCss).toContain('--sidebar-brand-size: .9375rem');
-    expect(catppuccinCss).toContain('--sidebar-brand-weight: 700');
-    expect(catppuccinCss).toContain('--sidebar-heading-weight: 600');
-    expect(catppuccinCss).toContain('--sidebar-drone-fg: #a6adc8');
-    expect(catppuccinCss).toContain('--sidebar-drone-active-fg: #cdd6f4');
-    expect(catppuccinCss).toContain('--sidebar-drone-size: .75rem');
-    expect(catppuccinCss).toContain('--sidebar-drone-weight: 500');
-    expect(catppuccinCss).toContain('--sidebar-row-selected-bg: rgba(49, 50, 68, .44)');
-    expect(catppuccinCss).toContain('--sidebar-meta-fg: #7f849c');
-    expect(catppuccinCss).toContain('--selected: rgba(69, 71, 90, .34)');
-    expect(catppuccinCss).toContain('--code-bg: #313244');
-    expect(catppuccinCss).toContain('--code-fg: #b4befe');
-    expect(catppuccinCss).toContain('--code-block-bg: #11111b');
-    expect(catppuccinCss).toContain('--code-block-fg: #cdd6f4');
-    expect(catppuccinCss).toContain('--glow-accent: none');
+    expect(tokens).toMatchObject({
+      '--workspace': '#1e1e2e',
+      '--panel': '#181825',
+      '--panel-raised': '#313244',
+      '--border': 'rgba(69, 71, 90, .56)',
+      '--fg-strong': '#cdd6f4',
+      '--muted': '#a6adc8',
+      '--muted-dim': '#7f849c',
+      '--border-subtle': 'rgba(49, 50, 68, .78)',
+      '--assistant-message-fg': '#bac2de',
+      '--chat-list-marker': '#7f849c',
+      '--user-bubble': '#313244',
+      '--user-bubble-border': 'rgba(69, 71, 90, .48)',
+      '--user-bubble-fg': '#cdd6f4',
+      '--chat-background': '#1e1e2e',
+      '--chat-user-message-time': '#a6adc8',
+      '--chat-composer-border': 'rgba(69, 71, 90, .56)',
+      '--chat-composer-focus-border': 'rgba(203, 166, 247, .26)',
+      '--chat-composer-surface': '#313244',
+      '--chat-composer-fg': '#cdd6f4',
+      '--chat-composer-placeholder': '#7f849c',
+      '--chat-composer-control-bg': 'rgba(69, 71, 90, .34)',
+      '--chat-composer-control-border': 'transparent',
+      '--chat-composer-control-fg': '#a6adc8',
+      '--chat-composer-model-fg': '#9399b2',
+      '--chat-composer-font': 'system-ui, -apple-system, sans-serif',
+      '--chat-composer-radius': '.4375rem',
+      '--chat-composer-control-radius': '.3125rem',
+      '--chat-composer-shadow': '0 .25rem .875rem rgba(17, 17, 27, .18)',
+      '--chat-composer-input': '#313244',
+      '--app-header-bg': '#181825',
+      '--app-header-border': 'rgba(69, 71, 90, .52)',
+      '--workspace-header-title-fg': '#cdd6f4',
+      '--sidebar-bg': '#181825',
+      '--sidebar-section-bg': '#181825',
+      '--sidebar-section-border': 'rgba(49, 50, 68, .78)',
+      '--sidebar-tab-active-bg': 'transparent',
+      '--sidebar-create-bg': 'transparent',
+      '--sidebar-create-border': 'transparent',
+      '--sidebar-create-hover-bg': '#313244',
+      '--toolbar-control-bg': 'transparent',
+      '--toolbar-control-border': 'transparent',
+      '--toolbar-control-hover-border': 'rgba(69, 71, 90, .68)',
+      '--sidebar-brand-fg': '#cdd6f4',
+      '--sidebar-brand-size': '.9375rem',
+      '--sidebar-brand-weight': '700',
+      '--sidebar-heading-weight': '600',
+      '--sidebar-drone-fg': '#a6adc8',
+      '--sidebar-drone-active-fg': '#cdd6f4',
+      '--sidebar-drone-size': '.75rem',
+      '--sidebar-drone-weight': '500',
+      '--sidebar-row-selected-bg': 'rgba(49, 50, 68, .44)',
+      '--sidebar-meta-fg': '#7f849c',
+      '--selected': 'rgba(147, 153, 178, .24)',
+      '--selection-highlight': 'rgba(147, 153, 178, .25)',
+      '--link': '#89b4fa',
+      '--link-hover': '#89dceb',
+      '--cursor': '#f5e0dc',
+      '--code-bg': '#313244',
+      '--code-fg': '#b4befe',
+      '--code-block-bg': '#11111b',
+      '--code-block-fg': '#cdd6f4',
+      '--syntax-number': '#fab387',
+      '--syntax-string': '#a6e3a1',
+      '--syntax-operator': '#89dceb',
+      '--syntax-keyword': '#cba6f7',
+      '--syntax-function': '#89b4fa',
+      '--syntax-type': '#f9e2af',
+      '--syntax-regex': '#f5c2e7',
+      '--syntax-macro': '#f5e0dc',
+      '--syntax-variable': '#eba0ac',
+      '--glow-accent': 'none',
+    });
     const catppuccinTokenNames = Array.from(catppuccinCss.matchAll(/(--[a-z0-9-]+)\s*:/g), (match) => match[1]);
     const presentationTokenPrefixes = [
       '--body-',

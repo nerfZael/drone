@@ -6,13 +6,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronUp from 'lucide-react-native/icons/chevron-up';
 import { ErrorBanner, Label } from '../components/Ui';
+import { ThemedTextInput } from '../components/ThemedTextInput';
 import { TopTabs } from '../components/TopTabs';
 import { AssistantComposer } from '../local-assistant/AssistantComposer';
 import {
@@ -850,26 +850,22 @@ export function NewDroneScreen({
         {detailsOpen ? (
           <View style={styles.accordionBody}>
             <Text style={styles.fieldTitle}>Name</Text>
-            <TextInput
+            <ThemedTextInput
               value={name}
               onChangeText={setName}
               editable={!busy}
               placeholder="Automatic name"
               placeholderTextColor={colors.subtle}
-              selectionColor={colors.accent}
-              cursorColor={colors.accent}
               autoCapitalize="none"
               style={[styles.input, styles.monoInput]}
             />
             <Text style={styles.fieldTitle}>Group</Text>
-            <TextInput
+            <ThemedTextInput
               value={group}
               onChangeText={setGroup}
               editable={!busy}
               placeholder="No group"
               placeholderTextColor={colors.subtle}
-              selectionColor={colors.accent}
-              cursorColor={colors.accent}
               autoCapitalize="none"
               style={styles.input}
             />

@@ -62,7 +62,10 @@ describe('mobile theme contrast', () => {
     expect(colors.accentDark).toBe('rgba(203, 166, 247, 0.075)');
     expect(colors.accentBorder).toBe('rgba(203, 166, 247, 0.26)');
     expect(colors.accentWash).toBe('rgba(203, 166, 247, 0.06)');
-    expect(colors.selectionWash).toBe('rgba(69, 71, 90, 0.34)');
+    expect(colors.link).toBe('#89b4fa');
+    expect(colors.cursor).toBe('#f5e0dc');
+    expect(colors.selectionWash).toBe('rgba(147, 153, 178, 0.24)');
+    expect(colors.textSelection).toBe('rgba(147, 153, 178, 0.25)');
     expect(colors.composerBorder).toBe('rgba(69, 71, 90, 0.56)');
     expect(colors.controlSurface).toBe('rgba(69, 71, 90, 0.34)');
 
@@ -83,6 +86,12 @@ describe('mobile theme contrast', () => {
     expect(contrastRatio(colors.subtle, colors.crust)).toBeGreaterThanOrEqual(4.5);
     for (const background of [colors.background, colors.panel]) {
       expect(contrastRatio(colors.mutedDim, background)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  test('keeps links readable on standard content surfaces', () => {
+    for (const background of [colors.background, colors.panel, colors.panelRaised]) {
+      expect(contrastRatio(colors.link, background)).toBeGreaterThanOrEqual(4.5);
     }
   });
 

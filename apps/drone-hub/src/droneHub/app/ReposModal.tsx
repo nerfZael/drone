@@ -472,7 +472,7 @@ export function ReposModal({
                   <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                     Remote
                   </div>
-                  <a href={selectedGithubUrl} target="_blank" rel="noreferrer" className="text-[var(--text-11)] text-[var(--accent)] truncate" title={selectedGithubUrl}>
+                  <a href={selectedGithubUrl} target="_blank" rel="noreferrer" className="text-[var(--text-11)] text-[var(--link)] hover:text-[var(--link-hover)] truncate transition-colors" title={selectedGithubUrl}>
                     {selectedGithubUrl}
                   </a>
                 </div>

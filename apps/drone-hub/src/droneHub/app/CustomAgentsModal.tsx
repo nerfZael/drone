@@ -124,7 +124,7 @@ export function CustomAgentsModal({
             className={`h-9 px-4 rounded-[var(--radius-large)] text-[var(--text-12)] font-[var(--weight-semibold)] border transition-colors ${
               !canAdd
                 ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                : 'bg-[var(--accent)] border-[var(--accent-muted)] text-[white] hover:brightness-110'
+                : 'bg-[var(--accent)] border-[var(--accent-muted)] text-[var(--accent-fg)] hover:brightness-110'
             }`}
           >
             Add

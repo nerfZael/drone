@@ -23,7 +23,7 @@ import { normalizeSidebarRepoScopedGroupMap } from './sidebar-repo-scoped-groups
 import { normalizeSidebarGroupOrder } from './sidebar-group-order';
 import { mergeSeenModelIds, normalizeSeenModelIds } from './spawn-model-history';
 import { profileStorageKey } from '../../profile-storage';
-import { normalizeDesktopThemeId, type DesktopThemeId } from '../../theme';
+import { DEFAULT_DESKTOP_THEME_ID, normalizeDesktopThemeId, type DesktopThemeId } from '../../theme';
 
 type Updater<T> = T | ((prev: T) => T);
 
@@ -560,7 +560,7 @@ const initialChatInputDrafts = readPersistedChatInputDrafts();
 export const useDroneHubUiStore = create<DroneHubUiState>()(
   persist(
     (set) => ({
-      themeId: 'monolith',
+      themeId: DEFAULT_DESKTOP_THEME_ID,
       activeRepoPath: '',
       settingsActiveTab: 'general',
       chatHeaderRepoPath: '',

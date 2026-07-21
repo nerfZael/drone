@@ -78,7 +78,7 @@ export function DroneLinksDock({
                       href={routedUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="min-w-0 truncate text-[var(--accent)] hover:text-[var(--fg)] tabular-nums font-mono text-[var(--text-10)] transition-colors"
+                      className="min-w-0 truncate text-[var(--link)] hover:text-[var(--link-hover)] tabular-nums font-mono text-[var(--text-10)] transition-colors"
                       title={`Open container:${p.containerPort} via ${routedUrl}`}
                     >
                       :{p.containerPort}

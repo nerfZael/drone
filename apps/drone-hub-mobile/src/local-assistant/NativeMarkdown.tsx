@@ -247,7 +247,7 @@ const styles = StyleSheet.create({
   strong: { fontWeight: '800', color: colors.text },
   emphasis: { fontStyle: 'italic' },
   strike: { textDecorationLine: 'line-through', color: colors.muted },
-  link: { color: colors.accent, textDecorationLine: 'underline' },
+  link: { color: colors.link, textDecorationLine: 'underline' },
   fileLink: {
     color: colors.accentAlt,
     textDecorationLine: 'underline',

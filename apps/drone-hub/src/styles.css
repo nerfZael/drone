@@ -115,6 +115,7 @@
   --warning-panel: rgba(18, 14, 8, .96);
   --hover: rgba(255, 255, 255, .05);
   --selected: rgba(177, 156, 255, .10);
+  --selection-highlight: rgba(177, 156, 255, .22);
   --focus-ring: rgba(177, 156, 255, .82);
   --shadow-color: rgba(0, 0, 0, .48);
   --canvas-dot: rgba(141, 161, 197, .18);
@@ -190,6 +191,7 @@
   --link: #c1b3ff;
   --link-hover: #d4caff;
   --link-strong: #e2dcff;
+  --cursor: #b19cff;
   --code-bg: rgba(177, 156, 255, .10);
   --code-border: rgba(177, 156, 255, .20);
   --code-fg: #ded7ff;
@@ -198,11 +200,17 @@
   --code-block-fg: var(--fg-secondary);
   --syntax-comment: #858ea3;
   --syntax-punctuation: #c7cdda;
-  --syntax-red: #ff8585;
-  --syntax-blue: #8db4ff;
-  --syntax-cyan: #9edce4;
-  --syntax-violet: #c9a9ff;
-  --syntax-orange: #ffb77a;
+  --syntax-property: #8db4ff;
+  --syntax-symbol: #ff8585;
+  --syntax-number: #ffb77a;
+  --syntax-string: #65e69a;
+  --syntax-operator: #9edce4;
+  --syntax-keyword: #c9a9ff;
+  --syntax-function: #8db4ff;
+  --syntax-type: #ffc15a;
+  --syntax-regex: #c6a0f6;
+  --syntax-macro: #ded7ff;
+  --syntax-variable: #c7cdda;
 }
 
 :root[data-theme='catppuccin-mocha'] {
@@ -294,7 +302,8 @@
   --danger-panel: #313244;
   --warning-panel: #313244;
   --hover: rgba(205, 214, 244, .035);
-  --selected: rgba(69, 71, 90, .34);
+  --selected: rgba(147, 153, 178, .24);
+  --selection-highlight: rgba(147, 153, 178, .25);
   --focus-ring: rgba(203, 166, 247, .68);
   --shadow-color: rgba(17, 17, 27, .28);
   --canvas-dot: rgba(147, 153, 178, .18);
@@ -336,9 +345,10 @@
   --chat-composer-input: #313244;
   --chat-composer-input-border: transparent;
   --chat-composer-input-focus-border: transparent;
-  --link: #cba6f7;
-  --link-hover: #f5c2e7;
-  --link-strong: #f5e0dc;
+  --link: #89b4fa;
+  --link-hover: #89dceb;
+  --link-strong: #b4befe;
+  --cursor: #f5e0dc;
   --code-bg: #313244;
   --code-border: rgba(69, 71, 90, .48);
   --code-fg: #b4befe;
@@ -347,11 +357,17 @@
   --code-block-fg: #cdd6f4;
   --syntax-comment: #9399b2;
   --syntax-punctuation: #bac2de;
-  --syntax-red: #f38ba8;
-  --syntax-blue: #89b4fa;
-  --syntax-cyan: #94e2d5;
-  --syntax-violet: #cba6f7;
-  --syntax-orange: #fab387;
+  --syntax-property: #89b4fa;
+  --syntax-symbol: #f38ba8;
+  --syntax-number: #fab387;
+  --syntax-string: #a6e3a1;
+  --syntax-operator: #89dceb;
+  --syntax-keyword: #cba6f7;
+  --syntax-function: #89b4fa;
+  --syntax-type: #f9e2af;
+  --syntax-regex: #f5c2e7;
+  --syntax-macro: #f5e0dc;
+  --syntax-variable: #eba0ac;
 }
 
 /* Excalidraw owns its canvas/document colors. Only its application chrome follows
@@ -411,6 +427,17 @@
 }
 
 * { box-sizing: border-box; }
+
+::selection {
+  color: var(--fg);
+  background: var(--selection-highlight);
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  caret-color: var(--cursor);
+}
 
 html, body { height: 100%; overflow: hidden; }
 
@@ -1622,49 +1649,73 @@ select:disabled optgroup {
   color: var(--syntax-punctuation);
 }
 
-.dh-changes-dock .rdv-wrapper .diff .token.property,
-.dh-changes-dock .rdv-wrapper .diff .token.tag,
-.dh-changes-dock .rdv-wrapper .diff .token.constant,
-.dh-changes-dock .rdv-wrapper .diff .token.symbol,
-.dh-changes-dock .rdv-wrapper .diff .token.deleted {
-  color: var(--syntax-red);
+.dh-changes-dock .rdv-wrapper .diff .token.property {
+  color: var(--syntax-property);
 }
 
+.dh-changes-dock .rdv-wrapper .diff .token.tag,
+.dh-changes-dock .rdv-wrapper .diff .token.symbol,
+.dh-changes-dock .rdv-wrapper .diff .token.deleted {
+  color: var(--syntax-symbol);
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.constant,
 .dh-changes-dock .rdv-wrapper .diff .token.boolean,
 .dh-changes-dock .rdv-wrapper .diff .token.number {
-  color: var(--syntax-blue);
+  color: var(--syntax-number);
 }
 
 .dh-changes-dock .rdv-wrapper .diff .token.selector,
-.dh-changes-dock .rdv-wrapper .diff .token.attr-name,
 .dh-changes-dock .rdv-wrapper .diff .token.string,
 .dh-changes-dock .rdv-wrapper .diff .token.char,
-.dh-changes-dock .rdv-wrapper .diff .token.builtin,
 .dh-changes-dock .rdv-wrapper .diff .token.inserted {
-  color: var(--syntax-cyan);
+  color: var(--syntax-string);
 }
 
-.dh-changes-dock .rdv-wrapper .diff .token.operator,
+.dh-changes-dock .rdv-wrapper .diff .token.attr-name,
+.dh-changes-dock .rdv-wrapper .diff .token.class-name,
+.dh-changes-dock .rdv-wrapper .diff .token.annotation {
+  color: var(--syntax-type);
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.builtin,
+.dh-changes-dock .rdv-wrapper .diff .token.important {
+  color: var(--syntax-symbol);
+}
+
 .dh-changes-dock .rdv-wrapper .diff .token.entity,
 .dh-changes-dock .rdv-wrapper .diff .token.url,
 .dh-changes-dock .rdv-wrapper .diff .language-css .token.string,
 .dh-changes-dock .rdv-wrapper .diff .style .token.string {
-  color: var(--syntax-violet);
+  color: var(--syntax-property);
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.operator {
+  color: var(--syntax-operator);
 }
 
 .dh-changes-dock .rdv-wrapper .diff .token.atrule,
-.dh-changes-dock .rdv-wrapper .diff .token.attr-value,
 .dh-changes-dock .rdv-wrapper .diff .token.keyword {
-  color: var(--syntax-orange);
+  color: var(--syntax-keyword);
 }
 
-.dh-changes-dock .rdv-wrapper .diff .token.function,
-.dh-changes-dock .rdv-wrapper .diff .token.class-name {
-  color: var(--syntax-violet);
+.dh-changes-dock .rdv-wrapper .diff .token.attr-value {
+  color: var(--syntax-string);
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.function {
+  color: var(--syntax-function);
 }
 
 .dh-changes-dock .rdv-wrapper .diff .token.regex,
-.dh-changes-dock .rdv-wrapper .diff .token.important,
+.dh-changes-dock .rdv-wrapper .diff .token.regex-delimiter {
+  color: var(--syntax-regex);
+}
+
+.dh-changes-dock .rdv-wrapper .diff .token.macro {
+  color: var(--syntax-macro);
+}
+
 .dh-changes-dock .rdv-wrapper .diff .token.variable {
-  color: var(--syntax-orange);
+  color: var(--syntax-variable);
 }

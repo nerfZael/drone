@@ -2,6 +2,8 @@ export const DESKTOP_THEME_IDS = ['monolith', 'catppuccin-mocha'] as const;
 
 export type DesktopThemeId = (typeof DESKTOP_THEME_IDS)[number];
 
+export const DEFAULT_DESKTOP_THEME_ID: DesktopThemeId = 'catppuccin-mocha';
+
 export type DesktopMonacoTheme = {
   id: string;
   definition: {
@@ -43,8 +45,8 @@ export type DesktopThemeDefinition = {
   };
 };
 
-export const DESKTOP_THEMES: readonly DesktopThemeDefinition[] = [
-  {
+const DESKTOP_THEME_BY_ID: Record<DesktopThemeId, DesktopThemeDefinition> = {
+  monolith: {
     id: 'monolith',
     label: 'Monolith',
     description: 'The refined Drone Hub look: graphite surfaces with a focused violet accent.',
@@ -74,7 +76,7 @@ export const DESKTOP_THEMES: readonly DesktopThemeDefinition[] = [
       brightWhite: '#f3f5f8',
     },
   },
-  {
+  'catppuccin-mocha': {
     id: 'catppuccin-mocha',
     label: 'Catppuccin Mocha',
     description: 'A warmer dark palette matching Drone Hub mobile, with Catppuccin pastels.',
@@ -83,36 +85,43 @@ export const DESKTOP_THEMES: readonly DesktopThemeDefinition[] = [
     terminal: {
       background: '#1e1e2e',
       foreground: '#cdd6f4',
-      cursor: '#cba6f7',
-      cursorAccent: '#1e1e2e',
-      selectionBackground: 'rgba(203,166,247,.20)',
+      cursor: '#f5e0dc',
+      cursorAccent: '#11111b',
+      selectionBackground: 'rgba(147,153,178,.25)',
       black: '#45475a',
       red: '#f38ba8',
       green: '#a6e3a1',
       yellow: '#f9e2af',
       blue: '#89b4fa',
-      magenta: '#cba6f7',
+      magenta: '#f5c2e7',
       cyan: '#94e2d5',
-      white: '#bac2de',
+      white: '#a6adc8',
       brightBlack: '#585b70',
-      brightRed: '#eba0ac',
-      brightGreen: '#94e2d5',
-      brightYellow: '#fab387',
-      brightBlue: '#74c7ec',
-      brightMagenta: '#f5c2e7',
-      brightCyan: '#89dceb',
-      brightWhite: '#cdd6f4',
+      brightRed: '#f37799',
+      brightGreen: '#89d88b',
+      brightYellow: '#ebd391',
+      brightBlue: '#74a8fc',
+      brightMagenta: '#f2aede',
+      brightCyan: '#6bd7ca',
+      brightWhite: '#bac2de',
     },
   },
-] as const;
+};
+
+export const DESKTOP_THEMES: readonly DesktopThemeDefinition[] = DESKTOP_THEME_IDS.map(
+  (themeId) => DESKTOP_THEME_BY_ID[themeId],
+);
+
+function isDesktopThemeId(value: unknown): value is DesktopThemeId {
+  return typeof value === 'string' && DESKTOP_THEME_IDS.some((themeId) => themeId === value);
+}
 
 export function normalizeDesktopThemeId(value: unknown): DesktopThemeId {
-  return value === 'catppuccin-mocha' ? 'catppuccin-mocha' : 'monolith';
+  return isDesktopThemeId(value) ? value : DEFAULT_DESKTOP_THEME_ID;
 }
 
 export function desktopThemeDefinition(themeId: unknown): DesktopThemeDefinition {
-  const normalized = normalizeDesktopThemeId(themeId);
-  return DESKTOP_THEMES.find((theme) => theme.id === normalized) ?? DESKTOP_THEMES[0];
+  return DESKTOP_THEME_BY_ID[normalizeDesktopThemeId(themeId)];
 }
 
 const MONOLITH_MONACO_THEME: DesktopMonacoTheme = {
@@ -175,19 +184,24 @@ const CATPPUCCIN_MOCHA_MONACO_THEME: DesktopMonacoTheme = {
       { token: 'type.identifier', foreground: 'F9E2AF' },
       { token: 'function', foreground: '89B4FA' },
       { token: 'variable', foreground: 'CDD6F4' },
+      { token: 'variable.parameter', foreground: 'EBA0AC' },
+      { token: 'operator', foreground: '89DCEB' },
+      { token: 'delimiter', foreground: '9399B2' },
       { token: 'regexp', foreground: 'F5C2E7' },
       { token: 'tag', foreground: 'F38BA8' },
       { token: 'attribute.name', foreground: 'F9E2AF' },
+      { token: 'annotation', foreground: 'F9E2AF' },
+      { token: 'macro', foreground: 'F5E0DC' },
     ],
     colors: {
       'editor.background': '#1E1E2E',
       'editor.foreground': '#CDD6F4',
-      'editorCursor.foreground': '#CBA6F7',
-      'editor.selectionBackground': '#CBA6F744',
-      'editor.inactiveSelectionBackground': '#585B7066',
-      'editor.lineHighlightBackground': '#31324488',
-      'editorLineNumber.foreground': '#6C7086',
-      'editorLineNumber.activeForeground': '#A6ADC8',
+      'editorCursor.foreground': '#F5E0DC',
+      'editor.selectionBackground': '#9399B240',
+      'editor.inactiveSelectionBackground': '#9399B226',
+      'editor.lineHighlightBackground': '#CDD6F41A',
+      'editorLineNumber.foreground': '#7F849C',
+      'editorLineNumber.activeForeground': '#B4BEFE',
       'editorIndentGuide.background1': '#45475A',
       'editorIndentGuide.activeBackground1': '#585B70',
       'editorWhitespace.foreground': '#45475A',
@@ -207,10 +221,13 @@ const CATPPUCCIN_MOCHA_MONACO_THEME: DesktopMonacoTheme = {
   },
 };
 
+const DESKTOP_MONACO_THEME_BY_ID: Record<DesktopThemeId, DesktopMonacoTheme> = {
+  monolith: MONOLITH_MONACO_THEME,
+  'catppuccin-mocha': CATPPUCCIN_MOCHA_MONACO_THEME,
+};
+
 export function desktopMonacoTheme(themeId: unknown): DesktopMonacoTheme {
-  return normalizeDesktopThemeId(themeId) === 'catppuccin-mocha'
-    ? CATPPUCCIN_MOCHA_MONACO_THEME
-    : MONOLITH_MONACO_THEME;
+  return DESKTOP_MONACO_THEME_BY_ID[normalizeDesktopThemeId(themeId)];
 }
 
 export function applyDesktopTheme(themeId: unknown): DesktopThemeId {

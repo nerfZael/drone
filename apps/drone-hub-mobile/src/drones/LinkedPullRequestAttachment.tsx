@@ -154,7 +154,7 @@ function LinkedPullRequestRow({
           onPress={openOnGithub}
           style={({ pressed }) => [styles.externalButton, pressed && styles.pressed]}
         >
-          <ExternalLink color={colors.muted} size={14} strokeWidth={2} />
+          <ExternalLink color={colors.link} size={14} strokeWidth={2} />
         </Pressable>
       </View>
       <Pressable
@@ -339,7 +339,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: radii.small,
   },
-  title: { color: colors.text, fontSize: 13, lineHeight: 18, fontWeight: '700', marginTop: 3 },
+  title: { color: colors.link, fontSize: 13, lineHeight: 18, fontWeight: '700', marginTop: 3 },
   metaRow: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: 7, marginTop: 5 },
   repo: { color: colors.subtle, fontSize: 8, fontFamily: 'monospace' },
   branch: { color: colors.muted, fontSize: 8, lineHeight: 12, fontFamily: 'monospace' },
