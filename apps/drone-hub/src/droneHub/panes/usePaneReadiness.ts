@@ -1,16 +1,11 @@
 import React from 'react';
-import type { DroneSummary } from '../types';
+import {
+  droneProvisioningLabel,
+  isDroneProvisioningPhase,
+  type HubPhase,
+} from '../hub-phase';
 
-export type HubPhase = DroneSummary['hubPhase'];
-
-export function isProvisioningPhase(hubPhase: HubPhase | undefined): boolean {
-  return hubPhase === 'creating' || hubPhase === 'starting' || hubPhase === 'seeding';
-}
-
-export function provisioningLabel(hubPhase: HubPhase | undefined): string {
-  if (hubPhase === 'seeding') return 'Seeding';
-  return 'Starting';
-}
+export { droneProvisioningLabel as provisioningLabel, isDroneProvisioningPhase as isProvisioningPhase };
 
 export type PaneReadinessState = {
   ready: boolean;
@@ -52,7 +47,7 @@ export function usePaneReadiness({
     reset();
   }, [resetKey, reset]);
 
-  const provisioning = isProvisioningPhase(hubPhase);
+  const provisioning = isDroneProvisioningPhase(hubPhase);
   const waiting = provisioning && !ready;
 
   React.useEffect(() => {
@@ -103,4 +98,3 @@ export function usePaneReadiness({
     reset,
   };
 }
-

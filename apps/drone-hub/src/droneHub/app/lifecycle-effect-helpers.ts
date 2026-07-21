@@ -1,3 +1,5 @@
+import type { DroneSummary } from '../types';
+import { isDroneProvisioningPhase } from '../hub-phase';
 import type { ShortcutActionId } from './shortcuts';
 
 type EditableShortcutDispatchArgs = {
@@ -16,4 +18,17 @@ export function shouldDispatchEditableShortcutAction(_args: EditableShortcutDisp
     return inVoiceShortcutChatInput;
   }
   return false;
+}
+export function shouldHandoffDraftChatWorkspace(args: {
+  hubPhase?: DroneSummary['hubPhase'];
+  creating: boolean;
+  autoRenaming: boolean;
+  hasSelectedDrone: boolean;
+}): boolean {
+  return (
+    args.hasSelectedDrone &&
+    !args.creating &&
+    !args.autoRenaming &&
+    !isDroneProvisioningPhase(args.hubPhase)
+  );
 }

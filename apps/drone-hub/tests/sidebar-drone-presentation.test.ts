@@ -62,6 +62,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(sidebarItemStateToneClass('idle', true)).toContain('--green');
     expect(sidebarItemStateToneClass('blocked', true)).toContain('--red');
     expect(sidebarItemStateToneClass('approval', false)).toContain('--yellow');
+    expect(sidebarItemStateToneClass('starting', false)).toContain('--yellow');
   });
 
   test('keeps runtime metadata neutral while the state changes color', () => {
@@ -94,6 +95,15 @@ describe('desktop sidebar drone presentation', () => {
 
     expect(html).toContain('M4 2.5v7M8 2.5v7');
     expect(html).not.toContain('animate-spin');
+  });
+
+  test('keeps starting in the working color and motion language', () => {
+    const html = renderToStaticMarkup(
+      createElement(SidebarItemStateIndicator, { state: 'starting' }),
+    );
+
+    expect(html).toContain('animate-spin');
+    expect(html).toContain('text-[var(--yellow)]');
   });
 
   test('reserves hover actions for delete and the context menu', () => {

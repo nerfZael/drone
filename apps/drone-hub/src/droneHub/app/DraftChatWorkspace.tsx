@@ -8,7 +8,8 @@ import type { ChatAgentConfig } from '../../domain';
 import type { DraftChatState } from './app-types';
 import type { QueuedPrompt } from './use-queued-prompts-state';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
-import type { RepoRemoteBranchOption } from '../types';
+import type { DroneSummary, RepoRemoteBranchOption } from '../types';
+import { droneProvisioningLabel } from '../hub-phase';
 import {
   filterSpawnAgentMenuEntriesForRuntime,
   runtimeSupportsCustomAgents,
@@ -33,6 +34,7 @@ type DraftChatWorkspaceProps = {
   spawnAgentMenuEntries: UiMenuSelectEntry[];
   draftCreating: boolean;
   draftAutoRenaming: boolean;
+  draftHubPhase?: DroneSummary['hubPhase'];
   spawnAgentConfig: ChatAgentConfig;
   createRepoMenuEntries: UiMenuSelectEntry[];
   draftCreateRepoPath: string;
@@ -77,6 +79,7 @@ export function DraftChatWorkspace({
   spawnAgentMenuEntries,
   draftCreating,
   draftAutoRenaming,
+  draftHubPhase,
   spawnAgentConfig,
   createRepoMenuEntries,
   draftCreateRepoPath,
@@ -161,6 +164,10 @@ export function DraftChatWorkspace({
         stagedQueuedPrompts: queuedDraftPrompts,
       }),
     [draftChat.prompt, draftChat.queuedPrompts, queuedDraftPrompts],
+  );
+  const draftTitle = String(draftChat.droneName ?? '').trim() || 'New drone';
+  const startupLabel = droneProvisioningLabel(
+    draftHubPhase ?? (draftCreating && !draftChat.droneId ? 'creating' : 'starting'),
   );
   const idleSetupCard = (
     <div className="w-full rounded-[20px] border border-[var(--border-subtle)] bg-[var(--panel-raised)] p-5 text-left shadow-[0_12px_36px_var(--shadow-color)]">
@@ -372,43 +379,36 @@ export function DraftChatWorkspace({
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-      <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] relative">
-        <div className="px-5 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-8 h-8 rounded-[var(--radius-medium)] flex items-center justify-center flex-shrink-0 border bg-[var(--yellow-subtle)] border-[var(--yellow-border)]">
-                <IconChat className="text-[var(--yellow)]" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2.5">
-                  <span className="font-[var(--weight-semibold)] text-sm tracking-tight" style={{ fontFamily: 'var(--display)' }}>
-                    New drone
-                  </span>
-                  {draftCreateParentDroneLabel ? (
-                    <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]">
-                      Child of {draftCreateParentDroneLabel}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="text-[var(--text-10)] text-[var(--muted)] mt-0.5">
-                  {draftChat.prompt
-                    ? 'Creating your drone. Any new messages you send will queue and auto-send when it is ready.'
-                    : createWithChat
-                      ? 'Send the first message to create the drone and start its first chat.'
-                      : 'Create the runtime now. You can add chats later.'}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onCancel}
-                className="inline-flex items-center justify-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase"
-                style={{ fontFamily: 'var(--display)' }}
+      <div className="flex h-[3.25rem] flex-shrink-0 items-center border-b border-[var(--border)] bg-[var(--panel-alt)] px-4">
+        <div className="flex w-full items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="max-w-[min(34vw,360px)] truncate dh-type-title dh-type-workspace-title">
+              {draftTitle}
+            </span>
+            {draftChat.prompt && draftChat.prompt.state !== 'failed' ? (
+              <span
+                className="inline-flex items-center gap-1.5 text-[var(--text-10)] font-[var(--weight-medium)] text-[var(--muted-dim)]"
+                aria-label={`${startupLabel} drone`}
               >
-                Cancel
-              </button>
-            </div>
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)] animate-pulse" />
+                {startupLabel}
+              </span>
+            ) : null}
+            {draftCreateParentDroneLabel ? (
+              <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]">
+                Child of {draftCreateParentDroneLabel}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="inline-flex items-center justify-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase"
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       </div>

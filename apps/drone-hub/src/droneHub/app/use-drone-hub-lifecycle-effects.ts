@@ -7,7 +7,10 @@ import { isUngroupedGroupName } from '../../domain';
 import type { ShortcutActionId, ShortcutBindingMap } from './shortcuts';
 import { SHORTCUT_DEFINITIONS, isShortcutMatch } from './shortcuts';
 import { isDroneStartingOrSeeding } from './helpers';
-import { shouldDispatchEditableShortcutAction } from './lifecycle-effect-helpers';
+import {
+  shouldDispatchEditableShortcutAction,
+  shouldHandoffDraftChatWorkspace,
+} from './lifecycle-effect-helpers';
 import { useDropdownDismiss } from '../../ui/dropdown';
 
 type Updater<T> = T | ((prev: T) => T);
@@ -566,6 +569,11 @@ export function useDroneHubLifecycleEffects({
         }
         const isStarting = isDroneStartingOrSeeding(summary.hubPhase);
         if (!isStarting && !summary.busy) {
+          const awaitingNativePromptReconciliation =
+            seed.agent?.kind === 'native' &&
+            Boolean(String(seed.prompt ?? '').trim()) &&
+            isStartupSeedFresh(seed, nowMs);
+          if (awaitingNativePromptReconciliation) continue;
           delete next[id];
           changed = true;
         }
@@ -599,26 +607,25 @@ export function useDroneHubLifecycleEffects({
 
   React.useEffect(() => {
     const pending = draftChat?.prompt ?? null;
-    const prompt = String(pending?.prompt ?? '').trim();
-    if (!pending || !prompt || draftCreating || draftAutoRenaming) return;
-    if (!selectedDrone || !currentDrone) return;
-    if (chatUiMode === 'cli') {
-      setDraftChat(null);
-      return;
-    }
-    const promptInTranscript = Boolean(transcripts?.some((item) => String(item?.prompt ?? '').trim() === prompt));
-    const promptInPending = visiblePendingPromptsWithStartup.some((item) => String(item?.prompt ?? '').trim() === prompt);
-    if (!promptInTranscript && !promptInPending) return;
+    if (!pending || !currentDrone) return;
+    // The synthetic startup prompt is visible immediately, but it is not proof
+    // that the real chat surface is ready. Keep this workspace mounted so partial
+    // status and relationship metadata cannot replace the optimistic conversation.
+    if (
+      !shouldHandoffDraftChatWorkspace({
+        hubPhase: currentDrone.hubPhase,
+        creating: draftCreating,
+        autoRenaming: draftAutoRenaming,
+        hasSelectedDrone: Boolean(selectedDrone),
+      })
+    ) return;
     setDraftChat(null);
   }, [
-    chatUiMode,
     currentDrone,
     draftAutoRenaming,
     draftChat?.prompt,
     draftCreating,
     selectedDrone,
     setDraftChat,
-    transcripts,
-    visiblePendingPromptsWithStartup,
   ]);
 }

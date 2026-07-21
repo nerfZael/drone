@@ -4,6 +4,7 @@ import type { DroneSummary } from '../types';
 import { fetchFleetActor, type FleetActorPayload } from '../fleet/fleet-api';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from './drone-hub-dnd';
 import { assignedDroneIdsFromData, resolveAssignedDroneIdsFromTransfer } from './drone-hub-dnd-utils';
+import { isDroneProvisioningPhase } from '../hub-phase';
 import {
   CANVAS_ASSIGNMENT_PREVIEW_EVENT,
   FLEET_ASSIGNMENT_UPDATED_EVENT,
@@ -114,6 +115,12 @@ export function useFleetAssignmentDropState({
     let cancelled = false;
     setFleetBadgeData(null);
     setFleetBadgeError(null);
+    if (isDroneProvisioningPhase(currentDrone.hubPhase)) {
+      setFleetBadgeLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
     setFleetBadgeLoading(true);
 
     const tick = async (silent: boolean) => {
@@ -145,7 +152,7 @@ export function useFleetAssignmentDropState({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [currentDrone.id]);
+  }, [currentDrone.hubPhase, currentDrone.id]);
 
   useDndMonitor({
     onDragMove: updateFleetDropState,

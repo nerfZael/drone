@@ -112,12 +112,12 @@ export function sidebarItemStateToneClass(
   state: SidebarDroneDisplayState,
   unread = false,
 ): string {
-  if (state === 'working' || state === 'archiving' || state === 'deleting') {
+  if (state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting') {
     return 'text-[var(--yellow)]';
   }
   if (state === 'approval') return 'text-[var(--yellow)]';
   if (unread && state === 'idle') return 'text-[var(--green)]';
-  if (state === 'waiting' || state === 'starting') return 'text-[var(--info)]';
+  if (state === 'waiting') return 'text-[var(--info)]';
   if (state === 'blocked' || state === 'offline') return 'text-[var(--red)]';
   return 'text-[var(--muted)]';
 }
@@ -129,12 +129,12 @@ export function SidebarItemStateIndicator({
   state: SidebarDroneDisplayState;
   unread?: boolean;
 }) {
-  const working = state === 'working' || state === 'archiving' || state === 'deleting';
+  const working = state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting';
   const approvalRequired = state === 'approval';
   const indicatorToneClass =
     unread && state === 'idle'
       ? 'bg-[var(--green)]'
-      : state === 'waiting' || state === 'starting'
+      : state === 'waiting'
         ? 'bg-[var(--info)]'
         : state === 'blocked' || state === 'offline'
           ? 'bg-[var(--red)]'

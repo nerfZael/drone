@@ -1,7 +1,27 @@
 import { describe, expect, test } from 'bun:test';
-import { createDraftQueuedPrompt, visibleDraftQueuedPrompts } from '../src/droneHub/app/draft-chat-queue';
+import {
+  createDraftQueuedPrompt,
+  createSubmittedDraftChat,
+  visibleDraftQueuedPrompts,
+} from '../src/droneHub/app/draft-chat-queue';
 
 describe('draft chat queue helpers', () => {
+  test('creates the first optimistic turn as sent with a stable display name', () => {
+    const draft = createSubmittedDraftChat({
+      payload: { prompt: 'Inspect the repository' },
+      droneName: 'Untitled 1',
+      id: 'draft-first',
+      at: '2026-07-21T12:00:00.000Z',
+    });
+
+    expect(draft?.droneName).toBe('Untitled 1');
+    expect(draft?.prompt).toMatchObject({
+      id: 'draft-first',
+      prompt: 'Inspect the repository',
+      state: 'sent',
+    });
+  });
+
   test('creates a queued draft prompt with attachment previews intact', () => {
     const item = createDraftQueuedPrompt({
       prompt: 'follow-up',

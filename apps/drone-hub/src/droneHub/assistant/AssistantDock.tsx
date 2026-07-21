@@ -16,6 +16,7 @@ import {
   type DroneHubTask,
   type DroneHubTaskSpawnMode,
 } from '../chat';
+import { PendingTranscriptTurn } from '../chat/PendingTranscriptTurn';
 import type { LinkedPullRequestContext } from '../chat/LinkedPullRequestCards';
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-dnd';
@@ -46,18 +47,25 @@ import {
   AssistantQueuedPromptRow,
   AssistantMessageRow,
   AssistantWorkingRow,
+  AssistantRunActivity,
   ToolRunActivity,
 } from './AssistantTranscript';
 import { ApprovalCard } from './AssistantWorkflowCards';
 import { buildNativeAgentComposerControls } from './native-agent-composer-controls';
+import {
+  resolveAssistantStartupPromptPresentation,
+  type AssistantStartupPrompt,
+} from './assistant-startup-prompt';
 import {
   formatArtifactSize,
   formatUpdatedAt,
 } from './assistant-formatters';
 import {
   assistantHasEnabledMcpGroup,
+  assistantMessageTimestampMs,
   assistantPromptHasVisibleUserMessage,
   compactPreview,
+  directAssistantRunTiming,
   isChatIdleToolName,
   lastAssistantContentBlock,
   latestThinkingText,
@@ -91,7 +99,6 @@ import type {
   AssistantDroneReference,
   AssistantMessage,
   AssistantModelOption,
-  AssistantPromptDeliveryMode,
   AssistantProviderId,
   AssistantScopeDraft,
   AssistantScopeDrone,
@@ -111,14 +118,6 @@ const ASSISTANT_FILES_OPEN_STORAGE_KEY = 'droneHub.assistant.filesOpen';
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
 const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
 const EMPTY_ASSISTANT_WORKSPACES: AssistantWorkspaceSummary[] = [];
-
-function assistantMessageTimestampMs(message: AssistantMessage | undefined): number | undefined {
-  if (!message) return undefined;
-  const value = message.createdAt ?? message.timestamp;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
-  const parsed = Date.parse(String(value ?? ''));
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
 
 function readInitialFilesOpen(): boolean {
   if (typeof window === 'undefined') return false;
@@ -253,10 +252,14 @@ export function AssistantDock({
   nativeChat,
   messageFeatures,
   onHistoryChange,
+  startupPrompt,
+  onStartupPromptReconciled,
 }: {
   nativeChat: NativeChatBinding;
   messageFeatures: AssistantMessageFeatures;
   onHistoryChange?: (hasHistory: boolean) => void;
+  startupPrompt?: AssistantStartupPrompt | null;
+  onStartupPromptReconciled?: () => void;
 }) {
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
   const nativeDroneId = nativeChat.droneId;
@@ -343,16 +346,30 @@ export function AssistantDock({
     },
     initialHistory: bootstrapHistory,
   });
+  const startupPromptPresentation = React.useMemo(
+    () =>
+      resolveAssistantStartupPromptPresentation({
+        startupPrompt,
+        messages: blipSession.messages as AssistantMessage[],
+        queuedPrompts: activeThread?.queuedPrompts ?? [],
+      }),
+    [activeThread?.queuedPrompts, blipSession.messages, startupPrompt],
+  );
+  React.useEffect(() => {
+    if (!startupPrompt) return;
+    if (!startupPromptPresentation.reconciled && !error) return;
+    onStartupPromptReconciled?.();
+  }, [error, onStartupPromptReconciled, startupPrompt, startupPromptPresentation.reconciled]);
   const hasHistory =
     blipSession.messages.length > 0 ||
-    Boolean(activeThread?.queuedPrompts?.length);
+    Boolean(activeThread?.queuedPrompts?.length) ||
+    startupPromptPresentation.showOptimistic;
   React.useEffect(() => {
     if (hasHistory) onHistoryChange?.(true);
   }, [hasHistory, onHistoryChange]);
   React.useEffect(() => {
     if (activeThreadId) void blipSession.refreshHistory({ quiet: true });
   }, [activeThread?.updatedAt, activeThreadId, blipSession.refreshHistory]);
-  const promptDeliveryMode: AssistantPromptDeliveryMode = activeThread?.promptDeliveryMode === 'asap' ? 'asap' : 'queue';
   const activeAccessScope: AssistantAccessScope | null = activeThread?.accessScope ?? snapshot?.accessScope ?? null;
   const activeAccessScopeDroneIdsKey = activeAccessScope?.droneIds?.join('\u0000') ?? '';
   const activePendingApprovals = React.useMemo(
@@ -380,10 +397,12 @@ export function AssistantDock({
     () =>
       (activeThread?.queuedPrompts ?? []).filter(
         (prompt) =>
-          prompt.status !== 'running' ||
-          !assistantPromptHasVisibleUserMessage(blipSession.messages, prompt),
+          (prompt.id !== startupPromptPresentation.matchingQueuedPrompt?.id ||
+            !startupPromptPresentation.showOptimistic) &&
+          (prompt.status !== 'running' ||
+            !assistantPromptHasVisibleUserMessage(blipSession.messages, prompt)),
       ),
-    [activeThread?.queuedPrompts, blipSession.messages],
+    [activeThread?.queuedPrompts, blipSession.messages, startupPromptPresentation],
   );
   const running =
     blipSession.running ||
@@ -490,6 +509,7 @@ export function AssistantDock({
   }, [latestActivityItemKey, running, visibleItems]);
   const showWorking =
     running &&
+    !startupPromptPresentation.showOptimistic &&
     activePendingApprovals.length === 0 &&
     !hasActiveToolRun &&
     !latestActivityShowsReasoning &&
@@ -1467,6 +1487,22 @@ export function AssistantDock({
       ),
     });
   }
+  if (startupPromptPresentation.showOptimistic && startupPrompt) {
+    nativeTranscriptItems.push({
+      key: 'startup-prompt',
+      kind: 'pending',
+      content: (
+        <PendingTranscriptTurn
+          item={{
+            id: 'native-startup-prompt',
+            at: startupPrompt.at,
+            prompt: startupPrompt.prompt,
+            state: 'sent',
+          }}
+        />
+      ),
+    });
+  }
   const toolCallStartedAt = new Map<string, number>();
   for (const message of visibleMessages) {
     if (message.role !== 'assistant') continue;
@@ -1520,6 +1556,23 @@ export function AssistantDock({
           />
         ),
       });
+      if (item.message.role === 'user') {
+        const directRun = directAssistantRunTiming(visibleItems, itemIndex);
+        if (directRun) {
+          const directRunActive = running && itemIndex === latestUserItemIndex;
+          nativeTranscriptItems.push({
+            key: `direct-run:${item.key}:${directRunActive ? 'active' : 'complete'}`,
+            kind: 'status',
+            content: (
+              <AssistantRunActivity
+                active={directRunActive}
+                startedAt={directRun.startedAt}
+                endedAt={directRun.endedAt}
+              />
+            ),
+          });
+        }
+      }
       continue;
     }
 
@@ -1785,12 +1838,14 @@ export function AssistantDock({
               scrollRef={bindScrollRef}
               contentRef={bindScrollContentRef}
               loading={Boolean(
-                (loading && !snapshot) || (blipSession.historyLoading && visibleItems.length === 0),
+                !startupPromptPresentation.showOptimistic &&
+                ((loading && !snapshot) || (blipSession.historyLoading && visibleItems.length === 0)),
               )}
               loadingMessage="Loading conversation…"
               hasContent={Boolean(
                 blipSession.hasOlder ||
                 visibleItems.length > 0 ||
+                startupPromptPresentation.showOptimistic ||
                 showWorking ||
                 activePendingApprovals.length > 0 ||
                 visibleQueuedPrompts.length > 0 ||
@@ -1819,13 +1874,6 @@ export function AssistantDock({
               sending={scopeSyncBusy}
               waiting={running}
               disabled={!activeThread}
-              modeHint={
-                running
-                  ? promptDeliveryMode === 'asap'
-                    ? 'Sends at the next turn'
-                    : 'Queues after the current run'
-                  : ''
-              }
               composerContext={nativeComposerContext}
               composerControls={nativeComposerControls}
               onStop={() => stop()}
