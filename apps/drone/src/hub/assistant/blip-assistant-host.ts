@@ -14,6 +14,8 @@ export type BlipAssistantThreadConfiguration = {
   promptDeliveryMode?: 'queue' | 'asap';
   tools: AgentTool<any>[];
   onResponse?: CreateBlipSessionOptions['onResponse'];
+  beforePrompt?: CreateBlipSessionOptions['beforePrompt'];
+  afterPrompt?: CreateBlipSessionOptions['afterPrompt'];
   toolProviders?: BlipToolProvider[];
   permissionPreflight?: BlipToolPreflight;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
@@ -287,6 +289,8 @@ export class BlipAssistantHost {
         ...(sessionId ? { sessionId } : {}),
         reasoning: config.thinkingLevel,
         onResponse: config.onResponse,
+        beforePrompt: config.beforePrompt,
+        afterPrompt: config.afterPrompt,
         tools: config.tools,
         toolProviders: config.toolProviders,
         permissionPreflight: config.permissionPreflight,

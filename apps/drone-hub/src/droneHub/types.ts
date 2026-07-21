@@ -1,4 +1,5 @@
 import type { ChatAgentConfig } from '../domain';
+import type { AgentRunFileChanges } from '@blip/protocol';
 
 export type DroneSummary = {
   id: string;
@@ -542,6 +543,7 @@ export type TranscriptItem = {
   error?: string;
   output: string;
   agentPlan?: AgentPlan;
+  fileChanges?: AgentRunFileChanges;
   dockerSnapshot?: {
     id: string;
     status: 'creating' | 'ready' | 'failed' | 'restoring';
@@ -593,6 +595,7 @@ export type PendingPrompt = {
     lastError?: string;
   };
   agentPlan?: AgentPlan;
+  fileChanges?: AgentRunFileChanges;
   updatedAt?: string;
 };
 

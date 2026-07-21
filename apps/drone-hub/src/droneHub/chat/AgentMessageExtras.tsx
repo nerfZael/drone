@@ -1,4 +1,5 @@
 import React from 'react';
+import type { AgentRunFileChanges } from '@blip/protocol';
 
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import type { AgentPlan } from '../types';
@@ -13,6 +14,7 @@ import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
 import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { IconImage, IconJobs, IconOpen, IconSpinner } from './icons';
 import { collectInlineAgentMedia, type InlineAgentMedia } from './inline-agent-media';
+import { ChangedFilesCard } from './ChangedFilesCard';
 
 export type AgentMessageContent = {
   text: string;
@@ -52,6 +54,7 @@ export type AgentMessageExtrasProps = {
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
   plan?: AgentPlan;
+  fileChanges?: AgentRunFileChanges;
   actionEnd?: React.ReactNode;
 };
 
@@ -70,6 +73,7 @@ export function AgentMessageExtras({
   onOpenFileReference,
   onOpenLink,
   plan,
+  fileChanges,
   actionEnd,
 }: AgentMessageExtrasProps) {
   const inlineMediaOverride = useDroneHubUiStore(
@@ -221,6 +225,7 @@ export function AgentMessageExtras({
         </div>
       ) : null}
 
+      <ChangedFilesCard fileChanges={fileChanges} />
       <LinkedPullRequestCards
         text={text}
         context={linkedPullRequestContext}

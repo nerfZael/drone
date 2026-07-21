@@ -84,6 +84,70 @@ function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
   );
 }
 
+function ChangedFilesSummary({
+  item,
+}: {
+  item: Extract<AssistantRenderItem, { type: 'runSummary' }>;
+}) {
+  const [expanded, setExpanded] = React.useState(false);
+  const summary = item.fileChanges;
+  return (
+    <View style={styles.changedFilesCard}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${summary.counts.changed} changed files`}
+        accessibilityState={{ expanded }}
+        onPress={() => setExpanded((current) => !current)}
+        style={({ pressed }) => [styles.changedFilesHeader, pressed && styles.changedFilesPressed]}
+      >
+        <View style={styles.changedFilesTitleBlock}>
+          <Text style={styles.changedFilesTitle}>Changed files</Text>
+          <Text style={styles.changedFilesSubtitle}>
+            {summary.counts.changed} {summary.counts.changed === 1 ? 'file' : 'files'}
+          </Text>
+        </View>
+        <View style={styles.changedFilesCounts}>
+          {summary.counts.additions > 0 ? (
+            <Text style={styles.changedFilesAdditions}>+{summary.counts.additions}</Text>
+          ) : null}
+          {summary.counts.deletions > 0 ? (
+            <Text style={styles.changedFilesDeletions}>-{summary.counts.deletions}</Text>
+          ) : null}
+          {expanded ? (
+            <ChevronDown color={colors.muted} size={14} />
+          ) : (
+            <ChevronRight color={colors.muted} size={14} />
+          )}
+        </View>
+      </Pressable>
+      {expanded ? (
+        <View style={styles.changedFilesList}>
+          {summary.workspaces.map((workspace) => (
+            <View key={workspace.targetId}>
+              {summary.workspaces.length > 1 ? (
+                <Text style={styles.changedFilesWorkspace}>{workspace.label}</Text>
+              ) : null}
+              {workspace.entries.map((entry) => (
+                <View key={`${entry.status}:${entry.path}`} style={styles.changedFilesRow}>
+                  <Text style={styles.changedFilesStatus}>
+                    {entry.status === 'added' ? 'A' : entry.status === 'deleted' ? 'D' : entry.status === 'renamed' ? 'R' : 'M'}
+                  </Text>
+                  <Text numberOfLines={1} style={styles.changedFilesPath}>{entry.path}</Text>
+                  {!entry.binary && (entry.additions > 0 || entry.deletions > 0) ? (
+                    <Text style={styles.changedFilesLineCounts}>
+                      {entry.additions > 0 ? `+${entry.additions}` : ''}{entry.additions > 0 && entry.deletions > 0 ? ' ' : ''}{entry.deletions > 0 ? `-${entry.deletions}` : ''}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function ConversationLoadingState() {
   const rotation = React.useRef(new Animated.Value(0)).current;
 
@@ -778,6 +842,9 @@ export function MobileAssistantTranscript({
     if (item.type === 'toolGroup') {
       return <ToolGroupRow key={item.key} item={item} />;
     }
+    if (item.type === 'runSummary') {
+      return <ChangedFilesSummary key={item.key} item={item} />;
+    }
     const text = visibleMessageText(item.message).trim();
     const images = messageImageParts(item.message);
     const files = attachments(item.message);
@@ -1031,6 +1098,53 @@ export function LocalAssistantTranscript({
 }
 
 const styles = StyleSheet.create({
+  changedFilesCard: {
+    marginHorizontal: 10,
+    marginVertical: 8,
+    overflow: 'hidden',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panel,
+  },
+  changedFilesHeader: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  changedFilesPressed: { backgroundColor: colors.whiteWashSoft },
+  changedFilesTitleBlock: { flex: 1 },
+  changedFilesTitle: { color: colors.text, fontSize: 12, fontWeight: '600' },
+  changedFilesSubtitle: { color: colors.muted, fontSize: 10, marginTop: 2 },
+  changedFilesCounts: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  changedFilesAdditions: { color: colors.online, fontSize: 10, fontFamily: 'monospace' },
+  changedFilesDeletions: { color: colors.danger, fontSize: 10, fontFamily: 'monospace' },
+  changedFilesList: { borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 5 },
+  changedFilesWorkspace: {
+    color: colors.muted,
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+    paddingTop: 5,
+  },
+  changedFilesRow: {
+    minHeight: 29,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  changedFilesStatus: { width: 12, color: colors.accent, fontSize: 10, fontFamily: 'monospace', fontWeight: '700' },
+  changedFilesPath: { flex: 1, color: colors.text, fontSize: 10, fontFamily: 'monospace' },
+  changedFilesLineCounts: { color: colors.muted, fontSize: 9, fontFamily: 'monospace' },
   messages: { gap: 0 },
   runBody: { marginHorizontal: 10 },
   runSummary: {

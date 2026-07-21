@@ -482,6 +482,36 @@ describe('mobile drone sidebar model', () => {
     });
   });
 
+  test('preserves changed-file summaries for external and native agents', () => {
+    const fileChanges = {
+      version: 1 as const,
+      capturedAt: '2026-07-21T00:00:00.000Z',
+      counts: { changed: 1, additions: 2, deletions: 0 },
+      workspaces: [],
+    };
+    const external = mobileDroneTurnsToAssistantMessages([
+      { id: 'turn-1', prompt: 'Change it', output: 'Done', fileChanges },
+    ]);
+    const native = normalizeMobileNativeChatHistory({
+      entries: [
+        {
+          id: 'summary-1',
+          message: { role: 'runSummary', content: '', details: { fileChanges } },
+        },
+      ],
+    });
+
+    expect(external.at(-1)).toMatchObject({
+      role: 'runSummary',
+      details: { fileChanges: { counts: { changed: 1 } } },
+    });
+    expect(native.messages[0]).toMatchObject({
+      id: 'summary-1',
+      role: 'runSummary',
+      details: { fileChanges: { counts: { changed: 1 } } },
+    });
+  });
+
   test('preserves raw phone-hosted native chat messages', () => {
     expect(
       normalizeMobileNativeChatHistory([

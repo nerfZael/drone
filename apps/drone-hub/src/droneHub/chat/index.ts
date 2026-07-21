@@ -39,6 +39,7 @@ export {
 export { EmptyState } from './EmptyState';
 export { CollapsibleOutput } from './CollapsibleOutput';
 export { TranscriptTurn } from './TranscriptTurn';
+export { ChangedFilesCard } from './ChangedFilesCard';
 export type { DroneHubTask } from './drone-hub-task-parser';
 export type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 export { ChatComposerMenu, type ChatComposerMenuAction } from './ChatComposerMenu';

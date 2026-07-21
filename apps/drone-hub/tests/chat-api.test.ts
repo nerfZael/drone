@@ -61,6 +61,20 @@ describe('chat api transcript equality', () => {
 
     expect(sameTranscriptItem(pending, completed)).toBe(false);
   });
+
+  test('detects a finalized changed-files summary', () => {
+    const before = transcriptItem();
+    const after = transcriptItem({
+      fileChanges: {
+        version: 1,
+        capturedAt: '2026-07-21T00:00:00.000Z',
+        counts: { changed: 1, additions: 1, deletions: 0 },
+        workspaces: [],
+      },
+    });
+
+    expect(sameTranscriptItem(before, after)).toBe(false);
+  });
 });
 
 describe('chat api request scopes', () => {

@@ -11,6 +11,8 @@ import {
 import { appendHubOutboxEvent, initializeHubOutbox } from '../host/hub-outbox';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 import type { AgentPlan } from './agent-plan';
+import type { AgentRunFileChanges } from '@blip/protocol';
+import type { AgentRunFileChangesBaseline } from './run-file-changes';
 
 export type StoredTranscriptTurn = {
   at: string;
@@ -27,6 +29,7 @@ export type StoredTranscriptTurn = {
   inheritedFromClone?: boolean;
   dockerSnapshot?: unknown;
   agentPlan?: AgentPlan;
+  fileChanges?: AgentRunFileChanges;
 };
 
 export type StoredPendingPrompt = {
@@ -42,6 +45,8 @@ export type StoredPendingPrompt = {
   observability?: unknown;
   blipClones?: unknown;
   agentPlan?: AgentPlan;
+  fileChangesBaseline?: AgentRunFileChangesBaseline;
+  fileChanges?: AgentRunFileChanges;
   updatedAt?: string;
 };
 
@@ -548,6 +553,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
     ...(raw?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
     ...(raw?.dockerSnapshot && typeof raw.dockerSnapshot === 'object' ? { dockerSnapshot: raw.dockerSnapshot } : {}),
     ...(raw?.agentPlan && typeof raw.agentPlan === 'object' ? { agentPlan: raw.agentPlan } : {}),
+    ...(raw?.fileChanges && typeof raw.fileChanges === 'object' ? { fileChanges: raw.fileChanges } : {}),
   };
 }
 

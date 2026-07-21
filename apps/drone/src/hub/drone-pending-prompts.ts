@@ -15,6 +15,8 @@ import {
   upsertPendingPromptInStore,
 } from './transcript-store';
 import { resolveCanonicalDroneOrPendingForReadRef } from './drone-lifecycle-service';
+import type { AgentRunFileChanges } from '@blip/protocol';
+import type { AgentRunFileChangesBaseline } from './run-file-changes';
 
 export type PendingPrompt = {
   id: string;
@@ -34,6 +36,8 @@ export type PendingPrompt = {
   };
   blipClones?: unknown;
   agentPlan?: AgentPlan;
+  fileChangesBaseline?: AgentRunFileChangesBaseline;
+  fileChanges?: AgentRunFileChanges;
   updatedAt?: string;
 };
 
@@ -141,6 +145,12 @@ export function createDronePendingPromptStore(deps: {
           error: typeof p?.error === 'string' ? p.error : undefined,
           observability: normalizeObservability((p as any)?.observability),
           agentPlan: normalizePendingAgentPlan((p as any)?.agentPlan),
+          ...((p as any)?.fileChangesBaseline && typeof (p as any).fileChangesBaseline === 'object'
+            ? { fileChangesBaseline: (p as any).fileChangesBaseline as AgentRunFileChangesBaseline }
+            : {}),
+          ...((p as any)?.fileChanges && typeof (p as any).fileChanges === 'object'
+            ? { fileChanges: (p as any).fileChanges as AgentRunFileChanges }
+            : {}),
           updatedAt: typeof p?.updatedAt === 'string' ? p.updatedAt : undefined,
         }))
         .filter((p: PendingPrompt) => p.id && p.prompt.trim())
@@ -352,7 +362,19 @@ export function createDronePendingPromptStore(deps: {
     droneId: string;
     chatName: string;
     id: string;
-    patch: Partial<Pick<PendingPrompt, 'state' | 'error' | 'observability' | 'blipClones' | 'agentPlan' | 'updatedAt'>>;
+    patch: Partial<
+      Pick<
+        PendingPrompt,
+        | 'state'
+        | 'error'
+        | 'observability'
+        | 'blipClones'
+        | 'agentPlan'
+        | 'fileChangesBaseline'
+        | 'fileChanges'
+        | 'updatedAt'
+      >
+    >;
   }): Promise<void> {
     const droneIdForStore = normalizeDroneIdentity(opts.droneId);
     const chatNameForStore = opts.chatName || 'default';
