@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  type TextStyle,
   View,
 } from 'react-native';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
@@ -16,16 +17,10 @@ import { useEvent } from 'expo';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { SvgXml } from 'react-native-svg';
-import { colors } from '../theme';
+import { catppuccin, colors } from '../theme';
 import { NativeMarkdown } from '../local-assistant/NativeMarkdown';
 import { isCodePreview, isMarkdownPreview, type MobileFilePreview } from './file-preview-model';
-
-function formatBytes(value: number): string {
-  const bytes = Math.max(0, Number(value) || 0);
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
-  return `${(bytes / 1024 ** 2).toFixed(bytes < 10 * 1024 ** 2 ? 1 : 0)} MB`;
-}
+import { highlightMobileCode } from './mobile-syntax-highlighting';
 
 function MediaUnavailable({ message }: { message: string }) {
   return (
@@ -90,6 +85,58 @@ function PreviewImage({ uri }: { uri: string }) {
   );
 }
 
+const syntaxTokenStyles: Record<string, TextStyle> = {
+  comment: { color: catppuccin.overlay1, fontStyle: 'italic' },
+  prolog: { color: catppuccin.overlay1 },
+  doctype: { color: catppuccin.overlay1 },
+  cdata: { color: catppuccin.overlay1 },
+  punctuation: { color: catppuccin.subtext0 },
+  property: { color: catppuccin.sky },
+  tag: { color: catppuccin.red },
+  constant: { color: catppuccin.peach },
+  symbol: { color: catppuccin.flamingo },
+  deleted: { color: catppuccin.red },
+  boolean: { color: catppuccin.peach },
+  number: { color: catppuccin.peach },
+  selector: { color: catppuccin.green },
+  'attr-name': { color: catppuccin.yellow },
+  string: { color: catppuccin.green },
+  char: { color: catppuccin.green },
+  builtin: { color: catppuccin.red },
+  inserted: { color: catppuccin.green },
+  operator: { color: catppuccin.sky },
+  entity: { color: catppuccin.peach },
+  url: { color: catppuccin.sky },
+  atrule: { color: catppuccin.mauve },
+  'attr-value': { color: catppuccin.green },
+  keyword: { color: catppuccin.mauve },
+  function: { color: catppuccin.blue },
+  'class-name': { color: catppuccin.yellow },
+  regex: { color: catppuccin.peach },
+  important: { color: catppuccin.peach, fontWeight: '700' },
+  variable: { color: catppuccin.flamingo },
+  namespace: { color: catppuccin.overlay2 },
+};
+
+function HighlightedCode({ content, path, mime }: { content: string; path: string; mime: string }) {
+  const result = React.useMemo(
+    () => highlightMobileCode(content, path, mime),
+    [content, mime, path],
+  );
+  return (
+    <Text selectable style={[styles.textContent, styles.codeContent]}>
+      {result.tokens.map((token, index) => (
+        <Text
+          key={index}
+          style={token.types.map((type) => syntaxTokenStyles[type]).filter(Boolean)}
+        >
+          {token.text}
+        </Text>
+      ))}
+    </Text>
+  );
+}
+
 function TextPreview({ preview, line }: { preview: MobileFilePreview; line: number | null }) {
   const scrollRef = React.useRef<ScrollView | null>(null);
   const markdown = isMarkdownPreview(preview.path, preview.mime);
@@ -116,9 +163,17 @@ function TextPreview({ preview, line }: { preview: MobileFilePreview; line: numb
       contentContainerStyle={styles.textVerticalContent}
     >
       <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.textRow}>
-        <Text selectable style={[styles.textContent, code && styles.codeContent]}>
-          {preview.content ?? ''}
-        </Text>
+        {code ? (
+          <HighlightedCode
+            content={preview.content ?? ''}
+            path={preview.path}
+            mime={preview.mime}
+          />
+        ) : (
+          <Text selectable style={styles.textContent}>
+            {preview.content ?? ''}
+          </Text>
+        )}
       </ScrollView>
     </ScrollView>
   );
@@ -127,7 +182,7 @@ function TextPreview({ preview, line }: { preview: MobileFilePreview; line: numb
 export function FilePreviewModal({
   visible,
   preview,
-  requestedPath,
+  displayPath,
   line,
   loading,
   error,
@@ -136,7 +191,7 @@ export function FilePreviewModal({
 }: {
   visible: boolean;
   preview: MobileFilePreview | null;
-  requestedPath: string;
+  displayPath: string;
   line: number | null;
   loading: boolean;
   error: string | null;
@@ -165,23 +220,15 @@ export function FilePreviewModal({
           <View style={styles.headerCopy}>
             <View style={styles.titleRow}>
               <Text numberOfLines={1} style={styles.title}>
-                {preview?.name || requestedPath.split('/').at(-1) || 'File preview'}
+                {preview?.name || displayPath.split('/').at(-1) || 'File preview'}
               </Text>
               <Text style={styles.readOnly}>PREVIEW</Text>
             </View>
             <Text numberOfLines={1} style={styles.path}>
-              {preview?.path || requestedPath}
+              {displayPath}
             </Text>
           </View>
         </View>
-
-        {preview ? (
-          <View style={styles.metaBar}>
-            <Text style={styles.meta}>{preview.mime || preview.kind}</Text>
-            <Text style={styles.meta}>{formatBytes(preview.size)}</Text>
-            {line ? <Text style={styles.lineBadge}>LINE {line}</Text> : null}
-          </View>
-        ) : null}
 
         <View style={styles.content}>
           {loading ? (
@@ -272,18 +319,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   path: { color: colors.muted, fontFamily: 'monospace', fontSize: 9, marginTop: 3 },
-  metaBar: {
-    minHeight: 30,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 13,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.surface0,
-    backgroundColor: colors.crust,
-  },
-  meta: { color: colors.subtle, fontSize: 9, fontFamily: 'monospace' },
-  lineBadge: { color: colors.accentAlt, fontSize: 8, fontWeight: '900', letterSpacing: 0.6 },
   content: { flex: 1, minHeight: 0 },
   centerState: {
     flex: 1,

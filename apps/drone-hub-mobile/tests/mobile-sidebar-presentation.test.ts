@@ -2,6 +2,28 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 
 describe('mobile sidebar presentation', () => {
+  test('matches the desktop Hub working-indicator speed', () => {
+    const mobileSource = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const desktopSource = readFileSync(
+      new URL('../../drone-hub/src/droneHub/overview/DroneCard.tsx', import.meta.url),
+      'utf8',
+    );
+    const mobileDuration = Number(
+      /DRAWER_WORKING_SPIN_DURATION_MS = ([\d_]+)/
+        .exec(mobileSource)?.[1]
+        ?.replaceAll('_', ''),
+    );
+    const desktopDuration = Number(
+      /animate-\[spin_([\d.]+)s_linear_infinite\]/.exec(desktopSource)?.[1],
+    ) * 1_000;
+
+    expect(mobileDuration).toBe(desktopDuration);
+    expect(mobileSource.match(/duration: DRAWER_WORKING_SPIN_DURATION_MS/g)).toHaveLength(2);
+  });
+
   test('keeps repository rows path-free and aligned with desktop state glyphs', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
@@ -13,6 +35,41 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('<WorkingStatusIndicator />');
     expect(source).toContain('<UnreadStatusIndicator />');
     expect(source).toContain("repoCopy: { flex: 1, minWidth: 0, justifyContent: 'center' }");
+  });
+
+  test('matches the desktop drone row hierarchy and selection treatment', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const indicatorIndex = source.indexOf(
+      '<SwitchItemStatusIndicator state={displayState} unread={unread} />',
+    );
+    const titleIndex = source.indexOf('{drone.name}', indicatorIndex);
+
+    expect(indicatorIndex).toBeGreaterThan(-1);
+    expect(titleIndex).toBeGreaterThan(indicatorIndex);
+    expect(source).toContain('<RuntimeStatusIndicator runtime={drone.runtime} />');
+    expect(source).toContain('style={styles.switchItemTimeSlot}');
+    expect(source).not.toContain('styles.switchItemMeta');
+    expect(source).not.toContain('styles.chatCount');
+    expect(source).toContain('selected ? <View style={styles.sidebarSelectionEdge} /> : null');
+    expect(source).toContain('containsSelectedDrone ? <View style={styles.sidebarSelectionEdge} /> : null');
+    expect(source).toContain('switchItemRowActive: { backgroundColor: colors.sidebarSelectionWash }');
+    expect(source).toContain('repoRowActive: { backgroundColor: colors.sidebarSelectionWash }');
+    expect(source).toContain("droneList: { paddingBottom: 24 }");
+  });
+
+  test('uses the working spinner for starting and operation states without visible labels', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain("state === 'starting' ||");
+    expect(source).toContain("state === 'archiving' ||");
+    expect(source).toContain("state === 'deleting' ? (");
+    expect(source).not.toContain('{stateLabel}</Text>');
   });
 
   test('omits the selected-drone subtitle while preserving contextual create copy', () => {

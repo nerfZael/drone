@@ -8,6 +8,7 @@ import {
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { ChatMessageFrame } from '../chat/ChatMessageFrame';
+import { collectInlineAgentMedia } from '../chat/inline-agent-media';
 import { UserChatMessage } from '../chat/UserChatMessage';
 import {
   AgentRunSummaryLine,
@@ -968,6 +969,17 @@ export function AssistantMessageRow({
       ),
     [message.errorMessage, message.role, visibleText],
   );
+  const renderedInlineMediaHrefs = React.useMemo(
+    () =>
+      collectInlineAgentMedia(
+        agentMessage.text,
+        messageExtras?.droneId,
+        messageExtras?.droneHomePath,
+      )
+        .map((media) => media.linkHref)
+        .filter((href): href is string => Boolean(href)),
+    [agentMessage.text, messageExtras?.droneHomePath, messageExtras?.droneId],
+  );
   const structuredAssistant =
     message.role === 'assistant' &&
     Array.isArray(content) &&
@@ -1032,6 +1044,7 @@ export function AssistantMessageRow({
               role="assistant"
               text={t}
               autoExpand={autoExpandMessage}
+              renderedInlineMediaHrefs={renderedInlineMediaHrefs}
               onOpenFileReference={messageExtras?.onOpenFileReference}
               onOpenLink={messageExtras?.onOpenLink}
               textMentionLinks={droneMentionLinks}
@@ -1057,6 +1070,7 @@ export function AssistantMessageRow({
           alt: 'Attached image',
         }))}
         autoExpand={autoExpandMessage}
+        renderedInlineMediaHrefs={renderedInlineMediaHrefs}
         onOpenFileReference={messageExtras?.onOpenFileReference}
         onOpenLink={messageExtras?.onOpenLink}
         textMentionLinks={droneMentionLinks}

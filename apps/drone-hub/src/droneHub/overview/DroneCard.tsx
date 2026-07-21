@@ -3,9 +3,9 @@ import { timeAgo } from '../../domain';
 import type { DroneSummary } from '../types';
 import { RelativeTimeText } from '../chat/RelativeTimeText';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
-import { IconBaseImage, IconClone, IconMessageCircle, IconMore, IconPlus, IconRename, IconSpinner, IconTrash } from './icons';
+import { IconBaseImage, IconClone, IconMore, IconPlus, IconRename, IconSpinner, IconTrash } from './icons';
 import type { SidebarDensityMode } from '../app/settings-types';
-import { sidebarItemTypeClass } from '../sidebar/presentation';
+import { sidebarItemTypeClass, sidebarSelectionEdgeClass } from '../sidebar/presentation';
 
 type DroneCardProps = {
   drone: DroneSummary;
@@ -155,7 +155,7 @@ export function SidebarItemStateIndicator({
 export function SidebarWorkingStatusIndicator() {
   return (
     <svg
-      className="block h-3 w-3 animate-spin text-[var(--yellow)]"
+      className="block h-3 w-3 animate-[spin_1.6s_linear_infinite] text-[var(--yellow)]"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -182,6 +182,30 @@ export function SidebarApprovalStatusIndicator() {
     >
       <path d="M4 2.5v7M8 2.5v7" />
     </svg>
+  );
+}
+
+function SidebarRuntimeIndicator({ runtime }: { runtime: string }) {
+  const normalizedRuntime = runtime.trim().toLowerCase() === 'host' ? 'host' : 'container';
+  return (
+    <span
+      className="inline-flex h-3 w-3 items-center justify-center"
+      title={`${normalizedRuntime} runtime`}
+      aria-label={`${normalizedRuntime} runtime`}
+      data-sidebar-runtime={normalizedRuntime}
+    >
+      {normalizedRuntime === 'host' ? (
+        <svg viewBox="0 0 12 12" fill="none" aria-hidden="true" className="h-3 w-3">
+          <rect x="1.25" y="1.75" width="9.5" height="8.5" rx="1.25" stroke="currentColor" strokeWidth="1.1" />
+          <path d="M3.25 4.25 4.6 5.5 3.25 6.75M6 7h2.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 12 12" fill="none" aria-hidden="true" className="h-3 w-3">
+          <rect x="1.25" y="2" width="9.5" height="8" rx="1.1" stroke="currentColor" strokeWidth="1.1" />
+          <path d="M4 2v8M8 2v8M1.5 5.95h9" stroke="currentColor" strokeWidth="1.1" opacity=".72" />
+        </svg>
+      )}
+    </span>
   );
 }
 
@@ -305,7 +329,6 @@ export const DroneCard = React.memo(function DroneCard({
   );
   const stateLabel = sidebarDroneStateLabel(displayState, unread);
   const runtimeLabel = drone.runtime ?? 'container';
-  const stateToneClass = sidebarItemStateToneClass(displayState, unread);
   const showActiveIndicator = Boolean(active) && !unread;
   const renderActiveEdge = showActiveIndicator && activeIndicatorStyle === 'edge';
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
@@ -314,10 +337,10 @@ export const DroneCard = React.memo(function DroneCard({
   const renderSelectionEdge = showSelectionEdge !== false;
   const rowDensityClass =
     density === 'compact'
-      ? 'min-h-[42px] px-2 py-1'
+      ? 'min-h-[42px] py-1 pl-1 pr-1'
       : density === 'comfortable'
-        ? 'min-h-[52px] px-3 py-2'
-        : 'min-h-[48px] px-2.5 py-1.5';
+        ? 'min-h-[52px] py-2 pl-2 pr-1.5'
+        : 'min-h-[48px] py-1.5 pl-1.5 pr-1.5';
   const titleDensityClass =
     density === 'compact'
       ? 'text-[var(--sidebar-drone-compact-size)]'
@@ -347,108 +370,121 @@ export const DroneCard = React.memo(function DroneCard({
       }}
       onKeyDown={(e) => {
         if (disabled) return;
-        if (e.key === ' ') {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === ' ' || e.key === 'Enter') {
           e.preventDefault();
           onClick();
         }
       }}
-      className={`w-full text-left ${rowDensityClass} grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto] items-center rounded-[var(--sidebar-row-radius)] border transition-colors duration-150 group/drone relative ${
-        selected
+      className={`dh-sidebar-row-interactive ${highlighted ? 'dh-sidebar-row-highlighted' : ''} w-full text-left ${rowDensityClass} grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[1fr_1fr] items-center rounded-[var(--sidebar-row-radius)] border transition-colors duration-150 group/drone relative ${
+        highlighted
+          ? 'bg-[var(--yellow-subtle)] border-[var(--yellow-border)]'
+          : selected
           ? selectedTone === 'muted'
-            ? 'bg-[var(--surface-soft)] border-transparent'
-            : 'bg-[var(--sidebar-row-selected-bg)] border-[var(--sidebar-row-selected-border)]'
-          : highlighted
-            ? 'bg-[var(--yellow-subtle)] border-[var(--yellow-border)]'
-            : 'border-transparent hover:bg-[var(--surface-soft)]'
+            ? 'border-transparent'
+            : 'dh-sidebar-row-selected border-[var(--sidebar-row-selected-border)]'
+          : renderActiveEdge
+            ? 'dh-sidebar-row-selected border-transparent'
+            : 'border-transparent'
       } ${draggable ? 'cursor-grab touch-none active:cursor-grabbing' : ''} ${
         dragging ? 'opacity-35' : ''
       } ${disabled ? 'cursor-not-allowed opacity-60' : ''} ${
         highlighted ? 'shadow-[var(--glow-yellow)]' : ''
-      } focus:outline-none focus-visible:outline-none`}
+      } focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]`}
     >
       {/* Accent edge for selected state or open-chat state when requested */}
       {(selected && renderSelectionEdge) || renderActiveEdge ? (
-        <div className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--sidebar-row-selected-edge)]" />
+        <div className={sidebarSelectionEdgeClass} />
       ) : null}
 
-      <div className="col-span-2 row-start-1 flex min-w-0 items-center gap-2">
-          {leadingIcon ? <span className="inline-flex flex-shrink-0 items-center">{leadingIcon}</span> : null}
-          {showActiveIndicator && !renderActiveEdge ? (
-            <span
-              className="inline-flex h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--accent)]"
-              title="Open chat"
-              aria-label="Open chat"
-            />
-          ) : null}
-          <span
-            className={`min-w-0 flex-1 truncate ${titleDensityClass} ${sidebarItemTypeClass(selected)}`}
-            title={`${shownName}${shownName !== drone.name ? ` (${drone.name})` : ''} · created ${timeAgo(drone.createdAt)}`}
-          >
-            {shownName}
-          </span>
-          {statusHint ? (
-            <span
-              className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
-              title={statusHint}
-            >
-              {statusHint}
-            </span>
-          ) : null}
-          {drone.lastMessageAt ? (
-            <RelativeTimeText
-              at={drone.lastMessageAt}
-              compact
-              className="flex-shrink-0 font-mono text-[.5625rem] font-normal text-[var(--sidebar-meta-fg)]"
-              title={`Last message ${timeAgo(drone.lastMessageAt)}`}
-            />
-          ) : null}
-      </div>
       <div
-        className="col-start-1 row-start-2 mt-[3px] flex min-w-0 items-center gap-1.5 font-mono text-[.5625rem] font-medium leading-none tracking-[.00625rem]"
-        aria-label={`${stateLabel}, ${runtimeLabel}${drone.chats.length > 1 ? `, ${drone.chats.length} chats` : ''}`}
+        className={`col-start-1 row-span-2 flex min-w-0 items-center gap-1.5 self-stretch ${
+          hasActions
+            ? 'transition-[padding] duration-150 group-hover/drone:pr-8 group-focus-within/drone:pr-8'
+            : ''
+        } ${pinActionsVisible || actionMenuOpen ? 'pr-8' : ''}`}
       >
-          <SidebarItemStateIndicator state={displayState} unread={unread} />
-          {canOpenInlineError ? (
-            <span className="flex min-w-0 items-center">
-              <button
-                type="button"
-                onClick={(e) => {
-                  stopCardSelection(e);
-                  onErrorClick?.(drone, errText);
-                }}
-                onMouseDown={stopActionPressPropagation}
-                onPointerDown={stopActionPressPropagation}
-                className={`flex-shrink-0 hover:underline focus:outline-none ${stateToneClass}`}
-                title="View full error details"
-              >
-                {stateLabel}
-              </button>
-              <span className="min-w-0 truncate text-[var(--muted)]">{' · '}{runtimeLabel}</span>
-            </span>
-          ) : (
-            <span className="flex min-w-0 items-center" title={errText || undefined}>
-              <span className={`flex-shrink-0 ${stateToneClass}`}>{stateLabel}</span>
-              <span className="min-w-0 truncate text-[var(--muted)]">{' · '}{runtimeLabel}</span>
-            </span>
-          )}
-          {drone.chats.length > 1 ? (
-            <span className="inline-flex flex-shrink-0 items-center gap-[3px] pl-0.5 text-[var(--sidebar-meta-fg)]" title={`${drone.chats.length} chats`}>
-              <IconMessageCircle className="h-[.6875rem] w-[.6875rem]" />
-              {drone.chats.length}
-            </span>
-          ) : null}
+        {leadingIcon ? <span className="inline-flex flex-shrink-0 items-center">{leadingIcon}</span> : null}
+        {canOpenInlineError ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              stopCardSelection(e);
+              onErrorClick?.(drone, errText);
+            }}
+            onMouseDown={stopActionPressPropagation}
+            onPointerDown={stopActionPressPropagation}
+            className="inline-flex flex-shrink-0 rounded-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)]"
+            title={`${stateLabel}: view full error details`}
+            aria-label={`${stateLabel}: view full error details`}
+          >
+            <SidebarItemStateIndicator state={displayState} unread={unread} />
+          </button>
+        ) : (
+          <span
+            role="img"
+            className="inline-flex flex-shrink-0"
+            title={errText || stateLabel}
+            aria-label={stateLabel}
+          >
+            <SidebarItemStateIndicator state={displayState} unread={unread} />
+          </span>
+        )}
+        {showActiveIndicator && !renderActiveEdge ? (
+          <span
+            role="img"
+            className="inline-flex h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--accent)]"
+            title="Open chat"
+            aria-label="Open chat"
+          />
+        ) : null}
+        <span
+          className={`min-w-0 flex-1 truncate ${titleDensityClass} ${sidebarItemTypeClass(selected)}`}
+          title={`${shownName}${shownName !== drone.name ? ` (${drone.name})` : ''} · created ${timeAgo(drone.createdAt)}`}
+        >
+          {shownName}
+        </span>
+        {statusHint ? (
+          <span
+            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
+            title={statusHint}
+          >
+            {statusHint}
+          </span>
+        ) : null}
       </div>
 
-      {hasActions ? (
-        <div
-          ref={actionMenuRef}
-          data-onboarding-id="sidebar.droneCard.actions"
-          className={`relative col-start-2 row-start-2 ml-1.5 mt-[3px] flex flex-shrink-0 items-center gap-1 pb-px transition-opacity duration-150 ${
-            pinActionsVisible || actionMenuOpen
-              ? 'opacity-100 pointer-events-auto'
-              : 'opacity-0 pointer-events-none group-hover/drone:opacity-100 group-hover/drone:pointer-events-auto group-focus-within/drone:opacity-100 group-focus-within/drone:pointer-events-auto'
+      <div className="col-start-2 row-start-1 ml-1.5 flex min-w-0 items-center justify-end self-center font-mono text-[.5625rem] font-normal leading-none text-[var(--sidebar-meta-fg)]">
+        {drone.lastMessageAt ? (
+          <RelativeTimeText
+            at={drone.lastMessageAt}
+            compact
+            className="flex-shrink-0"
+            title={`Last message ${timeAgo(drone.lastMessageAt)}`}
+          />
+        ) : null}
+      </div>
+
+      <div className="relative col-start-2 row-start-2 ml-1.5 flex items-center justify-end self-center">
+        <span
+          className={`inline-flex text-[var(--sidebar-meta-fg)] opacity-55 transition-opacity duration-150 ${
+            hasActions
+              ? 'group-hover/drone:opacity-0 group-focus-within/drone:opacity-0'
+              : ''
           }`}
         >
+          <SidebarRuntimeIndicator runtime={runtimeLabel} />
+        </span>
+        {hasActions ? (
+          <div
+            ref={actionMenuRef}
+            data-onboarding-id="sidebar.droneCard.actions"
+            className={`absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-1 transition-opacity duration-150 ${
+              pinActionsVisible || actionMenuOpen
+                ? 'opacity-100 pointer-events-auto'
+                : 'opacity-0 pointer-events-none group-hover/drone:opacity-100 group-hover/drone:pointer-events-auto group-focus-within/drone:opacity-100 group-focus-within/drone:pointer-events-auto'
+            }`}
+          >
           {canDelete ? (
             <button
               type="button"
@@ -574,8 +610,9 @@ export const DroneCard = React.memo(function DroneCard({
               </div>
             </div>
           ) : null}
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }, areDroneCardPropsEqual);

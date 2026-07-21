@@ -19,6 +19,15 @@ export type AgentMessageContent = {
   tasks: DroneHubTask[];
 };
 
+export function resolveInlineMediaToggleState(inlineMediaVisible: boolean): {
+  active: boolean;
+  label: 'Hide inline media' | 'Show inline media';
+} {
+  return inlineMediaVisible
+    ? { active: false, label: 'Hide inline media' }
+    : { active: true, label: 'Show inline media' };
+}
+
 export function extractAgentMessageContent(text: string, enabled = true): AgentMessageContent {
   if (!enabled) return { text, tasks: [] };
   const taskData = extractDroneHubTasksFromAgentMessage(text);
@@ -76,7 +85,7 @@ export function AgentMessageExtras({
   const [failedMediaById, setFailedMediaById] = React.useState<Record<string, true>>({});
   const inlineMediaVisible = inlineMediaOverride !== false;
   const showInlineMedia = inlineMedia.length > 0 && inlineMediaVisible;
-  const inlineMediaToggleLabel = showInlineMedia ? 'Hide inline media' : 'Show inline media';
+  const inlineMediaToggle = resolveInlineMediaToggleState(inlineMediaVisible);
   const hasPlan = Boolean(plan?.items.length);
 
   const openInlineMediaTarget = React.useCallback(
@@ -104,13 +113,14 @@ export function AgentMessageExtras({
         <button
           type="button"
           onClick={() => setInlineMediaOverride(messageId, !inlineMediaVisible)}
-          className={`inline-flex h-7 w-7 items-center justify-center rounded border opacity-100 transition-opacity ${
-            showInlineMedia
+          className={`pointer-events-none inline-flex h-7 w-7 items-center justify-center rounded border opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 ${
+            inlineMediaToggle.active
               ? 'border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] text-[var(--accent)]'
               : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)]'
           } hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)]`}
-          title={inlineMediaToggleLabel}
-          aria-label={inlineMediaToggleLabel}
+          title={inlineMediaToggle.label}
+          aria-label={inlineMediaToggle.label}
+          aria-pressed={inlineMediaToggle.active}
         >
           <IconImage className="h-3.5 w-3.5 opacity-90" />
         </button>

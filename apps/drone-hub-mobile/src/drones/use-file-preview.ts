@@ -7,6 +7,7 @@ import type { MobileFileReference } from '../local-assistant/file-reference';
 import {
   mobileFileName,
   MOBILE_MEDIA_PREVIEW_MAX_BYTES,
+  mobileWorkspaceRelativeFilePath,
   resolveMobileDroneFilePath,
   type MobileFilePreview,
 } from './file-preview-model';
@@ -281,7 +282,9 @@ export function useFilePreview({
   return {
     visible: Boolean(request),
     preview,
-    requestedPath: request?.path ?? '',
+    displayPath: selectedDrone
+      ? mobileWorkspaceRelativeFilePath(selectedDrone, preview?.path ?? request?.path ?? '')
+      : (preview?.path ?? request?.path ?? ''),
     line: request?.line ?? null,
     loading,
     error,

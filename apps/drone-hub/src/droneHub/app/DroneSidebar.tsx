@@ -10,7 +10,6 @@ import {
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
   sidebarDroneStateLabel,
-  sidebarItemStateToneClass,
 } from '../overview';
 import {
   dropdownMenuItemBaseClass,
@@ -96,6 +95,7 @@ import {
   sidebarCountClass,
   sidebarDensityClasses,
   sidebarFolderLabelClass,
+  sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
 import { useSidebarReadModel } from './use-sidebar-read-model';
 import { buildSidebarRepositoryNavigationModel } from './sidebar-repository-navigation';
@@ -107,7 +107,7 @@ import {
 import { useSidebarRootDnd } from './use-sidebar-root-dnd';
 import { useDroneHubRuntimeStore } from './use-drone-hub-runtime-store';
 
-const SIDEBAR_EXPANDED_WIDTH_PX = 280;
+const SIDEBAR_EXPANDED_WIDTH_PX = 308;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
 const GROUP_HEADER_SINGLE_CLICK_DELAY_MS = 180;
 const AUTO_MINIMIZE_COLLAPSE_DELAY_MS = 90;
@@ -325,7 +325,7 @@ function ReadOnlySidebarGroups({
               </span>
             </button>
             {!collapsed ? (
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-0">
                 {group.items.map((drone) => {
                   const droneId = String(drone?.id ?? '').trim();
                   const chats = readOnlyDroneChats(drone);
@@ -335,6 +335,7 @@ function ReadOnlySidebarGroups({
                     (Array.isArray(drone?.busyChats) && drone.busyChats.length > 0);
                   const displayName = uiDroneName(drone.name) || drone.name || droneId;
                   const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
+                  const hasActiveChildChat = selectedDrone === droneId && !hasOnlyDefaultChat;
                   const defaultChatNodeId = createCanvasChatNodeId(droneId, 'default');
                   const showChatRows = chats.length > 1 && (showAllChats || selected);
                   return (
@@ -351,8 +352,8 @@ function ReadOnlySidebarGroups({
                           activeChatName === 'default'
                         }
                         activeIndicatorStyle="edge"
-                        selectionTone="muted"
-                        showSelectionEdge={false}
+                        selectionTone={hasActiveChildChat ? 'muted' : 'accent'}
+                        showSelectionEdge={!hasActiveChildChat}
                         busy={busy && hasOnlyDefaultChat}
                         approvalRequired={
                           hasOnlyDefaultChat &&
@@ -382,7 +383,6 @@ function ReadOnlySidebarGroups({
                               Boolean(approvalRequiredByChatNodeId[chatNodeId]),
                             );
                             const chatStateLabel = sidebarDroneStateLabel(chatState, false);
-                            const chatStateToneClass = sidebarItemStateToneClass(chatState, false);
                             return (
                               <button
                                 key={chatName}
@@ -393,18 +393,17 @@ function ReadOnlySidebarGroups({
                                 }}
                                 title={`${displayName} / ${chatName}`}
                               >
-                                {active ? (
-                                  <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
-                                ) : null}
-                                <span className={sidebarChatLabelClass}>
-                                  {chatName}
-                                </span>
+                                {active ? <span className={sidebarSelectionEdgeClass} /> : null}
                                 <span
-                                  className={`${sidebarChatStateClass} ${chatStateToneClass}`}
+                                  className={sidebarChatStateClass}
                                   title={chatStateLabel}
+                                  role="img"
+                                  aria-label={chatStateLabel}
                                 >
                                   <SidebarItemStateIndicator state={chatState} />
-                                  {chatStateLabel}
+                                </span>
+                                <span className={sidebarChatLabelClass}>
+                                  {chatName}
                                 </span>
                               </button>
                             );
@@ -535,6 +534,7 @@ function StaticReadOnlySidebarTree({
       (chat) => chat,
     );
     const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
+    const hasActiveChildChat = selectedDrone === drone.id && !hasOnlyDefaultChat;
     const selected = selectedDroneSet.has(drone.id);
     const disabledReason = String(disabledDroneReasonById[drone.id] ?? '').trim();
     const defaultChatNodeId = createCanvasChatNodeId(drone.id, 'default');
@@ -555,8 +555,8 @@ function StaticReadOnlySidebarTree({
           highlighted={highlightedDroneIds.has(drone.id)}
           active={selectedDrone === drone.id && hasOnlyDefaultChat && activeChatName === 'default'}
           activeIndicatorStyle="edge"
-          selectionTone="muted"
-          showSelectionEdge={false}
+          selectionTone={hasActiveChildChat ? 'muted' : 'accent'}
+          showSelectionEdge={!hasActiveChildChat}
           busy={busy && hasOnlyDefaultChat}
           approvalRequired={
             hasOnlyDefaultChat &&
@@ -587,7 +587,6 @@ function StaticReadOnlySidebarTree({
                 Boolean(approvalRequiredByChatNodeId[chatNodeId]),
               );
               const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
-              const chatStateToneClass = sidebarItemStateToneClass(chatState, chatUnread);
               return (
                 <button
                   key={chatName}
@@ -599,17 +598,16 @@ function StaticReadOnlySidebarTree({
                   }}
                   title={disabledReason || `${uiDroneName(drone.name)} / ${chatName}`}
                 >
-                  {active ? (
-                    <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
-                  ) : null}
-                  <span className={sidebarChatLabelClass}>{chatName}</span>
+                  {active ? <span className={sidebarSelectionEdgeClass} /> : null}
                   <span
-                    className={`${sidebarChatStateClass} ${chatStateToneClass}`}
+                    className={sidebarChatStateClass}
                     title={chatStateLabel}
+                    role="img"
+                    aria-label={chatStateLabel}
                   >
                     <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
-                    {chatStateLabel}
                   </span>
+                  <span className={sidebarChatLabelClass}>{chatName}</span>
                 </button>
               );
             })}
@@ -675,7 +673,7 @@ function StaticReadOnlySidebarTree({
   };
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-0">
       {nodeTree.rootChildIds.map((nodeId) => renderNode(nodeId, new Set()))}
     </div>
   );
@@ -1010,7 +1008,7 @@ function SidebarGroupSection({
         </div>
       </div>
       {!collapsed ? (
-        <div ref={setMoveDropNodeRef} className="px-1.5 py-1.5 flex flex-col gap-0.5">
+        <div ref={setMoveDropNodeRef} className="px-1.5 py-1.5 flex flex-col gap-0">
           <SidebarDroneTreeList
             {...sharedDroneTreeListProps}
             tree={groupTree}
@@ -2446,9 +2444,10 @@ export function DroneSidebar({
       {sidebarDockDragActive ? (
         <div className="pointer-events-none fixed inset-0 z-[10000]" aria-hidden="true">
           <div
-            className={`absolute top-0 h-full w-[280px] border bg-[var(--user-subtle)] border-[var(--user-border)] shadow-[inset_0_0_0_1px_var(--border-subtle)] ${
+            className={`absolute top-0 h-full border bg-[var(--user-subtle)] border-[var(--user-border)] shadow-[inset_0_0_0_1px_var(--border-subtle)] ${
               sidebarDockPreviewSide === 'right' ? 'right-0' : 'left-0'
             }`}
+            style={{ width: SIDEBAR_EXPANDED_WIDTH_PX }}
           />
         </div>
       ) : null}
@@ -2566,7 +2565,7 @@ export function DroneSidebar({
         ) : null}
 
         <div
-          className="dh-sidebar-scrollbar flex-1 min-h-0 overflow-y-auto px-2 py-1.5"
+          className="dh-sidebar-scrollbar flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-2 pt-0 pb-1.5 [--sidebar-selection-edge-offset:-0.5rem]"
           style={{
             WebkitOverflowScrolling: 'touch',
             overscrollBehaviorY: 'contain',
@@ -2734,7 +2733,7 @@ export function DroneSidebar({
                 </button>
               </div>
             )}
-          <div className={`flex flex-col gap-0.5 ${sidebarListSelectClass}`}>
+          <div className={`flex flex-col gap-0 ${sidebarListSelectClass}`}>
             {sidebarCapabilities.headerActions && repositoryOverviewOpen ? (
               <div className="flex flex-col pb-6">
                 {repositoryNavigationItems.map((item) => {
@@ -2742,12 +2741,11 @@ export function DroneSidebar({
                   return (
                     <div
                       key={item.id}
-                      className={`group/repository-row flex min-h-14 w-full items-center rounded-[.25rem] border-b border-[var(--surface-soft)] transition-colors ${
-                        containsSelectedDrone
-                          ? 'bg-[var(--selected)]'
-                          : 'hover:bg-[var(--hover)]'
+                      className={`dh-sidebar-row-interactive group/repository-row relative flex min-h-14 w-full items-center border-b border-[var(--surface-soft)] transition-colors ${
+                        containsSelectedDrone ? 'dh-sidebar-row-selected' : ''
                       }`}
                     >
+                      {containsSelectedDrone ? <span className={sidebarSelectionEdgeClass} /> : null}
                       <button
                         type="button"
                         onClick={() => openRepositoryNavigationItem(item)}
@@ -2838,7 +2836,7 @@ export function DroneSidebar({
               />
             ) : (
               <>
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-0">
                   <>
                     {sidebarCapabilities.actions && !isRepoGroupingMode ? (
                       <>

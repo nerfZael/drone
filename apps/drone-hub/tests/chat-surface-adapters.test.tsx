@@ -11,6 +11,7 @@ import {
   ChatSurfaceLoadingView,
   adaptExternalAgentChatSurface,
   adaptNativeAgentChatSurface,
+  stripRenderedMarkdownImages,
   type AgentChatSurfaceAdapter,
 } from '../src/droneHub/chat';
 import {
@@ -21,6 +22,7 @@ import {
   formatAssistantRunDuration,
 } from '../src/droneHub/assistant/AssistantTranscript';
 import { buildNativeAgentComposerControls } from '../src/droneHub/assistant/native-agent-composer-controls';
+import { resolveInlineMediaToggleState } from '../src/droneHub/chat/AgentMessageExtras';
 
 const TRANSCRIPT_ITEMS = [
   { key: 'message', kind: 'message' as const, content: <div>Visible message</div> },
@@ -438,6 +440,50 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('Attached image');
   });
 
+  test('assistant message bodies leave inline media rendering to the media rail', () => {
+    const text = [
+      'Implemented the change.',
+      '![Queued message footer inside the bubble](artifacts/queued-footer.png)',
+      'Typecheck passes.',
+    ].join('\n\n');
+    const html = renderToStaticMarkup(
+      <ChatMessageBody
+        role="assistant"
+        text={text}
+        renderedInlineMediaHrefs={['artifacts/queued-footer.png']}
+      />,
+    );
+
+    expect(stripRenderedMarkdownImages(text)).toBe('Implemented the change.\n\nTypecheck passes.');
+    expect(html).toContain('Implemented the change.');
+    expect(html).toContain('Typecheck passes.');
+    expect(html).not.toContain('Queued message footer inside the bubble');
+    expect(html).not.toContain('<img');
+  });
+
+  test('assistant message bodies keep images that are not represented by the media rail', () => {
+    const text = [
+      '![Rail image](artifacts/queued-footer.png)',
+      '![Standalone image](https://example.com/render?id=standalone)',
+    ].join('\n\n');
+    const html = renderToStaticMarkup(
+      <ChatMessageBody
+        role="assistant"
+        text={text}
+        renderedInlineMediaHrefs={['artifacts/queued-footer.png']}
+      />,
+    );
+
+    expect(html).not.toContain('Rail image');
+    expect(html).toContain('alt="Standalone image"');
+    expect(html).toContain('src="https://example.com/render?id=standalone"');
+  });
+
+  test('keeps image-looking Markdown examples inside code fences', () => {
+    const text = ['```md', '![Screenshot](screenshot.png)', '```'].join('\n');
+    expect(stripRenderedMarkdownImages(text)).toBe(text);
+  });
+
   test('quoted chat blocks expose their own hover copy action', () => {
     const html = renderToStaticMarkup(
       <ChatMessageBody role="assistant" text="> Create a multi-shot prompt." />,
@@ -487,9 +533,24 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('Follow up');
     expect(html).toContain('screenshot.png');
     expect(html).toContain('aria-label="Hide inline media"');
+    expect(html).toContain('aria-pressed="false"');
+    expect(html).toContain('pointer-events-none inline-flex');
+    expect(html).toContain('group-hover:pointer-events-auto group-hover:opacity-100');
+    expect(html.match(/<img/g)).toHaveLength(1);
     expect(html).toContain('Pull request');
     expect(html).toContain('#609');
     expect(html).not.toContain('&quot;type&quot;:&quot;drone-hub-task&quot;');
+  });
+
+  test('marks the inline media control active only while media is hidden', () => {
+    expect(resolveInlineMediaToggleState(true)).toEqual({
+      active: false,
+      label: 'Hide inline media',
+    });
+    expect(resolveInlineMediaToggleState(false)).toEqual({
+      active: true,
+      label: 'Show inline media',
+    });
   });
 
   test('native assistant messages make file references openable', () => {

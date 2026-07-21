@@ -65,7 +65,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(sidebarItemStateToneClass('starting', false)).toContain('--yellow');
   });
 
-  test('keeps runtime metadata neutral while the state changes color', () => {
+  test('puts the state indicator before the name without a visible state label', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
         drone: drone({ runtime: 'container', busyChats: ['default'] }),
@@ -75,7 +75,12 @@ describe('desktop sidebar drone presentation', () => {
     );
 
     expect(html).toContain('text-[var(--yellow)]');
-    expect(html).toContain('text-[var(--muted)]"> · container</span>');
+    expect(html.indexOf('animate-[spin_1.6s_linear_infinite]')).toBeLessThan(html.indexOf('>worker</span>'));
+    expect(html).not.toContain('>Working</span>');
+    expect(html).toContain('text-[var(--sidebar-meta-fg)] opacity-55');
+    expect(html).toContain('data-sidebar-runtime="container"');
+    expect(html).toContain('aria-label="container runtime"');
+    expect(html).not.toContain('>container</span>');
   });
 
   test('matches the mobile working indicator geometry and baseline slot', () => {
@@ -94,7 +99,7 @@ describe('desktop sidebar drone presentation', () => {
     );
 
     expect(html).toContain('M4 2.5v7M8 2.5v7');
-    expect(html).not.toContain('animate-spin');
+    expect(html).not.toContain('animate-[spin_1.6s_linear_infinite]');
   });
 
   test('keeps starting in the working color and motion language', () => {
@@ -102,7 +107,7 @@ describe('desktop sidebar drone presentation', () => {
       createElement(SidebarItemStateIndicator, { state: 'starting' }),
     );
 
-    expect(html).toContain('animate-spin');
+    expect(html).toContain('animate-[spin_1.6s_linear_infinite]');
     expect(html).toContain('text-[var(--yellow)]');
   });
 
@@ -126,7 +131,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).not.toContain('aria-label="Clone &quot;worker&quot;"');
   });
 
-  test('keeps the timestamp at the right edge above the in-flow actions', () => {
+  test('uses two rows while hover actions replace the bottom-right runtime label', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
         drone: drone({ lastMessageAt: '2026-07-20T11:00:00.000Z' }),
@@ -137,8 +142,46 @@ describe('desktop sidebar drone presentation', () => {
       }),
     );
 
-    expect(html).toContain('grid-cols-[minmax(0,1fr)_auto]');
-    expect(html).toContain('col-span-2 row-start-1');
-    expect(html).toContain('col-start-2 row-start-2');
+    expect(html).toContain('min-h-[48px] py-1.5 pl-1.5 pr-1.5');
+    expect(html).toContain('grid-rows-[1fr_1fr]');
+    expect(html).toContain('col-start-1 row-span-2 flex min-w-0 items-center gap-1.5 self-stretch');
+    expect(html).toContain('group-hover/drone:pr-8 group-focus-within/drone:pr-8');
+    expect(html).toContain('col-start-2 row-start-1 ml-1.5');
+    expect(html).toContain('col-start-2 row-start-2 ml-1.5');
+    expect(html).not.toContain('min-w-[2.75rem]');
+    expect(html).toContain('group-hover/drone:opacity-0');
+    expect(html).toContain('absolute right-0 top-1/2');
+    expect(html).toContain('Last message');
+  });
+
+  test('uses a faint accent wash and rail for selection', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone(),
+        selected: true,
+        onClick: () => {},
+      }),
+    );
+
+    expect(html).toContain('dh-sidebar-row-selected');
+    expect(html).toContain('dh-sidebar-row-interactive');
+    expect(html).toContain('bg-[var(--sidebar-row-selected-edge)]');
+    expect(html).toContain('focus-visible:ring-[var(--focus-ring)]');
+  });
+
+  test('keeps a selected parent drone text-only when its child chat is active', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({ chats: ['default', 'notes'] }),
+        selected: true,
+        selectionTone: 'muted',
+        showSelectionEdge: false,
+        onClick: () => {},
+      }),
+    );
+
+    expect(html).toContain('dh-type-sidebar-item-active');
+    expect(html).not.toContain('dh-sidebar-row-selected');
+    expect(html).not.toContain('bg-[var(--sidebar-row-selected-edge)]');
   });
 });

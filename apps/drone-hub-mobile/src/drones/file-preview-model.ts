@@ -68,6 +68,29 @@ export function mobileFileName(path: string): string {
   return normalizedPath(path).split('/').filter(Boolean).at(-1) || path;
 }
 
+export function mobileWorkspaceRelativeFilePath(
+  drone: Pick<MobileDroneSummary, 'runtime' | 'repoPath' | 'cwd' | 'repoAttached'>,
+  rawPath: string,
+): string {
+  const filePath = normalizedPath(rawPath);
+  if (!filePath || !filePath.startsWith('/')) return filePath.replace(/^\.\//, '');
+
+  const hostRuntime = String(drone.runtime ?? '').toLowerCase() === 'host';
+  const repoPath = normalizedPath(drone.repoPath);
+  const cwd = normalizedPath(drone.cwd);
+  const repoAttached =
+    typeof drone.repoAttached === 'boolean' ? drone.repoAttached : Boolean(repoPath);
+  const roots = hostRuntime
+    ? [repoAttached ? repoPath : '', cwd]
+    : [repoAttached ? '/work/repo' : '/dvm-data/home'];
+
+  for (const root of roots.filter(Boolean)) {
+    if (filePath === root) return mobileFileName(filePath);
+    if (inside(filePath, root)) return filePath.slice(root.length + 1);
+  }
+  return filePath;
+}
+
 export function isMarkdownPreview(path: string, mime: string): boolean {
   return (
     /(?:^|\/)readme$/i.test(path) ||

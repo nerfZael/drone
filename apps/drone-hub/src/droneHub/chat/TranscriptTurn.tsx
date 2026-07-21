@@ -10,6 +10,7 @@ import type { DroneHubTask } from './drone-hub-task-parser';
 import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { IconSnapshot, IconSpinner } from './icons';
 import { ChatMessageFrame } from './ChatMessageFrame';
+import { collectInlineAgentMedia } from './inline-agent-media';
 import { AgentRunSummaryLine } from './WorkingElapsedStatus';
 import { UserChatMessage } from './UserChatMessage';
 
@@ -72,6 +73,13 @@ export const TranscriptTurn = React.memo(
       [cleaned, item.ok],
     );
     const cleanedAgentMessage = agentMessage.text;
+    const renderedInlineMediaHrefs = React.useMemo(
+      () =>
+        collectInlineAgentMedia(cleanedAgentMessage, droneId, droneHomePath)
+          .map((media) => media.linkHref)
+          .filter((href): href is string => Boolean(href)),
+      [cleanedAgentMessage, droneHomePath, droneId],
+    );
     const promptIso = item.promptAt || item.at;
     const agentIso = item.completedAt || item.at;
     const promptStartedAtMs = Date.parse(String(promptIso ?? ''));
@@ -126,6 +134,7 @@ export const TranscriptTurn = React.memo(
             preserveLeadParagraph
             toggleOnMessageClick
             autoExpand={autoExpandAgentMessage}
+            renderedInlineMediaHrefs={renderedInlineMediaHrefs}
             onOpenFileReference={onOpenFileReference}
             onOpenLink={onOpenLink}
           />

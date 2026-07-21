@@ -70,7 +70,7 @@ export {
   type ChatComposerContextItem,
 } from './ChatComposerContext';
 export { ChatMessageFrame } from './ChatMessageFrame';
-export { ChatMessageBody, type ChatMessageImage } from './ChatMessageBody';
+export { ChatMessageBody, stripRenderedMarkdownImages, type ChatMessageImage } from './ChatMessageBody';
 export { UserChatMessage } from './UserChatMessage';
 export { ChatMessageCopyAction } from './ChatMessageCopyAction';
 export { PendingTranscriptTurn } from './PendingTranscriptTurn';

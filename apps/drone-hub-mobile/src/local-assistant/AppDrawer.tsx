@@ -99,6 +99,7 @@ type RegisterDrawer = (props: AppDrawerProps | null) => void;
 
 const AppDrawerHostContext = React.createContext<RegisterDrawer | null>(null);
 const DrawerWorkingPhaseContext = React.createContext<Animated.Value | null>(null);
+const DRAWER_WORKING_SPIN_DURATION_MS = 1_600;
 
 export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
   const [drawerProps, setDrawerProps] = React.useState<AppDrawerProps | null>(null);
@@ -435,41 +436,34 @@ function switchStateLabel(state: SwitchDisplayState): string {
 
 function switchStateColor(state: SwitchDisplayState): string {
   if (state === 'approval') return colors.warning;
-  if (state === 'working' || state === 'archiving' || state === 'deleting') return colors.warning;
-  if (state === 'waiting' || state === 'starting') return colors.info;
+  if (
+    state === 'working' ||
+    state === 'starting' ||
+    state === 'archiving' ||
+    state === 'deleting'
+  )
+    return colors.warning;
+  if (state === 'waiting') return colors.info;
   if (state === 'blocked' || state === 'offline') return colors.danger;
   if (state === 'done') return colors.online;
   return colors.muted;
 }
 
-function SwitchItemState({
+function SwitchItemStatusIndicator({
   state,
-  detail,
-  chatCount,
   unread = false,
 }: {
   state: SwitchDisplayState;
-  detail?: string;
-  chatCount?: number;
   unread?: boolean;
 }) {
   const stateColor = switchStateColor(state);
   const indicatorColor = unread && state === 'idle' ? colors.online : stateColor;
-  const stateLabel = unread && state === 'idle' ? 'Unread' : switchStateLabel(state);
   return (
-    <View
-      accessible
-      accessibilityLabel={[
-        stateLabel,
-        detail,
-        unread && stateLabel !== 'Unread' ? 'unread chat' : '',
-        chatCount != null && chatCount > 1 ? `${chatCount} chats` : '',
-      ]
-        .filter(Boolean)
-        .join(', ')}
-      style={styles.switchItemMetaRow}
-    >
-      {state === 'working' || state === 'archiving' || state === 'deleting' ? (
+    <View accessible={false} style={styles.switchItemStatus}>
+      {state === 'working' ||
+      state === 'starting' ||
+      state === 'archiving' ||
+      state === 'deleting' ? (
         <WorkingStatusIndicator />
       ) : state === 'approval' ? (
         <ApprovalStatusIndicator />
@@ -478,19 +472,78 @@ function SwitchItemState({
           <View style={[styles.switchStateDot, { backgroundColor: indicatorColor }]} />
         </View>
       )}
-      <Text numberOfLines={1} style={styles.switchItemMeta}>
-        <Text style={{ color: indicatorColor }}>{stateLabel}</Text>
-        {detail ? ` · ${detail}` : ''}
-      </Text>
-      {chatCount != null && chatCount > 1 ? (
-        <View
-          accessibilityLabel={`${chatCount} ${chatCount === 1 ? 'chat' : 'chats'}`}
-          style={styles.chatCount}
-        >
-          <MessageCircle color={colors.subtle} size={11} strokeWidth={1.9} />
-          <Text style={styles.chatCountText}>{chatCount}</Text>
-        </View>
-      ) : null}
+    </View>
+  );
+}
+
+function RuntimeStatusIndicator({ runtime }: { runtime: string }) {
+  const normalizedRuntime = runtime.trim().toLowerCase() === 'host' ? 'host' : 'container';
+  return (
+    <View accessible={false} style={styles.runtimeStatusIndicator}>
+      <Svg height={12} width={12} viewBox="0 0 12 12" fill="none">
+        {normalizedRuntime === 'host' ? (
+          <>
+            <Rect
+              x="1.25"
+              y="1.75"
+              width="9.5"
+              height="8.5"
+              rx="1.25"
+              stroke={colors.mutedDim}
+              strokeWidth="1.1"
+            />
+            <Line
+              x1="3.25"
+              y1="4.25"
+              x2="4.6"
+              y2="5.5"
+              stroke={colors.mutedDim}
+              strokeWidth="1.1"
+              strokeLinecap="round"
+            />
+            <Line
+              x1="4.6"
+              y1="5.5"
+              x2="3.25"
+              y2="6.75"
+              stroke={colors.mutedDim}
+              strokeWidth="1.1"
+              strokeLinecap="round"
+            />
+            <Line
+              x1="6"
+              y1="7"
+              x2="8.5"
+              y2="7"
+              stroke={colors.mutedDim}
+              strokeWidth="1.1"
+              strokeLinecap="round"
+            />
+          </>
+        ) : (
+          <>
+            <Rect
+              x="1.25"
+              y="2"
+              width="9.5"
+              height="8"
+              rx="1.1"
+              stroke={colors.mutedDim}
+              strokeWidth="1.1"
+            />
+            <Line x1="4" y1="2" x2="4" y2="10" stroke={colors.mutedDim} strokeWidth="1.1" />
+            <Line x1="8" y1="2" x2="8" y2="10" stroke={colors.mutedDim} strokeWidth="1.1" />
+            <Line
+              x1="1.5"
+              y1="5.95"
+              x2="10.5"
+              y2="5.95"
+              stroke={colors.mutedDim}
+              strokeWidth="1.1"
+            />
+          </>
+        )}
+      </Svg>
     </View>
   );
 }
@@ -504,7 +557,7 @@ function WorkingStatusIndicator() {
     const animation = Animated.loop(
       Animated.timing(localPhase, {
         toValue: 1,
-        duration: 900,
+        duration: DRAWER_WORKING_SPIN_DURATION_MS,
         easing: Easing.linear,
         useNativeDriver: true,
       }),
@@ -586,40 +639,47 @@ function DrawerDroneNode({
   const chats = drone.chats.length > 0 ? drone.chats : ['default'];
   const selected = drone.id === activeDroneId;
   const selectedChat = selected && chats.includes(activeChatName) ? activeChatName : chats[0]!;
-  const operation = droneOperationById[drone.id];
+  const operation = droneOperationById[drone.id] as 'archiving' | 'deleting' | undefined;
   const displayState = operation ?? mobileDroneDisplayState(drone);
   const unread = (drone.unreadChats?.length ?? 0) > 0;
+  const stateLabel = unread && displayState === 'idle' ? 'Unread' : switchStateLabel(displayState);
+  const runtimeLabel = drone.runtime.trim().toLowerCase() === 'host' ? 'host' : 'container';
+  const accessibilityLabel = [
+    `Open ${drone.name} chat`,
+    stateLabel,
+    unread && stateLabel !== 'Unread' ? 'unread chat' : '',
+    `${runtimeLabel} runtime`,
+    chats.length > 1 ? `${chats.length} chats` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
   return (
     <View style={styles.droneNode}>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ selected, disabled: Boolean(operation) }}
-        accessibilityLabel={`Open ${drone.name} chat`}
+        accessibilityLabel={accessibilityLabel}
         disabled={Boolean(operation)}
         onPress={() => onSelect(drone.id, selectedChat)}
         style={({ pressed }) => [
           styles.switchItemRow,
-          { paddingLeft: 10 + depth * 16, paddingRight: 7 },
+          { paddingLeft: 7 + depth * 14, paddingRight: 6 },
           selected && styles.switchItemRowActive,
-          pressed && styles.pressed,
+          pressed && styles.sidebarRowPressed,
         ]}
       >
-        <View style={styles.switchItemCopy}>
-          <View style={styles.switchItemTitleRow}>
-            <Text numberOfLines={1} style={[styles.switchItemTitle, selected && styles.activeText]}>
-              {drone.name}
-            </Text>
-            <RelativeMessageTimestamp
-              timestamp={drone.lastMessageAt}
-              style={styles.switchItemTime}
-            />
-          </View>
-          <SwitchItemState
-            state={displayState}
-            detail={drone.runtime}
-            chatCount={chats.length}
-            unread={unread}
-          />
+        {selected ? <View style={styles.sidebarSelectionEdge} /> : null}
+        <View style={styles.switchItemMain}>
+          <SwitchItemStatusIndicator state={displayState} unread={unread} />
+          <Text numberOfLines={1} style={[styles.switchItemTitle, selected && styles.activeText]}>
+            {drone.name}
+          </Text>
+        </View>
+        <View pointerEvents="none" style={styles.switchItemTimeSlot}>
+          <RelativeMessageTimestamp timestamp={drone.lastMessageAt} style={styles.switchItemTime} />
+        </View>
+        <View pointerEvents="none" style={styles.switchItemRuntimeSlot}>
+          <RuntimeStatusIndicator runtime={drone.runtime} />
         </View>
       </Pressable>
       {node.children.length > 0 ? (
@@ -939,7 +999,7 @@ function AppDrawerView({
     const animation = Animated.loop(
       Animated.timing(workingPhase, {
         toValue: 1,
-        duration: 900,
+        duration: DRAWER_WORKING_SPIN_DURATION_MS,
         easing: Easing.linear,
         useNativeDriver: true,
       }),
@@ -1139,6 +1199,9 @@ function AppDrawerView({
                 renderItem={({ item: group }) => {
                   const stateSummary =
                     repoStateSummaries.get(group.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY;
+                  const containsSelectedDrone =
+                    droneTreeContains(group.roots, activeDroneId) ||
+                    group.folders.some((folder) => droneFolderContains(folder, activeDroneId));
                   return (
                     <View style={styles.repoGroup}>
                       <Pressable
@@ -1147,14 +1210,11 @@ function AppDrawerView({
                         onPress={() => setActiveRepoId(group.id)}
                         style={({ pressed }) => [
                           styles.repoRow,
-                          (droneTreeContains(group.roots, activeDroneId) ||
-                            group.folders.some((folder) =>
-                              droneFolderContains(folder, activeDroneId),
-                            )) &&
-                            styles.repoRowActive,
-                          pressed && styles.pressed,
+                          containsSelectedDrone && styles.repoRowActive,
+                          pressed && styles.sidebarRowPressed,
                         ]}
                       >
+                        {containsSelectedDrone ? <View style={styles.sidebarSelectionEdge} /> : null}
                         <FolderGit2 color={colors.mutedDim} size={15} strokeWidth={1.9} />
                         <View style={styles.repoCopy}>
                           <Text numberOfLines={1} style={styles.repoName}>
@@ -1371,7 +1431,7 @@ const styles = StyleSheet.create({
   fleetStateTextApproval: { color: colors.warning },
   fleetStateTextWorking: { color: colors.warning },
   fleetStateTextUnread: { color: colors.online },
-  droneList: { paddingHorizontal: 8, paddingBottom: 24 },
+  droneList: { paddingBottom: 24 },
   repoGroup: {
     borderBottomWidth: 1,
     borderBottomColor: colors.whiteWash,
@@ -1382,9 +1442,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 7,
     paddingHorizontal: 7,
-    borderRadius: 4,
+    paddingLeft: 9,
+    paddingRight: 8,
+    position: 'relative',
   },
-  repoRowActive: { backgroundColor: colors.selectionWash },
+  repoRowActive: { backgroundColor: colors.sidebarSelectionWash },
   repoCopy: { flex: 1, minWidth: 0, justifyContent: 'center' },
   repoName: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
   droneNode: { position: 'relative' },
@@ -1392,13 +1454,19 @@ const styles = StyleSheet.create({
     minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
     paddingHorizontal: 10,
-    borderRadius: 4,
+    position: 'relative',
   },
-  switchItemRowActive: { backgroundColor: colors.selectionWash },
-  switchItemCopy: { flex: 1, minWidth: 0 },
-  switchItemTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  switchItemRowActive: { backgroundColor: colors.sidebarSelectionWash },
+  switchItemMain: {
+    flex: 1,
+    minWidth: 0,
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingRight: 34,
+  },
   switchItemTitle: {
     flex: 1,
     minWidth: 0,
@@ -1412,20 +1480,19 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontWeight: '400',
   },
-  switchItemMeta: {
-    color: colors.secondary,
-    flexShrink: 1,
-    fontSize: 9,
-    fontWeight: '500',
-    letterSpacing: 0.1,
-    fontFamily: 'monospace',
+  switchItemTimeSlot: {
+    position: 'absolute',
+    top: 7,
+    right: 6,
+    alignItems: 'flex-end',
   },
-  switchItemMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 3,
+  switchItemRuntimeSlot: {
+    position: 'absolute',
+    right: 6,
+    bottom: 7,
+    alignItems: 'flex-end',
   },
+  switchItemStatus: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   switchStateIndicator: {
     width: 12,
     height: 12,
@@ -1436,13 +1503,24 @@ const styles = StyleSheet.create({
   workingStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   stateStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   unreadStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.online },
-  chatCount: {
-    flexDirection: 'row',
+  runtimeStatusIndicator: {
+    width: 12,
+    height: 12,
     alignItems: 'center',
-    gap: 3,
-    paddingLeft: 2,
+    justifyContent: 'center',
+    opacity: 0.55,
   },
-  chatCountText: { color: colors.subtle, fontSize: 9, fontFamily: 'monospace' },
+  sidebarSelectionEdge: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    left: 0,
+    width: 2,
+    borderTopRightRadius: 2,
+    borderBottomRightRadius: 2,
+    backgroundColor: colors.sidebarSelectionEdge,
+  },
+  sidebarRowPressed: { backgroundColor: colors.sidebarSelectionWash },
   droneChildren: {},
   groupRow: {
     minHeight: 34,

@@ -3,6 +3,7 @@ import {
   inferMobilePreviewMime,
   isCodePreview,
   isMarkdownPreview,
+  mobileWorkspaceRelativeFilePath,
   resolveMobileDroneFilePath,
 } from '../src/drones/file-preview-model';
 
@@ -43,6 +44,38 @@ describe('mobile file preview model', () => {
       repoAttached: false,
     };
     expect(resolveMobileDroneFilePath(drone, 'notes.txt')).toBe('/dvm-data/home/notes.txt');
+  });
+
+  test('shows file paths relative to the active workspace root', () => {
+    expect(
+      mobileWorkspaceRelativeFilePath(
+        {
+          runtime: 'container',
+          repoPath: '/host/projects/drone',
+          cwd: '',
+          repoAttached: true,
+        },
+        '/work/repo/src/index.ts',
+      ),
+    ).toBe('src/index.ts');
+    expect(
+      mobileWorkspaceRelativeFilePath(
+        { runtime: 'host', repoPath: '/srv/drone', cwd: '/srv/drone', repoAttached: true },
+        '/srv/drone/README.md',
+      ),
+    ).toBe('README.md');
+    expect(
+      mobileWorkspaceRelativeFilePath(
+        { runtime: 'host', repoPath: '', cwd: '/srv/scratch', repoAttached: false },
+        '/srv/scratch/output/result.json',
+      ),
+    ).toBe('output/result.json');
+    expect(
+      mobileWorkspaceRelativeFilePath(
+        { runtime: 'host', repoPath: '', cwd: '', repoAttached: false },
+        'artifacts/report.md',
+      ),
+    ).toBe('artifacts/report.md');
   });
 
   test('separates Markdown, code, and ordinary text previews', () => {

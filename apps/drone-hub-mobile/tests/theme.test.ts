@@ -62,6 +62,8 @@ describe('mobile theme contrast', () => {
     expect(colors.accentDark).toBe('rgba(203, 166, 247, 0.075)');
     expect(colors.accentBorder).toBe('rgba(203, 166, 247, 0.26)');
     expect(colors.accentWash).toBe('rgba(203, 166, 247, 0.06)');
+    expect(colors.sidebarSelectionWash).toBe('rgba(203, 166, 247, 0.055)');
+    expect(colors.sidebarSelectionEdge).toBe('rgba(203, 166, 247, 0.78)');
     expect(colors.link).toBe('#89b4fa');
     expect(colors.cursor).toBe('#f5e0dc');
     expect(colors.selectionWash).toBe('rgba(147, 153, 178, 0.24)');

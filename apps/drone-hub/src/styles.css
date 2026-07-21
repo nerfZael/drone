@@ -57,9 +57,9 @@
   --sidebar-drone-fg: var(--sidebar-fg);
   --sidebar-drone-active-fg: var(--sidebar-fg-active);
   --sidebar-drone-weight: 400;
-  --sidebar-row-selected-bg: var(--surface-strong);
+  --sidebar-row-selected-bg: rgba(177, 156, 255, .055);
   --sidebar-row-selected-border: transparent;
-  --sidebar-row-selected-edge: transparent;
+  --sidebar-row-selected-edge: rgba(177, 156, 255, .82);
   --sidebar-row-radius: var(--radius-medium);
   --sidebar-meta-fg: var(--muted-dim);
   --sidebar-drone-compact-size: var(--text-10-5);
@@ -260,9 +260,9 @@
   --sidebar-drone-fg: #a6adc8;
   --sidebar-drone-active-fg: #cdd6f4;
   --sidebar-drone-weight: 500;
-  --sidebar-row-selected-bg: rgba(49, 50, 68, .44);
+  --sidebar-row-selected-bg: rgba(203, 166, 247, .055);
   --sidebar-row-selected-border: transparent;
-  --sidebar-row-selected-edge: transparent;
+  --sidebar-row-selected-edge: rgba(203, 166, 247, .78);
   --sidebar-row-radius: .25rem;
   --sidebar-meta-fg: #7f849c;
   --sidebar-drone-compact-size: .75rem;
@@ -677,16 +677,69 @@ code, pre {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted-dim); }
 
-.dh-sidebar-scrollbar {
-  scrollbar-color: var(--border-subtle) transparent;
-  scrollbar-width: thin;
+.dh-sidebar-scrollbar::-webkit-scrollbar { width: 2px; }
+.dh-sidebar-scrollbar::-webkit-scrollbar-button {
+  -webkit-appearance: none;
+  background: transparent;
+  display: none;
+  width: 0;
+  height: 0;
 }
-.dh-sidebar-scrollbar::-webkit-scrollbar { width: 3px; }
+.dh-sidebar-scrollbar::-webkit-scrollbar-button:vertical:start:decrement,
+.dh-sidebar-scrollbar::-webkit-scrollbar-button:vertical:end:increment {
+  -webkit-appearance: none;
+  display: none;
+  width: 0;
+  height: 0;
+}
+.dh-sidebar-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .dh-sidebar-scrollbar::-webkit-scrollbar-thumb {
   background: var(--border-subtle);
   border-radius: 999px;
 }
 .dh-sidebar-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
+@supports (-moz-appearance: none) {
+  .dh-sidebar-scrollbar {
+    scrollbar-color: var(--border-subtle) transparent;
+    scrollbar-width: thin;
+  }
+}
+
+/* Full-bleed navigation states without disturbing the row's content indent. */
+.dh-sidebar-row-interactive,
+.dh-sidebar-row-selected {
+  isolation: isolate;
+  background: transparent;
+}
+
+.dh-sidebar-row-interactive:not([aria-disabled='true']):not(.dh-sidebar-row-selected):not(.dh-sidebar-row-highlighted):hover::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: -1px;
+  bottom: -1px;
+  left: -100vw;
+  right: -100vw;
+  background: var(--sidebar-row-selected-bg);
+  pointer-events: none;
+}
+
+.dh-sidebar-row-selected::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: -1px;
+  bottom: -1px;
+  left: -100vw;
+  right: -100vw;
+  background: var(--sidebar-row-selected-bg);
+  pointer-events: none;
+}
+
+.dh-sidebar-selection-edge {
+  left: var(--sidebar-selection-edge-offset, 0px);
+}
 
 /* ──────────────────────────────────────────────────────────
    Collapse/expand

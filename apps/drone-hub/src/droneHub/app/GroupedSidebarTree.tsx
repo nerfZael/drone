@@ -6,7 +6,6 @@ import {
   SidebarItemStateIndicator,
   sidebarChatDisplayState,
   sidebarDroneStateLabel,
-  sidebarItemStateToneClass,
 } from '../overview';
 import type { DroneSummary } from '../types';
 import { createCanvasChatNodeId } from './app-config';
@@ -52,6 +51,7 @@ import {
   sidebarCountClass,
   sidebarDensityClasses,
   sidebarFolderLabelClass,
+  sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
 
 const GROUPED_FOLDER_SINGLE_CLICK_DELAY_MS = 180;
@@ -429,7 +429,6 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
   const chatUnread = !active && unreadAgentMessageByChatNodeId[chatNodeId] === true;
   const chatState = sidebarChatDisplayState(drone, chatBusy, approvalRequired);
   const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
-  const chatStateToneClass = sidebarItemStateToneClass(chatState, chatUnread);
   const draft = drone.draftChats?.[chatName] === true;
   const reorderPreviewClass =
     dragOverChat?.key === `${drone.id}:${chatName}`
@@ -483,25 +482,24 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
             setSelectedSidebarNodeId(sidebarChatId);
             onSelectDroneChat(drone.id, chatName);
           }}
-          className={`relative flex flex-1 items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })} ${isDragging ? 'opacity-35' : ''} ${!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
+          className={`relative flex flex-1 items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })} ${isDragging ? 'opacity-35' : ''} ${!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${actionsEnabled && chatName !== 'default' ? 'group-hover/chat-row:pr-14 group-focus-within/chat-row:pr-14' : ''}`}
           title={`${uiDroneName(drone.name)} / ${chatName}`}
         >
-          {active ? (
-            <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
-          ) : null}
+          {selected || active ? <span className={sidebarSelectionEdgeClass} /> : null}
+          <span
+            className={sidebarChatStateClass}
+            title={chatStateLabel}
+            role="img"
+            aria-label={chatStateLabel}
+          >
+            <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
+          </span>
           <span className={sidebarChatLabelClass}>{chatName}</span>
           {draft ? (
             <span className="flex-shrink-0 rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
               Draft
             </span>
           ) : null}
-          <span
-            className={`${sidebarChatStateClass} ${chatStateToneClass} ${actionsEnabled && chatName !== 'default' ? 'transition-opacity group-hover/chat-row:opacity-0' : ''}`}
-            title={chatStateLabel}
-          >
-            <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
-            {chatStateLabel}
-          </span>
         </button>
         {actionsEnabled && chatName !== 'default' ? (
           <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1">
@@ -564,7 +562,6 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
   const chatUnread = !active && unreadAgentMessageByChatNodeId[chatNodeId] === true;
   const chatState = sidebarChatDisplayState(drone, chatBusy, approvalRequired);
   const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
-  const chatStateToneClass = sidebarItemStateToneClass(chatState, chatUnread);
   return (
     <div className="flex flex-col gap-0.5">
       <div className="relative flex items-stretch gap-1 group/chat-row">
@@ -579,15 +576,16 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
           className={`relative flex flex-1 items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })}`}
           title={`${uiDroneName(drone.name)} / ${chatName}`}
         >
-          {active ? <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" /> : null}
-          <span className={sidebarChatLabelClass}>{chatName}</span>
+          {selected || active ? <span className={sidebarSelectionEdgeClass} /> : null}
           <span
-            className={`${sidebarChatStateClass} ${chatStateToneClass}`}
+            className={sidebarChatStateClass}
             title={chatStateLabel}
+            role="img"
+            aria-label={chatStateLabel}
           >
             <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
-            {chatStateLabel}
           </span>
+          <span className={sidebarChatLabelClass}>{chatName}</span>
         </button>
       </div>
     </div>
@@ -704,6 +702,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const selected = selectedDroneSet.has(drone.id) || selectedSidebarNodeId === node.id;
   const showOpenDefaultChatIndicator =
     hasOnlyDefaultChat && selectedDrone === drone.id && activeChatName === 'default';
+  const hasActiveChildChat = selectedDrone === drone.id && !hasOnlyDefaultChat;
   const onDeleteDroneRef = React.useRef(onDeleteDrone);
   onDeleteDroneRef.current = onDeleteDrone;
   const handleDeleteDrone = React.useCallback(() => {
@@ -748,8 +747,8 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             highlighted={highlightedDroneIds.has(drone.id)}
             active={showOpenDefaultChatIndicator}
             activeIndicatorStyle="edge"
-            selectionTone="muted"
-            showSelectionEdge={false}
+            selectionTone={hasActiveChildChat ? 'muted' : 'accent'}
+            showSelectionEdge={!hasActiveChildChat}
             busy={showBusy}
             approvalRequired={hasOnlyDefaultChat && defaultChatApprovalRequired}
             operationLabel={

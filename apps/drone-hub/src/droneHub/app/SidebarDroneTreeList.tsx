@@ -6,7 +6,6 @@ import {
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
   sidebarDroneStateLabel,
-  sidebarItemStateToneClass,
 } from '../overview';
 import type { DroneSummary } from '../types';
 import { createCanvasChatNodeId } from './app-config';
@@ -45,6 +44,7 @@ import {
   sidebarChatRowTone,
   sidebarChatStateClass,
   sidebarDensityClasses,
+  sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
 
 export type SidebarDroneTreeListProps = {
@@ -123,6 +123,8 @@ type SidebarDroneRowProps = {
   busy: boolean;
   approvalRequired: boolean;
   unread: boolean;
+  active: boolean;
+  activeDescendant: boolean;
   showGroup?: boolean;
   groupOrderKey?: string | null;
   groupName?: string | null;
@@ -256,6 +258,8 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
   busy,
   approvalRequired,
   unread,
+  active,
+  activeDescendant,
   showGroup,
   groupOrderKey,
   groupName,
@@ -335,6 +339,10 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           statusHint={isOptimistic ? 'queued' : undefined}
           selected={selectedDroneSet.has(drone.id)}
           highlighted={highlightedDroneIds.has(drone.id)}
+          active={active}
+          activeIndicatorStyle="edge"
+          selectionTone={activeDescendant ? 'muted' : 'accent'}
+          showSelectionEdge={!activeDescendant}
           busy={busy}
           approvalRequired={approvalRequired}
           operationLabel={
@@ -434,7 +442,6 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
   const approvalRequired = useChatApprovalRequired(createCanvasChatNodeId(drone.id, chatName));
   const chatState = sidebarChatDisplayState(drone, busy, approvalRequired);
   const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
-  const chatStateToneClass = sidebarItemStateToneClass(chatState, chatUnread);
   const chatDragData = React.useMemo(
     () => createSidebarChatDragData(drone.id, chatName, `${uiDroneName(drone.name)} / ${chatName}`),
     [chatName, drone.id, drone.name, uiDroneName],
@@ -495,11 +502,20 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
           event.stopPropagation();
           onSelectDroneChat(drone.id, chatName);
         }}
-        className={`flex-1 rounded border text-left transition-colors flex items-center gap-1.5 min-w-0 ${densityClasses.chatRow} ${sidebarChatRowTone({ selected })} ${!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${
+        className={`relative flex-1 rounded border text-left transition-colors flex items-center gap-1.5 min-w-0 ${densityClasses.chatRow} ${sidebarChatRowTone({ selected })} ${!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${actionsEnabled && (canRename || canDelete) ? 'group-hover/chat-row:pr-14 group-focus-within/chat-row:pr-14' : ''} ${
           isDragging ? 'opacity-35' : ''
         }`}
         title={`${uiDroneName(drone.name)} / ${chatName}`}
       >
+        {selected ? <span className={sidebarSelectionEdgeClass} /> : null}
+        <span
+          className={sidebarChatStateClass}
+          title={chatStateLabel}
+          role="img"
+          aria-label={chatStateLabel}
+        >
+          <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
+        </span>
         <span className={sidebarChatLabelClass}>
           {chatName}
         </span>
@@ -508,13 +524,6 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
             Draft
           </span>
         ) : null}
-        <span
-          className={`${sidebarChatStateClass} ${chatStateToneClass} ${actionsEnabled && (canRename || canDelete) ? 'transition-opacity group-hover/chat-row:opacity-0' : ''}`}
-          title={chatStateLabel}
-        >
-          <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
-          {chatStateLabel}
-        </span>
       </button>
       <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1">
         {actionsEnabled && canRename ? (
@@ -740,6 +749,8 @@ function SidebarDroneNode({
         busy={showDroneBusy}
         approvalRequired={hasOnlyDefaultChat && defaultChatApprovalRequired}
         unread={showDroneUnread}
+        active={selectedDrone === drone.id && hasOnlyDefaultChat && activeChatName === 'default'}
+        activeDescendant={selectedDrone === drone.id && !hasOnlyDefaultChat}
         showGroup={showGroup}
         groupOrderKey={groupOrderKey}
         groupName={groupName}

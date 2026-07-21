@@ -1947,7 +1947,7 @@ export function DronesScreen({
       <FilePreviewModal
         visible={filePreview.visible}
         preview={filePreview.preview}
-        requestedPath={filePreview.requestedPath}
+        displayPath={filePreview.displayPath}
         line={filePreview.line}
         loading={filePreview.loading}
         error={filePreview.error}
