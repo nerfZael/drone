@@ -76,6 +76,8 @@ type RepositoryDependencyName =
   | 'resolveDroneOrRespond'
   | 'resolveLanguageDefinition'
   | 'resolveLanguageReferences'
+  | 'createDroneDaemonGitRunner'
+  | 'createDroneDaemonWorktreeHasher'
   | 'runGitInDrone'
   | 'runGitInDroneOrThrow'
   | 'runHostCommand'
@@ -84,8 +86,7 @@ type RepositoryDependencyName =
   | 'syncRepoAgentsInstructionsForDrone'
   | 'updateHostRef'
   | 'withLockedDroneContainer'
-  | 'withLockedDroneContainers'
-  | 'withReadonlyDroneContainer';
+  | 'withLockedDroneContainers';
 
 export type RepositoryRouteDependencies = LegacyRouteDependencyContract<RepositoryDependencyName>;
 

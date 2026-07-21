@@ -9,6 +9,7 @@ import {
   DroneApiRequestError,
   workspaceBatch,
   workspaceExec,
+  workspaceGitHashes,
   workspaceReadChunk,
   workspaceReadFile,
   workspaceWriteChunk,
@@ -114,6 +115,80 @@ describe('drone daemon workspace API', () => {
     expect(await fs.readFile(moved, 'utf8')).toBe('source');
     expect(await fs.readFile(added, 'utf8')).toBe('added');
     expect(executed).toMatchObject({ code: 0, stdout: 'workspace-ok', timedOut: false });
+  });
+
+  test('reuses Git hashes until a workspace file changes', async () => {
+    const { client, root } = await startWorkspaceServer();
+    await workspaceExec(client, { cmd: 'git', args: ['init', '--quiet', root] });
+    await fs.writeFile(path.join(root, 'changed.txt'), 'first version');
+
+    const first = await workspaceGitHashes(client, {
+      repoRoot: root,
+      paths: ['changed.txt'],
+    });
+    const second = await workspaceGitHashes(client, {
+      repoRoot: root,
+      paths: ['changed.txt'],
+    });
+
+    expect(first).toMatchObject({ cacheHits: 0, hashed: 1 });
+    expect(first.hashes).toHaveLength(1);
+    expect(second).toMatchObject({
+      cacheHits: 1,
+      hashed: 0,
+      hashes: first.hashes,
+    });
+
+    await fs.writeFile(path.join(root, 'changed.txt'), 'a different second version');
+    const third = await workspaceGitHashes(client, {
+      repoRoot: root,
+      paths: ['changed.txt'],
+    });
+
+    expect(third).toMatchObject({ cacheHits: 0, hashed: 1 });
+    expect(third.hashes[0]?.hash).not.toBe(first.hashes[0]?.hash);
+  });
+
+  test('does not hash paths outside the requested repository', async () => {
+    const { client, root } = await startWorkspaceServer();
+    const error = await workspaceGitHashes(client, {
+      repoRoot: root,
+      paths: ['../outside.txt'],
+    })
+      .then(() => null)
+      .catch((value) => value);
+
+    expect(error).toBeInstanceOf(DroneApiRequestError);
+    expect(error.statusCode).toBe(400);
+  });
+
+  test('splits Git hash work before command arguments exceed the daemon limit', async () => {
+    const { client, root } = await startWorkspaceServer();
+    await workspaceExec(client, { cmd: 'git', args: ['init', '--quiet', root] });
+    const directory = 'd'.repeat(160);
+    await fs.mkdir(path.join(root, directory));
+    const paths = Array.from({ length: 380 }, (_, index) =>
+      `${directory}/${'f'.repeat(180)}-${String(index).padStart(3, '0')}.txt`,
+    );
+    await Promise.all(paths.map((relativePath) => fs.writeFile(path.join(root, relativePath), relativePath)));
+
+    const result = await workspaceGitHashes(client, { repoRoot: root, paths });
+
+    expect(result).toMatchObject({ cacheHits: 0, hashed: paths.length });
+    expect(result.hashes).toHaveLength(paths.length);
+  });
+
+  test('rejects non-string Git hash paths', async () => {
+    const { client, root } = await startWorkspaceServer();
+    const error = await workspaceGitHashes(client, {
+      repoRoot: root,
+      paths: [{ path: 'changed.txt' }] as any,
+    })
+      .then(() => null)
+      .catch((value) => value);
+
+    expect(error).toBeInstanceOf(DroneApiRequestError);
+    expect(error.statusCode).toBe(400);
   });
 
   test('terminates commands at the requested timeout', async () => {

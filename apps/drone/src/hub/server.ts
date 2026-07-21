@@ -312,6 +312,8 @@ import {
   droneRepoDiffForPath,
   droneRepoPullChangesSummary,
   droneRepoPullDiffForPath,
+  createDroneDaemonGitRunner,
+  createDroneDaemonWorktreeHasher,
   nameStatusCharToType,
   runGitInDrone,
   runGitInDroneOrThrow,
@@ -5716,6 +5718,8 @@ export async function startDroneHubApiServer(opts: {
     resolveDroneOrRespond,
     resolveLanguageDefinition,
     resolveLanguageReferences,
+    createDroneDaemonGitRunner,
+    createDroneDaemonWorktreeHasher,
     runGitInDrone,
     runGitInDroneOrThrow,
     runHostCommand,
@@ -5725,7 +5729,6 @@ export async function startDroneHubApiServer(opts: {
     updateHostRef,
     withLockedDroneContainer,
     withLockedDroneContainers,
-    withReadonlyDroneContainer,
   });
 
   const handleChatRoute = createChatRouteHandler({

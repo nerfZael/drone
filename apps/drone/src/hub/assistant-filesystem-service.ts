@@ -8,7 +8,7 @@ import {
   workspaceReadFile,
   workspaceWriteChunk,
   workspaceWriteFile,
-  type DroneClient,
+  daemonClientForDrone,
   type WorkspaceBatchOperation,
 } from '../host/api';
 import { run as runHostCommand } from '../host/dvm';
@@ -36,7 +36,11 @@ import {
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { resolveDroneFromRegistryRef } from './drone-lifecycle-service';
 import { readTransferBytes, writeTransferBytes } from './assistant/transfer-file-io';
-import { droneRepoChangesSummary } from './drone-repo';
+import {
+  createDroneDaemonGitRunner,
+  createDroneDaemonWorktreeHasher,
+  droneRepoChangesSummary,
+} from './drone-repo';
 import { gitRepoChangesSummary, gitTopLevel } from './repoOps';
 
 type ContainerAccess = {
@@ -77,15 +81,6 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     withLockedDroneContainer,
   } = deps;
   const NON_REPO_HOME_CWD = deps.nonRepoHomeCwd;
-
-  function daemonClientForDrone(drone: any): DroneClient {
-    const hostPort = Number(drone?.hostPort);
-    const token = String(drone?.token ?? '').trim();
-    if (!Number.isFinite(hostPort) || hostPort <= 0 || !token) {
-      throw new Error('container drone is missing its daemon connection');
-    }
-    return { baseUrl: `http://127.0.0.1:${Math.floor(hostPort)}`, token };
-  }
 
   async function runContainerCommand(
     drone: any,
@@ -1301,12 +1296,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
         return await droneRepoChangesSummary({
           container: target.name,
           repoPathInContainer,
-          runGit: async (input) =>
-            await runContainerCommand(droneEntry, 'git', [
-              '-C',
-              normalizeContainerPath(input.repoPathInContainer),
-              ...input.args,
-            ]),
+          runGit: createDroneDaemonGitRunner(droneEntry),
+          hashWorktreeFiles: createDroneDaemonWorktreeHasher(droneEntry),
         });
       },
     );

@@ -1,3 +1,11 @@
+import {
+  daemonClientForDrone,
+  DroneApiRequestError,
+  DroneDaemonUnavailableError,
+  workspaceExec,
+  workspaceGitHashes,
+  type DroneDaemonConnection,
+} from '../host/api';
 import { dvmExec } from '../host/dvm';
 import { normalizeContainerPath } from './hub-format';
 import {
@@ -11,12 +19,118 @@ import {
   type RepoCommitSummary,
 } from './repoOps';
 
-export async function runGitInDrone(opts: {
+export type DroneGitCommand = {
   container: string;
   repoPathInContainer: string;
   args: string[];
-}): Promise<{ code: number; stdout: string; stderr: string }> {
+};
+
+export type DroneGitRunner = (
+  opts: DroneGitCommand,
+) => Promise<{ code: number; stdout: string; stderr: string }>;
+
+export type DroneWorktreeHasher = (opts: {
+  repoRoot: string;
+  repoRelativePaths: string[];
+}) => Promise<Map<string, string>>;
+
+const DAEMON_GIT_HASH_REQUEST_MAX_PATHS = 5_000;
+const DAEMON_GIT_HASH_REQUEST_MAX_BYTES = 4 * 1024 * 1024;
+
+function daemonGitHashRequestChunks(repoRoot: string, paths: string[]): string[][] {
+  const baseBytes = Buffer.byteLength(JSON.stringify({ repoRoot, paths: [] }), 'utf8');
+  const chunks: string[][] = [];
+  let chunk: string[] = [];
+  let chunkBytes = baseBytes;
+  for (const filePath of paths) {
+    const pathBytes = Buffer.byteLength(JSON.stringify(filePath), 'utf8') + 1;
+    if (
+      chunk.length > 0 &&
+      (chunk.length >= DAEMON_GIT_HASH_REQUEST_MAX_PATHS ||
+        chunkBytes + pathBytes > DAEMON_GIT_HASH_REQUEST_MAX_BYTES)
+    ) {
+      chunks.push(chunk);
+      chunk = [];
+      chunkBytes = baseBytes;
+    }
+    chunk.push(filePath);
+    chunkBytes += pathBytes;
+  }
+  if (chunk.length > 0) chunks.push(chunk);
+  return chunks;
+}
+
+export async function runGitInDrone(opts: DroneGitCommand): Promise<{ code: number; stdout: string; stderr: string }> {
   return await dvmExec(opts.container, 'git', ['-C', normalizeContainerPath(opts.repoPathInContainer), ...opts.args]);
+}
+
+function throwDaemonRequestError(error: any): never {
+  if (error?.code === 'daemon_unavailable') throw error;
+  if (
+    error instanceof DroneApiRequestError &&
+    error.statusCode !== 401 &&
+    error.statusCode !== 403 &&
+    error.statusCode !== 404
+  ) {
+    throw error;
+  }
+  throw new DroneDaemonUnavailableError(
+    `container drone daemon is unavailable: ${error?.message ?? String(error)}`,
+  );
+}
+
+export async function runGitInDroneViaDaemon(opts: {
+  droneEntry: DroneDaemonConnection;
+  repoPathInContainer: string;
+  args: string[];
+}): Promise<{ code: number; stdout: string; stderr: string }> {
+  let result: Awaited<ReturnType<typeof workspaceExec>>;
+  try {
+    result = await workspaceExec(daemonClientForDrone(opts.droneEntry), {
+      cmd: 'git',
+      args: ['-C', normalizeContainerPath(opts.repoPathInContainer), ...opts.args],
+      timeoutMs: 30_000,
+    });
+  } catch (error: any) {
+    throwDaemonRequestError(error);
+  }
+  if (result.stdoutTruncated || result.stderrTruncated) {
+    throw new Error('container Git output exceeded the daemon response limit');
+  }
+  return result;
+}
+
+export function createDroneDaemonGitRunner(droneEntry: DroneDaemonConnection): DroneGitRunner {
+  return async (input) =>
+    await runGitInDroneViaDaemon({
+      droneEntry,
+      repoPathInContainer: input.repoPathInContainer,
+      args: input.args,
+    });
+}
+
+export function createDroneDaemonWorktreeHasher(droneEntry: DroneDaemonConnection): DroneWorktreeHasher {
+  return async ({ repoRoot, repoRelativePaths }) => {
+    try {
+      const client = daemonClientForDrone(droneEntry);
+      const normalizedRepoRoot = normalizeContainerPath(repoRoot);
+      const hashes = new Map<string, string>();
+      for (const paths of daemonGitHashRequestChunks(normalizedRepoRoot, repoRelativePaths)) {
+        const result = await workspaceGitHashes(client, {
+          repoRoot: normalizedRepoRoot,
+          paths,
+        });
+        for (const entry of result.hashes
+          .map((entry) => [String(entry.path ?? ''), String(entry.hash ?? '').toLowerCase()] as const)
+          .filter((entry) => entry[0] && /^[0-9a-f]{40}$/.test(entry[1]))) {
+          hashes.set(entry[0], entry[1]);
+        }
+      }
+      return hashes;
+    } catch (error: any) {
+      throwDaemonRequestError(error);
+    }
+  };
 }
 
 export async function runGitInDroneOrThrow(opts: {
@@ -24,7 +138,7 @@ export async function runGitInDroneOrThrow(opts: {
   repoPathInContainer: string;
   args: string[];
   okCodes?: number[];
-  runGit?: typeof runGitInDrone;
+  runGit?: DroneGitRunner;
 }): Promise<{ code: number; stdout: string; stderr: string }> {
   const okCodes = Array.isArray(opts.okCodes) && opts.okCodes.length > 0 ? opts.okCodes : [0];
   const r = await (opts.runGit ?? runGitInDrone)(opts);
@@ -38,7 +152,8 @@ export async function runGitInDroneOrThrow(opts: {
 export async function droneRepoChangesSummary(opts: {
   container: string;
   repoPathInContainer: string;
-  runGit?: typeof runGitInDrone;
+  runGit?: DroneGitRunner;
+  hashWorktreeFiles?: DroneWorktreeHasher;
 }): Promise<{ repoRoot: string; summary: ReturnType<typeof parseGitStatusPorcelainV2Z> }> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const repoRootRaw = await runGitInDroneOrThrow({
@@ -58,12 +173,14 @@ export async function droneRepoChangesSummary(opts: {
   const pathsToHash = parsed.entries
     .filter((entry) => entry.isUntracked || (entry.unstagedType !== null && entry.unstagedType !== 'deleted'))
     .map((entry) => entry.path);
-  const worktreeHashes = await hashDroneFileContentsBatch({
-    container: opts.container,
-    repoPathInContainer,
-    repoRelativePaths: pathsToHash,
-    runGit: opts.runGit,
-  });
+  const worktreeHashes = opts.hashWorktreeFiles
+    ? await opts.hashWorktreeFiles({ repoRoot, repoRelativePaths: pathsToHash })
+    : await hashDroneFileContentsBatch({
+        container: opts.container,
+        repoPathInContainer,
+        repoRelativePaths: pathsToHash,
+        runGit: opts.runGit,
+      });
   const entries = parsed.entries.map((entry) => {
     const worktreeContentHash = worktreeHashes.get(entry.path) ?? null;
     return {
@@ -85,7 +202,7 @@ export async function hashDroneFileContentsBatch(opts: {
   container: string;
   repoPathInContainer: string;
   repoRelativePaths: string[];
-  runGit?: typeof runGitInDrone;
+  runGit?: DroneGitRunner;
 }): Promise<Map<string, string>> {
   const requestedPaths = opts.repoRelativePaths
     .map((value) => String(value ?? '').trim())
@@ -113,6 +230,7 @@ export async function droneRepoDiffForPath(opts: {
   kind: 'staged' | 'unstaged';
   contextLines?: number;
   maxChars?: number;
+  runGit?: DroneGitRunner;
 }): Promise<{ path: string; kind: 'staged' | 'unstaged'; diff: string; truncated: boolean; fromUntracked: boolean }> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const requestedPath = String(opts.filePath ?? '').trim();
@@ -136,6 +254,7 @@ export async function droneRepoDiffForPath(opts: {
       container: opts.container,
       repoPathInContainer,
       args: ['diff', '--no-color', '--no-ext-diff', '--cached', contextFlag, '--', requestedPath],
+      runGit: opts.runGit,
     });
     diffText = staged.stdout;
   } else {
@@ -143,6 +262,7 @@ export async function droneRepoDiffForPath(opts: {
       container: opts.container,
       repoPathInContainer,
       args: ['diff', '--no-color', '--no-ext-diff', contextFlag, '--', requestedPath],
+      runGit: opts.runGit,
     });
     diffText = unstaged.stdout;
 
@@ -154,9 +274,10 @@ export async function droneRepoDiffForPath(opts: {
         repoPathInContainer,
         args: ['ls-files', '--error-unmatch', '--', requestedPath],
         okCodes: [0, 1],
+        runGit: opts.runGit,
       });
       if (tracked.code !== 0) {
-        const noIndex = await runGitInDrone({
+        const noIndex = await (opts.runGit ?? runGitInDrone)({
           container: opts.container,
           repoPathInContainer,
           args: ['diff', '--no-color', '--no-ext-diff', '--no-index', contextFlag, '/dev/null', requestedPath],
@@ -293,13 +414,14 @@ export function parseGitNameStatusZ(raw: string): RepoPullChangeEntry[] {
   return out;
 }
 
-export async function droneRepoBaseSha(opts: { container: string; repoPathInContainer: string }): Promise<string | null> {
+export async function droneRepoBaseSha(opts: { container: string; repoPathInContainer: string; runGit?: DroneGitRunner }): Promise<string | null> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const r = await runGitInDroneOrThrow({
     container: opts.container,
     repoPathInContainer,
     args: ['config', '--get', 'dvm.baseSha'],
     okCodes: [0, 1],
+    runGit: opts.runGit,
   });
   const sha = String(r.stdout ?? '').trim().toLowerCase();
   if (!sha) return null;
@@ -310,12 +432,14 @@ export async function droneRepoPullChangesSummary(opts: {
   container: string;
   repoPathInContainer: string;
   baseSha?: string;
+  runGit?: DroneGitRunner;
 }): Promise<{ repoRoot: string; baseSha: string; headSha: string; branchHead: string | null; entries: RepoPullChangeEntry[] }> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const repoRootRaw = await runGitInDroneOrThrow({
     container: opts.container,
     repoPathInContainer,
     args: ['rev-parse', '--show-toplevel'],
+    runGit: opts.runGit,
   });
   const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
 
@@ -323,7 +447,13 @@ export async function droneRepoPullChangesSummary(opts: {
     typeof opts.baseSha === 'string' && /^[0-9a-f]{40}$/.test(opts.baseSha.trim().toLowerCase())
       ? opts.baseSha.trim().toLowerCase()
       : null;
-  const baseSha = overrideBaseSha ?? (await droneRepoBaseSha({ container: opts.container, repoPathInContainer }));
+  const baseSha =
+    overrideBaseSha ??
+    (await droneRepoBaseSha({
+      container: opts.container,
+      repoPathInContainer,
+      runGit: opts.runGit,
+    }));
   if (!baseSha) {
     throw new Error('missing dvm.baseSha (reseed may be required)');
   }
@@ -332,6 +462,7 @@ export async function droneRepoPullChangesSummary(opts: {
     container: opts.container,
     repoPathInContainer,
     args: ['rev-parse', 'HEAD'],
+    runGit: opts.runGit,
   });
   const headSha = String(headRaw.stdout ?? '').trim().toLowerCase();
   if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error('failed to resolve HEAD sha');
@@ -340,6 +471,7 @@ export async function droneRepoPullChangesSummary(opts: {
     repoPathInContainer,
     args: ['symbolic-ref', '--quiet', '--short', 'HEAD'],
     okCodes: [0, 1],
+    runGit: opts.runGit,
   });
   const branchHead = branchRaw.code === 0 ? String(branchRaw.stdout ?? '').trim() || null : null;
 
@@ -347,6 +479,7 @@ export async function droneRepoPullChangesSummary(opts: {
     container: opts.container,
     repoPathInContainer,
     args: ['diff', '--name-status', '-z', `${baseSha}..${headSha}`],
+    runGit: opts.runGit,
   });
   const entries = parseGitNameStatusZ(nameStatus.stdout);
   return { repoRoot, baseSha, headSha, branchHead, entries };
@@ -360,6 +493,7 @@ export async function droneRepoPullDiffForPath(opts: {
   headSha?: string;
   contextLines?: number;
   maxChars?: number;
+  runGit?: DroneGitRunner;
 }): Promise<{ repoRoot: string; baseSha: string; headSha: string; path: string; diff: string; truncated: boolean }> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const requestedPath = String(opts.filePath ?? '').trim();
@@ -370,13 +504,18 @@ export async function droneRepoPullDiffForPath(opts: {
     container: opts.container,
     repoPathInContainer,
     args: ['rev-parse', '--show-toplevel'],
+    runGit: opts.runGit,
   });
   const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
 
   const baseSha =
     typeof opts.baseSha === 'string' && /^[0-9a-f]{40}$/.test(opts.baseSha.trim().toLowerCase())
       ? opts.baseSha.trim().toLowerCase()
-      : await droneRepoBaseSha({ container: opts.container, repoPathInContainer });
+      : await droneRepoBaseSha({
+          container: opts.container,
+          repoPathInContainer,
+          runGit: opts.runGit,
+        });
   if (!baseSha) throw new Error('missing dvm.baseSha (reseed may be required)');
 
   const headSha =
@@ -388,6 +527,7 @@ export async function droneRepoPullDiffForPath(opts: {
               container: opts.container,
               repoPathInContainer,
               args: ['rev-parse', 'HEAD'],
+              runGit: opts.runGit,
             })
           ).stdout ?? '',
         )
@@ -406,6 +546,7 @@ export async function droneRepoPullDiffForPath(opts: {
     container: opts.container,
     repoPathInContainer,
     args: ['diff', '--no-color', '--no-ext-diff', `-U${contextLines}`, `${baseSha}..${headSha}`, '--', requestedPath],
+    runGit: opts.runGit,
   });
   let diffText = diffRaw.stdout ?? '';
   let truncated = false;
@@ -422,12 +563,14 @@ export async function droneRepoCommitList(opts: {
   headRef?: string;
   baseRef?: string | null;
   limit?: number;
+  runGit?: DroneGitRunner;
 }): Promise<{ repoRoot: string; commits: RepoCommitSummary[] }> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const repoRootRaw = await runGitInDroneOrThrow({
     container: opts.container,
     repoPathInContainer,
     args: ['rev-parse', '--show-toplevel'],
+    runGit: opts.runGit,
   });
   const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
   const headRef = String(opts.headRef ?? 'HEAD').trim() || 'HEAD';
@@ -446,6 +589,7 @@ export async function droneRepoCommitList(opts: {
       '--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%s',
       revisionRange,
     ],
+    runGit: opts.runGit,
   });
   return {
     repoRoot,
@@ -457,6 +601,7 @@ export async function droneRepoCommitDetails(opts: {
   container: string;
   repoPathInContainer: string;
   sha: string;
+  runGit?: DroneGitRunner;
 }): Promise<RepoCommitDetails> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const sha = String(opts.sha ?? '').trim().toLowerCase();
@@ -465,6 +610,7 @@ export async function droneRepoCommitDetails(opts: {
     container: opts.container,
     repoPathInContainer,
     args: ['rev-parse', '--show-toplevel'],
+    runGit: opts.runGit,
   });
   const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
   const commit = parseGitCommitDetails(
@@ -473,6 +619,7 @@ export async function droneRepoCommitDetails(opts: {
         container: opts.container,
         repoPathInContainer,
         args: ['show', '-s', '--no-show-signature', '--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%s%x00%b', sha],
+        runGit: opts.runGit,
       })
     ).stdout,
   );
@@ -484,6 +631,7 @@ export async function droneRepoCommitDetails(opts: {
       args: parentSha
         ? ['diff-tree', '--name-status', '-z', '-r', '--find-renames', '--find-copies', parentSha, sha]
         : ['diff-tree', '--root', '--name-status', '-z', '-r', '--find-renames', '--find-copies', sha],
+      runGit: opts.runGit,
     }),
     runGitInDroneOrThrow({
       container: opts.container,
@@ -491,6 +639,7 @@ export async function droneRepoCommitDetails(opts: {
       args: parentSha
         ? ['diff-tree', '--numstat', '-z', '-r', '--find-renames', '--find-copies', parentSha, sha]
         : ['diff-tree', '--root', '--numstat', '-z', '-r', '--find-renames', '--find-copies', sha],
+      runGit: opts.runGit,
     }),
   ]);
   const nameStatus = parseGitNameStatusZ(nameStatusRaw.stdout);
@@ -537,6 +686,7 @@ export async function droneRepoCommitDiffForPath(opts: {
   filePath: string;
   contextLines?: number;
   maxChars?: number;
+  runGit?: DroneGitRunner;
 }): Promise<{ repoRoot: string; sha: string; path: string; diff: string; truncated: boolean }> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const sha = String(opts.sha ?? '').trim().toLowerCase();
@@ -553,12 +703,14 @@ export async function droneRepoCommitDiffForPath(opts: {
     container: opts.container,
     repoPathInContainer,
     args: ['rev-parse', '--show-toplevel'],
+    runGit: opts.runGit,
   });
   const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
   const parentsRaw = await runGitInDroneOrThrow({
     container: opts.container,
     repoPathInContainer,
     args: ['show', '-s', '--format=%P', sha],
+    runGit: opts.runGit,
   });
   const parentSha =
     String(parentsRaw.stdout ?? '')
@@ -572,6 +724,7 @@ export async function droneRepoCommitDiffForPath(opts: {
     args: parentSha
       ? ['diff', '--no-color', '--no-ext-diff', `-U${contextLines}`, parentSha, sha, '--', requestedPath]
       : ['show', '--format=', '--no-color', '--no-ext-diff', `-U${contextLines}`, sha, '--', requestedPath],
+    runGit: opts.runGit,
   });
   let diffText = diffRaw.stdout ?? '';
   let truncated = false;
