@@ -202,6 +202,7 @@ type DraftSidebarPlaceholder = {
   name: string;
   repoPath: string;
   group: string | null;
+  starting: boolean;
 };
 
 const DRAFT_SIDEBAR_PLACEHOLDER_ID = '__draft-sidebar-placeholder__';
@@ -1699,8 +1700,8 @@ export function DroneSidebar({
       statusOk: true,
       statusError: null,
       chats: ['default'],
-      hubPhase: null,
-      hubMessage: null,
+      hubPhase: visibleDraftSidebarPlaceholder.starting ? 'starting' : null,
+      hubMessage: visibleDraftSidebarPlaceholder.starting ? 'Starting' : null,
       busy: false,
     };
   }, [visibleDraftSidebarPlaceholder]);

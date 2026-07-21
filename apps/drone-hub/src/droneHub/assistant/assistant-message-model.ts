@@ -101,9 +101,22 @@ export function assistantPromptHasVisibleUserMessage(
   messages: Array<{ role: string; content?: unknown; timestamp?: unknown }>,
   prompt: AssistantQueuedPrompt,
 ): boolean {
+  return assistantUserPromptIsVisible(messages, {
+    prompt: prompt.prompt,
+    createdAt: prompt.createdAt,
+  });
+}
+
+export function assistantUserPromptIsVisible(
+  messages: Array<{ role: string; content?: unknown; timestamp?: unknown }>,
+  prompt: { prompt: string; createdAt?: string | number | null },
+): boolean {
   const promptText = String(prompt.prompt ?? '').trim();
   if (!promptText) return false;
-  const createdAtMs = Date.parse(String(prompt.createdAt ?? ''));
+  const createdAtMs =
+    typeof prompt.createdAt === 'number'
+      ? prompt.createdAt
+      : Date.parse(String(prompt.createdAt ?? ''));
   return messages.some((message) => {
     if (message.role !== 'user') return false;
     const text = messageText(message as AssistantMessage).trim();

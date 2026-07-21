@@ -58,6 +58,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(sidebarChatDisplayState(drone({ hubPhase: 'error' }), false)).toBe('blocked');
     expect(sidebarItemStateToneClass('idle', true)).toContain('--green');
     expect(sidebarItemStateToneClass('blocked', true)).toContain('--red');
+    expect(sidebarItemStateToneClass('starting', false)).toContain('--yellow');
   });
 
   test('keeps runtime metadata neutral while the state changes color', () => {
@@ -81,6 +82,15 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).toContain('h-3 w-3 flex-shrink-0 self-center');
     expect(html).toContain('stroke-width="2.4"');
     expect(html).toContain('M21 12a9 9 0 1 1-6.219-8.56');
+  });
+
+  test('keeps starting in the working color and motion language', () => {
+    const html = renderToStaticMarkup(
+      createElement(SidebarItemStateIndicator, { state: 'starting' }),
+    );
+
+    expect(html).toContain('animate-spin');
+    expect(html).toContain('text-[var(--yellow)]');
   });
 
   test('reserves hover actions for delete and the context menu', () => {

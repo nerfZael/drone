@@ -594,6 +594,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     outputScrollRef,
     updatePinned,
     startupSeedForCurrentDrone,
+    clearStartupSeedForDrone,
     sessionText,
     pinnedToBottom,
     selectedDroneIdentity,
@@ -670,6 +671,10 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           spawnAgentMenuEntries,
           draftCreating,
           draftAutoRenaming,
+          draftHubPhase:
+            drones.find(
+              (drone: any) => String(drone?.id ?? '').trim() === String(draftChat.droneId ?? '').trim(),
+            )?.hubPhase ?? null,
           spawnAgentConfig,
           createRepoMenuEntries,
           draftCreateRepoPath,
@@ -803,6 +808,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           outputScrollRef,
           updatePinned,
           startupSeedForCurrentDrone,
+          clearStartupSeedForDrone,
           sessionText,
           pinnedToBottom,
           selectedDroneIdentity,

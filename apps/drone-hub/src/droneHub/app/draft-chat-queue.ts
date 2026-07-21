@@ -30,6 +30,36 @@ export function createDraftQueuedPrompt(payload: ChatSendPayload): DraftChatStat
   };
 }
 
+export function createSubmittedDraftChat(args: {
+  payload: ChatSendPayload;
+  droneName: string;
+  focusKey?: string;
+  id?: string;
+  at?: string;
+}): DraftChatState | null {
+  const prompt = String(args.payload?.prompt ?? '').trim();
+  const attachmentPayloads = normalizeChatImageAttachmentPayloads(args.payload?.attachments);
+  if (!prompt && attachmentPayloads.length === 0) return null;
+  return {
+    droneId: '',
+    droneName: String(args.droneName ?? '').trim(),
+    focusKey: args.focusKey,
+    queuedPrompts: [],
+    prompt: {
+      id: args.id ?? `draft-${makeId()}`,
+      at: args.at ?? new Date().toISOString(),
+      prompt,
+      ...(attachmentPayloads.length > 0
+        ? {
+            attachments: attachmentRefsFromPayload(attachmentPayloads),
+            attachmentPayloads,
+          }
+        : {}),
+      state: 'sent',
+    },
+  };
+}
+
 export function visibleDraftQueuedPrompts(args: {
   pendingPrompt: PendingPrompt | null;
   localQueuedPrompts: DraftChatState['queuedPrompts'];

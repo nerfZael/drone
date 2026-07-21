@@ -429,9 +429,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (!draftChat) return null;
     if (String(draftChat.droneId ?? '').trim()) return null;
     return {
-      name: allocateUntitledDisplayName(sidebarDrones.map((drone) => String(drone?.name ?? '').trim())),
+      name:
+        String(draftChat.droneName ?? '').trim() ||
+        allocateUntitledDisplayName(sidebarDrones.map((drone) => String(drone?.name ?? '').trim())),
       repoPath: String(chatHeaderRepoPath ?? '').trim(),
       group: String(draftCreateGroup ?? '').trim() || null,
+      starting: Boolean(draftChat.prompt),
     };
   }, [chatHeaderRepoPath, draftChat, draftCreateGroup, sidebarDrones]);
   const droneNameById = React.useMemo(() => {
@@ -730,6 +733,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       chatName?: string;
       group?: string | null;
       repoPath?: string | null;
+      at?: string | null;
     },
   ) => {
     const unique = new Map<string, string>();
@@ -748,7 +752,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     const group = String(opts.group ?? '').trim() || null;
     const repoPath = String(opts.repoPath ?? '').trim() || null;
     if (!prompt && !opts.agent && !model && agentPermissionMode === 'full-access') return;
-    const at = new Date().toISOString();
+    const submittedAt = String(opts.at ?? '').trim();
+    const at = Number.isFinite(Date.parse(submittedAt)) ? submittedAt : new Date().toISOString();
     setStartupSeedByDrone((prev) => {
       const next = { ...prev };
       for (const [id, droneName] of unique.entries()) {
@@ -2166,9 +2171,20 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onRefreshFsList: refreshFsList,
   });
   const startupSeedForCurrentDrone =
-    currentDrone && (isDroneStartingOrSeeding(currentDrone.hubPhase))
-      ? startupSeedByDrone[currentDrone.id] ?? null
-      : null;
+    currentDrone ? startupSeedByDrone[currentDrone.id] ?? null : null;
+  const clearStartupSeedForDrone = React.useCallback(
+    (droneIdRaw: string) => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (!droneId) return;
+      setStartupSeedByDrone((prev) => {
+        if (!prev[droneId]) return prev;
+        const next = { ...prev };
+        delete next[droneId];
+        return next;
+      });
+    },
+    [setStartupSeedByDrone],
+  );
   const effectiveChatInfo = chatInfo
     ? chatInfo
     : currentDrone && startupSeedForCurrentDrone?.agent
@@ -4070,6 +4086,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     outputScrollRef,
     updatePinned,
     startupSeedForCurrentDrone,
+    clearStartupSeedForDrone,
     sessionText,
     pinnedToBottom,
     selectedDroneIdentity,
