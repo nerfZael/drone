@@ -43,6 +43,46 @@ export type AssistantMessageDroneSummary = {
   message: string;
 };
 
+export type AssistantRunTiming = {
+  startedAt?: number;
+  endedAt?: number;
+};
+
+export function assistantMessageTimestampMs(
+  message: AssistantMessage | undefined,
+): number | undefined {
+  if (!message) return undefined;
+  const value = message.createdAt ?? message.timestamp;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  const parsed = Date.parse(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function directAssistantRunTiming(
+  items: AssistantRenderItem[],
+  userItemIndex: number,
+): AssistantRunTiming | null {
+  const userItem = items[userItemIndex];
+  if (userItem?.type !== 'message' || userItem.message.role !== 'user') return null;
+
+  let hasAssistantReply = false;
+  let endedAt: number | undefined;
+  for (let index = userItemIndex + 1; index < items.length; index += 1) {
+    const item = items[index]!;
+    if (item.type === 'message' && item.message.role === 'user') break;
+    if (item.type !== 'message') return null;
+    if (item.message.role !== 'assistant') continue;
+    hasAssistantReply = true;
+    endedAt = assistantMessageTimestampMs(item.message) ?? endedAt;
+  }
+
+  if (!hasAssistantReply) return null;
+  return {
+    startedAt: assistantMessageTimestampMs(userItem.message),
+    endedAt,
+  };
+}
+
 export function assistantHasEnabledMcpGroup(
   tools: Array<{ name: string; group?: { kind?: string; id?: string } | null }>,
   enabledToolNames: string[],

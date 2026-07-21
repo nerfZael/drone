@@ -740,6 +740,21 @@ export function ChatInput({
                       <rect x="7" y="7" width="10" height="10" rx="1" />
                     </svg>
                   </button>
+                  <button
+                    type="button"
+                    data-chat-composer-collapsed-action="true"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => sendNow({ trigger: 'button', modifierKey: false })}
+                    disabled={sendDisabled}
+                    className="inline-flex h-[2.125rem] w-[2.125rem] items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                    title={voiceActionInFlight ? sendButtonLabel : 'Transcribe and send recording'}
+                    aria-label={voiceActionInFlight ? sendButtonLabel : 'Transcribe and send recording'}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 19V5" />
+                      <path d="m5 12 7-7 7 7" />
+                    </svg>
+                  </button>
                 </div>
               </>
             ) : (

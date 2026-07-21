@@ -15,6 +15,7 @@ import {
 } from '../src/droneHub/chat';
 import {
   AssistantMessageRow,
+  AssistantRunActivity,
   AssistantThinkingRow,
   ToolRunActivity,
   formatAssistantRunDuration,
@@ -513,6 +514,19 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('uppercase');
     expect(html).not.toContain('ml-auto');
     expect(html).not.toContain('Read file');
+  });
+
+  test('completed runs without tool calls still show their duration', () => {
+    const html = renderToStaticMarkup(
+      <AssistantRunActivity
+        active={false}
+        startedAt={1_000}
+        endedAt={66_000}
+      />,
+    );
+
+    expect(html).toContain('Worked for 1m 5s');
+    expect(html).not.toContain('tool call');
   });
 
   test('expanded tool runs retain consecutive same-tool counts', () => {
