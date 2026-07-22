@@ -134,6 +134,25 @@ describe('native chat selection state', () => {
     ).toEqual([queuedPrompt]);
   });
 
+  test('does not duplicate a stopped pending row once its transcript turn exists', () => {
+    const stoppedPrompt = {
+      id: 'stopped-prompt',
+      prompt: 'Please change this',
+      state: 'failed',
+      error: 'Stopped by user.',
+      at: '2026-07-22T08:00:00.000Z',
+    } as any;
+
+    expect(
+      visiblePendingPromptsForAgent({
+        agentKind: 'builtin',
+        chatUiMode: 'transcript',
+        pendingPrompts: [stoppedPrompt],
+        transcripts: [{ id: 'stopped-prompt' } as any],
+      }),
+    ).toEqual([]);
+  });
+
   test('persists every locally queued draft prompt without starting provisioning queues early', () => {
     expect(shouldFlushLocalQueuedPrompts({ draft: true, hubPhase: 'draft' })).toBe(true);
     expect(shouldFlushLocalQueuedPrompts({ draft: false, hubPhase: 'draft' })).toBe(true);
