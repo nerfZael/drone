@@ -78,6 +78,7 @@ type DroneHubUiState = {
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarChatOrderByDrone: Record<string, string[]>;
+  pinnedDroneIds: string[];
   hiddenSidebarGroups: string[];
   showHiddenSidebarGroups: boolean;
   autoDelete: boolean;
@@ -135,6 +136,7 @@ type DroneHubUiState = {
   setSidebarDroneOrderByGroup: (next: Updater<Record<string, string[]>>) => void;
   setSidebarNodeOrderByParent: (next: Updater<Record<string, string[]>>) => void;
   setSidebarChatOrderByDrone: (next: Updater<Record<string, string[]>>) => void;
+  setPinnedDroneIds: (next: Updater<string[]>) => void;
   setHiddenSidebarGroups: (next: Updater<string[]>) => void;
   setShowHiddenSidebarGroups: (next: Updater<boolean>) => void;
   setAutoDelete: (next: Updater<boolean>) => void;
@@ -286,6 +288,7 @@ type DroneHubUiPersistedState = Pick<
   | 'sidebarDroneOrderByGroup'
   | 'sidebarNodeOrderByParent'
   | 'sidebarChatOrderByDrone'
+  | 'pinnedDroneIds'
   | 'hiddenSidebarGroups'
   | 'autoDelete'
   | 'terminalEmulator'
@@ -577,6 +580,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       sidebarDroneOrderByGroup: {},
       sidebarNodeOrderByParent: {},
       sidebarChatOrderByDrone: {},
+      pinnedDroneIds: [],
       hiddenSidebarGroups: [],
       showHiddenSidebarGroups: false,
       autoDelete: false,
@@ -655,6 +659,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({
           sidebarChatOrderByDrone: normalizeOrderedStringMap(resolveNext(s.sidebarChatOrderByDrone, next)),
         })),
+      setPinnedDroneIds: (next) =>
+        set((s) => ({ pinnedDroneIds: normalizeSidebarGroupOrder(resolveNext(s.pinnedDroneIds, next)) })),
       setHiddenSidebarGroups: (next) =>
         set((s) => ({ hiddenSidebarGroups: normalizeSidebarGroupOrder(resolveNext(s.hiddenSidebarGroups, next)) })),
       setShowHiddenSidebarGroups: (next) =>
@@ -879,6 +885,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         sidebarDroneOrderByGroup: state.sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent: state.sidebarNodeOrderByParent,
         sidebarChatOrderByDrone: state.sidebarChatOrderByDrone,
+        pinnedDroneIds: state.pinnedDroneIds,
         hiddenSidebarGroups: state.hiddenSidebarGroups,
         autoDelete: state.autoDelete,
         terminalEmulator: state.terminalEmulator,
@@ -951,6 +958,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           sidebarChatOrderByDrone: normalizeOrderedStringMap(
             persisted.sidebarChatOrderByDrone ?? currentState.sidebarChatOrderByDrone,
           ),
+          pinnedDroneIds: normalizeSidebarGroupOrder(
+            persisted.pinnedDroneIds ?? currentState.pinnedDroneIds,
+          ),
           hiddenSidebarGroups: normalizeSidebarGroupOrder(
             persisted.hiddenSidebarGroups ?? currentState.hiddenSidebarGroups,
           ),
@@ -1007,6 +1017,7 @@ export function useDroneHubAppModelUiState() {
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent: s.sidebarNodeOrderByParent,
       sidebarChatOrderByDrone: s.sidebarChatOrderByDrone,
+      pinnedDroneIds: s.pinnedDroneIds,
       hiddenSidebarGroups: s.hiddenSidebarGroups,
       showHiddenSidebarGroups: s.showHiddenSidebarGroups,
       autoDelete: s.autoDelete,
@@ -1054,6 +1065,7 @@ export function useDroneHubAppModelUiState() {
       setSidebarDroneOrderByGroup: s.setSidebarDroneOrderByGroup,
       setSidebarNodeOrderByParent: s.setSidebarNodeOrderByParent,
       setSidebarChatOrderByDrone: s.setSidebarChatOrderByDrone,
+      setPinnedDroneIds: s.setPinnedDroneIds,
       setHiddenSidebarGroups: s.setHiddenSidebarGroups,
       setShowHiddenSidebarGroups: s.setShowHiddenSidebarGroups,
       setHomeOpen: s.setHomeOpen,
@@ -1117,6 +1129,7 @@ export function useDroneSidebarUiState() {
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent: s.sidebarNodeOrderByParent,
       sidebarChatOrderByDrone: s.sidebarChatOrderByDrone,
+      pinnedDroneIds: s.pinnedDroneIds,
       hiddenSidebarGroups: s.hiddenSidebarGroups,
       showHiddenSidebarGroups: s.showHiddenSidebarGroups,
       autoDelete: s.autoDelete,
@@ -1134,6 +1147,7 @@ export function useDroneSidebarUiState() {
       setSidebarDroneOrderByGroup: s.setSidebarDroneOrderByGroup,
       setSidebarNodeOrderByParent: s.setSidebarNodeOrderByParent,
       setSidebarChatOrderByDrone: s.setSidebarChatOrderByDrone,
+      setPinnedDroneIds: s.setPinnedDroneIds,
       setHiddenSidebarGroups: s.setHiddenSidebarGroups,
       setShowHiddenSidebarGroups: s.setShowHiddenSidebarGroups,
       setSelectedDrone: s.setSelectedDrone,

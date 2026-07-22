@@ -3,7 +3,7 @@ import { timeAgo } from '../../domain';
 import type { DroneSummary } from '../types';
 import { RelativeTimeText } from '../chat/RelativeTimeText';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
-import { IconBaseImage, IconClone, IconMore, IconPlus, IconRename, IconSpinner, IconTrash } from './icons';
+import { IconBaseImage, IconClone, IconMore, IconPin, IconPlus, IconRename, IconSpinner, IconTrash } from './icons';
 import type { SidebarDensityMode } from '../app/settings-types';
 import { sidebarItemTypeClass, sidebarSelectionEdgeClass } from '../sidebar/presentation';
 
@@ -25,6 +25,7 @@ type DroneCardProps = {
   onCreateChat?: () => void;
   onRename?: () => void;
   onSetBaseImage?: () => void;
+  onTogglePinned?: () => void;
   onDelete?: () => void;
   onErrorClick?: (drone: DroneSummary, message: string) => void;
   cloneDisabled?: boolean;
@@ -33,6 +34,8 @@ type DroneCardProps = {
   renameBusy?: boolean;
   setBaseImageDisabled?: boolean;
   setBaseImageBusy?: boolean;
+  pinned?: boolean;
+  pinBusy?: boolean;
   deleteDisabled?: boolean;
   deleteBusy?: boolean;
   operationLabel?: string;
@@ -247,6 +250,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.onCreateChat) === Boolean(b.onCreateChat) &&
     Boolean(a.onRename) === Boolean(b.onRename) &&
     Boolean(a.onSetBaseImage) === Boolean(b.onSetBaseImage) &&
+    Boolean(a.onTogglePinned) === Boolean(b.onTogglePinned) &&
     Boolean(a.onDelete) === Boolean(b.onDelete) &&
     Boolean(a.onErrorClick) === Boolean(b.onErrorClick) &&
     Boolean(a.cloneDisabled) === Boolean(b.cloneDisabled) &&
@@ -255,6 +259,8 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.renameBusy) === Boolean(b.renameBusy) &&
     Boolean(a.setBaseImageDisabled) === Boolean(b.setBaseImageDisabled) &&
     Boolean(a.setBaseImageBusy) === Boolean(b.setBaseImageBusy) &&
+    Boolean(a.pinned) === Boolean(b.pinned) &&
+    Boolean(a.pinBusy) === Boolean(b.pinBusy) &&
     Boolean(a.deleteDisabled) === Boolean(b.deleteDisabled) &&
     Boolean(a.deleteBusy) === Boolean(b.deleteBusy) &&
     (a.operationLabel ?? '') === (b.operationLabel ?? '') &&
@@ -287,6 +293,7 @@ export const DroneCard = React.memo(function DroneCard({
   onCreateChat,
   onRename,
   onSetBaseImage,
+  onTogglePinned,
   onDelete,
   onErrorClick,
   cloneDisabled,
@@ -295,6 +302,8 @@ export const DroneCard = React.memo(function DroneCard({
   renameBusy,
   setBaseImageDisabled,
   setBaseImageBusy,
+  pinned,
+  pinBusy,
   deleteDisabled,
   deleteBusy,
   operationLabel,
@@ -313,11 +322,12 @@ export const DroneCard = React.memo(function DroneCard({
   const canCreateChat = typeof onCreateChat === 'function';
   const canRename = typeof onRename === 'function';
   const canSetBaseImage = typeof onSetBaseImage === 'function';
+  const canTogglePinned = typeof onTogglePinned === 'function';
   const canDelete = typeof onDelete === 'function';
-  const hasSecondaryActions = canClone || canCreateChat || canRename || canSetBaseImage;
-  const hasActions = canClone || canCreateChat || canRename || canSetBaseImage || canDelete;
+  const hasSecondaryActions = canTogglePinned || canClone || canCreateChat || canRename || canSetBaseImage;
+  const hasActions = hasSecondaryActions || canDelete;
   const activeOperationLabel = String(operationLabel ?? '').trim();
-  const pinActionsVisible = Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
+  const pinActionsVisible = Boolean(pinBusy) || Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
   const actionMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [actionMenuOpen, setActionMenuOpen] = React.useState(false);
   useDropdownDismiss(actionMenuRef, actionMenuOpen, setActionMenuOpen);
@@ -544,6 +554,22 @@ export const DroneCard = React.memo(function DroneCard({
               onPointerDown={stopActionPressPropagation}
             >
               <div className="py-1">
+                {canTogglePinned ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={Boolean(pinBusy)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setActionMenuOpen(false);
+                      onTogglePinned?.();
+                    }}
+                    className={`${dropdownMenuItemBaseClass} flex items-center gap-2 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-45`}
+                  >
+                    {pinBusy ? <IconSpinner className="h-3.5 w-3.5 text-[var(--accent)]" /> : <IconPin className="h-3.5 w-3.5 text-[var(--accent)]" filled={Boolean(pinned)} />}
+                    <span>{pinned ? 'Unpin from top' : 'Pin to top'}</span>
+                  </button>
+                ) : null}
                 {canCreateChat ? (
                   <button
                     type="button"

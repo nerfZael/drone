@@ -166,6 +166,9 @@ type GroupedSidebarTreeProps = {
   onCancelChatEditor: () => void;
   onRenameDrone: (droneId: string) => void;
   onSetDroneBaseImage: (droneId: string) => void;
+  pinnedDroneIdSet: ReadonlySet<string>;
+  pinningDroneIds: ReadonlySet<string>;
+  onSetDronePinned: (droneId: string, pinned: boolean) => Promise<void>;
   onDeleteDrone: (droneId: string) => void;
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
   onPrepareDroneDragStart: (droneId: string) => void;
@@ -635,6 +638,9 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     chatEditorInputRef,
     onRenameDrone,
     onSetDroneBaseImage,
+    pinnedDroneIdSet,
+    pinningDroneIds,
+    onSetDronePinned,
     onDeleteDrone,
     onOpenDroneErrorModal,
     dragOverTreeTarget,
@@ -771,6 +777,13 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             onClone={actionsEnabled ? () => onOpenCloneModal(drone) : undefined}
             onRename={actionsEnabled ? () => onRenameDrone(drone.id) : undefined}
             onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
+            pinned={pinnedDroneIdSet.has(drone.id)}
+            pinBusy={pinningDroneIds.has(drone.id)}
+            onTogglePinned={
+              actionsEnabled
+                ? () => void onSetDronePinned(drone.id, !pinnedDroneIdSet.has(drone.id))
+                : undefined
+            }
             onDelete={actionsEnabled ? handleDeleteDrone : undefined}
             onErrorClick={onOpenDroneErrorModal}
             cloneDisabled={
@@ -2091,6 +2104,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onSelectDroneChat,
       props.onSelectFolder,
       props.onSetDroneBaseImage,
+      props.onSetDronePinned,
       props.onStartRenameDroneChat,
       props.onStartRenameFolder,
       props.onSubmitChatEditor,
@@ -2110,6 +2124,8 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.setSidebarGroupOrder,
       props.setSidebarNodeOrderByParent,
       props.settingBaseImages,
+      props.pinnedDroneIdSet,
+      props.pinningDroneIds,
       props.sidebarChatOrderByDrone,
       props.sidebarDensityMode,
       props.sidebarDndEnabled,

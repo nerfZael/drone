@@ -504,6 +504,7 @@ function normalizeUiPreferences(value: unknown) {
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(raw.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarNodeOrderByParent),
     sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
+    pinnedDroneIds: normalizeOrderedStringList(raw.pinnedDroneIds),
     hiddenSidebarGroups: normalizeOrderedStringList(raw.hiddenSidebarGroups),
     autoDelete: raw.autoDelete === true,
     spawnAgentKey: cleanString(raw.spawnAgentKey, 'builtin:cursor'),
