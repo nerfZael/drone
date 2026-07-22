@@ -18,7 +18,7 @@ export type MobileOptimisticPendingPrompt = {
   id: string;
   at: string;
   prompt: string;
-  state: 'sending' | 'failed';
+  state: 'queued' | 'sending' | 'sent' | 'failed';
   imageCount: number;
   error?: string;
   optimisticSent: true;
@@ -31,12 +31,13 @@ export function optimisticMobilePendingPrompt(input: {
   prompt: string;
   imageCount?: number;
   at?: string;
+  state?: 'queued' | 'sending';
 }): MobileOptimisticPendingPrompt {
   return {
     id: input.id,
     at: input.at ?? new Date().toISOString(),
     prompt: input.prompt,
-    state: 'sending',
+    state: input.state ?? 'sending',
     imageCount: Math.max(0, input.imageCount ?? 0),
     optimisticSent: true,
   };
@@ -71,7 +72,15 @@ export function mergeOptimisticMobilePendingPrompts(input: {
     return {
       ...optimistic,
       ...prompt,
-      state: prompt?.state === 'failed' ? 'failed' : 'sending',
+      state:
+        prompt?.state === 'queued' ||
+        prompt?.state === 'sending' ||
+        prompt?.state === 'sent' ||
+        prompt?.state === 'failed'
+          ? prompt.state
+          : prompt?.state === 'running'
+            ? 'sending'
+            : optimistic.state,
       optimisticSent: true,
     };
   });
@@ -89,6 +98,16 @@ export function mergeOptimisticMobilePendingPrompts(input: {
     merged.push(prompt);
   }
   return merged.filter(Boolean);
+}
+
+export function confirmedMobilePendingPromptState(input: {
+  pendingState?: unknown;
+  queuedPromptId?: unknown;
+}): 'queued' | 'sending' | 'sent' {
+  if (String(input.queuedPromptId ?? '').trim()) return 'queued';
+  const state = String(input.pendingState ?? '').trim();
+  if (state === 'queued' || state === 'sent') return state;
+  return 'sending';
 }
 
 export function mobileDronePendingPrompts(

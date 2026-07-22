@@ -63,6 +63,7 @@ import {
 } from '../drones/drone-sidebar-model';
 import { withOptimisticMobileBusyChat } from '../drones/drone-state-summary';
 import {
+  confirmedMobilePendingPromptState,
   mergeOptimisticMobilePendingPrompts,
   mobileDronePendingPrompts,
   optimisticMobilePendingPrompt,
@@ -900,6 +901,7 @@ export function DronesScreen({
         id: optimisticId,
         prompt: promptSummary,
         imageCount: images.length,
+        state: running ? 'queued' : 'sending',
       }),
     ]);
     return run('prompt', async () => {
@@ -933,11 +935,20 @@ export function DronesScreen({
       const promptId = String(result?.promptId ?? '').trim();
       const queuedPromptId = String(result?.queuedPrompt?.id ?? '').trim();
       const acceptedPromptId = promptId || queuedPromptId;
+      const acceptedPromptState = confirmedMobilePendingPromptState({
+        pendingState: result?.pendingState,
+        queuedPromptId,
+      });
       if (acceptedPromptId)
         setPendingPrompts((current) =>
           current.map((item) =>
             item?.id === optimisticId
-              ? { ...item, id: acceptedPromptId, state: 'sending', optimisticSent: true }
+              ? {
+                  ...item,
+                  id: acceptedPromptId,
+                  state: acceptedPromptState,
+                  optimisticSent: true,
+                }
               : item,
           ),
         );
@@ -1085,11 +1096,20 @@ export function DronesScreen({
           const acceptedPromptId = String(
             promptResult?.promptId ?? promptResult?.queuedPrompt?.id ?? '',
           ).trim();
+          const acceptedPromptState = confirmedMobilePendingPromptState({
+            pendingState: promptResult?.pendingState,
+            queuedPromptId: promptResult?.queuedPrompt?.id,
+          });
           if (acceptedPromptId && optimisticPromptId) {
             setPendingPrompts((current) =>
               current.map((item) =>
                 item?.id === optimisticPromptId
-                  ? { ...item, id: acceptedPromptId, state: 'sending', optimisticSent: true }
+                  ? {
+                      ...item,
+                      id: acceptedPromptId,
+                      state: acceptedPromptState,
+                      optimisticSent: true,
+                    }
                   : item,
               ),
             );
