@@ -36,6 +36,8 @@ export type DroneSummary = {
   >;
   draftChats?: Record<string, boolean>;
   busyChats?: string[];
+  approvalChats?: string[];
+  approvalRequired?: boolean;
   dockerSize?: {
     totalBytes: number;
     containerWritableBytes: number | null;

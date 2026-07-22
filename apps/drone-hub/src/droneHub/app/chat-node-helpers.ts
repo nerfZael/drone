@@ -110,6 +110,36 @@ export function busyChatNodeIdsForDrone(drone: DroneSummary | null | undefined):
   return out;
 }
 
+export function approvalChatNodeIdsForDrone(
+  drone: DroneSummary | null | undefined,
+): string[] {
+  const droneId = String(drone?.id ?? '').trim();
+  if (!droneId) return [];
+  const chats = normalizedDroneChats(drone, { includeDefaultWhenEmpty: true });
+  const approvalChats = Array.isArray(drone?.approvalChats)
+    ? drone.approvalChats
+    : drone?.approvalRequired === true && chats.length === 1
+      ? chats
+      : [];
+  const out: string[] = [];
+  for (const raw of approvalChats) {
+    const chatName = String(raw ?? '').trim() || 'default';
+    const nodeId = createCanvasChatNodeId(droneId, chatName);
+    if (nodeId && !out.includes(nodeId)) out.push(nodeId);
+  }
+  return out;
+}
+
+export function droneChatRequiresApproval(
+  drone: DroneSummary | null | undefined,
+  chatNameRaw: string,
+): boolean {
+  const droneId = String(drone?.id ?? '').trim();
+  const chatName = String(chatNameRaw ?? '').trim() || 'default';
+  const chatNodeId = createCanvasChatNodeId(droneId, chatName);
+  return Boolean(chatNodeId && approvalChatNodeIdsForDrone(drone).includes(chatNodeId));
+}
+
 export function unreadChatNodeIdsForDrone(
   drone: DroneSummary | null | undefined,
 ): string[] {

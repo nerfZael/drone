@@ -45,6 +45,7 @@ import type { MeshStatus } from './use-device-mesh';
 import { SidebarDroneTreeList, type SidebarDroneTreeListSharedProps } from './SidebarDroneTreeList';
 import { GroupedSidebarTree } from './GroupedSidebarTree';
 import { createCanvasChatNodeId } from './app-config';
+import { droneChatRequiresApproval } from './chat-node-helpers';
 import { SidebarReorderDropIndicator } from './sidebar-reorder-ui';
 import { buildSidebarDroneTree } from './sidebar-drone-tree';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
@@ -360,7 +361,8 @@ function ReadOnlySidebarGroups({
                         busy={busy && hasOnlyDefaultChat}
                         approvalRequired={
                           hasOnlyDefaultChat &&
-                          Boolean(approvalRequiredByChatNodeId[defaultChatNodeId])
+                          (droneChatRequiresApproval(drone, 'default') ||
+                            Boolean(approvalRequiredByChatNodeId[defaultChatNodeId]))
                         }
                         unreadAgentMessage={false}
                         onClick={(rowOpts) => {
@@ -383,7 +385,8 @@ function ReadOnlySidebarGroups({
                             const chatState = sidebarChatDisplayState(
                               drone,
                               chatBusy,
-                              Boolean(approvalRequiredByChatNodeId[chatNodeId]),
+                              droneChatRequiresApproval(drone, chatName) ||
+                                Boolean(approvalRequiredByChatNodeId[chatNodeId]),
                             );
                             const chatStateLabel = sidebarDroneStateLabel(chatState, false);
                             return (
@@ -563,7 +566,8 @@ function StaticReadOnlySidebarTree({
           busy={busy && hasOnlyDefaultChat}
           approvalRequired={
             hasOnlyDefaultChat &&
-            Boolean(approvalRequiredByChatNodeId[defaultChatNodeId])
+            (droneChatRequiresApproval(drone, 'default') ||
+              Boolean(approvalRequiredByChatNodeId[defaultChatNodeId]))
           }
           statusHint={droneStatusHintById[drone.id]}
           unreadAgentMessage={
@@ -587,7 +591,8 @@ function StaticReadOnlySidebarTree({
               const chatState = sidebarChatDisplayState(
                 drone,
                 chatBusy,
-                Boolean(approvalRequiredByChatNodeId[chatNodeId]),
+                droneChatRequiresApproval(drone, chatName) ||
+                  Boolean(approvalRequiredByChatNodeId[chatNodeId]),
               );
               const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
               return (
@@ -2155,6 +2160,7 @@ export function DroneSidebar({
     for (const drone of drones) {
       const chats = drone.chats.length > 0 ? drone.chats : ['default'];
       const droneApprovalRequired = chats.some((chatName) =>
+        droneChatRequiresApproval(drone, chatName) ||
         Boolean(approvalRequiredByChatNodeId[createCanvasChatNodeId(drone.id, chatName)]),
       );
       const droneWorking =
@@ -2833,7 +2839,11 @@ export function DroneSidebar({
                         active={selectedDrone === droneId && hasOnlyDefaultChat && activeChatName === 'default'}
                         activeIndicatorStyle="edge"
                         busy={hasOnlyDefaultChat && busyChatNodeIdSet.has(defaultChatNodeId)}
-                        approvalRequired={hasOnlyDefaultChat && Boolean(approvalRequiredByChatNodeId[defaultChatNodeId])}
+                        approvalRequired={
+                          hasOnlyDefaultChat &&
+                          (droneChatRequiresApproval(drone, 'default') ||
+                            Boolean(approvalRequiredByChatNodeId[defaultChatNodeId]))
+                        }
                         operationLabel={
                           deletingDrones[droneId]
                             ? ((deleteOperationModeById[droneId] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')

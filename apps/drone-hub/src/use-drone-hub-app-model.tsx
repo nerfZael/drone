@@ -86,6 +86,7 @@ import {
   shouldInheritNewDroneContextFromCurrentSelection,
 } from './droneHub/app/new-drone-context';
 import {
+  approvalChatNodeIdsForDrone,
   busyChatNodeIdsForDrone,
   droneChatNodeIds,
   nextUnreadChatReadCursor,
@@ -189,6 +190,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     pinnedToBottom,
     setOptimisticallyDeletedDrones,
     setStartupSeedByDrone,
+    setApprovalRequiredByChatNodeId,
     setUnreadAgentMessageByChatNodeId,
     setLastAgentSnippetByChatNodeId,
     setTranscripts,
@@ -312,6 +314,25 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   React.useEffect(() => {
     droneByIdRef.current = droneById;
   }, [droneById]);
+  React.useEffect(() => {
+    const authoritativeApprovals: Record<string, boolean> = {};
+    for (const drone of drones) {
+      for (const nodeId of approvalChatNodeIdsForDrone(drone)) {
+        authoritativeApprovals[nodeId] = true;
+      }
+    }
+    setApprovalRequiredByChatNodeId((current) => {
+      const currentIds = Object.keys(current).filter((nodeId) => current[nodeId]).sort();
+      const authoritativeIds = Object.keys(authoritativeApprovals).sort();
+      if (
+        currentIds.length === authoritativeIds.length &&
+        currentIds.every((nodeId, index) => nodeId === authoritativeIds[index])
+      ) {
+        return current;
+      }
+      return authoritativeApprovals;
+    });
+  }, [drones, setApprovalRequiredByChatNodeId]);
   const {
     createOpen,
     creating,

@@ -35,6 +35,8 @@ function logRegistryBusyDebug(event: string, drones: DroneSummary[]): void {
       name: String(drone?.name ?? '').trim(),
       busy: Boolean(drone?.busy),
       busyChats: Array.isArray(drone?.busyChats) ? drone.busyChats.map(String) : [],
+      approvalChats: Array.isArray(drone?.approvalChats) ? drone.approvalChats.map(String) : [],
+      approvalRequired: Boolean(drone?.approvalRequired),
       hubPhase: drone?.hubPhase ?? null,
       hubMessage: drone?.hubMessage ?? null,
       statusOk: Boolean(drone?.statusOk),
@@ -120,6 +122,8 @@ function sameDroneSummary(left: DroneSummary, right: DroneSummary): boolean {
     sameChatReadStates(left.chatReadStates, right.chatReadStates) &&
     sameBooleanMap(left.draftChats, right.draftChats) &&
     sameStringArray(left.busyChats, right.busyChats) &&
+    sameStringArray(left.approvalChats, right.approvalChats) &&
+    Boolean(left.approvalRequired) === Boolean(right.approvalRequired) &&
     sameOptionalText(left.hubPhase, right.hubPhase) &&
     sameOptionalText(left.hubMessage, right.hubMessage) &&
     left.busy === right.busy

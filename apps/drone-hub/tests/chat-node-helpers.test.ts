@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  approvalChatNodeIdsForDrone,
+  droneChatRequiresApproval,
   hasOnlyDefaultChat,
   nextUnreadChatReadCursor,
   reconcileManualUnreadMarker,
@@ -22,6 +24,8 @@ function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>):
     chats: seed.chats ?? ['default'],
     unreadChats: seed.unreadChats,
     chatReadStates: seed.chatReadStates,
+    approvalChats: seed.approvalChats,
+    approvalRequired: seed.approvalRequired,
     fleetParentId: seed.fleetParentId ?? null,
     repoAttached: seed.repoAttached ?? false,
     hubPhase: seed.hubPhase ?? null,
@@ -31,6 +35,36 @@ function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>):
 }
 
 describe('chat node helpers', () => {
+  test('uses server approval state before the chat surface has mounted', () => {
+    const summary = drone({
+      id: 'alpha',
+      name: 'Alpha',
+      chats: ['default'],
+      approvalChats: ['default'],
+      approvalRequired: true,
+      busy: true,
+    });
+
+    expect(droneChatRequiresApproval(summary, 'default')).toBe(true);
+    expect(droneChatRequiresApproval(summary, 'other')).toBe(false);
+    expect(approvalChatNodeIdsForDrone(summary)).toEqual(['chat:alpha::default']);
+  });
+
+  test('uses aggregate approval only when a legacy summary has one chat', () => {
+    expect(
+      droneChatRequiresApproval(
+        drone({ id: 'alpha', name: 'Alpha', chats: ['default'], approvalRequired: true }),
+        'default',
+      ),
+    ).toBe(true);
+    expect(
+      droneChatRequiresApproval(
+        drone({ id: 'alpha', name: 'Alpha', chats: ['default', 'review'], approvalRequired: true }),
+        'default',
+      ),
+    ).toBe(false);
+  });
+
   test('treats an implicit empty chat list as only the default chat', () => {
     expect(hasOnlyDefaultChat(drone({ id: 'alpha', name: 'Alpha', chats: [] }))).toBe(true);
   });

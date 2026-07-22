@@ -9,7 +9,7 @@ import {
 } from '../overview';
 import type { DroneSummary } from '../types';
 import { createCanvasChatNodeId } from './app-config';
-import { normalizedDroneChats } from './chat-node-helpers';
+import { droneChatRequiresApproval, normalizedDroneChats } from './chat-node-helpers';
 import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag, type SidebarDroneDragData } from './drone-hub-dnd';
 import { isDroneStartingOrSeeding } from './helpers';
 import { IconColumns, IconEye, IconEyeOff, IconFolder, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
@@ -405,7 +405,9 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
-  const approvalRequired = useChatApprovalRequired(chatNodeId);
+  const locallyRequiredApproval = useChatApprovalRequired(chatNodeId);
+  const approvalRequired =
+    droneChatRequiresApproval(drone, chatName) || locallyRequiredApproval;
   const sidebarChatId = sidebarChatSidebarNodeId(drone.id, chatName);
   const chatDragData = React.useMemo(
     () => createSidebarChatDragData(drone.id, chatName, `${uiDroneName(drone.name)} / ${chatName}`),
@@ -558,7 +560,9 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
-  const approvalRequired = useChatApprovalRequired(chatNodeId);
+  const locallyRequiredApproval = useChatApprovalRequired(chatNodeId);
+  const approvalRequired =
+    droneChatRequiresApproval(drone, chatName) || locallyRequiredApproval;
   const sidebarChatId = sidebarChatSidebarNodeId(drone.id, chatName);
   const active = selectedDrone === drone.id && activeChatName === chatName;
   const selected = selectedSidebarNodeId === sidebarChatId;
@@ -700,7 +704,9 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
   const showCreateChatEditor = chatEditor?.mode === 'create' && chatEditor.droneId === drone.id;
   const defaultChatNodeId = createCanvasChatNodeId(drone.id, 'default');
-  const defaultChatApprovalRequired = useChatApprovalRequired(defaultChatNodeId);
+  const locallyRequiredDefaultChatApproval = useChatApprovalRequired(defaultChatNodeId);
+  const defaultChatApprovalRequired =
+    droneChatRequiresApproval(drone, 'default') || locallyRequiredDefaultChatApproval;
   const showBusy =
     !isDroneStartingOrSeeding(drone.hubPhase) && hasOnlyDefaultChat && busyChatNodeIdSet.has(defaultChatNodeId);
   const showUnread = hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true;

@@ -9,7 +9,7 @@ import {
 } from '../overview';
 import type { DroneSummary } from '../types';
 import { createCanvasChatNodeId } from './app-config';
-import { normalizedDroneChats } from './chat-node-helpers';
+import { droneChatRequiresApproval, normalizedDroneChats } from './chat-node-helpers';
 import { isDroneStartingOrSeeding } from './helpers';
 import { isDroneProvisioningPhase } from '../hub-phase';
 import { IconPencil, IconSpinner, IconTrash } from './icons';
@@ -440,7 +440,11 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const chatKey = `${drone.id}:${chatName}`;
   const chatUnread = unread && !selected;
-  const approvalRequired = useChatApprovalRequired(createCanvasChatNodeId(drone.id, chatName));
+  const locallyRequiredApproval = useChatApprovalRequired(
+    createCanvasChatNodeId(drone.id, chatName),
+  );
+  const approvalRequired =
+    droneChatRequiresApproval(drone, chatName) || locallyRequiredApproval;
   const chatState = sidebarChatDisplayState(drone, busy, approvalRequired);
   const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
   const chatDragData = React.useMemo(
@@ -629,12 +633,14 @@ function SidebarDroneNode({
   actionsEnabled = true,
 }: SidebarDroneNodeProps) {
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
-  const defaultChatApprovalRequired = useChatApprovalRequired(
+  const locallyRequiredDefaultChatApproval = useChatApprovalRequired(
     createCanvasChatNodeId(droneId, 'default'),
   );
   if (ancestorDroneIds?.has(droneId)) return null;
   const drone = droneById[droneId];
   if (!drone) return null;
+  const defaultChatApprovalRequired =
+    droneChatRequiresApproval(drone, 'default') || locallyRequiredDefaultChatApproval;
   const nextAncestorDroneIds = new Set(ancestorDroneIds ?? []);
   nextAncestorDroneIds.add(droneId);
   void onDeleteDroneChat;
