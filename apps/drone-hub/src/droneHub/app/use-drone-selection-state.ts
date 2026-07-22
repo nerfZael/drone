@@ -202,6 +202,30 @@ export function useDroneSelectionState({
     [selectDroneCard, setSelectedChat],
   );
 
+  const setDroneSelectionFromSidebarFolder = React.useCallback(
+    (droneIdsRaw: readonly string[]) => {
+      const droneIds = Array.from(
+        new Set(droneIdsRaw.map((droneId) => String(droneId ?? '').trim()).filter(Boolean)),
+      );
+      const activeDroneId = droneIds[0] ?? null;
+      preferredSelectedDroneRef.current = null;
+      preferredSelectedDroneHoldUntilRef.current = 0;
+      selectionAnchorRef.current = activeDroneId;
+      manualEmptySelectionRef.current = droneIds.length === 0;
+      setSelectedDroneIds((prev) => (sameStringArray(prev, droneIds) ? prev : droneIds));
+      setSelectedDrone(activeDroneId);
+      if (activeDroneId) setSelectedChat('default');
+    },
+    [
+      preferredSelectedDroneHoldUntilRef,
+      preferredSelectedDroneRef,
+      selectionAnchorRef,
+      setSelectedChat,
+      setSelectedDrone,
+      setSelectedDroneIds,
+    ],
+  );
+
   React.useEffect(() => {
     const valid = new Set(visibleDronesFilteredByRepo.map((d) => d.id));
     setSelectedDroneIds((prev) => {
@@ -304,5 +328,5 @@ export function useDroneSelectionState({
     setSelectedChat(chats.includes('default') ? 'default' : chats[0]);
   }, [droneById, selectedDrone, selectedChat, setSelectedChat]);
 
-  return { selectDroneCard, selectDroneChat };
+  return { selectDroneCard, selectDroneChat, setDroneSelectionFromSidebarFolder };
 }

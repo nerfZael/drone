@@ -15,6 +15,7 @@ import { isDroneStartingOrSeeding } from './helpers';
 import { IconColumns, IconEye, IconEyeOff, IconFolder, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
 import { canReorderSidebarDroneSelectionAtParent } from './sidebar-drone-drop';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
+import type { SidebarFolderSelectionOptions } from './sidebar-folder-selection';
 import { buildSidebarDroneTree, type SidebarDroneTree } from './sidebar-drone-tree';
 import { buildSidebarNodeTree, type SidebarNodeTreeModel, type SidebarTreeDroneNode, type SidebarTreeFolderNode, type SidebarTreeNode } from './sidebar-node-tree';
 import {
@@ -101,7 +102,7 @@ type GroupedSidebarTreeProps = {
   selectedSidebarNodeId: string | null;
   selectedFolderPath: string | null;
   setSelectedSidebarNodeId: React.Dispatch<React.SetStateAction<string | null>>;
-  onSelectFolder: (path: string, opts?: { toggle?: boolean }) => void;
+  onSelectFolder: (path: string, opts?: SidebarFolderSelectionOptions) => void;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
@@ -1032,16 +1033,17 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     }
   }, []);
   React.useEffect(() => clearClickTimer, [clearClickTimer]);
-  const runFolderSingleClick = React.useCallback((opts?: { toggle?: boolean }) => {
+  const runFolderSingleClick = React.useCallback((opts?: SidebarFolderSelectionOptions) => {
     if (shouldSuppressClick()) return;
-    if (isSelected && !opts?.toggle) {
+    if (isSelected && !opts?.selectDrones) {
+      onSelectFolder(folderPath, opts);
       onToggleGroupCollapsed(folderPath);
       return;
     }
     setSelectedSidebarNodeId(node.id);
     onSelectFolder(folderPath, opts);
   }, [folderPath, isSelected, node.id, onSelectFolder, onToggleGroupCollapsed, setSelectedSidebarNodeId, shouldSuppressClick]);
-  const scheduleFolderSingleClick = React.useCallback((opts?: { toggle?: boolean }) => {
+  const scheduleFolderSingleClick = React.useCallback((opts?: SidebarFolderSelectionOptions) => {
     clearClickTimer();
     clickTimerRef.current = setTimeout(() => {
       clickTimerRef.current = null;
@@ -1116,7 +1118,11 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX}`}
               onClick={(event) => {
                 if (event.detail > 1) return;
-                scheduleFolderSingleClick({ toggle: event.metaKey || event.ctrlKey });
+                const toggle = event.metaKey || event.ctrlKey;
+                scheduleFolderSingleClick({
+                  selectDrones: toggle || event.shiftKey,
+                  toggle,
+                });
               }}
               {...(folderDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
               {...(folderDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}

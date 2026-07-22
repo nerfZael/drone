@@ -45,11 +45,11 @@ import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
 import { useUiPreferencesSettings } from './droneHub/app/use-ui-preferences-settings';
 import {
+  moveSidebarDroneToTopInNodeOrder,
   removeDroneIdsFromSidebarNodeOrderByParent,
-  reorderSidebarNodeParentOrder,
-  sidebarDroneNodeId,
 } from './droneHub/app/sidebar-node-order';
-import { buildSidebarNodeTree } from './droneHub/app/sidebar-node-tree';
+import type { SidebarNodeTreeModel } from './droneHub/app/sidebar-node-tree';
+import { resolveSelectedDronePinMutation } from './droneHub/app/pinned-drone-selection';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
 import { useSetupStatus } from './droneHub/app/use-setup-status';
 import type { DroneDeleteMode, ProfileSettingsResponse } from './droneHub/app/settings-types';
@@ -633,8 +633,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const [chatOpenRequestRevision, setChatOpenRequestRevision] = React.useState(0);
   const droneIdentityByNameRef = React.useRef<Record<string, string>>({});
   const llmSettingsState = useLlmSettings(requestJson);
-  const { reloadUiPreferences, reloadPinnedDrones, setDronePinned } =
+  const { reloadUiPreferences, reloadPinnedDrones, setDronePinned, setDronesPinned } =
     useUiPreferencesSettings({ requestJson });
+  const selectedDronePinShortcutBusyRef = React.useRef(false);
+  const renderedSidebarNodeTreeRef = React.useRef<SidebarNodeTreeModel | null>(null);
+  const setRenderedSidebarNodeTree = React.useCallback((nodeTree: SidebarNodeTreeModel | null) => {
+    renderedSidebarNodeTreeRef.current = nodeTree;
+  }, []);
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
   const setupStatusState = useSetupStatus(requestJson);
   const { llmSettings } = llmSettingsState;
@@ -1415,7 +1420,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [movingDroneGroups, selectedDroneSet, selectionAnchorRef, setGroupMoveError, setSelectedDroneIds],
   );
-  const { selectDroneCard: selectDroneCardBase, selectDroneChat: selectDroneChatBase } = useDroneSelectionState({
+  const {
+    selectDroneCard: selectDroneCardBase,
+    selectDroneChat: selectDroneChatBase,
+    setDroneSelectionFromSidebarFolder,
+  } = useDroneSelectionState({
     orderedDroneIds,
     selectedDrone,
     selectedDroneIds,
@@ -3252,55 +3261,60 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return result.ok === true;
   }, [createDroneChat, currentDrone, selectedChat, suggestAndRenameDroneChatFromMessage]);
   const toggleSelectedDronePinnedFromShortcut = React.useCallback((): boolean => {
-    const droneId = String(currentDrone?.id ?? '').trim();
-    if (!droneId) return false;
-    const pinned = useDroneHubUiStore.getState().pinnedDroneIds.includes(droneId);
-    void setDronePinned(droneId, !pinned).then((saved) => {
-      if (saved) return;
-      showShortcutToast(
-        `Could not ${pinned ? 'unpin' : 'pin'} the selected drone.`,
-        'Pin failed',
-        'error',
-      );
-    });
-    return true;
-  }, [currentDrone?.id, setDronePinned, showShortcutToast]);
-  const moveSelectedDroneToTopFromShortcut = React.useCallback((): boolean => {
-    const droneId = String(currentDrone?.id ?? '').trim();
-    if (!droneId) return false;
-    const nodeTree = buildSidebarNodeTree({
-      sidebarGroups,
-      sidebarGroupOrder,
-      sidebarDroneOrderByGroup,
-      sidebarNodeOrderByParent,
-      sidebarGroupCreatedAtByName: registryGroupCreatedAtByName,
-    });
-    const nodeId = sidebarDroneNodeId(droneId);
-    const node = nodeTree.nodesById[nodeId];
-    if (!node || node.kind !== 'drone') return false;
-    const siblingIds = nodeTree.childIdsByParent[node.parentId] ?? [];
-    const firstSiblingId = siblingIds[0];
-    if (!firstSiblingId || firstSiblingId === nodeId) return true;
-    setSidebarNodeOrderByParent((previous) =>
-      reorderSidebarNodeParentOrder(
-        previous,
-        node.parentId,
-        siblingIds,
-        nodeId,
-        firstSiblingId,
-        'before',
+    if (selectedDronePinShortcutBusyRef.current) return true;
+    const mutation = resolveSelectedDronePinMutation({
+      selectedDroneIds,
+      activeDroneId: currentDrone?.id,
+      availableDroneIds: new Set(
+        [...drones, ...sidebarDrones]
+          .map((drone) => String(drone?.id ?? '').trim())
+          .filter(Boolean),
       ),
-    );
+      pinnedDroneIds: useDroneHubUiStore.getState().pinnedDroneIds,
+    });
+    if (!mutation) return false;
+    selectedDronePinShortcutBusyRef.current = true;
+    void setDronesPinned(mutation.droneIds, mutation.pinned)
+      .then((saved) => {
+        if (saved) return;
+        showShortcutToast(
+          `Could not ${mutation.pinned ? 'pin' : 'unpin'} the selected ${mutation.droneIds.length === 1 ? 'drone' : 'drones'}.`,
+          mutation.pinned ? 'Pin failed' : 'Unpin failed',
+          'error',
+        );
+      })
+      .finally(() => {
+        selectedDronePinShortcutBusyRef.current = false;
+      });
     return true;
-  }, [
-    currentDrone?.id,
-    registryGroupCreatedAtByName,
-    setSidebarNodeOrderByParent,
-    sidebarDroneOrderByGroup,
-    sidebarGroupOrder,
-    sidebarGroups,
-    sidebarNodeOrderByParent,
-  ]);
+  }, [currentDrone?.id, drones, selectedDroneIds, setDronesPinned, showShortcutToast, sidebarDrones]);
+  const moveSelectedDroneToTopFromShortcut = React.useCallback((): boolean => {
+    const droneId = String(selectedDrone ?? selectedDroneIds[0] ?? '').trim();
+    if (!droneId) return false;
+    const uiState = useDroneHubUiStore.getState();
+    const pinnedIndex = uiState.pinnedDroneIds.indexOf(droneId);
+    if (pinnedIndex >= 0) {
+      if (pinnedIndex > 0) {
+        uiState.setPinnedDroneIds([
+          droneId,
+          ...uiState.pinnedDroneIds.filter((pinnedDroneId) => pinnedDroneId !== droneId),
+        ]);
+      }
+      return true;
+    }
+    const nodeTree = renderedSidebarNodeTreeRef.current;
+    if (!nodeTree) return false;
+    const nextNodeOrder = moveSidebarDroneToTopInNodeOrder(
+      uiState.sidebarNodeOrderByParent,
+      nodeTree,
+      droneId,
+    );
+    if (!nextNodeOrder) return false;
+    if (nextNodeOrder !== uiState.sidebarNodeOrderByParent) {
+      uiState.setSidebarNodeOrderByParent(nextNodeOrder);
+    }
+    return true;
+  }, [selectedDrone, selectedDroneIds]);
   useDroneHubLifecycleEffects({
     normalizeCreateRepoPath,
     setCreateRepoPath,
@@ -3882,6 +3896,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     deleteGroup,
     prepareSidebarDroneDragStart,
     setReposModalOpen,
+    setRenderedSidebarNodeTree,
+    setDroneSelectionFromSidebarFolder,
   });
 
   const overlaysProps: DroneHubOverlaysProps = useDroneHubOverlaysProps({

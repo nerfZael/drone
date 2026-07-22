@@ -20,6 +20,7 @@ export type UseUiPreferencesSettingsResult = {
   reloadUiPreferences: () => Promise<void>;
   reloadPinnedDrones: () => Promise<void>;
   setDronePinned: (droneId: string, pinned: boolean) => Promise<boolean>;
+  setDronesPinned: (droneIds: readonly string[], pinned: boolean) => Promise<boolean>;
 };
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -350,10 +351,10 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     };
   }, [requestJson, snapshot]);
 
-  const setDronePinned = React.useCallback(
-    (droneIdRaw: string, pinned: boolean): Promise<boolean> => {
-      const droneId = String(droneIdRaw ?? '').trim();
-      if (!droneId) return Promise.resolve(false);
+  const setDronesPinned = React.useCallback(
+    (droneIdsRaw: readonly string[], pinned: boolean): Promise<boolean> => {
+      const droneIds = normalizeOrderedStringList(droneIdsRaw);
+      if (droneIds.length === 0) return Promise.resolve(false);
       const write = async (): Promise<boolean> => {
         try {
           const data = await requestJson<UiPreferencesSettingsResponse>(
@@ -361,7 +362,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
             {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ droneId, pinned }),
+              body: JSON.stringify({ droneIds, pinned }),
             },
           );
           const savedPinnedDroneIds = normalizeOrderedStringList(
@@ -392,6 +393,12 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     [requestJson, setPinnedDroneIds],
   );
 
+  const setDronePinned = React.useCallback(
+    (droneId: string, pinned: boolean): Promise<boolean> =>
+      setDronesPinned([droneId], pinned),
+    [setDronesPinned],
+  );
+
   const reloadPinnedDrones = React.useCallback(async () => {
     try {
       const data = await requestJson<UiPreferencesSettingsResponse>(
@@ -415,5 +422,5 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     }
   }, [requestJson, setPinnedDroneIds]);
 
-  return { reloadUiPreferences, reloadPinnedDrones, setDronePinned };
+  return { reloadUiPreferences, reloadPinnedDrones, setDronePinned, setDronesPinned };
 }

@@ -904,21 +904,37 @@ export async function upsertStoredUiPreferencesSettings(
   }
 }
 
+export function resolvePinnedDronePreferenceIds(
+  currentIdsRaw: unknown,
+  requestedIdsRaw: unknown,
+  pinned: boolean,
+): string[] {
+  const currentIds = normalizeOrderedStringList(currentIdsRaw);
+  const requestedIds = normalizeOrderedStringList(requestedIdsRaw);
+  const requestedIdSet = new Set(requestedIds);
+  if (!pinned) return currentIds.filter((droneId) => !requestedIdSet.has(droneId));
+  const currentIdSet = new Set(currentIds);
+  return [
+    ...currentIds,
+    ...requestedIds.filter((droneId) => !currentIdSet.has(droneId)),
+  ];
+}
+
 export async function updatePinnedDronePreference(
-  droneIdRaw: unknown,
+  droneIdOrIdsRaw: unknown,
   pinned: boolean,
 ): Promise<StoredUiPreferencesSettings> {
-  const droneId = String(droneIdRaw ?? '').trim();
-  if (!droneId) throw new UiPreferencesSettingsValidationError('droneId is required');
+  const droneIds = normalizeOrderedStringList(
+    Array.isArray(droneIdOrIdsRaw) ? droneIdOrIdsRaw : [droneIdOrIdsRaw],
+  );
+  if (droneIds.length === 0) {
+    throw new UiPreferencesSettingsValidationError('droneId or droneIds is required');
+  }
   const repository = await getHubSettingsRepository();
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const current = await getStoredUiPreferencesSettings();
     const currentIds = current.uiPreferences.pinnedDroneIds;
-    const nextIds = pinned
-      ? currentIds.includes(droneId)
-        ? currentIds
-        : [...currentIds, droneId]
-      : currentIds.filter((id) => id !== droneId);
+    const nextIds = resolvePinnedDronePreferenceIds(currentIds, droneIds, pinned);
     if (nextIds.length === currentIds.length) return current;
     try {
       const saved = await repository.put(

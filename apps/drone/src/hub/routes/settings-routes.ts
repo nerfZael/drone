@@ -604,7 +604,10 @@ export function registerSettingsRoutes(
   apiRouter.post('/api/settings/ui-preferences/pinned-drones', async ({ readJson, json: respond }) => {
     const body = await readJson<any>();
     try {
-      const saved = await updatePinnedDronePreference(body?.droneId, body?.pinned === true);
+      const saved = await updatePinnedDronePreference(
+        Array.isArray(body?.droneIds) ? body.droneIds : body?.droneId,
+        body?.pinned === true,
+      );
       await notifyPinnedDronesChanged();
       respond(200, { ok: true, ...saved });
     } catch (error: any) {

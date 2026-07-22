@@ -110,6 +110,11 @@ import { useSidebarRootDnd } from './use-sidebar-root-dnd';
 import { useDroneHubRuntimeStore } from './use-drone-hub-runtime-store';
 import { isDroneStartingOrSeeding } from './helpers';
 import { AddDroneToGroupDialog } from './AddDroneToGroupDialog';
+import { excludePinnedSidebarGroupItems } from './pinned-drone-selection';
+import {
+  resolveSidebarFolderDroneSelection,
+  type SidebarFolderSelectionOptions,
+} from './sidebar-folder-selection';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 308;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -1496,6 +1501,8 @@ export type DroneSidebarProps = {
   ) => Promise<boolean> | boolean;
   onPrepareDroneDragStart: (droneId: string) => void;
   onOpenReposModal: () => void;
+  onSetDroneSelectionFromFolder: (droneIds: readonly string[]) => void;
+  onRenderedNodeTreeChange?: (nodeTree: SidebarNodeTreeModel | null) => void;
   capabilities?: Partial<DroneSidebarCapabilities>;
   sidebarGroupingModeOverride?: SidebarGroupingMode;
   fillContainer?: boolean;
@@ -1558,6 +1565,8 @@ export function DroneSidebar({
   onDeleteGroup,
   onPrepareDroneDragStart,
   onOpenReposModal,
+  onSetDroneSelectionFromFolder,
+  onRenderedNodeTreeChange,
   capabilities,
   sidebarGroupingModeOverride,
   fillContainer,
@@ -1810,6 +1819,10 @@ export function DroneSidebar({
   const draftSidebarPlaceholderNodeId = draftSidebarPlaceholderDrone
     ? sidebarDroneNodeId(DRAFT_SIDEBAR_PLACEHOLDER_ID)
     : null;
+  const unpinnedOptimisticSidebarGroups = React.useMemo(
+    () => excludePinnedSidebarGroupItems(optimisticSidebarGroups, pinnedDroneIdSet),
+    [optimisticSidebarGroups, pinnedDroneIdSet],
+  );
   const {
     renderSidebarGroups,
     sidebarFolderTree,
@@ -1820,7 +1833,7 @@ export function DroneSidebar({
     hiddenSidebarGroupTokenSet,
     isRepoGroupingMode,
     optimisticSidebarDronesFilteredByRepo,
-    optimisticSidebarGroups,
+    optimisticSidebarGroups: unpinnedOptimisticSidebarGroups,
     repoScopedGroupPathsByRepoGroup,
     showHiddenSidebarGroups,
     sidebarGroupOrder,
@@ -1928,46 +1941,29 @@ export function DroneSidebar({
     visibleSidebarFolderPathSet,
   });
   const handleGroupedSelectFolderWithDrones = React.useCallback(
-    (path: string, opts?: { toggle?: boolean }) => {
+    (path: string, opts?: SidebarFolderSelectionOptions) => {
       const folderDroneIds = collectSidebarFolderDroneIds(staticReadOnlyNodeTree, path);
-      if (folderDroneIds.length === 0) {
-        if (!opts?.toggle) {
-          handleGroupedSelectFolder(path);
-          setSelectedDrone(null);
-          setSelectedDroneIds([]);
-        }
-        return;
-      }
-      const next = (() => {
-        if (!opts?.toggle) return folderDroneIds;
-        const folderSet = new Set(folderDroneIds);
-        const allSelected = folderDroneIds.every((droneId) => selectedDroneIds.includes(droneId));
-        return allSelected
-          ? selectedDroneIds.filter((droneId) => !folderSet.has(droneId))
-          : [
-              ...selectedDroneIds,
-              ...folderDroneIds.filter((droneId) => !selectedDroneIds.includes(droneId)),
-            ];
-      })();
+      const next = resolveSidebarFolderDroneSelection({
+        selectedDroneIds,
+        folderDroneIds,
+        options: opts,
+      });
       const toggledOff =
         Boolean(opts?.toggle) &&
+        folderDroneIds.length > 0 &&
         folderDroneIds.every((droneId) => selectedDroneIds.includes(droneId));
       if (toggledOff) {
         clearGroupedFolderSelection(path);
       } else {
         handleGroupedSelectFolder(path);
       }
-      setSelectedDroneIds(next);
-      setSelectedDrone(next[0] ?? null);
-      if (next.length > 0) setSelectedChat('default');
+      onSetDroneSelectionFromFolder(next);
     },
     [
       clearGroupedFolderSelection,
       handleGroupedSelectFolder,
       selectedDroneIds,
-      setSelectedChat,
-      setSelectedDrone,
-      setSelectedDroneIds,
+      onSetDroneSelectionFromFolder,
       staticReadOnlyNodeTree,
     ],
   );
@@ -2249,7 +2245,9 @@ export function DroneSidebar({
     if (!activeRepositoryNavigationItem) return null;
     const repoPath = activeRepositoryNavigationItem.repoPath;
     const activeDrones = Object.values(sidebarDroneById).filter(
-      (drone) => String(drone.repoPath ?? '').trim() === repoPath,
+      (drone) =>
+        String(drone.repoPath ?? '').trim() === repoPath &&
+        !pinnedDroneIdSet.has(String(drone.id ?? '').trim()),
     );
     return buildRepoSidebarModel({
       drones: activeDrones,
@@ -2262,6 +2260,7 @@ export function DroneSidebar({
     });
   }, [
     activeRepositoryNavigationItem,
+    pinnedDroneIdSet,
     repoScopedGroupPathsByRepoGroup,
     sidebarDroneById,
     sidebarDroneOrderByGroup,
@@ -2272,6 +2271,15 @@ export function DroneSidebar({
   const activeRepositoryRootNodeId = activeRepositoryNavigationItem
     ? sidebarFolderNodeId(activeRepositoryNavigationItem.id)
     : null;
+  const renderedSidebarNodeTree = sidebarCapabilities.headerActions
+    ? repositoryOverviewOpen
+      ? null
+      : activeRepositoryModel?.nodeTree ?? null
+    : staticReadOnlyNodeTree;
+  React.useLayoutEffect(() => {
+    onRenderedNodeTreeChange?.(renderedSidebarNodeTree);
+    return () => onRenderedNodeTreeChange?.(null);
+  }, [onRenderedNodeTreeChange, renderedSidebarNodeTree]);
   const activeRepositoryFolderTree = React.useMemo(
     () =>
       activeRepositoryModel

@@ -58,8 +58,8 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: 'toggleSelectedDronePinned',
-    label: 'Pin selected drone',
-    description: 'Pins or unpins the selected drone in the sidebar.',
+    label: 'Pin selected drones',
+    description: 'Pins all selected drones, or unpins them when they are already all pinned.',
   },
   {
     id: 'moveSelectedDroneToTop',

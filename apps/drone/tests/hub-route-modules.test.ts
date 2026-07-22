@@ -199,4 +199,41 @@ describe('extracted Hub route modules', () => {
       { status: 200, body: { ...waiting, status: 'idle', authorizationUrl: null } },
     ]);
   });
+
+  test('passes a pinned-drone batch to one atomic settings update', async () => {
+    const { router, request, responses } = routeHarness({
+      droneIds: ['alpha', 'bravo'],
+      pinned: true,
+    });
+    const updates: Array<{ droneIds: unknown; pinned: boolean }> = [];
+    let notificationCount = 0;
+    registerSettingsRoutes(router, {
+      updatePinnedDronePreference: async (droneIds: unknown, pinned: boolean) => {
+        updates.push({ droneIds, pinned });
+        return {
+          uiPreferences: { pinnedDroneIds: ['alpha', 'bravo'] },
+          updatedAt: '2026-07-22T12:00:00.000Z',
+          version: 2,
+        };
+      },
+      notifyPinnedDronesChanged: async () => {
+        notificationCount += 1;
+      },
+    } as any);
+
+    expect(await request('POST', '/api/settings/ui-preferences/pinned-drones')).toBe(true);
+    expect(updates).toEqual([{ droneIds: ['alpha', 'bravo'], pinned: true }]);
+    expect(notificationCount).toBe(1);
+    expect(responses).toEqual([
+      {
+        status: 200,
+        body: {
+          ok: true,
+          uiPreferences: { pinnedDroneIds: ['alpha', 'bravo'] },
+          updatedAt: '2026-07-22T12:00:00.000Z',
+          version: 2,
+        },
+      },
+    ]);
+  });
 });

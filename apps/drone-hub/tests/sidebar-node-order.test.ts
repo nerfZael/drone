@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   SIDEBAR_ROOT_PARENT_ID,
   mergeVisibleSidebarNodeOrderByParent,
+  moveSidebarDroneToTopInNodeOrder,
   renameSidebarNodeOrderByParentGroupPrefix,
   sidebarDroneNodeId,
   sidebarFolderNodeId,
@@ -81,5 +82,50 @@ describe('sidebar-node-order', () => {
         sidebarDroneNodeId('older-drone'),
       ],
     });
+  });
+
+  test('moves a drone to the top using its rendered repository-scoped parent', () => {
+    const repoParentId = sidebarFolderNodeId('repo-scope:repo:/work/drone:Long Term');
+    const firstDroneId = sidebarDroneNodeId('first');
+    const selectedDroneId = sidebarDroneNodeId('selected');
+    const nodeTree = {
+      nodesById: {
+        [firstDroneId]: {
+          id: firstDroneId,
+          kind: 'drone' as const,
+          droneId: 'first',
+          parentId: repoParentId,
+          groupPath: 'Long Term',
+          repoGroupPath: 'repo:/work/drone',
+          depth: 2,
+        },
+        [selectedDroneId]: {
+          id: selectedDroneId,
+          kind: 'drone' as const,
+          droneId: 'selected',
+          parentId: repoParentId,
+          groupPath: 'Long Term',
+          repoGroupPath: 'repo:/work/drone',
+          depth: 2,
+        },
+      },
+      childIdsByParent: {
+        [repoParentId]: [firstDroneId, selectedDroneId],
+      },
+    };
+
+    expect(moveSidebarDroneToTopInNodeOrder({}, nodeTree, 'selected')).toEqual({
+      [repoParentId]: [selectedDroneId, firstDroneId],
+    });
+  });
+
+  test('does not claim a move when the drone is absent from the rendered tree', () => {
+    expect(
+      moveSidebarDroneToTopInNodeOrder(
+        {},
+        { nodesById: {}, childIdsByParent: {} },
+        'not-visible',
+      ),
+    ).toBeNull();
   });
 });

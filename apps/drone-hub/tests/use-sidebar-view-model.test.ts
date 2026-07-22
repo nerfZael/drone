@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { buildRepoSidebarGroups } from '../src/droneHub/app/sidebar-repo-groups';
 import { isSidebarGroupDeleting } from '../src/droneHub/app/sidebar-group-delete-visibility';
 import { isDroneRecentForSidebar } from '../src/droneHub/app/sidebar-recent-filter';
+import { shouldShowSidebarGroup } from '../src/droneHub/app/use-sidebar-view-model';
 import type { DroneSummary } from '../src/droneHub/types';
 
 function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>): DroneSummary {
@@ -138,6 +139,32 @@ describe('isSidebarGroupDeleting', () => {
         { group: 'repo:/work/repo-b', kind: 'repo' },
         { 'repo:/work/repo-a': true },
       ),
+    ).toBe(false);
+  });
+});
+
+describe('shouldShowSidebarGroup', () => {
+  const group = {
+    items: [drone({ id: 'selected-draft', name: 'Selected draft' })],
+  };
+
+  test('keeps a hidden group visible while it contains the selected drone', () => {
+    expect(
+      shouldShowSidebarGroup(group, {
+        showHiddenSidebarGroups: false,
+        hidden: true,
+        retainedDroneIds: new Set(['selected-draft']),
+      }),
+    ).toBe(true);
+  });
+
+  test('continues hiding groups that do not contain a selected drone', () => {
+    expect(
+      shouldShowSidebarGroup(group, {
+        showHiddenSidebarGroups: false,
+        hidden: true,
+        retainedDroneIds: new Set(),
+      }),
     ).toBe(false);
   });
 });

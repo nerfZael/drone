@@ -21,6 +21,18 @@ export type SidebarGroup = {
 
 export const SIDEBAR_VISIBLE_MULTI_CHAT_GROUP = '__sidebar-visible-drones__';
 
+export function shouldShowSidebarGroup(
+  group: Pick<SidebarGroup, 'items'>,
+  opts: {
+    showHiddenSidebarGroups: boolean;
+    hidden: boolean;
+    retainedDroneIds: ReadonlySet<string>;
+  },
+): boolean {
+  if (opts.showHiddenSidebarGroups || !opts.hidden) return true;
+  return group.items.some((drone) => opts.retainedDroneIds.has(String(drone?.id ?? '').trim()));
+}
+
 type UseSidebarViewModelArgs = {
   selectedDroneIds: string[];
   sidebarGroupingMode: 'groups' | 'repos';
@@ -230,9 +242,14 @@ export function useSidebarViewModel({
   );
 
   const sidebarGroups = React.useMemo(() => {
-    if (showHiddenSidebarGroups) return allSidebarGroups;
-    return allSidebarGroups.filter((group) => !isSidebarGroupHidden(group));
-  }, [allSidebarGroups, isSidebarGroupHidden, showHiddenSidebarGroups]);
+    return allSidebarGroups.filter((group) =>
+      shouldShowSidebarGroup(group, {
+        showHiddenSidebarGroups,
+        hidden: isSidebarGroupHidden(group),
+        retainedDroneIds: selectedDroneSet,
+      }),
+    );
+  }, [allSidebarGroups, isSidebarGroupHidden, selectedDroneSet, showHiddenSidebarGroups]);
 
   const visibleSidebarDroneIdSet = React.useMemo(() => {
     const out = new Set<string>();

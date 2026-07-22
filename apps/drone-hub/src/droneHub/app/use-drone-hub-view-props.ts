@@ -58,6 +58,8 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     deleteGroup,
     prepareSidebarDroneDragStart,
     setReposModalOpen,
+    setRenderedSidebarNodeTree,
+    setDroneSelectionFromSidebarFolder,
   } = args;
 
   return {
@@ -127,6 +129,8 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     onDeleteGroup: async (group, count, opts) => await deleteGroup(group, count, opts),
     onPrepareDroneDragStart: prepareSidebarDroneDragStart,
     onOpenReposModal: () => setReposModalOpen(true),
+    onRenderedNodeTreeChange: setRenderedSidebarNodeTree,
+    onSetDroneSelectionFromFolder: setDroneSelectionFromSidebarFolder,
   };
 }
 

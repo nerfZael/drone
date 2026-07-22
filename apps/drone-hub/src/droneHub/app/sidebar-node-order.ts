@@ -8,6 +8,7 @@ import {
   SIDEBAR_ROOT_PARENT_ID,
   sidebarDroneNodeId,
   sidebarFolderNodeId,
+  type SidebarNodeTreeModel,
 } from '@drone/hub-model/sidebar';
 
 export {
@@ -86,6 +87,27 @@ export function reorderSidebarNodeParentOrder(
     ...map,
     [parentId]: nextOrder,
   });
+}
+
+export function moveSidebarDroneToTopInNodeOrder(
+  map: Record<string, string[]>,
+  nodeTree: Pick<SidebarNodeTreeModel, 'nodesById' | 'childIdsByParent'>,
+  droneIdRaw: string,
+): Record<string, string[]> | null {
+  const nodeId = sidebarDroneNodeId(String(droneIdRaw ?? '').trim());
+  const node = nodeTree.nodesById[nodeId];
+  if (!node || node.kind !== 'drone') return null;
+  const siblingIds = nodeTree.childIdsByParent[node.parentId] ?? [];
+  const firstSiblingId = siblingIds[0];
+  if (!firstSiblingId || firstSiblingId === nodeId) return map;
+  return reorderSidebarNodeParentOrder(
+    map,
+    node.parentId,
+    siblingIds,
+    nodeId,
+    firstSiblingId,
+    'before',
+  );
 }
 
 export function moveSidebarNodeIdsBetweenParents(args: {
