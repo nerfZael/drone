@@ -59,6 +59,74 @@ describe('mesh chat attachment store', () => {
     }
   });
 
+  test('sanitizes attachment filenames without rejecting long names', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-chat-filename-'));
+    roots.push(root);
+    const store = new MeshChatAttachmentStore(root);
+    try {
+      const prepared = await store.prepare({
+        sourceDeviceId: 'phone-1',
+        droneId: 'drone-1',
+        chatName: 'default',
+        name: `../folder/${'a'.repeat(300)}.txt`,
+        mime: 'text/plain',
+        size: 1,
+      });
+      await store.writeMesh({
+        sourceDeviceId: 'phone-1',
+        uploadId: prepared.uploadId,
+        offset: 0,
+        dataBase64: Buffer.from('x').toString('base64'),
+      });
+      await expect(store.commit('phone-1', prepared.uploadId)).resolves.toMatchObject({
+        name: 'a'.repeat(240),
+      });
+    } finally {
+      await store.close();
+    }
+  });
+
+  test('rejects overlapping writes to one upload session', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-chat-write-lock-'));
+    roots.push(root);
+    const store = new MeshChatAttachmentStore(root);
+    try {
+      const prepared = await store.prepare({
+        sourceDeviceId: 'phone-1',
+        droneId: 'drone-1',
+        chatName: 'default',
+        name: 'payload.bin',
+        mime: 'application/octet-stream',
+        size: 2,
+      });
+      const firstWrite = store.writeMesh({
+        sourceDeviceId: 'phone-1',
+        uploadId: prepared.uploadId,
+        offset: 0,
+        dataBase64: Buffer.from('a').toString('base64'),
+      });
+      await expect(
+        store.writeMesh({
+          sourceDeviceId: 'phone-1',
+          uploadId: prepared.uploadId,
+          offset: 0,
+          dataBase64: Buffer.from('b').toString('base64'),
+        }),
+      ).rejects.toMatchObject({ code: 'TRANSFER_BUSY' });
+      await firstWrite;
+      await expect(
+        store.writeMesh({
+          sourceDeviceId: 'phone-1',
+          uploadId: prepared.uploadId,
+          offset: 1,
+          dataBase64: Buffer.from('b').toString('base64'),
+        }),
+      ).resolves.toMatchObject({ offset: 2, complete: true });
+    } finally {
+      await store.close();
+    }
+  });
+
   test('limits abandoned upload sessions per source device', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-chat-session-limit-'));
     roots.push(root);
@@ -163,6 +231,35 @@ describe('mesh chat attachment store', () => {
       await expect(
         store.attachments('desktop-1', 'drone-1', 'default', [prepared.uploadId]),
       ).resolves.toMatchObject([{ name: 'status.ts', mime: 'text/plain', size: source.length }]);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test('allows a committed upload to be aborted after a rejected prompt', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-chat-committed-abort-'));
+    roots.push(root);
+    const store = new MeshChatAttachmentStore(root);
+    try {
+      const prepared = await store.prepare({
+        sourceDeviceId: 'desktop-1',
+        droneId: 'drone-1',
+        chatName: 'default',
+        name: 'status.txt',
+        mime: 'text/plain',
+        size: 1,
+      });
+      await store.writeMesh({
+        sourceDeviceId: 'desktop-1',
+        uploadId: prepared.uploadId,
+        offset: 0,
+        dataBase64: Buffer.from('x').toString('base64'),
+      });
+      await store.commit('desktop-1', prepared.uploadId);
+      await expect(store.abort('desktop-1', prepared.uploadId)).resolves.toEqual({ aborted: true });
+      await expect(
+        store.attachments('desktop-1', 'drone-1', 'default', [prepared.uploadId]),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     } finally {
       await store.close();
     }

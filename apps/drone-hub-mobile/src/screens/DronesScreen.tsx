@@ -259,6 +259,10 @@ export function DronesScreen({
   const [cancellingPromptId, setCancellingPromptId] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
   const [promptAttachments, setPromptAttachments] = React.useState<MobileChatAttachment[]>([]);
+  const promptRef = React.useRef(prompt);
+  const promptAttachmentsRef = React.useRef(promptAttachments);
+  promptRef.current = prompt;
+  promptAttachmentsRef.current = promptAttachments;
   const [createRepos, setCreateRepos] = React.useState<MobileDroneCreateRepo[]>([]);
   const [createOptionsLoading, setCreateOptionsLoading] = React.useState(false);
   const [busy, setBusy] = React.useState('');
@@ -494,6 +498,8 @@ export function DronesScreen({
     setCancellingPromptId('');
     setPrompt('');
     setPromptAttachments([]);
+    promptRef.current = '';
+    promptAttachmentsRef.current = [];
     setCreateRepos([]);
     setCreateOptionsLoading(false);
     setBusy('');
@@ -961,6 +967,8 @@ export function DronesScreen({
     const promptSummary = nextPrompt.trim();
     setPrompt('');
     setPromptAttachments([]);
+    promptRef.current = '';
+    promptAttachmentsRef.current = [];
     setPendingPrompts((current) => [
       ...current,
       optimisticMobilePendingPrompt({
@@ -996,6 +1004,18 @@ export function DronesScreen({
               : item,
           ),
         );
+        if (
+          targetIdRef.current === destinationId &&
+          selectedRef.current?.id === droneId &&
+          chatNameRef.current === activeChat &&
+          !promptRef.current &&
+          promptAttachmentsRef.current.length === 0
+        ) {
+          promptRef.current = nextPrompt;
+          promptAttachmentsRef.current = attachments;
+          setPrompt(nextPrompt);
+          setPromptAttachments(attachments);
+        }
         throw nextError;
       }
       if (targetIdRef.current !== destinationId) return;

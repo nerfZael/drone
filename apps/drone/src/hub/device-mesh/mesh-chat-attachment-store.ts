@@ -22,6 +22,7 @@ type Upload = {
   filePath: string;
   expiresAt: number;
   committed: boolean;
+  busy: boolean;
 };
 
 function safeEqual(left: string, right: string): boolean {
@@ -34,6 +35,16 @@ function cleanId(value: unknown, label: string): string {
   const text = String(value ?? '').trim();
   if (!text || text.length > 240) throw new Error(`${label} is required`);
   return text;
+}
+
+function attachmentName(value: unknown): string {
+  const raw = String(value ?? '')
+    .replace(/[\u0000\r\n\t]/gu, '')
+    .replace(/\\/gu, '/')
+    .trim();
+  const name = raw.split('/').pop()?.trim() ?? '';
+  if (!name) throw new Error('attachment name is required');
+  return name.slice(0, 240);
 }
 
 function attachmentMime(value: unknown): string {
@@ -88,7 +99,7 @@ export class MeshChatAttachmentStore {
     const sourceDeviceId = cleanId(input.sourceDeviceId, 'source device');
     const droneId = cleanId(input.droneId, 'droneId');
     const chatName = cleanId(input.chatName, 'chatName');
-    const name = cleanId(input.name, 'attachment name').slice(0, 240);
+    const name = attachmentName(input.name);
     const mime = attachmentMime(input.mime);
     const size = expectedSize(input.size);
     const sha256 =
@@ -126,6 +137,7 @@ export class MeshChatAttachmentStore {
       filePath,
       expiresAt: Date.now() + UPLOAD_TTL_MS,
       committed: false,
+      busy: false,
     };
     this.uploads.set(id, upload);
     return {
@@ -154,66 +166,81 @@ export class MeshChatAttachmentStore {
 
   async writeHttp(uploadId: string, token: string, offset: unknown, request: http.IncomingMessage) {
     const upload = this.authorizedUpload(uploadId, token);
-    if (upload.committed) throw new Error('attachment upload is already committed');
-    const parsedOffset = Number(offset);
-    if (!Number.isSafeInteger(parsedOffset) || parsedOffset < 0)
-      throw new Error('attachment offset is invalid');
-    const stat = await fs.stat(upload.filePath);
-    if (stat.size !== parsedOffset)
-      throw Object.assign(
-        new Error(`attachment offset mismatch: expected ${stat.size}, received ${parsedOffset}`),
-        { code: 'TRANSFER_OFFSET_MISMATCH' },
-      );
-    const handle = await fs.open(upload.filePath, 'a');
-    let written = 0;
+    this.beginOperation(upload);
     try {
-      for await (const raw of request) {
-        const chunk = Buffer.from(raw);
-        if (parsedOffset + written + chunk.length > upload.size)
-          throw new Error('attachment upload exceeds its declared size');
-        await handle.write(chunk);
-        written += chunk.length;
+      const parsedOffset = Number(offset);
+      if (!Number.isSafeInteger(parsedOffset) || parsedOffset < 0)
+        throw new Error('attachment offset is invalid');
+      const stat = await fs.stat(upload.filePath);
+      if (stat.size !== parsedOffset)
+        throw Object.assign(
+          new Error(`attachment offset mismatch: expected ${stat.size}, received ${parsedOffset}`),
+          { code: 'TRANSFER_OFFSET_MISMATCH' },
+        );
+      const handle = await fs.open(upload.filePath, 'a');
+      let written = 0;
+      try {
+        for await (const raw of request) {
+          const chunk = Buffer.from(raw);
+          if (parsedOffset + written + chunk.length > upload.size)
+            throw new Error('attachment upload exceeds its declared size');
+          await handle.write(chunk);
+          written += chunk.length;
+        }
+        if (written === 0) throw new Error('attachment upload body is empty');
+        await handle.sync();
+      } finally {
+        await handle.close();
       }
-      if (written === 0) throw new Error('attachment upload body is empty');
-      await handle.sync();
+      upload.expiresAt = Date.now() + UPLOAD_TTL_MS;
+      return {
+        uploadId: upload.id,
+        offset: parsedOffset + written,
+        complete: parsedOffset + written === upload.size,
+      };
     } finally {
-      await handle.close();
+      upload.busy = false;
     }
-    upload.expiresAt = Date.now() + UPLOAD_TTL_MS;
-    return {
-      uploadId: upload.id,
-      offset: parsedOffset + written,
-      complete: parsedOffset + written === upload.size,
-    };
   }
 
   async commit(sourceDeviceId: string, uploadId: unknown) {
     const upload = this.forSource(uploadId, sourceDeviceId);
-    const stat = await fs.stat(upload.filePath);
-    if (stat.size !== upload.size)
-      throw new Error(
-        `attachment upload is incomplete: received ${stat.size} of ${upload.size} bytes`,
-      );
-    if (upload.sha256) {
-      const digest = crypto
-        .createHash('sha256')
-        .update(await fs.readFile(upload.filePath))
-        .digest('hex');
-      if (!safeEqual(digest, upload.sha256)) throw new Error('attachment checksum did not match');
+    this.beginOperation(upload);
+    try {
+      const stat = await fs.stat(upload.filePath);
+      if (stat.size !== upload.size)
+        throw new Error(
+          `attachment upload is incomplete: received ${stat.size} of ${upload.size} bytes`,
+        );
+      if (upload.sha256) {
+        const digest = crypto
+          .createHash('sha256')
+          .update(await fs.readFile(upload.filePath))
+          .digest('hex');
+        if (!safeEqual(digest, upload.sha256))
+          throw new Error('attachment checksum did not match');
+      }
+      upload.committed = true;
+      return {
+        attachmentId: upload.id,
+        name: upload.name,
+        mime: upload.mime,
+        size: upload.size,
+      };
+    } finally {
+      upload.busy = false;
     }
-    upload.committed = true;
-    return {
-      attachmentId: upload.id,
-      name: upload.name,
-      mime: upload.mime,
-      size: upload.size,
-    };
   }
 
   async abort(sourceDeviceId: string, uploadId: unknown): Promise<{ aborted: true }> {
     const upload = this.forSource(uploadId, sourceDeviceId);
-    await this.remove([upload.id]);
-    return { aborted: true };
+    this.beginOperation(upload, true);
+    try {
+      await this.remove([upload.id]);
+      return { aborted: true };
+    } finally {
+      upload.busy = false;
+    }
   }
 
   async attachments(
@@ -222,10 +249,9 @@ export class MeshChatAttachmentStore {
     chatName: string,
     attachmentIds: unknown,
   ) {
-    const ids = Array.isArray(attachmentIds)
-      ? [...new Set(attachmentIds.map((value) => String(value ?? '').trim()).filter(Boolean))]
-      : [];
-    if (ids.length > 8) throw new Error('too many prompt attachments (max 8)');
+    const rawIds = Array.isArray(attachmentIds) ? attachmentIds : [];
+    if (rawIds.length > 8) throw new Error('too many prompt attachments (max 8)');
+    const ids = [...new Set(rawIds.map((value) => String(value ?? '').trim()).filter(Boolean))];
     const uploads = ids.map((id) => this.forSource(id, sourceDeviceId));
     let total = 0;
     for (const upload of uploads) {
@@ -298,34 +324,51 @@ export class MeshChatAttachmentStore {
   }
 
   private async write(upload: Upload, offsetRaw: unknown, data: Buffer) {
-    if (upload.committed) throw new Error('attachment upload is already committed');
-    const offset = Number(offsetRaw);
-    if (!Number.isSafeInteger(offset) || offset < 0)
-      throw new Error('attachment offset is invalid');
-    const stat = await fs.stat(upload.filePath);
-    if (stat.size !== offset)
-      throw Object.assign(
-        new Error(`attachment offset mismatch: expected ${stat.size}, received ${offset}`),
-        { code: 'TRANSFER_OFFSET_MISMATCH' },
-      );
-    if (offset + data.length > upload.size) throw new Error('attachment exceeds its declared size');
-    const handle = await fs.open(upload.filePath, 'a');
+    this.beginOperation(upload);
     try {
-      await handle.write(data);
-      await handle.sync();
+      const offset = Number(offsetRaw);
+      if (!Number.isSafeInteger(offset) || offset < 0)
+        throw new Error('attachment offset is invalid');
+      const stat = await fs.stat(upload.filePath);
+      if (stat.size !== offset)
+        throw Object.assign(
+          new Error(`attachment offset mismatch: expected ${stat.size}, received ${offset}`),
+          { code: 'TRANSFER_OFFSET_MISMATCH' },
+        );
+      if (offset + data.length > upload.size)
+        throw new Error('attachment exceeds its declared size');
+      const handle = await fs.open(upload.filePath, 'a');
+      try {
+        await handle.write(data);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      upload.expiresAt = Date.now() + UPLOAD_TTL_MS;
+      return {
+        uploadId: upload.id,
+        offset: offset + data.length,
+        complete: offset + data.length === upload.size,
+      };
     } finally {
-      await handle.close();
+      upload.busy = false;
     }
-    upload.expiresAt = Date.now() + UPLOAD_TTL_MS;
-    return {
-      uploadId: upload.id,
-      offset: offset + data.length,
-      complete: offset + data.length === upload.size,
-    };
+  }
+
+  private beginOperation(upload: Upload, allowCommitted = false): void {
+    if (upload.committed && !allowCommitted)
+      throw new Error('attachment upload is already committed');
+    if (upload.busy)
+      throw Object.assign(new Error('attachment upload is busy'), {
+        code: 'TRANSFER_BUSY',
+      });
+    upload.busy = true;
   }
 
   private async prune(): Promise<void> {
-    const expired = [...this.uploads.values()].filter((upload) => upload.expiresAt <= Date.now());
+    const expired = [...this.uploads.values()].filter(
+      (upload) => !upload.busy && upload.expiresAt <= Date.now(),
+    );
     await this.remove(expired.map((upload) => upload.id));
   }
 }

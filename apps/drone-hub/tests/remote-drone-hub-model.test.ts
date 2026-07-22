@@ -59,13 +59,22 @@ describe('desktop remote Drone Hub model', () => {
     expect(
       normalizeRemoteChatMessages({
         historyKind: 'turns',
-        turns: [{ id: 'turn-files', prompt: '', attachments: [{ name: 'screen.png' }] }],
+        turns: [
+          {
+            id: 'turn-files',
+            prompt: '',
+            attachments: [{ name: 'screen.png', mime: 'image/png', size: 2048 }],
+          },
+        ],
       }),
     ).toMatchObject([
       {
         id: 'turn-files:user',
         role: 'user',
         content: 'Attached 1 file to this prompt.',
+        details: {
+          attachments: [{ name: 'screen.png', mime: 'image/png', size: 2048 }],
+        },
       },
     ]);
   });

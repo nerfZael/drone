@@ -862,29 +862,30 @@ export function createDroneControlCapability(
           throw Object.assign(new Error('prompt text or an attachment is required'), {
             code: 'INVALID_REQUEST',
           });
-        const chat = await localHubRequest(access, chatPath);
-        if (chat?.agent?.kind === 'native') {
-          const { nativeChatId } = await resolveNativeChat();
-          const acknowledgement = await submitNativeChatPrompt(
-            access,
-            nativeChatId,
-            prompt,
-            attachments,
-          );
+        try {
+          const chat = await localHubRequest(access, chatPath);
+          if (chat?.agent?.kind === 'native') {
+            const { nativeChatId } = await resolveNativeChat();
+            const acknowledgement = await submitNativeChatPrompt(
+              access,
+              nativeChatId,
+              prompt,
+              attachments,
+            );
+            return {
+              accepted: true,
+              nativeChatId,
+              queuedPrompt:
+                acknowledgement?.type === 'queued' ? (acknowledgement.prompt ?? null) : null,
+            };
+          }
+          return await localHubRequest(access, `${chatPath}/prompt`, {
+            method: 'POST',
+            body: JSON.stringify({ prompt, attachments }),
+          });
+        } finally {
           await chatAttachments?.remove(attachmentIds);
-          return {
-            accepted: true,
-            nativeChatId,
-            queuedPrompt:
-              acknowledgement?.type === 'queued' ? (acknowledgement.prompt ?? null) : null,
-          };
         }
-        const response = await localHubRequest(access, `${chatPath}/prompt`, {
-          method: 'POST',
-          body: JSON.stringify({ prompt, attachments }),
-        });
-        await chatAttachments?.remove(attachmentIds);
-        return response;
       }
       if (operation === 'chat.stop') {
         const chat = await localHubRequest(access, chatPath);

@@ -38,6 +38,24 @@ function textList(value: unknown): string[] {
     : [];
 }
 
+function remoteAttachments(value: unknown): Array<{ name: string; mime: string; size: number }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): Array<{ name: string; mime: string; size: number }> => {
+    const name = text(item?.name);
+    const mime = text(item?.mime).toLowerCase();
+    const size = Number(item?.size);
+    if (
+      !name ||
+      mime.length > 120 ||
+      !/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u.test(mime) ||
+      !Number.isSafeInteger(size) ||
+      size <= 0
+    )
+      return [];
+    return [{ name, mime, size }];
+  }).slice(0, 8);
+}
+
 export function normalizeRemoteDrones(value: unknown): RemoteDroneSummary[] {
   const source = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   if (!Array.isArray(source.drones)) return [];
@@ -99,6 +117,7 @@ export function normalizeRemoteChatMessages(value: unknown): AssistantMessage[] 
     const prompt = String(turn.prompt ?? '');
     const output = String(turn.output ?? '');
     const error = String(turn.error ?? '');
+    const attachments = remoteAttachments(turn.attachments);
     const attachmentCount = Array.isArray(turn.attachments) ? turn.attachments.length : 0;
     if (prompt || attachmentCount > 0) {
       messages.push({
@@ -108,6 +127,7 @@ export function normalizeRemoteChatMessages(value: unknown): AssistantMessage[] 
           prompt ||
           `Attached ${attachmentCount} file${attachmentCount === 1 ? '' : 's'} to this prompt.`,
         createdAt: text(turn.promptAt || turn.at) || undefined,
+        ...(attachments.length > 0 ? { details: { attachments } } : {}),
         ...(turn.meshTruncated === true ? { meshTruncated: true } : {}),
       });
     }
@@ -324,7 +344,13 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
 
   const sendPrompt = React.useCallback(
     async (prompt: string, attachments: readonly ChatAttachmentPayload[] = []) => {
-      if (!selectedDrone || !selectedChat || !routeAvailable) return false;
+      if (
+        !selectedDrone ||
+        !selectedChat ||
+        !routeAvailable ||
+        (!prompt.trim() && attachments.length === 0)
+      )
+        return false;
       const target = targetDeviceId;
       const droneId = selectedDrone.id;
       const chatName = selectedChat;
@@ -340,6 +366,13 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
             prompt ||
             `Attached ${attachments.length} file${attachments.length === 1 ? '' : 's'} to this prompt.`,
           createdAt: new Date().toISOString(),
+          ...(attachments.length > 0
+            ? {
+                details: {
+                  attachments: attachments.map(({ name, mime, size }) => ({ name, mime, size })),
+                },
+              }
+            : {}),
         },
       ]);
       try {

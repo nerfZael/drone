@@ -32,14 +32,24 @@ export async function pickChatFiles(
     copyToCacheDirectory: true,
   });
   if (result.canceled) return [];
+  const remaining = MAX_ATTACHMENTS - existing.length;
+  if (result.assets.length > remaining) {
+    throw new Error(`A prompt can include up to ${MAX_ATTACHMENTS} attachments.`);
+  }
 
   const selected: MobileChatAttachment[] = [];
   let totalBytes = existing.reduce((total, attachment) => total + attachment.size, 0);
-  for (const asset of result.assets.slice(0, MAX_ATTACHMENTS - existing.length)) {
+  for (const asset of result.assets) {
     const file = new File(asset.uri);
     const name = String(asset.name ?? file.name ?? '').trim() || `attachment-${selected.length + 1}`;
-    const size = Number(asset.size ?? file.size ?? 0);
-    if (!Number.isSafeInteger(size) || size <= 0) throw new Error(`${name} is empty or unreadable.`);
+    const reportedSize = Number(asset.size ?? file.size ?? 0);
+    if (!Number.isSafeInteger(reportedSize) || reportedSize <= 0)
+      throw new Error(`${name} is empty or unreadable.`);
+    if (reportedSize > MAX_FILE_BYTES)
+      throw new Error('Each prompt attachment must be 6 MiB or smaller.');
+    const bytes = await file.bytes();
+    const size = bytes.length;
+    if (size <= 0) throw new Error(`${name} is empty or unreadable.`);
     if (size > MAX_FILE_BYTES) throw new Error('Each prompt attachment must be 6 MiB or smaller.');
     totalBytes += size;
     if (totalBytes > MAX_TOTAL_BYTES) {
@@ -51,7 +61,7 @@ export async function pickChatFiles(
       name,
       mime: safeMime(asset.mimeType ?? file.type),
       size,
-      bytes: await file.bytes(),
+      bytes,
     });
   }
   return selected;
