@@ -1158,25 +1158,20 @@ export function SelectedDroneWorkspace({
           )}
           {/* Overflow menu */}
           <div ref={headerOverflowRef as React.RefObject<HTMLDivElement>} className="relative">
-            <button
-              type="button"
+            <HeaderActionButton
               onClick={() => {
                 setTerminalMenuOpen(false);
                 setDroneControlsMenuOpen(false);
                 setHeaderOverflowOpen((v) => !v);
               }}
-              className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--header-control-fg)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)] transition-all"
               title="More actions"
-              aria-label="More actions"
               aria-haspopup="menu"
               aria-expanded={headerOverflowOpen}
+              className="dh-type-header-action--emphasis"
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <circle cx="4" cy="8" r="1.5" />
-                <circle cx="8" cy="8" r="1.5" />
-                <circle cx="12" cy="8" r="1.5" />
-              </svg>
-            </button>
+              <span>Actions</span>
+              <IconChevron down={!headerOverflowOpen} className="opacity-75" />
+            </HeaderActionButton>
             {headerOverflowOpen && (
               <HeaderDropdownPortal open={headerOverflowOpen} anchorRef={headerOverflowRef} width={280}>
                 <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto py-1">
