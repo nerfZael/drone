@@ -13,6 +13,7 @@ import { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { DeviceMeshRouter } from './device-mesh-router';
 import { DeviceMeshStore } from './device-mesh-store';
 import { DeviceRouteManager } from './device-route-manager';
+import { DesktopDroneControlHttp } from './desktop-drone-control-http';
 import { createDroneControlCapability } from './drone-control-capability';
 import { CrossDeviceAssistantPolicyHttp } from './features/cross-device-assistant/policy-http';
 import { CrossDeviceAssistantPolicyStore } from './features/cross-device-assistant/policy-store';
@@ -58,6 +59,7 @@ export async function createDeviceMeshService(options: {
   const audit = new DeviceMeshAuditStore(path.join(options.rootDir, 'audit.json'));
   router = new DeviceMeshRouter(identity, store, capabilities, routeManager, audit);
   const extensions: DeviceMeshHttpExtension[] = [
+    new DesktopDroneControlHttp(router, store),
     new MeshChatAttachmentHttp(chatAttachments),
     new CrossDeviceAssistantPolicyHttp(assistantPolicies, (targetDeviceId) =>
       router.request(targetDeviceId, 'workspace', 'workspaces.list', {}),
