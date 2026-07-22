@@ -55,8 +55,10 @@ describe('CollapsibleMarkdown', () => {
     );
 
     expect(html).toContain('<pre>');
-    expect(html).toContain('import { createDroneSDK, hubTransport } from &quot;drone-sdk&quot;;');
-    expect(html).toContain('const sdk = createDroneSDK({');
+    expect(html).toContain('createDroneSDK');
+    expect(html).toContain('hubTransport');
+    expect(html).toContain('&quot;drone-sdk&quot;');
+    expect(html).toContain('DRONE_TOKEN');
     expect(html).toContain('Show more');
     expect(html).not.toContain('Follow-up explanation that should stay behind the collapse.');
   });

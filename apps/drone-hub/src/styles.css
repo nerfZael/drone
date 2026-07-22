@@ -199,7 +199,7 @@
   --code-bg: rgba(177, 156, 255, .10);
   --code-border: rgba(177, 156, 255, .20);
   --code-fg: #ded7ff;
-  --code-block-bg: var(--surface-inset-strong);
+  --code-block-bg: var(--panel-alt);
   --code-block-border: var(--border-subtle);
   --code-block-fg: var(--fg-secondary);
   --syntax-comment: #858ea3;
@@ -360,8 +360,8 @@
   --code-bg: #313244;
   --code-border: rgba(69, 71, 90, .48);
   --code-fg: #b4befe;
-  --code-block-bg: #11111b;
-  --code-block-border: #313244;
+  --code-block-bg: #292a3c;
+  --code-block-border: rgba(127, 132, 156, .20);
   --code-block-fg: #cdd6f4;
   --syntax-comment: #9399b2;
   --syntax-punctuation: #bac2de;
@@ -1232,40 +1232,14 @@ code, pre {
 }
 
 .dh-code-card {
+  position: relative;
+  width: fit-content;
+  min-width: min(100%, 16rem);
+  max-width: 100%;
   overflow: hidden;
   border: 1px solid var(--code-block-border);
   border-radius: 8px;
   background: var(--code-block-bg);
-}
-.dh-code-card__header {
-  display: flex;
-  min-height: 32px;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--surface-inset);
-}
-.dh-code-card__mark {
-  display: inline-flex;
-  height: 18px;
-  min-width: 30px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--accent-muted);
-  border-radius: 4px;
-  background: var(--accent-subtle);
-  color: var(--accent);
-  font: var(--weight-bold) var(--text-9)/1 var(--code);
-}
-.dh-code-card__language {
-  overflow: hidden;
-  color: var(--muted);
-  font: var(--weight-semibold) var(--text-10)/1 var(--code);
-  letter-spacing: .08em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
 }
 .dh-code-card__scroll {
   max-width: 100%;
@@ -1276,13 +1250,19 @@ code, pre {
   outline: 1px solid var(--focus-ring);
   outline-offset: -1px;
 }
+@media (hover: none) {
+  .dh-code-card__copy-button {
+    pointer-events: auto;
+    opacity: 1;
+  }
+}
 .dh-code-card pre,
 .dh-markdown .dh-code-card pre {
   min-width: max-content;
   margin: 0;
   border: 0;
   border-radius: 0;
-  padding: 12px 14px;
+  padding: 11px 42px 11px 13px;
   overflow: visible;
 }
 .dh-code-card pre code,

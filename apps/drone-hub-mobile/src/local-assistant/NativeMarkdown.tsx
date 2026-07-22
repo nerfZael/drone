@@ -1,5 +1,15 @@
 import React from 'react';
-import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import Copy from 'lucide-react-native/icons/copy';
+import {
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type GestureResponderEvent,
+} from 'react-native';
 import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
 import { colors } from '../theme';
 import {
@@ -20,11 +30,83 @@ function safeLink(value: string): string | null {
 
 const CODE_CHARACTER_WIDTH = 7.5;
 
+function stopTouchPropagation(event: GestureResponderEvent): void {
+  event.stopPropagation();
+}
+
 function codeTextWidth(text: string): number {
   const longestLine = String(text ?? '')
     .split('\n')
     .reduce((longest, line) => Math.max(longest, line.replace(/\t/g, '    ').length), 1);
   return Math.ceil(longestLine * CODE_CHARACTER_WIDTH);
+}
+
+function NativeCodeBlock({ code, language }: { code: string; language: string }) {
+  const [copyVisible, setCopyVisible] = React.useState(false);
+  const contentWidth = codeTextWidth(code);
+  const languageLabel = language.trim() || 'plain text';
+
+  const copyCode = React.useCallback(async () => {
+    try {
+      await Clipboard.setStringAsync(code);
+      setCopyVisible(false);
+    } catch {
+      // Keep the action visible so the user can retry.
+    }
+  }, [code]);
+
+  return (
+    <Pressable
+      accessible={false}
+      onPress={(event) => {
+        event.stopPropagation();
+        setCopyVisible((visible) => !visible);
+      }}
+      onTouchStart={stopTouchPropagation}
+      onTouchEnd={stopTouchPropagation}
+      style={styles.codeBlock}
+    >
+      <ScrollView
+        horizontal
+        nestedScrollEnabled
+        scrollEnabled
+        showsHorizontalScrollIndicator
+        style={styles.codeScroll}
+        contentContainerStyle={styles.codeScrollContent}
+      >
+        <View
+          style={[
+            styles.codeContent,
+            copyVisible && styles.codeContentWithCopy,
+            { width: contentWidth + (copyVisible ? 54 : 24) },
+          ]}
+        >
+          <MobileHighlightedCode
+            content={code}
+            language={language}
+            style={[styles.codeText, { width: contentWidth }]}
+          />
+        </View>
+      </ScrollView>
+      {copyVisible ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Copy ${languageLabel} code`}
+          hitSlop={6}
+          onPress={(event) => {
+            event.stopPropagation();
+            void copyCode();
+          }}
+          style={({ pressed }) => [
+            styles.codeCopyButton,
+            pressed && styles.codeCopyButtonPressed,
+          ]}
+        >
+          <Copy color={colors.textSecondary} size={14} strokeWidth={2} />
+        </Pressable>
+      ) : null}
+    </Pressable>
+  );
 }
 
 function FileLinkedText({
@@ -149,35 +231,12 @@ export function NativeMarkdown({
           );
         }
         if (block.type === 'code') {
-          const contentWidth = codeTextWidth(block.text);
-          const languageLabel = block.language.trim() || 'plain text';
           return (
-            <View key={`code:${index}`} style={styles.codeBlock}>
-              <View style={styles.codeHeader}>
-                <View style={styles.codeMark}>
-                  <Text style={styles.codeMarkText}>{'</>'}</Text>
-                </View>
-                <Text numberOfLines={1} style={styles.codeLanguage}>
-                  {languageLabel}
-                </Text>
-              </View>
-              <ScrollView
-                horizontal
-                nestedScrollEnabled
-                scrollEnabled
-                showsHorizontalScrollIndicator
-                style={styles.codeScroll}
-                contentContainerStyle={styles.codeScrollContent}
-              >
-                <View style={[styles.codeContent, { width: contentWidth + 24 }]}>
-                  <MobileHighlightedCode
-                    content={block.text}
-                    language={block.language}
-                    style={[styles.codeText, { width: contentWidth }]}
-                  />
-                </View>
-              </ScrollView>
-            </View>
+            <NativeCodeBlock
+              key={`code:${index}`}
+              code={block.text}
+              language={block.language}
+            />
           );
         }
         if (block.type === 'quote') {
@@ -319,45 +378,27 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     flexShrink: 1,
     borderWidth: 1,
-    borderColor: colors.borderStrong,
+    borderColor: colors.border,
     borderRadius: 10,
     backgroundColor: colors.mantle,
     overflow: 'hidden',
   },
-  codeHeader: {
-    minHeight: 31,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 10,
-    backgroundColor: colors.surface0,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  codeMark: {
-    minWidth: 28,
-    height: 18,
+  codeCopyButton: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    width: 30,
+    height: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 4,
     borderWidth: 1,
-    borderColor: colors.accentBorder,
-    backgroundColor: colors.accentWash,
+    borderColor: colors.border,
+    borderRadius: 7,
+    backgroundColor: colors.surface0,
+    zIndex: 2,
   },
-  codeMarkText: {
-    color: colors.accent,
-    fontFamily: 'monospace',
-    fontSize: 8,
-    fontWeight: '800',
-  },
-  codeLanguage: {
-    flex: 1,
-    color: colors.textSecondary,
-    fontFamily: 'monospace',
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
+  codeCopyButtonPressed: {
+    opacity: 0.72,
   },
   codeScroll: {
     width: '100%',
@@ -373,6 +414,9 @@ const styles = StyleSheet.create({
   codeContent: {
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  codeContentWithCopy: {
+    paddingRight: 42,
   },
   codeText: {
     color: colors.text,

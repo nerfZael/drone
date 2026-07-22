@@ -9,7 +9,7 @@ export function ChatMessageCopyAction({
   copyLabel = 'message',
 }: {
   text: string;
-  position?: 'top' | 'bottom' | 'inline' | 'hover-rail' | 'block';
+  position?: 'top' | 'bottom' | 'inline' | 'hover-rail' | 'block' | 'code';
   copyLabel?: string;
 }) {
   const [copiedValue, setCopiedValue] = React.useState<string | null>(null);
@@ -30,9 +30,9 @@ export function ChatMessageCopyAction({
       className={
         position === 'inline' || position === 'hover-rail'
           ? 'relative z-20'
-          : position === 'block'
+          : position === 'block' || position === 'code'
             ? 'absolute right-2 top-2 z-20'
-          : `absolute right-2 z-20 ${position === 'top' ? 'top-2' : 'bottom-2'}`
+            : `absolute right-2 z-20 ${position === 'top' ? 'top-2' : 'bottom-2'}`
       }
     >
       {copied ? (
@@ -65,7 +65,9 @@ export function ChatMessageCopyAction({
             ? 'pointer-events-auto opacity-100'
             : position === 'block'
               ? 'pointer-events-none opacity-0 group-hover/markdown-block:pointer-events-auto group-hover/markdown-block:opacity-100'
-              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
+              : position === 'code'
+                ? 'dh-code-card__copy-button pointer-events-none opacity-0 group-hover/code-block:pointer-events-auto group-hover/code-block:opacity-100'
+                : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
         }`}
         title={`Copy ${copyLabel}`}
         aria-label={`Copy ${copyLabel}`}

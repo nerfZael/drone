@@ -662,7 +662,8 @@ export function MarkdownMessage({
               const onlyChild = childList.length === 1 ? childList[0] : null;
               if (
                 React.isValidElement(onlyChild) &&
-                (onlyChild.props as Record<string, unknown>)['data-markdown-code-block'] === true
+                (renderCodeBlock ||
+                  (onlyChild.props as Record<string, unknown>)['data-markdown-code-block'] === true)
               ) {
                 return (
                   <div className="dh-markdown-block dh-markdown-block--wide">{onlyChild}</div>
