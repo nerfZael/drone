@@ -133,14 +133,18 @@ export function ConfirmDialog({
           style={StyleSheet.absoluteFill}
         />
         <View style={styles.dialog}>
-          <View style={[styles.dialogMark, destructive && styles.dialogMarkDanger]}>
-            <AlertTriangle
-              color={destructive ? colors.danger : colors.accent}
-              size={20}
-              strokeWidth={2.3}
-            />
+          <View style={styles.dialogHeader}>
+            <View style={[styles.dialogMark, destructive && styles.dialogMarkDanger]}>
+              <AlertTriangle
+                color={destructive ? colors.danger : colors.accent}
+                size={20}
+                strokeWidth={2.3}
+              />
+            </View>
+            <Text accessibilityRole="header" style={[styles.dialogTitle, styles.dialogHeaderTitle]}>
+              {title}
+            </Text>
           </View>
-          <Text style={styles.dialogTitle}>{title}</Text>
           <Text style={styles.dialogMessage}>{message}</Text>
           <View style={styles.dialogActions}>
             <Button tone="quiet" disabled={busy} onPress={onCancel} style={styles.dialogButton}>
@@ -419,9 +423,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: radii.medium,
     backgroundColor: colors.accentDark,
-    marginBottom: 16,
   },
   dialogMarkDanger: { backgroundColor: colors.dangerDark },
+  dialogHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  dialogHeaderTitle: { flex: 1, minWidth: 0 },
   dialogTitle: { color: colors.textStrong, fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
   dialogMessage: { color: colors.muted, fontSize: 14, lineHeight: 21, marginTop: 9 },
   dialogInput: {
