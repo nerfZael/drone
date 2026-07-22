@@ -5,6 +5,7 @@ describe('editable shortcut dispatch', () => {
   test('allows create-draft shortcut from primary chat input', () => {
     const out = shouldDispatchEditableShortcutAction({
       matchedActionId: 'createDraftDrone',
+      matchedShortcutKey: 'tab',
       targetInPrimaryChatInput: true,
       targetInCanvasMessageInput: false,
       targetInAssistantChatInput: false,
@@ -15,6 +16,7 @@ describe('editable shortcut dispatch', () => {
   test('allows create-draft shortcut from canvas message input', () => {
     const out = shouldDispatchEditableShortcutAction({
       matchedActionId: 'createDraftDrone',
+      matchedShortcutKey: 'tab',
       targetInPrimaryChatInput: false,
       targetInCanvasMessageInput: true,
       targetInAssistantChatInput: false,
@@ -25,9 +27,21 @@ describe('editable shortcut dispatch', () => {
   test('does not allow create-draft shortcut from assistant chat input', () => {
     const out = shouldDispatchEditableShortcutAction({
       matchedActionId: 'createDraftDrone',
+      matchedShortcutKey: 'tab',
       targetInPrimaryChatInput: false,
       targetInCanvasMessageInput: false,
       targetInAssistantChatInput: true,
+    });
+    expect(out).toBe(false);
+  });
+
+  test('does not dispatch the numbered create-draft shortcut while typing', () => {
+    const out = shouldDispatchEditableShortcutAction({
+      matchedActionId: 'createDraftDrone',
+      matchedShortcutKey: '1',
+      targetInPrimaryChatInput: true,
+      targetInCanvasMessageInput: false,
+      targetInAssistantChatInput: false,
     });
     expect(out).toBe(false);
   });

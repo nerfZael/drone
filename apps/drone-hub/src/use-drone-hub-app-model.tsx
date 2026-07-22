@@ -44,7 +44,12 @@ import { useGroupManagement } from './droneHub/app/use-group-management';
 import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
 import { useUiPreferencesSettings } from './droneHub/app/use-ui-preferences-settings';
-import { removeDroneIdsFromSidebarNodeOrderByParent } from './droneHub/app/sidebar-node-order';
+import {
+  removeDroneIdsFromSidebarNodeOrderByParent,
+  reorderSidebarNodeParentOrder,
+  sidebarDroneNodeId,
+} from './droneHub/app/sidebar-node-order';
+import { buildSidebarNodeTree } from './droneHub/app/sidebar-node-tree';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
 import { useSetupStatus } from './droneHub/app/use-setup-status';
 import type { DroneDeleteMode, ProfileSettingsResponse } from './droneHub/app/settings-types';
@@ -3226,6 +3231,56 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return result.ok === true;
   }, [createDroneChat, currentDrone, selectedChat, suggestAndRenameDroneChatFromMessage]);
+  const toggleSelectedDronePinnedFromShortcut = React.useCallback((): boolean => {
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!droneId) return false;
+    const pinned = useDroneHubUiStore.getState().pinnedDroneIds.includes(droneId);
+    void setDronePinned(droneId, !pinned).then((saved) => {
+      if (saved) return;
+      showShortcutToast(
+        `Could not ${pinned ? 'unpin' : 'pin'} the selected drone.`,
+        'Pin failed',
+        'error',
+      );
+    });
+    return true;
+  }, [currentDrone?.id, setDronePinned, showShortcutToast]);
+  const moveSelectedDroneToTopFromShortcut = React.useCallback((): boolean => {
+    const droneId = String(currentDrone?.id ?? '').trim();
+    if (!droneId) return false;
+    const nodeTree = buildSidebarNodeTree({
+      sidebarGroups,
+      sidebarGroupOrder,
+      sidebarDroneOrderByGroup,
+      sidebarNodeOrderByParent,
+      sidebarGroupCreatedAtByName: registryGroupCreatedAtByName,
+    });
+    const nodeId = sidebarDroneNodeId(droneId);
+    const node = nodeTree.nodesById[nodeId];
+    if (!node || node.kind !== 'drone') return false;
+    const siblingIds = nodeTree.childIdsByParent[node.parentId] ?? [];
+    const firstSiblingId = siblingIds[0];
+    if (!firstSiblingId || firstSiblingId === nodeId) return true;
+    setSidebarNodeOrderByParent((previous) =>
+      reorderSidebarNodeParentOrder(
+        previous,
+        node.parentId,
+        siblingIds,
+        nodeId,
+        firstSiblingId,
+        'before',
+      ),
+    );
+    return true;
+  }, [
+    currentDrone?.id,
+    registryGroupCreatedAtByName,
+    setSidebarNodeOrderByParent,
+    sidebarDroneOrderByGroup,
+    sidebarGroupOrder,
+    sidebarGroups,
+    sidebarNodeOrderByParent,
+  ]);
   useDroneHubLifecycleEffects({
     normalizeCreateRepoPath,
     setCreateRepoPath,
@@ -3241,6 +3296,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openDraftChatComposer,
     openChildDraftChatComposer,
     createDroneChatFromShortcut,
+    toggleSelectedDronePinnedFromShortcut,
+    moveSelectedDroneToTopFromShortcut,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
     toggleVoiceClipboardRecording,

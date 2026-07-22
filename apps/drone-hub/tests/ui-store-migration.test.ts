@@ -185,7 +185,7 @@ describe('drone hub ui store migration', () => {
     expect(restored.snapshot.pinnedDroneIds).toEqual(['drone-b', 'drone-a']);
   });
 
-  test('migrates the former create-chat default onto child-drone and moves create-chat to W', () => {
+  test('migrates former creation defaults to 1/2/3', () => {
     const migrated = migrateDroneHubUiPersistedState(
       {
         shortcutBindings: {
@@ -198,8 +198,9 @@ describe('drone hub ui store migration', () => {
     );
 
     expect(migrated.shortcutBindings).toMatchObject({
-      createChildDraftDrone: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-      createDroneChat: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      createChildDraftDrone: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      createDroneChat: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
       markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
     });
   });
