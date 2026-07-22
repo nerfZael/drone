@@ -2,6 +2,58 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 
 describe('mobile sidebar presentation', () => {
+  test('uses a flat device picker with quiet local and trailing platform metadata', () => {
+    const drawerSource = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
+
+    expect(drawerSource).toContain('deviceOptionActiveEdge');
+    expect(drawerSource).toContain('borderColor: colors.mutedDim');
+    expect(drawerSource).toContain('shadowColor: colors.online');
+    expect(drawerSource).toContain('<Text numberOfLines={1} style={styles.devicePlatform}>');
+    expect(drawerSource).toContain('{devicePlatformLabel(device.platform)}');
+    expect(drawerSource).toContain("platform === 'server' || platform === 'desktop'");
+    expect(drawerSource).toContain("deviceOptionsContent: {\n    padding: 0,");
+    expect(drawerSource).not.toContain("deviceOptionsContent: {\n    padding: 5,");
+    expect(shellSource).toContain("detail: 'This device'");
+    expect(shellSource).toContain("platform: current?.platform ?? 'android'");
+    expect(shellSource).toContain('platform: device.platform');
+  });
+
+  test('uses explicit offline states without exposing transport terminology', () => {
+    const drawerSource = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const dronesSource = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+    const transcriptSource = readFileSync(
+      new URL('../src/local-assistant/LocalAssistantTranscript.tsx', import.meta.url),
+      'utf8',
+    );
+    const socketSource = readFileSync(new URL('../src/mesh/MeshSocket.ts', import.meta.url), 'utf8');
+
+    expect(drawerSource).not.toContain('No mesh route');
+    expect(drawerSource).toContain('Drones will appear when it reconnects.');
+    expect(dronesSource).toContain("subtitle: 'Offline · reconnecting automatically'");
+    expect(dronesSource).toContain("{activeTarget?.name ?? 'This device'} is offline");
+    expect(dronesSource).toContain('This chat is readable. Sending will resume');
+    expect(dronesSource).toContain('editable={targetReachable}');
+    expect(dronesSource).toContain('disabled={!targetReachable}');
+    expect(dronesSource).toContain("disabled={!targetReachable || busy === 'prompt'}");
+    expect(dronesSource).toContain(
+      '<MobileLoadingState accessibilityLabel="Loading drones" label="Loading drones…" />',
+    );
+    expect(dronesSource).toContain('requestError={dronesLoading ? null : error}');
+    expect(transcriptSource).toContain('<MobileLoadingState');
+    expect(socketSource).toContain("new Error('Target device did not respond in time.')");
+    expect(dronesSource).not.toContain('meshRouteAvailable');
+  });
+
   test('matches the desktop Hub working-indicator speed', () => {
     const mobileSource = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),

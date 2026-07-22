@@ -3,8 +3,12 @@ import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import React from 'react';
 import { fromByteArray } from 'base64-js';
-import type { DroneControlOperation } from '@drone/device-protocol';
+import {
+  DRONE_CONTROL_CAPABILITY,
+  type DroneControlOperation,
+} from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
+import { useMesh } from '../mesh/MeshContext';
 import { loadLocalAssistantSettings } from '../local-assistant/local-assistant-settings';
 import {
   localAssistantModelOptions,
@@ -78,7 +82,7 @@ function uniqueDroneName(drones: LocalDroneRecord[], requested: unknown): string
   return `${base} ${index}`;
 }
 
-export function useLocalDroneControl() {
+function useLocalDroneControlValue() {
   const assistant = useLocalAssistant();
   const [drones, setDrones] = React.useState<LocalDroneRecord[]>([]);
   const [pinnedDroneIds, setPinnedDroneIds] = React.useState<string[]>([]);
@@ -87,6 +91,17 @@ export function useLocalDroneControl() {
   const pinnedDroneIdsRef = React.useRef<string[]>([]);
   const writeRef = React.useRef(Promise.resolve());
   const loadedRef = React.useRef(false);
+  const readyRef = React.useRef<{
+    promise: Promise<void>;
+    resolve(): void;
+  } | null>(null);
+  if (!readyRef.current) {
+    let resolve: () => void = () => {};
+    const promise = new Promise<void>((ready) => {
+      resolve = ready;
+    });
+    readyRef.current = { promise, resolve };
+  }
 
   const replaceDrones = React.useCallback(async (next: LocalDroneRecord[]) => {
     dronesRef.current = next;
@@ -102,8 +117,8 @@ export function useLocalDroneControl() {
     if (assistant.loading || loadedRef.current) return;
     loadedRef.current = true;
     let active = true;
-    void AsyncStorage.getItem(LOCAL_DRONES_KEY)
-      .then(async (stored) => {
+    const loadDrones = AsyncStorage.getItem(LOCAL_DRONES_KEY)
+      .then(async (stored): Promise<LocalDroneRecord[]> => {
         if (stored !== null) {
           try {
             return cleanLocalDroneRecords(JSON.parse(stored));
@@ -117,41 +132,37 @@ export function useLocalDroneControl() {
         await AsyncStorage.setItem(LOCAL_DRONES_KEY, JSON.stringify(next));
         return next;
       })
-      .catch(() => [])
-      .then((next) => {
-        if (!active) return;
-        dronesRef.current = next;
-        setDrones(next);
-      })
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [assistant.loading, assistant.threads]);
-
-  React.useEffect(() => {
-    let active = true;
-    void AsyncStorage.getItem(LOCAL_PINNED_DRONES_KEY)
-      .then((stored) => {
+      .catch((): LocalDroneRecord[] => []);
+    const loadPinnedDroneIds = AsyncStorage.getItem(LOCAL_PINNED_DRONES_KEY)
+      .then((stored): string[] => {
         if (!stored) return [];
         const value: unknown = JSON.parse(stored);
         return Array.isArray(value)
           ? [...new Set(value.map((id: unknown) => String(id ?? '').trim()).filter(Boolean))]
           : [];
       })
-      .catch(() => [])
-      .then((ids) => {
+      .catch((): string[] => []);
+    void Promise.all([loadDrones, loadPinnedDroneIds])
+      .then(([nextDrones, nextPinnedDroneIds]) => {
         if (!active) return;
-        pinnedDroneIdsRef.current = ids;
-        setPinnedDroneIds(ids);
+        dronesRef.current = nextDrones;
+        setDrones(nextDrones);
+        pinnedDroneIdsRef.current = nextPinnedDroneIds;
+        setPinnedDroneIds(nextPinnedDroneIds);
+      })
+      .finally(() => {
+        if (!active) return;
+        setLoading(false);
+        readyRef.current?.resolve();
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [assistant.loading]);
 
   const request = React.useCallback(
     async (operation: DroneControlOperation, payload: any = {}): Promise<any> => {
+      await readyRef.current!.promise;
       const getDrone = () => {
         const drone = dronesRef.current.find(
           (candidate) => candidate.id === String(payload.droneId ?? ''),
@@ -485,4 +496,36 @@ export function useLocalDroneControl() {
     ),
   ].join('|');
   return { drones, loading: loading || assistant.loading, request, revision };
+}
+
+type LocalDroneControlValue = ReturnType<typeof useLocalDroneControlValue>;
+
+const LocalDroneControlContext = React.createContext<LocalDroneControlValue | null>(null);
+
+export function LocalDroneControlProvider({ children }: { children: React.ReactNode }) {
+  const mesh = useMesh();
+  const value = useLocalDroneControlValue();
+  const requestRef = React.useRef(value.request);
+  requestRef.current = value.request;
+
+  React.useEffect(
+    () =>
+      mesh.registerCapabilityHandler(
+        DRONE_CONTROL_CAPABILITY,
+        (operation, payload) =>
+          requestRef.current(
+            operation as DroneControlOperation,
+            payload as Record<string, unknown>,
+          ),
+      ),
+    [mesh.registerCapabilityHandler],
+  );
+
+  return React.createElement(LocalDroneControlContext.Provider, { value }, children);
+}
+
+export function useLocalDroneControl(): LocalDroneControlValue {
+  const value = React.useContext(LocalDroneControlContext);
+  if (!value) throw new Error('useLocalDroneControl must be used inside LocalDroneControlProvider');
+  return value;
 }

@@ -11,6 +11,7 @@ import {
 import type { MobileDeviceIdentity } from '../security/device-identity';
 import { verifyP256Signature } from '../security/device-identity';
 import type { MeshConnection } from './mesh-storage';
+import type { MobileCapabilityRouter } from './mobile-capability-router';
 
 function websocketUrl(endpoint: string, deviceId: string): string {
   const url = new URL(endpoint);
@@ -43,6 +44,7 @@ export class MeshSocket {
     private readonly onState: () => void,
     private readonly onTopologyChange: () => void,
     private readonly onCapabilityEvent: (event: CapabilityEvent) => void,
+    private readonly capabilityRouter: Pick<MobileCapabilityRouter, 'handle'>,
   ) {}
 
   get connected(): boolean {
@@ -150,7 +152,7 @@ export class MeshSocket {
       const timer = setTimeout(() => {
         signal?.removeEventListener('abort', onAbort);
         this.pending.delete(request.requestId);
-        reject(new Error('The target did not respond in time'));
+        reject(new Error('Target device did not respond in time.'));
       }, 30_000);
       this.pending.set(request.requestId, {
         resolve,
@@ -235,6 +237,18 @@ export class MeshSocket {
         typeof message.event === 'string'
       )
         this.onCapabilityEvent(message as CapabilityEvent);
+      return;
+    }
+    if (message.type === 'capability.request') {
+      const response = await this.capabilityRouter.handle(message);
+      if (response && this.socket?.readyState === WebSocket.OPEN) {
+        const serialized = JSON.stringify(response);
+        const responseBytes =
+          typeof TextEncoder === 'undefined'
+            ? serialized.length * 3
+            : new TextEncoder().encode(serialized).byteLength;
+        if (responseBytes <= MESH_SAFE_MESSAGE_BYTES) this.socket.send(serialized);
+      }
       return;
     }
     if (message.type !== 'capability.response') return;

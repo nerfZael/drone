@@ -1,6 +1,7 @@
 import React from 'react';
 import { AppState } from 'react-native';
 import type {
+  CapabilityDescriptor,
   CapabilityEvent,
   MeshDevice,
   PairingApproval,
@@ -12,6 +13,11 @@ import {
   type MobileDeviceIdentity,
 } from '../security/device-identity';
 import { MeshSocket } from './MeshSocket';
+import {
+  MobileCapabilityRouter,
+  type MobileCapabilityHandler,
+  type RegisteredMobileCapability,
+} from './mobile-capability-router';
 import { uploadMeshChatAttachment } from './upload-mesh-chat-attachment';
 import { claimPairing, validatePairingApproval, waitForPairingApproval } from './pair-device';
 import { assertKnownRecoveryTarget } from './pairing-recovery';
@@ -52,6 +58,10 @@ type MeshContextValue = {
     event: string,
     listener: (message: CapabilityEvent) => void,
   ): () => void;
+  registerCapabilityHandler(
+    descriptor: CapabilityDescriptor,
+    handler: MobileCapabilityHandler,
+  ): () => void;
   renameSelf(name: string): Promise<void>;
   makePrimary(deviceId: string): Promise<void>;
   forgetMesh(): Promise<void>;
@@ -69,6 +79,9 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
   >({});
   const [revision, setRevision] = React.useState(0);
   const sockets = React.useRef<MeshSocket[]>([]);
+  const profileRef = React.useRef<MeshProfile | null>(null);
+  const capabilityHandlers = React.useRef(new Map<string, RegisteredMobileCapability>());
+  const capabilityRouter = React.useRef<MobileCapabilityRouter | null>(null);
   const refreshRef = React.useRef<() => Promise<void>>(async () => undefined);
   const topologyRefreshTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventListeners = React.useRef(
@@ -84,6 +97,21 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         subscription.listener(event);
     }
   }, []);
+
+  profileRef.current = profile;
+
+  const registerCapabilityHandler = React.useCallback(
+    (descriptor: CapabilityDescriptor, handler: MobileCapabilityHandler) => {
+      const registered = { descriptor, invoke: handler };
+      capabilityHandlers.current.set(descriptor.id, registered);
+      return () => {
+        if (capabilityHandlers.current.get(descriptor.id) === registered) {
+          capabilityHandlers.current.delete(descriptor.id);
+        }
+      };
+    },
+    [],
+  );
 
   const connectSocket = React.useCallback(async (socket: MeshSocket) => {
     const deviceId = socket.connection.deviceId;
@@ -128,6 +156,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
                 topologyRefreshTimer.current = setTimeout(() => void refreshRef.current(), 300);
               },
               emitCapabilityEvent,
+              capabilityRouter.current!,
             ),
         );
       sockets.current = nextSockets;
@@ -167,6 +196,12 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
           loadMeshProfile(),
         ]);
         if (!active) return;
+        profileRef.current = nextProfile;
+        capabilityRouter.current = new MobileCapabilityRouter(
+          nextIdentity,
+          () => profileRef.current?.devices ?? [],
+          (id) => capabilityHandlers.current.get(id),
+        );
         setIdentity(nextIdentity);
         setProfile(nextProfile);
         if (nextProfile) await connect(nextProfile, nextIdentity);
@@ -296,6 +331,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       ? { ...profile, devices, connections: [...connectionMap.values()], capabilitiesByDevice }
       : null;
     if (next) {
+      profileRef.current = next;
       setProfile(next);
       await saveMeshProfile(next);
       const routesChanged =
@@ -339,6 +375,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         ),
       };
       await saveMeshProfile(next);
+      profileRef.current = next;
       setProfile(next);
     },
     [identity, profile, request],
@@ -381,6 +418,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         },
       };
       await saveMeshProfile(next);
+      profileRef.current = next;
       setProfile(next);
       await connect(next, identity);
     },
@@ -391,6 +429,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     sockets.current.forEach((socket) => socket.disconnect());
     sockets.current = [];
     await clearMeshProfile();
+    profileRef.current = null;
     setProfile(null);
     setError(null);
     setConnectionErrorsByDevice({});
@@ -407,6 +446,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         })),
       };
       setProfile(next);
+      profileRef.current = next;
       await saveMeshProfile(next);
       await connect(next, identity);
     },
@@ -428,6 +468,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     uploadChatAttachment,
     refreshDevices,
     subscribe,
+    registerCapabilityHandler,
     renameSelf,
     makePrimary,
     forgetMesh,

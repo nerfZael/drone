@@ -6,6 +6,7 @@ import type { DeviceMeshRouter } from './device-mesh-router';
 import type { DeviceMeshStore } from './device-mesh-store';
 
 const DESKTOP_DRONE_CONTROL_PATH = '/api/device-mesh/drone-control';
+const REMOTE_DRONE_CONTROL_TIMEOUT_MS = 10_000;
 
 function requiredText(value: unknown, label: string): string {
   const text = String(value ?? '').trim();
@@ -63,13 +64,34 @@ export class DesktopDroneControlHttp implements DeviceMeshHttpExtension {
       body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload)
         ? body.payload
         : {};
-    const result = await this.router.request(
-      targetDeviceId,
-      DRONE_CONTROL_CAPABILITY.id,
-      operation,
-      payload,
-    );
-    deviceMeshJson(response, 200, { ok: true, result });
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const timeout = setTimeout(abort, REMOTE_DRONE_CONTROL_TIMEOUT_MS);
+    timeout.unref?.();
+    request.once('aborted', abort);
+    response.once('close', abort);
+    try {
+      const result = await this.router.request(
+        targetDeviceId,
+        DRONE_CONTROL_CAPABILITY.id,
+        operation,
+        payload,
+        controller.signal,
+      );
+      deviceMeshJson(response, 200, { ok: true, result });
+    } catch (error: any) {
+      if (controller.signal.aborted) {
+        throw Object.assign(
+          new Error('Connected device did not make drone control available in time'),
+          { code: 'TARGET_TIMEOUT' },
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+      request.removeListener('aborted', abort);
+      response.removeListener('close', abort);
+    }
     return true;
   }
 }

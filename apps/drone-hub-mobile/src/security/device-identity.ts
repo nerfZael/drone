@@ -1,8 +1,9 @@
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { p256 } from '@noble/curves/nist.js';
-import { fromByteArray, toByteArray } from 'base64-js';
+import { fromByteArray } from 'base64-js';
 import { canonicalJson, type DevicePublicIdentity } from '@drone/device-protocol';
+export { verifyP256Signature } from './p256-signature';
 
 const PRIVATE_KEY_NAME = 'droneHub.devicePrivateKey.v1';
 const DEVICE_NAME_NAME = 'droneHub.deviceName.v1';
@@ -11,11 +12,6 @@ const encoder = new TextEncoder();
 
 function base64Url(bytes: Uint8Array): string {
   return fromByteArray(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function base64UrlBytes(value: string): Uint8Array {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
-  return toByteArray(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='));
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -90,21 +86,4 @@ export async function loadDeviceIdentity(name?: string): Promise<MobileDeviceIde
       return base64Url(p256.sign(encoder.encode(text), privateKey));
     },
   };
-}
-
-export function verifyP256Signature(
-  publicKey: JsonWebKey,
-  text: string,
-  signature: string,
-): boolean {
-  try {
-    if (!publicKey.x || !publicKey.y) return false;
-    const raw = new Uint8Array(65);
-    raw[0] = 4;
-    raw.set(base64UrlBytes(publicKey.x), 1);
-    raw.set(base64UrlBytes(publicKey.y), 33);
-    return p256.verify(base64UrlBytes(signature), encoder.encode(text), raw, { lowS: false });
-  } catch {
-    return false;
-  }
 }

@@ -3,9 +3,16 @@ import { AssistantMessageRow } from '../assistant/AssistantTranscript';
 import { ApprovalCard } from '../assistant/AssistantWorkflowCards';
 import { ChatInput, EmptyState } from '../chat';
 import { IconChat, IconDrone, IconFolder } from '../icons';
+import { DeviceConnectionIndicator } from './DeviceConnectionIndicator';
 import { DesktopDevicePicker } from './DesktopDevicePicker';
 import { useDesktopDevice } from './DesktopDeviceProvider';
-import { IconPlusOutline, IconSidebarCollapse, IconSidebarExpand, IconSpinner } from './icons';
+import {
+  IconDevices,
+  IconPlusOutline,
+  IconSidebarCollapse,
+  IconSidebarExpand,
+  IconSpinner,
+} from './icons';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { useRemoteDroneHub, type RemoteDroneSummary } from './use-remote-drone-hub';
 
@@ -48,6 +55,13 @@ function RemoteSidebar({
   onCollapse(): void;
 }) {
   const groups = React.useMemo(() => remoteDroneGroups(model.drones), [model.drones]);
+  const connectionLabel = !routeAvailable
+    ? 'Offline'
+    : model.loadingDrones && model.drones.length === 0
+      ? 'Checking access'
+      : model.listError && model.drones.length === 0
+        ? 'Control unavailable'
+        : 'Connected';
   return (
     <aside
       data-drone-sidebar-root="true"
@@ -65,13 +79,20 @@ function RemoteSidebar({
         </div>
       </div>
 
-      {!routeAvailable ? (
-        <div className="border-b border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-3 py-2 text-[var(--text-10)] text-[var(--yellow)]">
-          No mesh route · showing the last loaded state
-        </div>
-      ) : null}
-
       <div className="dh-sidebar-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2">
+        {!routeAvailable && groups.length === 0 ? (
+          <div className="flex items-start gap-2.5 px-2 py-3">
+            <DeviceConnectionIndicator online={false} className="mt-1" />
+            <div className="min-w-0">
+              <div className="text-[var(--text-10)] font-semibold text-[var(--sidebar-fg)]">
+                Device offline
+              </div>
+              <div className="mt-1 text-[var(--text-9)] leading-relaxed text-[var(--sidebar-meta-fg)]">
+                Drones will appear when it reconnects.
+              </div>
+            </div>
+          </div>
+        ) : null}
         {model.loadingDrones && model.drones.length === 0 ? (
           <div className="flex items-center gap-2 px-2 py-4 text-[var(--text-10)] text-[var(--muted)]">
             <IconSpinner className="h-3.5 w-3.5 animate-spin" /> Loading drones…
@@ -170,8 +191,9 @@ function RemoteSidebar({
       </div>
 
       <div className="flex h-10 flex-shrink-0 items-center justify-between border-t border-[var(--border)] px-2">
-        <span className="truncate px-1 text-[var(--text-9)] text-[var(--muted-dim)]">
-          Remote device
+        <span className="flex min-w-0 items-center gap-2 truncate px-1 text-[var(--text-9)] text-[var(--muted-dim)]">
+          <DeviceConnectionIndicator online={routeAvailable} />
+          {connectionLabel}
         </span>
         <button
           type="button"
@@ -198,8 +220,14 @@ function RemoteMain({
   sidebarCollapsed: boolean;
   onExpandSidebar(): void;
 }) {
-  const { selectedDevice } = useDesktopDevice();
+  const {
+    selectedDevice,
+    refresh: refreshDeviceStatus,
+    refreshing: deviceStatusLoading,
+  } = useDesktopDevice();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  const deviceName = selectedDevice?.name ?? 'This device';
+  const noDrones = !model.loadingDrones && !model.listError && model.drones.length === 0;
 
   React.useEffect(() => {
     const element = scrollRef.current;
@@ -227,7 +255,13 @@ function RemoteMain({
           <div className="truncate text-[var(--text-9)] text-[var(--muted)]">
             {model.selectedDrone
               ? `${selectedDevice?.name ?? 'Remote device'} · ${model.selectedChat || 'No chat selected'}`
-              : `${selectedDevice?.name ?? 'Remote device'} · Choose a drone`}
+              : !routeAvailable
+                ? 'Offline · reconnecting automatically'
+                : model.loadingDrones
+                  ? 'Checking for drones…'
+                  : model.drones.length === 0
+                    ? 'No drones available'
+                    : `${model.drones.length} ${model.drones.length === 1 ? 'drone' : 'drones'} available`}
           </div>
         </div>
         {model.selectedDrone ? (
@@ -248,25 +282,92 @@ function RemoteMain({
         <button
           type="button"
           className="inline-flex h-8 items-center rounded-[var(--radius-medium)] px-2.5 text-[var(--text-10)] font-semibold text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-45"
-          disabled={!routeAvailable || model.loadingDrones}
-          onClick={() => void model.loadDrones()}
+          disabled={routeAvailable ? model.loadingDrones : deviceStatusLoading}
+          onClick={() =>
+            void (routeAvailable ? model.loadDrones() : refreshDeviceStatus())
+          }
         >
-          Refresh
+          {routeAvailable ? 'Refresh' : 'Retry'}
         </button>
       </header>
 
-      {!routeAvailable ? (
-        <div className="border-b border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-4 py-2 text-center text-[var(--text-10)] text-[var(--yellow)]">
-          There is no mesh route to this device. Remote actions are disabled until one reconnects.
+      {!routeAvailable && model.selectedDrone ? (
+        <div className="flex items-center justify-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-2 text-center text-[var(--text-10)] text-[var(--muted)]">
+          <DeviceConnectionIndicator online={false} />
+          Device offline · This chat is still readable, but sending is paused until it reconnects.
         </div>
       ) : null}
 
-      {!model.selectedDrone ? (
+      {!routeAvailable && !model.selectedDrone ? (
+        <div className="min-h-0 flex-1">
+          <EmptyState
+            icon={
+              <span className="relative inline-flex">
+                <IconDevices className="h-7 w-7 text-[var(--yellow)]" />
+                <span className="absolute -bottom-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--chat-background)]">
+                  <DeviceConnectionIndicator online={false} />
+                </span>
+              </span>
+            }
+            title={`${deviceName} is offline`}
+            description="Drone Hub can’t reach this device. Make sure the app is running there and that both devices are connected to the internet or the same local network."
+            actions={
+              <div className="flex flex-col items-center gap-3">
+                <button
+                  type="button"
+                  className="inline-flex h-9 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-softest)] px-4 text-[var(--text-11)] font-semibold text-[var(--fg-secondary)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-45"
+                  disabled={deviceStatusLoading}
+                  onClick={() => void refreshDeviceStatus()}
+                >
+                  {deviceStatusLoading ? 'Checking…' : 'Retry connection'}
+                </button>
+                <span className="flex items-center gap-2 text-[var(--text-9)] text-[var(--muted-dim)]">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--muted-dim)]" />
+                  Checking automatically
+                </span>
+              </div>
+            }
+          />
+        </div>
+      ) : model.loadingDrones && model.drones.length === 0 ? (
+        <div className="min-h-0 flex-1">
+          <EmptyState
+            icon={<IconSpinner className="h-6 w-6 animate-spin text-[var(--accent)]" />}
+            title="Checking this device"
+            description={`Looking for drones available on ${deviceName}.`}
+          />
+        </div>
+      ) : model.listError && model.drones.length === 0 ? (
+        <div className="min-h-0 flex-1">
+          <EmptyState
+            icon={<IconDevices className="h-7 w-7 text-[var(--red)]" />}
+            title="Couldn’t load this device"
+            description="The device is connected, but it did not make drone control available. Keep Drone Hub open on that device, then try again."
+            actions={
+              <button
+                type="button"
+                className="rounded-[var(--radius-medium)] border border-[var(--border)] px-4 py-2 text-[var(--text-11)] font-semibold text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                onClick={() => void model.loadDrones()}
+              >
+                Try again
+              </button>
+            }
+          />
+        </div>
+      ) : noDrones ? (
+        <div className="min-h-0 flex-1">
+          <EmptyState
+            icon={<IconDrone className="h-7 w-7 text-[var(--muted)]" />}
+            title="No drones on this device"
+            description={`There aren’t any drones on ${deviceName} yet. Create one there and it will appear here automatically.`}
+          />
+        </div>
+      ) : !model.selectedDrone ? (
         <div className="min-h-0 flex-1">
           <EmptyState
             icon={<IconDrone className="h-7 w-7 text-[var(--accent)]" />}
-            title="Choose a remote drone"
-            description={`Select a drone on ${selectedDevice?.name ?? 'this device'} to open its chats and send prompts.`}
+            title="Choose a drone"
+            description={`Select a drone on ${deviceName} to open its chats and send prompts.`}
           />
         </div>
       ) : !model.selectedChat ? (

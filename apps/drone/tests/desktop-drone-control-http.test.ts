@@ -65,6 +65,7 @@ describe('desktop drone-control HTTP bridge', () => {
         'drone-control',
         'drones.list',
         { includeCreateOptions: false },
+        expect.any(AbortSignal),
       ],
     ]);
   });

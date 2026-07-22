@@ -73,7 +73,14 @@ export type DrawerDevicePickerItem = {
   name: string;
   connected: boolean;
   detail?: string;
+  platform: string;
 };
+
+function devicePlatformLabel(platform: string): string {
+  if (platform === 'android') return 'Android';
+  if (platform === 'server' || platform === 'desktop') return 'Desktop';
+  return 'Device';
+}
 
 export type AppDrawerProps = {
   open: boolean;
@@ -251,7 +258,7 @@ function DrawerDevicePicker({
     <View style={styles.devicePickerSection}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Choose device"
+        accessibilityLabel={`${activeDevice?.name ?? 'Choose device'}, ${activeDevice?.connected ? 'online' : 'offline'}. Choose device.`}
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen((current) => !current)}
         style={({ pressed }) => [
@@ -286,6 +293,7 @@ function DrawerDevicePicker({
               <Pressable
                 key={device.id}
                 accessibilityRole="button"
+                accessibilityLabel={`${device.name}, ${device.connected ? 'online' : 'offline'}, ${devicePlatformLabel(device.platform)}`}
                 accessibilityState={{ selected: active }}
                 onPress={() => {
                   setOpen(false);
@@ -297,6 +305,7 @@ function DrawerDevicePicker({
                   pressed && styles.pressed,
                 ]}
               >
+                {active ? <View style={styles.deviceOptionActiveEdge} /> : null}
                 <View style={[styles.deviceDot, device.connected && styles.deviceDotOnline]} />
                 <View style={styles.devicePickerCopy}>
                   <Text
@@ -311,6 +320,9 @@ function DrawerDevicePicker({
                     </Text>
                   ) : null}
                 </View>
+                <Text numberOfLines={1} style={styles.devicePlatform}>
+                  {devicePlatformLabel(device.platform)}
+                </Text>
               </Pressable>
             );
           })}
@@ -1034,9 +1046,22 @@ function AppDrawerView({
   }, [activeDeviceId]);
   const listStatus =
     !dronesLoading && !dronesReachable ? (
-      <Text style={styles.empty}>
-        No mesh route is currently available. Connect any paired Hub and try again.
-      </Text>
+      <View style={styles.drawerOffline}>
+        <View style={styles.deviceDot} />
+        <View style={styles.drawerOfflineCopy}>
+          <Text style={styles.drawerOfflineTitle}>Device offline</Text>
+          <Text style={styles.drawerOfflineBody}>Drones will appear when it reconnects.</Text>
+        </View>
+        {onRetryDrones ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={onRetryDrones}
+            style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+          >
+            <Text style={styles.retryText}>Retry</Text>
+          </Pressable>
+        ) : null}
+      </View>
     ) : !dronesLoading && dronesError ? (
       <View style={styles.drawerError}>
         <Text style={styles.drawerErrorText}>{dronesError}</Text>
@@ -1334,6 +1359,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.panelRaised,
   },
   retryText: { color: colors.accent, fontSize: 10, fontWeight: '600' },
+  drawerOffline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 9,
+    paddingVertical: 12,
+  },
+  drawerOfflineCopy: { flex: 1, minWidth: 0 },
+  drawerOfflineTitle: { color: colors.textSecondary, fontSize: 10, fontWeight: '700' },
+  drawerOfflineBody: { color: colors.mutedDim, fontSize: 9, lineHeight: 14, marginTop: 2 },
   devicePickerSection: {
     position: 'relative',
     width: '55%',
@@ -1355,7 +1390,7 @@ const styles = StyleSheet.create({
   devicePickerOpen: { backgroundColor: colors.whiteWash },
   devicePickerPressed: { backgroundColor: colors.whiteWashSoft },
   devicePickerTriggerCopy: { flexShrink: 1, minWidth: 0 },
-  devicePickerCopy: { flex: 1, minWidth: 0 },
+  devicePickerCopy: { flex: 1, minWidth: 0, justifyContent: 'center' },
   devicePickerName: { color: colors.text, fontSize: 12, fontWeight: '600' },
   devicePickerDetail: {
     color: colors.muted,
@@ -1365,18 +1400,33 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.45,
   },
-  deviceDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.overlay0 },
-  deviceDotOnline: { backgroundColor: colors.online },
+  deviceDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: colors.mutedDim,
+    backgroundColor: 'transparent',
+  },
+  deviceDotOnline: {
+    borderColor: colors.online,
+    backgroundColor: colors.online,
+    shadowColor: colors.online,
+    shadowOpacity: 0.3,
+    shadowRadius: 2.5,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 1,
+  },
   deviceOptions: {
     position: 'absolute',
     top: 46,
     right: 0,
-    width: 220,
-    maxHeight: 220,
+    width: 208,
+    maxHeight: 208,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.panelRaised,
+    backgroundColor: colors.panel,
     elevation: 8,
     shadowColor: colors.shadow,
     shadowOpacity: 0.2,
@@ -1384,19 +1434,39 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
   },
   deviceOptionsContent: {
-    padding: 5,
-    gap: 2,
+    padding: 0,
   },
   deviceOption: {
-    minHeight: 44,
+    position: 'relative',
+    minHeight: 42,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 9,
-    paddingHorizontal: 10,
-    borderRadius: 5,
+    paddingLeft: 10,
+    paddingRight: 9,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
-  deviceOptionActive: { backgroundColor: colors.selectionWash },
-  deviceOptionName: { color: colors.text, fontSize: 12, fontWeight: '600' },
+  deviceOptionActive: { backgroundColor: colors.sidebarSelectionWash },
+  deviceOptionActiveEdge: {
+    position: 'absolute',
+    top: 7,
+    bottom: 7,
+    left: 0,
+    width: 2,
+    borderTopRightRadius: 2,
+    borderBottomRightRadius: 2,
+    backgroundColor: colors.accent,
+  },
+  deviceOptionName: { color: colors.textSecondary, fontSize: 11, fontWeight: '600' },
+  devicePlatform: {
+    width: 52,
+    flexShrink: 0,
+    color: colors.mutedDim,
+    fontSize: 8,
+    fontWeight: '500',
+    textAlign: 'right',
+  },
   repoNavigationHead: {
     minHeight: 56,
     flexDirection: 'row',

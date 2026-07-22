@@ -27,6 +27,16 @@ describe('sidebar presentation', () => {
     expect(pickerSource).toContain('aria-haspopup="menu"');
     expect(pickerSource).toContain('selectDevice(device.id)');
     expect(pickerSource).not.toContain('switching is coming soon');
+    expect(pickerSource).not.toContain('Drone Hubs');
+    expect(pickerSource).not.toContain('Mesh route available');
+    expect(pickerSource).not.toContain('No mesh devices');
+    expect(pickerSource).toContain('<DeviceConnectionIndicator online={hasRoute} />');
+    expect(pickerSource).toContain('{platformLabel(device.platform)}');
+    expect(pickerSource).toContain("platform === 'server' || platform === 'desktop'");
+    expect(pickerSource).toContain("return 'Desktop'");
+    expect(pickerSource).toContain('w-[232px] !bg-[var(--sidebar-bg)]');
+    expect(pickerSource).toContain('bg-[var(--sidebar-row-selected-bg)]');
+    expect(pickerSource).toContain('border-b border-[var(--border-subtle)]');
     expect(sidebarSource).toContain('flex-shrink-0 text-left dh-type-sidebar-brand');
     expect(pickerSource).toContain('rounded-[var(--radius-medium)] pl-1.5 pr-0.5');
     expect(pickerSource).toContain('ml-2 h-3.5 w-3.5');

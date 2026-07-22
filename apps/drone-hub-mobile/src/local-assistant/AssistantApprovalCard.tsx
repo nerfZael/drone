@@ -44,10 +44,12 @@ function approvalDetails(approval: MobileAssistantApproval): string {
 export function AssistantApprovalCard({
   approval,
   busy,
+  disabled = false,
   onResolve,
 }: {
   approval: MobileAssistantApproval;
   busy?: boolean;
+  disabled?: boolean;
   onResolve(approved: boolean): void;
 }) {
   const detailsTruncated = approval.args?.truncated === true;
@@ -65,11 +67,16 @@ export function AssistantApprovalCard({
         <Text style={styles.details}>{details}</Text>
       ) : null}
       <View style={styles.actions}>
-        <Button tone="quiet" disabled={busy} onPress={() => onResolve(false)} style={styles.button}>
+        <Button
+          tone="quiet"
+          disabled={disabled || busy}
+          onPress={() => onResolve(false)}
+          style={styles.button}
+        >
           Deny
         </Button>
         <Button
-          disabled={busy || detailsTruncated}
+          disabled={disabled || busy || detailsTruncated}
           onPress={() => onResolve(true)}
           style={styles.button}
         >

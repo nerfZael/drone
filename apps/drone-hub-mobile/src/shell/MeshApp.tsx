@@ -13,6 +13,7 @@ import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
 import Trash2 from 'lucide-react-native/icons/trash-2';
 import { CircuitRobotLoader } from '../components/CircuitRobotLoader';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
+import { LocalDroneControlProvider } from '../drones/local-drone-control';
 import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext';
 import { MobileChatVoiceRecorderProvider } from '../local-assistant/MobileChatVoiceRecorderContext';
 import {
@@ -134,6 +135,7 @@ function Shell() {
               name: current?.name ?? mesh.identity?.name ?? 'This device',
               connected: true,
               detail: 'This device',
+              platform: current?.platform ?? 'android',
             },
           ]
         : []),
@@ -141,6 +143,7 @@ function Shell() {
         id: device.id,
         name: device.name,
         connected: mesh.connectedDeviceIds.includes(device.id),
+        platform: device.platform,
       })),
     ];
   }, [mesh.connectedDeviceIds, mesh.devices, mesh.identity?.id, mesh.identity?.name]);
@@ -442,11 +445,13 @@ export function MeshApp() {
   return (
     <MeshProvider>
       <LocalAssistantProvider>
-        <MobileChatVoiceRecorderProvider>
-          <AppDrawerProvider>
-            <Shell />
-          </AppDrawerProvider>
-        </MobileChatVoiceRecorderProvider>
+        <LocalDroneControlProvider>
+          <MobileChatVoiceRecorderProvider>
+            <AppDrawerProvider>
+              <Shell />
+            </AppDrawerProvider>
+          </MobileChatVoiceRecorderProvider>
+        </LocalDroneControlProvider>
       </LocalAssistantProvider>
     </MeshProvider>
   );

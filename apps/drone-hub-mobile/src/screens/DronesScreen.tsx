@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
+import WifiOff from 'lucide-react-native/icons/wifi-off';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ConfirmDialog, ErrorBanner, TextInputDialog } from '../components/Ui';
 import {
@@ -21,6 +22,7 @@ import {
   type DrawerDevicePickerItem,
 } from '../local-assistant/AppDrawer';
 import { AssistantComposer } from '../local-assistant/AssistantComposer';
+import { MobileLoadingState } from '../local-assistant/MobileLoadingState';
 import {
   AssistantModelPicker,
   type AssistantModelChoice,
@@ -74,6 +76,7 @@ import {
 } from '../drones/mobile-pending-prompts';
 import { useDroneLinkedPullRequests } from '../drones/use-drone-linked-pull-requests';
 import { useLocalDroneControl } from '../drones/local-drone-control';
+import { mobileDeviceReachable } from '../drones/mobile-device-reachability';
 import { ChatAttachmentStrip } from '../drones/ChatAttachmentStrip';
 import { FilePreviewModal } from '../drones/FilePreviewModal';
 import { useFilePreview } from '../drones/use-file-preview';
@@ -214,7 +217,11 @@ export function DronesScreen({
   const targetId = selectedDeviceId;
   const phoneTarget = Boolean(targetId && targetId === mesh.identity?.id);
   const targetSupportsDrones = phoneTarget || targets.some((target) => target.id === targetId);
-  const meshRouteAvailable = phoneTarget || mesh.connectedDeviceIds.length > 0;
+  const targetReachable = mobileDeviceReachable({
+    targetDeviceId: targetId,
+    selfDeviceId: mesh.identity?.id,
+    connectedDeviceIds: mesh.connectedDeviceIds,
+  });
   const requestDroneControl = React.useCallback(
     (destinationId: string, operation: DroneControlOperation, payload?: any) =>
       destinationId === mesh.identity?.id
@@ -545,12 +552,12 @@ export function DronesScreen({
     }
   }, [targetId, targetSupportsDrones]);
   React.useEffect(() => {
-    if (meshRouteAvailable && targetSupportsDrones) {
+    if (targetReachable && targetSupportsDrones) {
       // Callback identities change while the local assistant and mesh hydrate. Refresh only when
       // the resource key or route changes, and keep already-loaded content visible on reconnect.
       void loadDronesRef.current(loadedDronesTargetIdRef.current === targetId);
     }
-  }, [meshRouteAvailable, targetId, targetSupportsDrones]);
+  }, [targetReachable, targetId, targetSupportsDrones]);
 
   const openDrone = (drone: MobileDroneSummary, requestedChat?: string) =>
     run('chats', async () => {
@@ -1582,6 +1589,8 @@ export function DronesScreen({
     nativeThread?.status === 'waiting_for_chats_idle' ||
     Boolean(selected?.busyChats.some((chat) => chat === chatName));
   const activeTarget = mesh.devices.find((target) => target.id === targetId);
+  const dronesLoading =
+    targetReachable && targetSupportsDrones && (!dronesLoaded || busy === 'drones');
   const displayedModel = chatModel || latestModel || 'Model';
   const visibleChats = chats;
   const selectedChatOptimisticallyBusy = visiblePendingPrompts.some(
@@ -1682,6 +1691,20 @@ export function DronesScreen({
     return () => cancelAnimationFrame(frame);
   }, [selected?.id, visibleChats.length]);
   React.useEffect(() => {
+    if (!targetReachable && targetSupportsDrones) {
+      onHeaderChange({
+        title: selected?.name ?? activeTarget?.name ?? 'Device offline',
+        subtitle: 'Offline · reconnecting automatically',
+      });
+      return;
+    }
+    if (dronesLoading && !selected) {
+      onHeaderChange({
+        title: activeTarget?.name ?? 'Drone Hub',
+        subtitle: 'Loading drones…',
+      });
+      return;
+    }
     onHeaderChange(
       selected
         ? {
@@ -1749,9 +1772,11 @@ export function DronesScreen({
     chats,
     busy,
     droneSidebarOrder.pinnedDroneIds,
+    dronesLoading,
     pinningDroneIds,
     newDroneDraft,
     targetSupportsDrones,
+    targetReachable,
     accessOpen,
     accessDirty,
     nativeMessages,
@@ -1938,24 +1963,24 @@ export function DronesScreen({
         activeDroneId={selected?.id ?? ''}
         activeChatName={chatName}
         droneOperationById={droneOperationById}
-        dronesLoading={
-          meshRouteAvailable && targetSupportsDrones && (!dronesLoaded || busy === 'drones')
-        }
-        dronesReachable={meshRouteAvailable}
+        dronesLoading={dronesLoading}
+        dronesReachable={targetReachable}
         dronesError={droneListError}
         devicePickerItems={devicePickerItems}
         activeDeviceId={targetId}
         onOpen={() => onDrawerOpenChange(true)}
         onClose={() => onDrawerOpenChange(false)}
         onCreateDrone={
-          targetSupportsDrones && meshRouteAvailable
+          targetSupportsDrones && targetReachable
             ? (repoPath) => {
                 onDrawerOpenChange(false);
                 void openNewDroneScreen({ repoPath });
               }
             : undefined
         }
-        onRetryDrones={() => void loadDrones()}
+        onRetryDrones={() =>
+          void (targetReachable ? loadDrones() : mesh.refreshDevices())
+        }
         onSelectDevice={(deviceId) => {
           setDronesLoaded(false);
           setDroneListError(null);
@@ -1976,8 +2001,49 @@ export function DronesScreen({
         behavior={Platform.OS === 'android' ? 'height' : 'padding'}
         keyboardVerticalOffset={insets.top + APP_HEADER_HEIGHT}
       >
-        {selected ? (
+        {!targetReachable && targetSupportsDrones && !selected ? (
+          <View style={styles.deviceOffline}>
+            <View style={styles.deviceOfflineIcon}>
+              <WifiOff color={colors.warning} size={28} strokeWidth={1.7} />
+              <View style={styles.deviceOfflineIndicator} />
+            </View>
+            <Text style={styles.deviceOfflineTitle}>
+              {activeTarget?.name ?? 'This device'} is offline
+            </Text>
+            <Text style={styles.deviceOfflineBody}>
+              Drone Hub can’t reach this device. Make sure the app is running there and that both
+              devices are connected to the internet or the same local network.
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void mesh.refreshDevices()}
+              style={({ pressed }) => [
+                styles.deviceOfflineRetry,
+                pressed && styles.chatTabPressed,
+              ]}
+            >
+              <Text style={styles.deviceOfflineRetryText}>Retry connection</Text>
+            </Pressable>
+            <View style={styles.deviceOfflineAutomatic}>
+              <View style={styles.deviceOfflinePulse} />
+              <Text style={styles.deviceOfflineAutomaticText}>Checking automatically</Text>
+            </View>
+          </View>
+        ) : dronesLoading && !selected ? (
+          <MobileLoadingState accessibilityLabel="Loading drones" label="Loading drones…" />
+        ) : selected ? (
           <View style={styles.chatWorkspace}>
+            {!targetReachable ? (
+              <View style={styles.offlineChatNotice}>
+                <View style={styles.deviceOfflineIndicator} />
+                <View style={styles.offlineChatNoticeCopy}>
+                  <Text style={styles.offlineChatNoticeTitle}>Device offline</Text>
+                  <Text style={styles.offlineChatNoticeBody}>
+                    This chat is readable. Sending will resume when it reconnects.
+                  </Text>
+                </View>
+              </View>
+            ) : null}
             {visibleChats.length === 0 ? (
               <View style={styles.emptyDrone}>
                 <MessageCircle color={colors.muted} size={28} strokeWidth={1.6} />
@@ -1987,10 +2053,11 @@ export function DronesScreen({
                 </Text>
                 <Pressable
                   accessibilityRole="button"
-                  disabled={busy === 'create-chat'}
+                  disabled={!targetReachable || busy === 'create-chat'}
                   onPress={() => void createNewChat()}
                   style={({ pressed }) => [
                     styles.emptyDroneButton,
+                    !targetReachable && styles.disabledAction,
                     pressed && styles.chatTabPressed,
                   ]}
                 >
@@ -2157,6 +2224,7 @@ export function DronesScreen({
                           key={approval.id}
                           approval={approval}
                           busy={approvalBusyId === approval.id}
+                          disabled={!targetReachable}
                           onResolve={(approved) => resolveNativeApproval(approval, approved)}
                         />
                       ))}
@@ -2171,20 +2239,23 @@ export function DronesScreen({
                       onOpenModel={() => void openModelPicker()}
                       modelLabel={displayedModel}
                       reasoningLabel={chatReasoning}
-                      placeholder="Ask the agent"
                       sending={busy === 'prompt'}
                       running={running}
-                      editable
-                      queueWhileRunning
+                      editable={targetReachable}
+                      queueWhileRunning={targetReachable}
+                      placeholder={targetReachable ? 'Ask the agent' : 'Device offline'}
                       hasAttachments={promptAttachments.length > 0}
                       onAddAttachment={addPromptAttachment}
-                      attachmentActionsDisabled={phoneTarget && running}
-                      sendBlocked={phoneTarget && running && promptAttachments.length > 0}
+                      attachmentActionsDisabled={!targetReachable || (phoneTarget && running)}
+                      sendBlocked={
+                        !targetReachable ||
+                        (phoneTarget && running && promptAttachments.length > 0)
+                      }
                       footer={
                         promptAttachments.length > 0 ? (
                           <ChatAttachmentStrip
                             attachments={promptAttachments}
-                            disabled={busy === 'prompt'}
+                            disabled={!targetReachable || busy === 'prompt'}
                             onRemove={(id) =>
                               setPromptAttachments((current) =>
                                 current.filter((attachment) => attachment.id !== id),
@@ -2214,11 +2285,11 @@ export function DronesScreen({
             key={`${targetId}:${newDroneScreenVersion}`}
             repos={createRepos}
             loadingOptions={
-              meshRouteAvailable && (!dronesLoaded || busy === 'drones' || createOptionsLoading)
+              targetReachable && (!dronesLoaded || busy === 'drones' || createOptionsLoading)
             }
             busy={busy.startsWith('create-')}
             draft={newDroneDraft}
-            requestError={error}
+            requestError={dronesLoading ? null : error}
             initialValues={newDroneDefaults ?? undefined}
             localDevice={phoneTarget}
             onDetectModels={detectCreateModels}
@@ -2349,7 +2420,87 @@ const styles = StyleSheet.create({
   content: { flex: 1 },
   unavailable: { flex: 1, justifyContent: 'center', padding: 24, gap: 14 },
   unavailableText: { color: colors.muted, fontSize: 14, lineHeight: 21 },
+  deviceOffline: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 30,
+  },
+  deviceOfflineIcon: {
+    width: 64,
+    height: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    backgroundColor: colors.warningDark,
+    position: 'relative',
+    marginBottom: 20,
+  },
+  deviceOfflineIndicator: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.mutedDim,
+    backgroundColor: 'transparent',
+  },
+  deviceOfflineTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  deviceOfflineBody: {
+    maxWidth: 340,
+    marginTop: 9,
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  deviceOfflineRetry: {
+    minHeight: 40,
+    marginTop: 22,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.whiteWashSoft,
+  },
+  deviceOfflineRetryText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  deviceOfflineAutomatic: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginTop: 14,
+  },
+  deviceOfflinePulse: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.mutedDim,
+    opacity: 0.7,
+  },
+  deviceOfflineAutomaticText: { color: colors.mutedDim, fontSize: 9 },
   chatWorkspace: { flex: 1, backgroundColor: colors.background },
+  offlineChatNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    backgroundColor: colors.whiteWashSoft,
+  },
+  offlineChatNoticeCopy: { flex: 1, minWidth: 0 },
+  offlineChatNoticeTitle: { color: colors.textSecondary, fontSize: 10, fontWeight: '700' },
+  offlineChatNoticeBody: { color: colors.mutedDim, fontSize: 9, lineHeight: 14, marginTop: 1 },
+  disabledAction: { opacity: 0.4 },
   emptyDrone: {
     flex: 1,
     alignItems: 'center',

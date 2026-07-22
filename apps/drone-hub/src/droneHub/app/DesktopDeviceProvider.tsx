@@ -11,6 +11,7 @@ type DesktopDeviceContextValue = {
   selectedDeviceId: string;
   selfDeviceId: string;
   loading: boolean;
+  refreshing: boolean;
   error: string | null;
   remoteRouteAvailable: boolean;
   selectDevice(deviceId: string): void;
@@ -18,6 +19,14 @@ type DesktopDeviceContextValue = {
 };
 
 const DesktopDeviceContext = React.createContext<DesktopDeviceContextValue | null>(null);
+
+export function desktopDeviceRouteAvailable(
+  status: Pick<MeshStatus, 'selfDeviceId' | 'connectedDeviceIds'> | null,
+  device: Pick<MeshDevice, 'id'> | null,
+): boolean {
+  if (!device) return false;
+  return device.id === status?.selfDeviceId || Boolean(status?.connectedDeviceIds.includes(device.id));
+}
 
 function storedDeviceId(): string {
   try {
@@ -41,6 +50,7 @@ export function DesktopDeviceProvider({ children }: { children: React.ReactNode 
   const [status, setStatus] = React.useState<MeshStatus | null>(null);
   const [selectedDeviceId, setSelectedDeviceId] = React.useState(storedDeviceId);
   const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
@@ -68,6 +78,14 @@ export function DesktopDeviceProvider({ children }: { children: React.ReactNode 
     }, 3_000);
     return () => window.clearInterval(timer);
   }, [load]);
+  const refresh = React.useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [load]);
   React.useEffect(() => {
     if (!selectedDeviceId) return;
     try {
@@ -91,14 +109,13 @@ export function DesktopDeviceProvider({ children }: { children: React.ReactNode 
       selectedDeviceId: selectedDevice?.id ?? selectedDeviceId,
       selfDeviceId,
       loading,
+      refreshing,
       error,
-      remoteRouteAvailable:
-        Boolean(selectedDevice && selectedDevice.id === selfDeviceId) ||
-        Boolean(status?.connectedDeviceIds.length),
+      remoteRouteAvailable: desktopDeviceRouteAvailable(status, selectedDevice),
       selectDevice: setSelectedDeviceId,
-      refresh: load,
+      refresh,
     }),
-    [devices, error, load, loading, selectedDevice, selectedDeviceId, selfDeviceId, status],
+    [devices, error, loading, refresh, refreshing, selectedDevice, selectedDeviceId, selfDeviceId, status],
   );
 
   return <DesktopDeviceContext.Provider value={value}>{children}</DesktopDeviceContext.Provider>;

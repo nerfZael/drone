@@ -2,7 +2,6 @@ import React from 'react';
 import {
   ActivityIndicator,
   Animated,
-  Easing,
   Image,
   Pressable,
   ScrollView,
@@ -31,6 +30,7 @@ import { colors } from '../theme';
 import { QueuedPromptRows, type MobileQueuedPrompt } from '../components/QueuedPromptRows';
 import { ContextMenu } from '../components/Ui';
 import { NativeMarkdown } from './NativeMarkdown';
+import { MobileLoadingState } from './MobileLoadingState';
 import { nativeMarkdownHasCodeBlock } from './native-markdown-model';
 import {
   parseMobileFileReference,
@@ -449,39 +449,11 @@ function ChangedFilesSummary({
 }
 
 function ConversationLoadingState() {
-  const rotation = React.useRef(new Animated.Value(0)).current;
-
-  React.useEffect(() => {
-    const animation = Animated.loop(
-      Animated.timing(rotation, {
-        toValue: 1,
-        duration: 900,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }),
-    );
-    animation.start();
-    return () => animation.stop();
-  }, [rotation]);
-
-  const rotate = rotation.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
-
   return (
-    <View
+    <MobileLoadingState
       accessibilityLabel="Loading conversation"
-      accessibilityRole="progressbar"
-      style={styles.loadingTranscript}
-    >
-      <View style={styles.loadingSpinner}>
-        <View style={styles.loadingSpinnerBase} />
-        <Animated.View style={[styles.loadingSpinnerArc, { transform: [{ rotate }] }]} />
-        <View style={styles.loadingSpinnerCore} />
-      </View>
-      <Text style={styles.loadingTranscriptText}>Loading conversation…</Text>
-    </View>
+      label="Loading conversation…"
+    />
   );
 }
 
@@ -1891,49 +1863,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 28,
-  },
-  loadingTranscript: {
-    flex: 1,
-    minHeight: 280,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-  },
-  loadingSpinner: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  loadingSpinnerBase: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.whiteWashSoft,
-  },
-  loadingSpinnerArc: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    borderRadius: 18,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    borderTopColor: colors.accent,
-  },
-  loadingSpinnerCore: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.accent,
-  },
-  loadingTranscriptText: {
-    color: colors.muted,
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
   },
   emptyOrbit: {
     width: 72,

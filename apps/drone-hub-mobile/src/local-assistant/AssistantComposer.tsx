@@ -212,11 +212,13 @@ export function AssistantComposer({
     voiceActive,
     voiceError,
   });
-  const showAssistantStop = mobileAssistantStopVisible({
-    running,
-    hasStopAction: Boolean(onStop),
-    voiceActive,
-  });
+  const showAssistantStop =
+    editable &&
+    mobileAssistantStopVisible({
+      running,
+      hasStopAction: Boolean(onStop),
+      voiceActive,
+    });
   const canSend =
     (Boolean(value.trim()) || hasAttachments || voiceCanPauseOrStop) &&
     !sending &&
@@ -488,11 +490,11 @@ export function AssistantComposer({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Choose model and reasoning"
-                  disabled={running}
+                  disabled={!editable || running}
                   onPress={onOpenModel}
                   style={({ pressed }) => [
                     styles.modelControl,
-                    running && styles.disabled,
+                    (!editable || running) && styles.disabled,
                     pressed && styles.pressed,
                   ]}
                 >

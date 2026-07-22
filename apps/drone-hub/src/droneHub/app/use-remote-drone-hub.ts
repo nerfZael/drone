@@ -1,6 +1,6 @@
 import React from 'react';
 import type { AssistantMessage, NativeChatApproval } from '@drone/assistant-chat';
-import { requestJson } from '../http';
+import { requestJson, requestJsonWithTimeout } from '../http';
 import type { ChatAttachmentPayload } from '../chat/ChatInput';
 import { sendRemoteChatPrompt } from './remote-chat-attachments';
 
@@ -150,13 +150,21 @@ async function remoteControl<T>(
   operation: RemoteControlOperation,
   payload: Record<string, unknown> = {},
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<T> {
-  const response = await requestJson<RemoteControlResponse<T>>('/api/device-mesh/drone-control', {
+  const init = {
     method: 'POST',
     signal,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ targetDeviceId, operation, payload }),
-  });
+  } satisfies RequestInit;
+  const response = timeoutMs
+    ? await requestJsonWithTimeout<RemoteControlResponse<T>>(
+        '/api/device-mesh/drone-control',
+        init,
+        timeoutMs,
+      )
+    : await requestJson<RemoteControlResponse<T>>('/api/device-mesh/drone-control', init);
   return response.result;
 }
 
@@ -189,6 +197,7 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
   const targetRef = React.useRef(targetDeviceId);
   const routeAvailableRef = React.useRef(routeAvailable);
   const listVersion = React.useRef(0);
+  const listRequests = React.useRef(new Map<string, symbol>());
   const chatVersion = React.useRef(0);
   targetRef.current = targetDeviceId;
 
@@ -205,10 +214,19 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
         if (!quiet) setLoadingDrones(false);
         return;
       }
+      if (listRequests.current.has(targetDeviceId)) return;
+      const requestToken = Symbol(targetDeviceId);
+      listRequests.current.set(targetDeviceId, requestToken);
       const version = ++listVersion.current;
       if (!quiet) setLoadingDrones(true);
       try {
-        const result = await remoteControl<unknown>(targetDeviceId, 'drones.list');
+        const result = await remoteControl<unknown>(
+          targetDeviceId,
+          'drones.list',
+          {},
+          undefined,
+          12_000,
+        );
         if (targetRef.current !== targetDeviceId || listVersion.current !== version) return;
         const next = normalizeRemoteDrones(result);
         setDrones(next);
@@ -220,6 +238,9 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
         if (targetRef.current === targetDeviceId && !quiet)
           setListError(error?.message ?? String(error));
       } finally {
+        if (listRequests.current.get(targetDeviceId) === requestToken) {
+          listRequests.current.delete(targetDeviceId);
+        }
         if (targetRef.current === targetDeviceId && !quiet) setLoadingDrones(false);
       }
     },
