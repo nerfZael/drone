@@ -1,29 +1,12 @@
 import React from 'react';
 import type { AgentRunFileChangeEntry } from '@blip/protocol';
+import {
+  agentRunFileStatusLabel,
+  buildAgentRunChangeTree,
+  type AgentRunChangeTreeNode,
+} from '@drone/assistant-chat';
 
 import { IconChevron, IconFolder, iconForFilePath } from '../icons';
-import { buildAgentRunChangeTree, type AgentRunChangeTreeNode } from './agent-run-change-tree';
-
-function statusLabel(entry: AgentRunFileChangeEntry): string {
-  switch (entry.status) {
-    case 'added':
-      return 'A';
-    case 'deleted':
-      return 'D';
-    case 'renamed':
-      return 'R';
-    case 'copied':
-      return 'C';
-    case 'type-changed':
-      return 'T';
-    case 'unmerged':
-      return 'U';
-    case 'modified':
-      return 'M';
-    default:
-      return '?';
-  }
-}
 
 function statusClass(entry: AgentRunFileChangeEntry): string {
   if (entry.status === 'added') return 'text-[var(--green)]';
@@ -47,6 +30,8 @@ export function AgentRunChangedFilesTree({
   expandedDirectories,
   selectedPath = null,
   density = 'compact',
+  defaultDirectoriesExpanded = true,
+  initialVisibleRows,
   onToggleDirectory,
   onSelectFile,
 }: {
@@ -54,16 +39,31 @@ export function AgentRunChangedFilesTree({
   expandedDirectories: Record<string, boolean>;
   selectedPath?: string | null;
   density?: 'compact' | 'comfortable';
+  defaultDirectoriesExpanded?: boolean;
+  initialVisibleRows?: number;
   onToggleDirectory: (directoryPath: string) => void;
   onSelectFile: (entry: AgentRunFileChangeEntry) => void;
 }) {
   const nodes = React.useMemo(() => buildAgentRunChangeTree(entries), [entries]);
+  const [visibleRowLimit, setVisibleRowLimit] = React.useState(
+    initialVisibleRows ?? Number.POSITIVE_INFINITY,
+  );
+  React.useEffect(() => {
+    setVisibleRowLimit(initialVisibleRows ?? Number.POSITIVE_INFINITY);
+  }, [entries, initialVisibleRows]);
   const rowHeight = density === 'comfortable' ? 'py-1.5' : 'py-1';
+  let visibleRows = 0;
+  let hasMoreVisibleRows = false;
 
   const renderNode = (node: AgentRunChangeTreeNode, depth: number): React.ReactNode => {
+    if (visibleRows >= visibleRowLimit) {
+      hasMoreVisibleRows = true;
+      return null;
+    }
+    visibleRows += 1;
     const paddingLeft = 8 + depth * 14;
     if (node.kind === 'directory') {
-      const open = expandedDirectories[node.path] ?? true;
+      const open = expandedDirectories[node.path] ?? defaultDirectoriesExpanded;
       return (
         <div key={`directory:${node.path}`}>
           <button
@@ -101,7 +101,7 @@ export function AgentRunChangedFilesTree({
         <span
           className={`w-3 shrink-0 text-center font-mono text-[var(--text-9)] font-[var(--weight-bold)] ${statusClass(node.entry)}`}
         >
-          {statusLabel(node.entry)}
+          {agentRunFileStatusLabel(node.entry)}
         </span>
         <FileIcon className="shrink-0 text-[var(--muted)]" size={13} />
         <span className="min-w-0 flex-1 truncate font-mono text-[var(--text-10)]">{node.name}</span>
@@ -114,5 +114,18 @@ export function AgentRunChangedFilesTree({
     );
   };
 
-  return <div className="space-y-0.5">{nodes.map((node) => renderNode(node, 0))}</div>;
+  return (
+    <div className="space-y-0.5">
+      {nodes.map((node) => renderNode(node, 0))}
+      {hasMoreVisibleRows && Number.isFinite(visibleRowLimit) ? (
+        <button
+          type="button"
+          onClick={() => setVisibleRowLimit((current) => current + (initialVisibleRows ?? 200))}
+          className="w-full rounded-[var(--radius-small)] px-2 py-1.5 text-left text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] hover:bg-[var(--hover)]"
+        >
+          Show {initialVisibleRows ?? 200} more rows
+        </button>
+      ) : null}
+    </div>
+  );
 }

@@ -1478,6 +1478,37 @@ export function DronesScreen({
     },
     [chatName, phoneTarget, requestDroneControl, selected, targetId],
   );
+  const loadRunFiles = React.useCallback(
+    async ({
+      artifactId,
+      offset,
+      limit,
+    }: {
+      artifactId: string;
+      offset: number;
+      limit: number;
+    }) => {
+      if (!selected || phoneTarget) {
+        throw new Error('Historical file changes are unavailable for this chat.');
+      }
+      const response: any = await requestDroneControl(targetId, 'chat.read', {
+        droneId: selected.id,
+        chatName,
+        diffArtifactId: artifactId,
+        diffList: true,
+        diffListOffset: offset,
+        diffListLimit: limit,
+      });
+      return {
+        entries: Array.isArray(response?.files?.entries) ? response.files.entries : [],
+        nextOffset: Number.isSafeInteger(response?.files?.nextOffset)
+          ? Number(response.files.nextOffset)
+          : null,
+        metadataTruncated: response?.files?.metadataTruncated === true,
+      };
+    },
+    [chatName, phoneTarget, requestDroneControl, selected, targetId],
+  );
   const chatLoading = busy === 'chats' || busy === 'chat' || busy === 'create-chat';
   const latestMessageScroll = useLatestMessageScroll(
     selected ? `${selected.id}:${chatName}` : '',
@@ -2041,6 +2072,7 @@ export function DronesScreen({
                         fullMessageLoadingId={fullMessageBusyId}
                         onOpenFileReference={filePreview.open}
                         onLoadRunFileDiff={loadRunFileDiff}
+                        onLoadRunFiles={loadRunFiles}
                         onDeleteMessageRequest={
                           nativeMessages !== null
                             ? ({ message, deleteFollowing }) => {

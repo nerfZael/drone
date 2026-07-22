@@ -51,24 +51,52 @@ export type AgentRunFileChangeEntry = {
   binary?: boolean;
 };
 
-export type AgentRunFileChangeWorkspace = {
+export type AgentRunFileChangeCounts = {
+  changed: number;
+  additions: number;
+  deletions: number;
+};
+
+export type AgentRunFileChangeWorkspaceV1 = {
   targetId: string;
   droneId?: string;
   label: string;
   repoRoot: string;
   diffArtifactId?: string;
-  counts: { changed: number; additions: number; deletions: number };
+  counts: AgentRunFileChangeCounts;
   entries: AgentRunFileChangeEntry[];
   truncated?: boolean;
 };
 
-export type AgentRunFileChanges = {
+export type AgentRunFileChangeWorkspaceV2 = {
+  targetId: string;
+  droneId?: string;
+  label: string;
+  diffArtifactId?: string;
+  counts: AgentRunFileChangeCounts;
+  previewEntries: AgentRunFileChangeEntry[];
+  metadataTruncated?: boolean;
+};
+
+export type AgentRunFileChangeWorkspace = AgentRunFileChangeWorkspaceV1 | AgentRunFileChangeWorkspaceV2;
+
+export type AgentRunFileChangesV1 = {
   version: 1;
   capturedAt: string;
-  counts: { changed: number; additions: number; deletions: number };
-  workspaces: AgentRunFileChangeWorkspace[];
+  counts: AgentRunFileChangeCounts;
+  workspaces: AgentRunFileChangeWorkspaceV1[];
   truncated?: boolean;
 };
+
+export type AgentRunFileChangesV2 = {
+  version: 2;
+  capturedAt: string;
+  counts: AgentRunFileChangeCounts;
+  workspaces: AgentRunFileChangeWorkspaceV2[];
+  metadataTruncated?: boolean;
+};
+
+export type AgentRunFileChanges = AgentRunFileChangesV1 | AgentRunFileChangesV2;
 
 export type BlipRuntimeEvent =
   | (BlipRuntimeEventBase & { type: "session_started"; workspaceRoot: string; model: string; permissionMode: BlipPermissionMode; toolProfile: BlipToolProfile; resumed: boolean })

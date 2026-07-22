@@ -83,18 +83,38 @@ describe('agent run file changes', () => {
 
     const summary = await finalizeDroneRunFileChanges({ baseline: baseline!, drone });
 
+    expect(summary?.version).toBe(2);
     expect(summary?.counts).toEqual({ changed: 5, additions: 3, deletions: 1 });
     expect(summary?.workspaces[0]).toMatchObject({
       droneId: 'host-1',
       label: 'Host drone',
       counts: { changed: 5, additions: 3, deletions: 1 },
     });
-    expect(summary?.workspaces[0]?.entries).toEqual([
-      expect.objectContaining({ path: 'before-run.txt', status: 'modified', additions: 1, deletions: 0 }),
-      expect.objectContaining({ path: 'deleted.txt', status: 'deleted', additions: 0, deletions: 1 }),
-      expect.objectContaining({ path: 'moved.txt', originalPath: 'renamed.txt', status: 'renamed' }),
+    expect(summary?.workspaces[0]?.previewEntries).toEqual([
+      expect.objectContaining({
+        path: 'before-run.txt',
+        status: 'modified',
+        additions: 1,
+        deletions: 0,
+      }),
+      expect.objectContaining({
+        path: 'deleted.txt',
+        status: 'deleted',
+        additions: 0,
+        deletions: 1,
+      }),
+      expect.objectContaining({
+        path: 'moved.txt',
+        originalPath: 'renamed.txt',
+        status: 'renamed',
+      }),
       expect.objectContaining({ path: 'new.txt', status: 'added', additions: 1, deletions: 0 }),
-      expect.objectContaining({ path: 'src/existing.ts', status: 'modified', additions: 1, deletions: 0 }),
+      expect.objectContaining({
+        path: 'src/existing.ts',
+        status: 'modified',
+        additions: 1,
+        deletions: 0,
+      }),
     ]);
   });
 

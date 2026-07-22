@@ -1,9 +1,17 @@
 import React from 'react';
-import type { AgentRunFileChanges } from '@blip/protocol';
+import type {
+  AgentRunFileChangeEntry,
+  AgentRunFileChanges,
+  AgentRunFileChangeWorkspace,
+} from '@blip/protocol';
+import { agentRunWorkspacePreviewEntries, isAgentRunFileChanges } from '@drone/assistant-chat';
 
 import { IconChevron } from '../icons';
 import { AgentRunChangedFilesTree } from './AgentRunChangedFilesTree';
 import type { AgentRunChangesPanelSelection } from './AgentRunChangesPanel';
+import { agentRunDiffError, loadAgentRunDiffFiles } from './agent-run-diffs';
+
+const CARD_PAGE_SIZE = 20;
 
 const AgentRunChangesPanel = React.lazy(async () => ({
   default: (await import('./AgentRunChangesPanel')).AgentRunChangesPanel,
@@ -32,6 +40,7 @@ function changesIcon() {
     </svg>
   );
 }
+
 function openPanelIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -47,6 +56,151 @@ function openPanelIcon() {
   );
 }
 
+function WorkspaceFiles({
+  workspace,
+  onSelectFile,
+}: {
+  workspace: AgentRunFileChangeWorkspace;
+  onSelectFile: (entry: AgentRunFileChangeEntry) => void;
+}) {
+  const legacyEntries = 'entries' in workspace ? workspace.entries : null;
+  const [entries, setEntries] = React.useState<AgentRunFileChangeEntry[]>(legacyEntries ?? []);
+  const [nextOffset, setNextOffset] = React.useState<number | null>(
+    legacyEntries && legacyEntries.length > CARD_PAGE_SIZE ? CARD_PAGE_SIZE : null,
+  );
+  const [status, setStatus] = React.useState<'idle' | 'loading' | 'loaded' | 'error'>(
+    legacyEntries ? 'loaded' : 'idle',
+  );
+  const [error, setError] = React.useState('');
+  const [retryNonce, setRetryNonce] = React.useState(0);
+  const [expandedDirectories, setExpandedDirectories] = React.useState<Record<string, boolean>>({});
+  const visibleEntries = legacyEntries
+    ? legacyEntries.slice(0, nextOffset ?? legacyEntries.length)
+    : entries;
+
+  React.useEffect(() => {
+    if (legacyEntries) return;
+    if (!workspace.diffArtifactId) {
+      setEntries(agentRunWorkspacePreviewEntries(workspace));
+      setNextOffset(null);
+      setStatus('loaded');
+      return;
+    }
+    const controller = new AbortController();
+    setStatus('loading');
+    setError('');
+    void loadAgentRunDiffFiles(workspace.diffArtifactId, {
+      offset: 0,
+      limit: CARD_PAGE_SIZE,
+      signal: controller.signal,
+    })
+      .then((result) => {
+        setEntries(result.entries);
+        setNextOffset(result.nextOffset);
+        setStatus('loaded');
+      })
+      .catch((reason: any) => {
+        if (reason?.name === 'AbortError') return;
+        setStatus('error');
+        setError(agentRunDiffError(reason).message);
+      });
+    return () => controller.abort();
+  }, [legacyEntries, retryNonce, workspace]);
+
+  const loadMore = () => {
+    if (legacyEntries) {
+      const next = Math.min(legacyEntries.length, (nextOffset ?? 0) + CARD_PAGE_SIZE);
+      setNextOffset(next < legacyEntries.length ? next : null);
+      return;
+    }
+    if (!workspace.diffArtifactId || nextOffset == null || status === 'loading') return;
+    setStatus('loading');
+    setError('');
+    void loadAgentRunDiffFiles(workspace.diffArtifactId, {
+      offset: nextOffset,
+      limit: CARD_PAGE_SIZE,
+    })
+      .then((result) => {
+        setEntries((current) => [...current, ...result.entries]);
+        setNextOffset(result.nextOffset);
+        setStatus('loaded');
+      })
+      .catch((reason: any) => {
+        setStatus('error');
+        setError(agentRunDiffError(reason).message);
+      });
+  };
+
+  if (status === 'loading' && visibleEntries.length === 0) {
+    return (
+      <div className="px-2 py-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+        Loading changed files…
+      </div>
+    );
+  }
+  if (status === 'error' && visibleEntries.length === 0) {
+    return (
+      <div className="flex items-center justify-between gap-2 px-2 py-2 text-[var(--text-10)] text-[var(--red)]">
+        <span className="min-w-0 truncate">{error}</span>
+        <button
+          type="button"
+          className="shrink-0 font-[var(--weight-semibold)] hover:underline"
+          onClick={() => setRetryNonce((value) => value + 1)}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <AgentRunChangedFilesTree
+        entries={visibleEntries}
+        expandedDirectories={expandedDirectories}
+        onToggleDirectory={(directoryPath) =>
+          setExpandedDirectories((current) => ({
+            ...current,
+            [directoryPath]: !(current[directoryPath] ?? true),
+          }))
+        }
+        onSelectFile={onSelectFile}
+      />
+      {nextOffset != null ? (
+        <button
+          type="button"
+          disabled={status === 'loading'}
+          onClick={loadMore}
+          className="mt-1 w-full rounded-[var(--radius-small)] px-2 py-1.5 text-left text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] hover:bg-[var(--hover)] disabled:text-[var(--muted-dim)]"
+        >
+          {status === 'loading' ? 'Loading…' : `Show ${CARD_PAGE_SIZE} more`}
+        </button>
+      ) : null}
+      {status === 'error' && visibleEntries.length > 0 ? (
+        <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-[var(--text-10)] text-[var(--red)]">
+          <span>{error}</span>
+          <button
+            type="button"
+            className="font-[var(--weight-semibold)] hover:underline"
+            onClick={loadMore}
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+      {'metadataTruncated' in workspace && workspace.metadataTruncated ? (
+        <div className="px-2 py-1.5 text-[var(--text-10)] text-[var(--muted-dim)]">
+          The stored list is limited to 5,000 files.
+        </div>
+      ) : 'truncated' in workspace && workspace.truncated ? (
+        <div className="px-2 py-1.5 text-[var(--text-10)] text-[var(--muted-dim)]">
+          This older run contains a partial file list.
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function ChangedFilesCard({
   fileChanges,
   className = '',
@@ -55,23 +209,23 @@ export function ChangedFilesCard({
   className?: string;
 }) {
   const [expanded, setExpanded] = React.useState(false);
-  const [expandedByWorkspace, setExpandedByWorkspace] = React.useState<
-    Record<string, Record<string, boolean>>
-  >({});
   const [panelSelection, setPanelSelection] = React.useState<AgentRunChangesPanelSelection | null>(
     null,
   );
-  if (!fileChanges || fileChanges.version !== 1 || fileChanges.counts.changed <= 0) return null;
+  if (!isAgentRunFileChanges(fileChanges)) return null;
 
   const workspaceCount = fileChanges.workspaces.length;
   const changedLabel = `${fileChanges.counts.changed} changed ${fileChanges.counts.changed === 1 ? 'file' : 'files'}`;
-  const firstWorkspace = fileChanges.workspaces.find((workspace) => workspace.entries.length > 0);
-  const firstEntry = firstWorkspace?.entries[0];
+  const firstWorkspace = fileChanges.workspaces.find((workspace) => workspace.counts.changed > 0);
+  const firstEntry = firstWorkspace
+    ? agentRunWorkspacePreviewEntries(firstWorkspace)[0]
+    : undefined;
+  const canOpenPanel = Boolean(firstWorkspace && (firstEntry || firstWorkspace.diffArtifactId));
   const openPanel = (selection?: AgentRunChangesPanelSelection) => {
     const next =
       selection ??
-      (firstWorkspace && firstEntry
-        ? { workspaceTargetId: firstWorkspace.targetId, path: firstEntry.path }
+      (firstWorkspace
+        ? { workspaceTargetId: firstWorkspace.targetId, path: firstEntry?.path }
         : null);
     if (next) setPanelSelection(next);
   };
@@ -114,7 +268,7 @@ export function ChangedFilesCard({
           <button
             type="button"
             onClick={() => openPanel()}
-            disabled={!firstEntry}
+            disabled={!canOpenPanel}
             className="flex w-10 shrink-0 items-center justify-center border-l border-[var(--border-subtle)] text-[var(--muted)] transition-colors hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)] focus-visible:bg-[var(--accent-subtle)] focus-visible:text-[var(--accent)] focus-visible:outline-none disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--muted)]"
             aria-label="Open agent run changes panel"
             title="View agent run changes"
@@ -122,7 +276,6 @@ export function ChangedFilesCard({
             {openPanelIcon()}
           </button>
         </div>
-
         {expanded ? (
           <div className="border-t border-[var(--border-subtle)] px-1.5 py-1.5">
             {fileChanges.workspaces.map((workspace) => (
@@ -133,33 +286,17 @@ export function ChangedFilesCard({
                     <span className="font-mono tabular-nums">{workspace.counts.changed}</span>
                   </div>
                 ) : null}
-                <AgentRunChangedFilesTree
-                  entries={workspace.entries}
-                  expandedDirectories={expandedByWorkspace[workspace.targetId] ?? {}}
-                  onToggleDirectory={(directoryPath) => {
-                    setExpandedByWorkspace((current) => ({
-                      ...current,
-                      [workspace.targetId]: {
-                        ...(current[workspace.targetId] ?? {}),
-                        [directoryPath]: !(current[workspace.targetId]?.[directoryPath] ?? true),
-                      },
-                    }));
-                  }}
+                <WorkspaceFiles
+                  workspace={workspace}
                   onSelectFile={(entry) =>
                     openPanel({ workspaceTargetId: workspace.targetId, path: entry.path })
                   }
                 />
-                {workspace.truncated ? (
-                  <div className="px-2 py-1.5 text-[var(--text-10)] text-[var(--muted-dim)]">
-                    Showing the first {workspace.entries.length} files.
-                  </div>
-                ) : null}
               </div>
             ))}
           </div>
         ) : null}
       </section>
-
       {panelSelection ? (
         <React.Suspense fallback={<ChangesPanelLoading />}>
           <AgentRunChangesPanel

@@ -1,4 +1,8 @@
-import type { AgentRunFileChangeEntry } from '@blip/protocol';
+import type {
+  AgentRunFileChangeEntry,
+  AgentRunFileChanges,
+  AgentRunFileChangeWorkspace,
+} from '@blip/protocol';
 
 export type AgentRunChangeTreeStats = {
   changed: number;
@@ -28,6 +32,43 @@ type DirectoryBuilder = {
   directories: Map<string, DirectoryBuilder>;
   files: AgentRunFileChangeEntry[];
 };
+
+export function isAgentRunFileChanges(value: unknown): value is AgentRunFileChanges {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Partial<AgentRunFileChanges>;
+  return (
+    (candidate.version === 1 || candidate.version === 2) &&
+    Array.isArray(candidate.workspaces) &&
+    Number(candidate.counts?.changed) > 0
+  );
+}
+
+export function agentRunWorkspacePreviewEntries(
+  workspace: AgentRunFileChangeWorkspace,
+): AgentRunFileChangeEntry[] {
+  return 'entries' in workspace ? workspace.entries : workspace.previewEntries;
+}
+
+export function agentRunFileStatusLabel(entry: AgentRunFileChangeEntry): string {
+  switch (entry.status) {
+    case 'added':
+      return 'A';
+    case 'deleted':
+      return 'D';
+    case 'renamed':
+      return 'R';
+    case 'copied':
+      return 'C';
+    case 'type-changed':
+      return 'T';
+    case 'unmerged':
+      return 'U';
+    case 'modified':
+      return 'M';
+    default:
+      return '?';
+  }
+}
 
 function fileName(filePath: string): string {
   const parts = filePath.split('/').filter(Boolean);

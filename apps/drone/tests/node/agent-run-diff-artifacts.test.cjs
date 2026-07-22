@@ -9,6 +9,7 @@ const {
   AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES,
   AGENT_RUN_DIFF_TOTAL_PATCH_MAX_BYTES,
   cleanupAgentRunDiffArtifacts,
+  listAgentRunDiffFiles,
   persistAgentRunDiffArtifact,
   readAgentRunFileDiff,
   resetAgentRunDiffArtifactsForTests,
@@ -79,6 +80,7 @@ describe('agent run diff artifacts', () => {
       owner: { droneId: 'drone-1', chatName: 'default', promptId: 'prompt-1' },
       targetId: 'drone:drone-1',
       label: 'Drone 1',
+      counts: { changed: 1, additions: 1, deletions: 1 },
       entries: [{ path: 'src/a.ts', status: 'modified', additions: 1, deletions: 1 }],
       readPatch: async () => patch,
     });
@@ -101,6 +103,51 @@ describe('agent run diff artifacts', () => {
       chatName: 'default',
       promptId: 'prompt-1',
     });
+    const listed = await listAgentRunDiffFiles({ artifactId, offset: 0, limit: 1 });
+    assert.deepEqual(listed.entries, [
+      { path: 'src/a.ts', status: 'modified', additions: 1, deletions: 1 },
+    ]);
+    assert.equal(listed.total, 1);
+    assert.equal(listed.nextOffset, null);
+  });
+
+  test('pages complete metadata while retaining patches only for the bounded prefix', async () => {
+    useDroneDataDir();
+    const entries = ['a.ts', 'b.ts', 'c.ts'].map((filePath, index) => ({
+      path: filePath,
+      status: 'modified',
+      additions: index + 1,
+      deletions: index,
+    }));
+    let patchReads = 0;
+    const artifactId = await persistAgentRunDiffArtifact({
+      owner: { droneId: 'drone-1', chatName: 'default' },
+      targetId: 'drone:drone-1',
+      label: 'Drone 1',
+      counts: { changed: 3, additions: 6, deletions: 3 },
+      entries,
+      patchEntryLimit: 1,
+      readPatch: async (entry) => {
+        patchReads += 1;
+        return `diff --git a/${entry.path} b/${entry.path}\n`;
+      },
+    });
+
+    const firstPage = await listAgentRunDiffFiles({ artifactId, offset: 0, limit: 2 });
+    const secondPage = await listAgentRunDiffFiles({
+      artifactId,
+      offset: firstPage.nextOffset,
+      limit: 2,
+    });
+    assert.deepEqual(firstPage.entries, entries.slice(0, 2));
+    assert.deepEqual(secondPage.entries, entries.slice(2));
+    assert.equal(firstPage.nextOffset, 2);
+    assert.equal(secondPage.nextOffset, null);
+    assert.equal(patchReads, 1);
+    await assert.rejects(
+      readAgentRunFileDiff({ artifactId, path: 'b.ts' }),
+      (error) => error.statusCode === 413 && /many files/.test(error.message),
+    );
   });
 
   test('captures only changes made during the agent run', async () => {
@@ -202,7 +249,7 @@ describe('agent run diff artifacts', () => {
         droneId: workspace.droneId,
         label: workspace.label,
         counts: workspace.counts,
-        entries: workspace.entries,
+        entries: workspace.previewEntries,
       },
       {
         targetId: 'artifacts:thread-1',
@@ -231,6 +278,7 @@ describe('agent run diff artifacts', () => {
       owner: { droneId: 'drone-1', threadId: 'thread-1', turnId: 'turn-1' },
       targetId: 'drone:drone-1',
       label: 'Drone 1',
+      counts: { changed: 1, additions: 1, deletions: 0 },
       entries: [{ path: 'new.txt', status: 'added', additions: 1, deletions: 0 }],
       readPatch: async () => '+new\n',
     });

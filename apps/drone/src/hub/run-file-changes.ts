@@ -8,7 +8,7 @@ import type {
   AgentRunFileChangeEntry,
   AgentRunFileChanges,
   AgentRunFileChangeStatus,
-  AgentRunFileChangeWorkspace,
+  AgentRunFileChangeWorkspaceV2,
 } from '@blip/protocol';
 
 import { dvmExec } from '../host/dvm';
@@ -16,12 +16,14 @@ import { normalizeDroneRuntime } from '../host/runtime';
 import { ensureAssistantArtifactsRoot } from './assistant-artifacts';
 import {
   AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES,
+  AGENT_RUN_DIFF_METADATA_FILE_LIMIT,
+  AGENT_RUN_DIFF_PATCH_FILE_LIMIT,
   AGENT_RUN_DIFF_TOTAL_PATCH_MAX_BYTES,
   persistAgentRunDiffArtifact,
   type AgentRunDiffArtifactOwner,
 } from './agent-run-diff-artifacts';
 
-const MAX_PERSISTED_FILES_PER_WORKSPACE = 200;
+const MAX_TRANSCRIPT_PREVIEW_FILES_PER_WORKSPACE = 10;
 
 type GitResult = { code: number; stdout: string; stderr: string; stdoutTruncated?: boolean };
 type GitRunOptions = { maxStdoutBytes?: number };
@@ -288,8 +290,7 @@ async function summarizeTrees(input: {
   baseline: AgentRunFileChangesBaseline;
   currentTreeOid: string;
   runGit: GitRunner;
-  repoRoot: string;
-}): Promise<AgentRunFileChangeWorkspace | null> {
+}): Promise<AgentRunFileChangeWorkspaceV2 | null> {
   if (input.baseline.treeOid === input.currentTreeOid) return null;
   const revisionArgs = [input.baseline.treeOid, input.currentTreeOid];
   const [nameStatusRaw, numstatRaw, patchResult] = await Promise.all([
@@ -340,13 +341,16 @@ async function summarizeTrees(input: {
   entries.sort((left, right) => left.path.localeCompare(right.path));
   const additions = entries.reduce((sum, entry) => sum + entry.additions, 0);
   const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
-  const truncated = entries.length > MAX_PERSISTED_FILES_PER_WORKSPACE;
-  const persistedEntries = entries.slice(0, MAX_PERSISTED_FILES_PER_WORKSPACE);
+  const metadataTruncated = entries.length > AGENT_RUN_DIFF_METADATA_FILE_LIMIT;
+  const storedEntries = entries.slice(0, AGENT_RUN_DIFF_METADATA_FILE_LIMIT);
   const diffArtifactId = await persistAgentRunDiffArtifact({
     owner: input.baseline.owner ?? { droneId: input.baseline.droneId },
     targetId: input.baseline.targetId,
     label: input.baseline.label,
-    entries: persistedEntries,
+    counts: { changed: entries.length, additions, deletions },
+    entries: storedEntries,
+    metadataTruncated,
+    patchEntryLimit: AGENT_RUN_DIFF_PATCH_FILE_LIMIT,
     readPatch: async (entry) => {
       const combinedPatch = patchesByPath?.get(entry.path);
       if (combinedPatch != null) return combinedPatch;
@@ -377,11 +381,10 @@ async function summarizeTrees(input: {
     targetId: input.baseline.targetId,
     ...(input.baseline.droneId ? { droneId: input.baseline.droneId } : {}),
     label: input.baseline.label,
-    repoRoot: input.repoRoot,
     ...(diffArtifactId ? { diffArtifactId } : {}),
     counts: { changed: entries.length, additions, deletions },
-    entries: persistedEntries,
-    ...(truncated ? { truncated: true } : {}),
+    previewEntries: storedEntries.slice(0, MAX_TRANSCRIPT_PREVIEW_FILES_PER_WORKSPACE),
+    ...(metadataTruncated ? { metadataTruncated: true } : {}),
   };
 }
 
@@ -467,7 +470,6 @@ export async function finalizeDroneRunFileChanges(input: {
     baseline: input.baseline,
     currentTreeOid: current.treeOid,
     runGit: target.runGit,
-    repoRoot: current.repoRoot,
   });
   return workspace ? combineAgentRunFileChanges([workspace]) : null;
 }
@@ -521,7 +523,7 @@ export async function captureAssistantArtifactRunFileChangesBaseline(input: {
 
 export async function finalizeAssistantArtifactRunFileChanges(input: {
   baseline: AssistantArtifactRunFileChangesBaseline;
-}): Promise<AgentRunFileChangeWorkspace | null> {
+}): Promise<AgentRunFileChangeWorkspaceV2 | null> {
   const baseline = input.baseline;
   try {
     const runGit = assistantArtifactGitRunner(baseline.temporaryGitDir, baseline.repoRoot);
@@ -530,7 +532,6 @@ export async function finalizeAssistantArtifactRunFileChanges(input: {
       baseline,
       currentTreeOid,
       runGit,
-      repoRoot: baseline.repoRoot,
     });
   } finally {
     await fs.rm(baseline.temporaryGitDir, { recursive: true, force: true });
@@ -544,12 +545,12 @@ export async function discardAssistantArtifactRunFileChangesBaseline(
 }
 
 export function combineAgentRunFileChanges(
-  workspaces: AgentRunFileChangeWorkspace[],
+  workspaces: AgentRunFileChangeWorkspaceV2[],
 ): AgentRunFileChanges | null {
   const visible = workspaces.filter((workspace) => workspace.counts.changed > 0);
   if (visible.length === 0) return null;
   return {
-    version: 1,
+    version: 2,
     capturedAt: new Date().toISOString(),
     counts: {
       changed: visible.reduce((sum, workspace) => sum + workspace.counts.changed, 0),
@@ -557,15 +558,18 @@ export function combineAgentRunFileChanges(
       deletions: visible.reduce((sum, workspace) => sum + workspace.counts.deletions, 0),
     },
     workspaces: visible,
-    ...(visible.some((workspace) => workspace.truncated) ? { truncated: true } : {}),
+    ...(visible.some((workspace) => workspace.metadataTruncated)
+      ? { metadataTruncated: true }
+      : {}),
   };
 }
 
 export async function finalizeDroneRunFileChangesWorkspace(input: {
   baseline: AgentRunFileChangesBaseline;
   drone: any;
-}): Promise<AgentRunFileChangeWorkspace | null> {
-  return (await finalizeDroneRunFileChanges(input))?.workspaces[0] ?? null;
+}): Promise<AgentRunFileChangeWorkspaceV2 | null> {
+  const summary = await finalizeDroneRunFileChanges(input);
+  return summary?.version === 2 ? (summary.workspaces[0] ?? null) : null;
 }
 
 export function isMutatingWorkspaceTool(toolNameRaw: unknown): boolean {

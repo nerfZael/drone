@@ -5,6 +5,7 @@ import type {
   AgentRunFileChanges,
   AgentRunFileChangeWorkspace,
 } from '@blip/protocol';
+import { agentRunWorkspacePreviewEntries } from '@drone/assistant-chat';
 
 import { DiffBlock } from '../changes/DiffBlock';
 import type { DiffState, DiffViewType } from '../changes/types';
@@ -13,13 +14,23 @@ import {
   agentRunDiffError,
   agentRunDiffKey,
   loadAgentRunDiff,
+  loadAgentRunDiffFiles,
   type AgentRunDiffState,
 } from './agent-run-diffs';
+
+const PANEL_METADATA_PAGE_SIZE = 5_000;
 
 export type AgentRunChangesPanelSelection = {
   workspaceTargetId: string;
   path?: string;
 };
+
+type WorkspaceMetadataState =
+  | { status: 'loading'; entries: AgentRunFileChangeEntry[] }
+  | { status: 'loaded'; entries: AgentRunFileChangeEntry[]; metadataTruncated: boolean }
+  | { status: 'error'; entries: AgentRunFileChangeEntry[]; message: string };
+
+type SelectedDiffState = { key: string; state: AgentRunDiffState } | null;
 
 function closeIcon() {
   return (
@@ -34,16 +45,56 @@ function closeIcon() {
   );
 }
 
-function firstSelection(fileChanges: AgentRunFileChanges): AgentRunChangesPanelSelection | null {
-  const workspace = fileChanges.workspaces.find((candidate) => candidate.entries.length > 0);
-  const entry = workspace?.entries[0];
-  return workspace && entry ? { workspaceTargetId: workspace.targetId, path: entry.path } : null;
+function initialWorkspaceMetadata(
+  fileChanges: AgentRunFileChanges,
+): Record<string, WorkspaceMetadataState> {
+  return Object.fromEntries(
+    fileChanges.workspaces.map((workspace) => [
+      workspace.targetId,
+      'entries' in workspace
+        ? {
+            status: 'loaded',
+            entries: workspace.entries,
+            metadataTruncated: workspace.truncated === true,
+          }
+        : { status: 'loading', entries: workspace.previewEntries },
+    ]),
+  );
+}
+
+async function loadCompleteWorkspaceMetadata(
+  workspace: AgentRunFileChangeWorkspace,
+  signal: AbortSignal,
+): Promise<{ entries: AgentRunFileChangeEntry[]; metadataTruncated: boolean }> {
+  if ('entries' in workspace) {
+    return { entries: workspace.entries, metadataTruncated: workspace.truncated === true };
+  }
+  if (!workspace.diffArtifactId) {
+    return {
+      entries: workspace.previewEntries,
+      metadataTruncated: workspace.metadataTruncated === true,
+    };
+  }
+  const entries: AgentRunFileChangeEntry[] = [];
+  let offset: number | null = 0;
+  let metadataTruncated = workspace.metadataTruncated === true;
+  while (offset != null) {
+    const page = await loadAgentRunDiffFiles(workspace.diffArtifactId, {
+      offset,
+      limit: PANEL_METADATA_PAGE_SIZE,
+      signal,
+    });
+    entries.push(...page.entries);
+    metadataTruncated ||= page.metadataTruncated;
+    offset = page.nextOffset;
+  }
+  return { entries, metadataTruncated };
 }
 
 function diffStateForSelection(
   workspace: AgentRunFileChangeWorkspace,
   entry: AgentRunFileChangeEntry,
-  state: AgentRunDiffState | undefined,
+  selectedDiff: SelectedDiffState,
 ): DiffState {
   if (!workspace.diffArtifactId) {
     return {
@@ -56,6 +107,8 @@ function diffStateForSelection(
       contextLines: 3,
     };
   }
+  const key = agentRunDiffKey(workspace.diffArtifactId, entry.path);
+  const state = selectedDiff?.key === key ? selectedDiff.state : undefined;
   if (!state || state.status === 'loading') return { status: 'loading' };
   if (state.status === 'error') return { status: 'error', error: state.message };
   return {
@@ -78,17 +131,50 @@ export function AgentRunChangesPanel({
   initialSelection: AgentRunChangesPanelSelection;
   onClose: () => void;
 }) {
-  const fallbackSelection = React.useMemo(() => firstSelection(fileChanges), [fileChanges]);
-  const [selection, setSelection] = React.useState<AgentRunChangesPanelSelection>(
-    initialSelection ?? fallbackSelection ?? { workspaceTargetId: '' },
+  const [selection, setSelection] = React.useState(initialSelection);
+  const [workspaceMetadata, setWorkspaceMetadata] = React.useState(() =>
+    initialWorkspaceMetadata(fileChanges),
   );
+  const [metadataRetryNonce, setMetadataRetryNonce] = React.useState(0);
   const [expandedByWorkspace, setExpandedByWorkspace] = React.useState<
     Record<string, Record<string, boolean>>
   >({});
   const [viewType, setViewType] = React.useState<DiffViewType>('unified');
-  const [diffs, setDiffs] = React.useState<Record<string, AgentRunDiffState>>({});
-  const diffsRef = React.useRef(diffs);
-  diffsRef.current = diffs;
+  const [selectedDiff, setSelectedDiff] = React.useState<SelectedDiffState>(null);
+  const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    for (const workspace of fileChanges.workspaces) {
+      if ('entries' in workspace) continue;
+      setWorkspaceMetadata((current) => ({
+        ...current,
+        [workspace.targetId]: {
+          status: 'loading',
+          entries: current[workspace.targetId]?.entries ?? workspace.previewEntries,
+        },
+      }));
+      void loadCompleteWorkspaceMetadata(workspace, controller.signal)
+        .then((result) => {
+          setWorkspaceMetadata((current) => ({
+            ...current,
+            [workspace.targetId]: { status: 'loaded', ...result },
+          }));
+        })
+        .catch((error: any) => {
+          if (error?.name === 'AbortError') return;
+          setWorkspaceMetadata((current) => ({
+            ...current,
+            [workspace.targetId]: {
+              status: 'error',
+              entries: current[workspace.targetId]?.entries ?? workspace.previewEntries,
+              message: agentRunDiffError(error).message,
+            },
+          }));
+        });
+    }
+    return () => controller.abort();
+  }, [fileChanges, metadataRetryNonce]);
 
   const selectedWorkspace =
     fileChanges.workspaces.find(
@@ -96,32 +182,41 @@ export function AgentRunChangesPanel({
     ) ??
     fileChanges.workspaces[0] ??
     null;
+  const selectedWorkspaceEntries = selectedWorkspace
+    ? (workspaceMetadata[selectedWorkspace.targetId]?.entries ??
+      agentRunWorkspacePreviewEntries(selectedWorkspace))
+    : [];
   const selectedEntry =
-    selectedWorkspace?.entries.find((entry) => entry.path === selection.path) ??
-    selectedWorkspace?.entries[0] ??
+    selectedWorkspaceEntries.find((entry) => entry.path === selection.path) ??
+    selectedWorkspaceEntries[0] ??
     null;
   const selectedArtifactId = selectedWorkspace?.diffArtifactId;
-  const selectedDiffKey =
-    selectedArtifactId && selectedEntry
-      ? agentRunDiffKey(selectedArtifactId, selectedEntry.path)
-      : null;
-
-  const requestDiff = React.useCallback((artifactId: string, filePath: string, force = false) => {
-    const key = agentRunDiffKey(artifactId, filePath);
-    if (!force && diffsRef.current[key]) return;
-    setDiffs((current) => ({ ...current, [key]: { status: 'loading' } }));
-    void loadAgentRunDiff(artifactId, filePath)
-      .then((value) => {
-        setDiffs((current) => ({ ...current, [key]: { status: 'loaded', value } }));
-      })
-      .catch((error: any) => {
-        setDiffs((current) => ({ ...current, [key]: agentRunDiffError(error) }));
-      });
-  }, []);
+  const selectedPath = selectedEntry?.path;
 
   React.useEffect(() => {
-    if (selectedArtifactId && selectedEntry) requestDiff(selectedArtifactId, selectedEntry.path);
-  }, [requestDiff, selectedArtifactId, selectedEntry]);
+    if (!selectedWorkspace || selection.path || selectedWorkspaceEntries.length === 0) return;
+    setSelection({
+      workspaceTargetId: selectedWorkspace.targetId,
+      path: selectedWorkspaceEntries[0]!.path,
+    });
+  }, [selectedWorkspace, selectedWorkspaceEntries, selection.path]);
+
+  React.useEffect(() => {
+    if (!selectedArtifactId || !selectedPath) {
+      setSelectedDiff(null);
+      return;
+    }
+    const key = agentRunDiffKey(selectedArtifactId, selectedPath);
+    const controller = new AbortController();
+    setSelectedDiff({ key, state: { status: 'loading' } });
+    void loadAgentRunDiff(selectedArtifactId, selectedPath, controller.signal)
+      .then((value) => setSelectedDiff({ key, state: { status: 'loaded', value } }))
+      .catch((error: any) => {
+        if (error?.name === 'AbortError') return;
+        setSelectedDiff({ key, state: agentRunDiffError(error) });
+      });
+    return () => controller.abort();
+  }, [diffRetryNonce, selectedArtifactId, selectedPath]);
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -143,13 +238,10 @@ export function AgentRunChangesPanel({
 
   const currentDiffState =
     selectedWorkspace && selectedEntry
-      ? diffStateForSelection(
-          selectedWorkspace,
-          selectedEntry,
-          selectedDiffKey ? diffs[selectedDiffKey] : undefined,
-        )
+      ? diffStateForSelection(selectedWorkspace, selectedEntry, selectedDiff)
       : undefined;
-  const currentError = selectedDiffKey ? diffs[selectedDiffKey] : undefined;
+  const currentError = selectedDiff?.state.status === 'error' ? selectedDiff.state : null;
+
   const panel = (
     <div
       className="fixed inset-0 z-[90] bg-[var(--scrim-soft)] backdrop-blur-[2px]"
@@ -191,11 +283,7 @@ export function AgentRunChangesPanel({
                 type="button"
                 onClick={() => setViewType(nextViewType)}
                 aria-pressed={viewType === nextViewType}
-                className={`rounded px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide transition-colors ${
-                  viewType === nextViewType
-                    ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                }`}
+                className={`rounded px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide transition-colors ${viewType === nextViewType ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--muted)] hover:text-[var(--fg-secondary)]'}`}
               >
                 {nextViewType}
               </button>
@@ -214,42 +302,67 @@ export function AgentRunChangesPanel({
 
         <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] max-md:grid-cols-[220px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[minmax(180px,34vh)_minmax(0,1fr)]">
           <aside className="min-h-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-inset-faint)] px-2 py-2 max-sm:border-b max-sm:border-r-0">
-            {fileChanges.workspaces.map((workspace) => (
-              <div key={workspace.targetId} className="mb-2 last:mb-0">
-                {fileChanges.workspaces.length > 1 ||
-                workspace.targetId.startsWith('artifacts:') ? (
-                  <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-1 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
-                    <span className="truncate">{workspace.label}</span>
-                    <span className="font-mono tabular-nums">{workspace.counts.changed}</span>
-                  </div>
-                ) : null}
-                <AgentRunChangedFilesTree
-                  entries={workspace.entries}
-                  expandedDirectories={expandedByWorkspace[workspace.targetId] ?? {}}
-                  selectedPath={
-                    selectedWorkspace?.targetId === workspace.targetId ? selectedEntry?.path : null
-                  }
-                  density="comfortable"
-                  onToggleDirectory={(directoryPath) => {
-                    setExpandedByWorkspace((current) => ({
-                      ...current,
-                      [workspace.targetId]: {
-                        ...(current[workspace.targetId] ?? {}),
-                        [directoryPath]: !(current[workspace.targetId]?.[directoryPath] ?? true),
-                      },
-                    }));
-                  }}
-                  onSelectFile={(entry) => {
-                    setSelection({ workspaceTargetId: workspace.targetId, path: entry.path });
-                  }}
-                />
-                {workspace.truncated ? (
-                  <div className="px-2 py-2 text-[var(--text-9)] text-[var(--muted-dim)]">
-                    Showing the first {workspace.entries.length} files.
-                  </div>
-                ) : null}
-              </div>
-            ))}
+            {fileChanges.workspaces.map((workspace) => {
+              const metadata = workspaceMetadata[workspace.targetId];
+              const entries = metadata?.entries ?? agentRunWorkspacePreviewEntries(workspace);
+              return (
+                <div key={workspace.targetId} className="mb-2 last:mb-0">
+                  {fileChanges.workspaces.length > 1 ||
+                  workspace.targetId.startsWith('artifacts:') ? (
+                    <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-1 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+                      <span className="truncate">{workspace.label}</span>
+                      <span className="font-mono tabular-nums">{workspace.counts.changed}</span>
+                    </div>
+                  ) : null}
+                  <AgentRunChangedFilesTree
+                    entries={entries}
+                    expandedDirectories={expandedByWorkspace[workspace.targetId] ?? {}}
+                    defaultDirectoriesExpanded={false}
+                    initialVisibleRows={200}
+                    selectedPath={
+                      selectedWorkspace?.targetId === workspace.targetId
+                        ? selectedEntry?.path
+                        : null
+                    }
+                    density="comfortable"
+                    onToggleDirectory={(directoryPath) =>
+                      setExpandedByWorkspace((current) => ({
+                        ...current,
+                        [workspace.targetId]: {
+                          ...(current[workspace.targetId] ?? {}),
+                          [directoryPath]: !(current[workspace.targetId]?.[directoryPath] ?? false),
+                        },
+                      }))
+                    }
+                    onSelectFile={(entry) =>
+                      setSelection({ workspaceTargetId: workspace.targetId, path: entry.path })
+                    }
+                  />
+                  {metadata?.status === 'loading' ? (
+                    <div className="px-2 py-2 text-[var(--text-9)] text-[var(--muted-dim)]">
+                      Loading complete file list…
+                    </div>
+                  ) : null}
+                  {metadata?.status === 'error' ? (
+                    <div className="flex items-center justify-between gap-2 px-2 py-2 text-[var(--text-9)] text-[var(--red)]">
+                      <span className="min-w-0 truncate">{metadata.message}</span>
+                      <button
+                        type="button"
+                        className="shrink-0 font-[var(--weight-semibold)] hover:underline"
+                        onClick={() => setMetadataRetryNonce((value) => value + 1)}
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : null}
+                  {metadata?.status === 'loaded' && metadata.metadataTruncated ? (
+                    <div className="px-2 py-2 text-[var(--text-9)] text-[var(--muted-dim)]">
+                      Stored list limited to 5,000 files.
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </aside>
 
           <main className="min-h-0 overflow-auto bg-[var(--panel)]">
@@ -261,12 +374,10 @@ export function AgentRunChangesPanel({
                       ? `${selectedEntry.originalPath} → ${selectedEntry.path}`
                       : selectedEntry.path}
                   </span>
-                  {currentError?.status === 'error' &&
-                  currentError.retryable &&
-                  selectedArtifactId ? (
+                  {currentError?.retryable ? (
                     <button
                       type="button"
-                      onClick={() => requestDiff(selectedArtifactId, selectedEntry.path, true)}
+                      onClick={() => setDiffRetryNonce((value) => value + 1)}
                       className="rounded border border-[var(--red-border)] px-2 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--red)] hover:bg-[var(--red-subtle)]"
                     >
                       Retry
