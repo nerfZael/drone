@@ -26,6 +26,7 @@ type RepoBranchSourceControlsProps = {
   disabled?: boolean;
   className?: string;
   compact?: boolean;
+  appearance?: 'card' | 'flat';
 };
 
 function hostBranchLabel(hostBranch: string | null): string {
@@ -49,6 +50,7 @@ export function RepoBranchSourceControls({
   disabled = false,
   className,
   compact = false,
+  appearance = 'card',
 }: RepoBranchSourceControlsProps) {
   const remoteBranchEntries = React.useMemo<UiMenuSelectEntry[]>(
     () =>
@@ -69,56 +71,95 @@ export function RepoBranchSourceControls({
   );
   const remoteBranchValid = remoteBranches.some((entry) => entry.name === remoteBranch);
   const remoteBranchDisabled = disabled || !remoteBranchCheckoutEnabled;
+  const flat = appearance === 'flat';
 
   return (
     <div
       className={
         className ??
-        `rounded-[var(--radius-xlarge)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] ${compact ? 'px-3 py-3' : 'px-4 py-4'}`
+        (flat
+          ? 'border-t border-[var(--border-subtle)] pt-5'
+          : `rounded-[var(--radius-xlarge)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] ${compact ? 'px-3 py-3' : 'px-4 py-4'}`)
       }
     >
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-[0.12em] uppercase text-[var(--muted-dim)]">Repo branch source</div>
+          <div className={`${flat ? 'text-[var(--text-12)] text-[var(--fg)]' : 'text-[var(--text-10)] tracking-[0.12em] uppercase text-[var(--muted-dim)]'} font-[var(--weight-semibold)]`}>Repo branch source</div>
           <div className="mt-1 text-[var(--text-11)] text-[var(--muted)] font-mono truncate" title={repoPath}>
             {repoPath}
           </div>
         </div>
         {loading ? <div className="text-[var(--text-10)] text-[var(--muted-dim)]">Loading branches…</div> : null}
       </div>
-      <div className={`mt-3 grid gap-3 ${compact ? 'lg:grid-cols-2' : 'md:grid-cols-2'}`}>
+      <div className={`mt-3 grid ${flat ? 'gap-5' : 'gap-3'} ${compact ? 'lg:grid-cols-2' : 'md:grid-cols-2'}`}>
         <button
           type="button"
           onClick={() => onBranchSourceChange('host')}
           disabled={disabled}
-          className={`rounded-[var(--radius-xlarge)] border px-3 py-3 text-left transition-all ${
-            branchSource === 'host'
-              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-              : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:border-[var(--border)]'
+          aria-pressed={branchSource === 'host'}
+          className={`${flat ? 'border-b-2 px-0' : 'rounded-[var(--radius-large)] px-3'} py-3 text-left transition-colors ${
+            flat
+              ? branchSource === 'host'
+                ? 'border-[var(--accent)]'
+                : 'border-transparent hover:text-[var(--fg-secondary)]'
+              : branchSource === 'host'
+                ? 'border border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
+                : 'border border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:border-[var(--border)]'
           } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
-          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">Use host branch</div>
-          <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)] uppercase tracking-[0.08em]">Host branch</div>
-          <div className="mt-1 font-mono text-[var(--text-12)] text-[var(--fg-secondary)]">{hostBranchLabel(hostBranch)}</div>
+          {flat ? (
+            <div className="flex items-start gap-2.5">
+              <span aria-hidden="true" className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${branchSource === 'host' ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'}`} />
+              <span className="min-w-0">
+                <span className="block text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">Host branch</span>
+                <span className="mt-1 block truncate font-mono text-[var(--text-11)] text-[var(--muted)]">{hostBranchLabel(hostBranch)}</span>
+              </span>
+            </div>
+          ) : (
+            <>
+              <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">Use host branch</div>
+              <div className="mt-1 text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Host branch</div>
+              <div className="mt-1 font-mono text-[var(--text-12)] text-[var(--fg-secondary)]">{hostBranchLabel(hostBranch)}</div>
+            </>
+          )}
         </button>
         <button
           type="button"
           onClick={() => onBranchSourceChange('remote')}
           disabled={remoteBranchDisabled}
+          aria-pressed={branchSource === 'remote'}
           title={remoteBranchCheckoutDisabledReason ?? undefined}
-          className={`rounded-[var(--radius-xlarge)] border px-3 py-3 text-left transition-all ${
-            branchSource === 'remote'
-              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-              : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:border-[var(--border)]'
+          className={`${flat ? 'border-b-2 px-0' : 'rounded-[var(--radius-large)] px-3'} py-3 text-left transition-colors ${
+            flat
+              ? branchSource === 'remote'
+                ? 'border-[var(--accent)]'
+                : 'border-transparent hover:text-[var(--fg-secondary)]'
+              : branchSource === 'remote'
+                ? 'border border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
+                : 'border border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:border-[var(--border)]'
           } ${remoteBranchDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
-          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">Checkout remote branch</div>
-          <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
-            Creates from a remote-tracking ref without changing local branches.
-          </div>
-          <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
-            {remoteBranches.length} remote branch{remoteBranches.length === 1 ? '' : 'es'} available
-          </div>
+          {flat ? (
+            <div className="flex items-start gap-2.5">
+              <span aria-hidden="true" className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${branchSource === 'remote' ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'}`} />
+              <span className="min-w-0">
+                <span className="block text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">Remote branch</span>
+                <span className="mt-1 block text-[var(--text-10)] text-[var(--muted-dim)]">
+                  {remoteBranches.length} branch{remoteBranches.length === 1 ? '' : 'es'} available
+                </span>
+              </span>
+            </div>
+          ) : (
+            <>
+              <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">Checkout remote branch</div>
+              <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
+                Creates from a remote-tracking ref without changing local branches.
+              </div>
+              <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+                {remoteBranches.length} remote branch{remoteBranches.length === 1 ? '' : 'es'} available
+              </div>
+            </>
+          )}
         </button>
       </div>
       {!remoteBranchCheckoutEnabled && remoteBranchCheckoutDisabledReason ? (
@@ -127,7 +168,7 @@ export function RepoBranchSourceControls({
 
       {branchSource === 'host' ? (
         <label
-          className={`mt-3 inline-flex items-center gap-2 rounded-[var(--radius-large)] border border-[var(--border-subtle)] px-3 py-2 text-[var(--text-11)] ${
+          className={`mt-3 inline-flex items-center gap-2 ${flat ? 'py-2' : 'rounded-[var(--radius-large)] border border-[var(--border-subtle)] px-3 py-2'} text-[var(--text-11)] ${
             disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
           }`}
           title="Run git pull --ff-only on the current host branch before creating the drone."
