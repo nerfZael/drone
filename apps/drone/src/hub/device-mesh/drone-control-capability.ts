@@ -1,5 +1,6 @@
 import { DRONE_CONTROL_CAPABILITY, MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
 import type { CapabilityHandler } from './device-mesh-types';
+import { scheduleCreatedDroneAutoRename } from './auto-rename-created-drone';
 import { boundedDroneChatPage } from './drone-chat-page';
 import { isLikelyImagePath, isLikelyVideoPath } from '../filesystem-media';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
@@ -331,9 +332,14 @@ export function createDroneControlCapability(
 
       if (operation === 'drone.create.container' || operation === 'drone.create.host') {
         const agent = seedAgent(payload.seedAgent);
+        const requestedName = optionalText(payload.name);
+        const autoRenamePrompt =
+          payload.autoRename === true
+            ? optionalText(payload.autoRenamePrompt) ?? optionalText(payload.seedPrompt)
+            : undefined;
         const repoBranchSource = payload.repoBranchSource === 'remote' ? 'remote' : 'host';
         const createPayload = {
-          name: optionalText(payload.name),
+          name: requestedName,
           group: optionalText(payload.group),
           repoPath: optionalText(payload.repoPath),
           runtime: operation.endsWith('.host') ? 'host' : 'container',
@@ -366,10 +372,16 @@ export function createDroneControlCapability(
               }
             : {}),
         };
-        return await localHubRequest(access, '/api/drones', {
+        const created = await localHubRequest(access, '/api/drones', {
           method: 'POST',
           body: JSON.stringify(createPayload),
         });
+        const createdDroneId = firstText(created?.id, created?.droneId, created?.drone?.id);
+        if (!requestedName && autoRenamePrompt && createdDroneId) {
+          scheduleCreatedDroneAutoRename(access, createdDroneId, autoRenamePrompt);
+          return { ...created, autoRenameScheduled: true };
+        }
+        return created;
       }
 
       const droneId = requiredText(payload.droneId, 'droneId');

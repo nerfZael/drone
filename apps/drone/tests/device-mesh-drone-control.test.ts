@@ -3,6 +3,7 @@ import {
   createDroneControlCapability,
   deviceMeshDroneSummary,
 } from '../src/hub/device-mesh/drone-control-capability';
+import { autoRenameCreatedDroneFromPrompt } from '../src/hub/device-mesh/auto-rename-created-drone';
 
 describe('device mesh drone summaries', () => {
   test('preserves the sidebar hierarchy fields needed by mobile clients', () => {
@@ -239,6 +240,7 @@ describe('device mesh drone summaries', () => {
         seedReasoning: 'high',
         seedAgentPermissionMode: 'read-only',
         seedPrompt: 'Review the app',
+        autoRename: true,
       });
       expect(request).toMatchObject({
         method: 'POST',
@@ -259,8 +261,159 @@ describe('device mesh drone summaries', () => {
           seedPrompt: 'Review the app',
         },
       });
+      expect((request as { body: any } | null)?.body.autoRename).toBeUndefined();
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('schedules automatic naming for unnamed mobile-created drones', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ path: string; method: string; body: any }> = [];
+    let resolveSuggestion: ((response: Response) => void) | null = null;
+    globalThis.fetch = (async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      requests.push({
+        path,
+        method: String(init?.method ?? 'GET'),
+        body: JSON.parse(String(init?.body ?? '{}')),
+      });
+      if (path === '/api/drones') return Response.json({ ok: true, id: 'created-mobile' });
+      if (path === '/api/drones/name-from-message') {
+        return await new Promise<Response>((resolve) => {
+          resolveSuggestion = resolve;
+        });
+      }
+      return Response.json({ ok: true, renamed: true });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('drone.create.container', {
+          seedAgent: { kind: 'builtin', id: 'codex' },
+          autoRename: true,
+          autoRenamePrompt: 'Review the Android app',
+        }),
+      ).resolves.toMatchObject({
+        id: 'created-mobile',
+        autoRenameScheduled: true,
+      });
+      expect(requests[0]).toMatchObject({
+        path: '/api/drones',
+        body: {
+          runtime: 'container',
+        },
+      });
+      expect(requests[0]?.body.autoRenamePrompt).toBeUndefined();
+      expect(requests[1]).toMatchObject({
+        path: '/api/drones/name-from-message',
+        body: {
+          message: 'Review the Android app',
+          source: 'mobile-create-auto-rename',
+          droneId: 'created-mobile',
+        },
+      });
+
+      resolveSuggestion?.(Response.json({ ok: true, name: 'Review Android App' }));
+      for (let attempt = 0; attempt < 10 && requests.length < 3; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(requests[2]).toMatchObject({
+        path: '/api/drones/created-mobile/rename',
+        body: {
+          newName: 'Review Android App',
+          source: 'mobile-create-auto-rename',
+          attempt: 1,
+          suggestedBase: 'Review Android App',
+        },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('chooses a numbered automatic name when the first suggestion is already used', async () => {
+    const originalFetch = globalThis.fetch;
+    const renameBodies: any[] = [];
+    globalThis.fetch = (async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/drones/name-from-message') {
+        return Response.json({ ok: true, name: 'Review Android App' });
+      }
+      if (path === '/api/drones/drone-1/rename') {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        renameBodies.push(body);
+        if (renameBodies.length === 1) {
+          return Response.json(
+            { ok: false, error: 'drone already exists: Review Android App' },
+            { status: 409 },
+          );
+        }
+        return Response.json({ ok: true, renamed: true });
+      }
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      await expect(
+        autoRenameCreatedDroneFromPrompt(
+          { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+          'drone-1',
+          'Review the Android app',
+        ),
+      ).resolves.toBe('Review Android App (2)');
+      expect(renameBodies.map((body) => body.newName)).toEqual([
+        'Review Android App',
+        'Review Android App (2)',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('keeps a successful create when automatic naming is unavailable', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalWarn = console.warn;
+    const warnings: unknown[][] = [];
+    let createBody: any = null;
+    console.warn = (...args: unknown[]) => warnings.push(args);
+    globalThis.fetch = (async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/drones') {
+        createBody = JSON.parse(String(init?.body ?? '{}'));
+        return Response.json({ ok: true, id: 'created-without-name' });
+      }
+      return Response.json(
+        { ok: false, error: 'Connect Codex or configure an OpenAI API key in Settings.' },
+        { status: 412 },
+      );
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('drone.create.host', {
+          seedPrompt: 'Review the Android app',
+          autoRename: true,
+        }),
+      ).resolves.toMatchObject({ id: 'created-without-name', autoRenameScheduled: true });
+      expect(createBody).toMatchObject({
+        runtime: 'host',
+        seedPrompt: 'Review the Android app',
+      });
+      expect(createBody.autoRename).toBeUndefined();
+      expect(createBody.autoRenamePrompt).toBeUndefined();
+      for (let attempt = 0; attempt < 10 && warnings.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(String(warnings[0]?.[0] ?? '')).toContain('mobile-created drone auto-rename failed');
+    } finally {
+      globalThis.fetch = originalFetch;
+      console.warn = originalWarn;
     }
   });
 
