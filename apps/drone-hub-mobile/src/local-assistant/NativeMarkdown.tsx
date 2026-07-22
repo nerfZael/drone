@@ -1,5 +1,6 @@
 import React from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
 import { colors } from '../theme';
 import {
   parseNativeMarkdown,
@@ -56,9 +57,11 @@ function FileLinkedText({
 
 function InlineMarkdown({
   text,
+  tone,
   onOpenFileReference,
 }: {
   text: string;
+  tone: 'assistant' | 'user';
   onOpenFileReference?: (reference: MobileFileReference) => void;
 }) {
   return (
@@ -66,7 +69,9 @@ function InlineMarkdown({
       {parseNativeMarkdownInline(text).map((token: NativeMarkdownInline, index) => {
         const style =
           token.type === 'strong'
-            ? styles.strong
+            ? tone === 'user'
+              ? styles.userStrong
+              : styles.strong
             : token.type === 'emphasis'
               ? styles.emphasis
               : token.type === 'strike'
@@ -113,9 +118,11 @@ function InlineMarkdown({
 
 export function NativeMarkdown({
   text,
+  tone = 'assistant',
   onOpenFileReference,
 }: {
   text: string;
+  tone?: 'assistant' | 'user';
   onOpenFileReference?: (reference: MobileFileReference) => void;
 }) {
   const blocks = React.useMemo(() => parseNativeMarkdown(text), [text]);
@@ -127,16 +134,33 @@ export function NativeMarkdown({
             <Text
               selectable
               key={`heading:${index}`}
-              style={[styles.heading, block.level <= 2 ? styles.headingLarge : styles.headingSmall]}
+              style={[
+                styles.heading,
+                block.level <= 2 ? styles.headingLarge : styles.headingSmall,
+                tone === 'user' && styles.userText,
+              ]}
             >
-              <InlineMarkdown text={block.text} onOpenFileReference={onOpenFileReference} />
+              <InlineMarkdown
+                text={block.text}
+                tone={tone}
+                onOpenFileReference={onOpenFileReference}
+              />
             </Text>
           );
         }
         if (block.type === 'code') {
           const contentWidth = codeTextWidth(block.text);
+          const languageLabel = block.language.trim() || 'plain text';
           return (
             <View key={`code:${index}`} style={styles.codeBlock}>
+              <View style={styles.codeHeader}>
+                <View style={styles.codeMark}>
+                  <Text style={styles.codeMarkText}>{'</>'}</Text>
+                </View>
+                <Text numberOfLines={1} style={styles.codeLanguage}>
+                  {languageLabel}
+                </Text>
+              </View>
               <ScrollView
                 horizontal
                 nestedScrollEnabled
@@ -146,7 +170,11 @@ export function NativeMarkdown({
                 contentContainerStyle={styles.codeScrollContent}
               >
                 <View style={[styles.codeContent, { width: contentWidth + 24 }]}>
-                  <Text style={[styles.codeText, { width: contentWidth }]}>{block.text}</Text>
+                  <MobileHighlightedCode
+                    content={block.text}
+                    language={block.language}
+                    style={[styles.codeText, { width: contentWidth }]}
+                  />
                 </View>
               </ScrollView>
             </View>
@@ -164,8 +192,12 @@ export function NativeMarkdown({
               {block.callout ? (
                 <Text style={[styles.calloutLabel, calloutStyle?.label]}>{block.callout}</Text>
               ) : null}
-              <Text selectable style={styles.quoteText}>
-                <InlineMarkdown text={block.text} onOpenFileReference={onOpenFileReference} />
+              <Text selectable style={[styles.quoteText, tone === 'user' && styles.userText]}>
+                <InlineMarkdown
+                  text={block.text}
+                  tone={tone}
+                  onOpenFileReference={onOpenFileReference}
+                />
               </Text>
             </View>
           );
@@ -184,8 +216,12 @@ export function NativeMarkdown({
                         ? '☑'
                         : '☐'}
                   </Text>
-                  <Text selectable style={styles.body}>
-                    <InlineMarkdown text={item.text} onOpenFileReference={onOpenFileReference} />
+                  <Text selectable style={[styles.body, tone === 'user' && styles.userText]}>
+                    <InlineMarkdown
+                      text={item.text}
+                      tone={tone}
+                      onOpenFileReference={onOpenFileReference}
+                    />
                   </Text>
                 </View>
               ))}
@@ -214,10 +250,15 @@ export function NativeMarkdown({
                       <Text
                         selectable
                         key={cellIndex}
-                        style={[styles.tableCell, rowIndex === 0 && styles.tableHeadText]}
+                        style={[
+                          styles.tableCell,
+                          rowIndex === 0 && styles.tableHeadText,
+                          tone === 'user' && styles.userText,
+                        ]}
                       >
                         <InlineMarkdown
                           text={row[cellIndex] ?? ''}
+                          tone={tone}
                           onOpenFileReference={onOpenFileReference}
                         />
                       </Text>
@@ -229,8 +270,16 @@ export function NativeMarkdown({
           );
         }
         return (
-          <Text selectable key={`paragraph:${index}`} style={styles.body}>
-            <InlineMarkdown text={block.text} onOpenFileReference={onOpenFileReference} />
+          <Text
+            selectable
+            key={`paragraph:${index}`}
+            style={[styles.body, tone === 'user' && styles.userText]}
+          >
+            <InlineMarkdown
+              text={block.text}
+              tone={tone}
+              onOpenFileReference={onOpenFileReference}
+            />
           </Text>
         );
       })}
@@ -245,6 +294,8 @@ const styles = StyleSheet.create({
   headingLarge: { fontSize: 19, lineHeight: 25, marginTop: 3 },
   headingSmall: { fontSize: 16, lineHeight: 22, marginTop: 2 },
   strong: { fontWeight: '800', color: colors.text },
+  userStrong: { fontWeight: '800', color: colors.userBubbleText },
+  userText: { color: colors.userBubbleText },
   emphasis: { fontStyle: 'italic' },
   strike: { textDecorationLine: 'line-through', color: colors.muted },
   link: { color: colors.link, textDecorationLine: 'underline' },
@@ -268,10 +319,45 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     flexShrink: 1,
     borderWidth: 1,
-    borderColor: colors.surface0,
+    borderColor: colors.borderStrong,
     borderRadius: 10,
-    backgroundColor: colors.crust,
+    backgroundColor: colors.mantle,
     overflow: 'hidden',
+  },
+  codeHeader: {
+    minHeight: 31,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    backgroundColor: colors.surface0,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  codeMark: {
+    minWidth: 28,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
+    backgroundColor: colors.accentWash,
+  },
+  codeMarkText: {
+    color: colors.accent,
+    fontFamily: 'monospace',
+    fontSize: 8,
+    fontWeight: '800',
+  },
+  codeLanguage: {
+    flex: 1,
+    color: colors.textSecondary,
+    fontFamily: 'monospace',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
   },
   codeScroll: {
     width: '100%',

@@ -27,6 +27,7 @@ import { colors } from '../theme';
 import { QueuedPromptRows, type MobileQueuedPrompt } from '../components/QueuedPromptRows';
 import { ContextMenu } from '../components/Ui';
 import { NativeMarkdown } from './NativeMarkdown';
+import { nativeMarkdownHasCodeBlock } from './native-markdown-model';
 import {
   parseMobileFileReference,
   splitMobileFileReferences,
@@ -1000,6 +1001,7 @@ export function MobileAssistantTranscript({
       return null;
     const user = item.message.role === 'user';
     const assistant = item.message.role === 'assistant';
+    const userCodeBlock = user && nativeMarkdownHasCodeBlock(text);
     const timestamp = messageTimestamp(item.message);
     const timestampKey = `${item.key}:${String(timestamp ?? '')}`;
     const timestampVisible = visibleMessageTimestamps.has(timestampKey);
@@ -1013,10 +1015,16 @@ export function MobileAssistantTranscript({
         : undefined;
     const content = (
       <>
-        {text && assistant ? (
+        {text && (assistant || userCodeBlock) ? (
           <>
-            <NativeMarkdown text={text} onOpenFileReference={onOpenFileReference} />
-            <LinkedPullRequestAttachments text={text} context={linkedPullRequests} />
+            <NativeMarkdown
+              text={text}
+              tone={user ? 'user' : 'assistant'}
+              onOpenFileReference={onOpenFileReference}
+            />
+            {assistant ? (
+              <LinkedPullRequestAttachments text={text} context={linkedPullRequests} />
+            ) : null}
           </>
         ) : text ? (
           <LinkedMessageText text={text} user={user} onOpenFileReference={onOpenFileReference} />

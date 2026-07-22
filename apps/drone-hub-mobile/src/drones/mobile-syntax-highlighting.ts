@@ -152,6 +152,55 @@ const LANGUAGE_BY_MIME: Record<string, string> = {
   'text/xml': 'markup',
 };
 
+const LANGUAGE_BY_FENCE: Record<string, string | null> = {
+  c: 'c',
+  'c++': 'cpp',
+  cpp: 'cpp',
+  cs: 'csharp',
+  csharp: 'csharp',
+  css: 'css',
+  diff: 'diff',
+  docker: 'docker',
+  dockerfile: 'docker',
+  go: 'go',
+  graphql: 'graphql',
+  groovy: 'groovy',
+  html: 'markup',
+  ini: 'ini',
+  java: 'java',
+  javascript: 'javascript',
+  js: 'javascript',
+  json: 'json',
+  jsonc: 'json',
+  jsx: 'jsx',
+  kotlin: 'kotlin',
+  less: 'less',
+  makefile: 'makefile',
+  markup: 'markup',
+  php: 'php',
+  plaintext: null,
+  properties: 'properties',
+  py: 'python',
+  python: 'python',
+  rb: 'ruby',
+  ruby: 'ruby',
+  rust: 'rust',
+  sass: 'scss',
+  scss: 'scss',
+  sh: 'bash',
+  shell: 'bash',
+  sql: 'sql',
+  text: null,
+  toml: 'toml',
+  ts: 'typescript',
+  tsx: 'tsx',
+  typescript: 'typescript',
+  xml: 'markup',
+  yaml: 'yaml',
+  yml: 'yaml',
+  zsh: 'bash',
+};
+
 function fileName(path: string): string {
   const normalized = String(path ?? '')
     .trim()
@@ -169,6 +218,11 @@ export function mobileSyntaxLanguageForFile(path: string, mime = ''): string | n
   const fromExtension = LANGUAGE_BY_EXTENSION[extension];
   if (fromExtension) return fromExtension;
   return LANGUAGE_BY_MIME[String(mime).split(';', 1)[0]?.trim().toLowerCase()] ?? null;
+}
+
+export function mobileSyntaxLanguageForFence(languageRaw: string): string | null {
+  const language = String(languageRaw ?? '').trim().toLowerCase();
+  return language ? (LANGUAGE_BY_FENCE[language] ?? null) : null;
 }
 
 function nodeClasses(node: Extract<RefractorNode, { type: 'element' }>): string[] {
@@ -215,13 +269,11 @@ function plainHighlight(content: string, language: string | null): MobileSyntaxH
   };
 }
 
-export function highlightMobileCode(
+function highlightMobileCodeWithLanguage(
   content: string,
-  path: string,
-  mime = '',
+  language: string | null,
 ): MobileSyntaxHighlight {
   const source = String(content ?? '');
-  const language = mobileSyntaxLanguageForFile(path, mime);
   if (!language || source.length > MOBILE_SYNTAX_HIGHLIGHT_MAX_CHARS) {
     return plainHighlight(source, language);
   }
@@ -236,4 +288,20 @@ export function highlightMobileCode(
   } catch {
     return plainHighlight(source, language);
   }
+}
+
+export function highlightMobileCode(
+  content: string,
+  path: string,
+  mime = '',
+): MobileSyntaxHighlight {
+  const language = mobileSyntaxLanguageForFile(path, mime);
+  return highlightMobileCodeWithLanguage(content, language);
+}
+
+export function highlightMobileCodeFence(
+  content: string,
+  languageRaw: string,
+): MobileSyntaxHighlight {
+  return highlightMobileCodeWithLanguage(content, mobileSyntaxLanguageForFence(languageRaw));
 }
