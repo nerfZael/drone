@@ -148,6 +148,7 @@ describe('mobile drone sidebar model', () => {
         sidebarGroupOrder: ['repo:repo:/work/mapped'],
         sidebarDroneOrderByGroup: { 'group:Review': ['mapped'] },
         sidebarNodeOrderByParent: { root: ['drone:mapped'] },
+        pinnedDroneIds: ['mapped'],
       },
     });
 
@@ -164,6 +165,7 @@ describe('mobile drone sidebar model', () => {
       sidebarGroupOrder: ['repo:repo:/work/mapped'],
       sidebarDroneOrderByGroup: { 'group:Review': ['mapped'] },
       sidebarNodeOrderByParent: { root: ['drone:mapped'] },
+      pinnedDroneIds: ['mapped'],
     });
   });
 

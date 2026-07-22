@@ -158,6 +158,7 @@ export type UiPreferencesSettingsResponse = {
     sidebarDroneOrderByGroup: Record<string, string[]>;
     sidebarNodeOrderByParent: Record<string, string[]>;
     sidebarChatOrderByDrone: Record<string, string[]>;
+    pinnedDroneIds: string[];
     hiddenSidebarGroups: string[];
     autoDelete: boolean;
     spawnAgentKey: string;

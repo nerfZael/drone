@@ -206,6 +206,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent,
     sidebarChatOrderByDrone,
+    pinnedDroneIds,
     hiddenSidebarGroups,
     showHiddenSidebarGroups,
     autoDelete,
@@ -605,7 +606,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const [chatOpenRequestRevision, setChatOpenRequestRevision] = React.useState(0);
   const droneIdentityByNameRef = React.useRef<Record<string, string>>({});
   const llmSettingsState = useLlmSettings(requestJson);
-  const { reloadUiPreferences } = useUiPreferencesSettings({ requestJson });
+  const { reloadUiPreferences, reloadPinnedDrones, setDronePinned } =
+    useUiPreferencesSettings({ requestJson });
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
   const setupStatusState = useSetupStatus(requestJson);
   const { llmSettings } = llmSettingsState;
@@ -1597,6 +1599,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         void reloadUiPreferences();
         return;
       }
+      if (action.type === 'reload_pinned_drones') {
+        void reloadPinnedDrones();
+        return;
+      }
       if (action.type === 'open_whiteboard') {
         const whiteboardId = String(action.whiteboardId ?? '').trim() || 'main';
         try {
@@ -1643,7 +1649,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       closed = true;
       source.close();
     };
-  }, [expandGroupsForDroneIds, reloadUiPreferences, requestRightPanelTab, rightPanelBottomTab, rightPanelTab, selectDroneChat]);
+  }, [expandGroupsForDroneIds, reloadPinnedDrones, reloadUiPreferences, requestRightPanelTab, rightPanelBottomTab, rightPanelTab, selectDroneChat]);
   React.useEffect(
     () => () => {
       if (typeof window === 'undefined') return;
@@ -3742,6 +3748,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarDronesFilteredByRepo,
     sidebarVisibleDrones,
     sidebarDrones,
+    pinnedDroneIds,
     sidebarOptimisticDroneIdSet,
     selectedDroneSet,
     highlightedDroneIds,
@@ -3778,6 +3785,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     renameDrone,
     renameDrones,
     setDroneBaseImage,
+    setDronePinned,
     deleteDrone: requestDeleteDrone,
     reparentDronesToParent,
     openDroneErrorModal,

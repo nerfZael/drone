@@ -323,6 +323,7 @@ export function createDroneControlCapability(
             sidebarGroupOrder: textList(preferences.sidebarGroupOrder),
             sidebarDroneOrderByGroup: textListMap(preferences.sidebarDroneOrderByGroup),
             sidebarNodeOrderByParent: textListMap(preferences.sidebarNodeOrderByParent),
+            pinnedDroneIds: textList(preferences.pinnedDroneIds),
           },
           ...(payload.includeCreateOptions === true
             ? { createOptions: { repos: createRepos } }
@@ -386,6 +387,12 @@ export function createDroneControlCapability(
 
       const droneId = requiredText(payload.droneId, 'droneId');
       const encodedDrone = encodeURIComponent(droneId);
+      if (operation === 'drone.pin.update') {
+        return await localHubRequest(access, '/api/settings/ui-preferences/pinned-drones', {
+          method: 'POST',
+          body: JSON.stringify({ droneId, pinned: payload.pinned === true }),
+        });
+      }
       if (operation === 'drone.delete') {
         // Do not guess for a destructive operation. Falling back to permanent deletion when the
         // settings request fails can bypass an explicitly configured archive policy.

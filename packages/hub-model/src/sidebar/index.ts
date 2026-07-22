@@ -6,3 +6,4 @@ export * from './repo-groups';
 export * from './folder-tree';
 export * from './node-tree';
 export * from './model';
+export * from './pinned-drones';

@@ -199,6 +199,10 @@ export function DronesScreen({
   const [droneSidebarOrder, setDroneSidebarOrder] = React.useState<MobileDroneSidebarOrder>(
     EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   );
+  const droneSidebarOrderRef = React.useRef<MobileDroneSidebarOrder>(
+    EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+  );
+  const pinWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const [selected, setSelected] = React.useState<MobileDroneSummary | null>(null);
   const [chats, setChats] = React.useState<string[]>([]);
   const [chatName, setChatName] = React.useState('default');
@@ -240,6 +244,9 @@ export function DronesScreen({
   const [droneOperationById, setDroneOperationById] = React.useState<
     Record<string, 'archiving' | 'deleting'>
   >({});
+  const [pinningDroneIds, setPinningDroneIds] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [newDroneDefaults, setNewDroneDefaults] = React.useState<MobileDroneCreateDefaults | null>(
     null,
   );
@@ -267,6 +274,7 @@ export function DronesScreen({
     async () => {},
   );
   targetIdRef.current = targetId;
+  droneSidebarOrderRef.current = droneSidebarOrder;
   selectedRef.current = selected;
   chatNameRef.current = chatName;
 
@@ -322,6 +330,7 @@ export function DronesScreen({
         }
         loadedDronesTargetIdRef.current = targetId;
         setDrones(nextDrones);
+        droneSidebarOrderRef.current = normalized.sidebar;
         setDroneSidebarOrder(normalized.sidebar);
         const currentSelected = selectedRef.current;
         const nextSelected = currentSelected
@@ -430,6 +439,7 @@ export function DronesScreen({
     const createDefaultsVersion = ++createDefaultsRequestVersion.current;
     selectedRef.current = null;
     setDrones([]);
+    droneSidebarOrderRef.current = EMPTY_MOBILE_DRONE_SIDEBAR_ORDER;
     setDroneSidebarOrder(EMPTY_MOBILE_DRONE_SIDEBAR_ORDER);
     setSelected(null);
     setChats([]);
@@ -1454,6 +1464,67 @@ export function DronesScreen({
       ),
     [drones, pendingApprovals.length, selected?.id],
   );
+  const setDronePinned = React.useCallback(
+    (droneId: string, pinned: boolean): Promise<void> => {
+      const destinationId = targetId;
+      const write = async () => {
+        if (targetIdRef.current !== destinationId) return;
+        const previousIds = droneSidebarOrderRef.current.pinnedDroneIds;
+        const nextIds = pinned
+          ? previousIds.includes(droneId)
+            ? previousIds
+            : [...previousIds, droneId]
+          : previousIds.filter((id) => id !== droneId);
+        const optimisticOrder = { ...droneSidebarOrderRef.current, pinnedDroneIds: nextIds };
+        droneSidebarOrderRef.current = optimisticOrder;
+        setPinningDroneIds((current) => new Set(current).add(droneId));
+        setDroneSidebarOrder(optimisticOrder);
+        try {
+          const result = await requestDroneControl(destinationId, 'drone.pin.update', {
+            droneId,
+            pinned,
+          });
+          const savedIds: string[] = Array.isArray(result?.uiPreferences?.pinnedDroneIds)
+            ? [
+                ...new Set<string>(
+                  result.uiPreferences.pinnedDroneIds
+                    .map((id: unknown) => String(id ?? '').trim())
+                    .filter(Boolean),
+                ),
+              ]
+            : nextIds;
+          if (targetIdRef.current === destinationId) {
+            const savedOrder = { ...droneSidebarOrderRef.current, pinnedDroneIds: savedIds };
+            droneSidebarOrderRef.current = savedOrder;
+            setDroneSidebarOrder(savedOrder);
+          }
+        } catch (nextError: any) {
+          if (targetIdRef.current === destinationId) {
+            const restoredOrder = {
+              ...droneSidebarOrderRef.current,
+              pinnedDroneIds: previousIds,
+            };
+            droneSidebarOrderRef.current = restoredOrder;
+            setDroneSidebarOrder(restoredOrder);
+            setError(nextError?.message ?? String(nextError));
+          }
+        } finally {
+          setPinningDroneIds((current) => {
+            const next = new Set(current);
+            next.delete(droneId);
+            return next;
+          });
+        }
+      };
+      const queued = pinWriteQueueRef.current.then(write, write);
+      pinWriteQueueRef.current = queued.then(
+        () => undefined,
+        () => undefined,
+      );
+      return queued;
+    },
+    [requestDroneControl, targetId],
+  );
   React.useEffect(() => {
     const frame = requestAnimationFrame(() =>
       chatTabsRef.current?.scrollToEnd({ animated: false }),
@@ -1669,6 +1740,7 @@ export function DronesScreen({
         activeDroneId={selected?.id ?? ''}
         activeChatName={chatName}
         droneOperationById={droneOperationById}
+        pinningDroneIds={pinningDroneIds}
         dronesLoading={
           meshRouteAvailable && targetSupportsDrones && (!dronesLoaded || busy === 'drones')
         }
@@ -1701,6 +1773,7 @@ export function DronesScreen({
           onDrawerOpenChange(false);
           void openDrone(drone, nextChat);
         }}
+        onSetDronePinned={(droneId, pinned) => void setDronePinned(droneId, pinned)}
       />
       <KeyboardAvoidingView
         style={styles.content}

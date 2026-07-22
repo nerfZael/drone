@@ -18,6 +18,8 @@ type UseUiPreferencesSettingsArgs = {
 
 export type UseUiPreferencesSettingsResult = {
   reloadUiPreferences: () => Promise<void>;
+  reloadPinnedDrones: () => Promise<void>;
+  setDronePinned: (droneId: string, pinned: boolean) => Promise<boolean>;
 };
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -72,6 +74,7 @@ function normalizeUiPreferencesSnapshot(value: Partial<UiPreferencesSnapshot> | 
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(value?.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(value?.sidebarNodeOrderByParent),
     sidebarChatOrderByDrone: normalizeOrderedStringMap(value?.sidebarChatOrderByDrone),
+    pinnedDroneIds: normalizeOrderedStringList(value?.pinnedDroneIds),
     hiddenSidebarGroups: normalizeOrderedStringList(value?.hiddenSidebarGroups),
     autoDelete: value?.autoDelete === true,
     spawnAgentKey: normalizeTrimmedText(value?.spawnAgentKey, 200) || 'builtin:cursor',
@@ -94,6 +97,7 @@ function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boole
     Object.keys(value.sidebarDroneOrderByGroup).length > 0 ||
     Object.keys(value.sidebarNodeOrderByParent).length > 0 ||
     Object.keys(value.sidebarChatOrderByDrone).length > 0 ||
+    value.pinnedDroneIds.length > 0 ||
     value.hiddenSidebarGroups.length > 0 ||
     value.autoDelete ||
     value.spawnAgentKey !== 'builtin:cursor' ||
@@ -115,6 +119,7 @@ function mergeUiPreferencesForRecovery(base: UiPreferencesSnapshot, rescue: UiPr
       Object.keys(base.sidebarNodeOrderByParent).length > 0 ? base.sidebarNodeOrderByParent : rescue.sidebarNodeOrderByParent,
     sidebarChatOrderByDrone:
       Object.keys(base.sidebarChatOrderByDrone).length > 0 ? base.sidebarChatOrderByDrone : rescue.sidebarChatOrderByDrone,
+    pinnedDroneIds: base.pinnedDroneIds.length > 0 ? base.pinnedDroneIds : rescue.pinnedDroneIds,
     hiddenSidebarGroups: base.hiddenSidebarGroups.length > 0 ? base.hiddenSidebarGroups : rescue.hiddenSidebarGroups,
     autoDelete: base.autoDelete || rescue.autoDelete,
     spawnAgentKey: base.spawnAgentKey !== 'builtin:cursor' ? base.spawnAgentKey : rescue.spawnAgentKey,
@@ -158,6 +163,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent,
     sidebarChatOrderByDrone,
+    pinnedDroneIds,
     hiddenSidebarGroups,
     autoDelete,
     spawnAgentKey,
@@ -171,6 +177,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     setSidebarDroneOrderByGroup,
     setSidebarNodeOrderByParent,
     setSidebarChatOrderByDrone,
+    setPinnedDroneIds,
     setHiddenSidebarGroups,
     setAutoDelete,
     setSpawnAgentKey,
@@ -183,6 +190,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent: s.sidebarNodeOrderByParent,
       sidebarChatOrderByDrone: s.sidebarChatOrderByDrone,
+      pinnedDroneIds: s.pinnedDroneIds,
       hiddenSidebarGroups: s.hiddenSidebarGroups,
       autoDelete: s.autoDelete,
       spawnAgentKey: s.spawnAgentKey,
@@ -196,6 +204,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       setSidebarDroneOrderByGroup: s.setSidebarDroneOrderByGroup,
       setSidebarNodeOrderByParent: s.setSidebarNodeOrderByParent,
       setSidebarChatOrderByDrone: s.setSidebarChatOrderByDrone,
+      setPinnedDroneIds: s.setPinnedDroneIds,
       setHiddenSidebarGroups: s.setHiddenSidebarGroups,
       setAutoDelete: s.setAutoDelete,
       setSpawnAgentKey: s.setSpawnAgentKey,
@@ -205,6 +214,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
 
   const readyRef = React.useRef(false);
   const lastSavedSerializedRef = React.useRef('');
+  const pinWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const saveSeqRef = React.useRef(0);
   const saveTimeoutRef = React.useRef<number | null>(null);
 
@@ -217,6 +227,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       setSidebarDroneOrderByGroup(normalized.sidebarDroneOrderByGroup);
       setSidebarNodeOrderByParent(normalized.sidebarNodeOrderByParent);
       setSidebarChatOrderByDrone(normalized.sidebarChatOrderByDrone);
+      setPinnedDroneIds(normalized.pinnedDroneIds);
       setHiddenSidebarGroups(normalized.hiddenSidebarGroups);
       setAutoDelete(normalized.autoDelete);
       setSpawnAgentKey(normalized.spawnAgentKey);
@@ -228,6 +239,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       setSidebarDensityMode,
       setHiddenSidebarGroups,
       setSidebarChatOrderByDrone,
+      setPinnedDroneIds,
       setSidebarDroneOrderByGroup,
       setSidebarNodeOrderByParent,
       setSidebarGroupOrder,
@@ -254,6 +266,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
         sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent,
         sidebarChatOrderByDrone,
+        pinnedDroneIds,
         hiddenSidebarGroups,
         autoDelete,
         spawnAgentKey,
@@ -270,6 +283,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       repoCreateRemoteBranch,
       sidebarDensityMode,
       sidebarChatOrderByDrone,
+      pinnedDroneIds,
       sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent,
       sidebarGroupOrder,
@@ -336,5 +350,70 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     };
   }, [requestJson, snapshot]);
 
-  return { reloadUiPreferences };
+  const setDronePinned = React.useCallback(
+    (droneIdRaw: string, pinned: boolean): Promise<boolean> => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (!droneId) return Promise.resolve(false);
+      const write = async (): Promise<boolean> => {
+        try {
+          const data = await requestJson<UiPreferencesSettingsResponse>(
+            '/api/settings/ui-preferences/pinned-drones',
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ droneId, pinned }),
+            },
+          );
+          const savedPinnedDroneIds = normalizeOrderedStringList(
+            data.uiPreferences.pinnedDroneIds,
+          );
+          const current = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
+          const currentIsDirty =
+            serializeUiPreferencesSnapshot(current) !== lastSavedSerializedRef.current;
+          setPinnedDroneIds(savedPinnedDroneIds);
+          if (!currentIsDirty) {
+            lastSavedSerializedRef.current = serializeUiPreferencesSnapshot({
+              ...current,
+              pinnedDroneIds: savedPinnedDroneIds,
+            });
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const queued = pinWriteQueueRef.current.then(write, write);
+      pinWriteQueueRef.current = queued.then(
+        () => undefined,
+        () => undefined,
+      );
+      return queued;
+    },
+    [requestJson, setPinnedDroneIds],
+  );
+
+  const reloadPinnedDrones = React.useCallback(async () => {
+    try {
+      const data = await requestJson<UiPreferencesSettingsResponse>(
+        '/api/settings/ui-preferences',
+      );
+      const savedPinnedDroneIds = normalizeOrderedStringList(
+        data.uiPreferences.pinnedDroneIds,
+      );
+      const current = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
+      const currentIsDirty =
+        serializeUiPreferencesSnapshot(current) !== lastSavedSerializedRef.current;
+      setPinnedDroneIds(savedPinnedDroneIds);
+      if (!currentIsDirty) {
+        lastSavedSerializedRef.current = serializeUiPreferencesSnapshot({
+          ...current,
+          pinnedDroneIds: savedPinnedDroneIds,
+        });
+      }
+    } catch {
+      // Keep the current pin list when the backend copy is unavailable.
+    }
+  }, [requestJson, setPinnedDroneIds]);
+
+  return { reloadUiPreferences, reloadPinnedDrones, setDronePinned };
 }

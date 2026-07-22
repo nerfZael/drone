@@ -23,6 +23,7 @@ import {
 } from './file-preview-model';
 
 const LOCAL_DRONES_KEY = 'droneHub.nativeDrones.v1';
+const LOCAL_PINNED_DRONES_KEY = 'droneHub.nativePinnedDrones.v1';
 const LOCAL_PREVIEW_CHUNK_BYTES = 128 * 1024;
 
 function localArtifactPathParts(raw: unknown): string[] {
@@ -80,8 +81,10 @@ function uniqueDroneName(drones: LocalDroneRecord[], requested: unknown): string
 export function useLocalDroneControl() {
   const assistant = useLocalAssistant();
   const [drones, setDrones] = React.useState<LocalDroneRecord[]>([]);
+  const [pinnedDroneIds, setPinnedDroneIds] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(true);
   const dronesRef = React.useRef<LocalDroneRecord[]>([]);
+  const pinnedDroneIdsRef = React.useRef<string[]>([]);
   const writeRef = React.useRef(Promise.resolve());
   const loadedRef = React.useRef(false);
 
@@ -125,6 +128,27 @@ export function useLocalDroneControl() {
       active = false;
     };
   }, [assistant.loading, assistant.threads]);
+
+  React.useEffect(() => {
+    let active = true;
+    void AsyncStorage.getItem(LOCAL_PINNED_DRONES_KEY)
+      .then((stored) => {
+        if (!stored) return [];
+        const value: unknown = JSON.parse(stored);
+        return Array.isArray(value)
+          ? [...new Set(value.map((id: unknown) => String(id ?? '').trim()).filter(Boolean))]
+          : [];
+      })
+      .catch(() => [])
+      .then((ids) => {
+        if (!active) return;
+        pinnedDroneIdsRef.current = ids;
+        setPinnedDroneIds(ids);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const request = React.useCallback(
     async (operation: DroneControlOperation, payload: any = {}): Promise<any> => {
@@ -191,6 +215,7 @@ export function useLocalDroneControl() {
             sidebarGroupOrder: [],
             sidebarDroneOrderByGroup: {},
             sidebarNodeOrderByParent: {},
+            pinnedDroneIds: pinnedDroneIdsRef.current,
           },
           createOptions: { repos: [] },
         };
@@ -198,6 +223,21 @@ export function useLocalDroneControl() {
 
       if (operation === 'drone.create.container') {
         throw new Error('Container drones are not available on this phone');
+      }
+      if (operation === 'drone.pin.update') {
+        const droneId = String(payload.droneId ?? '').trim();
+        if (!dronesRef.current.some((drone) => drone.id === droneId)) {
+          throw new Error('Phone drone was not found');
+        }
+        const next = payload.pinned === true
+          ? pinnedDroneIdsRef.current.includes(droneId)
+            ? pinnedDroneIdsRef.current
+            : [...pinnedDroneIdsRef.current, droneId]
+          : pinnedDroneIdsRef.current.filter((id) => id !== droneId);
+        await AsyncStorage.setItem(LOCAL_PINNED_DRONES_KEY, JSON.stringify(next));
+        pinnedDroneIdsRef.current = next;
+        setPinnedDroneIds(next);
+        return { ok: true, uiPreferences: { pinnedDroneIds: next } };
       }
       if (operation === 'drone.create.host') {
         const name = uniqueDroneName(dronesRef.current, payload.name);
@@ -399,6 +439,7 @@ export function useLocalDroneControl() {
   );
 
   const revision = [
+    pinnedDroneIds.join(','),
     assistant.runningThreadId ?? '',
     assistant.pendingApprovals.map((approval) => approval.id).join(','),
     ...assistant.threads.map(

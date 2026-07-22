@@ -95,6 +95,7 @@ describe('device mesh drone summaries', () => {
                       sidebarGroupOrder: ['repo:repo:/work/one'],
                       sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
                       sidebarNodeOrderByParent: { root: ['drone:one'] },
+                      pinnedDroneIds: ['one'],
                     },
                   };
       return new Response(JSON.stringify(body), {
@@ -119,6 +120,7 @@ describe('device mesh drone summaries', () => {
           sidebarGroupOrder: ['repo:repo:/work/one'],
           sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
           sidebarNodeOrderByParent: { root: ['drone:one'] },
+          pinnedDroneIds: ['one'],
         },
         createOptions: {
           repos: [
@@ -153,6 +155,41 @@ describe('device mesh drone summaries', () => {
         },
       });
       expect(requestedPaths).toContain('/api/repos/branches?repoPath=%2Fwork%2Fone');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('forwards pin updates to the focused UI preference endpoint', async () => {
+    const originalFetch = globalThis.fetch;
+    let request: { url: string; method: string; body: unknown } | null = null;
+    globalThis.fetch = (async (input, init) => {
+      request = {
+        url: String(input),
+        method: String(init?.method ?? 'GET'),
+        body: JSON.parse(String(init?.body ?? '{}')),
+      };
+      return Response.json({
+        ok: true,
+        uiPreferences: { pinnedDroneIds: ['drone one'] },
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('drone.pin.update', { droneId: 'drone one', pinned: true }),
+      ).resolves.toMatchObject({
+        ok: true,
+        uiPreferences: { pinnedDroneIds: ['drone one'] },
+      });
+      expect(request).toEqual({
+        url: 'http://127.0.0.1:7777/api/settings/ui-preferences/pinned-drones',
+        method: 'POST',
+        body: { droneId: 'drone one', pinned: true },
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }

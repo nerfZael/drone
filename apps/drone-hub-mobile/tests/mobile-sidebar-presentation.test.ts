@@ -103,6 +103,22 @@ describe('mobile sidebar presentation', () => {
     );
   });
 
+  test('shows pinned drones first and gives every drone row a direct pin action', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds)');
+    expect(source).toContain(
+      'accessibilityLabel={pinned ? `Unpin ${drone.name}` : `Pin ${drone.name} to top`}',
+    );
+    expect(source).toContain('<Text style={styles.pinnedHeaderText}>Pinned</Text>');
+    expect(source).toContain('<Pin color={colors.mutedDim} size={13} strokeWidth={1.7} />');
+    expect(source).toContain('onSetDronePinned(drone.id, !pinned)');
+    expect(source.match(/<DrawerPinnedDrones/g)).toHaveLength(2);
+  });
+
   test('omits the selected-drone subtitle while preserving contextual create copy', () => {
     const dronesSource = readFileSync(
       new URL('../src/screens/DronesScreen.tsx', import.meta.url),

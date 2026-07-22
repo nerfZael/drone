@@ -103,6 +103,7 @@ export type MobileDroneSidebarOrder = {
   sidebarGroupOrder: string[];
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
+  pinnedDroneIds: string[];
 };
 
 export type MobileDroneCreateBranch = {
@@ -197,6 +198,7 @@ export const EMPTY_MOBILE_DRONE_SIDEBAR_ORDER: MobileDroneSidebarOrder = {
   sidebarGroupOrder: [],
   sidebarDroneOrderByGroup: {},
   sidebarNodeOrderByParent: {},
+  pinnedDroneIds: [],
 };
 
 export function suggestNextMobileDroneChatName(
@@ -403,6 +405,7 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
       sidebarGroupOrder: stringList(sidebar.sidebarGroupOrder),
       sidebarDroneOrderByGroup: stringListMap(sidebar.sidebarDroneOrderByGroup),
       sidebarNodeOrderByParent: stringListMap(sidebar.sidebarNodeOrderByParent),
+      pinnedDroneIds: stringList(sidebar.pinnedDroneIds),
     },
     createRepos,
     deleteMode: value.deleteMode === 'archive' ? 'archive' : 'permanent',
