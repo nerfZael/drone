@@ -204,14 +204,12 @@ export function useLocalDroneControl() {
                 : [],
             ),
             approvalChats: Object.entries(drone.chats).flatMap(([chatName, threadId]) =>
-              threadById.get(threadId)?.status === 'waiting_for_approval' ||
               assistant.pendingApprovals.some((approval) => approval.threadId === threadId)
                 ? [chatName]
                 : [],
             ),
             approvalRequired: Object.values(drone.chats).some(
               (threadId) =>
-                threadById.get(threadId)?.status === 'waiting_for_approval' ||
                 assistant.pendingApprovals.some((approval) => approval.threadId === threadId),
             ),
             createdAt: drone.createdAt,
