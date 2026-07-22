@@ -4,11 +4,43 @@ import {
   mergeMobileDraftWithVoiceTranscript,
   mobileVoiceRecordActionDisabled,
   mobileVoiceStatusLabel,
+  resolveMobileVoiceRecorderEvent,
   resolveMobileGroqTranscriptionResponse,
   shouldDiscardMobileVoiceWhenInactive,
 } from '../src/local-assistant/mobile-voice-transcription-model';
 
 describe('mobile voice transcription', () => {
+  test('keeps delayed native events from replacing the active recording', () => {
+    expect(
+      resolveMobileVoiceRecorderEvent({
+        activeUri: null,
+        eventUri: 'file:///previous.m4a',
+        failed: false,
+      }),
+    ).toEqual({ uri: null, handleFailure: false });
+    expect(
+      resolveMobileVoiceRecorderEvent({
+        activeUri: 'file:///current.m4a',
+        eventUri: 'file:///previous.m4a',
+        failed: false,
+      }),
+    ).toEqual({ uri: 'file:///current.m4a', handleFailure: false });
+    expect(
+      resolveMobileVoiceRecorderEvent({
+        activeUri: 'file:///current.m4a',
+        eventUri: 'file:///previous.m4a',
+        failed: true,
+      }),
+    ).toEqual({ uri: 'file:///current.m4a', handleFailure: false });
+    expect(
+      resolveMobileVoiceRecorderEvent({
+        activeUri: 'file:///current.m4a',
+        eventUri: 'file:///current.m4a',
+        failed: true,
+      }),
+    ).toEqual({ uri: 'file:///current.m4a', handleFailure: true });
+  });
+
   test('allows recording while a running chat accepts queued prompts', () => {
     expect(
       mobileVoiceRecordActionDisabled({
@@ -31,6 +63,9 @@ describe('mobile voice transcription', () => {
   test('appends a transcript to an existing draft like the desktop composer', () => {
     expect(mergeMobileDraftWithVoiceTranscript('', '  hello world  ')).toBe('hello world');
     expect(mergeMobileDraftWithVoiceTranscript('typed draft  ', 'voice text')).toBe(
+      'typed draft voice text',
+    );
+    expect(mergeMobileDraftWithVoiceTranscript('typed draft\n\n', 'voice text')).toBe(
       'typed draft voice text',
     );
     expect(

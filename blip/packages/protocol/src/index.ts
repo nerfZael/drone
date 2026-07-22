@@ -32,6 +32,44 @@ export type BlipSessionTiming = {
 
 export type BlipContextUsage = { tokens: number; contextWindow: number; percent: number };
 
+export type AgentRunFileChangeStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "type-changed"
+  | "unmerged"
+  | "unknown";
+
+export type AgentRunFileChangeEntry = {
+  path: string;
+  originalPath?: string | null;
+  status: AgentRunFileChangeStatus;
+  additions: number;
+  deletions: number;
+  binary?: boolean;
+};
+
+export type AgentRunFileChangeWorkspace = {
+  targetId: string;
+  droneId?: string;
+  label: string;
+  repoRoot: string;
+  diffArtifactId?: string;
+  counts: { changed: number; additions: number; deletions: number };
+  entries: AgentRunFileChangeEntry[];
+  truncated?: boolean;
+};
+
+export type AgentRunFileChanges = {
+  version: 1;
+  capturedAt: string;
+  counts: { changed: number; additions: number; deletions: number };
+  workspaces: AgentRunFileChangeWorkspace[];
+  truncated?: boolean;
+};
+
 export type BlipRuntimeEvent =
   | (BlipRuntimeEventBase & { type: "session_started"; workspaceRoot: string; model: string; permissionMode: BlipPermissionMode; toolProfile: BlipToolProfile; resumed: boolean })
   | (BlipRuntimeEventBase & { type: "turn_started"; prompt?: string })
@@ -47,7 +85,7 @@ export type BlipRuntimeEvent =
   | (BlipRuntimeEventBase & { type: "compaction_skipped"; reason: string })
   | (BlipRuntimeEventBase & { type: "compaction_completed"; summaryId: string; tokensBefore: number; tokensAfter: number })
   | (BlipRuntimeEventBase & { type: "session_error"; error: string; recoverable: boolean })
-  | (BlipRuntimeEventBase & { type: "session_finished"; status: BlipSessionStatus; changedFiles: string[]; durationMs: number; timing?: BlipSessionTiming; contextUsage?: BlipContextUsage; error?: string; toolFailures?: Array<{ callId: string; tool: string; error: string }> });
+  | (BlipRuntimeEventBase & { type: "session_finished"; status: BlipSessionStatus; changedFiles: string[]; fileChanges?: AgentRunFileChanges; durationMs: number; timing?: BlipSessionTiming; contextUsage?: BlipContextUsage; error?: string; toolFailures?: Array<{ callId: string; tool: string; error: string }> });
 
 export type BlipHistoryMessage = {
   role: string;

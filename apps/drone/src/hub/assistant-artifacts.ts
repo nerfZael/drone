@@ -128,6 +128,12 @@ function artifactsRoot(threadId: string): string {
   return droneRootPath('assistant-artifacts', safeThreadSegment(threadId));
 }
 
+export async function ensureAssistantArtifactsRoot(threadId: string): Promise<string> {
+  const root = artifactsRoot(threadId);
+  await fs.mkdir(root, { recursive: true });
+  return root;
+}
+
 function resolveArtifactPath(
   threadId: string,
   artifactPathRaw: unknown,
@@ -213,7 +219,10 @@ function mimeTypeForPath(artifactPath: string): string {
   }
 }
 
-export function createAssistantArtifactTransferAdapter(threadId: string): WorkspaceTransferAdapter {
+export function createAssistantArtifactTransferAdapter(
+  threadId: string,
+  beforeMutation?: () => Promise<void>,
+): WorkspaceTransferAdapter {
   const tempPath = (filePath: string, transferId: string) =>
     path.join(path.dirname(filePath), `.blip-transfer-${transferId}.part`);
   const resolve = (raw: unknown) =>
@@ -303,9 +312,11 @@ export function createAssistantArtifactTransferAdapter(threadId: string): Worksp
     },
     destination: {
       createDirectory: async (artifactPath) => {
+        await beforeMutation?.();
         await fs.mkdir(await writable(artifactPath), { recursive: true });
       },
       prepareFile: async ({ path: artifactPath, transferId, size, overwrite }) => {
+        await beforeMutation?.();
         const target = await writable(artifactPath);
         const existing = await fs
           .stat(target)
@@ -359,6 +370,7 @@ export function createAssistantArtifactTransferAdapter(threadId: string): Worksp
         }
       },
       commitFile: async ({ path: artifactPath, transferId, size, overwrite }) => {
+        await beforeMutation?.();
         const target = await writable(artifactPath);
         const temp = tempPath(target, transferId);
         const info = await fs

@@ -36,7 +36,7 @@ export function mergeDraftWithVoiceTranscript(draft: string, transcript: string)
   if (!cleanTranscript) return draft;
   const cleanDraft = draft.trimEnd();
   if (!cleanDraft) return cleanTranscript;
-  return `${cleanDraft}\n${cleanTranscript}`;
+  return `${cleanDraft} ${cleanTranscript}`;
 }
 
 export function concatArrayBuffers(chunks: ArrayBuffer[], totalBytes: number): ArrayBuffer {

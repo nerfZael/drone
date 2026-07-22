@@ -9,6 +9,7 @@ import { RelativeTimeText } from './RelativeTimeText';
 import { AgentPlanList } from './AgentPlanList';
 import { WorkingElapsedStatus } from './WorkingElapsedStatus';
 import { UserChatMessage } from './UserChatMessage';
+import { ChangedFilesCard } from './ChangedFilesCard';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
@@ -160,6 +161,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               ) : null}
             </>
           )}
+          <ChangedFilesCard fileChanges={item.fileChanges} />
         </ChatMessageFrame>
       ) : cancelError ? (
         <div className="mt-2 whitespace-pre-wrap text-right text-[var(--text-10)] text-[var(--red)]">

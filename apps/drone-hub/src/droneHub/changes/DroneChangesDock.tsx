@@ -5,6 +5,7 @@ import {
 } from '@drone/assistant-chat';
 import { requestJson } from '../http';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
+import { PaneLoadingState } from '../../ui/PaneLoadingState';
 import { IconChevron, IconFolder, iconForFilePath } from '../icons';
 import { IconEye, IconEyeOff, IconPencil } from '../app/icons';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
@@ -1132,7 +1133,10 @@ export function DroneChangesDock({
   }, [contextMode, disabled, droneId, primaryView, pullRequestNumber, refreshNonce, repoAttached, repoPath, selectedCommitSha]);
 
   const activePullRequestChanges =
-    contextMode === 'pull-request' && pullRequestNumber && pullRequestChanges?.pullRequest.number === pullRequestNumber
+    contextMode === 'pull-request' &&
+    pullRequestNumber &&
+    pullRequestChanges?.id === droneId &&
+    pullRequestChanges.pullRequest.number === pullRequestNumber
       ? pullRequestChanges
       : null;
 
@@ -1192,11 +1196,48 @@ export function DroneChangesDock({
   );
   const listLoading =
     dataMode === 'working-tree' ? changesLoading : dataMode === 'pull-request' ? pullRequestLoading : pullLoading;
-  const listError =
+  const rawListError =
     dataMode === 'working-tree' ? changesError : dataMode === 'pull-request' ? pullRequestError : pullError;
-  const commitList = contextMode === 'pull-request' ? pullRequestCommitList?.commits ?? [] : branchCommitList?.commits ?? [];
+  const activeListCacheKey =
+    dataMode === 'working-tree'
+      ? changesCacheKey('working-tree', droneId, repoPath)
+      : dataMode === 'pull-request'
+        ? pullRequestNumber
+          ? changesCacheKey('pull-request', droneId, repoPath, pullRequestNumber)
+          : ''
+        : changesCacheKey('pull-preview', droneId, repoPath);
+  const loadedListCacheKey =
+    dataMode === 'working-tree'
+      ? workingTreeCacheKeyRef.current
+      : dataMode === 'pull-request'
+        ? pullRequestCacheKeyRef.current
+        : pullPreviewCacheKeyRef.current;
+  const listError = activeListCacheKey === loadedListCacheKey ? rawListError : null;
+  const activeCommitList =
+    contextMode === 'pull-request'
+      ? pullRequestNumber &&
+        pullRequestCommitList?.id === droneId &&
+        pullRequestCommitList.pullNumber === pullRequestNumber
+        ? pullRequestCommitList
+        : null
+      : branchCommitList?.id === droneId
+        ? branchCommitList
+        : null;
+  const commitList = activeCommitList?.commits ?? [];
   const commitListLoading = contextMode === 'pull-request' ? pullRequestCommitListLoading : branchCommitListLoading;
-  const commitListError = contextMode === 'pull-request' ? pullRequestCommitListError : branchCommitListError;
+  const rawCommitListError = contextMode === 'pull-request' ? pullRequestCommitListError : branchCommitListError;
+  const activeCommitListCacheKey =
+    contextMode === 'pull-request'
+      ? pullRequestNumber
+        ? changesCacheKey('pull-request-commits', droneId, repoPath, pullRequestNumber)
+        : ''
+      : changesCacheKey('branch-commits', droneId, repoPath);
+  const loadedCommitListCacheKey =
+    contextMode === 'pull-request'
+      ? pullRequestCommitListCacheKeyRef.current
+      : branchCommitListCacheKeyRef.current;
+  const commitListError =
+    activeCommitListCacheKey === loadedCommitListCacheKey ? rawCommitListError : null;
   const storedActiveCommitDetails = contextMode === 'pull-request' ? pullRequestCommitDetails : branchCommitDetails;
   const activeCommitDetails =
     storedActiveCommitDetails && storedActiveCommitDetails.commit.sha === selectedCommitSha ? storedActiveCommitDetails : null;
@@ -2825,6 +2866,43 @@ export function DroneChangesDock({
 
   const statusLegendTitle = "Status badge uses S/U (staged/unstaged). '-' means no change and '?' means untracked.";
   const unavailableReason = String(repoUnavailableReason ?? '').trim();
+  const activeChangesPayload =
+    dataMode === 'working-tree'
+      ? changes?.id === droneId
+        ? changes
+        : null
+      : dataMode === 'pull-request'
+        ? activePullRequestChanges
+        : pullChanges?.id === droneId
+          ? pullChanges
+          : null;
+  const showingInitialLoad =
+    repoAttached &&
+    !disabled &&
+    (primaryView === 'commits'
+      ? !activeCommitList && !commitListError
+      : !activeChangesPayload && !listError);
+  const initialLoadingLabel =
+    primaryView === 'commits'
+      ? contextMode === 'pull-request'
+        ? 'Loading pull request commits…'
+        : 'Loading branch commits…'
+      : dataMode === 'pull-request'
+        ? 'Loading pull request…'
+        : dataMode === 'pull-preview'
+          ? 'Loading apply preview…'
+          : 'Loading changes…';
+
+  if (showingInitialLoad) {
+    return (
+      <div
+        ref={dockRootRef}
+        className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden dh-changes-dock"
+      >
+        <PaneLoadingState label={initialLoadingLabel} />
+      </div>
+    );
+  }
 
   return (
     <div

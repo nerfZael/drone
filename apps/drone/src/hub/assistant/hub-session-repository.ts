@@ -183,17 +183,49 @@ export class HubSessionRepository implements SessionRepository {
       SELECT sequence, entry_json
       FROM assistant_blip_entries
       WHERE session_id = ?
-        AND json_extract(entry_json, '$.type') = 'message'
+        AND (
+          json_extract(entry_json, '$.type') = 'message'
+          OR (
+            json_extract(entry_json, '$.type') = 'runtime_event'
+            AND json_extract(entry_json, '$.event.type') = 'session_finished'
+            AND COALESCE(json_extract(entry_json, '$.event.fileChanges.counts.changed'), 0) > 0
+          )
+        )
         AND (? IS NULL OR sequence < ?)
       ORDER BY sequence DESC
       LIMIT ?
     `).all(sessionId, before, before, limit + 1) as Array<{ sequence: number; entry_json: string }>;
     const hasOlder = rows.length > limit;
     const selected = (hasOlder ? rows.slice(0, limit) : rows).reverse();
-    const entries = selected.flatMap((row) => {
+    const entries = selected.flatMap<BlipHistoryPage['entries'][number]>((row) => {
       try {
-        const entry = JSON.parse(row.entry_json) as Extract<TranscriptEntry, { type: 'message' }>;
-        return [{ sequence: Number(row.sequence), id: entry.id, timestamp: entry.timestamp, message: entry.message }];
+        const entry = JSON.parse(row.entry_json) as TranscriptEntry;
+        if (entry.type === 'message') {
+          return [{
+            sequence: Number(row.sequence),
+            id: entry.id,
+            timestamp: entry.timestamp,
+            message: entry.message,
+          }];
+        }
+        if (entry.type === 'runtime_event' && entry.event.type === 'session_finished') {
+          return [{
+            sequence: Number(row.sequence),
+            id: entry.id,
+            timestamp: entry.timestamp,
+            message: {
+              role: 'runSummary',
+              content: '',
+              details: {
+                turnId: entry.event.turnId,
+                status: entry.event.status,
+                durationMs: entry.event.durationMs,
+                fileChanges: entry.event.fileChanges,
+              },
+            },
+          }];
+        }
+        return [];
       } catch {
         return [];
       }

@@ -14,6 +14,7 @@ import { DroneFilesDock } from '../files/DroneFilesDock';
 import { DronePullRequestsDock } from '../pullRequests/DronePullRequestsDock';
 import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-state';
 import { WhiteboardDock } from '../whiteboard/WhiteboardDock';
+import { PaneLoadingState } from '../../ui/PaneLoadingState';
 import {
   RIGHT_PANEL_TAB_LABELS,
   RIGHT_PANEL_TABS,
@@ -42,15 +43,8 @@ export function RightPanelPaneLoadingFallback({ tab }: { tab: RightPanelTab }) {
   const label = RIGHT_PANEL_TAB_LABELS[tab] ?? 'Pane';
   const loadingLabel = tab === 'env' ? 'environment' : label.toLowerCase();
   return (
-    <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex items-start px-2.5 py-2">
-      <div className="w-full rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-12)] text-[var(--muted)]">
-        <div className="text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-          {label}
-        </div>
-        <div className="mt-1" aria-live="polite">
-          Loading {loadingLabel}...
-        </div>
-      </div>
+    <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden">
+      <PaneLoadingState label={`Loading ${loadingLabel}…`} />
     </div>
   );
 }

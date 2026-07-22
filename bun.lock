@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "drone-monorepo",
@@ -98,6 +99,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@blip/core": "workspace:*",
+        "@blip/protocol": "workspace:*",
         "@blip/workspace": "workspace:*",
         "@drone/assistant-chat": "workspace:*",
         "@drone/device-protocol": "workspace:*",
@@ -341,6 +343,9 @@
     "packages/assistant-chat": {
       "name": "@drone/assistant-chat",
       "version": "0.1.0",
+      "dependencies": {
+        "@blip/protocol": "workspace:*",
+      },
       "devDependencies": {
         "typescript": "^5.6.3",
       },

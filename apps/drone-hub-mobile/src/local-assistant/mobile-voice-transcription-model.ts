@@ -8,6 +8,18 @@ export type MobileVoiceRecordingStatus =
 export const MOBILE_GROQ_TRANSCRIPTION_MODEL = 'whisper-large-v3-turbo';
 export const MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES = 25 * 1024 * 1024;
 
+export function resolveMobileVoiceRecorderEvent(input: {
+  activeUri: string | null;
+  eventUri: string | null;
+  failed: boolean;
+}): { uri: string | null; handleFailure: boolean } {
+  if (!input.failed) return { uri: input.activeUri, handleFailure: false };
+  if (input.eventUri && input.activeUri && input.eventUri !== input.activeUri) {
+    return { uri: input.activeUri, handleFailure: false };
+  }
+  return { uri: input.activeUri || input.eventUri, handleFailure: true };
+}
+
 export function mobileVoiceRecordActionDisabled(input: {
   editable: boolean;
   sending: boolean;

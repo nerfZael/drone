@@ -5,6 +5,7 @@ import { MarkdownMessage } from '../chat/MarkdownMessage';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import {
   AgentChatTranscript,
+  ChangedFilesCard,
   ChatSurfaceComposer,
   EmptyState,
   useAgentChatSurfaceAdapter,
@@ -491,7 +492,8 @@ export function AssistantDock({
   }, [visibleItems]);
   const hasActiveToolRun = React.useMemo(() => {
     return visibleItems.some(
-      (item, index) => index > latestUserItemIndex && item.type !== 'message',
+      (item, index) =>
+        index > latestUserItemIndex && (item.type === 'tool' || item.type === 'toolGroup'),
     );
   }, [latestUserItemIndex, visibleItems]);
   const latestUserStartedAt = React.useMemo(() => {
@@ -1512,13 +1514,26 @@ export function AssistantDock({
   }
   let lastToolItemIndex = -1;
   for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
-    if (visibleItems[index]?.type === 'message') continue;
+    if (visibleItems[index]?.type !== 'tool' && visibleItems[index]?.type !== 'toolGroup') continue;
     lastToolItemIndex = index;
     break;
   }
 
   for (let itemIndex = 0; itemIndex < visibleItems.length; itemIndex += 1) {
     const item = visibleItems[itemIndex]!;
+    if (item.type === 'runSummary') {
+      nativeTranscriptItems.push({
+        key: item.key,
+        kind: 'status',
+        latestActivityEligible: false,
+        content: (
+          <ChangedFilesCard
+            fileChanges={item.fileChanges}
+          />
+        ),
+      });
+      continue;
+    }
     if (item.type === 'message') {
       const jobsTurn = -(item.sourceMessageIndex + 1);
       const latestActivityEligible = Boolean(
@@ -1580,7 +1595,7 @@ export function AssistantDock({
     const runStartIndex = itemIndex;
     while (itemIndex < visibleItems.length) {
       const runItem = visibleItems[itemIndex]!;
-      if (runItem.type === 'message') break;
+      if (runItem.type === 'message' || runItem.type === 'runSummary') break;
       if (runItem.type === 'tool') runItems.push(runItem);
       else runItems.push(...runItem.items);
       itemIndex += 1;

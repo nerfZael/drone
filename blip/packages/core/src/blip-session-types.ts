@@ -8,6 +8,7 @@ import type { ImageContent, Model } from '@mariozechner/pi-ai';
 import type { PermissionMode, ToolProfile } from '@blip/tools';
 import type { CompactionSettings } from './compaction.js';
 import type { SessionRepository } from './session-repository.js';
+import type { AgentRunFileChanges } from '@blip/protocol';
 import type { BlipRuntimeEvent, BlipSessionState } from './types.js';
 import type { BlipRuntimeDiagnostics } from './platform.js';
 
@@ -54,7 +55,10 @@ export type BlipToolPreflight = (
 
 export interface BlipPromptLifecycleContext extends BlipSessionContext {
   prompt: AgentMessage;
+  turnId: string;
 }
+
+export type BlipPromptLifecycleResult = { fileChanges?: AgentRunFileChanges };
 
 export interface CreateBlipSessionOptions {
   workspaceRoot: string;
@@ -79,7 +83,9 @@ export interface CreateBlipSessionOptions {
   compactionSettings?: CompactionSettings;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   beforePrompt?: (context: BlipPromptLifecycleContext) => Promise<void> | void;
-  afterPrompt?: (context: BlipPromptLifecycleContext) => Promise<void> | void;
+  afterPrompt?: (
+    context: BlipPromptLifecycleContext,
+  ) => Promise<BlipPromptLifecycleResult | void> | BlipPromptLifecycleResult | void;
   processExitDiagnosticsDelayMs?: number;
   runtimeDiagnostics?: () => BlipRuntimeDiagnostics;
 }

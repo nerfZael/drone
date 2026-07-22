@@ -15,9 +15,10 @@ function readAscii(view: DataView, offset: number, length: number): string {
 }
 
 describe('chat voice recorder helpers', () => {
-  test('merges voice transcript below existing draft text', () => {
+  test('merges voice transcript after existing draft text with one space', () => {
     expect(mergeDraftWithVoiceTranscript('', ' hello world ')).toBe('hello world');
-    expect(mergeDraftWithVoiceTranscript('existing draft  ', 'new transcript')).toBe('existing draft\nnew transcript');
+    expect(mergeDraftWithVoiceTranscript('existing draft  ', 'new transcript')).toBe('existing draft new transcript');
+    expect(mergeDraftWithVoiceTranscript('existing draft\n\n', 'new transcript')).toBe('existing draft new transcript');
     expect(mergeDraftWithVoiceTranscript('existing draft', '   ')).toBe('existing draft');
   });
 

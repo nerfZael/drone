@@ -624,7 +624,7 @@ class BlipSession implements BlipSessionHandle {
     try {
       await this.maybeAutoCompact();
       await this.refreshSystemPrompt();
-      await this.options.beforePrompt?.({ ...this.context(), prompt: message });
+      await this.options.beforePrompt?.({ ...this.context(), prompt: message, turnId: active.turnId });
       if (active.cancelRequested) active.cancelled = true;
       else await this.agent.prompt(message);
     } catch (error) {
@@ -637,7 +637,11 @@ class BlipSession implements BlipSessionHandle {
       }
     } finally {
       try {
-        await this.options.afterPrompt?.({ ...this.context(), prompt: message });
+        const lifecycleResult = await this.options.afterPrompt?.({
+          ...this.context(),
+          prompt: message,
+          turnId: active.turnId,
+        });
         await this.options.sessionRepository.save(this.state);
         const finishedAt = Date.now();
         const status = active.cancelled ? 'cancelled' : active.failed ? 'error' : 'completed';
@@ -647,6 +651,7 @@ class BlipSession implements BlipSessionHandle {
           type: 'session_finished',
           status,
           changedFiles: this.state.changedFiles,
+          ...(lifecycleResult?.fileChanges ? { fileChanges: lifecycleResult.fileChanges } : {}),
           durationMs: finishedAt - active.startedAt,
           timing: active.timing.finish(finishedAt),
           ...(contextUsage ? { contextUsage } : {}),

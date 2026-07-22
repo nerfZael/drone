@@ -1,4 +1,5 @@
 import type { AssistantMessage } from './assistant-message-types';
+import type { AgentRunFileChanges } from '@blip/protocol';
 
 export type AssistantToolCall = { id: string; name: string; args: any };
 export type AssistantToolRenderItem = {
@@ -16,7 +17,8 @@ export type AssistantRenderItem =
       sourceMessageIndex: number;
     }
   | AssistantToolRenderItem
-  | { type: 'toolGroup'; key: string; items: AssistantToolRenderItem[] };
+  | { type: 'toolGroup'; key: string; items: AssistantToolRenderItem[] }
+  | { type: 'runSummary'; key: string; fileChanges: AgentRunFileChanges };
 
 export function messageText(message: AssistantMessage): string {
   const content = message.content;
@@ -211,6 +213,17 @@ export function renderItemsFromMessages(messages: AssistantMessage[]): Assistant
   const items: AssistantRenderItem[] = [];
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
+    if (message.role === 'runSummary') {
+      const fileChanges = (message.details as any)?.fileChanges as AgentRunFileChanges | undefined;
+      if (fileChanges?.version === 1 && fileChanges.counts?.changed > 0) {
+        items.push({
+          type: 'runSummary',
+          key: `run-summary:${message.id ?? index}`,
+          fileChanges,
+        });
+      }
+      continue;
+    }
     if (message.role === 'toolResult') {
       if (consumedToolResults.has(index)) continue;
       const resultKey = String(message.toolCallId ?? '').trim();
