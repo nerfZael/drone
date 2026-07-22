@@ -517,6 +517,30 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     next.createDroneChat = { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false };
     changed = true;
   }
+  const currentDefaultMigrations: Array<[keyof ShortcutBindingMap, string, string]> = [
+    ['createDraftDrone', 'tab', '1'],
+    ['createChildDraftDrone', 'q', '3'],
+    ['createDroneChat', 'w', '2'],
+  ];
+  for (const [actionId, previousKey, nextKey] of currentDefaultMigrations) {
+    if (!isExactShortcutBinding(next[actionId], {
+      key: previousKey,
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    })) continue;
+    next[actionId] = {
+      key: nextKey,
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    };
+    changed = true;
+  }
   return changed ? next : value;
 }
 

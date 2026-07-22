@@ -4,16 +4,25 @@ import type { ShortcutActionId } from './shortcuts';
 
 type EditableShortcutDispatchArgs = {
   matchedActionId: ShortcutActionId | null;
+  matchedShortcutKey?: string | null;
   targetInPrimaryChatInput: boolean;
   targetInCanvasMessageInput: boolean;
   targetInAssistantChatInput: boolean;
 };
 
 export function shouldDispatchEditableShortcutAction(_args: EditableShortcutDispatchArgs): boolean {
-  const { matchedActionId, targetInPrimaryChatInput, targetInCanvasMessageInput, targetInAssistantChatInput } = _args;
+  const {
+    matchedActionId,
+    matchedShortcutKey,
+    targetInPrimaryChatInput,
+    targetInCanvasMessageInput,
+    targetInAssistantChatInput,
+  } = _args;
   const inDraftShortcutChatInput = targetInPrimaryChatInput || targetInCanvasMessageInput;
   const inVoiceShortcutChatInput = inDraftShortcutChatInput || targetInAssistantChatInput;
-  if (matchedActionId === 'createDraftDrone') return inDraftShortcutChatInput;
+  if (matchedActionId === 'createDraftDrone') {
+    return matchedShortcutKey === 'tab' && inDraftShortcutChatInput;
+  }
   if (matchedActionId === 'toggleVoiceClipboardRecording') {
     return inVoiceShortcutChatInput;
   }
