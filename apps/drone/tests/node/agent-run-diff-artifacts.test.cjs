@@ -6,6 +6,8 @@ const path = require('node:path');
 const { afterEach, describe, test } = require('node:test');
 
 const {
+  AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES,
+  AGENT_RUN_DIFF_TOTAL_PATCH_MAX_BYTES,
   cleanupAgentRunDiffArtifacts,
   persistAgentRunDiffArtifact,
   readAgentRunFileDiff,
@@ -142,6 +144,29 @@ describe('agent run diff artifacts', () => {
       chatName: 'default',
       promptId: 'prompt-1',
     });
+  });
+
+  test('bounds Git patch output before storing a large run diff', async () => {
+    useDroneDataDir();
+    const repoPath = createRepository();
+    const largePath = path.join(repoPath, 'large.txt');
+    fs.writeFileSync(largePath, 'before\n');
+    git(repoPath, 'add', 'large.txt');
+    git(repoPath, 'commit', '--quiet', '-m', 'add large fixture');
+    const drone = { runtime: 'host', repoAttached: true, repoPath, name: 'Host drone' };
+    const baseline = await captureDroneRunFileChangesBaseline({ droneId: 'host-large', drone });
+    fs.writeFileSync(largePath, `${'x'.repeat(AGENT_RUN_DIFF_TOTAL_PATCH_MAX_BYTES + 1024)}\n`);
+
+    const summary = await finalizeDroneRunFileChanges({ baseline, drone });
+    const artifactId = summary.workspaces[0].diffArtifactId;
+    assert.ok(artifactId);
+    const historical = await readAgentRunFileDiff({ artifactId, path: 'large.txt' });
+
+    assert.equal(historical.truncated, true);
+    assert.ok(
+      Buffer.byteLength(historical.patch, 'utf8') <= AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES + 64,
+    );
+    assert.match(historical.patch, /diff truncated/);
   });
 
   test('captures native assistant artifact workspace changes', async () => {

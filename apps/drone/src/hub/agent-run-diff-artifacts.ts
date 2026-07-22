@@ -18,8 +18,8 @@ import { droneRootPath } from '../host/paths';
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
 
-const PATCH_FILE_MAX_BYTES = 512 * 1024;
-const ARTIFACT_PATCH_MAX_BYTES = 24 * 1024 * 1024;
+export const AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES = 512 * 1024;
+export const AGENT_RUN_DIFF_TOTAL_PATCH_MAX_BYTES = 24 * 1024 * 1024;
 const ARTIFACT_STORE_MAX_BYTES = 1024 * 1024 * 1024;
 const ARTIFACT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const ARTIFACT_WRITE_CONCURRENCY = 6;
@@ -196,10 +196,10 @@ function parseManifest(raw: string): ArtifactManifest {
 
 function truncatePatch(raw: string): { patch: string; bytes: number; truncated: boolean } {
   const source = Buffer.from(raw, 'utf8');
-  if (source.length <= PATCH_FILE_MAX_BYTES) {
+  if (source.length <= AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES) {
     return { patch: raw, bytes: source.length, truncated: false };
   }
-  const bounded = source.subarray(0, PATCH_FILE_MAX_BYTES).toString('utf8');
+  const bounded = source.subarray(0, AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES).toString('utf8');
   const lastNewline = bounded.lastIndexOf('\n');
   const patch = `${lastNewline > 0 ? bounded.slice(0, lastNewline + 1) : bounded}\n… diff truncated …\n`;
   return { patch, bytes: Buffer.byteLength(patch), truncated: true };
@@ -254,7 +254,7 @@ export async function persistAgentRunDiffArtifact(input: {
         files[index] = { ...base, unavailableReason: 'empty' };
         return;
       }
-      if (artifactPatchBytes + bounded.bytes > ARTIFACT_PATCH_MAX_BYTES) {
+      if (artifactPatchBytes + bounded.bytes > AGENT_RUN_DIFF_TOTAL_PATCH_MAX_BYTES) {
         files[index] = { ...base, unavailableReason: 'artifact-limit' };
         return;
       }
@@ -374,9 +374,7 @@ export async function cleanupAgentRunDiffArtifacts(input?: {
   await repository().remove(remove.map((record) => record.id));
   const removedIds = new Set(remove.map((record) => record.id));
   const retainedDirectories = new Set(
-    records
-      .filter((record) => !removedIds.has(record.id))
-      .map((record) => record.storage_dir),
+    records.filter((record) => !removedIds.has(record.id)).map((record) => record.storage_dir),
   );
   await cleanupOrphanedArtifactDirectories(retainedDirectories, nowMs);
   return { removed: remove.length };
