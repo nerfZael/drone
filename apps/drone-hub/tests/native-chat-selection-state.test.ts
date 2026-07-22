@@ -4,6 +4,7 @@ import {
   chatInfoForSelection,
 } from '../src/droneHub/app/chat-selection-model';
 import {
+  localQueuedPromptStateWhileFlushing,
   shouldFlushLocalQueuedPrompts,
   visiblePendingPromptsForAgent,
 } from '../src/droneHub/app/use-chat-runtime-orchestration';
@@ -140,5 +141,11 @@ describe('native chat selection state', () => {
     expect(shouldFlushLocalQueuedPrompts({ draft: false, hubPhase: 'seeding' })).toBe(false);
     expect(shouldFlushLocalQueuedPrompts({ draft: false, hubPhase: 'ready' })).toBe(true);
     expect(shouldFlushLocalQueuedPrompts({ draft: false, hubPhase: 'error' })).toBe(false);
+  });
+
+  test('does not present draft persistence as active agent work', () => {
+    expect(localQueuedPromptStateWhileFlushing({ draft: true, hubPhase: 'draft' })).toBe('queued');
+    expect(localQueuedPromptStateWhileFlushing({ draft: false, hubPhase: 'draft' })).toBe('queued');
+    expect(localQueuedPromptStateWhileFlushing({ draft: false, hubPhase: 'ready' })).toBe('sending');
   });
 });

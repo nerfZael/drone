@@ -118,6 +118,14 @@ export function shouldFlushLocalQueuedPrompts(
   return !isDroneStartingOrSeeding(drone.hubPhase);
 }
 
+export function localQueuedPromptStateWhileFlushing(
+  drone: Pick<DroneSummary, 'draft' | 'hubPhase'> | null | undefined,
+): PendingPrompt['state'] {
+  // Persisting a draft prompt is not the same as submitting it to an agent.
+  // Keep its presentation queued until the server confirms the durable row.
+  return drone?.draft === true || drone?.hubPhase === 'draft' ? 'queued' : 'sending';
+}
+
 export function visiblePendingPromptsForAgent(opts: {
   agentKind: ChatAgentConfig['kind'] | null | undefined;
   chatUiMode: 'transcript' | 'cli';
@@ -480,7 +488,10 @@ export function useChatRuntimeOrchestration({
           // Preserve strict FIFO ordering: if the head failed (or is mid-send), don't send later items.
           if (head.state !== 'queued') return;
 
-          patchQueuedPrompt(key, head.id, { state: 'sending', error: undefined });
+          patchQueuedPrompt(key, head.id, {
+            state: localQueuedPromptStateWhileFlushing(drone),
+            error: undefined,
+          });
           try {
             const data = await sendDroneChatPrompt(requestJson, {
               droneId: parsed.droneId,

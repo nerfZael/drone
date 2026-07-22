@@ -78,9 +78,8 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).toContain('text-[var(--yellow)]');
     expect(html.indexOf('animate-[spin_1.6s_linear_infinite]')).toBeLessThan(html.indexOf('>worker</span>'));
     expect(html).not.toContain('>Working</span>');
-    expect(html).toContain('text-[var(--sidebar-meta-fg)] opacity-55');
-    expect(html).toContain('data-sidebar-runtime="container"');
-    expect(html).toContain('aria-label="container runtime"');
+    expect(html).not.toContain('data-sidebar-runtime');
+    expect(html).not.toContain('aria-label="container runtime"');
     expect(html).not.toContain('>container</span>');
   });
 
@@ -156,7 +155,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(source).toContain("actionMenuOpen ? 'z-50' : ''");
   });
 
-  test('uses two rows while hover actions replace the bottom-right runtime label', () => {
+  test('uses two rows while hover actions occupy the otherwise empty bottom-right slot', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
         drone: drone({ lastMessageAt: '2026-07-20T11:00:00.000Z' }),
@@ -174,9 +173,39 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).toContain('col-start-2 row-start-1 ml-1.5');
     expect(html).toContain('col-start-2 row-start-2 ml-1.5');
     expect(html).not.toContain('min-w-[2.75rem]');
-    expect(html).toContain('group-hover/drone:opacity-0');
+    expect(html).not.toContain('data-sidebar-runtime');
     expect(html).toContain('absolute right-0 top-1/2');
     expect(html).toContain('Last message');
+  });
+
+  test('replaces the message timestamp with a clean draft pill for draft drones', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({
+          draft: true,
+          hubPhase: 'draft',
+          lastMessageAt: '2026-07-20T11:00:00.000Z',
+        }),
+        selected: false,
+        unreadAgentMessage: true,
+        onClick: () => {},
+      }),
+    );
+
+    expect(html).toContain('aria-label="Draft drone"');
+    expect(html).toContain('rounded-[3px]');
+    expect(html).toContain('bg-[var(--accent-subtle)]');
+    expect(html).toContain('text-[var(--accent)]');
+    expect(html).toContain('normal-case');
+    expect(html).not.toContain('border-[var(--accent-muted)]');
+    expect(html).not.toContain('h-1 w-1 rounded-full');
+    expect(html).not.toContain('h-1.5 w-1.5 rounded-full');
+    expect(html).not.toContain('bg-[var(--green)]');
+    expect(html).not.toContain('aria-label="Unavailable"');
+    expect(html).toContain('data-sidebar-state-spacer="draft"');
+    expect(html).toContain('inline-flex h-3 w-3 flex-shrink-0');
+    expect(html).toContain('>Draft</span>');
+    expect(html).not.toContain('Last message');
   });
 
   test('uses a faint accent wash and rail for selection', () => {
