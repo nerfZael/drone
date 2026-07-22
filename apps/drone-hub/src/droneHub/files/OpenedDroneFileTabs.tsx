@@ -1,5 +1,4 @@
 import React from 'react';
-import { IconGrip } from '../app/icons';
 import { iconForFilePath } from '../icons';
 import type { DroneOpenedFileTabState } from './opened-file-types';
 
@@ -9,6 +8,7 @@ type OpenedDroneFileTabsProps = {
   onActivateTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onReorderTabs: (fromTabId: string, toTabId: string) => void;
+  trailingActions?: React.ReactNode;
 };
 
 function IconClose({ className }: { className?: string }) {
@@ -26,18 +26,26 @@ export function OpenedDroneFileTabs({
   onActivateTab,
   onCloseTab,
   onReorderTabs,
+  trailingActions,
 }: OpenedDroneFileTabsProps) {
   const [draggingTabId, setDraggingTabId] = React.useState<string | null>(null);
   const normalizedTabs = tabs.filter((tab) => String(tab.tabId ?? '').trim());
-  if (normalizedTabs.length === 0) return null;
+  if (normalizedTabs.length === 0 && !trailingActions) return null;
 
   return (
-    <div className="border-b border-[var(--border-subtle)] bg-[var(--surface-soft)]">
-      <div className="min-h-[34px] flex items-end gap-1 overflow-x-auto px-2 pt-1.5" role="tablist" aria-label="Open files">
+    <div className="flex items-end border-b border-[var(--border-subtle)] bg-[var(--surface-soft)]">
+      <div className="min-h-[34px] min-w-0 flex flex-1 items-end gap-1 overflow-x-auto px-2 pt-1.5" role="tablist" aria-label="Open files">
         {normalizedTabs.map((tab) => {
           const active = tab.tabId === activeTabId;
           const FileIcon = iconForFilePath(tab.path ?? tab.name ?? '');
-          const title = `${tab.path || tab.name || 'File'}${tab.dirty ? ' (unsaved)' : ''}`;
+          const displayName =
+            tab.name ||
+            String(tab.path ?? '')
+              .split(/[\\/]/)
+              .filter(Boolean)
+              .pop() ||
+            'File';
+          const title = `${displayName}${tab.dirty ? ' (unsaved)' : ''}`;
           return (
             <div
               key={tab.tabId}
@@ -48,6 +56,15 @@ export function OpenedDroneFileTabs({
                 event.dataTransfer.setData('text/plain', tab.tabId);
               }}
               onDragEnd={() => setDraggingTabId(null)}
+              onMouseDown={(event) => {
+                if (event.button === 1) event.preventDefault();
+              }}
+              onAuxClick={(event) => {
+                if (event.button !== 1) return;
+                event.preventDefault();
+                event.stopPropagation();
+                onCloseTab(tab.tabId);
+              }}
               onDragOver={(event) => {
                 if (!draggingTabId || draggingTabId === tab.tabId) return;
                 event.preventDefault();
@@ -67,9 +84,6 @@ export function OpenedDroneFileTabs({
               } ${draggingTabId === tab.tabId ? 'opacity-45' : ''}`}
               title={title}
             >
-              <span className="shrink-0 cursor-grab text-[var(--muted-dim)] active:cursor-grabbing" aria-hidden="true">
-                <IconGrip className="h-3 w-3" />
-              </span>
               <button
                 type="button"
                 role="tab"
@@ -79,11 +93,12 @@ export function OpenedDroneFileTabs({
                 title={title}
               >
                 <FileIcon className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{tab.name || tab.path || 'File'}</span>
+                <span className="truncate">
+                  {displayName}
+                  {tab.dirty ? <span aria-hidden="true">*</span> : null}
+                </span>
                 {tab.dirty ? (
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" title="Unsaved changes">
-                    <span className="sr-only">Unsaved changes</span>
-                  </span>
+                  <span className="sr-only"> (unsaved)</span>
                 ) : null}
               </button>
               <button
@@ -93,9 +108,9 @@ export function OpenedDroneFileTabs({
                   event.stopPropagation();
                   onCloseTab(tab.tabId);
                 }}
-                className="shrink-0 rounded p-0.5 text-[var(--muted-dim)] opacity-70 hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] group-hover/tab:opacity-100 focus:opacity-100"
-                title={`Close ${tab.name || tab.path || 'file'}`}
-                aria-label={`Close ${tab.name || tab.path || 'file'}`}
+                className="pointer-events-none shrink-0 rounded p-0.5 text-[var(--muted-dim)] opacity-0 transition-opacity hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+                title={`Close ${displayName}`}
+                aria-label={`Close ${displayName}`}
               >
                 <IconClose className="h-3 w-3" />
               </button>
@@ -103,6 +118,11 @@ export function OpenedDroneFileTabs({
           );
         })}
       </div>
+      {trailingActions ? (
+        <div className="flex h-[38px] shrink-0 items-center px-2">
+          {trailingActions}
+        </div>
+      ) : null}
     </div>
   );
 }

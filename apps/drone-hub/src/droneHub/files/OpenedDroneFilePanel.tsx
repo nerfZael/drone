@@ -6,7 +6,7 @@ import {
   isMarkdownFile,
   type TextFileViewMode,
 } from '../code-languages';
-import { formatBytes, formatEditorMtime } from '../app/selected-drone-workspace-utils';
+import { formatBytes } from '../app/selected-drone-workspace-utils';
 import { requestJson } from '../http';
 import { resolveMarkdownPreviewLinkTarget } from './markdown-preview-link-utils';
 import type { DroneFsTextChunkPayload } from '../types';
@@ -198,10 +198,6 @@ type OpenedDroneFilePanelProps = {
   onActivateFileTab?: (tabId: string) => void;
   onReorderFileTabs?: (fromTabId: string, toTabId: string) => void;
   onOpenResolvedFile?: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
-  canGoBack?: boolean;
-  canGoForward?: boolean;
-  onGoBack?: () => void;
-  onGoForward?: () => void;
   readOnly?: boolean;
 };
 
@@ -216,10 +212,6 @@ export function OpenedDroneFilePanel({
   onActivateFileTab,
   onReorderFileTabs,
   onOpenResolvedFile,
-  canGoBack = false,
-  canGoForward = false,
-  onGoBack,
-  onGoForward,
   readOnly = false,
 }: OpenedDroneFilePanelProps) {
   const themeId = useDroneHubUiStore((state) => state.themeId);
@@ -235,7 +227,6 @@ export function OpenedDroneFilePanel({
     size: fileSize,
     content: fileContent,
     dirty: fileDirty,
-    mtimeMs: fileMtimeMs,
     targetLine: fileTargetLine,
     targetColumn: fileTargetColumn,
     navigationSeq: fileNavigationSeq,
@@ -255,10 +246,6 @@ export function OpenedDroneFilePanel({
     findReferences: () => void;
   } | null>(null);
   const languageRequestSeqRef = React.useRef(0);
-  const [languageStatus, setLanguageStatus] = React.useState<string | null>(null);
-  const [languageLoading, setLanguageLoading] = React.useState<'definition' | 'references' | null>(
-    null,
-  );
   const [referencesState, setReferencesState] = React.useState<ReferencesResultsState>({
     open: false,
     loading: false,
@@ -326,22 +313,6 @@ export function OpenedDroneFilePanel({
   const openedFileShowsMarkdownPreview = openedFileIsMarkdown && openedTextMode === 'preview';
   const openedFileEditorVisible =
     openedEditorIsText && Boolean(activeFilePath) && !openedFileShowsMarkdownPreview;
-  const headerStatusText = React.useMemo(() => {
-    if (openedFileIsLargeText) {
-      return `Read-only • ${formatBytes(fileSize)}`;
-    }
-    if (openedEditorIsText) {
-      if (readOnly) return 'Read-only';
-      if (fileSaving) return 'Saving...';
-      if (fileDirty) return 'Unsaved changes';
-      const savedText = formatEditorMtime(fileMtimeMs ?? null);
-      return savedText === '-' ? 'Saved' : `Saved ${savedText}`;
-    }
-    const details = [fileMime || null, (fileSize ?? 0) > 0 ? formatBytes(fileSize) : null].filter(
-      Boolean,
-    );
-    return details.length > 0 ? details.join(' • ') : 'Preview';
-  }, [fileDirty, fileMime, fileMtimeMs, fileSaving, fileSize, openedEditorIsText, openedFileIsLargeText, readOnly]);
   const openedFileMediaSrc = React.useMemo(() => {
     if (!activeFilePath) return '';
     if (fileKind !== 'image' && fileKind !== 'video') return '';
@@ -374,8 +345,6 @@ export function OpenedDroneFilePanel({
 
   React.useEffect(() => {
     languageRequestSeqRef.current += 1;
-    setLanguageStatus(null);
-    setLanguageLoading(null);
     setReferencesState({
       open: false,
       loading: false,
@@ -388,8 +357,6 @@ export function OpenedDroneFilePanel({
   React.useEffect(() => {
     if (!fileDirty) return;
     languageRequestSeqRef.current += 1;
-    setLanguageStatus(null);
-    setLanguageLoading(null);
     setReferencesState((prev) => {
       if (!prev.open && !prev.loading && !prev.error && prev.references.length === 0) return prev;
       return {
@@ -465,26 +432,17 @@ export function OpenedDroneFilePanel({
     if (!position) return;
     const seq = languageRequestSeqRef.current + 1;
     languageRequestSeqRef.current = seq;
-    setLanguageLoading('definition');
-    setLanguageStatus(null);
     void fetchLanguageDefinition(droneId, position)
       .then((payload) => {
         if (languageRequestSeqRef.current !== seq) return;
         if (payload.ok !== true)
           throw new Error(String((payload as any).error ?? 'definition lookup failed'));
-        if (!payload.target) {
-          setLanguageStatus('No definition found.');
-          return;
-        }
+        if (!payload.target) return;
         openLanguageLocation(payload.target);
       })
       .catch((error: any) => {
         if (languageRequestSeqRef.current !== seq) return;
-        setLanguageStatus(String(error?.message ?? error ?? 'definition lookup failed'));
-      })
-      .finally(() => {
-        if (languageRequestSeqRef.current !== seq) return;
-        setLanguageLoading(null);
+        console.warn(String(error?.message ?? error ?? 'definition lookup failed'));
       });
   }, [activeLanguagePosition, droneId, openLanguageLocation]);
 
@@ -493,8 +451,6 @@ export function OpenedDroneFilePanel({
     if (!position) return;
     const seq = languageRequestSeqRef.current + 1;
     languageRequestSeqRef.current = seq;
-    setLanguageLoading('references');
-    setLanguageStatus(null);
     setReferencesState({
       open: true,
       loading: true,
@@ -524,10 +480,6 @@ export function OpenedDroneFilePanel({
           references: [],
           truncated: false,
         });
-      })
-      .finally(() => {
-        if (languageRequestSeqRef.current !== seq) return;
-        setLanguageLoading(null);
       });
   }, [activeLanguagePosition, droneId]);
 
@@ -535,19 +487,10 @@ export function OpenedDroneFilePanel({
     languageActionsRef.current = { goToDefinition, findReferences };
   }, [findReferences, goToDefinition]);
 
-  const modeButtonClassName = (active: boolean, disabled: boolean) =>
-    `h-7 px-2 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] transition-colors ${
-      active
-        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-        : 'border-[var(--border-subtle)] bg-transparent text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-    } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`;
-  const navButtonClassName = (enabled: boolean) =>
-    `h-7 w-7 rounded-[var(--radius-medium)] border text-[var(--text-13)] font-[var(--weight-semibold)] transition-colors ${
-      enabled
-        ? 'border-[var(--border-subtle)] bg-transparent text-[var(--fg-secondary)] hover:text-[var(--fg)] hover:bg-[var(--hover)]'
-        : 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+  const modeButtonClassName = (disabled: boolean) =>
+    `h-7 rounded-[var(--radius-medium)] bg-transparent px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
+      disabled ? 'cursor-not-allowed opacity-50' : ''
     }`;
-
   return (
     <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]">
       <div className="min-w-0 h-full min-h-0 bg-[var(--panel-alt)] flex flex-col">
@@ -557,126 +500,26 @@ export function OpenedDroneFilePanel({
           onActivateTab={(tabId) => onActivateFileTab?.(tabId)}
           onCloseTab={(tabId) => onCloseFile?.(tabId)}
           onReorderTabs={(fromTabId, toTabId) => onReorderFileTabs?.(fromTabId, toTabId)}
-        />
-        <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="truncate text-[var(--text-13)] font-medium text-[var(--fg-secondary)]">
-                {fileName || activeFilePath || 'File'}
-              </div>
-              <div className="shrink-0 text-[var(--text-10)] text-[var(--muted)]">{headerStatusText}</div>
-            </div>
-            <div
-              className="mt-0.5 text-[var(--text-10)] text-[var(--muted-dim)] font-mono truncate"
-              title={activeFilePath || undefined}
-            >
-              {activeFilePath}
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={onGoBack}
-              disabled={!canGoBack || !onGoBack}
-              className={navButtonClassName(Boolean(canGoBack && onGoBack))}
-              title="Go back (Alt+Left)"
-              aria-label="Go back"
-            >
-              {'<'}
-            </button>
-            <button
-              type="button"
-              onClick={onGoForward}
-              disabled={!canGoForward || !onGoForward}
-              className={navButtonClassName(Boolean(canGoForward && onGoForward))}
-              title="Go forward (Alt+Right)"
-              aria-label="Go forward"
-            >
-              {'>'}
-            </button>
-            {openedEditorIsText && !readOnly ? (
-              <>
-                {languageStatus ? (
-                  <div className="max-w-[220px] truncate text-[var(--text-10)] text-[var(--muted)]">
-                    {languageStatus}
-                  </div>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={goToDefinition}
-                  disabled={languageCommandsDisabled || languageLoading === 'definition'}
-                  className={`h-7 px-2.5 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] transition-colors ${
-                    languageCommandsDisabled || languageLoading === 'definition'
-                      ? 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
-                      : 'border-[var(--border-subtle)] bg-transparent text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-                  }`}
-                  title={
-                    fileDirty ? 'Save before using go to definition' : 'Go to definition (F12)'
-                  }
-                >
-                  {languageLoading === 'definition' ? 'Going...' : 'Definition'}
-                </button>
-                <button
-                  type="button"
-                  onClick={findReferences}
-                  disabled={languageCommandsDisabled || languageLoading === 'references'}
-                  className={`h-7 px-2.5 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] transition-colors ${
-                    languageCommandsDisabled || languageLoading === 'references'
-                      ? 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
-                      : 'border-[var(--border-subtle)] bg-transparent text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-                  }`}
-                  title={
-                    fileDirty ? 'Save before finding references' : 'Find references (Shift+F12)'
-                  }
-                >
-                  {languageLoading === 'references' ? 'Finding...' : 'References'}
-                </button>
-              </>
-            ) : null}
-            {openedFileIsMarkdown ? (
-              <div className="inline-flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setOpenedTextMode('preview')}
-                  disabled={Boolean(fileLoading)}
-                  className={modeButtonClassName(
-                    openedTextMode === 'preview',
-                    Boolean(fileLoading),
-                  )}
-                  title="Render markdown preview"
-                >
-                  Preview
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOpenedTextMode('edit')}
-                  disabled={Boolean(fileLoading)}
-                  className={modeButtonClassName(openedTextMode === 'edit', Boolean(fileLoading))}
-                  title="Edit markdown source"
-                >
-                  {readOnly ? 'Source' : 'Edit'}
-                </button>
-              </div>
-            ) : null}
-            {openedEditorIsText && !readOnly ? (
+          trailingActions={
+            openedFileIsMarkdown ? (
               <button
                 type="button"
-                onClick={() => {
-                  void onSaveFile?.();
-                }}
-                disabled={Boolean(fileLoading) || Boolean(fileSaving) || !fileDirty || !onSaveFile}
-                className={`h-7 px-2.5 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] transition-colors ${
-                  fileLoading || fileSaving || !fileDirty || !onSaveFile
-                    ? 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
-                    : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:shadow-[var(--glow-accent)]'
-                }`}
-                title="Save file (Ctrl/Cmd+S)"
+                onClick={() =>
+                  setOpenedTextMode(openedTextMode === 'preview' ? 'edit' : 'preview')
+                }
+                disabled={Boolean(fileLoading)}
+                className={modeButtonClassName(Boolean(fileLoading))}
+                title={
+                  openedTextMode === 'preview'
+                    ? 'Edit markdown source'
+                    : 'Render markdown preview'
+                }
               >
-                Save
+                {openedTextMode === 'preview' ? (readOnly ? 'Source' : 'Edit') : 'Preview'}
               </button>
-            ) : null}
-          </div>
-        </div>
+            ) : null
+          }
+        />
         {fileError ? (
           <div className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
             {fileError}

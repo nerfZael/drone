@@ -76,10 +76,6 @@ export function DroneEditorDock({
           onActivateFileTab={onActivateOpenedEditorFileTab}
           onReorderFileTabs={onReorderOpenedEditorFileTabs}
           onOpenResolvedFile={onOpenFileTargetInEditor}
-          canGoBack={quickOpen.canGoBack}
-          canGoForward={quickOpen.canGoForward}
-          onGoBack={quickOpen.onGoBack}
-          onGoForward={quickOpen.onGoForward}
         />
       ) : (
         <div className="h-full flex items-center justify-center px-4 text-center text-[var(--text-12)] text-[var(--muted)]">

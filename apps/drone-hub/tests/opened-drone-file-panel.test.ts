@@ -36,8 +36,19 @@ function makeFile(overrides: Partial<DroneOpenedFileState>): DroneOpenedFileStat
   };
 }
 
-function renderPanel(file: DroneOpenedFileState): string {
-  return renderToStaticMarkup(React.createElement(OpenedDroneFilePanel, { droneId: 'drone-1', file }));
+function renderPanel(file: DroneOpenedFileState, withTab = false): string {
+  return renderToStaticMarkup(
+    React.createElement(OpenedDroneFilePanel, {
+      droneId: 'drone-1',
+      file,
+      ...(withTab
+        ? {
+            fileTabs: [{ ...file, droneId: 'drone-1', tabId: `drone-1:${file.path}` }],
+            activeTabId: `drone-1:${file.path}`,
+          }
+        : {}),
+    }),
+  );
 }
 
 describe('OpenedDroneFilePanel', () => {
@@ -91,11 +102,35 @@ describe('OpenedDroneFilePanel', () => {
     expect(monacoImportCount).toBe(1);
   });
 
-  test('disables language actions for unsaved text files', () => {
-    const html = renderPanel(makeFile({ dirty: true }));
+  test('uses the tab strip as the only file header', () => {
+    const html = renderPanel(makeFile({ dirty: true }), true);
 
-    expect(html).toContain('Save before using go to definition');
-    expect(html).toContain('Save before finding references');
+    expect(html).toContain('index.ts<span aria-hidden="true">*</span>');
+    expect(html).not.toContain('Unsaved changes');
+    expect(html).not.toContain('>Saved<');
+    expect(html).not.toContain('/work/repo/src/index.ts');
+    expect(html).not.toContain('>Save<');
+    expect(html).not.toContain('>Definition<');
+    expect(html).not.toContain('>References<');
+    expect(html).not.toContain('aria-label="Go back"');
+    expect(html).not.toContain('aria-label="Go forward"');
+  });
+
+  test('places one contextual markdown view action in the tab strip', () => {
+    const html = renderPanel(
+      makeFile({
+        path: '/work/repo/README.md',
+        name: 'README.md',
+        mime: 'text/markdown',
+        content: '# Readme',
+      }),
+      true,
+    );
+
+    expect(html).toContain('aria-label="Open files"');
+    expect(html).toContain('>Edit</button>');
+    expect(html).not.toContain('>Preview</button>');
+    expect(html).not.toContain('>Saved<');
   });
 
   test('renders oversized text files in the large-file viewer', () => {
