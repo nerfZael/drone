@@ -76,7 +76,8 @@ describe('mobile sidebar presentation', () => {
 
     expect(indicatorIndex).toBeGreaterThan(-1);
     expect(titleIndex).toBeGreaterThan(indicatorIndex);
-    expect(source).toContain('<RuntimeStatusIndicator runtime={drone.runtime} />');
+    expect(source).not.toContain('RuntimeStatusIndicator');
+    expect(source).not.toContain('styles.switchItemRuntimeSlot');
     expect(source).toContain('style={styles.switchItemTimeSlot}');
     expect(source).not.toContain('styles.switchItemMeta');
     expect(source).not.toContain('styles.chatCount');
@@ -108,9 +109,19 @@ describe('mobile sidebar presentation', () => {
 
     expect(source).toContain("const ready = state === 'idle' && !unread;");
     expect(source).toContain('{ready ? null : working ? (');
-    expect(source).toContain(
-      "switchItemStatus: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' }",
+    expect(source).toContain('width: DRAWER_TREE_LEADING_SLOT_WIDTH');
+    expect(source).toContain('height: DRAWER_TREE_LEADING_SLOT_WIDTH');
+  });
+
+  test('aligns group and drone labels at the same tree depth', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
     );
+
+    expect(source.match(/paddingLeft: drawerTreeRowPaddingLeft\(depth\)/g)).toHaveLength(2);
+    expect(source).toContain('gap: DRAWER_TREE_LEADING_GAP');
+    expect(source).toContain('width: DRAWER_TREE_LEADING_SLOT_WIDTH');
   });
 
   test('shows pinned drones first and keeps pinning in the chat header menu', () => {
@@ -125,17 +136,33 @@ describe('mobile sidebar presentation', () => {
     const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
 
     expect(drawerSource).toContain(
-      'resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds)',
+      'resolvePinnedSidebarDronesForRepo(',
     );
+    expect(drawerSource).toContain('activeRepo.repoPath');
+    expect(drawerSource).toContain('drones={activeRepoPinnedDrones}');
     expect(drawerSource).toContain('<Text style={styles.pinnedHeaderText}>Pinned</Text>');
     expect(drawerSource).toContain('<Pin color={colors.mutedDim} size={13} strokeWidth={1.7} />');
+    expect(drawerSource).not.toContain('styles.pinnedCount');
+    expect(drawerSource).not.toContain('<Text style={styles.pinnedCount}>{drones.length}</Text>');
     expect(drawerSource).not.toContain('accessibilityLabel={pinned ? `Unpin ${drone.name}`');
-    expect(drawerSource.match(/<DrawerPinnedDrones/g)).toHaveLength(2);
+    expect(drawerSource.match(/<DrawerPinnedDrones/g)).toHaveLength(1);
     expect(dronesSource).toContain('onTogglePinned: () =>');
     expect(dronesSource).toContain('void setDronePinned(');
     expect(shellSource).toContain("id: 'toggle-pin'");
     expect(shellSource).toContain("label: dronesHeader.pinned ? 'Unpin drone' : 'Pin drone'");
     expect(shellSource).toContain('disabled: dronesHeader.pinDisabled');
+  });
+
+  test('does not render status counts on group rows', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const folderStart = source.indexOf('function DrawerDroneFolder');
+    const folderEnd = source.indexOf('function DrawerDroneEntry', folderStart);
+    const folderSource = source.slice(folderStart, folderEnd);
+
+    expect(folderSource).not.toContain('<DroneStateCounts');
   });
 
   test('omits the selected-drone subtitle while preserving contextual create copy', () => {

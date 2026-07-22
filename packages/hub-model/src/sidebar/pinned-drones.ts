@@ -19,3 +19,16 @@ export function resolvePinnedSidebarDrones<TDrone extends SidebarTreeDrone>(
     return drone ? [drone] : [];
   });
 }
+
+export function resolvePinnedSidebarDronesForRepo<
+  TDrone extends SidebarTreeDrone & { repoPath?: string | null },
+>(
+  drones: readonly TDrone[],
+  pinnedDroneIds: readonly string[],
+  repoPath: string | null | undefined,
+): TDrone[] {
+  const normalizedRepoPath = String(repoPath ?? '').trim();
+  return resolvePinnedSidebarDrones(drones, pinnedDroneIds).filter(
+    (drone) => String(drone.repoPath ?? '').trim() === normalizedRepoPath,
+  );
+}

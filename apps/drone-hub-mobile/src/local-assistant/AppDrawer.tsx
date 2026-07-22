@@ -48,7 +48,7 @@ import {
   type MobileDroneSummary,
   type MobileDroneTreeNode,
 } from '../drones/drone-sidebar-model';
-import { resolvePinnedSidebarDrones } from '@drone/hub-model/sidebar';
+import { resolvePinnedSidebarDronesForRepo } from '@drone/hub-model/sidebar';
 import {
   addMobileDroneToStateSummary,
   EMPTY_MOBILE_DRONE_STATE_SUMMARY,
@@ -102,6 +102,14 @@ type RegisterDrawer = (props: AppDrawerProps | null) => void;
 const AppDrawerHostContext = React.createContext<RegisterDrawer | null>(null);
 const DrawerWorkingPhaseContext = React.createContext<Animated.Value | null>(null);
 const DRAWER_WORKING_SPIN_DURATION_MS = 1_600;
+const DRAWER_TREE_ROW_PADDING_LEFT = 7;
+const DRAWER_TREE_DEPTH_INDENT = 14;
+const DRAWER_TREE_LEADING_SLOT_WIDTH = 12;
+const DRAWER_TREE_LEADING_GAP = 6;
+
+function drawerTreeRowPaddingLeft(depth: number): number {
+  return DRAWER_TREE_ROW_PADDING_LEFT + Math.max(0, depth) * DRAWER_TREE_DEPTH_INDENT;
+}
 
 export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
   const [drawerProps, setDrawerProps] = React.useState<AppDrawerProps | null>(null);
@@ -481,78 +489,6 @@ function SwitchItemStatusIndicator({
   );
 }
 
-function RuntimeStatusIndicator({ runtime }: { runtime: string }) {
-  const normalizedRuntime = runtime.trim().toLowerCase() === 'host' ? 'host' : 'container';
-  return (
-    <View accessible={false} style={styles.runtimeStatusIndicator}>
-      <Svg height={12} width={12} viewBox="0 0 12 12" fill="none">
-        {normalizedRuntime === 'host' ? (
-          <>
-            <Rect
-              x="1.25"
-              y="1.75"
-              width="9.5"
-              height="8.5"
-              rx="1.25"
-              stroke={colors.mutedDim}
-              strokeWidth="1.1"
-            />
-            <Line
-              x1="3.25"
-              y1="4.25"
-              x2="4.6"
-              y2="5.5"
-              stroke={colors.mutedDim}
-              strokeWidth="1.1"
-              strokeLinecap="round"
-            />
-            <Line
-              x1="4.6"
-              y1="5.5"
-              x2="3.25"
-              y2="6.75"
-              stroke={colors.mutedDim}
-              strokeWidth="1.1"
-              strokeLinecap="round"
-            />
-            <Line
-              x1="6"
-              y1="7"
-              x2="8.5"
-              y2="7"
-              stroke={colors.mutedDim}
-              strokeWidth="1.1"
-              strokeLinecap="round"
-            />
-          </>
-        ) : (
-          <>
-            <Rect
-              x="1.25"
-              y="2"
-              width="9.5"
-              height="8"
-              rx="1.1"
-              stroke={colors.mutedDim}
-              strokeWidth="1.1"
-            />
-            <Line x1="4" y1="2" x2="4" y2="10" stroke={colors.mutedDim} strokeWidth="1.1" />
-            <Line x1="8" y1="2" x2="8" y2="10" stroke={colors.mutedDim} strokeWidth="1.1" />
-            <Line
-              x1="1.5"
-              y1="5.95"
-              x2="10.5"
-              y2="5.95"
-              stroke={colors.mutedDim}
-              strokeWidth="1.1"
-            />
-          </>
-        )}
-      </Svg>
-    </View>
-  );
-}
-
 function WorkingStatusIndicator() {
   const sharedPhase = React.useContext(DrawerWorkingPhaseContext);
   const localPhase = React.useRef(new Animated.Value(0)).current;
@@ -668,7 +604,7 @@ function DrawerDroneNode({
         onPress={() => onSelect(drone.id, selectedChat)}
         style={({ pressed }) => [
           styles.switchItemRow,
-          { paddingLeft: 7 + depth * 14, paddingRight: 6 },
+          { paddingLeft: drawerTreeRowPaddingLeft(depth), paddingRight: 6 },
           selected && styles.switchItemRowActive,
           pressed && styles.sidebarRowPressed,
         ]}
@@ -682,9 +618,6 @@ function DrawerDroneNode({
         </View>
         <View pointerEvents="none" style={styles.switchItemTimeSlot}>
           <RelativeMessageTimestamp timestamp={drone.lastMessageAt} style={styles.switchItemTime} />
-        </View>
-        <View pointerEvents="none" style={styles.switchItemRuntimeSlot}>
-          <RuntimeStatusIndicator runtime={drone.runtime} />
         </View>
       </Pressable>
       {node.children.length > 0 ? (
@@ -726,10 +659,6 @@ function DrawerDroneFolder({
   onSelect(droneId: string, chatName: string): void;
 }) {
   const collapsed = collapsedFolderIds.has(folder.id);
-  const stateSummary = React.useMemo(
-    () => summarizeDroneScope(folder.roots, folder.children),
-    [folder],
-  );
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   return (
     <View>
@@ -739,11 +668,11 @@ function DrawerDroneFolder({
         onPress={() => onToggleFolder(folder.id)}
         style={({ pressed }) => [
           styles.groupRow,
-          { paddingLeft: 8 + depth * 18 },
+          { paddingLeft: drawerTreeRowPaddingLeft(depth) },
           pressed && styles.pressed,
         ]}
       >
-        <View style={styles.groupIcon}>
+        <View style={styles.folderGroupIcon}>
           <Folder color={colors.muted} size={15} strokeWidth={1.8} />
           <View style={styles.groupChevron}>
             <Chevron color={colors.muted} size={10} strokeWidth={2.3} />
@@ -752,7 +681,6 @@ function DrawerDroneFolder({
         <Text numberOfLines={1} style={styles.groupName}>
           {folder.label}
         </Text>
-        <DroneStateCounts summary={stateSummary} compact />
       </Pressable>
       {!collapsed ? (
         <>
@@ -840,7 +768,6 @@ function DrawerPinnedDrones({
       <View style={styles.pinnedHeader}>
         <Pin color={colors.mutedDim} size={13} strokeWidth={1.7} />
         <Text style={styles.pinnedHeaderText}>Pinned</Text>
-        <Text style={styles.pinnedCount}>{drones.length}</Text>
       </View>
       {drones.map((drone) => (
         <DrawerDroneNode
@@ -1052,10 +979,6 @@ function AppDrawerView({
     () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
     [droneSidebarOrder, drones],
   );
-  const pinnedDrones = React.useMemo(
-    () => resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds),
-    [droneSidebarOrder.pinnedDroneIds, drones],
-  );
   const repoStateSummaries = React.useMemo(
     () =>
       new Map(
@@ -1076,6 +999,17 @@ function AppDrawerView({
     });
   }, []);
   const activeRepo = droneGroups.find((group) => group.id === activeRepoId) ?? null;
+  const activeRepoPinnedDrones = React.useMemo(
+    () =>
+      activeRepo
+        ? resolvePinnedSidebarDronesForRepo(
+            drones,
+            droneSidebarOrder.pinnedDroneIds,
+            activeRepo.repoPath,
+          )
+        : [],
+    [activeRepo, droneSidebarOrder.pinnedDroneIds, drones],
+  );
   React.useEffect(() => {
     if (activeRepoId && !droneGroups.some((group) => group.id === activeRepoId)) {
       setActiveRepoId(null);
@@ -1228,7 +1162,7 @@ function AppDrawerView({
                 )}
                 ListHeaderComponent={
                   <DrawerPinnedDrones
-                    drones={pinnedDrones}
+                    drones={activeRepoPinnedDrones}
                     activeDroneId={activeDroneId}
                     activeChatName={activeChatName}
                     droneOperationById={droneOperationById}
@@ -1281,15 +1215,6 @@ function AppDrawerView({
                     </View>
                   );
                 }}
-                ListHeaderComponent={
-                  <DrawerPinnedDrones
-                    drones={pinnedDrones}
-                    activeDroneId={activeDroneId}
-                    activeChatName={activeChatName}
-                    droneOperationById={droneOperationById}
-                    onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
-                  />
-                }
                 ListFooterComponent={listStatus}
                 initialNumToRender={10}
                 maxToRenderPerBatch={8}
@@ -1513,12 +1438,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.2,
   },
-  pinnedCount: {
-    marginLeft: 'auto',
-    color: colors.mutedDim,
-    fontSize: 9,
-    fontFamily: 'monospace',
-  },
   repoGroup: {
     borderBottomWidth: 1,
     borderBottomColor: colors.whiteWash,
@@ -1551,7 +1470,7 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: DRAWER_TREE_LEADING_GAP,
     paddingRight: 34,
   },
   switchItemTitle: {
@@ -1573,13 +1492,12 @@ const styles = StyleSheet.create({
     right: 6,
     alignItems: 'flex-end',
   },
-  switchItemRuntimeSlot: {
-    position: 'absolute',
-    right: 6,
-    bottom: 7,
-    alignItems: 'flex-end',
+  switchItemStatus: {
+    width: DRAWER_TREE_LEADING_SLOT_WIDTH,
+    height: DRAWER_TREE_LEADING_SLOT_WIDTH,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  switchItemStatus: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   switchStateIndicator: {
     width: 12,
     height: 12,
@@ -1590,13 +1508,6 @@ const styles = StyleSheet.create({
   workingStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   stateStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   unreadStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.online },
-  runtimeStatusIndicator: {
-    width: 12,
-    height: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    opacity: 0.55,
-  },
   sidebarSelectionEdge: {
     position: 'absolute',
     top: 4,
@@ -1613,12 +1524,18 @@ const styles = StyleSheet.create({
     minHeight: 34,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: DRAWER_TREE_LEADING_GAP,
     paddingRight: 8,
     borderRadius: 3,
   },
   groupIcon: {
     width: 20,
+    height: 20,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  folderGroupIcon: {
+    width: DRAWER_TREE_LEADING_SLOT_WIDTH,
     height: 20,
     alignItems: 'flex-end',
     justifyContent: 'center',

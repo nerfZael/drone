@@ -49,7 +49,6 @@ import {
   sidebarChatLabelClass,
   sidebarChatRowTone,
   sidebarChatStateClass,
-  sidebarCountClass,
   sidebarDensityClasses,
   sidebarFolderLabelClass,
   sidebarSelectionEdgeClass,
@@ -1140,9 +1139,6 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               actionsEnabled ? (isVirtualGroup ? 'group-hover/folder-row:min-w-[72px]' : 'group-hover/folder-row:min-w-[112px]') : ''
             }`}
           >
-            <div className={`absolute inset-0 flex items-center justify-end pr-1 transition-opacity duration-150 ${sidebarCountClass} ${actionsEnabled ? 'group-hover/folder-row:opacity-0' : ''}`}>
-              {node.totalDroneCount}
-            </div>
             {actionsEnabled ? <div data-sidebar-folder-actions="true" className="absolute inset-y-0 right-0 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/folder-row:opacity-100">
               <button
                 type="button"

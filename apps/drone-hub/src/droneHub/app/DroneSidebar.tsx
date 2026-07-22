@@ -1,6 +1,9 @@
 import React from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
-import { buildRepoSidebarModel, resolvePinnedSidebarDrones } from '@drone/hub-model/sidebar';
+import {
+  buildRepoSidebarModel,
+  resolvePinnedSidebarDronesForRepo,
+} from '@drone/hub-model/sidebar';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, RepoSummary } from '../types';
 import {
@@ -94,7 +97,6 @@ import {
   sidebarChatLabelClass,
   sidebarChatRowTone,
   sidebarChatStateClass,
-  sidebarCountClass,
   sidebarDensityClasses,
   sidebarFolderLabelClass,
   sidebarSelectionEdgeClass,
@@ -328,9 +330,6 @@ function ReadOnlySidebarGroups({
               <IconFolder className={`${densityClasses.icon} flex-shrink-0 text-[var(--muted-dim)] opacity-80`} />
               <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`}>
                 {group.label}
-              </span>
-              <span className={sidebarCountClass}>
-                {group.items.length}
               </span>
             </button>
             {!collapsed ? (
@@ -661,9 +660,6 @@ function StaticReadOnlySidebarTree({
           <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`}>
             {node.label}
           </span>
-          <span className={sidebarCountClass}>
-            {node.totalDroneCount}
-          </span>
         </button>
         {!collapsed && childIds.length > 0 ? (
           <div className="flex flex-col gap-0.5">
@@ -824,9 +820,6 @@ function SidebarGroupSection({
   const actionsVisibleClass = pinGroupActionsVisible
     ? 'opacity-100 pointer-events-auto'
     : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto';
-  const countVisibleClass = pinGroupActionsVisible
-    ? 'opacity-0 pointer-events-none'
-    : 'opacity-100 group-hover/group-header:opacity-0 group-hover/group-header:pointer-events-none';
   const actionRailWidthClass = canRenameGroup
     ? 'group-hover/group-header:w-[124px]'
     : 'group-hover/group-header:w-[92px]';
@@ -897,14 +890,9 @@ function SidebarGroupSection({
         </button>
         <div
           className={`relative flex-shrink-0 transition-[width] duration-150 ${
-            pinGroupActionsVisible ? pinnedActionRailWidthClass : `w-[64px] ${actionRailWidthClass}`
+            pinGroupActionsVisible ? pinnedActionRailWidthClass : `w-0 ${actionRailWidthClass}`
           }`}
         >
-          <div
-            className={`absolute inset-0 flex items-center justify-end transition-opacity duration-150 ${sidebarCountClass} ${countVisibleClass}`}
-          >
-            {actualItems.length} drone{actualItems.length !== 1 ? 's' : ''}
-          </div>
           <div
             data-group-drag-block="true"
             className={`absolute inset-y-0 right-0 flex items-center justify-end gap-1 ${actionsVisibleClass}`}
@@ -1170,9 +1158,6 @@ function SidebarFolderTreeNode({
   const actionsVisibleClass = pinGroupActionsVisible
     ? 'opacity-100 pointer-events-auto'
     : 'opacity-0 pointer-events-none group-hover/folder-row:opacity-100 group-hover/folder-row:pointer-events-auto';
-  const countVisibleClass = pinGroupActionsVisible
-    ? 'opacity-0 pointer-events-none'
-    : 'opacity-100 group-hover/folder-row:opacity-0 group-hover/folder-row:pointer-events-none';
   const ownDroneTree = React.useMemo(() => buildSidebarDroneTree(node.ownItems), [node.ownItems]);
   const hoveredRepoPath = String(activeRepoPath ?? '').trim();
 
@@ -1238,12 +1223,11 @@ function SidebarFolderTreeNode({
               )}
             </div>
           </button>
-          <div className="relative w-[120px] flex-shrink-0">
-            <div
-              className={`absolute inset-0 flex items-center justify-end pr-1 transition-opacity duration-150 ${sidebarCountClass} ${countVisibleClass}`}
-            >
-              {node.totalDroneCount}
-            </div>
+          <div
+            className={`relative flex-shrink-0 transition-[width] duration-150 ${
+              pinGroupActionsVisible ? 'w-[120px]' : 'w-0 group-hover/folder-row:w-[120px]'
+            }`}
+          >
             <div
               className={`absolute inset-y-0 right-0 flex items-center justify-end gap-1 ${actionsVisibleClass}`}
               onPointerDown={stopGroupHeaderActionInteraction}
@@ -1662,10 +1646,6 @@ export function DroneSidebar({
     ? 'groups'
     : (sidebarGroupingModeOverride ?? sidebarGroupingMode);
   const isRepoGroupingMode = effectiveSidebarGroupingMode === 'repos';
-  const pinnedDrones = React.useMemo(
-    () => resolvePinnedSidebarDrones(sidebarDrones, pinnedDroneIds),
-    [pinnedDroneIds, sidebarDrones],
-  );
   const pinnedDroneIdSet = React.useMemo(() => new Set(pinnedDroneIds), [pinnedDroneIds]);
   const setPinned = React.useCallback(
     async (droneId: string, pinned: boolean) => {
@@ -2214,6 +2194,22 @@ export function DroneSidebar({
     () => repositoryNavigationItems.find((item) => item.id === activeSidebarRepoId) ?? null,
     [activeSidebarRepoId, repositoryNavigationItems],
   );
+  const activeRepositoryPinnedDrones = React.useMemo(
+    () =>
+      repositoryOverviewOpen || !activeRepositoryNavigationItem
+        ? []
+        : resolvePinnedSidebarDronesForRepo(
+            sidebarDrones,
+            pinnedDroneIds,
+            activeRepositoryNavigationItem.repoPath,
+          ),
+    [
+      activeRepositoryNavigationItem,
+      pinnedDroneIds,
+      repositoryOverviewOpen,
+      sidebarDrones,
+    ],
+  );
   const openRepositoryOverview = React.useCallback(() => {
     setRepositoryOverviewOpen(true);
     setActiveSidebarRepoId(null);
@@ -2582,11 +2578,11 @@ export function DroneSidebar({
         {sidebarCapabilities.headerActions ? (
           <>
             {!repositoryOverviewOpen && activeRepositoryNavigationItem ? (
-              <div className="flex min-h-14 w-full flex-shrink-0 items-center border-b border-[var(--border)] pr-2">
+              <div className="group/active-repository flex min-h-14 w-full flex-shrink-0 items-center border-b border-[var(--border)] pr-2 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)]">
                 <button
                   type="button"
                   onClick={openRepositoryOverview}
-                  className="flex min-h-14 min-w-0 flex-1 items-center gap-2 px-2.5 text-left transition-colors hover:bg-[var(--hover)]"
+                  className="flex min-h-14 min-w-0 flex-1 items-center gap-2 px-2.5 text-left"
                   title="Back to repositories"
                   aria-label="Back to repositories"
                 >
@@ -2818,14 +2814,14 @@ export function DroneSidebar({
               </div>
             )}
           <div className={`flex flex-col gap-0 ${sidebarListSelectClass}`}>
-            {pinnedDrones.length > 0 ? (
+            {activeRepositoryPinnedDrones.length > 0 ? (
               <section className="border-b border-[var(--border-subtle)]" aria-label="Pinned drones">
-                <div className="flex h-5 items-center gap-1 px-1.5 text-[var(--text-9)] font-[var(--weight-normal)] tracking-normal text-[var(--sidebar-meta-fg)]" style={{ fontFamily: 'var(--display)' }}>
-                  <IconPin className="h-2.5 w-2.5 opacity-45" />
+                <div className="flex min-h-7 items-center gap-1.5 px-2.5 py-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-[0.02em] text-[var(--muted-dim)] [font-family:var(--sidebar-font)]">
+                  <IconPin className="h-2.5 w-2.5 opacity-55" />
                   <span className="opacity-60">Pinned</span>
                 </div>
                 <div className="flex flex-col gap-0.5">
-                  {pinnedDrones.map((drone) => {
+                  {activeRepositoryPinnedDrones.map((drone) => {
                     const droneId = String(drone.id ?? '').trim();
                     const chats = Array.isArray(drone.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
                     const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
@@ -2881,7 +2877,7 @@ export function DroneSidebar({
                         setBaseImageBusy={Boolean(settingBaseImages[droneId])}
                         deleteDisabled={isOptimistic || droneMutationBusy}
                         deleteBusy={Boolean(deletingDrones[droneId])}
-                        onClick={(rowOpts) => onSelectDroneCard(droneId, { ...rowOpts, orderedDroneIds: pinnedDrones.map((item) => item.id) })}
+                        onClick={(rowOpts) => onSelectDroneCard(droneId, { ...rowOpts, orderedDroneIds: activeRepositoryPinnedDrones.map((item) => item.id) })}
                         draggable={false}
                         dragging={false}
                       />

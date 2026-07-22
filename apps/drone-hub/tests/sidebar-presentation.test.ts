@@ -128,6 +128,20 @@ describe('sidebar presentation', () => {
     expect(sidebarSource).not.toContain("containsSelectedDrone\n                          ? 'bg-[var(--selected)]'");
   });
 
+  test('highlights the complete active repository header row', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(sidebarSource).toContain(
+      'group/active-repository flex min-h-14 w-full flex-shrink-0 items-center border-b border-[var(--border)] pr-2 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)]',
+    );
+    expect(sidebarSource).toContain(
+      'className="flex min-h-14 min-w-0 flex-1 items-center gap-2 px-2.5 text-left"',
+    );
+  });
+
   test('orders repository header states by approval, unread, then working', () => {
     const sidebarSource = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
