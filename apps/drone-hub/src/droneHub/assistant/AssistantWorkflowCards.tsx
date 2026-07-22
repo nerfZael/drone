@@ -112,11 +112,17 @@ function approvalSummary(approval: AssistantApproval): {
 export function ApprovalCard({
   approval,
   busy,
+  disabled = false,
+  approveDisabled = false,
+  warning,
   onApprove,
   onDeny,
 }: {
   approval: AssistantApproval;
   busy: boolean;
+  disabled?: boolean;
+  approveDisabled?: boolean;
+  warning?: string;
   onApprove: () => void;
   onDeny: () => void;
 }) {
@@ -150,7 +156,7 @@ export function ApprovalCard({
         <div className="dh-approval-actions">
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || disabled}
             onClick={onDeny}
             className="dh-approval-button dh-approval-button--deny"
           >
@@ -158,7 +164,7 @@ export function ApprovalCard({
           </button>
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || disabled || approveDisabled}
             onClick={onApprove}
             className="dh-approval-button dh-approval-button--approve"
           >
@@ -166,6 +172,11 @@ export function ApprovalCard({
           </button>
         </div>
       </div>
+      {warning ? (
+        <div className="mt-2 text-[var(--text-10)] leading-relaxed text-[var(--yellow)]">
+          {warning}
+        </div>
+      ) : null}
       {summary.rows.length > 0 ? (
         <dl className="dh-approval-metadata">
           {summary.rows.map((row) => (

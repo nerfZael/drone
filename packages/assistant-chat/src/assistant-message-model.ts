@@ -1,5 +1,6 @@
 import type { AssistantMessage } from './assistant-message-types';
 import type { AgentRunFileChanges } from '@blip/protocol';
+import { isAgentRunFileChanges } from './agent-run-file-changes';
 
 export type AssistantToolCall = { id: string; name: string; args: any };
 export type AssistantToolRenderItem = {
@@ -215,7 +216,7 @@ export function renderItemsFromMessages(messages: AssistantMessage[]): Assistant
     const message = messages[index];
     if (message.role === 'runSummary') {
       const fileChanges = (message.details as any)?.fileChanges as AgentRunFileChanges | undefined;
-      if (fileChanges?.version === 1 && fileChanges.counts?.changed > 0) {
+      if (isAgentRunFileChanges(fileChanges)) {
         items.push({
           type: 'runSummary',
           key: `run-summary:${message.id ?? index}`,

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { gunzip, gzip } from 'node:zlib';
 
-import type { AgentRunFileChangeEntry } from '@blip/protocol';
+import type { AgentRunFileChangeCounts, AgentRunFileChangeEntry } from '@blip/protocol';
 
 import {
   applyHubDatabaseMigrations,
@@ -18,13 +18,15 @@ import { droneRootPath } from '../host/paths';
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
 
-const PATCH_FILE_MAX_BYTES = 512 * 1024;
-const ARTIFACT_PATCH_MAX_BYTES = 24 * 1024 * 1024;
+export const AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES = 512 * 1024;
+export const AGENT_RUN_DIFF_TOTAL_PATCH_MAX_BYTES = 24 * 1024 * 1024;
 const ARTIFACT_STORE_MAX_BYTES = 1024 * 1024 * 1024;
 const ARTIFACT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const ARTIFACT_WRITE_CONCURRENCY = 6;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const ORPHAN_GRACE_MS = 60 * 60 * 1000;
+export const AGENT_RUN_DIFF_PATCH_FILE_LIMIT = 200;
+export const AGENT_RUN_DIFF_METADATA_FILE_LIMIT = 5_000;
 
 export type AgentRunDiffArtifactOwner = {
   droneId?: string;
@@ -34,25 +36,44 @@ export type AgentRunDiffArtifactOwner = {
   turnId?: string;
 };
 
-type ArtifactFileManifest = {
+type ArtifactFilePatchManifest = {
   path: string;
   originalPath?: string;
   fileName?: string;
   patchBytes: number;
   compressedBytes: number;
   truncated?: boolean;
-  unavailableReason?: 'empty' | 'artifact-limit';
+  unavailableReason?: 'empty' | 'artifact-limit' | 'file-limit';
 };
 
-type ArtifactManifest = {
+type ArtifactFileManifestV1 = ArtifactFilePatchManifest;
+
+type ArtifactFileManifestV2 = ArtifactFilePatchManifest &
+  Omit<AgentRunFileChangeEntry, 'originalPath'>;
+
+type ArtifactManifestV1 = {
   version: 1;
   id: string;
   createdAt: string;
   owner: AgentRunDiffArtifactOwner;
   targetId: string;
   label: string;
-  files: ArtifactFileManifest[];
+  files: ArtifactFileManifestV1[];
 };
+
+type ArtifactManifestV2 = {
+  version: 2;
+  id: string;
+  createdAt: string;
+  owner: AgentRunDiffArtifactOwner;
+  targetId: string;
+  label: string;
+  counts: AgentRunFileChangeCounts;
+  files: ArtifactFileManifestV2[];
+  metadataTruncated?: boolean;
+};
+
+type ArtifactManifest = ArtifactManifestV1 | ArtifactManifestV2;
 
 type ArtifactRow = {
   id: string;
@@ -188,7 +209,7 @@ function validArtifactId(raw: unknown): string {
 
 function parseManifest(raw: string): ArtifactManifest {
   const manifest = JSON.parse(raw) as ArtifactManifest;
-  if (manifest?.version !== 1 || !Array.isArray(manifest.files)) {
+  if ((manifest?.version !== 1 && manifest?.version !== 2) || !Array.isArray(manifest.files)) {
     throw new AgentRunDiffArtifactError('The changed-files artifact is invalid.', 500);
   }
   return manifest;
@@ -196,35 +217,23 @@ function parseManifest(raw: string): ArtifactManifest {
 
 function truncatePatch(raw: string): { patch: string; bytes: number; truncated: boolean } {
   const source = Buffer.from(raw, 'utf8');
-  if (source.length <= PATCH_FILE_MAX_BYTES) {
+  if (source.length <= AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES) {
     return { patch: raw, bytes: source.length, truncated: false };
   }
-  const bounded = source.subarray(0, PATCH_FILE_MAX_BYTES).toString('utf8');
+  const bounded = source.subarray(0, AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES).toString('utf8');
   const lastNewline = bounded.lastIndexOf('\n');
   const patch = `${lastNewline > 0 ? bounded.slice(0, lastNewline + 1) : bounded}\n… diff truncated …\n`;
   return { patch, bytes: Buffer.byteLength(patch), truncated: true };
-}
-
-async function mapWithConcurrency<T>(
-  values: T[],
-  concurrency: number,
-  run: (value: T, index: number) => Promise<void>,
-): Promise<void> {
-  let nextIndex = 0;
-  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
-    while (nextIndex < values.length) {
-      const index = nextIndex++;
-      await run(values[index]!, index);
-    }
-  });
-  await Promise.all(workers);
 }
 
 export async function persistAgentRunDiffArtifact(input: {
   owner: AgentRunDiffArtifactOwner;
   targetId: string;
   label: string;
+  counts: AgentRunFileChangeCounts;
   entries: AgentRunFileChangeEntry[];
+  metadataTruncated?: boolean;
+  patchEntryLimit?: number;
   readPatch: (entry: AgentRunFileChangeEntry) => Promise<string>;
 }): Promise<string | null> {
   if (input.entries.length === 0) return null;
@@ -234,46 +243,84 @@ export async function persistAgentRunDiffArtifact(input: {
   const storageDir = id;
   const finalDirectory = path.join(root, storageDir);
   const temporaryDirectory = path.join(root, `.${id}.${crypto.randomUUID()}.tmp`);
-  const files: ArtifactFileManifest[] = new Array(input.entries.length);
+  const files: ArtifactFileManifestV2[] = input.entries.map((entry) => ({
+    path: entry.path,
+    ...(entry.originalPath ? { originalPath: entry.originalPath } : {}),
+    status: entry.status,
+    additions: entry.additions,
+    deletions: entry.deletions,
+    ...(entry.binary ? { binary: true } : {}),
+    patchBytes: 0,
+    compressedBytes: 0,
+    unavailableReason: 'file-limit',
+  }));
   let artifactPatchBytes = 0;
   let compressedBytes = 0;
+  const patchEntryLimit = Math.max(
+    0,
+    Math.min(input.entries.length, input.patchEntryLimit ?? AGENT_RUN_DIFF_PATCH_FILE_LIMIT),
+  );
 
   await fs.mkdir(temporaryDirectory, { recursive: true, mode: 0o700 });
   try {
-    await mapWithConcurrency(input.entries, ARTIFACT_WRITE_CONCURRENCY, async (entry, index) => {
-      const rawPatch = await input.readPatch(entry);
-      const bounded = truncatePatch(rawPatch);
-      const base = {
-        path: entry.path,
-        ...(entry.originalPath ? { originalPath: entry.originalPath } : {}),
-        patchBytes: bounded.bytes,
-        compressedBytes: 0,
-        ...(bounded.truncated ? { truncated: true } : {}),
-      };
-      if (!bounded.patch.trim()) {
-        files[index] = { ...base, unavailableReason: 'empty' };
-        return;
+    for (let start = 0; start < patchEntryLimit; start += ARTIFACT_WRITE_CONCURRENCY) {
+      const batch = input.entries.slice(
+        start,
+        Math.min(patchEntryLimit, start + ARTIFACT_WRITE_CONCURRENCY),
+      );
+      const patches = await Promise.all(
+        batch.map(async (entry) => truncatePatch(await input.readPatch(entry))),
+      );
+      const writes: Promise<void>[] = [];
+      for (let batchIndex = 0; batchIndex < batch.length; batchIndex += 1) {
+        const index = start + batchIndex;
+        const entry = batch[batchIndex]!;
+        const bounded = patches[batchIndex]!;
+        const base: ArtifactFileManifestV2 = {
+          path: entry.path,
+          ...(entry.originalPath ? { originalPath: entry.originalPath } : {}),
+          status: entry.status,
+          additions: entry.additions,
+          deletions: entry.deletions,
+          ...(entry.binary ? { binary: true } : {}),
+          patchBytes: bounded.bytes,
+          compressedBytes: 0,
+          ...(bounded.truncated ? { truncated: true } : {}),
+        };
+        if (!bounded.patch.trim()) {
+          files[index] = { ...base, unavailableReason: 'empty' };
+          continue;
+        }
+        if (artifactPatchBytes + bounded.bytes > AGENT_RUN_DIFF_TOTAL_PATCH_MAX_BYTES) {
+          files[index] = { ...base, unavailableReason: 'artifact-limit' };
+          continue;
+        }
+        artifactPatchBytes += bounded.bytes;
+        const fileName = `${String(index).padStart(4, '0')}.patch.gz`;
+        writes.push(
+          (async () => {
+            const compressed = await gzipAsync(Buffer.from(bounded.patch, 'utf8'), { level: 6 });
+            compressedBytes += compressed.length;
+            await fs.writeFile(path.join(temporaryDirectory, fileName), compressed, {
+              mode: 0o600,
+            });
+            files[index] = { ...base, fileName, compressedBytes: compressed.length };
+          })(),
+        );
       }
-      if (artifactPatchBytes + bounded.bytes > ARTIFACT_PATCH_MAX_BYTES) {
-        files[index] = { ...base, unavailableReason: 'artifact-limit' };
-        return;
-      }
-      artifactPatchBytes += bounded.bytes;
-      const fileName = `${String(index).padStart(4, '0')}.patch.gz`;
-      const compressed = await gzipAsync(Buffer.from(bounded.patch, 'utf8'), { level: 6 });
-      compressedBytes += compressed.length;
-      await fs.writeFile(path.join(temporaryDirectory, fileName), compressed, { mode: 0o600 });
-      files[index] = { ...base, fileName, compressedBytes: compressed.length };
-    });
+      await Promise.all(writes);
+    }
 
-    const manifest: ArtifactManifest = {
-      version: 1,
+    const manifest: ArtifactManifestV2 = {
+      version: 2,
       id,
       createdAt,
       owner: input.owner,
       targetId: input.targetId,
       label: input.label,
+      counts: input.counts,
       files,
+      ...(input.metadataTruncated ? { metadataTruncated: true } : {}),
     };
     const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`;
     await fs.writeFile(path.join(temporaryDirectory, 'manifest.json'), manifestJson, {
@@ -303,6 +350,63 @@ export async function persistAgentRunDiffArtifact(input: {
   return id;
 }
 
+export async function listAgentRunDiffFiles(input: {
+  artifactId: string;
+  offset?: number;
+  limit?: number;
+}): Promise<{
+  artifactId: string;
+  targetId: string;
+  label: string;
+  counts: AgentRunFileChangeCounts;
+  entries: AgentRunFileChangeEntry[];
+  total: number;
+  offset: number;
+  nextOffset: number | null;
+  metadataTruncated: boolean;
+  createdAt: string;
+  owner: AgentRunDiffArtifactOwner;
+}> {
+  const artifactId = validArtifactId(input.artifactId);
+  const offset = Math.max(0, Math.floor(Number(input.offset) || 0));
+  const limit = Math.max(
+    1,
+    Math.min(AGENT_RUN_DIFF_METADATA_FILE_LIMIT, Math.floor(Number(input.limit) || 20)),
+  );
+  const row = repository().read(artifactId);
+  if (!row) throw new AgentRunDiffArtifactError('These historical file changes have expired.', 404);
+  const manifest = parseManifest(row.manifest_json);
+  if (manifest.version !== 2) {
+    throw new AgentRunDiffArtifactError(
+      'The full file list is unavailable for this older agent run.',
+      404,
+    );
+  }
+  const total = manifest.files.length;
+  const entries = manifest.files.slice(offset, offset + limit).map((file) => ({
+    path: file.path,
+    ...(file.originalPath ? { originalPath: file.originalPath } : {}),
+    status: file.status,
+    additions: file.additions,
+    deletions: file.deletions,
+    ...(file.binary ? { binary: true } : {}),
+  }));
+  const nextOffset = offset + entries.length < total ? offset + entries.length : null;
+  return {
+    artifactId,
+    targetId: manifest.targetId,
+    label: manifest.label,
+    counts: manifest.counts,
+    entries,
+    total,
+    offset,
+    nextOffset,
+    metadataTruncated: manifest.metadataTruncated === true,
+    createdAt: manifest.createdAt,
+    owner: manifest.owner,
+  };
+}
+
 export async function readAgentRunFileDiff(input: { artifactId: string; path: string }): Promise<{
   artifactId: string;
   path: string;
@@ -326,7 +430,9 @@ export async function readAgentRunFileDiff(input: { artifactId: string; path: st
     const message =
       file.unavailableReason === 'artifact-limit'
         ? 'This diff exceeded the run artifact size limit.'
-        : 'No textual diff is available for this file.';
+        : file.unavailableReason === 'file-limit'
+          ? 'A patch was not retained for this file because the run changed many files.'
+          : 'No textual diff is available for this file.';
     throw new AgentRunDiffArtifactError(message, 413);
   }
   try {
@@ -374,9 +480,7 @@ export async function cleanupAgentRunDiffArtifacts(input?: {
   await repository().remove(remove.map((record) => record.id));
   const removedIds = new Set(remove.map((record) => record.id));
   const retainedDirectories = new Set(
-    records
-      .filter((record) => !removedIds.has(record.id))
-      .map((record) => record.storage_dir),
+    records.filter((record) => !removedIds.has(record.id)).map((record) => record.storage_dir),
   );
   await cleanupOrphanedArtifactDirectories(retainedDirectories, nowMs);
   return { removed: remove.length };

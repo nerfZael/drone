@@ -10,19 +10,26 @@ import {
 } from '../src/droneHub/sidebar/presentation';
 
 describe('sidebar presentation', () => {
-  test('prioritizes the current device name in the desktop header', () => {
+  test('keeps the enabled device picker compact in the desktop header', () => {
     const sidebarSource = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
       'utf8',
     );
+    const pickerSource = readFileSync(
+      new URL('../src/droneHub/app/DesktopDevicePicker.tsx', import.meta.url),
+      'utf8',
+    );
     const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 
-    expect(sidebarSource).toContain('h-8 min-w-0 cursor-default');
-    expect(sidebarSource).toContain('<span className="min-w-0 truncate">{deviceName}</span>');
-    expect(sidebarSource).not.toContain('max-w-[8.5rem]');
+    expect(sidebarSource).toContain('<DesktopDevicePicker />');
+    expect(pickerSource).toContain('h-8 min-w-0 items-center');
+    expect(pickerSource).toContain('<span className="min-w-0 truncate">{name}</span>');
+    expect(pickerSource).toContain('aria-haspopup="menu"');
+    expect(pickerSource).toContain('selectDevice(device.id)');
+    expect(pickerSource).not.toContain('switching is coming soon');
     expect(sidebarSource).toContain('flex-shrink-0 text-left dh-type-sidebar-brand');
-    expect(sidebarSource).toContain('rounded-[var(--radius-medium)] pl-1.5 pr-0.5');
-    expect(sidebarSource).toContain('ml-2 h-3.5 w-3.5');
+    expect(pickerSource).toContain('rounded-[var(--radius-medium)] pl-1.5 pr-0.5');
+    expect(pickerSource).toContain('ml-2 h-3.5 w-3.5');
     expect(sidebarSource).toContain('bg-[var(--app-header-bg)] pl-3.5 pr-2');
     expect(stylesSource).toContain('--sidebar-brand-size: .875rem;');
   });

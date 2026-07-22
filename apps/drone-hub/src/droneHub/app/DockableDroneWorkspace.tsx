@@ -194,13 +194,24 @@ function ensurePanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePan
 
 function ensureChatPanel(api: DockviewApi): void {
   if (api.getPanel(CHAT_PANEL_ID)) return;
+  const referencePanel = api.panels.find((panel) => panel.api.group.api.location.type === 'grid');
   api.addPanel({
     id: CHAT_PANEL_ID,
     component: 'chat',
     title: 'Agent Chat',
+    ...(referencePanel
+      ? { position: { direction: 'left' as const, referencePanel: referencePanel.api.id } }
+      : {}),
     minimumWidth: 320,
     minimumHeight: 220,
   });
+}
+
+export function restoreRequiredWorkspacePanels(api: DockviewApi): void {
+  for (const group of [...api.groups]) {
+    if (group.panels.length === 0) api.removeGroup(group);
+  }
+  ensureChatPanel(api);
 }
 
 function createDefaultLayout(
@@ -307,6 +318,7 @@ export function DockableDroneWorkspace({
   const apiRef = React.useRef<DockviewApi | null>(null);
   const disposablesRef = React.useRef<Array<{ dispose: () => void }>>([]);
   const suppressSaveRef = React.useRef(false);
+  const unmountingRef = React.useRef(false);
   const lastAppliedOpenRequestRef = React.useRef<number>(-1);
   const lastAppliedToolTabRef = React.useRef<RightPanelTab | null>(null);
   const lastAppliedOpenStateRef = React.useRef<boolean | null>(null);
@@ -356,9 +368,11 @@ export function DockableDroneWorkspace({
 
   const persistCurrentLayout = React.useCallback(() => {
     const api = apiRef.current;
-    if (!api || suppressSaveRef.current || disposedWorkspaceIds.has(currentDrone.id)) return;
+    if (!api || suppressSaveRef.current || unmountingRef.current || disposedWorkspaceIds.has(currentDrone.id)) return;
     try {
-      writeStoredLayout(currentDrone.id, api.toJSON());
+      const layout = api.toJSON();
+      if (!layout.panels[CHAT_PANEL_ID]) return;
+      writeStoredLayout(currentDrone.id, layout);
     } catch {
       // Ignore layout persistence failures; the active workspace can keep running.
     }
@@ -393,7 +407,7 @@ export function DockableDroneWorkspace({
       const stored = readStoredLayout(currentDrone.id);
       if (stored && toolPaneOpen) {
         api.fromJSON(stored, { reuseExistingPanels: true });
-        ensureChatPanel(api);
+        restoreRequiredWorkspacePanels(api);
       } else {
         createDefaultLayout(api, activeToolTab, toolPaneOpen);
       }
@@ -450,9 +464,10 @@ export function DockableDroneWorkspace({
     [loadLayout, onActiveToolTabChange, onAfterToolPanelRemove, persistCurrentLayout, rebalanceWorkspaceGridGroups, updateWorkspacePanelState],
   );
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     return () => {
       persistCurrentLayout();
+      unmountingRef.current = true;
       disposablesRef.current.forEach((disposable) => disposable.dispose());
       disposablesRef.current = [];
     };

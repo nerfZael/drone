@@ -568,17 +568,20 @@ export function createDroneControlCapability(
       if (operation === 'chat.read') {
         const diffArtifactId = optionalText(payload.diffArtifactId);
         const diffPath = optionalText(payload.diffPath);
-        if (diffArtifactId || diffPath) {
-          if (!diffArtifactId || !diffPath) {
-            throw Object.assign(new Error('diffArtifactId and diffPath are required together'), {
+        const diffList = payload.diffList === true;
+        if (diffArtifactId || diffPath || diffList) {
+          if (!diffArtifactId || (!diffList && !diffPath) || (diffList && diffPath)) {
+            throw Object.assign(new Error('A changed-files artifact and one read mode are required'), {
               code: 'INVALID_REQUEST',
             });
           }
           const response = await localHubRequest(
             access,
-            `/api/agent-run-diffs/${encodeURIComponent(diffArtifactId)}/file?path=${encodeURIComponent(diffPath)}`,
+            diffList
+              ? `/api/agent-run-diffs/${encodeURIComponent(diffArtifactId)}/files?offset=${Math.max(0, Math.floor(Number(payload.diffListOffset) || 0))}&limit=${Math.max(1, Math.min(500, Math.floor(Number(payload.diffListLimit) || 20)))}`
+              : `/api/agent-run-diffs/${encodeURIComponent(diffArtifactId)}/file?path=${encodeURIComponent(diffPath!)}`,
           );
-          const owner = object(response?.diff?.owner);
+          const owner = object(diffList ? response?.files?.owner : response?.diff?.owner);
           const ownerThreadId = optionalText(owner.threadId);
           if (ownerThreadId) {
             const identity = await localHubRequest(access, `${chatPath}/native`);
@@ -595,6 +598,7 @@ export function createDroneControlCapability(
               code: 'INVALID_REQUEST',
             });
           }
+          if (diffList) return response;
           const diff = object(response?.diff);
           const rawPatch = String(diff.patch ?? '');
           const patch = truncateUtf8(rawPatch, MOBILE_RUN_DIFF_MAX_BYTES);

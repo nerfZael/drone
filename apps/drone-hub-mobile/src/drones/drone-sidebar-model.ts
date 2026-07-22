@@ -1,4 +1,4 @@
-import type { AssistantMessage } from '@drone/assistant-chat';
+import { isAgentRunFileChanges, type AssistantMessage } from '@drone/assistant-chat';
 import type { AgentRunFileChanges } from '@blip/protocol';
 import {
   buildRepoSidebarModel,
@@ -560,7 +560,7 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
             },
       );
     }
-    if (turn.fileChanges?.version === 1 && turn.fileChanges.counts.changed > 0) {
+    if (isAgentRunFileChanges(turn.fileChanges)) {
       messages.push({
         id: `${turn.id}:run-summary`,
         role: 'runSummary',
@@ -650,7 +650,7 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
         model: text(turn.model),
         reasoning: text(turn.reasoning),
         ...(agentPlan ? { agentPlan } : {}),
-        ...(fileChanges?.version === 1 ? { fileChanges } : {}),
+        ...(isAgentRunFileChanges(fileChanges) ? { fileChanges } : {}),
         attachments: normalizeTurnAttachments(turn.attachments),
         ...(turn.meshTruncated === true ? { meshTruncated: true } : {}),
       },
