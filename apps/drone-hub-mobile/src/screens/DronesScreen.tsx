@@ -140,6 +140,9 @@ export type DronesAppHeaderState = {
   onToggleDraft?(): void;
   onNewDrone?(): void;
   onNewChat?(): void;
+  pinned?: boolean;
+  pinDisabled?: boolean;
+  onTogglePinned?(): void;
   onDelete?(): void;
   accessOpen?: boolean;
   accessDisabled?: boolean;
@@ -1538,6 +1541,13 @@ export function DronesScreen({
             title: selected.name,
             onNewDrone: openNewDroneFromCurrent,
             onNewChat: () => void createNewChat(),
+            pinned: droneSidebarOrder.pinnedDroneIds.includes(selected.id),
+            pinDisabled: pinningDroneIds.has(selected.id),
+            onTogglePinned: () =>
+              void setDronePinned(
+                selected.id,
+                !droneSidebarOrder.pinnedDroneIds.includes(selected.id),
+              ),
             onDelete: () => setDeleteCandidate(selected),
             ...(nativeMessages !== null
               ? {
@@ -1589,6 +1599,8 @@ export function DronesScreen({
     chatName,
     chats,
     busy,
+    droneSidebarOrder.pinnedDroneIds,
+    pinningDroneIds,
     newDroneDraft,
     targetSupportsDrones,
     accessOpen,
@@ -1740,7 +1752,6 @@ export function DronesScreen({
         activeDroneId={selected?.id ?? ''}
         activeChatName={chatName}
         droneOperationById={droneOperationById}
-        pinningDroneIds={pinningDroneIds}
         dronesLoading={
           meshRouteAvailable && targetSupportsDrones && (!dronesLoaded || busy === 'drones')
         }
@@ -1773,7 +1784,6 @@ export function DronesScreen({
           onDrawerOpenChange(false);
           void openDrone(drone, nextChat);
         }}
-        onSetDronePinned={(droneId, pinned) => void setDronePinned(droneId, pinned)}
       />
       <KeyboardAvoidingView
         style={styles.content}

@@ -14,6 +14,7 @@ import Check from 'lucide-react-native/icons/check';
 import Menu from 'lucide-react-native/icons/menu';
 import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
+import Pin from 'lucide-react-native/icons/pin';
 import Plus from 'lucide-react-native/icons/plus';
 import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
 import Trash2 from 'lucide-react-native/icons/trash-2';
@@ -249,6 +250,17 @@ function Shell() {
                   label: 'New chat',
                   icon: MessageCircle,
                   onPress: dronesHeader.onNewChat,
+                },
+              ]
+            : []),
+          ...(dronesHeader.onTogglePinned
+            ? [
+                {
+                  id: 'toggle-pin',
+                  label: dronesHeader.pinned ? 'Unpin drone' : 'Pin drone',
+                  icon: Pin,
+                  disabled: dronesHeader.pinDisabled,
+                  onPress: dronesHeader.onTogglePinned,
                 },
               ]
             : []),
