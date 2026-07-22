@@ -61,7 +61,14 @@ export function normalizeImageAttachmentRefs(raw: unknown): ChatImageAttachmentR
     const mime = String((item as any).mime ?? '').trim().toLowerCase();
     const sizeNum = Number((item as any).size ?? 0);
     const previewDataUrl = String((item as any).previewDataUrl ?? '').trim();
-    if (!name || (!mime.startsWith('image/') && mime !== 'text/plain') || !Number.isFinite(sizeNum) || sizeNum <= 0) continue;
+    if (
+      !name ||
+      mime.length > 120 ||
+      !/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u.test(mime) ||
+      !Number.isFinite(sizeNum) ||
+      sizeNum <= 0
+    )
+      continue;
     const path = normalizePath((item as any).path ?? '');
     const relativePath = normalizePath((item as any).relativePath ?? '');
     out.push({
@@ -167,7 +174,7 @@ export function ImageAttachmentChips({
                 className="inline-flex h-6 items-center rounded border border-[var(--border-subtle)] px-1.5 text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
-                {isImage ? 'Image' : 'Text'}
+                {isImage ? 'Image' : a.mime === 'text/plain' ? 'Text' : 'File'}
               </span>
             )}
             <span className="truncate max-w-[220px]">{a.name}</span>

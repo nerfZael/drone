@@ -599,6 +599,26 @@ describe('agent chat surface adapters', () => {
     expect(workingHtml).not.toContain('>Agent<');
   });
 
+  test('user messages show remote file attachment metadata', () => {
+    const html = renderToStaticMarkup(
+      <AssistantMessageRow
+        message={{
+          id: 'remote-file',
+          role: 'user',
+          content: 'Review this file.',
+          details: {
+            attachments: [{ name: 'report.pdf', mime: 'application/pdf', size: 4096 }],
+          },
+        }}
+      />,
+    );
+
+    expect(html).toContain('Review this file.');
+    expect(html).toContain('report.pdf');
+    expect(html).toContain('4.00 KB');
+    expect(html).toContain('>File<');
+  });
+
   test('active tool runs expand their calls by default', () => {
     const items = Array.from({ length: 7 }, (_, index) => ({
       type: 'tool' as const,

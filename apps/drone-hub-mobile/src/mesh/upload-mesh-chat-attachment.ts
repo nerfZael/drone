@@ -3,6 +3,15 @@ import { MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
 
 type MeshRequest = (payload: Record<string, unknown>) => Promise<any>;
 
+const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+
+function positiveChunkSize(value: unknown): number {
+  const size = Number(value);
+  return Number.isSafeInteger(size) && size > 0
+    ? Math.min(size, MESH_BINARY_CHUNK_BYTES)
+    : MESH_BINARY_CHUNK_BYTES;
+}
+
 export async function uploadMeshChatAttachment(input: {
   endpoint?: string | null;
   droneId: string;
@@ -13,8 +22,11 @@ export async function uploadMeshChatAttachment(input: {
   request: MeshRequest;
   fetchImpl?: typeof fetch;
 }): Promise<{ attachmentId: string; name: string; mime: string; size: number }> {
-  const prepare = () =>
-    input.request({
+  if (input.bytes.length === 0 || input.bytes.length > MAX_ATTACHMENT_BYTES) {
+    throw new Error('The attachment must be between 1 byte and 6 MiB.');
+  }
+  const prepare = async () => {
+    const result = await input.request({
       droneId: input.droneId,
       chatName: input.chatName,
       attachmentTransfer: {
@@ -24,6 +36,10 @@ export async function uploadMeshChatAttachment(input: {
         size: input.bytes.length,
       },
     });
+    const uploadId = String(result?.uploadId ?? '').trim();
+    if (!uploadId) throw new Error('The remote device returned an invalid attachment session.');
+    return { ...result, uploadId };
+  };
   let upload = await prepare();
   const abort = async () => {
     await input
@@ -35,7 +51,7 @@ export async function uploadMeshChatAttachment(input: {
       .catch(() => undefined);
   };
   let offset = 0;
-  if (input.endpoint) {
+  if (input.endpoint && String(upload.uploadToken ?? '').trim()) {
     try {
       const url = new URL(input.endpoint);
       url.pathname = `/api/device-mesh/attachments/${encodeURIComponent(String(upload.uploadId))}`;
@@ -52,7 +68,15 @@ export async function uploadMeshChatAttachment(input: {
       });
       if (!response.ok) throw new Error(`HTTP upload failed (${response.status})`);
       const result = await response.json();
-      offset = Number(result?.offset ?? 0);
+      const nextOffset = Number(result?.offset);
+      if (
+        !Number.isSafeInteger(nextOffset) ||
+        nextOffset !== input.bytes.length ||
+        result?.complete !== true
+      ) {
+        throw new Error('The direct attachment upload did not complete.');
+      }
+      offset = nextOffset;
     } catch {
       await abort();
       upload = await prepare();
@@ -60,10 +84,7 @@ export async function uploadMeshChatAttachment(input: {
     }
   }
   try {
-    const maxChunkBytes = Math.max(
-      1,
-      Math.min(MESH_BINARY_CHUNK_BYTES, Number(upload?.maxChunkBytes) || MESH_BINARY_CHUNK_BYTES),
-    );
+    const maxChunkBytes = positiveChunkSize(upload?.maxChunkBytes);
     while (offset < input.bytes.length) {
       const chunk = input.bytes.slice(offset, offset + maxChunkBytes);
       const result = await input.request({
@@ -81,11 +102,19 @@ export async function uploadMeshChatAttachment(input: {
         throw new Error('The remote attachment offset did not advance correctly');
       offset = nextOffset;
     }
-    return await input.request({
+    const committed = await input.request({
       droneId: input.droneId,
       chatName: input.chatName,
       attachmentTransfer: { action: 'commit', uploadId: upload.uploadId },
     });
+    const attachmentId = String(committed?.attachmentId ?? '').trim();
+    const name = String(committed?.name ?? '').trim();
+    const mime = String(committed?.mime ?? '').trim();
+    const size = Number(committed?.size);
+    if (!attachmentId || !name || !mime || size !== input.bytes.length) {
+      throw new Error('The remote device returned an invalid committed attachment.');
+    }
+    return { attachmentId, name, mime, size };
   } catch (error) {
     await abort();
     throw error;
