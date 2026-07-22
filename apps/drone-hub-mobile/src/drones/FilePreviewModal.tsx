@@ -13,6 +13,7 @@ import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import FileQuestion from 'lucide-react-native/icons/file-question-mark';
 import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
 import { useEvent } from 'expo';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { SvgXml } from 'react-native-svg';
@@ -20,6 +21,7 @@ import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
 import { colors } from '../theme';
 import { NativeMarkdown } from '../local-assistant/NativeMarkdown';
 import { isCodePreview, isMarkdownPreview, type MobileFilePreview } from './file-preview-model';
+import { ZoomableImageStage } from './ZoomableImageStage';
 
 function MediaUnavailable({ message }: { message: string }) {
   return (
@@ -63,8 +65,9 @@ function PreviewImage({ uri }: { uri: string }) {
   const [state, setState] = React.useState<'loading' | 'ready' | 'error'>('loading');
   React.useEffect(() => setState('loading'), [uri]);
   return (
-    <View style={styles.mediaStage}>
+    <ZoomableImageStage resetKey={uri} enabled={state === 'ready'}>
       <Image
+        accessible={false}
         source={{ uri }}
         resizeMode="contain"
         onLoad={() => setState('ready')}
@@ -80,7 +83,7 @@ function PreviewImage({ uri }: { uri: string }) {
           <MediaUnavailable message="This image format could not be displayed on this phone." />
         </View>
       ) : null}
-    </View>
+    </ZoomableImageStage>
   );
 }
 
@@ -154,79 +157,81 @@ export function FilePreviewModal({
       navigationBarTranslucent
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.screen}>
-        <View style={styles.header}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close file preview"
-            hitSlop={10}
-            onPress={onClose}
-            style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
-          >
-            <ChevronLeft color={colors.text} size={22} strokeWidth={2} />
-          </Pressable>
-          <View style={styles.headerCopy}>
-            <View style={styles.titleRow}>
-              <Text numberOfLines={1} style={styles.title}>
-                {preview?.name || displayPath.split('/').at(-1) || 'File preview'}
+      <GestureHandlerRootView style={styles.screen}>
+        <SafeAreaView style={styles.screen}>
+          <View style={styles.header}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close file preview"
+              hitSlop={10}
+              onPress={onClose}
+              style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+            >
+              <ChevronLeft color={colors.text} size={22} strokeWidth={2} />
+            </Pressable>
+            <View style={styles.headerCopy}>
+              <View style={styles.titleRow}>
+                <Text numberOfLines={1} style={styles.title}>
+                  {preview?.name || displayPath.split('/').at(-1) || 'File preview'}
+                </Text>
+                <Text style={styles.readOnly}>PREVIEW</Text>
+              </View>
+              <Text numberOfLines={1} style={styles.path}>
+                {displayPath}
               </Text>
-              <Text style={styles.readOnly}>PREVIEW</Text>
             </View>
-            <Text numberOfLines={1} style={styles.path}>
-              {displayPath}
-            </Text>
           </View>
-        </View>
 
-        <View style={styles.content}>
-          {loading ? (
-            <View style={styles.centerState}>
-              <ActivityIndicator color={colors.accent} size="large" />
-              <Text style={styles.stateTitle}>Opening preview</Text>
-              <Text style={styles.stateBody}>Reading the file from the selected drone…</Text>
-            </View>
-          ) : error ? (
-            <View style={styles.centerState}>
-              <FileQuestion color={colors.danger} size={34} strokeWidth={1.7} />
-              <Text style={styles.stateTitle}>Preview unavailable</Text>
-              <Text style={styles.stateBody}>{error}</Text>
-              <Pressable
-                accessibilityRole="button"
-                onPress={onRetry}
-                style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
-              >
-                <RotateCcw color={colors.onAccent} size={15} strokeWidth={2.2} />
-                <Text style={styles.retryText}>Try again</Text>
-              </Pressable>
-            </View>
-          ) : preview?.kind === 'text' ? (
-            <TextPreview preview={preview} line={line} />
-          ) : preview?.kind === 'image' && preview.mime === 'image/svg+xml' && preview.content ? (
-            <View style={styles.mediaStage}>
-              <SvgXml
-                xml={preview.content}
-                width="100%"
-                height="100%"
-                fallback={
-                  <MediaUnavailable message="This SVG file could not be displayed on this phone." />
-                }
-              />
-            </View>
-          ) : preview?.kind === 'image' && preview.uri ? (
-            <PreviewImage uri={preview.uri} />
-          ) : preview?.kind === 'video' && preview.uri ? (
-            <PreviewVideo uri={preview.uri} />
-          ) : preview ? (
-            <View style={styles.centerState}>
-              <FileQuestion color={colors.muted} size={34} strokeWidth={1.7} />
-              <Text style={styles.stateTitle}>No visual preview</Text>
-              <Text style={styles.stateBody}>
-                This file is available, but its binary format cannot be displayed yet.
-              </Text>
-            </View>
-          ) : null}
-        </View>
-      </SafeAreaView>
+          <View style={styles.content}>
+            {loading ? (
+              <View style={styles.centerState}>
+                <ActivityIndicator color={colors.accent} size="large" />
+                <Text style={styles.stateTitle}>Opening preview</Text>
+                <Text style={styles.stateBody}>Reading the file from the selected drone…</Text>
+              </View>
+            ) : error ? (
+              <View style={styles.centerState}>
+                <FileQuestion color={colors.danger} size={34} strokeWidth={1.7} />
+                <Text style={styles.stateTitle}>Preview unavailable</Text>
+                <Text style={styles.stateBody}>{error}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={onRetry}
+                  style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
+                >
+                  <RotateCcw color={colors.onAccent} size={15} strokeWidth={2.2} />
+                  <Text style={styles.retryText}>Try again</Text>
+                </Pressable>
+              </View>
+            ) : preview?.kind === 'text' ? (
+              <TextPreview preview={preview} line={line} />
+            ) : preview?.kind === 'image' && preview.mime === 'image/svg+xml' && preview.content ? (
+              <ZoomableImageStage resetKey={`${preview.path}:${preview.content.length}`}>
+                <SvgXml
+                  xml={preview.content}
+                  width="100%"
+                  height="100%"
+                  fallback={
+                    <MediaUnavailable message="This SVG file could not be displayed on this phone." />
+                  }
+                />
+              </ZoomableImageStage>
+            ) : preview?.kind === 'image' && preview.uri ? (
+              <PreviewImage uri={preview.uri} />
+            ) : preview?.kind === 'video' && preview.uri ? (
+              <PreviewVideo uri={preview.uri} />
+            ) : preview ? (
+              <View style={styles.centerState}>
+                <FileQuestion color={colors.muted} size={34} strokeWidth={1.7} />
+                <Text style={styles.stateTitle}>No visual preview</Text>
+                <Text style={styles.stateBody}>
+                  This file is available, but its binary format cannot be displayed yet.
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </SafeAreaView>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
