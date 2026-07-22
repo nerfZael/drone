@@ -203,6 +203,17 @@ export function useLocalDroneControl() {
                 ? [chatName]
                 : [],
             ),
+            approvalChats: Object.entries(drone.chats).flatMap(([chatName, threadId]) =>
+              threadById.get(threadId)?.status === 'waiting_for_approval' ||
+              assistant.pendingApprovals.some((approval) => approval.threadId === threadId)
+                ? [chatName]
+                : [],
+            ),
+            approvalRequired: Object.values(drone.chats).some(
+              (threadId) =>
+                threadById.get(threadId)?.status === 'waiting_for_approval' ||
+                assistant.pendingApprovals.some((approval) => approval.threadId === threadId),
+            ),
             createdAt: drone.createdAt,
             lastActivityAt: Object.values(drone.chats)
               .map((threadId) => threadById.get(threadId)?.updatedAt ?? '')
@@ -266,6 +277,34 @@ export function useLocalDroneControl() {
           void assistant.sendPrompt(thread.id, prompt, images).catch(() => undefined);
         }
         return { ok: true, droneId: drone.id, drone };
+      }
+      if (operation === 'drone.rename') {
+        const drone = getDrone();
+        const newName = String(payload.newName ?? '').trim();
+        if (!newName) throw new Error('Enter a drone name.');
+        if (/[\r\n]/.test(newName)) throw new Error('Drone names cannot contain newlines.');
+        if (newName.length > 80) throw new Error('Drone names must be 80 characters or fewer.');
+        if (
+          dronesRef.current.some(
+            (candidate) =>
+              candidate.id !== drone.id && candidate.name.trim() === newName,
+          )
+        ) {
+          throw new Error('A drone with that name already exists.');
+        }
+        const nextDrone = { ...drone, name: newName };
+        await replaceDrones(
+          dronesRef.current.map((candidate) =>
+            candidate.id === drone.id ? nextDrone : candidate,
+          ),
+        );
+        return {
+          ok: true,
+          id: drone.id,
+          oldName: drone.name,
+          newName,
+          renamed: newName !== drone.name,
+        };
       }
       if (operation === 'drone.delete') {
         const drone = getDrone();

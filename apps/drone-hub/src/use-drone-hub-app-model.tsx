@@ -171,6 +171,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     optimisticallyDeletedDrones,
     startupSeedByDrone,
+    localBusyChatCountByNodeId,
     unreadAgentMessageByChatNodeId,
     lastAgentSnippetByChatNodeId,
     transcripts,
@@ -902,10 +903,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     deletingDrones,
     renamingDrones,
+    renameDroneTarget,
     settingBaseImages,
     deleteDrone: deleteDroneBase,
     renameDrone,
-    renameDrones,
+    closeRenameDrone,
+    clearRenameDroneError,
+    confirmRenameDrone,
     setDroneBaseImage,
     reparentDronesToParent,
     renameDroneTo,
@@ -2516,8 +2520,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     const selectedNodeId = createCanvasChatNodeId(String(selectedDrone ?? '').trim(), String(selectedChat ?? '').trim() || 'default');
     if (selectedNodeId && selectedIsResponding) out.add(selectedNodeId);
+    for (const [nodeId, count] of Object.entries(localBusyChatCountByNodeId)) {
+      if (count > 0) out.add(nodeId);
+    }
     return out;
-  }, [drones, selectedChat, selectedDrone, selectedIsResponding]);
+  }, [drones, localBusyChatCountByNodeId, selectedChat, selectedDrone, selectedIsResponding]);
   const busyDebugLastSidebarSignatureRef = React.useRef('');
   React.useEffect(() => {
     if (!droneHubBusyDebugEnabled()) return;
@@ -3783,7 +3790,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     deleteCanvasChat,
     openCloneModal,
     renameDrone,
-    renameDrones,
     setDroneBaseImage,
     setDronePinned,
     deleteDrone: requestDeleteDrone,
@@ -3922,6 +3928,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     droneDeleteConfirmError,
     closeDroneDeleteConfirm,
     confirmDroneDelete,
+    renameDroneTarget,
+    closeRenameDrone,
+    clearRenameDroneError,
+    confirmRenameDrone,
+    renamingDrones,
     droneDropActionModal,
     closeDroneDropActionModal,
     droppedDroneTarget,

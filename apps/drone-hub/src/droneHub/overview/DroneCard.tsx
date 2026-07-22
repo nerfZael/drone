@@ -2,8 +2,24 @@ import React from 'react';
 import { timeAgo } from '../../domain';
 import type { DroneSummary } from '../types';
 import { RelativeTimeText } from '../chat/RelativeTimeText';
-import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
-import { IconBaseImage, IconClone, IconMore, IconPin, IconPlus, IconRename, IconSpinner, IconTrash } from './icons';
+import {
+  chooseDropdownVerticalPlacement,
+  dropdownMenuItemBaseClass,
+  dropdownPanelBaseClass,
+  dropdownViewportBounds,
+  type DropdownVerticalPlacement,
+  useDropdownDismiss,
+} from '../../ui/dropdown';
+import {
+  IconBaseImage,
+  IconClone,
+  IconMore,
+  IconPin,
+  IconPlus,
+  IconRename,
+  IconSpinner,
+  IconTrash,
+} from './icons';
 import type { SidebarDensityMode } from '../app/settings-types';
 import { sidebarItemTypeClass, sidebarSelectionEdgeClass } from '../sidebar/presentation';
 
@@ -329,8 +345,40 @@ export const DroneCard = React.memo(function DroneCard({
   const activeOperationLabel = String(operationLabel ?? '').trim();
   const pinActionsVisible = Boolean(pinBusy) || Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
   const actionMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const actionMenuPanelRef = React.useRef<HTMLDivElement | null>(null);
   const [actionMenuOpen, setActionMenuOpen] = React.useState(false);
+  const [actionMenuPlacement, setActionMenuPlacement] =
+    React.useState<DropdownVerticalPlacement>('below');
   useDropdownDismiss(actionMenuRef, actionMenuOpen, setActionMenuOpen);
+  React.useLayoutEffect(() => {
+    if (!actionMenuOpen) return;
+
+    const updatePlacement = () => {
+      const anchor = actionMenuRef.current;
+      const panel = actionMenuPanelRef.current;
+      if (!anchor || !panel) return;
+      const anchorRect = anchor.getBoundingClientRect();
+      const viewport = dropdownViewportBounds(anchor);
+      const nextPlacement = chooseDropdownVerticalPlacement({
+        anchorTop: anchorRect.top,
+        anchorBottom: anchorRect.bottom,
+        panelHeight: panel.getBoundingClientRect().height,
+        viewportTop: viewport.top,
+        viewportBottom: viewport.bottom,
+      });
+      setActionMenuPlacement((current) =>
+        current === nextPlacement ? current : nextPlacement,
+      );
+    };
+
+    updatePlacement();
+    window.addEventListener('resize', updatePlacement);
+    window.addEventListener('scroll', updatePlacement, true);
+    return () => {
+      window.removeEventListener('resize', updatePlacement);
+      window.removeEventListener('scroll', updatePlacement, true);
+    };
+  }, [actionMenuOpen]);
   const unread = Boolean(unreadAgentMessage) || (drone.unreadChats?.length ?? 0) > 0;
   const displayState = sidebarDroneDisplayState(
     drone,
@@ -546,7 +594,10 @@ export const DroneCard = React.memo(function DroneCard({
           ) : null}
           {hasSecondaryActions && actionMenuOpen ? (
             <div
-              className={`absolute bottom-full right-0 z-50 mb-1 w-[11.5rem] ${dropdownPanelBaseClass}`}
+              ref={actionMenuPanelRef}
+              className={`absolute right-0 z-50 w-[11.5rem] ${
+                actionMenuPlacement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'
+              } ${dropdownPanelBaseClass}`}
               role="menu"
               aria-label={`Actions for ${shownName}`}
               onClick={(event) => event.stopPropagation()}

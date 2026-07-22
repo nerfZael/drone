@@ -1,3 +1,4 @@
+import React from 'react';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
@@ -13,6 +14,7 @@ type DroneHubRuntimeState = {
   optimisticallyDeletedDrones: Record<string, boolean>;
   startupSeedByDrone: Record<string, StartupSeedState>;
   approvalRequiredByChatNodeId: Record<string, boolean>;
+  localBusyChatCountByNodeId: Record<string, number>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
   lastAgentSnippetByChatNodeId: Record<string, string>;
   transcripts: TranscriptItem[] | null;
@@ -26,6 +28,7 @@ type DroneHubRuntimeState = {
   setOptimisticallyDeletedDrones: (next: Updater<Record<string, boolean>>) => void;
   setStartupSeedByDrone: (next: Updater<Record<string, StartupSeedState>>) => void;
   setApprovalRequiredByChatNodeId: (next: Updater<Record<string, boolean>>) => void;
+  setLocalBusyChatCountByNodeId: (next: Updater<Record<string, number>>) => void;
   setUnreadAgentMessageByChatNodeId: (next: Updater<Record<string, boolean>>) => void;
   setLastAgentSnippetByChatNodeId: (next: Updater<Record<string, string>>) => void;
   setTranscripts: (next: Updater<TranscriptItem[] | null>) => void;
@@ -48,6 +51,7 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
       optimisticallyDeletedDrones: {},
       startupSeedByDrone: {},
       approvalRequiredByChatNodeId: {},
+      localBusyChatCountByNodeId: {},
       unreadAgentMessageByChatNodeId: {},
       lastAgentSnippetByChatNodeId: {},
       transcripts: null,
@@ -69,6 +73,10 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
       setApprovalRequiredByChatNodeId: (next) =>
         set((s) => ({
           approvalRequiredByChatNodeId: resolveNext(s.approvalRequiredByChatNodeId, next),
+        })),
+      setLocalBusyChatCountByNodeId: (next) =>
+        set((s) => ({
+          localBusyChatCountByNodeId: resolveNext(s.localBusyChatCountByNodeId, next),
         })),
       setUnreadAgentMessageByChatNodeId: (next) =>
         set((s) => ({
@@ -125,6 +133,7 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
           ...currentState,
           ...persisted,
           approvalRequiredByChatNodeId: {},
+          localBusyChatCountByNodeId: {},
           unreadAgentMessageByChatNodeId: {},
           lastAgentSnippetByChatNodeId,
         };
@@ -139,12 +148,45 @@ export function useChatApprovalRequired(chatNodeId: string): boolean {
   );
 }
 
+export function beginLocalChatBusy(chatNodeIdRaw: string): () => void {
+  const chatNodeId = chatNodeIdRaw.trim();
+  if (!chatNodeId) return () => {};
+  const setLocalBusyChatCountByNodeId =
+    useDroneHubRuntimeStore.getState().setLocalBusyChatCountByNodeId;
+  setLocalBusyChatCountByNodeId((current) => ({
+    ...current,
+    [chatNodeId]: (current[chatNodeId] ?? 0) + 1,
+  }));
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    setLocalBusyChatCountByNodeId((current) => {
+      const currentCount = current[chatNodeId] ?? 0;
+      if (currentCount <= 0) return current;
+      const next = { ...current };
+      if (currentCount === 1) delete next[chatNodeId];
+      else next[chatNodeId] = currentCount - 1;
+      return next;
+    });
+  };
+}
+
+export function useLocalChatBusy(chatNodeIdRaw: string, busy: boolean): void {
+  const chatNodeId = chatNodeIdRaw.trim();
+  React.useEffect(() => {
+    if (!chatNodeId || !busy) return;
+    return beginLocalChatBusy(chatNodeId);
+  }, [busy, chatNodeId]);
+}
+
 export function useDroneHubRuntimeState() {
   return useDroneHubRuntimeStore(
     useShallow((s) => ({
       optimisticallyDeletedDrones: s.optimisticallyDeletedDrones,
       startupSeedByDrone: s.startupSeedByDrone,
       approvalRequiredByChatNodeId: s.approvalRequiredByChatNodeId,
+      localBusyChatCountByNodeId: s.localBusyChatCountByNodeId,
       unreadAgentMessageByChatNodeId: s.unreadAgentMessageByChatNodeId,
       lastAgentSnippetByChatNodeId: s.lastAgentSnippetByChatNodeId,
       transcripts: s.transcripts,
@@ -158,6 +200,7 @@ export function useDroneHubRuntimeState() {
       setOptimisticallyDeletedDrones: s.setOptimisticallyDeletedDrones,
       setStartupSeedByDrone: s.setStartupSeedByDrone,
       setApprovalRequiredByChatNodeId: s.setApprovalRequiredByChatNodeId,
+      setLocalBusyChatCountByNodeId: s.setLocalBusyChatCountByNodeId,
       setUnreadAgentMessageByChatNodeId: s.setUnreadAgentMessageByChatNodeId,
       setLastAgentSnippetByChatNodeId: s.setLastAgentSnippetByChatNodeId,
       setTranscripts: s.setTranscripts,

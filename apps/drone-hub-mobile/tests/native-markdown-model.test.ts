@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  nativeMarkdownHasCodeBlock,
   parseNativeMarkdown,
   parseNativeMarkdownInline,
 } from '../src/local-assistant/native-markdown-model';
@@ -56,5 +57,10 @@ const ready = true;
     expect(parseNativeMarkdown('> [!WARNING]\n> Check permissions.')).toEqual([
       { type: 'quote', text: 'Check permissions.', callout: 'warning' },
     ]);
+  });
+
+  test('detects fenced code blocks for user-message rendering', () => {
+    expect(nativeMarkdownHasCodeBlock('ordinary user message')).toBe(false);
+    expect(nativeMarkdownHasCodeBlock('Example:\n```tsx\n<View />\n```')).toBe(true);
   });
 });

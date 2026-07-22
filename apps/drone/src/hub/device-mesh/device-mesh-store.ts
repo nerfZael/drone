@@ -13,7 +13,7 @@ const TERMINAL_PAIRING_RETENTION_MS = 10 * 60_000;
 const PENDING_PAIRING_RETENTION_MS = 60 * 60_000;
 const EXPIRED_INVITATION_RETENTION_MS = 10 * 60_000;
 
-export function migrateLegacyNativeChatGrants(
+export function migrateDeviceMeshGrants(
   grants: readonly CapabilityGrant[],
 ): CapabilityGrant[] {
   const legacy = grants.find(
@@ -23,12 +23,14 @@ export function migrateLegacyNativeChatGrants(
     ...(legacy?.operations.includes('approval.resolve') ? ['chat.approval.resolve'] : []),
     ...(legacy?.operations.includes('thread.message.delete') ? ['chat.message.delete'] : []),
   ];
-  if (operations.length === 0) return grants.slice();
-
   const next = grants.map((grant) => ({ ...grant, operations: [...grant.operations] }));
   const droneControl = next.find(
     (grant) => grant.capability === 'drone-control' && grant.version === 1,
   );
+  // Existing phones trusted to delete drones should not lose access to the
+  // less-destructive rename action merely because it arrived in a later release.
+  if (droneControl?.operations.includes('drone.delete')) operations.push('drone.rename');
+  if (operations.length === 0) return next;
   if (!droneControl) {
     next.push({ capability: 'drone-control', version: 1, operations });
     return next;
@@ -56,7 +58,7 @@ export class DeviceMeshStore {
       for (const pending of Object.values(this.state.pending)) pending.resolvedAt ??= null;
       let grantsMigrated = false;
       for (const device of Object.values(this.state.devices)) {
-        const grants = migrateLegacyNativeChatGrants(device.grants);
+        const grants = migrateDeviceMeshGrants(device.grants);
         if (JSON.stringify(grants) === JSON.stringify(device.grants)) continue;
         device.grants = grants;
         grantsMigrated = true;

@@ -17,7 +17,10 @@ import {
   mobileVoiceStatusLabel,
 } from './mobile-voice-transcription-model';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
-import { mobileAssistantComposerExpanded } from './assistant-composer-model';
+import {
+  mobileAssistantComposerExpanded,
+  mobileAssistantStopVisible,
+} from './assistant-composer-model';
 
 type ComposerIcon = typeof ArrowUp;
 
@@ -209,6 +212,11 @@ export function AssistantComposer({
     voiceActive,
     voiceError,
   });
+  const showAssistantStop = mobileAssistantStopVisible({
+    running,
+    hasStopAction: Boolean(onStop),
+    voiceActive,
+  });
   const canSend =
     (Boolean(value.trim()) || hasAttachments || voiceCanPauseOrStop) &&
     !sending &&
@@ -384,7 +392,7 @@ export function AssistantComposer({
               (attachmentsEnabled
                 ? styles.inputWithCollapsedVoice
                 : styles.inputWithCollapsedVoiceOnly),
-            !expanded && running && onStop && styles.inputWithCollapsedStop,
+            !expanded && showAssistantStop && styles.inputWithCollapsedStop,
           ]}
         />
         {!expanded ? (
@@ -415,19 +423,19 @@ export function AssistantComposer({
               onPress={() => void beginVoiceRecording()}
               style={({ pressed }) => [
                 styles.collapsedVoiceButton,
-                running && onStop && styles.collapsedVoiceButtonWithStop,
+                showAssistantStop && styles.collapsedVoiceButtonWithStop,
                 voiceRecordActionDisabled && styles.disabled,
                 pressed && styles.pressed,
               ]}
             >
               <Mic color={colors.textSecondary} size={17} strokeWidth={2.1} />
             </Pressable>
-            {running && onStop ? (
+            {showAssistantStop ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Stop assistant"
                 hitSlop={6}
-                onPress={onStop}
+                onPress={() => onStop?.()}
                 style={({ pressed }) => [styles.collapsedStopButton, pressed && styles.pressed]}
               >
                 <Square color={colors.danger} size={15} strokeWidth={2.2} fill={colors.danger} />
@@ -529,8 +537,8 @@ export function AssistantComposer({
                 </View>
               </>
             )}
-            {running && onStop ? (
-              <IconButton label="Stop assistant" icon={Square} onPress={onStop} />
+            {showAssistantStop ? (
+              <IconButton label="Stop assistant" icon={Square} onPress={() => onStop?.()} />
             ) : null}
             {!running || queueWhileRunning ? (
               <IconButton

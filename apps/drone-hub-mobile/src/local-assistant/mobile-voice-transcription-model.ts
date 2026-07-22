@@ -12,8 +12,12 @@ export function resolveMobileVoiceRecorderEvent(input: {
   activeUri: string | null;
   eventUri: string | null;
   failed: boolean;
+  ignoreFailureWithoutActiveUri?: boolean;
 }): { uri: string | null; handleFailure: boolean } {
   if (!input.failed) return { uri: input.activeUri, handleFailure: false };
+  if (!input.activeUri && input.ignoreFailureWithoutActiveUri) {
+    return { uri: null, handleFailure: false };
+  }
   if (input.eventUri && input.activeUri && input.eventUri !== input.activeUri) {
     return { uri: input.activeUri, handleFailure: false };
   }

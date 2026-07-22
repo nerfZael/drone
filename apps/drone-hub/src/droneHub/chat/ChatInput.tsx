@@ -1,6 +1,7 @@
 import React from 'react';
 import { ChatComposerContext, type ChatComposerContextConfig } from './ChatComposerContext';
 import { ChatComposerControls, type ChatComposerControlsConfig } from './ChatComposerControls';
+import { chatResponseStopVisible } from './chat-response-stop-visible';
 import {
   CHAT_INPUT_MAX_BYTES_EACH,
   CHAT_INPUT_MAX_BYTES_TOTAL,
@@ -194,10 +195,14 @@ export function ChatInput({
     resizeTextarea();
   }, [draft, resetKey, resizeTextarea]);
 
-  const showStopAction = waiting && typeof onStop === 'function';
+  const voiceRecordingActive = voiceRecordingStatus !== 'idle';
+  const showStopAction = chatResponseStopVisible({
+    waiting,
+    hasStopAction: typeof onStop === 'function',
+    voiceRecordingActive,
+  });
   const showSeparateStopAction = showStopAction && allowSendWhileWaiting;
   const hasModeHint = modeHint.trim().length > 0;
-  const voiceRecordingActive = voiceRecordingStatus !== 'idle';
   const voiceRecordingCanPauseOrStop = voiceRecordingStatus === 'recording' || voiceRecordingStatus === 'paused';
   const voiceRecordButtonDisabled =
     composerLocked ||

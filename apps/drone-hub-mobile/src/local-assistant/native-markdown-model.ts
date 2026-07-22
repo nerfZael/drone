@@ -17,6 +17,10 @@ export type NativeMarkdownBlock =
   | { type: 'divider' }
   | { type: 'table'; headers: string[]; rows: string[][] };
 
+export function nativeMarkdownHasCodeBlock(text: string): boolean {
+  return /^\s*```/m.test(String(text ?? ''));
+}
+
 const INLINE_PATTERN =
   /(`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|~~[^~\n]+~~|\[[^\]\n]+\]\([^)\n]+\)|\*[^*\n]+\*|_[^_\n]+_|https?:\/\/[^\s<]+)/g;
 

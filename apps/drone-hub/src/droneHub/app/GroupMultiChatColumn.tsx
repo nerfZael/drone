@@ -34,8 +34,10 @@ import {
   type DirtyDroneApplyModalState,
 } from './dirty-drone-apply';
 import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-multi-chat-sort';
+import { createCanvasChatNodeId } from './app-config';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { useLocalChatBusy } from './use-drone-hub-runtime-store';
 import { droneChatEventMatches, fetchDroneChatState, fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
 import { subscribeDroneChatEvents } from './chat-events';
 
@@ -317,6 +319,7 @@ export function GroupMultiChatColumn({
     if (sendingPrompt) return true;
     return visiblePendingPrompts.some((p) => p.state !== 'failed');
   }, [sendingPrompt, visiblePendingPrompts]);
+  useLocalChatBusy(createCanvasChatNodeId(drone.id, chatName), waitingForAgent);
 
   const canStopResponse = React.useMemo(
     () => visiblePendingPrompts.some((item) => item.state === 'queued' || item.state === 'sending' || item.state === 'sent'),

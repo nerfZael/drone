@@ -40,6 +40,7 @@ describe('DroneHubOverlays modal loading', () => {
     expect(overlaySource).toContain('createFromAgentMessageModalProps.jobsModal &&');
     expect(overlaySource).toContain('reposModalProps && <ReposModal');
     expect(overlaySource).toContain('dirtyDroneApplyModalProps && <DirtyDroneApplyModal');
+    expect(overlaySource).toContain('droneRenameModalProps && <DroneRenameModal');
     expect(overlaySource).toContain('droneErrorModalProps && <DroneErrorModal');
     expect(overlaySource).toContain('droneDropActionModalProps && <DroneDropActionModal');
   });

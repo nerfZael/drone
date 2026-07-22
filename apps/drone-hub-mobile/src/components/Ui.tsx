@@ -5,6 +5,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   type TextStyle,
   View,
   type ViewStyle,
@@ -147,6 +148,105 @@ export function ConfirmDialog({
             </Button>
             <Button
               tone={destructive ? 'danger' : 'accent'}
+              loading={busy}
+              onPress={onConfirm}
+              style={styles.dialogButton}
+            >
+              {confirmLabel}
+            </Button>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+export function TextInputDialog({
+  visible,
+  title,
+  message,
+  value,
+  error,
+  confirmLabel,
+  confirmDisabled,
+  busy,
+  maxLength,
+  onChangeText,
+  onCancel,
+  onConfirm,
+}: {
+  visible: boolean;
+  title: string;
+  message: string;
+  value: string;
+  error?: string | null;
+  confirmLabel: string;
+  confirmDisabled?: boolean;
+  busy?: boolean;
+  maxLength?: number;
+  onChangeText(value: string): void;
+  onCancel(): void;
+  onConfirm(): void;
+}) {
+  const insets = useSafeAreaInsets();
+  const canSubmit = Boolean(value.trim()) && !busy && !error && !confirmDisabled;
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={busy ? undefined : onCancel}
+    >
+      <View
+        style={[
+          styles.dialogLayer,
+          {
+            paddingTop: Math.max(insets.top, 24),
+            paddingBottom: Math.max(insets.bottom, 24),
+          },
+        ]}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Close ${title}`}
+          disabled={busy}
+          onPress={onCancel}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.dialog}>
+          <Text style={styles.dialogTitle}>{title}</Text>
+          <Text style={styles.dialogMessage}>{message}</Text>
+          <TextInput
+            autoFocus
+            accessibilityLabel={title}
+            accessibilityState={{ disabled: Boolean(busy) }}
+            value={value}
+            maxLength={maxLength}
+            editable={!busy}
+            selectTextOnFocus
+            returnKeyType="done"
+            onChangeText={onChangeText}
+            onSubmitEditing={() => {
+              if (canSubmit) onConfirm();
+            }}
+            style={styles.dialogInput}
+          />
+          {typeof maxLength === 'number' ? (
+            <Text style={styles.dialogInputCount}>{value.length}/{maxLength}</Text>
+          ) : null}
+          {error ? (
+            <View accessibilityLiveRegion="polite" style={styles.dialogInputError}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : null}
+          <View style={styles.dialogActions}>
+            <Button tone="quiet" disabled={busy} onPress={onCancel} style={styles.dialogButton}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!canSubmit}
               loading={busy}
               onPress={onConfirm}
               style={styles.dialogButton}
@@ -324,6 +424,32 @@ const styles = StyleSheet.create({
   dialogMarkDanger: { backgroundColor: colors.dangerDark },
   dialogTitle: { color: colors.textStrong, fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
   dialogMessage: { color: colors.muted, fontSize: 14, lineHeight: 21, marginTop: 9 },
+  dialogInput: {
+    minHeight: 46,
+    marginTop: 18,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radii.medium,
+    backgroundColor: colors.background,
+    paddingHorizontal: 13,
+    color: colors.textStrong,
+    fontSize: 15,
+  },
+  dialogInputCount: {
+    alignSelf: 'flex-end',
+    marginTop: 6,
+    color: colors.mutedDim,
+    fontSize: 10,
+    fontFamily: 'monospace',
+  },
+  dialogInputError: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    borderRadius: radii.medium,
+    backgroundColor: colors.dangerDark,
+    padding: 10,
+  },
   dialogActions: { flexDirection: 'row', gap: 9, marginTop: 22 },
   dialogButton: { flex: 1 },
   contextMenuLayer: {

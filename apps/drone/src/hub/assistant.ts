@@ -1228,6 +1228,14 @@ export class HubAssistantService {
     return () => this.changeListeners.delete(listener);
   }
 
+  threadRequiresApproval(threadIdRaw: string): boolean {
+    const threadId = cleanOptionalString(threadIdRaw);
+    if (!threadId) return false;
+    return [...this.approvals.values()].some(
+      (approval) => approval.threadId === threadId && approval.status === 'pending',
+    );
+  }
+
   private emitChange(reason: string, threadId?: string): void {
     const event: AssistantChangeEvent = {
       type: 'assistant_changed',

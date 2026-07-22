@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
   highlightMobileCode,
+  highlightMobileCodeFence,
   MOBILE_SYNTAX_HIGHLIGHT_MAX_CHARS,
+  mobileSyntaxLanguageForFence,
   mobileSyntaxLanguageForFile,
 } from '../src/drones/mobile-syntax-highlighting';
 
@@ -27,6 +29,20 @@ describe('mobile syntax highlighting', () => {
     expect(result.tokens).toContainEqual({ text: 'const', types: ['keyword'] });
     expect(result.tokens).toContainEqual({ text: '42', types: ['number'] });
     expect(result.tokens).toContainEqual({ text: '// final', types: ['comment'] });
+  });
+
+  test('highlights fenced chat code using common language aliases', () => {
+    expect(mobileSyntaxLanguageForFence('ts')).toBe('typescript');
+    expect(mobileSyntaxLanguageForFence('shell')).toBe('bash');
+    expect(mobileSyntaxLanguageForFence('plaintext')).toBeNull();
+
+    const source = 'const ready: boolean = true;';
+    const result = highlightMobileCodeFence(source, 'ts');
+    expect(result.highlighted).toBe(true);
+    expect(result.language).toBe('typescript');
+    expect(result.tokens.map((token) => token.text).join('')).toBe(source);
+    expect(result.tokens).toContainEqual({ text: 'const', types: ['keyword'] });
+    expect(result.tokens).toContainEqual({ text: 'true', types: ['boolean'] });
   });
 
   test('keeps unknown and very large files as lightweight plain text', () => {

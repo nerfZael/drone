@@ -78,6 +78,10 @@ export function useMobileChatVoiceRecorder({
         activeUri: recordingUriRef.current,
         eventUri: next.url,
         failed: next.hasError || Boolean(next.mediaServicesDidReset),
+        // prepareToRecordAsync reports its own errors. Until it gives this
+        // generation a URI, a callback cannot safely be attributed to it and
+        // may be the delayed stop event from the previous recording.
+        ignoreFailureWithoutActiveUri: statusRef.current === 'starting',
       });
       if (!event.handleFailure) return;
       generationRef.current += 1;

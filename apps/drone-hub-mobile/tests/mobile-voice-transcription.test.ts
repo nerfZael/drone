@@ -39,6 +39,14 @@ describe('mobile voice transcription', () => {
         failed: true,
       }),
     ).toEqual({ uri: 'file:///current.m4a', handleFailure: true });
+    expect(
+      resolveMobileVoiceRecorderEvent({
+        activeUri: null,
+        eventUri: 'file:///previous.m4a',
+        failed: true,
+        ignoreFailureWithoutActiveUri: true,
+      }),
+    ).toEqual({ uri: null, handleFailure: false });
   });
 
   test('allows recording while a running chat accepts queued prompts', () => {

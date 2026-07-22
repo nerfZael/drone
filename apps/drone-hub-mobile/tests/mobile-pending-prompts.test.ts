@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  confirmedMobilePendingPromptState,
   mergeOptimisticMobilePendingPrompts,
   mobileDronePendingPrompts,
   optimisticMobilePendingPrompt,
@@ -29,7 +30,7 @@ describe('mobile drone pending prompts', () => {
     });
   });
 
-  test('keeps a locally sent prompt optimistic and does not regress it to queued', () => {
+  test('uses the confirmed queued state instead of displaying a follow-up as active', () => {
     const local = optimisticMobilePendingPrompt({
       id: 'prompt-1',
       prompt: 'Fix it',
@@ -45,9 +46,34 @@ describe('mobile drone pending prompts', () => {
     ).toEqual([
       {
         ...local,
-        state: 'sending',
+        state: 'queued',
       },
     ]);
+  });
+
+  test('shows a follow-up as queued immediately while the active prompt is running', () => {
+    const queued = optimisticMobilePendingPrompt({
+      id: 'queued-local',
+      prompt: 'Do this next',
+      state: 'queued',
+    });
+
+    expect(mobileDronePendingPrompts([queued], [])).toEqual([
+      {
+        id: 'queued-local',
+        prompt: 'Do this next',
+        status: 'queued',
+        error: null,
+        imageCount: 0,
+        cancelable: true,
+        startedAt: queued.at,
+      },
+    ]);
+    expect(
+      confirmedMobilePendingPromptState({ pendingState: 'sending', queuedPromptId: 'queue-1' }),
+    ).toBe('queued');
+    expect(confirmedMobilePendingPromptState({ pendingState: 'queued' })).toBe('queued');
+    expect(confirmedMobilePendingPromptState({ pendingState: 'sending' })).toBe('sending');
   });
 
   test('keeps a locally failed prompt visible after the send grace period', () => {

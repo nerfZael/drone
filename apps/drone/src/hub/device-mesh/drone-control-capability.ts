@@ -155,6 +155,12 @@ export function deviceMeshDroneSummary(drone: any) {
     busyChats: Array.isArray(drone?.busyChats)
       ? drone.busyChats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean)
       : [],
+    approvalChats: Array.isArray(drone?.approvalChats)
+      ? drone.approvalChats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean)
+      : [],
+    approvalRequired:
+      drone?.approvalRequired === true ||
+      (Array.isArray(drone?.approvalChats) && drone.approvalChats.length > 0),
     unreadChats: Array.isArray(drone?.unreadChats)
       ? drone.unreadChats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean)
       : [],
@@ -387,6 +393,13 @@ export function createDroneControlCapability(
 
       const droneId = requiredText(payload.droneId, 'droneId');
       const encodedDrone = encodeURIComponent(droneId);
+      if (operation === 'drone.rename') {
+        const newName = requiredText(payload.newName, 'newName');
+        return await localHubRequest(access, `/api/drones/${encodedDrone}/rename`, {
+          method: 'POST',
+          body: JSON.stringify({ newName, source: 'drone-hub-mobile' }),
+        });
+      }
       if (operation === 'drone.pin.update') {
         return await localHubRequest(access, '/api/settings/ui-preferences/pinned-drones', {
           method: 'POST',

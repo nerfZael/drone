@@ -7,7 +7,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  type TextStyle,
   View,
 } from 'react-native';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
@@ -17,10 +16,10 @@ import { useEvent } from 'expo';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { SvgXml } from 'react-native-svg';
-import { catppuccin, colors } from '../theme';
+import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
+import { colors } from '../theme';
 import { NativeMarkdown } from '../local-assistant/NativeMarkdown';
 import { isCodePreview, isMarkdownPreview, type MobileFilePreview } from './file-preview-model';
-import { highlightMobileCode } from './mobile-syntax-highlighting';
 
 function MediaUnavailable({ message }: { message: string }) {
   return (
@@ -85,58 +84,6 @@ function PreviewImage({ uri }: { uri: string }) {
   );
 }
 
-const syntaxTokenStyles: Record<string, TextStyle> = {
-  comment: { color: catppuccin.overlay1, fontStyle: 'italic' },
-  prolog: { color: catppuccin.overlay1 },
-  doctype: { color: catppuccin.overlay1 },
-  cdata: { color: catppuccin.overlay1 },
-  punctuation: { color: catppuccin.subtext0 },
-  property: { color: catppuccin.sky },
-  tag: { color: catppuccin.red },
-  constant: { color: catppuccin.peach },
-  symbol: { color: catppuccin.flamingo },
-  deleted: { color: catppuccin.red },
-  boolean: { color: catppuccin.peach },
-  number: { color: catppuccin.peach },
-  selector: { color: catppuccin.green },
-  'attr-name': { color: catppuccin.yellow },
-  string: { color: catppuccin.green },
-  char: { color: catppuccin.green },
-  builtin: { color: catppuccin.red },
-  inserted: { color: catppuccin.green },
-  operator: { color: catppuccin.sky },
-  entity: { color: catppuccin.peach },
-  url: { color: catppuccin.sky },
-  atrule: { color: catppuccin.mauve },
-  'attr-value': { color: catppuccin.green },
-  keyword: { color: catppuccin.mauve },
-  function: { color: catppuccin.blue },
-  'class-name': { color: catppuccin.yellow },
-  regex: { color: catppuccin.peach },
-  important: { color: catppuccin.peach, fontWeight: '700' },
-  variable: { color: catppuccin.flamingo },
-  namespace: { color: catppuccin.overlay2 },
-};
-
-function HighlightedCode({ content, path, mime }: { content: string; path: string; mime: string }) {
-  const result = React.useMemo(
-    () => highlightMobileCode(content, path, mime),
-    [content, mime, path],
-  );
-  return (
-    <Text selectable style={[styles.textContent, styles.codeContent]}>
-      {result.tokens.map((token, index) => (
-        <Text
-          key={index}
-          style={token.types.map((type) => syntaxTokenStyles[type]).filter(Boolean)}
-        >
-          {token.text}
-        </Text>
-      ))}
-    </Text>
-  );
-}
-
 function TextPreview({ preview, line }: { preview: MobileFilePreview; line: number | null }) {
   const scrollRef = React.useRef<ScrollView | null>(null);
   const markdown = isMarkdownPreview(preview.path, preview.mime);
@@ -164,10 +111,11 @@ function TextPreview({ preview, line }: { preview: MobileFilePreview; line: numb
     >
       <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.textRow}>
         {code ? (
-          <HighlightedCode
+          <MobileHighlightedCode
             content={preview.content ?? ''}
             path={preview.path}
             mime={preview.mime}
+            style={[styles.textContent, styles.codeContent]}
           />
         ) : (
           <Text selectable style={styles.textContent}>

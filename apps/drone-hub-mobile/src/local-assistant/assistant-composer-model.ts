@@ -13,3 +13,11 @@ export function mobileAssistantComposerExpanded(input: {
     Boolean(input.voiceError)
   );
 }
+
+export function mobileAssistantStopVisible(input: {
+  running: boolean;
+  hasStopAction: boolean;
+  voiceActive: boolean;
+}): boolean {
+  return input.running && input.hasStopAction && !input.voiceActive;
+}
