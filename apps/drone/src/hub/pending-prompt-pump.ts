@@ -14,7 +14,11 @@ export function pendingPromptKeepsChatBusy(opts: {
 }): boolean {
   const state = String(opts.state ?? '').trim();
   if (state === 'failed' || state === 'cancelled') return false;
-  if (state === 'queued' || state === 'sending') return true;
+  // A queued prompt is waiting for delivery; the agent is not working on it
+  // yet. Keep it visible in the queue without promoting the chat/drone to the
+  // busy state.
+  if (state === 'queued') return false;
+  if (state === 'sending') return true;
   if (opts.native && state === 'sent') return false;
   return !opts.hasTurn;
 }

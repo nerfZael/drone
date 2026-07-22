@@ -2,10 +2,18 @@ import { describe, expect, test } from 'bun:test';
 import {
   appendOptimisticPendingPrompt,
   createOptimisticPendingPrompt,
+  pendingPromptShowsWorkingState,
   reconcileOptimisticPendingPrompt,
 } from '../src/droneHub/app/optimistic-pending-prompts';
 
 describe('optimistic pending prompt helpers', () => {
+  test('only presents submitted prompts as active agent work', () => {
+    expect(pendingPromptShowsWorkingState({ state: 'queued' })).toBe(false);
+    expect(pendingPromptShowsWorkingState({ state: 'sending' })).toBe(true);
+    expect(pendingPromptShowsWorkingState({ state: 'sent' })).toBe(true);
+    expect(pendingPromptShowsWorkingState({ state: 'failed' })).toBe(false);
+  });
+
   test('creates a local optimistic prompt with preview attachments', () => {
     const item = createOptimisticPendingPrompt({
       prompt: 'ship it',

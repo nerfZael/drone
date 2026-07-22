@@ -14,6 +14,12 @@ describe('pending prompt ownership', () => {
 
   test('does not keep native chats busy after native delivery completes', () => {
     expect(
+      pendingPromptKeepsChatBusy({ state: 'queued', hasTurn: false, native: true }),
+    ).toBe(false);
+    expect(
+      pendingPromptKeepsChatBusy({ state: 'queued', hasTurn: false, native: false }),
+    ).toBe(false);
+    expect(
       pendingPromptKeepsChatBusy({ state: 'sending', hasTurn: false, native: true }),
     ).toBe(true);
     expect(

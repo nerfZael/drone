@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 
 import { updateRegistry } from '../src/host/registry';
 import { createDronePendingPromptStore } from '../src/hub/drone-pending-prompts';
-import { createPendingDroneStateHelpers } from '../src/hub/drone-pending-state';
+import {
+  createPendingDroneStateHelpers,
+  hasQueuedPromptWithId,
+} from '../src/hub/drone-pending-state';
 import { resetTranscriptStoreForTests } from '../src/hub/transcript-store';
 import { withTempDroneDataDir } from './test-helpers';
 
@@ -22,6 +25,23 @@ const pendingPromptStore = createDronePendingPromptStore({
 });
 
 describe('drone pending prompt store', () => {
+  test('finds a durable queued seed prompt without treating submitted work as queued', () => {
+    const drone = {
+      chats: {
+        default: {
+          pendingPrompts: [
+            { id: 'queued-seed', state: 'queued' },
+            { id: 'submitted-seed', state: 'sending' },
+          ],
+        },
+      },
+    };
+
+    expect(hasQueuedPromptWithId(drone, 'queued-seed')).toBe(true);
+    expect(hasQueuedPromptWithId(drone, 'submitted-seed')).toBe(false);
+    expect(hasQueuedPromptWithId(drone, 'missing')).toBe(false);
+  });
+
   test('pushes pending prompts idempotently and can claim them for sending', async () => {
     await withTempDroneDataDir('drone-pending-prompts-', async () => {
       await updateRegistry((reg: any) => {

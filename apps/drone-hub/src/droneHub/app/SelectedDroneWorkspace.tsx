@@ -67,6 +67,7 @@ import {
   formatTranscriptMarkdown,
 } from '../chat/transcript-export';
 import { buildChatTimelineItems } from './chat-timeline-items';
+import { pendingPromptShowsWorkingState } from './optimistic-pending-prompts';
 
 type LaunchHint =
   | {
@@ -587,7 +588,7 @@ export function SelectedDroneWorkspace({
   const chatInputWaiting = currentChatIsDraft
     ? false
     : chatUiMode === 'transcript'
-      ? selectedChatDockerSnapshotBusy || visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')
+      ? selectedChatDockerSnapshotBusy || visiblePendingPromptsWithStartup.some(pendingPromptShowsWorkingState)
       : (showRespondingAsStatusInHeader || canStopResponse);
   const openChatErrorDetails = React.useCallback(() => {
     const message = String(chatInfoError ?? '').trim();

@@ -455,7 +455,11 @@ import {
   setDroneGroupMetadata,
   updateDroneFleetMetadata,
 } from './drone-metadata-commands';
-import { createPendingDroneStateHelpers, type PendingPhase } from './drone-pending-state';
+import {
+  createPendingDroneStateHelpers,
+  hasQueuedPromptWithId,
+  type PendingPhase,
+} from './drone-pending-state';
 import { createDronePendingPromptStore, type PendingPrompt } from './drone-pending-prompts';
 import { createDroneProvisioningController } from './drone-provisioning';
 import { createDockerSnapshotRuntime } from './docker-snapshot-runtime';
@@ -4832,6 +4836,16 @@ export async function startDroneHubApiServer(opts: {
           changedForDrone = true;
           break;
         }
+      }
+
+      // Current provisioning treats the initial prompt as durable queue work,
+      // not as part of runtime startup. Older records can still carry a
+      // `seeding` marker for that queued prompt. There is no daemon job to poll
+      // yet, so polling it only produces a swallowed 404 and leaves the UI
+      // permanently gated behind the stale phase.
+      if (nextHub && promptId && hasQueuedPromptWithId(d, promptId)) {
+        nextHub = null;
+        changedForDrone = true;
       }
 
       if (nextHub && promptId) {

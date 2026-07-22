@@ -25,6 +25,26 @@ export type PendingPromptProjection = {
   updatedAt: string;
 };
 
+export function hasQueuedPromptWithId(drone: unknown, promptIdRaw: unknown): boolean {
+  const promptId = String(promptIdRaw ?? '').trim();
+  if (!promptId || !drone || typeof drone !== 'object') return false;
+  const chats = (drone as any).chats;
+  if (!chats || typeof chats !== 'object') return false;
+  for (const entry of Object.values(chats) as any[]) {
+    const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
+    if (
+      pending.some(
+        (prompt: any) =>
+          String(prompt?.id ?? '').trim() === promptId &&
+          String(prompt?.state ?? '').trim() === 'queued',
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function createPendingDroneStateHelpers(deps: {
   normalizeChatName: (raw: any) => string;
   nowIso: () => string;

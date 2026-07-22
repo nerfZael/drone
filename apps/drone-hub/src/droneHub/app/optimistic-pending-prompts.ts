@@ -76,6 +76,12 @@ export function normalizePendingPromptState(
   return fallback;
 }
 
+export function pendingPromptShowsWorkingState(
+  item: Pick<PendingPrompt, 'state'> | null | undefined,
+): boolean {
+  return item?.state === 'sending' || item?.state === 'sent';
+}
+
 export function createOptimisticPendingPrompt(args: {
   prompt: string;
   attachments?: ChatSendPayload['attachments'];

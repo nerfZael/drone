@@ -26,6 +26,7 @@ import {
   appendOptimisticPendingPrompt,
   createOptimisticPendingPrompt,
   normalizePendingPromptState,
+  pendingPromptShowsWorkingState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
 import {
@@ -317,7 +318,7 @@ export function GroupMultiChatColumn({
 
   const waitingForAgent = React.useMemo(() => {
     if (sendingPrompt) return true;
-    return visiblePendingPrompts.some((p) => p.state !== 'failed');
+    return visiblePendingPrompts.some(pendingPromptShowsWorkingState);
   }, [sendingPrompt, visiblePendingPrompts]);
   useLocalChatBusy(createCanvasChatNodeId(drone.id, chatName), waitingForAgent);
 

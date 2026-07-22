@@ -9,6 +9,7 @@ import {
   appendOptimisticPendingPrompt,
   createOptimisticPendingPrompt,
   normalizePendingPromptState,
+  pendingPromptShowsWorkingState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
 import { droneChatEventMatches, fetchDroneChatState, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
@@ -616,7 +617,7 @@ export function useChatRuntimeOrchestration({
       id: `seed-${selectedDroneSummary.id}-${seed.chatName}`,
       at: seed.at || new Date().toISOString(),
       prompt,
-      state: 'sending',
+      state: 'queued',
       updatedAt: seed.at || undefined,
     };
   }, [chatUiMode, selectedDroneSummary, startupSeedByDrone]);
@@ -660,7 +661,7 @@ export function useChatRuntimeOrchestration({
       if (sendingPrompt) return true; // request in flight
       if (chatUiMode === 'cli' && cliTyping) return true; // best-effort signal for custom agents
     }
-    return visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed');
+    return visiblePendingPromptsWithStartup.some(pendingPromptShowsWorkingState);
   }, [chatUiMode, cliTyping, sendingPrompt, selectedDrone, visiblePendingPromptsWithStartup]);
 
   const canStopResponse = React.useMemo(() => {
