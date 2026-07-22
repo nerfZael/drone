@@ -871,8 +871,8 @@ code, pre {
 
 .dh-type-header-action {
   font-family: var(--sans);
-  font-size: var(--text-10);
-  font-weight: 500;
+  font-size: var(--text-11);
+  font-weight: 600;
   letter-spacing: 0;
   color: var(--chrome-muted);
 }
