@@ -145,6 +145,21 @@ export function toolItemName(item: AssistantToolRenderItem): string {
   return String(item.call?.name || item.result?.toolName || '').trim();
 }
 
+export function toolActivityIsSettled(item: AssistantToolRenderItem): boolean {
+  if (!item.result) return false;
+  const details = item.result.details;
+  if (
+    !details ||
+    typeof details !== 'object' ||
+    Array.isArray(details) ||
+    (details as Record<string, unknown>).type !== 'workspace_transfer'
+  ) {
+    return true;
+  }
+  const phase = (details as Record<string, unknown>).phase;
+  return item.result.isError === true || phase === 'completed' || phase === 'failed';
+}
+
 function canGroupToolItem(item: AssistantToolRenderItem): boolean {
   const name = toolItemName(item);
   return (

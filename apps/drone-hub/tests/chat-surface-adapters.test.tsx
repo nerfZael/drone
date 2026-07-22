@@ -621,6 +621,96 @@ describe('agent chat surface adapters', () => {
     expect(html.match(/animate-spin/g)).toHaveLength(7);
     expect(html).not.toContain('data-tool-status="ok"');
     expect(html).not.toContain('overflow-y-auto');
+    expect(html).not.toContain('uppercase');
+    expect(html).not.toContain('bg-[var(--surface-soft)]');
+    expect(html).not.toContain('rounded border');
+    expect(html.match(/data-tool-activity-row/g)).toHaveLength(7);
+    expect(html).not.toContain('data-agent-thinking');
+  });
+
+  test('active runs show thinking after their visible tools have settled', () => {
+    const settledHtml = renderToStaticMarkup(
+      <ToolRunActivity
+        items={[
+          {
+            type: 'tool',
+            key: 'settled-tool',
+            call: { id: 'settled-call', name: 'read_file', args: {} },
+            result: { role: 'toolResult', toolCallId: 'settled-call', content: 'Done' },
+          },
+        ]}
+        active
+        initiallyExpanded
+      />,
+    );
+    const transferringHtml = renderToStaticMarkup(
+      <ToolRunActivity
+        items={[
+          {
+            type: 'tool',
+            key: 'transfer-tool',
+            call: { id: 'transfer-call', name: 'transfer_files', args: {} },
+            result: {
+              role: 'toolResult',
+              toolCallId: 'transfer-call',
+              content: 'Transferring',
+              details: { type: 'workspace_transfer', phase: 'transferring' },
+            },
+          },
+        ]}
+        active
+        initiallyExpanded
+      />,
+    );
+    const groupedTransferringHtml = renderToStaticMarkup(
+      <ToolRunActivity
+        items={[1, 2].map((index) => ({
+          type: 'tool' as const,
+          key: `transfer-tool-${index}`,
+          call: { id: `transfer-call-${index}`, name: 'transfer_files', args: {} },
+          result: {
+            role: 'toolResult' as const,
+            toolCallId: `transfer-call-${index}`,
+            content: 'Transferring',
+            details: { type: 'workspace_transfer', phase: 'transferring' },
+          },
+        }))}
+        active
+        initiallyExpanded
+      />,
+    );
+    const completedTransferHtml = renderToStaticMarkup(
+      <ToolRunActivity
+        items={[
+          {
+            type: 'tool',
+            key: 'completed-transfer',
+            call: { id: 'completed-transfer', name: 'transfer_files', args: {} },
+            result: {
+              role: 'toolResult',
+              toolCallId: 'completed-transfer',
+              content: 'Done',
+            },
+          },
+        ]}
+        active
+        initiallyExpanded
+      />,
+    );
+
+    expect(settledHtml).toContain('data-agent-thinking');
+    expect(settledHtml).toContain('role="status"');
+    expect(settledHtml).toContain('Thinking…');
+    expect(settledHtml).not.toContain('uppercase');
+    expect(settledHtml).not.toContain('bg-[var(--surface-soft)]');
+    expect(transferringHtml).not.toContain('data-agent-thinking');
+    expect(groupedTransferringHtml).toContain('data-tool-status="pending"');
+    expect(groupedTransferringHtml).not.toContain('data-tool-status="ok"');
+    expect(groupedTransferringHtml).not.toContain('data-agent-thinking');
+    expect(completedTransferHtml).toContain('data-tool-status="ok"');
+    expect(completedTransferHtml).toContain('Complete');
+    expect(completedTransferHtml).toContain('Transfer complete');
+    expect(completedTransferHtml).not.toContain('Show details');
   });
 
   test('active tool runs identify when approval is required', () => {
@@ -732,12 +822,14 @@ describe('agent chat surface adapters', () => {
 
     expect(html).toContain('8 tool calls');
     expect(html).toContain('Read file');
-    expect(html).toContain('x5');
+    expect(html).toContain('×5');
     expect(html).toContain('List files');
-    expect(html).toContain('x2');
-    expect(html.indexOf('Read file')).toBeLessThan(html.indexOf('x5'));
-    expect(html.indexOf('List files')).toBeLessThan(html.indexOf('x2'));
+    expect(html).toContain('×2');
+    expect(html.indexOf('Read file')).toBeLessThan(html.indexOf('×5'));
+    expect(html.indexOf('List files')).toBeLessThan(html.indexOf('×2'));
     expect(html).not.toContain('Complete');
     expect(html).not.toContain('>Details<');
+    expect(html).not.toContain('uppercase');
+    expect(html).not.toContain('bg-[var(--surface-soft)]');
   });
 });

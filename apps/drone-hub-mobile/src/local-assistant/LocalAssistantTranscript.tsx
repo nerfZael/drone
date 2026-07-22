@@ -18,6 +18,7 @@ import {
   messageImageParts,
   messageText,
   renderItemsFromMessages,
+  toolActivityIsSettled,
   toolLabel,
   type AssistantMessage,
   type AssistantRenderItem,
@@ -39,6 +40,7 @@ import { LinkedPullRequestAttachments } from '../drones/LinkedPullRequestAttachm
 import type { MobileLinkedPullRequestContext } from '../drones/use-drone-linked-pull-requests';
 import {
   groupMobileTranscriptRuns,
+  mobileRunIsThinking,
   workingDurationLabel,
   type MobileAgentPlan,
   type MobileTranscriptRun,
@@ -435,7 +437,7 @@ function ToolStatus({ failed, pending }: { failed: boolean; pending: boolean }) 
   return (
     <View style={styles.toolStatusSlot}>
       {pending ? (
-        <View style={styles.toolStatusPending} />
+        <ActivityIndicator accessible={false} color={colors.accent} size={12} />
       ) : (
         <View style={[styles.toolStatusCircle, failed && styles.toolStatusError]}>
           <Text style={styles.toolStatusText}>{failed ? '!' : '✓'}</Text>
@@ -466,39 +468,67 @@ function TransferToolRow({
       ? item.result.details
       : null;
   const files = Array.isArray(progress?.files) ? progress.files : [];
+  const settled = toolActivityIsSettled(item);
+  const expandable = files.length > 0;
   const total = Number(progress?.totalBytes ?? 0);
   const transferred = Number(progress?.transferredBytes ?? 0);
+  const failed = item.result?.isError === true || progress?.phase === 'failed';
   const percent =
     total > 0
       ? Math.min(100, (transferred / total) * 100)
-      : progress?.phase === 'completed'
+      : settled && !failed
         ? 100
         : 0;
-  const failed = item.result?.isError === true || progress?.phase === 'failed';
+  const sourceLabel = progress?.source?.targetLabel ?? item.call?.args?.sourceTarget;
+  const destinationLabel =
+    progress?.destination?.targetLabel ?? item.call?.args?.destinationTarget;
+  const amountLabel = progress
+    ? `${formatTransferBytes(transferred)} / ${formatTransferBytes(total)}`
+    : failed
+      ? 'Failed'
+      : settled
+        ? 'Complete'
+        : 'Preparing…';
+  const summaryLabel =
+    sourceLabel || destinationLabel
+      ? `${sourceLabel ?? 'Source'} → ${destinationLabel ?? 'Destination'}`
+      : settled
+        ? 'File transfer finished'
+        : 'Scanning files to transfer';
+  const progressLabel = !progress
+    ? failed
+      ? 'Transfer failed'
+      : settled
+        ? 'Transfer complete'
+        : 'Scanning files…'
+    : progress.phase === 'planning'
+      ? 'Scanning folder…'
+      : `${progress.completedFiles ?? 0} of ${progress.fileCount ?? 0} files`;
   return (
-    <View style={[styles.transfer, nested && styles.transferNested, failed && styles.toolError]}>
+    <View style={[styles.transfer, nested && styles.transferNested]}>
       <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Transfer files, ${failed ? 'failed' : progress?.phase === 'completed' ? 'completed' : 'running'}`}
-        accessibilityState={{ expanded: open }}
+        accessible={expandable}
+        accessibilityRole={expandable ? 'button' : undefined}
+        accessibilityLabel={`Transfer files, ${failed ? 'failed' : settled ? 'completed' : 'running'}`}
+        accessibilityState={expandable ? { expanded: open } : undefined}
+        disabled={!expandable}
         hitSlop={4}
-        onPress={() => setOpen((value) => !value)}
-        style={({ pressed }) => [styles.transferHead, pressed && styles.toolHeadPressed]}
+        onPress={expandable ? () => setOpen((value) => !value) : undefined}
+        style={({ pressed }) => [
+          styles.transferHead,
+          pressed && expandable && styles.toolHeadPressed,
+        ]}
       >
-        <ToolStatus failed={failed} pending={!failed && progress?.phase !== 'completed'} />
+        <ToolStatus failed={failed} pending={!settled} />
         <View style={styles.toolCopy}>
           <View style={styles.transferTitleRow}>
             <Text style={styles.toolTitle}>Transfer files</Text>
             <Text style={styles.transferBytes}>
-              {progress
-                ? `${formatTransferBytes(transferred)} / ${formatTransferBytes(total)}`
-                : 'Preparing…'}
+              {amountLabel}
             </Text>
           </View>
           <Text numberOfLines={1} style={styles.toolSummary}>
-            {progress
-              ? `${progress.source?.targetLabel ?? 'Source'} → ${progress.destination?.targetLabel ?? 'Destination'}`
-              : 'Scanning files to transfer'}
+            {summaryLabel}
           </Text>
           <View style={styles.progressTrack}>
             <View
@@ -511,9 +541,7 @@ function TransferToolRow({
           </View>
           <View style={styles.transferMeta}>
             <Text style={styles.transferMetaText}>
-              {progress?.phase === 'planning'
-                ? 'Scanning folder…'
-                : `${progress?.completedFiles ?? 0} of ${progress?.fileCount ?? 0} files`}
+              {progressLabel}
             </Text>
             <Text style={styles.transferMetaText}>
               {progress?.retries
@@ -533,9 +561,16 @@ function TransferToolRow({
             </Text>
           ) : null}
         </View>
+        {expandable ? (
+          open ? (
+            <ChevronDown color={colors.mutedDim} size={14} strokeWidth={1.8} />
+          ) : (
+            <ChevronRight color={colors.mutedDim} size={14} strokeWidth={1.8} />
+          )
+        ) : null}
       </Pressable>
       {open && files.length > 0 ? (
-        <View style={styles.transferFiles}>
+        <View style={[styles.transferFiles, nested && styles.transferFilesNested]}>
           {files.map((file: any, index: number) => {
             const filePercent =
               file.size > 0
@@ -600,7 +635,7 @@ function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nest
     ? messageText(item.result).trim() || String(item.result.errorMessage ?? '').trim()
     : '';
   return (
-    <View style={[styles.tool, nested && styles.toolNested, failed && styles.toolError]}>
+    <View style={[styles.tool, nested && styles.toolNested]}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${toolLabel(item.call?.name ?? item.result?.toolName)}, ${pending ? 'running' : failed ? 'failed' : 'completed'}`}
@@ -615,21 +650,28 @@ function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nest
             {toolLabel(item.call?.name ?? item.result?.toolName)}
           </Text>
         </View>
+        {open ? (
+          <ChevronDown color={colors.mutedDim} size={14} strokeWidth={1.8} />
+        ) : (
+          <ChevronRight color={colors.mutedDim} size={14} strokeWidth={1.8} />
+        )}
       </Pressable>
       {open ? (
-        <View style={styles.toolDetails}>
+        <View style={[styles.toolDetails, nested && styles.toolDetailsNested]}>
           {args !== undefined ? (
             <>
-              <Text style={styles.detailLabel}>ARGUMENTS</Text>
-              <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
-                <Text selectable style={styles.detailText}>
-                  {JSON.stringify(args, null, 2)}
-                </Text>
-              </ScrollView>
+              <Text style={styles.detailLabel}>Arguments</Text>
+              <View style={styles.detailPayload}>
+                <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
+                  <Text selectable style={styles.detailText}>
+                    {JSON.stringify(args, null, 2)}
+                  </Text>
+                </ScrollView>
+              </View>
             </>
           ) : null}
-          <Text style={styles.detailLabel}>RESULT</Text>
-          <Text selectable style={styles.detailText}>
+          <Text style={styles.detailLabel}>Result</Text>
+          <Text selectable style={[styles.detailText, styles.detailPayload]}>
             {result || (pending ? 'Waiting…' : 'No result payload.')}
           </Text>
         </View>
@@ -641,10 +683,10 @@ function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nest
 function ToolGroupRow({ item }: { item: Extract<AssistantRenderItem, { type: 'toolGroup' }> }) {
   const [open, setOpen] = React.useState(false);
   const failed = item.items.some((tool) => tool.result?.isError === true);
-  const pending = item.items.some((tool) => !tool.result);
+  const pending = item.items.some((tool) => !toolActivityIsSettled(tool));
   const name = toolLabel(item.items[0]?.call?.name ?? item.items[0]?.result?.toolName);
   return (
-    <View style={[styles.tool, failed && styles.toolError]}>
+    <View style={styles.tool}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${name}, ${item.items.length} calls, ${pending ? 'running' : failed ? 'failed' : 'completed'}`}
@@ -662,6 +704,11 @@ function ToolGroupRow({ item }: { item: Extract<AssistantRenderItem, { type: 'to
             <Text style={styles.toolCount}>×{item.items.length}</Text>
           </View>
         </View>
+        {open ? (
+          <ChevronDown color={colors.mutedDim} size={14} strokeWidth={1.8} />
+        ) : (
+          <ChevronRight color={colors.mutedDim} size={14} strokeWidth={1.8} />
+        )}
       </Pressable>
       {open ? (
         <View style={styles.groupDetails}>
@@ -871,11 +918,17 @@ function MobileAgentPlanList({
 function TranscriptRun({
   run,
   renderItem,
+  showThinking,
 }: {
   run: MobileTranscriptRun;
   renderItem: (item: AssistantRenderItem) => any;
+  showThinking: boolean;
 }) {
-  const [toolsExpanded, setToolsExpanded] = React.useState(false);
+  const [toolsExpanded, setToolsExpanded] = React.useState(run.active);
+  React.useEffect(() => {
+    if (run.active) setToolsExpanded(true);
+  }, [run.active]);
+  const thinking = toolsExpanded && showThinking && mobileRunIsThinking(run);
   return (
     <View>
       {renderItem(run.user)}
@@ -900,6 +953,18 @@ function TranscriptRun({
           renderItem(item)
         );
       })}
+      {thinking ? (
+        <View
+          accessible
+          accessibilityLabel="Assistant is thinking"
+          accessibilityLiveRegion="polite"
+          accessibilityRole="progressbar"
+          style={[styles.runBody, styles.thinkingActivity]}
+        >
+          <ActivityIndicator accessible={false} color={colors.accent} size={12} />
+          <Text style={styles.thinkingActivityText}>Thinking…</Text>
+        </View>
+      ) : null}
       <View style={styles.runBody}>
         <MobileAgentPlanList plan={run.plan} running={run.active} />
       </View>
@@ -1154,7 +1219,12 @@ export function MobileAssistantTranscript({
     <View style={styles.messages}>
       {groups.map((group) =>
         group.type === 'run' ? (
-          <TranscriptRun key={group.key} run={group} renderItem={renderItem} />
+          <TranscriptRun
+            key={group.key}
+            run={group}
+            renderItem={renderItem}
+            showThinking={!currentReasoning.trim()}
+          />
         ) : (
           <React.Fragment key={group.key}>{renderItem(group.item)}</React.Fragment>
         ),
@@ -1497,31 +1567,24 @@ const styles = StyleSheet.create({
   attachmentName: { color: colors.text, fontSize: 11, fontWeight: '600' },
   attachmentMeta: { color: colors.muted, fontSize: 9, marginTop: 2 },
   tool: {
-    borderRadius: 6,
-    borderColor: colors.border,
-    borderWidth: 1,
-    backgroundColor: colors.whiteWashSoft,
     marginHorizontal: 0,
-    marginVertical: 2,
+    marginVertical: 1,
   },
-  toolNested: { marginHorizontal: 0, backgroundColor: colors.crust },
-  toolError: { borderColor: colors.dangerBorder },
+  toolNested: { marginHorizontal: 0 },
   toolHead: {
-    minHeight: 34,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
+    paddingVertical: 5,
   },
-  toolHeadPressed: { backgroundColor: colors.whiteWash },
+  toolHeadPressed: { opacity: 0.68 },
   toolStatusSlot: {
     width: 13,
     height: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  toolStatusPending: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
   toolStatusCircle: {
     width: 13,
     height: 13,
@@ -1546,10 +1609,8 @@ const styles = StyleSheet.create({
   },
   toolTitle: {
     color: colors.muted,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.45,
   },
   toolCount: {
     color: colors.subtle,
@@ -1557,38 +1618,44 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   toolDetails: {
-    gap: 6,
-    paddingHorizontal: 9,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderSubtle,
-    backgroundColor: colors.mantle,
+    gap: 7,
+    marginLeft: 6,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.borderSubtle,
+    paddingLeft: 15,
+    paddingRight: 4,
+    paddingBottom: 9,
+    paddingTop: 2,
   },
-  detailLabel: { color: colors.accent, fontSize: 7, fontWeight: '600', letterSpacing: 1 },
+  toolDetailsNested: { marginLeft: 21, borderLeftWidth: 0, paddingLeft: 0 },
+  detailLabel: { color: colors.muted, fontSize: 11, fontWeight: '500' },
+  detailPayload: {
+    borderRadius: 4,
+    backgroundColor: colors.mantle,
+    paddingHorizontal: 7,
+    paddingVertical: 6,
+  },
   detailText: { color: colors.muted, fontSize: 10, lineHeight: 15, fontFamily: 'monospace' },
   groupDetails: {
-    gap: 2,
-    padding: 5,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderSubtle,
-    backgroundColor: colors.mantle,
+    gap: 8,
+    marginLeft: 6,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.borderSubtle,
+    paddingLeft: 15,
+    paddingRight: 4,
+    paddingBottom: 9,
+    paddingTop: 2,
   },
   transfer: {
-    borderRadius: 6,
-    borderColor: colors.border,
-    borderWidth: 1,
-    backgroundColor: colors.whiteWashSoft,
     marginHorizontal: 0,
-    marginVertical: 2,
-    overflow: 'hidden',
+    marginVertical: 1,
   },
-  transferNested: { marginHorizontal: 0, backgroundColor: colors.crust },
+  transferNested: { marginHorizontal: 0 },
   transferHead: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 8,
-    paddingHorizontal: 9,
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   transferTitleRow: {
     flexDirection: 'row',
@@ -1609,13 +1676,19 @@ const styles = StyleSheet.create({
   progressFailed: { backgroundColor: colors.danger },
   transferMeta: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 5 },
   transferMetaText: { color: colors.subtle, fontSize: 8, fontFamily: 'monospace' },
-  transferFiles: { gap: 5, padding: 8, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
+  transferFiles: {
+    gap: 9,
+    marginLeft: 6,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.borderSubtle,
+    paddingLeft: 15,
+    paddingRight: 4,
+    paddingBottom: 9,
+    paddingTop: 2,
+  },
+  transferFilesNested: { marginLeft: 21, borderLeftWidth: 0, paddingLeft: 0 },
   transferFile: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 5,
-    backgroundColor: colors.background,
-    padding: 7,
+    paddingVertical: 2,
   },
   transferFileHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   transferFileName: { color: colors.text, fontSize: 9, flex: 1, minWidth: 0 },
@@ -1631,6 +1704,14 @@ const styles = StyleSheet.create({
   fileProgressFill: { height: '100%', borderRadius: 2, backgroundColor: colors.online },
   fileProgressRetry: { backgroundColor: colors.warning },
   transferError: { color: colors.subtle, fontSize: 7, marginTop: 5 },
+  thinkingActivity: {
+    minHeight: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+  },
+  thinkingActivityText: { color: colors.muted, fontSize: 12, fontWeight: '600' },
   reasoning: {
     marginHorizontal: 10,
     marginVertical: 12,

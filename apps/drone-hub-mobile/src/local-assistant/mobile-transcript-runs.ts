@@ -1,7 +1,10 @@
-import type {
-  AssistantMessage,
-  AssistantRenderItem,
-  AssistantToolRenderItem,
+import {
+  messageImageParts,
+  messageVisibleText,
+  toolActivityIsSettled,
+  type AssistantMessage,
+  type AssistantRenderItem,
+  type AssistantToolRenderItem,
 } from '@drone/assistant-chat';
 
 export type MobileAgentPlanItem = {
@@ -197,4 +200,25 @@ export function workingDurationLabel(durationMs: number): string {
   if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
   if (minutes > 0) return `${minutes}m ${seconds}s`;
   return `${seconds}s`;
+}
+
+export function mobileRunIsThinking(
+  run: Pick<MobileTranscriptRun, 'active' | 'items'>,
+): boolean {
+  if (!run.active) return false;
+  const lastItem = run.items.at(-1);
+  if (!lastItem) return false;
+  if (
+    lastItem.type === 'message' &&
+    lastItem.message.role === 'assistant' &&
+    (messageVisibleText(lastItem.message).trim() ||
+      messageImageParts(lastItem.message).length > 0 ||
+      lastItem.message.errorMessage)
+  ) {
+    return false;
+  }
+  const tools = run.items.flatMap((item) =>
+    item.type === 'tool' ? [item] : item.type === 'toolGroup' ? item.items : [],
+  );
+  return tools.length > 0 && tools.every(toolActivityIsSettled);
 }
