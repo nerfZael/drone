@@ -14,7 +14,7 @@ export function ZoomableImageStage({
 }: {
   resetKey: string;
   enabled?: boolean;
-  children: React.ReactNode;
+  children: React.ComponentProps<typeof View>['children'];
 }) {
   const [showHint, setShowHint] = React.useState(false);
   const scale = useSharedValue(1);
