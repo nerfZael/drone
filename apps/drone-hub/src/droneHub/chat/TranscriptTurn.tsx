@@ -1,4 +1,5 @@
 import React from 'react';
+import { isStoppedRunError } from '@drone/assistant-chat';
 import { stripAnsi } from '../../domain';
 import type { TranscriptItem } from '../types';
 import { AgentMessageExtras, extractAgentMessageContent } from './AgentMessageExtras';
@@ -13,6 +14,7 @@ import { ChatMessageFrame } from './ChatMessageFrame';
 import { collectInlineAgentMedia } from './inline-agent-media';
 import { AgentRunSummaryLine } from './WorkingElapsedStatus';
 import { UserChatMessage } from './UserChatMessage';
+import { StoppedRunNotice } from './StoppedRunNotice';
 
 function sameAttachments(aRaw: unknown, bRaw: unknown): boolean {
   const a = normalizeImageAttachmentRefs(aRaw);
@@ -67,7 +69,12 @@ export const TranscriptTurn = React.memo(
   }) {
     const attachments = normalizeImageAttachmentRefs((item as any).attachments);
     const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
-    const cleaned = item.ok ? stripAnsi(item.output) : stripAnsi(item.error || 'failed');
+    const isStopped = !item.ok && isStoppedRunError(item.error);
+    const cleaned = isStopped
+      ? stripAnsi(item.output || '')
+      : item.ok
+        ? stripAnsi(item.output)
+        : stripAnsi(item.error || 'failed');
     const agentMessage = React.useMemo(
       () => extractAgentMessageContent(cleaned, item.ok),
       [cleaned, item.ok],
@@ -122,7 +129,7 @@ export const TranscriptTurn = React.memo(
         <ChatMessageFrame
           role="assistant"
           at={completedRunDurationMs === null ? agentIso : undefined}
-          error={!item.ok}
+          error={!item.ok && !isStopped}
           showRoleIcon={showRoleIcons}
           showRoleLabel={showRoleIcons}
           plainAssistant={!showRoleIcons}
@@ -130,7 +137,7 @@ export const TranscriptTurn = React.memo(
           <ChatMessageBody
             role="assistant"
             text={cleanedAgentMessage}
-            error={!item.ok}
+            error={!item.ok && !isStopped}
             preserveLeadParagraph
             toggleOnMessageClick
             autoExpand={autoExpandAgentMessage}
@@ -205,6 +212,7 @@ export const TranscriptTurn = React.memo(
             }
           />
         </ChatMessageFrame>
+        {isStopped ? <StoppedRunNotice reason={item.error} at={agentIso} /> : null}
       </div>
     );
   },

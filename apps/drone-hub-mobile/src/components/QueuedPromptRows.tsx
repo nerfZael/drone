@@ -1,19 +1,22 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import X from 'lucide-react-native/icons/x';
+import Square from 'lucide-react-native/icons/square';
+import { stoppedRunDetail } from '@drone/assistant-chat';
 import { colors } from '../theme';
 import type { MobileAgentPlan } from '../local-assistant/mobile-transcript-runs';
 
 export type MobileQueuedPrompt = {
   id: string;
   prompt: string;
-  status: 'queued' | 'pending' | 'failed';
+  status: 'queued' | 'pending' | 'stopped' | 'failed';
   error?: string | null;
   attachmentCount?: number;
   imageCount?: number;
   cancelable?: boolean;
   startedAt?: string;
   agentPlan?: MobileAgentPlan;
+  delivered?: boolean;
 };
 
 export function QueuedPromptRows({
@@ -34,6 +37,7 @@ export function QueuedPromptRows({
           Number(prompt.attachmentCount ?? prompt.imageCount) || 0,
         );
         const failed = prompt.status === 'failed';
+        const stopped = prompt.status === 'stopped';
         const pending = prompt.status === 'pending';
         const cancelling = cancellingId === prompt.id;
         const label = failed ? 'Failed' : prompt.status === 'queued' ? 'Queued' : 'Pending';
@@ -51,6 +55,41 @@ export function QueuedPromptRows({
                     {attachmentCount} attachment{attachmentCount === 1 ? '' : 's'}
                   </Text>
                 ) : null}
+              </View>
+            </View>
+          );
+        }
+        if (stopped) {
+          return (
+            <View key={prompt.id} style={styles.stoppedGroup}>
+              {!prompt.delivered ? (
+                <View style={styles.pendingMessageGroup}>
+                  <View style={styles.pendingMessage}>
+                    {prompt.prompt ? (
+                      <Text selectable style={styles.pendingPrompt}>
+                        {prompt.prompt}
+                      </Text>
+                    ) : null}
+                    {attachmentCount ? (
+                      <Text style={styles.pendingImageCount}>
+                        {attachmentCount} attachment{attachmentCount === 1 ? '' : 's'}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
+              <View
+                accessible
+                accessibilityLabel={`Run stopped. ${stoppedRunDetail(prompt.error)}`}
+                style={styles.stoppedNotice}
+              >
+                <View style={styles.stoppedIcon}>
+                  <Square color={colors.warning} fill={colors.warning} size={9} strokeWidth={2} />
+                </View>
+                <View style={styles.stoppedCopy}>
+                  <Text style={styles.stoppedTitle}>Run stopped</Text>
+                  <Text style={styles.stoppedDetail}>{stoppedRunDetail(prompt.error)}</Text>
+                </View>
               </View>
             </View>
           );
@@ -114,6 +153,7 @@ const styles = StyleSheet.create({
   },
   rowFailed: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
   body: { flex: 1, gap: 5 },
+  stoppedGroup: { width: '100%' },
   pendingMessageGroup: {
     width: 'auto',
     maxWidth: '86%',
@@ -136,6 +176,40 @@ const styles = StyleSheet.create({
   },
   pendingPrompt: { color: colors.textStrong, fontSize: 14, lineHeight: 21 },
   pendingImageCount: { color: colors.muted, fontSize: 10, fontWeight: '700', marginTop: 4 },
+  stoppedNotice: {
+    maxWidth: '88%',
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 10,
+    marginVertical: 7,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    borderRadius: 8,
+    backgroundColor: colors.warningDark,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+  },
+  stoppedIcon: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    borderRadius: 12,
+    backgroundColor: colors.surface0,
+  },
+  stoppedCopy: { flex: 1, minWidth: 0 },
+  stoppedTitle: {
+    color: colors.warning,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  stoppedDetail: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 2 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   badge: {
     color: colors.accent,

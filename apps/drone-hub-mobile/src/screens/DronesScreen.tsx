@@ -1503,8 +1503,8 @@ export function DronesScreen({
     [nativeMessages, turns],
   );
   const visiblePendingPrompts = React.useMemo(
-    () => mobileDronePendingPrompts(pendingPrompts, turns),
-    [pendingPrompts, turns],
+    () => mobileDronePendingPrompts(pendingPrompts, turns, transcriptMessages),
+    [pendingPrompts, transcriptMessages, turns],
   );
   const linkedPullRequests = useDroneLinkedPullRequests({
     targetDeviceId: targetId,

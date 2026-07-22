@@ -5,6 +5,7 @@ import {
   mobileRunIsThinking,
   mobileRunDetails,
   normalizeMobileAgentPlan,
+  sortMobileTranscriptTimeline,
   workingDurationLabel,
 } from '../src/local-assistant/mobile-transcript-runs';
 
@@ -162,5 +163,19 @@ describe('mobile transcript runs', () => {
         ],
       }),
     ).toBe(false);
+  });
+
+  test('places a historical stopped run at its original transcript time', () => {
+    const timeline = sortMobileTranscriptTimeline([
+      { label: 'newer run', atMs: Date.parse('2026-07-20T10:02:00.000Z'), order: 1 },
+      { label: 'stopped run', atMs: Date.parse('2026-07-20T10:01:00.000Z'), order: 2 },
+      { label: 'older run', atMs: Date.parse('2026-07-20T10:00:00.000Z'), order: 0 },
+    ]);
+
+    expect(timeline.map((entry) => entry.label)).toEqual([
+      'older run',
+      'stopped run',
+      'newer run',
+    ]);
   });
 });
