@@ -242,6 +242,11 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
     droneDeleteConfirmError,
     closeDroneDeleteConfirm,
     confirmDroneDelete,
+    renameDroneTarget,
+    closeRenameDrone,
+    clearRenameDroneError,
+    confirmRenameDrone,
+    renamingDrones,
     droneErrorModal,
     clearingDroneError,
     closeDroneErrorModal,
@@ -424,6 +429,21 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
             },
           }
         : null,
+    droneRenameModalProps: renameDroneTarget
+      ? {
+          busy: Boolean(renamingDrones[renameDroneTarget.id]),
+          drone: {
+            id: renameDroneTarget.id,
+            currentName: renameDroneTarget.currentName,
+          },
+          error: renameDroneTarget.error,
+          onCancel: closeRenameDrone,
+          onConfirm: (name: string) => {
+            void confirmRenameDrone(name);
+          },
+          onNameChange: clearRenameDroneError,
+        }
+      : null,
     droneErrorModalProps: droneErrorModal
       ? {
           droneErrorModal,

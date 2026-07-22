@@ -5,6 +5,7 @@ import { isDroneStartingOrSeeding } from './helpers';
 import { parseCanvasChatNodeId } from './app-config';
 import type { DroneDeleteMode } from './settings-types';
 import { useDroneCanvasStore } from '../canvas/use-drone-canvas-store';
+import { droneRenameErrorMessage, type DroneRenameTarget } from './drone-rename';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -39,6 +40,10 @@ export function useDroneMutationActions({
   const [renamingDrones, setRenamingDrones] = React.useState<Record<string, boolean>>(
     {},
   );
+  const [renameDroneTarget, setRenameDroneTarget] = React.useState<DroneRenameTarget | null>(
+    null,
+  );
+  const renameDroneLaunchRef = React.useRef(false);
   const [settingBaseImages, setSettingBaseImages] = React.useState<Record<string, boolean>>(
     {},
   );
@@ -227,50 +232,57 @@ export function useDroneMutationActions({
   );
 
   const renameDrone = React.useCallback(
-    async (droneIdRaw: string) => {
+    (droneIdRaw: string) => {
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
+      if (renameDroneLaunchRef.current) return;
       if (deletingDrones[droneId] || renamingDrones[droneId] || settingBaseImages[droneId]) return;
       const currentName = String(drones.find((d) => d.id === droneId)?.name ?? '').trim() || droneId;
-      const suggested = String(window.prompt(`Rename drone "${currentName}" to:`, currentName) ?? '').trim();
-      if (!suggested || suggested === currentName) return;
-      const renamed = await renameDroneTo(droneId, suggested, { showAlert: true });
-      if (!renamed.ok) return;
+      renameDroneLaunchRef.current = false;
+      setRenameDroneTarget({ id: droneId, currentName, error: null });
     },
-    [deletingDrones, drones, renamingDrones, renameDroneTo, settingBaseImages],
+    [deletingDrones, drones, renamingDrones, settingBaseImages],
   );
 
-  const renameDrones = React.useCallback(
-    async (droneIdsRaw: string[]): Promise<{ ok: boolean; renamed: string[]; skipped: string[] }> => {
-      const droneIds = Array.from(
-        new Set(droneIdsRaw.map((item) => String(item ?? '').trim()).filter(Boolean)),
+  const closeRenameDrone = React.useCallback(() => {
+    if (renameDroneLaunchRef.current) return;
+    setRenameDroneTarget((current) => {
+      if (current && renamingDrones[current.id]) return current;
+      return null;
+    });
+  }, [renamingDrones]);
+
+  const clearRenameDroneError = React.useCallback(() => {
+    setRenameDroneTarget((current) =>
+      current?.error ? { ...current, error: null } : current,
+    );
+  }, []);
+
+  const confirmRenameDrone = React.useCallback(
+    async (newNameRaw: string): Promise<boolean> => {
+      const target = renameDroneTarget;
+      if (!target || renameDroneLaunchRef.current) return false;
+      renameDroneLaunchRef.current = true;
+      setRenameDroneTarget((current) =>
+        current?.id === target.id ? { ...current, error: null } : current,
       );
-      const renamed: string[] = [];
-      const skipped: string[] = [];
-      if (droneIds.length === 0) return { ok: false, renamed, skipped };
-
-      for (const droneId of droneIds) {
-        if (deletingDrones[droneId] || renamingDrones[droneId] || settingBaseImages[droneId]) {
-          skipped.push(droneId);
-          continue;
+      try {
+        const renamed = await renameDroneTo(target.id, newNameRaw, { showAlert: false });
+        if (renamed.ok) {
+          setRenameDroneTarget((current) => (current?.id === target.id ? null : current));
+          return true;
         }
-        const currentName =
-          String(dronesRef.current.find((d) => d.id === droneId)?.name ?? '').trim() || droneId;
-        const rawNext = window.prompt(`Rename drone "${currentName}" to:`, currentName);
-        if (rawNext == null) break;
-        const nextName = String(rawNext ?? '').trim();
-        if (!nextName || nextName === currentName) {
-          skipped.push(droneId);
-          continue;
-        }
-        const result = await renameDroneTo(droneId, nextName, { showAlert: true });
-        if (result.ok) renamed.push(droneId);
-        else skipped.push(droneId);
+        setRenameDroneTarget((current) =>
+          current?.id === target.id
+            ? { ...current, error: droneRenameErrorMessage(renamed.error) }
+            : current,
+        );
+        return false;
+      } finally {
+        renameDroneLaunchRef.current = false;
       }
-
-      return { ok: skipped.length === 0, renamed, skipped };
     },
-    [deletingDrones, renameDroneTo, renamingDrones, settingBaseImages],
+    [renameDroneTarget, renameDroneTo],
   );
 
   const setDroneBaseImage = React.useCallback(
@@ -521,10 +533,13 @@ export function useDroneMutationActions({
   return {
     deletingDrones,
     renamingDrones,
+    renameDroneTarget,
     settingBaseImages,
     deleteDrone,
     renameDrone,
-    renameDrones,
+    closeRenameDrone,
+    clearRenameDroneError,
+    confirmRenameDrone,
     setDroneBaseImage,
     reparentDronesToParent,
     renameDroneTo,

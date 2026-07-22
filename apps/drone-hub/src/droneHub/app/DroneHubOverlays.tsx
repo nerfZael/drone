@@ -4,6 +4,7 @@ import type { CreateDronesModal as CreateDronesModalComponent } from './CreateDr
 import type { CustomAgentsModal as CustomAgentsModalComponent } from './CustomAgentsModal';
 import type { DirtyDroneApplyModal as DirtyDroneApplyModalComponent } from './DirtyDroneApplyModal';
 import { DroneDeleteConfirmModal } from './DroneDeleteConfirmModal';
+import { DroneRenameModal } from './DroneRenameModal';
 import type { DroneDropActionModal as DroneDropActionModalComponent } from './DroneDropActionModal';
 import type { DraftCreateDroneModal as DraftCreateDroneModalComponent } from './DraftCreateDroneModal';
 import type { DroneErrorModal as DroneErrorModalComponent } from './DroneErrorModal';
@@ -59,6 +60,7 @@ export type DroneHubOverlaysProps = {
   reposModalProps: React.ComponentProps<typeof ReposModalComponent> | null;
   dirtyDroneApplyModalProps: React.ComponentProps<typeof DirtyDroneApplyModalComponent> | null;
   droneDeleteConfirmModalProps: React.ComponentProps<typeof DroneDeleteConfirmModal> | null;
+  droneRenameModalProps: React.ComponentProps<typeof DroneRenameModal> | null;
   droneErrorModalProps: React.ComponentProps<typeof DroneErrorModalComponent> | null;
   droneDropActionModalProps: React.ComponentProps<typeof DroneDropActionModalComponent> | null;
 };
@@ -72,6 +74,7 @@ export function DroneHubOverlays({
   reposModalProps,
   dirtyDroneApplyModalProps,
   droneDeleteConfirmModalProps,
+  droneRenameModalProps,
   droneErrorModalProps,
   droneDropActionModalProps,
 }: DroneHubOverlaysProps) {
@@ -97,6 +100,7 @@ export function DroneHubOverlays({
         {dirtyDroneApplyModalProps && <DirtyDroneApplyModal {...dirtyDroneApplyModalProps} />}
       </React.Suspense>
       {droneDeleteConfirmModalProps && <DroneDeleteConfirmModal {...droneDeleteConfirmModalProps} />}
+      {droneRenameModalProps && <DroneRenameModal {...droneRenameModalProps} />}
       <React.Suspense fallback={null}>
         {droneErrorModalProps && <DroneErrorModal {...droneErrorModalProps} />}
       </React.Suspense>
