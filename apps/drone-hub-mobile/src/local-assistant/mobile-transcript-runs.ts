@@ -107,6 +107,24 @@ function itemTimestamp(item: AssistantRenderItem): string | number | undefined {
   return undefined;
 }
 
+export function mobileTranscriptGroupStartedAt(
+  group: MobileTranscriptGroup,
+): string | number | undefined {
+  return group.type === 'run' ? group.startedAt : itemTimestamp(group.item);
+}
+
+export function sortMobileTranscriptTimeline<T extends { atMs: number; order: number }>(
+  entries: readonly T[],
+): T[] {
+  return [...entries].sort((left, right) => {
+    const leftHasTime = Number.isFinite(left.atMs);
+    const rightHasTime = Number.isFinite(right.atMs);
+    if (leftHasTime && rightHasTime && left.atMs !== right.atMs) return left.atMs - right.atMs;
+    if (leftHasTime !== rightHasTime) return leftHasTime ? -1 : 1;
+    return left.order - right.order;
+  });
+}
+
 function toolCount(item: AssistantRenderItem): number {
   if (item.type === 'tool') return 1;
   return item.type === 'toolGroup' ? item.items.length : 0;

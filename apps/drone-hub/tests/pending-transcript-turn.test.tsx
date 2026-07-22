@@ -77,4 +77,22 @@ describe('external pending transcript turn', () => {
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('Prompt line 45');
   });
+
+  test('presents a stopped run separately from the delivered user message', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          state: 'failed',
+          error: 'Stopped by user.',
+          updatedAt: new Date().toISOString(),
+        })}
+      />,
+    );
+
+    expect(html).toContain('Inspect the repository');
+    expect(html).toContain('Run stopped');
+    expect(html).toContain('Stopped by you.');
+    expect(html).not.toContain('>Stopped</span>');
+    expect(html).not.toContain('text-[var(--red)]');
+  });
 });

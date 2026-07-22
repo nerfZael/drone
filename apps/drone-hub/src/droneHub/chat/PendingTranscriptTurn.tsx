@@ -1,4 +1,5 @@
 import React from 'react';
+import { isStoppedRunError } from '@drone/assistant-chat';
 import { stripAnsi } from '../../domain';
 import type { PendingPrompt } from '../types';
 import { ChatMessageCopyAction } from './ChatMessageCopyAction';
@@ -10,6 +11,7 @@ import { AgentPlanList } from './AgentPlanList';
 import { WorkingElapsedStatus } from './WorkingElapsedStatus';
 import { UserChatMessage } from './UserChatMessage';
 import { ChangedFilesCard } from './ChangedFilesCard';
+import { StoppedRunNotice } from './StoppedRunNotice';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
@@ -45,9 +47,8 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           lastError: String(item.observability.lastError ?? '').trim(),
         }
       : null;
-  const isStopped =
-    isFailed && /stopped by user|stopped before submission|stopped because the drone was archived|stopped because the drone was deleted/i.test(String(item.error ?? ''));
-  const badgeLabel = isStopped ? 'Stopped' : isFailed ? 'Failed' : null;
+  const isStopped = isFailed && isStoppedRunError(item.error);
+  const badgeLabel = isFailed && !isStopped ? 'Failed' : null;
   const canCancelQueued = item.state === 'queued' && Boolean(onCancelQueued);
   const showAgentPendingBubble = !(item.state === 'queued' && !isFailed);
   const agentCopyText = isFailed ? stripAnsi(item.error || 'failed to send') : 'Working…';
@@ -87,11 +88,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   ) : null;
   const pendingHeader = badgeLabel ? (
     <span
-      className={`rounded border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${
-        isStopped
-          ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
-          : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
-      }`}
+      className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)]"
       style={{ fontFamily: 'var(--display)' }}
     >
       {badgeLabel}
@@ -99,7 +96,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   ) : null;
 
   return (
-    <div className={`animate-fade-in ${isFailed ? 'opacity-90' : ''}`}>
+    <div className={`animate-fade-in ${isFailed && !isStopped ? 'opacity-90' : ''}`}>
       <UserChatMessage
         at={item.at}
         showRoleIcons={showRoleIcons}
@@ -121,23 +118,23 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         )}
       />
 
-      {showAgentPendingBubble ? (
+      {isStopped ? (
+        <>
+          <StoppedRunNotice reason={item.error} at={item.updatedAt ?? item.at} />
+          <ChangedFilesCard fileChanges={item.fileChanges} />
+        </>
+      ) : showAgentPendingBubble ? (
         <ChatMessageFrame
           role="assistant"
           at={isFailed ? item.at : undefined}
           showRoleIcon={showRoleIcons}
           showRoleLabel={showRoleIcons}
           plainAssistant={!showRoleIcons}
-          error={isFailed && !isStopped}
-          warning={isStopped}
+          error={isFailed}
         >
           <ChatMessageCopyAction text={agentCopyText} />
           {isFailed ? (
-            <div
-              className={`whitespace-pre-wrap text-[var(--text-12-5)] leading-[1.6] ${
-                isStopped ? 'text-[var(--yellow)]' : 'text-[var(--red)]'
-              }`}
-            >
+            <div className="whitespace-pre-wrap text-[var(--text-12-5)] leading-[1.6] text-[var(--red)]">
               {stripAnsi(item.error || 'failed to send')}
             </div>
           ) : (

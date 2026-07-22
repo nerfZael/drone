@@ -43,7 +43,9 @@ import { LinkedPullRequestAttachments } from '../drones/LinkedPullRequestAttachm
 import type { MobileLinkedPullRequestContext } from '../drones/use-drone-linked-pull-requests';
 import {
   groupMobileTranscriptRuns,
+  mobileTranscriptGroupStartedAt,
   mobileRunIsThinking,
+  sortMobileTranscriptTimeline,
   workingDurationLabel,
   type MobileAgentPlan,
   type MobileTranscriptRun,
@@ -1162,7 +1164,10 @@ export function MobileAssistantTranscript({
     return <ConversationLoadingState />;
   }
   const activePrompts = queuedPrompts.filter((prompt) => prompt.status === 'pending');
-  const inactivePrompts = queuedPrompts.filter((prompt) => prompt.status !== 'pending');
+  const historicalPrompts = queuedPrompts.filter(
+    (prompt) => prompt.status === 'failed' || prompt.status === 'stopped',
+  );
+  const queuedOnlyPrompts = queuedPrompts.filter((prompt) => prompt.status === 'queued');
   if (items.length === 0 && !running && queuedPrompts.length === 0) {
     return (
       <View style={styles.emptyTranscript}>
@@ -1345,18 +1350,34 @@ export function MobileAssistantTranscript({
   const activePrompt = activePrompts.at(-1);
   const lastGroup = groups.at(-1);
   const groupedActiveRun = lastGroup?.type === 'run' && lastGroup.active;
+  const historicalTimeline = sortMobileTranscriptTimeline([
+    ...groups.map((group, order) => ({
+      kind: 'group' as const,
+      group,
+      order,
+      atMs: timestampMs(mobileTranscriptGroupStartedAt(group)),
+    })),
+    ...historicalPrompts.map((prompt, index) => ({
+      kind: 'prompt' as const,
+      prompt,
+      order: groups.length + index,
+      atMs: timestampMs(prompt.startedAt),
+    })),
+  ]);
   return (
     <View style={styles.messages}>
-      {groups.map((group) =>
-        group.type === 'run' ? (
+      {historicalTimeline.map((entry) =>
+        entry.kind === 'prompt' ? (
+          <QueuedPromptRows key={`prompt:${entry.prompt.id}`} prompts={[entry.prompt]} />
+        ) : entry.group.type === 'run' ? (
           <TranscriptRun
-            key={group.key}
-            run={group}
+            key={entry.group.key}
+            run={entry.group}
             renderItem={renderItem}
             showThinking={!currentReasoning.trim()}
           />
         ) : (
-          <React.Fragment key={group.key}>{renderItem(group.item)}</React.Fragment>
+          <React.Fragment key={entry.group.key}>{renderItem(entry.group.item)}</React.Fragment>
         ),
       )}
       {activePrompts.length > 0 ? (
@@ -1391,9 +1412,9 @@ export function MobileAssistantTranscript({
           <TypingDots label={`${assistantLabel} is working`} />
         </View>
       ) : null}
-      {inactivePrompts.length > 0 ? (
+      {queuedOnlyPrompts.length > 0 ? (
         <QueuedPromptRows
-          prompts={inactivePrompts}
+          prompts={queuedOnlyPrompts}
           cancellingId={cancellingPromptId}
           onCancel={onCancelQueuedPrompt}
         />

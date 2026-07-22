@@ -148,9 +148,7 @@ export function visiblePendingPromptsForAgent(opts: {
       .map((turn) => String((turn as any)?.id ?? '').trim())
       .filter(Boolean),
   );
-  return opts.pendingPrompts.filter(
-    (prompt) => prompt.state === 'failed' || !ids.has(prompt.id),
-  );
+  return opts.pendingPrompts.filter((prompt) => !ids.has(prompt.id));
 }
 
 export function useChatRuntimeOrchestration({

@@ -2,17 +2,19 @@ import {
   normalizeMobileAgentPlan,
   type MobileAgentPlan,
 } from '../local-assistant/mobile-transcript-runs';
+import { isStoppedRunError } from '@drone/assistant-chat';
 
 export type MobileDronePendingPrompt = {
   id: string;
   prompt: string;
-  status: 'queued' | 'pending' | 'failed';
+  status: 'queued' | 'pending' | 'stopped' | 'failed';
   error: string | null;
   attachmentCount?: number;
   imageCount: number;
   cancelable: boolean;
   startedAt?: string;
   agentPlan?: MobileAgentPlan;
+  delivered?: boolean;
 };
 
 export type MobileOptimisticPendingPrompt = {
@@ -122,10 +124,16 @@ export function confirmedMobilePendingPromptState(input: {
 export function mobileDronePendingPrompts(
   raw: unknown,
   turnsRaw: unknown,
+  messagesRaw: unknown = [],
 ): MobileDronePendingPrompt[] {
   const completedTurnIds = new Set(
     (Array.isArray(turnsRaw) ? turnsRaw : [])
       .map((turn: any) => String(turn?.id ?? '').trim())
+      .filter(Boolean),
+  );
+  const transcriptMessageIds = new Set(
+    (Array.isArray(messagesRaw) ? messagesRaw : [])
+      .map((message: any) => String(message?.id ?? '').trim())
       .filter(Boolean),
   );
   return (Array.isArray(raw) ? raw : []).flatMap((item: any) => {
@@ -135,6 +143,13 @@ export function mobileDronePendingPrompts(
     // The Hub deliberately retains recently completed pending rows for reconciliation. Once the
     // matching transcript turn is visible, rendering that row again would duplicate the prompt.
     if (state !== 'failed' && completedTurnIds.has(id)) return [];
+    const stopped = state === 'failed' && isStoppedRunError(item?.error);
+    const messageId = String(item?.messageId ?? '').trim();
+    const delivered =
+      stopped &&
+      (completedTurnIds.has(id) ||
+        transcriptMessageIds.has(id) ||
+        Boolean(messageId && transcriptMessageIds.has(messageId)));
     const agentPlan = normalizeMobileAgentPlan(item?.agentPlan);
     const attachmentCount = positiveCount(
       item?.attachmentCount ??
@@ -145,13 +160,20 @@ export function mobileDronePendingPrompts(
       {
         id,
         prompt: String(item?.prompt ?? ''),
-        status: state === 'failed' ? 'failed' : state === 'queued' ? 'queued' : 'pending',
+        status: stopped
+          ? 'stopped'
+          : state === 'failed'
+            ? 'failed'
+            : state === 'queued'
+              ? 'queued'
+              : 'pending',
         error: item?.error ? String(item.error) : null,
         ...(attachmentCount > 0 ? { attachmentCount } : {}),
         imageCount: positiveCount(item?.imageCount),
         cancelable: state === 'queued',
         ...(String(item?.at ?? '').trim() ? { startedAt: String(item.at).trim() } : {}),
         ...(agentPlan ? { agentPlan } : {}),
+        ...(delivered ? { delivered: true } : {}),
       } satisfies MobileDronePendingPrompt,
     ];
   });

@@ -146,4 +146,34 @@ describe('mobile drone pending prompts', () => {
       },
     ]);
   });
+
+  test('classifies a stop as a run outcome and remembers when its message was delivered', () => {
+    expect(
+      mobileDronePendingPrompts(
+        [
+          {
+            id: 'stopped',
+            messageId: 'user-message',
+            at: '2026-07-19T10:00:00.000Z',
+            prompt: 'Make the change',
+            state: 'failed',
+            error: 'Stopped by user.',
+          },
+        ],
+        [],
+        [{ id: 'user-message', role: 'user', content: 'Make the change' }],
+      ),
+    ).toEqual([
+      {
+        id: 'stopped',
+        prompt: 'Make the change',
+        status: 'stopped',
+        error: 'Stopped by user.',
+        imageCount: 0,
+        cancelable: false,
+        startedAt: '2026-07-19T10:00:00.000Z',
+        delivered: true,
+      },
+    ]);
+  });
 });
