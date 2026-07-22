@@ -1794,7 +1794,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   } = useChatRuntimeOrchestration({
     chatInfo,
     currentDrone,
-    currentDroneLabel,
     droneById,
     outputView,
     optimisticPendingPrompts,

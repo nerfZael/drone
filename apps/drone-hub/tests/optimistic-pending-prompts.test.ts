@@ -2,10 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import {
   appendOptimisticPendingPrompt,
   createOptimisticPendingPrompt,
+  optimisticPendingPromptState,
   reconcileOptimisticPendingPrompt,
 } from '../src/droneHub/app/optimistic-pending-prompts';
 
 describe('optimistic pending prompt helpers', () => {
+  test('presents follow-up submissions as queued while the chat is responding', () => {
+    expect(optimisticPendingPromptState(true)).toBe('queued');
+    expect(optimisticPendingPromptState(false)).toBe('sending');
+  });
+
   test('creates a local optimistic prompt with preview attachments', () => {
     const item = createOptimisticPendingPrompt({
       prompt: 'ship it',
