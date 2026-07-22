@@ -34,6 +34,7 @@ const {
   WHITEBOARD_ACTIVE_STORAGE_KEY,
   writeActiveWhiteboardId,
 } = await import('../src/droneHub/whiteboard/whiteboard-events');
+const { restoreRequiredWorkspacePanels } = await import('../src/droneHub/app/DockableDroneWorkspace');
 
 function readAppSource(relativePath: string): string {
   return fs.readFileSync(path.join(import.meta.dir, '../src/droneHub', relativePath), 'utf8');
@@ -67,8 +68,49 @@ describe('per-drone workspace state', () => {
     const selectedWorkspace = readAppSource('app/SelectedDroneWorkspace.tsx');
 
     expect(workspace).toContain('workspaceLayoutStorageKey(droneId)');
-    expect(workspace).toContain('writeStoredLayout(currentDrone.id, api.toJSON())');
+    expect(workspace).toContain('writeStoredLayout(currentDrone.id, layout)');
     expect(selectedWorkspace).toContain('key={currentDrone.id}');
+  });
+
+  test('repairs an empty saved chat group and restores chat beside the editor', () => {
+    const emptyGroup = { panels: [] };
+    const editorPanel = {
+      api: {
+        id: 'tool:editor',
+        group: { api: { location: { type: 'grid' } } },
+      },
+    };
+    const editorGroup = { panels: [editorPanel] };
+    const removedGroups: unknown[] = [];
+    const addedPanels: Array<{
+      id?: string;
+      component?: string;
+      position?: { direction?: string; referencePanel?: string };
+    }> = [];
+    const api = {
+      groups: [emptyGroup, editorGroup],
+      panels: [editorPanel],
+      getPanel: () => undefined,
+      removeGroup: (group: unknown) => removedGroups.push(group),
+      addPanel: (panel: (typeof addedPanels)[number]) => addedPanels.push(panel),
+    };
+
+    restoreRequiredWorkspacePanels(api as unknown as Parameters<typeof restoreRequiredWorkspacePanels>[0]);
+
+    expect(removedGroups).toEqual([emptyGroup]);
+    expect(addedPanels).toHaveLength(1);
+    expect(addedPanels[0]).toMatchObject({
+      id: 'agent-chat',
+      component: 'chat',
+      position: { direction: 'left', referencePanel: 'tool:editor' },
+    });
+  });
+
+  test('does not persist a teardown layout after the required chat panel is gone', () => {
+    const workspace = readAppSource('app/DockableDroneWorkspace.tsx');
+
+    expect(workspace).toContain('if (!layout.panels[CHAT_PANEL_ID]) return;');
+    expect(workspace).toContain('unmountingRef.current = true;');
   });
 
   test('keeps editor tabs in drone-keyed buckets instead of clearing them on navigation', () => {
