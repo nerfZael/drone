@@ -21,6 +21,17 @@ export const EMPTY_MOBILE_DRONE_STATE_SUMMARY: MobileDroneStateSummary = {
   unread: 0,
 };
 
+export function withOptimisticMobileBusyChat(
+  drone: MobileDroneSummary,
+  chatNameRaw: string,
+  busy: boolean,
+): MobileDroneSummary {
+  if (!busy) return drone;
+  const chatName = chatNameRaw.trim() || 'default';
+  if (drone.busyChats.includes(chatName)) return drone;
+  return { ...drone, busyChats: [...drone.busyChats, chatName] };
+}
+
 export function mobileDroneDisplayState(drone: MobileDroneSummary): MobileDroneDisplayState {
   const rawState = `${drone.phase ?? ''} ${drone.status ?? ''}`.toLowerCase();
   if (drone.approvalRequired || rawState.includes('approval')) return 'approval';

@@ -61,6 +61,7 @@ import {
   type MobileDroneSidebarOrder,
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
+import { withOptimisticMobileBusyChat } from '../drones/drone-state-summary';
 import {
   mergeOptimisticMobilePendingPrompts,
   mobileDronePendingPrompts,
@@ -1438,14 +1439,29 @@ export function DronesScreen({
   const activeTarget = mesh.devices.find((target) => target.id === targetId);
   const displayedModel = chatModel || latestModel || 'Model';
   const visibleChats = chats;
+  const selectedChatOptimisticallyBusy = visiblePendingPrompts.some(
+    (item) => item.status === 'pending',
+  );
   const drawerDrones = React.useMemo(
     () =>
-      drones.map((drone) =>
-        drone.id === selected?.id
-          ? { ...drone, approvalRequired: pendingApprovals.length > 0 }
-          : drone,
-      ),
-    [drones, pendingApprovals.length, selected?.id],
+      drones.map((drone) => {
+        if (drone.id !== selected?.id) return drone;
+        return {
+          ...withOptimisticMobileBusyChat(
+            drone,
+            chatName,
+            selectedChatOptimisticallyBusy,
+          ),
+          approvalRequired: pendingApprovals.length > 0,
+        };
+      }),
+    [
+      chatName,
+      drones,
+      pendingApprovals.length,
+      selected?.id,
+      selectedChatOptimisticallyBusy,
+    ],
   );
   React.useEffect(() => {
     const frame = requestAnimationFrame(() =>

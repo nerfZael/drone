@@ -24,7 +24,11 @@ import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-d
 import { CodexConnectComposerNotice } from '../app/CodexConnectControl';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import { createCanvasChatNodeId } from '../app/app-config';
-import { useDroneHubRuntimeStore } from '../app/use-drone-hub-runtime-store';
+import {
+  beginLocalChatBusy,
+  useDroneHubRuntimeStore,
+  useLocalChatBusy,
+} from '../app/use-drone-hub-runtime-store';
 import {
   IconPencil,
   IconSettings,
@@ -409,6 +413,7 @@ export function AssistantDock({
     blipSession.running ||
     activeThread?.status === 'running' ||
     activeThread?.status === 'waiting_for_approval';
+  useLocalChatBusy(nativeChatNodeId, running);
   const transcriptContentVersion = React.useMemo(
     () => [
       blipSession.messages,
@@ -941,61 +946,66 @@ export function AssistantDock({
       disposition: attachment.disposition,
     }));
     if (!prompt && encodedAttachments.length === 0) return false;
-    const requestSeq = beginSnapshotMutation();
-    setError(null);
-    setAttachmentError(null);
-    if (!(await waitForScopeSave())) return false;
-    if (!snapshotMutationCurrent(requestSeq)) return false;
-    setReferencedDrones([]);
-    scrollAssistantToBottom({ force: true });
-    refocusInputWhenIdleRef.current = true;
-    let sentOk = true;
+    const endLocalBusy = beginLocalChatBusy(nativeChatNodeId);
     try {
-      const response = await fetch(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/prompt`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          attachments: encodedAttachments,
-          provider: activeThread.provider,
-          model: activeThread.model,
-          thinkingLevel: activeThread.thinkingLevel,
-        }),
-      });
-      await readNdjson(response, (event) => {
-        if (!snapshotMutationCurrent(requestSeq)) return;
-        blipSession.handleStreamEvent(event);
-        if (event?.type === 'error') {
-          sentOk = false;
-          setError(String(event.error ?? 'Built-in agent failed.'));
+      const requestSeq = beginSnapshotMutation();
+      setError(null);
+      setAttachmentError(null);
+      if (!(await waitForScopeSave())) return false;
+      if (!snapshotMutationCurrent(requestSeq)) return false;
+      setReferencedDrones([]);
+      scrollAssistantToBottom({ force: true });
+      refocusInputWhenIdleRef.current = true;
+      let sentOk = true;
+      try {
+        const response = await fetch(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/prompt`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            attachments: encodedAttachments,
+            provider: activeThread.provider,
+            model: activeThread.model,
+            thinkingLevel: activeThread.thinkingLevel,
+          }),
+        });
+        await readNdjson(response, (event) => {
+          if (!snapshotMutationCurrent(requestSeq)) return;
+          blipSession.handleStreamEvent(event);
+          if (event?.type === 'error') {
+            sentOk = false;
+            setError(String(event.error ?? 'Built-in agent failed.'));
+          }
+        });
+        if (!sentOk && snapshotMutationCurrent(requestSeq)) {
+          setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
         }
-      });
-      if (!sentOk && snapshotMutationCurrent(requestSeq)) {
-        setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
+      } catch (err: any) {
+        sentOk = false;
+        if (snapshotMutationCurrent(requestSeq)) {
+          setError(err?.message ?? String(err));
+          setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
+        }
+      } finally {
+        if (snapshotMutationCurrent(requestSeq)) {
+          void blipSession.refreshHistory({ quiet: true });
+          void refresh({ silent: true });
+        }
+        if (snapshotMutationCurrent(requestSeq) && sentOk && encodedAttachments.length > 0) {
+          requestJson<{ ok: true; threadId: string; files: AssistantArtifactSummary[] }>(
+            `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/artifacts`,
+          )
+            .then((data) => {
+              if (activeThreadIdRef.current === activeThread.id) setArtifactFiles(Array.isArray(data.files) ? data.files : []);
+            })
+            .catch(() => {});
+        }
       }
-    } catch (err: any) {
-      sentOk = false;
-      if (snapshotMutationCurrent(requestSeq)) {
-        setError(err?.message ?? String(err));
-        setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
-      }
+      return sentOk;
     } finally {
-      if (snapshotMutationCurrent(requestSeq)) {
-        void blipSession.refreshHistory({ quiet: true });
-        void refresh({ silent: true });
-      }
-      if (snapshotMutationCurrent(requestSeq) && sentOk && encodedAttachments.length > 0) {
-        requestJson<{ ok: true; threadId: string; files: AssistantArtifactSummary[] }>(
-          `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/artifacts`,
-        )
-          .then((data) => {
-            if (activeThreadIdRef.current === activeThread.id) setArtifactFiles(Array.isArray(data.files) ? data.files : []);
-          })
-          .catch(() => {});
-      }
+      endLocalBusy();
     }
-    return sentOk;
-  }, [activeThread, beginSnapshotMutation, blipSession, refresh, scrollAssistantToBottom, snapshotMutationCurrent, waitForScopeSave]);
+  }, [activeThread, beginSnapshotMutation, blipSession, nativeChatNodeId, refresh, scrollAssistantToBottom, snapshotMutationCurrent, waitForScopeSave]);
 
   const stop = React.useCallback(async () => {
     if (!activeThread) return;
