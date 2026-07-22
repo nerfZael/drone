@@ -108,6 +108,7 @@ import {
 import { useSidebarRootDnd } from './use-sidebar-root-dnd';
 import { useDroneHubRuntimeStore } from './use-drone-hub-runtime-store';
 import { isDroneStartingOrSeeding } from './helpers';
+import { AddDroneToGroupDialog } from './AddDroneToGroupDialog';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 308;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -1618,6 +1619,11 @@ export function DroneSidebar({
   const lastAutoCollapsedAtRef = React.useRef<number>(0);
   const sidebarDockDragStartXRef = React.useRef<number | null>(null);
   const [footerOptionsMenuOpen, setFooterOptionsMenuOpen] = React.useState(false);
+  const [addToGroupTarget, setAddToGroupTarget] = React.useState<{
+    droneId: string;
+    droneName: string;
+    currentGroup: string | null;
+  } | null>(null);
   const [repositoryOverviewOpen, setRepositoryOverviewOpen] = React.useState(
     () => !String(activeRepoPath ?? '').trim(),
   );
@@ -1816,6 +1822,26 @@ export function DroneSidebar({
     sidebarGroupingMode: effectiveSidebarGroupingMode,
     sidebarGroupCreatedAtByName,
   });
+  const addToGroupOptions = React.useMemo(
+    () =>
+      optimisticSidebarGroups
+        .filter((group) => group.kind === 'group' && !isUngroupedGroupName(group.group))
+        .map((group) => String(group.group ?? '').trim())
+        .filter(Boolean),
+    [optimisticSidebarGroups],
+  );
+  const openAddDroneToGroup = React.useCallback(
+    (drone: DroneSummary) => {
+      const droneId = String(drone.id ?? '').trim();
+      if (!droneId) return;
+      setAddToGroupTarget({
+        droneId,
+        droneName: uiDroneName(drone.name) || drone.name || droneId,
+        currentGroup: String(drone.group ?? '').trim() || null,
+      });
+    },
+    [uiDroneName],
+  );
   const staticReadOnlyNodeTree = React.useMemo(
     () =>
       buildSidebarNodeTree({
@@ -2279,6 +2305,7 @@ export function DroneSidebar({
       onSelectDroneChat,
       onDeleteDroneChat,
       onOpenCloneModal,
+      onAddDroneToGroup: openAddDroneToGroup,
       onCreateDroneChat,
       onRenameDroneChat,
       onRenameDrone,
@@ -2302,6 +2329,7 @@ export function DroneSidebar({
       onDeleteDrone,
       onDeleteDroneChat,
       onOpenCloneModal,
+      openAddDroneToGroup,
       onOpenDroneErrorModal,
       onPrepareDroneDragStart,
       onRenameDrone,
@@ -2817,6 +2845,7 @@ export function DroneSidebar({
                         onTogglePinned={sidebarCapabilities.actions ? () => void setPinned(droneId, false) : undefined}
                         onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}
                         onClone={sidebarCapabilities.actions ? () => onOpenCloneModal(drone) : undefined}
+                        onAddToGroup={sidebarCapabilities.actions ? () => openAddDroneToGroup(drone) : undefined}
                         onRename={sidebarCapabilities.actions ? () => onRenameDrone(droneId) : undefined}
                         onSetBaseImage={sidebarCapabilities.actions ? () => onSetDroneBaseImage(droneId) : undefined}
                         onDelete={sidebarCapabilities.actions ? () => onDeleteDrone(droneId) : undefined}
@@ -2827,6 +2856,7 @@ export function DroneSidebar({
                           String(drone.runtime ?? 'container').trim().toLowerCase() === 'host'
                         }
                         createChatDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
+                        addToGroupDisabled={isOptimistic || movingDroneGroups || droneMutationBusy || droneProvisioning}
                         renameDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
                         renameBusy={Boolean(renamingDrones[droneId])}
                         setBaseImageDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
@@ -3054,6 +3084,7 @@ export function DroneSidebar({
                       uiDroneName={uiDroneName}
                       onDeleteDroneChat={onDeleteDroneChat}
                       onOpenCloneModal={onOpenCloneModal}
+                      onAddDroneToGroup={openAddDroneToGroup}
                       onCreateDroneChat={onCreateDroneChat}
                       onRenameDroneChat={onRenameDroneChat}
                       chatEditor={chatEditor}
@@ -3333,6 +3364,16 @@ export function DroneSidebar({
           </div>
         ) : null}
       </aside>
+
+      {addToGroupTarget ? (
+        <AddDroneToGroupDialog
+          target={addToGroupTarget}
+          groups={addToGroupOptions}
+          onCreateGroupAndMove={runOptimisticCreateGroupAndMove}
+          onMoveToGroup={runOptimisticMoveDronesToGroup}
+          onClose={() => setAddToGroupTarget(null)}
+        />
+      ) : null}
 
       <div
         data-drone-sidebar-root="true"

@@ -13,6 +13,7 @@ import {
 import {
   IconBaseImage,
   IconClone,
+  IconFolder,
   IconMore,
   IconPin,
   IconPlus,
@@ -39,6 +40,7 @@ type DroneCardProps = {
   dragging?: boolean;
   onClone?: () => void;
   onCreateChat?: () => void;
+  onAddToGroup?: () => void;
   onRename?: () => void;
   onSetBaseImage?: () => void;
   onTogglePinned?: () => void;
@@ -46,6 +48,7 @@ type DroneCardProps = {
   onErrorClick?: (drone: DroneSummary, message: string) => void;
   cloneDisabled?: boolean;
   createChatDisabled?: boolean;
+  addToGroupDisabled?: boolean;
   renameDisabled?: boolean;
   renameBusy?: boolean;
   setBaseImageDisabled?: boolean;
@@ -240,6 +243,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.dragging) === Boolean(b.dragging) &&
     Boolean(a.onClone) === Boolean(b.onClone) &&
     Boolean(a.onCreateChat) === Boolean(b.onCreateChat) &&
+    Boolean(a.onAddToGroup) === Boolean(b.onAddToGroup) &&
     Boolean(a.onRename) === Boolean(b.onRename) &&
     Boolean(a.onSetBaseImage) === Boolean(b.onSetBaseImage) &&
     Boolean(a.onTogglePinned) === Boolean(b.onTogglePinned) &&
@@ -247,6 +251,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.onErrorClick) === Boolean(b.onErrorClick) &&
     Boolean(a.cloneDisabled) === Boolean(b.cloneDisabled) &&
     Boolean(a.createChatDisabled) === Boolean(b.createChatDisabled) &&
+    Boolean(a.addToGroupDisabled) === Boolean(b.addToGroupDisabled) &&
     Boolean(a.renameDisabled) === Boolean(b.renameDisabled) &&
     Boolean(a.renameBusy) === Boolean(b.renameBusy) &&
     Boolean(a.setBaseImageDisabled) === Boolean(b.setBaseImageDisabled) &&
@@ -283,6 +288,7 @@ export const DroneCard = React.memo(function DroneCard({
   dragging,
   onClone,
   onCreateChat,
+  onAddToGroup,
   onRename,
   onSetBaseImage,
   onTogglePinned,
@@ -290,6 +296,7 @@ export const DroneCard = React.memo(function DroneCard({
   onErrorClick,
   cloneDisabled,
   createChatDisabled,
+  addToGroupDisabled,
   renameDisabled,
   renameBusy,
   setBaseImageDisabled,
@@ -312,11 +319,12 @@ export const DroneCard = React.memo(function DroneCard({
   const shownName = String(displayName ?? drone.name).trim() || drone.name;
   const canClone = typeof onClone === 'function';
   const canCreateChat = typeof onCreateChat === 'function';
+  const canAddToGroup = typeof onAddToGroup === 'function';
   const canRename = typeof onRename === 'function';
   const canSetBaseImage = typeof onSetBaseImage === 'function';
   const canTogglePinned = typeof onTogglePinned === 'function';
   const canDelete = typeof onDelete === 'function';
-  const hasSecondaryActions = canTogglePinned || canClone || canCreateChat || canRename || canSetBaseImage;
+  const hasSecondaryActions = canTogglePinned || canClone || canCreateChat || canAddToGroup || canRename || canSetBaseImage;
   const hasActions = hasSecondaryActions || canDelete;
   const activeOperationLabel = String(operationLabel ?? '').trim();
   const pinActionsVisible = Boolean(pinBusy) || Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
@@ -617,6 +625,22 @@ export const DroneCard = React.memo(function DroneCard({
                   >
                     <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />
                     <span>Create chat</span>
+                  </button>
+                ) : null}
+                {canAddToGroup ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={Boolean(addToGroupDisabled)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setActionMenuOpen(false);
+                      onAddToGroup?.();
+                    }}
+                    className={`${dropdownMenuItemBaseClass} flex items-center gap-2 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-45`}
+                  >
+                    <IconFolder className="h-3.5 w-3.5 text-[var(--accent)]" />
+                    <span>Add to group</span>
                   </button>
                 ) : null}
                 {canClone ? (

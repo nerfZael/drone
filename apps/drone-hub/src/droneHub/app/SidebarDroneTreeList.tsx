@@ -77,6 +77,7 @@ export type SidebarDroneTreeListProps = {
     chatName: string,
   ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
   onOpenCloneModal: (drone: DroneSummary) => void;
+  onAddDroneToGroup: (drone: DroneSummary) => void;
   onCreateDroneChat: (
     drone: DroneSummary,
     chatName: string,
@@ -134,6 +135,7 @@ type SidebarDroneRowProps = {
   uiDroneName: (nameRaw: string) => string;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
   onOpenCloneModal: (drone: DroneSummary) => void;
+  onAddDroneToGroup: (drone: DroneSummary) => void;
   onOpenCreateDroneChat: (drone: DroneSummary) => void;
   onRenameDrone: (droneId: string) => void;
   onSetDroneBaseImage: (droneId: string) => void;
@@ -269,6 +271,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
   uiDroneName,
   onSelectDroneCard,
   onOpenCloneModal,
+  onAddDroneToGroup,
   onOpenCreateDroneChat,
   onRenameDrone,
   onSetDroneBaseImage,
@@ -359,6 +362,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           dragAttributes={dragDisabled ? undefined : attributes as unknown as Record<string, unknown>}
           dragListeners={dragDisabled ? undefined : listeners as unknown as Record<string, unknown>}
           onClone={actionsEnabled ? () => onOpenCloneModal(drone) : undefined}
+          onAddToGroup={actionsEnabled ? () => onAddDroneToGroup(drone) : undefined}
           onCreateChat={actionsEnabled ? () => onOpenCreateDroneChat(drone) : undefined}
           onRename={actionsEnabled ? () => onRenameDrone(drone.id) : undefined}
           onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
@@ -373,6 +377,14 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           }
           createChatDisabled={
             isOptimistic ||
+            Boolean(deletingDrones[drone.id]) ||
+            Boolean(renamingDrones[drone.id]) ||
+            Boolean(settingBaseImages[drone.id]) ||
+            isDroneStartingOrSeeding(drone.hubPhase)
+          }
+          addToGroupDisabled={
+            isOptimistic ||
+            movingDroneGroups ||
             Boolean(deletingDrones[drone.id]) ||
             Boolean(renamingDrones[drone.id]) ||
             Boolean(settingBaseImages[drone.id]) ||
@@ -638,6 +650,7 @@ function SidebarDroneNode({
   onSelectDroneChat,
   onDeleteDroneChat,
   onOpenCloneModal,
+  onAddDroneToGroup,
   onCreateDroneChat,
   onRenameDroneChat,
   onRenameDrone,
@@ -760,6 +773,7 @@ function SidebarDroneNode({
         uiDroneName={uiDroneName}
         onSelectDroneCard={onSelectDroneCard}
         onOpenCloneModal={onOpenCloneModal}
+        onAddDroneToGroup={onAddDroneToGroup}
         onOpenCreateDroneChat={onOpenCreateDroneChat}
         onRenameDrone={onRenameDrone}
         onSetDroneBaseImage={onSetDroneBaseImage}
@@ -892,6 +906,7 @@ function SidebarDroneNode({
               onSelectDroneChat={onSelectDroneChat}
               onDeleteDroneChat={onDeleteDroneChat}
               onOpenCloneModal={onOpenCloneModal}
+              onAddDroneToGroup={onAddDroneToGroup}
               onCreateDroneChat={onCreateDroneChat}
               onRenameDroneChat={onRenameDroneChat}
               onRenameDrone={onRenameDrone}
@@ -956,6 +971,7 @@ export function SidebarDroneTreeList({
   onSelectDroneChat,
   onDeleteDroneChat,
   onOpenCloneModal,
+  onAddDroneToGroup,
   onCreateDroneChat,
   onRenameDroneChat,
   onRenameDrone,
@@ -1374,6 +1390,7 @@ export function SidebarDroneTreeList({
           onSelectDroneChat={onSelectDroneChat}
           onDeleteDroneChat={onDeleteDroneChat}
           onOpenCloneModal={onOpenCloneModal}
+          onAddDroneToGroup={onAddDroneToGroup}
           onCreateDroneChat={onCreateDroneChat}
           onRenameDroneChat={onRenameDroneChat}
           onRenameDrone={onRenameDrone}
