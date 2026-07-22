@@ -1,5 +1,4 @@
 import React from 'react';
-import { createPortal } from 'react-dom';
 import type {
   AgentRunFileChangeEntry,
   AgentRunFileChanges,
@@ -7,23 +6,24 @@ import type {
 } from '@blip/protocol';
 import { agentRunWorkspacePreviewEntries } from '@drone/assistant-chat';
 
-import { DiffBlock } from '../changes/DiffBlock';
-import type { DiffState, DiffViewType } from '../changes/types';
-import { AgentRunChangedFilesTree } from './AgentRunChangedFilesTree';
+import { DiffBlock } from './DiffBlock';
+import type { AgentRunChangesSelection } from './navigation';
+import {
+  CHANGES_DIFF_VIEW_STORAGE_KEY,
+  readChangesStorage,
+  writeChangesStorage,
+} from './storage';
+import type { DiffState, DiffViewType } from './types';
+import { AgentRunChangedFilesTree } from '../chat/AgentRunChangedFilesTree';
 import {
   agentRunDiffError,
   agentRunDiffKey,
   loadAgentRunDiff,
   loadAgentRunDiffFiles,
   type AgentRunDiffState,
-} from './agent-run-diffs';
+} from '../chat/agent-run-diffs';
 
 const PANEL_METADATA_PAGE_SIZE = 5_000;
-
-export type AgentRunChangesPanelSelection = {
-  workspaceTargetId: string;
-  path?: string;
-};
 
 type WorkspaceMetadataState =
   | { status: 'loading'; entries: AgentRunFileChangeEntry[] }
@@ -32,11 +32,11 @@ type WorkspaceMetadataState =
 
 type SelectedDiffState = { key: string; state: AgentRunDiffState } | null;
 
-function closeIcon() {
+function currentChangesIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <path
-        d="M3.5 3.5l9 9m0-9l-9 9"
+        d="M9.5 3.5 5 8l4.5 4.5M5.5 8H13"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
@@ -122,13 +122,13 @@ function diffStateForSelection(
   };
 }
 
-export function AgentRunChangesPanel({
+export function AgentRunHistoricalChangesView({
   fileChanges,
   initialSelection,
   onClose,
 }: {
   fileChanges: AgentRunFileChanges;
-  initialSelection: AgentRunChangesPanelSelection;
+  initialSelection: AgentRunChangesSelection;
   onClose: () => void;
 }) {
   const [selection, setSelection] = React.useState(initialSelection);
@@ -139,9 +139,15 @@ export function AgentRunChangesPanel({
   const [expandedByWorkspace, setExpandedByWorkspace] = React.useState<
     Record<string, Record<string, boolean>>
   >({});
-  const [viewType, setViewType] = React.useState<DiffViewType>('unified');
+  const [viewType, setViewType] = React.useState<DiffViewType>(() =>
+    readChangesStorage(CHANGES_DIFF_VIEW_STORAGE_KEY) === 'split' ? 'split' : 'unified',
+  );
   const [selectedDiff, setSelectedDiff] = React.useState<SelectedDiffState>(null);
   const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
+
+  React.useEffect(() => {
+    writeChangesStorage(CHANGES_DIFF_VIEW_STORAGE_KEY, viewType);
+  }, [viewType]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -218,90 +224,98 @@ export function AgentRunChangesPanel({
     return () => controller.abort();
   }, [diffRetryNonce, selectedArtifactId, selectedPath]);
 
-  React.useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
-  React.useEffect(() => {
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, []);
-
   const currentDiffState =
     selectedWorkspace && selectedEntry
       ? diffStateForSelection(selectedWorkspace, selectedEntry, selectedDiff)
       : undefined;
   const currentError = selectedDiff?.state.status === 'error' ? selectedDiff.state : null;
 
-  const panel = (
-    <div
-      className="fixed inset-0 z-[90] bg-[var(--scrim-soft)] backdrop-blur-[2px]"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Agent run changes"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section className="absolute inset-y-0 right-0 flex w-[min(1120px,calc(100vw-32px))] flex-col border-l border-[var(--border)] bg-[var(--panel-alt)] shadow-[-24px_0_72px_var(--shadow-color)] max-sm:w-full">
-        <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface-softest)] px-4">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span
-                className="text-[var(--text-12)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--fg-strong)]"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                Agent run changes
-              </span>
-              <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-0.5 font-mono text-[var(--text-9)] tabular-nums text-[var(--muted)] max-sm:hidden">
-                {fileChanges.counts.changed} files
-              </span>
-              <span className="font-mono text-[var(--text-10)] tabular-nums text-[var(--green)] max-sm:hidden">
-                +{fileChanges.counts.additions}
-              </span>
-              <span className="font-mono text-[var(--text-10)] tabular-nums text-[var(--red)] max-sm:hidden">
-                -{fileChanges.counts.deletions}
-              </span>
-            </div>
-            <div className="mt-0.5 truncate font-mono text-[var(--text-10)] text-[var(--muted-dim)]">
-              {selectedEntry?.path ?? 'Select a changed file'}
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-0.5 max-sm:hidden">
-            {(['unified', 'split'] as const).map((nextViewType) => (
-              <button
-                key={nextViewType}
-                type="button"
-                onClick={() => setViewType(nextViewType)}
-                aria-pressed={viewType === nextViewType}
-                className={`rounded px-2 py-1 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide transition-colors ${viewType === nextViewType ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--muted)] hover:text-[var(--fg-secondary)]'}`}
-              >
-                {nextViewType}
-              </button>
-            ))}
-          </div>
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--panel-alt)] dh-changes-dock">
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-2.5 py-1.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Changes
+          </span>
+          <span className="h-6 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide leading-6 text-[var(--accent)]">
+            Agent run
+          </span>
+          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--muted)]">
+            {fileChanges.counts.changed} files
+          </span>
+          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--green)]">
+            +{fileChanges.counts.additions}
+          </span>
+          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--red)]">
+            -{fileChanges.counts.deletions}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {(['unified', 'split'] as const).map((nextViewType) => (
+            <button
+              key={nextViewType}
+              type="button"
+              onClick={() => setViewType(nextViewType)}
+              aria-pressed={viewType === nextViewType}
+              className={`h-6 rounded-[var(--radius-medium)] border px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide transition-colors ${viewType === nextViewType ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'}`}
+            >
+              {nextViewType === 'split' ? 'Side-by-side' : 'Unified'}
+            </button>
+          ))}
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] transition-colors hover:border-[var(--border)] hover:text-[var(--fg)]"
-            aria-label="Close agent run changes"
-            title="Close"
+            className="ml-1 inline-flex h-6 items-center gap-1.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+            aria-label="Return to current changes"
+            title="Return to current changes"
           >
-            {closeIcon()}
+            {currentChangesIcon()}
+            Current
           </button>
-        </header>
+        </div>
+      </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] max-md:grid-cols-[220px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[minmax(180px,34vh)_minmax(0,1fr)]">
-          <aside className="min-h-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-inset-faint)] px-2 py-2 max-sm:border-b max-sm:border-r-0">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-[var(--surface-inset)]">
+          {selectedEntry ? (
+            <div className="min-w-0">
+              <div className="sticky top-0 z-10 flex min-h-9 items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 px-3 backdrop-blur">
+                <span className="min-w-0 flex-1 truncate font-mono text-[var(--text-10)] text-[var(--fg-secondary)]">
+                  {selectedEntry.originalPath
+                    ? `${selectedEntry.originalPath} → ${selectedEntry.path}`
+                    : selectedEntry.path}
+                </span>
+                {currentError?.retryable ? (
+                  <button
+                    type="button"
+                    onClick={() => setDiffRetryNonce((value) => value + 1)}
+                    className="rounded border border-[var(--red-border)] px-2 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--red)] hover:bg-[var(--red-subtle)]"
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </div>
+              <DiffBlock
+                state={currentDiffState}
+                filePath={selectedEntry.path}
+                viewType={viewType}
+              />
+            </div>
+          ) : (
+            <div className="flex h-full min-h-64 items-center justify-center px-6 text-center text-[var(--text-11)] text-[var(--muted)]">
+              No changed file is available for this run.
+            </div>
+          )}
+        </main>
+
+        <aside className="flex min-h-0 w-[min(280px,38%)] min-w-[190px] shrink-0 flex-col overflow-hidden border-l border-[var(--border-subtle)] bg-[var(--panel-alt)]">
+          <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 px-2 py-1.5 font-mono text-[var(--text-9)] text-[var(--muted-dim)]">
+            {selectedEntry?.path ?? 'Select a changed file'}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5">
             {fileChanges.workspaces.map((workspace) => {
               const metadata = workspaceMetadata[workspace.targetId];
               const entries = metadata?.entries ?? agentRunWorkspacePreviewEntries(workspace);
@@ -363,43 +377,9 @@ export function AgentRunChangesPanel({
                 </div>
               );
             })}
-          </aside>
-
-          <main className="min-h-0 overflow-auto bg-[var(--panel)]">
-            {selectedEntry ? (
-              <div className="min-w-[620px] max-sm:min-w-full">
-                <div className="sticky top-0 z-10 flex min-h-9 items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3">
-                  <span className="min-w-0 flex-1 truncate font-mono text-[var(--text-10)] text-[var(--fg-secondary)]">
-                    {selectedEntry.originalPath
-                      ? `${selectedEntry.originalPath} → ${selectedEntry.path}`
-                      : selectedEntry.path}
-                  </span>
-                  {currentError?.retryable ? (
-                    <button
-                      type="button"
-                      onClick={() => setDiffRetryNonce((value) => value + 1)}
-                      className="rounded border border-[var(--red-border)] px-2 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--red)] hover:bg-[var(--red-subtle)]"
-                    >
-                      Retry
-                    </button>
-                  ) : null}
-                </div>
-                <DiffBlock
-                  state={currentDiffState}
-                  filePath={selectedEntry.path}
-                  viewType={viewType}
-                />
-              </div>
-            ) : (
-              <div className="flex h-full min-h-64 items-center justify-center px-6 text-center text-[var(--text-11)] text-[var(--muted)]">
-                No changed file is available for this run.
-              </div>
-            )}
-          </main>
-        </div>
-      </section>
+          </div>
+        </aside>
+      </div>
     </div>
   );
-
-  return typeof document === 'undefined' ? panel : createPortal(panel, document.body);
 }

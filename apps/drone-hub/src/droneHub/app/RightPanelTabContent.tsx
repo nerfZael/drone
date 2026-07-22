@@ -539,6 +539,7 @@ export function RightPanelTabContent({
               repoPath={drone.repoPath}
               repoUnavailableReason={repoUnavailableReason}
               fixedContextMode="branch"
+              acceptHistoricalRunChanges
               disabled={disabled}
               hubPhase={drone.hubPhase}
               hubMessage={drone.hubMessage}

@@ -7,25 +7,11 @@ import type {
 import { agentRunWorkspacePreviewEntries, isAgentRunFileChanges } from '@drone/assistant-chat';
 
 import { IconChevron } from '../icons';
+import { requestAgentRunChanges, type AgentRunChangesSelection } from '../changes/navigation';
 import { AgentRunChangedFilesTree } from './AgentRunChangedFilesTree';
-import type { AgentRunChangesPanelSelection } from './AgentRunChangesPanel';
 import { agentRunDiffError, loadAgentRunDiffFiles } from './agent-run-diffs';
 
 const CARD_PAGE_SIZE = 20;
-
-const AgentRunChangesPanel = React.lazy(async () => ({
-  default: (await import('./AgentRunChangesPanel')).AgentRunChangesPanel,
-}));
-
-function ChangesPanelLoading() {
-  return (
-    <div className="fixed inset-0 z-[80] bg-[var(--scrim-soft)]" aria-label="Loading changes panel">
-      <div className="absolute inset-y-0 right-0 w-full max-w-[min(1120px,94vw)] border-l border-[var(--border-subtle)] bg-[var(--surface-raised)] shadow-2xl">
-        <div className="h-14 animate-pulse border-b border-[var(--border-subtle)] bg-[var(--surface-inset-faint)]" />
-      </div>
-    </div>
-  );
-}
 
 function changesIcon() {
   return (
@@ -209,9 +195,6 @@ export function ChangedFilesCard({
   className?: string;
 }) {
   const [expanded, setExpanded] = React.useState(false);
-  const [panelSelection, setPanelSelection] = React.useState<AgentRunChangesPanelSelection | null>(
-    null,
-  );
   if (!isAgentRunFileChanges(fileChanges)) return null;
 
   const workspaceCount = fileChanges.workspaces.length;
@@ -221,91 +204,85 @@ export function ChangedFilesCard({
     ? agentRunWorkspacePreviewEntries(firstWorkspace)[0]
     : undefined;
   const canOpenPanel = Boolean(firstWorkspace && (firstEntry || firstWorkspace.diffArtifactId));
-  const openPanel = (selection?: AgentRunChangesPanelSelection) => {
+  const openPanel = (selection?: AgentRunChangesSelection) => {
     const next =
       selection ??
       (firstWorkspace
         ? { workspaceTargetId: firstWorkspace.targetId, path: firstEntry?.path }
         : null);
-    if (next) setPanelSelection(next);
+    if (!next) return;
+    requestAgentRunChanges({
+      fileChanges,
+      initialSelection: next,
+      ...(firstWorkspace?.droneId ? { droneId: firstWorkspace.droneId } : {}),
+    });
   };
 
   return (
-    <>
-      <section
-        className={`mt-3 overflow-hidden rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] ${className}`}
-        aria-label="Files changed by this agent run"
-      >
-        <div className="flex items-stretch">
-          <button
-            type="button"
-            className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] focus-visible:outline-none"
-            onClick={() => setExpanded((current) => !current)}
-            aria-expanded={expanded}
-          >
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-[var(--surface-inset-strong)] text-[var(--muted)]">
-              {changesIcon()}
+    <section
+      className={`mt-3 overflow-hidden rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] ${className}`}
+      aria-label="Files changed by this agent run"
+    >
+      <div className="flex items-stretch">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] focus-visible:outline-none"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+        >
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-[var(--surface-inset-strong)] text-[var(--muted)]">
+            {changesIcon()}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+              Changed files
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-                Changed files
-              </span>
-              <span className="block truncate text-[var(--text-10)] text-[var(--muted-dim)]">
-                {changedLabel}
-                {workspaceCount > 1 ? ` across ${workspaceCount} workspaces` : ''}
-              </span>
+            <span className="block truncate text-[var(--text-10)] text-[var(--muted-dim)]">
+              {changedLabel}
+              {workspaceCount > 1 ? ` across ${workspaceCount} workspaces` : ''}
             </span>
-            <span className="flex shrink-0 items-center gap-2 font-mono text-[var(--text-10)] tabular-nums">
-              {fileChanges.counts.additions > 0 ? (
-                <span className="text-[var(--green)]">+{fileChanges.counts.additions}</span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2 font-mono text-[var(--text-10)] tabular-nums">
+            {fileChanges.counts.additions > 0 ? (
+              <span className="text-[var(--green)]">+{fileChanges.counts.additions}</span>
+            ) : null}
+            {fileChanges.counts.deletions > 0 ? (
+              <span className="text-[var(--red)]">-{fileChanges.counts.deletions}</span>
+            ) : null}
+            <IconChevron down={expanded} className="text-[var(--muted)]" size={12} />
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => openPanel()}
+          disabled={!canOpenPanel}
+          className="flex w-10 shrink-0 items-center justify-center border-l border-[var(--border-subtle)] text-[var(--muted)] transition-colors hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)] focus-visible:bg-[var(--accent-subtle)] focus-visible:text-[var(--accent)] focus-visible:outline-none disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--muted)]"
+          aria-label="Open agent run changes in the Changes panel"
+          title="Open in Changes"
+        >
+          {openPanelIcon()}
+        </button>
+      </div>
+      {expanded ? (
+        <div className="border-t border-[var(--border-subtle)] px-1.5 py-1.5">
+          {fileChanges.workspaces.map((workspace) => (
+            <div key={workspace.targetId}>
+              {workspaceCount > 1 || workspace.targetId.startsWith('artifacts:') ? (
+                <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+                  <span className="truncate">{workspace.label}</span>
+                  <span className="font-mono tabular-nums">{workspace.counts.changed}</span>
+                </div>
               ) : null}
-              {fileChanges.counts.deletions > 0 ? (
-                <span className="text-[var(--red)]">-{fileChanges.counts.deletions}</span>
-              ) : null}
-              <IconChevron down={expanded} className="text-[var(--muted)]" size={12} />
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => openPanel()}
-            disabled={!canOpenPanel}
-            className="flex w-10 shrink-0 items-center justify-center border-l border-[var(--border-subtle)] text-[var(--muted)] transition-colors hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)] focus-visible:bg-[var(--accent-subtle)] focus-visible:text-[var(--accent)] focus-visible:outline-none disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--muted)]"
-            aria-label="Open agent run changes panel"
-            title="View agent run changes"
-          >
-            {openPanelIcon()}
-          </button>
+              <WorkspaceFiles
+                workspace={workspace}
+                onSelectFile={(entry) =>
+                  openPanel({ workspaceTargetId: workspace.targetId, path: entry.path })
+                }
+              />
+            </div>
+          ))}
         </div>
-        {expanded ? (
-          <div className="border-t border-[var(--border-subtle)] px-1.5 py-1.5">
-            {fileChanges.workspaces.map((workspace) => (
-              <div key={workspace.targetId}>
-                {workspaceCount > 1 || workspace.targetId.startsWith('artifacts:') ? (
-                  <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
-                    <span className="truncate">{workspace.label}</span>
-                    <span className="font-mono tabular-nums">{workspace.counts.changed}</span>
-                  </div>
-                ) : null}
-                <WorkspaceFiles
-                  workspace={workspace}
-                  onSelectFile={(entry) =>
-                    openPanel({ workspaceTargetId: workspace.targetId, path: entry.path })
-                  }
-                />
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </section>
-      {panelSelection ? (
-        <React.Suspense fallback={<ChangesPanelLoading />}>
-          <AgentRunChangesPanel
-            fileChanges={fileChanges}
-            initialSelection={panelSelection}
-            onClose={() => setPanelSelection(null)}
-          />
-        </React.Suspense>
       ) : null}
-    </>
+    </section>
   );
 }

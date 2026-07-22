@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import {
   clearSelectedPullRequestForDrone,
+  consumeRequestedAgentRunChanges,
   consumeRequestedPullRequestForDrone,
+  requestAgentRunChanges,
   requestChangesPullRequest,
   selectedPullRequestForDrone,
 } from '../src/droneHub/changes/navigation';
@@ -35,6 +37,35 @@ beforeEach(() => {
 });
 
 describe('changes navigation requests', () => {
+  test('routes a historical run to the matching drone changes panel once', () => {
+    const request = {
+      droneId: 'drone-a',
+      initialSelection: { workspaceTargetId: 'drone:drone-a', path: 'src/a.ts' },
+      fileChanges: {
+        version: 2 as const,
+        capturedAt: '2026-07-22T00:00:00.000Z',
+        counts: { changed: 1, additions: 1, deletions: 0 },
+        workspaces: [
+          {
+            targetId: 'drone:drone-a',
+            droneId: 'drone-a',
+            label: 'Drone A',
+            counts: { changed: 1, additions: 1, deletions: 0 },
+            previewEntries: [
+              { path: 'src/a.ts', status: 'modified' as const, additions: 1, deletions: 0 },
+            ],
+          },
+        ],
+      },
+    };
+
+    requestAgentRunChanges(request);
+
+    expect(consumeRequestedAgentRunChanges('drone-b')).toBeNull();
+    expect(consumeRequestedAgentRunChanges('drone-a')).toEqual(request);
+    expect(consumeRequestedAgentRunChanges('drone-a')).toBeNull();
+  });
+
   test('stores selected PR and consumes pending open request once', () => {
     requestChangesPullRequest({ droneId: 'drone-a', pullNumber: 42 });
 
