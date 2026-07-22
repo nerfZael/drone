@@ -8,21 +8,30 @@ import type {
   AgentRunFileChangeEntry,
   AgentRunFileChanges,
   AgentRunFileChangeStatus,
-  AgentRunFileChangeWorkspace,
+  AgentRunFileChangeWorkspaceV2,
 } from '@blip/protocol';
 
 import { dvmExec } from '../host/dvm';
 import { normalizeDroneRuntime } from '../host/runtime';
 import { ensureAssistantArtifactsRoot } from './assistant-artifacts';
 import {
+  AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES,
+  AGENT_RUN_DIFF_METADATA_FILE_LIMIT,
+  AGENT_RUN_DIFF_PATCH_FILE_LIMIT,
+  AGENT_RUN_DIFF_TOTAL_PATCH_MAX_BYTES,
   persistAgentRunDiffArtifact,
   type AgentRunDiffArtifactOwner,
 } from './agent-run-diff-artifacts';
 
-const MAX_PERSISTED_FILES_PER_WORKSPACE = 200;
+const MAX_TRANSCRIPT_PREVIEW_FILES_PER_WORKSPACE = 10;
 
-type GitResult = { code: number; stdout: string; stderr: string };
-type GitRunner = (args: string[], env?: Record<string, string>) => Promise<GitResult>;
+type GitResult = { code: number; stdout: string; stderr: string; stdoutTruncated?: boolean };
+type GitRunOptions = { maxStdoutBytes?: number };
+type GitRunner = (
+  args: string[],
+  env?: Record<string, string>,
+  options?: GitRunOptions,
+) => Promise<GitResult>;
 
 export type AgentRunFileChangesBaseline = {
   version: 1;
@@ -45,27 +54,51 @@ function isRepoAttachedDrone(drone: any): boolean {
   if (typeof drone.repoAttached === 'boolean') return drone.repoAttached;
   return Boolean(
     String(drone.repoPath ?? '').trim() ||
-      String(drone.repo?.dest ?? '').trim() ||
-      String(drone.repo?.seededAt ?? '').trim(),
+    String(drone.repo?.dest ?? '').trim() ||
+    String(drone.repo?.seededAt ?? '').trim(),
   );
 }
 
 function gitError(args: string[], result: GitResult): Error {
   return new Error(
-    String(result.stderr || result.stdout || `git ${args.join(' ')} failed (${result.code})`).trim(),
+    String(
+      result.stderr || result.stdout || `git ${args.join(' ')} failed (${result.code})`,
+    ).trim(),
   );
 }
 
 async function gitOrThrow(runGit: GitRunner, args: string[], env?: Record<string, string>) {
-  const result = await runGit(args, env);
-  if (result.code !== 0) throw gitError(args, result);
+  const result = await gitResultOrThrow(runGit, args, env);
   return result.stdout;
+}
+
+async function gitResultOrThrow(
+  runGit: GitRunner,
+  args: string[],
+  env?: Record<string, string>,
+  options?: GitRunOptions,
+) {
+  const result = await runGit(args, env, options);
+  if (result.code !== 0) throw gitError(args, result);
+  return result;
+}
+
+function boundedStdout(result: GitResult, maxStdoutBytes: number): GitResult {
+  const source = Buffer.from(result.stdout, 'utf8');
+  if (source.length <= maxStdoutBytes) return result;
+  return {
+    ...result,
+    code: 0,
+    stdout: source.subarray(0, maxStdoutBytes).toString('utf8'),
+    stdoutTruncated: true,
+  };
 }
 
 async function runHostCommand(
   command: string,
   args: string[],
   env?: Record<string, string>,
+  options?: GitRunOptions,
 ): Promise<GitResult> {
   return await new Promise<GitResult>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -74,33 +107,80 @@ async function runHostCommand(
     });
     let stdout = '';
     let stderr = '';
+    let stdoutBytes = 0;
+    let stdoutTruncated = false;
+    const maxStdoutBytes = Math.max(0, Number(options?.maxStdoutBytes) || 0);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
-      stdout += chunk;
+      if (!maxStdoutBytes) {
+        stdout += chunk;
+        return;
+      }
+      const buffer = Buffer.from(String(chunk), 'utf8');
+      const remaining = maxStdoutBytes - stdoutBytes;
+      if (remaining > 0) {
+        const included = buffer.subarray(0, remaining);
+        stdout += included.toString('utf8');
+        stdoutBytes += included.length;
+      }
+      if (buffer.length > remaining && !stdoutTruncated) {
+        stdoutTruncated = true;
+        child.kill('SIGTERM');
+      }
     });
     child.stderr.on('data', (chunk) => {
       stderr += chunk;
     });
     child.once('error', reject);
-    child.once('close', (code) => resolve({ code: Number(code ?? 1), stdout, stderr }));
+    child.once('close', (code) =>
+      resolve({
+        code: stdoutTruncated ? 0 : Number(code ?? 1),
+        stdout,
+        stderr,
+        ...(stdoutTruncated ? { stdoutTruncated: true } : {}),
+      }),
+    );
   });
 }
 
 function hostGitRunner(repoPath: string): GitRunner {
-  return (args, env) => runHostCommand('git', ['-C', repoPath, ...args], env);
+  return (args, env, options) => runHostCommand('git', ['-C', repoPath, ...args], env, options);
 }
 
 function droneGitRunner(container: string, repoPath: string): GitRunner {
-  return async (args, env) => {
+  return async (args, env, options) => {
     const environment = Object.entries(env ?? {}).map(([key, value]) => `${key}=${value}`);
-    return await dvmExec(
+    const maxStdoutBytes = Math.max(0, Number(options?.maxStdoutBytes) || 0);
+    if (!maxStdoutBytes) {
+      return await dvmExec(
+        container,
+        environment.length > 0 ? 'env' : 'git',
+        environment.length > 0
+          ? [...environment, 'git', '-C', repoPath, ...args]
+          : ['-C', repoPath, ...args],
+      );
+    }
+    const captureBytes = maxStdoutBytes + 1;
+    const script = 'git -C "$1" "${@:3}" | head -c "$2"';
+    const commandArgs = [
+      ...environment,
+      'bash',
+      '-o',
+      'pipefail',
+      '-c',
+      script,
+      'drone-bounded-git',
+      repoPath,
+      String(captureBytes),
+      ...args,
+    ];
+    const result = await dvmExec(
       container,
-      environment.length > 0 ? 'env' : 'git',
-      environment.length > 0
-        ? [...environment, 'git', '-C', repoPath, ...args]
-        : ['-C', repoPath, ...args],
+      environment.length > 0 ? 'env' : 'bash',
+      environment.length > 0 ? commandArgs : commandArgs.slice(1),
     );
+    return boundedStdout(result, maxStdoutBytes);
   };
 }
 
@@ -164,7 +244,9 @@ function parseNameStatus(raw: string): Array<{
   return entries;
 }
 
-function parseNumstat(raw: string): Map<string, { additions: number; deletions: number; binary: boolean }> {
+function parseNumstat(
+  raw: string,
+): Map<string, { additions: number; deletions: number; binary: boolean }> {
   const fields = raw.split('\0');
   const stats = new Map<string, { additions: number; deletions: number; binary: boolean }>();
   for (let index = 0; index < fields.length; ) {
@@ -208,11 +290,10 @@ async function summarizeTrees(input: {
   baseline: AgentRunFileChangesBaseline;
   currentTreeOid: string;
   runGit: GitRunner;
-  repoRoot: string;
-}): Promise<AgentRunFileChangeWorkspace | null> {
+}): Promise<AgentRunFileChangeWorkspaceV2 | null> {
   if (input.baseline.treeOid === input.currentTreeOid) return null;
   const revisionArgs = [input.baseline.treeOid, input.currentTreeOid];
-  const [nameStatusRaw, numstatRaw, patchRaw] = await Promise.all([
+  const [nameStatusRaw, numstatRaw, patchResult] = await Promise.all([
     gitOrThrow(input.runGit, [
       'diff',
       '--no-color',
@@ -231,18 +312,16 @@ async function summarizeTrees(input: {
       '-z',
       ...revisionArgs,
     ]),
-    gitOrThrow(input.runGit, [
-      'diff',
-      '--no-color',
-      '--no-ext-diff',
-      '--find-renames',
-      '--unified=3',
-      ...revisionArgs,
-    ]),
+    gitResultOrThrow(
+      input.runGit,
+      ['diff', '--no-color', '--no-ext-diff', '--find-renames', '--unified=3', ...revisionArgs],
+      undefined,
+      { maxStdoutBytes: AGENT_RUN_DIFF_TOTAL_PATCH_MAX_BYTES },
+    ),
   ]);
   const statusEntries = parseNameStatus(nameStatusRaw);
   if (statusEntries.length === 0) return null;
-  const patchChunks = splitGitPatches(patchRaw);
+  const patchChunks = patchResult.stdoutTruncated ? [] : splitGitPatches(patchResult.stdout);
   const patchesByPath =
     patchChunks.length === statusEntries.length
       ? new Map(statusEntries.map((entry, index) => [entry.path, patchChunks[index]!]))
@@ -262,13 +341,16 @@ async function summarizeTrees(input: {
   entries.sort((left, right) => left.path.localeCompare(right.path));
   const additions = entries.reduce((sum, entry) => sum + entry.additions, 0);
   const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
-  const truncated = entries.length > MAX_PERSISTED_FILES_PER_WORKSPACE;
-  const persistedEntries = entries.slice(0, MAX_PERSISTED_FILES_PER_WORKSPACE);
+  const metadataTruncated = entries.length > AGENT_RUN_DIFF_METADATA_FILE_LIMIT;
+  const storedEntries = entries.slice(0, AGENT_RUN_DIFF_METADATA_FILE_LIMIT);
   const diffArtifactId = await persistAgentRunDiffArtifact({
     owner: input.baseline.owner ?? { droneId: input.baseline.droneId },
     targetId: input.baseline.targetId,
     label: input.baseline.label,
-    entries: persistedEntries,
+    counts: { changed: entries.length, additions, deletions },
+    entries: storedEntries,
+    metadataTruncated,
+    patchEntryLimit: AGENT_RUN_DIFF_PATCH_FILE_LIMIT,
     readPatch: async (entry) => {
       const combinedPatch = patchesByPath?.get(entry.path);
       if (combinedPatch != null) return combinedPatch;
@@ -277,31 +359,39 @@ async function summarizeTrees(input: {
           [entry.originalPath, entry.path].filter((value): value is string => Boolean(value)),
         ),
       ];
-      return await gitOrThrow(input.runGit, [
-        'diff',
-        '--no-color',
-        '--no-ext-diff',
-        '--find-renames',
-        '--unified=3',
-        ...revisionArgs,
-        '--',
-        ...paths,
-      ]);
+      const result = await gitResultOrThrow(
+        input.runGit,
+        [
+          'diff',
+          '--no-color',
+          '--no-ext-diff',
+          '--find-renames',
+          '--unified=3',
+          ...revisionArgs,
+          '--',
+          ...paths,
+        ],
+        undefined,
+        { maxStdoutBytes: AGENT_RUN_DIFF_FILE_PATCH_MAX_BYTES },
+      );
+      return result.stdoutTruncated ? `${result.stdout}\n… diff truncated …\n` : result.stdout;
     },
   }).catch(() => null);
   return {
     targetId: input.baseline.targetId,
     ...(input.baseline.droneId ? { droneId: input.baseline.droneId } : {}),
     label: input.baseline.label,
-    repoRoot: input.repoRoot,
     ...(diffArtifactId ? { diffArtifactId } : {}),
     counts: { changed: entries.length, additions, deletions },
-    entries: persistedEntries,
-    ...(truncated ? { truncated: true } : {}),
+    previewEntries: storedEntries.slice(0, MAX_TRANSCRIPT_PREVIEW_FILES_PER_WORKSPACE),
+    ...(metadataTruncated ? { metadataTruncated: true } : {}),
   };
 }
 
-function droneCaptureTarget(droneId: string, drone: any): {
+function droneCaptureTarget(
+  droneId: string,
+  drone: any,
+): {
   label: string;
   repoPath: string;
   indexPath: string;
@@ -380,14 +470,13 @@ export async function finalizeDroneRunFileChanges(input: {
     baseline: input.baseline,
     currentTreeOid: current.treeOid,
     runGit: target.runGit,
-    repoRoot: current.repoRoot,
   });
   return workspace ? combineAgentRunFileChanges([workspace]) : null;
 }
 
 function assistantArtifactGitRunner(gitDir: string, workTree: string): GitRunner {
-  return (args, env) =>
-    runHostCommand('git', ['--git-dir', gitDir, '--work-tree', workTree, ...args], env);
+  return (args, env, options) =>
+    runHostCommand('git', ['--git-dir', gitDir, '--work-tree', workTree, ...args], env, options);
 }
 
 async function captureAssistantArtifactTree(runGit: GitRunner): Promise<string> {
@@ -407,12 +496,10 @@ export async function captureAssistantArtifactRunFileChangesBaseline(input: {
   const repoRoot = await ensureAssistantArtifactsRoot(threadId);
   const temporaryGitDir = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-artifact-run-changes-'));
   try {
-    await gitOrThrow((args) => runHostCommand('git', args), [
-      'init',
-      '--bare',
-      '--quiet',
-      temporaryGitDir,
-    ]);
+    await gitOrThrow(
+      (args) => runHostCommand('git', args),
+      ['init', '--bare', '--quiet', temporaryGitDir],
+    );
     await fs.writeFile(path.join(temporaryGitDir, 'info', 'exclude'), '.*\n**/.*\n', 'utf8');
     const runGit = assistantArtifactGitRunner(temporaryGitDir, repoRoot);
     await gitOrThrow(runGit, ['read-tree', '--empty']);
@@ -436,7 +523,7 @@ export async function captureAssistantArtifactRunFileChangesBaseline(input: {
 
 export async function finalizeAssistantArtifactRunFileChanges(input: {
   baseline: AssistantArtifactRunFileChangesBaseline;
-}): Promise<AgentRunFileChangeWorkspace | null> {
+}): Promise<AgentRunFileChangeWorkspaceV2 | null> {
   const baseline = input.baseline;
   try {
     const runGit = assistantArtifactGitRunner(baseline.temporaryGitDir, baseline.repoRoot);
@@ -445,7 +532,6 @@ export async function finalizeAssistantArtifactRunFileChanges(input: {
       baseline,
       currentTreeOid,
       runGit,
-      repoRoot: baseline.repoRoot,
     });
   } finally {
     await fs.rm(baseline.temporaryGitDir, { recursive: true, force: true });
@@ -459,12 +545,12 @@ export async function discardAssistantArtifactRunFileChangesBaseline(
 }
 
 export function combineAgentRunFileChanges(
-  workspaces: AgentRunFileChangeWorkspace[],
+  workspaces: AgentRunFileChangeWorkspaceV2[],
 ): AgentRunFileChanges | null {
   const visible = workspaces.filter((workspace) => workspace.counts.changed > 0);
   if (visible.length === 0) return null;
   return {
-    version: 1,
+    version: 2,
     capturedAt: new Date().toISOString(),
     counts: {
       changed: visible.reduce((sum, workspace) => sum + workspace.counts.changed, 0),
@@ -472,15 +558,18 @@ export function combineAgentRunFileChanges(
       deletions: visible.reduce((sum, workspace) => sum + workspace.counts.deletions, 0),
     },
     workspaces: visible,
-    ...(visible.some((workspace) => workspace.truncated) ? { truncated: true } : {}),
+    ...(visible.some((workspace) => workspace.metadataTruncated)
+      ? { metadataTruncated: true }
+      : {}),
   };
 }
 
 export async function finalizeDroneRunFileChangesWorkspace(input: {
   baseline: AgentRunFileChangesBaseline;
   drone: any;
-}): Promise<AgentRunFileChangeWorkspace | null> {
-  return (await finalizeDroneRunFileChanges(input))?.workspaces[0] ?? null;
+}): Promise<AgentRunFileChangeWorkspaceV2 | null> {
+  const summary = await finalizeDroneRunFileChanges(input);
+  return summary?.version === 2 ? (summary.workspaces[0] ?? null) : null;
 }
 
 export function isMutatingWorkspaceTool(toolNameRaw: unknown): boolean {

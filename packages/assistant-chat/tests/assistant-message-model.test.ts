@@ -146,7 +146,7 @@ describe('assistant message model', () => {
         content: '',
         details: {
           fileChanges: {
-            version: 1,
+            version: 2,
             capturedAt: '2026-07-21T00:00:00.000Z',
             counts: { changed: 1, additions: 2, deletions: 0 },
             workspaces: [
@@ -154,9 +154,8 @@ describe('assistant message model', () => {
                 targetId: 'drone:d1',
                 droneId: 'd1',
                 label: 'Drone 1',
-                repoRoot: '/work/repo',
                 counts: { changed: 1, additions: 2, deletions: 0 },
-                entries: [
+                previewEntries: [
                   { path: 'src/a.ts', status: 'modified', additions: 2, deletions: 0 },
                 ],
               },

@@ -13,7 +13,10 @@ import {
 import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import type { AgentRunFileChangeEntry, AgentRunFileChangeWorkspace } from '@blip/protocol';
 import {
+  agentRunFileStatusLabel,
+  agentRunWorkspacePreviewEntries,
   compactRepeatedToolItems,
   messageImageParts,
   messageText,
@@ -90,59 +93,167 @@ function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
 function ChangedFilesSummary({
   item,
   onLoadDiff,
+  onLoadFiles,
 }: {
   item: Extract<AssistantRenderItem, { type: 'runSummary' }>;
   onLoadDiff?: (input: { artifactId: string; path: string }) => Promise<{
     patch: string;
     truncated?: boolean;
   }>;
+  onLoadFiles?: (input: { artifactId: string; offset: number; limit: number }) => Promise<{
+    entries: AgentRunFileChangeEntry[];
+    nextOffset: number | null;
+    metadataTruncated?: boolean;
+  }>;
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const [openDiffKey, setOpenDiffKey] = React.useState('');
-  const [diffs, setDiffs] = React.useState<
-    Record<
-      string,
+  const [selectedDiff, setSelectedDiff] = React.useState<{
+    key: string;
+    state:
       | { status: 'loading' }
       | { status: 'loaded'; patch: string; truncated: boolean }
-      | { status: 'error'; message: string; retryable: boolean }
+      | { status: 'error'; message: string; retryable: boolean };
+  } | null>(null);
+  const diffRequestGeneration = React.useRef(0);
+  const [workspaceFiles, setWorkspaceFiles] = React.useState<
+    Record<
+      string,
+      {
+        status: 'loading' | 'loaded' | 'error';
+        entries: AgentRunFileChangeEntry[];
+        nextOffset: number | null;
+        message?: string;
+        metadataTruncated?: boolean;
+      }
     >
   >({});
   const summary = item.fileChanges;
-  const openDiff = (artifactId: string, filePath: string, force = false) => {
-    if (!onLoadDiff) return;
-    const key = `${artifactId}\u0000${filePath}`;
-    if (!force && openDiffKey === key) {
-      setOpenDiffKey('');
-      return;
-    }
-    setOpenDiffKey(key);
-    if (!force && diffs[key]) return;
-    setDiffs((current) => ({ ...current, [key]: { status: 'loading' } }));
-    void onLoadDiff({ artifactId, path: filePath })
-      .then((result) => {
-        setDiffs((current) => ({
+  React.useEffect(() => {
+    if (!expanded) return;
+    for (const workspace of summary.workspaces) {
+      if ('entries' in workspace || workspaceFiles[workspace.targetId]) continue;
+      if (!workspace.diffArtifactId || !onLoadFiles) {
+        setWorkspaceFiles((current) => ({
           ...current,
-          [key]: {
+          [workspace.targetId]: {
             status: 'loaded',
-            patch: String(result.patch ?? ''),
-            truncated: result.truncated === true,
+            entries: workspace.previewEntries,
+            nextOffset: null,
+            metadataTruncated: workspace.metadataTruncated,
+          },
+        }));
+        continue;
+      }
+      setWorkspaceFiles((current) => ({
+        ...current,
+        [workspace.targetId]: { status: 'loading', entries: [], nextOffset: null },
+      }));
+      void onLoadFiles({ artifactId: workspace.diffArtifactId, offset: 0, limit: 20 })
+        .then((result) => {
+          setWorkspaceFiles((current) => ({
+            ...current,
+            [workspace.targetId]: {
+              status: 'loaded',
+              entries: result.entries,
+              nextOffset: result.nextOffset,
+              metadataTruncated: result.metadataTruncated,
+            },
+          }));
+        })
+        .catch((error: any) => {
+          setWorkspaceFiles((current) => ({
+            ...current,
+            [workspace.targetId]: {
+              status: 'error',
+              entries: [],
+              nextOffset: null,
+              message: String(error?.message ?? error ?? 'Unable to load changed files.'),
+            },
+          }));
+        });
+    }
+  }, [expanded, onLoadFiles, summary.workspaces, workspaceFiles]);
+
+  const entriesForWorkspace = (workspace: AgentRunFileChangeWorkspace) =>
+    'entries' in workspace
+      ? workspace.entries
+      : (workspaceFiles[workspace.targetId]?.entries ?? workspace.previewEntries);
+
+  const loadMoreFiles = (workspace: AgentRunFileChangeWorkspace) => {
+    if ('entries' in workspace || !workspace.diffArtifactId || !onLoadFiles) return;
+    const current = workspaceFiles[workspace.targetId];
+    if (!current || current.nextOffset == null || current.status === 'loading') return;
+    setWorkspaceFiles((states) => ({
+      ...states,
+      [workspace.targetId]: { ...current, status: 'loading' },
+    }));
+    void onLoadFiles({
+      artifactId: workspace.diffArtifactId,
+      offset: current.nextOffset,
+      limit: 20,
+    })
+      .then((result) => {
+        setWorkspaceFiles((states) => ({
+          ...states,
+          [workspace.targetId]: {
+            status: 'loaded',
+            entries: [...current.entries, ...result.entries],
+            nextOffset: result.nextOffset,
+            metadataTruncated: result.metadataTruncated,
           },
         }));
       })
       .catch((error: any) => {
+        setWorkspaceFiles((states) => ({
+          ...states,
+          [workspace.targetId]: {
+            ...current,
+            status: 'error',
+            message: String(error?.message ?? error ?? 'Unable to load more changed files.'),
+          },
+        }));
+      });
+  };
+  const openDiff = (artifactId: string, filePath: string, force = false) => {
+    if (!onLoadDiff) return;
+    const key = `${artifactId}\u0000${filePath}`;
+    if (!force && openDiffKey === key) {
+      diffRequestGeneration.current += 1;
+      setOpenDiffKey('');
+      setSelectedDiff(null);
+      return;
+    }
+    setOpenDiffKey(key);
+    const requestGeneration = ++diffRequestGeneration.current;
+    setSelectedDiff({ key, state: { status: 'loading' } });
+    void onLoadDiff({ artifactId, path: filePath })
+      .then((result) => {
+        if (diffRequestGeneration.current !== requestGeneration) return;
+        setSelectedDiff({
+          key,
+          state: {
+            status: 'loaded',
+            patch: String(result.patch ?? ''),
+            truncated: result.truncated === true,
+          },
+        });
+      })
+      .catch((error: any) => {
+        if (diffRequestGeneration.current !== requestGeneration) return;
         const errorCode = String(error?.code ?? '');
         const hubStatus = Number(/^HUB_(\d+)$/.exec(errorCode)?.[1] ?? 0);
         const terminal =
           errorCode === 'INVALID_REQUEST' ||
           (hubStatus >= 400 && hubStatus < 500 && hubStatus !== 408 && hubStatus !== 429);
-        setDiffs((current) => ({
-          ...current,
-          [key]: {
+        setSelectedDiff({
+          key,
+          state: {
             status: 'error',
             message: String(error?.message ?? error ?? 'Unable to load historical diff.'),
             retryable: !terminal,
           },
-        }));
+        });
       });
   };
   return (
@@ -151,7 +262,14 @@ function ChangedFilesSummary({
         accessibilityRole="button"
         accessibilityLabel={`${summary.counts.changed} changed files`}
         accessibilityState={{ expanded }}
-        onPress={() => setExpanded((current) => !current)}
+        onPress={() => {
+          if (expanded) {
+            diffRequestGeneration.current += 1;
+            setOpenDiffKey('');
+            setSelectedDiff(null);
+          }
+          setExpanded((current) => !current);
+        }}
         style={({ pressed }) => [styles.changedFilesHeader, pressed && styles.changedFilesPressed]}
       >
         <View style={styles.changedFilesTitleBlock}>
@@ -181,22 +299,14 @@ function ChangedFilesSummary({
               {summary.workspaces.length > 1 || workspace.targetId.startsWith('artifacts:') ? (
                 <Text style={styles.changedFilesWorkspace}>{workspace.label}</Text>
               ) : null}
-              {workspace.entries.map((entry) => {
+              {entriesForWorkspace(workspace).map((entry) => {
                 const artifactId = workspace.diffArtifactId;
                 const diffKey = artifactId ? `${artifactId}\u0000${entry.path}` : '';
                 const open = Boolean(diffKey && openDiffKey === diffKey);
-                const diff = diffKey ? diffs[diffKey] : undefined;
+                const diff = selectedDiff?.key === diffKey ? selectedDiff.state : undefined;
                 const row = (
                   <View style={styles.changedFilesRow}>
-                    <Text style={styles.changedFilesStatus}>
-                      {entry.status === 'added'
-                        ? 'A'
-                        : entry.status === 'deleted'
-                          ? 'D'
-                          : entry.status === 'renamed'
-                            ? 'R'
-                            : 'M'}
-                    </Text>
+                    <Text style={styles.changedFilesStatus}>{agentRunFileStatusLabel(entry)}</Text>
                     <Text numberOfLines={1} style={styles.changedFilesPath}>
                       {entry.path}
                     </Text>
@@ -286,6 +396,50 @@ function ChangedFilesSummary({
                   </View>
                 );
               })}
+              {'entries' in workspace ? null : workspaceFiles[workspace.targetId]?.status ===
+                'loading' ? (
+                <View style={styles.changedFilesDiffLoading}>
+                  <ActivityIndicator color={colors.accent} size="small" />
+                  <Text style={styles.changedFilesDiffHint}>
+                    {workspaceFiles[workspace.targetId]!.entries.length > 0
+                      ? 'Loading more files…'
+                      : 'Loading changed files…'}
+                  </Text>
+                </View>
+              ) : workspaceFiles[workspace.targetId]?.status === 'error' ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    const current = workspaceFiles[workspace.targetId];
+                    if (current?.entries.length) loadMoreFiles(workspace);
+                    else {
+                      setWorkspaceFiles((states) => {
+                        const next = { ...states };
+                        delete next[workspace.targetId];
+                        return next;
+                      });
+                    }
+                  }}
+                  style={styles.changedFilesDiffError}
+                >
+                  <Text style={styles.changedFilesDiffErrorText}>
+                    {workspaceFiles[workspace.targetId]!.message}
+                  </Text>
+                  <Text style={styles.changedFilesDiffRetry}>Retry</Text>
+                </Pressable>
+              ) : workspaceFiles[workspace.targetId]?.nextOffset != null ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => loadMoreFiles(workspace)}
+                  style={styles.changedFilesDiffError}
+                >
+                  <Text style={styles.changedFilesDiffRetry}>Show 20 more</Text>
+                </Pressable>
+              ) : workspaceFiles[workspace.targetId]?.metadataTruncated ? (
+                <Text style={styles.changedFilesDiffHint}>
+                  Stored list limited to 5,000 files.
+                </Text>
+              ) : null}
             </View>
           ))}
         </View>
@@ -474,14 +628,9 @@ function TransferToolRow({
   const transferred = Number(progress?.transferredBytes ?? 0);
   const failed = item.result?.isError === true || progress?.phase === 'failed';
   const percent =
-    total > 0
-      ? Math.min(100, (transferred / total) * 100)
-      : settled && !failed
-        ? 100
-        : 0;
+    total > 0 ? Math.min(100, (transferred / total) * 100) : settled && !failed ? 100 : 0;
   const sourceLabel = progress?.source?.targetLabel ?? item.call?.args?.sourceTarget;
-  const destinationLabel =
-    progress?.destination?.targetLabel ?? item.call?.args?.destinationTarget;
+  const destinationLabel = progress?.destination?.targetLabel ?? item.call?.args?.destinationTarget;
   const amountLabel = progress
     ? `${formatTransferBytes(transferred)} / ${formatTransferBytes(total)}`
     : failed
@@ -523,9 +672,7 @@ function TransferToolRow({
         <View style={styles.toolCopy}>
           <View style={styles.transferTitleRow}>
             <Text style={styles.toolTitle}>Transfer files</Text>
-            <Text style={styles.transferBytes}>
-              {amountLabel}
-            </Text>
+            <Text style={styles.transferBytes}>{amountLabel}</Text>
           </View>
           <Text numberOfLines={1} style={styles.toolSummary}>
             {summaryLabel}
@@ -540,9 +687,7 @@ function TransferToolRow({
             />
           </View>
           <View style={styles.transferMeta}>
-            <Text style={styles.transferMetaText}>
-              {progressLabel}
-            </Text>
+            <Text style={styles.transferMetaText}>{progressLabel}</Text>
             <Text style={styles.transferMetaText}>
               {progress?.retries
                 ? `${progress.retries} ${progress.retries === 1 ? 'retry' : 'retries'}`
@@ -990,6 +1135,7 @@ export function MobileAssistantTranscript({
   linkedPullRequests,
   onOpenFileReference,
   onLoadRunFileDiff,
+  onLoadRunFiles,
 }: {
   messages: AssistantMessage[];
   running?: boolean;
@@ -1014,6 +1160,11 @@ export function MobileAssistantTranscript({
   onLoadRunFileDiff?: (input: { artifactId: string; path: string }) => Promise<{
     patch: string;
     truncated?: boolean;
+  }>;
+  onLoadRunFiles?: (input: { artifactId: string; offset: number; limit: number }) => Promise<{
+    entries: AgentRunFileChangeEntry[];
+    nextOffset: number | null;
+    metadataTruncated?: boolean;
   }>;
 }) {
   const items = React.useMemo(
@@ -1057,7 +1208,14 @@ export function MobileAssistantTranscript({
       return <ToolGroupRow key={item.key} item={item} />;
     }
     if (item.type === 'runSummary') {
-      return <ChangedFilesSummary key={item.key} item={item} onLoadDiff={onLoadRunFileDiff} />;
+      return (
+        <ChangedFilesSummary
+          key={item.key}
+          item={item}
+          onLoadDiff={onLoadRunFileDiff}
+          onLoadFiles={onLoadRunFiles}
+        />
+      );
     }
     const text = visibleMessageText(item.message).trim();
     const images = messageImageParts(item.message);
