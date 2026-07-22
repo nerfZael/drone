@@ -984,11 +984,18 @@ export function DronesScreen({
                 ? { seedAttachments: inlinePromptAttachments(initialImages) }
                 : {}),
             }
-          : Object.fromEntries(
-              Object.entries(payload).filter(
-                ([key]) => key !== 'seedPrompt' && key !== 'seedSubmittedAt',
+          : {
+              ...Object.fromEntries(
+                Object.entries(payload).filter(
+                  ([key]) => key !== 'seedPrompt' && key !== 'seedSubmittedAt',
+                ),
               ),
-            );
+              // The chat prompt is sent after remote attachment upload. Keep one copy only for
+              // automatic naming while the new drone starts.
+              ...(payload.autoRename && payload.seedPrompt
+                ? { autoRenamePrompt: payload.seedPrompt }
+                : {}),
+            };
       const result = await requestDroneControl(
         destinationId,
         `drone.create.${payload.runtime}`,

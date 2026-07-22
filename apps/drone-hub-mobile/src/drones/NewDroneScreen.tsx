@@ -71,6 +71,7 @@ export type MobileDroneCreatePayload = {
   seedAgentPermissionMode?: MobileDroneAgentPermissionMode;
   seedPrompt?: string;
   seedSubmittedAt?: string;
+  autoRename?: boolean;
 };
 
 export type MobileDroneCreateDefaults = {
@@ -591,6 +592,7 @@ export function NewDroneScreen({
               : {}),
             seedPrompt: prompt,
             seedSubmittedAt: new Date().toISOString(),
+            ...(!name.trim() && prompt ? { autoRename: true } : {}),
           }
         : {}),
     };
