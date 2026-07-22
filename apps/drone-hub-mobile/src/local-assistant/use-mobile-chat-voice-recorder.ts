@@ -14,6 +14,7 @@ import { readGroqApiKey } from './local-assistant-settings';
 import { transcribeMobileVoiceRecording } from './mobile-groq-transcription';
 import {
   MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES,
+  resolveMobileVoiceRecorderEvent,
   shouldDiscardMobileVoiceWhenInactive,
   type MobileVoiceRecordingStatus,
 } from './mobile-voice-transcription-model';
@@ -71,14 +72,20 @@ export function useMobileChatVoiceRecorder({
 
   const handleNativeStatus = React.useCallback(
     (next: RecordingStatus) => {
-      if (next.url) recordingUriRef.current = next.url;
-      if (!next.hasError && !next.mediaServicesDidReset) return;
+      // stop() completion events can arrive after the next recording has begun.
+      // Never let an event from an older file replace or cancel the active session.
+      const event = resolveMobileVoiceRecorderEvent({
+        activeUri: recordingUriRef.current,
+        eventUri: next.url,
+        failed: next.hasError || Boolean(next.mediaServicesDidReset),
+      });
+      if (!event.handleFailure) return;
       generationRef.current += 1;
       transcribeAbortRef.current?.abort();
       transcribeAbortRef.current = null;
       statusRef.current = 'idle';
       const failedRecorder = recorderRef.current;
-      const uri = next.url || recordingUriRef.current;
+      const uri = event.uri;
       if (failedRecorder) {
         void failedRecorder
           .stop()
@@ -164,6 +171,9 @@ export function useMobileChatVoiceRecorder({
     if (statusRef.current !== 'idle') return;
     const generation = generationRef.current + 1;
     generationRef.current = generation;
+    const staleUri = recordingUriRef.current;
+    recordingUriRef.current = null;
+    deleteRecordingFile(staleUri);
     setStatusValue('starting');
     onError('');
     try {
@@ -261,7 +271,7 @@ export function useMobileChatVoiceRecorder({
     try {
       uri = recordingUriRef.current || recorder.uri || '';
       await recorder.stop();
-      uri = recordingUriRef.current || recorder.uri || uri;
+      uri ||= recorder.uri || '';
       if (!uri) throw new Error('The voice recording could not be saved.');
       recordingUriRef.current = uri;
       await deactivateRecordingMode();
