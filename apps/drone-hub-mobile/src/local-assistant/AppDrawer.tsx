@@ -27,6 +27,7 @@ import FolderGit2 from 'lucide-react-native/icons/folder-git-2';
 import Folder from 'lucide-react-native/icons/folder';
 import Square from 'lucide-react-native/icons/square';
 import X from 'lucide-react-native/icons/x';
+import Pin from 'lucide-react-native/icons/pin';
 import Svg, { Circle, Line, Rect } from 'react-native-svg';
 import { Drawer } from 'react-native-drawer-layout';
 import { colors } from '../theme';
@@ -47,6 +48,7 @@ import {
   type MobileDroneSummary,
   type MobileDroneTreeNode,
 } from '../drones/drone-sidebar-model';
+import { resolvePinnedSidebarDrones } from '@drone/hub-model/sidebar';
 import {
   addMobileDroneToStateSummary,
   EMPTY_MOBILE_DRONE_STATE_SUMMARY,
@@ -819,6 +821,42 @@ function DrawerDroneEntry({
   );
 }
 
+function DrawerPinnedDrones({
+  drones,
+  activeDroneId,
+  activeChatName,
+  droneOperationById,
+  onSelect,
+}: {
+  drones: MobileDroneSummary[];
+  activeDroneId: string;
+  activeChatName: string;
+  droneOperationById: Record<string, 'archiving' | 'deleting'>;
+  onSelect(droneId: string, chatName: string): void;
+}) {
+  if (drones.length === 0) return null;
+  return (
+    <View style={styles.pinnedSection} accessibilityLabel="Pinned drones">
+      <View style={styles.pinnedHeader}>
+        <Pin color={colors.mutedDim} size={13} strokeWidth={1.7} />
+        <Text style={styles.pinnedHeaderText}>Pinned</Text>
+        <Text style={styles.pinnedCount}>{drones.length}</Text>
+      </View>
+      {drones.map((drone) => (
+        <DrawerDroneNode
+          key={`pinned:${drone.id}`}
+          node={{ drone, children: [] }}
+          depth={0}
+          activeDroneId={activeDroneId}
+          activeChatName={activeChatName}
+          droneOperationById={droneOperationById}
+          onSelect={onSelect}
+        />
+      ))}
+    </View>
+  );
+}
+
 export function AppDrawer(props: AppDrawerProps) {
   const registerDrawer = React.useContext(AppDrawerHostContext);
 
@@ -1014,6 +1052,10 @@ function AppDrawerView({
     () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
     [droneSidebarOrder, drones],
   );
+  const pinnedDrones = React.useMemo(
+    () => resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds),
+    [droneSidebarOrder.pinnedDroneIds, drones],
+  );
   const repoStateSummaries = React.useMemo(
     () =>
       new Map(
@@ -1184,6 +1226,15 @@ function AppDrawerView({
                     onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
                   />
                 )}
+                ListHeaderComponent={
+                  <DrawerPinnedDrones
+                    drones={pinnedDrones}
+                    activeDroneId={activeDroneId}
+                    activeChatName={activeChatName}
+                    droneOperationById={droneOperationById}
+                    onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
+                  />
+                }
                 ListFooterComponent={listStatus}
                 initialNumToRender={10}
                 maxToRenderPerBatch={8}
@@ -1230,6 +1281,15 @@ function AppDrawerView({
                     </View>
                   );
                 }}
+                ListHeaderComponent={
+                  <DrawerPinnedDrones
+                    drones={pinnedDrones}
+                    activeDroneId={activeDroneId}
+                    activeChatName={activeChatName}
+                    droneOperationById={droneOperationById}
+                    onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
+                  />
+                }
                 ListFooterComponent={listStatus}
                 initialNumToRender={10}
                 maxToRenderPerBatch={8}
@@ -1435,6 +1495,30 @@ const styles = StyleSheet.create({
   fleetStateTextWorking: { color: colors.warning },
   fleetStateTextUnread: { color: colors.online },
   droneList: { paddingBottom: 24 },
+  pinnedSection: {
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+  },
+  pinnedHeader: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 9,
+  },
+  pinnedHeaderText: {
+    color: colors.mutedDim,
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  pinnedCount: {
+    marginLeft: 'auto',
+    color: colors.mutedDim,
+    fontSize: 9,
+    fontFamily: 'monospace',
+  },
   repoGroup: {
     borderBottomWidth: 1,
     borderBottomColor: colors.whiteWash,

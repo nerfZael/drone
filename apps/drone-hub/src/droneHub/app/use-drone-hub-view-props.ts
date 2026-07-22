@@ -9,6 +9,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     dronesLoading,
     sidebarDronesFilteredByRepo,
     sidebarDrones,
+    pinnedDroneIds,
     sidebarOptimisticDroneIdSet,
     selectedDroneSet,
     highlightedDroneIds,
@@ -44,6 +45,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     openCloneModal,
     renameDrone,
     setDroneBaseImage,
+    setDronePinned,
     deleteDrone,
     reparentDronesToParent,
     openDroneErrorModal,
@@ -64,6 +66,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     dronesLoading,
     sidebarDronesFilteredByRepo,
     sidebarDrones,
+    pinnedDroneIds,
     sidebarOptimisticDroneIdSet,
     selectedDroneSet,
     highlightedDroneIds,
@@ -105,6 +108,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     onSetDroneBaseImage: (droneId) => {
       void setDroneBaseImage(droneId);
     },
+    onSetDronePinned: setDronePinned,
     onDeleteDrone: deleteDrone,
     onOpenDroneErrorModal: openDroneErrorModal,
     onReparentDronesToParent: reparentDronesToParent,

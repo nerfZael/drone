@@ -113,6 +113,31 @@ describe('mobile sidebar presentation', () => {
     );
   });
 
+  test('shows pinned drones first and keeps pinning in the chat header menu', () => {
+    const drawerSource = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const dronesSource = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+    const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
+
+    expect(drawerSource).toContain(
+      'resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds)',
+    );
+    expect(drawerSource).toContain('<Text style={styles.pinnedHeaderText}>Pinned</Text>');
+    expect(drawerSource).toContain('<Pin color={colors.mutedDim} size={13} strokeWidth={1.7} />');
+    expect(drawerSource).not.toContain('accessibilityLabel={pinned ? `Unpin ${drone.name}`');
+    expect(drawerSource.match(/<DrawerPinnedDrones/g)).toHaveLength(2);
+    expect(dronesSource).toContain('onTogglePinned: () =>');
+    expect(dronesSource).toContain('void setDronePinned(');
+    expect(shellSource).toContain("id: 'toggle-pin'");
+    expect(shellSource).toContain("label: dronesHeader.pinned ? 'Unpin drone' : 'Pin drone'");
+    expect(shellSource).toContain('disabled: dronesHeader.pinDisabled');
+  });
+
   test('omits the selected-drone subtitle while preserving contextual create copy', () => {
     const dronesSource = readFileSync(
       new URL('../src/screens/DronesScreen.tsx', import.meta.url),

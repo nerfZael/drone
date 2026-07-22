@@ -152,6 +152,7 @@ describe('drone hub ui store migration', () => {
         sidebarGroupOrder: [],
         sidebarDroneOrderByGroup: {},
         sidebarChatOrderByDrone: {},
+        pinnedDroneIds: [],
         hiddenSidebarGroups: [],
         autoDelete: false,
         spawnAgentKey: 'builtin:cursor',
@@ -168,6 +169,7 @@ describe('drone hub ui store migration', () => {
           repoBranchSource: 'remote',
           repoCreateRemoteBranch: 'origin/voice',
           pullHostBranchBeforeCreate: false,
+          pinnedDroneIds: ['drone-b', 'drone-a'],
         },
         version: 5,
       }),
@@ -180,6 +182,7 @@ describe('drone hub ui store migration', () => {
     expect(restored.snapshot.repoBranchSource).toBe('remote');
     expect(restored.snapshot.repoCreateRemoteBranch).toBe('origin/voice');
     expect(restored.snapshot.pullHostBranchBeforeCreate).toBe(false);
+    expect(restored.snapshot.pinnedDroneIds).toEqual(['drone-b', 'drone-a']);
   });
 
   test('migrates the former create-chat default onto child-drone and moves create-chat to W', () => {

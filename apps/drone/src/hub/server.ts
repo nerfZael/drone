@@ -374,6 +374,7 @@ import {
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
   upsertStoredUiPreferencesSettings,
+  updatePinnedDronePreference,
   type LlmProviderId,
   type StoredApiKeyProviderId,
   type UiPreferencesSettings,
@@ -5433,6 +5434,12 @@ export async function startDroneHubApiServer(opts: {
     droneRootPath,
     resolveUiPreferencesSettingsResponse,
     upsertStoredUiPreferencesSettings,
+    updatePinnedDronePreference,
+    notifyPinnedDronesChanged: () => {
+      const at = nowIso();
+      assistantService.emitExternalUiAction({ type: 'reload_pinned_drones', at });
+      void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
+    },
     clampIntParam,
     readHubLogTail,
     HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,

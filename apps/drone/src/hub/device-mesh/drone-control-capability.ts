@@ -329,6 +329,7 @@ export function createDroneControlCapability(
             sidebarGroupOrder: textList(preferences.sidebarGroupOrder),
             sidebarDroneOrderByGroup: textListMap(preferences.sidebarDroneOrderByGroup),
             sidebarNodeOrderByParent: textListMap(preferences.sidebarNodeOrderByParent),
+            pinnedDroneIds: textList(preferences.pinnedDroneIds),
           },
           ...(payload.includeCreateOptions === true
             ? { createOptions: { repos: createRepos } }
@@ -397,6 +398,12 @@ export function createDroneControlCapability(
         return await localHubRequest(access, `/api/drones/${encodedDrone}/rename`, {
           method: 'POST',
           body: JSON.stringify({ newName, source: 'drone-hub-mobile' }),
+        });
+      }
+      if (operation === 'drone.pin.update') {
+        return await localHubRequest(access, '/api/settings/ui-preferences/pinned-drones', {
+          method: 'POST',
+          body: JSON.stringify({ droneId, pinned: payload.pinned === true }),
         });
       }
       if (operation === 'drone.delete') {

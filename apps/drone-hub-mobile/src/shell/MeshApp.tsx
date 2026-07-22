@@ -14,6 +14,7 @@ import Check from 'lucide-react-native/icons/check';
 import Menu from 'lucide-react-native/icons/menu';
 import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
+import Pin from 'lucide-react-native/icons/pin';
 import Plus from 'lucide-react-native/icons/plus';
 import Pencil from 'lucide-react-native/icons/pencil';
 import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
@@ -260,6 +261,17 @@ function Shell() {
                   label: 'Rename drone',
                   icon: Pencil,
                   onPress: dronesHeader.onRename,
+                },
+              ]
+            : []),
+          ...(dronesHeader.onTogglePinned
+            ? [
+                {
+                  id: 'toggle-pin',
+                  label: dronesHeader.pinned ? 'Unpin drone' : 'Pin drone',
+                  icon: Pin,
+                  disabled: dronesHeader.pinDisabled,
+                  onPress: dronesHeader.onTogglePinned,
                 },
               ]
             : []),

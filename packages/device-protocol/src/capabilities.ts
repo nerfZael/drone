@@ -30,6 +30,7 @@ export const DRONE_CONTROL_OPERATIONS = [
   'drone.create.container',
   'drone.create.host',
   'drone.rename',
+  'drone.pin.update',
   'drone.delete',
 ] as const;
 

@@ -20,6 +20,14 @@ export function IconMore({ className }: { className?: string }) {
   );
 }
 
+export function IconPin({ className, filled = false }: { className?: string; filled?: boolean }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill={filled ? 'currentColor' : 'none'} aria-hidden="true">
+      <path d="M5.1 1.5h5.8l-.8 4.1 2.15 2.15v1.1H8.7V14.5H7.3V8.85H3.75v-1.1L5.9 5.6l-.8-4.1z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function IconClone({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

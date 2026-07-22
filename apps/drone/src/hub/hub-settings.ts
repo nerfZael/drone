@@ -119,6 +119,7 @@ export type UiPreferencesSettings = {
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarChatOrderByDrone: Record<string, string[]>;
+  pinnedDroneIds: string[];
   hiddenSidebarGroups: string[];
   autoDelete: boolean;
   spawnAgentKey: string;
@@ -275,6 +276,7 @@ function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(raw.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarNodeOrderByParent),
     sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
+    pinnedDroneIds: normalizeOrderedStringList(raw.pinnedDroneIds),
     hiddenSidebarGroups: normalizeOrderedStringList(raw.hiddenSidebarGroups),
     autoDelete: raw.autoDelete === true,
     spawnAgentKey: normalizeUiPreferenceText(raw.spawnAgentKey, 200) || DEFAULT_SPAWN_AGENT_KEY,
@@ -900,6 +902,36 @@ export async function upsertStoredUiPreferencesSettings(
     }
     throw error;
   }
+}
+
+export async function updatePinnedDronePreference(
+  droneIdRaw: unknown,
+  pinned: boolean,
+): Promise<StoredUiPreferencesSettings> {
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!droneId) throw new UiPreferencesSettingsValidationError('droneId is required');
+  const repository = await getHubSettingsRepository();
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const current = await getStoredUiPreferencesSettings();
+    const currentIds = current.uiPreferences.pinnedDroneIds;
+    const nextIds = pinned
+      ? currentIds.includes(droneId)
+        ? currentIds
+        : [...currentIds, droneId]
+      : currentIds.filter((id) => id !== droneId);
+    if (nextIds.length === currentIds.length) return current;
+    try {
+      const saved = await repository.put(
+        UI_PREFERENCES_SETTING_KEY,
+        { ...current.uiPreferences, pinnedDroneIds: nextIds },
+        { expectedVersion: current.version },
+      );
+      return storedUiPreferencesFromRecord(saved);
+    } catch (error) {
+      if (!(error instanceof HubSettingVersionConflictError) || attempt === 3) throw error;
+    }
+  }
+  throw new Error('Failed to update pinned drones');
 }
 
 export async function resolveUiPreferencesSettingsResponse(): Promise<{
