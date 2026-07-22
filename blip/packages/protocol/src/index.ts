@@ -56,6 +56,7 @@ export type AgentRunFileChangeWorkspace = {
   droneId?: string;
   label: string;
   repoRoot: string;
+  diffArtifactId?: string;
   counts: { changed: number; additions: number; deletions: number };
   entries: AgentRunFileChangeEntry[];
   truncated?: boolean;

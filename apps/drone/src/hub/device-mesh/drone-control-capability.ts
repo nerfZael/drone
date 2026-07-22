@@ -76,6 +76,7 @@ function compactPendingPrompts(value: unknown): any[] {
 const CREATE_REPO_BRANCH_PAGE_SIZE = 500;
 const CREATE_REPO_BRANCH_PAGE_BYTES = 160 * 1024;
 const MOBILE_FILE_MEDIA_MAX_BYTES = 32 * 1024 * 1024;
+const MOBILE_RUN_DIFF_MAX_BYTES = 80 * 1024;
 
 function compactCreateRepoBranch(branch: unknown) {
   const entry = object(branch);
@@ -533,6 +534,47 @@ export function createDroneControlCapability(
         return { nativeChatId, snapshot };
       };
       if (operation === 'chat.read') {
+        const diffArtifactId = optionalText(payload.diffArtifactId);
+        const diffPath = optionalText(payload.diffPath);
+        if (diffArtifactId || diffPath) {
+          if (!diffArtifactId || !diffPath) {
+            throw Object.assign(new Error('diffArtifactId and diffPath are required together'), {
+              code: 'INVALID_REQUEST',
+            });
+          }
+          const response = await localHubRequest(
+            access,
+            `/api/agent-run-diffs/${encodeURIComponent(diffArtifactId)}/file?path=${encodeURIComponent(diffPath)}`,
+          );
+          const owner = object(response?.diff?.owner);
+          const ownerThreadId = optionalText(owner.threadId);
+          if (ownerThreadId) {
+            const identity = await localHubRequest(access, `${chatPath}/native`);
+            if (requiredText(identity?.nativeChatId, 'nativeChatId') !== ownerThreadId) {
+              throw Object.assign(new Error('changed-files artifact does not belong to this chat'), {
+                code: 'INVALID_REQUEST',
+              });
+            }
+          } else if (
+            requiredText(owner.droneId, 'artifact owner droneId') !== droneId ||
+            optionalText(owner.chatName) !== chatName
+          ) {
+            throw Object.assign(new Error('changed-files artifact does not belong to this chat'), {
+              code: 'INVALID_REQUEST',
+            });
+          }
+          const diff = object(response?.diff);
+          const rawPatch = String(diff.patch ?? '');
+          const patch = truncateUtf8(rawPatch, MOBILE_RUN_DIFF_MAX_BYTES);
+          return {
+            ...response,
+            diff: {
+              ...diff,
+              patch,
+              truncated: diff.truncated === true || patch !== rawPatch,
+            },
+          };
+        }
         const [result, pendingResult] = await Promise.all([
           localHubRequest(access, chatPath),
           localHubRequest(access, `${chatPath}/pending`),

@@ -14,6 +14,7 @@ const summary = {
       droneId: 'd1',
       label: 'Drone 1',
       repoRoot: '/work/repo',
+      diffArtifactId: '018fdce7-6e20-7d31-a78c-3f95d665cc72',
       counts: { changed: 2, additions: 7, deletions: 3 },
       entries: [
         { path: 'src/new.ts', status: 'added' as const, additions: 7, deletions: 0 },

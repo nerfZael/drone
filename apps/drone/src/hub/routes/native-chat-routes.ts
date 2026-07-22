@@ -34,6 +34,28 @@ export function registerNativeChatRoutes(
     return { resolved, chat, chatId };
   };
 
+  apiRouter.get(
+    '/api/drones/:droneRef/chats/:chatName/native',
+    async ({ params, json: respond }) => {
+      try {
+        const droneRef = decodeURIComponent(params.droneRef);
+        const chatName = decodeURIComponent(params.chatName) || 'default';
+        const { resolved, chatId } = await resolveNativeChat(droneRef, chatName);
+        respond(200, {
+          ok: true,
+          nativeChatId: chatId,
+          droneId: resolved.id,
+          chatName,
+        });
+      } catch (error: any) {
+        const message = String(error?.message ?? error);
+        const status =
+          Number(error?.statusCode ?? 0) || (/unknown (drone|chat)/i.test(message) ? 404 : 400);
+        respond(status, { ok: false, error: message });
+      }
+    },
+  );
+
   apiRouter.post(
     '/api/drones/:droneRef/chats/:chatName/native',
     async ({ params, url, json: respond }) => {

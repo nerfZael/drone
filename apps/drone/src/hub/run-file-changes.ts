@@ -13,6 +13,11 @@ import type {
 
 import { dvmExec } from '../host/dvm';
 import { normalizeDroneRuntime } from '../host/runtime';
+import { ensureAssistantArtifactsRoot } from './assistant-artifacts';
+import {
+  persistAgentRunDiffArtifact,
+  type AgentRunDiffArtifactOwner,
+} from './agent-run-diff-artifacts';
 
 const MAX_PERSISTED_FILES_PER_WORKSPACE = 200;
 
@@ -23,10 +28,16 @@ export type AgentRunFileChangesBaseline = {
   version: 1;
   capturedAt: string;
   targetId: string;
-  droneId: string;
+  droneId?: string;
   label: string;
   repoRoot: string;
   treeOid: string;
+  owner: AgentRunDiffArtifactOwner;
+};
+
+export type AssistantArtifactRunFileChangesBaseline = AgentRunFileChangesBaseline & {
+  threadId: string;
+  temporaryGitDir: string;
 };
 
 function isRepoAttachedDrone(drone: any): boolean {
@@ -180,6 +191,19 @@ function parseNumstat(raw: string): Map<string, { additions: number; deletions: 
   return stats;
 }
 
+function splitGitPatches(raw: string): string[] {
+  const starts: number[] = [];
+  if (raw.startsWith('diff --git ')) starts.push(0);
+  let cursor = 0;
+  while (cursor < raw.length) {
+    const next = raw.indexOf('\ndiff --git ', cursor);
+    if (next < 0) break;
+    starts.push(next + 1);
+    cursor = next + 1;
+  }
+  return starts.map((start, index) => raw.slice(start, starts[index + 1] ?? raw.length));
+}
+
 async function summarizeTrees(input: {
   baseline: AgentRunFileChangesBaseline;
   currentTreeOid: string;
@@ -188,7 +212,7 @@ async function summarizeTrees(input: {
 }): Promise<AgentRunFileChangeWorkspace | null> {
   if (input.baseline.treeOid === input.currentTreeOid) return null;
   const revisionArgs = [input.baseline.treeOid, input.currentTreeOid];
-  const [nameStatusRaw, numstatRaw] = await Promise.all([
+  const [nameStatusRaw, numstatRaw, patchRaw] = await Promise.all([
     gitOrThrow(input.runGit, [
       'diff',
       '--no-color',
@@ -207,9 +231,22 @@ async function summarizeTrees(input: {
       '-z',
       ...revisionArgs,
     ]),
+    gitOrThrow(input.runGit, [
+      'diff',
+      '--no-color',
+      '--no-ext-diff',
+      '--find-renames',
+      '--unified=3',
+      ...revisionArgs,
+    ]),
   ]);
   const statusEntries = parseNameStatus(nameStatusRaw);
   if (statusEntries.length === 0) return null;
+  const patchChunks = splitGitPatches(patchRaw);
+  const patchesByPath =
+    patchChunks.length === statusEntries.length
+      ? new Map(statusEntries.map((entry, index) => [entry.path, patchChunks[index]!]))
+      : null;
   const stats = parseNumstat(numstatRaw);
   const entries: AgentRunFileChangeEntry[] = statusEntries.map((entry) => {
     const stat = stats.get(entry.path) ?? { additions: 0, deletions: 0, binary: false };
@@ -226,13 +263,40 @@ async function summarizeTrees(input: {
   const additions = entries.reduce((sum, entry) => sum + entry.additions, 0);
   const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
   const truncated = entries.length > MAX_PERSISTED_FILES_PER_WORKSPACE;
+  const persistedEntries = entries.slice(0, MAX_PERSISTED_FILES_PER_WORKSPACE);
+  const diffArtifactId = await persistAgentRunDiffArtifact({
+    owner: input.baseline.owner ?? { droneId: input.baseline.droneId },
+    targetId: input.baseline.targetId,
+    label: input.baseline.label,
+    entries: persistedEntries,
+    readPatch: async (entry) => {
+      const combinedPatch = patchesByPath?.get(entry.path);
+      if (combinedPatch != null) return combinedPatch;
+      const paths = [
+        ...new Set(
+          [entry.originalPath, entry.path].filter((value): value is string => Boolean(value)),
+        ),
+      ];
+      return await gitOrThrow(input.runGit, [
+        'diff',
+        '--no-color',
+        '--no-ext-diff',
+        '--find-renames',
+        '--unified=3',
+        ...revisionArgs,
+        '--',
+        ...paths,
+      ]);
+    },
+  }).catch(() => null);
   return {
     targetId: input.baseline.targetId,
-    droneId: input.baseline.droneId,
+    ...(input.baseline.droneId ? { droneId: input.baseline.droneId } : {}),
     label: input.baseline.label,
     repoRoot: input.repoRoot,
+    ...(diffArtifactId ? { diffArtifactId } : {}),
     counts: { changed: entries.length, additions, deletions },
-    entries: entries.slice(0, MAX_PERSISTED_FILES_PER_WORKSPACE),
+    entries: persistedEntries,
     ...(truncated ? { truncated: true } : {}),
   };
 }
@@ -284,6 +348,7 @@ function droneCaptureTarget(droneId: string, drone: any): {
 export async function captureDroneRunFileChangesBaseline(input: {
   droneId: string;
   drone: any;
+  owner?: Omit<AgentRunDiffArtifactOwner, 'droneId'>;
 }): Promise<AgentRunFileChangesBaseline | null> {
   const droneId = String(input.droneId ?? '').trim();
   const target = droneId ? droneCaptureTarget(droneId, input.drone) : null;
@@ -297,6 +362,7 @@ export async function captureDroneRunFileChangesBaseline(input: {
     label: target.label,
     repoRoot: snapshot.repoRoot,
     treeOid: snapshot.treeOid,
+    owner: { droneId, ...(input.owner ?? {}) },
   };
 }
 
@@ -305,7 +371,9 @@ export async function finalizeDroneRunFileChanges(input: {
   drone: any;
 }): Promise<AgentRunFileChanges | null> {
   if (input.baseline?.version !== 1) return null;
-  const target = droneCaptureTarget(input.baseline.droneId, input.drone);
+  const droneId = String(input.baseline.droneId ?? '').trim();
+  if (!droneId) return null;
+  const target = droneCaptureTarget(droneId, input.drone);
   if (!target) return null;
   const current = await captureTree(target.runGit, target.indexPath, target.cleanup);
   const workspace = await summarizeTrees({
@@ -315,6 +383,79 @@ export async function finalizeDroneRunFileChanges(input: {
     repoRoot: current.repoRoot,
   });
   return workspace ? combineAgentRunFileChanges([workspace]) : null;
+}
+
+function assistantArtifactGitRunner(gitDir: string, workTree: string): GitRunner {
+  return (args, env) =>
+    runHostCommand('git', ['--git-dir', gitDir, '--work-tree', workTree, ...args], env);
+}
+
+async function captureAssistantArtifactTree(runGit: GitRunner): Promise<string> {
+  await gitOrThrow(runGit, ['add', '-A', '--', ':/']);
+  const treeOid = (await gitOrThrow(runGit, ['write-tree'])).trim().toLowerCase();
+  if (!/^[0-9a-f]{40,64}$/.test(treeOid)) throw new Error('git returned an invalid tree id');
+  return treeOid;
+}
+
+export async function captureAssistantArtifactRunFileChangesBaseline(input: {
+  threadId: string;
+  turnId: string;
+}): Promise<AssistantArtifactRunFileChangesBaseline> {
+  const threadId = String(input.threadId ?? '').trim();
+  const turnId = String(input.turnId ?? '').trim();
+  if (!threadId || !turnId) throw new Error('threadId and turnId are required');
+  const repoRoot = await ensureAssistantArtifactsRoot(threadId);
+  const temporaryGitDir = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-artifact-run-changes-'));
+  try {
+    await gitOrThrow((args) => runHostCommand('git', args), [
+      'init',
+      '--bare',
+      '--quiet',
+      temporaryGitDir,
+    ]);
+    await fs.writeFile(path.join(temporaryGitDir, 'info', 'exclude'), '.*\n**/.*\n', 'utf8');
+    const runGit = assistantArtifactGitRunner(temporaryGitDir, repoRoot);
+    await gitOrThrow(runGit, ['read-tree', '--empty']);
+    const treeOid = await captureAssistantArtifactTree(runGit);
+    return {
+      version: 1,
+      capturedAt: new Date().toISOString(),
+      targetId: `artifacts:${threadId}`,
+      label: 'Artifacts',
+      repoRoot,
+      treeOid,
+      owner: { threadId, turnId },
+      threadId,
+      temporaryGitDir,
+    };
+  } catch (error) {
+    await fs.rm(temporaryGitDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export async function finalizeAssistantArtifactRunFileChanges(input: {
+  baseline: AssistantArtifactRunFileChangesBaseline;
+}): Promise<AgentRunFileChangeWorkspace | null> {
+  const baseline = input.baseline;
+  try {
+    const runGit = assistantArtifactGitRunner(baseline.temporaryGitDir, baseline.repoRoot);
+    const currentTreeOid = await captureAssistantArtifactTree(runGit);
+    return await summarizeTrees({
+      baseline,
+      currentTreeOid,
+      runGit,
+      repoRoot: baseline.repoRoot,
+    });
+  } finally {
+    await fs.rm(baseline.temporaryGitDir, { recursive: true, force: true });
+  }
+}
+
+export async function discardAssistantArtifactRunFileChangesBaseline(
+  baseline: AssistantArtifactRunFileChangesBaseline,
+): Promise<void> {
+  await fs.rm(baseline.temporaryGitDir, { recursive: true, force: true });
 }
 
 export function combineAgentRunFileChanges(
@@ -349,6 +490,7 @@ export function isMutatingWorkspaceTool(toolNameRaw: unknown): boolean {
     toolName === 'write_file' ||
     toolName === 'apply_patch' ||
     toolName === 'delete_file' ||
+    toolName === 'move_path' ||
     toolName === 'move_file' ||
     toolName === 'create_directory' ||
     toolName === 'delete_directory' ||

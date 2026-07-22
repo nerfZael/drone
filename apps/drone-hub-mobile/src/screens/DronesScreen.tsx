@@ -1403,6 +1403,24 @@ export function DronesScreen({
     phoneTarget,
     requestDroneControl,
   });
+  const loadRunFileDiff = React.useCallback(
+    async ({ artifactId, path }: { artifactId: string; path: string }) => {
+      if (!selected || phoneTarget) {
+        throw new Error('Historical diffs are unavailable for this chat.');
+      }
+      const response: any = await requestDroneControl(targetId, 'chat.read', {
+        droneId: selected.id,
+        chatName,
+        diffArtifactId: artifactId,
+        diffPath: path,
+      });
+      return {
+        patch: String(response?.diff?.patch ?? ''),
+        truncated: response?.diff?.truncated === true,
+      };
+    },
+    [chatName, phoneTarget, requestDroneControl, selected, targetId],
+  );
   const chatLoading = busy === 'chats' || busy === 'chat' || busy === 'create-chat';
   const latestMessageScroll = useLatestMessageScroll(
     selected ? `${selected.id}:${chatName}` : '',
@@ -1835,6 +1853,7 @@ export function DronesScreen({
                         onLoadFullMessage={(message) => void loadFullChatMessage(message)}
                         fullMessageLoadingId={fullMessageBusyId}
                         onOpenFileReference={filePreview.open}
+                        onLoadRunFileDiff={loadRunFileDiff}
                         onDeleteMessageRequest={
                           nativeMessages !== null
                             ? ({ message, deleteFollowing }) => {

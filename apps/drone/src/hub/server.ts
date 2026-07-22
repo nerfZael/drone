@@ -268,6 +268,7 @@ import { DroneRegistryBroadcaster } from './drone-registry-broadcaster';
 import { createTerminalWebSocketServer } from './terminal-websocket-server';
 import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgrade';
 import { registerAssistantRoutes } from './routes/assistant-routes';
+import { registerAgentRunDiffRoutes } from './routes/agent-run-diff-routes';
 import { NativeChatLifecycle } from './assistant/native-chat-lifecycle';
 import { buildNativeModelCatalog } from './assistant/native-model-catalog';
 import { registerNativeChatRoutes } from './routes/native-chat-routes';
@@ -5457,6 +5458,7 @@ export async function startDroneHubApiServer(opts: {
     validateAssistantPromptImages,
     saveAssistantArtifactUploads,
   });
+  registerAgentRunDiffRoutes(apiRouter);
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,
     nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),

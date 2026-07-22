@@ -560,11 +560,18 @@ describeSocketSuite('chat management api', () => {
     });
     expect(cloned.r.status).toBe(201);
 
+    const identity = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/review/native`,
+    );
+    expect(identity.r.status).toBe(200);
+    expect(String(identity.data?.nativeChatId ?? '')).toMatch(/^[0-9a-f-]{36}$/i);
+
     const opened = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/chats/review/native?includeHistory=1`,
       { method: 'POST' },
     );
     expect(opened.r.status).toBe(200);
+    expect(opened.data?.nativeChatId).toBe(identity.data?.nativeChatId);
     expect(String(opened.data?.nativeChatId ?? '')).toMatch(/^[0-9a-f-]{36}$/i);
     expect(opened.data?.initialHistory).toEqual({
       version: 1,
