@@ -61,7 +61,10 @@ import {
   type MobileDroneSidebarOrder,
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
-import { withOptimisticMobileBusyChat } from '../drones/drone-state-summary';
+import {
+  withMobileApprovalRequired,
+  withOptimisticMobileBusyChat,
+} from '../drones/drone-state-summary';
 import {
   confirmedMobilePendingPromptState,
   mergeOptimisticMobilePendingPrompts,
@@ -1466,18 +1469,19 @@ export function DronesScreen({
     () =>
       drones.map((drone) => {
         if (drone.id !== selected?.id) return drone;
-        return {
-          ...withOptimisticMobileBusyChat(
+        return withMobileApprovalRequired(
+          withOptimisticMobileBusyChat(
             drone,
             chatName,
             selectedChatOptimisticallyBusy,
           ),
-          approvalRequired: pendingApprovals.length > 0,
-        };
+          pendingApprovals.length > 0 || nativeThread?.status === 'waiting_for_approval',
+        );
       }),
     [
       chatName,
       drones,
+      nativeThread?.status,
       pendingApprovals.length,
       selected?.id,
       selectedChatOptimisticallyBusy,

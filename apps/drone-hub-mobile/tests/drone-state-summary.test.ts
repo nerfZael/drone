@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { normalizeMobileDrones } from '../src/drones/drone-sidebar-model';
 import {
+  mobileDroneDisplayState,
   summarizeMobileDrones,
+  withMobileApprovalRequired,
   withOptimisticMobileBusyChat,
 } from '../src/drones/drone-state-summary';
 
@@ -18,6 +20,23 @@ describe('mobile drone state summary', () => {
     expect(drone.busyChats).toEqual([]);
     expect(withOptimisticMobileBusyChat(optimistic, 'review', true)).toBe(optimistic);
     expect(withOptimisticMobileBusyChat(drone, 'review', false)).toBe(drone);
+  });
+
+  test('keeps approval ahead of working from either server or active-chat state', () => {
+    const [serverApproval, activeChatApproval] = normalizeMobileDrones([
+      { id: 'server', approvalRequired: true, busyChats: ['default'] },
+      { id: 'active-chat', busyChats: ['default'] },
+    ]);
+    expect(serverApproval).toBeDefined();
+    expect(activeChatApproval).toBeDefined();
+    if (!serverApproval || !activeChatApproval) return;
+
+    expect(withMobileApprovalRequired(serverApproval, false)).toBe(serverApproval);
+    expect(mobileDroneDisplayState(serverApproval)).toBe('approval');
+
+    const derivedApproval = withMobileApprovalRequired(activeChatApproval, true);
+    expect(derivedApproval.approvalRequired).toBe(true);
+    expect(mobileDroneDisplayState(derivedApproval)).toBe('approval');
   });
 
   test('summarizes approval, working, and unread drones with desktop precedence', () => {

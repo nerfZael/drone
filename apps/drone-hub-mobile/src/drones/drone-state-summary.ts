@@ -32,6 +32,14 @@ export function withOptimisticMobileBusyChat(
   return { ...drone, busyChats: [...drone.busyChats, chatName] };
 }
 
+export function withMobileApprovalRequired(
+  drone: MobileDroneSummary,
+  locallyRequired: boolean,
+): MobileDroneSummary {
+  if (drone.approvalRequired || !locallyRequired) return drone;
+  return { ...drone, approvalRequired: true };
+}
+
 export function mobileDroneDisplayState(drone: MobileDroneSummary): MobileDroneDisplayState {
   const rawState = `${drone.phase ?? ''} ${drone.status ?? ''}`.toLowerCase();
   if (drone.approvalRequired || rawState.includes('approval')) return 'approval';

@@ -54,6 +54,16 @@ describe('mobile sidebar presentation', () => {
     );
   });
 
+  test('derives the selected drone approval state from the active native thread', () => {
+    const source = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('withMobileApprovalRequired(');
+    expect(source).toContain("nativeThread?.status === 'waiting_for_approval'");
+  });
+
   test('matches the desktop drone row hierarchy and selection treatment', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
