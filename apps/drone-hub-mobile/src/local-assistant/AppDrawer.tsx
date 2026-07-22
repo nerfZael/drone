@@ -84,7 +84,6 @@ export type AppDrawerProps = {
   activeDroneId?: string;
   activeChatName?: string;
   droneOperationById?: Record<string, 'archiving' | 'deleting'>;
-  pinningDroneIds?: ReadonlySet<string>;
   dronesLoading?: boolean;
   dronesReachable?: boolean;
   dronesError?: string | null;
@@ -95,7 +94,6 @@ export type AppDrawerProps = {
   onCreateDrone?(repoPath: string): void;
   onRetryDrones?(): void;
   onSelectDroneChat?(droneId: string, chatName: string): void;
-  onSetDronePinned?(droneId: string, pinned: boolean): void;
   onSelectDevice?(deviceId: string): void;
 };
 
@@ -633,20 +631,14 @@ function DrawerDroneNode({
   activeDroneId,
   activeChatName,
   droneOperationById,
-  pinnedDroneIdSet,
-  pinningDroneIds,
   onSelect,
-  onSetDronePinned,
 }: {
   node: MobileDroneTreeNode;
   depth: number;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
-  pinnedDroneIdSet: ReadonlySet<string>;
-  pinningDroneIds: ReadonlySet<string>;
   onSelect(droneId: string, chatName: string): void;
-  onSetDronePinned?(droneId: string, pinned: boolean): void;
 }) {
   const { drone } = node;
   const chats = drone.chats.length > 0 ? drone.chats : ['default'];
@@ -657,8 +649,6 @@ function DrawerDroneNode({
   const unread = (drone.unreadChats?.length ?? 0) > 0;
   const stateLabel = unread && displayState === 'idle' ? 'Unread' : switchStateLabel(displayState);
   const runtimeLabel = drone.runtime.trim().toLowerCase() === 'host' ? 'host' : 'container';
-  const pinned = pinnedDroneIdSet.has(drone.id);
-  const pinning = pinningDroneIds.has(drone.id);
   const accessibilityLabel = [
     `Open ${drone.name} chat`,
     stateLabel,
@@ -696,26 +686,6 @@ function DrawerDroneNode({
         <View pointerEvents="none" style={styles.switchItemRuntimeSlot}>
           <RuntimeStatusIndicator runtime={drone.runtime} />
         </View>
-        {onSetDronePinned ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={pinned ? `Unpin ${drone.name}` : `Pin ${drone.name} to top`}
-            accessibilityState={{ selected: pinned, disabled: pinning }}
-            disabled={pinning}
-            hitSlop={4}
-            onPress={(event) => {
-              event.stopPropagation();
-              onSetDronePinned(drone.id, !pinned);
-            }}
-            style={({ pressed }) => [styles.pinButton, pinned && styles.pinButtonActive, pressed && styles.pressed]}
-          >
-            {pinning ? (
-              <ActivityIndicator color={colors.accent} size="small" />
-            ) : (
-              <Pin color={pinned ? colors.accent : colors.mutedDim} fill={pinned ? colors.accent : 'none'} size={14} strokeWidth={1.9} />
-            )}
-          </Pressable>
-        ) : null}
       </Pressable>
       {node.children.length > 0 ? (
         <View style={styles.droneChildren}>
@@ -727,10 +697,7 @@ function DrawerDroneNode({
               activeDroneId={activeDroneId}
               activeChatName={activeChatName}
               droneOperationById={droneOperationById}
-              pinnedDroneIdSet={pinnedDroneIdSet}
-              pinningDroneIds={pinningDroneIds}
               onSelect={onSelect}
-              onSetDronePinned={onSetDronePinned}
             />
           ))}
         </View>
@@ -746,11 +713,8 @@ function DrawerDroneFolder({
   activeDroneId,
   activeChatName,
   droneOperationById,
-  pinnedDroneIdSet,
-  pinningDroneIds,
   onToggleFolder,
   onSelect,
-  onSetDronePinned,
 }: {
   folder: MobileDroneGroupFolder;
   depth: number;
@@ -758,11 +722,8 @@ function DrawerDroneFolder({
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
-  pinnedDroneIdSet: ReadonlySet<string>;
-  pinningDroneIds: ReadonlySet<string>;
   onToggleFolder(folderId: string): void;
   onSelect(droneId: string, chatName: string): void;
-  onSetDronePinned?(droneId: string, pinned: boolean): void;
 }) {
   const collapsed = collapsedFolderIds.has(folder.id);
   const stateSummary = React.useMemo(
@@ -808,11 +769,8 @@ function DrawerDroneFolder({
               activeDroneId={activeDroneId}
               activeChatName={activeChatName}
               droneOperationById={droneOperationById}
-              pinnedDroneIdSet={pinnedDroneIdSet}
-              pinningDroneIds={pinningDroneIds}
               onToggleFolder={onToggleFolder}
               onSelect={onSelect}
-              onSetDronePinned={onSetDronePinned}
             />
           ))}
         </>
@@ -828,11 +786,8 @@ function DrawerDroneEntry({
   activeDroneId,
   activeChatName,
   droneOperationById,
-  pinnedDroneIdSet,
-  pinningDroneIds,
   onToggleFolder,
   onSelect,
-  onSetDronePinned,
 }: {
   entry: MobileDroneSidebarEntry;
   depth: number;
@@ -840,11 +795,8 @@ function DrawerDroneEntry({
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
-  pinnedDroneIdSet: ReadonlySet<string>;
-  pinningDroneIds: ReadonlySet<string>;
   onToggleFolder(folderId: string): void;
   onSelect(droneId: string, chatName: string): void;
-  onSetDronePinned?(droneId: string, pinned: boolean): void;
 }) {
   return entry.kind === 'drone' ? (
     <DrawerDroneNode
@@ -853,10 +805,7 @@ function DrawerDroneEntry({
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
       droneOperationById={droneOperationById}
-      pinnedDroneIdSet={pinnedDroneIdSet}
-      pinningDroneIds={pinningDroneIds}
       onSelect={onSelect}
-      onSetDronePinned={onSetDronePinned}
     />
   ) : (
     <DrawerDroneFolder
@@ -866,11 +815,8 @@ function DrawerDroneEntry({
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
       droneOperationById={droneOperationById}
-      pinnedDroneIdSet={pinnedDroneIdSet}
-      pinningDroneIds={pinningDroneIds}
       onToggleFolder={onToggleFolder}
       onSelect={onSelect}
-      onSetDronePinned={onSetDronePinned}
     />
   );
 }
@@ -880,19 +826,13 @@ function DrawerPinnedDrones({
   activeDroneId,
   activeChatName,
   droneOperationById,
-  pinnedDroneIdSet,
-  pinningDroneIds,
   onSelect,
-  onSetDronePinned,
 }: {
   drones: MobileDroneSummary[];
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
-  pinnedDroneIdSet: ReadonlySet<string>;
-  pinningDroneIds: ReadonlySet<string>;
   onSelect(droneId: string, chatName: string): void;
-  onSetDronePinned?(droneId: string, pinned: boolean): void;
 }) {
   if (drones.length === 0) return null;
   return (
@@ -910,10 +850,7 @@ function DrawerPinnedDrones({
           activeDroneId={activeDroneId}
           activeChatName={activeChatName}
           droneOperationById={droneOperationById}
-          pinnedDroneIdSet={pinnedDroneIdSet}
-          pinningDroneIds={pinningDroneIds}
           onSelect={onSelect}
-          onSetDronePinned={onSetDronePinned}
         />
       ))}
     </View>
@@ -1085,7 +1022,6 @@ function AppDrawerView({
   activeDroneId = '',
   activeChatName = 'default',
   droneOperationById = {},
-  pinningDroneIds = new Set(),
   dronesLoading = false,
   dronesReachable = true,
   dronesError = null,
@@ -1094,7 +1030,6 @@ function AppDrawerView({
   onCreateDrone,
   onRetryDrones,
   onSelectDroneChat,
-  onSetDronePinned,
   onSelectDevice,
 }: AppDrawerProps) {
   const insets = useSafeAreaInsets();
@@ -1120,10 +1055,6 @@ function AppDrawerView({
   const pinnedDrones = React.useMemo(
     () => resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds),
     [droneSidebarOrder.pinnedDroneIds, drones],
-  );
-  const pinnedDroneIdSet = React.useMemo(
-    () => new Set(droneSidebarOrder.pinnedDroneIds),
-    [droneSidebarOrder.pinnedDroneIds],
   );
   const repoStateSummaries = React.useMemo(
     () =>
@@ -1291,11 +1222,8 @@ function AppDrawerView({
                     activeDroneId={activeDroneId}
                     activeChatName={activeChatName}
                     droneOperationById={droneOperationById}
-                    pinnedDroneIdSet={pinnedDroneIdSet}
-                    pinningDroneIds={pinningDroneIds}
                     onToggleFolder={toggleFolder}
                     onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
-                    onSetDronePinned={onSetDronePinned}
                   />
                 )}
                 ListHeaderComponent={
@@ -1304,10 +1232,7 @@ function AppDrawerView({
                     activeDroneId={activeDroneId}
                     activeChatName={activeChatName}
                     droneOperationById={droneOperationById}
-                    pinnedDroneIdSet={pinnedDroneIdSet}
-                    pinningDroneIds={pinningDroneIds}
                     onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
-                    onSetDronePinned={onSetDronePinned}
                   />
                 }
                 ListFooterComponent={listStatus}
@@ -1362,10 +1287,7 @@ function AppDrawerView({
                     activeDroneId={activeDroneId}
                     activeChatName={activeChatName}
                     droneOperationById={droneOperationById}
-                    pinnedDroneIdSet={pinnedDroneIdSet}
-                    pinningDroneIds={pinningDroneIds}
                     onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
-                    onSetDronePinned={onSetDronePinned}
                   />
                 }
                 ListFooterComponent={listStatus}
@@ -1630,7 +1552,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingRight: 66,
+    paddingRight: 34,
   },
   switchItemTitle: {
     flex: 1,
@@ -1648,12 +1570,12 @@ const styles = StyleSheet.create({
   switchItemTimeSlot: {
     position: 'absolute',
     top: 7,
-    right: 38,
+    right: 6,
     alignItems: 'flex-end',
   },
   switchItemRuntimeSlot: {
     position: 'absolute',
-    right: 38,
+    right: 6,
     bottom: 7,
     alignItems: 'flex-end',
   },
@@ -1675,18 +1597,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     opacity: 0.55,
   },
-  pinButton: {
-    position: 'absolute',
-    right: 0,
-    top: 6,
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 6,
-    opacity: 0.72,
-  },
-  pinButtonActive: { opacity: 1, backgroundColor: colors.whiteWashSoft },
   sidebarSelectionEdge: {
     position: 'absolute',
     top: 4,
