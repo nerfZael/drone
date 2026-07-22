@@ -27,12 +27,16 @@ import type {
   RepoSourcePayload,
 } from '../types';
 import {
+  CHANGES_OPEN_AGENT_RUN_EVENT,
   CHANGES_OPEN_PULL_REQUEST_EVENT,
+  consumeRequestedAgentRunChanges,
+  type ChangesOpenAgentRunDetail,
   type ChangesOpenPullRequestDetail,
   consumeRequestedPullRequestForDrone,
   requestedPullRequestForDrone,
   selectedPullRequestForDrone,
 } from './navigation';
+import { AgentRunHistoricalChangesView } from './AgentRunHistoricalChangesView';
 import { DiffBlock } from './DiffBlock';
 import { CommitInspectionView } from './CommitInspectionView';
 import { createSingleFlightPoller, singleFlightByKey } from './singleFlight';
@@ -260,7 +264,58 @@ function ViewedProgressBadge({
   );
 }
 
-export function DroneChangesDock({
+export type DroneChangesDockProps = {
+  droneId: string;
+  repoAttached: boolean;
+  repoPath: string;
+  repoUnavailableReason?: string | null;
+  fixedContextMode?: ChangesContextMode | null;
+  initialViewMode?: ChangesViewMode | null;
+  initialDiffViewType?: DiffViewType | null;
+  persistViewPreferences?: boolean;
+  acceptHistoricalRunChanges?: boolean;
+  disabled: boolean;
+  hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null;
+  hubMessage?: string | null;
+  onRevealFileInFiles: (repoRelativePath: string) => void;
+  onOpenFileInEditor: (repoRelativePath: string) => void;
+};
+
+export function DroneChangesDock(props: DroneChangesDockProps) {
+  const { acceptHistoricalRunChanges = false, droneId } = props;
+  const [historicalRun, setHistoricalRun] = React.useState<ChangesOpenAgentRunDetail | null>(() =>
+    acceptHistoricalRunChanges ? consumeRequestedAgentRunChanges(droneId) : null,
+  );
+
+  React.useEffect(() => {
+    if (!acceptHistoricalRunChanges) return;
+    const openHistoricalRun = () => {
+      const requested = consumeRequestedAgentRunChanges(droneId);
+      if (requested) setHistoricalRun(requested);
+    };
+    window.addEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openHistoricalRun);
+    return () => window.removeEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openHistoricalRun);
+  }, [acceptHistoricalRunChanges, droneId]);
+
+  if (historicalRun) {
+    return (
+      <AgentRunHistoricalChangesView
+        key={[
+          historicalRun.fileChanges.capturedAt,
+          historicalRun.initialSelection.workspaceTargetId,
+          historicalRun.initialSelection.path ?? '',
+        ].join(':')}
+        fileChanges={historicalRun.fileChanges}
+        initialSelection={historicalRun.initialSelection}
+        onClose={() => setHistoricalRun(null)}
+      />
+    );
+  }
+
+  return <LiveDroneChangesDock {...props} />;
+}
+
+function LiveDroneChangesDock({
   droneId,
   repoAttached,
   repoPath,
@@ -274,21 +329,7 @@ export function DroneChangesDock({
   hubMessage,
   onRevealFileInFiles,
   onOpenFileInEditor,
-}: {
-  droneId: string;
-  repoAttached: boolean;
-  repoPath: string;
-  repoUnavailableReason?: string | null;
-  fixedContextMode?: ChangesContextMode | null;
-  initialViewMode?: ChangesViewMode | null;
-  initialDiffViewType?: DiffViewType | null;
-  persistViewPreferences?: boolean;
-  disabled: boolean;
-  hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null;
-  hubMessage?: string | null;
-  onRevealFileInFiles: (repoRelativePath: string) => void;
-  onOpenFileInEditor: (repoRelativePath: string) => void;
-}) {
+}: DroneChangesDockProps) {
   const confirm = useAppConfirmDialog();
   const [refreshNonce, setRefreshNonce] = React.useState(0);
   const [changes, setChanges] = React.useState<Extract<RepoChangesPayload, { ok: true }> | null>(null);

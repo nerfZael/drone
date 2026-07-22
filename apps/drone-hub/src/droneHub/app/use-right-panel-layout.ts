@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
 import { profileStorageKey } from '../../profile-storage';
+import { CHANGES_OPEN_AGENT_RUN_EVENT } from '../changes/navigation';
 import {
   RIGHT_PANEL_DEFAULT_WIDTH_PX,
   RIGHT_PANEL_TABS,
@@ -266,6 +267,18 @@ export function useRightPanelLayout() {
       window.removeEventListener('resize', updateWorkspaceWidth);
     };
   }, []);
+
+  React.useEffect(() => {
+    const openAgentRunChanges = () => {
+      if (rightPanelSplit && rightPanelBottomTab === 'changes') {
+        setRightPanelOpen(true);
+        return;
+      }
+      requestRightPanelTab('changes');
+    };
+    window.addEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openAgentRunChanges);
+    return () => window.removeEventListener(CHANGES_OPEN_AGENT_RUN_EVENT, openAgentRunChanges);
+  }, [requestRightPanelTab, rightPanelBottomTab, rightPanelSplit, setRightPanelOpen]);
 
   React.useEffect(() => {
     setRightPanelWidthStore((prev) => clampCustomRightPanelWidthPx(prev, workspaceWidth));

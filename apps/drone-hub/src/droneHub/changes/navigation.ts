@@ -1,13 +1,53 @@
 import { profileStorageKey } from '../../profile-storage';
+import type { AgentRunFileChanges } from '@blip/protocol';
 
 export const CHANGES_OPEN_PULL_REQUEST_EVENT = 'droneHub:changes:openPullRequest';
-const CHANGES_PULL_REQUEST_SELECTION_STORAGE_KEY = profileStorageKey('droneHub.changesPullRequestSelectionByDrone');
-const CHANGES_PENDING_PULL_REQUEST_OPEN_STORAGE_KEY = profileStorageKey('droneHub.changesPendingPullRequestOpenByDrone');
+export const CHANGES_OPEN_AGENT_RUN_EVENT = 'droneHub:changes:openAgentRun';
+const CHANGES_PULL_REQUEST_SELECTION_STORAGE_KEY = profileStorageKey(
+  'droneHub.changesPullRequestSelectionByDrone',
+);
+const CHANGES_PENDING_PULL_REQUEST_OPEN_STORAGE_KEY = profileStorageKey(
+  'droneHub.changesPendingPullRequestOpenByDrone',
+);
 
 export type ChangesOpenPullRequestDetail = {
   droneId: string;
   pullNumber: number;
 };
+
+export type AgentRunChangesSelection = {
+  workspaceTargetId: string;
+  path?: string;
+};
+
+export type ChangesOpenAgentRunDetail = {
+  fileChanges: AgentRunFileChanges;
+  initialSelection: AgentRunChangesSelection;
+  droneId?: string;
+};
+
+let pendingAgentRunChanges: ChangesOpenAgentRunDetail | null = null;
+
+export function consumeRequestedAgentRunChanges(
+  droneIdRaw: string,
+): ChangesOpenAgentRunDetail | null {
+  if (!pendingAgentRunChanges) return null;
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (pendingAgentRunChanges.droneId && pendingAgentRunChanges.droneId !== droneId) return null;
+  const requested = pendingAgentRunChanges;
+  pendingAgentRunChanges = null;
+  return requested;
+}
+
+export function requestAgentRunChanges(detail: ChangesOpenAgentRunDetail): void {
+  pendingAgentRunChanges = detail;
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent(CHANGES_OPEN_AGENT_RUN_EVENT));
+  } catch {
+    // ignore
+  }
+}
 
 function readPullRequestSelectionByDrone(): Record<string, number> {
   try {
