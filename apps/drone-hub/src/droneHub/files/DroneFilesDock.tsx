@@ -1,4 +1,5 @@
 import React from 'react';
+import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 import { invalidateFsListCachesForDrone } from '../app/use-files-and-ports-pane-state';
 import { requestJson, requestJsonWithTimeout } from '../http';
 import { IconChevron, IconFolder, iconForFilePath } from '../icons';
@@ -55,6 +56,22 @@ function clearChildDirectoryCacheForDrone(droneIdRaw: string): void {
   for (const key of Array.from(childDirectoryCache.keys())) {
     if (key.startsWith(`${droneId}\u0000`)) childDirectoryCache.delete(key);
   }
+}
+
+const expandedDirectoriesByWorkspace = new Map<string, Record<string, boolean>>();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener(DRONE_WORKSPACE_STATE_DISPOSE_EVENT, (event) => {
+    const droneId = disposedDroneIdFromEvent(event);
+    if (!droneId) return;
+    for (const key of expandedDirectoriesByWorkspace.keys()) {
+      if (key.startsWith(`${droneId}\u0000`)) expandedDirectoriesByWorkspace.delete(key);
+    }
+  });
+}
+
+function filesWorkspaceStateKey(droneIdRaw: string, pathRaw: string): string {
+  return `${String(droneIdRaw ?? '').trim()}\u0000${normalizeContainerPathInput(pathRaw)}`;
 }
 
 function normalizeContainerPathInput(raw: string): string {
@@ -176,10 +193,23 @@ export function DroneFilesDock({
   readOnly?: boolean;
 }) {
   const normalizedPath = normalizeContainerPathInput(path);
+  const workspaceStateKey = filesWorkspaceStateKey(droneId, normalizedPath);
   const activeOpenedFilePath = String(openedFile.path ?? '').trim();
   const explorerRef = React.useRef<HTMLDivElement | null>(null);
   const selectionAnchorRef = React.useRef<string | null>(null);
-  const [expandedDirs, setExpandedDirs] = React.useState<Record<string, boolean>>({});
+  const [expandedDirs, setExpandedDirsState] = React.useState<Record<string, boolean>>(
+    () => expandedDirectoriesByWorkspace.get(workspaceStateKey) ?? {},
+  );
+  const setExpandedDirs = React.useCallback<React.Dispatch<React.SetStateAction<Record<string, boolean>>>>(
+    (next) => {
+      setExpandedDirsState((current) => {
+        const resolved = typeof next === 'function' ? next(current) : next;
+        expandedDirectoriesByWorkspace.set(workspaceStateKey, resolved);
+        return resolved;
+      });
+    },
+    [workspaceStateKey],
+  );
   const [childEntriesByPath, setChildEntriesByPath] = React.useState<Record<string, DroneFsEntry[]>>({});
   const [childLoadingByPath, setChildLoadingByPath] = React.useState<Record<string, boolean>>({});
   const [childErrorByPath, setChildErrorByPath] = React.useState<Record<string, string | null>>({});
@@ -200,11 +230,11 @@ export function DroneFilesDock({
   const [contextMenu, setContextMenu] = React.useState<DroneFilesContextMenuState | null>(null);
 
   React.useEffect(() => {
-    setExpandedDirs({});
+    setExpandedDirsState(expandedDirectoriesByWorkspace.get(workspaceStateKey) ?? {});
     setChildEntriesByPath({});
     setChildLoadingByPath({});
     setChildErrorByPath({});
-  }, [droneId, normalizedPath]);
+  }, [workspaceStateKey]);
 
   React.useEffect(() => {
     uploadRunRef.current += 1;

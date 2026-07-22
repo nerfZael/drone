@@ -381,7 +381,7 @@ export function RightPanelTabContent({
       );
 
     case 'whiteboard':
-      return <WhiteboardDock />;
+      return <WhiteboardDock droneId={drone.id} />;
 
     case 'terminal':
       return (

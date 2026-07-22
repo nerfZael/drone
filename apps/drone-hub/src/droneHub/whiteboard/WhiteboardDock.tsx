@@ -8,7 +8,7 @@ function whiteboardLabel(item: WhiteboardSummary): string {
   return item.id === 'main' ? `${title} - main` : title;
 }
 
-export function WhiteboardDock() {
+export function WhiteboardDock({ droneId }: { droneId: string }) {
   const {
     whiteboards,
     activeId,
@@ -23,7 +23,7 @@ export function WhiteboardDock() {
     loadDocument,
     handleChange,
     handleCreate,
-  } = useWhiteboardState();
+  } = useWhiteboardState(droneId);
 
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] flex flex-col overflow-hidden">

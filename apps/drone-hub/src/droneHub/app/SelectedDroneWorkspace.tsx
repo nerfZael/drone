@@ -1453,6 +1453,7 @@ export function SelectedDroneWorkspace({
       </DroneWorkspaceHeaderFrame>
 
       <DockableDroneWorkspace
+        key={currentDrone.id}
         currentDrone={currentDrone}
         paneHeaderMode={workspacePaneHeaderMode}
         toolPaneOpen

@@ -1,6 +1,24 @@
 import React from 'react';
+import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 
 const DEFAULT_BOTTOM_THRESHOLD_PX = 48;
+type TranscriptScrollSnapshot = {
+  scrollTop: number;
+  scrollHeight: number;
+  pinned: boolean;
+};
+
+const transcriptScrollByContext = new Map<string, TranscriptScrollSnapshot>();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener(DRONE_WORKSPACE_STATE_DISPOSE_EVENT, (event) => {
+    const droneId = disposedDroneIdFromEvent(event);
+    if (!droneId) return;
+    for (const key of transcriptScrollByContext.keys()) {
+      if (key.startsWith(`${droneId}:`)) transcriptScrollByContext.delete(key);
+    }
+  });
+}
 
 export function isTranscriptPinned({
   scrollHeight,
@@ -147,9 +165,43 @@ export function usePinnedTranscriptScroll({
 
   React.useLayoutEffect(() => {
     if (!enabled || !scrollNode) return;
-    pinnedRef.current = true;
-    scrollToBottom({ force: true });
-  }, [contentNode, contextKey, enabled, scrollNode, scrollToBottom]);
+    let restoreFrame: number | null = null;
+    const saved = transcriptScrollByContext.get(contextKey);
+    if (!saved) {
+      pinnedRef.current = true;
+      scrollToBottom({ force: true });
+    } else {
+      pinnedRef.current = saved.pinned;
+      restoreFrame = window.requestAnimationFrame(() => {
+        restoreFrame = null;
+        if (saved.pinned) {
+          scrollNode.scrollTop = scrollNode.scrollHeight;
+        } else {
+          scrollNode.scrollTop = computePrependedTranscriptScrollTop({
+            previousScrollTop: saved.scrollTop,
+            previousScrollHeight: saved.scrollHeight,
+            nextScrollHeight: scrollNode.scrollHeight,
+            clientHeight: scrollNode.clientHeight,
+          });
+        }
+        updatePinned(scrollNode);
+      });
+    }
+    return () => {
+      if (restoreFrame != null) window.cancelAnimationFrame(restoreFrame);
+      if (scrollNode.scrollHeight <= 0) return;
+      transcriptScrollByContext.set(contextKey, {
+        scrollTop: scrollNode.scrollTop,
+        scrollHeight: scrollNode.scrollHeight,
+        pinned: isTranscriptPinned({
+          scrollHeight: scrollNode.scrollHeight,
+          scrollTop: scrollNode.scrollTop,
+          clientHeight: scrollNode.clientHeight,
+          threshold: bottomThreshold,
+        }),
+      });
+    };
+  }, [bottomThreshold, contentNode, contextKey, enabled, scrollNode, scrollToBottom, updatePinned]);
 
   React.useEffect(() => {
     if (!shouldAutoFollowTranscript({

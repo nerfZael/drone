@@ -70,15 +70,6 @@ diff --git a/src/views/Drawer.native.tsx b/src/views/Drawer.native.tsx
        display: isHidden.value ? 'none' : 'flex',
        transform:
          drawerType === 'permanent'
-             ? -1
-             : 0
--          : translateX.value === 0
--            ? 0
--            : 1,
-+          : 1,
-       display: isHidden.value ? 'none' : 'flex',
-       transform:
-         drawerType === 'permanent'
 diff --git a/lib/module/views/Drawer.native.js b/lib/module/views/Drawer.native.js
 --- a/lib/module/views/Drawer.native.js
 +++ b/lib/module/views/Drawer.native.js
