@@ -66,7 +66,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(sidebarItemStateToneClass('starting', false)).toContain('--yellow');
   });
 
-  test('puts the state indicator before the name without a visible state label', () => {
+  test('puts the state indicator before a visible title-and-state cluster', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
         drone: drone({ runtime: 'container', busyChats: ['default'] }),
@@ -77,7 +77,8 @@ describe('desktop sidebar drone presentation', () => {
 
     expect(html).toContain('text-[var(--yellow)]');
     expect(html.indexOf('animate-[spin_1.6s_linear_infinite]')).toBeLessThan(html.indexOf('>worker</span>'));
-    expect(html).not.toContain('>Working</span>');
+    expect(html).toContain('data-sidebar-drone-metadata="true"');
+    expect(html).toContain('>Working</span>');
     expect(html).not.toContain('data-sidebar-runtime');
     expect(html).not.toContain('aria-label="container runtime"');
     expect(html).not.toContain('>container</span>');
@@ -106,6 +107,9 @@ describe('desktop sidebar drone presentation', () => {
     const readyHtml = renderToStaticMarkup(
       createElement(SidebarItemStateIndicator, { state: 'idle' }),
     );
+    const anchoredReadyHtml = renderToStaticMarkup(
+      createElement(SidebarItemStateIndicator, { state: 'idle', showReadyAnchor: true }),
+    );
     const unreadHtml = renderToStaticMarkup(
       createElement(SidebarItemStateIndicator, { state: 'idle', unread: true }),
     );
@@ -113,6 +117,10 @@ describe('desktop sidebar drone presentation', () => {
     expect(readyHtml).toContain('h-3 w-3 flex-shrink-0 self-center');
     expect(readyHtml).not.toContain('rounded-full');
     expect(readyHtml).not.toContain('bg-[var(--muted)]');
+    expect(anchoredReadyHtml).toContain('data-sidebar-ready-anchor="true"');
+    expect(anchoredReadyHtml).toContain('h-1.5 w-1.5 rounded-full border');
+    expect(anchoredReadyHtml).toContain('border-[var(--muted-dim)] opacity-35');
+    expect(anchoredReadyHtml).not.toContain('bg-[var(--muted)]');
     expect(unreadHtml).toContain('rounded-full');
     expect(unreadHtml).toContain('bg-[var(--green)]');
   });
@@ -155,7 +163,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(source).toContain("actionMenuOpen ? 'z-50' : ''");
   });
 
-  test('uses two rows while hover actions occupy the otherwise empty bottom-right slot', () => {
+  test('uses the existing row height for a title-and-metadata cluster', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
         drone: drone({ lastMessageAt: '2026-07-20T11:00:00.000Z' }),
@@ -167,14 +175,15 @@ describe('desktop sidebar drone presentation', () => {
     );
 
     expect(html).toContain('min-h-[48px] py-1.5 pl-1.5 pr-1.5');
-    expect(html).toContain('grid-rows-[1fr_1fr]');
-    expect(html).toContain('col-start-1 row-span-2 flex min-w-0 items-center gap-1.5 self-stretch');
-    expect(html).toContain('group-hover/drone:pr-8 group-focus-within/drone:pr-8');
-    expect(html).toContain('col-start-2 row-start-1 ml-1.5');
-    expect(html).toContain('col-start-2 row-start-2 ml-1.5');
+    expect(html).not.toContain('grid-rows-[1fr_1fr]');
+    expect(html).toContain('flex min-w-0 flex-1 flex-col justify-center gap-[3px]');
+    expect(html).toContain('group-hover/drone:pr-12 group-focus-within/drone:pr-12');
+    expect(html).toContain('data-sidebar-drone-metadata="true"');
+    expect(html).toContain('>Ready</span>');
+    expect(html).toContain('aria-hidden="true">·</span>');
     expect(html).not.toContain('min-w-[2.75rem]');
     expect(html).not.toContain('data-sidebar-runtime');
-    expect(html).toContain('absolute right-0 top-1/2');
+    expect(html).toContain('absolute right-1 top-1/2');
     expect(html).toContain('Last message');
   });
 

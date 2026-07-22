@@ -147,9 +147,11 @@ export function sidebarItemStateToneClass(
 export function SidebarItemStateIndicator({
   state,
   unread = false,
+  showReadyAnchor = false,
 }: {
   state: SidebarDroneDisplayState;
   unread?: boolean;
+  showReadyAnchor?: boolean;
 }) {
   const ready = state === 'idle' && !unread;
   const working = state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting';
@@ -164,7 +166,14 @@ export function SidebarItemStateIndicator({
           : 'bg-[var(--muted)]';
   return (
     <span className="inline-flex h-3 w-3 flex-shrink-0 self-center items-center justify-center leading-none" aria-hidden="true">
-      {ready ? null : working ? (
+      {ready ? (
+        showReadyAnchor ? (
+          <span
+            data-sidebar-ready-anchor="true"
+            className="h-1.5 w-1.5 rounded-full border border-[var(--muted-dim)] opacity-35"
+          />
+        ) : null
+      ) : working ? (
         <SidebarWorkingStatusIndicator />
       ) : approvalRequired ? (
         <SidebarApprovalStatusIndicator />
@@ -419,7 +428,7 @@ export const DroneCard = React.memo(function DroneCard({
           onClick();
         }
       }}
-      className={`dh-sidebar-row-interactive ${highlighted ? 'dh-sidebar-row-highlighted' : ''} ${actionMenuOpen ? 'z-50' : ''} w-full text-left ${rowDensityClass} grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[1fr_1fr] items-center rounded-[var(--sidebar-row-radius)] border transition-colors duration-150 group/drone relative ${
+      className={`dh-sidebar-row-interactive ${highlighted ? 'dh-sidebar-row-highlighted' : ''} ${actionMenuOpen ? 'z-50' : ''} w-full text-left ${rowDensityClass} flex items-center rounded-[var(--sidebar-row-radius)] border transition-colors duration-150 group/drone relative ${
         highlighted
           ? 'bg-[var(--yellow-subtle)] border-[var(--yellow-border)]'
           : selected
@@ -441,11 +450,11 @@ export const DroneCard = React.memo(function DroneCard({
       ) : null}
 
       <div
-        className={`col-start-1 row-span-2 flex min-w-0 items-center gap-1.5 self-stretch ${
+        className={`flex min-w-0 flex-1 items-center gap-1.5 self-stretch ${
           hasActions
-            ? 'transition-[padding] duration-150 group-hover/drone:pr-8 group-focus-within/drone:pr-8'
+            ? 'transition-[padding] duration-150 group-hover/drone:pr-12 group-focus-within/drone:pr-12'
             : ''
-        } ${pinActionsVisible || actionMenuOpen ? 'pr-8' : ''}`}
+        } ${pinActionsVisible || actionMenuOpen ? 'pr-12' : ''}`}
       >
         {leadingIcon ? <span className="inline-flex flex-shrink-0 items-center">{leadingIcon}</span> : null}
         {isDraftDrone ? (
@@ -467,7 +476,7 @@ export const DroneCard = React.memo(function DroneCard({
             title={`${stateLabel}: view full error details`}
             aria-label={`${stateLabel}: view full error details`}
           >
-            <SidebarItemStateIndicator state={displayState} unread={unread} />
+            <SidebarItemStateIndicator state={displayState} unread={unread} showReadyAnchor />
           </button>
         ) : (
           <span
@@ -476,7 +485,7 @@ export const DroneCard = React.memo(function DroneCard({
             title={errText || stateLabel}
             aria-label={stateLabel}
           >
-            <SidebarItemStateIndicator state={displayState} unread={unread} />
+            <SidebarItemStateIndicator state={displayState} unread={unread} showReadyAnchor />
           </span>
         )}
         {showActiveIndicator && !renderActiveEdge ? (
@@ -487,53 +496,66 @@ export const DroneCard = React.memo(function DroneCard({
             aria-label="Open chat"
           />
         ) : null}
-        <span
-          className={`min-w-0 flex-1 truncate ${titleDensityClass} ${sidebarItemTypeClass(selected)}`}
-          title={`${shownName}${shownName !== drone.name ? ` (${drone.name})` : ''} · created ${timeAgo(drone.createdAt)}`}
-        >
-          {shownName}
-        </span>
-        {statusHint ? (
-          <span
-            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
-            title={statusHint}
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-[3px]">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span
+              className={`min-w-0 flex-1 truncate leading-tight ${titleDensityClass} ${sidebarItemTypeClass(selected)}`}
+              title={`${shownName}${shownName !== drone.name ? ` (${drone.name})` : ''} · created ${timeAgo(drone.createdAt)}`}
+            >
+              {shownName}
+            </span>
+            {statusHint ? (
+              <span
+                className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
+                title={statusHint}
+              >
+                {statusHint}
+              </span>
+            ) : null}
+          </div>
+          <div
+            data-sidebar-drone-metadata="true"
+            className="flex min-w-0 items-center gap-1.5 text-[.5625rem] font-normal leading-none text-[var(--sidebar-meta-fg)]"
           >
-            {statusHint}
-          </span>
-        ) : null}
-      </div>
-
-      <div className="col-start-2 row-start-1 ml-1.5 flex min-w-0 items-center justify-end self-center font-mono text-[.5625rem] font-normal leading-none text-[var(--sidebar-meta-fg)]">
-        {isDraftDrone ? (
-          <span
-            className="inline-flex flex-shrink-0 items-center rounded-[3px] bg-[var(--accent-subtle)] px-1.5 py-[3px] font-[var(--weight-semibold)] normal-case tracking-[0.02em] text-[var(--accent)]"
-            style={{ fontFamily: 'var(--display)' }}
-            title="Draft drone · queued messages run after publishing"
-            aria-label="Draft drone"
-          >
-            Draft
-          </span>
-        ) : drone.lastMessageAt ? (
-          <RelativeTimeText
-            at={drone.lastMessageAt}
-            compact
-            className="flex-shrink-0"
-            title={`Last message ${timeAgo(drone.lastMessageAt)}`}
-          />
-        ) : null}
+            {isDraftDrone ? (
+              <span
+                className="inline-flex flex-shrink-0 items-center rounded-[3px] bg-[var(--accent-subtle)] px-1.5 py-[3px] font-[var(--weight-semibold)] normal-case tracking-[0.02em] text-[var(--accent)]"
+                style={{ fontFamily: 'var(--display)' }}
+                title="Draft drone · queued messages run after publishing"
+                aria-label="Draft drone"
+              >
+                Draft
+              </span>
+            ) : (
+              <>
+                <span className="min-w-0 truncate">{stateLabel}</span>
+                {drone.lastMessageAt ? (
+                  <>
+                    <span className="opacity-55" aria-hidden="true">·</span>
+                    <RelativeTimeText
+                      at={drone.lastMessageAt}
+                      compact
+                      className="flex-shrink-0 font-mono"
+                      title={`Last message ${timeAgo(drone.lastMessageAt)}`}
+                    />
+                  </>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
       {hasActions ? (
-        <div className="relative col-start-2 row-start-2 ml-1.5 flex items-center justify-end self-center">
-          <div
-            ref={actionMenuRef}
-            data-onboarding-id="sidebar.droneCard.actions"
-            className={`absolute right-0 top-1/2 flex -translate-y-1/2 items-center gap-1 transition-opacity duration-150 ${
-              pinActionsVisible || actionMenuOpen
-                ? 'opacity-100 pointer-events-auto'
-                : 'opacity-0 pointer-events-none group-hover/drone:opacity-100 group-hover/drone:pointer-events-auto group-focus-within/drone:opacity-100 group-focus-within/drone:pointer-events-auto'
-            }`}
-          >
+        <div
+          ref={actionMenuRef}
+          data-onboarding-id="sidebar.droneCard.actions"
+          className={`absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 transition-opacity duration-150 ${
+            pinActionsVisible || actionMenuOpen
+              ? 'opacity-100 pointer-events-auto'
+              : 'opacity-0 pointer-events-none group-hover/drone:opacity-100 group-hover/drone:pointer-events-auto group-focus-within/drone:opacity-100 group-focus-within/drone:pointer-events-auto'
+          }`}
+        >
           {canDelete ? (
             <button
               type="button"
@@ -694,7 +716,6 @@ export const DroneCard = React.memo(function DroneCard({
               </div>
             </div>
           ) : null}
-          </div>
         </div>
       ) : null}
     </div>

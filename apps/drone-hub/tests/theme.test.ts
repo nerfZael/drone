@@ -144,7 +144,7 @@ describe('desktop themes', () => {
       '--sidebar-drone-active-fg': '#cdd6f4',
       '--sidebar-drone-size': '.75rem',
       '--sidebar-drone-weight': '500',
-      '--sidebar-row-selected-bg': 'rgba(203, 166, 247, .055)',
+      '--sidebar-row-selected-bg': 'rgba(203, 166, 247, .075)',
       '--sidebar-meta-fg': '#7f849c',
       '--selected': 'rgba(147, 153, 178, .24)',
       '--selection-highlight': 'rgba(147, 153, 178, .25)',

@@ -57,7 +57,7 @@
   --sidebar-drone-fg: var(--sidebar-fg);
   --sidebar-drone-active-fg: var(--sidebar-fg-active);
   --sidebar-drone-weight: 400;
-  --sidebar-row-selected-bg: rgba(177, 156, 255, .055);
+  --sidebar-row-selected-bg: rgba(177, 156, 255, .075);
   --sidebar-row-selected-border: transparent;
   --sidebar-row-selected-edge: rgba(177, 156, 255, .82);
   --sidebar-row-radius: var(--radius-medium);
@@ -260,7 +260,7 @@
   --sidebar-drone-fg: #a6adc8;
   --sidebar-drone-active-fg: #cdd6f4;
   --sidebar-drone-weight: 500;
-  --sidebar-row-selected-bg: rgba(203, 166, 247, .055);
+  --sidebar-row-selected-bg: rgba(203, 166, 247, .075);
   --sidebar-row-selected-border: transparent;
   --sidebar-row-selected-edge: rgba(203, 166, 247, .78);
   --sidebar-row-radius: .25rem;
@@ -721,7 +721,7 @@ code, pre {
   bottom: -1px;
   left: -100vw;
   right: -100vw;
-  background: var(--sidebar-row-selected-bg);
+  background: var(--hover);
   pointer-events: none;
 }
 

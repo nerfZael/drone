@@ -489,9 +489,10 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
             onSelectDroneChat(drone.id, chatName);
           }}
           className={`relative flex flex-1 items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })} ${isDragging ? 'opacity-35' : ''} ${!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${actionsEnabled && chatName !== 'default' ? 'group-hover/chat-row:pr-14 group-focus-within/chat-row:pr-14' : ''}`}
-          title={`${uiDroneName(drone.name)} / ${chatName}`}
+          aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
+          aria-current={active ? 'page' : undefined}
         >
-          {selected || active ? <span className={sidebarSelectionEdgeClass} /> : null}
+          {selected ? <span className={sidebarSelectionEdgeClass} /> : null}
           <span
             className={sidebarChatStateClass}
             title={chatStateLabel}
@@ -582,9 +583,10 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
             onSelectDroneChat(drone.id, chatName);
           }}
           className={`relative flex flex-1 items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })}`}
-          title={`${uiDroneName(drone.name)} / ${chatName}`}
+          aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
+          aria-current={active ? 'page' : undefined}
         >
-          {selected || active ? <span className={sidebarSelectionEdgeClass} /> : null}
+          {selected ? <span className={sidebarSelectionEdgeClass} /> : null}
           <span
             className={sidebarChatStateClass}
             title={chatStateLabel}
@@ -737,7 +739,10 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const showAfterPreview =
     (dragOverTreeTarget?.nodeId === node.id && dragOverTreeTarget.placement === 'after') || showChatTailPreview;
   return (
-    <div className={`flex flex-col gap-0.5 transition-[margin] duration-150 ${nested ? densityClasses.nestedDroneIndent : ''} ${reorderPreviewClass}`}>
+    <div
+      data-sidebar-drone-unit="true"
+      className={`mb-1 flex flex-col gap-0.5 transition-[margin] duration-150 ${nested ? densityClasses.nestedDroneIndent : ''} ${reorderPreviewClass}`}
+    >
       <div ref={droneDropDisabled ? undefined : setDropNodeRef} data-sidebar-node-anchor-id={node.id} className="relative">
         {dragOverTreeTarget?.nodeId === node.id &&
         (dragOverTreeTarget.placement === 'before' || dragOverTreeTarget.placement === 'after') ? (
@@ -835,7 +840,11 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
         </div>
       </div>
       {chats.length > 1 || showCreateChatEditor ? (
-        <div ref={chatTailDropDisabled ? undefined : setChatTailDropNodeRef} className={`${densityClasses.chatBlockIndent} flex flex-col gap-0.5`}>
+        <div
+          ref={chatTailDropDisabled ? undefined : setChatTailDropNodeRef}
+          data-sidebar-chat-rail="true"
+          className={`${densityClasses.chatBlockIndent} flex flex-col gap-0.5 border-l border-[var(--border-subtle)]`}
+        >
           {showCreateChatEditor ? (
             <div className="flex flex-col gap-0.5">
               <div className={`flex items-center gap-1.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] ${densityClasses.chatRow}`}>

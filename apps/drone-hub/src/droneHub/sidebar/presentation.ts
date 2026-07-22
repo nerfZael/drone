@@ -106,8 +106,11 @@ export function sidebarChatRowTone(args: {
   if (args.disabled) {
     return 'cursor-not-allowed border-transparent text-[var(--muted-dim)] opacity-60';
   }
-  if (args.selected || args.active) {
-    return `dh-sidebar-row-interactive dh-sidebar-row-selected border-transparent text-[var(--sidebar-fg-active)] ${focusClass}`;
+  if (args.selected) {
+    return `dh-sidebar-row-interactive dh-sidebar-row-selected border-transparent text-[var(--sidebar-drone-fg)] ${focusClass}`;
+  }
+  if (args.active) {
+    return `dh-sidebar-row-interactive border-transparent text-[var(--sidebar-drone-fg)] ${focusClass}`;
   }
   return `dh-sidebar-row-interactive border-transparent text-[var(--sidebar-subitem-fg)] hover:text-[var(--sidebar-fg)] ${focusClass}`;
 }

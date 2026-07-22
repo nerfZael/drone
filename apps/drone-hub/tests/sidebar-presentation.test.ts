@@ -64,13 +64,15 @@ describe('sidebar presentation', () => {
   test('keeps chat row state hierarchy centralized and compact', () => {
     const selected = sidebarChatRowTone({ selected: true });
     const active = sidebarChatRowTone({ active: true });
-    expect(selected).toContain('sidebar-fg-active');
+    expect(selected).toContain('sidebar-drone-fg');
+    expect(selected).not.toContain('sidebar-fg-active');
     expect(selected).toContain('dh-sidebar-row-selected');
     expect(selected).toContain('dh-sidebar-row-interactive');
     expect(selected).toContain('border-transparent');
     expect(selected).not.toContain('border-[var(--border)]');
-    expect(active).toContain('sidebar-fg-active');
-    expect(active).toContain('dh-sidebar-row-selected');
+    expect(active).toContain('sidebar-drone-fg');
+    expect(active).not.toContain('sidebar-fg-active');
+    expect(active).not.toContain('dh-sidebar-row-selected');
     expect(active).toContain('border-transparent');
     expect(active).toContain('focus-visible:ring-[var(--focus-ring)]');
     expect(sidebarChatRowTone({})).toContain('sidebar-subitem-fg');
@@ -96,6 +98,14 @@ describe('sidebar presentation', () => {
       'utf8',
     );
     const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+    const hoverRule = stylesSource.slice(
+      stylesSource.indexOf(".dh-sidebar-row-interactive:not([aria-disabled='true'])"),
+      stylesSource.indexOf('.dh-sidebar-row-selected::before'),
+    );
+    const selectedRule = stylesSource.slice(
+      stylesSource.indexOf('.dh-sidebar-row-selected::before'),
+      stylesSource.indexOf('.dh-sidebar-selection-edge'),
+    );
 
     expect(sidebarSource).toContain('overflow-x-hidden overflow-y-auto');
     expect(sidebarSource).toContain('px-2 pt-0 pb-1.5');
@@ -106,12 +116,57 @@ describe('sidebar presentation', () => {
     expect(sidebarSource).toContain('<div className="flex flex-col gap-0">\n                  <>');
     expect(stylesSource).toContain('.dh-sidebar-row-selected::before');
     expect(stylesSource).toContain(".dh-sidebar-row-interactive:not([aria-disabled='true']):not(.dh-sidebar-row-selected):not(.dh-sidebar-row-highlighted):hover::after");
-    expect(stylesSource).toContain('background: var(--sidebar-row-selected-bg);');
+    expect(hoverRule).toContain('background: var(--hover);');
+    expect(hoverRule).not.toContain('background: var(--sidebar-row-selected-bg);');
+    expect(selectedRule).toContain('background: var(--sidebar-row-selected-bg);');
     expect(stylesSource).toContain('top: -1px;');
     expect(stylesSource).toContain('bottom: -1px;');
     expect(stylesSource).toContain('left: -100vw;');
     expect(stylesSource).toContain('right: -100vw;');
     expect(stylesSource).toContain('left: var(--sidebar-selection-edge-offset, 0px);');
+  });
+
+  test('separates complete drone units with whitespace instead of divider lines', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(groupedTreeSource).toContain('data-sidebar-drone-unit="true"');
+    expect(groupedTreeSource).toContain(
+      'className={`mb-1 flex flex-col gap-0.5 transition-[margin] duration-150',
+    );
+  });
+
+  test('connects multi-chat subtrees to their parent with a subtle rail', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(groupedTreeSource).toContain('data-sidebar-chat-rail="true"');
+    expect(groupedTreeSource).toContain(
+      'className={`${densityClasses.chatBlockIndent} flex flex-col gap-0.5 border-l border-[var(--border-subtle)]`}',
+    );
+  });
+
+  test('distinguishes the selected chat from an open chat without an extra marker', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(groupedTreeSource).toContain("aria-current={active ? 'page' : undefined}");
+    expect(groupedTreeSource).not.toContain('sidebarOpenChatIndicatorClass');
+    expect(groupedTreeSource).toContain(
+      '{selected ? <span className={sidebarSelectionEdgeClass} /> : null}',
+    );
+    expect(groupedTreeSource).toContain(
+      'aria-label={`${uiDroneName(drone.name)} / ${chatName}`}',
+    );
+    expect(groupedTreeSource).not.toContain(
+      'title={`${uiDroneName(drone.name)} / ${chatName}`}',
+    );
   });
 
   test('uses the same full-bleed navigation states for repository rows', () => {

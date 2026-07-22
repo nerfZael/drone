@@ -510,7 +510,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
         className={`relative flex-1 rounded border text-left transition-colors flex items-center gap-1.5 min-w-0 ${densityClasses.chatRow} ${sidebarChatRowTone({ selected })} ${!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${actionsEnabled && (canRename || canDelete) ? 'group-hover/chat-row:pr-14 group-focus-within/chat-row:pr-14' : ''} ${
           isDragging ? 'opacity-35' : ''
         }`}
-        title={`${uiDroneName(drone.name)} / ${chatName}`}
+        aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
       >
         {selected ? <span className={sidebarSelectionEdgeClass} /> : null}
         <span

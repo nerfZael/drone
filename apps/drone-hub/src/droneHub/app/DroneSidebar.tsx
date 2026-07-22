@@ -401,9 +401,9 @@ function ReadOnlySidebarGroups({
                                 onClick={() => {
                                   if (droneId) onSelectDroneChat(droneId, chatName);
                                 }}
-                                title={`${displayName} / ${chatName}`}
+                                aria-label={`${displayName} / ${chatName}`}
+                                aria-current={active ? 'page' : undefined}
                               >
-                                {active ? <span className={sidebarSelectionEdgeClass} /> : null}
                                 <span
                                   className={sidebarChatStateClass}
                                   title={chatStateLabel}
@@ -608,9 +608,10 @@ function StaticReadOnlySidebarTree({
                   onClick={() => {
                     if (!disabledReason) onSelectDroneChat(drone.id, chatName);
                   }}
-                  title={disabledReason || `${uiDroneName(drone.name)} / ${chatName}`}
+                  title={disabledReason || undefined}
+                  aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
+                  aria-current={active ? 'page' : undefined}
                 >
-                  {active ? <span className={sidebarSelectionEdgeClass} /> : null}
                   <span
                     className={sidebarChatStateClass}
                     title={chatStateLabel}
