@@ -3,6 +3,8 @@ export type ShortcutActionId =
   | 'createDraftDrone'
   | 'createChildDraftDrone'
   | 'createDroneChat'
+  | 'toggleSelectedDronePinned'
+  | 'moveSelectedDroneToTop'
   | 'focusPrimaryChatInput'
   | 'toggleVoiceClipboardRecording'
   | 'markSelectedDronesUnread'
@@ -53,6 +55,16 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'createDroneChat',
     label: 'Create new chat',
     description: 'Creates a new chat on the selected drone, opens it immediately, and focuses the composer.',
+  },
+  {
+    id: 'toggleSelectedDronePinned',
+    label: 'Pin selected drone',
+    description: 'Pins or unpins the selected drone in the sidebar.',
+  },
+  {
+    id: 'moveSelectedDroneToTop',
+    label: 'Move selected drone to top',
+    description: 'Moves the selected drone to the top of its current sidebar level.',
   },
   {
     id: 'focusPrimaryChatInput',
@@ -118,9 +130,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openHome: { key: 'v', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  createDraftDrone: { key: 'tab', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  createChildDraftDrone: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  createDroneChat: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createChildDraftDrone: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createDroneChat: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleSelectedDronePinned: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  moveSelectedDroneToTop: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleVoiceClipboardRecording: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -190,6 +204,8 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     createDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDrone),
     createChildDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createChildDraftDrone),
     createDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDroneChat),
+    toggleSelectedDronePinned: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronePinned),
+    moveSelectedDroneToTop: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.moveSelectedDroneToTop),
     focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
     toggleVoiceClipboardRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleVoiceClipboardRecording),
     markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),

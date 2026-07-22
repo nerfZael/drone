@@ -2,11 +2,17 @@ import { describe, expect, test } from 'bun:test';
 import {
   appendOptimisticPendingPrompt,
   createOptimisticPendingPrompt,
+  optimisticPendingPromptState,
   pendingPromptShowsWorkingState,
   reconcileOptimisticPendingPrompt,
 } from '../src/droneHub/app/optimistic-pending-prompts';
 
 describe('optimistic pending prompt helpers', () => {
+  test('presents follow-up submissions as queued while the chat is responding', () => {
+    expect(optimisticPendingPromptState(true)).toBe('queued');
+    expect(optimisticPendingPromptState(false)).toBe('sending');
+  });
+
   test('only presents submitted prompts as active agent work', () => {
     expect(pendingPromptShowsWorkingState({ state: 'queued' })).toBe(false);
     expect(pendingPromptShowsWorkingState({ state: 'sending' })).toBe(true);

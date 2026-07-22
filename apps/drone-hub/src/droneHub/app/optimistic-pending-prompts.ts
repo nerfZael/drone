@@ -76,6 +76,12 @@ export function normalizePendingPromptState(
   return fallback;
 }
 
+export function optimisticPendingPromptState(
+  isChatResponding: boolean,
+): Extract<PendingPrompt['state'], 'queued' | 'sending'> {
+  return isChatResponding ? 'queued' : 'sending';
+}
+
 export function pendingPromptShowsWorkingState(
   item: Pick<PendingPrompt, 'state'> | null | undefined,
 ): boolean {

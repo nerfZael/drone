@@ -1,9 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  canSetSidebarDroneSelectionParent,
-  canReparentSidebarDroneSelection,
-  sidebarDroneDropIntentFromRects,
-} from '../src/droneHub/app/sidebar-drone-drop';
+import { canReorderSidebarDroneSelectionAtParent } from '../src/droneHub/app/sidebar-drone-drop';
 import type { DroneSummary } from '../src/droneHub/types';
 
 function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>): DroneSummary {
@@ -27,38 +23,18 @@ function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>):
 }
 
 describe('sidebar drone drop helpers', () => {
-  test('treats the middle third of a drone row as a parenting drop', () => {
-    const overRect = { top: 100, height: 90 };
-    expect(sidebarDroneDropIntentFromRects({ top: 100, height: 12 }, overRect)).toBe('before');
-    expect(sidebarDroneDropIntentFromRects({ top: 139, height: 12 }, overRect)).toBe('inside');
-    expect(sidebarDroneDropIntentFromRects({ top: 178, height: 12 }, overRect)).toBe('after');
-  });
-
-  test('rejects reparenting a drone beneath itself or one of its descendants', () => {
+  test('allows sibling reordering and clearing a parent without assigning a new parent', () => {
     const droneById = Object.fromEntries(
       [
         drone({ id: 'parent', name: 'parent' }),
-        drone({ id: 'child', name: 'child', fleetParentId: 'parent' }),
-        drone({ id: 'grandchild', name: 'grandchild', fleetParentId: 'child' }),
-        drone({ id: 'sibling', name: 'sibling' }),
+        drone({ id: 'child-a', name: 'child-a', fleetParentId: 'parent' }),
+        drone({ id: 'child-b', name: 'child-b', fleetParentId: 'parent' }),
+        drone({ id: 'top-level', name: 'top-level' }),
       ].map((item) => [item.id, item]),
     );
 
-    expect(canReparentSidebarDroneSelection(droneById, ['parent'], 'child')).toBe(false);
-    expect(canReparentSidebarDroneSelection(droneById, ['child'], 'child')).toBe(false);
-    expect(canReparentSidebarDroneSelection(droneById, ['child'], 'sibling')).toBe(true);
-  });
-
-  test('allows clearing a parent while still rejecting invalid descendant parenting', () => {
-    const droneById = Object.fromEntries(
-      [
-        drone({ id: 'parent', name: 'parent' }),
-        drone({ id: 'child', name: 'child', fleetParentId: 'parent' }),
-        drone({ id: 'grandchild', name: 'grandchild', fleetParentId: 'child' }),
-      ].map((item) => [item.id, item]),
-    );
-
-    expect(canSetSidebarDroneSelectionParent(droneById, ['child'], null)).toBe(true);
-    expect(canSetSidebarDroneSelectionParent(droneById, ['parent'], 'grandchild')).toBe(false);
+    expect(canReorderSidebarDroneSelectionAtParent(droneById, ['child-a'], 'parent')).toBe(true);
+    expect(canReorderSidebarDroneSelectionAtParent(droneById, ['child-a'], null)).toBe(true);
+    expect(canReorderSidebarDroneSelectionAtParent(droneById, ['top-level'], 'parent')).toBe(false);
   });
 });

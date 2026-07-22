@@ -42,6 +42,8 @@ type UseDroneHubLifecycleEffectsArgs = {
   openDraftChatComposer: (opts?: { repoPath?: string | null; group?: string | null }) => void;
   openChildDraftChatComposer: () => boolean;
   createDroneChatFromShortcut: () => Promise<boolean>;
+  toggleSelectedDronePinnedFromShortcut: () => boolean;
+  moveSelectedDroneToTopFromShortcut: () => boolean;
   openGroupMultiChat: (group: string) => void;
   openSidebarVisibleMultiChat: () => void;
   toggleVoiceClipboardRecording: () => boolean;
@@ -107,6 +109,8 @@ export function useDroneHubLifecycleEffects({
   openDraftChatComposer,
   openChildDraftChatComposer,
   createDroneChatFromShortcut,
+  toggleSelectedDronePinnedFromShortcut,
+  moveSelectedDroneToTopFromShortcut,
   openGroupMultiChat,
   openSidebarVisibleMultiChat,
   toggleVoiceClipboardRecording,
@@ -292,6 +296,8 @@ export function useDroneHubLifecycleEffects({
         })();
         return true;
       },
+      toggleSelectedDronePinned: () => toggleSelectedDronePinnedFromShortcut(),
+      moveSelectedDroneToTop: () => moveSelectedDroneToTopFromShortcut(),
       focusPrimaryChatInput: () => focusPrimaryChatInput(),
       toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
@@ -397,6 +403,7 @@ export function useDroneHubLifecycleEffects({
       if (isEditableTarget(e.target)) {
         const allowEditableShortcut = shouldDispatchEditableShortcutAction({
           matchedActionId: matched?.id ?? null,
+          matchedShortcutKey: matched ? shortcutBindings[matched.id]?.key ?? null : null,
           targetInPrimaryChatInput: isPrimaryChatInputTarget(e.target),
           targetInCanvasMessageInput: isCanvasMessageInputTarget(e.target),
           targetInAssistantChatInput: isAssistantChatInputTarget(e.target),
@@ -426,6 +433,8 @@ export function useDroneHubLifecycleEffects({
     openDraftChatComposer,
     openChildDraftChatComposer,
     createDroneChatFromShortcut,
+    toggleSelectedDronePinnedFromShortcut,
+    moveSelectedDroneToTopFromShortcut,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
     rightPanelBottomTab,
