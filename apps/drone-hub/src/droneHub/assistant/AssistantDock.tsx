@@ -1608,13 +1608,20 @@ export function AssistantDock({
       .map((runItem) => assistantMessageTimestampMs(runItem.result))
       .filter((timestamp): timestamp is number => timestamp !== undefined);
     let followingAssistantAt: number | undefined;
+    let hasFollowingAssistantActivity = false;
     for (let nextIndex = runEndIndex + 1; nextIndex < visibleItems.length; nextIndex += 1) {
       const next = visibleItems[nextIndex];
       if (next?.type !== 'message') continue;
       if (next.message.role === 'user') break;
       if (next.message.role !== 'assistant') continue;
-      followingAssistantAt = assistantMessageTimestampMs(next.message);
-      if (followingAssistantAt !== undefined) break;
+      hasFollowingAssistantActivity = Boolean(
+        messageVisibleText(next.message).trim() ||
+        messageImageParts(next.message).length > 0 ||
+        next.message.errorMessage ||
+        latestThinkingText(next.message).trim(),
+      );
+      followingAssistantAt ??= assistantMessageTimestampMs(next.message);
+      if (hasFollowingAssistantActivity) break;
     }
     const startedAt =
       precedingUserAt ??
@@ -1628,6 +1635,7 @@ export function AssistantDock({
           : undefined);
     const runActive =
       running &&
+      !hasFollowingAssistantActivity &&
       runEndIndex === lastToolItemIndex &&
       runEndIndex > latestUserItemIndex;
     const runKey = `tool-run:${runItems[0]?.key ?? runStartIndex}:${runStartIndex}`;

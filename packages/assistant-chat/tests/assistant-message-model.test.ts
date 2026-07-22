@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { renderItemsFromMessages } from '../src';
+import { renderItemsFromMessages, toolActivityIsSettled } from '../src';
 
 describe('assistant message model', () => {
   test('pairs tool calls with their results on every platform', () => {
@@ -108,5 +108,32 @@ describe('assistant message model', () => {
       'message',
     ]);
     expect(callCount).toBe(20);
+  });
+
+  test('distinguishes progress snapshots from settled tool results', () => {
+    const tool = (details?: unknown, isError = false) => ({
+      type: 'tool' as const,
+      key: 'transfer',
+      call: { id: 'transfer', name: 'transfer_files', args: {} },
+      result: {
+        role: 'toolResult' as const,
+        toolCallId: 'transfer',
+        content: '',
+        details,
+        isError,
+      },
+    });
+
+    expect(toolActivityIsSettled({ ...tool(), result: undefined })).toBe(false);
+    expect(toolActivityIsSettled(tool())).toBe(true);
+    expect(
+      toolActivityIsSettled(tool({ type: 'workspace_transfer', phase: 'transferring' })),
+    ).toBe(false);
+    expect(
+      toolActivityIsSettled(tool({ type: 'workspace_transfer', phase: 'completed' })),
+    ).toBe(true);
+    expect(
+      toolActivityIsSettled(tool({ type: 'workspace_transfer', phase: 'failed' }, true)),
+    ).toBe(true);
   });
 });

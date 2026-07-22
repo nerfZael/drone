@@ -28,6 +28,7 @@ import {
   messageText,
   normalizeAssistantWaitTargets,
   summarizeWaitTargets,
+  toolActivityIsSettled,
   toolActivityTitle,
   toolCalls,
   toolItemName,
@@ -103,12 +104,12 @@ function ToolDisclosure({
 }) {
   const [open, setOpen] = React.useState(false);
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
+    <div data-tool-activity-row>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]"
-        style={{ fontFamily: 'var(--display)' }}
+        aria-expanded={open}
+        className="group flex w-full items-center gap-2 py-1.5 text-left text-[var(--text-12)] text-[var(--muted)] hover:text-[var(--fg-secondary)]"
       >
         {status ? (
           <span
@@ -136,11 +137,22 @@ function ToolDisclosure({
             )}
           </span>
         ) : null}
-        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
+        <span className="text-[var(--muted-dim)] transition-colors group-hover:text-[var(--muted)]">
+          <ToolRunChevron open={open} />
+        </span>
       </button>
       {open ? (
-        <div className="border-t border-[var(--border-subtle)] px-2 py-1.5">{children}</div>
+        <ToolDetailRail>{children}</ToolDetailRail>
       ) : null}
+    </div>
+  );
+}
+
+function ToolDetailRail({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="ml-[5px] border-l border-[var(--border-subtle)] pb-2 pl-[19px] pr-1 pt-1">
+      {children}
     </div>
   );
 }
@@ -167,7 +179,7 @@ function ToolCheckIcon({ className }: { className?: string }) {
 function ToolSpinnerIcon({ className }: { className?: string }) {
   return (
     <svg
-      className={`animate-spin ${className ?? ''}`}
+      className={`animate-spin motion-reduce:animate-none ${className ?? ''}`}
       viewBox="0 0 12 12"
       fill="none"
       aria-hidden="true"
@@ -300,10 +312,11 @@ function ToolDetailsButton({ open, onClick }: { open: boolean; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="ml-auto flex h-5 flex-shrink-0 items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
-      style={{ fontFamily: 'var(--display)' }}
+      aria-expanded={open}
+      className="ml-auto inline-flex flex-shrink-0 items-center gap-1 text-[var(--text-10)] text-[var(--muted-dim)] hover:text-[var(--fg-secondary)]"
     >
-      {open ? 'Hide details' : 'Details'}
+      {open ? 'Hide details' : 'Show details'}
+      <ToolRunChevron open={open} />
     </button>
   );
 }
@@ -311,36 +324,32 @@ function ToolDetailsButton({ open, onClick }: { open: boolean; onClick: () => vo
 function ToolPayloadDetails({
   call,
   result,
+  pendingLabel = 'Waiting for result…',
 }: {
   call?: AssistantToolCall;
   result?: AssistantMessage;
+  pendingLabel?: string;
 }) {
   const resultText = result ? messageText(result) : '';
   return (
-    <div className="grid gap-2 border-t border-[var(--border-subtle)] px-2.5 py-2">
+    <div className="grid gap-3 py-1">
       {call ? (
         <div>
-          <div
-            className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-            style={{ fontFamily: 'var(--display)' }}
-          >
+          <div className="text-[var(--text-11)] font-medium text-[var(--muted)]">
             Arguments
           </div>
-          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[var(--text-10)] text-[var(--muted-dim)]">
+          <pre className="mt-1 max-h-24 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2 py-1.5 whitespace-pre-wrap break-words text-[var(--text-10)] leading-relaxed text-[var(--muted-dim)]">
             {JSON.stringify(call.args, null, 2)}
           </pre>
         </div>
       ) : null}
       {result ? (
-        <div className={call ? 'border-t border-[var(--border-subtle)] pt-2' : ''}>
-          <div
-            className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-            style={{ fontFamily: 'var(--display)' }}
-          >
+        <div>
+          <div className="text-[var(--text-11)] font-medium text-[var(--muted)]">
             Result
           </div>
           {resultText ? (
-            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[var(--text-11)] text-[var(--fg-secondary)]">
+            <pre className="mt-1 max-h-32 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2 py-1.5 whitespace-pre-wrap break-words text-[var(--text-11)] leading-relaxed text-[var(--fg-secondary)]">
               {resultText}
             </pre>
           ) : (
@@ -348,7 +357,7 @@ function ToolPayloadDetails({
           )}
         </div>
       ) : (
-        <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Waiting for result...</div>
+        <div className="text-[var(--text-11)] text-[var(--muted-dim)]">{pendingLabel}</div>
       )}
     </div>
   );
@@ -376,57 +385,68 @@ function TransferActivityRow({
       : null;
   const totalBytes = Number(progress?.totalBytes ?? 0);
   const transferredBytes = Number(progress?.transferredBytes ?? 0);
+  const files = Array.isArray(progress?.files) ? progress.files : [];
+  const settled = toolActivityIsSettled({ type: 'tool', key: call.id, call, result });
+  const failed = result?.isError === true || progress?.phase === 'failed';
   const percent =
     totalBytes > 0
       ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100))
-      : progress?.phase === 'completed'
+      : settled && !failed
         ? 100
         : 0;
-  const files = Array.isArray(progress?.files) ? progress.files : [];
-  const failed = result?.isError === true || progress?.phase === 'failed';
   const sourceLabel = progress?.source?.targetLabel || call.args?.sourceTarget || 'Source';
   const destinationLabel =
     progress?.destination?.targetLabel || call.args?.destinationTarget || 'Destination';
+  const amountLabel = progress
+    ? `${formatTransferBytes(transferredBytes)} / ${formatTransferBytes(totalBytes)}`
+    : failed
+      ? 'Failed'
+      : settled
+        ? 'Complete'
+        : 'Preparing…';
+  const progressLabel = !progress
+    ? failed
+      ? 'Transfer failed'
+      : settled
+        ? 'Transfer complete'
+        : 'Scanning files…'
+    : progress.phase === 'planning'
+      ? 'Scanning folder…'
+      : `${progress.completedFiles ?? 0} of ${progress.fileCount ?? files.length} files`;
   return (
-    <div
-      className={`mx-3 overflow-hidden rounded border ${failed ? 'border-[var(--red)]' : 'border-[var(--border-subtle)]'} bg-[var(--surface-soft)]`}
-    >
-      <div className="px-2.5 py-2.5">
+    <div className="mx-3 py-1" data-tool-activity-row>
+      <div className="py-1.5">
         <div className="flex min-w-0 items-center gap-2">
-          <ToolStatusIndicator
-            result={result && progress?.phase !== 'completed' && !failed ? undefined : result}
-          />
+          <ToolStatusIndicator result={settled ? result : undefined} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
-              <div
-                className="truncate text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-                style={{ fontFamily: 'var(--display)' }}
-              >
+              <div className="truncate text-[var(--text-12)] font-medium text-[var(--muted)]">
                 Transfer files
               </div>
               <div className="tabular-nums text-[var(--text-10)] text-[var(--muted)]">
-                {progress
-                  ? `${formatTransferBytes(transferredBytes)} / ${formatTransferBytes(totalBytes)}`
-                  : 'Preparing…'}
+                {amountLabel}
               </div>
             </div>
-            <div className="mt-1 truncate text-[var(--text-11)] text-[var(--fg-secondary)]">
+            <div className="mt-0.5 truncate text-[var(--text-11)] text-[var(--fg-secondary)]">
               {sourceLabel} <span className="text-[var(--muted-dim)]">→</span> {destinationLabel}
             </div>
           </div>
-          <ToolDetailsButton open={detailsOpen} onClick={() => setDetailsOpen((value) => !value)} />
+          {files.length > 0 ? (
+            <ToolDetailsButton
+              open={detailsOpen}
+              onClick={() => setDetailsOpen((value) => !value)}
+            />
+          ) : null}
         </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-strong)]">
+        <div className="ml-5 mt-2 h-1 overflow-hidden rounded-full bg-[var(--surface-strong)]">
           <div
             className={`h-full rounded-full transition-[width] duration-200 ${failed ? 'bg-[var(--red)]' : 'bg-[var(--accent)]'}`}
             style={{ width: `${percent}%` }}
           />
         </div>
-        <div className="mt-1.5 flex items-center justify-between text-[var(--text-10)] text-[var(--muted-dim)]">
+        <div className="ml-5 mt-1.5 flex items-center justify-between text-[var(--text-10)] text-[var(--muted-dim)]">
           <span>
-            {progress?.phase === 'planning'
-              ? 'Scanning folder…'
-              : `${progress?.completedFiles ?? 0} of ${progress?.fileCount ?? files.length} files`}
+            {progressLabel}
           </span>
           <span>
             {progress?.retries
@@ -435,20 +455,20 @@ function TransferActivityRow({
           </span>
         </div>
         {failed && progress?.failure?.error ? (
-          <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">
+          <div className="ml-5 mt-1.5 text-[var(--text-10)] text-[var(--red)]">
             {progress.failure.error}
             {progress.failure.cleanupError ? ` Cleanup: ${progress.failure.cleanupError}` : ''}
           </div>
         ) : null}
         {failed && progress?.resumeToken ? (
-          <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
+          <div className="ml-5 mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
             The assistant can resume after {progress.completedFiles ?? 0} committed files.
           </div>
         ) : null}
       </div>
       {detailsOpen && files.length > 0 ? (
-        <div className="max-h-56 overflow-y-auto border-t border-[var(--border-subtle)] p-2">
-          <div className="grid gap-1.5">
+        <ToolDetailRail>
+          <div className="grid max-h-56 gap-3 overflow-y-auto py-1">
             {files.map((file: any, index: number) => {
               const filePercent =
                 file.size > 0
@@ -459,7 +479,7 @@ function TransferActivityRow({
               return (
                 <div
                   key={`${file.destinationPath}-${index}`}
-                  className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5"
+                  className="py-0.5"
                 >
                   <div className="flex min-w-0 items-center gap-2 text-[var(--text-10)]">
                     <span className="min-w-0 flex-1 truncate text-[var(--fg-secondary)]">
@@ -490,7 +510,7 @@ function TransferActivityRow({
               );
             })}
           </div>
-        </div>
+        </ToolDetailRail>
       ) : null}
     </div>
   );
@@ -508,36 +528,33 @@ export function RepeatedToolActivityRow({
   const name = toolItemName(first);
   const label = toolLabel(name);
   const errorCount = items.filter((item) => item.result?.isError).length;
-  const pendingCount = items.filter((item) => !item.result).length;
+  const pendingCount = items.filter((item) => !toolActivityIsSettled(item)).length;
   const statusText = [
     pendingCount > 0 && !blocked ? `${pendingCount} pending` : '',
     errorCount > 0 ? `${errorCount} failed` : '',
   ].filter(Boolean).join(', ');
   const statusResult: AssistantMessage | undefined =
-    errorCount > 0
-      ? { role: 'toolResult', isError: true, content: '' }
-      : pendingCount > 0
-        ? undefined
+    pendingCount > 0
+      ? undefined
+      : errorCount > 0
+        ? { role: 'toolResult', isError: true, content: '' }
         : { role: 'toolResult', content: '' };
 
   return (
-    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)]">
+    <div className="mx-3" data-tool-activity-row>
       <button
         type="button"
         aria-expanded={detailsOpen}
         aria-label={detailsOpen ? `Collapse ${label} calls` : `Expand ${label} calls`}
         onClick={() => setDetailsOpen((value) => !value)}
-        className="flex w-full min-w-0 items-center gap-2 px-2.5 py-2 text-left hover:bg-[var(--surface-soft)]"
+        className="group flex w-full min-w-0 items-center gap-2 py-1.5 text-left"
       >
         <ToolStatusIndicator result={statusResult} blocked={blocked && pendingCount > 0} />
-        <span
-          className="min-w-0 truncate text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-          style={{ fontFamily: 'var(--display)' }}
-        >
+        <span className="min-w-0 truncate text-[var(--text-12)] font-medium text-[var(--muted)] group-hover:text-[var(--fg-secondary)]">
           {label}
         </span>
-        <span className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-          x{items.length}
+        <span className="flex-shrink-0 text-[var(--text-10)] tabular-nums text-[var(--muted-dim)]">
+          ×{items.length}
         </span>
         {statusText ? (
           <span className="hidden flex-shrink-0 text-[var(--text-10)] text-[var(--muted-dim)] sm:inline">
@@ -549,25 +566,28 @@ export function RepeatedToolActivityRow({
         </span>
       </button>
       {detailsOpen ? (
-        <div className="grid gap-2 border-t border-[var(--border-subtle)] p-2">
-          {items.map((item, index) => (
-            <div
-              key={item.key}
-              className="overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)]"
-            >
-              <div className="flex min-w-0 items-center gap-2 border-b border-[var(--border-subtle)] px-2.5 py-1.5">
-                <ToolStatusIndicator result={item.result} blocked={blocked && !item.result} />
-                <div
-                  className="min-w-0 flex-1 truncate text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  {label} #{index + 1}
+        <ToolDetailRail>
+          <div className="grid gap-4 py-1">
+            {items.map((item, index) => (
+              <div key={item.key}>
+                <div className="mb-1 flex min-w-0 items-center gap-2">
+                  <ToolStatusIndicator
+                    result={toolActivityIsSettled(item) ? item.result : undefined}
+                    blocked={blocked && !toolActivityIsSettled(item)}
+                  />
+                  <div className="min-w-0 flex-1 truncate text-[var(--text-11)] font-medium text-[var(--muted)]">
+                    {label} #{index + 1}
+                  </div>
                 </div>
+                <ToolPayloadDetails
+                  call={item.call}
+                  result={item.result}
+                  pendingLabel={blocked ? 'Blocked pending approval.' : undefined}
+                />
               </div>
-              <ToolPayloadDetails call={item.call} result={item.result} />
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </ToolDetailRail>
       ) : null}
     </div>
   );
@@ -588,15 +608,12 @@ export function MessageDroneActivityRow({
   const summary = messageDroneDetails(call.args, droneNameById);
   const preview = compactPreview(summary.message, 220);
   return (
-    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)]">
-      <div className="px-2.5 py-2">
+    <div className="mx-3 py-1" data-tool-activity-row>
+      <div className="py-1.5">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <ToolStatusIndicator result={result} blocked={blocked} />
-            <div
-              className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-              style={{ fontFamily: 'var(--display)' }}
-            >
+            <div className="text-[var(--text-12)] font-medium text-[var(--muted)]">
               Send user message
             </div>
             <ToolDetailsButton
@@ -604,19 +621,20 @@ export function MessageDroneActivityRow({
               onClick={() => setDetailsOpen((value) => !value)}
             />
           </div>
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-            <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[var(--text-11)] text-[var(--fg-secondary)]">
-              <span className="truncate">{summary.droneLabel || 'Target drone'}</span>
+          <div className="ml-5 mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[var(--text-11)]">
+            <span className="truncate text-[var(--fg-secondary)]">
+              to {summary.droneLabel || 'target drone'}
             </span>
             {summary.chatName && summary.chatName !== 'default' ? (
-              <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[var(--text-11)] text-[var(--muted)]">
+              <span className="inline-flex max-w-full items-center gap-1 text-[var(--muted)]">
+                <span aria-hidden="true" className="text-[var(--muted-dim)]">·</span>
                 <span className="truncate">{summary.chatName}</span>
               </span>
             ) : null}
           </div>
           {preview ? (
-            <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5 text-[var(--text-12)] leading-5 text-[var(--fg-secondary)]">
-              {preview}
+            <div className="ml-5 mt-1.5 line-clamp-3 text-[var(--text-12)] leading-5 text-[var(--fg-secondary)]">
+              “{preview}”
             </div>
           ) : (
             <div className="mt-2 text-[var(--text-11)] text-[var(--muted-dim)]">
@@ -625,7 +643,9 @@ export function MessageDroneActivityRow({
           )}
         </div>
       </div>
-      {detailsOpen ? <ToolPayloadDetails call={call} result={result} /> : null}
+      {detailsOpen ? (
+        <ToolDetailRail><ToolPayloadDetails call={call} result={result} /></ToolDetailRail>
+      ) : null}
     </div>
   );
 }
@@ -644,15 +664,12 @@ export function ChatsIdleActivityRow({
   const targetSummary = summarizeWaitTargets(targets);
   const label = toolLabel(call.name);
   return (
-    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)]">
-      <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
+    <div className="mx-3 py-1" data-tool-activity-row>
+      <div className="py-1.5">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <ToolStatusIndicator result={result} />
-            <div
-              className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-              style={{ fontFamily: 'var(--display)' }}
-            >
+            <div className="text-[var(--text-12)] font-medium text-[var(--muted)]">
               {label}
             </div>
             <ToolDetailsButton
@@ -660,35 +677,38 @@ export function ChatsIdleActivityRow({
               onClick={() => setDetailsOpen((value) => !value)}
             />
           </div>
-          <div className="mt-1 text-[var(--text-12)] text-[var(--fg-secondary)]">
+          <div className="ml-5 mt-0.5 text-[var(--text-11)] text-[var(--fg-secondary)]">
             {targetSummary || 'Resolving target drones'}
           </div>
         </div>
       </div>
-      <div className="grid gap-1.5 p-2">
+      <div className="ml-5 grid gap-1 py-0.5">
         {targets.length > 0 ? (
           targets.map((target) => (
             <div
               key={target.key}
-              className="flex min-h-8 min-w-0 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2"
+              className="flex min-h-6 min-w-0 items-center gap-2 text-[var(--text-11)]"
             >
-              <div className="min-w-0 flex-1 truncate text-[var(--text-12)] font-medium text-[var(--fg-secondary)]">
+              <span className="h-1 w-1 flex-shrink-0 rounded-full bg-[var(--muted-dim)]" aria-hidden="true" />
+              <div className="min-w-0 flex-1 truncate text-[var(--fg-secondary)]">
                 {target.droneLabel}
               </div>
               {target.chatName && target.chatName !== 'default' ? (
-                <div className="max-w-[42%] truncate rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-1.5 py-0.5 text-[var(--text-10)] text-[var(--muted)]">
+                <div className="max-w-[42%] truncate text-[var(--text-10)] text-[var(--muted)]">
                   {target.chatName}
                 </div>
               ) : null}
             </div>
           ))
         ) : (
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-2 text-[var(--text-11)] text-[var(--muted-dim)]">
+          <div className="py-1 text-[var(--text-11)] text-[var(--muted-dim)]">
             Waiting for result...
           </div>
         )}
       </div>
-      {detailsOpen ? <ToolPayloadDetails call={call} result={result} /> : null}
+      {detailsOpen ? (
+        <ToolDetailRail><ToolPayloadDetails call={call} result={result} /></ToolDetailRail>
+      ) : null}
     </div>
   );
 }
@@ -723,53 +743,17 @@ export function ToolActivityRow({
   }
 
   const title = toolActivityTitle(call, result, droneNameById);
-  const resultText = result ? messageText(result) : '';
   return (
     <div className="mx-3">
       <ToolDisclosure
         title={title}
         status={result ? (result.isError ? 'error' : 'ok') : blocked ? 'blocked' : 'pending'}
       >
-        {call ? (
-          <div>
-            <div
-              className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              Arguments
-            </div>
-            <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[var(--text-10)] text-[var(--muted-dim)]">
-              {JSON.stringify(call.args, null, 2)}
-            </pre>
-          </div>
-        ) : null}
-        {result ? (
-          <div className={call ? 'mt-2 border-t border-[var(--border-subtle)] pt-2' : ''}>
-            <div
-              className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              Result
-            </div>
-            {resultText ? (
-              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[var(--text-11)] text-[var(--fg-secondary)]">
-                {resultText}
-              </pre>
-            ) : (
-              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">No result payload.</div>
-            )}
-          </div>
-        ) : (
-          <div
-            className={
-              call
-                ? 'mt-2 border-t border-[var(--border-subtle)] pt-2 text-[var(--text-11)] text-[var(--muted-dim)]'
-                : 'text-[var(--text-11)] text-[var(--muted-dim)]'
-            }
-          >
-            {blocked ? 'Blocked pending approval.' : 'Waiting for result...'}
-          </div>
-        )}
+        <ToolPayloadDetails
+          call={call}
+          result={result}
+          pendingLabel={blocked ? 'Blocked pending approval.' : undefined}
+        />
       </ToolDisclosure>
     </div>
   );
@@ -822,6 +806,22 @@ function ToolRunChevron({ open }: { open: boolean }) {
     >
       <path d="m5 3 4 4-4 4" />
     </svg>
+  );
+}
+
+function AgentThinkingActivityRow() {
+  return (
+    <div
+      className="mx-3 flex min-h-7 items-center gap-2 py-1.5 text-[var(--text-12)] text-[var(--muted)]"
+      data-agent-thinking
+      role="status"
+      aria-live="polite"
+    >
+      <span className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center text-[var(--accent)]">
+        <ToolSpinnerIcon className="h-3 w-3" />
+      </span>
+      <span className="font-medium">Thinking…</span>
+    </div>
   );
 }
 
@@ -898,6 +898,8 @@ export function ToolRunActivity({
   );
   const callLabel = `${items.length} tool ${items.length === 1 ? 'call' : 'calls'}`;
   const groupedItems = compactRepeatedToolItems(items);
+  const showThinkingActivity =
+    active && !awaitingApproval && items.every(toolActivityIsSettled);
 
   return (
     <div>
@@ -934,6 +936,7 @@ export function ToolRunActivity({
               />
             ) : null,
           )}
+          {showThinkingActivity ? <AgentThinkingActivityRow /> : null}
         </div>
       ) : null}
     </div>

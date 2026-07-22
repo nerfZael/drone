@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { renderItemsFromMessages, type AssistantMessage } from '@drone/assistant-chat';
 import {
   groupMobileTranscriptRuns,
+  mobileRunIsThinking,
   mobileRunDetails,
   normalizeMobileAgentPlan,
   workingDurationLabel,
@@ -111,5 +112,55 @@ describe('mobile transcript runs', () => {
     );
     expect(groups[0]).toMatchObject({ type: 'run', plan });
     expect(workingDurationLabel(3_661_000)).toBe('1h 1m 1s');
+  });
+
+  test('shows thinking only after active tools have genuinely settled', () => {
+    const completedTool = {
+      type: 'tool' as const,
+      key: 'completed-tool',
+      call: { id: 'completed-call', name: 'read_file', args: {} },
+      result: { role: 'toolResult' as const, toolCallId: 'completed-call', content: 'Done' },
+    };
+    const pendingTool = {
+      type: 'tool' as const,
+      key: 'pending-tool',
+      call: { id: 'pending-call', name: 'read_file', args: {} },
+    };
+    const transferringTool = {
+      type: 'tool' as const,
+      key: 'transferring-tool',
+      call: { id: 'transfer-call', name: 'transfer_files', args: {} },
+      result: {
+        role: 'toolResult' as const,
+        toolCallId: 'transfer-call',
+        content: 'Transferring',
+        details: { type: 'workspace_transfer', phase: 'transferring' },
+      },
+    };
+
+    expect(mobileRunIsThinking({ active: true, items: [completedTool] })).toBe(true);
+    expect(mobileRunIsThinking({ active: true, items: [pendingTool] })).toBe(false);
+    expect(mobileRunIsThinking({ active: true, items: [transferringTool] })).toBe(false);
+    expect(
+      mobileRunIsThinking({
+        active: true,
+        items: [{ type: 'toolGroup', key: 'transfers', items: [transferringTool] }],
+      }),
+    ).toBe(false);
+    expect(mobileRunIsThinking({ active: false, items: [completedTool] })).toBe(false);
+    expect(
+      mobileRunIsThinking({
+        active: true,
+        items: [
+          completedTool,
+          {
+            type: 'message',
+            key: 'final-answer',
+            sourceMessageIndex: 4,
+            message: { role: 'assistant', content: 'Finished' },
+          },
+        ],
+      }),
+    ).toBe(false);
   });
 });
