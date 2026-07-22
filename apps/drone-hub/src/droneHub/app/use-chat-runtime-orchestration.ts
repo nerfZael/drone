@@ -9,6 +9,7 @@ import {
   appendOptimisticPendingPrompt,
   createOptimisticPendingPrompt,
   normalizePendingPromptState,
+  optimisticPendingPromptState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
 import { droneChatEventMatches, fetchDroneChatState, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
@@ -65,7 +66,6 @@ function writeChatRuntimeCache<T>(cache: ChatRuntimeCacheMap<T>, key: string, va
 type UseChatRuntimeOrchestrationArgs = {
   chatInfo: ChatInfo | null;
   currentDrone: DroneSummary | null;
-  currentDroneLabel: string;
   droneById: Record<string, DroneSummary>;
   outputView: 'screen' | 'log';
   optimisticPendingPrompts: PendingPrompt[];
@@ -155,7 +155,6 @@ export function visiblePendingPromptsForAgent(opts: {
 export function useChatRuntimeOrchestration({
   chatInfo,
   currentDrone,
-  currentDroneLabel,
   droneById,
   outputView,
   optimisticPendingPrompts,
@@ -338,85 +337,6 @@ export function useChatRuntimeOrchestration({
     setTranscriptError,
     setTranscripts,
   ]);
-
-  const sendPromptText = React.useCallback(
-    async (payload: ChatSendPayload): Promise<boolean> => {
-      if (!currentDrone) return false;
-      const prompt = String(payload?.prompt ?? '').trim();
-      const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
-      if (!prompt && attachments.length === 0) return false;
-
-      if (isDroneStartingOrSeeding(currentDrone.hubPhase)) {
-        enqueueQueuedPrompt(currentDrone.id, selectedChat || 'default', prompt, attachments);
-        setPromptError(null);
-        return true;
-      }
-
-      const originDroneId = currentDrone.id;
-      const originChat = selectedChat || 'default';
-      const optimisticItem = addOptimisticPendingPrompt(prompt, attachments, { state: 'sending' });
-      const optimisticId = String(optimisticItem?.id ?? '').trim();
-
-      setSendingPromptCount((c) => c + 1);
-      setPromptError(null);
-      setStopResponseError(null);
-      try {
-        const data = await sendDroneChatPrompt(requestJson, {
-          droneId: currentDrone.id,
-          chatName: selectedChat || 'default',
-          prompt,
-          attachments,
-          autoRenameHandledByClient: Boolean(prompt),
-        });
-        if (data.autoRenameChat && prompt) {
-          onAutoRenameChatFromFirstPrompt?.(originDroneId, originChat, prompt);
-        }
-        const stillOnSameChat =
-          selectedDroneRef.current === originDroneId &&
-          (selectedChatRef.current || 'default') === originChat;
-        if (stillOnSameChat) {
-          if (chatUiMode === 'cli') bumpCliTyping();
-          if (optimisticId) {
-            reconcileLocalPendingPrompt(optimisticId, {
-              confirmedId: String((data as any)?.promptId ?? '').trim(),
-              state: data?.pendingState,
-            });
-          } else {
-            addOptimisticPendingPrompt(prompt, attachments, {
-              id: String((data as any)?.promptId ?? '').trim(),
-              state: data?.pendingState,
-            });
-          }
-        }
-        return true;
-      } catch (e: any) {
-        const message = formatDroneRuntimeError(e);
-        if (
-          selectedDroneRef.current === originDroneId &&
-          (selectedChatRef.current || 'default') === originChat
-        ) {
-          if (optimisticId) {
-            reconcileLocalPendingPrompt(optimisticId, { state: 'failed', error: message });
-          }
-          setPromptError(message);
-        }
-        return false;
-      } finally {
-        setSendingPromptCount((c) => Math.max(0, c - 1));
-      }
-    },
-    [
-      addOptimisticPendingPrompt,
-      bumpCliTyping,
-      chatUiMode,
-      currentDrone,
-      currentDroneLabel,
-      enqueueQueuedPrompt,
-      onAutoRenameChatFromFirstPrompt,
-      requestJson,
-      selectedChat,
-    ],
-  );
 
   const requestCancelPendingPrompt = React.useCallback(
     async (promptIdRaw: string): Promise<void> => {
@@ -662,6 +582,87 @@ export function useChatRuntimeOrchestration({
     }
     return visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed');
   }, [chatUiMode, cliTyping, sendingPrompt, selectedDrone, visiblePendingPromptsWithStartup]);
+
+  const sendPromptText = React.useCallback(
+    async (payload: ChatSendPayload): Promise<boolean> => {
+      if (!currentDrone) return false;
+      const prompt = String(payload?.prompt ?? '').trim();
+      const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+      if (!prompt && attachments.length === 0) return false;
+
+      if (isDroneStartingOrSeeding(currentDrone.hubPhase)) {
+        enqueueQueuedPrompt(currentDrone.id, selectedChat || 'default', prompt, attachments);
+        setPromptError(null);
+        return true;
+      }
+
+      const originDroneId = currentDrone.id;
+      const originChat = selectedChat || 'default';
+      const optimisticItem = addOptimisticPendingPrompt(prompt, attachments, {
+        state: optimisticPendingPromptState(selectedIsResponding),
+      });
+      const optimisticId = String(optimisticItem?.id ?? '').trim();
+
+      setSendingPromptCount((c) => c + 1);
+      setPromptError(null);
+      setStopResponseError(null);
+      try {
+        const data = await sendDroneChatPrompt(requestJson, {
+          droneId: currentDrone.id,
+          chatName: selectedChat || 'default',
+          prompt,
+          attachments,
+          autoRenameHandledByClient: Boolean(prompt),
+        });
+        if (data.autoRenameChat && prompt) {
+          onAutoRenameChatFromFirstPrompt?.(originDroneId, originChat, prompt);
+        }
+        const stillOnSameChat =
+          selectedDroneRef.current === originDroneId &&
+          (selectedChatRef.current || 'default') === originChat;
+        if (stillOnSameChat) {
+          if (chatUiMode === 'cli') bumpCliTyping();
+          if (optimisticId) {
+            reconcileLocalPendingPrompt(optimisticId, {
+              confirmedId: String((data as any)?.promptId ?? '').trim(),
+              state: data?.pendingState,
+            });
+          } else {
+            addOptimisticPendingPrompt(prompt, attachments, {
+              id: String((data as any)?.promptId ?? '').trim(),
+              state: data?.pendingState,
+            });
+          }
+        }
+        return true;
+      } catch (e: any) {
+        const message = formatDroneRuntimeError(e);
+        if (
+          selectedDroneRef.current === originDroneId &&
+          (selectedChatRef.current || 'default') === originChat
+        ) {
+          if (optimisticId) {
+            reconcileLocalPendingPrompt(optimisticId, { state: 'failed', error: message });
+          }
+          setPromptError(message);
+        }
+        return false;
+      } finally {
+        setSendingPromptCount((c) => Math.max(0, c - 1));
+      }
+    },
+    [
+      addOptimisticPendingPrompt,
+      bumpCliTyping,
+      chatUiMode,
+      currentDrone,
+      enqueueQueuedPrompt,
+      onAutoRenameChatFromFirstPrompt,
+      requestJson,
+      selectedChat,
+      selectedIsResponding,
+    ],
+  );
 
   const canStopResponse = React.useMemo(() => {
     if (!selectedDrone || !selectedChat) return false;

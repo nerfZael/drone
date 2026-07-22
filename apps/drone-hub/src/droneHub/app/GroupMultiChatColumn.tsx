@@ -26,6 +26,7 @@ import {
   appendOptimisticPendingPrompt,
   createOptimisticPendingPrompt,
   normalizePendingPromptState,
+  optimisticPendingPromptState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
 import {
@@ -396,7 +397,7 @@ export function GroupMultiChatColumn({
       const optimisticItem = createOptimisticPendingPrompt({
         prompt,
         attachments,
-        state: 'sending',
+        state: optimisticPendingPromptState(waitingForAgent),
       });
       const optimisticId = String(optimisticItem?.id ?? '').trim();
       if (optimisticItem) {
@@ -443,7 +444,15 @@ export function GroupMultiChatColumn({
         setSendingPromptCount((c) => Math.max(0, c - 1));
       }
     },
-    [chatName, drone.hubPhase, drone.id, onAutoRenameChatFromFirstPrompt, scrollColumnToBottom, shownName],
+    [
+      chatName,
+      drone.hubPhase,
+      drone.id,
+      onAutoRenameChatFromFirstPrompt,
+      scrollColumnToBottom,
+      shownName,
+      waitingForAgent,
+    ],
   );
   const spawnDroneHubTaskForColumn = React.useCallback(
     (mode: DroneHubTaskSpawnMode, task: DroneHubTask) =>
