@@ -37,6 +37,16 @@ describe('mesh chat attachment store', () => {
           sourceDeviceId: 'phone-1',
           droneId: 'drone-1',
           chatName: 'default',
+          name: 'payload.bin',
+          mime: 'invalid',
+          size: 10,
+        }),
+      ).rejects.toThrow('MIME type');
+      await expect(
+        store.prepare({
+          sourceDeviceId: 'phone-1',
+          droneId: 'drone-1',
+          chatName: 'default',
           name: 'image.png',
           mime: 'image/png',
           size: 10,
@@ -124,6 +134,35 @@ describe('mesh chat attachment store', () => {
           dataBase64: source.toString('base64'),
         },
       ]);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test('accepts source files for native chat attachment uploads', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-chat-source-file-'));
+    roots.push(root);
+    const store = new MeshChatAttachmentStore(root);
+    try {
+      const source = Buffer.from('export const ready = true;');
+      const prepared = await store.prepare({
+        sourceDeviceId: 'desktop-1',
+        droneId: 'drone-1',
+        chatName: 'default',
+        name: 'status.ts',
+        mime: 'text/plain',
+        size: source.length,
+      });
+      await store.writeMesh({
+        sourceDeviceId: 'desktop-1',
+        uploadId: prepared.uploadId,
+        offset: 0,
+        dataBase64: source.toString('base64'),
+      });
+      await store.commit('desktop-1', prepared.uploadId);
+      await expect(
+        store.attachments('desktop-1', 'drone-1', 'default', [prepared.uploadId]),
+      ).resolves.toMatchObject([{ name: 'status.ts', mime: 'text/plain', size: source.length }]);
     } finally {
       await store.close();
     }

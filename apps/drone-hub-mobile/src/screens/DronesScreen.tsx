@@ -3,6 +3,7 @@ import { fromByteArray } from 'base64-js';
 import type { AssistantMessage } from '@drone/assistant-chat';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -73,10 +74,15 @@ import {
 } from '../drones/mobile-pending-prompts';
 import { useDroneLinkedPullRequests } from '../drones/use-drone-linked-pull-requests';
 import { useLocalDroneControl } from '../drones/local-drone-control';
-import { ChatImageStrip } from '../drones/ChatImageStrip';
+import { ChatAttachmentStrip } from '../drones/ChatAttachmentStrip';
 import { FilePreviewModal } from '../drones/FilePreviewModal';
 import { useFilePreview } from '../drones/use-file-preview';
-import { pickChatImages, type MobileChatImage } from '../drones/pick-chat-images';
+import {
+  pickChatImages,
+  type MobileChatAttachment,
+  type MobileChatImage,
+} from '../drones/pick-chat-images';
+import { pickChatFiles } from '../drones/pick-chat-files';
 import {
   mobileDroneRenameErrorMessage,
   validateMobileDroneRename,
@@ -99,11 +105,11 @@ const EMPTY_CHAT_HISTORY_PAGE: MobileChatHistoryPage = {
   contentTruncated: false,
 };
 
-function inlinePromptAttachments(images: readonly MobileChatImage[]) {
-  return images.map((image) => ({
-    name: image.name,
-    mime: image.mime,
-    dataBase64: fromByteArray(image.bytes),
+function inlinePromptAttachments(attachments: readonly MobileChatAttachment[]) {
+  return attachments.map((attachment) => ({
+    name: attachment.name,
+    mime: attachment.mime,
+    dataBase64: fromByteArray(attachment.bytes),
   }));
 }
 
@@ -118,6 +124,10 @@ function nativeUserMessageMatchesOptimisticPrompt(
   if (pending?.optimisticSent !== true) return false;
   const pendingText = String(pending?.prompt ?? '').trim();
   const pendingAt = Date.parse(String(pending?.at ?? ''));
+  const pendingAttachmentCount = Math.max(
+    0,
+    Number(pending?.attachmentCount ?? pending?.imageCount) || 0,
+  );
   const pendingImageCount = Math.max(0, Number(pending?.imageCount) || 0);
   return messages.some((message: any) => {
     if (message?.role !== 'user') return false;
@@ -135,8 +145,12 @@ function nativeUserMessageMatchesOptimisticPrompt(
     ).trim();
     const imageCount = parts.filter((part: any) => part?.type === 'image').length;
     return (
-      (pendingText && messageText === pendingText) ||
-      (!messageText && pendingImageCount > 0 && imageCount === pendingImageCount)
+      (pendingText &&
+        (messageText === pendingText || messageText.startsWith(`${pendingText}\n\nAttached files:\n`))) ||
+      (!pendingText &&
+        pendingAttachmentCount > 0 &&
+        ((pendingImageCount > 0 && imageCount === pendingImageCount) ||
+          messageText.startsWith('Attached files:\n')))
     );
   });
 }
@@ -244,7 +258,7 @@ export function DronesScreen({
   const [pendingPrompts, setPendingPrompts] = React.useState<any[]>([]);
   const [cancellingPromptId, setCancellingPromptId] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
-  const [promptImages, setPromptImages] = React.useState<MobileChatImage[]>([]);
+  const [promptAttachments, setPromptAttachments] = React.useState<MobileChatAttachment[]>([]);
   const [createRepos, setCreateRepos] = React.useState<MobileDroneCreateRepo[]>([]);
   const [createOptionsLoading, setCreateOptionsLoading] = React.useState(false);
   const [busy, setBusy] = React.useState('');
@@ -298,7 +312,7 @@ export function DronesScreen({
   React.useEffect(() => {
     setChatHistoryPage(EMPTY_CHAT_HISTORY_PAGE);
     setOlderHistoryBusy(false);
-    setPromptImages([]);
+    setPromptAttachments([]);
   }, [chatName, selected?.id, targetId]);
 
   const run = async (key: string, task: () => Promise<void>) => {
@@ -479,7 +493,7 @@ export function DronesScreen({
     setPendingPrompts([]);
     setCancellingPromptId('');
     setPrompt('');
-    setPromptImages([]);
+    setPromptAttachments([]);
     setCreateRepos([]);
     setCreateOptionsLoading(false);
     setBusy('');
@@ -859,39 +873,63 @@ export function DronesScreen({
   const addPromptImages = async () => {
     try {
       setError(null);
-      const images = await pickChatImages(promptImages);
-      if (images.length > 0) setPromptImages((current) => [...current, ...images]);
+      const images = await pickChatImages(promptAttachments);
+      if (images.length > 0) setPromptAttachments((current) => [...current, ...images]);
     } catch (nextError: any) {
       setError(nextError?.message ?? String(nextError));
     }
   };
 
-  const sendChatPromptWithImages = async (input: {
+  const addPromptFiles = async () => {
+    try {
+      setError(null);
+      const files = await pickChatFiles(promptAttachments);
+      if (files.length > 0) setPromptAttachments((current) => [...current, ...files]);
+    } catch (nextError: any) {
+      setError(nextError?.message ?? String(nextError));
+    }
+  };
+
+  const addPromptAttachment = () => {
+    if (phoneTarget || !nativeChatId) {
+      void addPromptImages();
+      return;
+    }
+    Alert.alert('Add attachment', 'Choose where to add it from.', [
+      { text: 'Photo library', onPress: () => void addPromptImages() },
+      { text: 'Files', onPress: () => void addPromptFiles() },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const sendChatPromptWithAttachments = async (input: {
     destinationId: string;
     droneId: string;
     chatName: string;
     prompt: string;
-    images: readonly MobileChatImage[];
+    attachments: readonly MobileChatAttachment[];
   }) => {
     if (input.destinationId === mesh.identity?.id) {
       return await requestDroneControl(input.destinationId, 'chat.prompt', {
         droneId: input.droneId,
         chatName: input.chatName,
         prompt: input.prompt,
-        ...(input.images.length > 0 ? { attachments: inlinePromptAttachments(input.images) } : {}),
+        ...(input.attachments.length > 0
+          ? { attachments: inlinePromptAttachments(input.attachments) }
+          : {}),
       });
     }
 
     const attachmentIds: string[] = [];
     try {
-      for (const image of input.images) {
+      for (const item of input.attachments) {
         const attachment = await mesh.uploadChatAttachment({
           targetDeviceId: input.destinationId,
           droneId: input.droneId,
           chatName: input.chatName,
-          name: image.name,
-          mime: image.mime,
-          bytes: image.bytes,
+          name: item.name,
+          mime: item.mime,
+          bytes: item.bytes,
         });
         attachmentIds.push(attachment.attachmentId);
       }
@@ -917,19 +955,19 @@ export function DronesScreen({
 
   const sendPrompt = (promptOverride?: string) => {
     const nextPrompt = String(promptOverride ?? prompt);
-    const images = promptImages;
-    if (!selected || (!nextPrompt.trim() && images.length === 0)) return;
+    const attachments = promptAttachments;
+    if (!selected || (!nextPrompt.trim() && attachments.length === 0)) return;
     const optimisticId = `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const promptSummary =
-      nextPrompt.trim() || `Attached ${images.length} image${images.length === 1 ? '' : 's'}`;
+    const promptSummary = nextPrompt.trim();
     setPrompt('');
-    setPromptImages([]);
+    setPromptAttachments([]);
     setPendingPrompts((current) => [
       ...current,
       optimisticMobilePendingPrompt({
         id: optimisticId,
         prompt: promptSummary,
-        imageCount: images.length,
+        attachmentCount: attachments.length,
+        imageCount: attachments.filter((attachment) => attachment.mime.startsWith('image/')).length,
         state: running ? 'queued' : 'sending',
       }),
     ]);
@@ -939,12 +977,12 @@ export function DronesScreen({
       const activeChat = chatName;
       let result: any;
       try {
-        result = await sendChatPromptWithImages({
+        result = await sendChatPromptWithAttachments({
           destinationId,
           droneId,
           chatName: activeChat,
           prompt: nextPrompt,
-          images,
+          attachments,
         });
       } catch (nextError: any) {
         setPendingPrompts((current) =>
@@ -1107,7 +1145,7 @@ export function DronesScreen({
               : [],
           );
           setPrompt('');
-          setPromptImages([]);
+          setPromptAttachments([]);
           setComposerFocusKey(`${createdDroneId}:default:${Date.now()}`);
         }
       }
@@ -1122,12 +1160,12 @@ export function DronesScreen({
           const droneId = String(result?.id ?? result?.droneId ?? '').trim();
           if (!droneId) throw new Error('The Drone Hub did not return the new drone id.');
           await waitForCreatedDrone(destinationId, droneId);
-          const promptResult = await sendChatPromptWithImages({
+          const promptResult = await sendChatPromptWithAttachments({
             destinationId,
             droneId,
             chatName: 'default',
             prompt: String(payload.seedPrompt ?? ''),
-            images: initialImages,
+            attachments: initialImages,
           });
           const acceptedPromptId = String(
             promptResult?.promptId ?? promptResult?.queuedPrompt?.id ?? '',
@@ -1433,7 +1471,7 @@ export function DronesScreen({
       setAccessDirty(false);
       setPendingPrompts([]);
       setPrompt('');
-      setPromptImages([]);
+      setPromptAttachments([]);
       setComposerFocusKey(`${drone.id}:${createdChat}:${Date.now()}`);
       await readChat(drone.id, createdChat);
       await loadDrones(true);
@@ -2118,18 +2156,18 @@ export function DronesScreen({
                       running={running}
                       editable
                       queueWhileRunning
-                      hasAttachments={promptImages.length > 0}
-                      onAddAttachment={() => void addPromptImages()}
+                      hasAttachments={promptAttachments.length > 0}
+                      onAddAttachment={addPromptAttachment}
                       attachmentActionsDisabled={phoneTarget && running}
-                      sendBlocked={phoneTarget && running && promptImages.length > 0}
+                      sendBlocked={phoneTarget && running && promptAttachments.length > 0}
                       footer={
-                        promptImages.length > 0 ? (
-                          <ChatImageStrip
-                            images={promptImages}
+                        promptAttachments.length > 0 ? (
+                          <ChatAttachmentStrip
+                            attachments={promptAttachments}
                             disabled={busy === 'prompt'}
                             onRemove={(id) =>
-                              setPromptImages((current) =>
-                                current.filter((image) => image.id !== id),
+                              setPromptAttachments((current) =>
+                                current.filter((attachment) => attachment.id !== id),
                               )
                             }
                           />

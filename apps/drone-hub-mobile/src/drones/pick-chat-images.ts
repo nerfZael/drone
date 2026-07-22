@@ -5,7 +5,7 @@ const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGES = 8;
 
-export type MobileChatImage = {
+export type MobileChatAttachment = {
   id: string;
   uri: string;
   name: string;
@@ -13,6 +13,8 @@ export type MobileChatImage = {
   size: number;
   bytes: Uint8Array;
 };
+
+export type MobileChatImage = MobileChatAttachment;
 
 function imageMime(value: unknown, name: string): string {
   const supplied = String(value ?? '')

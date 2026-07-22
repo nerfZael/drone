@@ -61,17 +61,23 @@ function compactPendingPrompts(value: unknown): any[] {
   const prompts = Array.isArray(value) ? value.slice(-50) : [];
   const promptLimit = Math.max(160, Math.floor(8_000 / Math.max(1, prompts.length)));
   const errorLimit = Math.max(80, Math.floor(4_000 / Math.max(1, prompts.length)));
-  return prompts.map((prompt: any) => ({
-    id: String(prompt?.id ?? '').slice(0, 160),
-    at: String(prompt?.at ?? ''),
-    prompt: truncateUtf8(prompt?.prompt, promptLimit),
-    state: ['queued', 'sending', 'sent', 'failed'].includes(String(prompt?.state ?? ''))
-      ? String(prompt.state)
-      : 'queued',
-    ...(prompt?.error ? { error: truncateUtf8(prompt.error, errorLimit) } : {}),
-    imageCount: Array.isArray(prompt?.attachments) ? prompt.attachments.length : 0,
-    updatedAt: String(prompt?.updatedAt ?? ''),
-  }));
+  return prompts.map((prompt: any) => {
+    const attachments = Array.isArray(prompt?.attachments) ? prompt.attachments : [];
+    return {
+      id: String(prompt?.id ?? '').slice(0, 160),
+      at: String(prompt?.at ?? ''),
+      prompt: truncateUtf8(prompt?.prompt, promptLimit),
+      state: ['queued', 'sending', 'sent', 'failed'].includes(String(prompt?.state ?? ''))
+        ? String(prompt.state)
+        : 'queued',
+      ...(prompt?.error ? { error: truncateUtf8(prompt.error, errorLimit) } : {}),
+      attachmentCount: attachments.length,
+      imageCount: attachments.filter((attachment: any) =>
+        String(attachment?.mime ?? '').startsWith('image/'),
+      ).length,
+      updatedAt: String(prompt?.updatedAt ?? ''),
+    };
+  });
 }
 
 const CREATE_REPO_BRANCH_PAGE_SIZE = 500;

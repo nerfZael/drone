@@ -20,7 +20,7 @@ export async function submitNativeChatPrompt(
       body: JSON.stringify({
         prompt,
         attachments: attachments.map((attachment) => ({
-          disposition: 'prompt',
+          disposition: attachment.mime.startsWith('image/') ? 'prompt' : 'artifact',
           name: attachment.name,
           mime: attachment.mime,
           dataBase64: attachment.dataBase64,

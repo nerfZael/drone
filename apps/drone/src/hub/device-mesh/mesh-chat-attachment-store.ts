@@ -36,12 +36,16 @@ function cleanId(value: unknown, label: string): string {
   return text;
 }
 
-function imageMime(value: unknown): string {
+function attachmentMime(value: unknown): string {
   const mime = String(value ?? '')
     .trim()
     .toLowerCase();
-  if (!/^image\/(?:png|jpeg|jpg|gif|webp)$/u.test(mime))
-    throw new Error('only PNG, JPEG, GIF, and WebP prompt images are supported');
+  if (
+    mime.length > 120 ||
+    !/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u.test(mime)
+  ) {
+    throw new Error('attachment MIME type is invalid');
+  }
   return mime === 'image/jpg' ? 'image/jpeg' : mime;
 }
 
@@ -85,7 +89,7 @@ export class MeshChatAttachmentStore {
     const droneId = cleanId(input.droneId, 'droneId');
     const chatName = cleanId(input.chatName, 'chatName');
     const name = cleanId(input.name, 'attachment name').slice(0, 240);
-    const mime = imageMime(input.mime);
+    const mime = attachmentMime(input.mime);
     const size = expectedSize(input.size);
     const sha256 =
       String(input.sha256 ?? '')
@@ -221,7 +225,7 @@ export class MeshChatAttachmentStore {
     const ids = Array.isArray(attachmentIds)
       ? [...new Set(attachmentIds.map((value) => String(value ?? '').trim()).filter(Boolean))]
       : [];
-    if (ids.length > 8) throw new Error('too many prompt images (max 8)');
+    if (ids.length > 8) throw new Error('too many prompt attachments (max 8)');
     const uploads = ids.map((id) => this.forSource(id, sourceDeviceId));
     let total = 0;
     for (const upload of uploads) {
@@ -229,7 +233,8 @@ export class MeshChatAttachmentStore {
       if (upload.droneId !== droneId || upload.chatName !== chatName)
         throw new Error('attachment upload belongs to another chat');
       total += upload.size;
-      if (total > 20 * 1024 * 1024) throw new Error('prompt images exceed 20 MiB in total');
+      if (total > 20 * 1024 * 1024)
+        throw new Error('prompt attachments exceed 20 MiB in total');
     }
     return await Promise.all(
       uploads.map(async (upload) => ({

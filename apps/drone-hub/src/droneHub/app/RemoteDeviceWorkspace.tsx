@@ -348,10 +348,13 @@ function RemoteMain({
             sending={model.sending}
             waiting={model.waiting}
             disabled={!routeAvailable}
-            attachmentsEnabled={false}
+            attachmentsEnabled
+            attachmentMode={model.attachmentMode}
             onStop={model.waiting ? model.stop : undefined}
             stopping={model.stopping}
-            onSend={async ({ prompt }) => await model.sendPrompt(prompt)}
+            onSend={async ({ prompt, attachments }) =>
+              await model.sendPrompt(prompt, attachments)
+            }
           />
         </>
       )}

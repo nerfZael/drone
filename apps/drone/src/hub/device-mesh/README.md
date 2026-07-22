@@ -25,7 +25,7 @@ The authenticated WebSocket is the required control path and supports direct and
 devices. Complete messages are capped at 256 KiB. Chat history is paged, oversized message bodies
 are fetched in bounded chunks, and large responses fail explicitly instead of closing the socket.
 
-Prompt images use short-lived upload sessions. A client with a direct destination endpoint uploads
+Prompt attachments use short-lived upload sessions. A client with a direct destination endpoint uploads
 the binary body over HTTP and then sends only the attachment id in `chat.prompt`. When the
 destination is reachable only through another mesh device, the same session accepts bounded base64
 chunks through `chat.prompt`. HTTP is therefore an optimization, not a connectivity requirement.
