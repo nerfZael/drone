@@ -13,6 +13,7 @@ import type { DroneSummary } from '../types';
 import { profileStorageKey } from '../../profile-storage';
 import { RIGHT_PANEL_TAB_LABELS, type RightPanelTab } from './app-config';
 import { useMobileViewport } from './use-mobile-viewport';
+import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 
 export type WorkspacePaneHeaderMode = 'normal' | 'compact';
 type WorkspacePaneKey = 'single' | 'top' | 'bottom';
@@ -45,8 +46,27 @@ const DEFAULT_NEW_TOOL_PANEL_HEIGHT = 320;
 const NEW_TOOL_PANEL_MIN_WIDTH = 360;
 const NEW_TOOL_PANEL_MAX_WIDTH = 1200;
 const PANE_HEADER_MODE_STORAGE_KEY = profileStorageKey('droneHub.workspacePaneHeaderMode');
-const LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.workspaceLayout.global');
+const LEGACY_LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.workspaceLayout.global');
 const PREVIEW_HOST_SELECTOR = '[data-dockview-preview-host="1"]';
+const disposedWorkspaceIds = new Set<string>();
+
+export function workspaceLayoutStorageKey(droneIdRaw: string): string {
+  const droneId = String(droneIdRaw ?? '').trim();
+  return profileStorageKey(`droneHub.workspaceLayout.drone.${encodeURIComponent(droneId)}`);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener(DRONE_WORKSPACE_STATE_DISPOSE_EVENT, (event) => {
+    const droneId = disposedDroneIdFromEvent(event);
+    if (!droneId) return;
+    disposedWorkspaceIds.add(droneId);
+    try {
+      window.localStorage.removeItem(workspaceLayoutStorageKey(droneId));
+    } catch {
+      // Ignore localStorage cleanup failures.
+    }
+  });
+}
 
 function previewHostStatesEqual(a: PreviewHostState, b: PreviewHostState): boolean {
   return (
@@ -122,10 +142,9 @@ export function writeWorkspacePaneHeaderMode(mode: WorkspacePaneHeaderMode): voi
   localStorage.setItem(PANE_HEADER_MODE_STORAGE_KEY, mode);
 }
 
-function readStoredLayout(): SerializedDockview | null {
-  if (typeof localStorage === 'undefined') return null;
+function parseStoredLayout(raw: string | null): SerializedDockview | null {
   try {
-    const parsed = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? 'null');
+    const parsed = JSON.parse(raw ?? 'null');
     return parsed && typeof parsed === 'object' && 'grid' in parsed && 'panels' in parsed
       ? (parsed as SerializedDockview)
       : null;
@@ -134,9 +153,16 @@ function readStoredLayout(): SerializedDockview | null {
   }
 }
 
-function writeStoredLayout(layout: SerializedDockview): void {
+function readStoredLayout(droneId: string): SerializedDockview | null {
+  if (typeof localStorage === 'undefined') return null;
+  const stored = parseStoredLayout(localStorage.getItem(workspaceLayoutStorageKey(droneId)));
+  if (stored) return stored;
+  return parseStoredLayout(localStorage.getItem(LEGACY_LAYOUT_STORAGE_KEY));
+}
+
+function writeStoredLayout(droneId: string, layout: SerializedDockview): void {
   if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layout));
+  localStorage.setItem(workspaceLayoutStorageKey(droneId), JSON.stringify(layout));
 }
 
 function ensurePanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePaneKey, referencePanel: string = CHAT_PANEL_ID): boolean {
@@ -330,13 +356,13 @@ export function DockableDroneWorkspace({
 
   const persistCurrentLayout = React.useCallback(() => {
     const api = apiRef.current;
-    if (!api || suppressSaveRef.current) return;
+    if (!api || suppressSaveRef.current || disposedWorkspaceIds.has(currentDrone.id)) return;
     try {
-      writeStoredLayout(api.toJSON());
+      writeStoredLayout(currentDrone.id, api.toJSON());
     } catch {
       // Ignore layout persistence failures; the active workspace can keep running.
     }
-  }, []);
+  }, [currentDrone.id]);
 
   const rebalanceWorkspaceGridGroups = React.useCallback((afterRebalance?: () => void) => {
     const api = apiRef.current;
@@ -364,7 +390,7 @@ export function DockableDroneWorkspace({
     if (!api) return;
     suppressSaveRef.current = true;
     try {
-      const stored = readStoredLayout();
+      const stored = readStoredLayout(currentDrone.id);
       if (stored && toolPaneOpen) {
         api.fromJSON(stored, { reuseExistingPanels: true });
         ensureChatPanel(api);
@@ -381,7 +407,7 @@ export function DockableDroneWorkspace({
       updateWorkspacePanelState();
       persistCurrentLayout();
     }
-  }, [activeToolTab, openRequestNonce, persistCurrentLayout, toolPaneOpen, updateWorkspacePanelState]);
+  }, [activeToolTab, currentDrone.id, openRequestNonce, persistCurrentLayout, toolPaneOpen, updateWorkspacePanelState]);
 
   const handleReady = React.useCallback(
     (event: DockviewReadyEvent) => {
@@ -426,10 +452,11 @@ export function DockableDroneWorkspace({
 
   React.useEffect(() => {
     return () => {
+      persistCurrentLayout();
       disposablesRef.current.forEach((disposable) => disposable.dispose());
       disposablesRef.current = [];
     };
-  }, []);
+  }, [persistCurrentLayout]);
 
   const handleWorkspaceMouseDownCapture = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;

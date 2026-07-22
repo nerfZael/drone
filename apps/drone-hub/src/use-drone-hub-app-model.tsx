@@ -6,11 +6,12 @@ import {
   normalizeChatInfoPayload,
 } from './domain';
 import { requestJson } from './droneHub/http';
+import { disposeDroneWorkspaceState } from './droneHub/workspace-state-events';
 import { activeProfileStorageId, persistProfileStorageIdOverride } from './profile-storage';
 import { requestGuidedOnboardingReplay, resetGuidedOnboardingDismissals } from './onboarding/control';
 import { copyText } from './droneHub/app/clipboard';
 import { isCanvasDraftNodeId, useDroneCanvasStore } from './droneHub/canvas/use-drone-canvas-store';
-import { WHITEBOARD_ACTIVE_STORAGE_KEY, WHITEBOARD_OPEN_EVENT } from './droneHub/whiteboard/whiteboard-events';
+import { WHITEBOARD_OPEN_EVENT, writeActiveWhiteboardId } from './droneHub/whiteboard/whiteboard-events';
 import {
   BUILTIN_AGENT_OPTIONS,
   HUB_LOGS_MAX_BYTES,
@@ -961,6 +962,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (!droneId) return false;
       const deleted = await deleteDroneBase(droneId, opts);
       if (!deleted) return false;
+      disposeDroneWorkspaceState(droneId);
       setSidebarChatOrderByDrone((prev) => {
         if (!(droneId in prev)) return prev;
         const next = { ...prev };
@@ -1644,13 +1646,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
       if (action.type === 'open_whiteboard') {
         const whiteboardId = String(action.whiteboardId ?? '').trim() || 'main';
-        try {
-          window.localStorage.setItem(WHITEBOARD_ACTIVE_STORAGE_KEY, whiteboardId);
-        } catch {
-          // Ignore localStorage failures; the panel will fall back to main.
-        }
+        const droneId = String(selectedDrone ?? '').trim();
+        if (droneId) writeActiveWhiteboardId(droneId, whiteboardId);
         requestRightPanelTab('whiteboard');
-        window.dispatchEvent(new CustomEvent(WHITEBOARD_OPEN_EVENT, { detail: { whiteboardId } }));
+        window.dispatchEvent(new CustomEvent(WHITEBOARD_OPEN_EVENT, { detail: { droneId, whiteboardId } }));
         return;
       }
       if (action.type === 'close_whiteboard') {

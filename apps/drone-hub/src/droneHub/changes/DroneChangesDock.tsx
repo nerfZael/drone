@@ -1,4 +1,5 @@
 import React from 'react';
+import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 import {
   pullRequestCloseConfirmation,
   pullRequestMergeConfirmation,
@@ -102,6 +103,21 @@ type ChangesContextMode = 'branch' | 'pull-request';
 type ChangesPrimaryView = 'changes' | 'commits';
 type BranchChangesMode = Exclude<ChangesDataMode, 'pull-request'>;
 type LastRefreshedByMode = Record<ChangesDataMode, number | null>;
+type ChangesWorkspaceUiSnapshot = {
+  pullRequestNumber: number | null;
+  contextMode: ChangesContextMode;
+  primaryView: ChangesPrimaryView;
+  branchChangesMode: BranchChangesMode;
+  selectedPath: string | null;
+  selectedCommitSha: string | null;
+  commitFileSelectedPath: string | null;
+  splitKind: DiffKind;
+  stackedPreferredKind: DiffKind;
+  expandedDirs: Record<string, boolean>;
+  expandedPullFiles: Record<string, boolean>;
+  expandedCommitDirs: Record<string, boolean>;
+  expandedCommitFiles: Record<string, boolean>;
+};
 const EXPLORER_SIDEBAR_MIN_WIDTH_PX = 180;
 const EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX = 240;
 const EXPLORER_SIDEBAR_MAX_WIDTH_PX = 360;
@@ -128,6 +144,14 @@ const workingTreeChangesInflight = new Map<string, Promise<Extract<RepoChangesPa
 const pullPreviewChangesCache: ChangesCacheMap<Extract<RepoPullChangesPayload, { ok: true }>> = new Map();
 const pullRequestChangesCache: ChangesCacheMap<Extract<RepoPullRequestChangesPayload, { ok: true }>> = new Map();
 const branchCommitListCache: ChangesCacheMap<Extract<RepoCommitListPayload, { ok: true }>> = new Map();
+const changesWorkspaceUiByDrone = new Map<string, ChangesWorkspaceUiSnapshot>();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener(DRONE_WORKSPACE_STATE_DISPOSE_EVENT, (event) => {
+    const droneId = disposedDroneIdFromEvent(event);
+    if (droneId) changesWorkspaceUiByDrone.delete(droneId);
+  });
+}
 const pullRequestCommitListCache: ChangesCacheMap<Extract<RepoPullRequestCommitListPayload, { ok: true }>> = new Map();
 const branchCommitDetailsCache: ChangesCacheMap<Extract<RepoCommitChangesPayload, { ok: true }>> = new Map();
 const pullRequestCommitDetailsCache: ChangesCacheMap<Extract<RepoPullRequestCommitChangesPayload, { ok: true }>> = new Map();
@@ -290,6 +314,10 @@ export function DroneChangesDock({
   onOpenFileInEditor: (repoRelativePath: string) => void;
 }) {
   const confirm = useAppConfirmDialog();
+  const workspaceSnapshotRef = React.useRef<ChangesWorkspaceUiSnapshot | null>(
+    changesWorkspaceUiByDrone.get(droneId) ?? null,
+  );
+  const workspaceSnapshot = workspaceSnapshotRef.current;
   const [refreshNonce, setRefreshNonce] = React.useState(0);
   const [changes, setChanges] = React.useState<Extract<RepoChangesPayload, { ok: true }> | null>(null);
   const [changesLoading, setChangesLoading] = React.useState(false);
@@ -308,7 +336,7 @@ export function DroneChangesDock({
   const pullChangesRef = React.useRef<Extract<RepoPullChangesPayload, { ok: true }> | null>(null);
   const initialRequestedPullNumberRef = React.useRef<number | null>(requestedPullRequestForDrone(droneId));
   const [pullRequestNumber, setPullRequestNumber] = React.useState<number | null>(
-    () => initialRequestedPullNumberRef.current ?? selectedPullRequestForDrone(droneId),
+    () => initialRequestedPullNumberRef.current ?? workspaceSnapshot?.pullRequestNumber ?? selectedPullRequestForDrone(droneId),
   );
   const [pullRequestChanges, setPullRequestChanges] = React.useState<Extract<RepoPullRequestChangesPayload, { ok: true }> | null>(null);
   const [pullRequestLoading, setPullRequestLoading] = React.useState(false);
@@ -342,16 +370,18 @@ export function DroneChangesDock({
     if (fixedContextMode) return fixedContextMode;
     return initialRequestedPullNumberRef.current && initialRequestedPullNumberRef.current > 0
       ? 'pull-request'
-      : readChangesStorage(CHANGES_CONTEXT_STORAGE_KEY) === 'pull-request'
-        ? 'pull-request'
-        : 'branch';
+      : workspaceSnapshot?.contextMode
+        ? workspaceSnapshot.contextMode
+        : readChangesStorage(CHANGES_CONTEXT_STORAGE_KEY) === 'pull-request'
+          ? 'pull-request'
+          : 'branch';
   });
   const contextMode = fixedContextMode ?? contextModeState;
   const [primaryView, setPrimaryView] = React.useState<ChangesPrimaryView>(() =>
-    readChangesStorage(CHANGES_PRIMARY_VIEW_STORAGE_KEY) === 'commits' ? 'commits' : 'changes',
+    workspaceSnapshot?.primaryView ?? (readChangesStorage(CHANGES_PRIMARY_VIEW_STORAGE_KEY) === 'commits' ? 'commits' : 'changes'),
   );
   const [branchChangesMode, setBranchChangesMode] = React.useState<BranchChangesMode>(() =>
-    readChangesStorage(CHANGES_BRANCH_MODE_STORAGE_KEY) === 'pull-preview' ? 'pull-preview' : 'working-tree',
+    workspaceSnapshot?.branchChangesMode ?? (readChangesStorage(CHANGES_BRANCH_MODE_STORAGE_KEY) === 'pull-preview' ? 'pull-preview' : 'working-tree'),
   );
   const dataMode: ChangesDataMode = contextMode === 'pull-request' ? 'pull-request' : branchChangesMode;
 
@@ -368,15 +398,15 @@ export function DroneChangesDock({
   const [hideViewed, setHideViewed] = React.useState<boolean>(() => readChangesStorage(CHANGES_HIDE_VIEWED_STORAGE_KEY) === '1');
   const [viewedStore, setViewedStore] = React.useState(() => readViewedChangesStore());
 
-  const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
-  const [selectedCommitSha, setSelectedCommitSha] = React.useState<string | null>(null);
-  const [commitFileSelectedPath, setCommitFileSelectedPath] = React.useState<string | null>(null);
-  const [splitKind, setSplitKind] = React.useState<DiffKind>('unstaged');
-  const [stackedPreferredKind, setStackedPreferredKind] = React.useState<DiffKind>('unstaged');
-  const [expandedDirs, setExpandedDirs] = React.useState<Record<string, boolean>>({});
-  const [expandedPullFiles, setExpandedPullFiles] = React.useState<Record<string, boolean>>({});
-  const [expandedCommitDirs, setExpandedCommitDirs] = React.useState<Record<string, boolean>>({});
-  const [expandedCommitFiles, setExpandedCommitFiles] = React.useState<Record<string, boolean>>({});
+  const [selectedPath, setSelectedPath] = React.useState<string | null>(workspaceSnapshot?.selectedPath ?? null);
+  const [selectedCommitSha, setSelectedCommitSha] = React.useState<string | null>(workspaceSnapshot?.selectedCommitSha ?? null);
+  const [commitFileSelectedPath, setCommitFileSelectedPath] = React.useState<string | null>(workspaceSnapshot?.commitFileSelectedPath ?? null);
+  const [splitKind, setSplitKind] = React.useState<DiffKind>(workspaceSnapshot?.splitKind ?? 'unstaged');
+  const [stackedPreferredKind, setStackedPreferredKind] = React.useState<DiffKind>(workspaceSnapshot?.stackedPreferredKind ?? 'unstaged');
+  const [expandedDirs, setExpandedDirs] = React.useState<Record<string, boolean>>(workspaceSnapshot?.expandedDirs ?? {});
+  const [expandedPullFiles, setExpandedPullFiles] = React.useState<Record<string, boolean>>(workspaceSnapshot?.expandedPullFiles ?? {});
+  const [expandedCommitDirs, setExpandedCommitDirs] = React.useState<Record<string, boolean>>(workspaceSnapshot?.expandedCommitDirs ?? {});
+  const [expandedCommitFiles, setExpandedCommitFiles] = React.useState<Record<string, boolean>>(workspaceSnapshot?.expandedCommitFiles ?? {});
   const [branchCommitList, setBranchCommitList] = React.useState<Extract<RepoCommitListPayload, { ok: true }> | null>(null);
   const [branchCommitListLoading, setBranchCommitListLoading] = React.useState(false);
   const [branchCommitListError, setBranchCommitListError] = React.useState<string | null>(null);
@@ -453,6 +483,39 @@ export function DroneChangesDock({
   const explorerIndentStepPx = Math.max(9, Math.round(9 * explorerZoom));
   const explorerBadgeMinWidthPx = Math.max(22, Math.round(22 * explorerZoom));
   const explorerBadgeHeightPx = Math.max(16, Math.round(16 * explorerZoom));
+
+  React.useEffect(() => {
+    changesWorkspaceUiByDrone.set(droneId, {
+      pullRequestNumber,
+      contextMode,
+      primaryView,
+      branchChangesMode,
+      selectedPath,
+      selectedCommitSha,
+      commitFileSelectedPath,
+      splitKind,
+      stackedPreferredKind,
+      expandedDirs,
+      expandedPullFiles,
+      expandedCommitDirs,
+      expandedCommitFiles,
+    });
+  }, [
+    branchChangesMode,
+    commitFileSelectedPath,
+    contextMode,
+    droneId,
+    expandedCommitDirs,
+    expandedCommitFiles,
+    expandedDirs,
+    expandedPullFiles,
+    primaryView,
+    pullRequestNumber,
+    selectedCommitSha,
+    selectedPath,
+    splitKind,
+    stackedPreferredKind,
+  ]);
   const markModeRefreshed = React.useCallback((mode: ChangesDataMode) => {
     const now = Date.now();
     setLastRefreshedByMode((prev) => ({ ...prev, [mode]: now }));
@@ -1290,28 +1353,33 @@ export function DroneChangesDock({
 
   React.useEffect(() => {
     setSelectedPath((prev) => {
-      if (entries.length === 0) return null;
+      if (entries.length === 0) {
+        return listLoading || activeListCacheKey !== loadedListCacheKey ? prev : null;
+      }
       if (prev && entries.some((e) => e.path === prev)) return prev;
       return entries[0].path;
     });
-  }, [entriesSignature]);
+  }, [activeListCacheKey, entriesSignature, listLoading, loadedListCacheKey]);
 
   React.useEffect(() => {
     if (primaryView !== 'commits') return;
     setSelectedCommitSha((prev) => {
-      if (commitList.length === 0) return null;
+      if (commitList.length === 0) {
+        return commitListLoading || activeCommitListCacheKey !== loadedCommitListCacheKey ? prev : null;
+      }
       if (prev && commitList.some((entry) => entry.sha === prev)) return prev;
       return null;
     });
-  }, [commitList, primaryView]);
+  }, [activeCommitListCacheKey, commitList, commitListLoading, loadedCommitListCacheKey, primaryView]);
 
   React.useEffect(() => {
     setCommitFileSelectedPath((prev) => {
-      if (commitEntries.length === 0) return null;
+      if (commitEntries.length === 0) return activeCommitDetailsLoading ? prev : null;
       if (prev && commitEntries.some((entry) => entry.path === prev)) return prev;
       return commitEntries[0].path;
     });
   }, [
+    activeCommitDetailsLoading,
     selectedCommitSha,
     activeCommitDetails?.commit.sha,
     commitEntries,

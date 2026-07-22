@@ -7,49 +7,30 @@ import {
   saveWhiteboard,
 } from './whiteboard-api';
 import type { WhiteboardDocument, WhiteboardScene, WhiteboardSummary } from './whiteboard-types';
+import {
+  readActiveWhiteboardId,
+  WHITEBOARD_OPEN_EVENT,
+  writeActiveWhiteboardId,
+} from './whiteboard-events';
 
 const SAVE_DEBOUNCE_MS = 900;
-const WHITEBOARD_OPEN_EVENT = 'dronehub:whiteboard-open';
+const initialWhiteboardCreationByDrone = new Map<string, ReturnType<typeof createWhiteboard>>();
 
-function normalizeProfileId(raw: unknown): string {
-  const value = String(raw ?? '')
-    .trim()
-    .toLowerCase();
-  if (!value) return '';
-  return /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/.test(value) ? value : '';
-}
-
-function readStoredProfileOverride(): string {
-  if (typeof localStorage === 'undefined') return '';
+async function createInitialWhiteboard(droneId: string) {
+  const existingRequest = initialWhiteboardCreationByDrone.get(droneId);
+  if (existingRequest) return await existingRequest;
+  const request = (async () => {
+    const listed = await listWhiteboards(droneId);
+    const existingId = listed.whiteboards[0]?.id;
+    return existingId ? await readWhiteboard(existingId) : await createWhiteboard('Whiteboard 1', droneId);
+  })();
+  initialWhiteboardCreationByDrone.set(droneId, request);
   try {
-    return normalizeProfileId(localStorage.getItem('droneHub.activeProfileOverride'));
-  } catch {
-    return '';
-  }
-}
-
-function whiteboardProfileStorageKey(baseKeyRaw: string): string {
-  const baseKey = String(baseKeyRaw ?? '').trim();
-  if (!baseKey) return '';
-  const profileId = readStoredProfileOverride() || normalizeProfileId(import.meta.env.VITE_DRONE_PROFILE_ID);
-  return profileId ? `${baseKey}:${profileId}` : baseKey;
-}
-
-const WHITEBOARD_ACTIVE_STORAGE_KEY = whiteboardProfileStorageKey('droneHub.whiteboard.activeId');
-
-function readStoredWhiteboardId(): string {
-  try {
-    return String(window.localStorage.getItem(WHITEBOARD_ACTIVE_STORAGE_KEY) ?? '').trim() || 'main';
-  } catch {
-    return 'main';
-  }
-}
-
-function writeStoredWhiteboardId(id: string): void {
-  try {
-    window.localStorage.setItem(WHITEBOARD_ACTIVE_STORAGE_KEY, id);
-  } catch {
-    // Ignore localStorage failures; the backend remains authoritative.
+    return await request;
+  } finally {
+    if (initialWhiteboardCreationByDrone.get(droneId) === request) {
+      initialWhiteboardCreationByDrone.delete(droneId);
+    }
   }
 }
 
@@ -107,9 +88,10 @@ export type UseWhiteboardStateResult = {
   handleCreate: () => Promise<void>;
 };
 
-export function useWhiteboardState(): UseWhiteboardStateResult {
+export function useWhiteboardState(droneIdRaw: string): UseWhiteboardStateResult {
+  const droneId = String(droneIdRaw ?? '').trim();
   const [whiteboards, setWhiteboards] = React.useState<WhiteboardSummary[]>([]);
-  const [activeId, setActiveId] = React.useState(() => (typeof window === 'undefined' ? 'main' : readStoredWhiteboardId()));
+  const [activeId, setActiveId] = React.useState(() => readActiveWhiteboardId(droneId));
   const [document, setDocument] = React.useState<WhiteboardDocument | null>(null);
   const [editorKey, setEditorKey] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
@@ -143,10 +125,10 @@ export function useWhiteboardState(): UseWhiteboardStateResult {
   }, []);
 
   const refreshList = React.useCallback(async () => {
-    const listed = await listWhiteboards();
+    const listed = await listWhiteboards(droneId);
     setWhiteboards(listed.whiteboards);
     return listed.whiteboards;
-  }, []);
+  }, [droneId]);
 
   const refreshListInBackground = React.useCallback(() => {
     void refreshList().catch((e: any) => {
@@ -164,7 +146,7 @@ export function useWhiteboardState(): UseWhiteboardStateResult {
         const loaded = await readWhiteboard(id);
         if (loadSequence !== loadSequenceRef.current) return;
         const normalized = { ...loaded.whiteboard, scene: normalizeWhiteboardScene(loaded.whiteboard.scene) };
-        writeStoredWhiteboardId(normalized.id);
+        writeActiveWhiteboardId(droneId, normalized.id);
         setActiveId(normalized.id);
         setDocument(normalized);
         latestSceneRef.current = normalized.scene;
@@ -182,7 +164,7 @@ export function useWhiteboardState(): UseWhiteboardStateResult {
         if (loadSequence === loadSequenceRef.current) setLoading(false);
       }
     },
-    [clearSaveTimer, refreshListInBackground],
+    [clearSaveTimer, droneId, refreshListInBackground],
   );
 
   const runSave = React.useCallback(async () => {
@@ -259,7 +241,17 @@ export function useWhiteboardState(): UseWhiteboardStateResult {
       setLoading(true);
       try {
         if (cancelled) return;
-        await loadDocument(activeId || 'main');
+        const listed = await refreshList();
+        if (cancelled) return;
+        const storedId = readActiveWhiteboardId(droneId);
+        const preferredId = listed.some((item) => item.id === storedId) ? storedId : listed[0]?.id ?? '';
+        if (preferredId) {
+          await loadDocument(preferredId);
+        } else {
+          const created = await createInitialWhiteboard(droneId);
+          if (cancelled) return;
+          await loadDocument(created.whiteboard.id);
+        }
       } catch (e: any) {
         if (!cancelled) setError(String(e?.message ?? e ?? 'Failed to initialize whiteboards.'));
       } finally {
@@ -270,21 +262,24 @@ export function useWhiteboardState(): UseWhiteboardStateResult {
     return () => {
       cancelled = true;
       loadSequenceRef.current += 1;
-      clearSaveTimer();
+      if (dirtyRef.current) void runSave();
+      else clearSaveTimer();
     };
-    // Run only once on mount; active document changes are handled explicitly.
+    // Run only once per keyed drone mount; active document changes are handled explicitly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   React.useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ whiteboardId?: string }>).detail;
+      const detail = (event as CustomEvent<{ droneId?: string; whiteboardId?: string }>).detail;
+      const targetDroneId = String(detail?.droneId ?? '').trim();
+      if (targetDroneId && targetDroneId !== droneId) return;
       const id = String(detail?.whiteboardId ?? '').trim() || 'main';
       void loadDocument(id);
     };
     window.addEventListener(WHITEBOARD_OPEN_EVENT, handler);
     return () => window.removeEventListener(WHITEBOARD_OPEN_EVENT, handler);
-  }, [loadDocument]);
+  }, [droneId, loadDocument]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
@@ -304,7 +299,13 @@ export function useWhiteboardState(): UseWhiteboardStateResult {
         void (async () => {
           const listed = await refreshList();
           if (current?.id === changedId) {
-            await loadDocument(listed[0]?.id ?? 'main');
+            const nextId = listed[0]?.id;
+            if (nextId) {
+              await loadDocument(nextId);
+            } else {
+              const created = await createInitialWhiteboard(droneId);
+              await loadDocument(created.whiteboard.id);
+            }
             setNotice('Whiteboard was deleted elsewhere.');
           }
         })();
@@ -377,7 +378,7 @@ export function useWhiteboardState(): UseWhiteboardStateResult {
     setLoading(true);
     setError(null);
     try {
-      const created = await createWhiteboard(title);
+      const created = await createWhiteboard(title, droneId);
       await refreshList();
       await loadDocument(created.whiteboard.id);
     } catch (e: any) {
@@ -385,7 +386,7 @@ export function useWhiteboardState(): UseWhiteboardStateResult {
     } finally {
       setLoading(false);
     }
-  }, [loadDocument, refreshList, whiteboards.length]);
+  }, [droneId, loadDocument, refreshList, whiteboards.length]);
 
   const activeInitialData = React.useMemo<ExcalidrawInitialDataState>(() => {
     const scene = normalizeWhiteboardScene(document?.scene);
