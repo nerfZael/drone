@@ -262,6 +262,23 @@ export type MarkdownTextMentionLink = {
 
 export type MarkdownBlockCopyActionRenderer = (text: string) => React.ReactNode;
 
+export type MarkdownCodeBlockRenderer = (input: {
+  code: string;
+  language: string;
+}) => React.ReactElement;
+
+export type MarkdownMessageProps = {
+  text: string;
+  className?: string;
+  onOpenFileReference?: (ref: MarkdownFileReference) => void;
+  onOpenLink?: (href: string) => boolean;
+  textMentionLinks?: MarkdownTextMentionLink[];
+  onOpenTextMention?: (mention: MarkdownTextMentionLink) => void;
+  renderBlockCopyAction?: MarkdownBlockCopyActionRenderer;
+  renderCodeBlock?: MarkdownCodeBlockRenderer;
+  preferOpenLinkBeforeModifiedClick?: boolean;
+};
+
 type PreparedTextMentionLink = MarkdownTextMentionLink & {
   lowerLabel: string;
 };
@@ -471,17 +488,9 @@ export function MarkdownMessage({
   textMentionLinks,
   onOpenTextMention,
   renderBlockCopyAction,
+  renderCodeBlock,
   preferOpenLinkBeforeModifiedClick = false,
-}: {
-  text: string;
-  className?: string;
-  onOpenFileReference?: (ref: MarkdownFileReference) => void;
-  onOpenLink?: (href: string) => boolean;
-  textMentionLinks?: MarkdownTextMentionLink[];
-  onOpenTextMention?: (mention: MarkdownTextMentionLink) => void;
-  renderBlockCopyAction?: MarkdownBlockCopyActionRenderer;
-  preferOpenLinkBeforeModifiedClick?: boolean;
-}) {
+}: MarkdownMessageProps) {
   const handleAnchorClick = React.useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>, hrefText: string) => {
       if (!onOpenLink || !hrefText) return;
@@ -578,6 +587,10 @@ export function MarkdownMessage({
               const raw = flattenText(children);
               const hasLanguageClass = typeof codeClassName === 'string' && codeClassName.includes('language-');
               const isInline = !hasLanguageClass && !raw.includes('\n');
+              if (!isInline && renderCodeBlock) {
+                const language = /(?:^|\s)language-([^\s]+)/.exec(codeClassName ?? '')?.[1] ?? '';
+                return renderCodeBlock({ code: raw.replace(/\n$/, ''), language });
+              }
               const href = isInline ? parseInlineCodeLinkHref(raw) : null;
               if (href) {
                 return (
@@ -644,11 +657,23 @@ export function MarkdownMessage({
                 </div>
               ) : blockquote;
             },
-            pre: ({ children, node: _node, ...props }) => (
-              <div className="dh-markdown-block dh-markdown-block--wide">
-                <pre {...props}>{children}</pre>
-              </div>
-            ),
+            pre: ({ children, node: _node, ...props }) => {
+              const childList = React.Children.toArray(children);
+              const onlyChild = childList.length === 1 ? childList[0] : null;
+              if (
+                React.isValidElement(onlyChild) &&
+                (onlyChild.props as Record<string, unknown>)['data-markdown-code-block'] === true
+              ) {
+                return (
+                  <div className="dh-markdown-block dh-markdown-block--wide">{onlyChild}</div>
+                );
+              }
+              return (
+                <div className="dh-markdown-block dh-markdown-block--wide">
+                  <pre {...props}>{children}</pre>
+                </div>
+              );
+            },
             table: ({ children, node, ...props }) => {
               const tableId = tableIdFromNode(node, children);
               const mode = tableModes[tableId] ?? 'fit';

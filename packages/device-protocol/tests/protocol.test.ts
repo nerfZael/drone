@@ -76,6 +76,10 @@ describe('device protocol', () => {
     ).toBe(false);
   });
 
+  test('advertises drone rename as an explicit permission', () => {
+    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('drone.rename');
+  });
+
   test('public pairing endpoints require a safe HTTPS origin', () => {
     expect(() =>
       parsePairingPayload({

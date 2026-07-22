@@ -18,6 +18,7 @@ describe('device mesh drone summaries', () => {
         fleetParentId: 'drone_parent',
         chats: ['default', 'review'],
         busyChats: ['review'],
+        approvalChats: ['default'],
         lastMessageAt: '2026-07-14T10:00:00.000Z',
         statusOk: false,
         statusError: 'offline',
@@ -31,6 +32,8 @@ describe('device mesh drone summaries', () => {
       group: 'Review',
       chats: ['default', 'review'],
       busyChats: ['review'],
+      approvalChats: ['default'],
+      approvalRequired: true,
       lastMessageAt: '2026-07-14T10:00:00.000Z',
       statusOk: false,
       statusError: 'offline',
@@ -262,6 +265,38 @@ describe('device mesh drone summaries', () => {
         },
       });
       expect((request as { body: any } | null)?.body.autoRename).toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('forwards mobile drone renames to the Hub rename endpoint', async () => {
+    const originalFetch = globalThis.fetch;
+    let request: { path: string; method: string; body: any } | null = null;
+    globalThis.fetch = (async (input, init) => {
+      request = {
+        path: new URL(String(input)).pathname,
+        method: String(init?.method ?? 'GET'),
+        body: JSON.parse(String(init?.body ?? '{}')),
+      };
+      return Response.json({ ok: true, id: 'drone-one', newName: 'Review drone' });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('drone.rename', {
+          droneId: 'drone-one',
+          newName: 'Review drone',
+        }),
+      ).resolves.toMatchObject({ ok: true, newName: 'Review drone' });
+      expect(request).toEqual({
+        path: '/api/drones/drone-one/rename',
+        method: 'POST',
+        body: { newName: 'Review drone', source: 'drone-hub-mobile' },
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }

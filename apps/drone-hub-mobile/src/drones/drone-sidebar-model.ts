@@ -26,6 +26,7 @@ export type MobileDroneSummary = {
   fleetParentId: string | null;
   chats: string[];
   busyChats: string[];
+  approvalChats?: string[];
   approvalRequired?: boolean;
   unreadChats?: string[];
   chatReadStates?: Record<
@@ -286,6 +287,9 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
     Object.keys(chatReadStates).length > 0
       ? chats.filter((chatName) => chatReadStates[chatName]?.unread === true)
       : stringList(value.unreadChats).filter((chatName) => chats.includes(chatName));
+  const approvalChats = stringList(value.approvalChats).filter((chatName) =>
+    chats.includes(chatName),
+  );
   return {
     id,
     name: text(value.name || value.id) || id,
@@ -313,9 +317,11 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
     fleetParentId: text(value.fleetParentId) || null,
     chats,
     busyChats: stringList(value.busyChats),
+    approvalChats,
     approvalRequired:
       value.approvalRequired === true ||
       value.requiresApproval === true ||
+      approvalChats.length > 0 ||
       /approval/.test(`${text(value.phase)} ${text(value.status)}`.toLowerCase()),
     unreadChats,
     chatReadStates,

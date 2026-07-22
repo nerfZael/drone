@@ -1231,6 +1231,102 @@ code, pre {
   word-break: break-word;
 }
 
+.dh-code-card {
+  overflow: hidden;
+  border: 1px solid var(--code-block-border);
+  border-radius: 8px;
+  background: var(--code-block-bg);
+}
+.dh-code-card__header {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-inset);
+}
+.dh-code-card__mark {
+  display: inline-flex;
+  height: 18px;
+  min-width: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--accent-muted);
+  border-radius: 4px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font: var(--weight-bold) var(--text-9)/1 var(--code);
+}
+.dh-code-card__language {
+  overflow: hidden;
+  color: var(--muted);
+  font: var(--weight-semibold) var(--text-10)/1 var(--code);
+  letter-spacing: .08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.dh-code-card__scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.dh-code-card__scroll:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+.dh-code-card pre,
+.dh-markdown .dh-code-card pre {
+  min-width: max-content;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 12px 14px;
+  overflow: visible;
+}
+.dh-code-card pre code,
+.dh-markdown .dh-code-card pre code {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.dh-markdown .token.comment,
+.dh-markdown .token.prolog,
+.dh-markdown .token.doctype,
+.dh-markdown .token.cdata { color: var(--syntax-comment); }
+.dh-markdown .token.punctuation { color: var(--syntax-punctuation); }
+.dh-markdown .token.property { color: var(--syntax-property); }
+.dh-markdown .token.tag,
+.dh-markdown .token.symbol,
+.dh-markdown .token.deleted { color: var(--syntax-symbol); }
+.dh-markdown .token.constant,
+.dh-markdown .token.boolean,
+.dh-markdown .token.number { color: var(--syntax-number); }
+.dh-markdown .token.selector,
+.dh-markdown .token.string,
+.dh-markdown .token.char,
+.dh-markdown .token.inserted { color: var(--syntax-string); }
+.dh-markdown .token.attr-name,
+.dh-markdown .token.class-name,
+.dh-markdown .token.annotation { color: var(--syntax-type); }
+.dh-markdown .token.builtin,
+.dh-markdown .token.important { color: var(--syntax-symbol); }
+.dh-markdown .token.entity,
+.dh-markdown .token.url,
+.dh-markdown .language-css .token.string,
+.dh-markdown .style .token.string { color: var(--syntax-property); }
+.dh-markdown .token.operator { color: var(--syntax-operator); }
+.dh-markdown .token.atrule,
+.dh-markdown .token.keyword { color: var(--syntax-keyword); }
+.dh-markdown .token.attr-value { color: var(--syntax-string); }
+.dh-markdown .token.function { color: var(--syntax-function); }
+.dh-markdown .token.regex,
+.dh-markdown .token.regex-delimiter { color: var(--syntax-regex); }
+.dh-markdown .token.macro { color: var(--syntax-macro); }
+.dh-markdown .token.variable { color: var(--syntax-variable); }
+
 .dh-markdown-block {
   margin: .9rem 0;
 }

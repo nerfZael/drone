@@ -29,6 +29,7 @@ export const DRONE_CONTROL_OPERATIONS = [
   'repo.pull-requests.close',
   'drone.create.container',
   'drone.create.host',
+  'drone.rename',
   'drone.delete',
 ] as const;
 

@@ -24,7 +24,12 @@ describe('mobile drone state summary', () => {
 
   test('keeps approval ahead of working from either server or active-chat state', () => {
     const [serverApproval, activeChatApproval] = normalizeMobileDrones([
-      { id: 'server', approvalRequired: true, busyChats: ['default'] },
+      {
+        id: 'server',
+        chats: ['default', 'review'],
+        approvalChats: ['review'],
+        busyChats: ['default'],
+      },
       { id: 'active-chat', busyChats: ['default'] },
     ]);
     expect(serverApproval).toBeDefined();
@@ -32,6 +37,7 @@ describe('mobile drone state summary', () => {
     if (!serverApproval || !activeChatApproval) return;
 
     expect(withMobileApprovalRequired(serverApproval, false)).toBe(serverApproval);
+    expect(serverApproval.approvalChats).toEqual(['review']);
     expect(mobileDroneDisplayState(serverApproval)).toBe('approval');
 
     const derivedApproval = withMobileApprovalRequired(activeChatApproval, true);

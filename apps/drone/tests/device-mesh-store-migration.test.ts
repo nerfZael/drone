@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { migrateLegacyNativeChatGrants } from '../src/hub/device-mesh/device-mesh-store';
+import { migrateDeviceMeshGrants } from '../src/hub/device-mesh/device-mesh-store';
 
 describe('device mesh grant migrations', () => {
   test('maps only equivalent legacy native-chat actions onto drone control', () => {
     expect(
-      migrateLegacyNativeChatGrants([
+      migrateDeviceMeshGrants([
         {
           capability: 'drone-control',
           version: 1,
@@ -35,6 +35,24 @@ describe('device mesh grant migrations', () => {
       { capability: 'drone-control', version: 1, operations: ['drones.list'] },
       { capability: 'assistant-threads', version: 1, operations: ['thread.get'] },
     ];
-    expect(migrateLegacyNativeChatGrants(grants)).toEqual(grants);
+    expect(migrateDeviceMeshGrants(grants)).toEqual(grants);
+  });
+
+  test('keeps existing drone-management access compatible with rename', () => {
+    expect(
+      migrateDeviceMeshGrants([
+        {
+          capability: 'drone-control',
+          version: 1,
+          operations: ['drones.list', 'drone.delete'],
+        },
+      ]),
+    ).toEqual([
+      {
+        capability: 'drone-control',
+        version: 1,
+        operations: ['drones.list', 'drone.delete', 'drone.rename'],
+      },
+    ]);
   });
 });

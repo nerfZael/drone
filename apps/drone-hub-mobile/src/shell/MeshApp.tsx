@@ -15,6 +15,7 @@ import Menu from 'lucide-react-native/icons/menu';
 import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
 import Plus from 'lucide-react-native/icons/plus';
+import Pencil from 'lucide-react-native/icons/pencil';
 import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
 import Trash2 from 'lucide-react-native/icons/trash-2';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
@@ -249,6 +250,16 @@ function Shell() {
                   label: 'New chat',
                   icon: MessageCircle,
                   onPress: dronesHeader.onNewChat,
+                },
+              ]
+            : []),
+          ...(dronesHeader.onRename
+            ? [
+                {
+                  id: 'rename-drone',
+                  label: 'Rename drone',
+                  icon: Pencil,
+                  onPress: dronesHeader.onRename,
                 },
               ]
             : []),

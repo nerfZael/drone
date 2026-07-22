@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ConfirmDialog, ErrorBanner } from '../components/Ui';
+import { ConfirmDialog, ErrorBanner, TextInputDialog } from '../components/Ui';
 import {
   AppDrawer,
   type AppDrawerNavigationItem,
@@ -77,6 +77,10 @@ import { ChatImageStrip } from '../drones/ChatImageStrip';
 import { FilePreviewModal } from '../drones/FilePreviewModal';
 import { useFilePreview } from '../drones/use-file-preview';
 import { pickChatImages, type MobileChatImage } from '../drones/pick-chat-images';
+import {
+  mobileDroneRenameErrorMessage,
+  validateMobileDroneRename,
+} from '../drones/mobile-drone-rename';
 import type { DroneControlOperation } from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { LocalWorkspaceEditor } from '../local-assistant/LocalWorkspaceEditor';
@@ -145,6 +149,7 @@ export type DronesAppHeaderState = {
   onToggleDraft?(): void;
   onNewDrone?(): void;
   onNewChat?(): void;
+  onRename?(): void;
   onDelete?(): void;
   accessOpen?: boolean;
   accessDisabled?: boolean;
@@ -241,6 +246,10 @@ export function DronesScreen({
   const [error, setError] = React.useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = React.useState<MobileDroneSummary | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const [renameCandidate, setRenameCandidate] = React.useState<MobileDroneSummary | null>(null);
+  const [renameName, setRenameName] = React.useState('');
+  const [renameError, setRenameError] = React.useState<string | null>(null);
+  const [renaming, setRenaming] = React.useState(false);
   const [deleteMode, setDeleteMode] = React.useState<'archive' | 'permanent'>('permanent');
   const [droneOperationById, setDroneOperationById] = React.useState<
     Record<string, 'archiving' | 'deleting'>
@@ -468,6 +477,10 @@ export function DronesScreen({
     setModelBusy(false);
     setDeleteCandidate(null);
     setDeleting(false);
+    setRenameCandidate(null);
+    setRenameName('');
+    setRenameError(null);
+    setRenaming(false);
     setDeleteMode('permanent');
     setDroneOperationById({});
     setNewDroneDefaults(null);
@@ -1494,6 +1507,11 @@ export function DronesScreen({
       selectedChatOptimisticallyBusy,
     ],
   );
+  const openDroneRename = React.useCallback((drone: MobileDroneSummary) => {
+    setRenameCandidate(drone);
+    setRenameName(drone.name);
+    setRenameError(null);
+  }, []);
   React.useEffect(() => {
     const frame = requestAnimationFrame(() =>
       chatTabsRef.current?.scrollToEnd({ animated: false }),
@@ -1507,6 +1525,7 @@ export function DronesScreen({
             title: selected.name,
             onNewDrone: openNewDroneFromCurrent,
             onNewChat: () => void createNewChat(),
+            onRename: () => openDroneRename(selected),
             onDelete: () => setDeleteCandidate(selected),
             ...(nativeMessages !== null
               ? {
@@ -1546,6 +1565,7 @@ export function DronesScreen({
   }, [
     activeTarget?.name,
     onHeaderChange,
+    openDroneRename,
     selected?.id,
     selected?.group,
     selected?.name,
@@ -1697,6 +1717,43 @@ export function DronesScreen({
       .catch((nextError: any) => setError(nextError?.message ?? String(nextError)))
       .finally(() => setApprovalBusyId(''));
   };
+
+  const confirmDroneRename = async () => {
+    if (!renameCandidate || renaming) return;
+    const newName = renameName.trim();
+    const validationError = validateMobileDroneRename(newName, renameCandidate.name);
+    if (validationError) {
+      setRenameError(validationError);
+      return;
+    }
+    const destinationId = targetId;
+    const droneId = renameCandidate.id;
+    setRenaming(true);
+    setRenameError(null);
+    try {
+      await requestDroneControl(destinationId, 'drone.rename', { droneId, newName });
+      if (targetIdRef.current !== destinationId) return;
+      setDrones((current) =>
+        current.map((drone) => (drone.id === droneId ? { ...drone, name: newName } : drone)),
+      );
+      setSelected((current) =>
+        current?.id === droneId ? { ...current, name: newName } : current,
+      );
+      setRenameCandidate(null);
+      setRenameName('');
+      await loadDrones(true);
+    } catch (nextError: any) {
+      if (targetIdRef.current === destinationId) {
+        setRenameError(mobileDroneRenameErrorMessage(nextError));
+      }
+    } finally {
+      if (targetIdRef.current === destinationId) setRenaming(false);
+    }
+  };
+
+  const renameValidationError = renameCandidate
+    ? validateMobileDroneRename(renameName, renameCandidate.name)
+    : null;
 
   return (
     <View style={styles.screen}>
@@ -2019,6 +2076,28 @@ export function DronesScreen({
         error={filePreview.error}
         onClose={filePreview.close}
         onRetry={filePreview.retry}
+      />
+      <TextInputDialog
+        visible={Boolean(renameCandidate)}
+        title="Rename drone"
+        message={`Choose the name shown for this drone on ${activeTarget?.name ?? 'the selected device'}.`}
+        value={renameName}
+        error={renameError}
+        confirmLabel="Rename"
+        confirmDisabled={Boolean(renameValidationError)}
+        busy={renaming}
+        maxLength={80}
+        onChangeText={(value) => {
+          setRenameName(value);
+          setRenameError(null);
+        }}
+        onCancel={() => {
+          if (renaming) return;
+          setRenameCandidate(null);
+          setRenameName('');
+          setRenameError(null);
+        }}
+        onConfirm={() => void confirmDroneRename()}
       />
       <ConfirmDialog
         visible={confirmAccessDiscard}

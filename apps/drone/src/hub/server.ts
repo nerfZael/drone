@@ -5168,6 +5168,13 @@ export async function startDroneHubApiServer(opts: {
     const droneId = normalizeDroneIdentity(d?.id);
     const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
     const chats = Object.keys(d.chats ?? {});
+    const approvalChats = Object.entries(d.chats ?? {}).flatMap(
+      ([chatName, chatEntry]: [string, any]) => {
+        if (inferChatAgent(chatEntry, d).kind !== 'native') return [];
+        const threadId = String(chatEntry?.id ?? '').trim();
+        return threadId && assistantService.threadRequiresApproval(threadId) ? [chatName] : [];
+      },
+    );
     const chatReadStates = Object.fromEntries(
       chats.map((chatName) => {
         const state = storedReadStates[chatName];
@@ -5221,6 +5228,8 @@ export async function startDroneHubApiServer(opts: {
       chatReadStates,
       draftChats,
       busyChats,
+      approvalChats,
+      approvalRequired: approvalChats.length > 0,
       hubPhase,
       hubMessage,
       busy: busyChats.length > 0,

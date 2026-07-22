@@ -67,6 +67,15 @@ describe('MarkdownMessage', () => {
     expect(html).toContain('href="https://example.com/path?q=1"');
   });
 
+  test('renders fenced code as a labeled, highlighted, horizontally scrollable card', () => {
+    const html = renderMarkdown('```ts\nconst answer = 42;\n```');
+    expect(html).toContain('class="dh-code-card"');
+    expect(html).toContain('class="dh-code-card__language">ts</span>');
+    expect(html).toContain('class="dh-code-card__scroll"');
+    expect(html).toContain('class="token keyword"');
+    expect(html).toContain('class="token number"');
+  });
+
   test('renders inline code file references as file buttons when a handler is provided', () => {
     const html = renderMarkdown('Inspect `src/main.ts:42`', {
       onOpenFileReference: () => {},
