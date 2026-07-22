@@ -465,6 +465,10 @@ export function DockableDroneWorkspace({
   );
 
   React.useLayoutEffect(() => {
+    // React Strict Mode runs this setup/cleanup pair twice on mount. Re-arm the
+    // guard during setup so the simulated cleanup does not permanently disable
+    // layout persistence for this workspace instance.
+    unmountingRef.current = false;
     return () => {
       persistCurrentLayout();
       unmountingRef.current = true;

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   computePrependedTranscriptScrollTop,
@@ -7,6 +9,15 @@ import {
 } from '../src/droneHub/chat/use-pinned-transcript-scroll';
 
 describe('shared transcript scrolling', () => {
+  test('keeps the live pinned state when the transcript effect cleans up', () => {
+    const source = fs.readFileSync(
+      path.join(import.meta.dir, '../src/droneHub/chat/use-pinned-transcript-scroll.ts'),
+      'utf8',
+    );
+
+    expect(source).toContain('pinned: pinnedRef.current');
+  });
+
   test('treats a transcript near the bottom as pinned', () => {
     expect(
       isTranscriptPinned({

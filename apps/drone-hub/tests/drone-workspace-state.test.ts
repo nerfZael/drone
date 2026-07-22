@@ -110,6 +110,7 @@ describe('per-drone workspace state', () => {
     const workspace = readAppSource('app/DockableDroneWorkspace.tsx');
 
     expect(workspace).toContain('if (!layout.panels[CHAT_PANEL_ID]) return;');
+    expect(workspace).toContain('unmountingRef.current = false;');
     expect(workspace).toContain('unmountingRef.current = true;');
   });
 

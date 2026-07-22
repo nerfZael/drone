@@ -193,12 +193,11 @@ export function usePinnedTranscriptScroll({
       transcriptScrollByContext.set(contextKey, {
         scrollTop: scrollNode.scrollTop,
         scrollHeight: scrollNode.scrollHeight,
-        pinned: isTranscriptPinned({
-          scrollHeight: scrollNode.scrollHeight,
-          scrollTop: scrollNode.scrollTop,
-          clientHeight: scrollNode.clientHeight,
-          threshold: bottomThreshold,
-        }),
+        // pinnedRef is updated while the surface is live. Measuring again in
+        // cleanup can observe the transient pre-scroll state from React Strict
+        // Mode (or a container whose layout is already collapsing) and turn an
+        // intended bottom-pinned chat into a saved scroll-to-top position.
+        pinned: pinnedRef.current,
       });
     };
   }, [bottomThreshold, contentNode, contextKey, enabled, scrollNode, scrollToBottom, updatePinned]);
