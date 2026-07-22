@@ -1,13 +1,5 @@
 import React from 'react';
-import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import Check from 'lucide-react-native/icons/check';
@@ -19,6 +11,7 @@ import Plus from 'lucide-react-native/icons/plus';
 import Pencil from 'lucide-react-native/icons/pencil';
 import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
 import Trash2 from 'lucide-react-native/icons/trash-2';
+import { CircuitRobotLoader } from '../components/CircuitRobotLoader';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
 import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext';
 import { MobileChatVoiceRecorderProvider } from '../local-assistant/MobileChatVoiceRecorderContext';
@@ -183,8 +176,7 @@ function Shell() {
   if (mesh.loading || !deviceSelectionLoaded) {
     return (
       <SafeAreaView style={styles.loading}>
-        <ActivityIndicator color={colors.accent} />
-        <Text style={styles.loadingText}>Preparing secure identity…</Text>
+        <CircuitRobotLoader />
       </SafeAreaView>
     );
   }
@@ -467,9 +459,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
   },
-  loadingText: { color: colors.muted, fontSize: 12 },
   header: {
     height: 58,
     flexDirection: 'row',
