@@ -4,8 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { createDroneControlCapability } from '../src/hub/device-mesh/drone-control-capability';
 import { MeshChatAttachmentStore } from '../src/hub/device-mesh/mesh-chat-attachment-store';
+import { submitNativeChatPrompt } from '../src/hub/device-mesh/native-chat-prompt';
 
-describe('device mesh native image prompts', () => {
+describe('device mesh native attachment prompts', () => {
   test('submits a committed mesh upload by id without putting image bytes in the prompt request', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mesh-native-prompt-'));
     const store = new MeshChatAttachmentStore(root);
@@ -93,6 +94,39 @@ describe('device mesh native image prompts', () => {
       globalThis.fetch = originalFetch;
       await store.close();
       await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('submits non-image attachments as native chat artifacts', async () => {
+    const originalFetch = globalThis.fetch;
+    let promptBody: any = null;
+    globalThis.fetch = (async (_input, init) => {
+      promptBody = JSON.parse(String(init?.body ?? '{}'));
+      return new Response('{"type":"accepted"}\n');
+    }) as typeof fetch;
+    try {
+      await submitNativeChatPrompt(
+        { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+        'native-1',
+        'Review this file',
+        [
+          {
+            name: 'status.ts',
+            mime: 'text/plain',
+            dataBase64: Buffer.from('export const ready = true;').toString('base64'),
+          },
+        ],
+      );
+      expect(promptBody.attachments).toEqual([
+        {
+          disposition: 'artifact',
+          name: 'status.ts',
+          mime: 'text/plain',
+          dataBase64: Buffer.from('export const ready = true;').toString('base64'),
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
     }
   });
 });

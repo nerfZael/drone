@@ -9,6 +9,7 @@ export type MobileQueuedPrompt = {
   prompt: string;
   status: 'queued' | 'pending' | 'failed';
   error?: string | null;
+  attachmentCount?: number;
   imageCount?: number;
   cancelable?: boolean;
   startedAt?: string;
@@ -28,6 +29,10 @@ export function QueuedPromptRows({
   return (
     <View>
       {prompts.map((prompt) => {
+        const attachmentCount = Math.max(
+          0,
+          Number(prompt.attachmentCount ?? prompt.imageCount) || 0,
+        );
         const failed = prompt.status === 'failed';
         const pending = prompt.status === 'pending';
         const cancelling = cancellingId === prompt.id;
@@ -41,9 +46,9 @@ export function QueuedPromptRows({
                     {prompt.prompt}
                   </Text>
                 ) : null}
-                {prompt.imageCount ? (
+                {attachmentCount ? (
                   <Text style={styles.pendingImageCount}>
-                    {prompt.imageCount} image{prompt.imageCount === 1 ? '' : 's'}
+                    {attachmentCount} attachment{attachmentCount === 1 ? '' : 's'}
                   </Text>
                 ) : null}
               </View>
@@ -55,9 +60,9 @@ export function QueuedPromptRows({
             <View style={styles.body}>
               <View style={styles.meta}>
                 <Text style={[styles.badge, failed && styles.badgeFailed]}>{label}</Text>
-                {prompt.imageCount ? (
+                {attachmentCount ? (
                   <Text style={styles.imageCount}>
-                    {prompt.imageCount} image{prompt.imageCount === 1 ? '' : 's'}
+                    {attachmentCount} attachment{attachmentCount === 1 ? '' : 's'}
                   </Text>
                 ) : null}
               </View>

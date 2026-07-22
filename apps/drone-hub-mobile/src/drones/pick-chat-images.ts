@@ -5,7 +5,7 @@ const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGES = 8;
 
-export type MobileChatImage = {
+export type MobileChatAttachment = {
   id: string;
   uri: string;
   name: string;
@@ -13,6 +13,8 @@ export type MobileChatImage = {
   size: number;
   bytes: Uint8Array;
 };
+
+export type MobileChatImage = MobileChatAttachment;
 
 function imageMime(value: unknown, name: string): string {
   const supplied = String(value ?? '')
@@ -40,6 +42,8 @@ export async function pickChatImages(
     quality: 0.9,
   });
   if (result.canceled) return [];
+  if (result.assets.length > MAX_IMAGES - existing.length)
+    throw new Error(`A prompt can include up to ${MAX_IMAGES} images.`);
   const selected: MobileChatImage[] = [];
   let totalBytes = existing.reduce((total, image) => total + image.size, 0);
   for (const asset of result.assets) {
@@ -50,8 +54,14 @@ export async function pickChatImages(
     const mime = imageMime(asset.mimeType ?? file.type, name);
     if (!['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'].includes(mime))
       throw new Error(`Unsupported image type: ${mime || 'unknown'}. Use PNG, JPEG, GIF, or WebP.`);
-    const size = Number(asset.fileSize ?? file.size ?? 0);
-    if (!Number.isSafeInteger(size) || size <= 0) throw new Error('The selected image is empty.');
+    const reportedSize = Number(asset.fileSize ?? file.size ?? 0);
+    if (!Number.isSafeInteger(reportedSize) || reportedSize <= 0)
+      throw new Error('The selected image is empty.');
+    if (reportedSize > MAX_IMAGE_BYTES)
+      throw new Error('Each prompt image must be 6 MiB or smaller.');
+    const bytes = await file.bytes();
+    const size = bytes.length;
+    if (size <= 0) throw new Error('The selected image is empty.');
     if (size > MAX_IMAGE_BYTES) throw new Error('Each prompt image must be 6 MiB or smaller.');
     totalBytes += size;
     if (totalBytes > MAX_TOTAL_BYTES)
@@ -62,7 +72,7 @@ export async function pickChatImages(
       name,
       mime: mime === 'image/jpg' ? 'image/jpeg' : mime,
       size,
-      bytes: await file.bytes(),
+      bytes,
     });
   }
   return selected;

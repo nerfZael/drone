@@ -20,7 +20,7 @@ import {
   type AssistantModelChoice,
 } from '../local-assistant/AssistantModelPicker';
 import { colors } from '../theme';
-import { ChatImageStrip } from './ChatImageStrip';
+import { ChatAttachmentStrip } from './ChatAttachmentStrip';
 import {
   mobileRepoLabel,
   type MobileDroneCreateModel,
@@ -898,8 +898,8 @@ export function NewDroneScreen({
               onAddAttachment={draft ? undefined : () => void addInitialImages()}
               footer={
                 <>
-                  <ChatImageStrip
-                    images={initialImages}
+                  <ChatAttachmentStrip
+                    attachments={initialImages}
                     disabled={busy}
                     onRemove={(id) =>
                       setInitialImages((current) =>

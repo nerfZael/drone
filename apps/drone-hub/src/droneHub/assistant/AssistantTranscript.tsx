@@ -8,6 +8,7 @@ import {
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { ChatMessageFrame } from '../chat/ChatMessageFrame';
+import { ImageAttachmentChips, normalizeImageAttachmentRefs } from '../chat/ImageAttachmentChips';
 import { collectInlineAgentMedia } from '../chat/inline-agent-media';
 import { UserChatMessage } from '../chat/UserChatMessage';
 import {
@@ -996,6 +997,7 @@ export function AssistantMessageRow({
 
   if (message.role === 'user') {
     const images = messageImageParts(message);
+    const attachments = normalizeImageAttachmentRefs((message.details as any)?.attachments);
     return (
       <UserChatMessage
         at={message.createdAt}
@@ -1005,6 +1007,7 @@ export function AssistantMessageRow({
           src: `data:${image.mimeType};base64,${image.data}`,
           alt: 'Attached image',
         }))}
+        attachmentContent={<ImageAttachmentChips attachments={attachments} />}
         autoExpand={autoExpandMessage}
         onOpenFileReference={messageExtras?.onOpenFileReference}
         onOpenLink={messageExtras?.onOpenLink}

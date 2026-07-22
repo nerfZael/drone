@@ -8,6 +8,7 @@ export type MobileDronePendingPrompt = {
   prompt: string;
   status: 'queued' | 'pending' | 'failed';
   error: string | null;
+  attachmentCount?: number;
   imageCount: number;
   cancelable: boolean;
   startedAt?: string;
@@ -19,6 +20,7 @@ export type MobileOptimisticPendingPrompt = {
   at: string;
   prompt: string;
   state: 'queued' | 'sending' | 'sent' | 'failed';
+  attachmentCount?: number;
   imageCount: number;
   error?: string;
   optimisticSent: true;
@@ -26,19 +28,26 @@ export type MobileOptimisticPendingPrompt = {
 
 const OPTIMISTIC_PENDING_GRACE_MS = 10_000;
 
+function positiveCount(value: unknown): number {
+  return Math.max(0, Number(value) || 0);
+}
+
 export function optimisticMobilePendingPrompt(input: {
   id: string;
   prompt: string;
+  attachmentCount?: number;
   imageCount?: number;
   at?: string;
   state?: 'queued' | 'sending';
 }): MobileOptimisticPendingPrompt {
+  const attachmentCount = positiveCount(input.attachmentCount ?? input.imageCount);
   return {
     id: input.id,
     at: input.at ?? new Date().toISOString(),
     prompt: input.prompt,
     state: input.state ?? 'sending',
-    imageCount: Math.max(0, input.imageCount ?? 0),
+    ...(attachmentCount > 0 ? { attachmentCount } : {}),
+    imageCount: positiveCount(input.imageCount),
     optimisticSent: true,
   };
 }
@@ -127,18 +136,19 @@ export function mobileDronePendingPrompts(
     // matching transcript turn is visible, rendering that row again would duplicate the prompt.
     if (state !== 'failed' && completedTurnIds.has(id)) return [];
     const agentPlan = normalizeMobileAgentPlan(item?.agentPlan);
+    const attachmentCount = positiveCount(
+      item?.attachmentCount ??
+        item?.imageCount ??
+        (Array.isArray(item?.attachments) ? item.attachments.length : 0),
+    );
     return [
       {
         id,
         prompt: String(item?.prompt ?? ''),
         status: state === 'failed' ? 'failed' : state === 'queued' ? 'queued' : 'pending',
         error: item?.error ? String(item.error) : null,
-        imageCount: Math.max(
-          0,
-          Number(
-            item?.imageCount ?? (Array.isArray(item?.attachments) ? item.attachments.length : 0),
-          ) || 0,
-        ),
+        ...(attachmentCount > 0 ? { attachmentCount } : {}),
+        imageCount: positiveCount(item?.imageCount),
         cancelable: state === 'queued',
         ...(String(item?.at ?? '').trim() ? { startedAt: String(item.at).trim() } : {}),
         ...(agentPlan ? { agentPlan } : {}),
