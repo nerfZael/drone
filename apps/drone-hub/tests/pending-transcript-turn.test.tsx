@@ -54,6 +54,7 @@ describe('external pending transcript turn', () => {
     );
 
     expect(html).toContain('Queued');
+    expect(html).toContain('Inspect the repository');
     expect(html).toContain('aria-label="Queued, waiting to send"');
     expect(html).toContain('aria-label="Cancel queued prompt"');
     expect(html).toContain('>Cancel</button>');

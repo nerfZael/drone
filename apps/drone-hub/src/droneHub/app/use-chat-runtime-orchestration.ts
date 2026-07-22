@@ -107,16 +107,32 @@ function isStoppableTranscriptPendingPrompt(item: PendingPrompt | null | undefin
   return item.state === 'queued' || item.state === 'sending' || item.state === 'sent';
 }
 
+export function shouldFlushLocalQueuedPrompts(
+  drone: Pick<DroneSummary, 'draft' | 'hubPhase'> | null | undefined,
+): boolean {
+  if (!drone || drone.hubPhase === 'error') return false;
+  // A saved draft is stable storage, not an in-progress runtime. Sending its
+  // local queue to the prompt endpoint persists each row as `queued`; the
+  // server still waits for Publish before executing anything.
+  if (drone.draft === true || drone.hubPhase === 'draft') return true;
+  return !isDroneStartingOrSeeding(drone.hubPhase);
+}
+
 export function visiblePendingPromptsForAgent(opts: {
   agentKind: ChatAgentConfig['kind'] | null | undefined;
   chatUiMode: 'transcript' | 'cli';
+  isDraftChat?: boolean;
   pendingPrompts: PendingPrompt[];
   transcripts: TranscriptItem[] | null;
 }): PendingPrompt[] {
   // Until the selected chat's config is resolved, do not project canonical
   // prompt rows into generic transcript state. The rows may belong to a native
   // chat, whose completion lives in the separate Assistant history store.
-  if (!opts.agentKind || opts.agentKind === 'native') return [];
+  // Published native chats render their queue in AssistantDock. Draft chats
+  // intentionally use the generic transcript until they are published, so
+  // dropping native (or not-yet-resolved) rows here makes every queued draft
+  // message disappear.
+  if ((!opts.agentKind || opts.agentKind === 'native') && !opts.isDraftChat) return [];
   if (opts.chatUiMode !== 'transcript') return opts.pendingPrompts;
   const ids = new Set(
     (Array.isArray(opts.transcripts) ? opts.transcripts : [])
@@ -452,8 +468,7 @@ export function useChatRuntimeOrchestration({
       const parsed = parseDroneChatQueueKey(key);
       if (!parsed) continue;
       const drone = droneById[parsed.droneId] ?? null;
-      if (!drone) continue;
-      if (isDroneStartingOrSeeding(drone.hubPhase) || drone.hubPhase === 'error') continue;
+      if (!shouldFlushLocalQueuedPrompts(drone)) continue;
       if (flushingQueuedKeysRef.current.has(key)) continue;
       flushingQueuedKeysRef.current.add(key);
 
@@ -569,10 +584,14 @@ export function useChatRuntimeOrchestration({
     return visiblePendingPromptsForAgent({
       agentKind: chatInfo?.agent?.kind,
       chatUiMode,
+      isDraftChat:
+        currentDrone?.draft === true ||
+        currentDrone?.hubPhase === 'draft' ||
+        currentDrone?.draftChats?.[selectedChat || 'default'] === true,
       pendingPrompts,
       transcripts,
     });
-  }, [chatInfo?.agent?.kind, chatUiMode, pendingPrompts, transcripts]);
+  }, [chatInfo?.agent?.kind, chatUiMode, currentDrone, pendingPrompts, selectedChat, transcripts]);
 
   const startupPendingPrompt = React.useMemo((): PendingPrompt | null => {
     if (chatUiMode !== 'transcript') return null;

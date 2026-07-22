@@ -435,7 +435,7 @@ export const DroneCard = React.memo(function DroneCard({
           onClick();
         }
       }}
-      className={`dh-sidebar-row-interactive ${highlighted ? 'dh-sidebar-row-highlighted' : ''} w-full text-left ${rowDensityClass} grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[1fr_1fr] items-center rounded-[var(--sidebar-row-radius)] border transition-colors duration-150 group/drone relative ${
+      className={`dh-sidebar-row-interactive ${highlighted ? 'dh-sidebar-row-highlighted' : ''} ${actionMenuOpen ? 'z-50' : ''} w-full text-left ${rowDensityClass} grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[1fr_1fr] items-center rounded-[var(--sidebar-row-radius)] border transition-colors duration-150 group/drone relative ${
         highlighted
           ? 'bg-[var(--yellow-subtle)] border-[var(--yellow-border)]'
           : selected

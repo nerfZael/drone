@@ -3,7 +3,10 @@ import {
   chatConfigResolutionState,
   chatInfoForSelection,
 } from '../src/droneHub/app/chat-selection-model';
-import { visiblePendingPromptsForAgent } from '../src/droneHub/app/use-chat-runtime-orchestration';
+import {
+  shouldFlushLocalQueuedPrompts,
+  visiblePendingPromptsForAgent,
+} from '../src/droneHub/app/use-chat-runtime-orchestration';
 
 const drone = {
   id: 'drone-native',
@@ -100,5 +103,42 @@ describe('native chat selection state', () => {
         transcripts: [],
       }),
     ).toEqual([sentPrompt]);
+  });
+
+  test('keeps queued native prompts visible while the chat is still a draft', () => {
+    const queuedPrompt = {
+      id: 'queued-draft-prompt',
+      prompt: 'Please keep this for later',
+      state: 'queued',
+      at: '2026-07-22T08:00:00.000Z',
+    } as any;
+
+    expect(
+      visiblePendingPromptsForAgent({
+        agentKind: 'native',
+        chatUiMode: 'transcript',
+        isDraftChat: true,
+        pendingPrompts: [queuedPrompt],
+        transcripts: [],
+      }),
+    ).toEqual([queuedPrompt]);
+    expect(
+      visiblePendingPromptsForAgent({
+        agentKind: null,
+        chatUiMode: 'transcript',
+        isDraftChat: true,
+        pendingPrompts: [queuedPrompt],
+        transcripts: [],
+      }),
+    ).toEqual([queuedPrompt]);
+  });
+
+  test('persists every locally queued draft prompt without starting provisioning queues early', () => {
+    expect(shouldFlushLocalQueuedPrompts({ draft: true, hubPhase: 'draft' })).toBe(true);
+    expect(shouldFlushLocalQueuedPrompts({ draft: false, hubPhase: 'draft' })).toBe(true);
+    expect(shouldFlushLocalQueuedPrompts({ draft: false, hubPhase: 'starting' })).toBe(false);
+    expect(shouldFlushLocalQueuedPrompts({ draft: false, hubPhase: 'seeding' })).toBe(false);
+    expect(shouldFlushLocalQueuedPrompts({ draft: false, hubPhase: 'ready' })).toBe(true);
+    expect(shouldFlushLocalQueuedPrompts({ draft: false, hubPhase: 'error' })).toBe(false);
   });
 });

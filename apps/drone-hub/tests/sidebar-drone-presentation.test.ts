@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -144,6 +145,15 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).toContain('aria-label="More actions for &quot;worker&quot;"');
     expect(html).not.toContain('aria-label="Create chat on');
     expect(html).not.toContain('aria-label="Clone &quot;worker&quot;"');
+  });
+
+  test('raises an open action menu above the isolated drone rows', () => {
+    const source = readFileSync(
+      new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain("actionMenuOpen ? 'z-50' : ''");
   });
 
   test('uses two rows while hover actions replace the bottom-right runtime label', () => {
