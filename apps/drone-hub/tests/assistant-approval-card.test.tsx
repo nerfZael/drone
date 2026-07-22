@@ -48,4 +48,20 @@ describe('assistant approval card', () => {
     expect(html).toContain('aria-busy="true"');
     expect(html.match(/disabled=""/g)?.length).toBe(2);
   });
+
+  test('can disable approval while leaving denial available for incomplete details', () => {
+    const html = renderToStaticMarkup(
+      <ApprovalCard
+        approval={bashApproval}
+        busy={false}
+        approveDisabled
+        warning="Review the complete request on its home device."
+        onApprove={() => {}}
+        onDeny={() => {}}
+      />,
+    );
+
+    expect(html).toContain('Review the complete request on its home device.');
+    expect(html.match(/disabled=""/g)?.length).toBe(1);
+  });
 });

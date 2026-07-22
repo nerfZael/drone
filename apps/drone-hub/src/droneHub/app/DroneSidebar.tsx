@@ -43,8 +43,7 @@ import {
   IconTrash,
   SkeletonLine,
 } from './icons';
-import { requestJson } from '../http';
-import type { MeshStatus } from './use-device-mesh';
+import { DesktopDevicePicker } from './DesktopDevicePicker';
 import { SidebarDroneTreeList, type SidebarDroneTreeListSharedProps } from './SidebarDroneTreeList';
 import { GroupedSidebarTree } from './GroupedSidebarTree';
 import { createCanvasChatNodeId } from './app-config';
@@ -207,38 +206,6 @@ function SidebarIconButton({
       tabIndex={tabIndex}
     >
       {children}
-    </button>
-  );
-}
-
-function CurrentDevicePicker() {
-  const [deviceName, setDeviceName] = React.useState('This device');
-
-  React.useEffect(() => {
-    let cancelled = false;
-    void requestJson<{ ok: true } & MeshStatus>('/api/device-mesh')
-      .then((status) => {
-        if (cancelled) return;
-        const self = status.devices.find((device) => device.id === status.selfDeviceId);
-        const nextName = String(self?.name ?? '').trim();
-        if (nextName) setDeviceName(nextName);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return (
-    <button
-      type="button"
-      className="flex h-8 min-w-0 cursor-default items-center rounded-[var(--radius-medium)] pl-1.5 pr-0.5 text-left text-[var(--text-11)] font-semibold text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)]"
-      title={`${deviceName} (device switching is coming soon)`}
-      aria-label={`Current device: ${deviceName}. Device switching is not available yet.`}
-    >
-      <span className="mr-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--green)]" />
-      <span className="min-w-0 truncate">{deviceName}</span>
-      <IconChevronDown className="ml-2 h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" />
     </button>
   );
 }
@@ -2568,7 +2535,7 @@ export function DroneSidebar({
             >
               DRONE HUB
             </button>
-            {sidebarCapabilities.headerActions ? <CurrentDevicePicker /> : null}
+            {sidebarCapabilities.headerActions ? <DesktopDevicePicker /> : null}
             {headerAccessory ? (
               <div className="flex items-center gap-1 flex-shrink-0">{headerAccessory}</div>
             ) : null}
