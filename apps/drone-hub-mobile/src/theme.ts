@@ -56,7 +56,7 @@ export const colors = {
   accentDark: 'rgba(203, 166, 247, 0.075)',
   accentBorder: 'rgba(203, 166, 247, 0.26)',
   accentWash: 'rgba(203, 166, 247, 0.06)',
-  sidebarSelectionWash: 'rgba(203, 166, 247, 0.055)',
+  sidebarSelectionWash: 'rgba(203, 166, 247, 0.075)',
   sidebarSelectionEdge: 'rgba(203, 166, 247, 0.78)',
   selectionWash: 'rgba(147, 153, 178, 0.24)',
   textSelection: 'rgba(147, 153, 178, 0.25)',

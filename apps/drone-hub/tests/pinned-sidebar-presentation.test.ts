@@ -26,9 +26,15 @@ describe('desktop pinned drone presentation', () => {
     expect(sidebarSource).toContain('draggable={false}');
     expect(sidebarSource).not.toContain('leadingIcon={<IconPin');
     expect(sidebarSource).toContain(
-      'min-h-7 items-center gap-1.5 px-2.5 py-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-[0.02em] text-[var(--muted-dim)] [font-family:var(--sidebar-font)]',
+      'className="flex min-h-8 items-center gap-1.5 px-1"',
     );
-    expect(sidebarSource).toContain('<span className="opacity-60">Pinned</span>');
+    expect(sidebarSource).toContain(
+      '<IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />',
+    );
+    expect(sidebarSource).toContain(
+      '<span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-medium text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">',
+    );
+    expect(sidebarSource).toContain('<div className="flex flex-col gap-0.5 pb-1">');
     expect(sidebarSource).not.toContain('>{pinnedDrones.length}</span>');
     expect(sidebarSource).toContain(
       'onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}',

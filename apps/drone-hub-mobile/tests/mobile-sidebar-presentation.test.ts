@@ -78,17 +78,21 @@ describe('mobile sidebar presentation', () => {
     expect(titleIndex).toBeGreaterThan(indicatorIndex);
     expect(source).not.toContain('RuntimeStatusIndicator');
     expect(source).not.toContain('styles.switchItemRuntimeSlot');
-    expect(source).toContain('style={styles.switchItemTimeSlot}');
-    expect(source).not.toContain('styles.switchItemMeta');
+    expect(source).toContain('<View style={styles.switchItemCopy}>');
+    expect(source).toContain('<View style={styles.switchItemMeta}>');
+    expect(source).toContain('<Text style={styles.switchItemState}>{stateLabel}</Text>');
+    expect(source).not.toContain('styles.switchItemTimeSlot');
     expect(source).not.toContain('styles.chatCount');
     expect(source).toContain('selected ? <View style={styles.sidebarSelectionEdge} /> : null');
     expect(source).toContain('containsSelectedDrone ? <View style={styles.sidebarSelectionEdge} /> : null');
     expect(source).toContain('switchItemRowActive: { backgroundColor: colors.sidebarSelectionWash }');
     expect(source).toContain('repoRowActive: { backgroundColor: colors.sidebarSelectionWash }');
+    expect(source).toContain("droneNode: { position: 'relative', marginBottom: 4 }");
+    expect(source).toContain('sidebarRowPressed: { backgroundColor: colors.whiteWash }');
     expect(source).toContain("droneList: { paddingBottom: 24 }");
   });
 
-  test('uses the working spinner for starting and operation states without visible labels', () => {
+  test('uses the working spinner for starting and operation states with a quiet text label', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
       'utf8',
@@ -97,20 +101,22 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain("state === 'starting' ||");
     expect(source).toContain("state === 'archiving' ||");
     expect(source).toContain("state === 'deleting';");
-    expect(source).toContain('{ready ? null : working ? (');
-    expect(source).not.toContain('{stateLabel}</Text>');
+    expect(source).toContain(') : working ? (');
+    expect(source).toContain('<Text style={styles.switchItemState}>{stateLabel}</Text>');
   });
 
-  test('keeps a fixed leading status gutter while leaving ready drones visually silent', () => {
+  test('keeps a fixed leading status gutter with a faint ready anchor', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
       'utf8',
     );
 
     expect(source).toContain("const ready = state === 'idle' && !unread;");
-    expect(source).toContain('{ready ? null : working ? (');
+    expect(source).toContain('<View style={styles.readyStateAnchor} />');
     expect(source).toContain('width: DRAWER_TREE_LEADING_SLOT_WIDTH');
     expect(source).toContain('height: DRAWER_TREE_LEADING_SLOT_WIDTH');
+    expect(source).toContain('borderColor: colors.mutedDim');
+    expect(source).toContain('opacity: 0.35');
   });
 
   test('aligns group and drone labels at the same tree depth', () => {
@@ -141,6 +147,9 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('activeRepo.repoPath');
     expect(drawerSource).toContain('drones={activeRepoPinnedDrones}');
     expect(drawerSource).toContain('<Text style={styles.pinnedHeaderText}>Pinned</Text>');
+    expect(drawerSource).toContain('pinnedSection: {\n    paddingBottom: 0,');
+    expect(drawerSource).toContain('pinnedHeader: {\n    minHeight: 32,');
+    expect(drawerSource).toContain('paddingLeft: 6,\n    paddingRight: 9,');
     expect(drawerSource).toContain('<Pin color={colors.mutedDim} size={13} strokeWidth={1.7} />');
     expect(drawerSource).not.toContain('styles.pinnedCount');
     expect(drawerSource).not.toContain('<Text style={styles.pinnedCount}>{drones.length}</Text>');

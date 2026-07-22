@@ -2817,11 +2817,13 @@ export function DroneSidebar({
           <div className={`flex flex-col gap-0 ${sidebarListSelectClass}`}>
             {activeRepositoryPinnedDrones.length > 0 ? (
               <section className="border-b border-[var(--border-subtle)]" aria-label="Pinned drones">
-                <div className="flex min-h-7 items-center gap-1.5 px-2.5 py-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-[0.02em] text-[var(--muted-dim)] [font-family:var(--sidebar-font)]">
-                  <IconPin className="h-2.5 w-2.5 opacity-55" />
-                  <span className="opacity-60">Pinned</span>
+                <div className="flex min-h-8 items-center gap-1.5 px-1">
+                  <IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
+                  <span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-medium text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">
+                    Pinned
+                  </span>
                 </div>
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-0.5 pb-1">
                   {activeRepositoryPinnedDrones.map((drone) => {
                     const droneId = String(drone.id ?? '').trim();
                     const chats = Array.isArray(drone.chats) && drone.chats.length > 0 ? drone.chats : ['default'];

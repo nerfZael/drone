@@ -476,7 +476,9 @@ function SwitchItemStatusIndicator({
   const indicatorColor = unread && state === 'idle' ? colors.online : stateColor;
   return (
     <View accessible={false} style={styles.switchItemStatus}>
-      {ready ? null : working ? (
+      {ready ? (
+        <View style={styles.readyStateAnchor} />
+      ) : working ? (
         <WorkingStatusIndicator />
       ) : state === 'approval' ? (
         <ApprovalStatusIndicator />
@@ -606,18 +608,29 @@ function DrawerDroneNode({
           styles.switchItemRow,
           { paddingLeft: drawerTreeRowPaddingLeft(depth), paddingRight: 6 },
           selected && styles.switchItemRowActive,
-          pressed && styles.sidebarRowPressed,
+          pressed && !selected && styles.sidebarRowPressed,
         ]}
       >
         {selected ? <View style={styles.sidebarSelectionEdge} /> : null}
         <View style={styles.switchItemMain}>
           <SwitchItemStatusIndicator state={displayState} unread={unread} />
-          <Text numberOfLines={1} style={[styles.switchItemTitle, selected && styles.activeText]}>
-            {drone.name}
-          </Text>
-        </View>
-        <View pointerEvents="none" style={styles.switchItemTimeSlot}>
-          <RelativeMessageTimestamp timestamp={drone.lastMessageAt} style={styles.switchItemTime} />
+          <View style={styles.switchItemCopy}>
+            <Text numberOfLines={1} style={[styles.switchItemTitle, selected && styles.activeText]}>
+              {drone.name}
+            </Text>
+            <View style={styles.switchItemMeta}>
+              <Text style={styles.switchItemState}>{stateLabel}</Text>
+              {drone.lastMessageAt ? (
+                <>
+                  <Text style={styles.switchItemMetaSeparator}>·</Text>
+                  <RelativeMessageTimestamp
+                    timestamp={drone.lastMessageAt}
+                    style={styles.switchItemTime}
+                  />
+                </>
+              ) : null}
+            </View>
+          </View>
         </View>
       </Pressable>
       {node.children.length > 0 ? (
@@ -1199,7 +1212,7 @@ function AppDrawerView({
                         style={({ pressed }) => [
                           styles.repoRow,
                           containsSelectedDrone && styles.repoRowActive,
-                          pressed && styles.sidebarRowPressed,
+                          pressed && !containsSelectedDrone && styles.sidebarRowPressed,
                         ]}
                       >
                         {containsSelectedDrone ? <View style={styles.sidebarSelectionEdge} /> : null}
@@ -1421,7 +1434,7 @@ const styles = StyleSheet.create({
   fleetStateTextUnread: { color: colors.online },
   droneList: { paddingBottom: 24 },
   pinnedSection: {
-    paddingBottom: 8,
+    paddingBottom: 0,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
   },
@@ -1430,7 +1443,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 9,
+    paddingLeft: 6,
+    paddingRight: 9,
   },
   pinnedHeaderText: {
     color: colors.mutedDim,
@@ -1455,7 +1469,7 @@ const styles = StyleSheet.create({
   repoRowActive: { backgroundColor: colors.sidebarSelectionWash },
   repoCopy: { flex: 1, minWidth: 0, justifyContent: 'center' },
   repoName: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
-  droneNode: { position: 'relative' },
+  droneNode: { position: 'relative', marginBottom: 4 },
   switchItemRow: {
     minHeight: 48,
     flexDirection: 'row',
@@ -1471,26 +1485,43 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: DRAWER_TREE_LEADING_GAP,
-    paddingRight: 34,
   },
-  switchItemTitle: {
+  switchItemCopy: {
     flex: 1,
     minWidth: 0,
-    color: colors.textSecondary,
+    justifyContent: 'center',
+    gap: 3,
+  },
+  switchItemTitle: {
+    minWidth: 0,
+    color: colors.secondary,
     fontSize: 12,
     fontWeight: '500',
   },
-  switchItemTime: {
-    color: colors.secondary,
+  switchItemMeta: {
+    minHeight: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  switchItemState: {
+    color: colors.mutedDim,
     fontSize: 9,
-    fontFamily: 'monospace',
+    lineHeight: 10,
     fontWeight: '400',
   },
-  switchItemTimeSlot: {
-    position: 'absolute',
-    top: 7,
-    right: 6,
-    alignItems: 'flex-end',
+  switchItemMetaSeparator: {
+    color: colors.mutedDim,
+    fontSize: 9,
+    lineHeight: 10,
+    opacity: 0.55,
+  },
+  switchItemTime: {
+    color: colors.mutedDim,
+    fontSize: 9,
+    lineHeight: 10,
+    fontFamily: 'monospace',
+    fontWeight: '400',
   },
   switchItemStatus: {
     width: DRAWER_TREE_LEADING_SLOT_WIDTH,
@@ -1503,6 +1534,14 @@ const styles = StyleSheet.create({
     height: 12,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  readyStateAnchor: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: colors.mutedDim,
+    opacity: 0.35,
   },
   switchStateDot: { width: 6, height: 6, borderRadius: 3 },
   workingStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
@@ -1518,7 +1557,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 2,
     backgroundColor: colors.sidebarSelectionEdge,
   },
-  sidebarRowPressed: { backgroundColor: colors.sidebarSelectionWash },
+  sidebarRowPressed: { backgroundColor: colors.whiteWash },
   droneChildren: {},
   groupRow: {
     minHeight: 34,
