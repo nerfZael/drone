@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import path from 'node:path';
 
-const { blipBundleArgs } = require('../scripts/postbuild.cjs');
+const { blipBundleArgs, mcpBridgeBundleArgs } = require('../scripts/postbuild.cjs');
 
 describe('postbuild bundles', () => {
   test('bundles blip for Node into dist/blip.js', () => {
@@ -12,6 +12,17 @@ describe('postbuild bundles', () => {
       '--target=node',
       '--format=cjs',
       `--outfile=${path.join(root, 'dist', 'blip.js')}`,
+    ]);
+  });
+
+  test('bundles the credential-free MCP bridge for Node', () => {
+    const root = path.resolve(__dirname, '..');
+    expect(mcpBridgeBundleArgs(root)).toEqual([
+      'build',
+      path.join(root, 'src', 'mcp-http-stdio-bridge.ts'),
+      '--target=node',
+      '--format=cjs',
+      `--outfile=${path.join(root, 'dist', 'mcp-http-stdio-bridge.js')}`,
     ]);
   });
 });

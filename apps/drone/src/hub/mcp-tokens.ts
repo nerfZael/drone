@@ -3,6 +3,10 @@ import crypto from 'node:crypto';
 import { loadRegistry, loadRegistryRawSnapshot, updateRegistry } from '../host/registry';
 import { getCatalogStore, type CatalogStore } from '../host/catalog-store';
 import { getHubDatabase } from '../host/hub-database';
+import {
+  normalizeMcpChatAccessScope,
+  type McpChatAccessScope,
+} from './mcp-chat-access';
 
 export type McpAccessTokenKind = 'host' | 'drone';
 
@@ -23,9 +27,20 @@ export type McpAccessTokenSummary = Omit<McpAccessTokenRecord, 'secretSeed'>;
 
 export type McpTokenIdentity =
   | { kind: 'legacy'; tokenId: 'legacy'; name: 'Legacy Drone Hub MCP token' }
-  | { kind: McpAccessTokenKind; tokenId: string; name: string; droneId?: string };
+  | { kind: McpAccessTokenKind; tokenId: string; name: string; droneId?: string }
+  | {
+      kind: 'chat';
+      tokenId: string;
+      name: string;
+      droneId: string;
+      chatName: string;
+      chatId: string;
+      accessScope: McpChatAccessScope;
+      selectedDroneRefs: string[];
+    };
 
 const TOKEN_PREFIX = 'dhmcp';
+const CHAT_TOKEN_PREFIX = 'dhchat';
 const LAST_USED_WRITE_INTERVAL_MS = 60_000;
 const lastUsedWrites = new Map<string, number>();
 
@@ -325,12 +340,96 @@ export function bearerTokenFromAuthorizationHeader(header: string | string[] | u
   return match?.[1]?.trim() || '';
 }
 
+type ChatTokenPayload = {
+  version: 1;
+  droneId: string;
+  chatName: string;
+  chatId: string;
+};
+
+function chatTokenSignature(signingSecret: string, encodedPayload: string): string {
+  return crypto.createHmac('sha256', signingSecret).update(encodedPayload).digest('base64url');
+}
+
+export function createChatMcpAccessToken(input: {
+  droneId: string;
+  chatName: string;
+  chatId: string;
+  signingSecret: string;
+}): string {
+  const droneId = normalizeOptionalString(input.droneId);
+  const chatName = normalizeOptionalString(input.chatName);
+  const chatId = normalizeOptionalString(input.chatId);
+  const signingSecret = normalizeOptionalString(input.signingSecret);
+  if (!droneId) throw new Error('missing drone id for chat MCP token');
+  if (!chatName) throw new Error('missing chat name for chat MCP token');
+  if (!chatId) throw new Error('missing chat id for chat MCP token');
+  if (!signingSecret) throw new Error('missing MCP token signing secret');
+  const payload: ChatTokenPayload = { version: 1, droneId, chatName, chatId };
+  const encodedPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  return `${CHAT_TOKEN_PREFIX}_${encodedPayload}.${chatTokenSignature(signingSecret, encodedPayload)}`;
+}
+
+async function authenticateChatMcpToken(
+  token: string,
+  signingSecret: string,
+): Promise<McpTokenIdentity | null> {
+  if (!token.startsWith(`${CHAT_TOKEN_PREFIX}_`)) return null;
+  const [encodedPayload, signature] = token.slice(CHAT_TOKEN_PREFIX.length + 1).split('.', 2);
+  if (!encodedPayload || !signature) return null;
+  const expectedSignature = chatTokenSignature(signingSecret, encodedPayload);
+  if (!timingSafeStringEqual(signature, expectedSignature)) return null;
+  let payload: ChatTokenPayload;
+  try {
+    payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (
+    payload?.version !== 1 ||
+    !normalizeOptionalString(payload.droneId) ||
+    !normalizeOptionalString(payload.chatName) ||
+    !normalizeOptionalString(payload.chatId)
+  ) {
+    return null;
+  }
+  const registry: any = await loadRegistry();
+  const chats = registry?.drones?.[payload.droneId]?.chats;
+  const currentChat = Object.entries(
+    chats && typeof chats === 'object' && !Array.isArray(chats) ? chats : {},
+  ).find(([, chat]: [string, any]) => normalizeOptionalString(chat?.id) === payload.chatId);
+  if (!currentChat) return null;
+  const [chatName, chat] = currentChat as [string, any];
+  const accessScope = normalizeMcpChatAccessScope(
+    chat.droneHubMcpAccessScope,
+    payload.droneId,
+  );
+  const selectedDroneRefs = accessScope.droneIds.flatMap((droneId) => {
+    const drone = registry?.drones?.[droneId];
+    const name = normalizeOptionalString(drone?.name);
+    return name && name !== droneId ? [droneId, name] : [droneId];
+  });
+  return {
+    kind: 'chat',
+    tokenId: `chat:${payload.chatId}`,
+    name: `${payload.droneId}/${chatName} chat`,
+    droneId: payload.droneId,
+    chatName,
+    chatId: payload.chatId,
+    accessScope,
+    selectedDroneRefs,
+  };
+}
+
 export async function authenticateMcpBearerToken(bearerToken: string, signingSecret: string): Promise<McpTokenIdentity | null> {
   const token = String(bearerToken ?? '').trim();
   const secret = String(signingSecret ?? '').trim();
   if (!token || !secret) return null;
   if (timingSafeStringEqual(token, secret)) {
     return { kind: 'legacy', tokenId: 'legacy', name: 'Legacy Drone Hub MCP token' };
+  }
+  if (token.startsWith(`${CHAT_TOKEN_PREFIX}_`)) {
+    return await authenticateChatMcpToken(token, secret);
   }
   if (!token.startsWith(`${TOKEN_PREFIX}_`)) return null;
   const id = token.slice(TOKEN_PREFIX.length + 1).split('.', 1)[0]?.trim();

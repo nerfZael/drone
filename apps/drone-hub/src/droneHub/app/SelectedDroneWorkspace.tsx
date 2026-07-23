@@ -1,5 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import {
   AgentChatTranscript,
   ChatSurface,
@@ -61,6 +62,7 @@ import { parseGithubPullRequestHref } from '../chat/github-pull-request-links';
 import { useHeaderRepoPullRequestSummary } from './HeaderPullRequestShortcuts';
 import { useFleetAssignmentDropState } from './use-fleet-assignment-drop-state';
 import { AssistantDock } from '../assistant/AssistantDock';
+import { ScopeModeControl } from '../assistant/AssistantSettingsPanels';
 import {
   buildTranscriptExportFilename,
   formatTranscriptJson,
@@ -68,6 +70,9 @@ import {
 } from '../chat/transcript-export';
 import { buildChatTimelineItems } from './chat-timeline-items';
 import { pendingPromptShowsWorkingState } from './optimistic-pending-prompts';
+import { useChatMcpAccess, withChatMcpSelectedDrones } from './use-chat-mcp-access';
+import { parseDroneHubDragData } from './drone-hub-dnd';
+import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 
 type LaunchHint =
   | {
@@ -656,6 +661,44 @@ export function SelectedDroneWorkspace({
   ]);
   const [workspacePaneHeaderMode, setWorkspacePaneHeaderModeState] = React.useState<WorkspacePaneHeaderMode>(() => readWorkspacePaneHeaderMode());
   const [droneControlsMenuOpen, setDroneControlsMenuOpen] = React.useState(false);
+  const chatMcpAccess = useChatMcpAccess(
+    currentDrone.id,
+    activeChatName,
+    !nativeChatActive && hasChats && chatUiMode === 'transcript',
+  );
+  const chatMcpAccessDropId = `chat-mcp-access:${currentDrone.id}:${activeChatName}`;
+  const {
+    isOver: chatMcpAccessDropActive,
+    setNodeRef: setChatMcpAccessDropNodeRef,
+  } = useDroppable({ id: chatMcpAccessDropId });
+  useDndMonitor({
+    onDragEnd(event) {
+      if (
+        chatMcpAccess.loading ||
+        chatMcpAccess.saving ||
+        !chatMcpAccess.available
+      ) {
+        return;
+      }
+      if (String(event.over?.id ?? '') !== chatMcpAccessDropId) return;
+      const droneIds = assignedDroneIdsFromData(parseDroneHubDragData(event.active.data.current));
+      if (droneIds.length === 0) return;
+      void chatMcpAccess.updateAccessScope(
+        withChatMcpSelectedDrones(chatMcpAccess.accessScope, droneIds),
+      );
+    },
+  });
+  const chatMcpAccessStatusText = chatMcpAccess.loading
+    ? 'Loading access…'
+    : chatMcpAccess.error
+      ? chatMcpAccess.error
+      : !chatMcpAccess.available
+        ? 'Drone Hub MCP is not enabled'
+        : chatMcpAccess.saving
+          ? 'Saving…'
+          : chatMcpAccessDropActive
+            ? 'Drop to add selected drones'
+            : 'Per chat · drop drones to scope · terminal agents have no access';
 
   const openPullRequestsTab = React.useCallback(() => {
     requestRightPanelTab('prs');
@@ -1446,6 +1489,83 @@ export function SelectedDroneWorkspace({
           </div>
         </div>
       </DroneWorkspaceHeaderFrame>
+
+      {!nativeChatActive && hasChats && chatUiMode === 'transcript' ? (
+        <div
+          ref={setChatMcpAccessDropNodeRef}
+          title="R controls reads, W controls state changes, and X controls actions that trigger agents or Hub UI. This policy applies only to the managed chat."
+          className={cn(
+            'flex flex-shrink-0 items-center gap-1.5 border-b border-[var(--border)] bg-[var(--surface-inset-faint)] px-2 py-1.5',
+            chatMcpAccess.loading || chatMcpAccess.saving || !chatMcpAccess.available
+              ? 'pointer-events-none opacity-70'
+              : '',
+            chatMcpAccessDropActive ? 'bg-[var(--accent-subtle)]' : '',
+          )}
+        >
+          <div
+            className="mr-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Existing drones
+          </div>
+          <ScopeModeControl
+            label="R"
+            mode={chatMcpAccess.accessScope.readMode}
+            onChange={(mode) => void chatMcpAccess.setMode('read', mode)}
+          />
+          <ScopeModeControl
+            label="W"
+            mode={chatMcpAccess.accessScope.writeMode}
+            onChange={(mode) => void chatMcpAccess.setMode('write', mode)}
+          />
+          <ScopeModeControl
+            label="X"
+            mode={chatMcpAccess.accessScope.executeMode}
+            onChange={(mode) => void chatMcpAccess.setMode('execute', mode)}
+          />
+          {chatMcpAccess.accessScope.droneIds.length > 0 ? (
+            <div className="flex min-w-0 gap-1 overflow-x-auto no-scrollbar">
+              {chatMcpAccess.accessScope.droneIds.map((droneId) => (
+                <span
+                  key={droneId}
+                  className="inline-flex max-w-[150px] flex-shrink-0 items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-1.5 py-0.5 text-[var(--text-10)] text-[var(--fg-secondary)]"
+                >
+                  <span className="min-w-0 truncate">
+                    {droneId === currentDrone.id ? currentDroneLabel : droneId}
+                  </span>
+                  {droneId !== currentDrone.id ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void chatMcpAccess.updateAccessScope({
+                          ...chatMcpAccess.accessScope,
+                          droneIds: chatMcpAccess.accessScope.droneIds.filter(
+                            (selectedId) => selectedId !== droneId,
+                          ),
+                        })
+                      }
+                      className="ml-1 text-[var(--text-11)] leading-none text-[var(--muted-dim)] hover:text-[var(--red)]"
+                      title={`Remove ${droneId} from this chat's selected-drone scope`}
+                      aria-label={`Remove ${droneId} from this chat's selected-drone scope`}
+                    >
+                      x
+                    </button>
+                  ) : null}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <div
+            className={cn(
+              'min-w-0 flex-1 truncate pl-1 text-[var(--text-10)]',
+              chatMcpAccess.error ? 'text-[var(--red)]' : 'text-[var(--muted-dim)]',
+            )}
+            title="Access applies only to this managed chat. Manually launched terminal agents receive no Drone Hub credential."
+          >
+            {chatMcpAccessStatusText}
+          </div>
+        </div>
+      ) : null}
 
       <DockableDroneWorkspace
         key={currentDrone.id}

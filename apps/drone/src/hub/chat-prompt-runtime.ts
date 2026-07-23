@@ -116,6 +116,7 @@ type ChatPromptRuntimeDependencyName =
   | 'resolveEffectiveLlmProvider'
   | 'resolveEffectiveProviderApiKeySettings'
   | 'resolveHostPort'
+  | 'resolveManagedChatMcpEnv'
   | 'resolvePendingDroneDisplayName'
   | 'resolveTranscriptPromptAt'
   | 'runNodeCli'
@@ -246,6 +247,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     resolveEffectiveLlmProvider,
     resolveEffectiveProviderApiKeySettings,
     resolveHostPort,
+    resolveManagedChatMcpEnv,
     resolvePendingDroneDisplayName,
     resolveTranscriptPromptAt,
     runNodeCli,
@@ -397,6 +399,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       if (agentPermissionMode === 'read-only') assertReadOnlySupportedForAgent(agent);
       const managedEnv = resolveDroneEnvironmentConfig(regLatest, d).resolvedVars;
       const managedEnvLines = buildEnvExportLines(managedEnv);
+      const managedChatMcpEnv = await resolveManagedChatMcpEnv({
+        runtime,
+        droneId,
+        chatName: normalizedChat,
+        chat,
+      });
+      const managedChatMcpEnvLines = buildEnvExportLines(managedChatMcpEnv);
 
       const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
       const cdCommand =
@@ -479,6 +488,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print --output-format stream-json ${bashQuote(promptWithHistory)}`,
@@ -512,6 +522,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             'set -euo pipefail',
             ...buildContainerManagedEnvLines(d),
             ...managedEnvLines,
+            ...managedChatMcpEnvLines,
             `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
             cdCommand,
             `codex --ask-for-approval never${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never${codexImageArgs} ${bashQuote(promptWithHistory)}`,
@@ -538,6 +549,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `codex --ask-for-approval never${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never resume${codexImageArgs} ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
@@ -570,6 +582,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg} --session-id ${bashQuote(claudeSessionId)} ${bashQuote(promptWithHistory)}`,
@@ -604,6 +617,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `opencode run --format json --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(promptWithHistory)}`,
@@ -634,6 +648,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `pi --mode json${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
@@ -671,6 +686,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `${blipCommand} --jsonl ${permissionArgs}${modelArg}${reasoningArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
@@ -702,7 +718,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         chatName: normalizedChat,
         command: tmuxCmd,
         cwd,
-        envVars: managedEnv,
+        envVars: { ...(managedEnv ?? {}), ...managedChatMcpEnv },
       });
       await dvmSessionType(containerName, sessionName, { text: effectivePrompt });
       await sleepMs(60);

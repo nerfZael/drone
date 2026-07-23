@@ -408,8 +408,8 @@ import {
   updateMcpServerRecord,
 } from './mcp-servers';
 import {
+  createChatMcpAccessToken,
   createMcpAccessToken,
-  ensureDroneMcpAccessToken,
   ensureHostMcpAccessToken,
   getMcpAccessTokenById,
   listMcpAccessTokens,
@@ -417,6 +417,10 @@ import {
   revokeMcpAccessToken,
   revokeMcpAccessTokensForDrone,
 } from './mcp-tokens';
+import {
+  isDroneHubMcpServer,
+  projectMcpServerForManagedChats,
+} from './mcp-managed-chat-projection';
 import {
   importSkillFromSource,
   listSkillSourceCandidates,
@@ -1823,8 +1827,22 @@ function setActiveDroneHubMcpProjectionConfig(config: ActiveDroneHubMcpProjectio
   activeDroneHubMcpProjectionConfig = config;
 }
 
-function isDroneHubMcpServer(server: McpServerRecord): boolean {
-  return server.name === 'drone-hub' && server.transport === 'http';
+async function revokeLegacyProjectedDroneMcpTokens(): Promise<void> {
+  const activeDroneTokens = (await listMcpAccessTokens()).filter(
+    (token) => token.kind === 'drone' && !token.revokedAt,
+  );
+  if (activeDroneTokens.length === 0) return;
+  await Promise.all(activeDroneTokens.map((token) => revokeMcpAccessToken(token.id)));
+  hubLog('info', 'revoked legacy globally projected drone MCP credentials', {
+    count: activeDroneTokens.length,
+  });
+}
+
+async function isManagedChatMcpAvailable(): Promise<boolean> {
+  if (!activeDroneHubMcpProjectionConfig?.signingSecret) return false;
+  return (await listMcpServers()).some(
+    (server) => isDroneHubMcpServer(server) && server.enabled !== false,
+  );
 }
 
 async function mcpServersForProjection(opts: {
@@ -1841,24 +1859,35 @@ async function mcpServersForProjection(opts: {
       out.push(server);
       continue;
     }
-    const next: McpServerRecord = {
-      ...server,
-      url: opts.runtime === 'container' ? config.containerUrl : config.hostUrl,
-    };
-    if (opts.runtime === 'container' && server.enabled !== false) {
-      const token = await ensureDroneMcpAccessToken({
-        droneId: opts.droneId ?? '',
-        droneName: String(opts.droneEntry?.name ?? opts.droneId ?? '').trim() || opts.droneId,
-        signingSecret: config.signingSecret,
-      });
-      next.headers = {
-        ...(server.headers ?? {}),
-        Authorization: `Bearer ${token.tokenValue}`,
-      };
-    }
-    out.push(next);
+    out.push(projectMcpServerForManagedChats({
+      server,
+      runtime: opts.runtime,
+      hostBridgePath: path.resolve(__dirname, '..', 'mcp-http-stdio-bridge.js'),
+    }));
   }
   return out;
+}
+
+async function resolveManagedChatMcpEnv(input: {
+  runtime: DroneRuntime;
+  droneId: string;
+  chatName: string;
+  chat: any;
+}): Promise<Record<string, string>> {
+  const config = activeDroneHubMcpProjectionConfig;
+  if (!config || !(await isManagedChatMcpAvailable())) return {};
+  const chatId = String(input.chat?.id ?? '').trim();
+  if (!chatId) return {};
+  return {
+    DRONE_HUB_MCP_URL:
+      input.runtime === 'container' ? config.containerUrl : config.hostUrl,
+    DRONE_HUB_MCP_TOKEN: createChatMcpAccessToken({
+      droneId: input.droneId,
+      chatName: input.chatName,
+      chatId,
+      signingSecret: config.signingSecret,
+    }),
+  };
 }
 
 async function syncSkillLibraryForDrone(opts: { droneId: string; droneEntry: any }): Promise<void> {
@@ -3539,6 +3568,7 @@ promptRuntime = createChatPromptRuntime({
   resolveEffectiveLlmProvider,
   resolveEffectiveProviderApiKeySettings,
   resolveHostPort,
+  resolveManagedChatMcpEnv,
   resolvePendingDroneDisplayName,
   resolveTranscriptPromptAt,
   runNodeCli,
@@ -4283,6 +4313,7 @@ export async function startDroneHubApiServer(opts: {
   const apiToken = String(opts.apiToken ?? '').trim();
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
+  if (mcpToken) await revokeLegacyProjectedDroneMcpTokens();
   let actualPort = opts.port;
   const deviceMesh = await createDeviceMeshService({
     rootDir: droneRootPath('device-mesh'),
@@ -5854,6 +5885,7 @@ export async function startDroneHubApiServer(opts: {
     importResolvedChatToStore,
     importResolvedDroneChatsToStore,
     inferChatAgent,
+    isManagedChatMcpAvailable,
     isDraftChatEntry,
     isSafePromptId,
     isStaleDockerExecErrorMessage,

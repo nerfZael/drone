@@ -6,6 +6,7 @@ import path from 'node:path';
 import { McpIdleSubscriptionStore } from '../src/hub/assistant/mcp-idle-subscription-store';
 import { ASSISTANT_TOOL_SUMMARIES } from '../src/hub/assistant/assistant-config';
 import { createInProcessDroneHubMcpClient } from '../src/hub/assistant/in-process-drone-hub-mcp';
+import { normalizeMcpChatAccessScope } from '../src/hub/mcp-chat-access';
 import { authorizeDroneHubMcpTool, imageToolResult } from '../src/hub/mcp-server';
 import { droneStatusSummary } from '../src/hub/mcp-summaries';
 import { withTempDroneDataDir } from './test-helpers';
@@ -67,6 +68,51 @@ describe('Drone Hub MCP principal authorization', () => {
   test('allows host principals to use all domain tools', () => {
     const host = { principal: { kind: 'host' as const, tokenId: 'host', name: 'Host token' } };
     expect(() => authorizeDroneHubMcpTool(host, 'create_drone', {})).not.toThrow();
+  });
+
+  test('enforces the native read, write, and execute scope shape for chat principals', () => {
+    const chatPrincipal = {
+      kind: 'chat' as const,
+      tokenId: 'chat:drone-a:default',
+      name: 'Drone A / default',
+      droneId: 'drone-a',
+      chatName: 'default',
+      chatId: 'chat-a',
+      accessScope: {
+        readMode: 'all' as const,
+        writeMode: 'selected' as const,
+        executeMode: 'selected' as const,
+        droneIds: ['drone-a'],
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      selectedDroneRefs: ['drone-a', 'Drone A'],
+    };
+    const scoped = { principal: chatPrincipal };
+    expect(() => authorizeDroneHubMcpTool(scoped, 'read_chat', { drone: 'drone-b' })).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(scoped, 'create_chat', { drone: 'drone-b' })).toThrow('write scope');
+    expect(() => authorizeDroneHubMcpTool(scoped, 'send_message', { drone: 'drone-b' })).toThrow('execute scope');
+    expect(() => authorizeDroneHubMcpTool(scoped, 'send_message', { drone: 'Drone A' })).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(scoped, 'create_drone', { name: 'Child' })).not.toThrow();
+  });
+
+  test('uses native defaults and includes the owner whenever a scope is selected', () => {
+    expect(normalizeMcpChatAccessScope({}, 'drone-a')).toMatchObject({
+      readMode: 'all',
+      writeMode: 'selected',
+      executeMode: 'selected',
+      droneIds: ['drone-a'],
+    });
+    expect(
+      normalizeMcpChatAccessScope(
+        {
+          readMode: 'all',
+          writeMode: 'all',
+          executeMode: 'all',
+          droneIds: ['drone-a'],
+        },
+        'drone-a',
+      ).droneIds,
+    ).toEqual([]);
   });
 
   test('enforces assistant read and write scopes for host principals', () => {

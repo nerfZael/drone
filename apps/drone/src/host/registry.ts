@@ -26,6 +26,7 @@ const REGISTRY_HOURLY_SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000;
 const REGISTRY_EMPTY_FLEET_GUARD_MIN_PREVIOUS = 10;
 
 type DroneRegistryChatEntry = {
+  id?: string;
   createdAt: string;
   chatId?: string;
   model?: string;
@@ -36,6 +37,13 @@ type DroneRegistryChatEntry = {
   openCodeSessionId?: string;
   piSessionId?: string;
   blipSessionId?: string;
+  droneHubMcpAccessScope?: {
+    readMode: 'all' | 'selected';
+    writeMode: 'all' | 'selected';
+    executeMode: 'all' | 'selected';
+    droneIds: string[];
+    updatedAt: string;
+  };
   turns?: Array<{
     at: string;
     id?: string;

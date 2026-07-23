@@ -4,8 +4,14 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 
 import { resetDroneRootDirForTests } from '../src/host/paths';
+import { updateRegistry } from '../src/host/registry';
 import { startDroneHubApiServer } from '../src/hub/server';
-import { authenticateMcpBearerToken, ensureDroneMcpAccessToken, revokeMcpAccessTokensForDrone } from '../src/hub/mcp-tokens';
+import {
+  authenticateMcpBearerToken,
+  createChatMcpAccessToken,
+  ensureDroneMcpAccessToken,
+  revokeMcpAccessTokensForDrone,
+} from '../src/hub/mcp-tokens';
 import { getSocketListenSupport } from './socket-listen-support';
 
 const listenSupport = getSocketListenSupport();
@@ -206,5 +212,133 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
     expect(revoked).toHaveLength(1);
     const rejected = await authenticateMcpBearerToken(first.tokenValue, mcpToken);
     expect(rejected).toBeNull();
+  });
+
+  test('refreshes chat scope within a session and rejects mismatched or replaced chats', async () => {
+    const firstChatId = 'session-chat-a';
+    const secondChatId = 'session-chat-b';
+    await updateRegistry((registry: any) => {
+      registry.drones['session-drone-a'] = {
+        id: 'session-drone-a',
+        name: 'Session Drone A',
+        chats: {
+          default: {
+            id: firstChatId,
+            createdAt: new Date().toISOString(),
+            droneHubMcpAccessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['session-drone-a'],
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        },
+      };
+      registry.drones['session-drone-b'] = {
+        id: 'session-drone-b',
+        name: 'Session Drone B',
+        chats: {
+          default: {
+            id: secondChatId,
+            createdAt: new Date().toISOString(),
+            droneHubMcpAccessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['session-drone-b'],
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        },
+      };
+    });
+    const firstToken = createChatMcpAccessToken({
+      droneId: 'session-drone-a',
+      chatName: 'default',
+      chatId: firstChatId,
+      signingSecret: mcpToken,
+    });
+    const secondToken = createChatMcpAccessToken({
+      droneId: 'session-drone-b',
+      chatName: 'default',
+      chatId: secondChatId,
+      signingSecret: mcpToken,
+    });
+    const requestHeaders = (token: string, sessionId?: string) => ({
+      authorization: `Bearer ${token}`,
+      accept: 'application/json, text/event-stream',
+      'content-type': 'application/json',
+      ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
+    });
+    const init = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: requestHeaders(firstToken),
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 20,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          clientInfo: { name: 'permission-refresh-test', version: '0.1.0' },
+        },
+      }),
+    });
+    expect(init.status).toBe(200);
+    const sessionId = init.headers.get('mcp-session-id');
+    expect(sessionId).toBeTruthy();
+
+    const callReadOtherChat = async (token: string) => {
+      const response = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: requestHeaders(token, sessionId ?? undefined),
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 21,
+          method: 'tools/call',
+          params: {
+            name: 'read_chat',
+            arguments: { drone: 'session-drone-b', chat: 'default' },
+          },
+        }),
+      });
+      return { response, body: await response.text() };
+    };
+
+    const deniedBefore = await callReadOtherChat(firstToken);
+    expect(deniedBefore.body).toContain('read scope does not include the requested drone');
+
+    await updateRegistry((registry: any) => {
+      registry.drones['session-drone-a'].chats.default.droneHubMcpAccessScope.readMode = 'all';
+    });
+    const allowed = await callReadOtherChat(firstToken);
+    expect(allowed.response.status).toBe(200);
+    expect(allowed.body).not.toContain('read scope does not include the requested drone');
+
+    await updateRegistry((registry: any) => {
+      registry.drones['session-drone-a'].chats.default.droneHubMcpAccessScope.readMode =
+        'selected';
+    });
+    const deniedAfter = await callReadOtherChat(firstToken);
+    expect(deniedAfter.body).toContain('read scope does not include the requested drone');
+
+    const wrongToken = await callReadOtherChat(secondToken);
+    expect(wrongToken.response.status).toBe(403);
+    expect(wrongToken.body).toContain('MCP session belongs to another token');
+
+    await updateRegistry((registry: any) => {
+      const chat = registry.drones['session-drone-a'].chats.default;
+      delete registry.drones['session-drone-a'].chats.default;
+      registry.drones['session-drone-a'].chats.renamed = chat;
+    });
+    const renamedIdentity = await authenticateMcpBearerToken(firstToken, mcpToken);
+    expect(renamedIdentity?.kind).toBe('chat');
+    if (renamedIdentity?.kind === 'chat') expect(renamedIdentity.chatName).toBe('renamed');
+
+    await updateRegistry((registry: any) => {
+      registry.drones['session-drone-a'].chats.renamed.id = 'replacement-chat-id';
+    });
+    expect(await authenticateMcpBearerToken(firstToken, mcpToken)).toBeNull();
   });
 });

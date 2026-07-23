@@ -259,6 +259,7 @@ export async function runBlipTask(
           });
         },
       },
+      ...(options.toolProviders ?? []),
     ],
     beforePrompt: async () => {
       initialUntrackedFiles = await collectGitUntrackedFiles(options.workspaceRoot);
