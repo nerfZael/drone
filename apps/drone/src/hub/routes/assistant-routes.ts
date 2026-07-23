@@ -15,6 +15,7 @@ export type AssistantRouteDependencies = {
     promptId?: string;
     prompt: string;
     promptImages?: any[];
+    deliveryMode?: 'queue' | 'asap';
   }) => Promise<any>;
   validateAssistantPromptImages: (attachments: any[]) => any[];
   saveAssistantArtifactUploads: (threadId: string, attachments: any[]) => Promise<any[]>;
@@ -448,6 +449,12 @@ export function registerAssistantRoutes(
           promptId: String(body?.promptId ?? '').trim() || undefined,
           prompt,
           promptImages,
+          deliveryMode:
+            body?.deliveryMode === 'asap'
+              ? 'asap'
+              : body?.deliveryMode === 'queue'
+                ? 'queue'
+                : undefined,
         });
         writeEvent({ type: 'queued', threadId: params.threadId, prompt: queued });
         writeEvent({ type: 'done' });

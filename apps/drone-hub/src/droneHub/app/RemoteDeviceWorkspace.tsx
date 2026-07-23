@@ -448,13 +448,14 @@ function RemoteMain({
             promptError={model.chatError}
             sending={model.sending}
             waiting={model.waiting}
+            allowSendWhileWaiting
             disabled={!routeAvailable}
             attachmentsEnabled
             attachmentMode={model.attachmentMode}
             onStop={model.waiting ? model.stop : undefined}
             stopping={model.stopping}
-            onSend={async ({ prompt, attachments }) =>
-              await model.sendPrompt(prompt, attachments)
+            onSend={async ({ prompt, attachments }, context) =>
+              await model.sendPrompt(prompt, attachments, context.deliveryMode)
             }
           />
         </>

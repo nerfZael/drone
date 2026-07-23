@@ -67,7 +67,8 @@ export function AssistantQueuedPromptRow({
 }) {
   const failed = prompt.status === 'failed';
   const running = prompt.status === 'running';
-  const statusLabel = failed ? 'Failed' : running ? 'Working' : 'Queued';
+  const statusLabel =
+    failed ? 'Failed' : running ? 'Working' : prompt.deliveryMode === 'asap' ? 'ASAP' : 'Queued';
   return (
     <div className="mx-3 flex justify-end">
       <div className={`max-w-[88%] rounded-[var(--radius-large)] border px-3 py-2 ${failed ? 'border-[var(--red-border)] bg-[var(--red-subtle)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)]'}`}>

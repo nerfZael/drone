@@ -331,7 +331,16 @@ export async function readOutput(client: DroneClient, payload: { since?: number;
 
 export async function promptEnqueue(
   client: DroneClient,
-  payload: { id: string; kind?: string; cmd: string; args?: string[]; cwd?: string; env?: Record<string, string>; prompt?: string }
+  payload: {
+    id: string;
+    kind?: string;
+    cmd: string;
+    args?: string[];
+    cwd?: string;
+    env?: Record<string, string>;
+    prompt?: string;
+    deliveryMode?: 'queue' | 'asap';
+  }
 ) {
   return await req(client, 'POST', '/v1/prompts/enqueue', payload);
 }

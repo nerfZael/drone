@@ -1,7 +1,7 @@
 import React from 'react';
 import type { ChatAgentConfig, ChatInfo } from '../../domain';
 import { stripAnsi } from '../../domain';
-import type { ChatSendPayload } from '../chat';
+import type { ChatSendContext, ChatSendPayload } from '../chat';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { StartupSeedState } from './app-types';
 import { formatDroneRuntimeError, isTransientDroneStartupError } from './chat-startup-errors';
@@ -583,7 +583,7 @@ export function useChatRuntimeOrchestration({
   }, [chatUiMode, cliTyping, sendingPrompt, selectedDrone, visiblePendingPromptsWithStartup]);
 
   const sendPromptText = React.useCallback(
-    async (payload: ChatSendPayload): Promise<boolean> => {
+    async (payload: ChatSendPayload, context: ChatSendContext): Promise<boolean> => {
       if (!currentDrone) return false;
       const prompt = String(payload?.prompt ?? '').trim();
       const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
@@ -611,6 +611,7 @@ export function useChatRuntimeOrchestration({
           chatName: selectedChat || 'default',
           prompt,
           attachments,
+          deliveryMode: context.deliveryMode,
           autoRenameHandledByClient: Boolean(prompt),
         });
         if (data.autoRenameChat && prompt) {

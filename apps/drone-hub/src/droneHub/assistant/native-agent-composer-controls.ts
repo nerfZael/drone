@@ -6,7 +6,7 @@ import type {
 } from './assistant-types';
 
 type AgentPatch = Partial<
-  Pick<AssistantThread, 'provider' | 'model' | 'thinkingLevel' | 'promptDeliveryMode'>
+  Pick<AssistantThread, 'provider' | 'model' | 'thinkingLevel'>
 >;
 
 export function buildNativeAgentComposerControls({
@@ -26,31 +26,14 @@ export function buildNativeAgentComposerControls({
 }): ChatComposerControlsConfig {
   const isDefault = Boolean(
     thread &&
-      defaultModel?.provider === thread.provider &&
+      defaultModel &&
+      defaultModel.provider === thread.provider &&
       defaultModel.model === thread.model &&
       defaultModel.thinkingLevel === thread.thinkingLevel,
   );
 
   return {
     controls: [
-      {
-        kind: 'choice-picker',
-        id: 'native-delivery',
-        value: thread?.promptDeliveryMode ?? 'queue',
-        title: 'Choose message delivery',
-        sectionTitle: 'Delivery',
-        disabled: !thread,
-        options: [
-          { value: 'queue', label: 'Queue', title: 'Queue after the agent finishes' },
-          {
-            value: 'asap',
-            label: 'ASAP',
-            title: 'Inject after the current turn before the next agent response',
-          },
-        ],
-        onValueChange: (promptDeliveryMode) =>
-          onUpdate({ promptDeliveryMode: promptDeliveryMode as AssistantThread['promptDeliveryMode'] }),
-      },
       {
         kind: 'model-picker',
         id: 'native-model',

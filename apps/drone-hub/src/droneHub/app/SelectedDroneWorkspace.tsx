@@ -11,6 +11,7 @@ import {
   adaptNativeAgentChatSurface,
   type AgentChatTranscriptItem,
   type ChatComposerControlsConfig,
+  type ChatSendContext,
   type DroneHubTask,
   type DroneHubTaskSpawnMode,
   type ChatSendPayload,
@@ -264,7 +265,7 @@ type SelectedDroneWorkspaceProps = {
   selectedDroneIdentity: string;
   promptError: string | null;
   sendingPrompt: boolean;
-  sendPromptText: (payload: ChatSendPayload) => Promise<boolean>;
+  sendPromptText: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   publishSelectedDraft: () => Promise<boolean>;
   publishingDraft: boolean;
   canStopResponse: boolean;
@@ -1765,9 +1766,9 @@ export function SelectedDroneWorkspace({
               }
               stopping={stoppingResponse}
               onPublish={currentChatIsDraft ? publishSelectedDraft : undefined}
-              onSend={async (payload: ChatSendPayload) => {
+              onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
                 if (chatUiMode === 'transcript') scrollTranscriptToBottom({ force: true });
-                const sent = await sendPromptText(payload);
+                const sent = await sendPromptText(payload, context);
                 if (sent && chatUiMode === 'transcript') scrollTranscriptToBottom({ force: true });
                 return sent;
               }}

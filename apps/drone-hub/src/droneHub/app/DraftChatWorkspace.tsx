@@ -396,7 +396,8 @@ export function DraftChatWorkspace({
           onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
             if (!draftChat.prompt) {
               return await onStartDraftPrompt(payload, {
-                keepComposerOpen: context.trigger === 'keyboard' && context.modifierKey,
+                keepComposerOpen:
+                  context.trigger === 'keyboard' && context.deliveryMode === 'queue',
               });
             }
             const droneId = String(draftChat.droneId ?? '').trim();

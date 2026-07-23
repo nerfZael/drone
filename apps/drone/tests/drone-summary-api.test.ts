@@ -116,7 +116,7 @@ describeSocketSuite('drone summary api', () => {
     });
   });
 
-  test('reports just-created drones as busy while first messages are still pending', async () => {
+  test('reports in-flight first messages as busy without treating queued work as active', async () => {
     const now = new Date(0).toISOString();
     const makeDrone = (id: string, state: string, turns: any[] = []) => ({
       id,
@@ -156,7 +156,7 @@ describeSocketSuite('drone summary api', () => {
     const resp = await apiFetch('/api/drones/summary');
 
     expect(resp.r.status).toBe(200);
-    for (const id of ['drone-first-message-sent', 'drone-first-message-sending', 'drone-first-message-queued']) {
+    for (const id of ['drone-first-message-sent', 'drone-first-message-sending']) {
       expect(resp.data?.drones?.find((item: any) => item.id === id)).toMatchObject({
         id,
         status: 'busy',
@@ -164,6 +164,11 @@ describeSocketSuite('drone summary api', () => {
         busyChats: ['default'],
       });
     }
+    expect(resp.data?.drones?.find((item: any) => item.id === 'drone-first-message-queued')).toMatchObject({
+      id: 'drone-first-message-queued',
+      status: 'ready',
+    });
+    expect(resp.data?.drones?.find((item: any) => item.id === 'drone-first-message-queued')).not.toHaveProperty('busy');
     expect(resp.data?.drones?.find((item: any) => item.id === 'drone-first-message-completed')).toMatchObject({
       id: 'drone-first-message-completed',
       status: 'ready',

@@ -1024,6 +1024,7 @@ function sanitizeQueuedPrompt(
     promptImages,
     imageCount: promptImages.length,
     createdAt: cleanOptionalString(prompt.createdAt) || nowIso(),
+    ...(prompt.deliveryMode ? { deliveryMode: prompt.deliveryMode } : {}),
     status:
       prompt.status === 'failed' ? 'failed' : prompt.status === 'running' ? 'running' : 'queued',
     error: cleanOptionalString(prompt.error) || null,
@@ -2143,6 +2144,7 @@ export class HubAssistantService {
         promptImages,
         imageCount: promptImages.length,
         createdAt: record.at,
+        deliveryMode: record.deliveryMode === 'asap' ? 'asap' : 'queue',
         status:
           record.state === 'failed' ? 'failed' : record.state === 'sending' ? 'running' : 'queued',
         error: cleanOptionalString(record.error ?? record.lastError) || null,
@@ -2478,6 +2480,7 @@ export class HubAssistantService {
       id?: unknown;
       prompt?: unknown;
       promptImages?: unknown;
+      deliveryMode?: unknown;
     },
   ): Promise<AssistantQueuedPrompt> {
     await this.ensureLoaded();
@@ -2505,6 +2508,7 @@ export class HubAssistantService {
         at: nowIso(),
         prompt,
         attachments: { promptImages },
+        deliveryMode: input.deliveryMode === 'asap' ? 'asap' : 'queue',
         state: 'queued',
       },
     });

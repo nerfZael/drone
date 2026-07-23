@@ -202,6 +202,54 @@ describe('Blip assistant host', () => {
     });
   });
 
+  test('steers an in-flight native prompt when the request is ASAP', async () => {
+    await withTempDroneDataDir('blip-assistant-steer-', async () => {
+      const faux = registerFauxProvider({
+        api: 'faux',
+        provider: 'faux',
+        tokensPerSecond: 0,
+      });
+      let signalStarted = () => {};
+      const started = new Promise<void>((resolve) => {
+        signalStarted = resolve;
+      });
+      let releaseFirst = () => {};
+      const firstReleased = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const latestUserPrompts: string[] = [];
+      faux.setResponses([
+        async (context) => {
+          latestUserPrompts.push(String((context.messages.at(-1) as any)?.content ?? ''));
+          signalStarted();
+          await firstReleased;
+          return fauxAssistantMessage('initial response');
+        },
+        (context) => {
+          latestUserPrompts.push(String((context.messages.at(-1) as any)?.content ?? ''));
+          return fauxAssistantMessage('steered response');
+        },
+      ]);
+      const host = new BlipAssistantHost(async () => ({
+        provider: 'faux',
+        model: faux.getModel().id,
+        thinkingLevel: 'off',
+        promptDeliveryMode: 'queue',
+        systemPrompt: 'Hub host prompt',
+        tools: [],
+      }));
+
+      const running = host.promptThread('thread-steer', 'initial prompt');
+      await started;
+      const steered = host.promptThread('thread-steer', 'urgent steering', undefined, 'asap');
+      releaseFirst();
+      await Promise.all([running, steered]);
+
+      expect(latestUserPrompts).toEqual(['initial prompt', 'urgent steering']);
+      faux.unregister();
+    });
+  });
+
   test('persists externally produced messages and publishes transcript changes', async () => {
     await withTempDroneDataDir('blip-assistant-external-message-', async () => {
       const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });

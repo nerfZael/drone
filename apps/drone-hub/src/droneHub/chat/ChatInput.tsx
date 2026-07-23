@@ -24,6 +24,10 @@ import {
   mergeDraftWithVoiceTranscript,
   useChatVoiceRecorder,
 } from './use-chat-voice-recorder';
+import {
+  chatSendShortcut,
+  type ChatMessageDeliveryMode,
+} from './chat-send-shortcuts';
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
@@ -45,7 +49,7 @@ export type ChatSendPayload = {
 
 export type ChatSendContext = {
   trigger: 'button' | 'keyboard';
-  modifierKey: boolean;
+  deliveryMode: ChatMessageDeliveryMode;
 };
 
 export type ChatInputProps = {
@@ -731,7 +735,7 @@ export function ChatInput({
                     type="button"
                     data-chat-composer-collapsed-action="true"
                     onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => sendNow({ trigger: 'button', modifierKey: false })}
+                    onClick={() => sendNow({ trigger: 'button', deliveryMode: 'asap' })}
                     disabled={sendDisabled}
                     className="inline-flex h-[2.125rem] w-[2.125rem] items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
                     title={voiceActionInFlight ? sendButtonLabel : 'Transcribe and send recording'}
@@ -793,11 +797,20 @@ export function ChatInput({
                   event.currentTarget.blur();
                   return;
                 }
-                const modifierKey = event.ctrlKey || event.metaKey;
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  sendNow({ trigger: 'keyboard', modifierKey });
-                }
+                const deliveryMode = chatSendShortcut({
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  ctrlKey: event.ctrlKey,
+                  metaKey: event.metaKey,
+                  altKey: event.altKey,
+                  hasContent:
+                    Boolean(draftRef.current.trim()) ||
+                    attachmentsRef.current.length > 0 ||
+                    voiceRecordingActive,
+                });
+                if (!deliveryMode) return;
+                event.preventDefault();
+                sendNow({ trigger: 'keyboard', deliveryMode });
               }}
               rows={1}
               placeholder="Ask the agent"
@@ -807,6 +820,7 @@ export function ChatInput({
               disabled={composerLocked || voiceRecordingActive}
               autoFocus={Boolean(autoFocus)}
               aria-label={`Message ${droneName}`}
+              aria-keyshortcuts="Enter Tab Control+Enter Meta+Enter"
             />
             {!composerExpanded ? (
               <>
@@ -999,7 +1013,7 @@ export function ChatInput({
                   void onStop?.();
                   return;
                 }
-                sendNow({ trigger: 'button', modifierKey: false });
+                sendNow({ trigger: 'button', deliveryMode: 'asap' });
               }}
               disabled={showStopAction && !showSeparateStopAction ? stopping : sendDisabled}
               className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border transition-opacity hover:opacity-70 ${
@@ -1011,7 +1025,11 @@ export function ChatInput({
                     ? 'cursor-not-allowed border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] opacity-40'
                     : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]'
               }`}
-              title={showStopAction && !showSeparateStopAction ? 'Stop response' : 'Send'}
+              title={
+                showStopAction && !showSeparateStopAction
+                  ? 'Stop response'
+                  : 'Send ASAP (Enter). Queue with Tab or Ctrl/Command+Enter.'
+              }
               aria-label={sendButtonLabel}
             >
                 {showStopAction && !showSeparateStopAction ? (

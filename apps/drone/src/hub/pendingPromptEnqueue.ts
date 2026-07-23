@@ -101,6 +101,20 @@ export function hasActivePriorPendingPrompt(opts: {
   return false;
 }
 
+export function hasInFlightPriorPendingPrompt(opts: {
+  priorPendingPrompts: PendingPromptLike[];
+  transcriptDoneIds?: Set<string>;
+}): boolean {
+  const done = opts.transcriptDoneIds ?? new Set<string>();
+  for (const prompt of opts.priorPendingPrompts ?? []) {
+    const id = String(prompt?.id ?? '').trim();
+    if (!id || done.has(id)) continue;
+    const state = String(prompt?.state ?? '').trim();
+    if (state === 'sending' || state === 'sent') return true;
+  }
+  return false;
+}
+
 type PendingPromptStalenessOpts = {
   state: PendingPromptState | string;
   updatedAt?: string | null;

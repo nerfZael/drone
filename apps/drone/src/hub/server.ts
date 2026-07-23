@@ -186,10 +186,9 @@ import {
 } from './sync-sets';
 import { createSyncSetService } from './sync-set-service';
 import {
-  hasActivePriorPendingPrompt,
+  hasInFlightPriorPendingPrompt,
   looksLikeTransientPromptEnqueueError,
   shouldDeferQueuedPendingPrompt,
-  shouldDeferQueuedTranscriptPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
 } from './pendingPromptEnqueue';
@@ -1322,6 +1321,7 @@ let nativeChatPromptHandler: (input: {
   provider?: string;
   model?: string;
   thinkingLevel?: string;
+  deliveryMode?: 'queue' | 'asap';
   prompt: string;
   attachments?: ChatImageAttachment[];
 }) => Promise<void> = async () => {
@@ -3513,7 +3513,7 @@ promptRuntime = createChatPromptRuntime({
   failStaleDockerSnapshotsForChat,
   formatTranscriptJobFailure,
   getChatEntry,
-  hasActivePriorPendingPrompt,
+  hasInFlightPriorPendingPrompt,
   hasKnownBuiltinTranscriptSession,
   hubChatSessionName,
   hubLog,
@@ -3576,7 +3576,6 @@ promptRuntime = createChatPromptRuntime({
   setChatAgentConfig,
   setDroneHubMetaByIdentity,
   shouldDeferQueuedPendingPrompt,
-  shouldDeferQueuedTranscriptPrompt,
   shouldRetryFailedPendingPrompt,
   sleepMs,
   stalePendingPromptState,
@@ -4508,6 +4507,7 @@ export async function startDroneHubApiServer(opts: {
     provider,
     model,
     thinkingLevel,
+    deliveryMode,
     prompt,
     attachments,
   }) => {
@@ -4547,6 +4547,7 @@ export async function startDroneHubApiServer(opts: {
       promptId,
       prompt: promptWithFiles,
       promptImages,
+      deliveryMode,
     });
   };
   nativeChatStopHandler = async (nativeChatId: string) => {

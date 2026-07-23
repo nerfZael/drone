@@ -47,13 +47,20 @@ export class BlipAssistantHost {
     };
   }
 
-  async promptThread(threadId: string, prompt: BlipPromptInput, onEvent?: (event: BlipRuntimeEvent) => Promise<void> | void): Promise<void> {
+  async promptThread(
+    threadId: string,
+    prompt: BlipPromptInput,
+    onEvent?: (event: BlipRuntimeEvent) => Promise<void> | void,
+    deliveryMode?: 'queue' | 'asap',
+  ): Promise<void> {
     if (onEvent) {
       this.subscribeEvents(threadId, onEvent);
     }
     try {
       const handle = await this.handle(threadId);
-      if (handle.running && this.loadedConfigurations.get(threadId)?.promptDeliveryMode === 'asap') {
+      const effectiveDeliveryMode =
+        deliveryMode ?? this.loadedConfigurations.get(threadId)?.promptDeliveryMode;
+      if (handle.running && effectiveDeliveryMode === 'asap') {
         handle.steer(prompt);
         await handle.waitForIdle();
       }
