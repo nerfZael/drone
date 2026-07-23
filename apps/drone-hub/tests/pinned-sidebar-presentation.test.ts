@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 
 describe('desktop pinned drone presentation', () => {
-  test('shows pinned shortcuts before the hierarchy and keeps them out of drag ordering', () => {
+  test('shows reorderable pinned shortcuts before the hierarchy', () => {
     const sidebarSource = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
       'utf8',
@@ -23,7 +23,9 @@ describe('desktop pinned drone presentation', () => {
       'className="border-b border-[var(--border-subtle)]" aria-label="Pinned drones"',
     );
     expect(sidebarSource).toContain('key={`pinned:${droneId}`}');
-    expect(sidebarSource).toContain('draggable={false}');
+    expect(sidebarSource).toContain('<PinnedDroneReorderItem');
+    expect(sidebarSource).toContain('draggable={dragProps.draggable}');
+    expect(sidebarSource).toContain('dragging={dragProps.dragging}');
     expect(sidebarSource).not.toContain('leadingIcon={<IconPin');
     expect(sidebarSource).toContain(
       'className="flex min-h-8 items-center gap-1.5 px-1"',
