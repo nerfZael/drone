@@ -55,6 +55,7 @@ export type AgentMessageExtrasProps = {
   onOpenLink?: (href: string) => boolean;
   plan?: AgentPlan;
   fileChanges?: AgentRunFileChanges;
+  initiallyExpandFileChanges?: boolean;
   actionEnd?: React.ReactNode;
 };
 
@@ -74,6 +75,7 @@ export function AgentMessageExtras({
   onOpenLink,
   plan,
   fileChanges,
+  initiallyExpandFileChanges = false,
   actionEnd,
 }: AgentMessageExtrasProps) {
   const inlineMediaOverride = useDroneHubUiStore(
@@ -225,7 +227,10 @@ export function AgentMessageExtras({
         </div>
       ) : null}
 
-      <ChangedFilesCard fileChanges={fileChanges} />
+      <ChangedFilesCard
+        fileChanges={fileChanges}
+        initiallyExpanded={initiallyExpandFileChanges}
+      />
       <LinkedPullRequestCards
         text={text}
         context={linkedPullRequestContext}

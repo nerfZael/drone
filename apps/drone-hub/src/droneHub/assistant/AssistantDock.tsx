@@ -1550,10 +1550,16 @@ export function AssistantDock({
     for (const call of toolCalls(message)) toolCallStartedAt.set(call.id, timestamp);
   }
   let lastToolItemIndex = -1;
+  let lastRunSummaryItemIndex = -1;
   for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
-    if (visibleItems[index]?.type !== 'tool' && visibleItems[index]?.type !== 'toolGroup') continue;
-    lastToolItemIndex = index;
-    break;
+    const itemType = visibleItems[index]?.type;
+    if (lastToolItemIndex < 0 && (itemType === 'tool' || itemType === 'toolGroup')) {
+      lastToolItemIndex = index;
+    }
+    if (lastRunSummaryItemIndex < 0 && itemType === 'runSummary') {
+      lastRunSummaryItemIndex = index;
+    }
+    if (lastToolItemIndex >= 0 && lastRunSummaryItemIndex >= 0) break;
   }
 
   for (let itemIndex = 0; itemIndex < visibleItems.length; itemIndex += 1) {
@@ -1566,6 +1572,7 @@ export function AssistantDock({
         content: (
           <ChangedFilesCard
             fileChanges={item.fileChanges}
+            initiallyExpanded={itemIndex === lastRunSummaryItemIndex}
           />
         ),
       });

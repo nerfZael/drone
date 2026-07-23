@@ -677,6 +677,12 @@ code, pre {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted-dim); }
 
+.dh-changed-files-scrollbar::-webkit-scrollbar { width: 3px; }
+.dh-changed-files-scrollbar {
+  scrollbar-color: var(--border) transparent;
+  scrollbar-width: thin;
+}
+
 .dh-sidebar-scrollbar::-webkit-scrollbar { width: 2px; }
 .dh-sidebar-scrollbar::-webkit-scrollbar-button {
   -webkit-appearance: none;

@@ -46,15 +46,23 @@ export type AgentRunFileChangeEntry = {
   path: string;
   originalPath?: string | null;
   status: AgentRunFileChangeStatus;
+  /** Raw inserted-line count reported by Git; includes lines paired as modifications. */
   additions: number;
+  /** Raw deleted-line count reported by Git; includes lines paired as modifications. */
   deletions: number;
+  /** Replacement lines inferred by pairing inserted and deleted lines within this file. */
+  modified?: number;
   binary?: boolean;
 };
 
 export type AgentRunFileChangeCounts = {
   changed: number;
+  /** Raw inserted-line count reported by Git; includes lines paired as modifications. */
   additions: number;
+  /** Raw deleted-line count reported by Git; includes lines paired as modifications. */
   deletions: number;
+  /** Replacement lines inferred per file and summed across the workspace or run. */
+  modified?: number;
 };
 
 export type AgentRunFileChangeWorkspaceV1 = {

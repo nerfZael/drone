@@ -64,6 +64,7 @@ export type ChatInputProps = {
   attachmentMode?: 'images' | 'files';
   composerContext?: ChatComposerContextConfig;
   composerControls?: ChatComposerControlsConfig;
+  composerFooter?: React.ReactNode;
   allowSendWhileWaiting?: boolean;
   onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onPublish?: () => Promise<boolean> | boolean;
@@ -88,6 +89,7 @@ export function ChatInput({
   attachmentMode = 'images',
   composerContext,
   composerControls,
+  composerFooter,
   allowSendWhileWaiting = false,
   onSend,
   onPublish,
@@ -1035,6 +1037,7 @@ export function ChatInput({
             </div>
           )}
         </div>
+        {composerFooter ? <div className="mt-2">{composerFooter}</div> : null}
       </div>
     </div>
   );

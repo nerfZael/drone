@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import type { AgentRunFileChanges } from '@blip/protocol';
+
 import type { ChatImageAttachment } from './chat-attachments';
 import { ChatStateMaintenanceScheduler } from './chat-state-maintenance';
 import type { AgentPermissionMode, ChatAgentConfig } from './chat-types';
@@ -11,6 +13,16 @@ import type { DroneRuntime } from '../host/runtime';
 import type { ResolvedOrPendingDrone } from './drone-lifecycle-service';
 
 type TranscriptTurn = any;
+
+function normalizeAgentRunFileChanges(raw: unknown): AgentRunFileChanges | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const candidate = raw as Partial<AgentRunFileChanges>;
+  if (candidate.version !== 1 && candidate.version !== 2) return undefined;
+  if (!Array.isArray(candidate.workspaces) || Number(candidate.counts?.changed) <= 0) {
+    return undefined;
+  }
+  return raw as AgentRunFileChanges;
+}
 
 export type ChatSessionRuntimeDependencies = {
   applyChatReconciliationInStore: any;
@@ -796,6 +808,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const reasoning = normalizeChatReasoning((turn as any)?.reasoning);
     const attachments = normalizeChatImageAttachmentRefs((turn as any)?.attachments);
     const dockerSnapshot = normalizeDockerSnapshot((turn as any)?.dockerSnapshot);
+    const fileChanges = normalizeAgentRunFileChanges((turn as any)?.fileChanges);
     const agentPlanRaw = (turn as any)?.agentPlan;
     const agentPlanSource = String(agentPlanRaw?.source ?? '').trim();
     const agentPlan =
@@ -819,6 +832,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       ...(reasoning ? { reasoning } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(agentPlan ? { agentPlan } : {}),
+      ...(fileChanges ? { fileChanges } : {}),
       ...(dockerSnapshot
         ? {
             dockerSnapshot: {

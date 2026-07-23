@@ -7,6 +7,7 @@ import type {
   WorkflowCondition,
   WorkflowContextRef,
   WorkflowInvocation,
+  WorkflowJsonSchema,
   WorkflowJsonValue,
   WorkflowNode,
   WorkflowRun,
@@ -106,6 +107,48 @@ function parseStructuredOutput(text: string): WorkflowJsonValue {
   const trimmed = text.trim();
   const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
   return JSON.parse(fenced?.[1] ?? trimmed) as WorkflowJsonValue;
+}
+
+class StructuredOutputError extends Error {}
+
+function parseAndValidateStructuredOutput(
+  schema: WorkflowJsonSchema,
+  text: string,
+): WorkflowJsonValue {
+  let structured: WorkflowJsonValue;
+  try {
+    structured = parseStructuredOutput(text);
+  } catch (error) {
+    throw new StructuredOutputError(
+      `invalid structured output: response is not valid JSON: ${errorMessage(error)}`,
+    );
+  }
+  if (Buffer.byteLength(JSON.stringify(structured), 'utf8') > MAX_STRUCTURED_RESULT_BYTES) {
+    throw new StructuredOutputError(
+      `structured output exceeds ${MAX_STRUCTURED_RESULT_BYTES} bytes`,
+    );
+  }
+  const errors = validateWorkflowJsonSchema(schema, structured);
+  if (errors.length > 0) {
+    throw new StructuredOutputError(`invalid structured output: ${errors.join('; ')}`);
+  }
+  return structured;
+}
+
+function structuredOutputRetryPrompt(
+  schema: WorkflowJsonSchema,
+  error: StructuredOutputError,
+): string {
+  return [
+    'Your previous response could not be accepted as the structured workflow output.',
+    `Validation error: ${error.message}`,
+    '',
+    'Required output schema (JSON Schema):',
+    JSON.stringify(schema, null, 2),
+    '',
+    'Return one corrected JSON value that matches this schema exactly.',
+    'Return JSON only, without markdown fences or explanatory text.',
+  ].join('\n');
 }
 
 export class WorkflowExecutor {
@@ -322,6 +365,7 @@ export class WorkflowExecutor {
     instructions: string,
     prompt: string,
     contextRefs: WorkflowContextRef[] | undefined,
+    outputSchema: WorkflowJsonSchema | undefined,
     context: ExecutionContext,
   ): string {
     const selected: Record<string, WorkflowJsonValue> = {};
@@ -344,6 +388,16 @@ export class WorkflowExecutor {
       prompt.trim(),
       ...(Object.keys(selected).length > 0
         ? ['', 'Selected workflow context (JSON):', selectedJson]
+        : []),
+      ...(outputSchema
+        ? [
+            '',
+            'Required output schema (JSON Schema):',
+            JSON.stringify(outputSchema, null, 2),
+            '',
+            'Return one JSON value that matches this schema exactly.',
+            'Return JSON only, without markdown fences or explanatory text.',
+          ]
         : []),
     ].join('\n');
   }
@@ -411,23 +465,36 @@ export class WorkflowExecutor {
         targetRecorded = true;
         this.publishInvocation(context.run, current);
 
-        const response = await this.runnerGateway.runPrompt({
+        let response = await this.runnerGateway.runPrompt({
           target,
-          prompt: this.buildPrompt(agent.instructions, node.prompt, node.contextFrom, context),
+          prompt: this.buildPrompt(
+            agent.instructions,
+            node.prompt,
+            node.contextFrom,
+            node.outputSchema,
+            context,
+          ),
           signal: context.signal,
         });
+        let structured: WorkflowJsonValue | null = null;
+        if (node.outputSchema) {
+          try {
+            structured = parseAndValidateStructuredOutput(node.outputSchema, response.text);
+          } catch (error) {
+            if (!(error instanceof StructuredOutputError)) throw error;
+            this.ensureActive(context);
+            response = await this.runnerGateway.runPrompt({
+              target,
+              prompt: structuredOutputRetryPrompt(node.outputSchema, error),
+              signal: context.signal,
+            });
+            structured = parseAndValidateStructuredOutput(node.outputSchema, response.text);
+          }
+        }
         const textResult =
           response.text.length > MAX_TEXT_RESULT_CHARS
             ? `${response.text.slice(0, MAX_TEXT_RESULT_CHARS)}\n[workflow result truncated]`
             : response.text;
-        const structured = node.outputSchema ? parseStructuredOutput(response.text) : null;
-        if (node.outputSchema) {
-          if (Buffer.byteLength(JSON.stringify(structured), 'utf8') > MAX_STRUCTURED_RESULT_BYTES) {
-            throw new Error(`structured output exceeds ${MAX_STRUCTURED_RESULT_BYTES} bytes`);
-          }
-          const errors = validateWorkflowJsonSchema(node.outputSchema, structured!);
-          if (errors.length > 0) throw new Error(`invalid structured output: ${errors.join('; ')}`);
-        }
         current = await this.store.patchInvocation(context.run.droneId, invocation.id, {
           promptRunId: response.promptRunId,
           status: 'completed',

@@ -4,7 +4,11 @@ import type {
   AgentRunFileChanges,
   AgentRunFileChangeWorkspace,
 } from '@blip/protocol';
-import { agentRunWorkspacePreviewEntries } from '@drone/assistant-chat';
+import {
+  agentRunLineChangeBreakdown,
+  agentRunNetLineChangeLabel,
+  agentRunWorkspacePreviewEntries,
+} from '@drone/assistant-chat';
 
 import { DiffBlock } from './DiffBlock';
 import type { AgentRunChangesSelection } from './navigation';
@@ -131,6 +135,7 @@ export function AgentRunHistoricalChangesView({
   initialSelection: AgentRunChangesSelection;
   onClose: () => void;
 }) {
+  const lineChanges = agentRunLineChangeBreakdown(fileChanges.counts);
   const [selection, setSelection] = React.useState(initialSelection);
   const [workspaceMetadata, setWorkspaceMetadata] = React.useState(() =>
     initialWorkspaceMetadata(fileChanges),
@@ -246,11 +251,24 @@ export function AgentRunHistoricalChangesView({
           <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--muted)]">
             {fileChanges.counts.changed} files
           </span>
-          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--green)]">
-            +{fileChanges.counts.additions}
+          <span
+            className="font-mono text-[var(--text-9)] font-[var(--weight-semibold)] tabular-nums text-[var(--accent)]"
+            title="Net line change"
+            aria-label={`${agentRunNetLineChangeLabel(lineChanges.net)} net lines`}
+          >
+            {agentRunNetLineChangeLabel(lineChanges.net)}
           </span>
-          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--red)]">
-            -{fileChanges.counts.deletions}
+          <span className="text-[var(--muted-dim)]" aria-hidden="true">
+            │
+          </span>
+          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--green)]" title="Lines added">
+            +{lineChanges.added}
+          </span>
+          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--yellow)]" title="Lines modified">
+            ~{lineChanges.modified}
+          </span>
+          <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--red)]" title="Lines deleted">
+            -{lineChanges.deleted}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1">

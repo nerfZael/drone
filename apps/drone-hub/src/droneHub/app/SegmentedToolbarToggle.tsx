@@ -4,6 +4,7 @@ type SegmentedToolbarToggleOption<T extends string> = {
   value: T;
   label: string;
   title?: string;
+  disabled?: boolean;
 };
 
 type SegmentedToolbarToggleProps<T extends string> = {
@@ -30,27 +31,24 @@ export function SegmentedToolbarToggle<T extends string>({
           {label}
         </span>
       )}
-      <div className="grid min-w-0 flex-1 grid-flow-col auto-cols-fr gap-5">
+      <div className="grid min-w-0 flex-1 grid-flow-col auto-cols-fr gap-1 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-soft)] p-1">
         {options.map((option) => {
           const active = value === option.value;
+          const optionDisabled = disabled || option.disabled;
           return (
             <button
               key={option.value}
               type="button"
               onClick={() => onChange(option.value)}
-              disabled={disabled}
+              disabled={optionDisabled}
               aria-pressed={active}
-              className={`flex h-10 items-center justify-center gap-2 border-b-2 px-1 text-[var(--text-11)] font-[var(--weight-semibold)] transition-colors ${
+              className={`flex h-9 items-center justify-center rounded-[calc(var(--radius-large)-0.25rem)] border px-3 text-[var(--text-11)] font-[var(--weight-semibold)] transition-[background-color,border-color,color,box-shadow,transform] ${
                 active
-                  ? 'border-[var(--accent)] text-[var(--fg)]'
-                  : 'border-transparent text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-              } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_1px_3px_var(--shadow-color)]'
+                  : 'border-transparent bg-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
+              } ${optionDisabled ? 'cursor-not-allowed opacity-40' : 'active:translate-y-px'}`}
               title={option.title}
             >
-              <span
-                aria-hidden="true"
-                className={`h-2 w-2 rounded-full ${active ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'}`}
-              />
               {option.label}
             </button>
           );

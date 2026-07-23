@@ -75,7 +75,10 @@ describe('agent run file changes', () => {
     const baseline = await captureDroneRunFileChangesBaseline({ droneId: 'host-1', drone });
     expect(baseline).not.toBeNull();
 
-    fs.appendFileSync(path.join(repoPath, 'src', 'existing.ts'), 'added by run\n');
+    fs.writeFileSync(
+      path.join(repoPath, 'src', 'existing.ts'),
+      'ONE\ntwo\ndirty before run\nadded by run\n',
+    );
     fs.appendFileSync(path.join(repoPath, 'before-run.txt'), 'changed by run\n');
     fs.writeFileSync(path.join(repoPath, 'new.txt'), 'new file\n');
     fs.unlinkSync(path.join(repoPath, 'deleted.txt'));
@@ -84,11 +87,16 @@ describe('agent run file changes', () => {
     const summary = await finalizeDroneRunFileChanges({ baseline: baseline!, drone });
 
     expect(summary?.version).toBe(2);
-    expect(summary?.counts).toEqual({ changed: 5, additions: 3, deletions: 1 });
+    expect(summary?.counts).toEqual({
+      changed: 5,
+      additions: 4,
+      deletions: 2,
+      modified: 1,
+    });
     expect(summary?.workspaces[0]).toMatchObject({
       droneId: 'host-1',
       label: 'Host drone',
-      counts: { changed: 5, additions: 3, deletions: 1 },
+      counts: { changed: 5, additions: 4, deletions: 2, modified: 1 },
     });
     expect(summary?.workspaces[0]?.previewEntries).toEqual([
       expect.objectContaining({
@@ -112,8 +120,9 @@ describe('agent run file changes', () => {
       expect.objectContaining({
         path: 'src/existing.ts',
         status: 'modified',
-        additions: 1,
-        deletions: 0,
+        additions: 2,
+        deletions: 1,
+        modified: 1,
       }),
     ]);
   });

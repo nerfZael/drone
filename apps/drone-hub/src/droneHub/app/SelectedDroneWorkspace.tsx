@@ -919,6 +919,12 @@ export function SelectedDroneWorkspace({
         }
       : undefined;
 
+  let latestFileChangesTimelineIndex = -1;
+  for (let index = externalTimelineItems.length - 1; index >= 0; index -= 1) {
+    if (!externalTimelineItems[index]?.item.fileChanges) continue;
+    latestFileChangesTimelineIndex = index;
+    break;
+  }
   const externalTranscriptItems: AgentChatTranscriptItem[] = [];
   for (let timelineIndex = 0; timelineIndex < externalTimelineItems.length; timelineIndex += 1) {
     const entry = externalTimelineItems[timelineIndex]!;
@@ -939,6 +945,7 @@ export function SelectedDroneWorkspace({
             cancelBusy={Boolean(cancellingPendingPromptById[prompt.id])}
             cancelError={cancelPendingPromptErrorById[prompt.id] ?? null}
             autoExpandPrompt={isLatestActivity}
+            initiallyExpandFileChanges={timelineIndex === latestFileChangesTimelineIndex}
           />
         ),
       });
@@ -953,6 +960,7 @@ export function SelectedDroneWorkspace({
         <TranscriptTurn
           item={turn}
           autoExpandAgentMessage={isLatestActivity}
+          initiallyExpandFileChanges={timelineIndex === latestFileChangesTimelineIndex}
           parsingJobs={Boolean(parsingJobsByTurn[turn.turn])}
           onCreateJobs={parseJobsFromAgentMessage}
           onSpawnDroneHubTask={spawnCurrentDroneHubTask}

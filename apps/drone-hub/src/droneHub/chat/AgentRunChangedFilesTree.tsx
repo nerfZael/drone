@@ -15,12 +15,26 @@ function statusClass(entry: AgentRunFileChangeEntry): string {
   return 'text-[var(--accent)]';
 }
 
-function DiffStats({ additions, deletions }: { additions: number; deletions: number }) {
+function DiffStats({
+  additions,
+  deletions,
+}: {
+  additions: number;
+  deletions: number;
+}) {
   if (additions <= 0 && deletions <= 0) return null;
   return (
-    <span className="ml-auto flex shrink-0 gap-1.5 font-mono text-[var(--text-9)] tabular-nums">
-      {additions > 0 ? <span className="text-[var(--green)]">+{additions}</span> : null}
-      {deletions > 0 ? <span className="text-[var(--red)]">-{deletions}</span> : null}
+    <span className="ml-auto flex shrink-0 gap-1.5 font-mono text-[var(--text-9)] tabular-nums opacity-75 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+      {additions > 0 ? (
+        <span className="text-[var(--green)]" title="Lines added">
+          +{additions}
+        </span>
+      ) : null}
+      {deletions > 0 ? (
+        <span className="text-[var(--red)]" title="Lines deleted">
+          -{deletions}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -69,12 +83,16 @@ export function AgentRunChangedFilesTree({
           <button
             type="button"
             onClick={() => onToggleDirectory(node.path)}
-            className={`group flex w-full items-center gap-1.5 rounded-[var(--radius-small)] pr-2 text-left text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${rowHeight}`}
+            className={`group flex w-full items-center gap-1.5 rounded-[var(--radius-small)] pr-2 text-left text-[var(--muted)] transition-colors hover:text-[var(--fg)] focus-visible:text-[var(--fg)] focus-visible:outline-none ${rowHeight}`}
             style={{ paddingLeft }}
             aria-expanded={open}
           >
-            <IconChevron down={open} className="shrink-0 text-[var(--muted-dim)]" size={11} />
-            <IconFolder className="shrink-0 text-[var(--muted)]" size={13} />
+            <IconChevron
+              down={open}
+              className="shrink-0 text-[var(--muted-dim)] transition-colors group-hover:text-[var(--accent)] group-focus-visible:text-[var(--accent)]"
+              size={11}
+            />
+            <IconFolder className="shrink-0 text-[var(--muted)] transition-colors group-hover:text-[var(--fg)] group-focus-visible:text-[var(--fg)]" size={13} />
             <span className="min-w-0 truncate font-mono text-[var(--text-10)]">{node.name}</span>
             <DiffStats additions={node.stats.additions} deletions={node.stats.deletions} />
           </button>
@@ -90,10 +108,10 @@ export function AgentRunChangedFilesTree({
         key={`file:${node.path}`}
         type="button"
         onClick={() => onSelectFile(node.entry)}
-        className={`group flex w-full items-center gap-1.5 rounded-[var(--radius-small)] pr-2 text-left transition-colors ${rowHeight} ${
+        className={`group flex w-full items-center gap-1.5 rounded-[var(--radius-small)] pr-2 text-left transition-colors focus-visible:outline-none ${rowHeight} ${
           selected
-            ? 'bg-[var(--accent-subtle)] text-[var(--fg)]'
-            : 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+            ? 'text-[var(--accent)]'
+            : 'text-[var(--fg-secondary)] hover:text-[var(--fg)] focus-visible:text-[var(--fg)]'
         }`}
         style={{ paddingLeft: paddingLeft + 14 }}
         title={node.entry.originalPath ? `${node.entry.originalPath} → ${node.path}` : node.path}
@@ -103,7 +121,14 @@ export function AgentRunChangedFilesTree({
         >
           {agentRunFileStatusLabel(node.entry)}
         </span>
-        <FileIcon className="shrink-0 text-[var(--muted)]" size={13} />
+        <FileIcon
+          className={`shrink-0 transition-colors ${
+            selected
+              ? 'text-[var(--accent)]'
+              : 'text-[var(--muted)] group-hover:text-[var(--fg)] group-focus-visible:text-[var(--fg)]'
+          }`}
+          size={13}
+        />
         <span className="min-w-0 flex-1 truncate font-mono text-[var(--text-10)]">{node.name}</span>
         {node.entry.binary ? (
           <span className="shrink-0 text-[var(--text-9)] text-[var(--muted-dim)]">binary</span>
@@ -121,7 +146,7 @@ export function AgentRunChangedFilesTree({
         <button
           type="button"
           onClick={() => setVisibleRowLimit((current) => current + (initialVisibleRows ?? 200))}
-          className="w-full rounded-[var(--radius-small)] px-2 py-1.5 text-left text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] hover:bg-[var(--hover)]"
+          className="w-full rounded-[var(--radius-small)] px-2 py-1.5 text-left text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] transition-colors hover:text-[var(--fg)] focus-visible:text-[var(--fg)] focus-visible:outline-none"
         >
           Show {initialVisibleRows ?? 200} more rows
         </button>

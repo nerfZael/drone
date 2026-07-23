@@ -117,6 +117,112 @@ describe('workflow service', () => {
     assert.throws(() => service.getRun('drone-a', pending.id), /not found/);
   });
 
+  test('retries invalid structured output once with the validation error and schema', async () => {
+    useTemporaryDataDir();
+    const prompts = [];
+    const gateway = {
+      async createTarget({ ownerDroneId, origin, agent }) {
+        return {
+          runnerKind: agent.runner.kind,
+          executionDroneId: ownerDroneId,
+          childDroneId: null,
+          chatId: `chat-${origin.invocationId}`,
+          chatName: 'worker',
+        };
+      },
+      async runPrompt({ prompt }) {
+        prompts.push(prompt);
+        return prompts.length === 1
+          ? { promptRunId: 'prompt-1', text: '{"wrong":"shape"}' }
+          : { promptRunId: 'prompt-2', text: '{"answer":"recovered"}' };
+      },
+      async stopTarget() {},
+      async deleteTarget() {},
+    };
+    const service = new WorkflowService(WorkflowStore.open(), gateway, {
+      defaultTimeoutMinutes: 1,
+    });
+    const input = definition();
+    input.phases[0].run.outputSchema = {
+      type: 'object',
+      properties: { answer: { type: 'string' } },
+      required: ['answer'],
+      additionalProperties: false,
+    };
+    const workflow = await service.createWorkflow(
+      'drone-a',
+      { name: 'Structured recovery', definition: input },
+      actor,
+    );
+    const pending = await service.requestRun('drone-a', workflow.id, {}, actor);
+
+    await service.approveRun('drone-a', pending.id, actor);
+    const completed = await waitForTerminal(service, 'drone-a', pending.id);
+
+    assert.equal(completed.status, 'completed');
+    assert.deepEqual(completed.output, { answer: 'recovered' });
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[0], /Required output schema/);
+    assert.match(prompts[0], /"answer"/);
+    assert.match(prompts[1], /Your previous response could not be accepted/);
+    assert.match(prompts[1], /\$\.answer is required/);
+    assert.match(prompts[1], /"answer"/);
+    const page = await service.listInvocations('drone-a', pending.id);
+    assert.equal(page.invocations[0].promptRunId, 'prompt-2');
+    assert.deepEqual(page.invocations[0].structuredResult, { answer: 'recovered' });
+  });
+
+  test('fails structured output after one correction retry', async () => {
+    useTemporaryDataDir();
+    let promptCount = 0;
+    const gateway = {
+      async createTarget({ ownerDroneId, origin, agent }) {
+        return {
+          runnerKind: agent.runner.kind,
+          executionDroneId: ownerDroneId,
+          childDroneId: null,
+          chatId: `chat-${origin.invocationId}`,
+          chatName: 'worker',
+        };
+      },
+      async runPrompt() {
+        promptCount += 1;
+        return {
+          promptRunId: `prompt-${promptCount}`,
+          text: promptCount === 1 ? '{"wrong":"shape"}' : '{"still_wrong":"shape"}',
+        };
+      },
+      async stopTarget() {},
+      async deleteTarget() {},
+    };
+    const service = new WorkflowService(WorkflowStore.open(), gateway, {
+      defaultTimeoutMinutes: 1,
+    });
+    const input = definition();
+    input.phases[0].run.outputSchema = {
+      type: 'object',
+      properties: { answer: { type: 'string' } },
+      required: ['answer'],
+      additionalProperties: false,
+    };
+    const workflow = await service.createWorkflow(
+      'drone-a',
+      { name: 'Structured failure', definition: input },
+      actor,
+    );
+    const pending = await service.requestRun('drone-a', workflow.id, {}, actor);
+
+    await service.approveRun('drone-a', pending.id, actor);
+    const failed = await waitForTerminal(service, 'drone-a', pending.id);
+
+    assert.equal(failed.status, 'failed');
+    assert.equal(promptCount, 2);
+    assert.match(failed.error, /invalid structured output/);
+    assert.match(failed.error, /\$\.answer is required/);
+    const page = await service.listInvocations('drone-a', pending.id);
+    assert.equal(page.invocations[0].status, 'failed');
+  });
+
   test('deleting a run deletes its child drone target', async () => {
     useTemporaryDataDir();
     const deletedTargets = [];

@@ -1,4 +1,5 @@
 import type {
+  AgentRunFileChangeCounts,
   AgentRunFileChangeEntry,
   AgentRunFileChanges,
   AgentRunFileChangeWorkspace,
@@ -8,7 +9,38 @@ export type AgentRunChangeTreeStats = {
   changed: number;
   additions: number;
   deletions: number;
+  modified?: number;
 };
+
+export type AgentRunLineChangeBreakdown = {
+  net: number;
+  added: number;
+  modified: number;
+  deleted: number;
+};
+
+export function agentRunLineChangeBreakdown(
+  counts: Pick<AgentRunFileChangeCounts, 'additions' | 'deletions' | 'modified'>,
+): AgentRunLineChangeBreakdown {
+  const additions = Math.max(0, Number(counts.additions) || 0);
+  const deletions = Math.max(0, Number(counts.deletions) || 0);
+  const modified = Math.min(
+    additions,
+    deletions,
+    Math.max(0, Number(counts.modified) || 0),
+  );
+  return {
+    net: additions - deletions,
+    added: additions - modified,
+    modified,
+    deleted: deletions - modified,
+  };
+}
+
+export function agentRunNetLineChangeLabel(net: number): string {
+  const value = Number.isFinite(net) ? Math.trunc(net) : 0;
+  return value === 0 ? '±0' : `${value > 0 ? '+' : ''}${value}`;
+}
 
 export type AgentRunChangeTreeNode =
   | {
@@ -81,8 +113,9 @@ function sumStats(nodes: AgentRunChangeTreeNode[]): AgentRunChangeTreeStats {
       changed: total.changed + node.stats.changed,
       additions: total.additions + node.stats.additions,
       deletions: total.deletions + node.stats.deletions,
+      modified: (total.modified ?? 0) + (node.stats.modified ?? 0),
     }),
-    { changed: 0, additions: 0, deletions: 0 },
+    { changed: 0, additions: 0, deletions: 0, modified: 0 },
   );
 }
 
@@ -147,7 +180,12 @@ export function buildAgentRunChangeTree(
         kind: 'file' as const,
         name: fileName(entry.path),
         path: entry.path,
-        stats: { changed: 1, additions: entry.additions, deletions: entry.deletions },
+        stats: {
+          changed: 1,
+          additions: entry.additions,
+          deletions: entry.deletions,
+          modified: entry.modified ?? 0,
+        },
         entry,
       }));
     return [...directories, ...files];

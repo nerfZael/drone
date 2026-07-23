@@ -32,6 +32,7 @@ type NewDroneSetupPanelProps = {
   onDraftCreateNameChange: (value: string) => void;
   onDraftCreateGroupChange: (value: string) => void;
   controlsLocked: boolean;
+  targetsBelowComposer?: boolean;
 };
 
 function InfoTip({ label, children }: { label: string; children: React.ReactNode }) {
@@ -175,6 +176,7 @@ export function NewDroneSetupPanel({
   onDraftCreateNameChange,
   onDraftCreateGroupChange,
   controlsLocked,
+  targetsBelowComposer = false,
 }: NewDroneSetupPanelProps) {
   const {
     pullHostBranchBeforeCreate,
@@ -222,36 +224,38 @@ export function NewDroneSetupPanel({
 
       <div>
         <section className="py-6">
-          <div className="grid gap-5 lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start">
-            <div>
-              <div className="flex items-center gap-1 text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]">
-                Runtime
-                <InfoTip label="runtime">Containers are isolated and managed by Drone Hub. Host mode runs directly on this device.</InfoTip>
+          {!targetsBelowComposer ? (
+            <div className="grid gap-5 lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start">
+              <div>
+                <div className="flex items-center gap-1 text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                  Execution target
+                  <InfoTip label="execution target">Containers are isolated and managed by Drone Hub. Host mode runs directly on this device.</InfoTip>
+                </div>
+              </div>
+              <div className="max-w-[420px]">
+                <SegmentedToolbarToggle
+                  label="Execution target"
+                  hideLabel
+                  value={createRuntime}
+                  options={[
+                    {
+                      value: 'container',
+                      label: 'Container',
+                      title: 'Create the new drone in a managed container.',
+                    },
+                    {
+                      value: 'host',
+                      label: 'Host',
+                      title: 'Create the new drone directly on the host machine.',
+                    },
+                  ]}
+                  onChange={onCreateRuntimeChange}
+                  disabled={controlsLocked}
+                />
               </div>
             </div>
-            <div className="max-w-[420px]">
-              <SegmentedToolbarToggle
-                label="Runtime"
-                hideLabel
-                value={createRuntime}
-                options={[
-                  {
-                    value: 'container',
-                    label: 'Container',
-                    title: 'Create the new drone in a managed container.',
-                  },
-                  {
-                    value: 'host',
-                    label: 'Host',
-                    title: 'Create the new drone directly on the host machine.',
-                  },
-                ]}
-                onChange={onCreateRuntimeChange}
-                disabled={controlsLocked}
-              />
-            </div>
-          </div>
-          <div className={`mt-5 grid border-y border-[var(--border-subtle)] ${createRuntime === 'container' ? 'sm:grid-cols-2' : ''}`}>
+          ) : null}
+          <div className={`${targetsBelowComposer ? '' : 'mt-5'} grid border-y border-[var(--border-subtle)] ${createRuntime === 'container' ? 'sm:grid-cols-2' : ''}`}>
             {createRuntime === 'container' ? (
               <div className="sm:pr-6">
                 <SetupSwitch
@@ -322,7 +326,7 @@ export function NewDroneSetupPanel({
           />
         </section>
 
-        {draftCreateRepoPath ? (
+        {draftCreateRepoPath && !targetsBelowComposer ? (
           <RepoBranchSourceControls
             repoPath={draftCreateRepoPath}
             hostBranch={draftRepoHostBranch}

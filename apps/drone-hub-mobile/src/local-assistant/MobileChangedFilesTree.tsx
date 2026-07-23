@@ -45,29 +45,40 @@ export function MobileChangedFilesTree({
           accessibilityLabel={`${collapsed ? 'Expand' : 'Collapse'} ${node.name}`}
           accessibilityState={{ expanded: !collapsed }}
           onPress={() => toggleDirectory(node.path)}
-          style={({ pressed }) => [
-            styles.directory,
-            { paddingLeft: 12 + depth * 14 },
-            pressed && styles.pressed,
-          ]}
+          style={[styles.directory, { paddingLeft: 12 + depth * 14 }]}
         >
-          {collapsed ? (
-            <ChevronRight color={colors.mutedDim} size={12} strokeWidth={2} />
-          ) : (
-            <ChevronDown color={colors.mutedDim} size={12} strokeWidth={2} />
+          {({ pressed }) => (
+            <>
+              {collapsed ? (
+                <ChevronRight
+                  color={pressed ? colors.accent : colors.mutedDim}
+                  size={12}
+                  strokeWidth={2}
+                />
+              ) : (
+                <ChevronDown
+                  color={pressed ? colors.accent : colors.mutedDim}
+                  size={12}
+                  strokeWidth={2}
+                />
+              )}
+              <Folder color={pressed ? colors.text : colors.muted} size={13} strokeWidth={1.8} />
+              <Text
+                numberOfLines={1}
+                style={[styles.directoryName, pressed && styles.directoryNamePressed]}
+              >
+                {node.name}
+              </Text>
+              <View style={[styles.stats, pressed && styles.statsPressed]}>
+                {node.stats.additions > 0 ? (
+                  <Text style={styles.additions}>+{node.stats.additions}</Text>
+                ) : null}
+                {node.stats.deletions > 0 ? (
+                  <Text style={styles.deletions}>-{node.stats.deletions}</Text>
+                ) : null}
+              </View>
+            </>
           )}
-          <Folder color={colors.muted} size={13} strokeWidth={1.8} />
-          <Text numberOfLines={1} style={styles.directoryName}>
-            {node.name}
-          </Text>
-          <View style={styles.stats}>
-            {node.stats.additions > 0 ? (
-              <Text style={styles.additions}>+{node.stats.additions}</Text>
-            ) : null}
-            {node.stats.deletions > 0 ? (
-              <Text style={styles.deletions}>-{node.stats.deletions}</Text>
-            ) : null}
-          </View>
         </Pressable>
         {!collapsed ? node.children.map((child) => renderNode(child, depth + 1)) : null}
       </View>
@@ -92,9 +103,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: 'monospace',
   },
-  stats: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  directoryNamePressed: { color: colors.text },
+  stats: { flexDirection: 'row', alignItems: 'center', gap: 6, opacity: 0.75 },
+  statsPressed: { opacity: 1 },
   additions: { color: colors.online, fontSize: 9, fontFamily: 'monospace' },
   deletions: { color: colors.danger, fontSize: 9, fontFamily: 'monospace' },
   file: { paddingRight: 0 },
-  pressed: { backgroundColor: colors.whiteWashSoft },
 });

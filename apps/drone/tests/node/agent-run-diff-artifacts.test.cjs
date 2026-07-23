@@ -255,10 +255,22 @@ describe('agent run diff artifacts', () => {
         targetId: 'artifacts:thread-1',
         droneId: undefined,
         label: 'Artifacts',
-        counts: { changed: 2, additions: 2, deletions: 1 },
+        counts: { changed: 2, additions: 2, deletions: 1, modified: 1 },
         entries: [
-          { path: 'notes/existing.md', status: 'modified', additions: 1, deletions: 1 },
-          { path: 'report.md', status: 'added', additions: 1, deletions: 0 },
+          {
+            path: 'notes/existing.md',
+            status: 'modified',
+            additions: 1,
+            deletions: 1,
+            modified: 1,
+          },
+          {
+            path: 'report.md',
+            status: 'added',
+            additions: 1,
+            deletions: 0,
+            modified: 0,
+          },
         ],
       },
     );

@@ -659,6 +659,20 @@ export function GroupMultiChatColumn({
     if (!ok) setQuickActionError('No preview URL available yet.');
   }, [disabledByProvisioning, drone]);
 
+  let latestTranscriptFileChangesIndex = -1;
+  let latestPendingFileChangesIndex = -1;
+  for (let index = visiblePendingPrompts.length - 1; index >= 0; index -= 1) {
+    if (!visiblePendingPrompts[index]?.fileChanges) continue;
+    latestPendingFileChangesIndex = index;
+    break;
+  }
+  if (latestPendingFileChangesIndex < 0) {
+    for (let index = (transcripts?.length ?? 0) - 1; index >= 0; index -= 1) {
+      if (!transcripts?.[index]?.fileChanges) continue;
+      latestTranscriptFileChangesIndex = index;
+      break;
+    }
+  }
 
   return (
     <section
@@ -809,6 +823,7 @@ export function GroupMultiChatColumn({
                   autoExpandAgentMessage={
                     index === items.length - 1 && visiblePendingPrompts.length === 0
                   }
+                  initiallyExpandFileChanges={index === latestTranscriptFileChangesIndex}
                   parsingJobs={false}
                   onCreateJobs={onCreateJobs}
                   onSpawnDroneHubTask={spawnDroneHubTaskForColumn}
@@ -824,6 +839,7 @@ export function GroupMultiChatColumn({
                 key={`${drone.id}:pending:${item.id}`}
                 item={item}
                 autoExpandPrompt={index === visiblePendingPrompts.length - 1}
+                initiallyExpandFileChanges={index === latestPendingFileChangesIndex}
                 droneId={drone.id}
                 droneHomePath={droneHome}
                 showRoleIcons={false}

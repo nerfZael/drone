@@ -50,6 +50,7 @@ export const TranscriptTurn = React.memo(
     actionsEnabled = true,
     dockerSnapshotsEnabled = false,
     autoExpandAgentMessage = false,
+    initiallyExpandFileChanges = false,
   }: {
     item: TranscriptItem;
     parsingJobs: boolean;
@@ -66,6 +67,7 @@ export const TranscriptTurn = React.memo(
     actionsEnabled?: boolean;
     dockerSnapshotsEnabled?: boolean;
     autoExpandAgentMessage?: boolean;
+    initiallyExpandFileChanges?: boolean;
   }) {
     const attachments = normalizeImageAttachmentRefs((item as any).attachments);
     const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
@@ -163,6 +165,7 @@ export const TranscriptTurn = React.memo(
             onOpenLink={onOpenLink}
             plan={item.agentPlan}
             fileChanges={item.fileChanges}
+            initiallyExpandFileChanges={initiallyExpandFileChanges}
             actionEnd={
               actionsEnabled && item.ok && dockerSnapshot &&
               (dockerSnapshotBusy || dockerSnapshot.status === 'failed' || onRollbackDockerSnapshot) ? (
@@ -245,6 +248,7 @@ export const TranscriptTurn = React.memo(
     (a.droneHomePath ?? '') === (b.droneHomePath ?? '') &&
     (a.dockerSnapshotsEnabled ?? false) === (b.dockerSnapshotsEnabled ?? false) &&
     (a.autoExpandAgentMessage ?? false) === (b.autoExpandAgentMessage ?? false) &&
+    (a.initiallyExpandFileChanges ?? false) === (b.initiallyExpandFileChanges ?? false) &&
     sameAttachments((a.item as any).attachments, (b.item as any).attachments) &&
     (a.item.dockerSnapshot?.id ?? '') === (b.item.dockerSnapshot?.id ?? '') &&
     (a.item.dockerSnapshot?.status ?? '') === (b.item.dockerSnapshot?.status ?? '') &&

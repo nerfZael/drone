@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  chatNamesForConfigSelection,
   chatConfigResolutionState,
   chatInfoForSelection,
 } from '../src/droneHub/app/chat-selection-model';
@@ -16,6 +17,15 @@ const drone = {
 } as any;
 
 describe('native chat selection state', () => {
+  test('allows hidden workflow chats to load their runtime metadata', () => {
+    expect(
+      chatNamesForConfigSelection({
+        chats: ['default'],
+        workflowChats: ['workflow-run-planner', 'workflow-run-analyst'],
+      }),
+    ).toEqual(['default', 'workflow-run-analyst', 'workflow-run-planner']);
+  });
+
   test('does not reuse chat metadata from the previously selected drone', () => {
     const previousChat = {
       name: 'another-drone',

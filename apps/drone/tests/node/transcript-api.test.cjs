@@ -100,6 +100,29 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
 
   const older = '2026-01-01T00:01:00.000Z';
   const newer = '2026-01-01T00:02:00.000Z';
+  const fileChanges = {
+    version: 2,
+    capturedAt: '2026-01-01T00:03:03.000Z',
+    counts: { changed: 1, additions: 12, deletions: 1, modified: 1 },
+    workspaces: [
+      {
+        targetId: `drone:${droneId}`,
+        droneId,
+        label: droneId,
+        diffArtifactId: 'diff-artifact-newer',
+        counts: { changed: 1, additions: 12, deletions: 1, modified: 1 },
+        previewEntries: [
+          {
+            path: 'ARCHITECTURE.md',
+            status: 'modified',
+            additions: 12,
+            deletions: 1,
+            modified: 1,
+          },
+        ],
+      },
+    ],
+  };
   await upsertChatInStore({
     droneId,
     chatName: 'default',
@@ -123,6 +146,7 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
           sizeBytes: 123456,
           readyAt: '2026-01-01T00:03:02.000Z',
         },
+        fileChanges,
       },
       {
         id: 'older',
@@ -155,6 +179,7 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   assert.equal(first.data.ok, true);
   assert.equal(first.data.transcripts[1].dockerSnapshot.id, 'snapshot-newer');
   assert.equal(first.data.transcripts[1].dockerSnapshot.status, 'ready');
+  assert.deepEqual(first.data.transcripts[1].fileChanges, fileChanges);
   assert.deepEqual(
     first.data.transcripts.map((turn) => turn.prompt),
     ['first', 'second'],
@@ -180,6 +205,7 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   assert.equal(stateRead.response.status, 200, stateRead.text);
   assert.deepEqual(readCounts(), beforeCanonicalRead, 'canonical hot reads must not backfill or mutate storage');
   assert.equal(stateRead.data.transcripts.length, 1);
+  assert.equal(stateRead.data.transcripts[0].fileChanges.workspaces[0].diffArtifactId, 'diff-artifact-newer');
   assert.equal(stateRead.data.pending[0].id, 'pending-1');
   const stateEtag = stateRead.response.headers.get('etag');
   const unchangedState = await apiFetch(

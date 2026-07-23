@@ -4,7 +4,12 @@ import type {
   AgentRunFileChanges,
   AgentRunFileChangeWorkspace,
 } from '@blip/protocol';
-import { agentRunWorkspacePreviewEntries, isAgentRunFileChanges } from '@drone/assistant-chat';
+import {
+  agentRunLineChangeBreakdown,
+  agentRunNetLineChangeLabel,
+  agentRunWorkspacePreviewEntries,
+  isAgentRunFileChanges,
+} from '@drone/assistant-chat';
 
 import { IconChevron } from '../icons';
 import { requestAgentRunChanges, type AgentRunChangesSelection } from '../changes/navigation';
@@ -12,20 +17,6 @@ import { AgentRunChangedFilesTree } from './AgentRunChangedFilesTree';
 import { agentRunDiffError, loadAgentRunDiffFiles } from './agent-run-diffs';
 
 const CARD_PAGE_SIZE = 20;
-
-function changesIcon() {
-  return (
-    <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M3 3.5h4M3 8h7M3 12.5h10"
-        stroke="currentColor"
-        strokeWidth="1.35"
-        strokeLinecap="round"
-      />
-      <path d="M11 3.5h2M12 2.5v2" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 function openPanelIcon() {
   return (
@@ -190,15 +181,23 @@ function WorkspaceFiles({
 export function ChangedFilesCard({
   fileChanges,
   className = '',
+  initiallyExpanded = false,
 }: {
   fileChanges?: AgentRunFileChanges | null;
   className?: string;
+  initiallyExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(initiallyExpanded);
+  const previousInitiallyExpanded = React.useRef(initiallyExpanded);
+  React.useEffect(() => {
+    if (previousInitiallyExpanded.current === initiallyExpanded) return;
+    previousInitiallyExpanded.current = initiallyExpanded;
+    setExpanded(initiallyExpanded);
+  }, [initiallyExpanded]);
   if (!isAgentRunFileChanges(fileChanges)) return null;
 
+  const lineChanges = agentRunLineChangeBreakdown(fileChanges.counts);
   const workspaceCount = fileChanges.workspaces.length;
-  const changedLabel = `${fileChanges.counts.changed} changed ${fileChanges.counts.changed === 1 ? 'file' : 'files'}`;
   const firstWorkspace = fileChanges.workspaces.find((workspace) => workspace.counts.changed > 0);
   const firstEntry = firstWorkspace
     ? agentRunWorkspacePreviewEntries(firstWorkspace)[0]
@@ -220,43 +219,53 @@ export function ChangedFilesCard({
 
   return (
     <section
-      className={`mt-3 overflow-hidden rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] ${className}`}
+      className={`mt-2 overflow-hidden rounded-[var(--radius-medium)] bg-[var(--surface-inset-faint)] text-[var(--muted)] ${className}`}
       aria-label="Files changed by this agent run"
     >
       <div className="flex items-stretch">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] focus-visible:outline-none"
+          className="group/changed-files-header flex min-w-0 flex-1 items-center px-1 py-1 text-left focus-visible:outline-none"
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
         >
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-[var(--surface-inset-strong)] text-[var(--muted)]">
-            {changesIcon()}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-              Changed files
+          <span className="inline-flex min-w-0 max-w-full items-center gap-2 px-2 py-1">
+            <span className="min-w-0 truncate text-[var(--text-10-5)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors group-hover/changed-files-header:text-[var(--fg)] group-focus-visible/changed-files-header:text-[var(--fg)]">
+              Changed files <span className="text-[var(--muted-dim)] transition-colors group-hover/changed-files-header:text-[var(--muted)] group-focus-visible/changed-files-header:text-[var(--muted)]">({fileChanges.counts.changed})</span>
             </span>
-            <span className="block truncate text-[var(--text-10)] text-[var(--muted-dim)]">
-              {changedLabel}
-              {workspaceCount > 1 ? ` across ${workspaceCount} workspaces` : ''}
+            <span className="flex shrink-0 items-center gap-1.5 font-mono text-[var(--text-10)] tabular-nums opacity-80 transition-opacity group-hover/changed-files-header:opacity-100 group-focus-visible/changed-files-header:opacity-100">
+              <span className="text-[var(--green)]" title="Lines added">
+                +{lineChanges.added}
+              </span>
+              <span className="text-[var(--yellow)]" title="Lines modified">
+                ~{lineChanges.modified}
+              </span>
+              <span className="text-[var(--red)]" title="Lines deleted">
+                -{lineChanges.deleted}
+              </span>
+              <span className="mx-0.5 text-[var(--muted-dim)]" aria-hidden="true">
+                │
+              </span>
+              <span
+                className="font-[var(--weight-semibold)] text-[var(--accent)]"
+                title="Net line change"
+                aria-label={`${agentRunNetLineChangeLabel(lineChanges.net)} net lines`}
+              >
+                {agentRunNetLineChangeLabel(lineChanges.net)}
+              </span>
             </span>
-          </span>
-          <span className="flex shrink-0 items-center gap-2 font-mono text-[var(--text-10)] tabular-nums">
-            {fileChanges.counts.additions > 0 ? (
-              <span className="text-[var(--green)]">+{fileChanges.counts.additions}</span>
-            ) : null}
-            {fileChanges.counts.deletions > 0 ? (
-              <span className="text-[var(--red)]">-{fileChanges.counts.deletions}</span>
-            ) : null}
-            <IconChevron down={expanded} className="text-[var(--muted)]" size={12} />
+            <IconChevron
+              down={expanded}
+              className="shrink-0 text-[var(--muted)] transition-colors group-hover/changed-files-header:text-[var(--accent)] group-focus-visible/changed-files-header:text-[var(--accent)]"
+              size={12}
+            />
           </span>
         </button>
         <button
           type="button"
           onClick={() => openPanel()}
           disabled={!canOpenPanel}
-          className="flex w-10 shrink-0 items-center justify-center border-l border-[var(--border-subtle)] text-[var(--muted)] transition-colors hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)] focus-visible:bg-[var(--accent-subtle)] focus-visible:text-[var(--accent)] focus-visible:outline-none disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--muted)]"
+          className="my-0.5 flex w-8 shrink-0 items-center justify-center rounded-[var(--radius-small)] text-[var(--muted-dim)] transition-colors hover:text-[var(--accent)] focus-visible:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-default disabled:opacity-40 disabled:hover:text-[var(--muted-dim)]"
           aria-label="Open agent run changes in the Changes panel"
           title="Open in Changes"
         >
@@ -264,7 +273,7 @@ export function ChangedFilesCard({
         </button>
       </div>
       {expanded ? (
-        <div className="border-t border-[var(--border-subtle)] px-1.5 py-1.5">
+        <div className="dh-changed-files-scrollbar mx-1 mt-0.5 max-h-72 overflow-y-auto overscroll-contain rounded-[var(--radius-small)] px-1.5 py-1.5">
           {fileChanges.workspaces.map((workspace) => (
             <div key={workspace.targetId}>
               {workspaceCount > 1 || workspace.targetId.startsWith('artifacts:') ? (

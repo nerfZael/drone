@@ -26,6 +26,7 @@ import {
 } from './drone-create-runtime';
 import { visibleDraftQueuedPrompts as resolveVisibleDraftQueuedPrompts } from './draft-chat-queue';
 import { NewDroneSetupPanel } from './NewDroneSetupPanel';
+import { NewDroneTargetControls } from './NewDroneTargetControls';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { useSpawnModelCatalog } from './use-spawn-model-catalog';
 
@@ -293,6 +294,7 @@ export function DraftChatWorkspace({
       onDraftCreateNameChange={onDraftCreateNameChange}
       onDraftCreateGroupChange={onDraftCreateGroupChange}
       controlsLocked={controlsLocked}
+      targetsBelowComposer={createWithChat}
     />
   );
 
@@ -393,6 +395,24 @@ export function DraftChatWorkspace({
           autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt && visibleQueuedDraftPrompts.length === 0}
           attachmentsEnabled
           composerControls={newDroneComposerControls}
+          composerFooter={
+            !draftChat.prompt ? (
+              <NewDroneTargetControls
+                createRuntime={createRuntime}
+                onCreateRuntimeChange={onCreateRuntimeChange}
+                repoPath={draftCreateRepoPath}
+                branchSource={repoBranchSource}
+                onBranchSourceChange={onRepoBranchSourceChange}
+                remoteBranch={repoCreateRemoteBranch}
+                onRemoteBranchChange={onRepoCreateRemoteBranchChange}
+                hostBranch={draftRepoHostBranch}
+                remoteBranches={draftRepoRemoteBranches}
+                branchesLoading={draftRepoBranchesLoading}
+                branchesError={draftRepoBranchesError}
+                disabled={controlsLocked}
+              />
+            ) : null
+          }
           onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
             if (!draftChat.prompt) {
               return await onStartDraftPrompt(payload, {

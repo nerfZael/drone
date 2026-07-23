@@ -338,7 +338,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           (p as any).fileChanges = fileChanges ?? {
             version: 1,
             capturedAt: nowIso(),
-            counts: { changed: 0, additions: 0, deletions: 0 },
+            counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
             workspaces: [],
           };
           changed = true;

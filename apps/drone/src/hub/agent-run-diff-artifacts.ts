@@ -249,6 +249,7 @@ export async function persistAgentRunDiffArtifact(input: {
     status: entry.status,
     additions: entry.additions,
     deletions: entry.deletions,
+    ...(typeof entry.modified === 'number' ? { modified: entry.modified } : {}),
     ...(entry.binary ? { binary: true } : {}),
     patchBytes: 0,
     compressedBytes: 0,
@@ -282,6 +283,7 @@ export async function persistAgentRunDiffArtifact(input: {
           status: entry.status,
           additions: entry.additions,
           deletions: entry.deletions,
+          ...(typeof entry.modified === 'number' ? { modified: entry.modified } : {}),
           ...(entry.binary ? { binary: true } : {}),
           patchBytes: bounded.bytes,
           compressedBytes: 0,
@@ -389,6 +391,7 @@ export async function listAgentRunDiffFiles(input: {
     status: file.status,
     additions: file.additions,
     deletions: file.deletions,
+    ...(typeof file.modified === 'number' ? { modified: file.modified } : {}),
     ...(file.binary ? { binary: true } : {}),
   }));
   const nextOffset = offset + entries.length < total ? offset + entries.length : null;

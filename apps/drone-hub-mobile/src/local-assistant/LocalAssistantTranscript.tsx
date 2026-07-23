@@ -15,6 +15,8 @@ import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import type { AgentRunFileChangeEntry, AgentRunFileChangeWorkspace } from '@blip/protocol';
 import {
   agentRunFileStatusLabel,
+  agentRunLineChangeBreakdown,
+  agentRunNetLineChangeLabel,
   agentRunWorkspacePreviewEntries,
   compactRepeatedToolItems,
   messageImageParts,
@@ -98,6 +100,7 @@ function ChangedFilesSummary({
   item,
   onLoadDiff,
   onLoadFiles,
+  initiallyExpanded = false,
 }: {
   item: Extract<AssistantRenderItem, { type: 'runSummary' }>;
   onLoadDiff?: (input: { artifactId: string; path: string }) => Promise<{
@@ -109,8 +112,15 @@ function ChangedFilesSummary({
     nextOffset: number | null;
     metadataTruncated?: boolean;
   }>;
+  initiallyExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(initiallyExpanded);
+  const previousInitiallyExpanded = React.useRef(initiallyExpanded);
+  React.useEffect(() => {
+    if (previousInitiallyExpanded.current === initiallyExpanded) return;
+    previousInitiallyExpanded.current = initiallyExpanded;
+    setExpanded(initiallyExpanded);
+  }, [initiallyExpanded]);
   const [openDiffKey, setOpenDiffKey] = React.useState('');
   const [selectedDiff, setSelectedDiff] = React.useState<{
     key: string;
@@ -133,6 +143,7 @@ function ChangedFilesSummary({
     >
   >({});
   const summary = item.fileChanges;
+  const lineChanges = agentRunLineChangeBreakdown(summary.counts);
   React.useEffect(() => {
     if (!expanded) return;
     for (const workspace of summary.workspaces) {
@@ -274,30 +285,41 @@ function ChangedFilesSummary({
           }
           setExpanded((current) => !current);
         }}
-        style={({ pressed }) => [styles.changedFilesHeader, pressed && styles.changedFilesPressed]}
+        style={({ pressed }) => [
+          styles.changedFilesHeader,
+          pressed && styles.changedFilesHeaderPressed,
+        ]}
       >
-        <View style={styles.changedFilesTitleBlock}>
-          <Text style={styles.changedFilesTitle}>Changed files</Text>
-          <Text style={styles.changedFilesSubtitle}>
-            {summary.counts.changed} {summary.counts.changed === 1 ? 'file' : 'files'}
+        <View style={styles.changedFilesHeaderHighlight}>
+          <Text numberOfLines={1} style={styles.changedFilesTitle}>
+            Changed files <Text style={styles.changedFilesCount}>({summary.counts.changed})</Text>
           </Text>
-        </View>
-        <View style={styles.changedFilesCounts}>
-          {summary.counts.additions > 0 ? (
-            <Text style={styles.changedFilesAdditions}>+{summary.counts.additions}</Text>
-          ) : null}
-          {summary.counts.deletions > 0 ? (
-            <Text style={styles.changedFilesDeletions}>-{summary.counts.deletions}</Text>
-          ) : null}
-          {expanded ? (
-            <ChevronDown color={colors.muted} size={14} />
-          ) : (
-            <ChevronRight color={colors.muted} size={14} />
-          )}
+          <View style={styles.changedFilesCounts}>
+            <Text style={styles.changedFilesAdditions}>+{lineChanges.added}</Text>
+            <Text style={styles.changedFilesModified}>~{lineChanges.modified}</Text>
+            <Text style={styles.changedFilesDeletions}>-{lineChanges.deleted}</Text>
+            <View accessibilityElementsHidden style={styles.changedFilesCountsSeparator} />
+            <Text
+              accessibilityLabel={`${agentRunNetLineChangeLabel(lineChanges.net)} net lines`}
+              style={styles.changedFilesNet}
+            >
+              {agentRunNetLineChangeLabel(lineChanges.net)}
+            </Text>
+            {expanded ? (
+              <ChevronDown color={colors.muted} size={14} />
+            ) : (
+              <ChevronRight color={colors.muted} size={14} />
+            )}
+          </View>
         </View>
       </Pressable>
       {expanded ? (
-        <View style={styles.changedFilesList}>
+        <ScrollView
+          nestedScrollEnabled
+          showsVerticalScrollIndicator
+          style={styles.changedFilesListScroll}
+          contentContainerStyle={styles.changedFilesList}
+        >
           {summary.workspaces.map((workspace) => (
             <View key={workspace.targetId}>
               {summary.workspaces.length > 1 || workspace.targetId.startsWith('artifacts:') ? (
@@ -310,26 +332,51 @@ function ChangedFilesSummary({
                   const diffKey = artifactId ? `${artifactId}\u0000${entry.path}` : '';
                   const open = Boolean(diffKey && openDiffKey === diffKey);
                   const diff = selectedDiff?.key === diffKey ? selectedDiff.state : undefined;
-                  const row = (
+                  const renderRow = (pressed = false) => (
                     <View style={styles.changedFilesRow}>
-                      <Text style={styles.changedFilesStatus}>
+                      <Text
+                        style={[
+                          styles.changedFilesStatus,
+                          pressed && styles.changedFilesStatusPressed,
+                        ]}
+                      >
                         {agentRunFileStatusLabel(entry)}
                       </Text>
-                      <Text numberOfLines={1} style={styles.changedFilesPath}>
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.changedFilesPath,
+                          pressed && styles.changedFilesPathPressed,
+                        ]}
+                      >
                         {name}
                       </Text>
                       {!entry.binary && (entry.additions > 0 || entry.deletions > 0) ? (
-                        <Text style={styles.changedFilesLineCounts}>
-                          {entry.additions > 0 ? `+${entry.additions}` : ''}
-                          {entry.additions > 0 && entry.deletions > 0 ? ' ' : ''}
-                          {entry.deletions > 0 ? `-${entry.deletions}` : ''}
+                        <Text
+                          style={[
+                            styles.changedFilesLineCounts,
+                            pressed && styles.changedFilesLineCountsPressed,
+                          ]}
+                        >
+                          {[
+                            entry.additions > 0 ? `+${entry.additions}` : '',
+                            entry.deletions > 0 ? `-${entry.deletions}` : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                         </Text>
                       ) : null}
                       {artifactId && onLoadDiff ? (
                         open ? (
-                          <ChevronDown color={colors.muted} size={12} />
+                          <ChevronDown
+                            color={pressed ? colors.accent : colors.muted}
+                            size={12}
+                          />
                         ) : (
-                          <ChevronRight color={colors.muted} size={12} />
+                          <ChevronRight
+                            color={pressed ? colors.accent : colors.muted}
+                            size={12}
+                          />
                         )
                       ) : null}
                     </View>
@@ -342,12 +389,11 @@ function ChangedFilesSummary({
                           accessibilityLabel={`Show the diff captured for ${entry.path}`}
                           accessibilityState={{ expanded: open }}
                           onPress={() => openDiff(artifactId, entry.path)}
-                          style={({ pressed }) => pressed && styles.changedFilesPressed}
                         >
-                          {row}
+                          {({ pressed }) => renderRow(pressed)}
                         </Pressable>
                       ) : (
-                        row
+                        renderRow()
                       )}
                       {open && diff ? (
                         <View style={styles.changedFilesDiffPanel}>
@@ -451,7 +497,7 @@ function ChangedFilesSummary({
               ) : null}
             </View>
           ))}
-        </View>
+        </ScrollView>
       ) : null}
     </View>
   );
@@ -1199,6 +1245,12 @@ export function MobileAssistantTranscript({
       </View>
     );
   }
+  let latestRunSummaryKey = '';
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index]?.type !== 'runSummary') continue;
+    latestRunSummaryKey = items[index]!.key;
+    break;
+  }
   const renderItem = (item: AssistantRenderItem): any => {
     if (item.type === 'tool') return <ToolRow key={item.key} item={item} />;
     if (item.type === 'toolGroup') {
@@ -1211,6 +1263,7 @@ export function MobileAssistantTranscript({
           item={item}
           onLoadDiff={onLoadRunFileDiff}
           onLoadFiles={onLoadRunFiles}
+          initiallyExpanded={item.key === latestRunSummaryKey}
         />
       );
     }
@@ -1495,30 +1548,55 @@ export function LocalAssistantTranscript({
 const styles = StyleSheet.create({
   changedFilesCard: {
     marginHorizontal: 10,
-    marginVertical: 8,
+    marginVertical: 5,
     overflow: 'hidden',
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.whiteWashSoft,
   },
   changedFilesHeader: {
-    minHeight: 52,
+    minHeight: 34,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingVertical: 3,
+  },
+  changedFilesHeaderPressed: { opacity: 0.72 },
+  changedFilesHeaderHighlight: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    gap: 8,
+    maxWidth: '100%',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
   },
   changedFilesPressed: { backgroundColor: colors.whiteWashSoft },
-  changedFilesTitleBlock: { flex: 1 },
-  changedFilesTitle: { color: colors.text, fontSize: 12, fontWeight: '600' },
-  changedFilesSubtitle: { color: colors.muted, fontSize: 10, marginTop: 2 },
-  changedFilesCounts: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  changedFilesTitle: {
+    flexShrink: 1,
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  changedFilesCount: { color: colors.mutedDim },
+  changedFilesCounts: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  changedFilesCountsSeparator: {
+    width: 1,
+    height: 12,
+    backgroundColor: colors.borderStrong,
+  },
+  changedFilesNet: {
+    color: colors.accent,
+    fontSize: 10,
+    fontFamily: 'monospace',
+    fontWeight: '600',
+  },
   changedFilesAdditions: { color: colors.online, fontSize: 10, fontFamily: 'monospace' },
+  changedFilesModified: { color: colors.warning, fontSize: 10, fontFamily: 'monospace' },
   changedFilesDeletions: { color: colors.danger, fontSize: 10, fontFamily: 'monospace' },
-  changedFilesList: { borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 5 },
+  changedFilesListScroll: {
+    maxHeight: 288,
+    marginHorizontal: 4,
+    borderRadius: 6,
+  },
+  changedFilesList: { paddingVertical: 5 },
   changedFilesWorkspace: {
     color: colors.muted,
     fontSize: 9,
@@ -1543,9 +1621,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: 'monospace',
     fontWeight: '700',
+    opacity: 0.78,
   },
+  changedFilesStatusPressed: { opacity: 1 },
   changedFilesPath: { flex: 1, color: colors.text, fontSize: 10, fontFamily: 'monospace' },
-  changedFilesLineCounts: { color: colors.muted, fontSize: 9, fontFamily: 'monospace' },
+  changedFilesPathPressed: { color: colors.accent },
+  changedFilesLineCounts: {
+    color: colors.muted,
+    fontSize: 9,
+    fontFamily: 'monospace',
+    opacity: 0.75,
+  },
+  changedFilesLineCountsPressed: { color: colors.text, opacity: 1 },
   changedFilesDiffPanel: {
     borderTopWidth: 1,
     borderTopColor: colors.border,

@@ -329,25 +329,28 @@ async function summarizeTrees(input: {
   const stats = parseNumstat(numstatRaw);
   const entries: AgentRunFileChangeEntry[] = statusEntries.map((entry) => {
     const stat = stats.get(entry.path) ?? { additions: 0, deletions: 0, binary: false };
+    const modified = stat.binary ? 0 : Math.min(stat.additions, stat.deletions);
     return {
       path: entry.path,
       ...(entry.originalPath ? { originalPath: entry.originalPath } : {}),
       status: entry.status,
       additions: stat.additions,
       deletions: stat.deletions,
+      modified,
       ...(stat.binary ? { binary: true } : {}),
     };
   });
   entries.sort((left, right) => left.path.localeCompare(right.path));
   const additions = entries.reduce((sum, entry) => sum + entry.additions, 0);
   const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
+  const modified = entries.reduce((sum, entry) => sum + (entry.modified ?? 0), 0);
   const metadataTruncated = entries.length > AGENT_RUN_DIFF_METADATA_FILE_LIMIT;
   const storedEntries = entries.slice(0, AGENT_RUN_DIFF_METADATA_FILE_LIMIT);
   const diffArtifactId = await persistAgentRunDiffArtifact({
     owner: input.baseline.owner ?? { droneId: input.baseline.droneId },
     targetId: input.baseline.targetId,
     label: input.baseline.label,
-    counts: { changed: entries.length, additions, deletions },
+    counts: { changed: entries.length, additions, deletions, modified },
     entries: storedEntries,
     metadataTruncated,
     patchEntryLimit: AGENT_RUN_DIFF_PATCH_FILE_LIMIT,
@@ -382,7 +385,7 @@ async function summarizeTrees(input: {
     ...(input.baseline.droneId ? { droneId: input.baseline.droneId } : {}),
     label: input.baseline.label,
     ...(diffArtifactId ? { diffArtifactId } : {}),
-    counts: { changed: entries.length, additions, deletions },
+    counts: { changed: entries.length, additions, deletions, modified },
     previewEntries: storedEntries.slice(0, MAX_TRANSCRIPT_PREVIEW_FILES_PER_WORKSPACE),
     ...(metadataTruncated ? { metadataTruncated: true } : {}),
   };
@@ -549,6 +552,9 @@ export function combineAgentRunFileChanges(
 ): AgentRunFileChanges | null {
   const visible = workspaces.filter((workspace) => workspace.counts.changed > 0);
   if (visible.length === 0) return null;
+  const hasModifiedCounts = visible.every(
+    (workspace) => typeof workspace.counts.modified === 'number',
+  );
   return {
     version: 2,
     capturedAt: new Date().toISOString(),
@@ -556,6 +562,14 @@ export function combineAgentRunFileChanges(
       changed: visible.reduce((sum, workspace) => sum + workspace.counts.changed, 0),
       additions: visible.reduce((sum, workspace) => sum + workspace.counts.additions, 0),
       deletions: visible.reduce((sum, workspace) => sum + workspace.counts.deletions, 0),
+      ...(hasModifiedCounts
+        ? {
+            modified: visible.reduce(
+              (sum, workspace) => sum + Math.max(0, Number(workspace.counts.modified) || 0),
+              0,
+            ),
+          }
+        : {}),
     },
     workspaces: visible,
     ...(visible.some((workspace) => workspace.metadataTruncated)

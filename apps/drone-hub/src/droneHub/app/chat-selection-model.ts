@@ -1,5 +1,18 @@
 import type { ChatInfo } from '../../domain';
 
+export function chatNamesForConfigSelection(input: {
+  chats?: readonly string[] | null;
+  workflowChats?: readonly string[] | null;
+}): string[] {
+  return Array.from(
+    new Set(
+      [...(input.chats ?? []), ...(input.workflowChats ?? [])]
+        .map((chatName) => String(chatName ?? '').trim())
+        .filter(Boolean),
+    ),
+  ).sort();
+}
+
 export function chatSelectionKey(
   droneIdRaw: string | null | undefined,
   chatNameRaw: string | null | undefined,

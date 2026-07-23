@@ -3,7 +3,11 @@ import type { AgentPermissionMode, ChatAgentConfig, ChatInfo } from '../../domai
 import { normalizeChatInfoPayload } from '../../domain';
 import type { DroneSummary } from '../types';
 import type { ChatModelOption } from './app-types';
-import { chatInfoForSelection, chatSelectionKey } from './chat-selection-model';
+import {
+  chatInfoForSelection,
+  chatNamesForConfigSelection,
+  chatSelectionKey,
+} from './chat-selection-model';
 import { isDroneStartingOrSeeding } from './helpers';
 import { fetchJson, isNotFoundError } from './hooks';
 
@@ -103,13 +107,11 @@ export function useChatConfigState({
   const selectedDroneProvisioning = isDroneStartingOrSeeding(selectedDroneHubPhase);
   const selectedDroneHasChatList = Array.isArray(selectedDroneSummary?.chats);
   const selectedDroneChatsKey = React.useMemo(() => {
-    if (!Array.isArray(selectedDroneSummary?.chats)) return '';
-    const normalized = selectedDroneSummary.chats
-      .map((chat) => String(chat ?? '').trim())
-      .filter(Boolean);
-    if (normalized.length === 0) return '';
-    return Array.from(new Set(normalized)).sort().join('\u0000');
-  }, [selectedDroneSummary?.chats]);
+    return chatNamesForConfigSelection({
+      chats: selectedDroneSummary?.chats,
+      workflowChats: selectedDroneSummary?.workflowChats,
+    }).join('\u0000');
+  }, [selectedDroneSummary?.chats, selectedDroneSummary?.workflowChats]);
 
   React.useEffect(() => {
     if (!selectedDrone || !selectedChat) {

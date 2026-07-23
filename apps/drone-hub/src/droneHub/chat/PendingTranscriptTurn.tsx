@@ -24,6 +24,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   cancelBusy = false,
   cancelError = null,
   autoExpandPrompt = false,
+  initiallyExpandFileChanges = false,
 }: {
   item: PendingPrompt;
   showRoleIcons?: boolean;
@@ -35,6 +36,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   cancelBusy?: boolean;
   cancelError?: string | null;
   autoExpandPrompt?: boolean;
+  initiallyExpandFileChanges?: boolean;
 }) {
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
@@ -121,7 +123,10 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       {isStopped ? (
         <>
           <StoppedRunNotice reason={item.error} at={item.updatedAt ?? item.at} />
-          <ChangedFilesCard fileChanges={item.fileChanges} />
+          <ChangedFilesCard
+            fileChanges={item.fileChanges}
+            initiallyExpanded={initiallyExpandFileChanges}
+          />
         </>
       ) : showAgentPendingBubble ? (
         <ChatMessageFrame
@@ -158,7 +163,10 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               ) : null}
             </>
           )}
-          <ChangedFilesCard fileChanges={item.fileChanges} />
+          <ChangedFilesCard
+            fileChanges={item.fileChanges}
+            initiallyExpanded={initiallyExpandFileChanges}
+          />
         </ChatMessageFrame>
       ) : cancelError ? (
         <div className="mt-2 whitespace-pre-wrap text-right text-[var(--text-10)] text-[var(--red)]">
