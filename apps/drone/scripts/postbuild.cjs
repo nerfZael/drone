@@ -13,6 +13,16 @@ function blipBundleArgs(root) {
   ];
 }
 
+function mcpBridgeBundleArgs(root) {
+  return [
+    'build',
+    path.join(root, 'src', 'mcp-http-stdio-bridge.ts'),
+    '--target=node',
+    '--format=cjs',
+    `--outfile=${path.join(root, 'dist', 'mcp-http-stdio-bridge.js')}`,
+  ];
+}
+
 function workspaceBuildArgs(packageName) {
   return ['run', '--filter', packageName, 'build'];
 }
@@ -68,6 +78,7 @@ async function ensureBlipBundleDependenciesBuilt(root) {
   runOrThrow('bun', workspaceBuildArgs('@blip/workspace'), { cwd: repoRoot });
   runOrThrow('bun', workspaceBuildArgs('@blip/tools'), { cwd: repoRoot });
   runOrThrow('bun', workspaceBuildArgs('@blip/core'), { cwd: repoRoot });
+  runOrThrow('bun', workspaceBuildArgs('@blip/mcp'), { cwd: repoRoot });
 }
 
 async function copyDroneHubElectronMain(root) {
@@ -99,12 +110,15 @@ async function main() {
   await removeFileBestEffort(path.join(root, 'dist', 'fleet.js'));
   await removeFileBestEffort(path.join(root, 'dist', 'tasks.js'));
   await removeFileBestEffort(path.join(root, 'dist', 'blip.js'));
+  await removeFileBestEffort(path.join(root, 'dist', 'mcp-http-stdio-bridge.js'));
   await ensureBlipBundleDependenciesBuilt(root);
   runOrThrow('bun', blipBundleArgs(root), { cwd: root });
+  runOrThrow('bun', mcpBridgeBundleArgs(root), { cwd: root });
   await assertBlipBundleHasErrorDetails(root);
   await copyDroneHubElectronMain(root);
   await copyBuiltDroneHubUi(root);
   await chmodExecutableBestEffort(path.join(root, 'dist', 'blip.js'));
+  await chmodExecutableBestEffort(path.join(root, 'dist', 'mcp-http-stdio-bridge.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'cli.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'daemon.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'hub', 'mcp-server.js'));
@@ -112,6 +126,7 @@ async function main() {
 
 module.exports = {
   blipBundleArgs,
+  mcpBridgeBundleArgs,
 };
 
 if (require.main === module) {

@@ -15,7 +15,7 @@ import {
 type McpSession = {
   transport: StreamableHTTPServerTransport;
   server: ReturnType<typeof createDroneHubMcpServer>;
-  identity: McpTokenIdentity;
+  tokenId: string;
 };
 
 export class DroneHubMcpHttpTransport {
@@ -34,6 +34,19 @@ export class DroneHubMcpHttpTransport {
     if (!entry) return;
     this.sessions.delete(sessionId);
     await Promise.resolve(entry.server.close()).catch(() => {});
+  }
+
+  private refreshSessionIdentity(
+    session: McpSession,
+    identity: McpTokenIdentity,
+    res: http.ServerResponse,
+  ): boolean {
+    if (session.tokenId !== identity.tokenId) {
+      sendJson(res, 403, { ok: false, error: 'MCP session belongs to another token' });
+      return false;
+    }
+    session.server.setPrincipal(identity);
+    return true;
   }
 
   async close(): Promise<void> {
@@ -72,6 +85,7 @@ export class DroneHubMcpHttpTransport {
       if (method === 'POST') {
         const existing = sessionId ? this.sessions.get(sessionId) : null;
         if (existing) {
+          if (!this.refreshSessionIdentity(existing, identity, res)) return;
           await existing.transport.handleRequest(req, res);
           return;
         }
@@ -91,7 +105,7 @@ export class DroneHubMcpHttpTransport {
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => crypto.randomUUID(),
           onsessioninitialized: (nextSessionId) => {
-            this.sessions.set(nextSessionId, { transport, server, identity });
+            this.sessions.set(nextSessionId, { transport, server, tokenId: identity.tokenId });
           },
         });
         transport.onclose = () => void this.closeSession(transport.sessionId);
@@ -106,6 +120,7 @@ export class DroneHubMcpHttpTransport {
           sendJson(res, 400, { ok: false, error: 'invalid or missing MCP session' });
           return;
         }
+        if (!this.refreshSessionIdentity(existing, identity, res)) return;
         await existing.transport.handleRequest(req, res);
         return;
       }

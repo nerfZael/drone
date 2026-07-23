@@ -8,6 +8,7 @@ import {
 } from '../chat-route-schemas';
 import type { AgentPermissionMode, ChatAgentConfig } from '../chat-types';
 import { readJsonBody, sendJson as json } from '../hub-http';
+import { normalizeMcpChatAccessScope } from '../mcp-chat-access';
 import { parseRequestSchema } from '../request-schema';
 import { isWorkflowChatEntry } from '../workflows/workflow-chat-metadata';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './legacy-route';
@@ -30,6 +31,7 @@ type ChatManagementRouteDependencyName =
   | 'importResolvedChatToStore'
   | 'importResolvedDroneChatsToStore'
   | 'inferChatAgent'
+  | 'isManagedChatMcpAvailable'
   | 'isDraftChatEntry'
   | 'listChatReadStatesFromStore'
   | 'listChatsFromStore'
@@ -109,6 +111,7 @@ export function createChatManagementRouteHandler(
     importResolvedChatToStore,
     importResolvedDroneChatsToStore,
     inferChatAgent,
+    isManagedChatMcpAvailable,
     isDraftChatEntry,
     listChatReadStatesFromStore,
     listChatsFromStore,
@@ -702,6 +705,64 @@ export function createChatManagementRouteHandler(
             error: e?.message ?? String(e),
           });
           json(res, 500, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+      }
+
+      // GET|PUT /api/drones/:id/chats/:chat/mcp-access
+      if (
+        (method === 'GET' || method === 'PUT') &&
+        parts.length === 6 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'mcp-access'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = decodeURIComponent(parts[4]) || 'default';
+        try {
+          const resolved = await resolveDroneOrRespond(res, droneRef);
+          if (!resolved) return;
+          const droneId = resolved.id;
+          await ensureChatEntry({ droneId, chatName });
+          if (method === 'PUT') {
+            const body = await readJsonBody(req);
+            if (!body?.accessScope || typeof body.accessScope !== 'object') {
+              json(res, 400, { ok: false, error: 'accessScope must be an object' });
+              return;
+            }
+            await setChatAgentConfig({
+              droneId,
+              chatName,
+              setDroneHubMcpAccessScope: true,
+              droneHubMcpAccessScope: {
+                ...body.accessScope,
+                updatedAt: new Date().toISOString(),
+              },
+            });
+          }
+          const { chat } = await getChatEntry({ droneId, chatName });
+          const available = await isManagedChatMcpAvailable();
+          json(res, 200, {
+            ok: true,
+            available,
+            accessScope: normalizeMcpChatAccessScope(
+              chat?.droneHubMcpAccessScope,
+              droneId,
+            ),
+          });
+          return;
+        } catch (error: any) {
+          const message = error?.message ?? String(error);
+          json(
+            res,
+            /unknown drone|unknown chat/i.test(message)
+              ? 404
+              : /accessScope must be an object/i.test(message)
+                ? 400
+                : 500,
+            { ok: false, error: message },
+          );
           return;
         }
       }

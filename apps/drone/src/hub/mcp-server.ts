@@ -5,8 +5,13 @@ import path from 'node:path';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { McpTokenIdentity } from './mcp-tokens';
 import { z } from 'zod';
+
+import {
+  mcpChatAccessAllowsDrone,
+  type McpChatAccessKind,
+} from './mcp-chat-access';
+import type { McpTokenIdentity } from './mcp-tokens';
 
 import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameSync } from '../host/profiles';
 import { McpIdleSubscriptionStore } from './assistant/mcp-idle-subscription-store';
@@ -1536,6 +1541,10 @@ export type DroneHubMcpServerContext = {
   allowedDroneIds?: string[];
 };
 
+export type DroneHubMcpServer = McpServer & {
+  setPrincipal: (principal: McpTokenIdentity) => void;
+};
+
 const WRITE_SCOPED_TOOLS = new Set([
   'set_drone_group',
   'rename_drones',
@@ -1544,6 +1553,33 @@ const WRITE_SCOPED_TOOLS = new Set([
   'send_message',
   ...WORKFLOW_WRITE_SCOPED_TOOL_NAMES,
 ]);
+
+const CHAT_EXECUTE_SCOPED_TOOLS = new Set([
+  'open_drone_chat',
+  'open_drone',
+  'highlight_drones',
+  'open_whiteboard',
+  'close_whiteboard',
+  'send_message',
+  'subscribe_to_any_chat_idle',
+  'subscribe_to_all_chats_idle',
+  'cancel_chat_idle_subscription',
+]);
+
+const CHAT_WRITE_SCOPED_TOOLS = new Set([
+  'set_drone_group',
+  'rename_drones',
+  'reorder_drones',
+  'create_whiteboard',
+  'update_whiteboard',
+  'create_chat',
+]);
+
+function chatAccessKindForTool(tool: string): McpChatAccessKind {
+  if (CHAT_EXECUTE_SCOPED_TOOLS.has(tool)) return 'execute';
+  if (CHAT_WRITE_SCOPED_TOOLS.has(tool)) return 'write';
+  return 'read';
+}
 
 const DRONE_PRINCIPAL_TOOLS = new Set([
   'list_drones',
@@ -1590,6 +1626,25 @@ export function authorizeDroneHubMcpTool(context: DroneHubMcpServerContext, tool
     }
   }
   if (principal.kind === 'legacy' || principal.kind === 'host') return;
+  if (principal.kind === 'chat') {
+    const refs = assertedDroneRefs(args);
+    const kind = chatAccessKindForTool(tool);
+    if (
+      refs.every((ref) =>
+        mcpChatAccessAllowsDrone(
+          principal.accessScope,
+          kind,
+          ref,
+          principal.selectedDroneRefs,
+        ),
+      )
+    ) {
+      return;
+    }
+    throw new Error(
+      `MCP principal ${principal.name} ${kind} scope does not include the requested drone`,
+    );
+  }
   const scopedDroneId = cleanString(principal.droneId);
   if (!scopedDroneId || !DRONE_PRINCIPAL_TOOLS.has(tool)) {
     throw new Error(`MCP principal ${principal.name} is not authorized for ${tool}`);
@@ -1607,11 +1662,15 @@ function projectMcpResultForPrincipal(context: DroneHubMcpServerContext, tool: s
   const structured = result?.structuredContent;
   if (!structured || typeof structured !== 'object') return result;
   const allowedIds = context.allowedDroneIds ? new Set(context.allowedDroneIds.map((value) => cleanString(value)).filter(Boolean)) : null;
-  if (principal.kind !== 'drone' && !allowedIds) return result;
+  const chatAllowedIds =
+    principal.kind === 'chat' && principal.accessScope.readMode === 'selected'
+      ? new Set(principal.accessScope.droneIds)
+      : null;
+  if (principal.kind !== 'drone' && !allowedIds && !chatAllowedIds) return result;
   const drones = Array.isArray(structured.drones)
     ? structured.drones.filter((drone: any) => principal.kind === 'drone'
       ? cleanString(drone?.id) === principal.droneId
-      : allowedIds!.has(cleanString(drone?.id)))
+      : (allowedIds ?? chatAllowedIds)!.has(cleanString(drone?.id)))
     : [];
   const next = { ...structured, count: drones.length, drones };
   return toolResult(next);
@@ -1634,7 +1693,7 @@ function registerAuthorizedTools(server: McpServer, context: DroneHubMcpServerCo
   (server as any).registerTool = registerTool;
 }
 
-export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext>) {
+export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext>): DroneHubMcpServer {
   const context: DroneHubMcpServerContext = {
     principal: input?.principal ?? { kind: 'legacy', tokenId: 'legacy', name: 'Legacy Drone Hub MCP token' },
     ...(input?.correlationId ? { correlationId: input.correlationId } : {}),
@@ -1645,7 +1704,10 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
   const server = new McpServer(
     { name: 'Drone Hub MCP Server', version: '0.1.0' },
     { capabilities: { logging: {} } },
-  );
+  ) as DroneHubMcpServer;
+  server.setPrincipal = (principal) => {
+    context.principal = principal;
+  };
   registerAuthorizedTools(server, context);
   restoreIdleSubscriptions(server);
   return server;

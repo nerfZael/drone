@@ -41,12 +41,15 @@ describe('drone daemon runtime resolution', () => {
     await expect(assertDroneDaemonRuntimeReady(root)).rejects.toThrow(/bun run --filter drone build/);
   });
 
-  test('requires the daemon and supported container CLI entrypoint in the built runtime', async () => {
+  test('requires the daemon, supported CLI, and managed MCP bridge in the built runtime', async () => {
     const root = await makeTempRepo();
     await fs.writeFile(path.join(root, 'daemon.js'), 'module.exports = {};\n');
     await expect(assertDroneDaemonRuntimeReady(root)).rejects.toThrow(/blip\.js/);
 
     await fs.writeFile(path.join(root, 'blip.js'), 'module.exports = {};\n');
+    await expect(assertDroneDaemonRuntimeReady(root)).rejects.toThrow(/mcp-http-stdio-bridge\.js/);
+
+    await fs.writeFile(path.join(root, 'mcp-http-stdio-bridge.js'), 'module.exports = {};\n');
     await expect(assertDroneDaemonRuntimeReady(root)).resolves.toBeUndefined();
   });
 });

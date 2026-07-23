@@ -1337,7 +1337,7 @@ function parseGithubSlug(remoteUrl: string | null): { owner: string; repo: strin
 
 async function ensureDaemonBuilt(_repoPath: string) {
   const runtimeDir = resolveDroneDaemonRuntimeDir();
-  for (const fileName of ['daemon.js', 'blip.js']) {
+  for (const fileName of ['daemon.js', 'blip.js', 'mcp-http-stdio-bridge.js']) {
     const filePath = path.join(runtimeDir, fileName);
     try {
       await fs.stat(filePath);

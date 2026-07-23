@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "drone-monorepo",
@@ -233,8 +234,10 @@
       },
       "dependencies": {
         "@blip/core": "workspace:*",
+        "@blip/mcp": "workspace:*",
         "@blip/tools": "workspace:*",
         "@mariozechner/pi-ai": "workspace:*",
+        "@modelcontextprotocol/sdk": "1.29.0",
       },
       "devDependencies": {
         "@types/node": "^24.3.0",
