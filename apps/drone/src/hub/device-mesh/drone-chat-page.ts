@@ -1,6 +1,6 @@
 import { MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
 
-const MAX_TURNS_PER_PAGE = 40;
+const MAX_TURNS_PER_PAGE = 100;
 const MAX_TURN_TEXT_BYTES = 24 * 1024;
 
 function truncateUtf8(value: unknown, maxBytes: number): { value: string; truncated: boolean } {
@@ -29,7 +29,8 @@ function compactTurn(turn: any, sourceIndex: number): Record<string, unknown> {
   const prompt = truncateUtf8(turn?.prompt, MAX_TURN_TEXT_BYTES);
   const output = truncateUtf8(turn?.output, MAX_TURN_TEXT_BYTES);
   const error = truncateUtf8(turn?.error, 4 * 1024);
-  const meshTruncated = prompt.truncated || output.truncated || error.truncated;
+  const responseTruncated = output.truncated || error.truncated;
+  const meshTruncated = prompt.truncated || responseTruncated;
   const turnNumber = Number.isFinite(Number(turn?.turn)) ? Number(turn.turn) : null;
   return {
     id:
@@ -46,6 +47,8 @@ function compactTurn(turn: any, sourceIndex: number): Record<string, unknown> {
     model: String(turn?.model ?? ''),
     reasoning: String(turn?.reasoning ?? ''),
     attachments: compactAttachments(turn?.attachments),
+    ...(prompt.truncated ? { promptTruncated: true } : {}),
+    ...(responseTruncated ? { responseTruncated: true } : {}),
     ...(meshTruncated ? { meshTruncated: true } : {}),
   };
 }

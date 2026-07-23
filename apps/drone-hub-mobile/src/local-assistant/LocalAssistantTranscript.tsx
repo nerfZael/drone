@@ -31,6 +31,7 @@ import { QueuedPromptRows, type MobileQueuedPrompt } from '../components/QueuedP
 import { ContextMenu } from '../components/Ui';
 import { NativeMarkdown } from './NativeMarkdown';
 import { MobileLoadingState } from './MobileLoadingState';
+import { MobileChangedFilesTree } from './MobileChangedFilesTree';
 import { nativeMarkdownHasCodeBlock } from './native-markdown-model';
 import {
   parseMobileFileReference,
@@ -43,6 +44,7 @@ import { LinkedPullRequestAttachments } from '../drones/LinkedPullRequestAttachm
 import type { MobileLinkedPullRequestContext } from '../drones/use-drone-linked-pull-requests';
 import {
   groupMobileTranscriptRuns,
+  limitMobileRunToolItems,
   mobileTranscriptGroupStartedAt,
   mobileRunIsThinking,
   sortMobileTranscriptTimeline,
@@ -301,103 +303,108 @@ function ChangedFilesSummary({
               {summary.workspaces.length > 1 || workspace.targetId.startsWith('artifacts:') ? (
                 <Text style={styles.changedFilesWorkspace}>{workspace.label}</Text>
               ) : null}
-              {entriesForWorkspace(workspace).map((entry) => {
-                const artifactId = workspace.diffArtifactId;
-                const diffKey = artifactId ? `${artifactId}\u0000${entry.path}` : '';
-                const open = Boolean(diffKey && openDiffKey === diffKey);
-                const diff = selectedDiff?.key === diffKey ? selectedDiff.state : undefined;
-                const row = (
-                  <View style={styles.changedFilesRow}>
-                    <Text style={styles.changedFilesStatus}>{agentRunFileStatusLabel(entry)}</Text>
-                    <Text numberOfLines={1} style={styles.changedFilesPath}>
-                      {entry.path}
-                    </Text>
-                    {!entry.binary && (entry.additions > 0 || entry.deletions > 0) ? (
-                      <Text style={styles.changedFilesLineCounts}>
-                        {entry.additions > 0 ? `+${entry.additions}` : ''}
-                        {entry.additions > 0 && entry.deletions > 0 ? ' ' : ''}
-                        {entry.deletions > 0 ? `-${entry.deletions}` : ''}
+              <MobileChangedFilesTree
+                entries={entriesForWorkspace(workspace)}
+                renderFile={(entry, name) => {
+                  const artifactId = workspace.diffArtifactId;
+                  const diffKey = artifactId ? `${artifactId}\u0000${entry.path}` : '';
+                  const open = Boolean(diffKey && openDiffKey === diffKey);
+                  const diff = selectedDiff?.key === diffKey ? selectedDiff.state : undefined;
+                  const row = (
+                    <View style={styles.changedFilesRow}>
+                      <Text style={styles.changedFilesStatus}>
+                        {agentRunFileStatusLabel(entry)}
                       </Text>
-                    ) : null}
-                    {artifactId && onLoadDiff ? (
-                      open ? (
-                        <ChevronDown color={colors.muted} size={12} />
-                      ) : (
-                        <ChevronRight color={colors.muted} size={12} />
-                      )
-                    ) : null}
-                  </View>
-                );
-                return (
-                  <View key={`${entry.status}:${entry.path}`}>
-                    {artifactId && onLoadDiff ? (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Show the diff captured for ${entry.path}`}
-                        accessibilityState={{ expanded: open }}
-                        onPress={() => openDiff(artifactId, entry.path)}
-                        style={({ pressed }) => pressed && styles.changedFilesPressed}
-                      >
-                        {row}
-                      </Pressable>
-                    ) : (
-                      row
-                    )}
-                    {open && diff ? (
-                      <View style={styles.changedFilesDiffPanel}>
-                        {diff.status === 'loading' ? (
-                          <View style={styles.changedFilesDiffLoading}>
-                            <ActivityIndicator color={colors.accent} size="small" />
-                            <Text style={styles.changedFilesDiffHint}>
-                              Loading historical diff…
-                            </Text>
-                          </View>
-                        ) : diff.status === 'error' && diff.retryable ? (
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel="Retry loading historical diff"
-                            onPress={() => openDiff(artifactId!, entry.path, true)}
-                            style={({ pressed }) => [
-                              styles.changedFilesDiffError,
-                              pressed && styles.changedFilesPressed,
-                            ]}
-                          >
-                            <Text style={styles.changedFilesDiffErrorText}>{diff.message}</Text>
-                            <Text style={styles.changedFilesDiffRetry}>Retry</Text>
-                          </Pressable>
-                        ) : diff.status === 'error' ? (
-                          <View style={styles.changedFilesDiffError}>
-                            <Text style={styles.changedFilesDiffErrorText}>{diff.message}</Text>
-                          </View>
+                      <Text numberOfLines={1} style={styles.changedFilesPath}>
+                        {name}
+                      </Text>
+                      {!entry.binary && (entry.additions > 0 || entry.deletions > 0) ? (
+                        <Text style={styles.changedFilesLineCounts}>
+                          {entry.additions > 0 ? `+${entry.additions}` : ''}
+                          {entry.additions > 0 && entry.deletions > 0 ? ' ' : ''}
+                          {entry.deletions > 0 ? `-${entry.deletions}` : ''}
+                        </Text>
+                      ) : null}
+                      {artifactId && onLoadDiff ? (
+                        open ? (
+                          <ChevronDown color={colors.muted} size={12} />
                         ) : (
-                          <>
-                            <ScrollView
-                              nestedScrollEnabled
-                              showsVerticalScrollIndicator
-                              style={styles.changedFilesDiffScroll}
-                            >
-                              <ScrollView
-                                horizontal
-                                nestedScrollEnabled
-                                showsHorizontalScrollIndicator
-                              >
-                                <Text selectable style={styles.changedFilesDiffText}>
-                                  {diff.patch.slice(0, 80_000)}
-                                </Text>
-                              </ScrollView>
-                            </ScrollView>
-                            {diff.truncated || diff.patch.length > 80_000 ? (
+                          <ChevronRight color={colors.muted} size={12} />
+                        )
+                      ) : null}
+                    </View>
+                  );
+                  return (
+                    <View>
+                      {artifactId && onLoadDiff ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`Show the diff captured for ${entry.path}`}
+                          accessibilityState={{ expanded: open }}
+                          onPress={() => openDiff(artifactId, entry.path)}
+                          style={({ pressed }) => pressed && styles.changedFilesPressed}
+                        >
+                          {row}
+                        </Pressable>
+                      ) : (
+                        row
+                      )}
+                      {open && diff ? (
+                        <View style={styles.changedFilesDiffPanel}>
+                          {diff.status === 'loading' ? (
+                            <View style={styles.changedFilesDiffLoading}>
+                              <ActivityIndicator color={colors.accent} size="small" />
                               <Text style={styles.changedFilesDiffHint}>
-                                Diff preview was limited for performance.
+                                Loading historical diff…
                               </Text>
-                            ) : null}
-                          </>
-                        )}
-                      </View>
-                    ) : null}
-                  </View>
-                );
-              })}
+                            </View>
+                          ) : diff.status === 'error' && diff.retryable ? (
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel="Retry loading historical diff"
+                              onPress={() => openDiff(artifactId!, entry.path, true)}
+                              style={({ pressed }) => [
+                                styles.changedFilesDiffError,
+                                pressed && styles.changedFilesPressed,
+                              ]}
+                            >
+                              <Text style={styles.changedFilesDiffErrorText}>{diff.message}</Text>
+                              <Text style={styles.changedFilesDiffRetry}>Retry</Text>
+                            </Pressable>
+                          ) : diff.status === 'error' ? (
+                            <View style={styles.changedFilesDiffError}>
+                              <Text style={styles.changedFilesDiffErrorText}>{diff.message}</Text>
+                            </View>
+                          ) : (
+                            <>
+                              <ScrollView
+                                nestedScrollEnabled
+                                showsVerticalScrollIndicator
+                                style={styles.changedFilesDiffScroll}
+                              >
+                                <ScrollView
+                                  horizontal
+                                  nestedScrollEnabled
+                                  showsHorizontalScrollIndicator
+                                >
+                                  <Text selectable style={styles.changedFilesDiffText}>
+                                    {diff.patch.slice(0, 80_000)}
+                                  </Text>
+                                </ScrollView>
+                              </ScrollView>
+                              {diff.truncated || diff.patch.length > 80_000 ? (
+                                <Text style={styles.changedFilesDiffHint}>
+                                  Diff preview was limited for performance.
+                                </Text>
+                              ) : null}
+                            </>
+                          )}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                }}
+              />
               {'entries' in workspace ? null : workspaceFiles[workspace.targetId]?.status ===
                 'loading' ? (
                 <View style={styles.changedFilesDiffLoading}>
@@ -1043,10 +1050,16 @@ function TranscriptRun({
   renderItem: (item: AssistantRenderItem) => any;
   showThinking: boolean;
 }) {
-  const [toolsExpanded, setToolsExpanded] = React.useState(run.active);
+  const [toolExpansion, setToolExpansion] = React.useState<'auto' | 'manual' | 'collapsed'>(
+    run.active ? 'auto' : 'collapsed',
+  );
+  const userControlledExpansion = React.useRef(false);
   React.useEffect(() => {
-    if (run.active) setToolsExpanded(true);
+    if (userControlledExpansion.current) return;
+    setToolExpansion(run.active ? 'auto' : 'collapsed');
   }, [run.active]);
+  const toolsExpanded = toolExpansion !== 'collapsed';
+  const visibleItems = toolExpansion === 'auto' ? limitMobileRunToolItems(run.items) : run.items;
   const thinking = toolsExpanded && showThinking && mobileRunIsThinking(run);
   return (
     <View>
@@ -1058,10 +1071,17 @@ function TranscriptRun({
           completedAt={run.completedAt}
           toolCallCount={run.toolCallCount}
           expanded={toolsExpanded}
-          onToggle={run.toolCallCount > 0 ? () => setToolsExpanded((value) => !value) : undefined}
+          onToggle={
+            run.toolCallCount > 0
+              ? () => {
+                  userControlledExpansion.current = true;
+                  setToolExpansion((current) => (current === 'collapsed' ? 'manual' : 'collapsed'));
+                }
+              : undefined
+          }
         />
       </View>
-      {run.items.map((item) => {
+      {visibleItems.map((item) => {
         const tool = item.type === 'tool' || item.type === 'toolGroup';
         if (tool && !toolsExpanded) return null;
         return tool ? (
@@ -1281,18 +1301,15 @@ export function MobileAssistantTranscript({
             })}
           </View>
         ) : null}
-        {item.message.meshTruncated ? (
+        {item.message.meshTruncated && item.message.id && onLoadFullMessage ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Load the full message"
+            accessibilityLabel="Show the full message"
             accessibilityState={{
-              disabled:
-                !item.message.id || !onLoadFullMessage || fullMessageLoadingId === item.message.id,
+              disabled: fullMessageLoadingId === item.message.id,
             }}
-            disabled={
-              !item.message.id || !onLoadFullMessage || fullMessageLoadingId === item.message.id
-            }
-            onPress={() => onLoadFullMessage?.(item.message)}
+            disabled={fullMessageLoadingId === item.message.id}
+            onPress={() => onLoadFullMessage(item.message)}
             style={({ pressed }) => [
               styles.fullMessageButton,
               pressed && styles.fullMessageButtonPressed,
@@ -1301,7 +1318,7 @@ export function MobileAssistantTranscript({
             {fullMessageLoadingId === item.message.id ? (
               <ActivityIndicator color={colors.accent} size="small" />
             ) : (
-              <Text style={styles.fullMessageText}>Load full message</Text>
+              <Text style={styles.fullMessageText}>Show full message</Text>
             )}
           </Pressable>
         ) : null}
@@ -1350,6 +1367,7 @@ export function MobileAssistantTranscript({
   const activePrompt = activePrompts.at(-1);
   const lastGroup = groups.at(-1);
   const groupedActiveRun = lastGroup?.type === 'run' && lastGroup.active;
+  const showStandaloneReasoning = running && Boolean(currentReasoning.trim()) && !groupedActiveRun;
   const historicalTimeline = sortMobileTranscriptTimeline([
     ...groups.map((group, order) => ({
       kind: 'group' as const,
@@ -1374,7 +1392,7 @@ export function MobileAssistantTranscript({
             key={entry.group.key}
             run={entry.group}
             renderItem={renderItem}
-            showThinking={!currentReasoning.trim()}
+            showThinking={!showStandaloneReasoning}
           />
         ) : (
           <React.Fragment key={entry.group.key}>{renderItem(entry.group.item)}</React.Fragment>
@@ -1398,7 +1416,7 @@ export function MobileAssistantTranscript({
           <MobileAgentPlanList plan={activePrompt.agentPlan} running />
         </View>
       ) : null}
-      {running && currentReasoning.trim() ? (
+      {showStandaloneReasoning ? (
         <View style={styles.reasoning}>
           <View style={styles.reasoningHead}>
             <TypingDots label={`${assistantLabel} is working`} />
@@ -1689,19 +1707,21 @@ const styles = StyleSheet.create({
   image: { width: '100%', height: 220, borderRadius: 12, backgroundColor: colors.panel },
   attachments: { gap: 6, marginTop: 9 },
   fullMessageButton: {
-    minHeight: 32,
+    minHeight: 28,
     alignSelf: 'flex-start',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 9,
-    paddingHorizontal: 11,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: colors.accentBorder,
-    backgroundColor: colors.accentWash,
+    paddingHorizontal: 1,
+    paddingVertical: 4,
   },
   fullMessageButtonPressed: { opacity: 0.72 },
-  fullMessageText: { color: colors.accent, fontSize: 11, fontWeight: '600' },
+  fullMessageText: {
+    color: colors.accent,
+    fontSize: 11,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
   attachment: {
     flexDirection: 'row',
     alignItems: 'center',

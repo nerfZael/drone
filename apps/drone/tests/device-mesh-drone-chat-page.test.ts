@@ -21,4 +21,18 @@ describe('device mesh drone chat pages', () => {
     const older = boundedDroneChatPage(turns, page.page.beforeCursor);
     expect(Number(older.turns.at(-1)?.turn)).toBeLessThan(Number(page.turns[0]?.turn));
   });
+
+  test('marks the exact side of a turn whose content was truncated', () => {
+    const [turn] = boundedDroneChatPage([
+      {
+        id: 'turn-1',
+        prompt: 'Short prompt',
+        output: 'x'.repeat(40_000),
+      },
+    ]).turns;
+
+    expect(turn?.promptTruncated).toBeUndefined();
+    expect(turn?.responseTruncated).toBe(true);
+    expect(turn?.meshTruncated).toBe(true);
+  });
 });

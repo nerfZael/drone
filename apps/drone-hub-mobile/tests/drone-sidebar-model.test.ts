@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildMobileDroneRepoGroups,
+  excludePinnedMobileDrones,
   mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneListPayload,
   normalizeMobileDroneCreateModelCatalog,
@@ -11,6 +12,17 @@ import {
 } from '../src/drones/drone-sidebar-model';
 
 describe('mobile drone sidebar model', () => {
+  test('keeps pinned drones out of the ordinary repository tree', () => {
+    const drones = normalizeMobileDrones([
+      { id: 'pinned', name: 'Pinned', repoPath: '/work/repo' },
+      { id: 'ordinary', name: 'Ordinary', repoPath: '/work/repo' },
+    ]);
+
+    expect(excludePinnedMobileDrones(drones, ['pinned']).map((drone) => drone.id)).toEqual([
+      'ordinary',
+    ]);
+  });
+
   test('normalizes detected create models and their supported reasoning levels', () => {
     expect(
       normalizeMobileDroneCreateModelCatalog({
@@ -511,6 +523,25 @@ describe('mobile drone sidebar model', () => {
       id: 'summary-1',
       role: 'runSummary',
       details: { fileChanges: { counts: { changed: 1 } } },
+    });
+  });
+
+  test('offers full-content loading only on the truncated side of an external turn', () => {
+    const messages = mobileDroneTurnsToAssistantMessages([
+      {
+        id: 'turn-1',
+        prompt: 'Short prompt',
+        output: 'Bounded response',
+        responseTruncated: true,
+      },
+    ]);
+
+    expect(messages[0]).toMatchObject({ role: 'user', content: 'Short prompt' });
+    expect(messages[0]?.meshTruncated).toBeUndefined();
+    expect(messages[1]).toMatchObject({
+      id: 'turn-1:assistant',
+      role: 'assistant',
+      meshTruncated: true,
     });
   });
 

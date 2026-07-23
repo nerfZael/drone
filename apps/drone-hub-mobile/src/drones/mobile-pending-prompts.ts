@@ -80,18 +80,22 @@ export function mergeOptimisticMobilePendingPrompts(input: {
     if (!optimistic) return prompt;
     optimisticById.delete(id);
     if (completedIds.has(id)) return null;
+    const serverState = String(prompt?.state ?? '');
+    const reconciledState =
+      optimistic.state === 'sending' && serverState === 'queued'
+        ? 'sending'
+        : serverState === 'queued' ||
+            serverState === 'sending' ||
+            serverState === 'sent' ||
+            serverState === 'failed'
+          ? serverState
+          : serverState === 'running'
+            ? 'sending'
+            : optimistic.state;
     return {
       ...optimistic,
       ...prompt,
-      state:
-        prompt?.state === 'queued' ||
-        prompt?.state === 'sending' ||
-        prompt?.state === 'sent' ||
-        prompt?.state === 'failed'
-          ? prompt.state
-          : prompt?.state === 'running'
-            ? 'sending'
-            : optimistic.state,
+      state: reconciledState,
       optimisticSent: true,
     };
   });
@@ -114,9 +118,12 @@ export function mergeOptimisticMobilePendingPrompts(input: {
 export function confirmedMobilePendingPromptState(input: {
   pendingState?: unknown;
   queuedPromptId?: unknown;
+  optimisticState?: 'queued' | 'sending';
 }): 'queued' | 'sending' | 'sent' {
-  if (String(input.queuedPromptId ?? '').trim()) return 'queued';
   const state = String(input.pendingState ?? '').trim();
+  if (input.optimisticState === 'queued') return 'queued';
+  if (input.optimisticState === 'sending') return state === 'sent' ? 'sent' : 'sending';
+  if (String(input.queuedPromptId ?? '').trim()) return 'queued';
   if (state === 'queued' || state === 'sent') return state;
   return 'sending';
 }

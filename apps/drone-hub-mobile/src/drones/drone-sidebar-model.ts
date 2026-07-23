@@ -59,6 +59,8 @@ export type MobileDroneTurn = {
   agentPlan?: MobileAgentPlan;
   fileChanges?: AgentRunFileChanges;
   attachments: Array<{ name: string; mime: string; size: number | null }>;
+  promptTruncated?: boolean;
+  responseTruncated?: boolean;
   meshTruncated?: boolean;
 };
 
@@ -343,6 +345,14 @@ export function normalizeMobileDrones(raw: unknown): MobileDroneSummary[] {
   });
 }
 
+export function excludePinnedMobileDrones(
+  drones: readonly MobileDroneSummary[],
+  pinnedDroneIds: readonly string[],
+): MobileDroneSummary[] {
+  const pinnedIds = new Set(pinnedDroneIds.map(text).filter(Boolean));
+  return drones.filter((drone) => !pinnedIds.has(drone.id));
+}
+
 export function normalizeMobileDroneListPayload(raw: unknown): {
   drones: MobileDroneSummary[];
   schemaVersion: number | null;
@@ -523,15 +533,17 @@ export function buildMobileDroneRepoGroups(
 export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMessage[] {
   return normalizeMobileDroneTurns(raw).flatMap((turn): AssistantMessage[] => {
     const { prompt, output, error, attachments } = turn;
+    const promptTruncated = turn.promptTruncated === true || turn.meshTruncated === true;
+    const responseTruncated = turn.responseTruncated === true || turn.meshTruncated === true;
     const messages: AssistantMessage[] = [];
     if (prompt || attachments.length > 0) {
       messages.push({
-        ...(turn.meshTruncated ? { id: `${turn.id}:user` } : {}),
+        ...(promptTruncated ? { id: `${turn.id}:user` } : {}),
         role: 'user',
         ...(prompt ? { content: prompt } : {}),
         ...(turn.promptAt || turn.at ? { createdAt: turn.promptAt || turn.at } : {}),
         ...(attachments.length > 0 ? { details: { attachments } } : {}),
-        ...(turn.meshTruncated ? { meshTruncated: true } : {}),
+        ...(promptTruncated ? { meshTruncated: true } : {}),
       });
     }
     if (output || error || turn.completedAt || turn.agentPlan) {
@@ -541,22 +553,22 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
       messages.push(
         !turn.ok && error
           ? {
-              ...(turn.meshTruncated ? { id: `${turn.id}:assistant` } : {}),
+              ...(responseTruncated ? { id: `${turn.id}:assistant` } : {}),
               role: 'assistant',
               ...(output ? { content: output } : {}),
               ...(turn.completedAt || turn.at ? { createdAt: turn.completedAt || turn.at } : {}),
               ...(runDetails ? { details: runDetails } : {}),
               isError: true,
               errorMessage: error,
-              ...(turn.meshTruncated ? { meshTruncated: true } : {}),
+              ...(responseTruncated ? { meshTruncated: true } : {}),
             }
           : {
-              ...(turn.meshTruncated ? { id: `${turn.id}:assistant` } : {}),
+              ...(responseTruncated ? { id: `${turn.id}:assistant` } : {}),
               role: 'assistant',
               content: output || error,
               ...(turn.completedAt || turn.at ? { createdAt: turn.completedAt || turn.at } : {}),
               ...(runDetails ? { details: runDetails } : {}),
-              ...(turn.meshTruncated ? { meshTruncated: true } : {}),
+              ...(responseTruncated ? { meshTruncated: true } : {}),
             },
       );
     }
@@ -636,6 +648,13 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
       turn.fileChanges && typeof turn.fileChanges === 'object' && !Array.isArray(turn.fileChanges)
         ? (turn.fileChanges as AgentRunFileChanges)
         : undefined;
+    const hasPreciseTruncation =
+      Object.prototype.hasOwnProperty.call(turn, 'promptTruncated') ||
+      Object.prototype.hasOwnProperty.call(turn, 'responseTruncated');
+    const promptTruncated =
+      turn.promptTruncated === true || (!hasPreciseTruncation && turn.meshTruncated === true);
+    const responseTruncated =
+      turn.responseTruncated === true || (!hasPreciseTruncation && turn.meshTruncated === true);
     return [
       {
         id: text(turn.id) || `turn-${Number.isFinite(turnNumber) ? turnNumber : index}`,
@@ -652,7 +671,8 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
         ...(agentPlan ? { agentPlan } : {}),
         ...(isAgentRunFileChanges(fileChanges) ? { fileChanges } : {}),
         attachments: normalizeTurnAttachments(turn.attachments),
-        ...(turn.meshTruncated === true ? { meshTruncated: true } : {}),
+        ...(promptTruncated ? { promptTruncated: true } : {}),
+        ...(responseTruncated ? { responseTruncated: true } : {}),
       },
     ];
   });
