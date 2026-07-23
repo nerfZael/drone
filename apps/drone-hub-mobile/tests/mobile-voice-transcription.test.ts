@@ -5,6 +5,7 @@ import {
   mobileVoiceRecordActionDisabled,
   mobileVoiceStatusLabel,
   resolveMobileVoiceRecorderEvent,
+  resolveMobileVoiceTranscriptDraft,
   resolveMobileGroqTranscriptionResponse,
   shouldDiscardMobileVoiceWhenInactive,
 } from '../src/local-assistant/mobile-voice-transcription-model';
@@ -83,6 +84,35 @@ describe('mobile voice transcription', () => {
       ),
     ).toBe('typed draft first segment second segment');
     expect(mergeMobileDraftWithVoiceTranscript('typed draft', '   ')).toBe('typed draft');
+  });
+
+  test('consumes the internal draft when a recording is transcribed and sent directly', () => {
+    const first = resolveMobileVoiceTranscriptDraft({
+      draft: '',
+      transcript: 'first recording',
+      action: 'send',
+    });
+    const second = resolveMobileVoiceTranscriptDraft({
+      draft: first.nextDraft,
+      transcript: 'second recording',
+      action: 'send',
+    });
+
+    expect(first).toEqual({ message: 'first recording', nextDraft: '' });
+    expect(second).toEqual({ message: 'second recording', nextDraft: '' });
+  });
+
+  test('keeps the transcript in the draft when recording is stopped without sending', () => {
+    expect(
+      resolveMobileVoiceTranscriptDraft({
+        draft: 'first recording',
+        transcript: 'second recording',
+        action: 'append',
+      }),
+    ).toEqual({
+      message: 'first recording second recording',
+      nextDraft: 'first recording second recording',
+    });
   });
 
   test('formats the elapsed recording time', () => {
