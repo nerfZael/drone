@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   DEFAULT_DRONE_NAME_MODEL_ID,
   suggestDroneNameFromMessage,
-} from '../src/hub/jobs-from-message';
+} from '../src/hub/drone-name-from-message';
 import { codexObjectCompletionOptions } from '../src/hub/llm-runtime';
 
 function fakeCodexToken(): string {

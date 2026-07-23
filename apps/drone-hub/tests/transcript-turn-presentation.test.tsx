@@ -19,8 +19,6 @@ describe('completed external transcript presentation', () => {
           ok: true,
           output: 'The interface is ready for review.',
         }}
-        parsingJobs={false}
-        onCreateJobs={() => {}}
         onSpawnDroneHubTask={async () => ({ ok: true })}
         messageId="external-turn-1"
         showRoleIcons={false}

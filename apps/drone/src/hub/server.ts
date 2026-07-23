@@ -88,7 +88,7 @@ import {
   terminalOutput as droneTerminalOutput,
   terminalPrompt as droneTerminalPrompt,
 } from '../host/api';
-import { suggestDroneNameFromMessage } from './jobs-from-message';
+import { suggestDroneNameFromMessage } from './drone-name-from-message';
 import { buildAutoRenamedChatCandidate, isGeneratedChatName } from './chat-auto-rename';
 import type { AgentPermissionMode, BuiltinAgentId, ChatAgentConfig } from './chat-types';
 import { createDeviceMeshService } from './device-mesh';
@@ -5526,8 +5526,6 @@ export async function startDroneHubApiServer(opts: {
   });
 
   registerMessageRoutes(apiRouter, {
-    resolveEffectiveLlmProvider,
-    resolveEffectiveProviderApiKeySettings,
     resolveNameSuggestionLlmSettings,
     logProviderApiKeyResolution,
     llmProviderEnvLogMeta,

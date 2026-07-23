@@ -16,10 +16,6 @@ const modalImports = [
   { name: 'DirtyDroneApplyModal', path: './DirtyDroneApplyModal' },
   { name: 'DroneErrorModal', path: './DroneErrorModal' },
   { name: 'DroneDropActionModal', path: './DroneDropActionModal' },
-  {
-    name: 'CreateDronesFromAgentMessageModal',
-    path: '../../CreateDronesFromAgentMessageModal',
-  },
   { name: 'CustomAgentsModal', path: './CustomAgentsModal' },
   { name: 'DraftCreateDroneModal', path: './DraftCreateDroneModal' },
   { name: 'CreateDronesModal', path: './CreateDronesModal' },
@@ -37,7 +33,6 @@ describe('DroneHubOverlays modal loading', () => {
     expect(overlaySource).toContain('createDronesModalProps.open && <CreateDronesModal');
     expect(overlaySource).toContain('draftCreateDroneModalProps.open && <DraftCreateDroneModal');
     expect(overlaySource).toContain('customAgentsModalProps.open && <CustomAgentsModal');
-    expect(overlaySource).toContain('createFromAgentMessageModalProps.jobsModal &&');
     expect(overlaySource).toContain('reposModalProps && <ReposModal');
     expect(overlaySource).toContain('dirtyDroneApplyModalProps && <DirtyDroneApplyModal');
     expect(overlaySource).toContain('droneRenameModalProps && <DroneRenameModal');
