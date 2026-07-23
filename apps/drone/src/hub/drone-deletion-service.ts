@@ -8,6 +8,7 @@ import {
   deleteCanonicalDroneLifecycle,
   getCanonicalDroneLifecycle,
 } from './drone-lifecycle-service';
+import { deleteDroneWorkflowRecords } from './workflows/workflow-store';
 
 export async function permanentlyDeleteCanonicalDrone(opts: {
   droneId: string;
@@ -16,22 +17,25 @@ export async function permanentlyDeleteCanonicalDrone(opts: {
   await getCanonicalDroneLifecycle(opts.droneId);
   getPromptQueueRepository();
   const transcriptStore = getTranscriptStore();
-  if (transcriptStore) return await commitPermanentDroneDeletionInStore(opts);
-
-  const removedLifecycle = Boolean(await deleteCanonicalDroneLifecycle(opts.droneId, opts.lifecycleState));
-  if (!removedLifecycle) {
-    return {
-      available: true,
-      removedLifecycle: false,
-      alreadyDeleted: false,
-      activeChatsDeleted: 0,
-      turnsDeleted: 0,
-      archivedChatsDeleted: 0,
-      chatTombstonesDeleted: 0,
-      archivedChatTombstonesDeleted: 0,
-      promptsDeleted: 0,
-    };
+  let cleanup: PermanentDroneChatCleanupResult;
+  if (transcriptStore) {
+    cleanup = await commitPermanentDroneDeletionInStore(opts);
+  } else {
+    const removedLifecycle = Boolean(await deleteCanonicalDroneLifecycle(opts.droneId, opts.lifecycleState));
+    cleanup = removedLifecycle
+      ? { ...(await commitPermanentDroneDeletionInStore(opts)), removedLifecycle: true }
+      : {
+          available: true,
+          removedLifecycle: false,
+          alreadyDeleted: false,
+          activeChatsDeleted: 0,
+          turnsDeleted: 0,
+          archivedChatsDeleted: 0,
+          chatTombstonesDeleted: 0,
+          archivedChatTombstonesDeleted: 0,
+          promptsDeleted: 0,
+        };
   }
-  const cleanup = await commitPermanentDroneDeletionInStore(opts);
-  return { ...cleanup, removedLifecycle: true };
+  await deleteDroneWorkflowRecords(opts.droneId);
+  return cleanup;
 }

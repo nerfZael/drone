@@ -12,7 +12,8 @@ export type RightPanelTabId =
   | 'changes'
   | 'prs'
   | 'canvas'
-  | 'whiteboard';
+  | 'whiteboard'
+  | 'workflows';
 export type RightPanelPaneId = 'single' | 'top' | 'bottom';
 
 export type RightPanelProps = {

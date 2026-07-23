@@ -11,6 +11,13 @@ import { z } from 'zod';
 import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameSync } from '../host/profiles';
 import { McpIdleSubscriptionStore } from './assistant/mcp-idle-subscription-store';
 import { droneSummary } from './mcp-summaries';
+import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
+import { isWorkflowChildDroneEntry } from './workflows/workflow-child-drone-metadata';
+import {
+  WORKFLOW_DRONE_DEFAULTED_TOOL_NAMES,
+  WORKFLOW_MCP_TOOL_NAMES,
+  WORKFLOW_WRITE_SCOPED_TOOL_NAMES,
+} from './workflows/workflow-tool-names';
 
 const DEFAULT_HUB_BASE_URL = 'http://127.0.0.1:5174';
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -994,7 +1001,11 @@ function registerTools(server: McpServer) {
     const wantedNames = new Set((args.names ?? []).map((item) => cleanString(item)).filter(Boolean));
     const group = cleanString(args.group);
     const limit = cleanPositiveInt(args.limit, 50, 200);
-    let drones = Array.isArray(response?.drones) ? response.drones.map(droneSummary) : [];
+    let drones = Array.isArray(response?.drones)
+      ? response.drones
+          .filter((drone: any) => !isWorkflowChildDroneEntry(drone))
+          .map(droneSummary)
+      : [];
     if (group) drones = drones.filter((drone: any) => drone.group === group);
     if (wantedNames.size > 0) drones = drones.filter((drone: any) => wantedNames.has(drone.id) || wantedNames.has(drone.name));
     drones.sort(compareDronesByRecentActivity);
@@ -1361,6 +1372,8 @@ function registerTools(server: McpServer) {
     return toolResult({ ok: true, phase: args.completion === 'accepted' ? 'accepted' : 'ready', drone, raw: response });
   });
 
+  registerWorkflowMcpTools(server, { requestJson, toolResult });
+
   server.registerTool('list_chats', {
     title: 'List drone chats',
     description: 'List chats for a Drone Hub drone.',
@@ -1529,6 +1542,7 @@ const WRITE_SCOPED_TOOLS = new Set([
   'reorder_drones',
   'create_chat',
   'send_message',
+  ...WORKFLOW_WRITE_SCOPED_TOOL_NAMES,
 ]);
 
 const DRONE_PRINCIPAL_TOOLS = new Set([
@@ -1549,7 +1563,10 @@ const DRONE_PRINCIPAL_TOOLS = new Set([
   'subscribe_to_any_chat_idle',
   'subscribe_to_all_chats_idle',
   'read_chat',
+  ...WORKFLOW_MCP_TOOL_NAMES,
 ]);
+
+const DRONE_DEFAULTED_TOOLS = new Set<string>(WORKFLOW_DRONE_DEFAULTED_TOOL_NAMES);
 
 function assertedDroneRefs(args: any): string[] {
   const direct = [args?.drone, args?.droneId, args?.targetDroneId, args?.id, args?.beforeDrone, args?.afterDrone]
@@ -1604,8 +1621,14 @@ function registerAuthorizedTools(server: McpServer, context: DroneHubMcpServerCo
   const registerTool = server.registerTool.bind(server) as any;
   (server as any).registerTool = (name: string, config: any, handler: (args: any, extra: any) => Promise<any>) =>
     registerTool(name, config, async (args: any, extra: any) => {
-      authorizeDroneHubMcpTool(context, name, args);
-      return projectMcpResultForPrincipal(context, name, await handler(args, extra));
+      const effectiveArgs =
+        context.principal.kind === 'drone' &&
+        DRONE_DEFAULTED_TOOLS.has(name) &&
+        !cleanString(args?.drone)
+          ? { ...args, drone: context.principal.droneId }
+          : args;
+      authorizeDroneHubMcpTool(context, name, effectiveArgs);
+      return projectMcpResultForPrincipal(context, name, await handler(effectiveArgs, extra));
     });
   registerTools(server);
   (server as any).registerTool = registerTool;
