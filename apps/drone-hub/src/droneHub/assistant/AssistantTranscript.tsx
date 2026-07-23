@@ -826,6 +826,8 @@ function AgentThinkingActivityRow() {
   );
 }
 
+export const AUTO_EXPANDED_TOOL_CALL_LIMIT = 5;
+
 export function ToolRunActivity({
   items,
   active,
@@ -845,7 +847,10 @@ export function ToolRunActivity({
   awaitingApproval?: boolean;
   approvalStartedAt?: number;
 }) {
-  const [expanded, setExpanded] = React.useState(initiallyExpanded);
+  const [expansionMode, setExpansionMode] = React.useState<'auto' | 'manual' | 'collapsed'>(
+    initiallyExpanded ? 'auto' : 'collapsed',
+  );
+  const expanded = expansionMode !== 'collapsed';
   const fallbackStart = React.useRef(Date.now()).current;
   const normalizedApprovalStartedAt = Number.isFinite(approvalStartedAt)
     ? Number(approvalStartedAt)
@@ -898,7 +903,9 @@ export function ToolRunActivity({
     end - start - pauseClock.accumulatedMs - resumingPauseMs,
   );
   const callLabel = `${items.length} tool ${items.length === 1 ? 'call' : 'calls'}`;
-  const groupedItems = compactRepeatedToolItems(items);
+  const visibleItems =
+    expansionMode === 'auto' ? items.slice(-AUTO_EXPANDED_TOOL_CALL_LIMIT) : items;
+  const groupedItems = compactRepeatedToolItems(visibleItems);
   const showThinkingActivity =
     active && !awaitingApproval && items.every(toolActivityIsSettled);
 
@@ -916,7 +923,9 @@ export function ToolRunActivity({
         }
         trailing={<ToolRunChevron open={expanded} />}
         expanded={expanded}
-        onToggle={() => setExpanded((value) => !value)}
+        onToggle={() =>
+          setExpansionMode((current) => (current === 'collapsed' ? 'manual' : 'collapsed'))
+        }
       />
       {expanded ? (
         <div className="mt-1 space-y-1">

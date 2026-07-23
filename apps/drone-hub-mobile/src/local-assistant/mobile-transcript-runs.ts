@@ -42,6 +42,8 @@ export type MobileTranscriptGroup =
   | MobileTranscriptRun
   | { type: 'standalone'; key: string; item: AssistantRenderItem };
 
+export const AUTO_EXPANDED_MOBILE_TOOL_CALL_LIMIT = 5;
+
 const PLAN_STATUSES = new Set(['pending', 'in_progress', 'completed', 'cancelled']);
 
 export function normalizeMobileAgentPlan(value: unknown): MobileAgentPlan | undefined {
@@ -239,4 +241,31 @@ export function mobileRunIsThinking(
     item.type === 'tool' ? [item] : item.type === 'toolGroup' ? item.items : [],
   );
   return tools.length > 0 && tools.every(toolActivityIsSettled);
+}
+
+export function limitMobileRunToolItems(
+  items: AssistantRenderItem[],
+  limit = AUTO_EXPANDED_MOBILE_TOOL_CALL_LIMIT,
+): AssistantRenderItem[] {
+  let remainingTools = Math.max(0, Math.floor(limit));
+  const visible: AssistantRenderItem[] = [];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    if (item.type === 'tool') {
+      if (remainingTools > 0) {
+        visible.push(item);
+        remainingTools -= 1;
+      }
+      continue;
+    }
+    if (item.type === 'toolGroup') {
+      if (remainingTools <= 0) continue;
+      const groupItems = item.items.slice(-remainingTools);
+      remainingTools -= groupItems.length;
+      visible.push({ ...item, items: groupItems });
+      continue;
+    }
+    visible.push(item);
+  }
+  return visible.reverse();
 }

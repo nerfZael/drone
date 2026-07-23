@@ -73,7 +73,7 @@ export function registerNativeChatRoutes(
         });
         const includeHistory = url.searchParams.get('includeHistory') === '1';
         const initialHistory = includeHistory
-          ? await deps.nativeChatHistoryPage(chatId, { limit: 80 }).catch(() => undefined)
+          ? await deps.nativeChatHistoryPage(chatId, { limit: 200 }).catch(() => undefined)
           : undefined;
         respond(200, {
           ...snapshot,

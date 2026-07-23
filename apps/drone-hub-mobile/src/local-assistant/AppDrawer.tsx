@@ -41,6 +41,7 @@ import {
 import {
   buildMobileDroneRepoGroups,
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+  excludePinnedMobileDrones,
   type MobileDroneGroupFolder,
   type MobileDroneRepoGroup,
   type MobileDroneSidebarEntry,
@@ -1004,6 +1005,12 @@ function AppDrawerView({
     () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
     [droneSidebarOrder, drones],
   );
+  const unpinnedDroneGroups = React.useMemo(() => {
+    return buildMobileDroneRepoGroups(
+      excludePinnedMobileDrones(drones, droneSidebarOrder.pinnedDroneIds),
+      droneSidebarOrder,
+    );
+  }, [droneSidebarOrder, drones]);
   const repoStateSummaries = React.useMemo(
     () =>
       new Map(
@@ -1024,6 +1031,7 @@ function AppDrawerView({
     });
   }, []);
   const activeRepo = droneGroups.find((group) => group.id === activeRepoId) ?? null;
+  const activeUnpinnedRepo = unpinnedDroneGroups.find((group) => group.id === activeRepoId) ?? null;
   const activeRepoPinnedDrones = React.useMemo(
     () =>
       activeRepo
@@ -1180,7 +1188,7 @@ function AppDrawerView({
                 key={`repo:${activeRepo.id}`}
                 style={styles.scroll}
                 contentContainerStyle={styles.droneList}
-                data={activeRepo.entries}
+                data={activeUnpinnedRepo?.entries ?? []}
                 keyExtractor={(entry) =>
                   entry.kind === 'drone'
                     ? `drone:${entry.node.drone.id}`

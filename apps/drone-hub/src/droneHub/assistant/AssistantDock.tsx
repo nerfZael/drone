@@ -448,6 +448,36 @@ export function AssistantDock({
   const loadOlderMessages = React.useCallback(async () => {
     await preserveScrollOnPrepend(() => blipSession.loadOlder());
   }, [blipSession.loadOlder, preserveScrollOnPrepend]);
+  const olderHistoryTriggerArmedRef = React.useRef(true);
+  React.useEffect(() => {
+    olderHistoryTriggerArmedRef.current = true;
+  }, [activeThreadId]);
+  React.useEffect(() => {
+    const node = scrollRef.current;
+    if (!node || !blipSession.hasOlder) return;
+    const loadAtTop = () => {
+      if (node.scrollTop > 96) {
+        olderHistoryTriggerArmedRef.current = true;
+        return;
+      }
+      if (
+        node.scrollTop > 40 ||
+        !olderHistoryTriggerArmedRef.current ||
+        blipSession.olderLoading
+      ) {
+        return;
+      }
+      olderHistoryTriggerArmedRef.current = false;
+      void loadOlderMessages();
+    };
+    node.addEventListener('scroll', loadAtTop, { passive: true });
+    return () => node.removeEventListener('scroll', loadAtTop);
+  }, [
+    blipSession.hasOlder,
+    blipSession.olderLoading,
+    loadOlderMessages,
+    scrollRef,
+  ]);
   const droneMentionLinks = React.useMemo<MarkdownTextMentionLink[]>(() => {
     const nameCounts = new Map<string, number>();
     for (const name of Object.values(droneNameById)) {
@@ -1481,20 +1511,17 @@ export function AssistantDock({
 
   const toolActivityVisible = chatSurfaceAdapter.capabilities.toolActivity === 'visible';
   const nativeTranscriptItems: AgentChatTranscriptItem[] = [];
-  if (blipSession.hasOlder) {
+  if (blipSession.olderLoading) {
     nativeTranscriptItems.push({
       key: 'native-history-older',
       kind: 'status',
       content: (
-        <div className="text-center">
-          <button
-            type="button"
-            className="rounded border border-[var(--border)] px-2.5 py-1 text-[var(--text-11)] text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-50"
-            disabled={blipSession.olderLoading}
-            onClick={() => void loadOlderMessages()}
-          >
-            {blipSession.olderLoading ? 'Loading older messages...' : 'Load older messages'}
-          </button>
+        <div
+          className="text-center text-[var(--text-11)] text-[var(--muted)]"
+          role="status"
+          aria-live="polite"
+        >
+          Loading older messages…
         </div>
       ),
     });

@@ -35,6 +35,7 @@ describe('mobile drone pending prompts', () => {
       id: 'prompt-1',
       prompt: 'Fix it',
       at: '2026-07-19T10:00:00.000Z',
+      state: 'queued',
     });
     expect(
       mergeOptimisticMobilePendingPrompts({
@@ -49,6 +50,22 @@ describe('mobile drone pending prompts', () => {
         state: 'queued',
       },
     ]);
+  });
+
+  test('does not relabel an initial sent message as queued during reconciliation', () => {
+    const local = optimisticMobilePendingPrompt({
+      id: 'initial-prompt',
+      prompt: 'Start working',
+      state: 'sending',
+    });
+
+    expect(
+      mergeOptimisticMobilePendingPrompts({
+        serverPrompts: [{ id: 'initial-prompt', prompt: 'Start working', state: 'queued' }],
+        localPrompts: [local],
+        turns: [],
+      }),
+    ).toEqual([{ ...local, state: 'sending' }]);
   });
 
   test('shows a follow-up as queued immediately while the active prompt is running', () => {
@@ -74,6 +91,13 @@ describe('mobile drone pending prompts', () => {
     ).toBe('queued');
     expect(confirmedMobilePendingPromptState({ pendingState: 'queued' })).toBe('queued');
     expect(confirmedMobilePendingPromptState({ pendingState: 'sending' })).toBe('sending');
+    expect(
+      confirmedMobilePendingPromptState({
+        pendingState: 'queued',
+        queuedPromptId: 'transient-queue-id',
+        optimisticState: 'sending',
+      }),
+    ).toBe('sending');
   });
 
   test('keeps a locally failed prompt visible after the send grace period', () => {

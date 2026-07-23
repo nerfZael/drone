@@ -11,7 +11,9 @@ describe('mobile tool activity presentation', () => {
     expect(transcriptSource).toContain('<Text style={styles.detailLabel}>Arguments</Text>');
     expect(transcriptSource).toContain('<Text style={styles.detailLabel}>Result</Text>');
     expect(transcriptSource).toContain('styles.thinkingActivityText}>Thinking…</Text>');
-    expect(transcriptSource).toContain('const [toolsExpanded, setToolsExpanded] = React.useState(run.active);');
+    expect(transcriptSource).toContain("run.active ? 'auto' : 'collapsed'");
+    expect(transcriptSource).toContain('limitMobileRunToolItems(run.items)');
+    expect(transcriptSource).toContain('!groupedActiveRun');
     expect(transcriptSource).toContain('disabled={!expandable}');
     expect(transcriptSource).not.toContain('<Text style={styles.detailLabel}>ARGUMENTS</Text>');
     expect(transcriptSource).not.toContain('<Text style={styles.detailLabel}>RESULT</Text>');

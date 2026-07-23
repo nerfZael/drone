@@ -1032,6 +1032,7 @@ export function DronesScreen({
       const acceptedPromptState = confirmedMobilePendingPromptState({
         pendingState: result?.pendingState,
         queuedPromptId,
+        optimisticState: running ? 'queued' : 'sending',
       });
       if (acceptedPromptId)
         setPendingPrompts((current) =>
@@ -1200,6 +1201,7 @@ export function DronesScreen({
           const acceptedPromptState = confirmedMobilePendingPromptState({
             pendingState: promptResult?.pendingState,
             queuedPromptId: promptResult?.queuedPrompt?.id,
+            optimisticState: 'sending',
           });
           if (acceptedPromptId && optimisticPromptId) {
             setPendingPrompts((current) =>
@@ -1586,6 +1588,9 @@ export function DronesScreen({
   const latestMessageScroll = useLatestMessageScroll(
     selected ? `${selected.id}:${chatName}` : '',
     chatLoading,
+    {
+      onReachTop: chatHistoryPage.hasOlder && !olderHistoryBusy ? loadOlderChatHistory : undefined,
+    },
   );
   const latestModel = [...normalizedTurns].reverse().find((turn) => turn.model)?.model;
   const running =
@@ -1601,9 +1606,7 @@ export function DronesScreen({
     targetReachable && targetSupportsDrones && (!dronesLoaded || busy === 'drones');
   const displayedModel = chatModel || latestModel || 'Model';
   const visibleChats = chats;
-  const selectedChatOptimisticallyBusy = visiblePendingPrompts.some(
-    (item) => item.status === 'pending',
-  );
+  const selectedChatOptimisticallyBusy = running;
   const drawerDrones = React.useMemo(
     () =>
       drones.map((drone) => {
@@ -2170,30 +2173,24 @@ export function DronesScreen({
                       onScroll={latestMessageScroll.onScroll}
                       scrollEventThrottle={16}
                     >
-                      {chatHistoryPage.hasOlder ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel="Load older chat messages"
-                          accessibilityState={{ disabled: olderHistoryBusy }}
-                          disabled={olderHistoryBusy}
-                          onPress={() => void loadOlderChatHistory()}
-                          style={({ pressed }) => [
-                            styles.loadOlderButton,
-                            pressed && styles.chatTabPressed,
-                          ]}
+                      {chatHistoryPage.hasOlder || olderHistoryBusy ? (
+                        <View
+                          accessibilityLiveRegion="polite"
+                          accessibilityRole={olderHistoryBusy ? 'progressbar' : undefined}
+                          accessibilityLabel={
+                            olderHistoryBusy ? 'Loading older chat messages' : undefined
+                          }
+                          style={styles.loadOlderStatus}
                         >
                           {olderHistoryBusy ? (
                             <ActivityIndicator color={colors.accent} size="small" />
-                          ) : (
-                            <Text style={styles.loadOlderText}>Load older messages</Text>
-                          )}
-                        </Pressable>
+                          ) : null}
+                        </View>
                       ) : null}
                       <MobileAssistantTranscript
                         messages={transcriptMessages}
                         loading={chatLoading}
                         running={running}
-                        currentReasoning={running ? (normalizedTurns.at(-1)?.reasoning ?? '') : ''}
                         emptyTitle="This drone chat is ready."
                         emptyBody="Send a prompt to start the conversation."
                         assistantLabel="Agent"
@@ -2565,17 +2562,11 @@ const styles = StyleSheet.create({
   transcriptScroll: { flex: 1 },
   transcriptContent: { flexGrow: 1 },
   transcriptContentHidden: { opacity: 0 },
-  loadOlderButton: {
+  loadOlderStatus: {
     minHeight: 38,
     alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 10,
-    paddingHorizontal: 16,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.panelRaised,
   },
-  loadOlderText: { color: colors.accent, fontSize: 12, fontWeight: '800' },
 });
