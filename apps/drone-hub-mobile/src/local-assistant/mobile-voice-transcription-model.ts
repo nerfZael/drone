@@ -44,6 +44,18 @@ export function mergeMobileDraftWithVoiceTranscript(
   return `${cleanDraft} ${cleanTranscript}`;
 }
 
+export function resolveMobileVoiceTranscriptDraft(input: {
+  draft: string;
+  transcript: string;
+  action: 'append' | 'send';
+}): { message: string; nextDraft: string } {
+  const message = mergeMobileDraftWithVoiceTranscript(input.draft, input.transcript);
+  return {
+    message,
+    nextDraft: input.action === 'append' ? message : '',
+  };
+}
+
 export function formatMobileVoiceDuration(durationMillis: number): string {
   const milliseconds = Number(durationMillis);
   const totalSeconds = Number.isFinite(milliseconds)

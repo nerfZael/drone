@@ -12,9 +12,9 @@ import { ThemedTextInput } from '../components/ThemedTextInput';
 import { colors } from '../theme';
 import {
   formatMobileVoiceDuration,
-  mergeMobileDraftWithVoiceTranscript,
   mobileVoiceRecordActionDisabled,
   mobileVoiceStatusLabel,
+  resolveMobileVoiceTranscriptDraft,
 } from './mobile-voice-transcription-model';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
 import {
@@ -305,35 +305,42 @@ export function AssistantComposer({
     }
   }, [startRecording]);
 
-  const stopVoiceAndAppend = React.useCallback(async (): Promise<string | null> => {
-    if (!voiceCanPauseOrStop || voiceActionInFlight) return null;
-    const token = voiceActionTokenRef.current + 1;
-    voiceActionTokenRef.current = token;
-    setVoiceActionInFlight(true);
-    try {
-      const transcript = await stopRecordingForTranscript();
-      if (voiceActionTokenRef.current !== token) return null;
-      const currentDraft = valueRef.current;
-      const nextDraft = mergeMobileDraftWithVoiceTranscript(currentDraft, transcript);
-      if (nextDraft === currentDraft) {
-        setVoiceError((current) => current || 'No speech detected.');
-        return null;
+  const stopVoiceForAction = React.useCallback(
+    async (action: 'append' | 'send'): Promise<string | null> => {
+      if (!voiceCanPauseOrStop || voiceActionInFlight) return null;
+      const token = voiceActionTokenRef.current + 1;
+      voiceActionTokenRef.current = token;
+      setVoiceActionInFlight(true);
+      try {
+        const transcript = await stopRecordingForTranscript();
+        if (voiceActionTokenRef.current !== token) return null;
+        const currentDraft = valueRef.current;
+        const result = resolveMobileVoiceTranscriptDraft({
+          draft: currentDraft,
+          transcript,
+          action,
+        });
+        if (result.message === currentDraft) {
+          setVoiceError((current) => current || 'No speech detected.');
+          return null;
+        }
+        valueRef.current = result.nextDraft;
+        if (action === 'append') onChangeText(result.message);
+        return result.message;
+      } finally {
+        if (voiceActionTokenRef.current === token) setVoiceActionInFlight(false);
       }
-      valueRef.current = nextDraft;
-      onChangeText(nextDraft);
-      return nextDraft;
-    } finally {
-      if (voiceActionTokenRef.current === token) setVoiceActionInFlight(false);
-    }
-  }, [onChangeText, stopRecordingForTranscript, voiceActionInFlight, voiceCanPauseOrStop]);
+    },
+    [onChangeText, stopRecordingForTranscript, voiceActionInFlight, voiceCanPauseOrStop],
+  );
 
   const stopVoiceAndFillDraft = React.useCallback(async () => {
-    const nextDraft = await stopVoiceAndAppend();
+    const nextDraft = await stopVoiceForAction('append');
     if (nextDraft) {
       suppressInputFocusRef.current = false;
       requestAnimationFrame(() => inputRef.current?.focus());
     }
-  }, [stopVoiceAndAppend]);
+  }, [stopVoiceForAction]);
 
   const changeText = React.useCallback(
     (nextValue: string) => {
@@ -350,7 +357,7 @@ export function AssistantComposer({
       onSend();
       return;
     }
-    const nextDraft = await stopVoiceAndAppend();
+    const nextDraft = await stopVoiceForAction('send');
     if (nextDraft?.trim()) {
       setVoiceError('');
       onSend(nextDraft.trim());
@@ -358,7 +365,7 @@ export function AssistantComposer({
       setVoiceError('');
       onSend();
     }
-  }, [canSend, hasAttachments, onSend, stopVoiceAndAppend, voiceActive]);
+  }, [canSend, hasAttachments, onSend, stopVoiceForAction, voiceActive]);
 
   return (
     <View style={styles.frame}>
