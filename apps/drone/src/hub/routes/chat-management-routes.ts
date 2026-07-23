@@ -9,6 +9,7 @@ import {
 import type { AgentPermissionMode, ChatAgentConfig } from '../chat-types';
 import { readJsonBody, sendJson as json } from '../hub-http';
 import { parseRequestSchema } from '../request-schema';
+import { isWorkflowChatEntry } from '../workflows/workflow-chat-metadata';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './legacy-route';
 
 type ChatManagementRouteDependencyName =
@@ -646,7 +647,11 @@ export function createChatManagementRouteHandler(
           timer.mark('import');
           const storeChats = listChatsFromStore({ droneId });
           timer.mark('store');
-          const chats = storeChats.available ? storeChats.chats : importedChats;
+          const allChats = storeChats.available ? storeChats.chats : importedChats;
+          const chats = allChats.filter((chatName: string) => {
+            const stored = readChatFromStore({ droneId, chatName });
+            return !isWorkflowChatEntry(stored?.chat);
+          });
           const registryChats = (resolved.drone as any)?.chats ?? {};
           const readStates = listChatReadStatesFromStore({ droneId });
           const chatDetails = chats.map((chatName: string) => ({

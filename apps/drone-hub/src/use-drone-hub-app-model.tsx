@@ -77,6 +77,7 @@ import { useVoiceClipboardRecorder } from './droneHub/app/use-voice-clipboard-re
 import { transcriptMessageId } from './droneHub/app/transcript-message-id';
 import { useWorkspaceNavigationActions } from './droneHub/app/use-workspace-navigation-actions';
 import { useWorkspaceActions } from './droneHub/app/use-workspace-actions';
+import { isWorkflowChildDrone } from './droneHub/workflows/workflow-drone-visibility';
 import {
   loadDesktopNewDronePreferences,
   normalizeDesktopNewDronePreferences,
@@ -2808,7 +2809,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const onActivateChatFromCanvas = React.useCallback(
     (droneIdRaw: string, chatNameRaw: string) => {
       const droneId = String(droneIdRaw ?? '').trim();
-      if (!droneId || !sidebarSelectableDroneIdSet.has(droneId)) return;
+      if (
+        !droneId ||
+        (!sidebarSelectableDroneIdSet.has(droneId) &&
+          !isWorkflowChildDrone(droneByIdRef.current[droneId]))
+      ) return;
       const chatName = String(chatNameRaw ?? '').trim() || 'default';
       selectDroneChat(droneId, chatName);
     },

@@ -1,4 +1,9 @@
 import type { LlmProviderId } from '../hub-settings';
+import {
+  WORKFLOW_ASSISTANT_SYSTEM_PROMPT_LINE,
+  WORKFLOW_ASSISTANT_TOOL_SUMMARIES,
+} from '../workflows/workflow-assistant-tools';
+import { WORKFLOW_MCP_TOOL_NAMES } from '../workflows/workflow-tool-names';
 import type { AssistantThinkingLevel, AssistantToolSummary } from './assistant-contracts';
 
 export const ASSISTANT_THREAD_MESSAGE_LIMIT = 80;
@@ -42,6 +47,7 @@ export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Use web_search for current information, documentation, news, prices, schedules, or facts that may have changed. Use fetch_content when the user gives a direct URL to read, inspect, summarize, or analyze. Cite source URLs in the final answer.',
   'Use list_drones before referring to specific drones unless the user already provided an exact drone id.',
   'Use list_chats to discover chats and read_chat in pages when you need drone conversation context.',
+  WORKFLOW_ASSISTANT_SYSTEM_PROMPT_LINE,
   ASSISTANT_MULTI_TARGET_PROMPT_LINE,
   'Use list_files, search_files, read_file, write_file, and apply_patch to inspect and modify files in a workspace target. Prefer apply_patch for coordinated code edits.',
   'File results keep path as the runtime path and include relativePath when the path can be expressed relative to the drone workspace or repo root.',
@@ -275,6 +281,7 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     category: 'chats',
     description: 'Cancel a durable chat-idle subscription.',
   },
+  ...WORKFLOW_ASSISTANT_TOOL_SUMMARIES,
   {
     name: 'create_drone',
     label: 'Create drone',
@@ -370,6 +377,7 @@ const DRONE_HUB_MCP_TOOL_NAMES = new Set([
   'list_chat_idle_subscriptions',
   'cancel_chat_idle_subscription',
   'read_chat',
+  ...WORKFLOW_MCP_TOOL_NAMES,
 ]);
 export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] =
   ASSISTANT_TOOL_SUMMARY_DEFINITIONS.map((tool) =>

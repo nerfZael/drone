@@ -1,5 +1,6 @@
 import { parseBoolParam } from '../hub-format';
 import type { HubRouter } from '../hub-router';
+import { isWorkflowChildDroneEntry } from '../workflows/workflow-child-drone-metadata';
 
 type GroupRecord = { name: string; createdAt?: string | null; updatedAt?: string | null };
 type GroupTarget = { id: string; name: string; group: string; repoPath: string };
@@ -62,6 +63,7 @@ export function registerGroupRoutes(router: HubRouter, deps: GroupRouteDependenc
 
     const count = (entries: any, kind: 'drones' | 'pending') => {
       for (const drone of Object.values(entries ?? {}) as any[]) {
+        if (isWorkflowChildDroneEntry(drone)) continue;
         const group = normalizeGroupName(drone?.group);
         if (!group || isUngroupedGroupName(group)) continue;
         const current = counts.get(group) ?? { drones: 0, pending: 0 };
@@ -149,6 +151,7 @@ export function registerGroupRoutes(router: HubRouter, deps: GroupRouteDependenc
 
     const targetsFrom = (entries: any): GroupTarget[] =>
       (Object.entries(entries ?? {}) as Array<[string, any]>)
+        .filter(([, drone]) => !isWorkflowChildDroneEntry(drone))
         .map(([id, drone]) => ({
           id: normalizeDroneIdentity(id),
           name: String(drone?.name ?? '').trim(),

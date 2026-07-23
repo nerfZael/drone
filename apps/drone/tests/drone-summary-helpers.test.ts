@@ -20,4 +20,25 @@ describe('drone summary helpers', () => {
       lastActivityChat: 'default',
     });
   });
+
+  test('does not let hidden workflow chats change ordinary drone activity', () => {
+    expect(
+      summarizeDroneActivity({
+        createdAt: '2026-07-01T08:00:00.000Z',
+        chats: {
+          default: {
+            turns: [{ at: '2026-07-02T08:00:00.000Z' }],
+          },
+          worker: {
+            visibility: 'workflow',
+            turns: [{ at: '2026-07-20T08:00:00.000Z' }],
+          },
+        },
+      }),
+    ).toEqual({
+      lastActivityAt: '2026-07-02T08:00:00.000Z',
+      lastMessageAt: '2026-07-02T08:00:00.000Z',
+      lastActivityChat: 'default',
+    });
+  });
 });
