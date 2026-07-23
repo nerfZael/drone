@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ChatSendPayload } from '../chat';
+import type { ChatSendContext, ChatSendPayload } from '../chat';
 import type { DroneSummary } from '../types';
 import { sendDroneChatPrompt } from './chat-api';
 import { isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
@@ -75,7 +75,7 @@ export function useGroupBroadcast({
   }, [selectedGroupMultiChat, setGroupBroadcastExpanded]);
 
   const sendGroupBroadcastPrompt = React.useCallback(
-    async (payload: ChatSendPayload): Promise<boolean> => {
+    async (payload: ChatSendPayload, context: ChatSendContext): Promise<boolean> => {
       const prompt = String(payload?.prompt ?? '').trim();
       const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
       if (!prompt && attachments.length === 0) return false;
@@ -100,6 +100,7 @@ export function useGroupBroadcast({
               chatName,
               prompt,
               attachments,
+              deliveryMode: context.deliveryMode,
               autoRenameHandledByClient: Boolean(prompt),
             });
             if (data.autoRenameChat && prompt) {

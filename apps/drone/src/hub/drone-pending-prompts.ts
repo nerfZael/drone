@@ -26,6 +26,7 @@ export type PendingPrompt = {
   messageId?: string;
   cwd?: string | null;
   attachments?: ChatImageAttachmentRef[];
+  deliveryMode?: 'queue' | 'asap';
   state: PendingPromptState;
   error?: string;
   observability?: {
@@ -138,6 +139,7 @@ export function createDronePendingPromptStore(deps: {
           ...(typeof p?.messageId === 'string' && String(p.messageId).trim() ? { messageId: String(p.messageId).trim() } : {}),
           cwd: typeof p?.cwd === 'string' ? String(p.cwd) : p?.cwd === null ? null : undefined,
           attachments: deps.normalizeChatImageAttachmentRefs(p?.attachments),
+          deliveryMode: p?.deliveryMode === 'asap' ? 'asap' : 'queue',
           state:
             p?.state === 'sent' || p?.state === 'failed' || p?.state === 'sending' || p?.state === 'queued'
               ? (p.state as PendingPromptState)

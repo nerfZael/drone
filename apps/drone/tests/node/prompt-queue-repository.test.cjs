@@ -197,6 +197,51 @@ test('steering can claim a follow-up while the current built-in prompt is sendin
   );
 });
 
+test('ASAP prompts are selected before older queued prompts', async () => {
+  const queue = repository('asap-priority');
+  const at = '2026-07-10T09:00:00.000Z';
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('queue-first', at), deliveryMode: 'queue' },
+  });
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('asap-first', at), deliveryMode: 'asap' },
+  });
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('asap-second', at), deliveryMode: 'asap' },
+  });
+
+  assert.equal(
+    queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id,
+    'asap-first',
+  );
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'asap-first',
+    patch: { state: 'sent', updatedAt: at },
+  });
+  assert.equal(
+    queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id,
+    'asap-second',
+  );
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'asap-second',
+    patch: { state: 'sent', updatedAt: at },
+  });
+  assert.equal(
+    queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id,
+    'queue-first',
+  );
+});
+
 test('a conditional update permits only one competing claimant', async () => {
   const queue = repository('claim-race');
   const at = '2026-07-10T09:00:00.000Z';

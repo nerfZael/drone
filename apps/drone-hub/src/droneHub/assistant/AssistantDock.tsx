@@ -967,7 +967,10 @@ export function AssistantDock({
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
-  const sendPrompt = React.useCallback(async (sharedPayload: ChatSendPayload): Promise<boolean> => {
+  const sendPrompt = React.useCallback(async (
+    sharedPayload: ChatSendPayload,
+    deliveryMode: 'asap' | 'queue',
+  ): Promise<boolean> => {
     if (!activeThread) return false;
     const referencedDroneSnapshot = referencedDronesRef.current.slice();
     const prompt = appendAssistantDroneReferences(sharedPayload.prompt, referencedDroneSnapshot);
@@ -997,6 +1000,7 @@ export function AssistantDock({
             provider: activeThread.provider,
             model: activeThread.model,
             thinkingLevel: activeThread.thinkingLevel,
+            deliveryMode,
           }),
         });
         await readNdjson(response, (event) => {
@@ -1938,7 +1942,9 @@ export function AssistantDock({
               composerControls={nativeComposerControls}
               onStop={() => stop()}
               stopping={assistantStopBusy}
-              onSend={async (payload) => await sendPrompt(payload)}
+              onSend={async (payload, context) =>
+                await sendPrompt(payload, context.deliveryMode)
+              }
             />
           </div>
         )}

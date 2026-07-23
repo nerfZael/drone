@@ -1318,6 +1318,7 @@ let nativeChatPromptHandler: (input: {
   provider?: string;
   model?: string;
   thinkingLevel?: string;
+  deliveryMode?: 'queue' | 'asap';
   prompt: string;
   attachments?: ChatImageAttachment[];
 }) => Promise<void> = async () => {
@@ -4477,6 +4478,7 @@ export async function startDroneHubApiServer(opts: {
     provider,
     model,
     thinkingLevel,
+    deliveryMode,
     prompt,
     attachments,
   }) => {
@@ -4516,6 +4518,7 @@ export async function startDroneHubApiServer(opts: {
       promptId,
       prompt: promptWithFiles,
       promptImages,
+      deliveryMode,
     });
   };
   nativeChatStopHandler = async (nativeChatId: string) => {

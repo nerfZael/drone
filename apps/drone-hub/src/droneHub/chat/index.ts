@@ -1,6 +1,11 @@
 export { ChatTabs } from './ChatTabs';
 export { ChatInput } from './ChatInput';
 export {
+  chatSendShortcut,
+  type ChatMessageDeliveryMode,
+  type ChatSendShortcutInput,
+} from './chat-send-shortcuts';
+export {
   ChatSurface,
   ChatSurfaceComposer,
   ChatSurfaceLoadingView,

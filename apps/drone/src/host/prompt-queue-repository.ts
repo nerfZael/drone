@@ -11,6 +11,7 @@ export type PromptQueueItem = {
   messageId?: string;
   cwd?: string | null;
   attachments?: unknown;
+  deliveryMode?: 'queue' | 'asap';
   state: PromptQueueState;
   error?: string;
   observability?: unknown;
@@ -413,7 +414,9 @@ export class PromptQueueRepository {
           .prepare(
             `SELECT * FROM prompts
              WHERE drone_id = ? AND chat_name = ? AND state = 'queued'
-             ORDER BY sequence
+             ORDER BY
+               CASE WHEN json_extract(payload_json, '$.deliveryMode') = 'asap' THEN 0 ELSE 1 END,
+               sequence
              LIMIT 1`,
           )
           .get(opts.droneId, opts.chatName) as PromptRow | undefined,

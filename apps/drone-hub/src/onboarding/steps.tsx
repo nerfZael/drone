@@ -80,7 +80,9 @@ export const GUIDED_ONBOARDING_STEPS: GuidedOnboardingStep[] = [
     title: 'Send prompts',
     body: (
       <div className="space-y-2">
-        <div>Type a message and press Enter to send (Shift+Enter for a newline).</div>
+        <div>
+          Press Enter to send ASAP, Tab or Ctrl+Enter to queue, and Shift+Enter for a newline.
+        </div>
       </div>
     ),
   },

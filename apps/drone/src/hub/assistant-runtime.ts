@@ -795,13 +795,15 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     promptId?: string;
     prompt: string;
     promptImages?: Array<{ type: 'image'; data: string; mimeType: string }>;
+    deliveryMode?: 'queue' | 'asap';
   }) => {
     await assistantService.beginNativeThreadPrompt(input.threadId);
     const promptInput: AssistantPromptInput = input.promptImages?.length
       ? { text: input.prompt, images: input.promptImages }
       : input.prompt;
     const steerImmediately =
-      (await assistantService.promptDeliveryMode(input.threadId)) === 'asap' &&
+      (input.deliveryMode ?? (await assistantService.promptDeliveryMode(input.threadId))) ===
+        'asap' &&
       blipAssistantHost.isThreadRunning(input.threadId);
     const queued = await assistantService.enqueueThreadPrompt(input.threadId, {
       id: input.promptId,
@@ -816,7 +818,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       if (!claimed) throw new Error('built-in prompt could not be claimed');
       await notifyNativePromptQueueChanged(input.threadId);
       void blipAssistantHost
-        .promptThread(input.threadId, promptInput)
+        .promptThread(input.threadId, promptInput, undefined, 'asap')
         .then(async () => {
           await assistantService.completeQueuedPrompt(input.threadId, queued.id);
           await notifyNativePromptQueueChanged(input.threadId);

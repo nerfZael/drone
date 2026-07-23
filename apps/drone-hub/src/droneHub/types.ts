@@ -597,6 +597,7 @@ export type PendingPrompt = {
     size: number;
     dataBase64: string;
   }>;
+  deliveryMode?: 'queue' | 'asap';
   // `queued` is a local-only UI state used when a drone is still provisioning.
   state: 'queued' | 'sending' | 'sent' | 'failed';
   error?: string;

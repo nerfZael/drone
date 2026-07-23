@@ -16,7 +16,7 @@ export function adaptExternalAgentChatSurface(
     agentType: 'external',
     capabilities: {
       attachments: capabilities.attachments ?? 'images',
-      sendWhileWaiting: capabilities.sendWhileWaiting ?? false,
+      sendWhileWaiting: capabilities.sendWhileWaiting ?? true,
       toolActivity: capabilities.toolActivity ?? 'hidden',
     },
   };
