@@ -253,6 +253,10 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         transform: (current) => {
         const pendingLatest = latestPendingForCreate ?? pending;
         const fleetMeta = pendingLatest?.fleet && typeof pendingLatest.fleet === 'object' ? pendingLatest.fleet : null;
+        const workflowChild =
+          pendingLatest?.workflowChild && typeof pendingLatest.workflowChild === 'object'
+            ? pendingLatest.workflowChild
+            : null;
         const environment = pendingLatest?.environment ?? null;
         const d = { ...current };
         deps.applyPendingDisplayNameToProvisionedDrone(d, pendingLatest, displayName);
@@ -270,6 +274,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
             assigned: fleetMeta.assigned,
           });
         }
+        if (workflowChild) d.workflowChild = { ...workflowChild };
         if (environment && typeof environment === 'object') {
           d.environment = {
             vars: normalizeEnvVarMap((environment as any)?.vars),

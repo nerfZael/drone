@@ -1,4 +1,5 @@
 import React from 'react';
+import { isWorkflowChildDrone } from '../workflows/workflow-drone-visibility';
 import type { StartupSeedState } from './app-types';
 import { isStartupSeedFresh } from './app-config';
 import { normalizedDroneChats } from './chat-node-helpers';
@@ -115,7 +116,10 @@ export function useDroneSelectionState({
     const chatName = String(selectedChat ?? '').trim() || 'default';
     if (!droneId) return;
     const drone = droneById[droneId] ?? null;
-    const chats = normalizedDroneChats(drone, { includeDefaultWhenEmpty: true });
+    const chats = [
+      ...normalizedDroneChats(drone, { includeDefaultWhenEmpty: true }),
+      ...(drone?.workflowChats ?? []),
+    ];
     if (chatName !== 'default' && !chats.includes(chatName)) {
       pendingSelectedChatUntilByDroneRef.current[droneId] = Date.now() + PENDING_SELECTED_CHAT_GRACE_MS;
       return;
@@ -228,6 +232,9 @@ export function useDroneSelectionState({
 
   React.useEffect(() => {
     const valid = new Set(visibleDronesFilteredByRepo.map((d) => d.id));
+    for (const drone of Object.values(droneById)) {
+      if (isWorkflowChildDrone(drone)) valid.add(drone.id);
+    }
     setSelectedDroneIds((prev) => {
       const next = prev.filter((id) => valid.has(id));
       if (selectedDrone && valid.has(selectedDrone) && !next.includes(selectedDrone)) {
@@ -236,7 +243,7 @@ export function useDroneSelectionState({
       if (next.length === prev.length && next.every((id, idx) => id === prev[idx])) return prev;
       return next;
     });
-  }, [selectedDrone, setSelectedDroneIds, visibleDronesFilteredByRepo]);
+  }, [droneById, selectedDrone, setSelectedDroneIds, visibleDronesFilteredByRepo]);
 
   // Auto-select first drone (and recover from deletions).
   React.useEffect(() => {
@@ -250,7 +257,11 @@ export function useDroneSelectionState({
       }
       return;
     }
-    const selectedExistsInRepo = Boolean(selectedDrone && dronesFilteredByRepoIdSet.has(selectedDrone));
+    const selectedExistsInRepo = Boolean(
+      selectedDrone &&
+        (dronesFilteredByRepoIdSet.has(selectedDrone) ||
+          isWorkflowChildDrone(droneById[selectedDrone])),
+    );
     if (visibleDronesFilteredByRepo.length === 0) {
       if (selectedExistsInRepo) return;
       clearSelectedDroneState();
@@ -296,6 +307,7 @@ export function useDroneSelectionState({
   }, [
     clearSelectedDroneState,
     draftChat,
+    droneById,
     homeOpen,
     dronesFilteredByRepoIdSet,
     visibleDronesFilteredByRepo,
@@ -313,7 +325,7 @@ export function useDroneSelectionState({
   React.useEffect(() => {
     if (!selectedDrone) return;
     const d = droneById[selectedDrone] ?? null;
-    const chats = d?.chats ?? [];
+    const chats = [...(d?.chats ?? []), ...(d?.workflowChats ?? [])];
     if (chats.length === 0) return;
     if (selectedChat && chats.includes(selectedChat)) return;
     if (

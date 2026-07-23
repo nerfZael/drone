@@ -11,6 +11,12 @@ export type DroneSummary = {
   lastActivityChat?: string | null;
   fleetParentId?: string | null;
   fleetAssignedIds?: string[] | null;
+  workflowChild?: {
+    ownerDroneId: string;
+    workflowId: string;
+    runId: string;
+    invocationId: string;
+  };
   runtime?: 'container' | 'host';
   persistVolume?: boolean;
   repoAttached?: boolean;
@@ -25,6 +31,7 @@ export type DroneSummary = {
   statusError: string | null;
   statusChecking?: boolean;
   chats: string[];
+  workflowChats?: string[];
   unreadChats?: string[];
   chatReadStates?: Record<
     string,

@@ -121,6 +121,7 @@ import {
   importTranscriptTurnsFromRegistry,
   listChatReadStatesForDronesFromStore,
   listChatReadStatesFromStore,
+  listArchivedChatsFromStore,
   listChatsFromStore,
   markChatReadInStore,
   markChatUnreadInStore,
@@ -288,6 +289,12 @@ import { registerSettingsRoutes } from './routes/settings-routes';
 import { registerSystemRoutes } from './routes/system-routes';
 import { createTerminalRouteHandler } from './routes/terminal-routes';
 import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
+import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
+import {
+  isWorkflowChildDroneEntry,
+  workflowChildDroneMetadata,
+} from './workflows/workflow-child-drone-metadata';
+import { registerWorkflowFeature } from './workflows/workflow-feature';
 import { DroneHubMcpHttpTransport } from './mcp-http-transport';
 import {
   assertDroneDaemonRuntimeReady,
@@ -885,7 +892,9 @@ async function resolveSetupStatusResponse(): Promise<any> {
     regAny?.drones && typeof regAny.drones === 'object' && !Array.isArray(regAny.drones)
       ? regAny.drones
       : {};
-  const droneCount = Object.keys(dronesObj).length;
+  const droneCount = Object.values(dronesObj).filter(
+    (drone) => !isWorkflowChildDroneEntry(drone),
+  ).length;
   const repoCount = (await listCanonicalRepositories()).length;
   const llmSettings = await resolveLlmSettingsResponse();
   const activeProvider = llmSettings.provider.selected;
@@ -4390,14 +4399,18 @@ export async function startDroneHubApiServer(opts: {
     isStaleSessionError: isStaleDockerExecErrorMessage,
   });
 
-  const callLocalHubApi = async (pathname: string, body: any): Promise<any> => {
-    const response = await fetch(`http://127.0.0.1:${opts.port}${pathname}`, {
-      method: 'POST',
+  const callLocalHubApi = async (
+    method: 'POST' | 'DELETE',
+    pathname: string,
+    body?: unknown,
+  ): Promise<any> => {
+    const response = await fetch(`http://127.0.0.1:${actualPort}${pathname}`, {
+      method,
       headers: {
         authorization: `Bearer ${apiToken}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify(body ?? {}),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     const text = await response.text();
     let data: any = null;
@@ -4408,7 +4421,11 @@ export async function startDroneHubApiServer(opts: {
         data = { error: text };
       }
     }
-    if (!response.ok) throw new Error(data?.error ?? `${response.status} ${response.statusText}`);
+    if (!response.ok) {
+      throw Object.assign(new Error(data?.error ?? `${response.status} ${response.statusText}`), {
+        status: response.status,
+      });
+    }
     return data;
   };
 
@@ -5103,6 +5120,7 @@ export async function startDroneHubApiServer(opts: {
       ),
     ].filter(Boolean);
     const chats = startupChats.length > 0 ? startupChats : ['default'];
+    const workflowChild = workflowChildDroneMetadata(p);
     return {
       id: normalizeDroneIdentity(p?.id) || null,
       name: String(p?.name ?? ''),
@@ -5118,6 +5136,7 @@ export async function startDroneHubApiServer(opts: {
         p?.id,
         fleetActorConfig(p).assigned,
       ),
+      ...(workflowChild ? { workflowChild } : {}),
       runtime,
       repoAttached,
       repoPath: repoAttached ? String(p?.repoPath ?? '') : '',
@@ -5181,15 +5200,19 @@ export async function startDroneHubApiServer(opts: {
       Boolean(String(d?.repo?.dest ?? '').trim()) ||
       Boolean(String(d?.repo?.seededAt ?? '').trim());
     const droneId = normalizeDroneIdentity(d?.id);
-    const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
-    const chats = Object.keys(d.chats ?? {});
-    const approvalChats = Object.entries(d.chats ?? {}).flatMap(
-      ([chatName, chatEntry]: [string, any]) => {
-        if (inferChatAgent(chatEntry, d).kind !== 'native') return [];
-        const threadId = String(chatEntry?.id ?? '').trim();
-        return threadId && assistantService.threadRequiresApproval(threadId) ? [chatName] : [];
-      },
-    );
+    const { chats, workflowChats } = partitionWorkflowChatEntries(d.chats);
+    const workflowChatSet = new Set(workflowChats);
+    const busyChats = droneId
+      ? busyChatNamesForDrone(d, droneId).filter(
+          (chatName: string) => !workflowChatSet.has(chatName),
+        )
+      : [];
+    const approvalChats = chats.flatMap((chatName) => {
+      const chatEntry = d.chats?.[chatName];
+      if (inferChatAgent(chatEntry, d).kind !== 'native') return [];
+      const threadId = String(chatEntry?.id ?? '').trim();
+      return threadId && assistantService.threadRequiresApproval(threadId) ? [chatName] : [];
+    });
     const chatReadStates = Object.fromEntries(
       chats.map((chatName) => {
         const state = storedReadStates[chatName];
@@ -5211,6 +5234,7 @@ export async function startDroneHubApiServer(opts: {
     );
     const { hostPort, statusOk, status, statusError, statusChecking } =
       cachedDroneStatusSummaryForEntry(d);
+    const workflowChild = workflowChildDroneMetadata(d);
 
     return {
       id: normalizeDroneIdentity(d?.id) || null,
@@ -5226,6 +5250,7 @@ export async function startDroneHubApiServer(opts: {
         d?.id,
         fleetActorConfig(d).assigned,
       ),
+      ...(workflowChild ? { workflowChild } : {}),
       runtime,
       repoAttached,
       repoPath: repoAttached ? repoPath : '',
@@ -5239,6 +5264,7 @@ export async function startDroneHubApiServer(opts: {
       statusError,
       statusChecking: Boolean(statusChecking),
       chats,
+      workflowChats,
       unreadChats,
       chatReadStates,
       draftChats,
@@ -5502,6 +5528,30 @@ export async function startDroneHubApiServer(opts: {
     writeHubSseEvent,
     subscribeWhiteboardChanges,
     emitWhiteboardChange,
+  });
+  await registerWorkflowFeature(apiRouter, {
+    nowIso,
+    resolveDrone: resolveDroneOrPendingForReadRef,
+    importDroneChats: importDroneChatsFromRegistry,
+    createChat: createChatInStore,
+    updateChat: updateChatInStore,
+    readChat: readChatFromStore,
+    listChats: listChatsFromStore,
+    deleteChat: deleteChatFromStore,
+    listArchivedChats: listArchivedChatsFromStore,
+    deleteArchivedChat: deleteArchivedChatFromStore,
+    projectChats: projectCanonicalChatsToRegistry,
+    buildChatEntry: buildNewChatEntry,
+    enqueuePrompt: createOrEnqueuePromptUnified,
+    stopChatActivity: stopSingleDroneChatActivity,
+    localApiRequest: callLocalHubApi,
+    notifyChatWrite: notifyCanonicalPromptQueueChatWrite,
+    notifyDroneWrite: notifyCanonicalDroneRegistryWrite,
+    droneExists: async (droneId) => {
+      const resolved = await resolveDroneOrPendingForReadRef(droneId);
+      return resolved?.kind === 'real';
+    },
+    writeSseEvent: writeHubSseEvent,
   });
 
   registerRepositoryRoutes(apiRouter, {

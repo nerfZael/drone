@@ -19,6 +19,7 @@ import {
 } from './pending-prompt-pump';
 import type { PendingPrompt } from './drone-pending-prompts';
 import { captureDroneRunFileChangesBaseline } from './run-file-changes';
+import { workflowBlipPermissionArgs } from './workflows/workflow-permissions';
 
 type ChatPromptRuntimeDependencyName =
   | 'NON_REPO_HOME_CWD'
@@ -659,9 +660,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
         const reasoningArg = chatReasoning ? ` --reasoning ${bashQuote(chatReasoning)}` : '';
         const permissionArgs =
-          agentPermissionMode === 'read-only'
+          workflowBlipPermissionArgs(chat) ??
+          (agentPermissionMode === 'read-only'
             ? '--permission read-only --profile read-only'
-            : '--permission full-access --profile local-trusted-write';
+            : '--permission full-access --profile local-trusted-write');
         const blipSessionId = readBuiltinTranscriptSessionId(chat, 'blip');
         const sessionArg = blipSessionId ? ` --session ${bashQuote(blipSessionId)}` : '';
         const blipCommand = resolveBlipPromptCommand(runtime);

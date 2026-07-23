@@ -48,10 +48,19 @@ describe('Drone Hub MCP principal authorization', () => {
 
   test('allows a drone principal to use its own chats', () => {
     expect(() => authorizeDroneHubMcpTool(dronePrincipal, 'read_chat', { drone: 'drone-a' })).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(dronePrincipal, 'list_workflows', { drone: 'drone-a' })).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(dronePrincipal, 'execute_workflow', {
+      drone: 'drone-a',
+      workflowId: 'wf-1',
+    })).not.toThrow();
   });
 
   test('rejects cross-drone and host-wide operations', () => {
     expect(() => authorizeDroneHubMcpTool(dronePrincipal, 'send_message', { drone: 'drone-b' })).toThrow('scoped to drone drone-a');
+    expect(() => authorizeDroneHubMcpTool(dronePrincipal, 'get_workflow_run', {
+      drone: 'drone-b',
+      runId: 'run-1',
+    })).toThrow('scoped to drone drone-a');
     expect(() => authorizeDroneHubMcpTool(dronePrincipal, 'create_drone', {})).toThrow('not authorized');
   });
 

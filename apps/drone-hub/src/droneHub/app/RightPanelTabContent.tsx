@@ -31,6 +31,7 @@ const loadDroneEnvDock = async () => (await import('../env/DroneEnvDock')).Drone
 const loadDroneLinksDock = async () => (await import('../overview/DroneLinksDock')).DroneLinksDock;
 const loadDronePreviewDock = async () => (await import('../overview/DronePreviewDock')).DronePreviewDock;
 const loadDroneTerminalDock = async () => (await import('../terminal/DroneTerminalDock')).DroneTerminalDock;
+const loadDroneWorkflowsDock = async () => (await import('../workflows/DroneWorkflowsDock')).DroneWorkflowsDock;
 export const LAZY_RIGHT_PANEL_TABS: ReadonlySet<RightPanelTab> = new Set(
   RIGHT_PANEL_TABS.filter((tab) => tab !== 'files' && tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs'),
 );
@@ -340,6 +341,19 @@ export function RightPanelTabContent({
   const isCurrent = Boolean(currentDroneId && String(currentDroneId) === String(drone.id));
 
   switch (tab) {
+    case 'workflows':
+      return (
+        <PaneModule tab={tab} load={loadDroneWorkflowsDock}>
+          {(DroneWorkflowsDock) => (
+            <DroneWorkflowsDock
+              droneId={drone.id}
+              disabled={disabled}
+              onOpenChat={onActivateChatFromCanvas}
+            />
+          )}
+        </PaneModule>
+      );
+
     case 'canvas':
       return (
         <PaneModule tab={tab} load={loadDroneCanvasDock}>

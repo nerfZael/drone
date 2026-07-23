@@ -1,3 +1,5 @@
+import { isWorkflowChatEntry } from './workflows/workflow-chat-metadata';
+
 function parseIsoOrZero(raw: unknown): number {
   const ms = Date.parse(String(raw ?? '').trim());
   return Number.isFinite(ms) ? ms : 0;
@@ -22,6 +24,7 @@ export function summarizeDroneActivity(
 
   const chats = entry?.chats && typeof entry.chats === 'object' ? entry.chats : {};
   for (const [chatName, chatEntry] of Object.entries(chats) as Array<[string, any]>) {
+    if (isWorkflowChatEntry(chatEntry)) continue;
     const chatId = String(chatEntry?.id ?? '').trim();
     const canonicalMessageMs = parseIsoOrZero(
       chatId ? canonicalMessageAtByChatId?.get(chatId) : null,

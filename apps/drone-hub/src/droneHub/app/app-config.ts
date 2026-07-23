@@ -48,6 +48,7 @@ export const RIGHT_PANEL_TABS: RightPanelTab[] = [
   'prs',
   'canvas',
   'whiteboard',
+  'workflows',
 ];
 export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   terminal: 'Terminal',
@@ -60,6 +61,7 @@ export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   prs: 'PRs',
   canvas: 'Canvas',
   whiteboard: 'Whiteboard',
+  workflows: 'Workflows',
 };
 export function rightPanelHeaderTabs(tabs: readonly RightPanelTab[]): RightPanelTab[] {
   return tabs.filter((tab) => tab !== 'editor' && tab !== 'links');

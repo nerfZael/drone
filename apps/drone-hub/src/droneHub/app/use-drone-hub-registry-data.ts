@@ -1,6 +1,7 @@
 import React from 'react';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, GroupSummary, RepoSummary } from '../types';
+import { isWorkflowChildDrone } from '../workflows/workflow-drone-visibility';
 import { compareDronesByNewestFirst } from './helpers';
 import { fetchJson, usePoll } from './hooks';
 
@@ -107,6 +108,10 @@ function sameDroneSummary(left: DroneSummary, right: DroneSummary): boolean {
     sameOptionalText(left.lastActivityChat, right.lastActivityChat) &&
     sameOptionalText(left.fleetParentId, right.fleetParentId) &&
     sameStringArray(left.fleetAssignedIds, right.fleetAssignedIds) &&
+    sameOptionalText(left.workflowChild?.ownerDroneId, right.workflowChild?.ownerDroneId) &&
+    sameOptionalText(left.workflowChild?.workflowId, right.workflowChild?.workflowId) &&
+    sameOptionalText(left.workflowChild?.runId, right.workflowChild?.runId) &&
+    sameOptionalText(left.workflowChild?.invocationId, right.workflowChild?.invocationId) &&
     sameOptionalText(left.runtime, right.runtime) &&
     left.repoAttached === right.repoAttached &&
     left.repoPath === right.repoPath &&
@@ -118,6 +123,7 @@ function sameDroneSummary(left: DroneSummary, right: DroneSummary): boolean {
     sameOptionalText(left.statusError, right.statusError) &&
     Boolean(left.statusChecking) === Boolean(right.statusChecking) &&
     sameStringArray(left.chats, right.chats) &&
+    sameStringArray(left.workflowChats, right.workflowChats) &&
     sameStringArray(left.unreadChats, right.unreadChats) &&
     sameChatReadStates(left.chatReadStates, right.chatReadStates) &&
     sameBooleanMap(left.draftChats, right.draftChats) &&
@@ -364,20 +370,24 @@ export function useDroneHubRegistryData({
   const dronesErrorUi = dronesResp ? null : dronesError;
   const polledDrones = dronesResp?.drones ?? [];
 
-  const drones = React.useMemo(() => {
+  const allDrones = React.useMemo(() => {
     const hiddenNames = Object.keys(optimisticallyDeletedDrones);
     if (hiddenNames.length === 0) return polledDrones;
     return polledDrones.filter((d) => !optimisticallyDeletedDrones[d.id]);
   }, [optimisticallyDeletedDrones, polledDrones]);
+  const drones = React.useMemo(
+    () => allDrones.filter((drone) => !isWorkflowChildDrone(drone)),
+    [allDrones],
+  );
   const droneById = React.useMemo(() => {
     const out: Record<string, DroneSummary> = {};
-    for (const drone of drones) {
+    for (const drone of allDrones) {
       const id = String(drone?.id ?? '').trim();
       if (!id) continue;
       out[id] = drone;
     }
     return out;
-  }, [drones]);
+  }, [allDrones]);
 
   React.useEffect(() => {
     if (Object.keys(optimisticallyDeletedDrones).length === 0) return;
