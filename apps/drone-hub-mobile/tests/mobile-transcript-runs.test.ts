@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { renderItemsFromMessages, type AssistantMessage } from '@drone/assistant-chat';
 import {
   groupMobileTranscriptRuns,
+  limitMobileRunToolItems,
   mobileRunIsThinking,
   mobileRunDetails,
   normalizeMobileAgentPlan,
@@ -10,6 +11,37 @@ import {
 } from '../src/local-assistant/mobile-transcript-runs';
 
 describe('mobile transcript runs', () => {
+  test('keeps only the five latest tool calls in an automatic live expansion', () => {
+    const items = [
+      {
+        type: 'message' as const,
+        key: 'progress',
+        sourceMessageIndex: 0,
+        message: { role: 'assistant' as const, content: 'Progress' },
+      },
+      {
+        type: 'toolGroup' as const,
+        key: 'reads',
+        items: Array.from({ length: 4 }, (_, index) => ({
+          type: 'tool' as const,
+          key: `read-${index + 1}`,
+          call: { id: `read-${index + 1}`, name: 'read_file', args: {} },
+        })),
+      },
+      ...Array.from({ length: 3 }, (_, index) => ({
+        type: 'tool' as const,
+        key: `write-${index + 1}`,
+        call: { id: `write-${index + 1}`, name: 'write_file', args: {} },
+      })),
+    ];
+
+    const visible = limitMobileRunToolItems(items);
+    expect(visible[0]).toMatchObject({ type: 'message', key: 'progress' });
+    expect(visible.flatMap((item) => (item.type === 'toolGroup' ? item.items : [item])).map(
+      (item) => item.key,
+    )).toEqual(['progress', 'read-3', 'read-4', 'write-1', 'write-2', 'write-3']);
+  });
+
   test('groups a user turn with its tool calls and completed response', () => {
     const messages: AssistantMessage[] = [
       { role: 'user', content: 'Inspect it', createdAt: '2026-07-20T10:00:00.000Z' },

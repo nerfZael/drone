@@ -652,7 +652,7 @@ export function createDroneControlCapability(
           }
           const history = await localHubRequest(
             access,
-            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=80${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
+            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=200${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
           );
           const nativeResponse = compactNativeChatReadResponse({
             nativeChatId,

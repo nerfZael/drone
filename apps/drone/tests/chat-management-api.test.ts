@@ -578,7 +578,7 @@ describeSocketSuite('chat management api', () => {
       threadId: opened.data.nativeChatId,
       sessionId: null,
       entries: [],
-      page: { limit: 80, beforeCursor: null, hasOlder: false },
+      page: { limit: 200, beforeCursor: null, hasOlder: false },
     });
   });
 

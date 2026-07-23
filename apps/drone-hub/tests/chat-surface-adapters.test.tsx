@@ -619,7 +619,7 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('>File<');
   });
 
-  test('active tool runs expand their calls by default', () => {
+  test('active tool runs automatically show only their five latest calls', () => {
     const items = Array.from({ length: 7 }, (_, index) => ({
       type: 'tool' as const,
       key: `tool-${index + 1}`,
@@ -633,18 +633,18 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('7 tool calls');
     expect(html).toContain('text-[var(--muted)]');
     expect(html).not.toContain('bg-[var(--accent)]');
-    expect(html).toContain('Tool 1');
-    expect(html).toContain('Tool 2');
+    expect(html).not.toContain('Tool 1');
+    expect(html).not.toContain('Tool 2');
     expect(html).toContain('Tool 3');
     expect(html).toContain('Tool 7');
-    expect(html.match(/data-tool-status="pending"/g)).toHaveLength(7);
-    expect(html.match(/animate-spin/g)).toHaveLength(7);
+    expect(html.match(/data-tool-status="pending"/g)).toHaveLength(5);
+    expect(html.match(/animate-spin/g)).toHaveLength(5);
     expect(html).not.toContain('data-tool-status="ok"');
     expect(html).not.toContain('overflow-y-auto');
     expect(html).not.toContain('uppercase');
     expect(html).not.toContain('bg-[var(--surface-soft)]');
     expect(html).not.toContain('rounded border');
-    expect(html.match(/data-tool-activity-row/g)).toHaveLength(7);
+    expect(html.match(/data-tool-activity-row/g)).toHaveLength(5);
     expect(html).not.toContain('data-agent-thinking');
   });
 
@@ -717,6 +717,25 @@ describe('agent chat surface adapters', () => {
         initiallyExpanded
       />,
     );
+    const pendingApplyPatchHtml = renderToStaticMarkup(
+      <ToolRunActivity
+        items={[
+          {
+            type: 'tool',
+            key: 'settled-read',
+            call: { id: 'settled-read', name: 'read_file', args: {} },
+            result: { role: 'toolResult', toolCallId: 'settled-read', content: 'Done' },
+          },
+          {
+            type: 'tool',
+            key: 'pending-apply-patch',
+            call: { id: 'pending-apply-patch', name: 'apply_patch', args: {} },
+          },
+        ]}
+        active
+        initiallyExpanded
+      />,
+    );
 
     expect(settledHtml).toContain('data-agent-thinking');
     expect(settledHtml).toContain('role="status"');
@@ -731,6 +750,9 @@ describe('agent chat surface adapters', () => {
     expect(completedTransferHtml).toContain('Complete');
     expect(completedTransferHtml).toContain('Transfer complete');
     expect(completedTransferHtml).not.toContain('Show details');
+    expect(pendingApplyPatchHtml).toContain('Apply Patch');
+    expect(pendingApplyPatchHtml).toContain('data-tool-status="pending"');
+    expect(pendingApplyPatchHtml).not.toContain('data-agent-thinking');
   });
 
   test('active tool runs identify when approval is required', () => {
@@ -818,7 +840,7 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('tool call');
   });
 
-  test('expanded tool runs retain consecutive same-tool counts', () => {
+  test('auto-expanded tool runs retain counts inside the five-call window', () => {
     const items = [
       ...Array.from({ length: 5 }, (_, index) => ({
         type: 'tool' as const,
@@ -842,11 +864,11 @@ describe('agent chat surface adapters', () => {
 
     expect(html).toContain('8 tool calls');
     expect(html).toContain('Read file');
-    expect(html).toContain('×5');
+    expect(html).toContain('×2');
     expect(html).toContain('List files');
     expect(html).toContain('×2');
-    expect(html.indexOf('Read file')).toBeLessThan(html.indexOf('×5'));
-    expect(html.indexOf('List files')).toBeLessThan(html.indexOf('×2'));
+    expect(html.indexOf('Read file')).toBeLessThan(html.indexOf('×2'));
+    expect(html.indexOf('List files')).toBeLessThan(html.lastIndexOf('×2'));
     expect(html).not.toContain('Complete');
     expect(html).not.toContain('>Details<');
     expect(html).not.toContain('uppercase');

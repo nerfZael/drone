@@ -9,6 +9,8 @@ import type {
   BlipThreadStreamEvent,
 } from '@blip/protocol';
 
+const ASSISTANT_HISTORY_PAGE_SIZE = 200;
+
 async function requestHistory(
   threadId: string,
   input?: { before?: number; limit?: number },
@@ -79,7 +81,7 @@ export function useBlipThreadSession({
       const requestId = ++latestHistoryRequestRef.current;
       if (!options?.quiet) setHistoryLoading(true);
       try {
-        const page = await requestHistory(threadId, { limit: 80 });
+        const page = await requestHistory(threadId, { limit: ASSISTANT_HISTORY_PAGE_SIZE });
         if (threadIdRef.current !== threadId) return;
         setEntries((current) => mergeEntries(current, page.entries));
         setEntriesThreadId(threadId);
@@ -148,7 +150,10 @@ export function useBlipThreadSession({
     if (!enabled || !threadId || !activeHasOlder || !activeBeforeCursor || olderLoading) return;
     setOlderLoading(true);
     try {
-      const page = await requestHistory(threadId, { before: activeBeforeCursor, limit: 80 });
+      const page = await requestHistory(threadId, {
+        before: activeBeforeCursor,
+        limit: ASSISTANT_HISTORY_PAGE_SIZE,
+      });
       if (threadIdRef.current !== threadId) return;
       setEntries((current) => mergeEntries(current, page.entries));
       setEntriesThreadId(threadId);
