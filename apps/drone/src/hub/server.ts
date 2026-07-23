@@ -186,10 +186,9 @@ import {
 } from './sync-sets';
 import { createSyncSetService } from './sync-set-service';
 import {
-  hasActivePriorPendingPrompt,
+  hasInFlightPriorPendingPrompt,
   looksLikeTransientPromptEnqueueError,
   shouldDeferQueuedPendingPrompt,
-  shouldDeferQueuedTranscriptPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
 } from './pendingPromptEnqueue';
@@ -3485,7 +3484,7 @@ promptRuntime = createChatPromptRuntime({
   failStaleDockerSnapshotsForChat,
   formatTranscriptJobFailure,
   getChatEntry,
-  hasActivePriorPendingPrompt,
+  hasInFlightPriorPendingPrompt,
   hasKnownBuiltinTranscriptSession,
   hubChatSessionName,
   hubLog,
@@ -3547,7 +3546,6 @@ promptRuntime = createChatPromptRuntime({
   setChatAgentConfig,
   setDroneHubMetaByIdentity,
   shouldDeferQueuedPendingPrompt,
-  shouldDeferQueuedTranscriptPrompt,
   shouldRetryFailedPendingPrompt,
   sleepMs,
   stalePendingPromptState,

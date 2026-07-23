@@ -485,8 +485,9 @@ export class PromptQueueRepository {
     if (!leaseOwner) throw new Error('Prompt lease owner cannot be empty');
     const leaseExpiresAt = addMs(now, Math.max(1_000, opts.leaseMs ?? 180_000));
     return await this.database.writeTransaction('claim prompt', (connection) => {
-      // This single conditional UPDATE is both the FIFO check and the claim.
-      // No daemon or other external work occurs in this transaction.
+      // This single conditional UPDATE is both the priority/FIFO check and the
+      // claim. ASAP rows lead queued rows, while each mode remains FIFO and any
+      // in-flight row still blocks a normal claim.
       const claimed = connection
         .prepare(
           `
@@ -501,11 +502,30 @@ export class PromptQueueRepository {
               AND state = 'queued'
               AND next_attempt_at <= ?
               AND NOT EXISTS (
-                SELECT 1 FROM prompts AS prior
-                WHERE prior.drone_id = prompts.drone_id
-                  AND prior.chat_name = prompts.chat_name
-                  AND prior.sequence < prompts.sequence
-                  AND prior.state IN ('queued', 'sending')
+                SELECT 1 FROM prompts AS blocker
+                WHERE blocker.drone_id = prompts.drone_id
+                  AND blocker.chat_name = prompts.chat_name
+                  AND (
+                    blocker.state = 'sending'
+                    OR (
+                      blocker.state = 'queued'
+                      AND (
+                        CASE WHEN json_extract(blocker.payload_json, '$.deliveryMode') = 'asap'
+                          THEN 0 ELSE 1 END
+                        <
+                        CASE WHEN json_extract(prompts.payload_json, '$.deliveryMode') = 'asap'
+                          THEN 0 ELSE 1 END
+                        OR (
+                          CASE WHEN json_extract(blocker.payload_json, '$.deliveryMode') = 'asap'
+                            THEN 0 ELSE 1 END
+                          =
+                          CASE WHEN json_extract(prompts.payload_json, '$.deliveryMode') = 'asap'
+                            THEN 0 ELSE 1 END
+                          AND blocker.sequence < prompts.sequence
+                        )
+                      )
+                    )
+                  )
               )
             RETURNING *
           `,

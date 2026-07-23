@@ -802,6 +802,7 @@ export function ChatInput({
                   shiftKey: event.shiftKey,
                   ctrlKey: event.ctrlKey,
                   metaKey: event.metaKey,
+                  altKey: event.altKey,
                   hasContent:
                     Boolean(draftRef.current.trim()) ||
                     attachmentsRef.current.length > 0 ||
@@ -1027,7 +1028,7 @@ export function ChatInput({
               title={
                 showStopAction && !showSeparateStopAction
                   ? 'Stop response'
-                  : 'Send ASAP (Enter). Queue with Tab or Ctrl+Enter.'
+                  : 'Send ASAP (Enter). Queue with Tab or Ctrl/Command+Enter.'
               }
               aria-label={sendButtonLabel}
             >

@@ -801,14 +801,16 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     const promptInput: AssistantPromptInput = input.promptImages?.length
       ? { text: input.prompt, images: input.promptImages }
       : input.prompt;
+    const deliveryMode =
+      input.deliveryMode ?? (await assistantService.promptDeliveryMode(input.threadId));
     const steerImmediately =
-      (input.deliveryMode ?? (await assistantService.promptDeliveryMode(input.threadId))) ===
-        'asap' &&
+      deliveryMode === 'asap' &&
       blipAssistantHost.isThreadRunning(input.threadId);
     const queued = await assistantService.enqueueThreadPrompt(input.threadId, {
       id: input.promptId,
       prompt: input.prompt,
       promptImages: input.promptImages,
+      deliveryMode,
     });
     await notifyNativePromptQueueChanged(input.threadId);
     if (steerImmediately) {

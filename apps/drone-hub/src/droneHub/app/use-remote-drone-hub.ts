@@ -367,7 +367,7 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
     async (
       prompt: string,
       attachments: readonly ChatAttachmentPayload[] = [],
-      deliveryMode: 'queue' | 'asap' = 'asap',
+      deliveryMode: 'queue' | 'asap' = 'queue',
     ) => {
       if (
         !selectedDrone ||

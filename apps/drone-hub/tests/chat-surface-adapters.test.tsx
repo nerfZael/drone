@@ -16,6 +16,7 @@ import {
 } from '../src/droneHub/chat';
 import {
   AssistantMessageRow,
+  AssistantQueuedPromptRow,
   AssistantWorkingRow,
   AssistantRunActivity,
   ToolRunActivity,
@@ -122,7 +123,7 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('aria-label="Send"');
   });
 
-  test('native agents use files, queue while running, and expose tool activity', () => {
+  test('native agents use files, send while running, and expose tool activity', () => {
     const adapter = adaptNativeAgentChatSurface();
     const html = renderComposer(adapter);
 
@@ -424,6 +425,28 @@ describe('agent chat surface adapters', () => {
       'reasoning',
     );
     expect(updates.at(-1)).toEqual({ thinkingLevel: 'medium' });
+  });
+
+  test('native queued prompts identify ASAP priority', () => {
+    const html = renderToStaticMarkup(
+      <AssistantQueuedPromptRow
+        prompt={{
+          id: 'asap-prompt',
+          prompt: 'Urgent follow-up',
+          promptImages: [],
+          imageCount: 0,
+          createdAt: '2026-07-23T00:00:00.000Z',
+          deliveryMode: 'asap',
+          status: 'queued',
+          error: null,
+        }}
+        cancelling={false}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(html).toContain('ASAP');
+    expect(html).not.toContain('>Queued<');
   });
 
   test('the shared message body renders the same markdown and images for either controller', () => {

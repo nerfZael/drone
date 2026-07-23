@@ -9,6 +9,7 @@ export type PendingStartupPrompt = {
   prompt: string;
   messageId?: string;
   cwd?: string | null;
+  deliveryMode?: 'queue' | 'asap';
   state: PendingPromptState;
   error?: string;
   updatedAt?: string;
@@ -20,6 +21,7 @@ export type PendingPromptProjection = {
   prompt: string;
   messageId?: string;
   cwd?: string | null;
+  deliveryMode?: 'queue' | 'asap';
   state: PendingPromptState;
   error?: string;
   updatedAt: string;
@@ -101,6 +103,9 @@ export function createPendingDroneStateHelpers(deps: {
           : {}),
         cwd:
           typeof (item as any).cwd === 'string' ? String((item as any).cwd) : (item as any).cwd === null ? null : undefined,
+        ...((item as any).deliveryMode === 'asap' || (item as any).deliveryMode === 'queue'
+          ? { deliveryMode: (item as any).deliveryMode as 'queue' | 'asap' }
+          : {}),
         state: normalizePendingPromptState((item as any).state),
         error: typeof (item as any).error === 'string' ? String((item as any).error) : undefined,
         updatedAt: typeof (item as any).updatedAt === 'string' ? String((item as any).updatedAt) : undefined,
@@ -116,6 +121,7 @@ export function createPendingDroneStateHelpers(deps: {
       prompt: prompt.prompt,
       ...(prompt.messageId ? { messageId: prompt.messageId } : {}),
       ...(typeof prompt.cwd === 'string' || prompt.cwd === null ? { cwd: prompt.cwd } : {}),
+      ...(prompt.deliveryMode ? { deliveryMode: prompt.deliveryMode } : {}),
       state: prompt.state,
       ...(prompt.error ? { error: prompt.error } : {}),
       updatedAt: prompt.updatedAt ?? deps.nowIso(),

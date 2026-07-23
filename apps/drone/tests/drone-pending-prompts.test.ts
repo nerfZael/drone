@@ -229,6 +229,7 @@ describe('drone pending prompt store', () => {
           id: 'startup-1',
           at: '2026-03-26T09:05:00.000Z',
           prompt: 'boot',
+          deliveryMode: 'asap',
           state: 'queued',
         },
       });
@@ -240,6 +241,7 @@ describe('drone pending prompt store', () => {
           id: 'startup-1',
           at: '2026-03-26T09:05:00.000Z',
           prompt: 'boot',
+          deliveryMode: 'asap',
           state: 'queued',
           updatedAt: '2026-03-26T10:00:00.000Z',
         },

@@ -66,12 +66,12 @@ type ChatPromptRuntimeDependencyName =
   | 'failStaleDockerSnapshotsForChat'
   | 'formatTranscriptJobFailure'
   | 'getChatEntry'
-  | 'hasActivePriorPendingPrompt'
   | 'hasKnownBuiltinTranscriptSession'
   | 'hubChatSessionName'
   | 'hubLog'
   | 'importChatFromRegistry'
   | 'inferChatAgent'
+  | 'hasInFlightPriorPendingPrompt'
   | 'isDraftChatEntry'
   | 'isNotFoundErrorMessage'
   | 'loadRegistry'
@@ -123,7 +123,6 @@ type ChatPromptRuntimeDependencyName =
   | 'setChatAgentConfig'
   | 'setDroneHubMetaByIdentity'
   | 'shouldDeferQueuedPendingPrompt'
-  | 'shouldDeferQueuedTranscriptPrompt'
   | 'shouldRetryFailedPendingPrompt'
   | 'sleepMs'
   | 'stalePendingPromptState'
@@ -193,12 +192,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     failStaleDockerSnapshotsForChat,
     formatTranscriptJobFailure,
     getChatEntry,
-    hasActivePriorPendingPrompt,
     hasKnownBuiltinTranscriptSession,
     hubChatSessionName,
     hubLog,
     importChatFromRegistry,
     inferChatAgent,
+    hasInFlightPriorPendingPrompt,
     isDraftChatEntry,
     isNotFoundErrorMessage,
     loadRegistry,
@@ -253,7 +252,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     setChatAgentConfig,
     setDroneHubMetaByIdentity,
     shouldDeferQueuedPendingPrompt,
-    shouldDeferQueuedTranscriptPrompt,
     shouldRetryFailedPendingPrompt,
     sleepMs,
     stalePendingPromptState,
@@ -1694,9 +1692,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       // A known agent session makes continuation possible, but does not make concurrent delivery safe.
       const defer =
         p?.deliveryMode === 'asap'
-          ? shouldDeferQueuedTranscriptPrompt({
-              agentId: agent.id,
-              sessionKnown,
+          ? hasInFlightPriorPendingPrompt({
               priorPendingPrompts: prior,
               transcriptDoneIds,
             })
@@ -2112,14 +2108,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const runtime = droneRuntime(d);
     const configuredModel = normalizeChatModel((chat as any)?.model);
     const disposition = getPromptEnqueueDisposition({
-      droneId,
-      chatName,
-      droneEntry: d,
       chatEntry: { ...chat, pendingPrompts: canonicalPendingPrompts },
     });
     const defer =
-      disposition.waitingForSession ||
-      (opts.priority !== 'asap' && disposition.defer);
+      disposition.hasPriorInFlight ||
+      (opts.priority !== 'asap' && disposition.hasPriorQueued);
     opts.mark?.('disposition');
 
     const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
@@ -2286,21 +2279,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   }
 
   type PromptEnqueueDisposition = {
-    defer: boolean;
-    hasPriorActive: boolean;
+    hasPriorInFlight: boolean;
     hasPriorQueued: boolean;
-    waitingForSession: boolean;
   };
 
   function getPromptEnqueueDisposition(opts: {
-    droneId: string;
-    chatName: string;
-    droneEntry: any;
     chatEntry: any;
   }): PromptEnqueueDisposition {
-    const droneId = normalizeDroneIdentity(opts.droneId);
-    const chatName = normalizeChatName(opts.chatName);
-    const agent = inferChatAgent(opts.chatEntry, opts.droneEntry);
     const turns: any[] = Array.isArray((opts.chatEntry as any)?.turns)
       ? (opts.chatEntry as any).turns
       : [];
@@ -2310,9 +2295,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const priorPending: any[] = Array.isArray((opts.chatEntry as any)?.pendingPrompts)
       ? (opts.chatEntry as any).pendingPrompts
       : [];
-    const sessionKnown =
-      agent.kind !== 'builtin' ? true : hasKnownBuiltinTranscriptSession(opts.chatEntry, agent.id);
-    const hasPriorActive = hasActivePriorPendingPrompt({
+    const hasPriorInFlight = hasInFlightPriorPendingPrompt({
       priorPendingPrompts: priorPending
         .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
         .filter((p: any) => p.id),
@@ -2321,22 +2304,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const hasPriorQueued = priorPending.some(
       (p: any) => String(p?.state ?? '') === 'queued',
     );
-    const waitingForSession =
-      agent.kind === 'builtin'
-        ? shouldDeferQueuedTranscriptPrompt({
-            agentId: agent.id,
-            sessionKnown,
-            priorPendingPrompts: priorPending
-              .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
-              .filter((p: any) => p.id),
-            transcriptDoneIds,
-          })
-        : false;
     return {
-      defer: hasPriorActive || hasPriorQueued || waitingForSession,
-      hasPriorActive,
+      hasPriorInFlight,
       hasPriorQueued,
-      waitingForSession,
     };
   }
 
@@ -2457,6 +2427,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         at: submittedAt,
         prompt,
         ...(opts.cwd != null ? { cwd: opts.cwd } : {}),
+        ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
         state: 'queued',
         updatedAt: submittedAt,
       };
@@ -2474,7 +2445,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           attachments,
           cwd: opts.cwd ?? null,
           submittedAt: opts.submittedAt ?? null,
-          deliveryMode: 'background',
+          deliveryMode: opts.deliveryMode === 'asap' ? 'immediate' : 'background',
+          priority: opts.deliveryMode === 'asap' ? 'asap' : 'queue',
           mark: opts.mark,
         });
         return {

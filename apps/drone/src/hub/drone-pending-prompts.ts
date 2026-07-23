@@ -328,6 +328,9 @@ export function createDronePendingPromptStore(deps: {
       prompt,
       ...(typeof opts.pending?.messageId === 'string' && opts.pending.messageId.trim() ? { messageId: opts.pending.messageId.trim() } : {}),
       ...(typeof opts.pending?.cwd === 'string' || opts.pending?.cwd === null ? { cwd: opts.pending.cwd } : {}),
+      ...(opts.pending?.deliveryMode === 'asap' || opts.pending?.deliveryMode === 'queue'
+        ? { deliveryMode: opts.pending.deliveryMode }
+        : {}),
       state: deps.normalizePendingPromptState(opts.pending?.state),
       ...(typeof opts.pending?.error === 'string' ? { error: opts.pending.error } : {}),
       updatedAt: String(opts.pending?.updatedAt ?? deps.nowIso()),

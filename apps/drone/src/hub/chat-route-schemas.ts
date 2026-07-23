@@ -11,6 +11,7 @@ export const chatPromptBodySchema = z
     clientSubmittedAt: z.unknown().optional(),
     at: z.unknown().optional(),
     cwd: z.string().optional(),
+    deliveryMode: z.enum(['queue', 'asap']).optional(),
     autoRenameHandledByClient: z.boolean().optional(),
   })
   .passthrough();
