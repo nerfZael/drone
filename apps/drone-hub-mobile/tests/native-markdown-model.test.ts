@@ -65,6 +65,12 @@ const ready = true;
     expect(nativeMarkdownHasCodeBlock('Example:\n```tsx\n<View />\n```')).toBe(true);
   });
 
+  test('parses Mermaid fences as diagram blocks', () => {
+    expect(parseNativeMarkdown('```mermaid\nflowchart LR\n  A --> B\n```')).toEqual([
+      { type: 'mermaid', text: 'flowchart LR\n  A --> B' },
+    ]);
+  });
+
   test('builds a nested document outline while preserving direct section content', () => {
     const blocks = parseNativeMarkdown(
       '# Document\n\nIntro.\n\n## Section\n\nSection body.\n\n### Detail\n\nDetail body.',

@@ -79,6 +79,14 @@ describe('MarkdownMessage', () => {
     expect(html).toContain('class="token number"');
   });
 
+  test('renders mermaid fences as diagrams instead of code cards', () => {
+    const html = renderMarkdown('```mermaid\nflowchart LR\n  A --> B\n```');
+    expect(html).toContain('class="dh-mermaid-card"');
+    expect(html).toContain('aria-label="Mermaid diagram"');
+    expect(html).toContain('Rendering diagram');
+    expect(html).not.toContain('class="dh-code-card');
+  });
+
   test('renders inline code file references as file buttons when a handler is provided', () => {
     const html = renderMarkdown('Inspect `src/main.ts:42`', {
       onOpenFileReference: () => {},

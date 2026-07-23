@@ -8,6 +8,7 @@ export type NativeMarkdownBlock =
   | { type: 'paragraph'; text: string }
   | { type: 'heading'; level: number; text: string }
   | { type: 'code'; language: string; text: string }
+  | { type: 'mermaid'; text: string }
   | { type: 'quote'; text: string; callout: string }
   | {
       type: 'list';
@@ -174,7 +175,13 @@ export function parseNativeMarkdown(text: string): NativeMarkdownBlock[] {
         index += 1;
       }
       if (index < lines.length) index += 1;
-      blocks.push({ type: 'code', language: fence[1] ?? '', text: content.join('\n') });
+      const language = fence[1] ?? '';
+      const blockText = content.join('\n');
+      blocks.push(
+        language.trim().toLowerCase() === 'mermaid'
+          ? { type: 'mermaid', text: blockText }
+          : { type: 'code', language, text: blockText },
+      );
       continue;
     }
 

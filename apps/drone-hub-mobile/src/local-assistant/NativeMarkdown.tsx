@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
 import { colors } from '../theme';
+import { NativeMermaidDiagram } from './NativeMermaidDiagram';
 import {
   buildNativeMarkdownOutline,
   parseNativeMarkdown,
@@ -110,6 +111,43 @@ function NativeCodeBlock({ code, language }: { code: string; language: string })
         </Pressable>
       ) : null}
     </Pressable>
+  );
+}
+
+function NativeMermaidBlock({ source }: { source: string }) {
+  const [showSource, setShowSource] = React.useState(false);
+
+  return (
+    <View style={styles.mermaidBlock}>
+      <View style={styles.mermaidToolbar}>
+        <Text style={styles.mermaidLabel}>Diagram</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={showSource ? 'Show rendered diagram' : 'Show Mermaid source'}
+          accessibilityState={{ expanded: showSource }}
+          hitSlop={6}
+          onPress={(event) => {
+            event.stopPropagation();
+            setShowSource((visible) => !visible);
+          }}
+          style={({ pressed }) => [
+            styles.mermaidSourceButton,
+            pressed && styles.mermaidSourceButtonPressed,
+          ]}
+        >
+          <Text style={styles.mermaidSourceButtonText}>
+            {showSource ? 'Diagram' : 'Source'}
+          </Text>
+        </Pressable>
+      </View>
+      {showSource ? (
+        <View style={styles.mermaidSource}>
+          <NativeCodeBlock code={source} language="mermaid" />
+        </View>
+      ) : (
+        <NativeMermaidDiagram source={source} />
+      )}
+    </View>
   );
 }
 
@@ -241,6 +279,9 @@ function NativeMarkdownBlocks({
               language={block.language}
             />
           );
+        }
+        if (block.type === 'mermaid') {
+          return <NativeMermaidBlock key={`mermaid:${index}`} source={block.text} />;
         }
         if (block.type === 'quote') {
           const calloutStyle = block.callout
@@ -637,6 +678,57 @@ const styles = StyleSheet.create({
     fontSize: 12,
     paddingVertical: 1,
     borderRadius: 4,
+  },
+  mermaidBlock: {
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
+    flexShrink: 1,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: colors.mantle,
+  },
+  mermaidToolbar: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: 12,
+    paddingRight: 7,
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    backgroundColor: colors.whiteWash,
+  },
+  mermaidLabel: {
+    color: colors.textSecondary,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  mermaidSourceButton: {
+    minHeight: 26,
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    borderRadius: 6,
+  },
+  mermaidSourceButtonPressed: {
+    borderColor: colors.border,
+    backgroundColor: colors.surface0,
+  },
+  mermaidSourceButtonText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  mermaidSource: {
+    padding: 8,
   },
   codeBlock: {
     width: '100%',
