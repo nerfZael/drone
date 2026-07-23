@@ -1,5 +1,4 @@
 import React from 'react';
-import { MarkdownMessage } from '../chat/MarkdownMessage';
 import {
   defaultTextFileViewModeForFile,
   editorLanguageForPath,
@@ -26,6 +25,10 @@ import type { DroneOpenedFileTabState } from './opened-file-types';
 import { VideoPreview } from '../media/VideoPreview';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { DESKTOP_THEMES, desktopMonacoTheme } from '../../theme';
+import {
+  MarkdownOutlinePreview,
+  type MarkdownOutlineExpansionCommand,
+} from './MarkdownOutlinePreview';
 
 type MonacoEditorComponent = (typeof import('@monaco-editor/react'))['default'];
 type MonacoEditorProps = React.ComponentProps<MonacoEditorComponent>;
@@ -37,6 +40,44 @@ const MonacoEditor = React.lazy(async (): Promise<{ default: MonacoEditorCompone
   const module = await import('@monaco-editor/react');
   return { default: module.default };
 });
+
+function CollapseAllHeadingsIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m4 3 4 4 4-4" />
+      <path d="m4 13 4-4 4 4" />
+    </svg>
+  );
+}
+
+function ExpandAllHeadingsIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m4 6 4-4 4 4" />
+      <path d="m4 10 4 4 4-4" />
+    </svg>
+  );
+}
 
 function PlainTextEditorFallback({
   value,
@@ -99,10 +140,12 @@ function LargeTextFileViewer({
   droneId,
   path,
   size,
+  revision,
 }: {
   droneId: string;
   path: string;
   size: number;
+  revision?: string | null;
 }) {
   const [content, setContent] = React.useState('');
   const [nextOffset, setNextOffset] = React.useState(0);
@@ -118,7 +161,7 @@ function LargeTextFileViewer({
     setEof(false);
     setLoading(false);
     setError(null);
-  }, [droneId, path]);
+  }, [droneId, path, revision]);
 
   const loadNextChunk = React.useCallback(async () => {
     if (!path || loading || eof) return;
@@ -194,6 +237,8 @@ type OpenedDroneFilePanelProps = {
   activeTabId?: string | null;
   onFileContentChange?: (next: string) => void;
   onSaveFile?: (contentOverride?: string) => Promise<boolean>;
+  onReloadFromDisk?: () => void;
+  onOverwriteFile?: () => Promise<boolean>;
   onCloseFile?: (tabId?: string | null) => void;
   onActivateFileTab?: (tabId: string) => void;
   onReorderFileTabs?: (fromTabId: string, toTabId: string) => void;
@@ -208,6 +253,8 @@ export function OpenedDroneFilePanel({
   activeTabId = null,
   onFileContentChange,
   onSaveFile,
+  onReloadFromDisk,
+  onOverwriteFile,
   onCloseFile,
   onActivateFileTab,
   onReorderFileTabs,
@@ -230,6 +277,7 @@ export function OpenedDroneFilePanel({
     targetLine: fileTargetLine,
     targetColumn: fileTargetColumn,
     navigationSeq: fileNavigationSeq,
+    revision: fileRevision,
   } = file;
   const activeFilePath = String(filePath ?? '').trim();
   const openedEditorIsText = (fileKind ?? 'text') === 'text';
@@ -240,6 +288,8 @@ export function OpenedDroneFilePanel({
       ? defaultTextFileViewModeForFile(activeFilePath, fileMime)
       : 'edit',
   );
+  const [markdownOutlineExpansionCommand, setMarkdownOutlineExpansionCommand] =
+    React.useState<MarkdownOutlineExpansionCommand | null>(null);
   const editorRef = React.useRef<MonacoEditorInstance | null>(null);
   const languageActionsRef = React.useRef<{
     goToDefinition: () => void;
@@ -272,6 +322,7 @@ export function OpenedDroneFilePanel({
       return;
     }
     setOpenedTextMode(defaultTextFileViewModeForFile(activeFilePath, fileMime));
+    setMarkdownOutlineExpansionCommand(null);
   }, [activeFilePath, fileMime, fileNavigationSeq, openedEditorIsText]);
 
   React.useEffect(() => {
@@ -316,8 +367,11 @@ export function OpenedDroneFilePanel({
   const openedFileMediaSrc = React.useMemo(() => {
     if (!activeFilePath) return '';
     if (fileKind !== 'image' && fileKind !== 'video') return '';
-    return `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(activeFilePath)}`;
-  }, [activeFilePath, droneId, fileKind]);
+    const revisionQuery = fileRevision
+      ? `&revision=${encodeURIComponent(fileRevision)}`
+      : '';
+    return `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${encodeURIComponent(activeFilePath)}${revisionQuery}`;
+  }, [activeFilePath, droneId, fileKind, fileRevision]);
   const applyEditorCursorTarget = React.useCallback(() => {
     if (!openedFileEditorVisible || !activeFilePath || !fileTargetLine) return;
     const editor = editorRef.current;
@@ -491,6 +545,10 @@ export function OpenedDroneFilePanel({
     `h-7 rounded-[var(--radius-medium)] bg-transparent px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
       disabled ? 'cursor-not-allowed opacity-50' : ''
     }`;
+  const headingActionClassName = (disabled: boolean) =>
+    `flex h-7 w-7 items-center justify-center rounded-[var(--radius-medium)] bg-transparent text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
+      disabled ? 'cursor-not-allowed opacity-50' : ''
+    }`;
   return (
     <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]">
       <div className="min-w-0 h-full min-h-0 bg-[var(--panel-alt)] flex flex-col">
@@ -502,27 +560,100 @@ export function OpenedDroneFilePanel({
           onReorderTabs={(fromTabId, toTabId) => onReorderFileTabs?.(fromTabId, toTabId)}
           trailingActions={
             openedFileIsMarkdown ? (
-              <button
-                type="button"
-                onClick={() =>
-                  setOpenedTextMode(openedTextMode === 'preview' ? 'edit' : 'preview')
-                }
-                disabled={Boolean(fileLoading)}
-                className={modeButtonClassName(Boolean(fileLoading))}
-                title={
-                  openedTextMode === 'preview'
-                    ? 'Edit markdown source'
-                    : 'Render markdown preview'
-                }
-              >
-                {openedTextMode === 'preview' ? (readOnly ? 'Source' : 'Edit') : 'Preview'}
-              </button>
+              <div className="flex items-center gap-1.5">
+                {openedFileShowsMarkdownPreview ? (
+                  <div
+                    className="flex items-center gap-0.5 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] p-0.5"
+                    role="group"
+                    aria-label="Heading expansion"
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMarkdownOutlineExpansionCommand((previous) => ({
+                          action: 'collapse',
+                          sequence: (previous?.sequence ?? 0) + 1,
+                        }))
+                      }
+                      disabled={Boolean(fileLoading)}
+                      className={headingActionClassName(Boolean(fileLoading))}
+                      title="Collapse all Markdown headings"
+                      aria-label="Collapse all Markdown headings"
+                    >
+                      <CollapseAllHeadingsIcon />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMarkdownOutlineExpansionCommand((previous) => ({
+                          action: 'expand',
+                          sequence: (previous?.sequence ?? 0) + 1,
+                        }))
+                      }
+                      disabled={Boolean(fileLoading)}
+                      className={headingActionClassName(Boolean(fileLoading))}
+                      title="Expand all Markdown headings"
+                      aria-label="Expand all Markdown headings"
+                    >
+                      <ExpandAllHeadingsIcon />
+                    </button>
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (openedFileShowsMarkdownPreview) {
+                      setOpenedTextMode('edit');
+                      setMarkdownOutlineExpansionCommand(null);
+                    } else {
+                      setOpenedTextMode('preview');
+                      setMarkdownOutlineExpansionCommand(null);
+                    }
+                  }}
+                  disabled={Boolean(fileLoading)}
+                  className={modeButtonClassName(Boolean(fileLoading))}
+                  title={
+                    openedFileShowsMarkdownPreview
+                      ? readOnly
+                        ? 'View markdown source'
+                        : 'Edit markdown source'
+                      : 'Render markdown preview'
+                  }
+                >
+                  {openedFileShowsMarkdownPreview ? (readOnly ? 'Source' : 'Edit') : 'Preview'}
+                </button>
+              </div>
             ) : null
           }
         />
         {fileError ? (
           <div className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
             {fileError}
+          </div>
+        ) : null}
+        {file.externallyChanged ? (
+          <div className="mx-3 mt-3 flex items-center justify-between gap-3 rounded border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--fg-secondary)]">
+            <span>
+              This file changed on disk{fileDirty ? ' while you have unsaved edits.' : '.'}
+            </span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {fileDirty && file.canOverwriteExternalChange && onOverwriteFile ? (
+                <button
+                  type="button"
+                  onClick={() => void onOverwriteFile()}
+                  className="rounded-[var(--radius-medium)] border border-[var(--yellow-border)] bg-transparent px-2 py-1 font-[var(--weight-semibold)] text-[var(--yellow)] hover:bg-[var(--yellow-subtle)]"
+                >
+                  Overwrite
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={onReloadFromDisk}
+                className="rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel)] px-2 py-1 font-[var(--weight-semibold)] text-[var(--fg)] hover:bg-[var(--hover)]"
+              >
+                Reload from disk
+              </button>
+            </div>
           </div>
         ) : null}
         <div className="flex-1 min-h-[360px] flex flex-col">
@@ -594,7 +725,12 @@ export function OpenedDroneFilePanel({
                 />
               </div>
             ) : openedFileIsLargeText && activeFilePath ? (
-              <LargeTextFileViewer droneId={droneId} path={activeFilePath} size={fileSize} />
+              <LargeTextFileViewer
+                droneId={droneId}
+                path={activeFilePath}
+                size={fileSize}
+                revision={fileRevision}
+              />
             ) : fileKind === 'binary' ? (
               <div className="h-full w-full flex items-center justify-center px-6">
                 <div className="max-w-[560px] rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3 text-center">
@@ -608,14 +744,11 @@ export function OpenedDroneFilePanel({
                 </div>
               </div>
             ) : openedFileShowsMarkdownPreview ? (
-              <div className="h-full w-full overflow-auto bg-[var(--panel-alt)] px-4 py-4">
-                <MarkdownMessage
-                  text={fileContent ?? ''}
-                  className="dh-markdown--agent"
-                  onOpenLink={openMarkdownPreviewLink}
-                  preferOpenLinkBeforeModifiedClick
-                />
-              </div>
+              <MarkdownOutlinePreview
+                text={fileContent ?? ''}
+                onOpenLink={openMarkdownPreviewLink}
+                expansionCommand={markdownOutlineExpansionCommand}
+              />
             ) : openedFileEditorVisible ? (
               <MonacoEditorErrorBoundary
                 fallback={

@@ -775,6 +775,85 @@ code, pre {
   cursor: auto;
 }
 
+/* Markdown section browser */
+.dh-markdown-outline {
+  height: 100%;
+  overflow: auto;
+  background: var(--panel-alt);
+}
+
+.dh-markdown-outline__heading-button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dh-markdown-outline__document {
+  padding: 16px;
+}
+
+.dh-markdown-outline__preamble,
+.dh-markdown-outline__tree,
+.dh-markdown-outline__section,
+.dh-markdown-outline__section-content,
+.dh-markdown-outline__children {
+  display: contents;
+}
+
+.dh-markdown-outline__tree:first-child > .dh-markdown-outline__section:first-child > .dh-markdown-outline__heading {
+  margin-top: 0;
+}
+
+.dh-markdown-outline__heading-button {
+  position: relative;
+  display: block;
+  width: 100%;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  text-align: left;
+  transition: color .14s ease;
+}
+
+.dh-markdown-outline__heading-button:hover {
+  color: var(--link-hover);
+}
+
+.dh-markdown-outline__title {
+  min-width: 0;
+}
+
+.dh-markdown-outline__expand-arrow {
+  display: inline-block;
+  margin-left: .42rem;
+  color: var(--muted-dim);
+  vertical-align: -.12em;
+  transition: color .14s ease, transform .14s ease;
+}
+
+.dh-markdown-outline__heading-button:hover .dh-markdown-outline__expand-arrow {
+  color: var(--link-hover);
+  transform: translateX(2px);
+}
+
+.dh-markdown-outline__heading-link {
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+
+@media (max-width: 680px) {
+  .dh-markdown-outline__document {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}
+
 /* ──────────────────────────────────────────────────────────
    Typography: Display headings (Chakra Petch)
    ────────────────────────────────────────────────────────── */
@@ -964,8 +1043,8 @@ code, pre {
   color: var(--user-bubble-fg);
 }
 
-.dh-markdown > :first-child { margin-top: 0; }
-.dh-markdown > :last-child { margin-bottom: 0; }
+.dh-markdown:not(.dh-markdown--preserve-edge-margins) > :first-child { margin-top: 0; }
+.dh-markdown:not(.dh-markdown--preserve-edge-margins) > :last-child { margin-bottom: 0; }
 
 .dh-markdown p { margin: .42rem 0; }
 .dh-markdown p + p { margin-top: 1rem; }
@@ -1003,6 +1082,67 @@ code, pre {
   font-size: .82rem;
   color: var(--muted);
   letter-spacing: .04em;
+}
+
+/* Full document previews need a much stronger hierarchy than compact chat prose. */
+.dh-markdown--document h1,
+.dh-markdown--document h2,
+.dh-markdown--document h3,
+.dh-markdown--document h4,
+.dh-markdown--document h5,
+.dh-markdown--document h6 {
+  scroll-margin-top: 1rem;
+}
+
+.dh-markdown--document h1 {
+  margin: 2rem 0 .9rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: .5rem;
+  color: var(--fg-strong);
+  font-size: 1.45rem;
+  font-weight: var(--weight-bold);
+  letter-spacing: -.015em;
+  line-height: 1.25;
+}
+
+.dh-markdown--document h2 {
+  margin: 1.75rem 0 .7rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  padding-bottom: .32rem;
+  color: var(--fg);
+  font-size: 1.16rem;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0;
+  line-height: 1.3;
+}
+
+.dh-markdown--document h3 {
+  margin: 1.35rem 0 .5rem;
+  color: var(--fg-secondary);
+  font-size: 1rem;
+  font-weight: var(--weight-semibold);
+  letter-spacing: .005em;
+  line-height: 1.35;
+}
+
+.dh-markdown--document h4 {
+  margin: 1.15rem 0 .42rem;
+  color: var(--fg-secondary);
+  font-size: .91rem;
+}
+
+.dh-markdown--document h5 {
+  margin: 1rem 0 .38rem;
+  color: var(--muted);
+  font-size: .85rem;
+}
+
+.dh-markdown--document h6 {
+  margin: .9rem 0 .34rem;
+  color: var(--muted-dim);
+  font-size: .79rem;
+  letter-spacing: .055em;
+  text-transform: uppercase;
 }
 
 .dh-markdown a {

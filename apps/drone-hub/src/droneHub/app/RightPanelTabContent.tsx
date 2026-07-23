@@ -201,6 +201,8 @@ type RightPanelTabContentProps = {
   setCurrentFsPath: (nextPath: string) => void;
   refreshFsList: () => void;
   onRefreshOpenedEditorFile: () => void;
+  onReloadOpenedEditorFileFromDisk: () => void;
+  onOverwriteOpenedEditorFile: () => Promise<boolean>;
   selectedPreviewPort: DronePortMapping | null;
   currentPortReachability: PortReachabilityByHostPort;
   portsLoading: boolean;
@@ -301,6 +303,8 @@ export function RightPanelTabContent({
   setCurrentFsPath,
   refreshFsList,
   onRefreshOpenedEditorFile,
+  onReloadOpenedEditorFileFromDisk,
+  onOverwriteOpenedEditorFile,
   selectedPreviewPort,
   currentPortReachability,
   portsLoading,
@@ -468,6 +472,8 @@ export function RightPanelTabContent({
           activeOpenedFileTabId={activeOpenedFileTabId}
           onOpenedEditorFileContentChange={onOpenedEditorFileContentChange}
           onSaveOpenedEditorFile={onSaveOpenedEditorFile}
+          onReloadOpenedEditorFileFromDisk={onReloadOpenedEditorFileFromDisk}
+          onOverwriteOpenedEditorFile={onOverwriteOpenedEditorFile}
           onCloseOpenedEditorFile={onCloseOpenedEditorFile}
           onActivateOpenedEditorFileTab={onActivateOpenedEditorFileTab}
           onReorderOpenedEditorFileTabs={onReorderOpenedEditorFileTabs}

@@ -9,6 +9,7 @@ export type MobileFilePreview = {
   mime: string;
   size: number;
   mtimeMs: number | null;
+  revision?: string | null;
   content?: string;
   uri?: string;
 };

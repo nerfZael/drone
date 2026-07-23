@@ -183,7 +183,150 @@ export function deviceMeshDroneSummary(drone: any) {
 export function createDroneControlCapability(
   access: LocalHubAccess,
   chatAttachments?: MeshChatAttachmentStore,
+  options?: {
+    broadcastFileChange?: (
+      payload: Record<string, any>,
+      targetDeviceIds: string[],
+    ) => void | Promise<void>;
+  },
 ): CapabilityHandler {
+  type FileWatch = {
+    droneId: string;
+    path: string;
+    subscribers: Map<string, Set<string>>;
+    revision: string | null;
+    size: number;
+    mtimeMs: number | null;
+    lastHashAt: number;
+    busy: boolean;
+    timer: ReturnType<typeof setInterval>;
+  };
+  const fileWatches = new Map<string, FileWatch>();
+  const fileWatchStarts = new Map<string, Promise<FileWatch>>();
+  let closed = false;
+  const stopWatch = (key: string) => {
+    const watch = fileWatches.get(key);
+    if (!watch) return;
+    clearInterval(watch.timer);
+    fileWatches.delete(key);
+  };
+  const readFileMetadata = async (
+    droneId: string,
+    filePath: string,
+    includeRevision: boolean,
+  ) =>
+    await localHubRequest(
+      access,
+      `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(filePath)}&metadata=1&revision=${includeRevision ? '1' : '0'}`,
+    );
+  const getOrCreateFileWatch = async (
+    watchKey: string,
+    droneId: string,
+    filePath: string,
+  ): Promise<FileWatch> => {
+    const existing = fileWatches.get(watchKey);
+    if (existing) return existing;
+    const pending = fileWatchStarts.get(watchKey);
+    if (pending) return await pending;
+    if (fileWatches.size + fileWatchStarts.size >= 128) {
+      throw Object.assign(new Error('too many active file watches'), {
+        code: 'RESOURCE_LIMIT',
+      });
+    }
+    const start = (async () => {
+      const metadata = await readFileMetadata(droneId, filePath, true);
+      if (closed) {
+        throw Object.assign(new Error('drone control capability is closed'), {
+          code: 'CAPABILITY_CLOSED',
+        });
+      }
+      const timer = setInterval(() => void pollWatch(watchKey), 2_000);
+      timer.unref?.();
+      const watch: FileWatch = {
+        droneId,
+        path: filePath,
+        subscribers: new Map(),
+        revision: optionalText(metadata?.revision) ?? null,
+        size: Number.isFinite(Number(metadata?.size))
+          ? Math.max(0, Math.floor(Number(metadata.size)))
+          : 0,
+        mtimeMs: Number.isFinite(Number(metadata?.mtimeMs))
+          ? Number(metadata.mtimeMs)
+          : null,
+        lastHashAt: Date.now(),
+        busy: false,
+        timer,
+      };
+      fileWatches.set(watchKey, watch);
+      return watch;
+    })();
+    fileWatchStarts.set(watchKey, start);
+    try {
+      return await start;
+    } finally {
+      if (fileWatchStarts.get(watchKey) === start) fileWatchStarts.delete(watchKey);
+    }
+  };
+  const pollWatch = async (key: string) => {
+    const watch = fileWatches.get(key);
+    if (!watch || watch.busy) return;
+    watch.busy = true;
+    try {
+      const fingerprint = await readFileMetadata(watch.droneId, watch.path, false);
+      if (fileWatches.get(key) !== watch) return;
+      const nextSize = Number.isFinite(Number(fingerprint?.size))
+        ? Math.max(0, Math.floor(Number(fingerprint.size)))
+        : 0;
+      const nextMtimeMs = Number.isFinite(Number(fingerprint?.mtimeMs))
+        ? Number(fingerprint.mtimeMs)
+        : null;
+      const fingerprintChanged = nextSize !== watch.size || nextMtimeMs !== watch.mtimeMs;
+      watch.size = nextSize;
+      watch.mtimeMs = nextMtimeMs;
+      if (!fingerprintChanged && Date.now() - watch.lastHashAt < 30_000) return;
+      const metadata = await readFileMetadata(watch.droneId, watch.path, true);
+      if (fileWatches.get(key) !== watch) return;
+      watch.lastHashAt = Date.now();
+      const revision = optionalText(metadata?.revision) ?? null;
+      if (revision && watch.revision && revision !== watch.revision) {
+        watch.revision = revision;
+        await options?.broadcastFileChange?.(
+          {
+            droneId: watch.droneId,
+            path: optionalText(metadata?.path) ?? watch.path,
+            revision,
+            size: Number(metadata?.size) || 0,
+            mtimeMs: Number.isFinite(Number(metadata?.mtimeMs))
+              ? Number(metadata.mtimeMs)
+              : null,
+            kind: 'changed',
+          },
+          [...watch.subscribers.keys()],
+        );
+      } else if (revision) {
+        watch.revision = revision;
+      }
+    } catch (error: any) {
+      const message = String(error?.message ?? error);
+      if (/not found|not-file|ENOENT/i.test(message) && watch.revision !== 'deleted') {
+        watch.revision = 'deleted';
+        watch.size = -1;
+        watch.mtimeMs = null;
+        watch.lastHashAt = 0;
+        await options?.broadcastFileChange?.(
+          {
+            droneId: watch.droneId,
+            path: watch.path,
+            revision: null,
+            kind: 'deleted',
+          },
+          [...watch.subscribers.keys()],
+        );
+      }
+    } finally {
+      watch.busy = false;
+    }
+  };
   return {
     descriptor: DRONE_CONTROL_CAPABILITY,
     async invoke(operation, rawPayload, context) {
@@ -476,13 +619,55 @@ export function createDroneControlCapability(
       }
       if (operation === 'file.preview') {
         const filePath = requiredText(payload.path, 'path');
+        const watchAction = optionalText(payload.watch);
+        const watchId = optionalText(payload.watchId) ?? 'default';
+        const watchKey = `${droneId}\u0000${filePath}`;
+        if (watchAction === 'unsubscribe') {
+          const watch = fileWatches.get(watchKey);
+          const deviceSubscriptions = watch?.subscribers.get(context.sourceDevice.id);
+          deviceSubscriptions?.delete(watchId);
+          if (watch && deviceSubscriptions?.size === 0) {
+            watch.subscribers.delete(context.sourceDevice.id);
+          }
+          if (watch && watch.subscribers.size === 0) stopWatch(watchKey);
+          return { watching: false, droneId, path: filePath };
+        }
+        if (watchAction === 'subscribe') {
+          const watch = await getOrCreateFileWatch(watchKey, droneId, filePath);
+          let deviceSubscriptions = watch.subscribers.get(context.sourceDevice.id);
+          if (!deviceSubscriptions) {
+            deviceSubscriptions = new Set();
+            watch.subscribers.set(context.sourceDevice.id, deviceSubscriptions);
+          }
+          if (!deviceSubscriptions.has(watchId) && deviceSubscriptions.size >= 32) {
+            throw Object.assign(new Error('too many subscriptions for this file watch'), {
+              code: 'RESOURCE_LIMIT',
+            });
+          }
+          deviceSubscriptions.add(watchId);
+          return {
+            watching: true,
+            droneId,
+            path: filePath,
+            revision: watch.revision,
+          };
+        }
         const fsFilePath = `/api/drones/${encodedDrone}/fs/file?path=${encodeURIComponent(filePath)}`;
+        if (payload.metadataOnly === true) {
+          return {
+            preview: await localHubRequest(
+              access,
+              `${fsFilePath}&metadata=1&revision=${payload.includeRevision === false ? '0' : '1'}`,
+            ),
+          };
+        }
         const likelyMedia = isLikelyImagePath(filePath) || isLikelyVideoPath(filePath);
+        const expectedRevision = optionalText(payload.expectedRevision);
         let metadata: any;
         try {
           metadata = await localHubRequest(
             access,
-            likelyMedia ? `${fsFilePath}&metadata=1` : fsFilePath,
+            likelyMedia ? `${fsFilePath}&metadata=1&revision=0` : fsFilePath,
           );
         } catch (error: any) {
           if (error?.code !== 'HUB_413' || likelyMedia) throw error;
@@ -511,6 +696,10 @@ export function createDroneControlCapability(
             ),
             { code: 'FILE_TOO_LARGE' },
           );
+        if (!optionalText(metadata?.revision) && !expectedRevision) {
+          metadata = await localHubRequest(access, `${fsFilePath}&metadata=1&revision=1`);
+        }
+        const revision = optionalText(metadata?.revision) ?? expectedRevision ?? null;
         const previewPath = requiredText(metadata?.path ?? filePath, 'preview path');
 
         const requestedOffset = Number(payload.contentOffset);
@@ -544,6 +733,7 @@ export function createDroneControlCapability(
             mime: String(metadata.mime ?? chunk?.mime ?? ''),
             size,
             mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
+            revision,
           },
           mediaChunk: {
             encoding: 'base64-binary',
@@ -915,6 +1105,16 @@ export function createDroneControlCapability(
       throw Object.assign(new Error(`unsupported drone-control operation: ${operation}`), {
         code: 'UNSUPPORTED_OPERATION',
       });
+    },
+    close() {
+      closed = true;
+      for (const key of [...fileWatches.keys()]) stopWatch(key);
+    },
+    revokeDevice(deviceId) {
+      for (const [key, watch] of fileWatches) {
+        watch.subscribers.delete(deviceId);
+        if (watch.subscribers.size === 0) stopWatch(key);
+      }
     },
   };
 }

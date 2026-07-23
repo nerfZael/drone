@@ -133,6 +133,7 @@ export type DroneFsReadPayload =
       content: string;
       size: number;
       mtimeMs: number | null;
+      revision?: string | null;
     }
   | {
       ok: true;
@@ -143,6 +144,7 @@ export type DroneFsReadPayload =
       mime: string | null;
       size: number;
       mtimeMs: number | null;
+      revision?: string | null;
     }
   | { ok: false; error: string; id?: string; name?: string; path?: string };
 
@@ -171,6 +173,7 @@ export type DroneFsWritePayload =
       path: string;
       size: number;
       mtimeMs: number | null;
+      revision?: string | null;
     }
   | { ok: false; error: string; id?: string; name?: string; path?: string };
 

@@ -1518,12 +1518,20 @@ export function DronesScreen({
     droneId: selected?.id ?? '',
     messages: transcriptMessages,
   });
+  const subscribeFileChanges = React.useCallback(
+    (listener: (payload: Record<string, any>) => void) =>
+      mesh.subscribe('drone-control', 'file.changed', (event) => {
+        if (event.sourceDeviceId === targetId) listener(event.payload ?? {});
+      }),
+    [mesh.subscribe, targetId],
+  );
   const filePreview = useFilePreview({
     targetId,
     selectedDrone: selected,
     chatName,
     phoneTarget,
     requestDroneControl,
+    subscribeFileChanges,
   });
   const loadRunFileDiff = React.useCallback(
     async ({ artifactId, path }: { artifactId: string; path: string }) => {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  buildNativeMarkdownOutline,
   nativeMarkdownHasCodeBlock,
   parseNativeMarkdown,
   parseNativeMarkdownInline,
@@ -62,5 +63,40 @@ const ready = true;
   test('detects fenced code blocks for user-message rendering', () => {
     expect(nativeMarkdownHasCodeBlock('ordinary user message')).toBe(false);
     expect(nativeMarkdownHasCodeBlock('Example:\n```tsx\n<View />\n```')).toBe(true);
+  });
+
+  test('builds a nested document outline while preserving direct section content', () => {
+    const blocks = parseNativeMarkdown(
+      '# Document\n\nIntro.\n\n## Section\n\nSection body.\n\n### Detail\n\nDetail body.',
+    );
+    const outline = buildNativeMarkdownOutline(blocks);
+
+    expect(outline.sectionIds).toHaveLength(3);
+    expect(outline.sections).toHaveLength(1);
+    expect(outline.sections[0]?.heading.text).toBe('Document');
+    expect(outline.sections[0]?.content).toEqual([{ type: 'paragraph', text: 'Intro.' }]);
+    expect(outline.sections[0]?.children[0]?.heading.text).toBe('Section');
+    expect(outline.sections[0]?.children[0]?.content).toEqual([
+      { type: 'paragraph', text: 'Section body.' },
+    ]);
+    expect(outline.sections[0]?.children[0]?.children[0]?.heading.text).toBe('Detail');
+  });
+
+  test('keeps heading identities stable when body content moves', () => {
+    const before = buildNativeMarkdownOutline(
+      parseNativeMarkdown('# Document\n\nIntro.\n\n## Section\n\nBody.'),
+    );
+    const after = buildNativeMarkdownOutline(
+      parseNativeMarkdown('Preamble.\n\n# Document\n\nLonger intro.\n\n## Section\n\nBody.'),
+    );
+
+    expect(after.sectionIds).toEqual(before.sectionIds);
+  });
+
+  test('parses setext document headings', () => {
+    expect(parseNativeMarkdown('Document title\n==============\n\nSection\n-------')).toEqual([
+      { type: 'heading', level: 1, text: 'Document title' },
+      { type: 'heading', level: 2, text: 'Section' },
+    ]);
   });
 });

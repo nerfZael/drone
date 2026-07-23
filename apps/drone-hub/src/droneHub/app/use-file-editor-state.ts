@@ -107,6 +107,8 @@ function readPayloadToTabState(data: Extract<DroneFsReadPayload, { ok: true }>):
   content: string;
   savedContent: string;
   mtimeMs: number | null;
+  revision: string | null;
+  externalRevision: string | null;
   path: string | null;
   name: string | null;
 } {
@@ -129,6 +131,9 @@ function readPayloadToTabState(data: Extract<DroneFsReadPayload, { ok: true }>):
     content: nextContent,
     savedContent: nextContent,
     mtimeMs: typeof data.mtimeMs === 'number' && Number.isFinite(data.mtimeMs) ? data.mtimeMs : null,
+    revision:
+      typeof data.revision === 'string' && data.revision.trim() ? data.revision.trim() : null,
+    externalRevision: null,
     path: nextPath || null,
     name: nextPath ? nextPath.split('/').filter(Boolean).pop() || nextPath : null,
   };
@@ -146,7 +151,9 @@ export function useFileEditorState({
   const [openFailure, setOpenFailure] = React.useState<{ message: string; at: number } | null>(null);
   const contentRef = React.useRef('');
   const activeTabIdRef = React.useRef<string | null>(null);
+  const tabsRef = React.useRef<OpenedFileTab[]>(tabs);
   const requestSeqRef = React.useRef(0);
+  const liveReloadSeqByTabRef = React.useRef(new Map<string, number>());
   const navigationSeqRef = React.useRef(0);
   const locationHistoryByDroneIdRef = React.useRef<Record<string, EditorLocationHistory>>({});
   const [locationHistoryByDroneId, setLocationHistoryByDroneId] = React.useState<Record<string, EditorLocationHistory>>({});
@@ -197,6 +204,7 @@ export function useFileEditorState({
     () => tabs.find((tab) => tab.tabId === activeTabId) ?? null,
     [activeTabId, tabs],
   );
+  tabsRef.current = tabs;
 
   React.useEffect(() => {
     activeTabIdRef.current = activeTab?.tabId ?? null;
@@ -459,6 +467,8 @@ export function useFileEditorState({
               content: '',
               savedContent: '',
               mtimeMs: null,
+              revision: null,
+              externalRevision: null,
             }
           : tab,
       ),
@@ -515,6 +525,8 @@ export function useFileEditorState({
                       content: '',
                       savedContent: '',
                       mtimeMs: null,
+                      revision: null,
+                      externalRevision: null,
                     }
                   : {
                       ...tab,
@@ -527,6 +539,8 @@ export function useFileEditorState({
                       content: '',
                       savedContent: '',
                       mtimeMs: null,
+                      revision: null,
+                      externalRevision: null,
                     }
                 : tab,
             ),
@@ -580,6 +594,8 @@ export function useFileEditorState({
                         content: '',
                         savedContent: '',
                         mtimeMs: null,
+                        revision: null,
+                        externalRevision: null,
                       }
                     : {
                         ...tab,
@@ -592,6 +608,8 @@ export function useFileEditorState({
                         content: '',
                         savedContent: '',
                         mtimeMs: null,
+                        revision: null,
+                        externalRevision: null,
                       }
                   : tab,
               ),
@@ -623,6 +641,141 @@ export function useFileEditorState({
     updateTabs,
   ]);
 
+  React.useEffect(() => {
+    if (!activeTab?.loaded || !activeTab.droneId || !activeTab.path) return;
+    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
+    const tabId = activeTab.tabId;
+    const source = new window.EventSource(
+      `/api/drones/${encodeURIComponent(activeTab.droneId)}/fs/file-events?path=${encodeURIComponent(activeTab.path)}`,
+    );
+    let retryTimer: number | null = null;
+    const onRevision = (event: MessageEvent) => {
+      let payload: any = null;
+      try {
+        payload = JSON.parse(String(event.data ?? ''));
+      } catch {
+        return;
+      }
+      const nextRevision =
+        typeof payload?.revision === 'string' && payload.revision.trim()
+          ? payload.revision.trim()
+          : null;
+      if (!nextRevision) return;
+      const currentTab = tabsRef.current.find((tab) => tab.tabId === tabId);
+      if (!currentTab || currentTab.revision === nextRevision) return;
+      if (openedFileTabDirty(currentTab)) {
+        updateTabs((prevTabs) =>
+          prevTabs.map((tab) =>
+            tab.tabId === tabId ? { ...tab, externalRevision: nextRevision } : tab,
+          ),
+        );
+        return;
+      }
+      if (nextRevision.startsWith('metadata:')) {
+        const nextSize = Number(payload?.size);
+        const nextMtimeMs = Number(payload?.mtimeMs);
+        updateTabs((prevTabs) =>
+          prevTabs.map((tab) => {
+            if (tab.tabId !== tabId) return tab;
+            if (openedFileTabDirty(tab)) {
+              return { ...tab, externalRevision: nextRevision };
+            }
+            return {
+              ...tab,
+              size:
+                Number.isFinite(nextSize) && nextSize >= 0
+                  ? Math.floor(nextSize)
+                  : tab.size,
+              mtimeMs:
+                Number.isFinite(nextMtimeMs) && nextMtimeMs >= 0
+                  ? Math.floor(nextMtimeMs)
+                  : null,
+              revision: nextRevision,
+              externalRevision: null,
+              error: null,
+            };
+          }),
+        );
+        return;
+      }
+      const nextSeq = (liveReloadSeqByTabRef.current.get(tabId) ?? 0) + 1;
+      liveReloadSeqByTabRef.current.set(tabId, nextSeq);
+      void requestJson<Extract<DroneFsReadPayload, { ok: true }>>(
+        `/api/drones/${encodeURIComponent(currentTab.droneId)}/fs/file?path=${encodeURIComponent(currentTab.path)}`,
+      )
+        .then((data) => {
+          if (liveReloadSeqByTabRef.current.get(tabId) !== nextSeq) return;
+          const nextLoadedState = readPayloadToTabState(data);
+          updateTabs((prevTabs) =>
+            prevTabs.map((tab) => {
+              if (tab.tabId !== tabId) return tab;
+              if (tab.revision !== currentTab.revision) {
+                return openedFileTabDirty(tab) && tab.revision !== nextLoadedState.revision
+                  ? {
+                      ...tab,
+                      externalRevision: nextLoadedState.revision ?? nextRevision,
+                    }
+                  : tab;
+              }
+              if (openedFileTabDirty(tab)) {
+                return {
+                  ...tab,
+                  externalRevision: nextLoadedState.revision ?? nextRevision,
+                };
+              }
+              return {
+                ...tab,
+                ...nextLoadedState,
+                path: nextLoadedState.path ?? tab.path,
+                name: nextLoadedState.name ?? tab.name,
+                loading: false,
+                loaded: true,
+                error: null,
+              };
+            }),
+          );
+        })
+        .catch(() => {
+          if (retryTimer != null) return;
+          retryTimer = window.setTimeout(() => {
+            retryTimer = null;
+            onRevision(event);
+          }, 2_000);
+        });
+    };
+    const onDeleted = () => {
+      if (retryTimer != null) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      updateTabs((prevTabs) =>
+        prevTabs.map((tab) =>
+          tab.tabId === tabId
+            ? {
+                ...tab,
+                externalRevision: 'deleted',
+                error: openedFileTabDirty(tab) ? tab.error : 'File was deleted on disk.',
+              }
+            : tab,
+        ),
+      );
+    };
+    source.addEventListener('snapshot', onRevision as EventListener);
+    source.addEventListener('changed', onRevision as EventListener);
+    source.addEventListener('deleted', onDeleted);
+    return () => {
+      if (retryTimer != null) window.clearTimeout(retryTimer);
+      source.close();
+    };
+  }, [
+    activeTab?.droneId,
+    activeTab?.loaded,
+    activeTab?.path,
+    activeTab?.tabId,
+    requestJson,
+    updateTabs,
+  ]);
+
   const openedFile = activeTab
     ? {
         droneId: activeTab.droneId,
@@ -642,6 +795,10 @@ export function useFileEditorState({
   const content = activeTab?.content ?? '';
   const dirty = activeTab ? openedFileTabDirty(activeTab) : false;
   const mtimeMs = activeTab?.mtimeMs ?? null;
+  const revision = activeTab?.revision ?? null;
+  const externallyChanged = Boolean(activeTab?.externalRevision);
+  const canOverwriteExternalChange =
+    Boolean(activeTab?.externalRevision) && activeTab?.externalRevision !== 'deleted';
 
   const openedFileTabs = React.useMemo(
     () =>
@@ -659,6 +816,10 @@ export function useFileEditorState({
         content: tab.content,
         dirty: openedFileTabDirty(tab),
         mtimeMs: tab.mtimeMs,
+        revision: tab.revision,
+        externallyChanged: Boolean(tab.externalRevision),
+        canOverwriteExternalChange:
+          Boolean(tab.externalRevision) && tab.externalRevision !== 'deleted',
         targetLine: tab.targetLine,
         targetColumn: tab.targetColumn,
         navigationSeq: tab.navigationSeq,
@@ -676,7 +837,10 @@ export function useFileEditorState({
     setTabState((prev) => reorderFileTabs(prev, fromTabId, toTabId));
   }, [setTabState]);
 
-  const saveOpenedFile = React.useCallback(async (contentOverride?: string): Promise<boolean> => {
+  const saveOpenedFile = React.useCallback(async (
+    contentOverride?: string,
+    expectedRevisionOverride?: string | null,
+  ): Promise<boolean> => {
     if (!activeTab || activeTab.loading || activeTab.saving) return false;
     if (activeTab.kind !== 'text') return false;
     const tabId = activeTab.tabId;
@@ -695,6 +859,7 @@ export function useFileEditorState({
           body: JSON.stringify({
             path: activeTab.path,
             content: textToSave,
+            expectedRevision: expectedRevisionOverride ?? activeTab.revision,
           }),
         },
       );
@@ -708,6 +873,11 @@ export function useFileEditorState({
                 content: textToSave,
                 savedContent: textToSave,
                 mtimeMs: typeof resp.mtimeMs === 'number' && Number.isFinite(resp.mtimeMs) ? resp.mtimeMs : null,
+                revision:
+                  typeof resp.revision === 'string' && resp.revision.trim()
+                    ? resp.revision.trim()
+                    : tab.revision,
+                externalRevision: null,
               }
             : tab,
         ),
@@ -717,10 +887,32 @@ export function useFileEditorState({
       return true;
     } catch (e: any) {
       const msg = e?.message ?? String(e);
-      updateTabs((prevTabs) => prevTabs.map((tab) => (tab.tabId === tabId ? { ...tab, saving: false, error: msg } : tab)));
+      updateTabs((prevTabs) =>
+        prevTabs.map((tab) =>
+          tab.tabId === tabId
+            ? {
+                ...tab,
+                saving: false,
+                error: msg,
+                externalRevision:
+                  Number(e?.status ?? 0) === 409
+                    ? String(e?.data?.currentRevision ?? tab.externalRevision ?? 'changed')
+                    : tab.externalRevision,
+              }
+            : tab,
+        ),
+      );
       return false;
     }
   }, [activeTab, onRefreshFsList, requestJson, updateTabs]);
+
+  const overwriteOpenedFile = React.useCallback(
+    async (): Promise<boolean> => {
+      if (!activeTab?.externalRevision || activeTab.externalRevision === 'deleted') return false;
+      return await saveOpenedFile(undefined, activeTab.externalRevision);
+    },
+    [activeTab?.externalRevision, saveOpenedFile],
+  );
 
   const setOpenedFileContent = React.useCallback((next: string) => {
     if (!activeTab || activeTab.kind !== 'text') return;
@@ -740,6 +932,24 @@ export function useFileEditorState({
               loaded: false,
               loading: false,
               error: null,
+              refreshNonce: tab.refreshNonce + 1,
+            }
+          : tab,
+      ),
+    );
+  }, [activeTab, updateTabs]);
+
+  const reloadOpenedFileFromDisk = React.useCallback(() => {
+    if (!activeTab || activeTab.loading || activeTab.saving) return;
+    updateTabs((prevTabs) =>
+      prevTabs.map((tab) =>
+        tab.tabId === activeTab.tabId
+          ? {
+              ...tab,
+              loaded: false,
+              loading: false,
+              error: null,
+              externalRevision: null,
               refreshNonce: tab.refreshNonce + 1,
             }
           : tab,
@@ -786,6 +996,9 @@ export function useFileEditorState({
     content,
     dirty,
     mtimeMs,
+    revision,
+    externallyChanged,
+    canOverwriteExternalChange,
     recentFiles: recentFilesByDroneId[String(currentDrone?.id ?? '').trim()] ?? [],
     quickOpenOpen,
     quickOpenQuery,
@@ -810,6 +1023,8 @@ export function useFileEditorState({
     reorderOpenedFileTabs,
     setOpenedFileContent,
     refreshOpenedFile,
+    reloadOpenedFileFromDisk,
+    overwriteOpenedFile,
     saveOpenedFile,
   };
 }

@@ -116,7 +116,7 @@ describe('OpenedDroneFilePanel', () => {
     expect(html).not.toContain('aria-label="Go forward"');
   });
 
-  test('places one contextual markdown view action in the tab strip', () => {
+  test('shows one contextual markdown view action and compact heading controls', () => {
     const html = renderPanel(
       makeFile({
         path: '/work/repo/README.md',
@@ -128,8 +128,13 @@ describe('OpenedDroneFilePanel', () => {
     );
 
     expect(html).toContain('aria-label="Open files"');
+    expect(html).toContain('aria-label="Heading expansion"');
+    expect(html).toContain('aria-label="Collapse all Markdown headings"');
+    expect(html).toContain('aria-label="Expand all Markdown headings"');
+    expect(html).toContain('dh-markdown--document');
     expect(html).toContain('>Edit</button>');
     expect(html).not.toContain('>Preview</button>');
+    expect(html).not.toContain('>Outline</button>');
     expect(html).not.toContain('>Saved<');
   });
 
@@ -139,5 +144,26 @@ describe('OpenedDroneFilePanel', () => {
     expect(html).toContain('Large file');
     expect(html).toContain('Load more');
     expect(html).not.toContain('Loading editor...');
+  });
+
+  test('keys media previews by revision so external changes bypass browser caches', () => {
+    const html = renderPanel(
+      makeFile({
+        path: '/work/repo/assets/image.png',
+        name: 'image.png',
+        kind: 'image',
+        mime: 'image/png',
+        revision: 'sha256:changed',
+      }),
+    );
+
+    expect(html).toContain('revision=sha256%3Achanged');
+  });
+
+  test('warns before replacing dirty content that changed on disk', () => {
+    const html = renderPanel(makeFile({ dirty: true, externallyChanged: true }));
+
+    expect(html).toContain('changed on disk while you have unsaved edits');
+    expect(html).toContain('Reload from disk');
   });
 });

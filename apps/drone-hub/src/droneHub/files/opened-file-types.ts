@@ -10,6 +10,9 @@ export type DroneOpenedFileState = {
   content: string;
   dirty: boolean;
   mtimeMs: number | null;
+  revision?: string | null;
+  externallyChanged?: boolean;
+  canOverwriteExternalChange?: boolean;
   targetLine: number | null;
   targetColumn: number | null;
   navigationSeq: number;

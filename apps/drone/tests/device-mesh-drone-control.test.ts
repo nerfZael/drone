@@ -950,12 +950,14 @@ describe('device mesh drone summaries', () => {
   test('returns chunked text and media file previews', async () => {
     const originalFetch = globalThis.fetch;
     const chunkRequests: string[] = [];
-    const metadataRequests: string[] = [];
+    const fileRequests: string[] = [];
     globalThis.fetch = (async (input, init) => {
       const url = new URL(String(input));
       const filePath = url.searchParams.get('path');
       if (url.pathname.endsWith('/fs/file')) {
-        metadataRequests.push(String(url.searchParams.get('metadata') ?? ''));
+        fileRequests.push(
+          `${url.searchParams.get('metadata') ?? ''}:${url.searchParams.get('revision') ?? ''}`,
+        );
         const body = filePath?.endsWith('.md')
           ? {
               ok: true,
@@ -965,6 +967,8 @@ describe('device mesh drone summaries', () => {
               content: '# Preview',
               size: 9,
               mtimeMs: 100,
+              revision:
+                url.searchParams.get('revision') === '0' ? null : 'sha256:text',
             }
           : {
               ok: true,
@@ -973,20 +977,24 @@ describe('device mesh drone summaries', () => {
               mime: 'video/mp4',
               size: 6,
               mtimeMs: 200,
+              revision:
+                url.searchParams.get('revision') === '0' ? null : 'sha256:video',
             };
         return Response.json(body);
       }
       if (url.pathname.endsWith('/fs/chunk')) {
-        chunkRequests.push(`${url.searchParams.get('offset')}:${url.searchParams.get('limit')}`);
+        const offset = Number(url.searchParams.get('offset'));
+        const bytes = offset === 0 ? Buffer.from([1, 2, 3]) : Buffer.from([4, 5, 6]);
+        chunkRequests.push(`${offset}:${url.searchParams.get('limit')}`);
         return Response.json({
           ok: true,
           kind: 'binary-chunk',
           mime: 'video/mp4',
           size: 6,
-          offset: 0,
-          nextOffset: 6,
-          eof: true,
-          dataBase64: Buffer.from([1, 2, 3, 4, 5, 6]).toString('base64'),
+          offset,
+          nextOffset: offset + bytes.length,
+          eof: offset + bytes.length >= 6,
+          dataBase64: bytes.toString('base64'),
         });
       }
       return Response.json({ error: 'not found' }, { status: 404 });
@@ -1007,6 +1015,17 @@ describe('device mesh drone summaries', () => {
         kind: 'text',
         mime: 'text/markdown',
         content: '# Preview',
+        revision: 'sha256:text',
+      });
+
+      await expect(
+        capability.invoke('file.preview', {
+          droneId: 'one',
+          path: '/work/repo/README.md',
+          metadataOnly: true,
+        }),
+      ).resolves.toMatchObject({
+        preview: { kind: 'text', revision: 'sha256:text' },
       });
 
       await expect(
@@ -1015,18 +1034,124 @@ describe('device mesh drone summaries', () => {
           path: '/work/repo/demo.mp4',
         }),
       ).resolves.toMatchObject({
-        preview: { kind: 'video', mime: 'video/mp4', size: 6 },
+        preview: {
+          kind: 'video',
+          mime: 'video/mp4',
+          size: 6,
+          revision: 'sha256:video',
+        },
         mediaChunk: {
           encoding: 'base64-binary',
           offset: 0,
-          bytes: 6,
+          bytes: 3,
+          totalBytes: 6,
+          done: false,
+        },
+      });
+      await expect(
+        capability.invoke('file.preview', {
+          droneId: 'one',
+          path: '/work/repo/demo.mp4',
+          contentOffset: 3,
+          expectedRevision: 'sha256:video',
+        }),
+      ).resolves.toMatchObject({
+        preview: { revision: 'sha256:video' },
+        mediaChunk: {
+          offset: 3,
+          bytes: 3,
           totalBytes: 6,
           done: true,
         },
       });
-      expect(chunkRequests).toEqual(['0:131072']);
-      expect(metadataRequests).toEqual(['', '1']);
+      expect(chunkRequests).toEqual(['0:131072', '3:131072']);
+      expect(fileRequests).toEqual([':', '1:1', '1:0', '1:1', '1:0']);
     } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('broadcasts hash changes for files watched by a mobile device', async () => {
+    const originalFetch = globalThis.fetch;
+    let revision = 'sha256:first';
+    let mtimeMs = 100;
+    const events: Array<{ payload: Record<string, any>; targetDeviceIds: string[] }> = [];
+    globalThis.fetch = (async () =>
+      Response.json({
+        ok: true,
+        path: '/work/repo/live.md',
+        kind: 'text',
+        mime: 'text/markdown',
+        size: 8,
+        mtimeMs,
+        revision,
+      })) as typeof fetch;
+    const capability = createDroneControlCapability(
+      { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+      undefined,
+      {
+        broadcastFileChange: (payload, targetDeviceIds) =>
+          events.push({ payload, targetDeviceIds }),
+      },
+    );
+    const context = { sourceDevice: { id: 'phone-1' }, requestId: 'request-1' } as any;
+    try {
+      await capability.invoke(
+        'file.preview',
+        {
+          droneId: 'one',
+          path: '/work/repo/live.md',
+          watch: 'subscribe',
+          watchId: 'watch-a',
+        },
+        context,
+      );
+      await capability.invoke(
+        'file.preview',
+        {
+          droneId: 'one',
+          path: '/work/repo/live.md',
+          watch: 'subscribe',
+          watchId: 'watch-b',
+        },
+        context,
+      );
+      await capability.invoke(
+        'file.preview',
+        {
+          droneId: 'one',
+          path: '/work/repo/live.md',
+          watch: 'unsubscribe',
+          watchId: 'watch-a',
+        },
+        context,
+      );
+      revision = 'sha256:second';
+      mtimeMs = 200;
+      await Bun.sleep(2_100);
+      expect(events).toEqual([
+        {
+          payload: expect.objectContaining({
+            droneId: 'one',
+            path: '/work/repo/live.md',
+            revision: 'sha256:second',
+            kind: 'changed',
+          }),
+          targetDeviceIds: ['phone-1'],
+        },
+      ]);
+      await capability.invoke(
+        'file.preview',
+        {
+          droneId: 'one',
+          path: '/work/repo/live.md',
+          watch: 'unsubscribe',
+          watchId: 'watch-b',
+        },
+        context,
+      );
+    } finally {
+      await capability.close?.();
       globalThis.fetch = originalFetch;
     }
   });

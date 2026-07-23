@@ -1,5 +1,6 @@
 import React from 'react';
 import * as Clipboard from 'expo-clipboard';
+import ArrowRight from 'lucide-react-native/icons/arrow-right';
 import Copy from 'lucide-react-native/icons/copy';
 import {
   Linking,
@@ -13,9 +14,12 @@ import {
 import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
 import { colors } from '../theme';
 import {
+  buildNativeMarkdownOutline,
   parseNativeMarkdown,
   parseNativeMarkdownInline,
+  type NativeMarkdownBlock,
   type NativeMarkdownInline,
+  type NativeMarkdownSection,
 } from './native-markdown-model';
 import {
   parseMobileFileReference,
@@ -198,16 +202,15 @@ function InlineMarkdown({
   );
 }
 
-export function NativeMarkdown({
-  text,
+function NativeMarkdownBlocks({
+  blocks,
   tone = 'assistant',
   onOpenFileReference,
 }: {
-  text: string;
+  blocks: NativeMarkdownBlock[];
   tone?: 'assistant' | 'user';
   onOpenFileReference?: (reference: MobileFileReference) => void;
 }) {
-  const blocks = React.useMemo(() => parseNativeMarkdown(text), [text]);
   return (
     <View style={styles.markdown}>
       {blocks.map((block, index) => {
@@ -346,8 +349,272 @@ export function NativeMarkdown({
   );
 }
 
+export type NativeMarkdownExpansionCommand = {
+  action: 'collapse' | 'expand';
+  sequence: number;
+};
+
+function DocumentSection({
+  section,
+  expandedIds,
+  keepChildrenVisible,
+  onToggle,
+  onOpenFileReference,
+}: {
+  section: NativeMarkdownSection;
+  expandedIds: ReadonlySet<string>;
+  keepChildrenVisible: boolean;
+  onToggle(id: string): void;
+  onOpenFileReference?: (reference: MobileFileReference) => void;
+}) {
+  const expanded = expandedIds.has(section.id);
+  const canToggle = Boolean(
+    section.content.length > 0 || (section.children.length > 0 && !keepChildrenVisible),
+  );
+  const level = Math.min(6, Math.max(1, section.heading.level));
+  const headingTextStyle = [
+    styles.documentHeadingText,
+    level === 1
+      ? styles.documentHeading1Text
+      : level === 2
+        ? styles.documentHeading2Text
+        : level === 3
+          ? styles.documentHeading3Text
+          : level === 4
+            ? styles.documentHeading4Text
+            : level === 5
+              ? styles.documentHeading5Text
+              : styles.documentHeading6Text,
+  ];
+  const headingContainerStyle = [
+    styles.documentHeading,
+    level === 1
+      ? styles.documentHeading1
+      : level === 2
+        ? styles.documentHeading2
+        : styles.documentHeadingNested,
+  ];
+  const headingContent = (
+    <View style={styles.documentHeadingRow}>
+      <Text style={headingTextStyle}>
+        <InlineMarkdown
+          text={section.heading.text}
+          tone="assistant"
+          onOpenFileReference={onOpenFileReference}
+        />
+      </Text>
+      {canToggle && !expanded ? (
+        <ArrowRight
+          color={colors.mutedDim}
+          size={14}
+          strokeWidth={1.8}
+          style={styles.documentExpandArrow}
+        />
+      ) : null}
+    </View>
+  );
+
+  return (
+    <View style={styles.documentSection}>
+      {canToggle ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${expanded ? 'Collapse' : 'Expand'} ${section.heading.text}`}
+          accessibilityState={{ expanded }}
+          onPress={() => onToggle(section.id)}
+          style={({ pressed }) => [headingContainerStyle, pressed && styles.headingPressed]}
+        >
+          {headingContent}
+        </Pressable>
+      ) : (
+        <View style={headingContainerStyle}>{headingContent}</View>
+      )}
+      {expanded && section.content.length > 0 ? (
+        <NativeMarkdownBlocks
+          blocks={section.content}
+          onOpenFileReference={onOpenFileReference}
+        />
+      ) : null}
+      {section.children.length > 0 && (expanded || keepChildrenVisible) ? (
+        <View style={styles.documentChildren}>
+          {section.children.map((child) => (
+            <DocumentSection
+              key={child.id}
+              section={child}
+              expandedIds={expandedIds}
+              keepChildrenVisible={false}
+              onToggle={onToggle}
+              onOpenFileReference={onOpenFileReference}
+            />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+export function NativeMarkdown({
+  text,
+  tone = 'assistant',
+  onOpenFileReference,
+  documentMode = false,
+  collapsibleHeadings = false,
+  expansionCommand,
+}: {
+  text: string;
+  tone?: 'assistant' | 'user';
+  onOpenFileReference?: (reference: MobileFileReference) => void;
+  documentMode?: boolean;
+  collapsibleHeadings?: boolean;
+  expansionCommand?: NativeMarkdownExpansionCommand | null;
+}) {
+  const blocks = React.useMemo(() => parseNativeMarkdown(text), [text]);
+  const outline = React.useMemo(() => buildNativeMarkdownOutline(blocks), [blocks]);
+  const [expandedIds, setExpandedIds] = React.useState<Set<string>>(
+    () => new Set(outline.sectionIds),
+  );
+  const previousSectionIdsRef = React.useRef(new Set(outline.sectionIds));
+
+  React.useEffect(() => {
+    const previousSectionIds = previousSectionIdsRef.current;
+    setExpandedIds((previousExpandedIds) => {
+      const next = new Set<string>();
+      for (const id of outline.sectionIds) {
+        if (!previousSectionIds.has(id) || previousExpandedIds.has(id)) next.add(id);
+      }
+      return next;
+    });
+    previousSectionIdsRef.current = new Set(outline.sectionIds);
+  }, [outline.sectionIds]);
+
+  React.useEffect(() => {
+    if (!expansionCommand) return;
+    setExpandedIds(
+      expansionCommand.action === 'expand' ? new Set(outline.sectionIds) : new Set(),
+    );
+  }, [expansionCommand?.sequence]);
+
+  const toggleSection = React.useCallback((id: string) => {
+    setExpandedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  if (!documentMode || !collapsibleHeadings || outline.sections.length === 0) {
+    return (
+      <NativeMarkdownBlocks
+        blocks={blocks}
+        tone={tone}
+        onOpenFileReference={onOpenFileReference}
+      />
+    );
+  }
+
+  const documentRoot =
+    outline.sections.length === 1 && outline.sections[0]!.children.length > 0
+      ? outline.sections[0]!
+      : null;
+
+  return (
+    <View style={styles.documentMarkdown}>
+      {outline.preamble.length > 0 ? (
+        <NativeMarkdownBlocks
+          blocks={outline.preamble}
+          tone={tone}
+          onOpenFileReference={onOpenFileReference}
+        />
+      ) : null}
+      {outline.sections.map((section) => (
+        <DocumentSection
+          key={section.id}
+          section={section}
+          expandedIds={expandedIds}
+          keepChildrenVisible={section === documentRoot}
+          onToggle={toggleSection}
+          onOpenFileReference={onOpenFileReference}
+        />
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   markdown: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: 10 },
+  documentMarkdown: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: 10 },
+  documentSection: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: 10 },
+  documentChildren: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: 10 },
+  documentHeading: {
+    width: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
+  },
+  documentHeading1: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surface1,
+    paddingBottom: 9,
+    marginBottom: 2,
+  },
+  documentHeading2: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    paddingBottom: 6,
+    marginTop: 8,
+  },
+  documentHeadingNested: { marginTop: 5 },
+  documentHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  documentHeadingText: {
+    flexShrink: 1,
+    color: colors.text,
+    fontWeight: '900',
+  },
+  documentHeading1Text: {
+    color: colors.textStrong,
+    fontSize: 24,
+    lineHeight: 30,
+    letterSpacing: -0.35,
+  },
+  documentHeading2Text: {
+    color: colors.text,
+    fontSize: 19,
+    lineHeight: 25,
+    letterSpacing: -0.15,
+  },
+  documentHeading3Text: {
+    color: colors.textSecondary,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '800',
+  },
+  documentHeading4Text: {
+    color: colors.textSecondary,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '800',
+  },
+  documentHeading5Text: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '800',
+  },
+  documentHeading6Text: {
+    color: colors.mutedDim,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '900',
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+  },
+  documentExpandArrow: { marginLeft: 6 },
+  headingPressed: { opacity: 0.7 },
   body: { flex: 1, color: colors.assistantText, fontSize: 14, lineHeight: 21 },
   heading: { color: colors.text, fontWeight: '900', letterSpacing: -0.2 },
   headingLarge: { fontSize: 19, lineHeight: 25, marginTop: 3 },

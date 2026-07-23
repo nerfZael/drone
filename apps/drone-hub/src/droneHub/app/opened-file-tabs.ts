@@ -18,6 +18,8 @@ export type OpenedFileTab = {
   content: string;
   savedContent: string;
   mtimeMs: number | null;
+  revision?: string | null;
+  externalRevision?: string | null;
   refreshNonce: number;
 };
 
@@ -88,6 +90,8 @@ export function createOpenedFileTab(args: {
     content: '',
     savedContent: '',
     mtimeMs: null,
+    revision: null,
+    externalRevision: null,
     refreshNonce: 0,
   };
 }

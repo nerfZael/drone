@@ -5,7 +5,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   type TextStyle,
   View,
   type ViewStyle,
@@ -13,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AlertTriangle from 'lucide-react-native/icons/triangle-alert';
 import { colors, radii } from '../theme';
+import { ThemedTextInput } from './ThemedTextInput';
 
 type ButtonIcon = React.ComponentType<{
   color?: string;
@@ -222,7 +222,7 @@ export function TextInputDialog({
         <View style={styles.dialog}>
           <Text style={styles.dialogTitle}>{title}</Text>
           <Text style={styles.dialogMessage}>{message}</Text>
-          <TextInput
+          <ThemedTextInput
             autoFocus
             accessibilityLabel={title}
             accessibilityState={{ disabled: Boolean(busy) }}

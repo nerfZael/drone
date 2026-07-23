@@ -17,6 +17,77 @@ export type NativeMarkdownBlock =
   | { type: 'divider' }
   | { type: 'table'; headers: string[]; rows: string[][] };
 
+export type NativeMarkdownHeadingBlock = Extract<NativeMarkdownBlock, { type: 'heading' }>;
+
+export type NativeMarkdownSection = {
+  id: string;
+  heading: NativeMarkdownHeadingBlock;
+  content: NativeMarkdownBlock[];
+  children: NativeMarkdownSection[];
+};
+
+export type NativeMarkdownOutline = {
+  preamble: NativeMarkdownBlock[];
+  sections: NativeMarkdownSection[];
+  sectionIds: string[];
+};
+
+function stableNativeHeadingId(
+  heading: NativeMarkdownHeadingBlock,
+  occurrences: Map<string, number>,
+): string {
+  const identity = `${heading.level}:${heading.text.trim().toLocaleLowerCase()}`;
+  let hash = 2166136261;
+  for (let index = 0; index < identity.length; index += 1) {
+    hash ^= identity.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const digest = (hash >>> 0).toString(36);
+  const occurrence = (occurrences.get(identity) ?? 0) + 1;
+  occurrences.set(identity, occurrence);
+  return `heading-${digest}-${occurrence}`;
+}
+
+export function buildNativeMarkdownOutline(
+  blocks: NativeMarkdownBlock[],
+): NativeMarkdownOutline {
+  const preamble: NativeMarkdownBlock[] = [];
+  const sections: NativeMarkdownSection[] = [];
+  const sectionIds: string[] = [];
+  const stack: NativeMarkdownSection[] = [];
+  let activeSection: NativeMarkdownSection | null = null;
+  const headingOccurrences = new Map<string, number>();
+
+  blocks.forEach((block) => {
+    if (block.type !== 'heading') {
+      if (activeSection) activeSection.content.push(block);
+      else preamble.push(block);
+      return;
+    }
+
+    const section: NativeMarkdownSection = {
+      id: stableNativeHeadingId(block, headingOccurrences),
+      heading: block,
+      content: [],
+      children: [],
+    };
+    while (
+      stack.length > 0 &&
+      (stack[stack.length - 1]?.heading.level ?? 0) >= block.level
+    ) {
+      stack.pop();
+    }
+    const parent = stack[stack.length - 1];
+    if (parent) parent.children.push(section);
+    else sections.push(section);
+    stack.push(section);
+    activeSection = section;
+    sectionIds.push(section.id);
+  });
+
+  return { preamble, sections, sectionIds };
+}
+
 export function nativeMarkdownHasCodeBlock(text: string): boolean {
   return /^\s*```/m.test(String(text ?? ''));
 }
@@ -74,6 +145,7 @@ function startsBlock(lines: string[], index: number): boolean {
   if (!line.trim()) return true;
   if (/^\s*```/.test(line)) return true;
   if (/^\s{0,3}#{1,6}\s+/.test(line)) return true;
+  if (line.trim() && /^\s{0,3}(?:=+|-+)\s*$/.test(lines[index + 1] ?? '')) return true;
   if (/^\s{0,3}>/.test(line)) return true;
   if (/^\s*(?:[-+*]|\d+[.)])\s+/.test(line)) return true;
   if (/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) return true;
@@ -110,6 +182,17 @@ export function parseNativeMarkdown(text: string): NativeMarkdownBlock[] {
     if (heading) {
       blocks.push({ type: 'heading', level: heading[1]!.length, text: heading[2]! });
       index += 1;
+      continue;
+    }
+
+    const setextHeading = /^\s{0,3}(=+|-+)\s*$/.exec(lines[index + 1] ?? '');
+    if (line.trim() && setextHeading) {
+      blocks.push({
+        type: 'heading',
+        level: setextHeading[1]!.startsWith('=') ? 1 : 2,
+        text: line.trim(),
+      });
+      index += 2;
       continue;
     }
 

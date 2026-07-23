@@ -3,6 +3,7 @@ import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
 import React from 'react';
 import { fromByteArray } from 'base64-js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import {
   DRONE_CONTROL_CAPABILITY,
   type DroneControlOperation,
@@ -29,6 +30,10 @@ import {
 const LOCAL_DRONES_KEY = 'droneHub.nativeDrones.v1';
 const LOCAL_PINNED_DRONES_KEY = 'droneHub.nativePinnedDrones.v1';
 const LOCAL_PREVIEW_CHUNK_BYTES = 128 * 1024;
+
+function fileRevision(bytes: Uint8Array): string {
+  return `sha256:${Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
 
 function localArtifactPathParts(raw: unknown): string[] {
   const path = String(raw ?? '')
@@ -359,11 +364,26 @@ function useLocalDroneControlValue() {
             : null;
         const fileSize = Number(file.size);
         const size = Number.isFinite(fileSize) ? Math.max(0, Math.floor(fileSize)) : 0;
+        const mtimeMs = Number.isFinite(Number(file.modificationTime))
+          ? Number(file.modificationTime)
+          : null;
         const maxBytes = mediaKind ? MOBILE_MEDIA_PREVIEW_MAX_BYTES : MOBILE_TEXT_PREVIEW_MAX_BYTES;
         if (size > maxBytes) {
           throw new Error(
             `${mediaKind ? 'Media' : 'File'} is too large to preview on mobile (${size} bytes, max ${maxBytes})`,
           );
+        }
+        if (payload.metadataOnly === true && payload.includeRevision !== true) {
+          return {
+            preview: {
+              path: parts.join('/'),
+              kind: mediaKind ?? 'text',
+              mime,
+              size,
+              mtimeMs,
+              revision: null,
+            },
+          };
         }
         const bytes = await file.bytes();
         const kind = mediaKind ?? (bytes.includes(0) ? 'binary' : 'text');
@@ -372,11 +392,14 @@ function useLocalDroneControlValue() {
           kind,
           mime: kind === 'text' && mime === 'text/plain' ? 'text/plain' : mime,
           size,
-          mtimeMs: Number.isFinite(Number(file.modificationTime))
-            ? Number(file.modificationTime)
-            : null,
+          mtimeMs,
+          revision: fileRevision(bytes),
           ...(kind === 'text' ? { content: new TextDecoder().decode(bytes) } : {}),
         };
+        if (payload.metadataOnly === true) {
+          const { content: _content, ...metadata } = preview;
+          return { preview: metadata };
+        }
         if (kind !== 'image' && kind !== 'video') {
           return { contentChunk: localJsonChunk(preview, payload.contentOffset) };
         }

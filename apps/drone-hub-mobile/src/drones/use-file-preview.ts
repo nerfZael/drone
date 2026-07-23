@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppState } from 'react-native';
 import { toByteArray } from 'base64-js';
 import { File, FileMode, Paths, type FileHandle } from 'expo-file-system';
 import type { DroneControlOperation } from '@drone/device-protocol';
@@ -42,19 +43,23 @@ export function useFilePreview({
   chatName,
   phoneTarget,
   requestDroneControl,
+  subscribeFileChanges,
 }: {
   targetId: string;
   selectedDrone: MobileDroneSummary | null;
   chatName: string;
   phoneTarget: boolean;
   requestDroneControl: RequestDroneControl;
+  subscribeFileChanges?: (listener: (payload: Record<string, any>) => void) => () => void;
 }) {
   const [request, setRequest] = React.useState<PreviewRequest | null>(null);
   const [preview, setPreview] = React.useState<MobileFilePreview | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const previewFileRef = React.useRef<File | null>(null);
+  const previewRef = React.useRef<MobileFilePreview | null>(null);
   const loadVersion = React.useRef(0);
+  previewRef.current = preview;
 
   const discardCachedPreview = React.useCallback(() => {
     const file = previewFileRef.current;
@@ -65,12 +70,15 @@ export function useFilePreview({
   React.useEffect(() => () => discardCachedPreview(), [discardCachedPreview]);
 
   const load = React.useCallback(
-    async (nextRequest: PreviewRequest) => {
+    async (nextRequest: PreviewRequest, options?: { background?: boolean }) => {
       const version = ++loadVersion.current;
-      setLoading(true);
+      const background = options?.background === true && previewRef.current != null;
+      if (!background) setLoading(true);
       setError(null);
-      setPreview(null);
-      discardCachedPreview();
+      if (!background) {
+        setPreview(null);
+        discardCachedPreview();
+      }
       try {
         let firstResult: any = await requestDroneControl(nextRequest.targetId, 'file.preview', {
           droneId: nextRequest.droneId,
@@ -105,8 +113,13 @@ export function useFilePreview({
             mime: String(content?.mime ?? 'text/plain'),
             size: Math.max(0, Number(content?.size) || 0),
             mtimeMs: Number.isFinite(Number(content?.mtimeMs)) ? Number(content.mtimeMs) : null,
+            revision:
+              typeof content?.revision === 'string' && content.revision.trim()
+                ? content.revision.trim()
+                : null,
             ...(typeof content?.content === 'string' ? { content: content.content } : {}),
           });
+          if (background) discardCachedPreview();
           return;
         }
 
@@ -168,6 +181,7 @@ export function useFilePreview({
                     chatName: nextRequest.chatName,
                     path: nextRequest.path,
                     contentOffset: offset,
+                    expectedRevision: metadata.revision,
                   });
             firstResult = null;
             const resultPreview = result?.preview;
@@ -176,12 +190,17 @@ export function useFilePreview({
             const nextOffset = offset + bytes.length;
             const expectedMtime = Number(metadata.mtimeMs);
             const resultMtime = Number(resultPreview?.mtimeMs);
+            const expectedRevision =
+              typeof metadata.revision === 'string' ? metadata.revision : null;
+            const resultRevision =
+              typeof resultPreview?.revision === 'string' ? resultPreview.revision : null;
             if (
               resultPreview?.kind !== metadata.kind ||
               Number(resultPreview?.size) !== totalBytes ||
               (Number.isFinite(expectedMtime) &&
                 Number.isFinite(resultMtime) &&
                 resultMtime !== expectedMtime) ||
+              (expectedRevision && resultRevision !== expectedRevision) ||
               chunk?.encoding !== 'base64-binary' ||
               Number(chunk?.offset) !== offset ||
               Number(chunk?.bytes) !== bytes.length ||
@@ -221,11 +240,17 @@ export function useFilePreview({
             mime,
             size: totalBytes,
             mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
+            revision:
+              typeof metadata.revision === 'string' && metadata.revision.trim()
+                ? metadata.revision.trim()
+                : null,
             content: new TextDecoder().decode(bytes),
           });
+          if (background) discardCachedPreview();
           return;
         }
         if (!cacheFile) throw new Error('The media preview cache could not be created');
+        const previousCacheFile = previewFileRef.current;
         previewFileRef.current = cacheFile;
         setPreview({
           path,
@@ -234,8 +259,15 @@ export function useFilePreview({
           mime,
           size: totalBytes,
           mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
+          revision:
+            typeof metadata.revision === 'string' && metadata.revision.trim()
+              ? metadata.revision.trim()
+              : null,
           uri: cacheFile.uri,
         });
+        if (previousCacheFile && previousCacheFile !== cacheFile) {
+          setTimeout(() => deleteCachedFile(previousCacheFile), 500);
+        }
       } catch (nextError: any) {
         if (version === loadVersion.current) {
           const message = nextError?.message ?? String(nextError);
@@ -246,7 +278,7 @@ export function useFilePreview({
           );
         }
       } finally {
-        if (version === loadVersion.current) setLoading(false);
+        if (version === loadVersion.current && !background) setLoading(false);
       }
     },
     [discardCachedPreview, requestDroneControl],
@@ -278,6 +310,111 @@ export function useFilePreview({
     setLoading(false);
     discardCachedPreview();
   }, [discardCachedPreview]);
+
+  React.useEffect(() => {
+    if (!request || !preview) return;
+    let active = true;
+    let checking = false;
+    let checkCount = 0;
+    const checkForChange = async (forceRevision = false) => {
+      if (!active || checking || AppState.currentState !== 'active') return;
+      checking = true;
+      try {
+        checkCount += 1;
+        const includeRevision =
+          !phoneTarget || forceRevision || checkCount % 15 === 0;
+        const result = await requestDroneControl(request.targetId, 'file.preview', {
+          droneId: request.droneId,
+          chatName: request.chatName,
+          path: request.path,
+          metadataOnly: true,
+          includeRevision,
+        });
+        if (!active) return;
+        const nextRevision =
+          typeof result?.preview?.revision === 'string' && result.preview.revision.trim()
+            ? result.preview.revision.trim()
+            : null;
+        const currentRevision = previewRef.current?.revision ?? null;
+        const nextSize = Number(result?.preview?.size);
+        const nextMtimeMs = Number(result?.preview?.mtimeMs);
+        const currentSize = Number(previewRef.current?.size);
+        const currentMtimeMs = Number(previewRef.current?.mtimeMs);
+        const fingerprintChanged =
+          (Number.isFinite(nextSize) && nextSize !== currentSize) ||
+          (Number.isFinite(nextMtimeMs) && nextMtimeMs !== currentMtimeMs);
+        if (
+          (nextRevision && nextRevision !== currentRevision) ||
+          (!nextRevision && fingerprintChanged)
+        ) {
+          await load(request, { background: true });
+        }
+      } catch {
+        // The visible preview stays usable while reconnect/fallback checks retry.
+      } finally {
+        checking = false;
+      }
+    };
+    const interval = setInterval(
+      () => void checkForChange(),
+      phoneTarget ? 2_000 : 30_000,
+    );
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void checkForChange(true);
+    });
+    let unsubscribeEvent: (() => void) | undefined;
+    let watchSubscription: Promise<any> | null = null;
+    const watchId = `preview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    if (!phoneTarget && subscribeFileChanges) {
+      unsubscribeEvent = subscribeFileChanges((payload) => {
+        const eventPath = String(payload?.path ?? '');
+        const eventRevision =
+          typeof payload?.revision === 'string' && payload.revision.trim()
+            ? payload.revision.trim()
+            : null;
+        if (
+          String(payload?.droneId ?? '') !== request.droneId ||
+          (eventPath !== request.path && eventPath !== previewRef.current?.path)
+        ) {
+          return;
+        }
+        if (eventRevision && eventRevision === previewRef.current?.revision) return;
+        void load(request, { background: true });
+      });
+      watchSubscription = requestDroneControl(request.targetId, 'file.preview', {
+        droneId: request.droneId,
+        chatName: request.chatName,
+        path: request.path,
+        watch: 'subscribe',
+        watchId,
+      });
+      void watchSubscription.catch(() => undefined);
+    }
+    return () => {
+      active = false;
+      clearInterval(interval);
+      appStateSubscription.remove();
+      unsubscribeEvent?.();
+      if (!phoneTarget && subscribeFileChanges) {
+        const unsubscribe = () =>
+          requestDroneControl(request.targetId, 'file.preview', {
+            droneId: request.droneId,
+            chatName: request.chatName,
+            path: request.path,
+            watch: 'unsubscribe',
+            watchId,
+          }).catch(() => undefined);
+        void (watchSubscription ?? Promise.resolve()).catch(() => undefined).then(unsubscribe);
+      }
+    };
+  }, [
+    load,
+    phoneTarget,
+    preview?.path,
+    request,
+    requestDroneControl,
+    subscribeFileChanges,
+  ]);
 
   return {
     visible: Boolean(request),

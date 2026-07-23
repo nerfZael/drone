@@ -160,6 +160,18 @@ describeSocketSuite('host runtime routing api', () => {
     expect(readResp.data?.ok).toBe(true);
     expect(readResp.data?.kind).toBe('text');
     expect(String(readResp.data?.content ?? '')).toBe('hello\n');
+    expect(String(readResp.data?.revision ?? '')).toMatch(/^sha256:[a-f0-9]{64}$/);
+
+    const metadataResp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(notePath)}&metadata=1`,
+    );
+    expect(metadataResp.r.status).toBe(200);
+    expect(metadataResp.data?.revision).toBe(readResp.data?.revision);
+    const fingerprintResp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(notePath)}&metadata=1&revision=0`,
+    );
+    expect(fingerprintResp.r.status).toBe(200);
+    expect(fingerprintResp.data?.revision).toBeNull();
 
     const largeReadResp = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(largeNotePath)}`,
@@ -196,6 +208,22 @@ describeSocketSuite('host runtime routing api', () => {
     expect(mediaMetadataResp.data?.mime).toBe('video/mp4');
     expect(mediaMetadataResp.data?.size).toBe(2 * 1024 * 1024 + 1);
     expect(mediaMetadataResp.data?.content).toBeUndefined();
+    expect(String(mediaMetadataResp.data?.revision ?? '')).toMatch(/^sha256:[a-f0-9]{64}$/);
+
+    fs.writeFileSync(notePath, 'changed elsewhere\n');
+    const conflictResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/file`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        path: notePath,
+        content: 'stale editor content\n',
+        expectedRevision: readResp.data?.revision,
+      }),
+    });
+    expect(conflictResp.r.status).toBe(409);
+    expect(conflictResp.data?.code).toBe('FILE_CONFLICT');
+    expect(String(conflictResp.data?.currentRevision ?? '')).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(fs.readFileSync(notePath, 'utf8')).toBe('changed elsewhere\n');
 
     const writeResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/file`, {
       method: 'POST',
@@ -328,6 +356,59 @@ describeSocketSuite('host runtime routing api', () => {
     );
     expect(thumbResp.status).toBe(200);
     expect(String(thumbResp.headers.get('content-type') ?? '')).toContain('image/');
+  });
+
+  test('streams hash revision changes for an open host file', async () => {
+    const droneId = 'host-file-events';
+    const droneRoot = path.join(tempRoot, 'host-file-events');
+    const notePath = path.join(droneRoot, 'live.md');
+    fs.mkdirSync(droneRoot, { recursive: true });
+    fs.writeFileSync(notePath, '# First\n');
+    await seedHostDrone(droneId, { cwd: droneRoot, repoPath: '' });
+
+    const controller = new AbortController();
+    const response = await fetch(
+      `${baseUrl}/api/drones/${encodeURIComponent(droneId)}/fs/file-events?path=${encodeURIComponent(notePath)}`,
+      {
+        headers: { authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      },
+    );
+    expect(response.status).toBe(200);
+    const reader = response.body?.getReader();
+    expect(reader).toBeTruthy();
+    const decoder = new TextDecoder();
+    let buffered = '';
+    const readEvent = async (eventName: string) => {
+      const deadline = Date.now() + 4_000;
+      while (!buffered.includes(`event: ${eventName}\n`)) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error(`timed out waiting for ${eventName}`);
+        const result = await Promise.race([
+          reader!.read(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`timed out waiting for ${eventName}`)), remaining),
+          ),
+        ]);
+        if (result.done) throw new Error(`file event stream closed before ${eventName}`);
+        buffered += decoder.decode(result.value, { stream: true });
+      }
+      const marker = buffered.indexOf('\n\n');
+      const event = marker >= 0 ? buffered.slice(0, marker) : buffered;
+      if (marker >= 0) buffered = buffered.slice(marker + 2);
+      return event;
+    };
+
+    try {
+      const snapshot = await readEvent('snapshot');
+      expect(snapshot).toMatch(/"revision":"sha256:[a-f0-9]{64}"/);
+      fs.writeFileSync(notePath, '# Second\n');
+      const changed = await readEvent('changed');
+      expect(changed).toMatch(/"revision":"sha256:[a-f0-9]{64}"/);
+    } finally {
+      controller.abort();
+      await reader?.cancel().catch(() => undefined);
+    }
   });
 
   test('supports repo routes for host runtime drone', async () => {

@@ -2175,6 +2175,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     content: openedEditorFileContent,
     dirty: openedEditorFileDirty,
     mtimeMs: openedEditorFileMtimeMs,
+    revision: openedEditorFileRevision,
+    externallyChanged: openedEditorFileExternallyChanged,
+    canOverwriteExternalChange: openedEditorFileCanOverwriteExternalChange,
     recentFiles: openedEditorRecentFiles,
     quickOpenOpen,
     quickOpenQuery,
@@ -2199,6 +2202,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     reorderOpenedFileTabs,
     setOpenedFileContent,
     refreshOpenedFile,
+    reloadOpenedFileFromDisk,
+    overwriteOpenedFile,
     saveOpenedFile,
   } = useFileEditorState({
     currentDrone,
@@ -3601,6 +3606,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           agentLabel={agentLabel}
           portRows={previewPortRows}
           onRefreshOpenedEditorFile={refreshOpenedFile}
+          onReloadOpenedEditorFileFromDisk={reloadOpenedFileFromDisk}
+          onOverwriteOpenedEditorFile={overwriteOpenedFile}
           onOpenFileInEditor={(entry) => {
             if (entry.kind !== 'file') return;
             openFileInFilesPane({ path: entry.path, name: entry.name });
@@ -3622,6 +3629,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             content: openedEditorFileContent,
             dirty: openedEditorFileDirty,
             mtimeMs: openedEditorFileMtimeMs,
+            revision: openedEditorFileRevision,
+            externallyChanged: openedEditorFileExternallyChanged,
+            canOverwriteExternalChange: openedEditorFileCanOverwriteExternalChange,
             targetLine: openedEditorFile?.targetLine ?? null,
             targetColumn: openedEditorFile?.targetColumn ?? null,
             navigationSeq: openedEditorFile?.navigationSeq ?? 0,

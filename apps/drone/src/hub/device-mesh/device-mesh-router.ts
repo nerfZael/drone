@@ -172,8 +172,10 @@ export class DeviceMeshRouter {
     event: string,
     payload: Record<string, any>,
     requiredOperation: string,
+    targetDeviceIds?: Iterable<string>,
   ): Promise<void> {
     const state = await this.store.read();
+    const targets = targetDeviceIds ? new Set(targetDeviceIds) : null;
     const message = {
       type: 'capability.event',
       version: 1,
@@ -185,6 +187,7 @@ export class DeviceMeshRouter {
       issuedAt: new Date().toISOString(),
     } as const;
     for (const connection of this.connections.values()) {
+      if (targets && !targets.has(connection.peerDeviceId)) continue;
       const peer = state.devices[connection.peerDeviceId];
       if (peer && !peer.revokedAt && isGranted(peer.grants, capability, 1, requiredOperation))
         send(connection.ws, message);

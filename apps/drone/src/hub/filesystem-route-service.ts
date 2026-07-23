@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, watch as watchFs } from 'node:fs';
 import fs from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
@@ -77,6 +77,133 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           ? 'text'
           : 'binary';
     return { kind, mime };
+  };
+  const sha256 = (value: Buffer | string) =>
+    `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+  const hashHostFile = async (filePath: string): Promise<string> =>
+    await new Promise((resolve, reject) => {
+      const hash = crypto.createHash('sha256');
+      const stream = createReadStream(filePath);
+      stream.on('data', (chunk) => hash.update(chunk));
+      stream.on('error', reject);
+      stream.on('end', () => resolve(`sha256:${hash.digest('hex')}`));
+    });
+  const readFileRevision = async ({
+    drone,
+    droneName,
+    targetPath,
+  }: {
+    drone: any;
+    droneName: string;
+    targetPath: string;
+  }): Promise<{ path: string; size: number; mtimeMs: number | null; revision: string }> => {
+    if (droneRuntime(drone) === 'host') {
+      const resolvedPath = path.resolve(targetPath);
+      const stat = await fs.stat(resolvedPath);
+      if (!stat.isFile()) {
+        const error = new Error(`file not found: ${resolvedPath}`) as Error & { code?: string };
+        error.code = 'ENOENT';
+        throw error;
+      }
+      return {
+        path: resolvedPath,
+        size: Number.isFinite(stat.size) ? Math.max(0, Math.floor(stat.size)) : 0,
+        mtimeMs: Number.isFinite(stat.mtimeMs) ? Math.max(0, Math.floor(stat.mtimeMs)) : null,
+        revision: await hashHostFile(resolvedPath),
+      };
+    }
+    return await withReadonlyDroneContainer(
+      { requestedDroneName: droneName, droneEntry: drone },
+      async ({ containerName }: any) => {
+        const script = [
+          'set -euo pipefail',
+          `target=${bashQuote(targetPath)}`,
+          'if [ ! -f "$target" ]; then echo "__ERR__\tnot-file"; exit 3; fi',
+          'size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)',
+          'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
+          'revision=$(sha256sum -- "$target" | cut -d " " -f 1)',
+          'printf "__META__\\t%s\\t%s\\t%s\\n" "$size" "$mtime" "$revision"',
+        ].join('\n');
+        const result = await dvmExec(containerName, 'bash', ['-lc', script]);
+        const line = String(result.stdout ?? '').trim();
+        if (result.code !== 0 || !line.startsWith('__META__\t')) {
+          throw new Error(
+            /__ERR__\s+not-file\b/i.test(`${result.stdout}\n${result.stderr}`)
+              ? `file not found: ${targetPath}`
+              : (result.stderr || result.stdout || 'failed reading file revision').trim(),
+          );
+        }
+        const parts = line.split('\t');
+        const size = Number(parts[1] ?? 0);
+        const mtime = Number(parts[2] ?? 0);
+        const digest = String(parts[3] ?? '').trim();
+        if (!/^[a-f0-9]{64}$/i.test(digest)) throw new Error('file revision response malformed');
+        return {
+          path: targetPath,
+          size: Number.isFinite(size) ? Math.max(0, Math.floor(size)) : 0,
+          mtimeMs: Number.isFinite(mtime) ? Math.max(0, Math.floor(mtime * 1000)) : null,
+          revision: `sha256:${digest.toLowerCase()}`,
+        };
+      },
+    );
+  };
+  const readFileFingerprint = async ({
+    drone,
+    droneName,
+    targetPath,
+  }: {
+    drone: any;
+    droneName: string;
+    targetPath: string;
+  }): Promise<{ path: string; size: number; mtimeMs: number | null }> => {
+    if (droneRuntime(drone) === 'host') {
+      const resolvedPath = path.resolve(targetPath);
+      const stat = await fs.stat(resolvedPath);
+      if (!stat.isFile()) {
+        const error = new Error(`file not found: ${resolvedPath}`) as Error & { code?: string };
+        error.code = 'ENOENT';
+        throw error;
+      }
+      return {
+        path: resolvedPath,
+        size: Number.isFinite(stat.size) ? Math.max(0, Math.floor(stat.size)) : 0,
+        mtimeMs: Number.isFinite(stat.mtimeMs) ? Math.max(0, Math.floor(stat.mtimeMs)) : null,
+      };
+    }
+    return await withReadonlyDroneContainer(
+      { requestedDroneName: droneName, droneEntry: drone },
+      async ({ containerName }: any) => {
+        const script = [
+          'set -euo pipefail',
+          `target=${bashQuote(targetPath)}`,
+          'if [ ! -f "$target" ]; then echo "__ERR__\tnot-file"; exit 3; fi',
+          'size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)',
+          'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
+          'printf "__META__\\t%s\\t%s\\n" "$size" "$mtime"',
+        ].join('\n');
+        const result = await dvmExec(containerName, 'bash', ['-lc', script]);
+        const line = String(result.stdout ?? '').trim();
+        if (result.code !== 0 || !line.startsWith('__META__\t')) {
+          throw new Error(
+            /__ERR__\s+not-file\b/i.test(`${result.stdout}\n${result.stderr}`)
+              ? `file not found: ${targetPath}`
+              : (result.stderr || result.stdout || 'failed reading file metadata').trim(),
+          );
+        }
+        const parts = line.split('\t');
+        const size = Number(parts[1] ?? 0);
+        const mtime = Number(parts[2] ?? 0);
+        return {
+          path: targetPath,
+          size: Number.isFinite(size) ? Math.max(0, Math.floor(size)) : 0,
+          mtimeMs: Number.isFinite(mtime) ? Math.max(0, Math.floor(mtime * 1000)) : null,
+        };
+      },
+    );
+  };
+  const writeFileSseEvent = (res: ServerResponse, event: string, data: unknown) => {
+    if (res.writableEnded || res.destroyed) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
   return async ({ req, res, url: u, method, parts }) => {
     const handled = await (async (): Promise<false | void> => {
@@ -549,6 +676,172 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         parts[0] === 'api' &&
         parts[1] === 'drones' &&
         parts[3] === 'fs' &&
+        parts[4] === 'file-events'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+        const targetPath = normalizeFsPathForRuntime(
+          resolved.drone,
+          u.searchParams.get('path') ?? '',
+          { fallbackToHome: false },
+        );
+        if (!targetPath || targetPath === '/') {
+          json(res, 400, { ok: false, error: 'missing file path' });
+          return;
+        }
+
+        res.statusCode = 200;
+        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+        res.setHeader('cache-control', 'no-cache, no-transform');
+        res.setHeader('connection', 'keep-alive');
+        req.socket.setTimeout(0);
+        (res as any).flushHeaders?.();
+
+        let closed = false;
+        let busy = false;
+        let forceAfterBusy = false;
+        let lastRevision: string | null = null;
+        let lastFingerprint: { size: number; mtimeMs: number | null } | null = null;
+        let lastHashAt = 0;
+        let lastMissing = false;
+        const poll = async (forceHash = false) => {
+          if (closed) return;
+          if (busy) {
+            if (forceHash) forceAfterBusy = true;
+            return;
+          }
+          busy = true;
+          try {
+            const fingerprint = await readFileFingerprint({
+              drone: resolved.drone,
+              droneName,
+              targetPath,
+            });
+            const fingerprintChanged =
+              lastFingerprint == null ||
+              fingerprint.size !== lastFingerprint.size ||
+              fingerprint.mtimeMs !== lastFingerprint.mtimeMs;
+            lastFingerprint = {
+              size: fingerprint.size,
+              mtimeMs: fingerprint.mtimeMs,
+            };
+            if (fingerprint.size > FS_EDITOR_MAX_BYTES) {
+              const metadataRevision = `metadata:${fingerprint.size}:${fingerprint.mtimeMs ?? 'unknown'}`;
+              const event =
+                lastRevision == null
+                  ? 'snapshot'
+                  : metadataRevision !== lastRevision
+                    ? 'changed'
+                    : null;
+              lastRevision = metadataRevision;
+              lastHashAt = Date.now();
+              lastMissing = false;
+              if (event) {
+                writeFileSseEvent(res, event, {
+                  ok: true,
+                  id: droneId,
+                  ...fingerprint,
+                  revision: metadataRevision,
+                });
+              }
+              return;
+            }
+            const shouldHash =
+              forceHash ||
+              lastRevision == null ||
+              fingerprintChanged ||
+              Date.now() - lastHashAt >= 30_000;
+            if (!shouldHash) {
+              lastMissing = false;
+              return;
+            }
+            const current = await readFileRevision({
+              drone: resolved.drone,
+              droneName,
+              targetPath,
+            });
+            lastHashAt = Date.now();
+            const event = lastRevision == null ? 'snapshot' : current.revision !== lastRevision ? 'changed' : null;
+            lastRevision = current.revision;
+            lastMissing = false;
+            if (event) writeFileSseEvent(res, event, { ok: true, id: droneId, ...current });
+          } catch (error: any) {
+            const message = String(error?.message ?? error);
+            const missing = /not found|not-file|ENOENT/i.test(message);
+            if (missing && !lastMissing) {
+              lastMissing = true;
+              lastRevision = null;
+              lastFingerprint = null;
+              lastHashAt = 0;
+              writeFileSseEvent(res, 'deleted', { ok: false, id: droneId, path: targetPath });
+            } else if (!missing) {
+              writeFileSseEvent(res, 'stream-error', {
+                ok: false,
+                id: droneId,
+                path: targetPath,
+                error: message,
+              });
+            }
+          } finally {
+            busy = false;
+            if (forceAfterBusy && !closed) {
+              forceAfterBusy = false;
+              void poll(true);
+            }
+          }
+        };
+        const hostRuntime = droneRuntime(resolved.drone) === 'host';
+        const resolvedHostPath = hostRuntime ? path.resolve(targetPath) : null;
+        let hostWatcher: ReturnType<typeof watchFs> | null = null;
+        if (resolvedHostPath) {
+          try {
+            hostWatcher = watchFs(
+              path.dirname(resolvedHostPath),
+              { persistent: false },
+              (_eventType, filename) => {
+                if (filename == null || String(filename) === path.basename(resolvedHostPath)) {
+                  void poll(true);
+                }
+              },
+            );
+          } catch {
+            hostWatcher = null;
+          }
+        }
+        hostWatcher?.on('error', () => {
+          // The periodic revision check remains the correctness fallback.
+        });
+        const timer = setInterval(
+          () => void poll(hostRuntime),
+          hostRuntime ? 30_000 : 2_000,
+        );
+        timer.unref?.();
+        const heartbeat = setInterval(() => {
+          if (!closed && !res.writableEnded) res.write(': keepalive\n\n');
+        }, 15_000);
+        heartbeat.unref?.();
+        const cleanup = () => {
+          if (closed) return;
+          closed = true;
+          clearInterval(timer);
+          clearInterval(heartbeat);
+          hostWatcher?.close();
+        };
+        req.on('close', cleanup);
+        res.on('close', cleanup);
+        void poll(true);
+        return;
+      }
+
+      if (
+        method === 'GET' &&
+        parts.length === 5 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'fs' &&
         parts[4] === 'file'
       ) {
         const droneRef = decodeURIComponent(parts[2]);
@@ -567,6 +860,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           return;
         }
         const metadataOnly = u.searchParams.get('metadata') === '1';
+        const includeRevision = u.searchParams.get('revision') !== '0';
 
         if (runtime === 'host') {
           try {
@@ -595,6 +889,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                 mtimeMs: Number.isFinite(stat.mtimeMs)
                   ? Math.max(0, Math.floor(stat.mtimeMs))
                   : null,
+                revision: includeRevision ? await hashHostFile(resolvedPath) : null,
               });
               return;
             }
@@ -627,6 +922,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                 mime: inferredMime,
                 size: read.size,
                 mtimeMs: read.mtimeMs,
+                revision: sha256(read.buf),
               });
               return;
             }
@@ -641,6 +937,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               content: read.buf.toString('utf8'),
               size: read.size,
               mtimeMs: read.mtimeMs,
+              revision: sha256(read.buf),
             });
             return;
           } catch (e: any) {
@@ -689,7 +986,10 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                   '  exit 4',
                   'fi',
                 ]),
-            'printf "__META__\t%s\t%s\t%s\n" "$mime" "$size" "$mtime"',
+            ...(includeRevision
+              ? ['revision=$(sha256sum -- "$target" | cut -d " " -f 1)']
+              : ['revision=""']),
+            'printf "__META__\t%s\t%s\t%s\t%s\n" "$mime" "$size" "$mtime" "$revision"',
             ...(metadataOnly ? [] : ['base64 < "$target" | tr -d "\\n"']),
           ].join('\n');
 
@@ -824,6 +1124,9 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             .toLowerCase();
           const sizeNum = Number(meta[2] ?? 0);
           const mtimeSec = Number(meta[3] ?? 0);
+          const revision = /^[a-f0-9]{64}$/i.test(String(meta[4] ?? ''))
+            ? `sha256:${String(meta[4]).toLowerCase()}`
+            : null;
           if (metadataOnly) {
             const { kind, mime } = inferPreviewType(effectivePath, mimeRaw);
             json(res, 200, {
@@ -835,6 +1138,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               mime,
               size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
               mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+              revision,
             });
             return;
           }
@@ -878,6 +1182,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               mime: inferredMime,
               size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
               mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+              revision: revision ?? sha256(buf),
             });
             return;
           }
@@ -892,6 +1197,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             content: buf.toString('utf8'),
             size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
             mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+            revision: revision ?? sha256(buf),
           });
           return;
         } catch (e: any) {
@@ -967,6 +1273,10 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           return;
         }
         const content = String(body?.content ?? '');
+        const expectedRevision =
+          typeof body?.expectedRevision === 'string' && body.expectedRevision.trim()
+            ? body.expectedRevision.trim()
+            : null;
         const nextBytes = Buffer.byteLength(content, 'utf8');
         if (nextBytes > FS_EDITOR_MAX_BYTES) {
           json(res, 413, {
@@ -989,6 +1299,21 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               });
               return;
             }
+            if (expectedRevision) {
+              const currentRevision = await hashHostFile(resolvedPath);
+              if (currentRevision !== expectedRevision) {
+                json(res, 409, {
+                  ok: false,
+                  error: 'file changed on disk',
+                  code: 'FILE_CONFLICT',
+                  id: droneId,
+                  name: droneName,
+                  path: resolvedPath,
+                  currentRevision,
+                });
+                return;
+              }
+            }
             await fs.writeFile(resolvedPath, content, 'utf8');
             const after = await fs.stat(resolvedPath);
             json(res, 200, {
@@ -1000,6 +1325,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               mtimeMs: Number.isFinite(after.mtimeMs)
                 ? Math.max(0, Math.floor(after.mtimeMs))
                 : null,
+              revision: sha256(content),
             });
             return;
           } catch (e: any) {
@@ -1021,19 +1347,29 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           const result = await withLockedDroneContainer(
             { requestedDroneName: droneName, droneEntry: resolved.drone },
             async ({ containerName }: any) => {
-              const preflightScript = [
+              const writeScript = [
                 'set -euo pipefail',
                 `target=${bashQuote(targetPath)}`,
+                `data=${bashQuote(contentBase64)}`,
                 'if [ ! -f "$target" ]; then',
                 '  echo "__ERR__\tnot-file"',
                 '  exit 3',
                 'fi',
-                'echo "__OK__"',
+                ...(expectedRevision
+                  ? [
+                      'revision=$(sha256sum -- "$target" | cut -d " " -f 1)',
+                      `if [ "sha256:$revision" != ${bashQuote(expectedRevision)} ]; then`,
+                      '  printf "__ERR__\\tconflict\\t%s\\n" "$revision"',
+                      '  exit 4',
+                      'fi',
+                    ]
+                  : []),
+                'printf "%s" "$data" | base64 -d > "$target"',
               ].join('\n');
 
-              const preflight = await dvmExec(containerName, 'bash', ['-lc', preflightScript]);
-              if (preflight.code !== 0) {
-                const out = `${preflight.stdout || ''}\n${preflight.stderr || ''}`;
+              const writeOut = await dvmExec(containerName, 'bash', ['-lc', writeScript]);
+              if (writeOut.code !== 0) {
+                const out = `${writeOut.stdout || ''}\n${writeOut.stderr || ''}`;
                 if (/\bnot-file\b/i.test(out)) {
                   const err = new Error(`file not found: ${targetPath}`) as Error & {
                     statusCode?: number;
@@ -1041,25 +1377,22 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
                   err.statusCode = 404;
                   throw err;
                 }
+                const conflict = out.match(/__ERR__\s+conflict\s+([a-f0-9]{64})/i);
+                if (conflict) {
+                  const err = new Error('file changed on disk') as Error & {
+                    statusCode?: number;
+                    currentRevision?: string;
+                  };
+                  err.statusCode = 409;
+                  err.currentRevision = `sha256:${conflict[1].toLowerCase()}`;
+                  throw err;
+                }
                 throw new Error(
                   (
-                    preflight.stderr ||
-                    preflight.stdout ||
-                    'failed checking file before save'
+                    writeOut.stderr ||
+                    writeOut.stdout ||
+                    'failed writing file'
                   ).trim(),
-                );
-              }
-
-              const writeScript = [
-                'set -euo pipefail',
-                `target=${bashQuote(targetPath)}`,
-                `data=${bashQuote(contentBase64)}`,
-                'printf "%s" "$data" | base64 -d > "$target"',
-              ].join('\n');
-              const writeOut = await dvmExec(containerName, 'bash', ['-lc', writeScript]);
-              if (writeOut.code !== 0) {
-                throw new Error(
-                  (writeOut.stderr || writeOut.stdout || 'failed writing file').trim(),
                 );
               }
 
@@ -1096,6 +1429,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             path: targetPath,
             size: result.size,
             mtimeMs: result.mtimeMs,
+            revision: sha256(content),
           });
           return;
         } catch (e: any) {
@@ -1109,6 +1443,9 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             id: droneId,
             name: droneName,
             path: targetPath,
+            ...((e as any)?.currentRevision
+              ? { code: 'FILE_CONFLICT', currentRevision: (e as any).currentRevision }
+              : {}),
           });
           return;
         }

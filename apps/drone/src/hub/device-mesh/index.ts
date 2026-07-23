@@ -47,6 +47,16 @@ export async function createDeviceMeshService(options: {
     createDroneControlCapability(
       { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
       chatAttachments,
+      {
+        broadcastFileChange: (payload, targetDeviceIds) =>
+          router.broadcastCapabilityEvent(
+            'drone-control',
+            'file.changed',
+            payload,
+            'file.preview',
+            targetDeviceIds,
+          ),
+      },
     ),
   );
   const assistantPolicies = new CrossDeviceAssistantPolicyStore(

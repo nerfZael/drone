@@ -10,6 +10,8 @@ import {
   View,
 } from 'react-native';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
+import ChevronsDown from 'lucide-react-native/icons/chevrons-down';
+import ChevronsUp from 'lucide-react-native/icons/chevrons-up';
 import FileQuestion from 'lucide-react-native/icons/file-question-mark';
 import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
 import { useEvent } from 'expo';
@@ -19,7 +21,10 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { SvgXml } from 'react-native-svg';
 import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
 import { colors } from '../theme';
-import { NativeMarkdown } from '../local-assistant/NativeMarkdown';
+import {
+  NativeMarkdown,
+  type NativeMarkdownExpansionCommand,
+} from '../local-assistant/NativeMarkdown';
 import { isCodePreview, isMarkdownPreview, type MobileFilePreview } from './file-preview-model';
 import { ZoomableImageStage } from './ZoomableImageStage';
 
@@ -87,7 +92,15 @@ function PreviewImage({ uri }: { uri: string }) {
   );
 }
 
-function TextPreview({ preview, line }: { preview: MobileFilePreview; line: number | null }) {
+function TextPreview({
+  preview,
+  line,
+  markdownExpansionCommand,
+}: {
+  preview: MobileFilePreview;
+  line: number | null;
+  markdownExpansionCommand: NativeMarkdownExpansionCommand | null;
+}) {
   const scrollRef = React.useRef<ScrollView | null>(null);
   const markdown = isMarkdownPreview(preview.path, preview.mime);
   const code = isCodePreview(preview.path, preview.mime);
@@ -102,7 +115,12 @@ function TextPreview({ preview, line }: { preview: MobileFilePreview; line: numb
   if (markdown) {
     return (
       <ScrollView style={styles.bodyScroll} contentContainerStyle={styles.markdownContent}>
-        <NativeMarkdown text={preview.content ?? ''} />
+        <NativeMarkdown
+          text={preview.content ?? ''}
+          documentMode
+          collapsibleHeadings
+          expansionCommand={markdownExpansionCommand}
+        />
       </ScrollView>
     );
   }
@@ -149,6 +167,16 @@ export function FilePreviewModal({
   onClose(): void;
   onRetry(): void;
 }) {
+  const [markdownExpansionCommand, setMarkdownExpansionCommand] =
+    React.useState<NativeMarkdownExpansionCommand | null>(null);
+  const markdownPreview = Boolean(
+    preview?.kind === 'text' && isMarkdownPreview(preview.path, preview.mime),
+  );
+
+  React.useEffect(() => {
+    setMarkdownExpansionCommand(null);
+  }, [preview?.path, visible]);
+
   return (
     <Modal
       visible={visible}
@@ -180,6 +208,38 @@ export function FilePreviewModal({
                 {displayPath}
               </Text>
             </View>
+            {markdownPreview ? (
+              <View style={styles.headingActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Collapse all Markdown headings"
+                  hitSlop={8}
+                  onPress={() =>
+                    setMarkdownExpansionCommand((previous) => ({
+                      action: 'collapse',
+                      sequence: (previous?.sequence ?? 0) + 1,
+                    }))
+                  }
+                  style={({ pressed }) => [styles.headingAction, pressed && styles.pressed]}
+                >
+                  <ChevronsUp color={colors.muted} size={17} strokeWidth={2} />
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Expand all Markdown headings"
+                  hitSlop={8}
+                  onPress={() =>
+                    setMarkdownExpansionCommand((previous) => ({
+                      action: 'expand',
+                      sequence: (previous?.sequence ?? 0) + 1,
+                    }))
+                  }
+                  style={({ pressed }) => [styles.headingAction, pressed && styles.pressed]}
+                >
+                  <ChevronsDown color={colors.muted} size={17} strokeWidth={2} />
+                </Pressable>
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.content}>
@@ -204,7 +264,11 @@ export function FilePreviewModal({
                 </Pressable>
               </View>
             ) : preview?.kind === 'text' ? (
-              <TextPreview preview={preview} line={line} />
+              <TextPreview
+                preview={preview}
+                line={line}
+                markdownExpansionCommand={markdownExpansionCommand}
+              />
             ) : preview?.kind === 'image' && preview.mime === 'image/svg+xml' && preview.content ? (
               <ZoomableImageStage resetKey={`${preview.path}:${preview.content.length}`}>
                 <SvgXml
@@ -257,6 +321,14 @@ const styles = StyleSheet.create({
   },
   pressed: { opacity: 0.68 },
   headerCopy: { flex: 1, minWidth: 0 },
+  headingActions: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  headingAction: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+  },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { flexShrink: 1, color: colors.textStrong, fontSize: 15, fontWeight: '800' },
   readOnly: {
