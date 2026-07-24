@@ -125,3 +125,22 @@ export function formatReasoningLabel(valueRaw: string | null | undefined): strin
   if (value === 'xhigh') return 'X-high';
   return `${value[0]?.toUpperCase() ?? ''}${value.slice(1)}`;
 }
+
+export function formatModelDisplayLabel(valueRaw: string | null | undefined): string {
+  const value = String(valueRaw ?? '')
+    .trim()
+    .replace(/\s+\(custom\)$/i, '');
+  if (!value) return '';
+  if (!/^gpt(?:[-_\s]|$)/i.test(value)) return value;
+
+  const suffix = value
+    .replace(/^gpt[-_\s]*/i, '')
+    .replace(/[-_]+/g, ' ')
+    .trim();
+  if (!suffix) return 'GPT';
+  const [version, ...variantParts] = suffix.split(/\s+/).filter(Boolean);
+  const variant = variantParts
+    .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1).toLowerCase()}`)
+    .join(' ');
+  return `GPT-${version}${variant ? ` ${variant}` : ''}`;
+}

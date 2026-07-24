@@ -2,6 +2,7 @@ import type { ChatComposerControlsConfig } from '../chat';
 import type { ChatModelOption } from './app-types';
 import {
   displayedChatModelTitle,
+  formatModelDisplayLabel,
   formatReasoningLabel,
   latestTranscriptRuntime,
   resolveDisplayedChatModel,
@@ -66,8 +67,8 @@ export function buildExternalAgentComposerControls(opts: {
   );
   const catalogModelLabel = (modelId: string) =>
     opts.models.find((model) => model.id === modelId)?.label || modelId;
-  const displayedModelLabel = catalogModelLabel(displayedModel.label);
-  const autoModelLabel = catalogModelLabel(autoModel.label);
+  const displayedModelLabel = formatModelDisplayLabel(catalogModelLabel(displayedModel.label));
+  const autoModelLabel = formatModelDisplayLabel(catalogModelLabel(autoModel.label));
   const reasoningControlEnabled =
     opts.currentAgentKey === 'builtin:codex' ||
     opts.currentAgentKey === 'builtin:blip' ||
@@ -117,7 +118,7 @@ export function buildExternalAgentComposerControls(opts: {
         : undefined;
   const triggerLabel = `${displayedModelLabel}${
     reasoningControlEnabled && displayedReasoning
-      ? ` · ${formatReasoningLabel(displayedReasoning)}`
+      ? ` (${formatReasoningLabel(displayedReasoning)})`
       : ''
   }`;
 

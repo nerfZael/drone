@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   displayedChatModelTitle,
   formatAgentModelMetadata,
+  formatModelDisplayLabel,
   latestTranscriptModel,
   latestTranscriptRuntime,
   resolveDisplayedChatModel,
@@ -134,7 +135,7 @@ describe('chat model runtime', () => {
       onUpdate: (settings) => updates.push(settings),
     });
     const picker = config?.controls.find((control) => control.kind === 'model-picker');
-    expect(picker?.triggerLabel).toBe('GPT-5.2 · High');
+    expect(picker?.triggerLabel).toBe('GPT-5.2 (High)');
     if (!picker || picker.kind !== 'model-picker') throw new Error('model picker missing');
     picker.onSelect(
       { provider: 'external', id: 'gpt-5.2', thinkingLevel: 'medium' },
@@ -169,5 +170,10 @@ describe('chat model runtime', () => {
     if (!picker || picker.kind !== 'model-picker') throw new Error('model picker missing');
     picker.onSelect({ provider: 'external', id: 'gpt-unknown' }, 'model');
     expect(updates).toEqual([{ model: 'gpt-unknown' }]);
+  });
+
+  test('formats raw GPT model ids without exposing internal custom markers', () => {
+    expect(formatModelDisplayLabel('gpt-5.6-sol (custom)')).toBe('GPT-5.6 Sol');
+    expect(formatModelDisplayLabel('GPT-5.2 Codex')).toBe('GPT-5.2 Codex');
   });
 });
