@@ -12,7 +12,7 @@ export type AgentModelCatalogOption = {
   defaultReasoningLevel: string;
 };
 
-const STORAGE_KEY = profileStorageKey('droneHub.agentModelCatalog.v2');
+const STORAGE_KEY = profileStorageKey('droneHub.agentModelCatalog.v3');
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 
 function text(value: unknown): string {

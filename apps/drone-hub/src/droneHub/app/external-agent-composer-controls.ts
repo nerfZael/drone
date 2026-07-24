@@ -45,54 +45,38 @@ export function buildExternalAgentComposerControls(opts: {
     opts.modelControlEnabled,
     latestRuntime.model,
   );
-  const autoModel = resolveDisplayedChatModel(
-    null,
-    opts.models,
-    opts.loading,
-    opts.modelControlEnabled,
-    latestRuntime.model,
-  );
   const displayedReasoning = resolveDisplayedReasoning(
     opts.currentReasoning,
     displayedModel,
     opts.models,
     latestRuntime,
   );
-  const autoReasoning = resolveDisplayedReasoning(
-    null,
-    autoModel,
-    opts.models,
-    latestRuntime,
-  );
   const catalogModelLabel = (modelId: string) =>
     opts.models.find((model) => model.id === modelId)?.label || modelId;
   const displayedModelLabel = formatModelDisplayLabel(catalogModelLabel(displayedModel.label));
-  const autoModelLabel = formatModelDisplayLabel(catalogModelLabel(autoModel.label));
   const reasoningControlEnabled =
     opts.currentAgentKey === 'builtin:codex' ||
     opts.currentAgentKey === 'builtin:blip' ||
     opts.models.some((model) => (model.reasoningLevels?.length ?? 0) > 0);
-  const autoCatalogModel = opts.models.find((model) => model.id === autoModel.label) ?? null;
+  const autoCatalogModel =
+    opts.models.find((model) => model.isCurrent) ??
+    opts.models.find((model) => model.isDefault) ??
+    opts.models.find((model) => model.id === latestRuntime.model) ??
+    null;
   const autoReasoningLevels = autoCatalogModel?.reasoningLevels ?? [];
   const autoChoices =
     autoReasoningLevels.length > 0
       ? autoReasoningLevels.map((thinkingLevel) => ({
           provider: 'external',
           id: '',
-          name: `Auto · ${autoModelLabel}`,
+          name: 'Auto',
           thinkingLevel,
         }))
       : [
           {
             provider: 'external',
             id: '',
-            name:
-              autoModel.source === 'loading'
-                ? 'Detecting models…'
-                : autoModel.source === 'unknown'
-                  ? 'Auto'
-                  : `Auto · ${autoModelLabel}`,
-            ...(autoReasoning ? { thinkingLevel: autoReasoning } : {}),
+            name: 'Auto',
           },
         ];
   const modelChoices = [

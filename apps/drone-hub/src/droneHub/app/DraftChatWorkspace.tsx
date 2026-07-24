@@ -162,20 +162,12 @@ export function DraftChatWorkspace({
     return spawnAgentConfig.id;
   }, [filteredAgentMenuEntries, spawnAgentConfig, spawnAgentKey]);
   const modelProvider = agentCatalogId || 'default';
-  const catalogDefaultModel =
-    modelCatalog.models.find((model) => model.isCurrent) ??
-    modelCatalog.models.find((model) => model.isDefault) ??
-    null;
   const modelChoices = React.useMemo(
     () => [
       {
         provider: modelProvider,
         id: '',
-        name: modelCatalog.loading && !catalogDefaultModel
-          ? 'Detecting models…'
-          : catalogDefaultModel
-            ? `Auto · ${catalogDefaultModel.label}`
-            : 'Auto',
+        name: 'Auto',
       },
       ...modelCatalog.models.flatMap((model) =>
         model.reasoningLevels.length > 0
@@ -188,8 +180,15 @@ export function DraftChatWorkspace({
           : [{ provider: modelProvider, id: model.id, name: model.label }],
       ),
     ],
-    [catalogDefaultModel, modelCatalog.loading, modelCatalog.models, modelProvider],
+    [modelCatalog.models, modelProvider],
   );
+  const modelCatalogStatusMessage = modelCatalog.error
+    ? `${modelCatalog.models.length > 0 ? 'Using the last detected catalog. ' : ''}${modelCatalog.error}`
+    : modelCatalog.loading && modelCatalog.models.length === 0
+      ? 'Detecting available models…'
+      : modelCatalog.stale
+        ? 'Updating the agent model catalog in the background…'
+        : undefined;
   const newDroneComposerControls = React.useMemo<ChatComposerControlsConfig | undefined>(() => {
     if (!createWithChat) return undefined;
     const controls: ChatComposerControl[] = [
@@ -220,6 +219,7 @@ export function DraftChatWorkspace({
         searchable: true,
         searchPlaceholder: 'Search models',
         title: 'Choose model and reasoning',
+        statusMessage: modelCatalogStatusMessage,
         onSelect: (choice, selection) => {
           if (selection === 'reasoning') {
             setSpawnReasoning(choice.thinkingLevel ?? '');
@@ -251,6 +251,7 @@ export function DraftChatWorkspace({
     createWithChat,
     filteredAgentMenuEntries,
     modelChoices,
+    modelCatalogStatusMessage,
     modelProvider,
     setCustomAgentModalOpen,
     setSpawnAgentKey,

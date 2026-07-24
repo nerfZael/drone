@@ -137,6 +137,7 @@ describe('chat model runtime', () => {
     expect(picker?.triggerLabel).toBe('GPT-5.2 (High)');
     expect(picker?.statusMessage).toBeUndefined();
     if (!picker || picker.kind !== 'model-picker') throw new Error('model picker missing');
+    expect(picker.options[0]).toMatchObject({ id: '', name: 'Auto' });
     picker.onSelect(
       { provider: 'external', id: 'gpt-5.2', thinkingLevel: 'medium' },
       'model',

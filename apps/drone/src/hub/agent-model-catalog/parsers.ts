@@ -173,7 +173,24 @@ export function parseCodexModelCache(raw: string): AgentModelCatalogModel[] {
     const current = String(parsed?.current_model ?? parsed?.currentModel ?? '').trim();
     const defaultModel = String(parsed?.default_model ?? parsed?.defaultModel ?? '').trim();
     const collector = createCollector();
-    for (const model of list) {
+    const prioritizedModels: Array<{
+      model: any;
+      index: number;
+      priority: number;
+    }> = list.map((model: any, index: number) => ({
+      model,
+      index,
+      priority: Number.isFinite(Number(model?.priority))
+        ? Number(model.priority)
+        : Number.POSITIVE_INFINITY,
+    }));
+    const availableModels = prioritizedModels
+      .filter(({ model }: { model: any }) => {
+        const visibility = String(model?.visibility ?? '').trim().toLowerCase();
+        return visibility !== 'hide';
+      })
+      .sort((left, right) => left.priority - right.priority || left.index - right.index);
+    for (const { model } of availableModels) {
       const id = model?.slug ?? model?.id ?? model?.model ?? model?.name;
       const modelId = String(id ?? '').trim();
       const label =
