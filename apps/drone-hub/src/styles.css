@@ -731,7 +731,7 @@ code, pre {
   background: transparent;
 }
 
-.dh-sidebar-row-interactive:not([aria-disabled='true']):not(.dh-sidebar-row-selected):not(.dh-sidebar-row-highlighted):hover::after {
+.dh-sidebar-row-interactive:not([aria-disabled='true']):not(.dh-sidebar-row-selected):not(.dh-sidebar-row-highlighted):is(:hover, :focus-visible)::after {
   content: '';
   position: absolute;
   z-index: -1;

@@ -442,7 +442,7 @@ export const DroneCard = React.memo(function DroneCard({
         dragging ? 'opacity-35' : ''
       } ${disabled ? 'cursor-not-allowed opacity-60' : ''} ${
         highlighted ? 'shadow-[var(--glow-yellow)]' : ''
-      } focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]`}
+      } focus:outline-none`}
     >
       {/* Accent edge for selected state or open-chat state when requested */}
       {(selected && renderSelectionEdge) || renderActiveEdge ? (

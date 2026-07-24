@@ -101,8 +101,7 @@ export function sidebarChatRowTone(args: {
   active?: boolean;
   disabled?: boolean;
 }): string {
-  const focusClass =
-    'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]';
+  const focusClass = 'focus-visible:outline-none';
   if (args.disabled) {
     return 'cursor-not-allowed border-transparent text-[var(--muted-dim)] opacity-60';
   }

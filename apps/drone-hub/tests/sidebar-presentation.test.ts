@@ -91,7 +91,8 @@ describe('sidebar presentation', () => {
     expect(active).not.toContain('sidebar-fg-active');
     expect(active).not.toContain('dh-sidebar-row-selected');
     expect(active).toContain('border-transparent');
-    expect(active).toContain('focus-visible:ring-[var(--focus-ring)]');
+    expect(active).toContain('focus-visible:outline-none');
+    expect(active).not.toContain('focus-visible:ring-');
     expect(sidebarChatRowTone({})).toContain('sidebar-subitem-fg');
     expect(sidebarChatRowTone({})).toContain('dh-sidebar-row-interactive');
     expect(sidebarChatRowTone({})).not.toContain('hover:bg-');
@@ -132,7 +133,7 @@ describe('sidebar presentation', () => {
     expect(sidebarSource).toContain('<div className="flex flex-col gap-0">');
     expect(sidebarSource).toContain('<div className="flex flex-col gap-0">\n                  <>');
     expect(stylesSource).toContain('.dh-sidebar-row-selected::before');
-    expect(stylesSource).toContain(".dh-sidebar-row-interactive:not([aria-disabled='true']):not(.dh-sidebar-row-selected):not(.dh-sidebar-row-highlighted):hover::after");
+    expect(stylesSource).toContain(".dh-sidebar-row-interactive:not([aria-disabled='true']):not(.dh-sidebar-row-selected):not(.dh-sidebar-row-highlighted):is(:hover, :focus-visible)::after");
     expect(hoverRule).toContain('background: var(--hover);');
     expect(hoverRule).not.toContain('background: var(--sidebar-row-selected-bg);');
     expect(selectedRule).toContain('background: var(--sidebar-row-selected-bg);');

@@ -229,7 +229,8 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).toContain('dh-sidebar-row-selected');
     expect(html).toContain('dh-sidebar-row-interactive');
     expect(html).toContain('bg-[var(--sidebar-row-selected-edge)]');
-    expect(html).toContain('focus-visible:ring-[var(--focus-ring)]');
+    expect(html).toContain('focus:outline-none');
+    expect(html).not.toContain('focus-visible:ring-');
   });
 
   test('keeps a selected parent drone text-only when its child chat is active', () => {
