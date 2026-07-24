@@ -427,6 +427,170 @@ describe('mobile drone sidebar model', () => {
     });
   });
 
+  test('projects external reasoning and tool activity without duplicating the final answer', () => {
+    const messages = mobileDroneTurnsToAssistantMessages([
+      {
+        id: 'turn-with-activity',
+        prompt: 'Inspect it',
+        output: 'Finished.',
+        activity: {
+          version: 1,
+          source: 'codex',
+          updatedAt: '2026-07-24T00:00:01.000Z',
+          messages: [
+            {
+              role: 'assistant',
+              content: [{ type: 'thinking', thinking: 'Inspecting.' }],
+            },
+            {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'toolCall',
+                  id: 'tool-1',
+                  name: 'command_execution',
+                  arguments: { command: 'git status' },
+                },
+              ],
+            },
+            {
+              role: 'toolResult',
+              toolCallId: 'tool-1',
+              toolName: 'command_execution',
+              content: 'clean',
+            },
+            {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'Finished.' }],
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(messages.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'assistant',
+      'toolResult',
+      'assistant',
+    ]);
+    expect(
+      messages.filter(
+        (message) =>
+          message.role === 'assistant' &&
+          (typeof message.content === 'string'
+            ? message.content === 'Finished.'
+            : message.content?.some((part) => part.text === 'Finished.')),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test('discloses trimmed external activity details', () => {
+    const messages = mobileDroneTurnsToAssistantMessages([
+      {
+        id: 'trimmed-activity',
+        prompt: 'Inspect it',
+        output: 'Finished.',
+        activity: {
+          version: 1,
+          source: 'claude',
+          updatedAt: '2026-07-24T00:00:01.000Z',
+          truncated: true,
+          messages: [
+            {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'Finished.' }],
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(messages.some(
+      (message) => message.content === 'Earlier or oversized activity details were trimmed.',
+    )).toBe(true);
+  });
+
+  test('ignores stale error text on successful activity-backed turns', () => {
+    const messages = mobileDroneTurnsToAssistantMessages([
+      {
+        id: 'successful-activity',
+        prompt: 'Inspect it',
+        ok: true,
+        output: 'Finished.',
+        error: 'stale failure',
+        activity: {
+          version: 1,
+          source: 'opencode',
+          updatedAt: '2026-07-24T00:00:01.000Z',
+          messages: [
+            {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'Finished.' }],
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(messages.some((message) => message.content === 'stale failure')).toBe(false);
+    expect(messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+  });
+
+  test('adds active pending activity to the mobile transcript with its plan and file summary', () => {
+    const fileChanges = {
+      version: 1 as const,
+      capturedAt: '2026-07-24T00:00:02.000Z',
+      counts: { changed: 1, additions: 2, deletions: 0 },
+      workspaces: [],
+    };
+    const messages = mobileDroneTurnsToAssistantMessages([], [
+      {
+        id: 'pending-activity',
+        at: '2026-07-24T00:00:00.000Z',
+        prompt: 'Implement it',
+        state: 'sent',
+        agentPlan: {
+          source: 'codex',
+          items: [{ text: 'Implement', status: 'in_progress' }],
+        },
+        fileChanges,
+        activityMeshTruncated: true,
+        activity: {
+          version: 1,
+          source: 'codex',
+          updatedAt: '2026-07-24T00:00:01.000Z',
+          messages: [
+            {
+              role: 'assistant',
+              content: [{ type: 'thinking', thinking: 'Working through it.' }],
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(messages[0]).toMatchObject({
+      id: 'pending-activity:user',
+      role: 'user',
+      details: {
+        mobileRun: {
+          plan: { items: [{ text: 'Implement', status: 'in_progress' }] },
+        },
+      },
+    });
+    expect(messages[1]).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking: 'Working through it.' }],
+    });
+    expect(messages[2]).toMatchObject({
+      role: 'runSummary',
+      details: { fileChanges: { counts: { changed: 1 } } },
+    });
+    expect(messages.some((message) => message.meshTruncated === true)).toBe(false);
+  });
+
   test('normalizes DroneHub transcript metadata for the native chat presentation', () => {
     expect(
       normalizeMobileDroneTurns([
@@ -541,6 +705,42 @@ describe('mobile drone sidebar model', () => {
     expect(messages[1]).toMatchObject({
       id: 'turn-1:assistant',
       role: 'assistant',
+      meshTruncated: true,
+    });
+  });
+
+  test('offers full loading on the fallback response when only tool activity was trimmed', () => {
+    const messages = mobileDroneTurnsToAssistantMessages([
+      {
+        id: 'turn-tool-activity',
+        prompt: 'Inspect it',
+        output: 'Done.',
+        activityMeshTruncated: true,
+        activity: {
+          version: 1,
+          source: 'pi',
+          updatedAt: '2026-07-24T00:00:01.000Z',
+          messages: [
+            {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'toolCall',
+                  id: 'tool-1',
+                  name: 'read',
+                  arguments: {},
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(messages.at(-1)).toMatchObject({
+      id: 'turn-tool-activity:assistant',
+      role: 'assistant',
+      content: 'Done.',
       meshTruncated: true,
     });
   });

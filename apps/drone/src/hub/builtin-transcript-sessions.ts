@@ -1,5 +1,7 @@
+import type { AgentRunActivity } from '@drone/assistant-chat';
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
 import { normalizeAgentPlan, type AgentPlan } from './agent-plan';
+import { BuiltinAgentActivityCollector, normalizeAgentRunActivity } from './builtin-agent-activity';
 
 export function readBuiltinTranscriptSessionId(
   chatEntry: any,
@@ -76,7 +78,7 @@ function extractModelId(raw: any): string | null {
     raw.info?.modelID;
   const value =
     direct && typeof direct === 'object'
-      ? direct.id ?? direct.modelId ?? direct.modelID ?? direct.model_id ?? direct.name
+      ? (direct.id ?? direct.modelId ?? direct.modelID ?? direct.model_id ?? direct.name)
       : direct;
   const text = typeof value === 'string' ? value.trim() : '';
   if (!text || text.length > 160 || /[\r\n\t]/.test(text)) return null;
@@ -103,6 +105,7 @@ type CodexTerminalEvent = 'turn.completed' | 'response.completed' | 'response.fa
 type CodexJsonlParseResult = {
   threadId: string | null;
   message: string | null;
+  activity?: AgentRunActivity;
   model?: string;
   reasoning?: string;
   terminalEvent?: CodexTerminalEvent;
@@ -111,13 +114,20 @@ type CodexJsonlParseResult = {
 type StructuredAgentJsonlParseResult = {
   sessionId: string | null;
   message: string | null;
+  activity?: AgentRunActivity;
   model?: string;
   reasoning?: string;
   agentPlan?: AgentPlan;
   terminalStatus?: 'completed' | 'failed';
   error?: string;
 };
-type PiJsonlParseResult = { sessionId: string | null; message: string | null; model?: string; reasoning?: string };
+type PiJsonlParseResult = {
+  sessionId: string | null;
+  message: string | null;
+  activity?: AgentRunActivity;
+  model?: string;
+  reasoning?: string;
+};
 export type BlipCloneActivity = {
   status: 'running';
   count: number;
@@ -138,6 +148,7 @@ export type BlipToolCallSummary = {
 type BlipJsonlParseResult = {
   sessionId: string | null;
   message: string | null;
+  activity?: AgentRunActivity;
   model?: string;
   reasoning?: string;
   terminalEvent?: 'session_finished' | 'session_error';
@@ -165,6 +176,9 @@ function createCodexJsonlParser(): {
   let streamedMsg = '';
   let terminalEvent: CodexTerminalEvent | null = null;
   let agentPlan: AgentPlan | undefined;
+  let assistantSequence = 0;
+  let lastActivityText = '';
+  const activity = new BuiltinAgentActivityCollector('codex');
 
   function extractItemText(item: any): string | null {
     if (!item || typeof item !== 'object') return null;
@@ -193,9 +207,85 @@ function createCodexJsonlParser(): {
   function considerAssistantItem(item: any) {
     if (!isAssistantItem(item)) return;
     const text = extractItemText(item);
-    if (text) lastMsg = text;
+    if (text) {
+      lastMsg = text;
+      lastActivityText = text;
+      activity.upsertAssistant({
+        id: String(item?.id ?? `assistant-${assistantSequence++}`),
+        text,
+        createdAt: item?.timestamp,
+      });
+    }
     lastModel = extractModelId(item) ?? lastModel;
     lastReasoning = extractReasoningEffort(item) ?? lastReasoning;
+  }
+
+  function considerItem(item: any, eventType = 'item.completed') {
+    if (!item || typeof item !== 'object') return;
+    const itemType = String(item.type ?? '').trim();
+    const id = String(item.id ?? `${itemType || 'item'}-${assistantSequence++}`);
+    if (itemType === 'reasoning') {
+      const thinking =
+        takeStringText(item.text) ??
+        takeStringText(item.summary) ??
+        extractContentText(item.summary) ??
+        extractContentText(item.content);
+      if (thinking) activity.upsertAssistant({ id, thinking, createdAt: item.timestamp });
+      return;
+    }
+    const toolName =
+      itemType === 'command_execution'
+        ? 'command_execution'
+        : itemType === 'mcp_tool_call'
+          ? [item.server, item.tool]
+              .map((value) => String(value ?? '').trim())
+              .filter(Boolean)
+              .join('.') || 'mcp_tool_call'
+          : itemType === 'web_search'
+            ? 'web_search'
+            : itemType === 'file_change'
+              ? 'file_change'
+              : '';
+    if (toolName) {
+      const args =
+        itemType === 'command_execution'
+          ? { command: item.command }
+          : itemType === 'mcp_tool_call'
+            ? (item.arguments ?? item.args ?? {})
+            : itemType === 'web_search'
+              ? { query: item.query }
+              : { changes: item.changes };
+      activity.upsertToolCall({ id, name: toolName, arguments: args, createdAt: item.timestamp });
+      const status = String(item.status ?? '')
+        .trim()
+        .toLowerCase();
+      const completed =
+        eventType === 'item.completed' ||
+        status === 'completed' ||
+        status === 'failed' ||
+        status === 'declined';
+      if (completed) {
+        const error =
+          item.error ??
+          (status === 'failed' || status === 'declined'
+            ? (item.aggregated_output ?? item.output ?? status)
+            : undefined);
+        activity.upsertToolResult({
+          id,
+          name: toolName,
+          result:
+            item.result ??
+            item.aggregated_output ??
+            item.output ??
+            item.changes ??
+            (status ? { status } : undefined),
+          error,
+          createdAt: item.timestamp,
+        });
+      }
+      return;
+    }
+    considerAssistantItem(item);
   }
 
   function considerResponse(response: any) {
@@ -204,10 +294,12 @@ function createCodexJsonlParser(): {
     const responseText = takeStringText(response?.output_text);
     if (responseText) {
       lastMsg = responseText;
+      lastActivityText = responseText;
+      activity.upsertAssistant({ id: 'response-output', text: responseText });
       return;
     }
     if (!Array.isArray(response?.output)) return;
-    for (const item of response.output) considerAssistantItem(item);
+    for (const item of response.output) considerItem(item, 'item.completed');
   }
 
   return {
@@ -231,13 +323,16 @@ function createCodexJsonlParser(): {
         type === 'error'
       ) {
         terminalEvent = type;
+        activity.settleOpenTools();
       }
       if (obj.type === 'thread.started' && typeof obj.thread_id === 'string') {
         threadId = obj.thread_id;
         return;
       }
       if (
-        (obj.type === 'item.completed' || obj.type === 'item.started' || obj.type === 'item.updated') &&
+        (obj.type === 'item.completed' ||
+          obj.type === 'item.started' ||
+          obj.type === 'item.updated') &&
         obj.item &&
         typeof obj.item === 'object'
       ) {
@@ -245,23 +340,37 @@ function createCodexJsonlParser(): {
           agentPlan = normalizeAgentPlan(obj.item.items, 'codex', new Date().toISOString());
           return;
         }
-        considerAssistantItem(obj.item);
+        considerItem(obj.item, obj.type);
         return;
       }
 
       if (obj.type === 'response.output_text.delta') {
         const delta = takeStringText(obj.delta);
-        if (delta) streamedMsg += delta;
+        if (delta) {
+          streamedMsg += delta;
+          lastActivityText = streamedMsg;
+          activity.upsertAssistant({ id: 'response-stream', text: streamedMsg });
+        }
         return;
       }
       if (obj.type === 'response.output_text.done') {
         const text = takeStringText(obj.text);
-        if (text) lastMsg = text;
+        if (text) {
+          lastMsg = text;
+          lastActivityText = text;
+          activity.upsertAssistant({ id: 'response-stream', text });
+        }
         return;
       }
       if (obj.type === 'turn.completed') {
         const text = takeStringText(obj.last_agent_message) ?? takeStringText(obj.message);
-        if (text) lastMsg = text;
+        if (text) {
+          lastMsg = text;
+          if (text !== lastActivityText) {
+            activity.upsertAssistant({ id: 'turn-final', text });
+            lastActivityText = text;
+          }
+        }
         lastModel = extractModelId(obj) ?? lastModel;
       }
 
@@ -270,9 +379,11 @@ function createCodexJsonlParser(): {
       considerResponse(obj?.response);
     },
     result() {
+      const agentActivity = activity.result();
       return {
         threadId,
         message: lastMsg ?? (streamedMsg ? streamedMsg : null),
+        ...(agentActivity ? { activity: agentActivity } : {}),
         ...(lastModel ? { model: lastModel } : {}),
         ...(lastReasoning ? { reasoning: lastReasoning } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
@@ -293,7 +404,11 @@ function findTodoList(raw: unknown): unknown[] | null {
   }
   const value = raw as any;
   if (Array.isArray(value.todos)) return value.todos;
-  if (Array.isArray(value.items) && /todo|plan/i.test(String(value.name ?? value.tool ?? value.type ?? ''))) return value.items;
+  if (
+    Array.isArray(value.items) &&
+    /todo|plan/i.test(String(value.name ?? value.tool ?? value.type ?? ''))
+  )
+    return value.items;
   for (const [key, child] of Object.entries(value)) {
     if (key === 'content' || key === 'text') continue;
     const found = findTodoList(child);
@@ -313,9 +428,53 @@ function createStructuredAgentJsonlParser(
   let cursorAssistantText = '';
   let terminalStatus: StructuredAgentJsonlParseResult['terminalStatus'];
   let error: string | null = null;
+  let activitySequence = 0;
+  let lastActivityText = '';
+  const activity = new BuiltinAgentActivityCollector(source);
 
   const considerText = (raw: any) => {
     if (typeof raw === 'string' && raw.trim()) message = raw.trimEnd();
+  };
+
+  const recordAssistant = (input: {
+    id?: unknown;
+    text?: unknown;
+    thinking?: unknown;
+    createdAt?: unknown;
+    replaceLastText?: boolean;
+  }) => {
+    const text = typeof input.text === 'string' ? input.text.trimEnd() : '';
+    const thinking = typeof input.thinking === 'string' ? input.thinking.trimEnd() : '';
+    if (!text && !thinking) return;
+    if (text && text === lastActivityText && !thinking) return;
+    if (text) lastActivityText = text;
+    activity.upsertAssistant({
+      id: String(
+        input.id ??
+          (input.replaceLastText
+            ? `${source}-stream`
+            : `${source}-assistant-${activitySequence++}`),
+      ),
+      ...(text ? { text } : {}),
+      ...(thinking ? { thinking } : {}),
+      createdAt: input.createdAt,
+    });
+  };
+
+  const cursorTool = (obj: any): { id: string; name: string; payload: any } | null => {
+    const root = obj?.tool_call;
+    if (!root || typeof root !== 'object' || Array.isArray(root)) return null;
+    const [entryName, payloadRaw] =
+      Object.entries(root).find(([, value]) => value && typeof value === 'object') ?? [];
+    const payload: any = payloadRaw ?? {};
+    const name = String(entryName ?? '')
+      .replace(/ToolCall$/i, '')
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .toLowerCase();
+    const id = String(
+      obj.call_id ?? obj.tool_call_id ?? payload?.id ?? `cursor-tool-${activitySequence++}`,
+    );
+    return name ? { id, name, payload } : null;
   };
 
   return {
@@ -344,11 +503,21 @@ function createStructuredAgentJsonlParser(
           error;
       }
       if (eventType === 'result') {
-        const failed = obj.is_error === true || String(obj.subtype ?? '').trim().toLowerCase() === 'error';
+        const failed =
+          obj.is_error === true ||
+          String(obj.subtype ?? '')
+            .trim()
+            .toLowerCase() === 'error';
         terminalStatus = failed ? 'failed' : 'completed';
         if (failed) error = optionalString(obj.result) ?? optionalString(obj.error) ?? error;
+        activity.settleOpenTools(
+          failed
+            ? 'The agent stopped before this tool reported completion.'
+            : 'The agent completed without a matching tool result.',
+        );
       }
-      const isToolEvent = eventType === 'tool_call' || eventType === 'tool_use' || eventType === 'assistant';
+      const isToolEvent =
+        eventType === 'tool_call' || eventType === 'tool_use' || eventType === 'assistant';
       if (isToolEvent) {
         const todos = findTodoList(obj.tool_call ?? obj.part ?? obj.message?.content ?? obj);
         if (todos) agentPlan = normalizeAgentPlan(todos, source, new Date().toISOString());
@@ -356,11 +525,81 @@ function createStructuredAgentJsonlParser(
 
       if (source === 'claude') {
         const content = Array.isArray(obj.message?.content) ? obj.message.content : [];
-        const text = content.filter((item: any) => item?.type === 'text').map((item: any) => String(item.text ?? '')).join('\n');
-        if (eventType === 'assistant') considerText(text);
-        if (eventType === 'result') considerText(obj.result);
+        const messageId = String(obj.message?.id ?? `claude-${activitySequence++}`);
+        if (eventType === 'assistant') {
+          const text = content
+            .filter((item: any) => item?.type === 'text')
+            .map((item: any) => String(item.text ?? ''))
+            .join('\n');
+          considerText(text);
+          for (let index = 0; index < content.length; index += 1) {
+            const block = content[index];
+            const blockId = `${messageId}:${index}`;
+            if (block?.type === 'text') {
+              recordAssistant({ id: blockId, text: block.text });
+            } else if (block?.type === 'thinking') {
+              recordAssistant({ id: blockId, thinking: block.thinking ?? block.text });
+            } else if (block?.type === 'tool_use') {
+              activity.upsertToolCall({
+                id: String(block.id ?? blockId),
+                name: String(block.name ?? 'tool'),
+                arguments: block.input ?? {},
+              });
+            }
+          }
+        }
+        if (eventType === 'user') {
+          for (let index = 0; index < content.length; index += 1) {
+            const block = content[index];
+            if (block?.type !== 'tool_result') continue;
+            const id = String(block.tool_use_id ?? `${messageId}:${index}`);
+            activity.upsertToolResult({
+              id,
+              result: block.content,
+              ...(block.is_error === true ? { error: block.content ?? 'Tool call failed.' } : {}),
+            });
+          }
+        }
+        if (eventType === 'result') {
+          considerText(obj.result);
+          recordAssistant({ id: 'claude-result', text: obj.result });
+        }
       } else if (source === 'opencode') {
-        if (eventType === 'text') considerText(obj.part?.text);
+        const part = obj.part && typeof obj.part === 'object' ? obj.part : {};
+        const partId = String(
+          part.id ?? part.callID ?? part.callId ?? `opencode-${activitySequence++}`,
+        );
+        const partType = String(part.type ?? eventType).trim();
+        if (eventType === 'text' || partType === 'text') {
+          considerText(part.text);
+          recordAssistant({ id: partId, text: part.text });
+        }
+        if (eventType === 'reasoning' || partType === 'reasoning') {
+          recordAssistant({ id: partId, thinking: part.text ?? part.reasoning });
+        }
+        if (eventType === 'tool_use' || partType === 'tool') {
+          const state = part.state && typeof part.state === 'object' ? part.state : {};
+          const callId = String(part.callID ?? part.callId ?? part.id ?? partId);
+          const toolName = String(part.tool ?? part.name ?? 'tool');
+          activity.upsertToolCall({
+            id: callId,
+            name: toolName,
+            arguments: state.input ?? part.input ?? {},
+          });
+          const status = String(state.status ?? '')
+            .trim()
+            .toLowerCase();
+          if (status === 'completed' || status === 'error' || status === 'failed') {
+            activity.upsertToolResult({
+              id: callId,
+              name: toolName,
+              result: state.output ?? state.result,
+              ...(status === 'error' || status === 'failed'
+                ? { error: state.error ?? state.output ?? 'Tool call failed.' }
+                : {}),
+            });
+          }
+        }
       } else {
         if (eventType === 'assistant') {
           const content = obj.message?.content;
@@ -368,15 +607,61 @@ function createStructuredAgentJsonlParser(
           if (text) {
             cursorAssistantText += text;
             considerText(cursorAssistantText);
+            recordAssistant({
+              id: 'cursor-stream',
+              text: cursorAssistantText,
+              replaceLastText: true,
+            });
           }
         }
-        if (eventType === 'result') considerText(obj.result);
+        if (eventType === 'thinking' || eventType === 'reasoning') {
+          recordAssistant({
+            id: String(obj.id ?? `cursor-reasoning-${activitySequence++}`),
+            thinking: obj.text ?? obj.reasoning ?? obj.message?.content,
+          });
+        }
+        if (eventType === 'tool_call') {
+          const tool = cursorTool(obj);
+          if (tool) {
+            activity.upsertToolCall({
+              id: tool.id,
+              name: tool.name,
+              arguments: tool.payload?.args ?? tool.payload?.input ?? {},
+            });
+            const subtype = String(obj.subtype ?? tool.payload?.status ?? '')
+              .trim()
+              .toLowerCase();
+            const result = tool.payload?.result ?? tool.payload?.output;
+            const toolError = tool.payload?.error;
+            if (
+              subtype === 'completed' ||
+              subtype === 'failed' ||
+              result !== undefined ||
+              toolError !== undefined
+            ) {
+              activity.upsertToolResult({
+                id: tool.id,
+                name: tool.name,
+                result,
+                ...(subtype === 'failed' || toolError !== undefined
+                  ? { error: toolError ?? result ?? 'Tool call failed.' }
+                  : {}),
+              });
+            }
+          }
+        }
+        if (eventType === 'result') {
+          considerText(obj.result);
+          recordAssistant({ id: 'cursor-result', text: obj.result });
+        }
       }
     },
     result() {
+      const agentActivity = activity.result();
       return {
         sessionId,
         message,
+        ...(agentActivity ? { activity: agentActivity } : {}),
         ...(model ? { model } : {}),
         ...(reasoning ? { reasoning } : {}),
         ...(agentPlan ? { agentPlan } : {}),
@@ -408,6 +693,8 @@ function createPiJsonlParser(): {
   let lastMsg: string | null = null;
   let lastModel: string | null = null;
   let lastReasoning: string | null = null;
+  let messageSequence = 0;
+  const activity = new BuiltinAgentActivityCollector('pi');
 
   const extractAssistantText = (message: any): string | null => {
     if (!message || typeof message !== 'object') return null;
@@ -429,9 +716,41 @@ function createPiJsonlParser(): {
   };
 
   const considerMessage = (message: any) => {
+    if (!message || typeof message !== 'object') return;
     const text = extractAssistantText(message);
-    if (!text) return;
-    lastMsg = text;
+    const baseId = String(message.id ?? message.timestamp ?? `pi-message-${messageSequence++}`);
+    if (String(message.role ?? '').trim() === 'assistant' && Array.isArray(message.content)) {
+      for (let index = 0; index < message.content.length; index += 1) {
+        const part = message.content[index];
+        if (!part || typeof part !== 'object') continue;
+        const partId = `${baseId}:${index}`;
+        const partType = String(part.type ?? '').trim();
+        if (partType === 'text') {
+          activity.upsertAssistant({ id: partId, text: part.text });
+        } else if (partType === 'thinking') {
+          activity.upsertAssistant({ id: partId, thinking: part.thinking ?? part.text });
+        } else if (partType === 'toolCall') {
+          activity.upsertToolCall({
+            id: String(part.id ?? partId),
+            name: String(part.name ?? 'tool'),
+            arguments: part.arguments ?? {},
+          });
+        }
+      }
+    } else if (text) {
+      activity.upsertAssistant({ id: baseId, text });
+    }
+    if (String(message.role ?? '').trim() === 'toolResult') {
+      activity.upsertToolResult({
+        id: String(message.toolCallId ?? message.tool_call_id ?? baseId),
+        name: String(message.toolName ?? message.tool_name ?? 'tool'),
+        result: message.content ?? message.result,
+        ...(message.isError === true
+          ? { error: message.errorMessage ?? message.content ?? 'Tool call failed.' }
+          : {}),
+      });
+    }
+    if (text) lastMsg = text;
     lastModel = extractModelId(message) ?? lastModel;
     lastReasoning = extractReasoningEffort(message) ?? lastReasoning;
   };
@@ -453,15 +772,33 @@ function createPiJsonlParser(): {
         const parsedId = parseUuid(String(obj.id ?? obj.sessionId ?? obj.session_id ?? '').trim());
         if (parsedId) sessionId = parsedId;
       }
+      if (obj.type === 'tool_execution_start' || obj.type === 'tool_execution_update') {
+        activity.upsertToolCall({
+          id: String(obj.toolCallId ?? obj.tool_call_id ?? `pi-tool-${messageSequence++}`),
+          name: String(obj.toolName ?? obj.tool_name ?? ''),
+          arguments: obj.args,
+        });
+      }
+      if (obj.type === 'tool_execution_end') {
+        activity.upsertToolResult({
+          id: String(obj.toolCallId ?? obj.tool_call_id ?? `pi-tool-${messageSequence++}`),
+          name: String(obj.toolName ?? obj.tool_name ?? 'tool'),
+          result: obj.result,
+          ...(obj.isError === true ? { error: obj.result ?? 'Tool call failed.' } : {}),
+        });
+      }
+      if (obj.type === 'agent_end') activity.settleOpenTools();
       considerMessage(obj.message);
       if (Array.isArray(obj.messages)) {
         for (const message of obj.messages) considerMessage(message);
       }
     },
     result() {
+      const agentActivity = activity.result();
       return {
         sessionId,
         message: lastMsg,
+        ...(agentActivity ? { activity: agentActivity } : {}),
         ...(lastModel ? { model: lastModel } : {}),
         ...(lastReasoning ? { reasoning: lastReasoning } : {}),
       };
@@ -525,6 +862,10 @@ function createBlipJsonlParser(): {
   let toolCallCompletedCount = 0;
   let toolCallFailedCount = 0;
   let longestToolCall: BlipToolCallSummary | null = null;
+  let assistantSequence = 0;
+  let reasoningSequence = 0;
+  let streamedReasoning = '';
+  const activity = new BuiltinAgentActivityCollector('blip');
   const eventCounts: Record<string, number> = {};
   const activeToolCalls = new Map<
     string,
@@ -557,6 +898,12 @@ function createBlipJsonlParser(): {
       const callId = String(obj.callId ?? '').trim();
       if (type === 'tool_call_started') {
         toolCallCount += 1;
+        activity.upsertToolCall({
+          id: callId || `blip-tool-${toolCallCount}`,
+          name: tool || 'tool',
+          arguments: obj.args ?? {},
+          createdAt: timestamp,
+        });
         if (callId) {
           activeToolCalls.set(callId, {
             tool: tool || 'unknown',
@@ -592,20 +939,69 @@ function createBlipJsonlParser(): {
             longestToolCall = summary;
         }
         if (callId) activeToolCalls.delete(callId);
+        activity.upsertToolResult({
+          id: callId || `blip-tool-${toolCallCount}`,
+          name: tool || started?.tool || 'tool',
+          result: obj.result,
+          ...(type === 'tool_call_failed' ? { error: obj.error ?? 'Tool call failed.' } : {}),
+          createdAt: timestamp,
+        });
       }
       if (type === 'assistant_delta') {
         const delta = takeStringText(obj.text);
-        if (delta) streamedMsg += delta;
+        if (delta) {
+          streamedMsg += delta;
+          activity.upsertAssistant({
+            id: `blip-assistant-${assistantSequence}`,
+            text: streamedMsg,
+            createdAt: timestamp,
+          });
+        }
         lastModel = extractModelId(obj) ?? lastModel;
         return;
       }
       if (type === 'assistant_message') {
         const text = takeStringText(obj.text) ?? takeStringText(obj.message);
-        if (text) lastMsg = text;
+        if (text) {
+          lastMsg = text;
+          activity.upsertAssistant({
+            id: `blip-assistant-${assistantSequence}`,
+            text,
+            createdAt: timestamp,
+          });
+          assistantSequence += 1;
+          streamedMsg = '';
+        }
         lastModel = extractModelId(obj) ?? lastModel;
         return;
       }
+      if (type === 'reasoning_delta') {
+        const delta = takeStringText(obj.text);
+        if (delta) {
+          streamedReasoning += delta;
+          activity.upsertAssistant({
+            id: `blip-reasoning-${reasoningSequence}`,
+            thinking: streamedReasoning,
+            createdAt: timestamp,
+          });
+        }
+        return;
+      }
+      if (type === 'reasoning_message') {
+        const text = takeStringText(obj.text);
+        if (text) {
+          activity.upsertAssistant({
+            id: `blip-reasoning-${reasoningSequence}`,
+            thinking: text,
+            createdAt: timestamp,
+          });
+          reasoningSequence += 1;
+          streamedReasoning = '';
+        }
+        return;
+      }
       if (type === 'session_finished') {
+        activity.settleOpenTools();
         terminalEvent = 'session_finished';
         terminalEventAt = timestamp;
         terminalStatus = String(obj.status ?? '').trim() || null;
@@ -615,6 +1011,7 @@ function createBlipJsonlParser(): {
         return;
       }
       if (type === 'session_error') {
+        activity.settleOpenTools('The session ended before this tool reported completion.');
         terminalEvent = 'session_error';
         terminalEventAt = timestamp;
         terminalStatus = String(obj.status ?? '').trim() || null;
@@ -624,9 +1021,11 @@ function createBlipJsonlParser(): {
     },
     result() {
       const eventCountsOut = Object.keys(eventCounts).length > 0 ? eventCounts : null;
+      const agentActivity = activity.result();
       return {
         sessionId,
         message: lastMsg ?? (streamedMsg ? streamedMsg : null),
+        ...(agentActivity ? { activity: agentActivity } : {}),
         ...(lastModel ? { model: lastModel } : {}),
         ...(lastReasoning ? { reasoning: lastReasoning } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
@@ -730,6 +1129,7 @@ export type BuiltinPromptJobTranscript =
       kind: 'cursor' | 'claude' | 'opencode';
       message: string | null;
       sessionId: string | null;
+      activity?: AgentRunActivity;
       model?: string;
       reasoning?: string;
       agentPlan?: AgentPlan;
@@ -743,6 +1143,7 @@ export type BuiltinPromptJobTranscript =
       kind: 'codex';
       message: string | null;
       threadId: string | null;
+      activity?: AgentRunActivity;
       model?: string;
       reasoning?: string;
       terminalEvent?: CodexTerminalEvent;
@@ -755,6 +1156,7 @@ export type BuiltinPromptJobTranscript =
       kind: 'pi';
       message: string | null;
       sessionId: string | null;
+      activity?: AgentRunActivity;
       model?: string;
       reasoning?: string;
       stdoutBytes?: number;
@@ -765,6 +1167,7 @@ export type BuiltinPromptJobTranscript =
       kind: 'blip';
       message: string | null;
       sessionId: string | null;
+      activity?: AgentRunActivity;
       model?: string;
       reasoning?: string;
       terminalEvent?: 'session_finished' | 'session_error';
@@ -842,6 +1245,7 @@ export function parseBuiltinPromptJobTranscript(
       kind: 'codex',
       message: parsed.message,
       threadId: parsed.threadId,
+      ...(parsed.activity ? { activity: parsed.activity } : {}),
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
@@ -855,6 +1259,7 @@ export function parseBuiltinPromptJobTranscript(
       kind,
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.activity ? { activity: parsed.activity } : {}),
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
@@ -869,6 +1274,7 @@ export function parseBuiltinPromptJobTranscript(
       kind: 'pi',
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.activity ? { activity: parsed.activity } : {}),
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...promptJobTranscriptMeta(opts),
@@ -880,6 +1286,7 @@ export function parseBuiltinPromptJobTranscript(
       kind: 'blip',
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.activity ? { activity: parsed.activity } : {}),
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
@@ -902,6 +1309,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
       kind: 'codex',
       message: parsed.message,
       threadId: parsed.threadId,
+      ...(parsed.activity ? { activity: parsed.activity } : {}),
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
@@ -915,6 +1323,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
       kind,
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.activity ? { activity: parsed.activity } : {}),
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
@@ -929,6 +1338,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
       kind: 'pi',
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.activity ? { activity: parsed.activity } : {}),
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...promptJobTranscriptMeta(opts),
@@ -940,6 +1350,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
       kind: 'blip',
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.activity ? { activity: parsed.activity } : {}),
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
@@ -953,6 +1364,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
 export function parseCodexJobTranscript(job: any): {
   threadId: string | null;
   message: string | null;
+  activity?: AgentRunActivity;
   model?: string;
   reasoning?: string;
   terminalEvent?: CodexTerminalEvent;
@@ -967,6 +1379,7 @@ export function parseCodexJobTranscript(job: any): {
     if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
       const model = optionalString(transcript.model);
       const reasoning = optionalString(transcript.reasoning);
+      const activity = normalizeAgentRunActivity(transcript.activity);
       const terminalEventRaw = String(transcript.terminalEvent ?? '').trim();
       const terminalEvent =
         terminalEventRaw === 'turn.completed' ||
@@ -975,10 +1388,15 @@ export function parseCodexJobTranscript(job: any): {
         terminalEventRaw === 'error'
           ? terminalEventRaw
           : undefined;
-      const agentPlan = normalizeAgentPlan(transcript.agentPlan, 'codex', transcript.agentPlan?.updatedAt);
+      const agentPlan = normalizeAgentPlan(
+        transcript.agentPlan,
+        'codex',
+        transcript.agentPlan?.updatedAt,
+      );
       return {
         threadId: optionalString(transcript.threadId),
         message: optionalString(transcript.message),
+        ...(activity ? { activity } : {}),
         ...(model ? { model } : {}),
         ...(reasoning ? { reasoning } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
@@ -1000,18 +1418,28 @@ export function parseStructuredAgentJobTranscript(
     String(transcript.kind ?? '').trim() === kind &&
     Object.prototype.hasOwnProperty.call(transcript, 'message')
   ) {
-    const agentPlan = normalizeAgentPlan(transcript.agentPlan, kind, transcript.agentPlan?.updatedAt);
-    const terminalStatus = transcript.terminalStatus === 'completed' || transcript.terminalStatus === 'failed'
-      ? transcript.terminalStatus
-      : undefined;
+    const agentPlan = normalizeAgentPlan(
+      transcript.agentPlan,
+      kind,
+      transcript.agentPlan?.updatedAt,
+    );
+    const activity = normalizeAgentRunActivity(transcript.activity);
+    const model = optionalString(transcript.model);
+    const reasoning = optionalString(transcript.reasoning);
+    const error = optionalString(transcript.error);
+    const terminalStatus =
+      transcript.terminalStatus === 'completed' || transcript.terminalStatus === 'failed'
+        ? transcript.terminalStatus
+        : undefined;
     return {
       sessionId: optionalString(transcript.sessionId),
       message: optionalString(transcript.message),
-      ...(optionalString(transcript.model) ? { model: optionalString(transcript.model)! } : {}),
-      ...(optionalString(transcript.reasoning) ? { reasoning: optionalString(transcript.reasoning)! } : {}),
+      ...(activity ? { activity } : {}),
+      ...(model ? { model } : {}),
+      ...(reasoning ? { reasoning } : {}),
       ...(agentPlan ? { agentPlan } : {}),
       ...(terminalStatus ? { terminalStatus } : {}),
-      ...(optionalString(transcript.error) ? { error: optionalString(transcript.error)! } : {}),
+      ...(error ? { error } : {}),
     };
   }
   return parseStructuredAgentJsonl(kind, String(job?.stdout ?? ''));
@@ -1020,6 +1448,7 @@ export function parseStructuredAgentJobTranscript(
 export function parsePiJobTranscript(job: any): {
   sessionId: string | null;
   message: string | null;
+  activity?: AgentRunActivity;
   model?: string;
   reasoning?: string;
 } {
@@ -1032,9 +1461,11 @@ export function parsePiJobTranscript(job: any): {
     if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
       const model = optionalString(transcript.model);
       const reasoning = optionalString(transcript.reasoning);
+      const activity = normalizeAgentRunActivity(transcript.activity);
       return {
         sessionId: optionalString(transcript.sessionId),
         message: optionalString(transcript.message),
+        ...(activity ? { activity } : {}),
         ...(model ? { model } : {}),
         ...(reasoning ? { reasoning } : {}),
       };
@@ -1046,6 +1477,7 @@ export function parsePiJobTranscript(job: any): {
 export function parseBlipJobTranscript(job: any): {
   sessionId: string | null;
   message: string | null;
+  activity?: AgentRunActivity;
   model?: string;
   reasoning?: string;
   terminalEvent?: 'session_finished' | 'session_error';
@@ -1070,6 +1502,7 @@ export function parseBlipJobTranscript(job: any): {
     if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
       const model = optionalString(transcript.model);
       const reasoning = optionalString(transcript.reasoning);
+      const activity = normalizeAgentRunActivity(transcript.activity);
       const terminalEventRaw = String(transcript.terminalEvent ?? '').trim();
       const terminalEvent =
         terminalEventRaw === 'session_finished' || terminalEventRaw === 'session_error'
@@ -1078,6 +1511,7 @@ export function parseBlipJobTranscript(job: any): {
       return {
         sessionId: optionalString(transcript.sessionId),
         message: optionalString(transcript.message),
+        ...(activity ? { activity } : {}),
         ...(model ? { model } : {}),
         ...(reasoning ? { reasoning } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),

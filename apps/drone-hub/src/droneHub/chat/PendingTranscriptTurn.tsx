@@ -1,10 +1,14 @@
 import React from 'react';
-import { isStoppedRunError } from '@drone/assistant-chat';
+import { isStoppedRunError, normalizeAgentRunActivity } from '@drone/assistant-chat';
 import { stripAnsi } from '../../domain';
 import type { PendingPrompt } from '../types';
 import { ChatMessageCopyAction } from './ChatMessageCopyAction';
 import { ChatMessageFrame } from './ChatMessageFrame';
-import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
+import {
+  ImageAttachmentChips,
+  isAttachmentOnlyPrompt,
+  normalizeImageAttachmentRefs,
+} from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
 import { RelativeTimeText } from './RelativeTimeText';
 import { AgentPlanList } from './AgentPlanList';
@@ -12,6 +16,7 @@ import { WorkingElapsedStatus } from './WorkingElapsedStatus';
 import { UserChatMessage } from './UserChatMessage';
 import { ChangedFilesCard } from './ChangedFilesCard';
 import { StoppedRunNotice } from './StoppedRunNotice';
+import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
@@ -44,58 +49,60 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   const observability =
     item.observability?.state === 'status-unavailable'
       ? {
-          message: String(item.observability.message ?? '').trim() || 'Prompt status is temporarily unavailable.',
+          message:
+            String(item.observability.message ?? '').trim() ||
+            'Prompt status is temporarily unavailable.',
           lastCheckedAt: String(item.observability.lastCheckedAt ?? '').trim(),
           lastError: String(item.observability.lastError ?? '').trim(),
         }
       : null;
   const isStopped = isFailed && isStoppedRunError(item.error);
+  const activity = normalizeAgentRunActivity(item.activity);
   const badgeLabel = isFailed && !isStopped ? 'Failed' : null;
   const canCancelQueued = item.state === 'queued' && Boolean(onCancelQueued);
   const showAgentPendingBubble = !(item.state === 'queued' && !isFailed);
   const agentCopyText = isFailed ? stripAnsi(item.error || 'failed to send') : 'Working…';
-  const queuedFooter = item.state === 'queued' ? (
-    <div className="mt-2 flex items-center justify-between gap-3">
-      <span
-        role="status"
-        aria-label={
-          item.deliveryMode === 'asap'
-            ? 'ASAP, waiting for the next safe delivery point'
-            : 'Queued, waiting to send'
-        }
-        title={
-          item.deliveryMode === 'asap'
-            ? 'Will run before queued follow-ups'
-            : 'Waiting to send'
-        }
-        className="inline-flex items-center gap-1.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--user-muted)]"
-      >
-        <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.35" />
-          <path
-            d="M8 4.75V8l2.1 1.35"
-            stroke="currentColor"
-            strokeWidth="1.35"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        {item.deliveryMode === 'asap' ? 'ASAP' : 'Queued'}
-      </span>
-      {canCancelQueued ? (
-        <button
-          type="button"
-          onClick={() => void onCancelQueued?.(item.id)}
-          disabled={cancelBusy}
-          className="inline-flex min-h-5 items-center rounded px-1 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--red-subtle)] hover:text-[var(--red)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:text-[var(--muted-dim)]"
-          aria-label="Cancel queued prompt"
-          title="Cancel queued prompt"
+  const queuedFooter =
+    item.state === 'queued' ? (
+      <div className="mt-2 flex items-center justify-between gap-3">
+        <span
+          role="status"
+          aria-label={
+            item.deliveryMode === 'asap'
+              ? 'ASAP, waiting for the next safe delivery point'
+              : 'Queued, waiting to send'
+          }
+          title={
+            item.deliveryMode === 'asap' ? 'Will run before queued follow-ups' : 'Waiting to send'
+          }
+          className="inline-flex items-center gap-1.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--user-muted)]"
         >
-          {cancelBusy ? 'Canceling…' : 'Cancel'}
-        </button>
-      ) : null}
-    </div>
-  ) : null;
+          <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.35" />
+            <path
+              d="M8 4.75V8l2.1 1.35"
+              stroke="currentColor"
+              strokeWidth="1.35"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          {item.deliveryMode === 'asap' ? 'ASAP' : 'Queued'}
+        </span>
+        {canCancelQueued ? (
+          <button
+            type="button"
+            onClick={() => void onCancelQueued?.(item.id)}
+            disabled={cancelBusy}
+            className="inline-flex min-h-5 items-center rounded px-1 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--red-subtle)] hover:text-[var(--red)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:text-[var(--muted-dim)]"
+            aria-label="Cancel queued prompt"
+            title="Cancel queued prompt"
+          >
+            {cancelBusy ? 'Canceling…' : 'Cancel'}
+          </button>
+        ) : null}
+      </div>
+    ) : null;
   const pendingHeader = badgeLabel ? (
     <span
       className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)]"
@@ -115,7 +122,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         autoExpand={autoExpandPrompt}
         onOpenFileReference={onOpenFileReference}
         onOpenLink={onOpenLink}
-        attachmentContent={(
+        attachmentContent={
           <>
             <ImageAttachmentChips
               attachments={attachments}
@@ -125,8 +132,15 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             />
             {queuedFooter}
           </>
-        )}
+        }
       />
+
+      {activity && !isFailed ? (
+        <div className="px-3">
+          <WorkingElapsedStatus startedAt={item.at} />
+        </div>
+      ) : null}
+      {activity ? <AgentRunActivityView activity={activity} active={!isFailed} /> : null}
 
       {isStopped ? (
         <>
@@ -144,9 +158,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           showRoleLabel={showRoleIcons}
           plainAssistant={!showRoleIcons}
           error={isFailed}
-          hoverActions={
-            <ChatMessageCopyAction text={agentCopyText} position="hover-rail" />
-          }
+          hoverActions={<ChatMessageCopyAction text={agentCopyText} position="hover-rail" />}
         >
           {isFailed ? (
             <div className="whitespace-pre-wrap text-[var(--text-12-5)] leading-[1.6] text-[var(--red)]">
@@ -154,7 +166,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             </div>
           ) : (
             <>
-              <WorkingElapsedStatus startedAt={item.at} />
+              {!activity ? <WorkingElapsedStatus startedAt={item.at} /> : null}
               {observability ? (
                 <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-[var(--text-10-5)] leading-[1.45] text-[var(--yellow)]">
                   <div>{observability.message}</div>

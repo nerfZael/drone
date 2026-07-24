@@ -2,7 +2,7 @@ import {
   normalizeMobileAgentPlan,
   type MobileAgentPlan,
 } from '../local-assistant/mobile-transcript-runs';
-import { isStoppedRunError } from '@drone/assistant-chat';
+import { isStoppedRunError, normalizeAgentRunActivity } from '@drone/assistant-chat';
 
 export type MobileDronePendingPrompt = {
   id: string;
@@ -128,16 +128,29 @@ export function confirmedMobilePendingPromptState(input: {
   return 'sending';
 }
 
+function completedMobileTurnIds(turnsRaw: unknown): Set<string> {
+  return new Set(
+    (Array.isArray(turnsRaw) ? turnsRaw : [])
+      .map((turn: any) => String(turn?.id ?? '').trim())
+      .filter(Boolean),
+  );
+}
+
+export function hasActiveMobileDronePendingPrompt(raw: unknown, turnsRaw: unknown): boolean {
+  const completedTurnIds = completedMobileTurnIds(turnsRaw);
+  return (Array.isArray(raw) ? raw : []).some((item: any) => {
+    const state = String(item?.state ?? '').trim();
+    const id = String(item?.id ?? '').trim();
+    return Boolean(id && (state === 'sending' || state === 'sent') && !completedTurnIds.has(id));
+  });
+}
+
 export function mobileDronePendingPrompts(
   raw: unknown,
   turnsRaw: unknown,
   messagesRaw: unknown = [],
 ): MobileDronePendingPrompt[] {
-  const completedTurnIds = new Set(
-    (Array.isArray(turnsRaw) ? turnsRaw : [])
-      .map((turn: any) => String(turn?.id ?? '').trim())
-      .filter(Boolean),
-  );
+  const completedTurnIds = completedMobileTurnIds(turnsRaw);
   const transcriptMessageIds = new Set(
     (Array.isArray(messagesRaw) ? messagesRaw : [])
       .map((message: any) => String(message?.id ?? '').trim())
@@ -150,6 +163,12 @@ export function mobileDronePendingPrompts(
     // The Hub deliberately retains recently completed pending rows for reconciliation. Once the
     // matching transcript turn is visible, rendering that row again would duplicate the prompt.
     if (state !== 'failed' && completedTurnIds.has(id)) return [];
+    if (
+      (state === 'sending' || state === 'sent') &&
+      normalizeAgentRunActivity(item?.activity)?.messages.length
+    ) {
+      return [];
+    }
     const stopped = state === 'failed' && isStoppedRunError(item?.error);
     const messageId = String(item?.messageId ?? '').trim();
     const delivered =

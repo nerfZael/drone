@@ -17,6 +17,8 @@ import {
 import { resolveCanonicalDroneOrPendingForReadRef } from './drone-lifecycle-service';
 import type { AgentRunFileChanges } from '@blip/protocol';
 import type { AgentRunFileChangesBaseline } from './run-file-changes';
+import type { AgentRunActivity } from '@drone/assistant-chat';
+import { normalizeAgentRunActivity } from './builtin-agent-activity';
 
 export type PendingPrompt = {
   id: string;
@@ -36,6 +38,7 @@ export type PendingPrompt = {
     lastError?: string;
   };
   blipClones?: unknown;
+  activity?: AgentRunActivity;
   agentPlan?: AgentPlan;
   fileChangesBaseline?: AgentRunFileChangesBaseline;
   fileChanges?: AgentRunFileChanges;
@@ -146,6 +149,7 @@ export function createDronePendingPromptStore(deps: {
               : 'sending',
           error: typeof p?.error === 'string' ? p.error : undefined,
           observability: normalizeObservability((p as any)?.observability),
+          activity: normalizeAgentRunActivity((p as any)?.activity),
           agentPlan: normalizePendingAgentPlan((p as any)?.agentPlan),
           ...((p as any)?.fileChangesBaseline && typeof (p as any).fileChangesBaseline === 'object'
             ? { fileChangesBaseline: (p as any).fileChangesBaseline as AgentRunFileChangesBaseline }
@@ -374,6 +378,7 @@ export function createDronePendingPromptStore(deps: {
         | 'error'
         | 'observability'
         | 'blipClones'
+        | 'activity'
         | 'agentPlan'
         | 'fileChangesBaseline'
         | 'fileChanges'

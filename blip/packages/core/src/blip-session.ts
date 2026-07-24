@@ -83,6 +83,14 @@ function messageText(message: AgentMessage): string {
   return '';
 }
 
+function messageReasoning(message: AgentMessage): string {
+  if (message.role !== 'assistant') return '';
+  return message.content
+    .map((item) => (item.type === 'thinking' ? item.thinking : ''))
+    .filter(Boolean)
+    .join('\n');
+}
+
 function normalizePrompt(input: BlipPromptInput): AgentMessage {
   if (typeof input === 'string') {
     return { role: 'user', content: input, timestamp: Date.now() };
@@ -401,6 +409,14 @@ class BlipSession implements BlipSessionHandle {
       });
       return;
     }
+    if (event.type === 'message_update' && event.assistantMessageEvent.type === 'thinking_delta') {
+      await this.emit({
+        ...eventBase(this.state.id, active.turnId),
+        type: 'reasoning_delta',
+        text: event.assistantMessageEvent.delta,
+      });
+      return;
+    }
     if (event.type === 'message_end') {
       await this.options.sessionRepository.appendMessage(this.state, event.message);
       await this.emit({
@@ -409,6 +425,15 @@ class BlipSession implements BlipSessionHandle {
         role: event.message.role,
       });
       if (event.message.role === 'assistant') {
+        const reasoning = messageReasoning(event.message);
+        if (reasoning.trim()) {
+          await this.emit({
+            ...eventBase(this.state.id, active.turnId),
+            type: 'reasoning_message',
+            messageId: createPortableId(),
+            text: reasoning,
+          });
+        }
         const text = messageText(event.message);
         if (text.trim()) {
           await this.emit({

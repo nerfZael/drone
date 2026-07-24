@@ -13,6 +13,10 @@ import {
   parseCodexRolloutRuntime,
   parsePiJsonl,
 } from '../src/hub/builtin-transcript-sessions';
+import {
+  boundedActivityValue,
+  BuiltinAgentActivityCollector,
+} from '../src/hub/builtin-agent-activity';
 
 describe('parseCodexJsonl', () => {
   test('keeps the latest Codex todo-list snapshot', () => {
@@ -38,7 +42,7 @@ describe('parseCodexJsonl', () => {
           '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Hello from Codex."}}',
         ].join('\n'),
       ),
-    ).toEqual({
+    ).toMatchObject({
       threadId: '019e1922-047b-74b1-bab8-0eaceadf4062',
       message: 'Hello from Codex.',
     });
@@ -52,7 +56,7 @@ describe('parseCodexJsonl', () => {
           '{"type":"item.completed","item":{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"First line."},{"type":"output_text","text":"Second line."}]}}',
         ].join('\n'),
       ),
-    ).toEqual({
+    ).toMatchObject({
       threadId: '019e1922-047b-74b1-bab8-0eaceadf4062',
       message: 'First line.\nSecond line.',
     });
@@ -74,7 +78,7 @@ describe('parseCodexJsonl', () => {
           },
         }),
       ),
-    ).toEqual({
+    ).toMatchObject({
       threadId: null,
       message: 'Final answer.',
       terminalEvent: 'response.completed',
@@ -90,14 +94,14 @@ describe('parseCodexJsonl', () => {
   });
 
   test('parses root-level Codex agent message events', () => {
-    expect(parseCodexJsonl('{"type":"agent_message","text":"Root event answer."}')).toEqual({
+    expect(parseCodexJsonl('{"type":"agent_message","text":"Root event answer."}')).toMatchObject({
       threadId: null,
       message: 'Root event answer.',
     });
   });
 
   test('parses Codex agent message events that use message instead of text', () => {
-    expect(parseCodexJsonl('{"type":"agent_message","message":"Root message answer."}')).toEqual({
+    expect(parseCodexJsonl('{"type":"agent_message","message":"Root message answer."}')).toMatchObject({
       threadId: null,
       message: 'Root message answer.',
     });
@@ -106,7 +110,7 @@ describe('parseCodexJsonl', () => {
   test('parses final assistant text from completed turn metadata', () => {
     expect(
       parseCodexJsonl('{"type":"turn.completed","last_agent_message":"Completed turn answer."}'),
-    ).toEqual({
+    ).toMatchObject({
       threadId: null,
       message: 'Completed turn answer.',
       terminalEvent: 'turn.completed',
@@ -121,7 +125,7 @@ describe('parseCodexJsonl', () => {
           '{"type":"item.completed","item":{"id":"user_1","type":"message","content":[{"type":"input_text","text":"Do not treat input as output."}]}}',
         ].join('\n'),
       ),
-    ).toEqual({
+    ).toMatchObject({
       threadId: null,
       message: 'Output without role.',
     });
@@ -222,6 +226,281 @@ describe('structured agent plan parsers', () => {
   });
 });
 
+describe('built-in external agent activity', () => {
+  test('preserves ordered Codex reasoning, tool calls, results, and intermediary messages', () => {
+    const parsed = parseCodexJsonl([
+      JSON.stringify({
+        type: 'item.completed',
+        item: { id: 'reasoning-1', type: 'reasoning', text: 'Checking the repository.' },
+      }),
+      JSON.stringify({
+        type: 'item.started',
+        item: { id: 'command-1', type: 'command_execution', command: 'git status' },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'command-1',
+          type: 'command_execution',
+          command: 'git status',
+          status: 'completed',
+          aggregated_output: 'clean',
+        },
+      }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: { id: 'message-1', type: 'agent_message', text: 'The tree is clean.' },
+      }),
+    ].join('\n'));
+
+    expect(parsed.activity?.messages).toMatchObject([
+      { role: 'assistant', content: [{ type: 'thinking', thinking: 'Checking the repository.' }] },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'command-1',
+            name: 'command_execution',
+            arguments: { command: 'git status' },
+          },
+        ],
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'command-1',
+        toolName: 'command_execution',
+        content: 'clean',
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'The tree is clean.' }] },
+    ]);
+  });
+
+  test('reads Codex reasoning summaries expressed as content blocks', () => {
+    const parsed = parseCodexJsonl(
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'reasoning-1',
+          type: 'reasoning',
+          summary: [{ type: 'summary_text', text: 'I compared the two implementations.' }],
+        },
+      }),
+    );
+
+    expect(parsed.activity?.messages[0]).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking: 'I compared the two implementations.' }],
+    });
+  });
+
+  test('normalizes Claude, OpenCode, Cursor, Pi, and Blip activity', () => {
+    const claude = parseClaudeJsonl([
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'claude-message',
+          content: [
+            { type: 'thinking', thinking: 'Inspecting.' },
+            { type: 'tool_use', id: 'claude-tool', name: 'Read', input: { path: 'README.md' } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: {
+          content: [{ type: 'tool_result', tool_use_id: 'claude-tool', content: 'contents' }],
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { id: 'claude-final', content: [{ type: 'text', text: 'Finished.' }] },
+      }),
+    ].join('\n'));
+    const opencode = parseOpenCodeJsonl([
+      JSON.stringify({ type: 'reasoning', part: { id: 'oc-r', type: 'reasoning', text: 'Inspecting.' } }),
+      JSON.stringify({
+        type: 'tool_use',
+        part: {
+          callID: 'oc-tool',
+          type: 'tool',
+          tool: 'read',
+          state: { status: 'completed', input: { path: 'README.md' }, output: 'contents' },
+        },
+      }),
+      JSON.stringify({ type: 'text', part: { id: 'oc-final', text: 'Finished.' } }),
+    ].join('\n'));
+    const cursor = parseCursorJsonl([
+      JSON.stringify({ type: 'reasoning', id: 'cursor-r', text: 'Inspecting.' }),
+      JSON.stringify({
+        type: 'tool_call',
+        subtype: 'completed',
+        call_id: 'cursor-tool',
+        tool_call: {
+          readToolCall: { args: { path: 'README.md' }, result: 'contents' },
+        },
+      }),
+      JSON.stringify({ type: 'result', result: 'Finished.' }),
+    ].join('\n'));
+    const pi = parsePiJsonl([
+      JSON.stringify({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          timestamp: 1,
+          content: [
+            { type: 'thinking', thinking: 'Inspecting.' },
+            { type: 'toolCall', id: 'pi-tool', name: 'read', arguments: { path: 'README.md' } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'pi-tool',
+        toolName: 'read',
+        result: { content: [{ type: 'text', text: 'contents' }] },
+        isError: false,
+      }),
+      JSON.stringify({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          timestamp: 2,
+          content: [{ type: 'text', text: 'Finished.' }],
+        },
+      }),
+    ].join('\n'));
+    const blip = parseBlipJsonl([
+      JSON.stringify({ type: 'reasoning_message', text: 'Inspecting.' }),
+      JSON.stringify({
+        type: 'tool_call_started',
+        callId: 'blip-tool',
+        tool: 'read',
+        args: { path: 'README.md' },
+      }),
+      JSON.stringify({
+        type: 'tool_call_completed',
+        callId: 'blip-tool',
+        tool: 'read',
+        result: 'contents',
+      }),
+      JSON.stringify({ type: 'assistant_message', messageId: 'blip-final', text: 'Finished.' }),
+    ].join('\n'));
+
+    for (const parsed of [claude, opencode, cursor, pi, blip]) {
+      const messages = parsed.activity?.messages ?? [];
+      expect(
+        messages.some(
+          (message) =>
+            Array.isArray(message.content) &&
+            message.content.some((part) => part.type === 'thinking'),
+        ),
+      ).toBe(true);
+      expect(
+        messages.some(
+          (message) =>
+            Array.isArray(message.content) &&
+            message.content.some((part) => part.type === 'toolCall'),
+        ),
+      ).toBe(true);
+      expect(messages.some((message) => message.role === 'toolResult')).toBe(true);
+      expect(
+        messages.some(
+          (message) =>
+            Array.isArray(message.content) &&
+            message.content.some((part) => part.type === 'text' && part.text === 'Finished.'),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  test('redacts sensitive fields and trims oversized tool payloads', () => {
+    const bounded = boundedActivityValue({
+      apiKey: 'secret-value',
+      authToken: 'auth-token-value',
+      clientSecret: 'camel-secret-value',
+      nested: { access_token: 'secret-token' },
+      headers: { authorization: 'Bearer private' },
+      output: 'x'.repeat(100_000),
+    });
+
+    expect(bounded.truncated).toBe(true);
+    expect(JSON.stringify(bounded.value)).not.toContain('secret-value');
+    expect(JSON.stringify(bounded.value)).not.toContain('auth-token-value');
+    expect(JSON.stringify(bounded.value)).not.toContain('camel-secret-value');
+    expect(JSON.stringify(bounded.value)).not.toContain('secret-token');
+    expect(JSON.stringify(bounded.value)).not.toContain('Bearer private');
+    expect(JSON.stringify(bounded.value)).toContain('[redacted]');
+    expect(Buffer.byteLength(JSON.stringify(bounded.value))).toBeLessThanOrEqual(64 * 1024);
+  });
+
+  test('bounds provider-controlled tool identifiers and names', () => {
+    const collector = new BuiltinAgentActivityCollector('codex');
+    collector.upsertToolCall({
+      id: `tool-${'x'.repeat(10_000)}`,
+      name: `tool-${'y'.repeat(10_000)}`,
+      arguments: {},
+    });
+    collector.upsertToolResult({
+      id: `tool-${'x'.repeat(10_000)}`,
+      name: `tool-${'y'.repeat(10_000)}`,
+      result: 'ok',
+    });
+
+    const activity = collector.result();
+    expect(activity?.truncated).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(activity))).toBeLessThan(10_000);
+    expect(activity?.messages.some((message) => message.role === 'toolResult')).toBe(true);
+  });
+
+  test('keeps collector memory bounded to the newest activity messages', () => {
+    const collector = new BuiltinAgentActivityCollector('claude');
+    for (let index = 0; index < 500; index += 1) {
+      collector.upsertAssistant({ id: `message-${index}`, text: `Message ${index}` });
+    }
+
+    const activity = collector.result();
+    expect(activity?.messages).toHaveLength(200);
+    expect(activity?.messages[0]).toMatchObject({
+      content: [{ type: 'text', text: 'Message 300' }],
+    });
+    expect(activity?.messages.at(-1)).toMatchObject({
+      content: [{ type: 'text', text: 'Message 499' }],
+    });
+    expect(activity?.truncated).toBe(true);
+  });
+
+  test('keeps Pi tool arguments when later progress events omit them', () => {
+    const parsed = parsePiJsonl([
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'tool-1',
+        toolName: 'bash',
+        args: { command: 'git status' },
+      }),
+      JSON.stringify({
+        type: 'tool_execution_update',
+        toolCallId: 'tool-1',
+      }),
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'tool-1',
+        toolName: 'bash',
+        result: 'clean',
+      }),
+    ].join('\n'));
+
+    const toolCall = parsed.activity?.messages
+      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
+      .find((part) => part.type === 'toolCall');
+    expect(toolCall).toMatchObject({
+      id: 'tool-1',
+      name: 'bash',
+      arguments: { command: 'git status' },
+    });
+  });
+});
+
 describe('parseCodexRolloutModel', () => {
   test('uses the latest turn context runtime from a persisted Codex rollout', () => {
     const raw = [
@@ -248,7 +527,7 @@ describe('parseBlipJsonl', () => {
           '{"version":1,"type":"session_finished","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:02.000Z","status":"completed","changedFiles":[],"durationMs":1000}',
         ].join('\n'),
       ),
-    ).toEqual({
+    ).toMatchObject({
       sessionId: 'sess_blip',
       message: 'Hello from Blip.',
       terminalEvent: 'session_finished',
@@ -274,7 +553,7 @@ describe('parseBlipJsonl', () => {
           '{"version":1,"type":"assistant_delta","sessionId":"sess_blip","timestamp":"2026-06-17T00:00:01.000Z","text":"lo"}',
         ].join('\n'),
       ),
-    ).toEqual({
+    ).toMatchObject({
       sessionId: 'sess_blip',
       message: 'Hello',
       firstEventAt: '2026-06-17T00:00:00.000Z',
@@ -315,7 +594,7 @@ describe('prompt job transcript metadata', () => {
       parsedAt: '2026-05-25T21:50:23.410Z',
     });
 
-    expect(transcript).toEqual({
+    expect(transcript).toMatchObject({
       kind: 'codex',
       message: 'Final report.',
       threadId: '019e1922-047b-74b1-bab8-0eaceadf4062',
@@ -331,7 +610,7 @@ describe('prompt job transcript metadata', () => {
           '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Interim status."}}\n\n…(truncated)…',
         transcript,
       }),
-    ).toEqual({
+    ).toMatchObject({
       threadId: '019e1922-047b-74b1-bab8-0eaceadf4062',
       message: 'Final report.',
       terminalEvent: 'turn.completed',
@@ -349,7 +628,7 @@ describe('prompt job transcript metadata', () => {
       { stdoutBytes: 1024, stdoutTruncated: false, parsedAt: '2026-06-17T00:00:03.000Z' },
     );
 
-    expect(transcript).toEqual({
+    expect(transcript).toMatchObject({
       kind: 'blip',
       message: 'Final Blip report.',
       sessionId: 'sess_blip',
@@ -368,7 +647,7 @@ describe('prompt job transcript metadata', () => {
       stdoutTruncated: false,
       parsedAt: '2026-06-17T00:00:03.000Z',
     });
-    expect(parseBlipJobTranscript({ transcript, stdout: '' })).toEqual({
+    expect(parseBlipJobTranscript({ transcript, stdout: '' })).toMatchObject({
       sessionId: 'sess_blip',
       message: 'Final Blip report.',
       terminalEvent: 'session_finished',
@@ -395,7 +674,7 @@ describe('prompt job transcript metadata', () => {
       ].join('\n'),
     });
 
-    expect(parsed).toEqual({
+    expect(parsed).toMatchObject({
       threadId: '019e1922-047b-74b1-bab8-0eaceadf4062',
       message: 'I checked part A and now I am checking part B.',
     });

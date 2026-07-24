@@ -1,4 +1,5 @@
 import type { AgentPlan } from './agent-plan';
+import type { AgentRunActivity } from '@drone/assistant-chat';
 import type { PendingPrompt } from './drone-pending-prompts';
 import { finalizeDroneRunFileChanges } from './run-file-changes';
 
@@ -99,13 +100,36 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     STOPPED_BY_USER_ERROR,
   } = deps;
 
-  function parseLiveAgentPlan(jobKind: string, job: any): AgentPlan | undefined {
-    if (jobKind === 'codex') return parseCodexJobTranscript(job).agentPlan;
+  function parseLiveAgentState(jobKind: string, job: any): any {
+    if (jobKind === 'codex') return parseCodexJobTranscript(job);
     if (jobKind === 'cursor' || jobKind === 'claude' || jobKind === 'opencode') {
-      return parseStructuredAgentJobTranscript(jobKind, job).agentPlan;
+      return parseStructuredAgentJobTranscript(jobKind, job);
     }
-    return undefined;
+    if (jobKind === 'pi') return parsePiJobTranscript(job);
+    if (jobKind === 'blip') return parseBlipJobTranscript(job);
+    return {};
   }
+
+  function sameLiveAgentActivity(
+    left: AgentRunActivity | undefined,
+    right: AgentRunActivity | undefined,
+  ): boolean {
+    if (left === right) return true;
+    if (!left || !right) return false;
+    if (
+      left.version !== right.version ||
+      left.source !== right.source ||
+      left.updatedAt !== right.updatedAt ||
+      left.truncated !== right.truncated ||
+      !Array.isArray(left.messages) ||
+      !Array.isArray(right.messages) ||
+      left.messages.length !== right.messages.length
+    ) {
+      return false;
+    }
+    return JSON.stringify(left.messages) === JSON.stringify(right.messages);
+  }
+
   async function reconcileChatFromDaemon(opts: {
     droneId: string;
     chatName: string;
@@ -265,10 +289,10 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       let jobState = String(job?.state ?? '').trim();
       let jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
       if (jobState === 'queued' || jobState === 'running') {
-        const parsedBlip =
-          jobKind === 'blip' && jobState === 'running' ? parseBlipJobTranscript(job) : null;
-        const nextAgentPlan =
-          jobState === 'running' ? parseLiveAgentPlan(jobKind, job) : (p as any).agentPlan;
+        const liveState = jobState === 'running' ? parseLiveAgentState(jobKind, job) : {};
+        const parsedBlip = jobKind === 'blip' && jobState === 'running' ? liveState : null;
+        const nextAgentPlan = jobState === 'running' ? liveState.agentPlan : (p as any).agentPlan;
+        const nextActivity = jobState === 'running' ? liveState.activity : (p as any).activity;
         if (
           parsedBlip?.sessionId &&
           String(parsedBlip.sessionId).trim() &&
@@ -278,13 +302,15 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           changed = true;
         }
         const agentPlanChanged = !sameAgentPlan((p as any).agentPlan, nextAgentPlan);
+        const activityChanged = !sameLiveAgentActivity((p as any).activity, nextActivity);
         const observabilityChanged = Boolean((p as any).observability);
-        if (state !== 'sent' || agentPlanChanged || observabilityChanged) {
+        if (state !== 'sent' || agentPlanChanged || activityChanged || observabilityChanged) {
           pendingList[i] = {
             ...p,
             state: 'sent',
             observability: undefined,
             agentPlan: nextAgentPlan,
+            activity: nextActivity,
             updatedAt: nowIso(),
           };
           changed = true;
@@ -386,6 +412,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               state: 'failed',
               error,
               observability: undefined,
+              activity: parsed.activity ?? (p as any).activity,
               updatedAt: nowIso(),
             };
             changed = true;
@@ -405,6 +432,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ...(turnRuntime.model ? { model: turnRuntime.model } : {}),
             ...(turnRuntime.reasoning ? { reasoning: turnRuntime.reasoning } : {}),
             ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+            ...(parsed.activity ? { activity: parsed.activity } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
             ok: true,
@@ -435,6 +463,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               state: 'failed',
               error,
               observability: undefined,
+              activity: parsed.activity ?? (p as any).activity,
               updatedAt: nowIso(),
             };
             changed = true;
@@ -463,6 +492,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ...(turnModel ? { model: turnModel } : {}),
             ...(turnReasoning ? { reasoning: turnReasoning } : {}),
             ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+            ...(parsed.activity ? { activity: parsed.activity } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
             ok: true,
@@ -494,6 +524,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               state: 'failed',
               error: 'pi finished but no assistant message was parsed',
               observability: undefined,
+              activity: parsed.activity ?? (p as any).activity,
               updatedAt: nowIso(),
             };
             changed = true;
@@ -507,6 +538,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             prompt: String(p?.prompt ?? ''),
             ...(turnModel ? { model: turnModel } : {}),
             ...(turnReasoning ? { reasoning: turnReasoning } : {}),
+            ...(parsed.activity ? { activity: parsed.activity } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
             ok: true,
@@ -538,6 +570,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               state: 'failed',
               error: 'blip finished but no assistant message was parsed',
               observability: undefined,
+              activity: parsed.activity ?? (p as any).activity,
               updatedAt: nowIso(),
             };
             changed = true;
@@ -551,6 +584,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             prompt: String(p?.prompt ?? ''),
             ...(turnModel ? { model: turnModel } : {}),
             ...(turnReasoning ? { reasoning: turnReasoning } : {}),
+            ...(parsed.activity ? { activity: parsed.activity } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
             ok: true,
@@ -590,6 +624,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           id,
           prompt: String(p?.prompt ?? ''),
           ...(pendingModel ? { model: pendingModel } : {}),
+          ...((p as any).activity ? { activity: (p as any).activity } : {}),
           ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
           ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
           ok: true,
@@ -603,6 +638,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       }
 
       if (jobState === 'failed') {
+        let failedActivity = (p as any).activity;
         if (jobKind === 'codex') {
           const stdout = String(job?.stdout ?? '');
           const stderr = String(job?.stderr ?? '');
@@ -640,6 +676,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ...(turnRuntime.model ? { model: turnRuntime.model } : {}),
               ...(turnRuntime.reasoning ? { reasoning: turnRuntime.reasoning } : {}),
               ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+              ...(parsed.activity ? { activity: parsed.activity } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
               ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
               ok: true,
@@ -657,6 +694,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             changed = true;
             continue;
           }
+          failedActivity = parsed.activity ?? failedActivity;
         }
         if (jobKind === 'cursor' || jobKind === 'claude' || jobKind === 'opencode') {
           const parsed = parseStructuredAgentJobTranscript(jobKind, job);
@@ -679,6 +717,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ...(turnModel ? { model: turnModel } : {}),
               ...(turnReasoning ? { reasoning: turnReasoning } : {}),
               ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+              ...(parsed.activity ? { activity: parsed.activity } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
               ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
               ok: true,
@@ -713,6 +752,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             error,
             observability: undefined,
             agentPlan: parsed.agentPlan ?? (p as any).agentPlan,
+            activity: parsed.activity ?? (p as any).activity,
             updatedAt: nowIso(),
           };
           changed = true;
@@ -749,6 +789,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               prompt: String(p?.prompt ?? ''),
               ...(turnModel ? { model: turnModel } : {}),
               ...(turnReasoning ? { reasoning: turnReasoning } : {}),
+              ...(parsed.activity ? { activity: parsed.activity } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
               ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
               ok: true,
@@ -766,6 +807,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             changed = true;
             continue;
           }
+          failedActivity = parsed.activity ?? failedActivity;
         }
         if (jobKind === 'blip') {
           const parsed = parseBlipJobTranscript(job);
@@ -795,6 +837,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               prompt: String(p?.prompt ?? ''),
               ...(turnModel ? { model: turnModel } : {}),
               ...(turnReasoning ? { reasoning: turnReasoning } : {}),
+              ...(parsed.activity ? { activity: parsed.activity } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
               ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
               ok: true,
@@ -811,6 +854,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             changed = true;
             continue;
           }
+          failedActivity = parsed.activity ?? failedActivity;
         }
         const exitCode =
           typeof job?.exitCode === 'number' && Number.isFinite(job.exitCode)
@@ -832,6 +876,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           state: 'failed',
           error: errText,
           observability: undefined,
+          activity: failedActivity,
           updatedAt: nowIso(),
         };
         changed = true;
@@ -898,6 +943,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             agentPlan: pending.agentPlan,
             fileChangesBaseline: pending.fileChangesBaseline,
             fileChanges: pending.fileChanges,
+            activity: pending.activity,
             updatedAt: pending.updatedAt,
           },
         });

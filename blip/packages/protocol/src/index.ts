@@ -111,6 +111,8 @@ export type BlipRuntimeEvent =
   | (BlipRuntimeEventBase & { type: "turn_started"; prompt?: string })
   | (BlipRuntimeEventBase & { type: "assistant_delta"; text: string })
   | (BlipRuntimeEventBase & { type: "assistant_message"; messageId: string; text: string })
+  | (BlipRuntimeEventBase & { type: "reasoning_delta"; text: string })
+  | (BlipRuntimeEventBase & { type: "reasoning_message"; messageId: string; text: string })
   | (BlipRuntimeEventBase & { type: "transcript_changed"; role: string })
   | (BlipRuntimeEventBase & { type: "tool_call_started"; callId: string; tool: string; args: unknown })
   | (BlipRuntimeEventBase & { type: "tool_call_progress"; callId: string; tool: string; message: string; details?: unknown })

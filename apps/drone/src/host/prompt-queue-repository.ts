@@ -1,5 +1,6 @@
 import { applyHubDatabaseMigrations, getHubDatabase } from './hub-database';
 import type { HubDatabase, HubDatabaseConnection, HubDatabaseMigration } from './hub-database';
+import type { AgentRunActivity } from '@drone/assistant-chat';
 
 export type PromptQueueState = 'queued' | 'sending' | 'sent' | 'failed' | 'cancelled';
 
@@ -16,6 +17,7 @@ export type PromptQueueItem = {
   error?: string;
   observability?: unknown;
   blipClones?: unknown;
+  activity?: AgentRunActivity;
   agentPlan?: unknown;
   fileChangesBaseline?: unknown;
   fileChanges?: unknown;
@@ -582,6 +584,7 @@ export class PromptQueueRepository {
         | 'error'
         | 'observability'
         | 'blipClones'
+        | 'activity'
         | 'agentPlan'
         | 'fileChangesBaseline'
         | 'fileChanges'

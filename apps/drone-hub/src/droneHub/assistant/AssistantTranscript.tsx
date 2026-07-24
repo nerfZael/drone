@@ -23,7 +23,6 @@ import {
   compactRepeatedToolItems,
   compactPreview,
   isChatIdleToolName,
-  lastAssistantContentBlock,
   latestThinkingText,
   messageDroneDetails,
   messageImageParts,
@@ -68,14 +67,30 @@ export function AssistantQueuedPromptRow({
 }) {
   const failed = prompt.status === 'failed';
   const running = prompt.status === 'running';
-  const statusLabel =
-    failed ? 'Failed' : running ? 'Working' : prompt.deliveryMode === 'asap' ? 'ASAP' : 'Queued';
+  const statusLabel = failed
+    ? 'Failed'
+    : running
+      ? 'Working'
+      : prompt.deliveryMode === 'asap'
+        ? 'ASAP'
+        : 'Queued';
   return (
     <div className="mx-3 flex justify-end">
-      <div className={`max-w-[88%] rounded-[var(--radius-large)] border px-3 py-2 ${failed ? 'border-[var(--red-border)] bg-[var(--red-subtle)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)]'}`}>
-        <div className="mb-1 flex items-center gap-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
-          <span className={failed ? 'text-[var(--red)]' : 'text-[var(--muted)]'}>{statusLabel}</span>
-          {prompt.imageCount > 0 ? <span className="text-[var(--muted-dim)]">{prompt.imageCount} image{prompt.imageCount === 1 ? '' : 's'}</span> : null}
+      <div
+        className={`max-w-[88%] rounded-[var(--radius-large)] border px-3 py-2 ${failed ? 'border-[var(--red-border)] bg-[var(--red-subtle)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)]'}`}
+      >
+        <div
+          className="mb-1 flex items-center gap-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide"
+          style={{ fontFamily: 'var(--display)' }}
+        >
+          <span className={failed ? 'text-[var(--red)]' : 'text-[var(--muted)]'}>
+            {statusLabel}
+          </span>
+          {prompt.imageCount > 0 ? (
+            <span className="text-[var(--muted-dim)]">
+              {prompt.imageCount} image{prompt.imageCount === 1 ? '' : 's'}
+            </span>
+          ) : null}
           {!running ? (
             <button
               type="button"
@@ -89,8 +104,14 @@ export function AssistantQueuedPromptRow({
             </button>
           ) : null}
         </div>
-        {prompt.prompt ? <div className="whitespace-pre-wrap break-words text-[var(--text-12)] leading-relaxed text-[var(--fg-secondary)]">{prompt.prompt}</div> : null}
-        {failed && prompt.error ? <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">{prompt.error}</div> : null}
+        {prompt.prompt ? (
+          <div className="whitespace-pre-wrap break-words text-[var(--text-12)] leading-relaxed text-[var(--fg-secondary)]">
+            {prompt.prompt}
+          </div>
+        ) : null}
+        {failed && prompt.error ? (
+          <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">{prompt.error}</div>
+        ) : null}
       </div>
     </div>
   );
@@ -145,9 +166,7 @@ function ToolDisclosure({
           <ToolRunChevron open={open} />
         </span>
       </button>
-      {open ? (
-        <ToolDetailRail>{children}</ToolDetailRail>
-      ) : null}
+      {open ? <ToolDetailRail>{children}</ToolDetailRail> : null}
     </div>
   );
 }
@@ -222,7 +241,7 @@ export function AssistantWorkingRow({ startedAt }: { startedAt?: string | number
   );
 }
 
-function ReasoningBlock({ text }: { text: string }) {
+export function ReasoningBlock({ text }: { text: string }) {
   const [open, setOpen] = React.useState(false);
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -338,9 +357,7 @@ function ToolPayloadDetails({
     <div className="grid gap-3 py-1">
       {call ? (
         <div>
-          <div className="text-[var(--text-11)] font-medium text-[var(--muted)]">
-            Arguments
-          </div>
+          <div className="text-[var(--text-11)] font-medium text-[var(--muted)]">Arguments</div>
           <pre className="mt-1 max-h-24 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2 py-1.5 whitespace-pre-wrap break-words text-[var(--text-10)] leading-relaxed text-[var(--muted-dim)]">
             {JSON.stringify(call.args, null, 2)}
           </pre>
@@ -348,15 +365,15 @@ function ToolPayloadDetails({
       ) : null}
       {result ? (
         <div>
-          <div className="text-[var(--text-11)] font-medium text-[var(--muted)]">
-            Result
-          </div>
+          <div className="text-[var(--text-11)] font-medium text-[var(--muted)]">Result</div>
           {resultText ? (
             <pre className="mt-1 max-h-32 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2 py-1.5 whitespace-pre-wrap break-words text-[var(--text-11)] leading-relaxed text-[var(--fg-secondary)]">
               {resultText}
             </pre>
           ) : (
-            <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">No result payload.</div>
+            <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
+              No result payload.
+            </div>
           )}
         </div>
       ) : (
@@ -448,9 +465,7 @@ function TransferActivityRow({
           />
         </div>
         <div className="ml-5 mt-1.5 flex items-center justify-between text-[var(--text-10)] text-[var(--muted-dim)]">
-          <span>
-            {progressLabel}
-          </span>
+          <span>{progressLabel}</span>
           <span>
             {progress?.retries
               ? `${progress.retries} ${progress.retries === 1 ? 'retry' : 'retries'}`
@@ -480,10 +495,7 @@ function TransferActivityRow({
                     ? 100
                     : 0;
               return (
-                <div
-                  key={`${file.destinationPath}-${index}`}
-                  className="py-0.5"
-                >
+                <div key={`${file.destinationPath}-${index}`} className="py-0.5">
                   <div className="flex min-w-0 items-center gap-2 text-[var(--text-10)]">
                     <span className="min-w-0 flex-1 truncate text-[var(--fg-secondary)]">
                       {file.sourcePath}
@@ -535,7 +547,9 @@ export function RepeatedToolActivityRow({
   const statusText = [
     pendingCount > 0 && !blocked ? `${pendingCount} pending` : '',
     errorCount > 0 ? `${errorCount} failed` : '',
-  ].filter(Boolean).join(', ');
+  ]
+    .filter(Boolean)
+    .join(', ');
   const statusResult: AssistantMessage | undefined =
     pendingCount > 0
       ? undefined
@@ -630,7 +644,9 @@ export function MessageDroneActivityRow({
             </span>
             {summary.chatName && summary.chatName !== 'default' ? (
               <span className="inline-flex max-w-full items-center gap-1 text-[var(--muted)]">
-                <span aria-hidden="true" className="text-[var(--muted-dim)]">·</span>
+                <span aria-hidden="true" className="text-[var(--muted-dim)]">
+                  ·
+                </span>
                 <span className="truncate">{summary.chatName}</span>
               </span>
             ) : null}
@@ -647,7 +663,9 @@ export function MessageDroneActivityRow({
         </div>
       </div>
       {detailsOpen ? (
-        <ToolDetailRail><ToolPayloadDetails call={call} result={result} /></ToolDetailRail>
+        <ToolDetailRail>
+          <ToolPayloadDetails call={call} result={result} />
+        </ToolDetailRail>
       ) : null}
     </div>
   );
@@ -672,9 +690,7 @@ export function ChatsIdleActivityRow({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <ToolStatusIndicator result={result} />
-            <div className="text-[var(--text-12)] font-medium text-[var(--muted)]">
-              {label}
-            </div>
+            <div className="text-[var(--text-12)] font-medium text-[var(--muted)]">{label}</div>
             <ToolDetailsButton
               open={detailsOpen}
               onClick={() => setDetailsOpen((value) => !value)}
@@ -692,7 +708,10 @@ export function ChatsIdleActivityRow({
               key={target.key}
               className="flex min-h-6 min-w-0 items-center gap-2 text-[var(--text-11)]"
             >
-              <span className="h-1 w-1 flex-shrink-0 rounded-full bg-[var(--muted-dim)]" aria-hidden="true" />
+              <span
+                className="h-1 w-1 flex-shrink-0 rounded-full bg-[var(--muted-dim)]"
+                aria-hidden="true"
+              />
               <div className="min-w-0 flex-1 truncate text-[var(--fg-secondary)]">
                 {target.droneLabel}
               </div>
@@ -710,7 +729,9 @@ export function ChatsIdleActivityRow({
         )}
       </div>
       {detailsOpen ? (
-        <ToolDetailRail><ToolPayloadDetails call={call} result={result} /></ToolDetailRail>
+        <ToolDetailRail>
+          <ToolPayloadDetails call={call} result={result} />
+        </ToolDetailRail>
       ) : null}
     </div>
   );
@@ -787,12 +808,7 @@ export function AssistantRunActivity({
   const start = Number.isFinite(startedAt) ? Number(startedAt) : fallbackStart;
   const end = active ? now : Number.isFinite(endedAt) ? Number(endedAt) : start;
 
-  return (
-    <AgentRunSummaryLine
-      active={active}
-      durationMs={Math.max(0, end - start)}
-    />
-  );
+  return <AgentRunSummaryLine active={active} durationMs={Math.max(0, end - start)} />;
 }
 
 function ToolRunChevron({ open }: { open: boolean }) {
@@ -874,8 +890,7 @@ export function ToolRunActivity({
   }, [active, awaitingApproval]);
 
   React.useEffect(() => {
-    const timestamp =
-      !active && Number.isFinite(endedAt) ? Number(endedAt) : Date.now();
+    const timestamp = !active && Number.isFinite(endedAt) ? Number(endedAt) : Date.now();
     setPauseClock((current) => {
       if (awaitingApproval) {
         const startedAt = normalizedApprovalStartedAt ?? current.startedAt ?? timestamp;
@@ -884,8 +899,7 @@ export function ToolRunActivity({
       }
       if (current.startedAt === null) return current;
       return {
-        accumulatedMs:
-          current.accumulatedMs + Math.max(0, timestamp - current.startedAt),
+        accumulatedMs: current.accumulatedMs + Math.max(0, timestamp - current.startedAt),
         startedAt: null,
       };
     });
@@ -894,22 +908,17 @@ export function ToolRunActivity({
   if (items.length === 0) return null;
   const start = Number.isFinite(startedAt) ? Number(startedAt) : fallbackStart;
   const rawEnd = active ? now : Number.isFinite(endedAt) ? Number(endedAt) : start;
-  const end =
-    awaitingApproval && pauseClock.startedAt !== null ? pauseClock.startedAt : rawEnd;
+  const end = awaitingApproval && pauseClock.startedAt !== null ? pauseClock.startedAt : rawEnd;
   const resumingPauseMs =
     !awaitingApproval && pauseClock.startedAt !== null
       ? Math.max(0, rawEnd - pauseClock.startedAt)
       : 0;
-  const durationMs = Math.max(
-    0,
-    end - start - pauseClock.accumulatedMs - resumingPauseMs,
-  );
+  const durationMs = Math.max(0, end - start - pauseClock.accumulatedMs - resumingPauseMs);
   const callLabel = `${items.length} tool ${items.length === 1 ? 'call' : 'calls'}`;
   const visibleItems =
     expansionMode === 'auto' ? items.slice(-AUTO_EXPANDED_TOOL_CALL_LIMIT) : items;
   const groupedItems = compactRepeatedToolItems(visibleItems);
-  const showThinkingActivity =
-    active && !awaitingApproval && items.every(toolActivityIsSettled);
+  const showThinkingActivity = active && !awaitingApproval && items.every(toolActivityIsSettled);
 
   return (
     <div>
@@ -1031,23 +1040,13 @@ export function AssistantMessageRow({
   let body: React.ReactNode = null;
   if (message.role === 'assistant' && structuredAssistant) {
     const blocks: React.ReactNode[] = [];
-    let lastThinkingPartIndex = -1;
-    for (let i = 0; i < content.length; i += 1) {
-      if (content[i]?.type === 'thinking') lastThinkingPartIndex = i;
-    }
-    const lastBlock = lastAssistantContentBlock(message);
     for (let i = 0; i < content.length; i += 1) {
       const part = content[i];
       if (!part || typeof part !== 'object') continue;
       if (part.type === 'thinking') {
         const thinkingText = String(part.thinking ?? '');
-        const currentReasoning = Boolean(
-          showReasoning && lastBlock?.type === 'thinking' && i === lastThinkingPartIndex,
-        );
-        if (currentReasoning) {
-          blocks.push(
-            <ReasoningBlock key={`th:${i}`} text={thinkingText} />,
-          );
+        if (showReasoning) {
+          blocks.push(<ReasoningBlock key={`th:${i}`} text={thinkingText} />);
         }
       } else if (part.type === 'text') {
         const t = extractAgentMessageContent(
@@ -1075,25 +1074,26 @@ export function AssistantMessageRow({
   } else {
     const text = agentMessage.text;
     const images = messageImageParts(message);
-    body = text || images.length > 0 || message.errorMessage ? (
-      <ChatMessageBody
-        role="assistant"
-        text={text}
-        error={Boolean(message.errorMessage)}
-        errorMessage={message.errorMessage}
-        images={images.map((image, index) => ({
-          key: `${image.mimeType}:${index}`,
-          src: `data:${image.mimeType};base64,${image.data}`,
-          alt: 'Attached image',
-        }))}
-        autoExpand={autoExpandMessage}
-        renderedInlineMediaHrefs={renderedInlineMediaHrefs}
-        onOpenFileReference={messageExtras?.onOpenFileReference}
-        onOpenLink={messageExtras?.onOpenLink}
-        textMentionLinks={droneMentionLinks}
-        onOpenTextMention={onOpenDroneMention}
-      />
-    ) : null;
+    body =
+      text || images.length > 0 || message.errorMessage ? (
+        <ChatMessageBody
+          role="assistant"
+          text={text}
+          error={Boolean(message.errorMessage)}
+          errorMessage={message.errorMessage}
+          images={images.map((image, index) => ({
+            key: `${image.mimeType}:${index}`,
+            src: `data:${image.mimeType};base64,${image.data}`,
+            alt: 'Attached image',
+          }))}
+          autoExpand={autoExpandMessage}
+          renderedInlineMediaHrefs={renderedInlineMediaHrefs}
+          onOpenFileReference={messageExtras?.onOpenFileReference}
+          onOpenLink={messageExtras?.onOpenLink}
+          textMentionLinks={droneMentionLinks}
+          onOpenTextMention={onOpenDroneMention}
+        />
+      ) : null;
   }
 
   if (

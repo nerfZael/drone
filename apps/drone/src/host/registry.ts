@@ -3,6 +3,7 @@ import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import type { AgentRunActivity } from '@drone/assistant-chat';
 import { droneRootPath, legacyDroneRootDirs } from './paths';
 import {
   getLegacyResidualStateRepository,
@@ -50,6 +51,7 @@ type DroneRegistryChatEntry = {
     prompt: string;
     model?: string;
     reasoning?: string;
+    activity?: AgentRunActivity;
     ok: boolean;
     output: string;
     error?: string;
@@ -61,6 +63,7 @@ type DroneRegistryChatEntry = {
     at: string;
     prompt: string;
     model?: string;
+    activity?: AgentRunActivity;
     state: 'queued' | 'sending' | 'sent' | 'failed';
     cwd?: string | null;
     error?: string;
