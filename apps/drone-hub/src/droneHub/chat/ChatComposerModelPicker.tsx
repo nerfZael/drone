@@ -154,7 +154,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
     : models;
   const triggerLabel =
     triggerLabelOverride ??
-    `${modelName(currentName)}${showReasoning ? ` · ${reasoningName(selectedReasoning)}` : ''}`;
+    `${modelName(currentName)}${showReasoning ? ` (${reasoningName(selectedReasoning)})` : ''}`;
   const customModelId =
     allowCustomModel &&
     normalizedQuery &&
