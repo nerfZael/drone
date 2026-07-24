@@ -15,6 +15,7 @@ export type StartupSeedMutationOptions = {
   runtime?: 'container' | 'host';
   agent: ChatAgentConfig | null;
   model?: string | null;
+  reasoning?: string | null;
   agentPermissionMode?: AgentPermissionMode;
   prompt: string;
   chatName?: string;
@@ -29,6 +30,7 @@ function normalizeStartupSeedOptions(opts: StartupSeedMutationOptions) {
     chatName: String(opts.chatName ?? 'default').trim() || 'default',
     agent: opts.agent ?? null,
     model: String(opts.model ?? '').trim() || null,
+    reasoning: String(opts.reasoning ?? '').trim().toLowerCase() || null,
     agentPermissionMode,
     prompt: String(opts.prompt ?? '').trim(),
     group: String(opts.group ?? '').trim() || null,
@@ -59,6 +61,7 @@ export function addOptimisticStartupSeeds(
         chatName: normalized.chatName,
         agent: normalized.agent,
         model: normalized.model,
+        reasoning: normalized.reasoning,
         agentPermissionMode: normalized.agentPermissionMode,
         prompt: normalized.prompt,
         group: normalized.group,
@@ -123,6 +126,7 @@ export function replaceOptimisticStartupSeeds(
         chatName: normalized.chatName,
         agent: normalized.agent,
         model: normalized.model,
+        reasoning: normalized.reasoning,
         agentPermissionMode: normalized.agentPermissionMode,
         prompt: normalized.prompt,
         group: normalized.group,

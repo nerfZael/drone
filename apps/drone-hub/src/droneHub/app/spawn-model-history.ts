@@ -47,7 +47,7 @@ export function buildSpawnModelMenuEntries(
   const activeModel = String(currentModel ?? '').trim();
   const options = mergeSeenModelIds(normalizeSeenModelIds(seenModelIds), activeModel ? [activeModel] : []);
   return [
-    { value: '', label: 'Default model' },
+    { value: '', label: 'Auto' },
     ...options.map((id) => ({
       value: id,
       label: id === activeModel && !seenModelIds.includes(id) ? `${id} (custom)` : id,

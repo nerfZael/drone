@@ -48,6 +48,7 @@ type ChatManagementRouteDependencyName =
   | 'nowIso'
   | 'parseAgentPermissionModeForUpdate'
   | 'parseChatModelForUpdate'
+  | 'parseChatReasoningForUpdate'
   | 'parseChatNameForMutation'
   | 'parseDraftFlag'
   | 'projectCanonicalChatToRegistry'
@@ -128,6 +129,7 @@ export function createChatManagementRouteHandler(
     nowIso,
     parseAgentPermissionModeForUpdate,
     parseChatModelForUpdate,
+    parseChatReasoningForUpdate,
     parseChatNameForMutation,
     parseDraftFlag,
     projectCanonicalChatToRegistry,
@@ -982,12 +984,18 @@ export function createChatManagementRouteHandler(
           typeof body === 'object' &&
           Object.prototype.hasOwnProperty.call(body, 'agentPermissionMode'),
         );
+        const hasReasoningField = Boolean(
+          body &&
+          typeof body === 'object' &&
+          Object.prototype.hasOwnProperty.call(body, 'reasoning'),
+        );
         const hasDockerSnapshotField = Boolean(
           body &&
           typeof body === 'object' &&
           Object.prototype.hasOwnProperty.call(body, 'dockerSnapshotAfterAgentMessageEnabled'),
         );
         let model: string | null = null;
+        let reasoning: string | null = null;
         let agentPermissionMode: AgentPermissionMode = 'full-access';
         let dockerSnapshotAfterAgentMessageEnabled = false;
         if (hasModelField) {
@@ -999,6 +1007,14 @@ export function createChatManagementRouteHandler(
                 ? body.model
                 : body?.chatModel,
             );
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+        }
+        if (hasReasoningField) {
+          try {
+            reasoning = parseChatReasoningForUpdate(body?.reasoning);
           } catch (e: any) {
             json(res, 400, { ok: false, error: e?.message ?? String(e) });
             return;
@@ -1037,6 +1053,8 @@ export function createChatManagementRouteHandler(
               agent,
               setModel: hasModelField,
               model,
+              setReasoning: hasReasoningField,
+              reasoning,
               setAgentPermissionMode: hasAgentPermissionModeField,
               agentPermissionMode,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
@@ -1049,6 +1067,7 @@ export function createChatManagementRouteHandler(
               chat: chatName,
               agent,
               ...(hasModelField ? { model } : {}),
+              ...(hasReasoningField ? { reasoning } : {}),
             });
             return;
           }
@@ -1067,6 +1086,8 @@ export function createChatManagementRouteHandler(
               agent,
               setModel: hasModelField,
               model,
+              setReasoning: hasReasoningField,
+              reasoning,
               setAgentPermissionMode: hasAgentPermissionModeField,
               agentPermissionMode,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
@@ -1080,6 +1101,7 @@ export function createChatManagementRouteHandler(
               chat: chatName,
               agent,
               ...(hasModelField ? { model } : {}),
+              ...(hasReasoningField ? { reasoning } : {}),
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
             });
@@ -1105,6 +1127,8 @@ export function createChatManagementRouteHandler(
               agent,
               setModel: hasModelField,
               model,
+              setReasoning: hasReasoningField,
+              reasoning,
               setAgentPermissionMode: hasAgentPermissionModeField,
               agentPermissionMode,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
@@ -1118,17 +1142,25 @@ export function createChatManagementRouteHandler(
               chat: chatName,
               agent,
               ...(hasModelField ? { model } : {}),
+              ...(hasReasoningField ? { reasoning } : {}),
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
             });
             return;
           }
-          if (hasModelField) {
+          if (
+            hasModelField ||
+            hasReasoningField ||
+            hasAgentPermissionModeField ||
+            hasDockerSnapshotField
+          ) {
             await setChatAgentConfig({
               droneId,
               chatName,
-              setModel: true,
+              setModel: hasModelField,
               model,
+              setReasoning: hasReasoningField,
+              reasoning,
               setAgentPermissionMode: hasAgentPermissionModeField,
               agentPermissionMode,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
@@ -1139,52 +1171,16 @@ export function createChatManagementRouteHandler(
               id: droneId,
               name: droneName,
               chat: chatName,
-              model,
+              ...(hasModelField ? { model } : {}),
+              ...(hasReasoningField ? { reasoning } : {}),
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
-            });
-            return;
-          }
-          if (hasAgentPermissionModeField) {
-            await setChatAgentConfig({
-              droneId,
-              chatName,
-              setAgentPermissionMode: true,
-              agentPermissionMode,
-              setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
-              dockerSnapshotAfterAgentMessageEnabled,
-            });
-            json(res, 200, {
-              ok: true,
-              id: droneId,
-              name: droneName,
-              chat: chatName,
-              agentPermissionMode,
-              ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
-            });
-            return;
-          }
-          if (hasDockerSnapshotField) {
-            await setChatAgentConfig({
-              droneId,
-              chatName,
-              setAgentPermissionMode: hasAgentPermissionModeField,
-              agentPermissionMode,
-              setDockerSnapshotAfterAgentMessageEnabled: true,
-              dockerSnapshotAfterAgentMessageEnabled,
-            });
-            json(res, 200, {
-              ok: true,
-              id: droneId,
-              name: droneName,
-              chat: chatName,
-              dockerSnapshotAfterAgentMessageEnabled,
             });
             return;
           }
           json(res, 400, {
             ok: false,
-            error: `invalid request (expected agent native|cursor|codex|claude|opencode|pi|blip|custom, model, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled)`,
+            error: `invalid request (expected agent native|cursor|codex|claude|opencode|pi|blip|custom, model, reasoning, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled)`,
           });
           return;
         } catch (e: any) {

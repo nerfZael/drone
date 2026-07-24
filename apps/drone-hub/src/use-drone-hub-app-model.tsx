@@ -677,14 +677,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     loadingChatInfo,
     chatModels,
     chatModelsSource,
-    chatModelsDiscoveredAt,
     chatModelsError,
     loadingChatModels,
-    setChatModelsRefreshNonce,
-    manualChatModelInput,
-    setManualChatModelInput,
+    chatModelsStale,
     setChatAgent,
-    setChatModel,
+    setChatModelSettings,
     setChatAgentPermissionMode,
     setDockerSnapshotAfterAgentMessageEnabled,
     handleSetAgentFailure,
@@ -761,6 +758,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       runtime?: 'container' | 'host';
       agent: ChatAgentConfig | null;
       model?: string | null;
+      reasoning?: string | null;
       agentPermissionMode?: 'full-access' | 'read-only';
       prompt: string;
       chatName?: string;
@@ -781,6 +779,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     const chatName = String(opts.chatName ?? 'default').trim() || 'default';
     const runtime = opts.runtime === 'host' ? 'host' : 'container';
     const model = String(opts.model ?? '').trim() || null;
+    const reasoning = String(opts.reasoning ?? '').trim().toLowerCase() || null;
     const agentPermissionMode = opts.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access';
     const group = String(opts.group ?? '').trim() || null;
     const repoPath = String(opts.repoPath ?? '').trim() || null;
@@ -796,6 +795,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           chatName,
           agent: opts.agent ?? null,
           model,
+          reasoning,
           agentPermissionMode,
           prompt,
           group,
@@ -2200,6 +2200,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           agent: startupSeedForCurrentDrone.agent,
           agentLocked: false,
           model: startupSeedForCurrentDrone.model ?? null,
+          reasoning: startupSeedForCurrentDrone.reasoning ?? null,
           agentPermissionMode: startupSeedForCurrentDrone.agentPermissionMode ?? 'full-access',
           dockerSnapshotAfterAgentMessageEnabled: false,
           sessionName: `drone-hub-chat-${startupSeedForCurrentDrone.chatName || selectedChat || 'default'}`,
@@ -2214,6 +2215,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const builtinAgentOptions: Array<{ key: string; label: string; agent: ChatAgentConfig }> = BUILTIN_AGENT_OPTIONS;
   const currentAgent = effectiveChatInfo?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig);
   const currentModel = String(chatInfo?.model ?? effectiveChatInfo?.model ?? '').trim() || null;
+  const currentReasoning =
+    String(chatInfo?.reasoning ?? effectiveChatInfo?.reasoning ?? '').trim().toLowerCase() || null;
   const currentAgentKey =
     currentAgent.kind === 'native'
       ? 'native'
@@ -2600,14 +2603,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const modelDisabled = agentControlBusy || !modelControlEnabled;
   const {
     availableChatModels,
-    modelMenuEntries,
-    modelLabel,
     createRepoMenuEntries,
     spawnAgentMenuEntries,
     toolbarAgentMenuEntries,
     agentLabel,
     pickAgentValue,
-    applyManualChatModel,
   } = useDroneHubToolbarMenuState({
     chatModels,
     currentModel,
@@ -2619,10 +2619,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     currentCustomAgentMissing,
     currentAgentKey,
     agentLocked,
-    modelDisabled,
-    manualChatModelInput,
-    setChatModel,
-    setChatInfoError,
     setChatAgent,
     handleSetAgentFailure,
     setCustomAgentError,
@@ -4096,23 +4092,18 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     modelControlEnabled,
     availableChatModels,
     currentModel,
-    setChatModel,
+    currentReasoning,
+    setChatModelSettings,
     agentPermissionMode: effectiveChatInfo?.agentPermissionMode ?? 'full-access',
     setChatAgentPermissionMode,
     dockerSnapshotAfterAgentMessageEnabled: effectiveChatInfo?.dockerSnapshotAfterAgentMessageEnabled === true,
     setDockerSnapshotAfterAgentMessageEnabled,
     setChatInfoError,
-    modelMenuEntries,
     modelDisabled,
-    modelLabel,
-    manualChatModelInput,
-    setManualChatModelInput,
-    applyManualChatModel,
-    setChatModelsRefreshNonce,
     loadingChatModels,
     chatModelsError,
-    chatModelsDiscoveredAt,
     chatModelsSource,
+    chatModelsStale,
     currentDroneRepoAttached,
     currentDroneRepoPath,
     openDroneTerminal,

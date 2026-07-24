@@ -1,24 +1,11 @@
 import path from 'node:path';
 
-import { parseBoolParam } from '../hub-format';
 import type { HubRouter } from '../hub-router';
-import type { DroneRuntime } from '../../host/runtime';
 
 type ServiceFunction = (...args: any[]) => any;
 
-interface ModelDiscoveryCacheEntry {
-  atMs: number;
-  models: unknown[];
-}
-
 export interface RepositoryRouteDependencies {
-  normalizeBuiltinAgentId: ServiceFunction;
-  nativeModelCatalog: ServiceFunction;
-  modelCatalogCacheKey: ServiceFunction;
-  latestChatModelDiscoveryByAgent: Map<string, ModelDiscoveryCacheEntry>;
   loadRegistry: ServiceFunction;
-  droneRuntime: ServiceFunction;
-  discoverAndRememberModelsForBuiltinAgent: ServiceFunction;
   listCanonicalRepositories: ServiceFunction;
   gitListRemoteBranches: ServiceFunction;
   removeCanonicalRepository: ServiceFunction;
@@ -39,13 +26,7 @@ export function registerRepositoryRoutes(
   deps: RepositoryRouteDependencies,
 ): void {
   const {
-    normalizeBuiltinAgentId,
-    nativeModelCatalog,
-    modelCatalogCacheKey,
-    latestChatModelDiscoveryByAgent,
     loadRegistry,
-    droneRuntime,
-    discoverAndRememberModelsForBuiltinAgent,
     listCanonicalRepositories,
     gitListRemoteBranches,
     removeCanonicalRepository,
@@ -60,71 +41,6 @@ export function registerRepositoryRoutes(
     normalizeAgentsMarkdown,
     updateCanonicalRepositoryAgents,
   } = deps;
-
-  router.get('/api/model-catalog', async ({ url, fail, json }) => {
-    const requestedAgent = String(url.searchParams.get('agent') ?? '').trim().toLowerCase();
-    const runtime: DroneRuntime =
-      String(url.searchParams.get('runtime') ?? '').trim() === 'host' ? 'host' : 'container';
-    const forceRefresh = parseBoolParam(url.searchParams.get('refresh'), false);
-    if (requestedAgent === 'native') {
-      const catalog = await nativeModelCatalog();
-      json(200, { ok: true, agent: 'native', runtime, ...catalog, source: 'native' });
-      return;
-    }
-    const agentId = normalizeBuiltinAgentId(requestedAgent);
-    if (!agentId) return fail(400, 'A builtin agent is required.');
-
-    const cacheKey = modelCatalogCacheKey(runtime, agentId);
-    const cached = latestChatModelDiscoveryByAgent.get(cacheKey);
-    if (!forceRefresh && cached) {
-      json(200, {
-        ok: true,
-        agent: agentId,
-        runtime,
-        models: cached.models,
-        source: 'cache',
-        discoveredAt: new Date(cached.atMs).toISOString(),
-      });
-      return;
-    }
-
-    const registry: any = await loadRegistry();
-    const candidate = Object.entries<any>(registry?.drones ?? {}).find(
-      ([, drone]) => droneRuntime(drone) === runtime,
-    );
-    if (!candidate) {
-      json(200, {
-        ok: true,
-        agent: agentId,
-        runtime,
-        models: cached?.models ?? [],
-        source: cached ? 'cache' : 'none',
-        discoveredAt: cached ? new Date(cached.atMs).toISOString() : null,
-        error: `No ${runtime} drone is available for model discovery.`,
-      });
-      return;
-    }
-
-    const [droneId, drone] = candidate;
-    const discovered = await discoverAndRememberModelsForBuiltinAgent({
-      containerName: String(drone?.containerName ?? drone?.name ?? droneId).trim() || droneId,
-      containerPort: Number(drone?.containerPort ?? 7777),
-      runtime,
-      droneName: droneId,
-      chatName: '__model_catalog__',
-      agentId,
-      forceRefresh,
-    });
-    json(200, {
-      ok: true,
-      agent: agentId,
-      runtime,
-      models: discovered.models,
-      source: discovered.source,
-      discoveredAt: discovered.discoveredAt,
-      ...(discovered.error ? { error: discovered.error } : {}),
-    });
-  });
 
   router.get('/api/repos', async ({ json }) => {
     const repos = (await listCanonicalRepositories()).map((repo: any) => ({

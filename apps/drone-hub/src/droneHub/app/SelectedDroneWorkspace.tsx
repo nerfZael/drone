@@ -10,7 +10,6 @@ import {
   adaptExternalAgentChatSurface,
   adaptNativeAgentChatSurface,
   type AgentChatTranscriptItem,
-  type ChatComposerControlsConfig,
   type ChatSendContext,
   type DroneHubTask,
   type DroneHubTaskSpawnMode,
@@ -59,6 +58,7 @@ import { CliPendingPromptStrip } from './CliPendingPromptStrip';
 import {
   formatBytes,
 } from './selected-drone-workspace-utils';
+import { buildExternalAgentComposerControls } from './external-agent-composer-controls';
 import { parseGithubPullRequestHref } from '../chat/github-pull-request-links';
 import { useHeaderRepoPullRequestSummary } from './HeaderPullRequestShortcuts';
 import { useFleetAssignmentDropState } from './use-fleet-assignment-drop-state';
@@ -209,21 +209,21 @@ type SelectedDroneWorkspaceProps = {
   modelControlEnabled: boolean;
   availableChatModels: ChatModelOption[];
   currentModel: string | null;
-  setChatModel: (model: string | null) => Promise<void>;
+  currentReasoning: string | null;
+  setChatModelSettings: (settings: {
+    model?: string | null;
+    reasoning?: string | null;
+  }) => Promise<void>;
   agentPermissionMode: AgentPermissionMode;
   setChatAgentPermissionMode: (mode: AgentPermissionMode) => Promise<void>;
   dockerSnapshotAfterAgentMessageEnabled: boolean;
   setDockerSnapshotAfterAgentMessageEnabled: (enabled: boolean) => Promise<void>;
   setChatInfoError: React.Dispatch<React.SetStateAction<string | null>>;
   modelDisabled: boolean;
-  manualChatModelInput: string;
-  setManualChatModelInput: React.Dispatch<React.SetStateAction<string>>;
-  applyManualChatModel: () => void;
-  setChatModelsRefreshNonce: React.Dispatch<React.SetStateAction<number>>;
   loadingChatModels: boolean;
   chatModelsError: string | null;
-  chatModelsDiscoveredAt: string | null;
   chatModelsSource: string;
+  chatModelsStale: boolean;
   currentDroneRepoAttached: boolean;
   currentDroneRepoPath: string;
   createRepoMenuEntries: UiMenuSelectEntry[];
@@ -314,20 +314,18 @@ export function SelectedDroneWorkspace({
   modelControlEnabled,
   availableChatModels,
   currentModel,
-  setChatModel,
+  currentReasoning,
+  setChatModelSettings,
   agentPermissionMode,
   setChatAgentPermissionMode,
   dockerSnapshotAfterAgentMessageEnabled,
   setDockerSnapshotAfterAgentMessageEnabled,
   setChatInfoError,
   modelDisabled,
-  manualChatModelInput,
-  setManualChatModelInput,
-  applyManualChatModel,
-  setChatModelsRefreshNonce,
   loadingChatModels,
   chatModelsError,
   chatModelsSource,
+  chatModelsStale,
   currentDroneRepoAttached,
   currentDroneRepoPath,
   openDroneTerminal,
@@ -886,78 +884,26 @@ export function SelectedDroneWorkspace({
     if (!headerOverflowOpen) setDroneControlsMenuOpen(false);
   }, [headerOverflowOpen]);
 
-  const externalComposerControls: ChatComposerControlsConfig | undefined =
-    hasChats && modelControlEnabled
-      ? {
-          onboardingId: 'chat.composer.model',
-          controls: [
-            {
-              kind: 'label',
-              id: 'external-agent',
-              value: agentLabel,
-              title: `Agent: ${agentLabel}`,
-            },
-            {
-              kind: 'model-picker',
-              id: 'external-model',
-              currentProvider: 'external',
-              currentModel: currentModel ?? '',
-              options: [
-                { provider: 'external', id: '', name: 'Default model' },
-                ...availableChatModels.map((model) => ({
-                  provider: 'external',
-                  id: model.id,
-                  name: model.label,
-                })),
-              ],
-              title: 'Choose model',
-              disabled: modelDisabled,
-              showReasoning: false,
-              searchable: true,
-              searchPlaceholder: 'Search models',
-              onSelect: (choice) => {
-                void setChatModel(choice.id || null).catch((err: any) =>
-                  setChatInfoError(err?.message ?? String(err)),
-                );
-              },
-            },
-            ...(availableChatModels.length === 0
-              ? [
-                  {
-                    kind: 'text' as const,
-                    id: 'external-model-manual',
-                    value: manualChatModelInput,
-                    placeholder: 'Model id',
-                    title: 'Type a model id and press Enter',
-                    disabled: modelDisabled,
-                    onValueChange: setManualChatModelInput,
-                    onSubmit: applyManualChatModel,
-                  },
-                  {
-                    kind: 'button' as const,
-                    id: 'external-model-apply',
-                    label: 'Set',
-                    title: 'Use this model for the chat',
-                    disabled: modelDisabled,
-                    onSelect: applyManualChatModel,
-                  },
-                ]
-              : []),
-            {
-              kind: 'button',
-              id: 'external-model-refresh',
-              label: 'Refresh',
-              title: chatModelsError
-                ? `Refresh model list: ${chatModelsError}`
-                : 'Refresh model list from the agent CLI',
-              disabled: modelDisabled || loadingChatModels,
-              active: loadingChatModels,
-              icon: 'refresh',
-              onSelect: () => setChatModelsRefreshNonce((nonce) => nonce + 1),
-            },
-          ],
-        }
-      : undefined;
+  const externalComposerControls = buildExternalAgentComposerControls({
+    hasChats,
+    modelControlEnabled,
+    currentAgentKey,
+    agentLabel,
+    models: availableChatModels,
+    currentModel,
+    currentReasoning,
+    modelDisabled,
+    loading: loadingChatModels,
+    error: chatModelsError,
+    source: chatModelsSource,
+    stale: chatModelsStale,
+    transcripts,
+    onUpdate: (settings) => {
+      void setChatModelSettings(settings).catch((err: any) =>
+        setChatInfoError(err?.message ?? String(err)),
+      );
+    },
+  });
 
   let latestFileChangesTimelineIndex = -1;
   for (let index = externalTimelineItems.length - 1; index >= 0; index -= 1) {
