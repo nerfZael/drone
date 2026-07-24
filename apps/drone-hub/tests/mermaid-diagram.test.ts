@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   clampMermaidZoom,
   fitMermaidZoom,
+  getMermaidCanvasDimensions,
   getMermaidSvgDimensions,
+  getMermaidZoomScrollPosition,
 } from '../src/droneHub/chat/MermaidDiagramViewport';
 import {
   getCachedMermaidRender,
@@ -22,6 +24,29 @@ describe('desktop Mermaid diagrams', () => {
     expect(fitMermaidZoom(848, 448, { width: 800, height: 400 })).toBe(1);
     expect(clampMermaidZoom(0.01)).toBe(0.2);
     expect(clampMermaidZoom(20)).toBe(5);
+  });
+
+  test('keeps the entire zoomed diagram inside the pannable canvas', () => {
+    expect(getMermaidCanvasDimensions({ width: 800, height: 400 }, 2)).toEqual({
+      width: 1_648,
+      height: 848,
+    });
+  });
+
+  test('keeps the cursor anchored while a centered diagram grows during zoom', () => {
+    expect(
+      getMermaidZoomScrollPosition({
+        anchorX: 500,
+        anchorY: 300,
+        currentZoom: 1,
+        diagram: { width: 500, height: 300 },
+        nextZoom: 2,
+        scrollLeft: 0,
+        scrollTop: 0,
+        viewportHeight: 600,
+        viewportWidth: 1_000,
+      }),
+    ).toEqual({ scrollLeft: 24, scrollTop: 24 });
   });
 
   test('scopes cached SVG ids for each mounted diagram', () => {

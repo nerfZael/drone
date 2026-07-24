@@ -1552,7 +1552,6 @@ code, pre {
   height: 100%;
   max-width: none !important;
 }
-.dh-mermaid-card__viewport-hint,
 .dh-mermaid-card__viewport-controls {
   position: absolute;
   bottom: 10px;
@@ -1560,17 +1559,6 @@ code, pre {
   border: 1px solid color-mix(in srgb, var(--border-subtle) 84%, transparent);
   box-shadow: 0 8px 22px color-mix(in srgb, #000 28%, transparent);
   backdrop-filter: blur(10px);
-}
-.dh-mermaid-card__viewport-hint {
-  left: 10px;
-  border-radius: 6px;
-  padding: 5px 8px;
-  color: var(--muted-dim);
-  background: color-mix(in srgb, var(--surface-soft) 88%, transparent);
-  font-size: 10px;
-  pointer-events: none;
-}
-.dh-mermaid-card__viewport-controls {
   right: 10px;
   display: flex;
   align-items: center;
@@ -1642,9 +1630,7 @@ code, pre {
   inset: 0;
   z-index: 160;
   display: flex;
-  padding: 14px;
-  background: color-mix(in srgb, var(--scrim) 88%, transparent);
-  backdrop-filter: blur(8px);
+  background: var(--code-block-bg);
 }
 .dh-mermaid-card.is-maximized {
   width: 100%;
@@ -1653,9 +1639,9 @@ code, pre {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  border-color: var(--border-strong);
-  border-radius: 12px;
-  box-shadow: 0 28px 90px color-mix(in srgb, #000 56%, transparent);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 .dh-mermaid-card.is-maximized .dh-mermaid-card__toolbar {
   flex: 0 0 auto;

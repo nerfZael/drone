@@ -9,6 +9,7 @@ const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 5;
 const ZOOM_BUTTON_FACTOR = 1.2;
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
+const CANVAS_PADDING = 24;
 
 export function getMermaidSvgDimensions(svg: string): MermaidSvgDimensions {
   const viewBox = /\bviewBox=["']\s*[-\d.]+\s+[-\d.]+\s+([\d.]+)\s+([\d.]+)\s*["']/i.exec(svg);
@@ -29,13 +30,79 @@ export function fitMermaidZoom(
   viewportHeight: number,
   diagram: MermaidSvgDimensions,
 ): number {
-  const horizontalPadding = 48;
-  const verticalPadding = 48;
+  const horizontalPadding = CANVAS_PADDING * 2;
+  const verticalPadding = CANVAS_PADDING * 2;
   const availableWidth = Math.max(1, viewportWidth - horizontalPadding);
   const availableHeight = Math.max(1, viewportHeight - verticalPadding);
   return clampMermaidZoom(
     Math.min(availableWidth / diagram.width, availableHeight / diagram.height),
   );
+}
+
+export function getMermaidCanvasDimensions(
+  diagram: MermaidSvgDimensions,
+  zoom: number,
+): MermaidSvgDimensions {
+  const totalPadding = CANVAS_PADDING * 2;
+  return {
+    height: diagram.height * zoom + totalPadding,
+    width: diagram.width * zoom + totalPadding,
+  };
+}
+
+export function getMermaidZoomScrollPosition({
+  anchorX,
+  anchorY,
+  currentZoom,
+  diagram,
+  nextZoom,
+  scrollLeft,
+  scrollTop,
+  viewportHeight,
+  viewportWidth,
+}: {
+  anchorX: number;
+  anchorY: number;
+  currentZoom: number;
+  diagram: MermaidSvgDimensions;
+  nextZoom: number;
+  scrollLeft: number;
+  scrollTop: number;
+  viewportHeight: number;
+  viewportWidth: number;
+}): { scrollLeft: number; scrollTop: number } {
+  const currentOffsetX = Math.max(
+    CANVAS_PADDING,
+    (viewportWidth - diagram.width * currentZoom) / 2,
+  );
+  const currentOffsetY = Math.max(
+    CANVAS_PADDING,
+    (viewportHeight - diagram.height * currentZoom) / 2,
+  );
+  const nextOffsetX = Math.max(
+    CANVAS_PADDING,
+    (viewportWidth - diagram.width * nextZoom) / 2,
+  );
+  const nextOffsetY = Math.max(
+    CANVAS_PADDING,
+    (viewportHeight - diagram.height * nextZoom) / 2,
+  );
+  const diagramX = (scrollLeft + anchorX - currentOffsetX) / currentZoom;
+  const diagramY = (scrollTop + anchorY - currentOffsetY) / currentZoom;
+  const nextCanvas = getMermaidCanvasDimensions(diagram, nextZoom);
+  const maxScrollLeft = Math.max(0, nextCanvas.width - viewportWidth);
+  const maxScrollTop = Math.max(0, nextCanvas.height - viewportHeight);
+
+  return {
+    scrollLeft: Math.min(
+      maxScrollLeft,
+      Math.max(0, nextOffsetX + diagramX * nextZoom - anchorX),
+    ),
+    scrollTop: Math.min(
+      maxScrollTop,
+      Math.max(0, nextOffsetY + diagramY * nextZoom - anchorY),
+    ),
+  };
 }
 
 function zoomFromWheel(currentZoom: number, deltaY: number): number {
@@ -61,9 +128,16 @@ export function MermaidDiagramViewport({
     scrollLeft: number;
     scrollTop: number;
   } | null>(null);
+  const pendingZoomScrollRef = React.useRef<{
+    scrollLeft: number;
+    scrollTop: number;
+    zoom: number;
+  } | null>(null);
+  const zoomRef = React.useRef(1);
   const [zoom, setZoom] = React.useState(1);
   const [panning, setPanning] = React.useState(false);
   const [fitMode, setFitMode] = React.useState(true);
+  const canvasDimensions = getMermaidCanvasDimensions(dimensions, zoom);
 
   const updateZoom = React.useCallback(
     (nextZoom: number, anchor?: { clientX: number; clientY: number }) => {
@@ -74,31 +148,49 @@ export function MermaidDiagramViewport({
       const rect = viewport.getBoundingClientRect();
       const anchorX = anchor ? anchor.clientX - rect.left : viewport.clientWidth / 2;
       const anchorY = anchor ? anchor.clientY - rect.top : viewport.clientHeight / 2;
-      const contentX = viewport.scrollLeft + anchorX;
-      const contentY = viewport.scrollTop + anchorY;
-      const ratio = clampedZoom / zoom;
+      const nextScroll = getMermaidZoomScrollPosition({
+        anchorX,
+        anchorY,
+        currentZoom: zoom,
+        diagram: dimensions,
+        nextZoom: clampedZoom,
+        scrollLeft: viewport.scrollLeft,
+        scrollTop: viewport.scrollTop,
+        viewportHeight: viewport.clientHeight,
+        viewportWidth: viewport.clientWidth,
+      });
 
+      pendingZoomScrollRef.current = { ...nextScroll, zoom: clampedZoom };
       setZoom(clampedZoom);
       onZoomChange(clampedZoom);
-      requestAnimationFrame(() => {
-        viewport.scrollLeft = contentX * ratio - anchorX;
-        viewport.scrollTop = contentY * ratio - anchorY;
-      });
     },
-    [onZoomChange, zoom],
+    [dimensions, onZoomChange, zoom],
   );
+
+  React.useLayoutEffect(() => {
+    zoomRef.current = zoom;
+    const viewport = viewportRef.current;
+    const pending = pendingZoomScrollRef.current;
+    if (!viewport || !pending || pending.zoom !== zoom) return;
+    viewport.scrollLeft = pending.scrollLeft;
+    viewport.scrollTop = pending.scrollTop;
+    pendingZoomScrollRef.current = null;
+  }, [zoom]);
 
   const fitDiagram = React.useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const nextZoom = fitMermaidZoom(viewport.clientWidth, viewport.clientHeight, dimensions);
+    if (nextZoom === zoomRef.current) {
+      pendingZoomScrollRef.current = null;
+      viewport.scrollLeft = 0;
+      viewport.scrollTop = 0;
+    } else {
+      pendingZoomScrollRef.current = { scrollLeft: 0, scrollTop: 0, zoom: nextZoom };
+    }
     setZoom(nextZoom);
     setFitMode(true);
     onZoomChange(nextZoom);
-    requestAnimationFrame(() => {
-      viewport.scrollLeft = 0;
-      viewport.scrollTop = 0;
-    });
   }, [dimensions, onZoomChange]);
 
   React.useLayoutEffect(() => {
@@ -174,7 +266,13 @@ export function MermaidDiagramViewport({
           setPanning(false);
         }}
       >
-        <div className="dh-mermaid-card__canvas">
+        <div
+          className="dh-mermaid-card__canvas"
+          style={{
+            height: canvasDimensions.height,
+            width: canvasDimensions.width,
+          }}
+        >
           <div
             className="dh-mermaid-card__canvas-size"
             style={{
@@ -193,9 +291,6 @@ export function MermaidDiagramViewport({
             />
           </div>
         </div>
-      </div>
-      <div className="dh-mermaid-card__viewport-hint" aria-hidden="true">
-        Wheel to zoom · Right-drag to pan
       </div>
       <div className="dh-mermaid-card__viewport-controls" role="group" aria-label="Diagram zoom">
         <button
