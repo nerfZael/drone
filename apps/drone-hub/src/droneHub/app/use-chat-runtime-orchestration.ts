@@ -413,6 +413,7 @@ export function useChatRuntimeOrchestration({
           });
           try {
             const data = await sendDroneChatPrompt(requestJson, {
+              promptId: head.id,
               droneId: parsed.droneId,
               chatName: parsed.chatName,
               prompt: head.prompt,
@@ -607,10 +608,12 @@ export function useChatRuntimeOrchestration({
       setStopResponseError(null);
       try {
         const data = await sendDroneChatPrompt(requestJson, {
+          promptId: optimisticId,
           droneId: currentDrone.id,
           chatName: selectedChat || 'default',
           prompt,
           attachments,
+          submittedAt: optimisticItem?.at,
           deliveryMode: context.deliveryMode,
           autoRenameHandledByClient: Boolean(prompt),
         });

@@ -405,10 +405,12 @@ export function GroupMultiChatColumn({
       }
       try {
         const data = await sendDroneChatPrompt(requestJson, {
+          promptId: optimisticId,
           droneId: drone.id,
           chatName,
           prompt,
           attachments,
+          submittedAt: optimisticItem?.at,
           deliveryMode: context.deliveryMode,
           autoRenameHandledByClient: Boolean(prompt),
         });

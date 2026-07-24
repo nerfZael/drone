@@ -89,11 +89,15 @@ describe('chat api request scopes', () => {
         droneId: 'drone-1',
         chatName: 'chat-2',
         prompt: 'Fix login',
+        promptId: 'optimistic-prompt-1',
+        submittedAt: '2026-07-24T12:34:56.000Z',
         deliveryMode: 'asap',
         autoRenameHandledByClient: true,
       },
     );
 
+    expect(body.promptId).toBe('optimistic-prompt-1');
+    expect(body.submittedAt).toBe('2026-07-24T12:34:56.000Z');
     expect(body.autoRenameHandledByClient).toBe(true);
     expect(body.deliveryMode).toBe('asap');
   });

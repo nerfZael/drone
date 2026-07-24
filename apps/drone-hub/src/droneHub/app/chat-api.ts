@@ -167,6 +167,7 @@ export async function sendDroneChatPrompt(
     droneId: string;
     chatName: string;
     prompt: string;
+    promptId?: string;
     attachments?: ChatSendPayload['attachments'];
     submittedAt?: string;
     autoRenameHandledByClient?: boolean;
@@ -176,6 +177,7 @@ export async function sendDroneChatPrompt(
   const droneId = String(opts.droneId ?? '').trim();
   const chatName = String(opts.chatName ?? '').trim() || 'default';
   const prompt = String(opts.prompt ?? '');
+  const promptId = String(opts.promptId ?? '').trim();
   const attachments = Array.isArray(opts.attachments) ? opts.attachments : [];
   const submittedAt = String(opts.submittedAt ?? '').trim() || new Date().toISOString();
   return await requestJson<SendDroneChatPromptResponse>(
@@ -185,6 +187,7 @@ export async function sendDroneChatPrompt(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         prompt,
+        ...(promptId ? { promptId } : {}),
         attachments,
         submittedAt,
         ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
