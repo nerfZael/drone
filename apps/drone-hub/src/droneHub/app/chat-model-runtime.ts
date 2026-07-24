@@ -131,6 +131,7 @@ export function formatModelDisplayLabel(valueRaw: string | null | undefined): st
     .trim()
     .replace(/\s+\(custom\)$/i, '');
   if (!value) return '';
+  if (/^gpt\s+/i.test(value)) return `GPT ${value.replace(/^gpt\s+/i, '')}`;
   if (!/^gpt(?:[-_\s]|$)/i.test(value)) return value;
 
   const suffix = value
@@ -139,8 +140,11 @@ export function formatModelDisplayLabel(valueRaw: string | null | undefined): st
     .trim();
   if (!suffix) return 'GPT';
   const [version, ...variantParts] = suffix.split(/\s+/).filter(Boolean);
+  const formattedVersion = /^[0-9]/.test(version)
+    ? `GPT-${version}`
+    : `GPT ${version.toUpperCase()}`;
   const variant = variantParts
     .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1).toLowerCase()}`)
     .join(' ');
-  return `GPT-${version}${variant ? ` ${variant}` : ''}`;
+  return `${formattedVersion}${variant ? ` ${variant}` : ''}`;
 }

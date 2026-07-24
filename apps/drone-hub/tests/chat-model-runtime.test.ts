@@ -129,13 +129,13 @@ describe('chat model runtime', () => {
       modelDisabled: false,
       loading: false,
       error: null,
-      source: 'live',
       stale: false,
       transcripts: [{ ok: true, model: 'gpt-5.2', reasoning: 'high' }],
       onUpdate: (settings) => updates.push(settings),
     });
     const picker = config?.controls.find((control) => control.kind === 'model-picker');
     expect(picker?.triggerLabel).toBe('GPT-5.2 (High)');
+    expect(picker?.statusMessage).toBeUndefined();
     if (!picker || picker.kind !== 'model-picker') throw new Error('model picker missing');
     picker.onSelect(
       { provider: 'external', id: 'gpt-5.2', thinkingLevel: 'medium' },
@@ -161,7 +161,6 @@ describe('chat model runtime', () => {
       modelDisabled: false,
       loading: false,
       error: null,
-      source: 'live',
       stale: false,
       transcripts: [],
       onUpdate: (settings) => updates.push(settings),
@@ -175,5 +174,6 @@ describe('chat model runtime', () => {
   test('formats raw GPT model ids without exposing internal custom markers', () => {
     expect(formatModelDisplayLabel('gpt-5.6-sol (custom)')).toBe('GPT-5.6 Sol');
     expect(formatModelDisplayLabel('GPT-5.2 Codex')).toBe('GPT-5.2 Codex');
+    expect(formatModelDisplayLabel('gpt Test Preview')).toBe('GPT Test Preview');
   });
 });

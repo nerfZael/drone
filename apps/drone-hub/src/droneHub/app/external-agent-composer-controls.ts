@@ -25,7 +25,6 @@ export function buildExternalAgentComposerControls(opts: {
   modelDisabled: boolean;
   loading: boolean;
   error: string | null;
-  source: string;
   stale: boolean;
   transcripts:
     | ReadonlyArray<{
@@ -113,9 +112,7 @@ export function buildExternalAgentComposerControls(opts: {
     ? `${opts.models.length > 0 ? 'Using the last detected catalog. ' : ''}${opts.error}`
     : opts.stale
       ? 'Updating the agent model catalog in the background…'
-      : opts.source === 'cache'
-        ? 'Model catalog loaded from the shared Hub cache.'
-        : undefined;
+      : undefined;
   const triggerLabel = `${displayedModelLabel}${
     reasoningControlEnabled && displayedReasoning
       ? ` (${formatReasoningLabel(displayedReasoning)})`

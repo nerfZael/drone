@@ -29,12 +29,12 @@ describe('spawn model history', () => {
     expect(mergeSeenModelIds([], ids)).toHaveLength(SEEN_SPAWN_MODEL_LIMIT);
   });
 
-  test('includes the active custom model in the dropdown entries', () => {
+  test('includes the active model in the dropdown entries', () => {
     const entries = buildSpawnModelMenuEntries(['gpt-5.4'], 'custom-model');
     expect(entries).toHaveLength(3);
     expect(entries[0]).toMatchObject({ value: '', label: 'Auto' });
-    expect(entries[1]).toMatchObject({ value: 'custom-model', label: 'custom-model (custom)' });
-    expect(entries[2]).toMatchObject({ value: 'gpt-5.4', label: 'gpt-5.4' });
+    expect(entries[1]).toMatchObject({ value: 'custom-model', label: 'custom-model' });
+    expect(entries[2]).toMatchObject({ value: 'gpt-5.4', label: 'GPT-5.4' });
   });
 
   test('uses a stable trigger label', () => {

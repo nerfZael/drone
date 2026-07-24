@@ -4,6 +4,7 @@ import type { ChatModelOption } from './app-types';
 import type { CustomAgentProfile } from '../types';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
 import { repoPathLabel } from './repo-path-label';
+import { formatModelDisplayLabel } from './chat-model-runtime';
 
 type BuiltinAgentOption = {
   key: string;
@@ -56,7 +57,7 @@ export function useDroneHubToolbarMenuState({
       map.set(id, m);
     }
     if (currentModel && !map.has(currentModel)) {
-      map.set(currentModel, { id: currentModel, label: `${currentModel} (custom)` });
+      map.set(currentModel, { id: currentModel, label: formatModelDisplayLabel(currentModel) });
     }
     return Array.from(map.values());
   }, [chatModels, currentModel]);
