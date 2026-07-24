@@ -349,7 +349,7 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('aria-label="Choose model and reasoning"');
     expect(html).toContain('aria-label="Choose message delivery"');
     expect(html).toContain('Queue');
-    expect(html).toContain('5 · Medium');
+    expect(html).toContain('5 (Medium)');
     expect(html).not.toContain('Built-in agent model');
   });
 
