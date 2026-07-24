@@ -46,6 +46,7 @@ export class DroneChatBroadcaster {
             outputLength: String(lastTurn?.output ?? '').length,
             outputTail: String(lastTurn?.output ?? '').slice(-256),
             agentPlan: lastTurn?.agentPlan ?? null,
+            activityUpdatedAt: String(lastTurn?.activity?.updatedAt ?? ''),
           }
         : null,
       pendingPrompts: pendingPrompts.map((item: any) => ({
@@ -53,6 +54,7 @@ export class DroneChatBroadcaster {
         state: String(item?.state ?? ''),
         error: String(item?.error ?? ''),
         agentPlan: item?.agentPlan ?? null,
+        activityUpdatedAt: String(item?.activity?.updatedAt ?? ''),
         updatedAt: String(item?.updatedAt ?? ''),
       })),
     });

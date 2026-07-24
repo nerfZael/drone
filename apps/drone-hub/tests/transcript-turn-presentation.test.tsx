@@ -41,4 +41,137 @@ describe('completed external transcript presentation', () => {
     expect(html).toContain('group-focus-within/turn:opacity-100');
     expect(html).not.toContain('left-0 top-full mt-1 text-[var(--chat-message-time)]');
   });
+
+  test('shows reasoning and completed tool activity without duplicating the final answer', () => {
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 2,
+          at: '2026-07-20T10:00:00.000Z',
+          prompt: 'Inspect the file.',
+          session: 'external-session',
+          logPath: '/tmp/external-session.log',
+          ok: true,
+          output: 'The file is ready.',
+          activity: {
+            version: 1,
+            source: 'codex',
+            updatedAt: '2026-07-20T10:00:02.000Z',
+            messages: [
+              {
+                role: 'assistant',
+                content: [{ type: 'thinking', thinking: 'I should inspect the file first.' }],
+              },
+              {
+                role: 'assistant',
+                content: [
+                  {
+                    type: 'toolCall',
+                    id: 'tool-1',
+                    name: 'read_file',
+                    arguments: { path: 'README.md' },
+                  },
+                ],
+              },
+              {
+                role: 'toolResult',
+                toolCallId: 'tool-1',
+                toolName: 'read_file',
+                content: 'file contents',
+              },
+              {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'The file is ready.' }],
+              },
+            ],
+          },
+        }}
+        messageId="external-turn-2"
+        showRoleIcons={false}
+      />,
+    );
+
+    expect(html).toContain('data-agent-run-activity="codex"');
+    expect(html).toContain('I should inspect the file first.');
+    expect(html).toContain('Read file');
+    expect(html).toContain('data-tool-status="ok"');
+    expect(html).not.toContain('data-tool-status="pending"');
+    expect(html.match(/The file is ready\./g)).toHaveLength(1);
+  });
+
+  test('marks missing terminal tool results as interrupted instead of spinning forever', () => {
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 3,
+          at: '2026-07-20T10:00:00.000Z',
+          prompt: 'Inspect the file.',
+          session: 'external-session',
+          logPath: '/tmp/external-session.log',
+          ok: true,
+          output: 'Done.',
+          activity: {
+            version: 1,
+            source: 'claude',
+            updatedAt: '2026-07-20T10:00:02.000Z',
+            messages: [
+              {
+                role: 'assistant',
+                content: [
+                  {
+                    type: 'toolCall',
+                    id: 'tool-1',
+                    name: 'read_file',
+                    arguments: { path: 'README.md' },
+                  },
+                ],
+              },
+              {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'Done.' }],
+              },
+            ],
+          },
+        }}
+        messageId="external-turn-3"
+        showRoleIcons={false}
+      />,
+    );
+
+    expect(html).toContain('data-tool-status="error"');
+    expect(html).not.toContain('data-tool-status="pending"');
+  });
+
+  test('keeps the terminal error visible after partial activity on a failed turn', () => {
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 4,
+          at: '2026-07-20T10:00:00.000Z',
+          prompt: 'Inspect the file.',
+          session: 'external-session',
+          logPath: '/tmp/external-session.log',
+          ok: false,
+          output: '',
+          error: 'The provider disconnected.',
+          activity: {
+            version: 1,
+            source: 'cursor',
+            updatedAt: '2026-07-20T10:00:02.000Z',
+            messages: [
+              {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'I started inspecting the file.' }],
+              },
+            ],
+          },
+        }}
+        messageId="external-turn-4"
+        showRoleIcons={false}
+      />,
+    );
+
+    expect(html).toContain('I started inspecting the file.');
+    expect(html).toContain('The provider disconnected.');
+  });
 });

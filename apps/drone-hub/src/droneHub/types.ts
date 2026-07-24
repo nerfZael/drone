@@ -1,5 +1,6 @@
 import type { ChatAgentConfig } from '../domain';
 import type { AgentRunFileChanges } from '@blip/protocol';
+import type { AgentRunActivity } from '@drone/assistant-chat';
 
 export type DroneSummary = {
   id: string;
@@ -552,6 +553,7 @@ export type TranscriptItem = {
   prompt: string;
   model?: string;
   reasoning?: string;
+  activity?: AgentRunActivity;
   attachments?: ChatImageAttachmentRef[];
   inheritedFromClone?: boolean;
   session: string;
@@ -603,6 +605,7 @@ export type PendingPrompt = {
     lastCheckedAt: string;
     lastError?: string;
   };
+  activity?: AgentRunActivity;
   agentPlan?: AgentPlan;
   fileChanges?: AgentRunFileChanges;
   updatedAt?: string;

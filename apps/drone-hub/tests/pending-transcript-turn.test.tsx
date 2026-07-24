@@ -64,6 +64,43 @@ describe('external pending transcript turn', () => {
     expect(html).not.toContain('animate-pulse-dot');
   });
 
+  test('shows live external reasoning and an in-progress tool call', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          activity: {
+            version: 1,
+            source: 'opencode',
+            updatedAt: new Date().toISOString(),
+            messages: [
+              {
+                role: 'assistant',
+                content: [{ type: 'thinking', thinking: 'Checking the current state.' }],
+              },
+              {
+                role: 'assistant',
+                content: [
+                  {
+                    type: 'toolCall',
+                    id: 'tool-1',
+                    name: 'read',
+                    arguments: { path: 'README.md' },
+                  },
+                ],
+              },
+            ],
+          },
+        })}
+        showRoleIcons={false}
+      />,
+    );
+
+    expect(html).toContain('data-agent-run-activity="opencode"');
+    expect(html).toContain('Checking the current state.');
+    expect(html).toContain('data-tool-status="pending"');
+    expect(html.match(/Working for/g)).toHaveLength(1);
+  });
+
   test('expands the latest external user prompt by default', () => {
     const html = renderToStaticMarkup(
       <PendingTranscriptTurn

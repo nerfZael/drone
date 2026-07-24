@@ -1,7 +1,12 @@
 import { DRONE_CONTROL_CAPABILITY, MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
 import type { CapabilityHandler } from './device-mesh-types';
 import { scheduleCreatedDroneAutoRename } from './auto-rename-created-drone';
-import { boundedDroneChatPage } from './drone-chat-page';
+import {
+  boundedDroneChatPage,
+  compactAgentPlanForMesh,
+  compactAgentRunActivityForMesh,
+  compactAgentRunFileChangesForMesh,
+} from './drone-chat-page';
 import { isLikelyImagePath, isLikelyVideoPath } from '../filesystem-media';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
 import { meshJsonContentChunk } from './mesh-content-chunk';
@@ -63,6 +68,9 @@ function compactPendingPrompts(value: unknown): any[] {
   const errorLimit = Math.max(80, Math.floor(4_000 / Math.max(1, prompts.length)));
   return prompts.map((prompt: any) => {
     const attachments = Array.isArray(prompt?.attachments) ? prompt.attachments : [];
+    const compactedActivity = compactAgentRunActivityForMesh(prompt?.activity);
+    const agentPlan = compactAgentPlanForMesh(prompt?.agentPlan);
+    const fileChanges = compactAgentRunFileChangesForMesh(prompt?.fileChanges);
     return {
       id: String(prompt?.id ?? '').slice(0, 160),
       at: String(prompt?.at ?? ''),
@@ -75,6 +83,10 @@ function compactPendingPrompts(value: unknown): any[] {
       imageCount: attachments.filter((attachment: any) =>
         String(attachment?.mime ?? '').startsWith('image/'),
       ).length,
+      ...(agentPlan ? { agentPlan } : {}),
+      ...(fileChanges ? { fileChanges } : {}),
+      ...(compactedActivity.activity ? { activity: compactedActivity.activity } : {}),
+      ...(compactedActivity.truncated ? { activityMeshTruncated: true } : {}),
       updatedAt: String(prompt?.updatedAt ?? ''),
     };
   });
@@ -210,11 +222,7 @@ export function createDroneControlCapability(
     clearInterval(watch.timer);
     fileWatches.delete(key);
   };
-  const readFileMetadata = async (
-    droneId: string,
-    filePath: string,
-    includeRevision: boolean,
-  ) =>
+  const readFileMetadata = async (droneId: string, filePath: string, includeRevision: boolean) =>
     await localHubRequest(
       access,
       `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(filePath)}&metadata=1&revision=${includeRevision ? '1' : '0'}`,
@@ -250,9 +258,7 @@ export function createDroneControlCapability(
         size: Number.isFinite(Number(metadata?.size))
           ? Math.max(0, Math.floor(Number(metadata.size)))
           : 0,
-        mtimeMs: Number.isFinite(Number(metadata?.mtimeMs))
-          ? Number(metadata.mtimeMs)
-          : null,
+        mtimeMs: Number.isFinite(Number(metadata?.mtimeMs)) ? Number(metadata.mtimeMs) : null,
         lastHashAt: Date.now(),
         busy: false,
         timer,
@@ -296,9 +302,7 @@ export function createDroneControlCapability(
             path: optionalText(metadata?.path) ?? watch.path,
             revision,
             size: Number(metadata?.size) || 0,
-            mtimeMs: Number.isFinite(Number(metadata?.mtimeMs))
-              ? Number(metadata.mtimeMs)
-              : null,
+            mtimeMs: Number.isFinite(Number(metadata?.mtimeMs)) ? Number(metadata.mtimeMs) : null,
             kind: 'changed',
           },
           [...watch.subscribers.keys()],
@@ -425,19 +429,19 @@ export function createDroneControlCapability(
           }
         }
         const result = await localHubRequest(access, '/api/drones');
-        const [reposResult, groupsResult, preferencesResult, deleteSettingsResult] = await Promise.all([
-          localHubRequest(access, '/api/repos').catch(() => ({})),
-          localHubRequest(access, '/api/groups').catch(() => ({})),
-          localHubRequest(access, '/api/settings/ui-preferences').catch(() => ({})),
-          localHubRequest(access, '/api/settings/delete-action').catch(() => ({})),
-        ]);
+        const [reposResult, groupsResult, preferencesResult, deleteSettingsResult] =
+          await Promise.all([
+            localHubRequest(access, '/api/repos').catch(() => ({})),
+            localHubRequest(access, '/api/groups').catch(() => ({})),
+            localHubRequest(access, '/api/settings/ui-preferences').catch(() => ({})),
+            localHubRequest(access, '/api/settings/delete-action').catch(() => ({})),
+          ]);
         const drones: ReturnType<typeof deviceMeshDroneSummary>[] = Array.isArray(result.drones)
           ? result.drones.map(deviceMeshDroneSummary)
           : [];
         const preferences = object(preferencesResult.uiPreferences);
-        const deleteMode = object(deleteSettingsResult.deleteAction).mode === 'archive'
-          ? 'archive'
-          : 'permanent';
+        const deleteMode =
+          object(deleteSettingsResult.deleteAction).mode === 'archive' ? 'archive' : 'permanent';
         const groups: unknown[] = Array.isArray(groupsResult.groups) ? groupsResult.groups : [];
         const repoPaths = textList(
           Array.isArray(reposResult.repos)
@@ -491,7 +495,7 @@ export function createDroneControlCapability(
         const requestedName = optionalText(payload.name);
         const autoRenamePrompt =
           payload.autoRename === true
-            ? optionalText(payload.autoRenamePrompt) ?? optionalText(payload.seedPrompt)
+            ? (optionalText(payload.autoRenamePrompt) ?? optionalText(payload.seedPrompt))
             : undefined;
         const repoBranchSource = payload.repoBranchSource === 'remote' ? 'remote' : 'host';
         const createPayload = {
@@ -559,7 +563,8 @@ export function createDroneControlCapability(
         // Do not guess for a destructive operation. Falling back to permanent deletion when the
         // settings request fails can bypass an explicitly configured archive policy.
         const settings = await localHubRequest(access, '/api/settings/delete-action');
-        const deleteMode = object(settings.deleteAction).mode === 'archive' ? 'archive' : 'permanent';
+        const deleteMode =
+          object(settings.deleteAction).mode === 'archive' ? 'archive' : 'permanent';
         await localHubRequest(
           access,
           deleteMode === 'archive'
@@ -767,9 +772,12 @@ export function createDroneControlCapability(
         const diffList = payload.diffList === true;
         if (diffArtifactId || diffPath || diffList) {
           if (!diffArtifactId || (!diffList && !diffPath) || (diffList && diffPath)) {
-            throw Object.assign(new Error('A changed-files artifact and one read mode are required'), {
-              code: 'INVALID_REQUEST',
-            });
+            throw Object.assign(
+              new Error('A changed-files artifact and one read mode are required'),
+              {
+                code: 'INVALID_REQUEST',
+              },
+            );
           }
           const response = await localHubRequest(
             access,
@@ -782,9 +790,12 @@ export function createDroneControlCapability(
           if (ownerThreadId) {
             const identity = await localHubRequest(access, `${chatPath}/native`);
             if (requiredText(identity?.nativeChatId, 'nativeChatId') !== ownerThreadId) {
-              throw Object.assign(new Error('changed-files artifact does not belong to this chat'), {
-                code: 'INVALID_REQUEST',
-              });
+              throw Object.assign(
+                new Error('changed-files artifact does not belong to this chat'),
+                {
+                  code: 'INVALID_REQUEST',
+                },
+              );
             }
           } else if (
             requiredText(owner.droneId, 'artifact owner droneId') !== droneId ||
@@ -1078,7 +1089,11 @@ export function createDroneControlCapability(
           }
           return await localHubRequest(access, `${chatPath}/prompt`, {
             method: 'POST',
-            body: JSON.stringify({ prompt, attachments, ...(deliveryMode ? { deliveryMode } : {}) }),
+            body: JSON.stringify({
+              prompt,
+              attachments,
+              ...(deliveryMode ? { deliveryMode } : {}),
+            }),
           });
         } finally {
           await chatAttachments?.remove(attachmentIds);

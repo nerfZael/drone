@@ -18,7 +18,6 @@ import {
   agentRunLineChangeBreakdown,
   agentRunNetLineChangeLabel,
   agentRunWorkspacePreviewEntries,
-  compactRepeatedToolItems,
   messageImageParts,
   messageText,
   renderItemsFromMessages,
@@ -33,6 +32,7 @@ import { QueuedPromptRows, type MobileQueuedPrompt } from '../components/QueuedP
 import { ContextMenu } from '../components/Ui';
 import { NativeMarkdown } from './NativeMarkdown';
 import { MobileLoadingState } from './MobileLoadingState';
+import { MobileReasoningBlock } from './MobileReasoningBlock';
 import { MobileChangedFilesTree } from './MobileChangedFilesTree';
 import { nativeMarkdownHasCodeBlock } from './native-markdown-model';
 import {
@@ -344,10 +344,7 @@ function ChangedFilesSummary({
                       </Text>
                       <Text
                         numberOfLines={1}
-                        style={[
-                          styles.changedFilesPath,
-                          pressed && styles.changedFilesPathPressed,
-                        ]}
+                        style={[styles.changedFilesPath, pressed && styles.changedFilesPathPressed]}
                       >
                         {name}
                       </Text>
@@ -368,15 +365,9 @@ function ChangedFilesSummary({
                       ) : null}
                       {artifactId && onLoadDiff ? (
                         open ? (
-                          <ChevronDown
-                            color={pressed ? colors.accent : colors.muted}
-                            size={12}
-                          />
+                          <ChevronDown color={pressed ? colors.accent : colors.muted} size={12} />
                         ) : (
-                          <ChevronRight
-                            color={pressed ? colors.accent : colors.muted}
-                            size={12}
-                          />
+                          <ChevronRight color={pressed ? colors.accent : colors.muted} size={12} />
                         )
                       ) : null}
                     </View>
@@ -491,9 +482,7 @@ function ChangedFilesSummary({
                   <Text style={styles.changedFilesDiffRetry}>Show 20 more</Text>
                 </Pressable>
               ) : workspaceFiles[workspace.targetId]?.metadataTruncated ? (
-                <Text style={styles.changedFilesDiffHint}>
-                  Stored list limited to 5,000 files.
-                </Text>
+                <Text style={styles.changedFilesDiffHint}>Stored list limited to 5,000 files.</Text>
               ) : null}
             </View>
           ))}
@@ -505,10 +494,7 @@ function ChangedFilesSummary({
 
 function ConversationLoadingState() {
   return (
-    <MobileLoadingState
-      accessibilityLabel="Loading conversation"
-      label="Loading conversation…"
-    />
+    <MobileLoadingState accessibilityLabel="Loading conversation" label="Loading conversation…" />
   );
 }
 
@@ -1207,10 +1193,7 @@ export function MobileAssistantTranscript({
     metadataTruncated?: boolean;
   }>;
 }) {
-  const items = React.useMemo(
-    () => compactRepeatedToolItems(renderItemsFromMessages(messages)),
-    [messages],
-  );
+  const items = React.useMemo(() => renderItemsFromMessages(messages), [messages]);
   const [visibleMessageTimestamps, setVisibleMessageTimestamps] = React.useState<Set<string>>(
     () => new Set(),
   );
@@ -1268,9 +1251,24 @@ export function MobileAssistantTranscript({
       );
     }
     const text = visibleMessageText(item.message).trim();
+    const structuredAssistantContent =
+      item.message.role === 'assistant' && Array.isArray(item.message.content)
+        ? item.message.content
+        : null;
+    const hasThinking = Boolean(
+      structuredAssistantContent?.some(
+        (part) => part?.type === 'thinking' && String(part.thinking ?? '').trim(),
+      ),
+    );
     const images = messageImageParts(item.message);
     const files = attachments(item.message);
-    if (!text && images.length === 0 && files.length === 0 && !item.message.errorMessage)
+    if (
+      !text &&
+      !hasThinking &&
+      images.length === 0 &&
+      files.length === 0 &&
+      !item.message.errorMessage
+    )
       return null;
     const user = item.message.role === 'user';
     const assistant = item.message.role === 'assistant';
@@ -1288,7 +1286,32 @@ export function MobileAssistantTranscript({
         : undefined;
     const content = (
       <>
-        {text && (assistant || userCodeBlock) ? (
+        {assistant && structuredAssistantContent ? (
+          <>
+            {structuredAssistantContent.map((part, index) => {
+              if (part?.type === 'thinking') {
+                return (
+                  <MobileReasoningBlock
+                    key={`thinking:${index}`}
+                    text={String(part.thinking ?? '')}
+                  />
+                );
+              }
+              if (part?.type !== 'text' || !String(part.text ?? '').trim()) return null;
+              return (
+                <NativeMarkdown
+                  key={`text:${index}`}
+                  text={String(part.text ?? '')}
+                  tone="assistant"
+                  onOpenFileReference={onOpenFileReference}
+                />
+              );
+            })}
+            {text ? (
+              <LinkedPullRequestAttachments text={text} context={linkedPullRequests} />
+            ) : null}
+          </>
+        ) : text && (assistant || userCodeBlock) ? (
           <>
             <NativeMarkdown
               text={text}

@@ -12,6 +12,8 @@ import { appendHubOutboxEvent, initializeHubOutbox } from '../host/hub-outbox';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 import type { AgentPlan } from './agent-plan';
 import type { AgentRunFileChanges } from '@blip/protocol';
+import type { AgentRunActivity } from '@drone/assistant-chat';
+import { normalizeAgentRunActivity } from './builtin-agent-activity';
 import type { AgentRunFileChangesBaseline } from './run-file-changes';
 
 export type StoredTranscriptTurn = {
@@ -25,6 +27,7 @@ export type StoredTranscriptTurn = {
   completedAt?: string;
   model?: string;
   reasoning?: string;
+  activity?: AgentRunActivity;
   attachments?: unknown;
   inheritedFromClone?: boolean;
   dockerSnapshot?: unknown;
@@ -44,6 +47,7 @@ export type StoredPendingPrompt = {
   error?: string;
   observability?: unknown;
   blipClones?: unknown;
+  activity?: AgentRunActivity;
   agentPlan?: AgentPlan;
   fileChangesBaseline?: AgentRunFileChangesBaseline;
   fileChanges?: AgentRunFileChanges;
@@ -538,6 +542,7 @@ function parseIsoMs(raw: unknown): number {
 function normalizeTurn(raw: any): StoredTranscriptTurn {
   const at = String(raw?.at ?? new Date().toISOString());
   const id = typeof raw?.id === 'string' && raw.id.trim() ? raw.id.trim() : undefined;
+  const activity = normalizeAgentRunActivity(raw?.activity);
   return {
     at,
     ...(id ? { id } : {}),
@@ -549,6 +554,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
     ...(typeof raw?.completedAt === 'string' && raw.completedAt.trim() ? { completedAt: raw.completedAt.trim() } : {}),
     ...(typeof raw?.model === 'string' && raw.model.trim() ? { model: raw.model.trim() } : {}),
     ...(typeof raw?.reasoning === 'string' && raw.reasoning.trim() ? { reasoning: raw.reasoning.trim() } : {}),
+    ...(activity ? { activity } : {}),
     ...(Array.isArray(raw?.attachments) ? { attachments: raw.attachments } : {}),
     ...(raw?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
     ...(raw?.dockerSnapshot && typeof raw.dockerSnapshot === 'object' ? { dockerSnapshot: raw.dockerSnapshot } : {}),

@@ -1,12 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import {
   confirmedMobilePendingPromptState,
+  hasActiveMobileDronePendingPrompt,
   mergeOptimisticMobilePendingPrompts,
   mobileDronePendingPrompts,
   optimisticMobilePendingPrompt,
 } from '../src/drones/mobile-pending-prompts';
 
 describe('mobile drone pending prompts', () => {
+  test('tracks activity-backed pending runs until their completed turn arrives', () => {
+    const pending = [{ id: 'pending-1', state: 'sent', activity: { messages: [] } }];
+    expect(hasActiveMobileDronePendingPrompt(pending, [])).toBe(true);
+    expect(hasActiveMobileDronePendingPrompt(pending, [{ id: 'pending-1' }])).toBe(false);
+  });
+
   test('preserves the active run timestamp and plan', () => {
     expect(
       mobileDronePendingPrompts(
@@ -28,6 +35,27 @@ describe('mobile drone pending prompts', () => {
       startedAt: '2026-07-20T10:00:00.000Z',
       agentPlan: { items: [{ text: 'Edit mobile UI', status: 'in_progress' }] },
     });
+  });
+
+  test('does not duplicate an active prompt once its activity is in the transcript', () => {
+    expect(
+      mobileDronePendingPrompts(
+        [
+          {
+            id: 'pending-activity',
+            state: 'sent',
+            prompt: 'Implement it',
+            activity: {
+              version: 1,
+              source: 'codex',
+              updatedAt: '2026-07-24T00:00:01.000Z',
+              messages: [{ role: 'assistant', content: 'Working on it.' }],
+            },
+          },
+        ],
+        [],
+      ),
+    ).toEqual([]);
   });
 
   test('uses the confirmed queued state instead of displaying a follow-up as active', () => {

@@ -105,6 +105,21 @@ function sameFileChanges(left: TranscriptItem['fileChanges'], right: TranscriptI
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function sameActivity(left: TranscriptItem['activity'], right: TranscriptItem['activity']): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  if (
+    left.version !== right.version ||
+    left.source !== right.source ||
+    left.updatedAt !== right.updatedAt ||
+    left.truncated !== right.truncated ||
+    left.messages.length !== right.messages.length
+  ) {
+    return false;
+  }
+  return JSON.stringify(left.messages) === JSON.stringify(right.messages);
+}
+
 export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem): boolean {
   return (
     left.turn === right.turn &&
@@ -124,6 +139,7 @@ export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem):
     sameAttachments(left.attachments, right.attachments) &&
     sameAgentPlan(left.agentPlan, right.agentPlan) &&
     sameFileChanges(left.fileChanges, right.fileChanges) &&
+    sameActivity(left.activity, right.activity) &&
     sameDockerSnapshot(left.dockerSnapshot, right.dockerSnapshot)
   );
 }

@@ -90,7 +90,7 @@ test('drops retired automation metadata from prompt payloads', async () => {
   assert.equal(stored.blockedByAutomation, undefined);
 });
 
-test('pending prompt updates preserve live agent plans', async () => {
+test('pending prompt updates preserve live agent plans and activity', async () => {
   const queue = repository('agent-plan');
   const at = '2026-07-10T09:00:00.000Z';
   await queue.enqueue({ droneId: 'alpha', chatName: 'default', prompt: prompt('p-plan', at) });
@@ -102,18 +102,28 @@ test('pending prompt updates preserve live agent plans', async () => {
       { text: 'Run tests', status: 'in_progress' },
     ],
   };
+  const activity = {
+    version: 1,
+    source: 'codex',
+    updatedAt: '2026-07-10T09:00:01.000Z',
+    messages: [
+      {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'Inspecting the repository.' }],
+      },
+    ],
+  };
 
   await queue.update({
     droneId: 'alpha',
     chatName: 'default',
     promptId: 'p-plan',
-    patch: { state: 'sent', agentPlan, updatedAt: agentPlan.updatedAt },
+    patch: { state: 'sent', agentPlan, activity, updatedAt: agentPlan.updatedAt },
   });
 
-  assert.deepEqual(
-    queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'p-plan' }).agentPlan,
-    agentPlan,
-  );
+  const stored = queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'p-plan' });
+  assert.deepEqual(stored.agentPlan, agentPlan);
+  assert.deepEqual(stored.activity, activity);
 });
 
 test('claims preserve FIFO within a chat while allowing another chat to proceed', async () => {

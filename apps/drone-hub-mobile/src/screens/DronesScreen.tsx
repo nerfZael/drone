@@ -56,7 +56,6 @@ import {
   normalizeMobileDrone,
   normalizeMobileNativeChatHistory,
   normalizeMobileDroneListPayload,
-  normalizeMobileDroneTurns,
   suggestNextMobileDroneChatName,
   type MobileDroneCreateRepo,
   type MobileDroneCreateModel,
@@ -70,6 +69,7 @@ import {
 } from '../drones/drone-state-summary';
 import {
   confirmedMobilePendingPromptState,
+  hasActiveMobileDronePendingPrompt,
   mergeOptimisticMobilePendingPrompts,
   mobileDronePendingPrompts,
   optimisticMobilePendingPrompt,
@@ -149,7 +149,8 @@ function nativeUserMessageMatchesOptimisticPrompt(
     const imageCount = parts.filter((part: any) => part?.type === 'image').length;
     return (
       (pendingText &&
-        (messageText === pendingText || messageText.startsWith(`${pendingText}\n\nAttached files:\n`))) ||
+        (messageText === pendingText ||
+          messageText.startsWith(`${pendingText}\n\nAttached files:\n`))) ||
       (!pendingText &&
         pendingAttachmentCount > 0 &&
         ((pendingImageCount > 0 && imageCount === pendingImageCount) ||
@@ -1506,10 +1507,9 @@ export function DronesScreen({
       await loadDrones(true);
     });
 
-  const normalizedTurns = React.useMemo(() => normalizeMobileDroneTurns(turns), [turns]);
   const transcriptMessages = React.useMemo(
-    () => nativeMessages ?? mobileDroneTurnsToAssistantMessages(turns),
-    [nativeMessages, turns],
+    () => nativeMessages ?? mobileDroneTurnsToAssistantMessages(turns, pendingPrompts),
+    [nativeMessages, pendingPrompts, turns],
   );
   const visiblePendingPrompts = React.useMemo(
     () => mobileDronePendingPrompts(pendingPrompts, turns, transcriptMessages),
@@ -1592,10 +1592,21 @@ export function DronesScreen({
       onReachTop: chatHistoryPage.hasOlder && !olderHistoryBusy ? loadOlderChatHistory : undefined,
     },
   );
-  const latestModel = [...normalizedTurns].reverse().find((turn) => turn.model)?.model;
+  const latestModel = React.useMemo(() => {
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const model = String(turns[index]?.model ?? '').trim();
+      if (model) return model;
+    }
+    return undefined;
+  }, [turns]);
+  const hasActivePendingPrompt = React.useMemo(
+    () => hasActiveMobileDronePendingPrompt(pendingPrompts, turns),
+    [pendingPrompts, turns],
+  );
   const running =
     busy === 'prompt' ||
     busy === 'stop' ||
+    hasActivePendingPrompt ||
     visiblePendingPrompts.some((item) => item.status === 'pending') ||
     nativeThread?.status === 'running' ||
     nativeThread?.status === 'waiting_for_approval' ||
@@ -1612,11 +1623,7 @@ export function DronesScreen({
       drones.map((drone) => {
         if (drone.id !== selected?.id) return drone;
         return withMobileApprovalRequired(
-          withOptimisticMobileBusyChat(
-            drone,
-            chatName,
-            selectedChatOptimisticallyBusy,
-          ),
+          withOptimisticMobileBusyChat(drone, chatName, selectedChatOptimisticallyBusy),
           pendingApprovals.length > 0 || nativeThread?.status === 'waiting_for_approval',
         );
       }),
@@ -1944,9 +1951,7 @@ export function DronesScreen({
       setDrones((current) =>
         current.map((drone) => (drone.id === droneId ? { ...drone, name: newName } : drone)),
       );
-      setSelected((current) =>
-        current?.id === droneId ? { ...current, name: newName } : current,
-      );
+      setSelected((current) => (current?.id === droneId ? { ...current, name: newName } : current));
       setRenameCandidate(null);
       setRenameName('');
       await loadDrones(true);
@@ -1989,9 +1994,7 @@ export function DronesScreen({
               }
             : undefined
         }
-        onRetryDrones={() =>
-          void (targetReachable ? loadDrones() : mesh.refreshDevices())
-        }
+        onRetryDrones={() => void (targetReachable ? loadDrones() : mesh.refreshDevices())}
         onSelectDevice={(deviceId) => {
           setDronesLoaded(false);
           setDroneListError(null);
@@ -2028,10 +2031,7 @@ export function DronesScreen({
             <Pressable
               accessibilityRole="button"
               onPress={() => void mesh.refreshDevices()}
-              style={({ pressed }) => [
-                styles.deviceOfflineRetry,
-                pressed && styles.chatTabPressed,
-              ]}
+              style={({ pressed }) => [styles.deviceOfflineRetry, pressed && styles.chatTabPressed]}
             >
               <Text style={styles.deviceOfflineRetryText}>Retry connection</Text>
             </Pressable>
@@ -2253,8 +2253,7 @@ export function DronesScreen({
                       onAddAttachment={addPromptAttachment}
                       attachmentActionsDisabled={!targetReachable || (phoneTarget && running)}
                       sendBlocked={
-                        !targetReachable ||
-                        (phoneTarget && running && promptAttachments.length > 0)
+                        !targetReachable || (phoneTarget && running && promptAttachments.length > 0)
                       }
                       footer={
                         promptAttachments.length > 0 ? (

@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { AgentRunFileChanges } from '@blip/protocol';
-
 import { normalizeMcpChatAccessScope } from './mcp-chat-access';
+import { settleAgentRunActivity } from './builtin-agent-activity';
 
 import type { ChatImageAttachment } from './chat-attachments';
 import { ChatStateMaintenanceScheduler } from './chat-state-maintenance';
@@ -829,6 +829,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const prompt = String(turn?.prompt ?? '');
     const model = normalizeChatModel((turn as any)?.model);
     const reasoning = normalizeChatReasoning((turn as any)?.reasoning);
+    const activity = settleAgentRunActivity((turn as any)?.activity);
     const attachments = normalizeChatImageAttachmentRefs((turn as any)?.attachments);
     const dockerSnapshot = normalizeDockerSnapshot((turn as any)?.dockerSnapshot);
     const fileChanges = normalizeAgentRunFileChanges((turn as any)?.fileChanges);
@@ -853,6 +854,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       prompt,
       ...(model ? { model } : {}),
       ...(reasoning ? { reasoning } : {}),
+      ...(activity ? { activity } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(agentPlan ? { agentPlan } : {}),
       ...(fileChanges ? { fileChanges } : {}),

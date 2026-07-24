@@ -1,4 +1,11 @@
-import { isAgentRunFileChanges, type AssistantMessage } from '@drone/assistant-chat';
+import {
+  agentRunActivityHasResponse,
+  isAgentRunFileChanges,
+  normalizeAgentRunActivity,
+  settleAgentRunActivity,
+  type AgentRunActivity,
+  type AssistantMessage,
+} from '@drone/assistant-chat';
 import type { AgentRunFileChanges } from '@blip/protocol';
 import {
   buildRepoSidebarModel,
@@ -56,11 +63,13 @@ export type MobileDroneTurn = {
   ok: boolean;
   model: string;
   reasoning: string;
+  activity?: AgentRunActivity;
   agentPlan?: MobileAgentPlan;
   fileChanges?: AgentRunFileChanges;
   attachments: Array<{ name: string; mime: string; size: number | null }>;
   promptTruncated?: boolean;
   responseTruncated?: boolean;
+  activityMeshTruncated?: boolean;
   meshTruncated?: boolean;
 };
 
@@ -530,8 +539,59 @@ export function buildMobileDroneRepoGroups(
   });
 }
 
-export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMessage[] {
-  return normalizeMobileDroneTurns(raw).flatMap((turn): AssistantMessage[] => {
+function mobileActivityMessages(input: {
+  activity: AgentRunActivity;
+  turnId: string;
+  createdAt: string;
+  runDetails?: Record<string, unknown>;
+  meshTruncated?: boolean;
+  fullLoadAvailable?: boolean;
+}): AssistantMessage[] {
+  let latestAssistantIndex = -1;
+  for (let index = input.activity.messages.length - 1; index >= 0; index -= 1) {
+    if (input.activity.messages[index]?.role === 'assistant') {
+      latestAssistantIndex = index;
+      break;
+    }
+  }
+  const messages = input.activity.messages.map((message, index) => ({
+    ...message,
+    ...(message.createdAt ? {} : { createdAt: input.createdAt }),
+    ...(input.runDetails
+      ? {
+          details: {
+            ...(message.details &&
+            typeof message.details === 'object' &&
+            !Array.isArray(message.details)
+              ? (message.details as Record<string, unknown>)
+              : {}),
+            ...input.runDetails,
+          },
+        }
+      : {}),
+    ...(input.meshTruncated && input.fullLoadAvailable !== false && index === latestAssistantIndex
+      ? { id: `${input.turnId}:assistant`, meshTruncated: true }
+      : {}),
+  }));
+  if (input.activity.truncated) {
+    messages.unshift({
+      id: `${input.turnId}:activity-truncated`,
+      role: 'assistant',
+      content: 'Earlier or oversized activity details were trimmed.',
+      createdAt: input.createdAt,
+      ...(input.runDetails ? { details: input.runDetails } : {}),
+    });
+  }
+  return messages;
+}
+
+export function mobileDroneTurnsToAssistantMessages(
+  raw: unknown,
+  pendingRaw: unknown = [],
+): AssistantMessage[] {
+  const turns = normalizeMobileDroneTurns(raw);
+  const completedIds = new Set(turns.map((turn) => turn.id));
+  const completedMessages = turns.flatMap((turn): AssistantMessage[] => {
     const { prompt, output, error, attachments } = turn;
     const promptTruncated = turn.promptTruncated === true || turn.meshTruncated === true;
     const responseTruncated = turn.responseTruncated === true || turn.meshTruncated === true;
@@ -546,29 +606,54 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
         ...(promptTruncated ? { meshTruncated: true } : {}),
       });
     }
-    if (output || error || turn.completedAt || turn.agentPlan) {
+    const activity = turn.activity;
+    const activityHasResponse = agentRunActivityHasResponse(activity);
+    const fallbackResponseTruncated =
+      responseTruncated || (turn.activityMeshTruncated === true && !activityHasResponse);
+    if (activity) {
+      const runDetails = mobileRunDetails({
+        id: turn.id,
+        startedAt: turn.promptAt || turn.at,
+        completedAt: turn.completedAt || turn.at,
+        plan: turn.agentPlan,
+      });
+      messages.push(
+        ...mobileActivityMessages({
+          activity,
+          turnId: turn.id,
+          createdAt: turn.completedAt || turn.at,
+          runDetails,
+          meshTruncated: turn.activityMeshTruncated === true,
+        }),
+      );
+    }
+    if (
+      (!activityHasResponse && output) ||
+      (!turn.ok && error) ||
+      (!activity && (turn.completedAt || turn.agentPlan))
+    ) {
       const runDetails = turn.agentPlan
         ? mobileRunDetails({ id: turn.id, plan: turn.agentPlan })
         : undefined;
       messages.push(
         !turn.ok && error
           ? {
-              ...(responseTruncated ? { id: `${turn.id}:assistant` } : {}),
+              ...(fallbackResponseTruncated ? { id: `${turn.id}:assistant` } : {}),
               role: 'assistant',
               ...(output ? { content: output } : {}),
               ...(turn.completedAt || turn.at ? { createdAt: turn.completedAt || turn.at } : {}),
               ...(runDetails ? { details: runDetails } : {}),
               isError: true,
               errorMessage: error,
-              ...(responseTruncated ? { meshTruncated: true } : {}),
+              ...(fallbackResponseTruncated ? { meshTruncated: true } : {}),
             }
           : {
-              ...(responseTruncated ? { id: `${turn.id}:assistant` } : {}),
+              ...(fallbackResponseTruncated ? { id: `${turn.id}:assistant` } : {}),
               role: 'assistant',
               content: output || error,
               ...(turn.completedAt || turn.at ? { createdAt: turn.completedAt || turn.at } : {}),
               ...(runDetails ? { details: runDetails } : {}),
-              ...(responseTruncated ? { meshTruncated: true } : {}),
+              ...(fallbackResponseTruncated ? { meshTruncated: true } : {}),
             },
       );
     }
@@ -583,6 +668,47 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
     }
     return messages;
   });
+  const pendingMessages = (Array.isArray(pendingRaw) ? pendingRaw : []).flatMap(
+    (item: any): AssistantMessage[] => {
+      const id = String(item?.id ?? '').trim();
+      const state = String(item?.state ?? '').trim();
+      const activity = normalizeAgentRunActivity(item?.activity);
+      if (!id || completedIds.has(id) || !activity || (state !== 'sending' && state !== 'sent')) {
+        return [];
+      }
+      const at = String(item?.at ?? '').trim();
+      const plan = normalizeMobileAgentPlan(item?.agentPlan);
+      const runDetails = mobileRunDetails({ id, startedAt: at, plan });
+      const messages: AssistantMessage[] = [
+        {
+          id: `${id}:user`,
+          role: 'user',
+          content: String(item?.prompt ?? ''),
+          createdAt: at,
+          details: runDetails,
+        },
+        ...mobileActivityMessages({
+          activity,
+          turnId: id,
+          createdAt: String(item?.updatedAt ?? at),
+          runDetails,
+          meshTruncated: item?.activityMeshTruncated === true,
+          fullLoadAvailable: false,
+        }),
+      ];
+      if (isAgentRunFileChanges(item?.fileChanges)) {
+        messages.push({
+          id: `${id}:run-summary`,
+          role: 'runSummary',
+          content: '',
+          createdAt: String(item?.updatedAt ?? at),
+          details: { fileChanges: item.fileChanges },
+        });
+      }
+      return messages;
+    },
+  );
+  return [...completedMessages, ...pendingMessages];
 }
 
 export function normalizeMobileNativeChatHistory(raw: unknown): {
@@ -644,13 +770,15 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
     const turnNumber = Number(turn.turn);
     const at = text(turn.at);
     const agentPlan = normalizeMobileAgentPlan(turn.agentPlan);
+    const activity = settleAgentRunActivity(turn.activity);
     const fileChanges =
       turn.fileChanges && typeof turn.fileChanges === 'object' && !Array.isArray(turn.fileChanges)
         ? (turn.fileChanges as AgentRunFileChanges)
         : undefined;
     const hasPreciseTruncation =
       Object.prototype.hasOwnProperty.call(turn, 'promptTruncated') ||
-      Object.prototype.hasOwnProperty.call(turn, 'responseTruncated');
+      Object.prototype.hasOwnProperty.call(turn, 'responseTruncated') ||
+      Object.prototype.hasOwnProperty.call(turn, 'activityMeshTruncated');
     const promptTruncated =
       turn.promptTruncated === true || (!hasPreciseTruncation && turn.meshTruncated === true);
     const responseTruncated =
@@ -668,11 +796,13 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
         ok: turn.ok !== false,
         model: text(turn.model),
         reasoning: text(turn.reasoning),
+        ...(activity ? { activity } : {}),
         ...(agentPlan ? { agentPlan } : {}),
         ...(isAgentRunFileChanges(fileChanges) ? { fileChanges } : {}),
         attachments: normalizeTurnAttachments(turn.attachments),
         ...(promptTruncated ? { promptTruncated: true } : {}),
         ...(responseTruncated ? { responseTruncated: true } : {}),
+        ...(turn.activityMeshTruncated === true ? { activityMeshTruncated: true } : {}),
       },
     ];
   });
