@@ -731,6 +731,9 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   assistantService.setTextPromptDelegate(async (threadId, prompt) => {
     await blipAssistantHost.promptThread(threadId, prompt);
   });
+  assistantService.setRuntimeStopDelegate((threadId) => {
+    blipAssistantHost.stopThread(threadId);
+  });
   type AssistantPromptInput =
     | string
     | { text: string; images: Array<{ type: 'image'; data: string; mimeType: string }> };

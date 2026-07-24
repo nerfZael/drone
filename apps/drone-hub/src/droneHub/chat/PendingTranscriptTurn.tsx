@@ -144,8 +144,10 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           showRoleLabel={showRoleIcons}
           plainAssistant={!showRoleIcons}
           error={isFailed}
+          hoverActions={
+            <ChatMessageCopyAction text={agentCopyText} position="hover-rail" />
+          }
         >
-          <ChatMessageCopyAction text={agentCopyText} />
           {isFailed ? (
             <div className="whitespace-pre-wrap text-[var(--text-12-5)] leading-[1.6] text-[var(--red)]">
               {stripAnsi(item.error || 'failed to send')}

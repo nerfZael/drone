@@ -34,6 +34,9 @@ describe('completed external transcript presentation', () => {
     expect(html).toContain('text-[var(--chat-user-message-time)]');
     expect(html).toContain('aria-label="Copy message"');
     expect(html).toContain('pointer-events-auto opacity-100');
+    expect(html.match(/bottom-full right-0 z-10 mb-1 flex min-h-7/g)).toHaveLength(2);
+    expect(html.match(/aria-label="Copy message"/g)).toHaveLength(2);
+    expect(html).not.toContain('data-agent-message-actions="true"');
     expect(html).toContain('group-hover/turn:opacity-100');
     expect(html).toContain('group-focus-within/turn:opacity-100');
     expect(html).not.toContain('left-0 top-full mt-1 text-[var(--chat-message-time)]');

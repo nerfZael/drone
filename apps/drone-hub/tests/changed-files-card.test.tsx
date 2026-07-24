@@ -60,7 +60,7 @@ describe('changed files card', () => {
     expect(html).toContain('overflow-y-auto');
   });
 
-  test('keeps message actions in flow below expanded file changes', () => {
+  test('keeps agent-specific actions in flow below expanded file changes', () => {
     const html = renderToStaticMarkup(
       <AgentMessageExtras
         text="Completed the requested changes."
@@ -68,6 +68,7 @@ describe('changed files card', () => {
         messageId="message-with-changes"
         fileChanges={summary}
         initiallyExpandFileChanges
+        actionEnd={<button type="button">Rollback</button>}
       />,
     );
 

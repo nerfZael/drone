@@ -7,6 +7,7 @@ import {
 } from '../chat/AgentMessageExtras';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
+import { ChatMessageCopyAction } from '../chat/ChatMessageCopyAction';
 import { ChatMessageFrame } from '../chat/ChatMessageFrame';
 import { ImageAttachmentChips, normalizeImageAttachmentRefs } from '../chat/ImageAttachmentChips';
 import { collectInlineAgentMedia } from '../chat/inline-agent-media';
@@ -1111,6 +1112,11 @@ export function AssistantMessageRow({
       error={Boolean(message.errorMessage)}
       showRoleLabel={false}
       plainAssistant
+      hoverActions={
+        agentMessage.text ? (
+          <ChatMessageCopyAction text={agentMessage.text} position="hover-rail" />
+        ) : undefined
+      }
     >
       {body}
       {!body && message.errorMessage ? (
