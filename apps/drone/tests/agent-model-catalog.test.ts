@@ -62,6 +62,58 @@ describe('agent model catalog', () => {
     ]);
   });
 
+  test('uses Codex visibility and priority metadata', () => {
+    expect(
+      parseCodexModelCache(
+        JSON.stringify({
+          models: [
+            {
+              slug: 'gpt-legacy',
+              display_name: 'GPT Legacy',
+              visibility: 'list',
+              supported_in_api: true,
+              priority: 10,
+            },
+            {
+              slug: 'codex-auto-review',
+              display_name: 'Codex Auto Review',
+              visibility: 'hide',
+              supported_in_api: true,
+              priority: 1,
+            },
+            {
+              slug: 'gpt-chatgpt-only',
+              display_name: 'GPT ChatGPT Only',
+              visibility: 'list',
+              supported_in_api: false,
+              priority: 2,
+            },
+            {
+              slug: 'gpt-5.6-sol',
+              display_name: 'GPT-5.6-Sol',
+              visibility: 'list',
+              supported_in_api: true,
+              priority: 3,
+            },
+          ],
+        }),
+      ),
+    ).toEqual([
+      {
+        id: 'gpt-chatgpt-only',
+        label: 'GPT ChatGPT Only',
+      },
+      {
+        id: 'gpt-5.6-sol',
+        label: 'GPT-5.6-Sol',
+      },
+      {
+        id: 'gpt-legacy',
+        label: 'GPT Legacy',
+      },
+    ]);
+  });
+
   test('shares one in-flight probe and caches it across containers', async () => {
     let modelListCalls = 0;
     const runtime: AgentModelCatalogRuntime = {
