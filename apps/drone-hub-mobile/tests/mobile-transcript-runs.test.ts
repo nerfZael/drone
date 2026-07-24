@@ -6,6 +6,7 @@ import {
   mobileRunIsThinking,
   mobileRunDetails,
   normalizeMobileAgentPlan,
+  partitionMobileRunItems,
   sortMobileTranscriptTimeline,
   workingDurationLabel,
 } from '../src/local-assistant/mobile-transcript-runs';
@@ -70,6 +71,43 @@ describe('mobile transcript runs', () => {
       startedAt: '2026-07-20T10:00:00.000Z',
       completedAt: '2026-07-20T10:00:04.000Z',
       active: false,
+    });
+  });
+
+  test('keeps the final answer outside collapsed completed activity', () => {
+    const items = renderItemsFromMessages([
+      {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'Inspecting the repository.' }],
+      },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'call-1',
+            name: 'command_execution',
+            arguments: { command: 'git status' },
+          },
+        ],
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'call-1',
+        content: 'clean',
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Everything is clean.' }],
+      },
+    ]);
+
+    const partition = partitionMobileRunItems({ active: false, items });
+    expect(partition.activityItems.map((item) => item.type)).toEqual(['message', 'tool']);
+    expect(partition.trailingItems).toHaveLength(1);
+    expect(partition.trailingItems[0]).toMatchObject({
+      type: 'message',
+      message: { role: 'assistant' },
     });
   });
 
@@ -181,6 +219,24 @@ describe('mobile transcript runs', () => {
       }),
     ).toBe(false);
     expect(mobileRunIsThinking({ active: false, items: [completedTool] })).toBe(false);
+    expect(
+      mobileRunIsThinking({
+        active: true,
+        items: [
+          completedTool,
+          {
+            type: 'runSummary',
+            key: 'changed-files',
+            fileChanges: {
+              version: 2,
+              capturedAt: '2026-07-24T00:00:02.000Z',
+              counts: { changed: 1, additions: 1, deletions: 0 },
+              workspaces: [],
+            },
+          },
+        ],
+      }),
+    ).toBe(true);
     expect(
       mobileRunIsThinking({
         active: true,

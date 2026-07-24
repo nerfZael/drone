@@ -12,6 +12,7 @@ type AgentRunSummaryLineProps = {
   trailing?: React.ReactNode;
   expanded?: boolean;
   onToggle?: () => void;
+  toggleLabel?: string;
 };
 
 export function formatWorkingDuration(durationMs: number): string {
@@ -34,6 +35,7 @@ export function AgentRunSummaryLine({
   trailing,
   expanded,
   onToggle,
+  toggleLabel = 'tool calls',
 }: AgentRunSummaryLineProps) {
   const summaryLabel = label ?? `${active ? 'Working' : 'Worked'} for ${formatWorkingDuration(durationMs)}`;
   const content = (
@@ -65,7 +67,7 @@ export function AgentRunSummaryLine({
       <button
         type="button"
         aria-expanded={expanded}
-        aria-label={expanded ? 'Collapse tool calls' : 'Expand tool calls'}
+        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${toggleLabel}`}
         onClick={onToggle}
         className={`${className} hover:text-[var(--fg-secondary)]`}
       >

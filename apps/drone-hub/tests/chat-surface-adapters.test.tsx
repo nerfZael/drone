@@ -19,9 +19,13 @@ import {
   AssistantQueuedPromptRow,
   AssistantWorkingRow,
   AssistantRunActivity,
+  RepeatedToolActivityRow,
+  ToolActivityRow,
+  ToolPayloadDetails,
   ToolRunActivity,
   formatAssistantRunDuration,
 } from '../src/droneHub/assistant/AssistantTranscript';
+import { AgentRunActivityView } from '../src/droneHub/assistant/AgentRunActivityView';
 import { buildNativeAgentComposerControls } from '../src/droneHub/assistant/native-agent-composer-controls';
 import { resolveInlineMediaToggleState } from '../src/droneHub/chat/AgentMessageExtras';
 
@@ -669,6 +673,271 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('report.pdf');
     expect(html).toContain('4.00 KB');
     expect(html).toContain('>File<');
+  });
+
+  test('grouped tools distinguish partial failure from complete failure', () => {
+    const partialHtml = renderToStaticMarkup(
+      <RepeatedToolActivityRow
+        items={[
+          {
+            type: 'tool',
+            key: 'failed-command',
+            call: { id: 'failed-command', name: 'command_execution', args: {} },
+            result: {
+              role: 'toolResult',
+              toolCallId: 'failed-command',
+              content: 'Failed',
+              isError: true,
+            },
+          },
+          {
+            type: 'tool',
+            key: 'successful-command',
+            call: { id: 'successful-command', name: 'command_execution', args: {} },
+            result: {
+              role: 'toolResult',
+              toolCallId: 'successful-command',
+              content: 'Done',
+            },
+          },
+        ]}
+      />,
+    );
+    const failedHtml = renderToStaticMarkup(
+      <RepeatedToolActivityRow
+        items={[1, 2].map((index) => ({
+          type: 'tool' as const,
+          key: `failed-command-${index}`,
+          call: {
+            id: `failed-command-${index}`,
+            name: 'command_execution',
+            args: {},
+          },
+          result: {
+            role: 'toolResult' as const,
+            toolCallId: `failed-command-${index}`,
+            content: 'Failed',
+            isError: true,
+          },
+        }))}
+      />,
+    );
+
+    expect(partialHtml).toContain('data-tool-status="partial-error"');
+    expect(partialHtml).toContain('aria-label="1 of 2 tool calls failed"');
+    expect(partialHtml).toContain('bg-[var(--yellow)]');
+    expect(partialHtml).not.toContain('data-tool-status="error"');
+    expect(failedHtml).toContain('data-tool-status="error"');
+    expect(failedHtml).toContain('aria-label="All 2 tool calls failed"');
+    expect(failedHtml).toContain(
+      'inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-full',
+    );
+    expect(failedHtml).toContain('m3 3 4 4M7 3 3 7');
+    expect(failedHtml).not.toContain('h-1.5 w-1.5 flex-shrink-0');
+  });
+
+  test('tool disclosure chevrons stay beside their label or invocation count', () => {
+    const singleHtml = renderToStaticMarkup(
+      <ToolActivityRow
+        call={{ id: 'single-command', name: 'command_execution', args: {} }}
+        result={{
+          role: 'toolResult',
+          toolCallId: 'single-command',
+          content: 'Done',
+        }}
+      />,
+    );
+    const groupedHtml = renderToStaticMarkup(
+      <RepeatedToolActivityRow
+        items={[1, 2].map((index) => ({
+          type: 'tool' as const,
+          key: `grouped-command-${index}`,
+          call: {
+            id: `grouped-command-${index}`,
+            name: 'command_execution',
+            args: {},
+          },
+          result: {
+            role: 'toolResult' as const,
+            toolCallId: `grouped-command-${index}`,
+            content: index === 1 ? 'Failed' : 'Done',
+            isError: index === 1,
+          },
+        }))}
+      />,
+    );
+    const chevronPath = 'm5 3 4 4-4 4';
+
+    expect(singleHtml).toContain(
+      '<span class="min-w-0 truncate font-medium">Command Execution</span>',
+    );
+    expect(singleHtml.indexOf('Command Execution')).toBeLessThan(
+      singleHtml.indexOf(chevronPath),
+    );
+    expect(groupedHtml.indexOf('×2')).toBeLessThan(groupedHtml.indexOf(chevronPath));
+    expect(groupedHtml.indexOf(chevronPath)).toBeLessThan(groupedHtml.indexOf('1 failed'));
+    expect(groupedHtml).not.toContain('ml-auto text-[var(--muted-dim)]');
+  });
+
+  test('tool payloads render JSON as readable fields while preserving raw output', () => {
+    const structuredHtml = renderToStaticMarkup(
+      <ToolPayloadDetails
+        call={{
+          id: 'structured-tool',
+          name: 'command_execution',
+          args: {
+            command: 'bun test',
+            workingDirectory: '/workspace/app',
+            includeHidden: false,
+          },
+        }}
+        result={{
+          role: 'toolResult',
+          toolCallId: 'structured-tool',
+          content: JSON.stringify({
+            exitCode: 0,
+            files: ['one.ts', 'two.ts'],
+            ok: true,
+          }),
+        }}
+      />,
+    );
+    const rawHtml = renderToStaticMarkup(
+      <ToolPayloadDetails
+        call={{ id: 'raw-tool', name: 'command_execution', args: { command: 'pwd' } }}
+        result={{
+          role: 'toolResult',
+          toolCallId: 'raw-tool',
+          content: '/workspace/app\ncompleted',
+        }}
+      />,
+    );
+
+    expect(structuredHtml).toContain('data-tool-structured-value="arguments"');
+    expect(structuredHtml).toContain('data-tool-structured-value="result"');
+    expect(structuredHtml).toContain('Working directory');
+    expect(structuredHtml).toContain('Include hidden');
+    expect(structuredHtml).toContain('Exit code');
+    expect(structuredHtml).toContain('one.ts, two.ts');
+    expect(structuredHtml).toContain('>True<');
+    expect(structuredHtml).not.toContain('&quot;');
+    expect(structuredHtml).not.toContain('{"');
+    expect(rawHtml).toContain('<pre');
+    expect(rawHtml).toContain('/workspace/app\ncompleted');
+    expect(rawHtml).not.toContain('data-tool-structured-value="result"');
+  });
+
+  test('tool payload formatting handles encoded, circular, and oversized values safely', () => {
+    const circularArguments: Record<string, unknown> = { command: 'inspect' };
+    circularArguments.self = circularArguments;
+    const encodedHtml = renderToStaticMarkup(
+      <ToolPayloadDetails
+        call={{
+          id: 'encoded-tool',
+          name: 'command_execution',
+          args: JSON.stringify({ workingDirectory: '/workspace/app', includeHidden: true }),
+        }}
+      />,
+    );
+    const circularHtml = renderToStaticMarkup(
+      <ToolPayloadDetails
+        call={{
+          id: 'circular-tool',
+          name: 'command_execution',
+          args: circularArguments,
+        }}
+      />,
+    );
+    const oversizedHtml = renderToStaticMarkup(
+      <ToolPayloadDetails
+        call={{
+          id: 'oversized-tool',
+          name: 'command_execution',
+          args: Object.fromEntries(
+            Array.from({ length: 55 }, (_, index) => [`field_${index + 1}`, index + 1]),
+          ),
+        }}
+      />,
+    );
+
+    expect(encodedHtml).toContain('Working directory');
+    expect(encodedHtml).toContain('Include hidden');
+    expect(encodedHtml).not.toContain('&quot;workingDirectory&quot;');
+    expect(circularHtml).toContain('Circular reference');
+    expect(oversizedHtml).toContain('+5 more fields');
+    expect(oversizedHtml).not.toContain('Field 51');
+  });
+
+  test('run-summary-only activity does not create an empty accordion', () => {
+    const html = renderToStaticMarkup(
+      <AgentRunActivityView
+        activity={{
+          version: 1,
+          source: 'codex',
+          updatedAt: '2026-07-24T18:00:10.000Z',
+          messages: [
+            {
+              role: 'runSummary',
+              content: '',
+              details: {
+                fileChanges: {
+                  version: 2,
+                  capturedAt: '2026-07-24T18:00:10.000Z',
+                  counts: { changed: 1, additions: 2, deletions: 0 },
+                  workspaces: [],
+                },
+              },
+            },
+          ],
+        }}
+        startedAt="2026-07-24T18:00:00.000Z"
+        endedAt="2026-07-24T18:00:10.000Z"
+      />,
+    );
+
+    expect(html).toContain('Worked for 10s');
+    expect(html).not.toContain('aria-label="Expand activity"');
+    expect(html).not.toContain('border-l border-[var(--border-subtle)]');
+  });
+
+  test('grouped failed workspace transfers use failure status even without isError', () => {
+    const groupedHtml = renderToStaticMarkup(
+      <RepeatedToolActivityRow
+        items={[1, 2].map((index) => ({
+          type: 'tool' as const,
+          key: `failed-transfer-${index}`,
+          call: {
+            id: `failed-transfer-${index}`,
+            name: 'transfer_files',
+            args: {},
+          },
+          result: {
+            role: 'toolResult' as const,
+            toolCallId: `failed-transfer-${index}`,
+            content: 'Transfer failed',
+            details: { type: 'workspace_transfer', phase: 'failed' },
+          },
+        }))}
+      />,
+    );
+    const singleHtml = renderToStaticMarkup(
+      <ToolActivityRow
+        call={{ id: 'single-failed-transfer', name: 'transfer_files', args: {} }}
+        result={{
+          role: 'toolResult',
+          toolCallId: 'single-failed-transfer',
+          content: 'Transfer failed',
+          details: { type: 'workspace_transfer', phase: 'failed' },
+        }}
+      />,
+    );
+
+    expect(groupedHtml).toContain('data-tool-status="error"');
+    expect(groupedHtml).toContain('aria-label="All 2 tool calls failed"');
+    expect(groupedHtml).toContain('2 failed');
+    expect(singleHtml).toContain('data-tool-status="error"');
+    expect(singleHtml).toContain('aria-label="Tool failed"');
+    expect(singleHtml).not.toContain('data-tool-status="ok"');
   });
 
   test('active tool runs automatically show only their five latest calls', () => {

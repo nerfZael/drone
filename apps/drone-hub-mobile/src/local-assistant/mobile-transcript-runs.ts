@@ -226,7 +226,7 @@ export function mobileRunIsThinking(
   run: Pick<MobileTranscriptRun, 'active' | 'items'>,
 ): boolean {
   if (!run.active) return false;
-  const lastItem = run.items.at(-1);
+  const lastItem = [...run.items].reverse().find((item) => item.type !== 'runSummary');
   if (!lastItem) return false;
   if (
     lastItem.type === 'message' &&
@@ -241,6 +241,38 @@ export function mobileRunIsThinking(
     item.type === 'tool' ? [item] : item.type === 'toolGroup' ? item.items : [],
   );
   return tools.length > 0 && tools.every(toolActivityIsSettled);
+}
+
+export function partitionMobileRunItems(
+  run: Pick<MobileTranscriptRun, 'active' | 'items'>,
+): {
+  activityItems: AssistantRenderItem[];
+  trailingItems: AssistantRenderItem[];
+} {
+  let finalResponseIndex = -1;
+  if (!run.active) {
+    for (let index = run.items.length - 1; index >= 0; index -= 1) {
+      const item = run.items[index];
+      if (
+        item?.type === 'message' &&
+        item.message.role === 'assistant' &&
+        (messageVisibleText(item.message).trim() ||
+          messageImageParts(item.message).length > 0 ||
+          item.message.errorMessage)
+      ) {
+        finalResponseIndex = index;
+        break;
+      }
+    }
+  }
+  return {
+    activityItems: run.items.filter(
+      (item, index) => index !== finalResponseIndex && item.type !== 'runSummary',
+    ),
+    trailingItems: run.items.filter(
+      (item, index) => index === finalResponseIndex || item.type === 'runSummary',
+    ),
+  };
 }
 
 export function limitMobileRunToolItems(

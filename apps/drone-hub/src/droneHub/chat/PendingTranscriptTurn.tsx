@@ -136,11 +136,16 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       />
 
       {activity && !isFailed ? (
-        <div className="px-3">
-          <WorkingElapsedStatus startedAt={item.at} />
-        </div>
+        <AgentRunActivityView activity={activity} active startedAt={item.at} />
       ) : null}
-      {activity ? <AgentRunActivityView activity={activity} active={!isFailed} /> : null}
+      {activity && isFailed ? (
+        <AgentRunActivityView
+          activity={activity}
+          startedAt={item.at}
+          endedAt={item.updatedAt ?? item.at}
+          at={item.updatedAt ?? item.at}
+        />
+      ) : null}
 
       {isStopped ? (
         <>

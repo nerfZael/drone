@@ -145,6 +145,19 @@ export function hasActiveMobileDronePendingPrompt(raw: unknown, turnsRaw: unknow
   });
 }
 
+export function mobileChatRespondingStatus(input: {
+  localActivity: boolean;
+  nativeRuntimeActive: boolean;
+  nativeTranscriptLoaded: boolean;
+  serverChatBusy: boolean;
+}): boolean {
+  return (
+    input.localActivity ||
+    input.nativeRuntimeActive ||
+    (input.nativeTranscriptLoaded && input.serverChatBusy)
+  );
+}
+
 export function mobileDronePendingPrompts(
   raw: unknown,
   turnsRaw: unknown,

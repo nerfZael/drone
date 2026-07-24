@@ -55,6 +55,7 @@ import { useSetupStatus } from './droneHub/app/use-setup-status';
 import type { DroneDeleteMode, ProfileSettingsResponse } from './droneHub/app/settings-types';
 import { shellTerminalPrewarmKey, shouldPrewarmShellTerminal } from './droneHub/app/terminal-prewarm';
 import { useQueuedPromptsState } from './droneHub/app/use-queued-prompts-state';
+import { selectedChatRespondingStatus } from './droneHub/app/optimistic-pending-prompts';
 import { useRightPanelLayout } from './droneHub/app/use-right-panel-layout';
 import {
   resolveDroneDeleteTargetIds,
@@ -2515,9 +2516,19 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedDrone,
     updateSpawnContextForRepo,
   ]);
+  const selectedChatUsesDroneBusyStatus =
+    chatUiMode === 'cli' ||
+    (currentAgent.kind === 'native' &&
+      currentDrone?.draft !== true &&
+      currentDrone?.hubPhase !== 'draft' &&
+      currentDrone?.draftChats?.[String(selectedChat ?? '').trim() || 'default'] !== true);
   const currentDroneBusy =
     currentDrone && !isDroneStartingOrSeeding(currentDrone.hubPhase)
-      ? Boolean(currentDrone.busy) || selectedIsResponding
+      ? selectedChatRespondingStatus({
+          includeDroneBusy: selectedChatUsesDroneBusyStatus,
+          droneBusy: Boolean(currentDrone.busy),
+          selectedIsResponding,
+        })
       : false;
   const busyChatNodeIdSet = React.useMemo(() => {
     const out = new Set<string>();

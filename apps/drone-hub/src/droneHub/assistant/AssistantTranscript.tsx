@@ -147,11 +147,23 @@ function ToolDisclosure({
                     ? 'text-[var(--yellow)]'
                     : 'text-[var(--accent)]'
             }`}
-            title={status === 'blocked' ? 'Blocked pending approval' : undefined}
-            aria-label={status === 'blocked' ? 'Blocked pending approval' : undefined}
+            title={
+              status === 'blocked'
+                ? 'Blocked pending approval'
+                : status === 'error'
+                  ? 'Tool failed'
+                  : undefined
+            }
+            aria-label={
+              status === 'blocked'
+                ? 'Blocked pending approval'
+                : status === 'error'
+                  ? 'Tool failed'
+                  : undefined
+            }
           >
             {status === 'error' ? (
-              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+              <ToolErrorIcon className="h-2.5 w-2.5" />
             ) : status === 'pending' ? (
               <ToolSpinnerIcon className="h-3 w-3" />
             ) : status === 'blocked' ? (
@@ -161,8 +173,8 @@ function ToolDisclosure({
             )}
           </span>
         ) : null}
-        <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
-        <span className="text-[var(--muted-dim)] transition-colors group-hover:text-[var(--muted)]">
+        <span className="min-w-0 truncate font-medium">{title}</span>
+        <span className="flex-shrink-0 text-[var(--muted-dim)] transition-colors group-hover:text-[var(--muted)]">
           <ToolRunChevron open={open} />
         </span>
       </button>
@@ -194,6 +206,43 @@ function ToolCheckIcon({ className }: { className?: string }) {
       aria-hidden="true"
     >
       <path d="M2 5.2l2 2 4-4.4" />
+    </svg>
+  );
+}
+
+function ToolErrorIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="m3 3 4 4M7 3 3 7" />
+    </svg>
+  );
+}
+
+function ToolPartialFailureIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M5 2.4v3.1" />
+      <path d="M5 7.4h.01" strokeWidth="2" />
     </svg>
   );
 }
@@ -286,9 +335,11 @@ export function ReasoningBlock({ text }: { text: string }) {
 function ToolStatusIndicator({
   result,
   blocked = false,
+  errorLabel = 'Tool failed',
 }: {
   result?: AssistantMessage;
   blocked?: boolean;
+  errorLabel?: string;
 }) {
   if (!result) {
     if (blocked) {
@@ -315,8 +366,12 @@ function ToolStatusIndicator({
     return (
       <span
         data-tool-status="error"
-        className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--red)]"
-      />
+        className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-full bg-[var(--red)] text-[var(--bg)]"
+        title={errorLabel}
+        aria-label={errorLabel}
+      >
+        <ToolErrorIcon className="h-2.5 w-2.5" />
+      </span>
     );
   }
   return (
@@ -325,6 +380,45 @@ function ToolStatusIndicator({
       className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-full bg-[var(--green)] text-[var(--bg)]"
     >
       <ToolCheckIcon className="h-2.5 w-2.5" />
+    </span>
+  );
+}
+
+function toolActivityFailed(item: AssistantToolRenderItem): boolean {
+  if (item.result?.isError) return true;
+  const details = item.result?.details;
+  return Boolean(
+    details &&
+      typeof details === 'object' &&
+      (details as Record<string, unknown>).type === 'workspace_transfer' &&
+      (details as Record<string, unknown>).phase === 'failed',
+  );
+}
+
+function toolActivityStatusResult(item: AssistantToolRenderItem): AssistantMessage | undefined {
+  if (!toolActivityIsSettled(item)) return undefined;
+  if (item.result && toolActivityFailed(item) && !item.result.isError) {
+    return { ...item.result, isError: true };
+  }
+  return item.result;
+}
+
+function ToolPartialFailureIndicator({
+  failed,
+  total,
+}: {
+  failed: number;
+  total: number;
+}) {
+  const label = `${failed} of ${total} tool calls failed`;
+  return (
+    <span
+      data-tool-status="partial-error"
+      className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-full bg-[var(--yellow)] text-[var(--bg)]"
+      title={label}
+      aria-label={label}
+    >
+      <ToolPartialFailureIcon className="h-2.5 w-2.5" />
     </span>
   );
 }
@@ -343,7 +437,150 @@ function ToolDetailsButton({ open, onClick }: { open: boolean; onClick: () => vo
   );
 }
 
-function ToolPayloadDetails({
+function humanizeToolField(value: string): string {
+  const words = String(value ?? '')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return words ? `${words[0]!.toUpperCase()}${words.slice(1)}` : 'Value';
+}
+
+function structuredToolValueFromText(value: string): unknown | undefined {
+  const trimmed = value.trim();
+  if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const TOOL_STRUCTURED_MAX_DEPTH = 6;
+const TOOL_STRUCTURED_MAX_ITEMS = 50;
+
+function toolScalarText(value: unknown): string {
+  if (value == null) return 'None';
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  return String(value);
+}
+
+function ToolPlaceholderValue({ children }: { children: React.ReactNode }) {
+  return <span className="italic text-[var(--muted-dim)]">{children}</span>;
+}
+
+function ToolScalarValue({ value }: { value: unknown }) {
+  if (value == null) return <ToolPlaceholderValue>None</ToolPlaceholderValue>;
+  if (typeof value === 'boolean') {
+    return (
+      <span className="inline-flex rounded bg-[var(--surface-strong)] px-1.5 py-0.5 font-mono text-[var(--text-9)] text-[var(--muted)]">
+        {toolScalarText(value)}
+      </span>
+    );
+  }
+  return (
+    <span className="whitespace-pre-wrap break-words font-mono text-[var(--text-10)] leading-relaxed text-[var(--fg-secondary)]">
+      {String(value)}
+    </span>
+  );
+}
+
+function ToolStructuredValue({
+  value,
+  depth = 0,
+  ancestors = [],
+}: {
+  value: unknown;
+  depth?: number;
+  ancestors?: readonly object[];
+}) {
+  if (!value || typeof value !== 'object') return <ToolScalarValue value={value} />;
+  if (ancestors.includes(value)) {
+    return <ToolPlaceholderValue>Circular reference</ToolPlaceholderValue>;
+  }
+  if (depth >= TOOL_STRUCTURED_MAX_DEPTH) {
+    const size = Array.isArray(value) ? value.length : Object.keys(value).length;
+    return (
+      <ToolPlaceholderValue>
+        Nested {Array.isArray(value) ? `${size} items` : `${size} fields`}
+      </ToolPlaceholderValue>
+    );
+  }
+
+  const nextAncestors = [...ancestors, value];
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <ToolPlaceholderValue>Empty list</ToolPlaceholderValue>;
+    if (value.every((item) => item == null || typeof item !== 'object')) {
+      const visibleItems = value.slice(0, TOOL_STRUCTURED_MAX_ITEMS);
+      const hiddenCount = value.length - visibleItems.length;
+      return (
+        <span className="whitespace-pre-wrap break-words font-mono text-[var(--text-10)] leading-relaxed text-[var(--fg-secondary)]">
+          {visibleItems.map(toolScalarText).join(', ')}
+          {hiddenCount > 0 ? `, +${hiddenCount} more` : ''}
+        </span>
+      );
+    }
+    const visibleItems = value.slice(0, TOOL_STRUCTURED_MAX_ITEMS);
+    const hiddenCount = value.length - visibleItems.length;
+    return (
+      <div className="grid gap-1.5">
+        {visibleItems.map((item, index) => (
+          <div
+            key={index}
+            className="grid min-w-0 grid-cols-[1.5rem_minmax(0,1fr)] gap-2"
+          >
+            <span className="pt-0.5 text-right font-mono text-[var(--text-9)] text-[var(--muted-dim)]">
+              {index + 1}
+            </span>
+            <ToolStructuredValue
+              value={item}
+              depth={depth + 1}
+              ancestors={nextAncestors}
+            />
+          </div>
+        ))}
+        {hiddenCount > 0 ? (
+          <ToolPlaceholderValue>+{hiddenCount} more items</ToolPlaceholderValue>
+        ) : null}
+      </div>
+    );
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) return <ToolPlaceholderValue>No fields</ToolPlaceholderValue>;
+  const visibleEntries = entries.slice(0, TOOL_STRUCTURED_MAX_ITEMS);
+  const hiddenCount = entries.length - visibleEntries.length;
+  return (
+    <dl className="grid gap-1.5">
+      {visibleEntries.map(([key, item]) => (
+        <div
+          key={key}
+          className="grid min-w-0 grid-cols-[minmax(5.5rem,28%)_minmax(0,1fr)] gap-3"
+        >
+          <dt className="pt-0.5 text-[var(--text-10)] text-[var(--muted-dim)]">
+            {humanizeToolField(key)}
+          </dt>
+          <dd className="min-w-0">
+            <ToolStructuredValue
+              value={item}
+              depth={depth + 1}
+              ancestors={nextAncestors}
+            />
+          </dd>
+        </div>
+      ))}
+      {hiddenCount > 0 ? (
+        <div className="text-[var(--text-10)]">
+          <ToolPlaceholderValue>+{hiddenCount} more fields</ToolPlaceholderValue>
+        </div>
+      ) : null}
+    </dl>
+  );
+}
+
+export function ToolPayloadDetails({
   call,
   result,
   pendingLabel = 'Waiting for result…',
@@ -353,23 +590,40 @@ function ToolPayloadDetails({
   pendingLabel?: string;
 }) {
   const resultText = result ? messageText(result) : '';
+  const structuredResult = resultText ? structuredToolValueFromText(resultText) : undefined;
+  const structuredArguments =
+    typeof call?.args === 'string'
+      ? (structuredToolValueFromText(call.args) ?? call.args)
+      : call?.args;
   return (
     <div className="grid gap-3 py-1">
       {call ? (
         <div>
           <div className="text-[var(--text-11)] font-medium text-[var(--muted)]">Arguments</div>
-          <pre className="mt-1 max-h-24 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2 py-1.5 whitespace-pre-wrap break-words text-[var(--text-10)] leading-relaxed text-[var(--muted-dim)]">
-            {JSON.stringify(call.args, null, 2)}
-          </pre>
+          <div
+            className="mt-1 max-h-40 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2.5 py-2"
+            data-tool-structured-value="arguments"
+          >
+            <ToolStructuredValue value={structuredArguments} />
+          </div>
         </div>
       ) : null}
       {result ? (
         <div>
           <div className="text-[var(--text-11)] font-medium text-[var(--muted)]">Result</div>
           {resultText ? (
-            <pre className="mt-1 max-h-32 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2 py-1.5 whitespace-pre-wrap break-words text-[var(--text-11)] leading-relaxed text-[var(--fg-secondary)]">
-              {resultText}
-            </pre>
+            structuredResult !== undefined ? (
+              <div
+                className="mt-1 max-h-48 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2.5 py-2"
+                data-tool-structured-value="result"
+              >
+                <ToolStructuredValue value={structuredResult} />
+              </div>
+            ) : (
+              <pre className="mt-1 max-h-32 overflow-auto rounded bg-[var(--surface-inset-faint)] px-2 py-1.5 whitespace-pre-wrap break-words text-[var(--text-11)] leading-relaxed text-[var(--fg-secondary)]">
+                {resultText}
+              </pre>
+            )
           ) : (
             <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
               No result payload.
@@ -406,8 +660,14 @@ function TransferActivityRow({
   const totalBytes = Number(progress?.totalBytes ?? 0);
   const transferredBytes = Number(progress?.transferredBytes ?? 0);
   const files = Array.isArray(progress?.files) ? progress.files : [];
-  const settled = toolActivityIsSettled({ type: 'tool', key: call.id, call, result });
-  const failed = result?.isError === true || progress?.phase === 'failed';
+  const activityItem: AssistantToolRenderItem = {
+    type: 'tool',
+    key: call.id,
+    call,
+    result,
+  };
+  const settled = toolActivityIsSettled(activityItem);
+  const failed = toolActivityFailed(activityItem);
   const percent =
     totalBytes > 0
       ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100))
@@ -437,7 +697,7 @@ function TransferActivityRow({
     <div className="mx-3 py-1" data-tool-activity-row>
       <div className="py-1.5">
         <div className="flex min-w-0 items-center gap-2">
-          <ToolStatusIndicator result={settled ? result : undefined} />
+          <ToolStatusIndicator result={toolActivityStatusResult(activityItem)} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
               <div className="truncate text-[var(--text-12)] font-medium text-[var(--muted)]">
@@ -542,8 +802,10 @@ export function RepeatedToolActivityRow({
   const first = items[0];
   const name = toolItemName(first);
   const label = toolLabel(name);
-  const errorCount = items.filter((item) => item.result?.isError).length;
+  const errorCount = items.filter(toolActivityFailed).length;
   const pendingCount = items.filter((item) => !toolActivityIsSettled(item)).length;
+  const hasPartialFailure =
+    pendingCount === 0 && errorCount > 0 && errorCount < items.length;
   const statusText = [
     pendingCount > 0 && !blocked ? `${pendingCount} pending` : '',
     errorCount > 0 ? `${errorCount} failed` : '',
@@ -566,21 +828,33 @@ export function RepeatedToolActivityRow({
         onClick={() => setDetailsOpen((value) => !value)}
         className="group flex w-full min-w-0 items-center gap-2 py-1.5 text-left"
       >
-        <ToolStatusIndicator result={statusResult} blocked={blocked && pendingCount > 0} />
+        {hasPartialFailure ? (
+          <ToolPartialFailureIndicator failed={errorCount} total={items.length} />
+        ) : (
+          <ToolStatusIndicator
+            result={statusResult}
+            blocked={blocked && pendingCount > 0}
+            errorLabel={
+              errorCount === items.length && items.length > 1
+                ? `All ${items.length} tool calls failed`
+                : undefined
+            }
+          />
+        )}
         <span className="min-w-0 truncate text-[var(--text-12)] font-medium text-[var(--muted)] group-hover:text-[var(--fg-secondary)]">
           {label}
         </span>
         <span className="flex-shrink-0 text-[var(--text-10)] tabular-nums text-[var(--muted-dim)]">
           ×{items.length}
         </span>
+        <span className="flex-shrink-0 text-[var(--muted-dim)]">
+          <ToolRunChevron open={detailsOpen} />
+        </span>
         {statusText ? (
           <span className="hidden flex-shrink-0 text-[var(--text-10)] text-[var(--muted-dim)] sm:inline">
             {statusText}
           </span>
         ) : null}
-        <span className="ml-auto text-[var(--muted-dim)]">
-          <ToolRunChevron open={detailsOpen} />
-        </span>
       </button>
       {detailsOpen ? (
         <ToolDetailRail>
@@ -589,7 +863,7 @@ export function RepeatedToolActivityRow({
               <div key={item.key}>
                 <div className="mb-1 flex min-w-0 items-center gap-2">
                   <ToolStatusIndicator
-                    result={toolActivityIsSettled(item) ? item.result : undefined}
+                    result={toolActivityStatusResult(item)}
                     blocked={blocked && !toolActivityIsSettled(item)}
                   />
                   <div className="min-w-0 flex-1 truncate text-[var(--text-11)] font-medium text-[var(--muted)]">

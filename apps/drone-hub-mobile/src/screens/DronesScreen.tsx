@@ -71,6 +71,7 @@ import {
   confirmedMobilePendingPromptState,
   hasActiveMobileDronePendingPrompt,
   mergeOptimisticMobilePendingPrompts,
+  mobileChatRespondingStatus,
   mobileDronePendingPrompts,
   optimisticMobilePendingPrompt,
 } from '../drones/mobile-pending-prompts';
@@ -1603,15 +1604,19 @@ export function DronesScreen({
     () => hasActiveMobileDronePendingPrompt(pendingPrompts, turns),
     [pendingPrompts, turns],
   );
-  const running =
-    busy === 'prompt' ||
-    busy === 'stop' ||
-    hasActivePendingPrompt ||
-    visiblePendingPrompts.some((item) => item.status === 'pending') ||
-    nativeThread?.status === 'running' ||
-    nativeThread?.status === 'waiting_for_approval' ||
-    nativeThread?.status === 'waiting_for_chats_idle' ||
-    Boolean(selected?.busyChats.some((chat) => chat === chatName));
+  const running = mobileChatRespondingStatus({
+    localActivity:
+      busy === 'prompt' ||
+      busy === 'stop' ||
+      hasActivePendingPrompt ||
+      visiblePendingPrompts.some((item) => item.status === 'pending'),
+    nativeRuntimeActive:
+      nativeThread?.status === 'running' ||
+      nativeThread?.status === 'waiting_for_approval' ||
+      nativeThread?.status === 'waiting_for_chats_idle',
+    nativeTranscriptLoaded: nativeMessages !== null,
+    serverChatBusy: Boolean(selected?.busyChats.some((chat) => chat === chatName)),
+  });
   const activeTarget = mesh.devices.find((target) => target.id === targetId);
   const dronesLoading =
     targetReachable && targetSupportsDrones && (!dronesLoaded || busy === 'drones');

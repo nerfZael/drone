@@ -88,6 +88,16 @@ export function pendingPromptShowsWorkingState(
   return item?.state === 'sending' || item?.state === 'sent';
 }
 
+export function selectedChatRespondingStatus(args: {
+  includeDroneBusy: boolean;
+  droneBusy: boolean;
+  selectedIsResponding: boolean;
+}): boolean {
+  return args.includeDroneBusy
+    ? args.droneBusy || args.selectedIsResponding
+    : args.selectedIsResponding;
+}
+
 export function createOptimisticPendingPrompt(args: {
   prompt: string;
   attachments?: ChatSendPayload['attachments'];

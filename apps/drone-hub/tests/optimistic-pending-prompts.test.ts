@@ -5,6 +5,7 @@ import {
   optimisticPendingPromptState,
   pendingPromptShowsWorkingState,
   reconcileOptimisticPendingPrompt,
+  selectedChatRespondingStatus,
 } from '../src/droneHub/app/optimistic-pending-prompts';
 
 describe('optimistic pending prompt helpers', () => {
@@ -18,6 +19,30 @@ describe('optimistic pending prompt helpers', () => {
     expect(pendingPromptShowsWorkingState({ state: 'sending' })).toBe(true);
     expect(pendingPromptShowsWorkingState({ state: 'sent' })).toBe(true);
     expect(pendingPromptShowsWorkingState({ state: 'failed' })).toBe(false);
+  });
+
+  test('does not leave external responding dots active after transcript completion', () => {
+    expect(
+      selectedChatRespondingStatus({
+        includeDroneBusy: false,
+        droneBusy: true,
+        selectedIsResponding: false,
+      }),
+    ).toBe(false);
+    expect(
+      selectedChatRespondingStatus({
+        includeDroneBusy: false,
+        droneBusy: false,
+        selectedIsResponding: true,
+      }),
+    ).toBe(true);
+    expect(
+      selectedChatRespondingStatus({
+        includeDroneBusy: true,
+        droneBusy: true,
+        selectedIsResponding: false,
+      }),
+    ).toBe(true);
   });
 
   test('creates a local optimistic prompt with preview attachments', () => {

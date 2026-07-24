@@ -12,6 +12,8 @@ import {
 import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
+import X from 'lucide-react-native/icons/x';
 import type { AgentRunFileChangeEntry, AgentRunFileChangeWorkspace } from '@blip/protocol';
 import {
   agentRunFileStatusLabel,
@@ -49,6 +51,7 @@ import {
   limitMobileRunToolItems,
   mobileTranscriptGroupStartedAt,
   mobileRunIsThinking,
+  partitionMobileRunItems,
   sortMobileTranscriptTimeline,
   workingDurationLabel,
   type MobileAgentPlan,
@@ -600,16 +603,173 @@ function TappableMessageView({
   );
 }
 
-function ToolStatus({ failed, pending }: { failed: boolean; pending: boolean }) {
+type MobileToolStatus = 'pending' | 'ok' | 'error' | 'partial-error';
+
+function ToolStatus({
+  status,
+  accessibilityLabel,
+}: {
+  status: MobileToolStatus;
+  accessibilityLabel?: string;
+}) {
+  const pending = status === 'pending';
+  const failed = status === 'error';
+  const partial = status === 'partial-error';
   return (
-    <View style={styles.toolStatusSlot}>
+    <View
+      accessible={!pending}
+      accessibilityLabel={
+        accessibilityLabel ?? (failed ? 'Tool failed' : partial ? 'Some tool calls failed' : undefined)
+      }
+      style={styles.toolStatusSlot}
+    >
       {pending ? (
         <ActivityIndicator accessible={false} color={colors.accent} size={12} />
       ) : (
-        <View style={[styles.toolStatusCircle, failed && styles.toolStatusError]}>
-          <Text style={styles.toolStatusText}>{failed ? '!' : '✓'}</Text>
+        <View
+          style={[
+            styles.toolStatusCircle,
+            failed && styles.toolStatusError,
+            partial && styles.toolStatusPartial,
+          ]}
+        >
+          {failed ? (
+            <X color={colors.onAccent} size={9} strokeWidth={2.5} />
+          ) : partial ? (
+            <TriangleAlert color={colors.onAccent} size={8} strokeWidth={2.2} />
+          ) : (
+            <Check color={colors.onAccent} size={9} strokeWidth={2.5} />
+          )}
         </View>
       )}
+    </View>
+  );
+}
+
+function toolItemFailed(item: AssistantToolRenderItem): boolean {
+  if (item.result?.isError) return true;
+  const details = item.result?.details;
+  return Boolean(
+    details &&
+      typeof details === 'object' &&
+      !Array.isArray(details) &&
+      (details as Record<string, unknown>).type === 'workspace_transfer' &&
+      (details as Record<string, unknown>).phase === 'failed',
+  );
+}
+
+function humanizeToolField(value: string): string {
+  const words = value
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return words ? `${words[0]!.toUpperCase()}${words.slice(1)}` : 'Value';
+}
+
+function structuredToolValueFromText(value: string): unknown | undefined {
+  const trimmed = value.trim();
+  if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const MOBILE_TOOL_MAX_DEPTH = 6;
+const MOBILE_TOOL_MAX_ITEMS = 50;
+
+function toolScalarText(value: unknown): string {
+  if (value == null) return 'None';
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  return String(value);
+}
+
+function ToolStructuredValue({
+  value,
+  depth = 0,
+  ancestors = [],
+}: {
+  value: unknown;
+  depth?: number;
+  ancestors?: readonly object[];
+}) {
+  if (!value || typeof value !== 'object') {
+    return (
+      <Text selectable style={[styles.detailText, value == null && styles.detailPlaceholder]}>
+        {toolScalarText(value)}
+      </Text>
+    );
+  }
+  if (ancestors.includes(value)) {
+    return <Text style={styles.detailPlaceholder}>Circular reference</Text>;
+  }
+  if (depth >= MOBILE_TOOL_MAX_DEPTH) {
+    const size = Array.isArray(value) ? value.length : Object.keys(value).length;
+    return (
+      <Text style={styles.detailPlaceholder}>
+        Nested {Array.isArray(value) ? `${size} items` : `${size} fields`}
+      </Text>
+    );
+  }
+  const nextAncestors = [...ancestors, value];
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <Text style={styles.detailPlaceholder}>Empty list</Text>;
+    if (value.every((item) => item == null || typeof item !== 'object')) {
+      const visible = value.slice(0, MOBILE_TOOL_MAX_ITEMS);
+      const hidden = value.length - visible.length;
+      return (
+        <Text selectable style={styles.detailText}>
+          {visible.map(toolScalarText).join(', ')}
+          {hidden > 0 ? `, +${hidden} more` : ''}
+        </Text>
+      );
+    }
+    const visible = value.slice(0, MOBILE_TOOL_MAX_ITEMS);
+    const hidden = value.length - visible.length;
+    return (
+      <View style={styles.detailList}>
+        {visible.map((item, index) => (
+          <View key={index} style={styles.detailArrayRow}>
+            <Text style={styles.detailIndex}>{index + 1}</Text>
+            <View style={styles.detailValue}>
+              <ToolStructuredValue
+                value={item}
+                depth={depth + 1}
+                ancestors={nextAncestors}
+              />
+            </View>
+          </View>
+        ))}
+        {hidden > 0 ? (
+          <Text style={styles.detailPlaceholder}>+{hidden} more items</Text>
+        ) : null}
+      </View>
+    );
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) return <Text style={styles.detailPlaceholder}>No fields</Text>;
+  const visible = entries.slice(0, MOBILE_TOOL_MAX_ITEMS);
+  const hidden = entries.length - visible.length;
+  return (
+    <View style={styles.detailList}>
+      {visible.map(([key, item]) => (
+        <View key={key} style={styles.detailField}>
+          <Text style={styles.detailFieldLabel}>{humanizeToolField(key)}</Text>
+          <ToolStructuredValue
+            value={item}
+            depth={depth + 1}
+            ancestors={nextAncestors}
+          />
+        </View>
+      ))}
+      {hidden > 0 ? (
+        <Text style={styles.detailPlaceholder}>+{hidden} more fields</Text>
+      ) : null}
     </View>
   );
 }
@@ -681,10 +841,19 @@ function TransferToolRow({
           pressed && expandable && styles.toolHeadPressed,
         ]}
       >
-        <ToolStatus failed={failed} pending={!settled} />
+        <ToolStatus status={!settled ? 'pending' : failed ? 'error' : 'ok'} />
         <View style={styles.toolCopy}>
           <View style={styles.transferTitleRow}>
-            <Text style={styles.toolTitle}>Transfer files</Text>
+            <View style={styles.toolTitleRow}>
+              <Text style={styles.toolTitle}>Transfer files</Text>
+              {expandable ? (
+                open ? (
+                  <ChevronDown color={colors.mutedDim} size={14} strokeWidth={1.8} />
+                ) : (
+                  <ChevronRight color={colors.mutedDim} size={14} strokeWidth={1.8} />
+                )
+              ) : null}
+            </View>
             <Text style={styles.transferBytes}>{amountLabel}</Text>
           </View>
           <Text numberOfLines={1} style={styles.toolSummary}>
@@ -719,13 +888,6 @@ function TransferToolRow({
             </Text>
           ) : null}
         </View>
-        {expandable ? (
-          open ? (
-            <ChevronDown color={colors.mutedDim} size={14} strokeWidth={1.8} />
-          ) : (
-            <ChevronRight color={colors.mutedDim} size={14} strokeWidth={1.8} />
-          )
-        ) : null}
       </Pressable>
       {open && files.length > 0 ? (
         <View style={[styles.transferFiles, nested && styles.transferFilesNested]}>
@@ -786,33 +948,41 @@ function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nest
   if ((item.call?.name ?? item.result?.toolName) === 'transfer_files') {
     return <TransferToolRow item={item} nested={nested} />;
   }
-  const failed = item.result?.isError === true;
-  const pending = !item.result;
-  const args = item.call?.args;
+  const failed = toolItemFailed(item);
+  const pending = !toolActivityIsSettled(item);
+  const rawArgs = item.call?.args;
+  const args =
+    typeof rawArgs === 'string'
+      ? (structuredToolValueFromText(rawArgs) ?? rawArgs)
+      : rawArgs;
   const result = item.result
     ? messageText(item.result).trim() || String(item.result.errorMessage ?? '').trim()
     : '';
+  const structuredResult = result ? structuredToolValueFromText(result) : undefined;
+  const label = toolLabel(item.call?.name ?? item.result?.toolName);
   return (
     <View style={[styles.tool, nested && styles.toolNested]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${toolLabel(item.call?.name ?? item.result?.toolName)}, ${pending ? 'running' : failed ? 'failed' : 'completed'}`}
+        accessibilityLabel={`${label}, ${pending ? 'running' : failed ? 'failed' : 'completed'}`}
         accessibilityState={{ expanded: open }}
         hitSlop={4}
         onPress={() => setOpen((value) => !value)}
         style={({ pressed }) => [styles.toolHead, pressed && styles.toolHeadPressed]}
       >
-        <ToolStatus failed={failed} pending={pending} />
+        <ToolStatus status={pending ? 'pending' : failed ? 'error' : 'ok'} />
         <View style={styles.toolCopy}>
-          <Text numberOfLines={1} style={styles.toolTitle}>
-            {toolLabel(item.call?.name ?? item.result?.toolName)}
-          </Text>
+          <View style={styles.toolTitleRow}>
+            <Text numberOfLines={1} style={styles.toolTitle}>
+              {label}
+            </Text>
+            {open ? (
+              <ChevronDown color={colors.mutedDim} size={14} strokeWidth={1.8} />
+            ) : (
+              <ChevronRight color={colors.mutedDim} size={14} strokeWidth={1.8} />
+            )}
+          </View>
         </View>
-        {open ? (
-          <ChevronDown color={colors.mutedDim} size={14} strokeWidth={1.8} />
-        ) : (
-          <ChevronRight color={colors.mutedDim} size={14} strokeWidth={1.8} />
-        )}
       </Pressable>
       {open ? (
         <View style={[styles.toolDetails, nested && styles.toolDetailsNested]}>
@@ -820,18 +990,20 @@ function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nest
             <>
               <Text style={styles.detailLabel}>Arguments</Text>
               <View style={styles.detailPayload}>
-                <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
-                  <Text selectable style={styles.detailText}>
-                    {JSON.stringify(args, null, 2)}
-                  </Text>
-                </ScrollView>
+                <ToolStructuredValue value={args} />
               </View>
             </>
           ) : null}
           <Text style={styles.detailLabel}>Result</Text>
-          <Text selectable style={[styles.detailText, styles.detailPayload]}>
-            {result || (pending ? 'Waiting…' : 'No result payload.')}
-          </Text>
+          <View style={styles.detailPayload}>
+            {structuredResult !== undefined ? (
+              <ToolStructuredValue value={structuredResult} />
+            ) : (
+              <Text selectable style={styles.detailText}>
+                {result || (pending ? 'Waiting…' : 'No result payload.')}
+              </Text>
+            )}
+          </View>
         </View>
       ) : null}
     </View>
@@ -840,33 +1012,54 @@ function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nest
 
 function ToolGroupRow({ item }: { item: Extract<AssistantRenderItem, { type: 'toolGroup' }> }) {
   const [open, setOpen] = React.useState(false);
-  const failed = item.items.some((tool) => tool.result?.isError === true);
+  const failedCount = item.items.filter(toolItemFailed).length;
   const pending = item.items.some((tool) => !toolActivityIsSettled(tool));
+  const partial = !pending && failedCount > 0 && failedCount < item.items.length;
+  const failed = !pending && failedCount === item.items.length;
   const name = toolLabel(item.items[0]?.call?.name ?? item.items[0]?.result?.toolName);
+  const stateLabel = pending
+    ? 'running'
+    : partial
+      ? `${failedCount} of ${item.items.length} calls failed`
+      : failed
+        ? 'all calls failed'
+        : 'completed';
   return (
     <View style={styles.tool}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${name}, ${item.items.length} calls, ${pending ? 'running' : failed ? 'failed' : 'completed'}`}
+        accessibilityLabel={`${name}, ${item.items.length} calls, ${stateLabel}`}
         accessibilityState={{ expanded: open }}
         hitSlop={4}
         onPress={() => setOpen((value) => !value)}
         style={({ pressed }) => [styles.toolHead, pressed && styles.toolHeadPressed]}
       >
-        <ToolStatus failed={failed} pending={pending} />
+        <ToolStatus
+          status={pending ? 'pending' : partial ? 'partial-error' : failed ? 'error' : 'ok'}
+          accessibilityLabel={
+            partial
+              ? `${failedCount} of ${item.items.length} tool calls failed`
+              : failed
+                ? `All ${item.items.length} tool calls failed`
+                : undefined
+          }
+        />
         <View style={styles.toolCopy}>
           <View style={styles.toolTitleRow}>
             <Text numberOfLines={1} style={styles.toolTitle}>
               {name}
             </Text>
             <Text style={styles.toolCount}>×{item.items.length}</Text>
+            {open ? (
+              <ChevronDown color={colors.mutedDim} size={14} strokeWidth={1.8} />
+            ) : (
+              <ChevronRight color={colors.mutedDim} size={14} strokeWidth={1.8} />
+            )}
+            {failedCount > 0 ? (
+              <Text style={styles.toolFailureCount}>{failedCount} failed</Text>
+            ) : null}
           </View>
         </View>
-        {open ? (
-          <ChevronDown color={colors.mutedDim} size={14} strokeWidth={1.8} />
-        ) : (
-          <ChevronRight color={colors.mutedDim} size={14} strokeWidth={1.8} />
-        )}
       </Pressable>
       {open ? (
         <View style={styles.groupDetails}>
@@ -958,7 +1151,7 @@ function AgentRunSummary({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={expanded ? 'Collapse tool calls' : 'Expand tool calls'}
+      accessibilityLabel={expanded ? 'Collapse activity' : 'Expand activity'}
       accessibilityState={{ expanded }}
       onPress={onToggle}
       style={({ pressed }) => [styles.runSummary, pressed && styles.runSummaryPressed]}
@@ -1090,9 +1283,12 @@ function TranscriptRun({
     if (userControlledExpansion.current) return;
     setToolExpansion(run.active ? 'auto' : 'collapsed');
   }, [run.active]);
-  const toolsExpanded = toolExpansion !== 'collapsed';
-  const visibleItems = toolExpansion === 'auto' ? limitMobileRunToolItems(run.items) : run.items;
-  const thinking = toolsExpanded && showThinking && mobileRunIsThinking(run);
+  const { activityItems, trailingItems } = partitionMobileRunItems(run);
+  const activityExpanded = toolExpansion !== 'collapsed';
+  const visibleActivityItems =
+    toolExpansion === 'auto' ? limitMobileRunToolItems(activityItems) : activityItems;
+  const hasActivityDetails = activityItems.length > 0;
+  const thinking = activityExpanded && showThinking && mobileRunIsThinking(run);
   return (
     <View>
       {renderItem(run.user)}
@@ -1102,9 +1298,9 @@ function TranscriptRun({
           startedAt={run.startedAt}
           completedAt={run.completedAt}
           toolCallCount={run.toolCallCount}
-          expanded={toolsExpanded}
+          expanded={activityExpanded}
           onToggle={
-            run.toolCallCount > 0
+            hasActivityDetails
               ? () => {
                   userControlledExpansion.current = true;
                   setToolExpansion((current) => (current === 'collapsed' ? 'manual' : 'collapsed'));
@@ -1113,29 +1309,30 @@ function TranscriptRun({
           }
         />
       </View>
-      {visibleItems.map((item) => {
-        const tool = item.type === 'tool' || item.type === 'toolGroup';
-        if (tool && !toolsExpanded) return null;
-        return tool ? (
-          <View key={item.key} style={styles.runBody}>
-            {renderItem(item)}
-          </View>
-        ) : (
-          renderItem(item)
-        );
-      })}
-      {thinking ? (
-        <View
-          accessible
-          accessibilityLabel="Assistant is thinking"
-          accessibilityLiveRegion="polite"
-          accessibilityRole="progressbar"
-          style={[styles.runBody, styles.thinkingActivity]}
-        >
-          <ActivityIndicator accessible={false} color={colors.accent} size={12} />
-          <Text style={styles.thinkingActivityText}>Thinking…</Text>
+      {hasActivityDetails && activityExpanded ? (
+        <View style={styles.activityRail}>
+          {visibleActivityItems.map((item) => (
+            <View key={item.key} style={styles.activityItem}>
+              {renderItem(item)}
+            </View>
+          ))}
+          {thinking ? (
+            <View
+              accessible
+              accessibilityLabel="Assistant is thinking"
+              accessibilityLiveRegion="polite"
+              accessibilityRole="progressbar"
+              style={styles.thinkingActivity}
+            >
+              <ActivityIndicator accessible={false} color={colors.accent} size={12} />
+              <Text style={styles.thinkingActivityText}>Thinking…</Text>
+            </View>
+          ) : null}
         </View>
       ) : null}
+      {trailingItems.map((item) => (
+        <React.Fragment key={item.key}>{renderItem(item)}</React.Fragment>
+      ))}
       <View style={styles.runBody}>
         <MobileAgentPlanList plan={run.plan} running={run.active} />
       </View>
@@ -1690,6 +1887,16 @@ const styles = StyleSheet.create({
   },
   messages: { gap: 0 },
   runBody: { marginHorizontal: 10 },
+  activityRail: {
+    marginLeft: 10,
+    marginRight: 10,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.borderSubtle,
+    paddingLeft: 10,
+    paddingVertical: 3,
+    opacity: 0.82,
+  },
+  activityItem: { minWidth: 0 },
   runSummary: {
     minHeight: 36,
     flexDirection: 'row',
@@ -1875,6 +2082,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.online,
   },
   toolStatusError: { backgroundColor: colors.danger },
+  toolStatusPartial: { backgroundColor: colors.warning },
   toolStatusText: {
     color: colors.onAccent,
     fontSize: 8,
@@ -1892,9 +2100,15 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 12,
     fontWeight: '600',
+    flexShrink: 1,
   },
   toolCount: {
     color: colors.subtle,
+    fontSize: 9,
+    fontWeight: '500',
+  },
+  toolFailureCount: {
+    color: colors.mutedDim,
     fontSize: 9,
     fontWeight: '500',
   },
@@ -1917,6 +2131,25 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   detailText: { color: colors.muted, fontSize: 10, lineHeight: 15, fontFamily: 'monospace' },
+  detailPlaceholder: {
+    color: colors.mutedDim,
+    fontSize: 10,
+    lineHeight: 15,
+    fontStyle: 'italic',
+  },
+  detailList: { gap: 7 },
+  detailField: { gap: 2 },
+  detailFieldLabel: { color: colors.mutedDim, fontSize: 9, fontWeight: '600' },
+  detailArrayRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
+  detailIndex: {
+    width: 18,
+    color: colors.mutedDim,
+    fontSize: 9,
+    lineHeight: 15,
+    fontFamily: 'monospace',
+    textAlign: 'right',
+  },
+  detailValue: { flex: 1, minWidth: 0 },
   groupDetails: {
     gap: 8,
     marginLeft: 6,

@@ -141,7 +141,7 @@ export const TranscriptTurn = React.memo(
           }
         />
 
-        {completedRunDurationMs !== null ? (
+        {completedRunDurationMs !== null && !activity ? (
           <AgentRunSummaryLine
             active={false}
             durationMs={completedRunDurationMs}
@@ -157,6 +157,10 @@ export const TranscriptTurn = React.memo(
         {activity ? (
           <AgentRunActivityView
             activity={activity}
+            startedAt={promptIso}
+            endedAt={agentIso}
+            at={agentIso}
+            autoExpandFinalMessage={autoExpandAgentMessage}
             messageExtras={{
               messageId,
               actionsEnabled: actionsEnabled && item.ok,

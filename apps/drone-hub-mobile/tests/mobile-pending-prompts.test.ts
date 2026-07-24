@@ -3,6 +3,7 @@ import {
   confirmedMobilePendingPromptState,
   hasActiveMobileDronePendingPrompt,
   mergeOptimisticMobilePendingPrompts,
+  mobileChatRespondingStatus,
   mobileDronePendingPrompts,
   optimisticMobilePendingPrompt,
 } from '../src/drones/mobile-pending-prompts';
@@ -12,6 +13,33 @@ describe('mobile drone pending prompts', () => {
     const pending = [{ id: 'pending-1', state: 'sent', activity: { messages: [] } }];
     expect(hasActiveMobileDronePendingPrompt(pending, [])).toBe(true);
     expect(hasActiveMobileDronePendingPrompt(pending, [{ id: 'pending-1' }])).toBe(false);
+  });
+
+  test('ignores stale server busy state for completed external transcripts', () => {
+    expect(
+      mobileChatRespondingStatus({
+        localActivity: false,
+        nativeRuntimeActive: false,
+        nativeTranscriptLoaded: false,
+        serverChatBusy: true,
+      }),
+    ).toBe(false);
+    expect(
+      mobileChatRespondingStatus({
+        localActivity: false,
+        nativeRuntimeActive: false,
+        nativeTranscriptLoaded: true,
+        serverChatBusy: true,
+      }),
+    ).toBe(true);
+    expect(
+      mobileChatRespondingStatus({
+        localActivity: true,
+        nativeRuntimeActive: false,
+        nativeTranscriptLoaded: false,
+        serverChatBusy: false,
+      }),
+    ).toBe(true);
   });
 
   test('preserves the active run timestamp and plan', () => {

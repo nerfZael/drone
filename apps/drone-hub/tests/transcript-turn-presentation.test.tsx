@@ -42,12 +42,14 @@ describe('completed external transcript presentation', () => {
     expect(html).not.toContain('left-0 top-full mt-1 text-[var(--chat-message-time)]');
   });
 
-  test('shows reasoning and completed tool activity without duplicating the final answer', () => {
+  test('collapses completed reasoning and tool activity while keeping the final answer visible', () => {
     const html = renderToStaticMarkup(
       <TranscriptTurn
         item={{
           turn: 2,
           at: '2026-07-20T10:00:00.000Z',
+          promptAt: '2026-07-20T10:00:00.000Z',
+          completedAt: '2026-07-20T10:00:02.000Z',
           prompt: 'Inspect the file.',
           session: 'external-session',
           logPath: '/tmp/external-session.log',
@@ -92,14 +94,18 @@ describe('completed external transcript presentation', () => {
     );
 
     expect(html).toContain('data-agent-run-activity="codex"');
-    expect(html).toContain('I should inspect the file first.');
-    expect(html).toContain('Read file');
-    expect(html).toContain('data-tool-status="ok"');
+    expect(html).toContain('Worked for 2s');
+    expect(html).toContain('1 tool call');
+    expect(html).toContain('aria-label="Expand activity"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain('I should inspect the file first.');
+    expect(html).not.toContain('Read file');
     expect(html).not.toContain('data-tool-status="pending"');
+    expect(html).toContain('class="mt-1 px-3"');
     expect(html.match(/The file is ready\./g)).toHaveLength(1);
   });
 
-  test('marks missing terminal tool results as interrupted instead of spinning forever', () => {
+  test('settles missing terminal tool results without leaving a spinner visible', () => {
     const html = renderToStaticMarkup(
       <TranscriptTurn
         item={{
@@ -138,8 +144,58 @@ describe('completed external transcript presentation', () => {
       />,
     );
 
-    expect(html).toContain('data-tool-status="error"');
+    expect(html).toContain('1 tool call');
+    expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain('data-tool-status="pending"');
+    expect(html).not.toContain('animate-spin');
+  });
+
+  test('fully expands the latest final answer outside the completed activity accordion', () => {
+    const finalTail = 'The final answer tail stays visible.';
+    const finalAnswer = [
+      ...Array.from({ length: 45 }, (_, index) => `Final answer line ${index + 1}`),
+      finalTail,
+    ].join('\n');
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 4,
+          at: '2026-07-20T10:00:00.000Z',
+          promptAt: '2026-07-20T10:00:00.000Z',
+          completedAt: '2026-07-20T10:00:03.000Z',
+          prompt: 'Give me the full answer.',
+          session: 'external-session',
+          logPath: '/tmp/external-session.log',
+          ok: true,
+          output: finalAnswer,
+          activity: {
+            version: 1,
+            source: 'codex',
+            updatedAt: '2026-07-20T10:00:03.000Z',
+            messages: [
+              {
+                role: 'assistant',
+                content: [{ type: 'thinking', thinking: 'Working through the answer.' }],
+              },
+              {
+                role: 'assistant',
+                content: [{ type: 'text', text: finalAnswer }],
+              },
+            ],
+          },
+        }}
+        messageId="external-turn-latest"
+        showRoleIcons={false}
+        autoExpandAgentMessage
+      />,
+    );
+
+    expect(html).toContain('Worked for 3s');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain('Working through the answer.');
+    expect(html).toContain(finalTail);
+    expect(html).toContain('>Collapse</button>');
+    expect(html).not.toContain('Show more');
   });
 
   test('keeps the terminal error visible after partial activity on a failed turn', () => {
