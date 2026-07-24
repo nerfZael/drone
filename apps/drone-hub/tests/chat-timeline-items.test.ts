@@ -50,6 +50,24 @@ describe('chat timeline items', () => {
     expect(items.map((item) => item.item.id)).toEqual(['first', 'second']);
   });
 
+  test('keeps an active prompt ahead of a later submitted completed turn', () => {
+    const active = pending(
+      'active',
+      '2026-01-01T10:00:00.000Z',
+      'sent',
+      '2026-01-01T10:03:00.000Z',
+    );
+    const items = buildChatTimelineItems(
+      [turn(2, '2026-01-01T10:01:00.000Z')],
+      [active],
+    );
+
+    expect(items.map((item) => item.kind === 'turn' ? `turn:${item.item.turn}` : `pending:${item.item.id}`)).toEqual([
+      'pending:active',
+      'turn:2',
+    ]);
+  });
+
   test('preserves input order when timestamps match', () => {
     const at = '2026-01-01T10:00:00.000Z';
     const items = buildChatTimelineItems([turn(1, at), turn(2, at)], [pending('same-time', at, 'failed')]);

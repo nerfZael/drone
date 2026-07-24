@@ -20,7 +20,6 @@ function isQueuedPendingPrompt(item: ChatTimelineItem): boolean {
 
 function timelineSortMs(item: ChatTimelineItem): number {
   if (item.kind === 'turn') return parseIsoMs(item.item.promptAt ?? item.item.at);
-  if (isActivePendingPrompt(item)) return parseIsoMs(item.item.updatedAt ?? item.item.at);
   return parseIsoMs(item.item.at);
 }
 
