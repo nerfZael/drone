@@ -84,6 +84,7 @@ describe('MarkdownMessage', () => {
     expect(html).toContain('class="dh-mermaid-card"');
     expect(html).toContain('aria-label="Mermaid diagram"');
     expect(html).toContain('Rendering diagram');
+    expect(html).toContain('Maximize');
     expect(html).not.toContain('class="dh-code-card');
   });
 

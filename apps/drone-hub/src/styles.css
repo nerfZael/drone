@@ -1431,6 +1431,19 @@ code, pre {
   border-bottom: 1px solid var(--border-subtle);
   background: var(--surface-soft);
 }
+.dh-mermaid-card__identity,
+.dh-mermaid-card__toolbar-actions {
+  display: flex;
+  align-items: center;
+}
+.dh-mermaid-card__identity {
+  min-width: 0;
+  gap: 8px;
+}
+.dh-mermaid-card__toolbar-actions {
+  flex: 0 0 auto;
+  gap: 3px;
+}
 .dh-mermaid-card__label {
   color: var(--fg-secondary);
   font-size: 11px;
@@ -1438,7 +1451,21 @@ code, pre {
   letter-spacing: .08em;
   text-transform: uppercase;
 }
-.dh-mermaid-card__source-toggle {
+.dh-mermaid-card__zoom-label {
+  color: var(--muted-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.dh-mermaid-card__render-status {
+  color: var(--accent);
+  font-size: 10px;
+}
+.dh-mermaid-card__toolbar-button {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   border: 1px solid transparent;
   border-radius: 6px;
   padding: 4px 8px;
@@ -1448,28 +1475,118 @@ code, pre {
   font-size: 11px;
   cursor: pointer;
 }
-.dh-mermaid-card__source-toggle:hover {
+.dh-mermaid-card__toolbar-button:hover {
   border-color: var(--border-subtle);
   color: var(--fg);
   background: var(--surface-strong);
 }
-.dh-mermaid-card__source-toggle:focus-visible {
+.dh-mermaid-card__toolbar-button:focus-visible {
   outline: 1px solid var(--focus-ring);
   outline-offset: 1px;
 }
-.dh-mermaid-card__diagram {
-  max-width: 100%;
-  padding: 18px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+.dh-mermaid-card__viewport-shell {
+  position: relative;
+  height: clamp(220px, 38vh, 420px);
+  min-height: 0;
+  overflow: hidden;
+  background: var(--code-block-bg);
 }
-.dh-mermaid-card__diagram svg {
-  display: block;
-  width: max-content;
+.dh-mermaid-card__viewport {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background-color: var(--code-block-bg);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--fg-secondary) 18%, transparent) 1px, transparent 1px);
+  background-position: -1px -1px;
+  background-size: 18px 18px;
+  cursor: default;
+}
+.dh-mermaid-card__viewport.is-panning {
+  cursor: grabbing;
+  user-select: none;
+}
+.dh-mermaid-card__viewport:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+.dh-mermaid-card__canvas {
+  display: flex;
   min-width: 100%;
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 24px;
+}
+.dh-mermaid-card__canvas-size {
+  position: relative;
+  flex: 0 0 auto;
+}
+.dh-mermaid-card__surface {
+  position: absolute;
+  inset: 0 auto auto 0;
+  transform-origin: top left;
+}
+.dh-mermaid-card__surface svg {
+  display: block;
+  width: 100%;
+  height: 100%;
   max-width: none !important;
-  height: auto;
-  margin: 0 auto;
+}
+.dh-mermaid-card__viewport-hint,
+.dh-mermaid-card__viewport-controls {
+  position: absolute;
+  bottom: 10px;
+  z-index: 2;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 84%, transparent);
+  box-shadow: 0 8px 22px color-mix(in srgb, #000 28%, transparent);
+  backdrop-filter: blur(10px);
+}
+.dh-mermaid-card__viewport-hint {
+  left: 10px;
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--muted-dim);
+  background: color-mix(in srgb, var(--surface-soft) 88%, transparent);
+  font-size: 10px;
+  pointer-events: none;
+}
+.dh-mermaid-card__viewport-controls {
+  right: 10px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-strong) 91%, transparent);
+}
+.dh-mermaid-card__viewport-controls button {
+  min-width: 29px;
+  height: 28px;
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  color: var(--fg-secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.dh-mermaid-card__viewport-controls button:last-child {
+  border-right: 0;
+}
+.dh-mermaid-card__viewport-controls button:hover {
+  color: var(--fg);
+  background: var(--surface-strong);
+}
+.dh-mermaid-card__viewport-controls button:focus-visible {
+  position: relative;
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.dh-mermaid-card__viewport-controls .is-zoom-value {
+  min-width: 50px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 .dh-mermaid-card__loading {
   min-height: 132px;
@@ -1501,6 +1618,40 @@ code, pre {
   color: var(--red);
   background: var(--red-subtle);
   font-size: 12px;
+}
+.dh-mermaid-card__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  display: flex;
+  padding: 14px;
+  background: color-mix(in srgb, var(--scrim) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+.dh-mermaid-card.is-maximized {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  border-color: var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 28px 90px color-mix(in srgb, #000 56%, transparent);
+}
+.dh-mermaid-card.is-maximized .dh-mermaid-card__toolbar {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding-inline: 14px 10px;
+}
+.dh-mermaid-card.is-maximized .dh-mermaid-card__viewport-shell,
+.dh-mermaid-card.is-maximized .dh-mermaid-card__source,
+.dh-mermaid-card.is-maximized .dh-mermaid-card__loading {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.dh-mermaid-card.is-maximized .dh-mermaid-card__source {
+  overflow: auto;
 }
 
 .dh-markdown .token.comment,
