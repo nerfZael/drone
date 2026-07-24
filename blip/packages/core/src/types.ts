@@ -1,7 +1,7 @@
 import type { AgentMessage } from '@mariozechner/pi-agent-core';
 import type { PermissionMode, ToolProfile } from '@blip/tools';
 import type { BlipRuntimeEvent } from '@blip/protocol';
-import type { BlipPromptProvider } from './blip-session-types.js';
+import type { BlipPromptProvider, BlipToolProvider } from './blip-session-types.js';
 
 export type {
   BlipContextUsage,
@@ -62,4 +62,5 @@ export interface RunBlipOptions {
   processExitDiagnosticsDelayMs?: number;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   promptProvider?: BlipPromptProvider;
+  toolProviders?: BlipToolProvider[];
 }

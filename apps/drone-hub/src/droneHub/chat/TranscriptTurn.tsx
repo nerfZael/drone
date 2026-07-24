@@ -36,8 +36,6 @@ function sameAttachments(aRaw: unknown, bRaw: unknown): boolean {
 export const TranscriptTurn = React.memo(
   function TranscriptTurn({
     item,
-    parsingJobs,
-    onCreateJobs,
     onSpawnDroneHubTask,
     messageId,
     onRollbackDockerSnapshot,
@@ -53,8 +51,6 @@ export const TranscriptTurn = React.memo(
     initiallyExpandFileChanges = false,
   }: {
     item: TranscriptItem;
-    parsingJobs: boolean;
-    onCreateJobs: (opts: { turn: number; message: string }) => void;
     onSpawnDroneHubTask: (mode: DroneHubTaskSpawnMode, task: DroneHubTask) => Promise<{ ok: boolean; error?: string | null }>;
     messageId: string;
     onRollbackDockerSnapshot?: (item: TranscriptItem) => void | Promise<void>;
@@ -151,9 +147,7 @@ export const TranscriptTurn = React.memo(
             text={cleanedAgentMessage}
             tasks={agentMessage.tasks}
             messageId={messageId}
-            parsingJobs={parsingJobs}
             actionsEnabled={actionsEnabled && item.ok}
-            onCreateJobs={(message) => onCreateJobs({ turn: item.turn, message })}
             onSpawnTask={onSpawnDroneHubTask}
             linkedPullRequestContext={linkedPullRequestContext}
             droneId={droneId}
@@ -228,8 +222,6 @@ export const TranscriptTurn = React.memo(
     JSON.stringify(a.item.agentPlan?.items ?? []) === JSON.stringify(b.item.agentPlan?.items ?? []) &&
     (a.item.agentPlan?.source ?? '') === (b.item.agentPlan?.source ?? '') &&
     (a.item.error ?? '') === (b.item.error ?? '') &&
-    a.parsingJobs === b.parsingJobs &&
-    a.onCreateJobs === b.onCreateJobs &&
     a.onSpawnDroneHubTask === b.onSpawnDroneHubTask &&
     a.messageId === b.messageId &&
     a.onRollbackDockerSnapshot === b.onRollbackDockerSnapshot &&

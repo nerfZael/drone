@@ -484,6 +484,65 @@ describeSocketSuite('chat management api', () => {
     expect(regAny?.drones?.[droneId]?.chats?.default?.agentPermissionMode).toBeUndefined();
   });
 
+  test('stores native-shaped Drone Hub access on the chat and assigns old chats a stable id', async () => {
+    const droneId = 'drone-chat-mcp-access';
+    await seedDrone(droneId);
+
+    const initial = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/mcp-access`,
+    );
+    expect(initial.r.status).toBe(200);
+    expect(initial.data?.accessScope).toMatchObject({
+      readMode: 'all',
+      writeMode: 'selected',
+      executeMode: 'selected',
+      droneIds: [droneId],
+    });
+
+    const updated = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/mcp-access`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          accessScope: {
+            readMode: 'selected',
+            writeMode: 'all',
+            executeMode: 'all',
+            droneIds: ['another-drone'],
+          },
+        }),
+      },
+    );
+    expect(updated.r.status).toBe(200);
+    expect(updated.data?.accessScope).toMatchObject({
+      readMode: 'selected',
+      writeMode: 'all',
+      executeMode: 'all',
+      droneIds: ['another-drone', droneId],
+    });
+
+    const registry: any = await loadRegistry();
+    const chat = registry?.drones?.[droneId]?.chats?.default;
+    expect(String(chat?.id ?? '')).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(chat?.droneHubMcpAccessScope).toMatchObject({
+      readMode: 'selected',
+      writeMode: 'all',
+      executeMode: 'all',
+      droneIds: ['another-drone', droneId],
+    });
+
+    const invalid = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/mcp-access`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accessScope: null }),
+      },
+    );
+    expect(invalid.r.status).toBe(400);
+  });
+
   test('locks every agent change after chat history exists', async () => {
     const droneId = 'drone-chat-agent-lock';
     await seedDrone(droneId);

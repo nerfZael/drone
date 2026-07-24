@@ -43,6 +43,12 @@ export type SidebarDroneDragData = {
   label: string;
 };
 
+export type SidebarPinnedDroneDragData = {
+  type: 'sidebar-pinned-drone';
+  droneId: string;
+  label: string;
+};
+
 export type SidebarChatDragData = {
   type: 'sidebar-chat';
   droneId: string;
@@ -55,6 +61,7 @@ export type DroneHubDragData =
   | SidebarFolderDragData
   | SidebarGroupDragData
   | SidebarDroneDragData
+  | SidebarPinnedDroneDragData
   | SidebarChatDragData;
 
 const DroneHubActiveDragContext = React.createContext<DroneHubDragData | null>(null);
@@ -103,6 +110,12 @@ export function parseDroneHubDragData(value: unknown): DroneHubDragData | null {
     if (!droneId || droneIds.length === 0 || !label) return null;
     return { type: 'sidebar-drone', droneId, droneIds, groupOrderKey, label };
   }
+  if (type === 'sidebar-pinned-drone') {
+    const droneId = String((value as SidebarPinnedDroneDragData).droneId ?? '').trim();
+    const label = String((value as SidebarPinnedDroneDragData).label ?? '').trim();
+    if (!droneId || !label) return null;
+    return { type: 'sidebar-pinned-drone', droneId, label };
+  }
   if (type === 'sidebar-chat') {
     const droneId = String((value as SidebarChatDragData).droneId ?? '').trim();
     const chatName = String((value as SidebarChatDragData).chatName ?? '').trim() || 'default';
@@ -118,6 +131,7 @@ export function draggedDroneIdsFromData(data: DroneHubDragData | null): string[]
   if (!data) return [];
   if (data.type === 'sidebar-folder') return [];
   if (data.type === 'sidebar-chat') return [];
+  if (data.type === 'sidebar-pinned-drone') return [];
   return Array.from(new Set(data.droneIds.map((item) => String(item ?? '').trim()).filter(Boolean)));
 }
 
@@ -128,6 +142,7 @@ export function draggedCanvasChatNodeIdsFromData(
   if (!data) return [];
   if (data.type === 'sidebar-folder') return [];
   if (data.type === 'sidebar-chat') return [data.nodeId];
+  if (data.type === 'sidebar-pinned-drone') return [];
   if (data.type === 'sidebar-drone') {
     return orderChatNodeIdsBySidebar(
       expandDroneIdsToChatNodeIds(data.droneIds, sidebarOrderedChatNodeIds),
@@ -147,8 +162,8 @@ function dragPreviewLabel(data: DroneHubDragData): { title: string; detail: stri
   if (data.type === 'sidebar-chat') {
     return { title: data.label, detail: 'Chat' };
   }
-  if (data.type === 'sidebar-drone') {
-    const count = data.droneIds.length;
+  if (data.type === 'sidebar-drone' || data.type === 'sidebar-pinned-drone') {
+    const count = data.type === 'sidebar-drone' ? data.droneIds.length : 1;
     return {
       title: count > 1 ? `${count} drones` : data.label,
       detail: count > 1 ? 'Sidebar selection' : 'Drone',
@@ -184,7 +199,8 @@ function ActiveDragPreview({ data }: { data: DroneHubDragData }) {
       </div>
     );
   }
-  if (data.type === 'sidebar-drone') {
+  if (data.type === 'sidebar-drone' || data.type === 'sidebar-pinned-drone') {
+    const droneIds = data.type === 'sidebar-drone' ? data.droneIds : [data.droneId];
     return (
       <div className="pointer-events-none w-[260px] rounded-[var(--radius-medium)] shadow-[0_18px_44px_var(--shadow-color)]">
         <DroneCard
@@ -204,7 +220,7 @@ function ActiveDragPreview({ data }: { data: DroneHubDragData }) {
             hubMessage: null,
             busy: false,
           }}
-          displayName={data.droneIds.length > 1 ? `${data.droneIds.length} drones` : data.label}
+          displayName={droneIds.length > 1 ? `${droneIds.length} drones` : data.label}
           selected={true}
           dragging={false}
           draggable={false}

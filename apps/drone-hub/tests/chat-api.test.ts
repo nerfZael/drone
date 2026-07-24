@@ -89,11 +89,13 @@ describe('chat api request scopes', () => {
         droneId: 'drone-1',
         chatName: 'chat-2',
         prompt: 'Fix login',
+        deliveryMode: 'asap',
         autoRenameHandledByClient: true,
       },
     );
 
     expect(body.autoRenameHandledByClient).toBe(true);
+    expect(body.deliveryMode).toBe('asap');
   });
 
   test('loads the initial transcript tail and pending prompts in one request', async () => {

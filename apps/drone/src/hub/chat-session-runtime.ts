@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import type { AgentRunFileChanges } from '@blip/protocol';
 
+import { normalizeMcpChatAccessScope } from './mcp-chat-access';
+
 import type { ChatImageAttachment } from './chat-attachments';
 import { ChatStateMaintenanceScheduler } from './chat-state-maintenance';
 import type { AgentPermissionMode, ChatAgentConfig } from './chat-types';
@@ -184,6 +186,10 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       ...(opts.sourceChatEntry && typeof opts.sourceChatEntry?.nativeProvider === 'string'
         ? { nativeProvider: String(opts.sourceChatEntry.nativeProvider).trim() }
         : {}),
+      droneHubMcpAccessScope: normalizeMcpChatAccessScope(
+        opts.sourceChatEntry?.droneHubMcpAccessScope,
+        opts.droneEntry?.id,
+      ),
     };
     return entry;
   }
@@ -286,7 +292,17 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
     if (!(globalThis as any).Bun) {
       await importDroneChatsFromRegistry({ droneId, chats: d.chats });
-      if (readChatFromStore({ droneId, chatName: opts.chatName }).chat) return;
+      const stored = readChatFromStore({ droneId, chatName: opts.chatName }).chat;
+      if (stored) {
+        if (typeof stored.id !== 'string' || !stored.id.trim()) {
+          await updateChatInStore({
+            droneId,
+            chatName: opts.chatName,
+            update: (current: any) => ({ ...current, id: crypto.randomUUID() }),
+          });
+        }
+        return;
+      }
       await upsertChatInStore({
         droneId,
         chatName: opts.chatName,
@@ -302,7 +318,14 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       const drone = droneId ? registry?.drones?.[droneId] : null;
       if (!drone) throw new Error(`unknown drone: ${opts.droneId}`);
       drone.chats = drone.chats ?? {};
-      if (!drone.chats[opts.chatName]) {
+      if (drone.chats[opts.chatName]) {
+        if (
+          typeof drone.chats[opts.chatName].id !== 'string' ||
+          !drone.chats[opts.chatName].id.trim()
+        ) {
+          drone.chats[opts.chatName].id = crypto.randomUUID();
+        }
+      } else {
         // Child drones default to Codex; other drones keep Cursor.
         // NOTE: chatId is intentionally omitted (it is created lazily on first prompt).
         drone.chats[opts.chatName] = buildNewChatEntry({
@@ -1232,6 +1255,8 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     dockerSnapshotAfterAgentMessageEnabled?: boolean;
     setBlipClonesEnabled?: boolean;
     blipClonesEnabled?: boolean;
+    setDroneHubMcpAccessScope?: boolean;
+    droneHubMcpAccessScope?: unknown;
   }) {
     const registry: any = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);
@@ -1326,6 +1351,13 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         }
         if (opts.setBlipClonesEnabled) {
           cur.blipClonesEnabled = opts.blipClonesEnabled !== false;
+        }
+        if (opts.setDroneHubMcpAccessScope) {
+          if (typeof cur.id !== 'string' || !cur.id.trim()) cur.id = crypto.randomUUID();
+          cur.droneHubMcpAccessScope = normalizeMcpChatAccessScope(
+            opts.droneHubMcpAccessScope,
+            droneId,
+          );
         }
         return cur;
       },

@@ -364,7 +364,11 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
   }, [loadDrones, routeAvailable, selectChat, selectedChat, selectedDrone, targetDeviceId]);
 
   const sendPrompt = React.useCallback(
-    async (prompt: string, attachments: readonly ChatAttachmentPayload[] = []) => {
+    async (
+      prompt: string,
+      attachments: readonly ChatAttachmentPayload[] = [],
+      deliveryMode: 'queue' | 'asap' = 'queue',
+    ) => {
       if (
         !selectedDrone ||
         !selectedChat ||
@@ -402,6 +406,7 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
           chatName,
           prompt,
           attachments,
+          deliveryMode,
           request: (payload) => remoteControl(target, 'chat.prompt', payload),
         });
         if (targetRef.current === target) {

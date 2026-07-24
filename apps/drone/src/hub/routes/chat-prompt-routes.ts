@@ -167,6 +167,8 @@ export function createChatPromptRouteHandler(
         if (!prompt && attachments.length > 0) {
           prompt = attachmentOnlyPromptLabel(attachments);
         }
+        const deliveryMode =
+          body?.deliveryMode === 'asap' ? 'asap' : body?.deliveryMode === 'queue' ? 'queue' : undefined;
 
         try {
           const resolved = await resolveDroneOrPendingForReadRef(droneRef);
@@ -231,6 +233,7 @@ export function createChatPromptRouteHandler(
                   at: submittedAt,
                   prompt,
                   ...(typeof body?.cwd === 'string' ? { cwd: body.cwd } : {}),
+                  ...(deliveryMode ? { deliveryMode } : {}),
                   state: 'queued',
                   updatedAt: submittedAt,
                 },
@@ -250,6 +253,7 @@ export function createChatPromptRouteHandler(
                   attachments,
                   cwd: typeof body?.cwd === 'string' ? body.cwd : null,
                   submittedAt,
+                  deliveryMode,
                   mark: (name: string) => timer.mark(name),
                 });
               }
@@ -273,6 +277,7 @@ export function createChatPromptRouteHandler(
                     at: submittedAt,
                     prompt,
                     ...(typeof body?.cwd === 'string' ? { cwd: body.cwd } : {}),
+                    ...(deliveryMode ? { deliveryMode } : {}),
                     state: 'queued',
                     updatedAt: submittedAt,
                   },
@@ -292,6 +297,7 @@ export function createChatPromptRouteHandler(
                 attachments,
                 cwd: typeof body?.cwd === 'string' ? body.cwd : null,
                 submittedAt,
+                deliveryMode,
                 mark: (name: string) => timer.mark(name),
               });
             }

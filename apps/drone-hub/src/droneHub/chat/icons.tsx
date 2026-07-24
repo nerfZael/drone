@@ -18,18 +18,6 @@ export function IconBot({ className }: { className?: string }) {
   );
 }
 
-export function IconJobs({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M2.5 2A1.5 1.5 0 014 0.5h8A1.5 1.5 0 0113.5 2v12A1.5 1.5 0 0112 15.5H4A1.5 1.5 0 012.5 14V2zm1.5-.5a.5.5 0 00-.5.5v12a.5.5 0 00.5.5h8a.5.5 0 00.5-.5V2a.5.5 0 00-.5-.5H4z" />
-      <path d="M6.35 5.1a.6.6 0 01.85.85L5.6 7.55a.6.6 0 01-.85 0l-.8-.8a.6.6 0 11.85-.85l.375.375L6.35 5.1z" />
-      <path d="M7.75 6.5a.5.5 0 01.5-.5h3.25a.5.5 0 010 1H8.25a.5.5 0 01-.5-.5z" />
-      <path d="M6.35 8.6a.6.6 0 01.85.85L5.6 11.05a.6.6 0 01-.85 0l-.8-.8a.6.6 0 11.85-.85l.375.375L6.35 8.6z" />
-      <path d="M7.75 10a.5.5 0 01.5-.5h3.25a.5.5 0 010 1H8.25a.5.5 0 01-.5-.5z" />
-    </svg>
-  );
-}
-
 export function IconImage({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

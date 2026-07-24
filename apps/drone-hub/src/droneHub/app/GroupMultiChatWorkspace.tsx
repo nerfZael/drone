@@ -1,6 +1,6 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ChatInput, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode, EmptyState } from '../chat';
+import { ChatInput, type ChatSendContext, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode, EmptyState } from '../chat';
 import { GroupMultiChatColumn } from './GroupMultiChatColumn';
 import {
   GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
@@ -23,13 +23,15 @@ type GroupMultiChatWorkspaceProps = {
   selectedGroupMultiChatData: GroupMultiChatData;
   groupBroadcastPromptError: string | null;
   groupBroadcastSending: boolean;
-  onSendGroupBroadcastPrompt: (payload: ChatSendPayload) => Promise<boolean>;
+  onSendGroupBroadcastPrompt: (
+    payload: ChatSendPayload,
+    context: ChatSendContext,
+  ) => Promise<boolean>;
   onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
   uiDroneName: (nameRaw: string) => string;
   onSelectDroneCard: (droneId: string) => void;
   onDeleteDrone: (droneId: string) => void;
   deletingDrones: Record<string, boolean>;
-  onParseJobsFromAgentMessage: (opts: { turn: number; message: string }) => void;
   onSpawnDroneHubTaskFromAgentMessage: (opts: {
     sourceDroneId: string;
     sourceChatName: string;
@@ -48,7 +50,6 @@ export function GroupMultiChatWorkspace({
   onSelectDroneCard,
   onDeleteDrone,
   deletingDrones,
-  onParseJobsFromAgentMessage,
   onSpawnDroneHubTaskFromAgentMessage,
 }: GroupMultiChatWorkspaceProps) {
   const {
@@ -258,7 +259,6 @@ export function GroupMultiChatWorkspace({
                   onOpenDrone={() => onSelectDroneCard(d.id)}
                   onDeleteDrone={() => onDeleteDrone(d.id)}
                   deleteBusy={Boolean(deletingDrones[d.id])}
-                  onCreateJobs={onParseJobsFromAgentMessage}
                   onSpawnDroneHubTask={onSpawnDroneHubTaskFromAgentMessage}
                   onAutoRenameChatFromFirstPrompt={onAutoRenameChatFromFirstPrompt}
                   columnWidthPx={groupMultiChatColumnWidth}

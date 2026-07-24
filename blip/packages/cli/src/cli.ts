@@ -14,7 +14,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { ReadStream as TtyReadStream, WriteStream as TtyWriteStream } from 'node:tty';
-import type { BlipRuntimeEvent } from '@blip/core';
+import type { BlipRuntimeEvent, BlipToolProvider } from '@blip/core';
 import {
   defaultToolProfile,
   compactSession,
@@ -23,7 +23,10 @@ import {
   SessionStore,
 } from '@blip/core/node';
 import type { PermissionMode, ToolProfile } from '@blip/tools';
+import { createMcpToolProvider } from '@blip/mcp';
 import { getModels } from '@mariozechner/pi-ai';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   getOAuthApiKey,
   refreshOpenAICodexToken,
@@ -691,7 +694,38 @@ type RunContext = {
   processExitDiagnosticsDelayMs: number;
   getApiKey: (provider: string) => Promise<string | undefined>;
   emit: (event: BlipRuntimeEvent) => void;
+  toolProviders: BlipToolProvider[];
 };
+
+async function connectManagedMcp(): Promise<{
+  toolProviders: BlipToolProvider[];
+  close: () => Promise<void>;
+}> {
+  const url = String(process.env.DRONE_HUB_MCP_URL ?? '').trim();
+  const token = String(process.env.DRONE_HUB_MCP_TOKEN ?? '').trim();
+  if (!url && !token) return { toolProviders: [], close: async () => undefined };
+  if (!url || !token) throw new Error('incomplete Drone Hub managed chat MCP configuration');
+  const client = new Client({ name: 'Blip managed chat', version: CLI_VERSION });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { Authorization: `Bearer ${token}` } },
+    }),
+  );
+  return {
+    toolProviders: [
+      createMcpToolProvider({
+        id: 'drone-hub',
+        namePrefix: 'drone_hub',
+        client,
+        promptGuidance:
+          'Use drone_hub__ tools for Drone Hub drones, chats, groups, repositories, and whiteboards.',
+      }),
+    ],
+    close: async () => {
+      await client.close();
+    },
+  };
+}
 
 type InteractiveReadline = {
   rl: ReturnType<typeof createInterface>;
@@ -1014,6 +1048,7 @@ async function runPrompt(
           workspaceRoot: context.workspaceRoot,
           toolProfile: context.toolProfile,
         }),
+      toolProviders: context.toolProviders,
     },
     context.emit,
   );
@@ -1271,6 +1306,7 @@ async function main(): Promise<void> {
     throw new Error('--continue, --resume, --session, and --fork are mutually exclusive');
   }
 
+  const managedMcp = await connectManagedMcp();
   const context: RunContext = {
     workspaceRoot,
     provider,
@@ -1281,17 +1317,28 @@ async function main(): Promise<void> {
     processExitDiagnosticsDelayMs: 0,
     getApiKey,
     emit: emitAndTrack,
+    toolProviders: managedMcp.toolProviders,
   };
 
   if (!prompt) {
     if (!options.jsonl && !readFromStdin) {
-      await runInteractive(context, options);
+      try {
+        await runInteractive(context, options);
+      } finally {
+        await managedMcp.close();
+      }
       return;
     }
+    await managedMcp.close();
     throw new Error('missing prompt');
   }
 
-  const sessionId = await runPrompt(prompt, context, options);
+  let sessionId: string;
+  try {
+    sessionId = await runPrompt(prompt, context, options);
+  } finally {
+    await managedMcp.close();
+  }
   await emitFinalProcessDiagnostics(workspaceRoot, sessionId, emit);
   humanRenderer.close?.();
   if (finishedStatus === 'error') {

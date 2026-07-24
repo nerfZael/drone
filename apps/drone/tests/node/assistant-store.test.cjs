@@ -223,6 +223,22 @@ describe('assistant SQLite store', () => {
     assert.equal(claimedImageOnly.promptImages[0].data, 'aW1hZ2U=');
     await service.completeQueuedPrompt(created.chatId, claimedImageOnly.id);
 
+    const queuedFollowUp = await service.enqueueThreadPrompt(created.chatId, {
+      prompt: 'ordinary follow-up',
+      deliveryMode: 'queue',
+    });
+    const asapFollowUp = await service.enqueueThreadPrompt(created.chatId, {
+      prompt: 'urgent follow-up',
+      deliveryMode: 'asap',
+    });
+    const claimedAsap = await service.claimNextQueuedPrompt(created.chatId);
+    assert.equal(claimedAsap.id, asapFollowUp.id);
+    assert.equal(claimedAsap.deliveryMode, 'asap');
+    await service.completeQueuedPrompt(created.chatId, claimedAsap.id);
+    const claimedQueued = await service.claimNextQueuedPrompt(created.chatId);
+    assert.equal(claimedQueued.id, queuedFollowUp.id);
+    await service.completeQueuedPrompt(created.chatId, claimedQueued.id);
+
     for (let index = 0; index < 32; index += 1) {
       await service.enqueueThreadPrompt(created.chatId, { prompt: `queued ${index}` });
     }

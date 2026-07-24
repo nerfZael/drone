@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ChatInput,
   ChatLoadingState,
+  type ChatSendContext,
   type ChatSendPayload,
   type DroneHubTask,
   type DroneHubTaskSpawnMode,
@@ -57,7 +58,6 @@ export type GroupMultiChatColumnProps = {
   onOpenDrone: () => void;
   onDeleteDrone: () => void;
   deleteBusy?: boolean;
-  onCreateJobs: (opts: { turn: number; message: string }) => void;
   onSpawnDroneHubTask: (opts: {
     sourceDroneId: string;
     sourceChatName: string;
@@ -76,7 +76,6 @@ export function GroupMultiChatColumn({
   onOpenDrone,
   onDeleteDrone,
   deleteBusy = false,
-  onCreateJobs,
   onSpawnDroneHubTask,
   onAutoRenameChatFromFirstPrompt,
   columnWidthPx,
@@ -381,7 +380,7 @@ export function GroupMultiChatColumn({
   }, [chatName, columnWidthPx, loading, scrollColumnToBottom, transcripts?.length, visiblePendingPrompts.length]);
 
   const sendPrompt = React.useCallback(
-    async (payload: ChatSendPayload): Promise<boolean> => {
+    async (payload: ChatSendPayload, context: ChatSendContext): Promise<boolean> => {
       const prompt = String(payload?.prompt ?? '').trim();
       const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
       if (!prompt && attachments.length === 0) return false;
@@ -410,6 +409,7 @@ export function GroupMultiChatColumn({
           chatName,
           prompt,
           attachments,
+          deliveryMode: context.deliveryMode,
           autoRenameHandledByClient: Boolean(prompt),
         });
         if (data.autoRenameChat && prompt) {
@@ -829,8 +829,6 @@ export function GroupMultiChatColumn({
                     index === items.length - 1 && visiblePendingPrompts.length === 0
                   }
                   initiallyExpandFileChanges={index === latestTranscriptFileChangesIndex}
-                  parsingJobs={false}
-                  onCreateJobs={onCreateJobs}
                   onSpawnDroneHubTask={spawnDroneHubTaskForColumn}
                   messageId={messageId}
                   droneId={drone.id}

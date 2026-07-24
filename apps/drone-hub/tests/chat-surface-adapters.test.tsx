@@ -16,6 +16,7 @@ import {
 } from '../src/droneHub/chat';
 import {
   AssistantMessageRow,
+  AssistantQueuedPromptRow,
   AssistantWorkingRow,
   AssistantRunActivity,
   ToolRunActivity,
@@ -38,6 +39,8 @@ function renderComposer(adapter: AgentChatSurfaceAdapter) {
         promptError={null}
         sending={false}
         waiting
+        draftValue="Follow up"
+        onDraftValueChange={() => {}}
         onStop={() => {}}
         onSend={async () => true}
       />
@@ -105,22 +108,22 @@ describe('agent chat surface adapters', () => {
 
     expect(adapter.capabilities).toEqual({
       attachments: 'images',
-      sendWhileWaiting: false,
+      sendWhileWaiting: true,
       toolActivity: 'hidden',
     });
     expect(html).toContain('data-agent-type="external"');
     expect(html).toContain('data-tool-activity="hidden"');
     expect(html).toContain('accept="image/*"');
-    expect(html).toContain('data-chat-composer-expanded="false"');
+    expect(html).toContain('data-chat-composer-expanded="true"');
     expect(html).toContain('aria-label="Record voice message"');
     const microphoneButton = html.match(/<button[^>]*aria-label="Record voice message"[^>]*>/)?.[0];
     expect(microphoneButton).toBeDefined();
     expect(microphoneButton).not.toContain('disabled=""');
-    expect(html).toContain('aria-label="Stop response"');
-    expect(html).not.toContain('aria-label="Send"');
+    expect(html).toContain('>Stop</button>');
+    expect(html).toContain('aria-label="Send"');
   });
 
-  test('native agents use files, queue while running, and expose tool activity', () => {
+  test('native agents use files, send while running, and expose tool activity', () => {
     const adapter = adaptNativeAgentChatSurface();
     const html = renderComposer(adapter);
 
@@ -132,10 +135,10 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('data-agent-type="native"');
     expect(html).toContain('data-tool-activity="visible"');
     expect(html).not.toContain('accept="image/*"');
-    expect(html).toContain('data-chat-composer-expanded="false"');
+    expect(html).toContain('data-chat-composer-expanded="true"');
     expect(html).toContain('aria-label="Record voice message"');
-    expect(html).toContain('aria-label="Stop response"');
-    expect(html).not.toContain('aria-label="Send"');
+    expect(html).toContain('>Stop</button>');
+    expect(html).toContain('aria-label="Send"');
   });
 
   test('capabilities can be extended without adding agent checks to the surface', () => {
@@ -385,14 +388,13 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('aria-label="Send"');
   });
 
-  test('native delivery precedes one cross-provider model picker', () => {
+  test('native controls use shortcuts instead of a delivery picker', () => {
     const updates: Array<Record<string, unknown>> = [];
     const config = buildNativeAgentComposerControls({
       thread: {
         provider: 'codex',
         model: 'gpt-5',
         thinkingLevel: 'medium',
-        promptDeliveryMode: 'queue',
       } as any,
       models: [
         { provider: 'codex', id: 'gpt-5', name: 'GPT-5', reasoning: true, thinkingLevel: 'medium' },
@@ -405,16 +407,11 @@ describe('agent chat surface adapters', () => {
     });
 
     expect(config.controls.map((control) => control.id)).toEqual([
-      'native-delivery',
       'native-model',
       'native-default-model',
     ]);
     const modelControl = config.controls.find((control) => control.id === 'native-model');
-    const deliveryControl = config.controls.find((control) => control.id === 'native-delivery');
-    expect(deliveryControl?.kind).toBe('choice-picker');
-    if (deliveryControl?.kind !== 'choice-picker') throw new Error('Expected delivery picker');
-    deliveryControl.onValueChange('asap');
-    expect(updates.at(-1)).toEqual({ promptDeliveryMode: 'asap' });
+    expect(config.controls.some((control) => control.id === 'native-delivery')).toBe(false);
     expect(modelControl?.kind).toBe('model-picker');
     if (modelControl?.kind !== 'model-picker') throw new Error('Expected native model picker');
     expect(modelControl.options.map((option) => `${option.provider}:${option.id}`)).toContain('openai:o3');
@@ -428,6 +425,28 @@ describe('agent chat surface adapters', () => {
       'reasoning',
     );
     expect(updates.at(-1)).toEqual({ thinkingLevel: 'medium' });
+  });
+
+  test('native queued prompts identify ASAP priority', () => {
+    const html = renderToStaticMarkup(
+      <AssistantQueuedPromptRow
+        prompt={{
+          id: 'asap-prompt',
+          prompt: 'Urgent follow-up',
+          promptImages: [],
+          imageCount: 0,
+          createdAt: '2026-07-23T00:00:00.000Z',
+          deliveryMode: 'asap',
+          status: 'queued',
+          error: null,
+        }}
+        cancelling={false}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(html).toContain('ASAP');
+    expect(html).not.toContain('>Queued<');
   });
 
   test('the shared message body renders the same markdown and images for either controller', () => {
@@ -517,7 +536,6 @@ describe('agent chat surface adapters', () => {
         }}
         messageExtras={{
           messageId: 'native-message',
-          onCreateJobs: () => {},
           onSpawnTask: async () => ({ ok: true }),
           linkedPullRequestContext: {
             droneId: 'drone-a',

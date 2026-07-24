@@ -1,6 +1,7 @@
 import React from 'react';
 import { highlightDesktopCodeFence } from './desktop-syntax-highlighting';
 import { ChatMessageCopyAction } from './ChatMessageCopyAction';
+import { MermaidDiagram } from './MermaidDiagram';
 
 export function DesktopHighlightedCodeBlock({
   code,
@@ -9,10 +10,16 @@ export function DesktopHighlightedCodeBlock({
   code: string;
   language: string;
 }) {
+  const isMermaid = language.trim().toLowerCase() === 'mermaid';
   const result = React.useMemo(
-    () => highlightDesktopCodeFence(code, language),
-    [code, language],
+    () => (isMermaid ? null : highlightDesktopCodeFence(code, language)),
+    [code, isMermaid, language],
   );
+  if (isMermaid) {
+    return <MermaidDiagram source={code} />;
+  }
+
+  const highlighted = result!;
   const languageLabel = language.trim() || 'plain text';
   return (
     <section
@@ -23,8 +30,8 @@ export function DesktopHighlightedCodeBlock({
       <ChatMessageCopyAction text={code} position="code" copyLabel="code" />
       <div className="dh-code-card__scroll" tabIndex={0}>
         <pre>
-          <code className={result.language ? `language-${result.language}` : undefined}>
-            {result.tokens.map((token, index) => (
+          <code className={highlighted.language ? `language-${highlighted.language}` : undefined}>
+            {highlighted.tokens.map((token, index) => (
               <span
                 key={`${index}:${token.text.length}`}
                 className={token.types.length > 0 ? `token ${token.types.join(' ')}` : undefined}

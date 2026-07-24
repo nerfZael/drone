@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   hasActivePriorPendingPrompt,
+  hasInFlightPriorPendingPrompt,
   looksLikeTransientPromptEnqueueError,
   shouldDeferQueuedPendingPrompt,
   shouldDeferQueuedTranscriptPrompt,
@@ -152,6 +153,36 @@ describe('hasActivePriorPendingPrompt', () => {
     expect(
       hasActivePriorPendingPrompt({
         priorPendingPrompts: [{ id: 'done', state: 'sent' }],
+        transcriptDoneIds: new Set(['done']),
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('hasInFlightPriorPendingPrompt', () => {
+  test('waits for running work but lets ASAP jump queued follow-ups', () => {
+    expect(
+      hasInFlightPriorPendingPrompt({
+        priorPendingPrompts: [
+          { id: 'queued', state: 'queued' },
+          { id: 'running', state: 'sent' },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      hasInFlightPriorPendingPrompt({
+        priorPendingPrompts: [{ id: 'queued', state: 'queued' }],
+      }),
+    ).toBe(false);
+  });
+
+  test('ignores completed and failed work', () => {
+    expect(
+      hasInFlightPriorPendingPrompt({
+        priorPendingPrompts: [
+          { id: 'done', state: 'sent' },
+          { id: 'failed', state: 'failed' },
+        ],
         transcriptDoneIds: new Set(['done']),
       }),
     ).toBe(false);

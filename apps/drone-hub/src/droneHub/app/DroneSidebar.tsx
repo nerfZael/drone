@@ -116,6 +116,10 @@ import {
   resolveSidebarFolderDroneSelection,
   type SidebarFolderSelectionOptions,
 } from './sidebar-folder-selection';
+import {
+  PinnedDroneReorderItem,
+  usePinnedDroneReorder,
+} from './pinned-drone-reorder';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 308;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -1566,6 +1570,7 @@ export function DroneSidebar({
     setSidebarDroneOrderByGroup,
     setSidebarNodeOrderByParent,
     setSidebarChatOrderByDrone,
+    setPinnedDroneIds,
     setHiddenSidebarGroups,
     setShowHiddenSidebarGroups,
     setSelectedDrone,
@@ -2178,6 +2183,21 @@ export function DroneSidebar({
       sidebarDrones,
     ],
   );
+  const activeRepositoryPinnedDroneIds = React.useMemo(
+    () => activeRepositoryPinnedDrones.map((drone) => drone.id),
+    [activeRepositoryPinnedDrones],
+  );
+  const pinnedDroneReorderEnabled =
+    sidebarDndEnabled &&
+    activeRepositoryPinnedDroneIds.length > 1 &&
+    pinningDroneIds.size === 0 &&
+    !movingDroneGroups;
+  const pinnedDroneDropTarget = usePinnedDroneReorder({
+    enabled: pinnedDroneReorderEnabled,
+    visibleDroneIds: activeRepositoryPinnedDroneIds,
+    setPinnedDroneIds,
+    onPrepareDroneDragStart,
+  });
   const openRepositoryOverview = React.useCallback(() => {
     setRepositoryOverviewOpen(true);
     setActiveSidebarRepoId(null);
@@ -2802,55 +2822,69 @@ export function DroneSidebar({
                       Boolean(renamingDrones[droneId]) ||
                       Boolean(settingBaseImages[droneId]);
                     const droneProvisioning = isDroneStartingOrSeeding(drone.hubPhase);
+                    const pinnedDragDisabled =
+                      !pinnedDroneReorderEnabled || isOptimistic;
                     return (
-                      <DroneCard
+                      <PinnedDroneReorderItem
                         key={`pinned:${droneId}`}
-                        drone={drone}
-                        density={sidebarDensityMode}
-                        displayName={uiDroneName(drone.name)}
-                        selected={selectedDroneSet.has(droneId)}
-                        highlighted={highlightedDroneIds.has(droneId)}
-                        active={selectedDrone === droneId && hasOnlyDefaultChat && activeChatName === 'default'}
-                        activeIndicatorStyle="edge"
-                        busy={hasOnlyDefaultChat && busyChatNodeIdSet.has(defaultChatNodeId)}
-                        approvalRequired={
-                          hasOnlyDefaultChat &&
-                          (droneChatRequiresApproval(drone, 'default') ||
-                            Boolean(approvalRequiredByChatNodeId[defaultChatNodeId]))
-                        }
-                        operationLabel={
-                          deletingDrones[droneId]
-                            ? ((deleteOperationModeById[droneId] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
-                            : undefined
-                        }
-                        unreadAgentMessage={hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true}
-                        pinned
-                        pinBusy={pinningDroneIds.has(droneId)}
-                        onTogglePinned={sidebarCapabilities.actions ? () => void setPinned(droneId, false) : undefined}
-                        onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}
-                        onClone={sidebarCapabilities.actions ? () => onOpenCloneModal(drone) : undefined}
-                        onAddToGroup={sidebarCapabilities.actions ? () => openAddDroneToGroup(drone) : undefined}
-                        onRename={sidebarCapabilities.actions ? () => onRenameDrone(droneId) : undefined}
-                        onSetBaseImage={sidebarCapabilities.actions ? () => onSetDroneBaseImage(droneId) : undefined}
-                        onDelete={sidebarCapabilities.actions ? () => onDeleteDrone(droneId) : undefined}
-                        onErrorClick={onOpenDroneErrorModal}
-                        cloneDisabled={
-                          isOptimistic ||
-                          droneMutationBusy ||
-                          String(drone.runtime ?? 'container').trim().toLowerCase() === 'host'
-                        }
-                        createChatDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
-                        addToGroupDisabled={isOptimistic || movingDroneGroups || droneMutationBusy || droneProvisioning}
-                        renameDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
-                        renameBusy={Boolean(renamingDrones[droneId])}
-                        setBaseImageDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
-                        setBaseImageBusy={Boolean(settingBaseImages[droneId])}
-                        deleteDisabled={isOptimistic || droneMutationBusy}
-                        deleteBusy={Boolean(deletingDrones[droneId])}
-                        onClick={(rowOpts) => onSelectDroneCard(droneId, { ...rowOpts, orderedDroneIds: activeRepositoryPinnedDrones.map((item) => item.id) })}
-                        draggable={false}
-                        dragging={false}
-                      />
+                        droneId={droneId}
+                        label={uiDroneName(drone.name)}
+                        disabled={pinnedDragDisabled}
+                        dropTarget={pinnedDroneDropTarget}
+                      >
+                        {(dragProps) => (
+                          <DroneCard
+                            drone={drone}
+                            density={sidebarDensityMode}
+                            displayName={uiDroneName(drone.name)}
+                            selected={selectedDroneSet.has(droneId)}
+                            highlighted={highlightedDroneIds.has(droneId)}
+                            active={selectedDrone === droneId && hasOnlyDefaultChat && activeChatName === 'default'}
+                            activeIndicatorStyle="edge"
+                            busy={hasOnlyDefaultChat && busyChatNodeIdSet.has(defaultChatNodeId)}
+                            approvalRequired={
+                              hasOnlyDefaultChat &&
+                              (droneChatRequiresApproval(drone, 'default') ||
+                                Boolean(approvalRequiredByChatNodeId[defaultChatNodeId]))
+                            }
+                            operationLabel={
+                              deletingDrones[droneId]
+                                ? ((deleteOperationModeById[droneId] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
+                                : undefined
+                            }
+                            unreadAgentMessage={hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true}
+                            pinned
+                            pinBusy={pinningDroneIds.has(droneId)}
+                            onTogglePinned={sidebarCapabilities.actions ? () => void setPinned(droneId, false) : undefined}
+                            onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}
+                            onClone={sidebarCapabilities.actions ? () => onOpenCloneModal(drone) : undefined}
+                            onAddToGroup={sidebarCapabilities.actions ? () => openAddDroneToGroup(drone) : undefined}
+                            onRename={sidebarCapabilities.actions ? () => onRenameDrone(droneId) : undefined}
+                            onSetBaseImage={sidebarCapabilities.actions ? () => onSetDroneBaseImage(droneId) : undefined}
+                            onDelete={sidebarCapabilities.actions ? () => onDeleteDrone(droneId) : undefined}
+                            onErrorClick={onOpenDroneErrorModal}
+                            cloneDisabled={
+                              isOptimistic ||
+                              droneMutationBusy ||
+                              String(drone.runtime ?? 'container').trim().toLowerCase() === 'host'
+                            }
+                            createChatDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
+                            addToGroupDisabled={isOptimistic || movingDroneGroups || droneMutationBusy || droneProvisioning}
+                            renameDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
+                            renameBusy={Boolean(renamingDrones[droneId])}
+                            setBaseImageDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
+                            setBaseImageBusy={Boolean(settingBaseImages[droneId])}
+                            deleteDisabled={isOptimistic || droneMutationBusy}
+                            deleteBusy={Boolean(deletingDrones[droneId])}
+                            onClick={(rowOpts) => onSelectDroneCard(droneId, { ...rowOpts, orderedDroneIds: activeRepositoryPinnedDroneIds })}
+                            dragNodeRef={dragProps.dragNodeRef}
+                            dragAttributes={dragProps.dragAttributes}
+                            dragListeners={dragProps.dragListeners}
+                            draggable={dragProps.draggable}
+                            dragging={dragProps.dragging}
+                          />
+                        )}
+                      </PinnedDroneReorderItem>
                     );
                   })}
                 </div>

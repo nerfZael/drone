@@ -66,12 +66,12 @@ type ChatPromptRuntimeDependencyName =
   | 'failStaleDockerSnapshotsForChat'
   | 'formatTranscriptJobFailure'
   | 'getChatEntry'
-  | 'hasActivePriorPendingPrompt'
   | 'hasKnownBuiltinTranscriptSession'
   | 'hubChatSessionName'
   | 'hubLog'
   | 'importChatFromRegistry'
   | 'inferChatAgent'
+  | 'hasInFlightPriorPendingPrompt'
   | 'isDraftChatEntry'
   | 'isNotFoundErrorMessage'
   | 'loadRegistry'
@@ -116,6 +116,7 @@ type ChatPromptRuntimeDependencyName =
   | 'resolveEffectiveLlmProvider'
   | 'resolveEffectiveProviderApiKeySettings'
   | 'resolveHostPort'
+  | 'resolveManagedChatMcpEnv'
   | 'resolvePendingDroneDisplayName'
   | 'resolveTranscriptPromptAt'
   | 'runNodeCli'
@@ -123,7 +124,6 @@ type ChatPromptRuntimeDependencyName =
   | 'setChatAgentConfig'
   | 'setDroneHubMetaByIdentity'
   | 'shouldDeferQueuedPendingPrompt'
-  | 'shouldDeferQueuedTranscriptPrompt'
   | 'shouldRetryFailedPendingPrompt'
   | 'sleepMs'
   | 'stalePendingPromptState'
@@ -193,12 +193,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     failStaleDockerSnapshotsForChat,
     formatTranscriptJobFailure,
     getChatEntry,
-    hasActivePriorPendingPrompt,
     hasKnownBuiltinTranscriptSession,
     hubChatSessionName,
     hubLog,
     importChatFromRegistry,
     inferChatAgent,
+    hasInFlightPriorPendingPrompt,
     isDraftChatEntry,
     isNotFoundErrorMessage,
     loadRegistry,
@@ -246,6 +246,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     resolveEffectiveLlmProvider,
     resolveEffectiveProviderApiKeySettings,
     resolveHostPort,
+    resolveManagedChatMcpEnv,
     resolvePendingDroneDisplayName,
     resolveTranscriptPromptAt,
     runNodeCli,
@@ -253,7 +254,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     setChatAgentConfig,
     setDroneHubMetaByIdentity,
     shouldDeferQueuedPendingPrompt,
-    shouldDeferQueuedTranscriptPrompt,
     shouldRetryFailedPendingPrompt,
     sleepMs,
     stalePendingPromptState,
@@ -278,6 +278,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     kind: string;
     script: string;
     prompt?: string;
+    deliveryMode?: 'queue' | 'asap';
   }) {
     const d = opts.drone;
     const containerName = String(d?.containerName ?? d?.name ?? '').trim();
@@ -309,6 +310,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         cmd: 'bash',
         args: ['-lc', opts.script],
         ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
+        ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
       });
       ensureDaemonPromptEventSubscription(droneId);
     } catch (e: any) {
@@ -322,6 +324,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           cmd: 'bash',
           args: ['-lc', opts.script],
           ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
+          ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
         });
         ensureDaemonPromptEventSubscription(droneId);
         return;
@@ -340,6 +343,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     cwd?: string | null;
     waitForDaemonMs?: number;
     skipManagedRepoSync?: boolean;
+    deliveryMode?: 'queue' | 'asap';
     mark?: (name: string) => void;
   }) {
     const droneId = normalizeDroneIdentity(opts.droneId);
@@ -397,6 +401,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       if (agentPermissionMode === 'read-only') assertReadOnlySupportedForAgent(agent);
       const managedEnv = resolveDroneEnvironmentConfig(regLatest, d).resolvedVars;
       const managedEnvLines = buildEnvExportLines(managedEnv);
+      const managedChatMcpEnv = await resolveManagedChatMcpEnv({
+        runtime,
+        droneId,
+        chatName: normalizedChat,
+        chat,
+      });
+      const managedChatMcpEnvLines = buildEnvExportLines(managedChatMcpEnv);
 
       const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
       const cdCommand =
@@ -430,6 +441,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           thinkingLevel: String((chat as any)?.reasoning ?? '').trim(),
           prompt: String(opts.prompt ?? '').trim(),
           attachments,
+          deliveryMode: opts.deliveryMode,
         });
         return {
           ok: true as const,
@@ -479,6 +491,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print --output-format stream-json ${bashQuote(promptWithHistory)}`,
@@ -490,6 +503,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           kind: 'cursor',
           script,
           prompt: effectivePrompt,
+          deliveryMode: opts.deliveryMode,
         });
         return {
           ok: true as const,
@@ -512,6 +526,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             'set -euo pipefail',
             ...buildContainerManagedEnvLines(d),
             ...managedEnvLines,
+            ...managedChatMcpEnvLines,
             `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
             cdCommand,
             `codex --ask-for-approval never${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never${codexImageArgs} ${bashQuote(promptWithHistory)}`,
@@ -523,6 +538,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             kind: 'codex',
             script,
             prompt: effectivePrompt,
+            deliveryMode: opts.deliveryMode,
           });
           return {
             ok: true as const,
@@ -538,6 +554,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `codex --ask-for-approval never${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never resume${codexImageArgs} ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
@@ -549,6 +566,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           kind: 'codex',
           script,
           prompt: effectivePrompt,
+          deliveryMode: opts.deliveryMode,
         });
         return {
           ok: true as const,
@@ -570,6 +588,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg} --session-id ${bashQuote(claudeSessionId)} ${bashQuote(promptWithHistory)}`,
@@ -581,6 +600,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           kind: 'claude',
           script,
           prompt: effectivePrompt,
+          deliveryMode: opts.deliveryMode,
         });
         return {
           ok: true as const,
@@ -604,6 +624,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `opencode run --format json --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(promptWithHistory)}`,
@@ -615,6 +636,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           kind: 'opencode',
           script,
           prompt: effectivePrompt,
+          deliveryMode: opts.deliveryMode,
         });
         return {
           ok: true as const,
@@ -634,6 +656,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `pi --mode json${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
@@ -645,6 +668,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           kind: 'pi',
           script,
           prompt: effectivePrompt,
+          deliveryMode: opts.deliveryMode,
         });
         return {
           ok: true as const,
@@ -671,6 +695,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
+          ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
           `${blipCommand} --jsonl ${permissionArgs}${modelArg}${reasoningArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
@@ -681,6 +706,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           waitForDaemonMs: opts.waitForDaemonMs,
           kind: 'blip',
           script,
+          deliveryMode: opts.deliveryMode,
         });
         return {
           ok: true as const,
@@ -702,7 +728,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         chatName: normalizedChat,
         command: tmuxCmd,
         cwd,
-        envVars: managedEnv,
+        envVars: { ...(managedEnv ?? {}), ...managedChatMcpEnv },
       });
       await dvmSessionType(containerName, sessionName, { text: effectivePrompt });
       await sleepMs(60);
@@ -1643,11 +1669,21 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       );
 
       const idx = pendingList.findIndex(
-        (p: any) => String(p?.state ?? '') === 'queued' && String(p?.id ?? '').trim(),
+        (p: any) =>
+          String(p?.state ?? '') === 'queued' &&
+          p?.deliveryMode === 'asap' &&
+          String(p?.id ?? '').trim(),
       );
-      if (idx === -1) return;
+      const queuedIndex =
+        idx >= 0
+          ? idx
+          : pendingList.findIndex(
+              (p: any) =>
+                String(p?.state ?? '') === 'queued' && String(p?.id ?? '').trim(),
+            );
+      if (queuedIndex === -1) return;
 
-      const p = pendingList[idx] ?? {};
+      const p = pendingList[queuedIndex] ?? {};
       const id = String(p?.id ?? '').trim();
       const prompt = String(p?.prompt ?? '');
       const cwd = typeof p?.cwd === 'string' ? String(p.cwd) : null;
@@ -1665,17 +1701,23 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
       const sessionKnown = hasKnownBuiltinTranscriptSession(entry, agent.id);
       const prior = pendingList
-        .slice(0, idx)
+        .slice(0, queuedIndex)
         .map((x: any) => ({ id: String(x?.id ?? '').trim(), state: String(x?.state ?? '') }))
         .filter((x: any) => x.id);
       // Keep manual follow-ups cancellable until the earlier response reaches the transcript.
       // A known agent session makes continuation possible, but does not make concurrent delivery safe.
-      const defer = shouldDeferQueuedPendingPrompt({
-        agentId: agent.id,
-        sessionKnown,
-        priorPendingPrompts: prior,
-        transcriptDoneIds,
-      });
+      const defer =
+        p?.deliveryMode === 'asap'
+          ? hasInFlightPriorPendingPrompt({
+              priorPendingPrompts: prior,
+              transcriptDoneIds,
+            })
+          : shouldDeferQueuedPendingPrompt({
+              agentId: agent.id,
+              sessionKnown,
+              priorPendingPrompts: prior,
+              transcriptDoneIds,
+            });
       if (defer) return;
 
       if (nativeAssistantOwnsPromptDelivery(agent.kind)) {
@@ -1691,6 +1733,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             attachmentRefs: normalizeChatImageAttachmentRefs(p?.attachments),
             cwd,
             waitForDaemonMs: undefined,
+            deliveryMode: p?.deliveryMode === 'asap' ? 'asap' : 'queue',
           });
         } catch (e: any) {
           const errorText = e?.message ?? String(e);
@@ -1739,6 +1782,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             attachmentRefs: normalizeChatImageAttachmentRefs(p?.attachments),
             cwd,
             waitForDaemonMs: undefined,
+            deliveryMode: p?.deliveryMode === 'asap' ? 'asap' : 'queue',
           }),
           enqueueTimeoutMs,
           `queued prompt enqueue failed for ${droneId}/${chatName}`,
@@ -2059,6 +2103,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     submittedAt?: string | null;
     waitForDaemonMs?: number;
     deliveryMode?: 'background' | 'immediate';
+    priority?: 'queue' | 'asap';
     mark?: (name: string) => void;
   }): Promise<{ id: string; pendingState: PendingPromptState }> {
     const preferredIdRaw = typeof opts.id === 'string' ? opts.id.trim() : '';
@@ -2079,12 +2124,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const runtime = droneRuntime(d);
     const configuredModel = normalizeChatModel((chat as any)?.model);
     const disposition = getPromptEnqueueDisposition({
-      droneId,
-      chatName,
-      droneEntry: d,
       chatEntry: { ...chat, pendingPrompts: canonicalPendingPrompts },
     });
-    const { defer } = disposition;
+    const defer =
+      disposition.hasPriorInFlight ||
+      (opts.priority !== 'asap' && disposition.hasPriorQueued);
     opts.mark?.('disposition');
 
     const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
@@ -2108,6 +2152,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         ...(configuredModel ? { model: configuredModel } : {}),
         cwd: opts.cwd ?? null,
         ...(attachmentsForPending.length > 0 ? { attachments: attachmentsForPending } : {}),
+        ...(opts.priority ? { deliveryMode: opts.priority } : {}),
         state: defer || opts.deliveryMode === 'background' ? 'queued' : 'sending',
         updatedAt: at,
       },
@@ -2183,6 +2228,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           cwd: opts.cwd ?? null,
           waitForDaemonMs: opts.waitForDaemonMs,
           mark: opts.mark,
+          deliveryMode: opts.priority,
         }),
         enqueueTimeoutMs,
         `prompt enqueue failed for ${droneId}/${chatName}`,
@@ -2249,21 +2295,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   }
 
   type PromptEnqueueDisposition = {
-    defer: boolean;
-    hasPriorActive: boolean;
+    hasPriorInFlight: boolean;
     hasPriorQueued: boolean;
-    waitingForSession: boolean;
   };
 
   function getPromptEnqueueDisposition(opts: {
-    droneId: string;
-    chatName: string;
-    droneEntry: any;
     chatEntry: any;
   }): PromptEnqueueDisposition {
-    const droneId = normalizeDroneIdentity(opts.droneId);
-    const chatName = normalizeChatName(opts.chatName);
-    const agent = inferChatAgent(opts.chatEntry, opts.droneEntry);
     const turns: any[] = Array.isArray((opts.chatEntry as any)?.turns)
       ? (opts.chatEntry as any).turns
       : [];
@@ -2273,9 +2311,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const priorPending: any[] = Array.isArray((opts.chatEntry as any)?.pendingPrompts)
       ? (opts.chatEntry as any).pendingPrompts
       : [];
-    const sessionKnown =
-      agent.kind !== 'builtin' ? true : hasKnownBuiltinTranscriptSession(opts.chatEntry, agent.id);
-    const hasPriorActive = hasActivePriorPendingPrompt({
+    const hasPriorInFlight = hasInFlightPriorPendingPrompt({
       priorPendingPrompts: priorPending
         .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
         .filter((p: any) => p.id),
@@ -2284,22 +2320,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const hasPriorQueued = priorPending.some(
       (p: any) => String(p?.state ?? '') === 'queued',
     );
-    const waitingForSession =
-      agent.kind === 'builtin'
-        ? shouldDeferQueuedTranscriptPrompt({
-            agentId: agent.id,
-            sessionKnown,
-            priorPendingPrompts: priorPending
-              .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
-              .filter((p: any) => p.id),
-            transcriptDoneIds,
-          })
-        : false;
     return {
-      defer: hasPriorActive || hasPriorQueued || waitingForSession,
-      hasPriorActive,
+      hasPriorInFlight,
       hasPriorQueued,
-      waitingForSession,
     };
   }
 
@@ -2318,6 +2341,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     attachments?: ChatImageAttachment[];
     cwd?: string | null;
     submittedAt?: string | null;
+    deliveryMode?: 'queue' | 'asap';
     mark?: (name: string) => void;
   }): Promise<
     | {
@@ -2376,6 +2400,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           thinkingLevel: String(chatEntry?.reasoning ?? '').trim(),
           prompt,
           attachments,
+          deliveryMode: opts.deliveryMode,
         });
         return {
           kind: 'enqueued',
@@ -2391,7 +2416,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         attachments,
         cwd: opts.cwd ?? null,
         submittedAt: opts.submittedAt ?? null,
-        deliveryMode: 'background',
+        deliveryMode: opts.deliveryMode === 'asap' ? 'immediate' : 'background',
+        priority: opts.deliveryMode === 'asap' ? 'asap' : 'queue',
         mark: opts.mark,
       });
       return {
@@ -2417,6 +2443,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         at: submittedAt,
         prompt,
         ...(opts.cwd != null ? { cwd: opts.cwd } : {}),
+        ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
         state: 'queued',
         updatedAt: submittedAt,
       };
@@ -2434,7 +2461,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           attachments,
           cwd: opts.cwd ?? null,
           submittedAt: opts.submittedAt ?? null,
-          deliveryMode: 'background',
+          deliveryMode: opts.deliveryMode === 'asap' ? 'immediate' : 'background',
+          priority: opts.deliveryMode === 'asap' ? 'asap' : 'queue',
           mark: opts.mark,
         });
         return {

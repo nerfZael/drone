@@ -240,8 +240,6 @@ export type NativeChatBinding = {
 };
 
 export type AssistantMessageFeatures = {
-  parsingJobsByTurn: Record<number, unknown>;
-  onCreateJobs: (opts: { turn: number; message: string }) => void;
   onSpawnTask: (
     mode: DroneHubTaskSpawnMode,
     task: DroneHubTask,
@@ -967,7 +965,10 @@ export function AssistantDock({
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
-  const sendPrompt = React.useCallback(async (sharedPayload: ChatSendPayload): Promise<boolean> => {
+  const sendPrompt = React.useCallback(async (
+    sharedPayload: ChatSendPayload,
+    deliveryMode: 'asap' | 'queue',
+  ): Promise<boolean> => {
     if (!activeThread) return false;
     const referencedDroneSnapshot = referencedDronesRef.current.slice();
     const prompt = appendAssistantDroneReferences(sharedPayload.prompt, referencedDroneSnapshot);
@@ -997,6 +998,7 @@ export function AssistantDock({
             provider: activeThread.provider,
             model: activeThread.model,
             thinkingLevel: activeThread.thinkingLevel,
+            deliveryMode,
           }),
         });
         await readNdjson(response, (event) => {
@@ -1579,7 +1581,6 @@ export function AssistantDock({
       continue;
     }
     if (item.type === 'message') {
-      const jobsTurn = -(item.sourceMessageIndex + 1);
       const latestActivityEligible = Boolean(
         item.message.role === 'user' ||
         messageVisibleText(item.message).trim() ||
@@ -1598,8 +1599,6 @@ export function AssistantDock({
             autoExpandMessage={isLatestActivity}
             messageExtras={{
               messageId: `${activeThreadId}:${item.key}`,
-              parsingJobs: Boolean(messageFeatures.parsingJobsByTurn[jobsTurn]),
-              onCreateJobs: (message) => messageFeatures.onCreateJobs({ turn: jobsTurn, message }),
               onSpawnTask: messageFeatures.onSpawnTask,
               linkedPullRequestContext: messageFeatures.linkedPullRequestContext,
               droneId: messageFeatures.droneId,
@@ -1945,7 +1944,9 @@ export function AssistantDock({
               composerControls={nativeComposerControls}
               onStop={() => stop()}
               stopping={assistantStopBusy}
-              onSend={async (payload) => await sendPrompt(payload)}
+              onSend={async (payload, context) =>
+                await sendPrompt(payload, context.deliveryMode)
+              }
             />
           </div>
         )}

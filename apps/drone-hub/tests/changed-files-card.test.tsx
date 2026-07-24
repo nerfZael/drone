@@ -68,7 +68,6 @@ describe('changed files card', () => {
         messageId="message-with-changes"
         fileChanges={summary}
         initiallyExpandFileChanges
-        onCreateJobs={() => undefined}
       />,
     );
 

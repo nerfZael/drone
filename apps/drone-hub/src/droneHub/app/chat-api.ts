@@ -170,6 +170,7 @@ export async function sendDroneChatPrompt(
     attachments?: ChatSendPayload['attachments'];
     submittedAt?: string;
     autoRenameHandledByClient?: boolean;
+    deliveryMode?: 'queue' | 'asap';
   },
 ): Promise<SendDroneChatPromptResponse> {
   const droneId = String(opts.droneId ?? '').trim();
@@ -186,6 +187,7 @@ export async function sendDroneChatPrompt(
         prompt,
         attachments,
         submittedAt,
+        ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
         ...(opts.autoRenameHandledByClient ? { autoRenameHandledByClient: true } : {}),
       }),
     },

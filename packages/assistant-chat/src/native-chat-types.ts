@@ -27,6 +27,7 @@ export type NativeQueuedPrompt = {
   promptImages: Array<{ type: 'image'; data: string; mimeType: string }>;
   imageCount: number;
   createdAt: string;
+  deliveryMode?: NativePromptDeliveryMode;
   status: 'queued' | 'running' | 'failed';
   error: string | null;
 };

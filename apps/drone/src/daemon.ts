@@ -21,6 +21,7 @@ import {
   handleDaemonWorkspaceRequest,
   readLimitedJson,
 } from './daemon-workspace';
+import { selectNextPromptJobId } from './prompt-job-scheduling';
 
 const execFileAsync = promisify(execFile);
 
@@ -70,6 +71,7 @@ type PromptJob = {
   createdAt: string;
   updatedAt: string;
   state: PromptJobState;
+  deliveryMode?: 'queue' | 'asap';
   session: string;
   stdoutPath: string;
   stderrPath: string;
@@ -1355,14 +1357,10 @@ async function main() {
     })();
     if (anyRunning) return;
 
-    let startId: string | null = null;
-    for (const id of order) {
-      const job = await loadPromptJob(promptsDir, id);
-      if (job && job.state === 'queued') {
-        startId = id;
-        break;
-      }
-    }
+    const candidates = (
+      await Promise.all(order.map((id) => loadPromptJob(promptsDir, id)))
+    ).filter((job): job is PromptJob => Boolean(job));
+    const startId = selectNextPromptJobId(candidates);
     if (!startId) return;
     const job = await loadPromptJob(promptsDir, startId);
     if (!job) return;
@@ -1449,6 +1447,7 @@ async function main() {
           : [];
         const cwd = typeof body?.cwd === 'string' && body.cwd.trim() ? body.cwd.trim() : undefined;
         const kind = String(body?.kind ?? 'shell').trim() || 'shell';
+        const deliveryMode = body?.deliveryMode === 'asap' ? 'asap' : 'queue';
         const env =
           body?.env && typeof body.env === 'object' && !Array.isArray(body.env)
             ? (Object.fromEntries(
@@ -1475,6 +1474,7 @@ async function main() {
           createdAt,
           updatedAt: createdAt,
           state: 'queued',
+          deliveryMode,
           session,
           stdoutPath,
           stderrPath,

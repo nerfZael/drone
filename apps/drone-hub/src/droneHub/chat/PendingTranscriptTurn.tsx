@@ -58,8 +58,16 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
     <div className="mt-2 flex items-center justify-between gap-3">
       <span
         role="status"
-        aria-label="Queued, waiting to send"
-        title="Waiting to send"
+        aria-label={
+          item.deliveryMode === 'asap'
+            ? 'ASAP, waiting for the next safe delivery point'
+            : 'Queued, waiting to send'
+        }
+        title={
+          item.deliveryMode === 'asap'
+            ? 'Will run before queued follow-ups'
+            : 'Waiting to send'
+        }
         className="inline-flex items-center gap-1.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--user-muted)]"
       >
         <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -72,7 +80,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             strokeLinejoin="round"
           />
         </svg>
-        Queued
+        {item.deliveryMode === 'asap' ? 'ASAP' : 'Queued'}
       </span>
       {canCancelQueued ? (
         <button

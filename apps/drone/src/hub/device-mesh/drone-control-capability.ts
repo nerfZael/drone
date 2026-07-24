@@ -1036,6 +1036,12 @@ export function createDroneControlCapability(
           );
         }
         const prompt = String(payload.prompt ?? '').trim();
+        const deliveryMode =
+          payload.deliveryMode === 'asap'
+            ? 'asap'
+            : payload.deliveryMode === 'queue'
+              ? 'queue'
+              : undefined;
         const attachmentIds = Array.isArray(payload.attachmentIds)
           ? payload.attachmentIds.map((value) => String(value ?? '').trim()).filter(Boolean)
           : [];
@@ -1061,6 +1067,7 @@ export function createDroneControlCapability(
               nativeChatId,
               prompt,
               attachments,
+              deliveryMode,
             );
             return {
               accepted: true,
@@ -1071,7 +1078,7 @@ export function createDroneControlCapability(
           }
           return await localHubRequest(access, `${chatPath}/prompt`, {
             method: 'POST',
-            body: JSON.stringify({ prompt, attachments }),
+            body: JSON.stringify({ prompt, attachments, ...(deliveryMode ? { deliveryMode } : {}) }),
           });
         } finally {
           await chatAttachments?.remove(attachmentIds);

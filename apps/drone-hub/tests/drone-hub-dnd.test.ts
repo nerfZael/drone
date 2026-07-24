@@ -18,6 +18,16 @@ describe('drone hub assignment drag helpers', () => {
     ).toEqual(['bravo']);
   });
 
+  test('keeps pinned reorder drags scoped to the pinned list', () => {
+    expect(
+      assignedDroneIdsFromData({
+        type: 'sidebar-pinned-drone',
+        droneId: 'bravo',
+        label: 'Bravo',
+      }),
+    ).toEqual([]);
+  });
+
   test('resolves native drag payloads from drone ids and chat refs', () => {
     const transfer = {
       getData(type: string) {

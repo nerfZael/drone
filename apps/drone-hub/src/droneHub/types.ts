@@ -582,15 +582,6 @@ export type ChatImageAttachmentRef = {
   previewDataUrl?: string;
 };
 
-export type JobSpec = {
-  // Display name for the drone (mutable; ids are the stable identifier).
-  name: string;
-  title: string;
-  details: string;
-};
-
-export type EditableJob = JobSpec & { id: string };
-
 export type PendingPrompt = {
   id: string;
   at: string;
@@ -602,6 +593,7 @@ export type PendingPrompt = {
     size: number;
     dataBase64: string;
   }>;
+  deliveryMode?: 'queue' | 'asap';
   // `queued` is a local-only UI state used when a drone is still provisioning.
   state: 'queued' | 'sending' | 'sent' | 'failed';
   error?: string;
