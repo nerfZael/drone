@@ -318,7 +318,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
                       }
                       className="flex min-h-9 items-center rounded-[.5rem] border border-dashed border-[var(--border)] px-2.5 text-left text-[.75rem] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-40"
                     >
-                      <span className="truncate">Use “{customModelId}” as a custom model</span>
+                      <span className="truncate">Use model ID “{customModelId}”</span>
                     </button>
                   ) : null}
                 </div>

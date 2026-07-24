@@ -1,6 +1,7 @@
 import React from 'react';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
 import { profileStorageKey } from '../../profile-storage';
+import { formatModelDisplayLabel } from './chat-model-runtime';
 
 export type AgentModelCatalogOption = {
   id: string;
@@ -37,7 +38,7 @@ export function normalizeAgentModelCatalog(value: unknown): AgentModelCatalogOpt
     }
     return [{
       id,
-      label: text(raw?.label) || id,
+      label: formatModelDisplayLabel(text(raw?.label) || id),
       ...(raw?.isDefault ? { isDefault: true } : {}),
       ...(raw?.isCurrent ? { isCurrent: true } : {}),
       reasoningLevels,
@@ -85,7 +86,7 @@ export function buildDetectedModelMenuEntries(
       className: 'font-mono truncate',
     })),
     ...(current && !includesCurrent
-      ? [{ value: current, label: `${current} (custom)`, title: current, className: 'font-mono truncate' }]
+      ? [{ value: current, label: formatModelDisplayLabel(current), title: current, className: 'font-mono truncate' }]
       : []),
   ];
 }
@@ -100,7 +101,6 @@ export function useAgentModelCatalog(opts: {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [discoveredAt, setDiscoveredAt] = React.useState<string | null>(null);
-  const [source, setSource] = React.useState<'live' | 'cache' | 'none'>('none');
   const [stale, setStale] = React.useState(false);
   const requestSequenceRef = React.useRef(0);
   const staleRetryAtRef = React.useRef<string | null>(null);
@@ -113,7 +113,6 @@ export function useAgentModelCatalog(opts: {
       setLoading(false);
       setError(null);
       setDiscoveredAt(null);
-      setSource('none');
       setStale(false);
       return;
     }
@@ -129,10 +128,8 @@ export function useAgentModelCatalog(opts: {
       const next = normalizeAgentModelCatalog(body);
       if (requestSequence !== requestSequenceRef.current) return;
       const nextDiscoveredAt = text(body?.discoveredAt) || null;
-      const nextSource = text(body?.source).toLowerCase();
       const nextStale = body?.stale === true;
       setDiscoveredAt(nextDiscoveredAt);
-      setSource(nextSource === 'live' || nextSource === 'cache' ? nextSource : 'none');
       setStale(nextStale);
       if (next.length === 0 && body?.error && cached?.length) {
         setModels(cached);
@@ -155,7 +152,6 @@ export function useAgentModelCatalog(opts: {
     const cached = readCache()[key] ?? [];
     setModels(cached);
     setDiscoveredAt(null);
-    setSource(cached.length > 0 ? 'cache' : 'none');
     setStale(false);
     void load();
   }, [key, load]);
@@ -203,7 +199,6 @@ export function useAgentModelCatalog(opts: {
     loading,
     error,
     discoveredAt,
-    source,
     stale,
   };
 }

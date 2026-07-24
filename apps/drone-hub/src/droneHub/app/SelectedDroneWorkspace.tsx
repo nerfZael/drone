@@ -222,7 +222,6 @@ type SelectedDroneWorkspaceProps = {
   modelDisabled: boolean;
   loadingChatModels: boolean;
   chatModelsError: string | null;
-  chatModelsSource: string;
   chatModelsStale: boolean;
   currentDroneRepoAttached: boolean;
   currentDroneRepoPath: string;
@@ -324,7 +323,6 @@ export function SelectedDroneWorkspace({
   modelDisabled,
   loadingChatModels,
   chatModelsError,
-  chatModelsSource,
   chatModelsStale,
   currentDroneRepoAttached,
   currentDroneRepoPath,
@@ -895,7 +893,6 @@ export function SelectedDroneWorkspace({
     modelDisabled,
     loading: loadingChatModels,
     error: chatModelsError,
-    source: chatModelsSource,
     stale: chatModelsStale,
     transcripts,
     onUpdate: (settings) => {
