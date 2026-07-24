@@ -9,7 +9,7 @@ describe('agent model catalog', () => {
     const models = normalizeAgentModelCatalog({
       models: [{
         id: 'gpt-5.2-codex',
-        label: 'GPT-5.2 Codex',
+        label: 'gpt-5.2-codex',
         reasoningLevels: ['low', 'medium', 'high', 'high'],
         defaultReasoningLevel: 'medium',
       }],
@@ -24,7 +24,7 @@ describe('agent model catalog', () => {
     expect(buildDetectedModelMenuEntries(models, 'custom-model')).toMatchObject([
       { value: '', label: 'Auto' },
       { value: 'gpt-5.2-codex', label: 'GPT-5.2 Codex' },
-      { value: 'custom-model', label: 'custom-model (custom)' },
+      { value: 'custom-model', label: 'custom-model' },
     ]);
   });
 
@@ -38,7 +38,7 @@ describe('agent model catalog', () => {
       }),
     ).toEqual([{
       id: 'gpt-default-only',
-      label: 'gpt-default-only',
+      label: 'GPT DEFAULT Only',
       reasoningLevels: ['high'],
       defaultReasoningLevel: 'high',
     }]);

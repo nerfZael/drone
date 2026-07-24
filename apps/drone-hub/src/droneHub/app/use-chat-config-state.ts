@@ -323,7 +323,6 @@ export function useChatConfigState({
     setChatInfoError,
     loadingChatInfo,
     chatModels: modelCatalog.models,
-    chatModelsSource: modelCatalog.source,
     chatModelsError: modelCatalog.error,
     loadingChatModels: modelCatalog.loading,
     chatModelsStale: modelCatalog.stale,

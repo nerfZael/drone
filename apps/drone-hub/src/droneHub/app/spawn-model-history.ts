@@ -1,4 +1,5 @@
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import { formatModelDisplayLabel } from './chat-model-runtime';
 
 export const SEEN_SPAWN_MODEL_LIMIT = 40;
 
@@ -50,7 +51,7 @@ export function buildSpawnModelMenuEntries(
     { value: '', label: 'Auto' },
     ...options.map((id) => ({
       value: id,
-      label: id === activeModel && !seenModelIds.includes(id) ? `${id} (custom)` : id,
+      label: formatModelDisplayLabel(id),
       title: id,
       searchText: id,
       className: 'font-mono truncate',
@@ -63,6 +64,6 @@ export function getSpawnModelTriggerLabel(
   currentModel: string | null | undefined,
 ): string {
   const activeModel = String(currentModel ?? '').trim();
-  if (activeModel) return activeModel;
+  if (activeModel) return formatModelDisplayLabel(activeModel);
   return normalizeSeenModelIds(seenModelIds).length > 0 ? 'Seen models' : 'No models seen';
 }
