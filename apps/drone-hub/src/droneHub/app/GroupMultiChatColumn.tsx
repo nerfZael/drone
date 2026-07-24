@@ -58,7 +58,6 @@ export type GroupMultiChatColumnProps = {
   onOpenDrone: () => void;
   onDeleteDrone: () => void;
   deleteBusy?: boolean;
-  onCreateJobs: (opts: { turn: number; message: string }) => void;
   onSpawnDroneHubTask: (opts: {
     sourceDroneId: string;
     sourceChatName: string;
@@ -77,7 +76,6 @@ export function GroupMultiChatColumn({
   onOpenDrone,
   onDeleteDrone,
   deleteBusy = false,
-  onCreateJobs,
   onSpawnDroneHubTask,
   onAutoRenameChatFromFirstPrompt,
   columnWidthPx,
@@ -811,8 +809,6 @@ export function GroupMultiChatColumn({
                   autoExpandAgentMessage={
                     index === items.length - 1 && visiblePendingPrompts.length === 0
                   }
-                  parsingJobs={false}
-                  onCreateJobs={onCreateJobs}
                   onSpawnDroneHubTask={spawnDroneHubTaskForColumn}
                   messageId={messageId}
                   droneId={drone.id}

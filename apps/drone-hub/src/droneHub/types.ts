@@ -577,15 +577,6 @@ export type ChatImageAttachmentRef = {
   previewDataUrl?: string;
 };
 
-export type JobSpec = {
-  // Display name for the drone (mutable; ids are the stable identifier).
-  name: string;
-  title: string;
-  details: string;
-};
-
-export type EditableJob = JobSpec & { id: string };
-
 export type PendingPrompt = {
   id: string;
   at: string;

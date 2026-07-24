@@ -248,8 +248,6 @@ type SelectedDroneWorkspaceProps = {
   transcripts: TranscriptItem[] | null;
   visiblePendingPromptsWithStartup: PendingPrompt[];
   transcriptMessageId: (item: TranscriptItem) => string;
-  parsingJobsByTurn: Record<number, unknown>;
-  parseJobsFromAgentMessage: (opts: { turn: number; message: string }) => void;
   spawnDroneHubTaskFromAgentMessage: (opts: {
     sourceDroneId: string;
     sourceChatName: string;
@@ -353,8 +351,6 @@ export function SelectedDroneWorkspace({
   transcripts,
   visiblePendingPromptsWithStartup,
   transcriptMessageId,
-  parsingJobsByTurn,
-  parseJobsFromAgentMessage,
   spawnDroneHubTaskFromAgentMessage,
   outputScrollRef,
   updatePinned,
@@ -997,8 +993,6 @@ export function SelectedDroneWorkspace({
         <TranscriptTurn
           item={turn}
           autoExpandAgentMessage={isLatestActivity}
-          parsingJobs={Boolean(parsingJobsByTurn[turn.turn])}
-          onCreateJobs={parseJobsFromAgentMessage}
           onSpawnDroneHubTask={spawnCurrentDroneHubTask}
           messageId={messageId}
           onRollbackDockerSnapshot={rollbackDockerSnapshot}
@@ -1656,8 +1650,6 @@ export function SelectedDroneWorkspace({
                 }
                 onStartupPromptReconciled={() => clearStartupSeedForDrone(currentDrone.id)}
                 messageFeatures={{
-                  parsingJobsByTurn,
-                  onCreateJobs: parseJobsFromAgentMessage,
                   onSpawnTask: spawnCurrentDroneHubTask,
                   linkedPullRequestContext,
                   droneId: currentDrone.id,

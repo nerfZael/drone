@@ -42,7 +42,6 @@ import { useFilesAndPortsPaneState } from './droneHub/app/use-files-and-ports-pa
 import { useFileEditorState } from './droneHub/app/use-file-editor-state';
 import { useGroupBroadcast } from './droneHub/app/use-group-broadcast';
 import { useGroupManagement } from './droneHub/app/use-group-management';
-import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
 import { useUiPreferencesSettings } from './droneHub/app/use-ui-preferences-settings';
 import {
@@ -843,40 +842,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       body: JSON.stringify({ drones, pullHostBranchBeforeCreate }),
     });
   }, [pullHostBranchBeforeCreate, requestJson]);
-
-  const {
-    parsingJobsByTurn,
-    jobsModal,
-    jobsModalError,
-    spawningAllJobs,
-    spawningJobById,
-    spawnedJobById,
-    spawnJobErrorById,
-    detailsOpenByJobId,
-    parseJobsFromAgentMessage,
-    spawnOneFromJobsModal,
-    spawnAllFromJobsModal,
-    spawnJobFromModal,
-    closeJobsModal,
-    onChangeJobsGroup,
-    onClearJobsGroup,
-    onChangeJobsAgentKey,
-    onChangeJobsPrefix,
-    onClearJobsPrefix,
-    onUpdateJobsModalJob,
-    onToggleJobsModalDetails,
-    dismissJobsModalError,
-  } = useJobsWorkflow({
-    drones,
-    selectedDrone,
-    spawnAgentKey,
-    setSpawnAgentKey,
-    spawnModelForSeed,
-    resolveAgentKeyToConfig,
-    queueDrones,
-    rememberStartupSeed,
-    rememberSeenModels,
-  });
 
   const {
     createName,
@@ -3993,27 +3958,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setCustomAgents,
     handleAddCustomAgent,
     nameSuggestToast,
-    jobsModalError,
-    jobsModal,
-    builtInAgentOptions: BUILTIN_AGENT_OPTIONS,
-    spawningAllJobs,
-    spawningJobById,
-    spawnedJobById,
-    spawnJobErrorById,
-    detailsOpenByJobId,
-    isValidDroneName: isValidDroneNameDashCase,
-    closeJobsModal,
-    spawnAllFromJobsModal,
-    spawnOneFromJobsModal,
-    spawnJobFromModal,
-    onChangeJobsGroup,
-    onClearJobsGroup,
-    onChangeJobsAgentKey,
-    onChangeJobsPrefix,
-    onClearJobsPrefix,
-    onUpdateJobsModalJob,
-    onToggleJobsModalDetails,
-    dismissJobsModalError,
     reposModalOpen,
     repos,
     reposError,
@@ -4113,7 +4057,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     deleteDrone: requestDeleteDrone,
     deletingDrones,
     optimisticallyDeletedDrones,
-    parseJobsFromAgentMessage,
     spawnDroneHubTaskFromAgentMessage,
     drones,
     dronesLoading,
@@ -4197,7 +4140,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     transcripts,
     visiblePendingPromptsWithStartup,
     transcriptMessageId,
-    parsingJobsByTurn,
     outputScrollRef,
     updatePinned,
     startupSeedForCurrentDrone,

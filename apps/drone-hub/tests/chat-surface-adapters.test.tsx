@@ -536,7 +536,6 @@ describe('agent chat surface adapters', () => {
         }}
         messageExtras={{
           messageId: 'native-message',
-          onCreateJobs: () => {},
           onSpawnTask: async () => ({ ok: true }),
           linkedPullRequestContext: {
             droneId: 'drone-a',

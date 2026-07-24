@@ -12,7 +12,7 @@ import type { MarkdownFileReference } from './MarkdownMessage';
 import type { DroneHubTask } from './drone-hub-task-parser';
 import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
 import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
-import { IconImage, IconJobs, IconOpen, IconSpinner } from './icons';
+import { IconImage, IconOpen } from './icons';
 import { collectInlineAgentMedia, type InlineAgentMedia } from './inline-agent-media';
 import { ChangedFilesCard } from './ChangedFilesCard';
 
@@ -40,9 +40,7 @@ export type AgentMessageExtrasProps = {
   text: string;
   tasks: DroneHubTask[];
   messageId: string;
-  parsingJobs?: boolean;
   actionsEnabled?: boolean;
-  onCreateJobs?: (message: string) => void;
   onSpawnTask?: (
     mode: DroneHubTaskSpawnMode,
     task: DroneHubTask,
@@ -62,9 +60,7 @@ export function AgentMessageExtras({
   text,
   tasks,
   messageId,
-  parsingJobs = false,
   actionsEnabled = true,
-  onCreateJobs,
   onSpawnTask,
   linkedPullRequestContext,
   linkedCardsClassName,
@@ -127,24 +123,6 @@ export function AgentMessageExtras({
           aria-pressed={inlineMediaToggle.active}
         >
           <IconImage className="h-3.5 w-3.5 opacity-90" />
-        </button>
-      ) : null}
-      {actionsEnabled && onCreateJobs && text.trim() ? (
-        <button
-          type="button"
-          onClick={() => onCreateJobs(text)}
-          disabled={parsingJobs}
-          className={`inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] transition-opacity hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] ${
-            parsingJobs ? 'cursor-wait opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }`}
-          title="Create jobs from this agent message"
-          aria-label="Create jobs from this agent message"
-        >
-          {parsingJobs ? (
-            <IconSpinner className="h-3.5 w-3.5 text-[var(--accent)]" />
-          ) : (
-            <IconJobs className="h-3.5 w-3.5 opacity-90" />
-          )}
         </button>
       ) : null}
       {actionEnd}

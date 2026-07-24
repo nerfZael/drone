@@ -32,7 +32,6 @@ type GroupMultiChatWorkspaceProps = {
   onSelectDroneCard: (droneId: string) => void;
   onDeleteDrone: (droneId: string) => void;
   deletingDrones: Record<string, boolean>;
-  onParseJobsFromAgentMessage: (opts: { turn: number; message: string }) => void;
   onSpawnDroneHubTaskFromAgentMessage: (opts: {
     sourceDroneId: string;
     sourceChatName: string;
@@ -51,7 +50,6 @@ export function GroupMultiChatWorkspace({
   onSelectDroneCard,
   onDeleteDrone,
   deletingDrones,
-  onParseJobsFromAgentMessage,
   onSpawnDroneHubTaskFromAgentMessage,
 }: GroupMultiChatWorkspaceProps) {
   const {
@@ -261,7 +259,6 @@ export function GroupMultiChatWorkspace({
                   onOpenDrone={() => onSelectDroneCard(d.id)}
                   onDeleteDrone={() => onDeleteDrone(d.id)}
                   deleteBusy={Boolean(deletingDrones[d.id])}
-                  onCreateJobs={onParseJobsFromAgentMessage}
                   onSpawnDroneHubTask={onSpawnDroneHubTaskFromAgentMessage}
                   onAutoRenameChatFromFirstPrompt={onAutoRenameChatFromFirstPrompt}
                   columnWidthPx={groupMultiChatColumnWidth}
