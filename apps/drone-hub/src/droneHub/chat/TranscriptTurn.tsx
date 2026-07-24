@@ -156,9 +156,6 @@ export const TranscriptTurn = React.memo(
             onCreateJobs={(message) => onCreateJobs({ turn: item.turn, message })}
             onSpawnTask={onSpawnDroneHubTask}
             linkedPullRequestContext={linkedPullRequestContext}
-            linkedCardsClassName={
-              item.agentPlan?.items.length ? undefined : 'mb-8'
-            }
             droneId={droneId}
             droneHomePath={droneHomePath}
             onOpenFileReference={onOpenFileReference}
@@ -166,6 +163,7 @@ export const TranscriptTurn = React.memo(
             plan={item.agentPlan}
             fileChanges={item.fileChanges}
             initiallyExpandFileChanges={initiallyExpandFileChanges}
+            initiallyExpandLinkedPullRequests={autoExpandAgentMessage}
             actionEnd={
               actionsEnabled && item.ok && dockerSnapshot &&
               (dockerSnapshotBusy || dockerSnapshot.status === 'failed' || onRollbackDockerSnapshot) ? (

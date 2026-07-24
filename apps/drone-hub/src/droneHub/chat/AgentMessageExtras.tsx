@@ -48,7 +48,6 @@ export type AgentMessageExtrasProps = {
     task: DroneHubTask,
   ) => Promise<{ ok: boolean; error?: string | null }>;
   linkedPullRequestContext?: LinkedPullRequestContext;
-  linkedCardsClassName?: string;
   droneId?: string;
   droneHomePath?: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
@@ -56,6 +55,7 @@ export type AgentMessageExtrasProps = {
   plan?: AgentPlan;
   fileChanges?: AgentRunFileChanges;
   initiallyExpandFileChanges?: boolean;
+  initiallyExpandLinkedPullRequests?: boolean;
   actionEnd?: React.ReactNode;
 };
 
@@ -68,7 +68,6 @@ export function AgentMessageExtras({
   onCreateJobs,
   onSpawnTask,
   linkedPullRequestContext,
-  linkedCardsClassName,
   droneId,
   droneHomePath,
   onOpenFileReference,
@@ -76,6 +75,7 @@ export function AgentMessageExtras({
   plan,
   fileChanges,
   initiallyExpandFileChanges = false,
+  initiallyExpandLinkedPullRequests = false,
   actionEnd,
 }: AgentMessageExtrasProps) {
   const inlineMediaOverride = useDroneHubUiStore(
@@ -235,12 +235,15 @@ export function AgentMessageExtras({
         text={text}
         context={linkedPullRequestContext}
         onOpenLink={onOpenLink}
-        className={linkedCardsClassName}
+        initiallyExpanded={initiallyExpandLinkedPullRequests}
       />
       <AgentPlanList plan={plan} headerActions={hasPlan ? messageActions : undefined} />
 
       {!hasPlan ? (
-        <div className="absolute bottom-2 right-2 flex items-center gap-1">
+        <div
+          data-agent-message-actions="true"
+          className="mt-1 flex min-h-7 items-center justify-end gap-1"
+        >
           {messageActions}
         </div>
       ) : null}

@@ -18,21 +18,6 @@ import { agentRunDiffError, loadAgentRunDiffFiles } from './agent-run-diffs';
 
 const CARD_PAGE_SIZE = 20;
 
-function openPanelIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d="M2.5 3.5h11v9h-11z" stroke="currentColor" strokeWidth="1.25" />
-      <path d="M6 3.5v9" stroke="currentColor" strokeWidth="1.25" />
-      <path
-        d="M8.5 6h2.5M8.5 8.5h3"
-        stroke="currentColor"
-        strokeWidth="1.15"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 function WorkspaceFiles({
   workspace,
   onSelectFile,
@@ -219,17 +204,23 @@ export function ChangedFilesCard({
 
   return (
     <section
-      className={`mt-2 overflow-hidden rounded-[var(--radius-medium)] bg-[var(--surface-inset-faint)] text-[var(--muted)] ${className}`}
+      className={`mt-2 overflow-hidden rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted)] ${className}`}
       aria-label="Files changed by this agent run"
     >
       <div className="flex items-stretch">
         <button
           type="button"
-          className="group/changed-files-header flex min-w-0 flex-1 items-center px-1 py-1 text-left focus-visible:outline-none"
+          className={`group/changed-files-header flex min-w-0 flex-1 items-center px-1 pt-1 text-left focus-visible:outline-none ${
+            expanded ? 'pb-0' : 'pb-1'
+          }`}
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
         >
-          <span className="inline-flex min-w-0 max-w-full items-center gap-2 px-2 py-1">
+          <span
+            className={`inline-flex min-w-0 max-w-full items-center gap-2 px-2 pt-1 ${
+              expanded ? 'pb-0.5' : 'pb-1'
+            }`}
+          >
             <span className="min-w-0 truncate text-[var(--text-10-5)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors group-hover/changed-files-header:text-[var(--fg)] group-focus-visible/changed-files-header:text-[var(--fg)]">
               Changed files <span className="text-[var(--muted-dim)] transition-colors group-hover/changed-files-header:text-[var(--muted)] group-focus-visible/changed-files-header:text-[var(--muted)]">({fileChanges.counts.changed})</span>
             </span>
@@ -263,17 +254,18 @@ export function ChangedFilesCard({
         </button>
         <button
           type="button"
+          data-changed-files-view-diff="true"
           onClick={() => openPanel()}
           disabled={!canOpenPanel}
-          className="my-0.5 flex w-8 shrink-0 items-center justify-center rounded-[var(--radius-small)] text-[var(--muted-dim)] transition-colors hover:text-[var(--accent)] focus-visible:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-default disabled:opacity-40 disabled:hover:text-[var(--muted-dim)]"
-          aria-label="Open agent run changes in the Changes panel"
-          title="Open in Changes"
+          className="mr-2 shrink-0 self-center rounded-[var(--radius-small)] px-1 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--link)] underline-offset-2 transition-colors hover:text-[var(--link-hover)] hover:underline focus-visible:text-[var(--link-hover)] focus-visible:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-default disabled:text-[var(--muted-dim)] disabled:no-underline"
+          aria-label="View agent run diff in the Changes panel"
+          title="View diff in Changes"
         >
-          {openPanelIcon()}
+          View diff
         </button>
       </div>
       {expanded ? (
-        <div className="dh-changed-files-scrollbar mx-1 mt-0.5 max-h-72 overflow-y-auto overscroll-contain rounded-[var(--radius-small)] px-1.5 py-1.5">
+        <div className="dh-changed-files-scrollbar mx-1 max-h-72 overflow-y-auto overscroll-contain rounded-[var(--radius-small)] px-1.5 pb-1.5 pt-0">
           {fileChanges.workspaces.map((workspace) => (
             <div key={workspace.targetId}>
               {workspaceCount > 1 || workspace.targetId.startsWith('artifacts:') ? (

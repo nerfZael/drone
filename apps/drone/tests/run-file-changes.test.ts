@@ -32,6 +32,7 @@ function createRepository(): string {
   fs.writeFileSync(path.join(repoPath, 'renamed.txt'), 'rename me\n');
   git(repoPath, 'add', '-A');
   git(repoPath, 'commit', '--quiet', '-m', 'base');
+  git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
   return repoPath;
 }
 
@@ -131,6 +132,32 @@ describe('agent run file changes', () => {
     const repoPath = createRepository();
     const drone = { runtime: 'host', repoAttached: true, repoPath, name: 'Host drone' };
     const baseline = await captureDroneRunFileChangesBaseline({ droneId: 'host-1', drone });
+
+    expect(await finalizeDroneRunFileChanges({ baseline: baseline!, drone })).toBeNull();
+  });
+
+  test('ignores upstream changes adopted while opening a pull request', async () => {
+    const repoPath = createRepository();
+    git(repoPath, 'switch', '--quiet', '-c', 'dvm/work');
+    fs.writeFileSync(path.join(repoPath, 'feature.txt'), 'feature change\n');
+    const drone = {
+      runtime: 'host',
+      repoAttached: true,
+      repoPath,
+      name: 'Host drone',
+      repo: { baseRef: 'main' },
+    };
+    const baseline = await captureDroneRunFileChangesBaseline({ droneId: 'host-1', drone });
+
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'feature');
+    git(repoPath, 'switch', '--quiet', '-c', 'upstream', 'refs/remotes/origin/main');
+    fs.writeFileSync(path.join(repoPath, 'upstream.txt'), 'unrelated upstream change\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'upstream');
+    git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(repoPath, 'switch', '--quiet', 'dvm/work');
+    git(repoPath, 'rebase', '--quiet', 'refs/remotes/origin/main');
 
     expect(await finalizeDroneRunFileChanges({ baseline: baseline!, drone })).toBeNull();
   });

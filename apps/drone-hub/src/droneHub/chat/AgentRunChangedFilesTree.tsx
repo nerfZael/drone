@@ -9,10 +9,20 @@ import {
 import { IconChevron, IconFolder, iconForFilePath } from '../icons';
 
 function statusClass(entry: AgentRunFileChangeEntry): string {
-  if (entry.status === 'added') return 'text-[var(--green)]';
-  if (entry.status === 'deleted') return 'text-[var(--red)]';
-  if (entry.status === 'renamed' || entry.status === 'copied') return 'text-[var(--yellow)]';
-  return 'text-[var(--accent)]';
+  switch (entry.status) {
+    case 'added':
+      return 'text-[var(--green)]';
+    case 'deleted':
+    case 'unmerged':
+      return 'text-[var(--red)]';
+    case 'modified':
+    case 'renamed':
+    case 'copied':
+    case 'type-changed':
+      return 'text-[var(--yellow)]';
+    default:
+      return 'text-[var(--muted)]';
+  }
 }
 
 function DiffStats({
@@ -24,7 +34,7 @@ function DiffStats({
 }) {
   if (additions <= 0 && deletions <= 0) return null;
   return (
-    <span className="ml-auto flex shrink-0 gap-1.5 font-mono text-[var(--text-9)] tabular-nums opacity-75 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+    <span className="ml-auto flex shrink-0 gap-1.5 font-mono text-[var(--text-9)] tabular-nums opacity-75 transition-opacity group-hover/change-row:opacity-100 group-focus-visible/change-row:opacity-100">
       {additions > 0 ? (
         <span className="text-[var(--green)]" title="Lines added">
           +{additions}
@@ -83,16 +93,16 @@ export function AgentRunChangedFilesTree({
           <button
             type="button"
             onClick={() => onToggleDirectory(node.path)}
-            className={`group flex w-full items-center gap-1.5 rounded-[var(--radius-small)] pr-2 text-left text-[var(--muted)] transition-colors hover:text-[var(--fg)] focus-visible:text-[var(--fg)] focus-visible:outline-none ${rowHeight}`}
+            className={`group/change-row flex w-full items-center gap-1.5 rounded-[var(--radius-small)] pr-2 text-left text-[var(--muted)] transition-colors hover:text-[var(--fg)] focus-visible:text-[var(--fg)] focus-visible:outline-none ${rowHeight}`}
             style={{ paddingLeft }}
             aria-expanded={open}
           >
             <IconChevron
               down={open}
-              className="shrink-0 text-[var(--muted-dim)] transition-colors group-hover:text-[var(--accent)] group-focus-visible:text-[var(--accent)]"
+              className="shrink-0 text-[var(--muted-dim)] transition-colors group-hover/change-row:text-[var(--accent)] group-focus-visible/change-row:text-[var(--accent)]"
               size={11}
             />
-            <IconFolder className="shrink-0 text-[var(--muted)] transition-colors group-hover:text-[var(--fg)] group-focus-visible:text-[var(--fg)]" size={13} />
+            <IconFolder className="shrink-0 text-[var(--muted)] transition-colors group-hover/change-row:text-[var(--fg)] group-focus-visible/change-row:text-[var(--fg)]" size={13} />
             <span className="min-w-0 truncate font-mono text-[var(--text-10)]">{node.name}</span>
             <DiffStats additions={node.stats.additions} deletions={node.stats.deletions} />
           </button>
@@ -108,7 +118,7 @@ export function AgentRunChangedFilesTree({
         key={`file:${node.path}`}
         type="button"
         onClick={() => onSelectFile(node.entry)}
-        className={`group flex w-full items-center gap-1.5 rounded-[var(--radius-small)] pr-2 text-left transition-colors focus-visible:outline-none ${rowHeight} ${
+        className={`group/change-row flex w-full items-center gap-1.5 rounded-[var(--radius-small)] pr-2 text-left transition-colors focus-visible:outline-none ${rowHeight} ${
           selected
             ? 'text-[var(--accent)]'
             : 'text-[var(--fg-secondary)] hover:text-[var(--fg)] focus-visible:text-[var(--fg)]'
@@ -125,7 +135,7 @@ export function AgentRunChangedFilesTree({
           className={`shrink-0 transition-colors ${
             selected
               ? 'text-[var(--accent)]'
-              : 'text-[var(--muted)] group-hover:text-[var(--fg)] group-focus-visible:text-[var(--fg)]'
+              : 'text-[var(--muted)] group-hover/change-row:text-[var(--fg)] group-focus-visible/change-row:text-[var(--fg)]'
           }`}
           size={13}
         />

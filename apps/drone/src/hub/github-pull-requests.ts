@@ -33,6 +33,11 @@ export type GithubPullRequestSummary = {
   title: string;
   state: GithubPullRequestState;
   draft: boolean;
+  diffStats: {
+    changed: number;
+    additions: number;
+    deletions: number;
+  } | null;
   htmlUrl: string;
   createdAt: string;
   updatedAt: string;
@@ -463,6 +468,22 @@ function normalizeGithubPullRequestState(
   return 'open';
 }
 
+function pullRequestDiffStats(raw: any): GithubPullRequestSummary['diffStats'] {
+  const changedRaw = raw?.changedFiles ?? raw?.changed_files;
+  const additionsRaw = raw?.additions;
+  const deletionsRaw = raw?.deletions;
+  if (changedRaw == null || additionsRaw == null || deletionsRaw == null) return null;
+  const changed = Number(changedRaw);
+  const additions = Number(additionsRaw);
+  const deletions = Number(deletionsRaw);
+  if (![changed, additions, deletions].every(Number.isFinite)) return null;
+  return {
+    changed: Math.max(0, Math.floor(changed)),
+    additions: Math.max(0, Math.floor(additions)),
+    deletions: Math.max(0, Math.floor(deletions)),
+  };
+}
+
 function mapGithubPullRequest(raw: any): GithubPullRequestSummary | null {
   const number = Number(raw?.number);
   if (!Number.isFinite(number) || number <= 0) return null;
@@ -484,6 +505,7 @@ function mapGithubPullRequest(raw: any): GithubPullRequestSummary | null {
     title,
     state,
     draft: Boolean(raw?.draft),
+    diffStats: pullRequestDiffStats(raw),
     htmlUrl,
     createdAt,
     updatedAt,
@@ -603,6 +625,7 @@ function mapGithubPullRequestFromGraphql(raw: any, owner: string): GithubPullReq
     title,
     state,
     draft: Boolean(raw?.isDraft),
+    diffStats: pullRequestDiffStats(raw),
     htmlUrl,
     createdAt,
     updatedAt,
@@ -701,6 +724,9 @@ async function listGithubPullRequestsViaGraphql(opts: {
               state
               merged
               isDraft
+              changedFiles
+              additions
+              deletions
               url
               createdAt
               updatedAt

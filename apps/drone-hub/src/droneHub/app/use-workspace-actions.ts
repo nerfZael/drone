@@ -8,6 +8,7 @@ import {
 } from './dirty-drone-apply';
 import { droneHomePath, isHostRuntimeDrone } from './helpers';
 import { normalizeRepoTransferProbeStatus, type RepoTransferProbeStatus } from './repo-transfer-probe-status';
+import { beginRepoApplyProgress } from './use-drone-hub-runtime-store';
 
 export type { RepoTransferProbeStatus } from './repo-transfer-probe-status';
 
@@ -370,6 +371,10 @@ export function useWorkspaceActions({
     if (!droneId) return;
     clearRepoOperationError();
     setRepoOp({ kind: 'pull' });
+    const endApplyProgress = beginRepoApplyProgress({
+      droneId,
+      droneLabel: repoActionDroneLabel(currentDrone),
+    });
     try {
       const url = `/api/drones/${encodeURIComponent(droneId)}/repo/pull`;
       const throwRepoPullError = (data: any, fallback: string): never => {
@@ -429,6 +434,7 @@ export function useWorkspaceActions({
     } catch (e: any) {
       setRepoOperationError(e?.message ?? String(e));
     } finally {
+      endApplyProgress();
       setRepoOp(null);
     }
   }, [clearRepoOperationError, currentDrone, postJson, setRepoOperationError, showTransientToast]);

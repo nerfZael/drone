@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,6 +24,7 @@ import {
 } from './agent-run-diff-artifacts';
 
 const MAX_TRANSCRIPT_PREVIEW_FILES_PER_WORKSPACE = 10;
+const MAX_BASE_RELATIVE_PATCH_BYTES = 32 * 1024 * 1024;
 
 type GitResult = { code: number; stdout: string; stderr: string; stdoutTruncated?: boolean };
 type GitRunOptions = { maxStdoutBytes?: number };
@@ -41,6 +42,8 @@ export type AgentRunFileChangesBaseline = {
   label: string;
   repoRoot: string;
   treeOid: string;
+  baseRef?: string;
+  baseTreeOid?: string;
   owner: AgentRunDiffArtifactOwner;
 };
 
@@ -182,6 +185,67 @@ function droneGitRunner(container: string, repoPath: string): GitRunner {
     );
     return boundedStdout(result, maxStdoutBytes);
   };
+}
+
+function normalizeBaseRef(raw: unknown): string | null {
+  const value = String(raw ?? '').trim();
+  if (!value || value.startsWith('-') || value.includes('..') || value.includes('@{')) return null;
+  return value;
+}
+
+function baseRefCandidates(baseRef: string): string[] {
+  const short = baseRef
+    .replace(/^refs\/heads\//, '')
+    .replace(/^refs\/remotes\/origin\//, '')
+    .replace(/^origin\//, '');
+  return [...new Set([`refs/remotes/origin/${short}`, `refs/heads/${short}`, baseRef])];
+}
+
+async function resolveBaseTree(
+  runGit: GitRunner,
+  baseRefRaw: unknown,
+): Promise<{ baseRef: string; treeOid: string } | null> {
+  const baseRef = normalizeBaseRef(baseRefRaw);
+  if (!baseRef) return null;
+  for (const candidate of baseRefCandidates(baseRef)) {
+    const result = await runGit(['rev-parse', '--verify', `${candidate}^{tree}`]);
+    const treeOid = result.stdout.trim().toLowerCase();
+    if (result.code === 0 && /^[0-9a-f]{40,64}$/.test(treeOid)) {
+      return { baseRef, treeOid };
+    }
+  }
+  return null;
+}
+
+async function baseRelativePatchId(
+  runGit: GitRunner,
+  fromTreeOid: string,
+  toTreeOid: string,
+): Promise<string | null> {
+  if (fromTreeOid === toTreeOid) return 'empty';
+  const diff = await gitResultOrThrow(
+    runGit,
+    [
+      'diff',
+      '--no-color',
+      '--no-ext-diff',
+      '--binary',
+      '--full-index',
+      fromTreeOid,
+      toTreeOid,
+    ],
+    undefined,
+    { maxStdoutBytes: MAX_BASE_RELATIVE_PATCH_BYTES },
+  );
+  if (diff.stdoutTruncated) return null;
+  const result = spawnSync('git', ['patch-id', '--verbatim'], {
+    input: diff.stdout,
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.status !== 0 || result.error) return null;
+  const patchId = String(result.stdout ?? '').trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+  return /^[0-9a-f]{40,64}$/.test(patchId) ? patchId : diff.stdout ? null : 'empty';
 }
 
 async function captureTree(
@@ -447,6 +511,7 @@ export async function captureDroneRunFileChangesBaseline(input: {
   const target = droneId ? droneCaptureTarget(droneId, input.drone) : null;
   if (!target) return null;
   const snapshot = await captureTree(target.runGit, target.indexPath, target.cleanup);
+  const base = await resolveBaseTree(target.runGit, input.drone?.repo?.baseRef);
   return {
     version: 1,
     capturedAt: new Date().toISOString(),
@@ -455,6 +520,12 @@ export async function captureDroneRunFileChangesBaseline(input: {
     label: target.label,
     repoRoot: snapshot.repoRoot,
     treeOid: snapshot.treeOid,
+    ...(base
+      ? {
+          baseRef: base.baseRef,
+          baseTreeOid: base.treeOid,
+        }
+      : {}),
     owner: { droneId, ...(input.owner ?? {}) },
   };
 }
@@ -469,6 +540,21 @@ export async function finalizeDroneRunFileChanges(input: {
   const target = droneCaptureTarget(droneId, input.drone);
   if (!target) return null;
   const current = await captureTree(target.runGit, target.indexPath, target.cleanup);
+  if (input.baseline.treeOid === current.treeOid) return null;
+  if (input.baseline.baseRef && input.baseline.baseTreeOid) {
+    const currentBase = await resolveBaseTree(target.runGit, input.baseline.baseRef);
+    if (currentBase && currentBase.treeOid !== input.baseline.baseTreeOid) {
+      const [baselinePatchId, currentPatchId] = await Promise.all([
+        baseRelativePatchId(
+          target.runGit,
+          input.baseline.baseTreeOid,
+          input.baseline.treeOid,
+        ),
+        baseRelativePatchId(target.runGit, currentBase.treeOid, current.treeOid),
+      ]);
+      if (baselinePatchId && currentPatchId && baselinePatchId === currentPatchId) return null;
+    }
+  }
   const workspace = await summarizeTrees({
     baseline: input.baseline,
     currentTreeOid: current.treeOid,

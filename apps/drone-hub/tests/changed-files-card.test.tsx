@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { buildAgentRunChangeTree } from '@drone/assistant-chat';
 
+import { AgentMessageExtras } from '../src/droneHub/chat/AgentMessageExtras';
 import { AgentRunChangedFilesTree } from '../src/droneHub/chat/AgentRunChangedFilesTree';
 import { ChangedFilesCard } from '../src/droneHub/chat/ChangedFilesCard';
 
@@ -46,7 +47,6 @@ describe('changed files card', () => {
       html.indexOf('aria-label="+4 net lines"'),
     );
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('bg-[var(--surface-inset-faint)]');
     expect(html).not.toContain('src/new.ts');
   });
 
@@ -58,6 +58,25 @@ describe('changed files card', () => {
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('max-h-72');
     expect(html).toContain('overflow-y-auto');
+  });
+
+  test('keeps message actions in flow below expanded file changes', () => {
+    const html = renderToStaticMarkup(
+      <AgentMessageExtras
+        text="Completed the requested changes."
+        tasks={[]}
+        messageId="message-with-changes"
+        fileChanges={summary}
+        initiallyExpandFileChanges
+        onCreateJobs={() => undefined}
+      />,
+    );
+
+    const changedFilesIndex = html.indexOf('aria-label="Files changed by this agent run"');
+    const actionsIndex = html.indexOf('data-agent-message-actions="true"');
+
+    expect(changedFilesIndex).toBeGreaterThanOrEqual(0);
+    expect(actionsIndex).toBeGreaterThan(changedFilesIndex);
   });
 
   test('does not render empty summaries', () => {

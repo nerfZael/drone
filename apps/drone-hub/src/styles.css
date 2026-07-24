@@ -677,10 +677,17 @@ code, pre {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted-dim); }
 
-.dh-changed-files-scrollbar::-webkit-scrollbar { width: 3px; }
-.dh-changed-files-scrollbar {
-  scrollbar-color: var(--border) transparent;
-  scrollbar-width: thin;
+.dh-changed-files-scrollbar::-webkit-scrollbar { width: 2px; }
+.dh-changed-files-scrollbar::-webkit-scrollbar-button {
+  -webkit-appearance: none;
+  display: none;
+  width: 0;
+  height: 0;
+}
+.dh-changed-files-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.dh-changed-files-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
 }
 
 .dh-sidebar-scrollbar::-webkit-scrollbar { width: 2px; }
@@ -706,6 +713,11 @@ code, pre {
 .dh-sidebar-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--border); }
 
 @supports (-moz-appearance: none) {
+  .dh-changed-files-scrollbar {
+    scrollbar-color: var(--border) transparent;
+    scrollbar-width: thin;
+  }
+
   .dh-sidebar-scrollbar {
     scrollbar-color: var(--border-subtle) transparent;
     scrollbar-width: thin;
@@ -2249,4 +2261,16 @@ select:disabled optgroup {
 
 .dh-changes-dock .rdv-wrapper .diff .token.variable {
   color: var(--syntax-variable);
+}
+
+@keyframes repo-sync-progress {
+  0% {
+    transform: translateX(-120%);
+  }
+  55% {
+    transform: translateX(110%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
 }

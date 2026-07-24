@@ -39,7 +39,7 @@ import { parseIsoDateMs, type GroupMultiChatColumnRuntimeState } from './group-m
 import { createCanvasChatNodeId } from './app-config';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
-import { useLocalChatBusy } from './use-drone-hub-runtime-store';
+import { beginRepoApplyProgress, useLocalChatBusy } from './use-drone-hub-runtime-store';
 import { droneChatEventMatches, fetchDroneChatState, fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
 import { subscribeDroneChatEvents } from './chat-events';
 
@@ -534,6 +534,10 @@ export function GroupMultiChatColumn({
     if (disabledByProvisioning || quickActionBusy || !repoAttached) return;
     setQuickActionBusy('pull');
     setQuickActionError(null);
+    const endApplyProgress = beginRepoApplyProgress({
+      droneId: drone.id,
+      droneLabel: shownName,
+    });
     try {
       const postPull = async (
         body: any,
@@ -597,6 +601,7 @@ export function GroupMultiChatColumn({
     } catch (err: any) {
       setQuickActionError(err?.message ?? String(err));
     } finally {
+      endApplyProgress();
       setQuickActionBusy(null);
     }
   }, [disabledByProvisioning, drone.id, quickActionBusy, repoAttached, shownName]);

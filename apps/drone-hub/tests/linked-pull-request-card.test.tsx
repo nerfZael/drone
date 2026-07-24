@@ -33,6 +33,7 @@ const openPayload: Extract<RepoPullRequestsPayload, { ok: true }> = {
       title: 'Add resilient workspace file and folder transfers',
       state: 'open',
       draft: false,
+      diffStats: { changed: 13, additions: 655, deletions: 14 },
       htmlUrl: 'https://github.com/nerfZael/drone/pull/596',
       createdAt: '2026-07-15T10:00:00.000Z',
       updatedAt: '2026-07-15T10:05:00.000Z',
@@ -105,6 +106,7 @@ describe('linked pull request messages', () => {
     const html = renderToStaticMarkup(
       <LinkedPullRequestCards
         text="PR created: https://github.com/nerfZael/drone/pull/596"
+        initiallyExpanded
         context={{
           droneId: 'drone-a',
           repoPath: '/work/repo',
@@ -125,6 +127,7 @@ describe('linked pull request messages', () => {
     const html = renderToStaticMarkup(
       <LinkedPullRequestCards
         text="PR created: https://github.com/nerfZael/drone/pull/596"
+        initiallyExpanded
         context={{
           droneId: 'drone-a',
           repoPath: '/work/repo',
@@ -139,14 +142,16 @@ describe('linked pull request messages', () => {
 
     expect(html).toContain('aria-label="Loading pull request status"');
     expect(html).toContain('animate-spin');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain('<details open=""');
     expect(html).not.toContain('>Loading status<');
-    expect(html).not.toContain('rounded border px-1.5');
   });
 
   test('renders live title, checks, branches, and actions from the existing open-PR summary', () => {
     const html = renderToStaticMarkup(
       <LinkedPullRequestCards
         text="PR created: https://github.com/nerfZael/drone/pull/596"
+        initiallyExpanded
         context={{
           droneId: 'drone-a',
           repoPath: '/work/repo',
@@ -168,24 +173,44 @@ describe('linked pull request messages', () => {
     expect(html).not.toContain('>View<');
     expect(html).not.toContain('Open on GitHub');
     expect(html).not.toContain('Merge requires confirmation');
-    expect(html).toContain('border-l-2');
-    expect(html).not.toContain('rounded-[var(--radius-medium)]');
-    expect(html).toContain('w-full');
-    expect(html).toContain('max-w-[42rem]');
-    expect(html).not.toContain('hover:border-l-');
-    expect(html).not.toContain('sm:grid-cols-[minmax(0,1fr)_auto]');
+    expect(html).toContain('<details open=""');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-label="Pull request state: Open"');
     expect(html).toContain('aria-label="Pull request actions"');
-    expect(html).not.toContain('shadow-[inset_3px_0_0');
     expect(html).toContain('Force merge');
     expect(html).toContain('Close');
-    expect(html).toContain('ml-auto flex shrink-0');
-    expect(html).toContain('border-[var(--red-border)] bg-[var(--red-subtle)]');
     expect(html.indexOf('Add resilient workspace file and folder transfers')).toBeLessThan(html.indexOf('Close'));
     expect(html.indexOf('Close')).toBeLessThan(html.indexOf('Force merge'));
     expect(html.indexOf('Force merge')).toBeLessThan(html.indexOf('Checks pending'));
     expect(html).toContain('aria-label="Pull request status details"');
     expect(html).toContain('h-1 w-1 flex-shrink-0 rounded-full bg-current');
     expect(html.match(/href=/g)).toHaveLength(1);
+  });
+
+  test('collapses open pull requests in historical messages to one summary row', () => {
+    const html = renderToStaticMarkup(
+      <LinkedPullRequestCards
+        text="PR created: https://github.com/nerfZael/drone/pull/596"
+        context={{
+          droneId: 'drone-a',
+          repoPath: '/work/repo',
+          repoAttached: true,
+          disabled: false,
+          openPullRequestsData: openPayload,
+          openPullRequestsLoading: false,
+          openPullRequestsError: null,
+        }}
+      />,
+    );
+
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('Add resilient workspace file and folder transfers');
+    expect(html).toContain('aria-label="Pull request state: Open"');
+    expect(html).toContain('aria-label="Pull request actions"');
+    expect(html).toContain('Force merge');
+    expect(html).toContain('Close');
+    expect(html).not.toContain('feature/workspace-transfers → main');
+    expect(html).not.toContain('<details open=""');
   });
 
   test('hides secondary status details after a pull request is merged', () => {
@@ -198,6 +223,7 @@ describe('linked pull request messages', () => {
     const html = renderToStaticMarkup(
       <LinkedPullRequestCards
         text="PR created: https://github.com/nerfZael/drone/pull/596"
+        initiallyExpanded
         context={{
           droneId: 'drone-a',
           repoPath: '/work/repo',
@@ -210,7 +236,10 @@ describe('linked pull request messages', () => {
       />,
     );
 
-    expect(html).toContain('>merged</span>');
+    expect(html).toContain('aria-label="Pull request state: Merged"');
+    expect(html).toContain('>Merged</span>');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain('<details open=""');
     expect(html).not.toContain('Checks passed');
     expect(html).not.toContain('Approved');
     expect(html).not.toContain('aria-label="Pull request status details"');

@@ -10,6 +10,13 @@ type Updater<T> = T | ((prev: T) => T);
 
 type DroneHubRuntimePersistedState = Pick<DroneHubRuntimeState, 'lastAgentSnippetByChatNodeId'>;
 
+export type RepoApplyProgress = {
+  token: string;
+  droneId: string;
+  droneLabel: string;
+  startedAt: number;
+};
+
 type DroneHubRuntimeState = {
   optimisticallyDeletedDrones: Record<string, boolean>;
   startupSeedByDrone: Record<string, StartupSeedState>;
@@ -25,6 +32,7 @@ type DroneHubRuntimeState = {
   sessionError: string | null;
   loadingSession: boolean;
   pinnedToBottom: boolean;
+  repoApplyProgressByToken: Record<string, RepoApplyProgress>;
   setOptimisticallyDeletedDrones: (next: Updater<Record<string, boolean>>) => void;
   setStartupSeedByDrone: (next: Updater<Record<string, StartupSeedState>>) => void;
   setApprovalRequiredByChatNodeId: (next: Updater<Record<string, boolean>>) => void;
@@ -62,6 +70,7 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
       sessionError: null,
       loadingSession: false,
       pinnedToBottom: true,
+      repoApplyProgressByToken: {},
       setOptimisticallyDeletedDrones: (next) =>
         set((s) => ({
           optimisticallyDeletedDrones: resolveNext(s.optimisticallyDeletedDrones, next),
@@ -135,12 +144,43 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
           approvalRequiredByChatNodeId: {},
           localBusyChatCountByNodeId: {},
           unreadAgentMessageByChatNodeId: {},
+          repoApplyProgressByToken: {},
           lastAgentSnippetByChatNodeId,
         };
       },
     },
   ),
 );
+
+export function beginRepoApplyProgress(input: {
+  droneId: string;
+  droneLabel: string;
+}): () => void {
+  const token = `repo-apply-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const progress: RepoApplyProgress = {
+    token,
+    droneId: String(input.droneId ?? '').trim(),
+    droneLabel: String(input.droneLabel ?? '').trim() || 'drone',
+    startedAt: Date.now(),
+  };
+  useDroneHubRuntimeStore.setState((state) => ({
+    repoApplyProgressByToken: {
+      ...state.repoApplyProgressByToken,
+      [token]: progress,
+    },
+  }));
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    useDroneHubRuntimeStore.setState((state) => {
+      if (!state.repoApplyProgressByToken[token]) return {};
+      const next = { ...state.repoApplyProgressByToken };
+      delete next[token];
+      return { repoApplyProgressByToken: next };
+    });
+  };
+}
 
 export function useChatApprovalRequired(chatNodeId: string): boolean {
   return useDroneHubRuntimeStore(

@@ -25,6 +25,7 @@ const pullRequest: RepoPullRequestSummary = {
   title: 'Workspace transfers',
   state: 'open',
   draft: false,
+  diffStats: { changed: 13, additions: 655, deletions: 14 },
   htmlUrl: 'https://github.com/nerfZael/drone/pull/596',
   createdAt: '2026-07-15T10:00:00.000Z',
   updatedAt: '2026-07-15T10:05:00.000Z',

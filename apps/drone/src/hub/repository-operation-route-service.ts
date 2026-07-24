@@ -2649,11 +2649,6 @@ function createRepositoryOperationServiceHandler(
         const requestedAutoCommitMessage = String((body as any)?.commitMessage ?? '').trim();
         const autoCommitMessage = requestedAutoCommitMessage || defaultAutoCommitMessage;
 
-        await setDroneHubMetaByIdentity({
-          droneId,
-          hub: { phase: 'seeding', message: 'Pulling repo changes…' },
-        });
-
         let repoRoot = '';
         let fromRef = '';
         let exportPath = '';
@@ -2707,7 +2702,6 @@ function createRepositoryOperationServiceHandler(
           const clean = await gitIsClean(repoRoot);
           if (!clean) {
             hubLog('warn', 'Repo pull blocked by local host changes', { droneName, repoRoot });
-            await setDroneHubMetaByIdentity({ droneId, hub: null });
             json(res, 409, {
               ok: false,
               error:
@@ -2799,7 +2793,6 @@ function createRepositoryOperationServiceHandler(
               repoPathInContainer,
               dirtyFileCount: droneDirtyFileCount,
             });
-            await setDroneHubMetaByIdentity({ droneId, hub: null });
             json(res, 409, {
               ok: false,
               error:
@@ -2977,7 +2970,6 @@ function createRepositoryOperationServiceHandler(
               fromRef,
               exportedHeadSha,
             });
-            await setDroneHubMetaByIdentity({ droneId, hub: null });
             json(res, 200, {
               ok: true,
               name: droneName,
@@ -3053,10 +3045,6 @@ function createRepositoryOperationServiceHandler(
                   };
                   return dd;
                 },
-              });
-              await setDroneHubMetaByIdentity({
-                droneId,
-                hub: { phase: 'error', message: 'Repo pull needs reseed (history mismatch)' },
               });
               json(res, 409, {
                 ok: false,
@@ -3167,7 +3155,6 @@ function createRepositoryOperationServiceHandler(
             },
           });
 
-          await setDroneHubMetaByIdentity({ droneId, hub: null });
           json(res, 200, {
             ok: true,
             name: droneName,
@@ -3250,10 +3237,6 @@ function createRepositoryOperationServiceHandler(
                   return dd;
                 },
               });
-              await setDroneHubMetaByIdentity({
-                droneId,
-                hub: { phase: 'error', message: 'Repo pull found conflicts before host apply' },
-              });
               json(res, 409, {
                 ok: false,
                 error: fullMsg,
@@ -3328,13 +3311,6 @@ function createRepositoryOperationServiceHandler(
                 return dd;
               },
             });
-            await setDroneHubMetaByIdentity({
-              droneId,
-              hub: {
-                phase: 'error',
-                message: `Repo pull conflict${patchErr.patchName ? ` (${patchErr.patchName})` : ''}: resolve conflicts in host repo`,
-              },
-            });
             json(res, 409, {
               ok: false,
               error: fullMsg,
@@ -3391,10 +3367,6 @@ function createRepositoryOperationServiceHandler(
               };
               return dd;
             },
-          });
-          await setDroneHubMetaByIdentity({
-            droneId,
-            hub: { phase: 'error', message: `Repo pull failed: ${msg}` },
           });
           json(res, statusCode, {
             ok: false,

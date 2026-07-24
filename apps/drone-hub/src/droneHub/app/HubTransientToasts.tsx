@@ -1,4 +1,8 @@
 import React from 'react';
+import {
+  useDroneHubRuntimeStore,
+  type RepoApplyProgress,
+} from './use-drone-hub-runtime-store';
 
 type NameSuggestToast = {
   id: string;
@@ -30,9 +34,24 @@ export function HubTransientToasts({
   const nameSuggestToastLabelClass =
     nameSuggestToastTone === 'success' ? 'text-[var(--green)]' : 'text-[var(--red)]';
   const voiceLevel = Math.max(0, Math.min(1, Number(nameSuggestToast?.voiceLevel ?? 0)));
+  const repoApplyProgressByToken = useDroneHubRuntimeStore(
+    (state) => state.repoApplyProgressByToken,
+  );
+  const repoApplyProgress = React.useMemo(
+    () =>
+      Object.values(repoApplyProgressByToken).sort((a, b) => a.startedAt - b.startedAt),
+    [repoApplyProgressByToken],
+  );
 
   return (
     <>
+      <RepoApplyProgressToast
+        progress={repoApplyProgress}
+        stackedToastCount={
+          (nameSuggestToast ? 1 : 0) + (jobsModalError && !jobsModalOpen ? 1 : 0)
+        }
+      />
+
       {nameSuggestToast && (
         <div
           onClick={onDismissNameSuggestToast}
@@ -73,6 +92,61 @@ export function HubTransientToasts({
         </div>
       )}
     </>
+  );
+}
+
+export function RepoApplyProgressToast({
+  progress,
+  stackedToastCount = 0,
+}: {
+  progress: RepoApplyProgress[];
+  stackedToastCount?: number;
+}) {
+  const applyCount = progress.length;
+  if (applyCount === 0) return null;
+  const applyLabel =
+    applyCount === 1 ? progress[0]?.droneLabel ?? 'drone' : `${applyCount} drones`;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={`Applying changes from ${applyLabel} to host`}
+      className={`fixed right-4 z-50 w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-[var(--radius-large)] border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_54px_var(--shadow-color)] animate-slide-up ${
+        stackedToastCount >= 2
+          ? 'bottom-[210px]'
+          : stackedToastCount === 1
+            ? 'bottom-[112px]'
+            : 'bottom-4'
+      }`}
+    >
+      <div className="flex items-center gap-3 px-4 py-3.5">
+        <div
+          aria-hidden="true"
+          className="relative flex h-8 w-8 flex-none items-center justify-center rounded-full border border-[var(--info-border)] bg-[var(--info-subtle)]"
+        >
+          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--info-border)] border-t-[var(--info)] motion-reduce:animate-none" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div
+            className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--info)]"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Applying changes to host
+          </div>
+          <div className="mt-0.5 truncate text-[var(--text-11)] text-[var(--muted)]">
+            Syncing from {applyLabel}. You can keep chatting.
+          </div>
+        </div>
+      </div>
+      <div
+        role="progressbar"
+        aria-label="Apply progress"
+        className="h-0.5 overflow-hidden bg-[var(--surface-softest)]"
+      >
+        <span className="block h-full w-1/3 animate-[repo-sync-progress_1.4s_ease-in-out_infinite] rounded-full bg-[var(--info)] motion-reduce:w-full motion-reduce:animate-none motion-reduce:opacity-60" />
+      </div>
+    </div>
   );
 }
 

@@ -482,6 +482,11 @@ export type RepoPullRequestSummary = {
   title: string;
   state: RepoPullRequestState;
   draft: boolean;
+  diffStats: {
+    changed: number;
+    additions: number;
+    deletions: number;
+  } | null;
   htmlUrl: string;
   createdAt: string;
   updatedAt: string;

@@ -1606,7 +1606,7 @@ export function AssistantDock({
               droneHomePath: messageFeatures.droneHomePath,
               onOpenFileReference: messageFeatures.onOpenFileReference,
               onOpenLink: messageFeatures.onOpenLink,
-              linkedCardsClassName: 'mb-8 md:mb-0 md:mr-40',
+              initiallyExpandLinkedPullRequests: isLatestActivity,
             }}
             droneMentionLinks={droneMentionLinks}
             onOpenDroneMention={openDroneMention}
