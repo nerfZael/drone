@@ -32,7 +32,7 @@ describe('spawn model history', () => {
   test('includes the active custom model in the dropdown entries', () => {
     const entries = buildSpawnModelMenuEntries(['gpt-5.4'], 'custom-model');
     expect(entries).toHaveLength(3);
-    expect(entries[0]).toMatchObject({ value: '', label: 'Default model' });
+    expect(entries[0]).toMatchObject({ value: '', label: 'Auto' });
     expect(entries[1]).toMatchObject({ value: 'custom-model', label: 'custom-model (custom)' });
     expect(entries[2]).toMatchObject({ value: 'gpt-5.4', label: 'gpt-5.4' });
   });

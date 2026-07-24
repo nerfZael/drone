@@ -969,8 +969,6 @@ export function createChatPromptRouteHandler(
               String((d as any)?.containerName ?? (d as any)?.name ?? droneId).trim() || droneId,
             containerPort: Number((d as any)?.containerPort ?? 7777),
             runtime: droneRuntime(d),
-            droneName: droneId,
-            chatName,
             agentId: agent.id,
             forceRefresh,
           });

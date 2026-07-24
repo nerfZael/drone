@@ -157,6 +157,10 @@ import {
   type AgentTurnRuntimeMetadata,
 } from './builtin-transcript-sessions';
 import { normalizeAgentPlan, sameAgentPlan } from './agent-plan';
+import { AgentModelCatalogService } from './agent-model-catalog/service';
+import { createAgentModelCatalogStore } from './agent-model-catalog/store';
+import type { AgentModelCatalogTarget } from './agent-model-catalog/types';
+import { registerAgentModelCatalogRoutes } from './agent-model-catalog/routes';
 import {
   normalizeAgentsMarkdown,
   normalizeRepoAgentsMode,
@@ -2389,15 +2393,6 @@ function parseAgentPermissionModeForUpdate(raw: unknown): AgentPermissionMode {
   throw new Error('agentPermissionMode must be full-access or read-only');
 }
 
-type DiscoveredModelOption = {
-  id: string;
-  label: string;
-  isDefault?: boolean;
-  isCurrent?: boolean;
-  reasoningLevels?: string[];
-  defaultReasoningLevel?: string;
-};
-
 type TranscriptTurn = {
   at: string;
   id?: string;
@@ -2679,23 +2674,7 @@ function parseSeedAgent(raw: any): ChatAgentConfig | null {
 }
 
 const CHAT_MODEL_MAX_LEN = 160;
-const CHAT_MODEL_DISCOVERY_CACHE_TTL_MS = 5 * 60 * 1000;
-const chatModelDiscoveryCache = new Map<
-  string,
-  {
-    atMs: number;
-    models: DiscoveredModelOption[];
-    error?: string;
-  }
->();
-const latestChatModelDiscoveryByAgent = new Map<
-  string,
-  {
-    atMs: number;
-    models: DiscoveredModelOption[];
-    source: 'live' | 'cache';
-  }
->();
+const CLI_MODEL_FLAG_CACHE_TTL_MS = 5 * 60 * 1000;
 const cliModelFlagSupportCache = new Map<string, { atMs: number; supported: boolean }>();
 const PULL_PREVIEW_HOST_MERGE_CACHE_TTL_MS = 25_000;
 const pullPreviewHostMergeCache = new Map<
@@ -2763,6 +2742,13 @@ function parseChatModelForUpdate(raw: any): string | null {
   return s;
 }
 
+function parseChatReasoningForUpdate(raw: unknown): string | null {
+  if (raw == null || String(raw).trim() === '') return null;
+  const reasoning = normalizeChatReasoning(raw);
+  if (!reasoning) throw new Error('reasoning contains invalid characters');
+  return reasoning;
+}
+
 function stripAnsiFromCliOutput(text: string): string {
   // eslint-disable-next-line no-control-regex
   return String(text ?? '')
@@ -2773,454 +2759,60 @@ function stripAnsiFromCliOutput(text: string): string {
     .replace(/\r/g, '');
 }
 
-function modelDiscoveryCacheKey(opts: {
-  droneName: string;
-  chatName: string;
-  agent: BuiltinAgentId;
-}): string {
-  return `${opts.droneName}::${opts.chatName}::${opts.agent}`;
+let agentModelCatalogService: AgentModelCatalogService | null = null;
+
+function getAgentModelCatalogService(): AgentModelCatalogService {
+  if (agentModelCatalogService) return agentModelCatalogService;
+  agentModelCatalogService = new AgentModelCatalogService(
+    {
+      runContainer: async (containerName, command, timeoutMs) =>
+        dvmExec(containerName, 'bash', ['-lc', command], { timeoutMs }),
+      runHost: async (command, timeoutMs) =>
+        runHostCommand('bash', ['-lc', command], { timeoutMs }),
+      readHostFile: (filePath) => fs.readFile(filePath, 'utf8'),
+      hostHomeDirectory: () => os.homedir(),
+      hostModelListCommand: (agentId) =>
+        agentId === 'blip' ? `${resolveBlipPromptCommand('host')} --list-models` : null,
+      ensureContainerAgent: async (agentId, target) => {
+        if (agentId !== 'blip' || !target.containerName) return;
+        await upgradeDroneDaemonInContainer({
+          containerName: target.containerName,
+          containerPort: Number(target.containerPort ?? 7777),
+        });
+      },
+      timeoutMs: defaultSeedBootstrapTimeoutMs,
+    },
+    createAgentModelCatalogStore(),
+  );
+  return agentModelCatalogService;
 }
 
-function normalizeDiscoveredReasoningLevels(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const levels: string[] = [];
-  const seen = new Set<string>();
-  for (const item of raw) {
-    const value =
-      typeof item === 'string'
-        ? item
-        : item && typeof item === 'object'
-          ? ((item as any).reasoning_effort ??
-            (item as any).reasoningEffort ??
-            (item as any).effort ??
-            (item as any).level ??
-            (item as any).name)
-          : '';
-    const level = normalizeChatReasoning(value);
-    if (!level || seen.has(level)) continue;
-    seen.add(level);
-    levels.push(level);
-  }
-  return levels;
-}
-
-function reasoningMetadataFromDiscoveredModel(value: any): {
-  reasoningLevels?: string[];
-  defaultReasoningLevel?: string;
-} {
-  const reasoningLevels = normalizeDiscoveredReasoningLevels(
-    value?.reasoningLevels ??
-      value?.reasoning_levels ??
-      value?.supportedReasoningLevels ??
-      value?.supported_reasoning_levels ??
-      value?.supportedReasoningEfforts ??
-      value?.supported_reasoning_efforts,
-  );
-  const defaultReasoningLevel = normalizeChatReasoning(
-    value?.defaultReasoningLevel ??
-      value?.default_reasoning_level ??
-      value?.defaultReasoningEffort ??
-      value?.default_reasoning_effort,
-  );
+function sharedAgentCatalogTarget(opts: {
+  runtime?: DroneRuntime;
+  containerName?: string;
+  containerPort?: number;
+}): AgentModelCatalogTarget {
+  const runtime = opts.runtime ?? 'container';
   return {
-    ...(reasoningLevels.length > 0 ? { reasoningLevels } : {}),
-    ...(defaultReasoningLevel ? { defaultReasoningLevel } : {}),
+    runtime,
+    installationKey: `shared:${runtime}`,
+    ...(opts.containerName ? { containerName: opts.containerName } : {}),
+    ...(opts.containerPort ? { containerPort: opts.containerPort } : {}),
   };
 }
 
-function parseDiscoveredModelsFromOutput(raw: string): DiscoveredModelOption[] {
-  const text = stripAnsiFromCliOutput(raw);
-  const out: DiscoveredModelOption[] = [];
-  const seen = new Set<string>();
-
-  const add = (
-    idRaw: any,
-    labelRaw?: any,
-    opts?: {
-      isDefault?: boolean;
-      isCurrent?: boolean;
-      reasoningLevels?: string[];
-      defaultReasoningLevel?: string;
-    },
-  ) => {
-    const id = String(idRaw ?? '').trim();
-    if (!id) return;
-    if (id.length > CHAT_MODEL_MAX_LEN) return;
-    if (seen.has(id)) return;
-    seen.add(id);
-    const label = String(labelRaw ?? '').trim() || id;
-    out.push({
-      id,
-      label,
-      ...(opts?.isDefault ? { isDefault: true } : {}),
-      ...(opts?.isCurrent ? { isCurrent: true } : {}),
-      ...(opts?.reasoningLevels?.length ? { reasoningLevels: opts.reasoningLevels } : {}),
-      ...(opts?.defaultReasoningLevel ? { defaultReasoningLevel: opts.defaultReasoningLevel } : {}),
-    });
-  };
-
-  const addFromUnknown = (value: any) => {
-    if (!value) return;
-    if (Array.isArray(value)) {
-      for (const item of value) addFromUnknown(item);
-      return;
-    }
-    if (typeof value === 'string') {
-      add(value, value);
-      return;
-    }
-    if (typeof value !== 'object') return;
-    const id =
-      (value as any).id ?? (value as any).model ?? (value as any).name ?? (value as any).slug;
-    const label =
-      (value as any).label ??
-      (value as any).displayName ??
-      (value as any).name ??
-      (value as any).model ??
-      id;
-    add(id, label, {
-      isDefault: Boolean((value as any).default),
-      isCurrent: Boolean((value as any).current),
-      ...reasoningMetadataFromDiscoveredModel(value),
-    });
-    const nested = (value as any).models ?? (value as any).items ?? (value as any).data ?? null;
-    if (nested) addFromUnknown(nested);
-  };
-
-  const trimmed = text.trim();
-  if (!trimmed) return out;
-
-  // Try full JSON payload first.
-  try {
-    const parsed = JSON.parse(trimmed);
-    addFromUnknown(parsed);
-  } catch {
-    // ignore
-  }
-
-  // Try JSONL-ish lines.
-  const lines = text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  for (const line of lines) {
-    if (!(line.startsWith('{') || line.startsWith('['))) continue;
-    try {
-      const parsed = JSON.parse(line);
-      addFromUnknown(parsed);
-    } catch {
-      // ignore
-    }
-  }
-
-  // Parse human-readable model lists (e.g. "id - Label (default)").
-  for (const rawLine of lines) {
-    const line = rawLine.replace(/^\s*[-*]\s+/, '');
-    if (!line) continue;
-    const low = line.toLowerCase();
-    if (
-      low.startsWith('usage:') ||
-      low.startsWith('available models') ||
-      low.startsWith('loading models') ||
-      low.startsWith('tip:') ||
-      low.startsWith('options:')
-    ) {
-      continue;
-    }
-    const withLabel = line.match(/^([A-Za-z0-9][A-Za-z0-9._:/+-]{0,159})\s*-\s*(.+)$/);
-    if (withLabel) {
-      const label = String(withLabel[2] ?? '')
-        .replace(/\s+\((default|current)\)\s*$/i, '')
-        .trim();
-      add(withLabel[1], label || withLabel[1], {
-        isDefault: /\(default\)\s*$/i.test(line),
-        isCurrent: /\(current\)\s*$/i.test(line),
-      });
-      continue;
-    }
-    const idOnly = line.match(/^([A-Za-z0-9][A-Za-z0-9._:/+-]{0,159})$/);
-    if (idOnly) add(idOnly[1], idOnly[1]);
-  }
-
-  return out;
-}
-
-function parseCodexModelsCache(raw: string): DiscoveredModelOption[] {
-  const out: DiscoveredModelOption[] = [];
-  const seen = new Set<string>();
-  const add = (
-    idRaw: any,
-    labelRaw?: any,
-    opts?: {
-      isDefault?: boolean;
-      isCurrent?: boolean;
-      reasoningLevels?: string[];
-      defaultReasoningLevel?: string;
-    },
-  ) => {
-    const id = String(idRaw ?? '').trim();
-    if (!id || seen.has(id) || id.length > CHAT_MODEL_MAX_LEN) return;
-    seen.add(id);
-    const label = String(labelRaw ?? '').trim() || id;
-    out.push({
-      id,
-      label,
-      ...(opts?.isDefault ? { isDefault: true } : {}),
-      ...(opts?.isCurrent ? { isCurrent: true } : {}),
-      ...(opts?.reasoningLevels?.length ? { reasoningLevels: opts.reasoningLevels } : {}),
-      ...(opts?.defaultReasoningLevel ? { defaultReasoningLevel: opts.defaultReasoningLevel } : {}),
-    });
-  };
-  try {
-    const parsed = JSON.parse(String(raw ?? ''));
-    const list = Array.isArray((parsed as any)?.models) ? (parsed as any).models : [];
-    const current = String(
-      (parsed as any)?.current_model ?? (parsed as any)?.currentModel ?? '',
-    ).trim();
-    const def = String(
-      (parsed as any)?.default_model ?? (parsed as any)?.defaultModel ?? '',
-    ).trim();
-    for (const m of list) {
-      const id = (m as any)?.slug ?? (m as any)?.id ?? (m as any)?.model ?? (m as any)?.name;
-      const label = (m as any)?.display_name ?? (m as any)?.displayName ?? (m as any)?.label ?? id;
-      const modelId = String(id ?? '').trim();
-      add(modelId, label, {
-        isCurrent: current ? modelId === current : false,
-        isDefault: def ? modelId === def : false,
-        ...reasoningMetadataFromDiscoveredModel(m),
-      });
-    }
-  } catch {
-    return [];
-  }
-  return out;
-}
-async function discoverModelsForBuiltinAgent(opts: {
-  containerName: string;
+async function discoverAndRememberModelsForBuiltinAgent(opts: {
+  containerName?: string;
   containerPort?: number;
   runtime?: DroneRuntime;
-  droneName: string;
-  chatName: string;
   agentId: BuiltinAgentId;
   forceRefresh?: boolean;
-}): Promise<{
-  models: DiscoveredModelOption[];
-  source: 'live' | 'cache' | 'none';
-  discoveredAt: string;
-  error?: string;
-}> {
-  const key = modelDiscoveryCacheKey({
-    droneName: opts.droneName,
-    chatName: opts.chatName,
-    agent: opts.agentId,
+}) {
+  return getAgentModelCatalogService().get({
+    agentId: opts.agentId,
+    target: sharedAgentCatalogTarget(opts),
+    forceRefresh: opts.forceRefresh,
   });
-  const now = Date.now();
-  const cached = chatModelDiscoveryCache.get(key);
-  if (!opts.forceRefresh && cached && now - cached.atMs < CHAT_MODEL_DISCOVERY_CACHE_TTL_MS) {
-    return {
-      models: cached.models,
-      source: 'cache',
-      discoveredAt: new Date(cached.atMs).toISOString(),
-      ...(cached.error ? { error: cached.error } : {}),
-    };
-  }
-
-  const binByAgent: Record<BuiltinAgentId, string> = {
-    cursor: 'agent',
-    codex: 'codex',
-    claude: 'claude',
-    opencode: 'opencode',
-    pi: 'pi',
-    blip: 'blip',
-  };
-  const bin = binByAgent[opts.agentId];
-  const runtime = opts.runtime ?? 'container';
-
-  if (runtime === 'host') {
-    if (opts.agentId !== 'blip') {
-      const error = `${bin} model discovery is not supported for host runtime`;
-      chatModelDiscoveryCache.set(key, { atMs: now, models: [], error });
-      return { models: [], source: 'none', discoveredAt: new Date(now).toISOString(), error };
-    }
-    const r = await runHostCommand(
-      'bash',
-      ['-lc', `${resolveBlipPromptCommand('host')} --list-models`],
-      {
-        timeoutMs: defaultSeedBootstrapTimeoutMs(),
-      },
-    );
-    const parsed = parseDiscoveredModelsFromOutput(`${r.stdout || ''}\n${r.stderr || ''}`);
-    if (parsed.length > 0) {
-      chatModelDiscoveryCache.set(key, { atMs: now, models: parsed });
-      return { models: parsed, source: 'live', discoveredAt: new Date(now).toISOString() };
-    }
-    const error = r.stderr || r.stdout || 'failed discovering Blip models';
-    chatModelDiscoveryCache.set(key, { atMs: now, models: [], error });
-    return { models: [], source: 'none', discoveredAt: new Date(now).toISOString(), error };
-  }
-
-  let exists = await dvmExec(opts.containerName, 'bash', [
-    '-lc',
-    `command -v ${bin} >/dev/null 2>&1`,
-  ]);
-  if (exists.code !== 0 && opts.agentId === 'blip') {
-    try {
-      await upgradeDroneDaemonInContainer({
-        containerName: opts.containerName,
-        containerPort: Number(opts.containerPort ?? 7777),
-      });
-      exists = await dvmExec(opts.containerName, 'bash', [
-        '-lc',
-        `command -v ${bin} >/dev/null 2>&1`,
-      ]);
-    } catch {
-      // Fall through to the normal "not installed" response below.
-    }
-  }
-  if (exists.code !== 0) {
-    const error = `${bin} is not installed in this drone`;
-    chatModelDiscoveryCache.set(key, { atMs: now, models: [], error });
-    return { models: [], source: 'none', discoveredAt: new Date(now).toISOString(), error };
-  }
-
-  const help = await dvmExec(opts.containerName, 'bash', ['-lc', `${bin} --help`]);
-  const helpText = stripAnsiFromCliOutput(`${help.stdout || ''}\n${help.stderr || ''}`);
-  const hasModelsCommand = helpText
-    .split('\n')
-    .map((l) => l.trim())
-    .some((l) => /^models?(?:\s{2,}.*)?$/i.test(l));
-  const candidates: string[] = [];
-  if (/\b--list-models\b/i.test(helpText)) candidates.push(`${bin} --list-models`);
-  if (hasModelsCommand) {
-    candidates.push(`${bin} models --json`);
-    candidates.push(`${bin} models list --json`);
-    candidates.push(`${bin} models`);
-    candidates.push(`${bin} models list`);
-  }
-  // Explicit fallbacks for known CLIs.
-  if (opts.agentId === 'cursor') {
-    candidates.push('agent --list-models');
-    candidates.push('agent models');
-  }
-  if (opts.agentId === 'codex') {
-    // Probe common Codex model-list commands even when `--help` doesn't advertise them.
-    candidates.push('codex models --json');
-    candidates.push('codex models list --json');
-    candidates.push('codex models');
-    candidates.push('codex models list');
-  }
-  if (opts.agentId === 'claude') {
-    candidates.push('claude models --json');
-    candidates.push('claude models');
-  }
-  if (opts.agentId === 'opencode') {
-    candidates.push('opencode models --json');
-    candidates.push('opencode models');
-  }
-  if (opts.agentId === 'pi') {
-    candidates.push('pi --list-models');
-  }
-  if (opts.agentId === 'blip') {
-    candidates.push('blip --list-models');
-  }
-
-  const deduped = Array.from(new Set(candidates.map((c) => c.trim()).filter(Boolean)));
-  for (const cmd of deduped) {
-    const r = await dvmExec(opts.containerName, 'bash', ['-lc', cmd], {
-      timeoutMs: defaultSeedBootstrapTimeoutMs(),
-    });
-    const parsed = parseDiscoveredModelsFromOutput(`${r.stdout || ''}\n${r.stderr || ''}`);
-    if (parsed.length > 0) {
-      chatModelDiscoveryCache.set(key, { atMs: now, models: parsed });
-      return { models: parsed, source: 'live', discoveredAt: new Date(now).toISOString() };
-    }
-  }
-
-  // Codex fallback: read Codex's local model cache file when direct CLI listing is unavailable.
-  if (opts.agentId === 'codex') {
-    const cacheProbeScript = [
-      'set -euo pipefail',
-      'paths=("$HOME/.codex/models_cache.json" "/root/.codex/models_cache.json" "/dvm-data/home/.codex/models_cache.json")',
-      'for p in "${paths[@]}"; do',
-      '  if [ -f "$p" ]; then',
-      '    echo "__PATH__\\t$p"',
-      '    cat "$p"',
-      '    exit 0',
-      '  fi',
-      'done',
-      'exit 1',
-    ].join('\n');
-    const r = await dvmExec(opts.containerName, 'bash', ['-lc', cacheProbeScript], {
-      timeoutMs: defaultSeedBootstrapTimeoutMs(),
-    });
-    if (r.code === 0) {
-      const combined = String(r.stdout || '');
-      const jsonStart = combined.indexOf('{');
-      if (jsonStart >= 0) {
-        const parsedCache = parseCodexModelsCache(combined.slice(jsonStart));
-        if (parsedCache.length > 0) {
-          chatModelDiscoveryCache.set(key, { atMs: now, models: parsedCache });
-          return { models: parsedCache, source: 'live', discoveredAt: new Date(now).toISOString() };
-        }
-      }
-    }
-
-    // Final Codex fallback: host-side cache file (helps when drone cache is cold).
-    const hostCandidates = Array.from(
-      new Set([
-        path.join(os.homedir(), '.codex', 'models_cache.json'),
-        '/root/.codex/models_cache.json',
-      ]),
-    );
-    for (const p of hostCandidates) {
-      try {
-        const raw = await fs.readFile(p, 'utf8');
-        const parsedCache = parseCodexModelsCache(raw);
-        if (parsedCache.length > 0) {
-          chatModelDiscoveryCache.set(key, { atMs: now, models: parsedCache });
-          return { models: parsedCache, source: 'live', discoveredAt: new Date(now).toISOString() };
-        }
-      } catch {
-        // ignore and continue
-      }
-    }
-  }
-  const error =
-    deduped.length > 0
-      ? `no models discovered for ${opts.agentId} (tried ${deduped.length} command${deduped.length === 1 ? '' : 's'})`
-      : `no model discovery command available for ${opts.agentId}`;
-  chatModelDiscoveryCache.set(key, { atMs: now, models: [], error });
-  return { models: [], source: 'none', discoveredAt: new Date(now).toISOString(), error };
-}
-
-function modelCatalogCacheKey(runtime: DroneRuntime, agentId: BuiltinAgentId): string {
-  return `${runtime}:${agentId}`;
-}
-
-async function discoverAndRememberModelsForBuiltinAgent(
-  opts: Parameters<typeof discoverModelsForBuiltinAgent>[0],
-): ReturnType<typeof discoverModelsForBuiltinAgent> {
-  const discovered = await discoverModelsForBuiltinAgent(opts);
-  const runtime = opts.runtime ?? 'container';
-  const models = discovered.models.map((model) =>
-    opts.agentId === 'codex' || opts.agentId === 'blip'
-      ? model
-      : {
-          id: model.id,
-          label: model.label,
-          ...(model.isDefault ? { isDefault: true } : {}),
-          ...(model.isCurrent ? { isCurrent: true } : {}),
-        },
-  );
-  if (models.length > 0) {
-    const discoveredAtMs = Date.parse(discovered.discoveredAt);
-    latestChatModelDiscoveryByAgent.set(modelCatalogCacheKey(runtime, opts.agentId), {
-      atMs: Number.isFinite(discoveredAtMs) ? discoveredAtMs : Date.now(),
-      models,
-      source: discovered.source === 'cache' ? 'cache' : 'live',
-    });
-  }
-  return { ...discovered, models };
 }
 
 async function readCodexLastTurnRuntime(opts: {
@@ -3299,7 +2891,7 @@ async function cliSupportsModelFlag(opts: {
   const key = `${opts.runtime}:${keyBase}::${opts.bin}`;
   const now = Date.now();
   const cached = cliModelFlagSupportCache.get(key);
-  if (cached && now - cached.atMs < CHAT_MODEL_DISCOVERY_CACHE_TTL_MS) return cached.supported;
+  if (cached && now - cached.atMs < CLI_MODEL_FLAG_CACHE_TTL_MS) return cached.supported;
   const r =
     opts.runtime === 'host'
       ? await runHostCommand('bash', ['-lc', `${opts.bin} --help`], {
@@ -5584,7 +5176,7 @@ export async function startDroneHubApiServer(opts: {
     writeSseEvent: writeHubSseEvent,
   });
 
-  registerRepositoryRoutes(apiRouter, {
+  registerAgentModelCatalogRoutes(apiRouter, {
     normalizeBuiltinAgentId,
     nativeModelCatalog: async () => {
       const [snapshot, effectiveProvider] = await Promise.all([
@@ -5607,11 +5199,13 @@ export async function startDroneHubApiServer(opts: {
         models,
       };
     },
-    modelCatalogCacheKey,
-    latestChatModelDiscoveryByAgent,
     loadRegistry,
     droneRuntime,
-    discoverAndRememberModelsForBuiltinAgent,
+    discoverModels: discoverAndRememberModelsForBuiltinAgent,
+  });
+
+  registerRepositoryRoutes(apiRouter, {
+    loadRegistry,
     listCanonicalRepositories,
     gitListRemoteBranches,
     removeCanonicalRepository,
@@ -5917,6 +5511,7 @@ export async function startDroneHubApiServer(opts: {
     nowIso,
     parseAgentPermissionModeForUpdate,
     parseChatModelForUpdate,
+    parseChatReasoningForUpdate,
     parseChatNameForMutation,
     parseDraftFlag,
     projectCanonicalChatToRegistry,

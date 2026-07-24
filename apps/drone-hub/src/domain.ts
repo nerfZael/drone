@@ -11,6 +11,7 @@ export type ChatInfo = {
   agent: ChatAgentConfig;
   agentLocked: boolean;
   model: string | null;
+  reasoning: string | null;
   agentPermissionMode: AgentPermissionMode;
   dockerSnapshotAfterAgentMessageEnabled: boolean;
   sessionName: string;
@@ -99,6 +100,8 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
   const chat = String(data?.chat ?? 'default').trim() || 'default';
   const modelRaw = String(data?.model ?? '').trim();
   const model = modelRaw || null;
+  const reasoningRaw = String(data?.reasoning ?? '').trim().toLowerCase();
+  const reasoning = reasoningRaw || null;
   const sessionName = String(data?.sessionName ?? '').trim() || `drone-hub-chat-${chat}`;
   const createdAt = String(data?.createdAt ?? '').trim() || new Date().toISOString();
   const agentPermissionMode: AgentPermissionMode = data?.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access';
@@ -110,6 +113,7 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
       name,
       chat,
       model,
+      reasoning,
       agentPermissionMode: 'full-access',
       dockerSnapshotAfterAgentMessageEnabled: false,
       sessionName,
@@ -137,6 +141,7 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
       name,
       chat,
       model,
+      reasoning,
       agentPermissionMode,
       dockerSnapshotAfterAgentMessageEnabled,
       sessionName,
@@ -153,6 +158,7 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
         name,
         chat,
         model,
+        reasoning,
         agentPermissionMode,
         dockerSnapshotAfterAgentMessageEnabled,
         sessionName,
@@ -167,6 +173,7 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
       name,
       chat,
       model,
+      reasoning,
       agentPermissionMode,
       dockerSnapshotAfterAgentMessageEnabled,
       sessionName,
@@ -179,6 +186,7 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
       name,
       chat,
       model,
+      reasoning,
       agentPermissionMode,
       dockerSnapshotAfterAgentMessageEnabled,
       sessionName,
@@ -187,21 +195,22 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
     };
   }
   if (String(data?.piSessionId ?? '').trim()) {
-    return { name, chat, model, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'pi' } };
+    return { name, chat, model, reasoning, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'pi' } };
   }
   if (String(data?.blipSessionId ?? '').trim()) {
-    return { name, chat, model, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'blip' } };
+    return { name, chat, model, reasoning, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'blip' } };
   }
   if (String(data?.codexThreadId ?? '').trim()) {
-    return { name, chat, model, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'codex' } };
+    return { name, chat, model, reasoning, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'codex' } };
   }
   if (String(data?.chatId ?? '').trim()) {
-    return { name, chat, model, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'cursor' } };
+    return { name, chat, model, reasoning, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'cursor' } };
   }
   return {
     name,
     chat,
     model,
+    reasoning,
     agentPermissionMode,
     dockerSnapshotAfterAgentMessageEnabled,
     sessionName,

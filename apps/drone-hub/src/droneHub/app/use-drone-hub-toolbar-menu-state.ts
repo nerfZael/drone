@@ -22,10 +22,6 @@ type UseDroneHubToolbarMenuStateArgs = {
   currentCustomAgentMissing: boolean;
   currentAgentKey: string;
   agentLocked: boolean;
-  modelDisabled: boolean;
-  manualChatModelInput: string;
-  setChatModel: (model: string | null) => Promise<void>;
-  setChatInfoError: React.Dispatch<React.SetStateAction<string | null>>;
   setChatAgent: (agent: ChatAgentConfig) => Promise<void>;
   handleSetAgentFailure: (label: string, error: unknown) => void;
   setCustomAgentError: (next: string | null) => void;
@@ -45,10 +41,6 @@ export function useDroneHubToolbarMenuState({
   currentCustomAgentMissing,
   currentAgentKey,
   agentLocked,
-  modelDisabled,
-  manualChatModelInput,
-  setChatModel,
-  setChatInfoError,
   setChatAgent,
   handleSetAgentFailure,
   setCustomAgentError,
@@ -68,24 +60,6 @@ export function useDroneHubToolbarMenuState({
     }
     return Array.from(map.values());
   }, [chatModels, currentModel]);
-
-  const modelMenuEntries = React.useMemo(
-    () => [
-      { value: '', label: 'Default model' },
-      ...availableChatModels.map((m) => ({
-        value: m.id,
-        label: `${m.label}${m.isDefault ? ' (default)' : ''}${m.isCurrent ? ' (current)' : ''}`,
-        title: m.id,
-        searchText: `${m.label} ${m.id}`,
-      })),
-    ],
-    [availableChatModels],
-  );
-
-  const modelLabel = React.useMemo(() => {
-    const active = modelMenuEntries.find((entry) => entry.value === (currentModel ?? ''));
-    return String(active?.label ?? 'Default model');
-  }, [currentModel, modelMenuEntries]);
 
   const createRepoMenuEntries = React.useMemo(
     () => [
@@ -204,24 +178,12 @@ export function useDroneHubToolbarMenuState({
     ],
   );
 
-  const applyManualChatModel = React.useCallback(() => {
-    if (modelDisabled) return;
-    const next = String(manualChatModelInput ?? '').trim();
-    void setChatModel(next || null).catch((error: unknown) => {
-      const msg = error instanceof Error ? error.message : String(error);
-      setChatInfoError(msg);
-    });
-  }, [manualChatModelInput, modelDisabled, setChatInfoError, setChatModel]);
-
   return {
     availableChatModels,
-    modelMenuEntries: modelMenuEntries as UiMenuSelectEntry[],
-    modelLabel,
     createRepoMenuEntries: createRepoMenuEntries as UiMenuSelectEntry[],
     spawnAgentMenuEntries: spawnAgentMenuEntries as UiMenuSelectEntry[],
     toolbarAgentMenuEntries: toolbarAgentMenuEntries as UiMenuSelectEntry[],
     agentLabel,
     pickAgentValue,
-    applyManualChatModel,
   };
 }

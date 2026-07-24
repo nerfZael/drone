@@ -484,6 +484,50 @@ describeSocketSuite('chat management api', () => {
     expect(regAny?.drones?.[droneId]?.chats?.default?.agentPermissionMode).toBeUndefined();
   });
 
+  test('stores model and reasoning together for Codex chats', async () => {
+    const droneId = 'drone-chat-model-reasoning';
+    await seedDrone(droneId);
+
+    const updated = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          agent: { kind: 'builtin', id: 'codex' },
+          model: 'gpt-test',
+          reasoning: 'high',
+        }),
+      },
+    );
+    expect(updated.r.status).toBe(200);
+    expect(updated.data?.model).toBe('gpt-test');
+    expect(updated.data?.reasoning).toBe('high');
+
+    const chatInfo = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default`,
+    );
+    expect(chatInfo.r.status).toBe(200);
+    expect(chatInfo.data?.model).toBe('gpt-test');
+    expect(chatInfo.data?.reasoning).toBe('high');
+
+    const cleared = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: null, reasoning: null }),
+      },
+    );
+    expect(cleared.r.status).toBe(200);
+
+    const clearedInfo = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default`,
+    );
+    expect(clearedInfo.data?.model).toBeNull();
+    expect(clearedInfo.data?.reasoning).toBeNull();
+  });
+
   test('stores native-shaped Drone Hub access on the chat and assigns old chats a stable id', async () => {
     const droneId = 'drone-chat-mcp-access';
     await seedDrone(droneId);

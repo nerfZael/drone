@@ -19,6 +19,9 @@ export type ChatComposerModelPickerConfig = {
   showReasoning?: boolean;
   searchable?: boolean;
   searchPlaceholder?: string;
+  triggerLabel?: string;
+  allowCustomModel?: boolean;
+  statusMessage?: string;
   title?: string;
   onSelect: (choice: ChatComposerModelChoice, selection: 'model' | 'reasoning') => void;
 };
@@ -83,6 +86,9 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
     showReasoning = true,
     searchable = true,
     searchPlaceholder = 'Search models',
+    triggerLabel: triggerLabelOverride,
+    allowCustomModel = false,
+    statusMessage,
     title = showReasoning ? 'Choose model and reasoning' : 'Choose model',
     onSelect,
   } = config;
@@ -108,8 +114,8 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
     (!currentModel ? availableModels[0] : undefined);
   const selectedProvider = selectedModel?.provider || currentProvider;
   const selectedModelId = selectedModel?.id ?? currentModel;
-  const selectedReasoning = currentThinkingLevel || 'low';
-  const currentName = selectedModel?.name || selectedModelId || 'Default model';
+  const selectedReasoning = currentThinkingLevel || selectedModel?.thinkingLevel || 'low';
+  const currentName = selectedModel?.name || selectedModelId || 'Auto';
   const choices = options.some(
     (option) =>
       option.provider === selectedProvider &&
@@ -146,7 +152,17 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
         `${choice.name ?? ''} ${choice.id}`.toLowerCase().includes(normalizedQuery),
       )
     : models;
-  const triggerLabel = `${modelName(currentName)}${showReasoning ? ` ${reasoningName(selectedReasoning)}` : ''}`;
+  const triggerLabel =
+    triggerLabelOverride ??
+    `${modelName(currentName)}${showReasoning ? ` · ${reasoningName(selectedReasoning)}` : ''}`;
+  const customModelId =
+    allowCustomModel &&
+    normalizedQuery &&
+    normalizedQuery.length <= 160 &&
+    !/[\r\n\t]/.test(normalizedQuery) &&
+    !models.some((model) => model.id.toLowerCase() === normalizedQuery)
+      ? searchQuery.trim()
+      : '';
 
   const selectReasoning = (thinkingLevel: string) => {
     const exact = choices.find(
@@ -175,7 +191,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
         choice.thinkingLevel === selectedReasoning,
     );
     onSelect(
-      exact ?? { ...model, thinkingLevel: model.thinkingLevel ?? selectedReasoning },
+      exact ?? model,
       'model',
     );
     setSearchQuery('');
@@ -279,19 +295,40 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
                               : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
                           }`}
                         >
-                          <span className="min-w-0 flex-1 truncate">{choice.name || choice.id || 'Default model'}</span>
+                          <span className="min-w-0 flex-1 truncate">{choice.name || choice.id || 'Auto'}</span>
                           {active ? <span className="ml-2 text-[var(--accent)]"><CheckIcon /></span> : null}
                         </button>
                       );
                     })
-                  ) : (
+                  ) : !customModelId ? (
                     <div className="flex min-h-12 items-center justify-center px-3 text-center text-[.6875rem] text-[var(--muted)]">
                       No matching models.
                     </div>
-                  )}
+                  ) : null}
+                  {customModelId ? (
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() =>
+                        selectModel({
+                          provider: selectedProvider,
+                          id: customModelId,
+                          name: customModelId,
+                        })
+                      }
+                      className="flex min-h-9 items-center rounded-[.5rem] border border-dashed border-[var(--border)] px-2.5 text-left text-[.75rem] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-40"
+                    >
+                      <span className="truncate">Use “{customModelId}” as a custom model</span>
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </>
+          ) : null}
+          {statusMessage ? (
+            <div className="flex-shrink-0 border-t border-[var(--border-subtle)] px-3 py-2 text-[.625rem] leading-relaxed text-[var(--muted-dim)]">
+              {statusMessage}
+            </div>
           ) : null}
         </div>
       ) : null}

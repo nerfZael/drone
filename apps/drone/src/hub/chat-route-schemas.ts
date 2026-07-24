@@ -50,6 +50,7 @@ export const chatConfigBodySchema = z
     agent: z.unknown().optional(),
     model: z.unknown().optional(),
     chatModel: z.unknown().optional(),
+    reasoning: z.unknown().optional(),
     agentPermissionMode: z.unknown().optional(),
     dockerSnapshotAfterAgentMessageEnabled: z.boolean().optional(),
   })

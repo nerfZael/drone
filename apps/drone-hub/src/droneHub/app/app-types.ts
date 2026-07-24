@@ -8,6 +8,8 @@ export type ChatModelOption = {
   label: string;
   isDefault?: boolean;
   isCurrent?: boolean;
+  reasoningLevels?: string[];
+  defaultReasoningLevel?: string;
 };
 
 export type AppView = 'workspace' | 'settings';
@@ -18,6 +20,7 @@ export type StartupSeedState = {
   chatName: string;
   agent: ChatAgentConfig | null;
   model: string | null;
+  reasoning: string | null;
   agentPermissionMode: AgentPermissionMode;
   prompt: string;
   group: string | null;

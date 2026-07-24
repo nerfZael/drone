@@ -28,7 +28,7 @@ import { visibleDraftQueuedPrompts as resolveVisibleDraftQueuedPrompts } from '.
 import { NewDroneSetupPanel } from './NewDroneSetupPanel';
 import { NewDroneTargetControls } from './NewDroneTargetControls';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
-import { useSpawnModelCatalog } from './use-spawn-model-catalog';
+import { useAgentModelCatalog } from './use-agent-model-catalog';
 
 type DraftChatWorkspaceProps = {
   draftChat: DraftChatState;
@@ -145,7 +145,7 @@ export function DraftChatWorkspace({
       : spawnAgentConfig.kind === 'builtin'
         ? spawnAgentConfig.id
         : '';
-  const modelCatalog = useSpawnModelCatalog({
+  const modelCatalog = useAgentModelCatalog({
     agentId: agentCatalogId,
     runtime: createRuntime,
     enabled: createWithChat && spawnAgentConfig.kind !== 'custom',
@@ -162,12 +162,20 @@ export function DraftChatWorkspace({
     return spawnAgentConfig.id;
   }, [filteredAgentMenuEntries, spawnAgentConfig, spawnAgentKey]);
   const modelProvider = agentCatalogId || 'default';
+  const catalogDefaultModel =
+    modelCatalog.models.find((model) => model.isCurrent) ??
+    modelCatalog.models.find((model) => model.isDefault) ??
+    null;
   const modelChoices = React.useMemo(
     () => [
       {
         provider: modelProvider,
         id: '',
-        name: modelCatalog.loading ? 'Detecting models…' : 'Default model',
+        name: modelCatalog.loading && !catalogDefaultModel
+          ? 'Detecting models…'
+          : catalogDefaultModel
+            ? `Auto · ${catalogDefaultModel.label}`
+            : 'Auto',
       },
       ...modelCatalog.models.flatMap((model) =>
         model.reasoningLevels.length > 0
@@ -180,7 +188,7 @@ export function DraftChatWorkspace({
           : [{ provider: modelProvider, id: model.id, name: model.label }],
       ),
     ],
-    [modelCatalog.loading, modelCatalog.models, modelProvider],
+    [catalogDefaultModel, modelCatalog.loading, modelCatalog.models, modelProvider],
   );
   const newDroneComposerControls = React.useMemo<ChatComposerControlsConfig | undefined>(() => {
     if (!createWithChat) return undefined;

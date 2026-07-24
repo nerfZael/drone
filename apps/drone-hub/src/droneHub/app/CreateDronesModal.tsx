@@ -8,7 +8,7 @@ import { IconChevron, IconSpinner, IconTrash } from './icons';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { filterSpawnAgentMenuEntriesForRuntime, type RepoBranchSourceMode } from './drone-create-runtime';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
-import { buildDetectedModelMenuEntries, useSpawnModelCatalog } from './use-spawn-model-catalog';
+import { buildDetectedModelMenuEntries, useAgentModelCatalog } from './use-agent-model-catalog';
 import { RepoBranchSourceControls } from './RepoBranchSourceControls';
 import { repoPathLabel } from './repo-path-label';
 import type { RepoRemoteBranchOption } from '../types';
@@ -156,7 +156,7 @@ export function CreateDronesModal({
       setSpawnReasoning: s.setSpawnReasoning,
     })),
   );
-  const modelCatalog = useSpawnModelCatalog({
+  const modelCatalog = useAgentModelCatalog({
     agentId:
       spawnAgentConfig.kind === 'native'
         ? 'native'
@@ -605,7 +605,7 @@ export function CreateDronesModal({
                   panelClassName="right-auto w-[360px] max-w-[calc(100vw-3rem)]"
                   menuClassName="max-h-[240px] overflow-y-auto"
                   title="Choose a model detected from the selected agent CLI."
-                  triggerLabel={spawnModel || (modelCatalog.loading ? 'Detecting models…' : 'Default model')}
+                  triggerLabel={spawnModel || (modelCatalog.loading ? 'Detecting models…' : 'Auto')}
                   triggerLabelClassName="font-mono"
                   searchable
                   searchPlaceholder="Search models"
@@ -619,7 +619,7 @@ export function CreateDronesModal({
                       ? 'opacity-50 cursor-not-allowed'
                       : ''
                   }`}
-                  placeholder="Default model"
+                  placeholder="Custom model ID"
                   disabled={creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind === 'custom'}
                 />
                 <button
@@ -634,15 +634,6 @@ export function CreateDronesModal({
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   Clear
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void modelCatalog.refresh()}
-                  disabled={spawnModelMenuDisabled || modelCatalog.loading}
-                  className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--border-subtle)] text-[var(--muted-dim)] disabled:opacity-40"
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  {modelCatalog.loading ? 'Detecting…' : 'Refresh'}
                 </button>
               </div>
               {reasoningEntries.length > 0 ? (
