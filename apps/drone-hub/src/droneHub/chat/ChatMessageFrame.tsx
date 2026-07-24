@@ -43,9 +43,9 @@ export function ChatMessageFrame({
           : 'rounded-[var(--radius-large)] rounded-tl-sm border border-[var(--assistant-bubble-border)] bg-[var(--assistant-bubble)] px-4 py-3';
   const bubble = (
     <div className={`group/message relative ${showRoleIcon ? (user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'min-w-0 flex-1') : user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'w-full'} min-w-[120px]`}>
-      {user && (at || hoverActions) ? (
+      {(user && at) || hoverActions ? (
         <div className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 flex min-h-7 items-center justify-end gap-1.5 opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100">
-          {at ? (
+          {user && at ? (
             <RelativeTimeText
               at={at}
               className="pointer-events-none whitespace-nowrap font-mono text-[var(--text-9)] leading-none text-[var(--chat-user-message-time)]"
@@ -54,7 +54,8 @@ export function ChatMessageFrame({
           ) : null}
           {hoverActions}
         </div>
-      ) : at ? (
+      ) : null}
+      {!user && at ? (
         <RelativeTimeText
           at={at}
           className="pointer-events-none absolute left-0 top-full z-10 mt-1 whitespace-nowrap font-mono text-[var(--text-9)] leading-none text-[var(--chat-message-time)] opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100"

@@ -1153,11 +1153,16 @@ export class HubAssistantService {
     }
   >();
   private textPromptDelegate: ((threadId: string, prompt: string) => Promise<void>) | null = null;
+  private runtimeStopDelegate: ((threadId: string) => void) | null = null;
 
   constructor(private readonly tools: AssistantToolCallbacks) {}
 
   setTextPromptDelegate(delegate: (threadId: string, prompt: string) => Promise<void>): void {
     this.textPromptDelegate = delegate;
+  }
+
+  setRuntimeStopDelegate(delegate: (threadId: string) => void): void {
+    this.runtimeStopDelegate = delegate;
   }
 
   async notifyCanonicalHistoryChanged(threadId: string): Promise<void> {
@@ -2461,6 +2466,7 @@ export class HubAssistantService {
       throw new Error(`approval does not belong to thread: ${expectedThreadId}`);
     approval.status = approved ? 'approved' : 'denied';
     this.approvals.delete(approvalId);
+    if (!approved) this.runtimeStopDelegate?.(approval.threadId);
     approval.resolve(approved);
     return await this.threadSnapshot(approval.threadId);
   }

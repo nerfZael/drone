@@ -1,110 +1,188 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { ChatMessageCopyAction } from './ChatMessageCopyAction';
+import { MermaidDiagramViewport, getMermaidSvgDimensions } from './MermaidDiagramViewport';
+import {
+  getCachedMermaidRender,
+  renderMermaidSource,
+  scopeMermaidSvgIds,
+  type MermaidRenderResult,
+} from './mermaid-renderer';
 
-type MermaidApi = (typeof import('mermaid'))['default'];
+function MaximizeIcon({ restore }: { restore: boolean }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      {restore ? (
+        <path
+          d="M6 2v4H2M10 14v-4h4M2 6l4-4M14 10l-4 4"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ) : (
+        <path
+          d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+    </svg>
+  );
+}
 
-const MAX_MERMAID_SOURCE_LENGTH = 50_000;
-const MAX_MERMAID_SOURCE_LINES = 1_000;
-
-let mermaidPromise: Promise<MermaidApi> | null = null;
-let mermaidRenderSequence = 0;
-
-function loadMermaid(): Promise<MermaidApi> {
-  if (!mermaidPromise) {
-    mermaidPromise = import('mermaid').then(({ default: mermaid }) => {
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: 'strict',
-        suppressErrorRendering: true,
-        theme: 'base',
-        darkMode: true,
-        themeVariables: {
-          background: '#181825',
-          primaryColor: '#313244',
-          primaryTextColor: '#cdd6f4',
-          primaryBorderColor: '#6c7086',
-          lineColor: '#9399b2',
-          secondaryColor: '#45475a',
-          secondaryTextColor: '#cdd6f4',
-          secondaryBorderColor: '#7f849c',
-          tertiaryColor: '#1e1e2e',
-          tertiaryTextColor: '#cdd6f4',
-          tertiaryBorderColor: '#585b70',
-          noteBkgColor: '#313244',
-          noteTextColor: '#cdd6f4',
-          noteBorderColor: '#6c7086',
-          fontFamily: 'inherit',
-        },
-      });
-      return mermaid;
-    });
-  }
-  return mermaidPromise;
+function focusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  );
 }
 
 export function MermaidDiagram({ source }: { source: string }) {
   const reactId = React.useId();
-  const diagramId = React.useMemo(
-    () => `drone-hub-mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}`,
+  const svgScope = React.useMemo(
+    () => `drone-hub-mermaid-instance-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}`,
     [reactId],
   );
-  const [svg, setSvg] = React.useState('');
-  const [errorMessage, setErrorMessage] = React.useState('');
+  const initialRender = React.useMemo(
+    () => getCachedMermaidRender(source) ?? { errorMessage: '', svg: '' },
+    [source],
+  );
+  const [render, setRender] = React.useState<MermaidRenderResult>(initialRender);
+  const [renderedSource, setRenderedSource] = React.useState(
+    initialRender.svg || initialRender.errorMessage ? source : '',
+  );
   const [showSource, setShowSource] = React.useState(false);
+  const [maximized, setMaximized] = React.useState(false);
+  const [fitRequest, setFitRequest] = React.useState(0);
+  const [zoom, setZoom] = React.useState(1);
+  const cardRef = React.useRef<HTMLElement | null>(null);
+  const maximizeButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const activeRenderRef = React.useRef(0);
 
   React.useEffect(() => {
-    let active = true;
-    const renderId = `${diagramId}-${mermaidRenderSequence++}`;
-    setSvg('');
-    setErrorMessage('');
-    setShowSource(false);
-
-    if (
-      source.length > MAX_MERMAID_SOURCE_LENGTH ||
-      source.split('\n').length > MAX_MERMAID_SOURCE_LINES
-    ) {
-      setErrorMessage('This Mermaid diagram is too large to render.');
-      return () => {
-        active = false;
-      };
+    const cached = getCachedMermaidRender(source);
+    if (cached) {
+      setRender(cached);
+      setRenderedSource(source);
+      return;
     }
 
-    void loadMermaid()
-      .then((mermaid) => mermaid.render(renderId, source))
-      .then((result) => {
-        if (!active) return;
-        setSvg(result.svg);
-      })
-      .catch(() => {
-        if (!active) return;
-        setErrorMessage('Could not render this Mermaid diagram. Check the syntax below.');
-      });
-
+    const request = ++activeRenderRef.current;
+    void renderMermaidSource(source).then((result) => {
+      if (activeRenderRef.current !== request) return;
+      setRender(result);
+      setRenderedSource(source);
+    });
     return () => {
-      active = false;
+      activeRenderRef.current += 1;
     };
-  }, [diagramId, source]);
+  }, [source]);
 
+  React.useEffect(() => {
+    if (!maximized) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    requestAnimationFrame(() => maximizeButtonRef.current?.focus());
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      requestAnimationFrame(() => maximizeButtonRef.current?.focus());
+    };
+  }, [maximized]);
+
+  React.useEffect(() => {
+    if (!maximized) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMaximized(false);
+        return;
+      }
+      if (event.key !== 'Tab' || !cardRef.current) return;
+      const focusable = focusableElements(cardRef.current);
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (!cardRef.current.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [maximized]);
+
+  const currentRender = renderedSource === source;
+  const errorMessage = currentRender ? render.errorMessage : '';
   const sourceVisible = showSource || Boolean(errorMessage);
+  const dimensions = React.useMemo(() => getMermaidSvgDimensions(render.svg), [render.svg]);
+  const scopedSvg = React.useMemo(
+    () => scopeMermaidSvgIds(render.svg, svgScope),
+    [render.svg, svgScope],
+  );
 
-  return (
+  const card = (
     <section
+      ref={cardRef}
       data-markdown-code-block={true}
-      className="dh-mermaid-card"
+      className={maximized ? 'dh-mermaid-card is-maximized' : 'dh-mermaid-card'}
       aria-label="Mermaid diagram"
+      aria-modal={maximized || undefined}
+      aria-busy={!currentRender || undefined}
+      role={maximized ? 'dialog' : undefined}
     >
       <div className="dh-mermaid-card__toolbar">
-        <span className="dh-mermaid-card__label">Diagram</span>
-        {errorMessage ? null : (
+        <div className="dh-mermaid-card__identity">
+          <span className="dh-mermaid-card__label">Diagram</span>
+          {!sourceVisible && render.svg ? (
+            <span className="dh-mermaid-card__zoom-label">{Math.round(zoom * 100)}%</span>
+          ) : null}
+          {!currentRender && render.svg ? (
+            <span className="dh-mermaid-card__render-status">Updating…</span>
+          ) : null}
+        </div>
+        <div className="dh-mermaid-card__toolbar-actions">
+          {!sourceVisible && render.svg ? (
+            <button
+              type="button"
+              className="dh-mermaid-card__toolbar-button"
+              onClick={() => setFitRequest((request) => request + 1)}
+              title="Fit diagram to viewport"
+            >
+              Fit
+            </button>
+          ) : null}
           <button
+            ref={maximizeButtonRef}
             type="button"
-            className="dh-mermaid-card__source-toggle"
-            aria-label={sourceVisible ? 'Show rendered diagram' : 'Show Mermaid source'}
-            onClick={() => setShowSource((visible) => !visible)}
+            className="dh-mermaid-card__toolbar-button"
+            aria-label={maximized ? 'Restore diagram' : 'Maximize diagram'}
+            onClick={() => setMaximized((value) => !value)}
+            title={maximized ? 'Restore diagram' : 'Maximize diagram'}
           >
-            {sourceVisible ? 'Diagram' : 'Source'}
+            <MaximizeIcon restore={maximized} />
+            <span>{maximized ? 'Restore' : 'Maximize'}</span>
           </button>
-        )}
+          {errorMessage ? null : (
+            <button
+              type="button"
+              className="dh-mermaid-card__toolbar-button"
+              aria-label={sourceVisible ? 'Show rendered diagram' : 'Show Mermaid source'}
+              onClick={() => setShowSource((visible) => !visible)}
+            >
+              {sourceVisible ? 'Diagram' : 'Source'}
+            </button>
+          )}
+        </div>
       </div>
       {sourceVisible ? (
         <div className="dh-mermaid-card__source">
@@ -118,12 +196,12 @@ export function MermaidDiagram({ source }: { source: string }) {
             <code className="language-mermaid">{source}</code>
           </pre>
         </div>
-      ) : svg ? (
-        <div
-          className="dh-mermaid-card__diagram"
-          role="img"
-          aria-label="Rendered Mermaid diagram"
-          dangerouslySetInnerHTML={{ __html: svg }}
+      ) : render.svg ? (
+        <MermaidDiagramViewport
+          dimensions={dimensions}
+          fitRequest={fitRequest}
+          onZoomChange={setZoom}
+          svg={scopedSvg}
         />
       ) : (
         <div className="dh-mermaid-card__loading" role="status">
@@ -131,5 +209,18 @@ export function MermaidDiagram({ source }: { source: string }) {
         </div>
       )}
     </section>
+  );
+
+  if (!maximized || typeof document === 'undefined') return card;
+  return createPortal(
+    <div
+      className="dh-mermaid-card__overlay"
+      onMouseDown={(event) => {
+        if (event.button === 0 && event.target === event.currentTarget) setMaximized(false);
+      }}
+    >
+      {card}
+    </div>,
+    document.body,
   );
 }
