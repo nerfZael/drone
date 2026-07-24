@@ -41,7 +41,7 @@ function focusableElements(container: HTMLElement): HTMLElement[] {
   );
 }
 
-export function MermaidDiagram({ source }: { source: string }) {
+export const MermaidDiagram = React.memo(function MermaidDiagram({ source }: { source: string }) {
   const reactId = React.useId();
   const svgScope = React.useMemo(
     () => `drone-hub-mermaid-instance-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}`,
@@ -223,4 +223,4 @@ export function MermaidDiagram({ source }: { source: string }) {
     </div>,
     document.body,
   );
-}
+});

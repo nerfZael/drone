@@ -480,6 +480,97 @@ function normalizeLooseNestedBullets(rawText: string): string {
   return changed ? lines.join('\n') : text;
 }
 
+type MarkdownCodeRenderContextValue = {
+  handleAnchorClick: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
+  onOpenFileReference: MarkdownMessageProps['onOpenFileReference'];
+  renderCodeBlock: MarkdownMessageProps['renderCodeBlock'];
+};
+
+const MarkdownCodeRenderContext = React.createContext<MarkdownCodeRenderContextValue | null>(null);
+
+function StableMarkdownCode({
+  children,
+  className: codeClassName,
+  node: _node,
+  ...props
+}: React.ComponentProps<'code'> & { node?: unknown }) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  const raw = flattenText(children);
+  const hasLanguageClass = typeof codeClassName === 'string' && codeClassName.includes('language-');
+  const isInline = !hasLanguageClass && !raw.includes('\n');
+  if (!isInline && context?.renderCodeBlock) {
+    const language = /(?:^|\s)language-([^\s]+)/.exec(codeClassName ?? '')?.[1] ?? '';
+    return context.renderCodeBlock({ code: raw.replace(/\n$/, ''), language });
+  }
+
+  const href = isInline ? parseInlineCodeLinkHref(raw) : null;
+  if (href) {
+    return (
+      <a
+        className="dh-inline-code-link"
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open link ${href}`}
+        onClick={(event) => context?.handleAnchorClick(event, href)}
+      >
+        <code className={codeClassName} {...props}>
+          {raw}
+        </code>
+      </a>
+    );
+  }
+
+  const fileRef = isInline ? parseInlineCodeFileReference(raw) : null;
+  if (fileRef && context?.onOpenFileReference) {
+    const targetDescription =
+      fileRef.line == null
+        ? fileRef.path
+        : `${fileRef.path}:${fileRef.line}${fileRef.column == null ? '' : `:${fileRef.column}`}`;
+    return (
+      <button
+        type="button"
+        className="dh-inline-code-file-link"
+        onClick={() => context.onOpenFileReference?.(fileRef)}
+        title={`Open ${targetDescription}`}
+        aria-label={`Open file ${targetDescription}`}
+      >
+        <code className={codeClassName} {...props}>
+          {raw}
+        </code>
+      </button>
+    );
+  }
+
+  return (
+    <code className={codeClassName} {...props}>
+      {children}
+    </code>
+  );
+}
+
+function StableMarkdownPre({
+  children,
+  node: _node,
+  ...props
+}: React.ComponentProps<'pre'> & { node?: unknown }) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  const childList = React.Children.toArray(children);
+  const onlyChild = childList.length === 1 ? childList[0] : null;
+  if (
+    React.isValidElement(onlyChild) &&
+    (context?.renderCodeBlock ||
+      (onlyChild.props as Record<string, unknown>)['data-markdown-code-block'] === true)
+  ) {
+    return <div className="dh-markdown-block dh-markdown-block--wide">{onlyChild}</div>;
+  }
+  return (
+    <div className="dh-markdown-block dh-markdown-block--wide">
+      <pre {...props}>{children}</pre>
+    </div>
+  );
+}
+
 export function MarkdownMessage({
   text,
   className,
@@ -525,6 +616,10 @@ export function MarkdownMessage({
   const [tableModes, setTableModes] = React.useState<Record<string, TableMode>>({});
   const [expandedTable, setExpandedTable] = React.useState<ExpandedTableState | null>(null);
   const [expandedTableMode, setExpandedTableMode] = React.useState<TableMode>('fit');
+  const codeRenderContext = React.useMemo<MarkdownCodeRenderContextValue>(
+    () => ({ handleAnchorClick, onOpenFileReference, renderCodeBlock }),
+    [handleAnchorClick, onOpenFileReference, renderCodeBlock],
+  );
 
   React.useEffect(() => {
     setTableModes({});
@@ -535,9 +630,10 @@ export function MarkdownMessage({
   return (
     <>
       <div className={`dh-markdown ${className ?? ''}`}>
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkBreaks]}
-          components={{
+        <MarkdownCodeRenderContext.Provider value={codeRenderContext}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkBreaks]}
+            components={{
             p: ({ children, node: _node, ...props }) => <p {...props}>{renderMentionChildren(children)}</p>,
             li: ({ children, node: _node, ...props }) => <li {...props}>{renderMentionChildren(children)}</li>,
             td: ({ children, node: _node, ...props }) => <td {...props}>{renderMentionChildren(children)}</td>,
@@ -583,57 +679,7 @@ export function MarkdownMessage({
                 </a>
               );
             },
-            code: ({ children, className: codeClassName, node: _node, ...props }) => {
-              const raw = flattenText(children);
-              const hasLanguageClass = typeof codeClassName === 'string' && codeClassName.includes('language-');
-              const isInline = !hasLanguageClass && !raw.includes('\n');
-              if (!isInline && renderCodeBlock) {
-                const language = /(?:^|\s)language-([^\s]+)/.exec(codeClassName ?? '')?.[1] ?? '';
-                return renderCodeBlock({ code: raw.replace(/\n$/, ''), language });
-              }
-              const href = isInline ? parseInlineCodeLinkHref(raw) : null;
-              if (href) {
-                return (
-                  <a
-                    className="dh-inline-code-link"
-                    href={href}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={`Open link ${href}`}
-                    onClick={(event) => handleAnchorClick(event, href)}
-                  >
-                    <code className={codeClassName} {...props}>
-                      {raw}
-                    </code>
-                  </a>
-                );
-              }
-              const fileRef = isInline ? parseInlineCodeFileReference(raw) : null;
-              if (fileRef && onOpenFileReference) {
-                const targetDescription =
-                  fileRef.line == null
-                    ? fileRef.path
-                    : `${fileRef.path}:${fileRef.line}${fileRef.column == null ? '' : `:${fileRef.column}`}`;
-                return (
-                  <button
-                    type="button"
-                    className="dh-inline-code-file-link"
-                    onClick={() => onOpenFileReference(fileRef)}
-                    title={`Open ${targetDescription}`}
-                    aria-label={`Open file ${targetDescription}`}
-                  >
-                    <code className={codeClassName} {...props}>
-                      {raw}
-                    </code>
-                  </button>
-                );
-              }
-              return (
-                <code className={codeClassName} {...props}>
-                  {children}
-                </code>
-              );
-            },
+            code: StableMarkdownCode,
             blockquote: ({ children, node, ...props }) => {
               const kind = detectCalloutKind(children);
               const cleanedChildren = kind ? stripLeadingCalloutMarker(children) : children;
@@ -657,24 +703,7 @@ export function MarkdownMessage({
                 </div>
               ) : blockquote;
             },
-            pre: ({ children, node: _node, ...props }) => {
-              const childList = React.Children.toArray(children);
-              const onlyChild = childList.length === 1 ? childList[0] : null;
-              if (
-                React.isValidElement(onlyChild) &&
-                (renderCodeBlock ||
-                  (onlyChild.props as Record<string, unknown>)['data-markdown-code-block'] === true)
-              ) {
-                return (
-                  <div className="dh-markdown-block dh-markdown-block--wide">{onlyChild}</div>
-                );
-              }
-              return (
-                <div className="dh-markdown-block dh-markdown-block--wide">
-                  <pre {...props}>{children}</pre>
-                </div>
-              );
-            },
+            pre: StableMarkdownPre,
             table: ({ children, node, ...props }) => {
               const tableId = tableIdFromNode(node, children);
               const mode = tableModes[tableId] ?? 'fit';
@@ -698,10 +727,11 @@ export function MarkdownMessage({
                 </MarkdownTable>
               );
             },
-          }}
-        >
-          {normalizedText}
-        </ReactMarkdown>
+            }}
+          >
+            {normalizedText}
+          </ReactMarkdown>
+        </MarkdownCodeRenderContext.Provider>
       </div>
       {expandedTable ? (
         <ExpandedMarkdownTableDialog
