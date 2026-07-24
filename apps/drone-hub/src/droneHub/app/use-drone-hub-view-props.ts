@@ -641,8 +641,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           onCreateAsDraftChange: setCreateAsDraft,
           createPersistVolume,
           onCreatePersistVolumeChange: setCreatePersistVolume,
-          draftCreateMode,
-          onDraftCreateModeChange: setDraftCreateMode,
           spawnAgentMenuEntries,
           draftCreating,
           draftAutoRenaming,
@@ -661,8 +659,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           draftRepoRemoteBranches: draftRepoBranchOptions?.remoteBranches ?? [],
           draftRepoBranchesLoading: draftRepoBranchOptions?.loading ?? false,
           draftRepoBranchesError: draftRepoBranchOptions?.error ?? null,
-          draftCreateName,
-          draftCreateGroup,
           draftCreateParentDroneLabel:
             drones.find(
               (drone: any) =>
@@ -681,10 +677,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           onStartDraftPrompt: startDraftPrompt,
           onQueueDraftPromptDuringCreate: queueDraftPromptDuringCreate,
           onEnqueueQueuedPrompt: enqueueQueuedPrompt,
-          onDraftCreateGroupChange: setDraftCreateGroup,
-          onDraftCreateNameChange: setDraftCreateName,
           onSetDraftCreateError: setDraftCreateError,
-          onCreateEmptyDrone: () => createDroneFromDraft({ createMode: 'without-chat' }),
         }
       : null,
     groupMultiChatWorkspaceProps: selectedGroupMultiChatData

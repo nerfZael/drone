@@ -24,7 +24,7 @@ describe('desktop new drone preferences', () => {
         repoPath: '/do/not/remember',
       }),
     ).toEqual({
-      mode: 'without-chat',
+      mode: 'with-chat',
       runtime: 'host',
       createAsDraft: true,
       persistVolume: true,

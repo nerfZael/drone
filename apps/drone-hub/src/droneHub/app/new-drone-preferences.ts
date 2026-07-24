@@ -29,7 +29,10 @@ export function normalizeDesktopNewDronePreferences(
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const candidate = value as Partial<DesktopNewDronePreferences>;
   return {
-    mode: candidate.mode === 'without-chat' ? 'without-chat' : 'with-chat',
+    // The desktop new-drone workspace is chat-first. Keep the legacy field in
+    // storage so older preferences remain readable, but never restore the
+    // removed empty-drone mode.
+    mode: 'with-chat',
     runtime: candidate.runtime === 'host' ? 'host' : 'container',
     createAsDraft: candidate.createAsDraft === true,
     persistVolume: candidate.persistVolume === true,

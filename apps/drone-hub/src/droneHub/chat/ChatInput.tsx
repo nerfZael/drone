@@ -69,6 +69,7 @@ export type ChatInputProps = {
   composerContext?: ChatComposerContextConfig;
   composerControls?: ChatComposerControlsConfig;
   composerFooter?: React.ReactNode;
+  alwaysExpanded?: boolean;
   allowSendWhileWaiting?: boolean;
   onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onPublish?: () => Promise<boolean> | boolean;
@@ -94,6 +95,7 @@ export function ChatInput({
   composerContext,
   composerControls,
   composerFooter,
+  alwaysExpanded = false,
   allowSendWhileWaiting = false,
   onSend,
   onPublish,
@@ -219,6 +221,7 @@ export function ChatInput({
   const trimmed = draft.trim();
   const sendDisabled = sending || composerLocked || voiceActionInFlight || (trimmed.length === 0 && attachments.length === 0 && !voiceRecordingActive);
   const composerExpanded =
+    alwaysExpanded ||
     composerFocused ||
     trimmed.length > 0 ||
     attachments.length > 0 ||

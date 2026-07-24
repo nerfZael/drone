@@ -388,6 +388,40 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('aria-label="Send"');
   });
 
+  test('the composer can stay expanded for chat-first creation surfaces', () => {
+    const html = renderToStaticMarkup(
+      <ChatSurface adapter={adaptExternalAgentChatSurface()}>
+        <ChatSurfaceComposer
+          resetKey="always-expanded-composer"
+          droneName="New drone"
+          promptError={null}
+          sending={false}
+          waiting={false}
+          alwaysExpanded
+          composerControls={{
+            controls: [
+              {
+                kind: 'select',
+                id: 'model',
+                value: 'model-a',
+                label: 'Model A',
+                title: 'Choose model',
+                entries: [{ value: 'model-a', label: 'Model A' }],
+                onValueChange: () => {},
+              },
+            ],
+          }}
+          onSend={async () => true}
+        />
+      </ChatSurface>,
+    );
+
+    expect(html).toContain('data-chat-composer-expanded="true"');
+    expect(html).toContain('Model A');
+    expect(html).toContain('aria-label="Send"');
+    expect(html).not.toContain('data-chat-composer-collapsed-action="true"');
+  });
+
   test('native controls use shortcuts instead of a delivery picker', () => {
     const updates: Array<Record<string, unknown>> = [];
     const config = buildNativeAgentComposerControls({

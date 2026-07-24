@@ -26,7 +26,6 @@ import {
 } from './drone-create-runtime';
 import { visibleDraftQueuedPrompts as resolveVisibleDraftQueuedPrompts } from './draft-chat-queue';
 import { NewDroneSetupPanel } from './NewDroneSetupPanel';
-import { NewDroneTargetControls } from './NewDroneTargetControls';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { useAgentModelCatalog } from './use-agent-model-catalog';
 
@@ -38,8 +37,6 @@ type DraftChatWorkspaceProps = {
   onCreateAsDraftChange: (value: boolean) => void;
   createPersistVolume: boolean;
   onCreatePersistVolumeChange: (value: boolean) => void;
-  draftCreateMode: 'with-chat' | 'without-chat';
-  onDraftCreateModeChange: (value: 'with-chat' | 'without-chat') => void;
   spawnAgentMenuEntries: UiMenuSelectEntry[];
   draftCreating: boolean;
   draftAutoRenaming: boolean;
@@ -55,23 +52,18 @@ type DraftChatWorkspaceProps = {
   draftRepoRemoteBranches: RepoRemoteBranchOption[];
   draftRepoBranchesLoading: boolean;
   draftRepoBranchesError: string | null;
-  draftCreateName: string;
-  draftCreateGroup: string;
   draftCreateParentDroneLabel: string | null;
   draftCreateError: string | null;
   queuedPromptsByDroneChat: Record<string, QueuedPrompt[]>;
   onCancel: () => void;
   onStartDraftPrompt: (payload: ChatSendPayload, opts?: { keepComposerOpen?: boolean }) => Promise<boolean>;
   onQueueDraftPromptDuringCreate: (payload: ChatSendPayload) => boolean;
-  onCreateEmptyDrone: () => Promise<boolean>;
   onEnqueueQueuedPrompt: (
     droneId: string,
     chatName: string,
     prompt: string,
     attachments?: ChatImageAttachmentPayload[],
   ) => void;
-  onDraftCreateNameChange: (value: string) => void;
-  onDraftCreateGroupChange: (value: string) => void;
   onSetDraftCreateError: (error: string | null) => void;
 };
 
@@ -83,8 +75,6 @@ export function DraftChatWorkspace({
   onCreateAsDraftChange,
   createPersistVolume,
   onCreatePersistVolumeChange,
-  draftCreateMode,
-  onDraftCreateModeChange,
   spawnAgentMenuEntries,
   draftCreating,
   draftAutoRenaming,
@@ -100,18 +90,13 @@ export function DraftChatWorkspace({
   draftRepoRemoteBranches,
   draftRepoBranchesLoading,
   draftRepoBranchesError,
-  draftCreateName,
-  draftCreateGroup,
   draftCreateParentDroneLabel,
   draftCreateError,
   queuedPromptsByDroneChat,
   onCancel,
   onStartDraftPrompt,
   onQueueDraftPromptDuringCreate,
-  onCreateEmptyDrone,
   onEnqueueQueuedPrompt,
-  onDraftCreateNameChange,
-  onDraftCreateGroupChange,
   onSetDraftCreateError,
 }: DraftChatWorkspaceProps) {
   const {
@@ -134,7 +119,6 @@ export function DraftChatWorkspace({
     })),
   );
   const controlsLocked = draftCreating || draftAutoRenaming || Boolean(draftChat.prompt);
-  const createWithChat = draftCreateMode === 'with-chat' || Boolean(draftChat.prompt);
   const filteredAgentMenuEntries = React.useMemo(
     () => filterSpawnAgentMenuEntriesForRuntime(createRuntime, spawnAgentMenuEntries),
     [createRuntime, spawnAgentMenuEntries],
@@ -148,7 +132,7 @@ export function DraftChatWorkspace({
   const modelCatalog = useAgentModelCatalog({
     agentId: agentCatalogId,
     runtime: createRuntime,
-    enabled: createWithChat && spawnAgentConfig.kind !== 'custom',
+    enabled: spawnAgentConfig.kind !== 'custom',
   });
   const agentLabel = React.useMemo(() => {
     const selectedEntry = filteredAgentMenuEntries.find(
@@ -191,7 +175,6 @@ export function DraftChatWorkspace({
     [catalogDefaultModel, modelCatalog.loading, modelCatalog.models, modelProvider],
   );
   const newDroneComposerControls = React.useMemo<ChatComposerControlsConfig | undefined>(() => {
-    if (!createWithChat) return undefined;
     const controls: ChatComposerControl[] = [
       {
         kind: 'select',
@@ -248,7 +231,6 @@ export function DraftChatWorkspace({
     agentLabel,
     controlsLocked,
     createRuntime,
-    createWithChat,
     filteredAgentMenuEntries,
     modelChoices,
     modelProvider,
@@ -285,8 +267,6 @@ export function DraftChatWorkspace({
       onCreateAsDraftChange={onCreateAsDraftChange}
       createPersistVolume={createPersistVolume}
       onCreatePersistVolumeChange={onCreatePersistVolumeChange}
-      draftCreateMode={draftCreateMode}
-      onDraftCreateModeChange={onDraftCreateModeChange}
       createRepoMenuEntries={createRepoMenuEntries}
       draftCreateRepoPath={draftCreateRepoPath}
       repoBranchSource={repoBranchSource}
@@ -297,12 +277,7 @@ export function DraftChatWorkspace({
       draftRepoRemoteBranches={draftRepoRemoteBranches}
       draftRepoBranchesLoading={draftRepoBranchesLoading}
       draftRepoBranchesError={draftRepoBranchesError}
-      draftCreateName={draftCreateName}
-      draftCreateGroup={draftCreateGroup}
-      onDraftCreateNameChange={onDraftCreateNameChange}
-      onDraftCreateGroupChange={onDraftCreateGroupChange}
       controlsLocked={controlsLocked}
-      targetsBelowComposer={createWithChat}
     />
   );
 
@@ -328,6 +303,12 @@ export function DraftChatWorkspace({
                 Child of {draftCreateParentDroneLabel}
               </span>
             ) : null}
+            {createAsDraft ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-2 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--accent)]">
+                <span className="h-1 w-1 rounded-full bg-current" aria-hidden="true" />
+                Draft
+              </span>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -342,13 +323,6 @@ export function DraftChatWorkspace({
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
-        {draftCreateError && !createWithChat && !draftChat.prompt ? (
-          <div className="px-5 pt-4">
-            <div className="mx-auto max-w-[1275px] rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)] whitespace-pre-wrap">
-              {draftCreateError}
-            </div>
-          </div>
-        ) : null}
         {draftChat.prompt ? (
           <div className="px-5 py-5">
             <div className="mx-auto max-w-[1275px] space-y-5">
@@ -366,87 +340,66 @@ export function DraftChatWorkspace({
             </div>
           </div>
         ) : (
-          <div className="mx-auto flex min-h-full w-full max-w-[980px] flex-col justify-center px-5 py-8 sm:px-8 sm:py-10">
-            <div className="mb-5">
-              <h2 className="text-lg font-[var(--weight-semibold)] tracking-tight text-[var(--fg)]">
-                {createWithChat ? 'Start with a message' : 'Create an empty drone'}
+          <div className="mx-auto flex min-h-full w-full max-w-[760px] items-center justify-center px-6 py-12 text-center">
+            <div className="relative -mt-6 max-w-[460px]">
+              <div className="mx-auto mb-5 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel-alt)] text-[var(--accent)] shadow-[0_12px_32px_var(--shadow-color)]">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 3v4" />
+                  <path d="M12 17v4" />
+                  <path d="m4.2 7.5 3.5 2" />
+                  <path d="m16.3 14.5 3.5 2" />
+                  <path d="m4.2 16.5 3.5-2" />
+                  <path d="m16.3 9.5 3.5-2" />
+                  <circle cx="12" cy="12" r="4" />
+                </svg>
+              </div>
+              <h2 className="text-[1.05rem] font-[var(--weight-semibold)] tracking-tight text-[var(--fg)]">
+                Start a new drone
               </h2>
+              <p className="mt-2 text-[var(--text-12)] leading-relaxed text-[var(--muted)]">
+                Describe what you want to work on. Your first message creates the drone and opens this chat.
+              </p>
             </div>
-            {idleSetupPanel}
-            {!createWithChat ? (
-              <button
-                type="button"
-                onClick={() => {
-                  void onCreateEmptyDrone();
-                }}
-                disabled={draftCreating || draftAutoRenaming}
-                className={`mt-4 inline-flex h-11 w-full items-center justify-center rounded-[var(--radius-large)] bg-[var(--accent)] px-4 text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--accent-fg)] transition-[filter,opacity] ${
-                  draftCreating || draftAutoRenaming
-                    ? 'cursor-not-allowed opacity-50'
-                    : 'hover:brightness-105 active:brightness-95'
-                }`}
-              >
-                {draftCreating ? 'Creating…' : 'Create drone'}
-              </button>
-            ) : null}
           </div>
         )}
       </div>
-      {createWithChat || draftChat.prompt ? (
-        <ChatInput
-          resetKey={draftChatInputResetKey(draftChat)}
-          focusTargetId="primary-chat"
-          droneName="new drone"
-          promptError={draftCreateError}
-          sending={false}
-          waiting={false}
-          autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt && visibleQueuedDraftPrompts.length === 0}
-          attachmentsEnabled
-          composerControls={newDroneComposerControls}
-          composerFooter={
-            !draftChat.prompt ? (
-              <NewDroneTargetControls
-                createRuntime={createRuntime}
-                onCreateRuntimeChange={onCreateRuntimeChange}
-                repoPath={draftCreateRepoPath}
-                branchSource={repoBranchSource}
-                onBranchSourceChange={onRepoBranchSourceChange}
-                remoteBranch={repoCreateRemoteBranch}
-                onRemoteBranchChange={onRepoCreateRemoteBranchChange}
-                hostBranch={draftRepoHostBranch}
-                remoteBranches={draftRepoRemoteBranches}
-                branchesLoading={draftRepoBranchesLoading}
-                branchesError={draftRepoBranchesError}
-                disabled={controlsLocked}
-              />
-            ) : null
+      <ChatInput
+        resetKey={draftChatInputResetKey(draftChat)}
+        focusTargetId="primary-chat"
+        droneName="new drone"
+        promptError={draftCreateError}
+        sending={false}
+        waiting={false}
+        autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt && visibleQueuedDraftPrompts.length === 0}
+        attachmentsEnabled
+        alwaysExpanded
+        composerControls={newDroneComposerControls}
+        composerFooter={!draftChat.prompt ? idleSetupPanel : null}
+        onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
+          if (!draftChat.prompt) {
+            return await onStartDraftPrompt(payload, {
+              keepComposerOpen:
+                context.trigger === 'keyboard' && context.deliveryMode === 'queue',
+            });
           }
-          onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
-            if (!draftChat.prompt) {
-              return await onStartDraftPrompt(payload, {
-                keepComposerOpen:
-                  context.trigger === 'keyboard' && context.deliveryMode === 'queue',
-              });
+          const droneId = String(draftChat.droneId ?? '').trim();
+          if (!droneId) {
+            if (!draftCreating) {
+              onSetDraftCreateError('Drone creation failed before it could be queued. Retry the first message.');
+              return false;
             }
-            const droneId = String(draftChat.droneId ?? '').trim();
-            if (!droneId) {
-              if (!draftCreating) {
-                onSetDraftCreateError('Drone creation failed before it could be queued. Retry the first message.');
-                return false;
-              }
-              const queued = onQueueDraftPromptDuringCreate(payload);
-              if (queued) onSetDraftCreateError(null);
-              return queued;
-            }
-            const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
-            const prompt = String(payload?.prompt ?? '').trim();
-            if (!prompt && attachments.length === 0) return false;
-            onEnqueueQueuedPrompt(droneId, 'default', prompt, attachments);
-            onSetDraftCreateError(null);
-            return true;
-          }}
-        />
-      ) : null}
+            const queued = onQueueDraftPromptDuringCreate(payload);
+            if (queued) onSetDraftCreateError(null);
+            return queued;
+          }
+          const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+          const prompt = String(payload?.prompt ?? '').trim();
+          if (!prompt && attachments.length === 0) return false;
+          onEnqueueQueuedPrompt(droneId, 'default', prompt, attachments);
+          onSetDraftCreateError(null);
+          return true;
+        }}
+      />
     </div>
   );
 }
