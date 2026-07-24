@@ -5,6 +5,7 @@ import type { TranscriptItem } from '../types';
 import { AgentMessageExtras, extractAgentMessageContent } from './AgentMessageExtras';
 import type { LinkedPullRequestContext } from './LinkedPullRequestCards';
 import { ChatMessageBody } from './ChatMessageBody';
+import { ChatMessageCopyAction } from './ChatMessageCopyAction';
 import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
 import type { DroneHubTask } from './drone-hub-task-parser';
@@ -131,6 +132,11 @@ export const TranscriptTurn = React.memo(
           showRoleIcon={showRoleIcons}
           showRoleLabel={showRoleIcons}
           plainAssistant={!showRoleIcons}
+          hoverActions={
+            cleanedAgentMessage ? (
+              <ChatMessageCopyAction text={cleanedAgentMessage} position="hover-rail" />
+            ) : undefined
+          }
         >
           <ChatMessageBody
             role="assistant"

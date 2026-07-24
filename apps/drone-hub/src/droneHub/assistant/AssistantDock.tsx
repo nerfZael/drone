@@ -1081,6 +1081,7 @@ export function AssistantDock({
         { method: 'POST' },
       );
       if (!snapshotMutationCurrent(requestSeq)) return;
+      if (!approved) refocusInputWhenIdleRef.current = true;
       applySnapshot(next);
     } catch (err: any) {
       if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));

@@ -286,4 +286,50 @@ describe('assistant drone workspace target execution', () => {
       ).resolves.toEqual({ block: true, reason: 'User denied bash.' });
     });
   });
+
+  test('stops the native run before releasing a denied approval', async () => {
+    await withTempDroneDataDir('assistant-denied-approval-stop-', async () => {
+      const service = new HubAssistantService({ listDrones: async () => [] });
+      const created = await ensureTestNativeChat(service, { chatName: 'deny and stop' });
+      const threadId = created.chatId;
+      let preflightSettled = false;
+      let stoppedThreadId = '';
+      let unsubscribe = () => {};
+      const approvalPending = new Promise<void>((resolve) => {
+        unsubscribe = service.subscribeChanges((event) => {
+          if (event.threadId !== threadId || event.reason !== 'approval_pending') return;
+          unsubscribe();
+          resolve();
+        });
+      });
+      service.setRuntimeStopDelegate((stoppedId) => {
+        expect(preflightSettled).toBe(false);
+        stoppedThreadId = stoppedId;
+      });
+
+      const preflight = service
+        .preflightBlipTool(threadId, 'bash', 'call-denied', {
+          command: 'pwd',
+          workspaceTarget: {
+            id: 'remote:desktop:project',
+            kind: 'remote-device',
+            label: 'Desktop · Project',
+          },
+        })
+        .then((decision) => {
+          preflightSettled = true;
+          return decision;
+        });
+      await approvalPending;
+      const approval = (await service.threadSnapshot(threadId)).pendingApprovals[0]!;
+
+      await service.approve(approval.id, false, threadId);
+
+      expect(stoppedThreadId).toBe(threadId);
+      await expect(preflight).resolves.toEqual({
+        block: true,
+        reason: 'User denied bash.',
+      });
+    });
+  });
 });

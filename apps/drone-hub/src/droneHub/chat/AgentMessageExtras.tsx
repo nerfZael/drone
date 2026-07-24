@@ -5,7 +5,6 @@ import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import type { AgentPlan } from '../types';
 import { VideoPreview } from '../media/VideoPreview';
 import { AgentPlanList } from './AgentPlanList';
-import { ChatMessageCopyAction } from './ChatMessageCopyAction';
 import { DroneHubTaskList } from './DroneHubTaskList';
 import { LinkedPullRequestCards, type LinkedPullRequestContext } from './LinkedPullRequestCards';
 import type { MarkdownFileReference } from './MarkdownMessage';
@@ -89,6 +88,7 @@ export function AgentMessageExtras({
   const showInlineMedia = inlineMedia.length > 0 && inlineMediaVisible;
   const inlineMediaToggle = resolveInlineMediaToggleState(inlineMediaVisible);
   const hasPlan = Boolean(plan?.items.length);
+  const hasMessageActions = inlineMedia.length > 0 || Boolean(actionEnd);
 
   const openInlineMediaTarget = React.useCallback(
     (media: InlineAgentMedia) => {
@@ -110,7 +110,6 @@ export function AgentMessageExtras({
 
   const messageActions = (
     <>
-      <ChatMessageCopyAction text={text} position="inline" />
       {inlineMedia.length > 0 ? (
         <button
           type="button"
@@ -215,9 +214,12 @@ export function AgentMessageExtras({
         onOpenLink={onOpenLink}
         initiallyExpanded={initiallyExpandLinkedPullRequests}
       />
-      <AgentPlanList plan={plan} headerActions={hasPlan ? messageActions : undefined} />
+      <AgentPlanList
+        plan={plan}
+        headerActions={hasPlan && hasMessageActions ? messageActions : undefined}
+      />
 
-      {!hasPlan ? (
+      {!hasPlan && hasMessageActions ? (
         <div
           data-agent-message-actions="true"
           className="mt-1 flex min-h-7 items-center justify-end gap-1"
