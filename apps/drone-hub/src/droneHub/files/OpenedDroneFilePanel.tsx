@@ -2,6 +2,7 @@ import React from 'react';
 import {
   defaultTextFileViewModeForFile,
   editorLanguageForPath,
+  isHtmlFile,
   isMarkdownFile,
   type TextFileViewMode,
 } from '../code-languages';
@@ -29,6 +30,7 @@ import {
   MarkdownOutlinePreview,
   type MarkdownOutlineExpansionCommand,
 } from './MarkdownOutlinePreview';
+import { IsolatedHtmlPreview } from './IsolatedHtmlPreview';
 
 type MonacoEditorComponent = (typeof import('@monaco-editor/react'))['default'];
 type MonacoEditorProps = React.ComponentProps<MonacoEditorComponent>;
@@ -283,6 +285,7 @@ export function OpenedDroneFilePanel({
   const openedEditorIsText = (fileKind ?? 'text') === 'text';
   const openedFileIsLargeText = fileKind === 'large-text';
   const openedFileIsMarkdown = openedEditorIsText && isMarkdownFile(activeFilePath, fileMime);
+  const openedFileIsHtml = openedEditorIsText && isHtmlFile(activeFilePath, fileMime);
   const [openedTextMode, setOpenedTextMode] = React.useState<TextFileViewMode>(() =>
     activeFilePath && openedEditorIsText
       ? defaultTextFileViewModeForFile(activeFilePath, fileMime)
@@ -362,8 +365,11 @@ export function OpenedDroneFilePanel({
   }, [openedFileImagePanning]);
 
   const openedFileShowsMarkdownPreview = openedFileIsMarkdown && openedTextMode === 'preview';
+  const openedFileShowsHtmlPreview = openedFileIsHtml && openedTextMode === 'preview';
+  const openedFileShowsPreview =
+    openedFileShowsMarkdownPreview || openedFileShowsHtmlPreview;
   const openedFileEditorVisible =
-    openedEditorIsText && Boolean(activeFilePath) && !openedFileShowsMarkdownPreview;
+    openedEditorIsText && Boolean(activeFilePath) && !openedFileShowsPreview;
   const openedFileMediaSrc = React.useMemo(() => {
     if (!activeFilePath) return '';
     if (fileKind !== 'image' && fileKind !== 'video') return '';
@@ -559,7 +565,7 @@ export function OpenedDroneFilePanel({
           onCloseTab={(tabId) => onCloseFile?.(tabId)}
           onReorderTabs={(fromTabId, toTabId) => onReorderFileTabs?.(fromTabId, toTabId)}
           trailingActions={
-            openedFileIsMarkdown ? (
+            openedFileIsMarkdown || openedFileIsHtml ? (
               <div className="flex items-center gap-1.5">
                 {openedFileShowsMarkdownPreview ? (
                   <div
@@ -602,7 +608,7 @@ export function OpenedDroneFilePanel({
                 <button
                   type="button"
                   onClick={() => {
-                    if (openedFileShowsMarkdownPreview) {
+                    if (openedFileShowsPreview) {
                       setOpenedTextMode('edit');
                       setMarkdownOutlineExpansionCommand(null);
                     } else {
@@ -613,14 +619,14 @@ export function OpenedDroneFilePanel({
                   disabled={Boolean(fileLoading)}
                   className={modeButtonClassName(Boolean(fileLoading))}
                   title={
-                    openedFileShowsMarkdownPreview
+                    openedFileShowsPreview
                       ? readOnly
-                        ? 'View markdown source'
-                        : 'Edit markdown source'
-                      : 'Render markdown preview'
+                        ? `View ${openedFileIsHtml ? 'HTML' : 'markdown'} source`
+                        : `Edit ${openedFileIsHtml ? 'HTML' : 'markdown'} source`
+                      : `Render ${openedFileIsHtml ? 'isolated HTML' : 'markdown'} preview`
                   }
                 >
-                  {openedFileShowsMarkdownPreview ? (readOnly ? 'Source' : 'Edit') : 'Preview'}
+                  {openedFileShowsPreview ? (readOnly ? 'Source' : 'Edit') : 'Preview'}
                 </button>
               </div>
             ) : null
@@ -749,6 +755,8 @@ export function OpenedDroneFilePanel({
                 onOpenLink={openMarkdownPreviewLink}
                 expansionCommand={markdownOutlineExpansionCommand}
               />
+            ) : openedFileShowsHtmlPreview ? (
+              <IsolatedHtmlPreview source={fileContent ?? ''} fileName={fileName} />
             ) : openedFileEditorVisible ? (
               <MonacoEditorErrorBoundary
                 fallback={

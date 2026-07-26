@@ -138,6 +138,32 @@ describe('OpenedDroneFilePanel', () => {
     expect(html).not.toContain('>Saved<');
   });
 
+  test('renders HTML in a script-capable opaque sandbox', () => {
+    const html = renderPanel(
+      makeFile({
+        path: '/work/repo/index.html',
+        name: 'index.html',
+        mime: 'text/html',
+        content: '<h1>Preview</h1><script>window.previewRan = true</script>',
+      }),
+      true,
+    );
+
+    expect(html).toContain('sandbox="allow-scripts"');
+    expect(html).not.toContain('allow-same-origin');
+    expect(html).not.toContain('allow-forms');
+    expect(html).toContain('credentialless=""');
+    expect(html).toContain('referrerPolicy="no-referrer"');
+    expect(html).toContain('camera');
+    expect(html).toContain('clipboard-read');
+    expect(html).toContain('Isolated preview: scripts run; network, storage, and DroneHub access are blocked.');
+    expect(html).toContain('Content-Security-Policy');
+    expect(html).toContain('connect-src');
+    expect(html).toContain('window.previewRan');
+    expect(html).toContain('>Edit</button>');
+    expect(html).not.toContain('Plain text editor');
+  });
+
   test('renders oversized text files in the large-file viewer', () => {
     const html = renderPanel(makeFile({ kind: 'large-text', size: 30 * 1024 * 1024, content: '' }));
 

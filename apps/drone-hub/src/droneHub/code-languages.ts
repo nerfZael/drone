@@ -105,10 +105,29 @@ export function isMarkdownFile(filePath: string, mime?: string | null): boolean 
   return isMarkdownPath(filePath) || isMarkdownMime(mime);
 }
 
+export function isHtmlPath(filePath: string): boolean {
+  return codeLanguagesForPath(filePath).editor === 'html';
+}
+
+export function isHtmlMime(mimeRaw: string | null | undefined): boolean {
+  const mime = String(mimeRaw ?? '').trim().toLowerCase();
+  if (!mime) return false;
+  return (
+    mime === 'text/html' ||
+    mime === 'application/xhtml+xml' ||
+    mime.startsWith('text/html;') ||
+    mime.startsWith('application/xhtml+xml;')
+  );
+}
+
+export function isHtmlFile(filePath: string, mime?: string | null): boolean {
+  return isHtmlPath(filePath) || isHtmlMime(mime);
+}
+
 export function defaultTextFileViewModeForPath(filePath: string): TextFileViewMode {
-  return isMarkdownPath(filePath) ? 'preview' : 'edit';
+  return isMarkdownPath(filePath) || isHtmlPath(filePath) ? 'preview' : 'edit';
 }
 
 export function defaultTextFileViewModeForFile(filePath: string, mime?: string | null): TextFileViewMode {
-  return isMarkdownFile(filePath, mime) ? 'preview' : 'edit';
+  return isMarkdownFile(filePath, mime) || isHtmlFile(filePath, mime) ? 'preview' : 'edit';
 }
