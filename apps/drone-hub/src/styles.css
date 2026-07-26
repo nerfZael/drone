@@ -541,6 +541,11 @@ code, pre {
   to { transform: translateX(200%); }
 }
 
+@keyframes progress-indeterminate {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(300%); }
+}
+
 @keyframes accent-glow-pulse {
   0%, 100% { box-shadow: var(--glow-accent); }
   50% { box-shadow: var(--glow-accent-strong); }

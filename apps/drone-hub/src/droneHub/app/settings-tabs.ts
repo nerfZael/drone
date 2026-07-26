@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'system';
+export type SettingsTabId = 'general' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'components' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -71,6 +71,12 @@ export const SETTINGS_TABS: Array<{
     label: 'Agents',
     title: 'Repo instructions',
     description: 'Manage the default AGENTS.md injected into repo-attached container drones and configure per-repo overrides.',
+  },
+  {
+    id: 'components',
+    label: 'Components',
+    title: 'Component library',
+    description: 'Preview the shared visual primitives and their interactive states across every supported theme.',
   },
   {
     id: 'system',

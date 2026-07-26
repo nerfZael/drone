@@ -951,6 +951,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             persisted.settingsActiveTab === 'skills' ||
             persisted.settingsActiveTab === 'mcp' ||
             persisted.settingsActiveTab === 'agents' ||
+            persisted.settingsActiveTab === 'components' ||
             persisted.settingsActiveTab === 'system'
               ? persisted.settingsActiveTab
               : currentState.settingsActiveTab,

@@ -14,7 +14,7 @@ export function PaneLoadingState({ label }: { label: string }) {
           <span className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-[var(--accent)] motion-reduce:animate-none" />
           <span className="absolute inset-[7px] rounded-full bg-[var(--accent-subtle)]" />
         </span>
-        <span className="text-[var(--text-11)] font-[var(--weight-medium)] text-[var(--muted)]">
+        <span className="text-[length:var(--text-11)] font-[var(--weight-medium)] text-[var(--muted)]">
           {label}
         </span>
       </div>

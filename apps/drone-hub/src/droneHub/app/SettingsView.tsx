@@ -1,7 +1,9 @@
 import React from 'react';
+import { UiBadge, UiButton } from '../../ui/components';
 import { AgentsSettingsSection } from './AgentsSettingsSection';
 import { ArchiveSettingsTab } from './ArchiveSettingsTab';
 import { BackupsSettingsTab } from './BackupsSettingsTab';
+import { ComponentLibraryPreview } from './ComponentLibraryPreview';
 import { GeneralSettingsTab } from './GeneralSettingsTab';
 import { DeviceMeshSettingsTab } from './DeviceMeshSettingsTab';
 import { McpServersSection } from './McpServersSection';
@@ -183,6 +185,7 @@ export function SettingsView({
     if (activeTab === 'skills') return <SkillLibrarySection skillLibrary={skillLibrary} />;
     if (activeTab === 'mcp') return <McpServersSection mcp={mcpServers} />;
     if (activeTab === 'agents') return <AgentsSettingsSection agents={agents} />;
+    if (activeTab === 'components') return <ComponentLibraryPreview />;
     return <SystemLogsSettingsTab hubLogsState={hubLogsState} hubLogsTailLines={hubLogsTailLines} hubLogsMaxBytes={hubLogsMaxBytes} />;
   };
 
@@ -193,13 +196,13 @@ export function SettingsView({
           <aside className="xl:sticky xl:top-5">
             <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden">
               <div className="px-4 py-4 border-b border-[var(--border)]">
-                <div className="text-[var(--text-10)] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-[var(--weight-semibold)]" style={{ fontFamily: 'var(--display)' }}>
+                <div className="text-[length:var(--text-10)] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-[var(--weight-semibold)]" style={{ fontFamily: 'var(--display)' }}>
                   Drone Hub
                 </div>
                 <div className="text-[18px] font-[var(--weight-semibold)] text-[var(--fg-strong)] mt-1" style={{ fontFamily: 'var(--display)' }}>
                   Settings
                 </div>
-                <div className="text-[var(--text-12)] text-[var(--muted)] mt-1 leading-relaxed">
+                <div className="text-[length:var(--text-12)] text-[var(--muted)] mt-1 leading-relaxed">
                   Split by area so archive controls, shortcuts, and the skill library each have room.
                 </div>
               </div>
@@ -210,14 +213,14 @@ export function SettingsView({
                   return (
                     <button key={tab.id} type="button" onClick={() => handleSelectTab(tab.id)} className={settingsNavButtonClass(active)}>
                       <div
-                        className={`text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${
+                        className={`text-[length:var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${
                           active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
                         }`}
                         style={{ fontFamily: 'var(--display)' }}
                       >
                         {tab.label}
                       </div>
-                      <div className={`text-[var(--text-11)] mt-1 leading-relaxed ${active ? 'text-[var(--fg-secondary)]' : 'text-[var(--muted-dim)]'}`}>
+                      <div className={`text-[length:var(--text-11)] mt-1 leading-relaxed ${active ? 'text-[var(--fg-secondary)]' : 'text-[var(--muted-dim)]'}`}>
                         {tab.description}
                       </div>
                     </button>
@@ -226,14 +229,14 @@ export function SettingsView({
               </div>
 
               <div className="px-3 pb-3">
-                <button
-                  type="button"
+                <UiButton
                   onClick={onBackToWorkspace}
-                  className="w-full h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-                  style={{ fontFamily: 'var(--display)' }}
+                  fullWidth
+                  size="large"
+                  className="uppercase"
                 >
                   Back to drones
-                </button>
+                </UiButton>
               </div>
             </div>
           </aside>
@@ -241,28 +244,27 @@ export function SettingsView({
           <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden min-w-0">
             <div className="px-5 py-4 border-b border-[var(--border)] flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[var(--text-10)] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-[var(--weight-semibold)]" style={{ fontFamily: 'var(--display)' }}>
+                <div className="text-[length:var(--text-10)] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-[var(--weight-semibold)]" style={{ fontFamily: 'var(--display)' }}>
                   {activeTabMeta.label}
                 </div>
                 <h1 className="text-[18px] font-[var(--weight-semibold)] text-[var(--fg-strong)] mt-1" style={{ fontFamily: 'var(--display)' }}>
                   {activeTabMeta.title}
                 </h1>
-                <p className="text-[var(--text-12)] text-[var(--muted)] mt-1 max-w-[72ch]">{activeTabMeta.description}</p>
+                <p className="text-[length:var(--text-12)] text-[var(--muted)] mt-1 max-w-[72ch]">{activeTabMeta.description}</p>
               </div>
-              <button
-                type="button"
-                onClick={handleRefreshAll}
-                disabled={settingsBusy}
-                className={`h-8 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                  settingsBusy
-                    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title="Refresh settings and logs"
-              >
-                Refresh
-              </button>
+              {activeTab === 'components' ? (
+                <UiBadge tone="success" dot className="mt-1">Live preview</UiBadge>
+              ) : (
+                <UiButton
+                  onClick={handleRefreshAll}
+                  disabled={settingsBusy}
+                  size="medium"
+                  className="uppercase"
+                  title="Refresh settings and logs"
+                >
+                  Refresh
+                </UiButton>
+              )}
             </div>
 
             <div className="px-5 py-4 flex flex-col gap-4 min-w-0">{renderActiveTab()}</div>
