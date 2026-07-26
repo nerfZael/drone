@@ -180,7 +180,7 @@ function GapActionButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex items-center justify-center rounded-full border border-[var(--border-subtle)] bg-transparent px-2 py-[1px] text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--surface-soft)] disabled:opacity-40 disabled:cursor-wait"
+      className="inline-flex h-[18px] items-center justify-center rounded-[3px] border border-transparent bg-transparent px-1.5 text-[var(--text-8)] font-[var(--weight-semibold)] tracking-wide text-[var(--muted)] transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg-secondary)] disabled:cursor-wait disabled:opacity-40"
       title={title}
     >
       {label}
@@ -201,9 +201,9 @@ function GapRow({
 }) {
   const hiddenLineLabel = hiddenLines === null ? 'Hidden lines' : `${hiddenLines} hidden line${hiddenLines === 1 ? '' : 's'}`;
   return (
-    <div className="w-full flex items-center justify-between gap-2 rounded-[var(--radius-medium)] px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
+    <div className="w-full flex items-center justify-between gap-2 px-2 py-0.5 text-[var(--text-9)] text-[var(--muted)]">
       <div className="flex items-center gap-2 min-w-0">
-        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] leading-none text-[var(--muted-dim)]">
+        <span className="inline-flex items-center justify-center w-4 h-4 text-[var(--text-10)] leading-none text-[var(--muted-dim)]">
           +
         </span>
         <span className="truncate text-[var(--muted-dim)]">{loading ? 'Expanding...' : hiddenLineLabel}</span>
@@ -230,9 +230,11 @@ const renderDiffGutter: RenderGutter = ({ change, side, renderDefault, wrapInAnc
     marker === '+' ? 'dh-diff-gutter-sign-insert' : marker === '-' ? 'dh-diff-gutter-sign-delete' : 'dh-diff-gutter-sign-neutral';
   return wrapInAnchor(
     <span className="dh-diff-gutter-content">
-      <span className={`dh-diff-gutter-sign ${markerClassName}`} aria-hidden="true">
-        {marker}
-      </span>
+      {marker ? (
+        <span className={`dh-diff-gutter-sign ${markerClassName}`} aria-hidden="true">
+          {marker}
+        </span>
+      ) : null}
       <span className="dh-diff-gutter-line">{renderDefault()}</span>
     </span>,
   );

@@ -7,6 +7,7 @@ export const CHANGES_PRIMARY_VIEW_STORAGE_KEY = profileStorageKey('droneHub.chan
 export const CHANGES_BRANCH_MODE_STORAGE_KEY = profileStorageKey('droneHub.changesBranchMode');
 export const CHANGES_EXPLORER_WIDTH_STORAGE_KEY = profileStorageKey('droneHub.changesExplorerWidthPx');
 export const CHANGES_EXPLORER_ZOOM_STORAGE_KEY = profileStorageKey('droneHub.changesExplorerZoom');
+export const CHANGES_DIFF_ZOOM_STORAGE_KEY = profileStorageKey('droneHub.changesDiffZoom');
 export const CHANGES_COMMIT_LIST_WIDTH_STORAGE_KEY = profileStorageKey('droneHub.changesCommitListWidthPx');
 export const CHANGES_VIEWED_FILES_STORAGE_KEY = profileStorageKey('droneHub.changesViewedFiles');
 export const CHANGES_HIDE_VIEWED_STORAGE_KEY = profileStorageKey('droneHub.changesHideViewed');

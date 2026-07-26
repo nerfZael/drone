@@ -2325,53 +2325,286 @@ select:disabled optgroup {
 }
 
 .dh-changes-dock {
+  background: var(--chat-background);
+  border-left: 1px solid var(--border);
+  --changes-diff-font-size: 11px;
   --diff-background-color: transparent;
   --diff-text-color: var(--fg-secondary);
   --diff-font-family: var(--code);
   --diff-selection-background-color: var(--accent-subtle);
   --diff-selection-text-color: var(--fg);
-  --diff-gutter-insert-background-color: var(--green-subtle);
+  --diff-gutter-insert-background-color: color-mix(in srgb, var(--green-subtle) 64%, transparent);
   --diff-gutter-insert-text-color: var(--fg);
-  --diff-gutter-delete-background-color: var(--red-subtle);
+  --diff-gutter-delete-background-color: color-mix(in srgb, var(--red-subtle) 64%, transparent);
   --diff-gutter-delete-text-color: var(--fg);
   --diff-gutter-selected-background-color: var(--yellow-subtle);
   --diff-gutter-selected-text-color: var(--fg);
-  --diff-code-insert-background-color: var(--green-subtle);
+  --diff-code-insert-background-color: color-mix(in srgb, var(--green-subtle) 38%, transparent);
   --diff-code-insert-text-color: var(--fg-secondary);
-  --diff-code-delete-background-color: var(--red-subtle);
+  --diff-code-delete-background-color: color-mix(in srgb, var(--red-subtle) 38%, transparent);
   --diff-code-delete-text-color: var(--fg-secondary);
-  --diff-code-insert-edit-background-color: var(--green-border);
+  --diff-code-insert-edit-background-color: color-mix(in srgb, var(--green-border) 62%, transparent);
   --diff-code-insert-edit-text-color: var(--fg);
-  --diff-code-delete-edit-background-color: var(--red-border);
+  --diff-code-delete-edit-background-color: color-mix(in srgb, var(--red-border) 62%, transparent);
   --diff-code-delete-edit-text-color: var(--fg);
   --diff-code-selected-background-color: var(--yellow-subtle);
   --diff-code-selected-text-color: var(--fg);
   --diff-omit-gutter-line-color: var(--red);
 }
 
-.dh-changes-dock .rdv-wrapper .diff {
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  overflow: hidden;
-  margin-bottom: 10px;
+.dh-changes-toolbar-controls {
+  display: inline-flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
 }
 
-/* Keep diffs readable in narrow panes. */
+.dh-changes-meta {
+  min-height: 18px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.dh-changes-meta + .dh-changes-meta {
+  margin-left: 2px;
+}
+
+.dh-changes-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dh-changes-toolbar-label {
+  color: var(--muted-dim);
+  font-family: var(--display);
+  font-size: var(--text-11);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dh-changes-segment {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.dh-changes-segment-button {
+  position: relative;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--display);
+  font-size: var(--text-11);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.01em;
+  line-height: 28px;
+  transition:
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.dh-changes-segment-button:hover {
+  color: var(--fg);
+  background: transparent;
+}
+
+.dh-changes-segment-button:focus-visible,
+.dh-changes-quiet-button:focus-visible,
+.dh-changes-explorer-row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent-muted);
+}
+
+.dh-changes-segment-button.is-active,
+.dh-changes-segment-button[aria-pressed='true'] {
+  background: transparent;
+  color: var(--fg);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.dh-changes-segment-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.dh-changes-quiet-button {
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--display);
+  font-size: var(--text-10);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.dh-changes-quiet-button:hover {
+  border-color: var(--border);
+  background: var(--surface-soft);
+  color: var(--fg-secondary);
+}
+
+.dh-changes-quiet-button.is-active {
+  border-color: var(--accent-muted);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.dh-changes-icon-button {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  transition:
+    opacity 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.dh-changes-icon-button:hover {
+  border-color: var(--border);
+  background: var(--surface-strong);
+  color: var(--fg-secondary);
+}
+
+.dh-changes-icon-button.is-active {
+  border-color: var(--accent-muted);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.dh-changes-icon-button.is-warning {
+  border-color: var(--yellow-border);
+  background: var(--yellow-subtle);
+  color: var(--yellow);
+}
+
+.dh-changes-icon-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent-muted);
+}
+
+.dh-changes-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.dh-changes-menu-trigger {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--display);
+  font-size: var(--text-11);
+  font-weight: var(--weight-semibold);
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.dh-changes-menu-trigger:hover,
+.dh-changes-menu-trigger[aria-expanded='true'] {
+  background: var(--surface-soft);
+  color: var(--fg);
+}
+
+.dh-changes-menu-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent-muted);
+}
+
+.dh-changes-explorer-row {
+  position: relative;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+}
+
+.dh-changes-explorer-row:hover {
+  background: var(--surface-strong);
+}
+
+.dh-changes-explorer-row.is-selected,
+.dh-changes-explorer-row[aria-selected='true'] {
+  background: transparent;
+  box-shadow: none;
+}
+
+.dh-changes-dock .rdv-wrapper {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.dh-changes-dock .rdv-wrapper .diff {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-inset);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 70%, transparent);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
 .dh-changes-dock .rdv-wrapper .diff table {
   width: 100%;
-  table-layout: fixed;
+  min-width: max-content;
+  table-layout: auto;
 }
 
-.dh-changes-dock .rdv-wrapper .diff td,
-.dh-changes-dock .rdv-wrapper .diff pre {
-  min-width: 0;
+.dh-changes-dock .rdv-wrapper .diff .diff-line,
+.dh-changes-dock .rdv-wrapper .diff .diff-decoration {
+  font-size: var(--changes-diff-font-size);
+  line-height: 1.45;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .diff-gutter {
+  min-width: 3ch;
+  padding: 0 0.35ch;
+  border-right: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  color: var(--muted-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .diff-gutter-col {
+  width: 3.75ch;
 }
 
 .dh-changes-dock .rdv-wrapper .diff .diff-gutter .dh-diff-gutter-content {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.45ch;
+  gap: 0.25ch;
   width: 100%;
 }
 
@@ -2404,9 +2637,47 @@ select:disabled optgroup {
 .dh-changes-dock .rdv-wrapper .diff .diff-code-edit,
 .dh-changes-dock .rdv-wrapper .diff .diff-code-delete,
 .dh-changes-dock .rdv-wrapper .diff .diff-code-insert {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .diff-code {
+  min-width: 32ch;
+  padding-left: 0.8ch;
+}
+
+/* A split diff has two code cells in one table row. Keep that table constrained
+   to the viewport and wrap long lines inside their own pane; allowing the table
+   to size to max-content lets either cell paint across the center divider. */
+.dh-changes-dock .rdv-wrapper .diff.diff-split {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.dh-changes-dock .rdv-wrapper .diff.diff-split .diff-code,
+.dh-changes-dock .rdv-wrapper .diff.diff-split .diff-code pre,
+.dh-changes-dock .rdv-wrapper .diff.diff-split .diff-code-edit,
+.dh-changes-dock .rdv-wrapper .diff.diff-split .diff-code-delete,
+.dh-changes-dock .rdv-wrapper .diff.diff-split .diff-code-insert {
+  min-width: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.dh-changes-dock .rdv-wrapper .diff .diff-code-insert {
+  box-shadow: inset 2px 0 0 var(--green-border);
+}
+
+.dh-changes-dock .rdv-wrapper .diff .diff-code-delete {
+  box-shadow: inset 2px 0 0 var(--red-border);
+}
+
+.dh-changes-dock .rdv-wrapper .diff .diff-gutter-omit {
+  background: var(--surface-soft);
+  color: var(--muted-dim);
 }
 
 .dh-changes-dock .rdv-wrapper .diff .token.comment,

@@ -11,9 +11,17 @@ import {
 } from '@drone/assistant-chat';
 
 import { DiffBlock } from './DiffBlock';
+import {
+  clampDiffZoom,
+  diffZoomStyle,
+  DiffZoomControl,
+  DIFF_ZOOM_DEFAULT,
+} from './DiffZoomControl';
+import { fileNameForChangesPath } from './helpers';
 import type { AgentRunChangesSelection } from './navigation';
 import {
   CHANGES_DIFF_VIEW_STORAGE_KEY,
+  CHANGES_DIFF_ZOOM_STORAGE_KEY,
   readChangesStorage,
   writeChangesStorage,
 } from './storage';
@@ -47,6 +55,15 @@ function currentChangesIcon() {
       />
     </svg>
   );
+}
+
+function expandedParentsForPath(filePath: string | null | undefined): Record<string, boolean> {
+  const segments = String(filePath ?? '').split('/').filter(Boolean);
+  const expanded: Record<string, boolean> = {};
+  for (let index = 1; index < segments.length; index += 1) {
+    expanded[segments.slice(0, index).join('/')] = true;
+  }
+  return expanded;
 }
 
 function initialWorkspaceMetadata(
@@ -143,16 +160,27 @@ export function AgentRunHistoricalChangesView({
   const [metadataRetryNonce, setMetadataRetryNonce] = React.useState(0);
   const [expandedByWorkspace, setExpandedByWorkspace] = React.useState<
     Record<string, Record<string, boolean>>
-  >({});
+  >(() => ({
+    [initialSelection.workspaceTargetId]: expandedParentsForPath(initialSelection.path),
+  }));
   const [viewType, setViewType] = React.useState<DiffViewType>(() =>
     readChangesStorage(CHANGES_DIFF_VIEW_STORAGE_KEY) === 'split' ? 'split' : 'unified',
   );
+  const [diffZoom, setDiffZoom] = React.useState<number>(() => {
+    const stored = readChangesStorage(CHANGES_DIFF_ZOOM_STORAGE_KEY);
+    if (stored === null) return DIFF_ZOOM_DEFAULT;
+    const raw = Number(stored);
+    return Number.isFinite(raw) ? clampDiffZoom(raw) : DIFF_ZOOM_DEFAULT;
+  });
   const [selectedDiff, setSelectedDiff] = React.useState<SelectedDiffState>(null);
   const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
 
   React.useEffect(() => {
     writeChangesStorage(CHANGES_DIFF_VIEW_STORAGE_KEY, viewType);
   }, [viewType]);
+  React.useEffect(() => {
+    writeChangesStorage(CHANGES_DIFF_ZOOM_STORAGE_KEY, String(diffZoom));
+  }, [diffZoom]);
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -205,6 +233,18 @@ export function AgentRunHistoricalChangesView({
   const selectedPath = selectedEntry?.path;
 
   React.useEffect(() => {
+    if (!selectedWorkspace || !selectedPath) return;
+    const parents = expandedParentsForPath(selectedPath);
+    setExpandedByWorkspace((current) => ({
+      ...current,
+      [selectedWorkspace.targetId]: {
+        ...(current[selectedWorkspace.targetId] ?? {}),
+        ...parents,
+      },
+    }));
+  }, [selectedPath, selectedWorkspace]);
+
+  React.useEffect(() => {
     if (!selectedWorkspace || selection.path || selectedWorkspaceEntries.length === 0) return;
     setSelection({
       workspaceTargetId: selectedWorkspace.targetId,
@@ -236,7 +276,10 @@ export function AgentRunHistoricalChangesView({
   const currentError = selectedDiff?.state.status === 'error' ? selectedDiff.state : null;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--panel-alt)] dh-changes-dock">
+    <div
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--chat-background)] dh-changes-dock"
+      style={diffZoomStyle(diffZoom)}
+    >
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-2.5 py-1.5">
         <div className="flex min-w-0 items-center gap-2">
           <span
@@ -271,22 +314,28 @@ export function AgentRunHistoricalChangesView({
             -{lineChanges.deleted}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {(['unified', 'split'] as const).map((nextViewType) => (
-            <button
-              key={nextViewType}
-              type="button"
-              onClick={() => setViewType(nextViewType)}
-              aria-pressed={viewType === nextViewType}
-              className={`h-6 rounded-[var(--radius-medium)] border px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide transition-colors ${viewType === nextViewType ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'}`}
-            >
-              {nextViewType === 'split' ? 'Side-by-side' : 'Unified'}
-            </button>
-          ))}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <DiffZoomControl value={diffZoom} onChange={setDiffZoom} />
+          <div className="dh-changes-toolbar-group">
+            <span className="dh-changes-toolbar-label">Diff</span>
+            <div className="dh-changes-segment">
+              {(['unified', 'split'] as const).map((nextViewType) => (
+                <button
+                  key={nextViewType}
+                  type="button"
+                  onClick={() => setViewType(nextViewType)}
+                  aria-pressed={viewType === nextViewType}
+                  className={`dh-changes-segment-button ${viewType === nextViewType ? 'is-active' : ''}`}
+                >
+                  {nextViewType === 'split' ? 'Split' : 'Unified'}
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             type="button"
             onClick={onClose}
-            className="ml-1 inline-flex h-6 items-center gap-1.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+            className="dh-changes-quiet-button inline-flex items-center gap-1.5"
             aria-label="Return to current changes"
             title="Return to current changes"
           >
@@ -297,14 +346,19 @@ export function AgentRunHistoricalChangesView({
       </header>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-[var(--surface-inset)]">
+        <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-[var(--chat-background)]">
           {selectedEntry ? (
             <div className="min-w-0">
-              <div className="sticky top-0 z-10 flex min-h-9 items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 px-3 backdrop-blur">
-                <span className="min-w-0 flex-1 truncate font-mono text-[var(--text-10)] text-[var(--fg-secondary)]">
-                  {selectedEntry.originalPath
-                    ? `${selectedEntry.originalPath} → ${selectedEntry.path}`
-                    : selectedEntry.path}
+              <div className="sticky top-0 z-10 flex h-8 items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 px-2.5 backdrop-blur">
+                <span
+                  className="min-w-0 flex-1 truncate font-mono text-[var(--text-10)] text-[var(--fg-secondary)]"
+                  title={
+                    selectedEntry.originalPath
+                      ? `${selectedEntry.originalPath} → ${selectedEntry.path}`
+                      : selectedEntry.path
+                  }
+                >
+                  {fileNameForChangesPath(selectedEntry.path)}
                 </span>
                 {currentError?.retryable ? (
                   <button
@@ -329,9 +383,12 @@ export function AgentRunHistoricalChangesView({
           )}
         </main>
 
-        <aside className="flex min-h-0 w-[min(280px,38%)] min-w-[190px] shrink-0 flex-col overflow-hidden border-l border-[var(--border-subtle)] bg-[var(--panel-alt)]">
-          <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 px-2 py-1.5 font-mono text-[var(--text-9)] text-[var(--muted-dim)]">
-            {selectedEntry?.path ?? 'Select a changed file'}
+        <aside className="flex min-h-0 w-[min(260px,36%)] min-w-[190px] shrink-0 flex-col overflow-hidden border-l border-[var(--border-subtle)] bg-[var(--chat-background)]">
+          <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 px-2">
+            <span className="dh-changes-toolbar-label">Files</span>
+            <span className="font-mono text-[var(--text-8)] tabular-nums text-[var(--muted-dim)]">
+              {fileChanges.counts.changed}
+            </span>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5">
             {fileChanges.workspaces.map((workspace) => {
@@ -356,7 +413,8 @@ export function AgentRunHistoricalChangesView({
                         ? selectedEntry?.path
                         : null
                     }
-                    density="comfortable"
+                    appearance="panel"
+                    density="compact"
                     onToggleDirectory={(directoryPath) =>
                       setExpandedByWorkspace((current) => ({
                         ...current,

@@ -1,6 +1,13 @@
 import React from 'react';
 import type { RepoChangeEntry, RepoCommitSummary } from '../types';
-import { badgeTone, shortSha, statusBadgeTitle, statusCharLabel, type ExplorerNode } from './helpers';
+import {
+  badgeTone,
+  fileNameForChangesPath,
+  shortSha,
+  statusBadgeTitle,
+  statusCharLabel,
+  type ExplorerNode,
+} from './helpers';
 import type { DiffState, DiffViewType } from './types';
 import { DiffBlock } from './DiffBlock';
 import { MetaChip } from './MetaChip';
@@ -118,7 +125,7 @@ export function CommitInspectionView({
   return (
     <div ref={commitLayoutRef as React.RefObject<HTMLDivElement>} className="flex-1 min-h-0 overflow-hidden flex">
       <div
-        className={`shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-inset)] overflow-auto ${
+        className={`shrink-0 border-r border-[var(--border-subtle)] bg-[var(--chat-background)] overflow-auto ${
           commitListResizing ? '' : 'transition-[width] duration-150 ease-out'
         }`}
         style={{
@@ -238,7 +245,7 @@ export function CommitInspectionView({
                           {statusCharLabel(entry.unstagedChar)}
                         </span>
                         <span className="text-[var(--text-11)] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
-                          {entry.path}
+                          {fileNameForChangesPath(entry.path)}
                         </span>
                         {renderFileQuickActions(entry)}
                         <button
@@ -267,10 +274,14 @@ export function CommitInspectionView({
               </div>
             ) : (
               <div ref={splitLayoutRef as React.RefObject<HTMLDivElement>} className="flex-1 min-h-0 overflow-hidden flex">
-                <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[var(--surface-inset)]">
+                <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[var(--chat-background)]">
                   <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center justify-between gap-2">
                     <div className="min-w-0 text-[var(--text-10)] text-[var(--muted)] font-mono truncate">
-                      {selectedCommitFileEntry ? selectedCommitFileEntry.path : 'No file selected'}
+                      <span title={selectedCommitFileEntry?.path}>
+                        {selectedCommitFileEntry
+                          ? fileNameForChangesPath(selectedCommitFileEntry.path)
+                          : 'No file selected'}
+                      </span>
                     </div>
                     <div className="inline-flex items-center gap-1">
                       {selectedCommitFileEntry ? renderFileQuickActions(selectedCommitFileEntry, true) : null}

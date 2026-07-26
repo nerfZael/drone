@@ -7,8 +7,9 @@ import {
 import { requestJson } from '../http';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { PaneLoadingState } from '../../ui/PaneLoadingState';
+import { dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
 import { IconChevron, IconFolder, iconForFilePath } from '../icons';
-import { IconEye, IconEyeOff, IconPencil } from '../app/icons';
+import { IconEye, IconEyeOff } from '../app/icons';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import { readPullRequestMergeMethod } from '../pullRequests/pull-request-preferences';
 import type {
@@ -39,6 +40,12 @@ import {
 } from './navigation';
 import { AgentRunHistoricalChangesView } from './AgentRunHistoricalChangesView';
 import { DiffBlock } from './DiffBlock';
+import {
+  clampDiffZoom,
+  diffZoomStyle,
+  DiffZoomControl,
+  DIFF_ZOOM_DEFAULT,
+} from './DiffZoomControl';
 import { CommitInspectionView } from './CommitInspectionView';
 import { createSingleFlightPoller, singleFlightByKey } from './singleFlight';
 import { MetaChip } from './MetaChip';
@@ -48,6 +55,7 @@ import {
   CHANGES_COMMIT_LIST_WIDTH_STORAGE_KEY,
   CHANGES_CONTEXT_STORAGE_KEY,
   CHANGES_DIFF_VIEW_STORAGE_KEY,
+  CHANGES_DIFF_ZOOM_STORAGE_KEY,
   CHANGES_EXPLORER_ZOOM_STORAGE_KEY,
   CHANGES_EXPLORER_WIDTH_STORAGE_KEY,
   CHANGES_HIDE_VIEWED_STORAGE_KEY,
@@ -64,16 +72,15 @@ import {
   defaultKindForEntry,
   entryPathExistsInCurrentTree,
   estimateExplorerSidebarWidth,
+  fileNameForChangesPath,
   diffKey,
   effectiveKindForEntry,
   flattenVisibleExplorerRows,
   hasStaged,
   hasUnstaged,
-  normalizeRef,
   parentDirPaths,
   pullRequestNoTextReason,
   pullRequestStateBadge,
-  refreshTimeLabel,
   resolveExplorerSidebarWidthBounds,
   sameRepoCommitChangesPayload,
   sameRepoCommitListPayload,
@@ -84,10 +91,8 @@ import {
   sameRepoPullRequestChangesPayload,
   sortRepoChangeEntries,
   scopedChangesStateKey,
-  shortRefName,
   shortSha,
   statusBadgeTitle,
-  statusCharLabel,
   toWorkingEntriesFromCommit,
   toWorkingEntriesFromPull,
   type ChangesDataMode,
@@ -106,7 +111,6 @@ type ChangesViewMode = 'stacked' | 'split';
 type ChangesContextMode = 'branch' | 'pull-request';
 type ChangesPrimaryView = 'changes' | 'commits';
 type BranchChangesMode = Exclude<ChangesDataMode, 'pull-request'>;
-type LastRefreshedByMode = Record<ChangesDataMode, number | null>;
 type ChangesWorkspaceUiSnapshot = {
   pullRequestNumber: number | null;
   contextMode: ChangesContextMode;
@@ -128,9 +132,9 @@ const EXPLORER_SIDEBAR_MAX_WIDTH_PX = 360;
 const EXPLORER_SIDEBAR_MAX_RATIO = 0.36;
 const CHANGES_DIFF_MIN_WIDTH_PX = 420;
 const EXPLORER_WIDTH_UPDATE_THRESHOLD_PX = 8;
-const EXPLORER_ZOOM_MIN = 0.9;
+const EXPLORER_ZOOM_MIN = 0.85;
 const EXPLORER_ZOOM_DEFAULT = 1;
-const EXPLORER_ZOOM_MAX = 1.4;
+const EXPLORER_ZOOM_MAX = 1.2;
 const EXPLORER_ZOOM_STEP = 0.1;
 const COMMIT_LIST_MIN_WIDTH_PX = 220;
 const COMMIT_LIST_DEFAULT_WIDTH_PX = 300;
@@ -142,6 +146,203 @@ const WORKING_TREE_CHANGES_POLL_INTERVAL_MS = 5_000;
 const PULL_PREVIEW_CHANGES_POLL_INTERVAL_MS = 10_000;
 
 type ChangesCacheMap<T> = Map<string, { atMs: number; payload: T }>;
+
+function changesSegmentButtonClass(active: boolean): string {
+  return `dh-changes-segment-button ${active ? 'is-active' : ''}`;
+}
+
+function changesEntryStatusLabel(entry: RepoChangeEntry): string {
+  if (entry.isConflicted) return 'Conflict';
+  if (entry.isUntracked) return 'New';
+  const status = entry.unstagedType ?? entry.stagedType;
+  switch (status) {
+    case 'added':
+      return 'Added';
+    case 'deleted':
+      return 'Deleted';
+    case 'renamed':
+      return 'Renamed';
+    case 'copied':
+      return 'Copied';
+    case 'type-changed':
+      return 'Type';
+    case 'unmerged':
+      return 'Conflict';
+    case 'modified':
+      return 'Modified';
+    case 'ignored':
+      return 'Ignored';
+    default:
+      return 'Changed';
+  }
+}
+
+function changesEntryStatusShortLabel(entry: RepoChangeEntry, kind?: DiffKind): string {
+  if (entry.isConflicted) return 'U';
+  if (entry.isUntracked && kind !== 'staged') return 'U';
+  const status = kind === 'staged' ? entry.stagedType : kind === 'unstaged' ? entry.unstagedType : entry.unstagedType ?? entry.stagedType;
+  switch (status) {
+    case 'added':
+      return 'A';
+    case 'deleted':
+      return 'D';
+    case 'renamed':
+      return 'R';
+    case 'copied':
+      return 'C';
+    case 'type-changed':
+      return 'T';
+    case 'unmerged':
+      return 'U';
+    case 'modified':
+      return 'M';
+    default:
+      return '•';
+  }
+}
+
+function changesEntryStatusTextClass(entry: RepoChangeEntry, kind?: DiffKind): string {
+  const status = kind === 'staged' ? entry.stagedType : kind === 'unstaged' ? entry.unstagedType : entry.unstagedType ?? entry.stagedType;
+  if (entry.isConflicted || status === 'deleted') {
+    return 'text-[var(--red)]';
+  }
+  if ((entry.isUntracked && kind !== 'staged') || status === 'added') {
+    return 'text-[var(--green)]';
+  }
+  if (status === 'modified') {
+    return 'text-[var(--yellow)]';
+  }
+  return 'text-[var(--accent)]';
+}
+
+function OpenFileIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M6 2.25h4.25L13 5v8.25H6z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M10.25 2.25V5H13M2.25 8h6M5.25 5l3 3-3 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function StageIcon({ unstage = false }: { unstage?: boolean }) {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M3.5 8h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      {!unstage ? <path d="M8 3.5v9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /> : null}
+    </svg>
+  );
+}
+
+function DiscardChangesIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M5.25 4.5 2.5 7.25 5.25 10M3 7.25h5.25a4 4 0 0 1 4 4v.25" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ChangesViewMenu({
+  viewMode,
+  diffViewType,
+  showViewedControl,
+  hideViewed,
+  hideViewedLabel,
+  onViewModeChange,
+  onDiffViewTypeChange,
+  onToggleHideViewed,
+}: {
+  viewMode: ChangesViewMode;
+  diffViewType: DiffViewType;
+  showViewedControl: boolean;
+  hideViewed: boolean;
+  hideViewedLabel: string;
+  onViewModeChange: (mode: ChangesViewMode) => void;
+  onDiffViewTypeChange: (viewType: DiffViewType) => void;
+  onToggleHideViewed: () => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement | null>(null);
+  useDropdownDismiss(menuRef, open, setOpen);
+
+  const option = (
+    label: string,
+    active: boolean,
+    onClick: () => void,
+  ) => (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={active}
+      onClick={() => {
+        onClick();
+        setOpen(false);
+      }}
+      className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[var(--text-11)] transition-colors ${
+        active
+          ? 'bg-[var(--surface-soft)] text-[var(--fg)]'
+          : 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+      }`}
+    >
+      <span>{label}</span>
+      <span className={`text-[var(--accent)] ${active ? 'opacity-100' : 'opacity-0'}`} aria-hidden="true">
+        ✓
+      </span>
+    </button>
+  );
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="dh-changes-menu-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        View
+        <IconChevron down={open} size={11} />
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className={`absolute right-0 top-full z-50 mt-1 w-48 ${dropdownPanelBaseClass}`}
+        >
+          <div className="px-3 pb-1 pt-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+            Layout
+          </div>
+          {option('Stacked', viewMode === 'stacked', () => onViewModeChange('stacked'))}
+          {option('Explorer', viewMode === 'split', () => onViewModeChange('split'))}
+          <div className="mx-2 my-1 border-t border-[var(--border-subtle)]" />
+          <div className="px-3 pb-1 pt-1 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+            Diff
+          </div>
+          {option('Unified', diffViewType === 'unified', () => onDiffViewTypeChange('unified'))}
+          {option('Side by side', diffViewType === 'split', () => onDiffViewTypeChange('split'))}
+          {showViewedControl ? (
+            <>
+              <div className="mx-2 my-1 border-t border-[var(--border-subtle)]" />
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={hideViewed}
+                onClick={() => {
+                  onToggleHideViewed();
+                  setOpen(false);
+                }}
+                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[var(--text-11)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)]"
+              >
+                <span>{hideViewedLabel}</span>
+                <span className={`text-[var(--accent)] ${hideViewed ? 'opacity-100' : 'opacity-0'}`} aria-hidden="true">
+                  ✓
+                </span>
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 const workingTreeChangesCache: ChangesCacheMap<Extract<RepoChangesPayload, { ok: true }>> = new Map();
 const workingTreeChangesInflight = new Map<string, Promise<Extract<RepoChangesPayload, { ok: true }>>>();
@@ -241,53 +442,6 @@ function summarizeExplorerReviewState(
   return summaries;
 }
 
-function ViewedProgressBadge({
-  viewed,
-  total,
-  stale,
-}: {
-  viewed: number;
-  total: number;
-  stale: number;
-}): React.ReactNode {
-  const safeTotal = Math.max(0, Math.floor(total));
-  if (safeTotal <= 0) return null;
-  const safeViewed = clampNumber(Math.floor(viewed), 0, safeTotal);
-  const safeStale = Math.max(0, Math.floor(stale));
-  const progress = safeTotal > 0 ? safeViewed / safeTotal : 0;
-  const radius = 5;
-  const circumference = 2 * Math.PI * radius;
-  const dashOffset = circumference * (1 - progress);
-
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-1.5 py-[1px]"
-      title={`${safeViewed} of ${safeTotal} files viewed${safeStale > 0 ? ` • ${safeStale} changed since viewed` : ''}`}
-    >
-      <span className="relative inline-flex items-center justify-center w-4 h-4">
-        <svg viewBox="0 0 16 16" className="w-4 h-4 -rotate-90" aria-hidden="true">
-          <circle cx="8" cy="8" r={radius} fill="none" stroke="var(--border)" strokeWidth="2" />
-          <circle
-            cx="8"
-            cy="8"
-            r={radius}
-            fill="none"
-            stroke="var(--accent)"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={dashOffset}
-          />
-        </svg>
-      </span>
-      <span className="font-mono tabular-nums text-[var(--fg-secondary)]">{safeViewed}</span>
-      <span className="text-[var(--muted-dim)]">/</span>
-      <span className="font-mono tabular-nums text-[var(--fg-secondary)]">{safeTotal}</span>
-      <span className="text-[var(--muted)]">viewed</span>
-    </span>
-  );
-}
-
 export type DroneChangesDockProps = {
   droneId: string;
   repoAttached: boolean;
@@ -351,7 +505,6 @@ function LiveDroneChangesDock({
   disabled,
   hubPhase,
   hubMessage,
-  onRevealFileInFiles,
   onOpenFileInEditor,
 }: DroneChangesDockProps) {
   const confirm = useAppConfirmDialog();
@@ -386,11 +539,6 @@ function LiveDroneChangesDock({
   const [pullRequestActionBusy, setPullRequestActionBusy] = React.useState<'merge' | 'close' | null>(null);
   const [pullRequestActionError, setPullRequestActionError] = React.useState<string | null>(null);
   const [pullRequestActionNotice, setPullRequestActionNotice] = React.useState<string | null>(null);
-  const [lastRefreshedByMode, setLastRefreshedByMode] = React.useState<LastRefreshedByMode>({
-    'working-tree': null,
-    'pull-preview': null,
-    'pull-request': null,
-  });
   const workingTreeRefreshNonceRef = React.useRef(refreshNonce);
   const pullPreviewRefreshNonceRef = React.useRef(refreshNonce);
   const pullRequestRefreshNonceRef = React.useRef(refreshNonce);
@@ -445,6 +593,10 @@ function LiveDroneChangesDock({
   const [splitKind, setSplitKind] = React.useState<DiffKind>(workspaceSnapshot?.splitKind ?? 'unstaged');
   const [stackedPreferredKind, setStackedPreferredKind] = React.useState<DiffKind>(workspaceSnapshot?.stackedPreferredKind ?? 'unstaged');
   const [expandedDirs, setExpandedDirs] = React.useState<Record<string, boolean>>(workspaceSnapshot?.expandedDirs ?? {});
+  const [stagedSectionOpen, setStagedSectionOpen] = React.useState(true);
+  const [unstagedSectionOpen, setUnstagedSectionOpen] = React.useState(true);
+  const [workingTreeActionBusy, setWorkingTreeActionBusy] = React.useState<string | null>(null);
+  const [workingTreeActionError, setWorkingTreeActionError] = React.useState<string | null>(null);
   const [expandedPullFiles, setExpandedPullFiles] = React.useState<Record<string, boolean>>(workspaceSnapshot?.expandedPullFiles ?? {});
   const [expandedCommitDirs, setExpandedCommitDirs] = React.useState<Record<string, boolean>>(workspaceSnapshot?.expandedCommitDirs ?? {});
   const [expandedCommitFiles, setExpandedCommitFiles] = React.useState<Record<string, boolean>>(workspaceSnapshot?.expandedCommitFiles ?? {});
@@ -484,6 +636,13 @@ function LiveDroneChangesDock({
     if (!Number.isFinite(raw)) return EXPLORER_ZOOM_DEFAULT;
     return clampExplorerZoom(raw);
   });
+  const [diffZoom, setDiffZoom] = React.useState<number>(() => {
+    const stored = readChangesStorage(CHANGES_DIFF_ZOOM_STORAGE_KEY);
+    if (stored === null) return DIFF_ZOOM_DEFAULT;
+    const raw = Number(stored);
+    if (!Number.isFinite(raw)) return DIFF_ZOOM_DEFAULT;
+    return clampDiffZoom(raw);
+  });
   const [explorerWidthPx, setExplorerWidthPx] = React.useState(EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX);
   const [explorerResizing, setExplorerResizing] = React.useState(false);
   const explorerDragRef = React.useRef<{ pointerId: number; startX: number; startWidth: number; liveWidth: number } | null>(
@@ -515,15 +674,14 @@ function LiveDroneChangesDock({
   const [dockHovered, setDockHovered] = React.useState(false);
   const [hoveredFilePath, setHoveredFilePath] = React.useState<string | null>(null);
   const explorerZoomPercent = Math.round(explorerZoom * 100);
-  const explorerRowHeightPx = Math.max(28, Math.round(28 * explorerZoom));
-  const explorerIconSizePx = Math.max(12, Math.round(12 * explorerZoom));
-  const explorerLeadingSlotPx = Math.max(explorerIconSizePx, Math.round(12 * explorerZoom));
-  const explorerTextSizePx = Math.max(11, Math.round(11 * explorerZoom * 10) / 10);
-  const explorerMetaTextSizePx = Math.max(9, Math.round(9 * explorerZoom * 10) / 10);
-  const explorerIndentBasePx = Math.max(6, Math.round(6 * explorerZoom));
-  const explorerIndentStepPx = Math.max(9, Math.round(9 * explorerZoom));
-  const explorerBadgeMinWidthPx = Math.max(22, Math.round(22 * explorerZoom));
-  const explorerBadgeHeightPx = Math.max(16, Math.round(16 * explorerZoom));
+  const explorerRowHeightPx = Math.max(21, Math.round(24 * explorerZoom));
+  const explorerIconSizePx = Math.max(12, Math.round(13 * explorerZoom));
+  const explorerLeadingSlotPx = Math.max(explorerIconSizePx, Math.round(14 * explorerZoom));
+  const explorerTextSizePx = Math.max(11, Math.round(12 * explorerZoom * 10) / 10);
+  const explorerMetaTextSizePx = Math.max(8.5, Math.round(9.5 * explorerZoom * 10) / 10);
+  const explorerIndentBasePx = Math.max(4, Math.round(5 * explorerZoom));
+  const explorerIndentStepPx = Math.max(10, Math.round(13 * explorerZoom));
+  const explorerBadgeHeightPx = Math.max(14, Math.round(15 * explorerZoom));
 
   React.useEffect(() => {
     changesWorkspaceUiByDrone.set(droneId, {
@@ -557,11 +715,6 @@ function LiveDroneChangesDock({
     splitKind,
     stackedPreferredKind,
   ]);
-  const markModeRefreshed = React.useCallback((mode: ChangesDataMode) => {
-    const now = Date.now();
-    setLastRefreshedByMode((prev) => ({ ...prev, [mode]: now }));
-  }, []);
-
   React.useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -628,6 +781,9 @@ function LiveDroneChangesDock({
   React.useEffect(() => {
     writeChangesStorage(CHANGES_EXPLORER_ZOOM_STORAGE_KEY, String(explorerZoom));
   }, [explorerZoom]);
+  React.useEffect(() => {
+    writeChangesStorage(CHANGES_DIFF_ZOOM_STORAGE_KEY, String(diffZoom));
+  }, [diffZoom]);
   React.useEffect(() => {
     writeChangesStorage(CHANGES_COMMIT_LIST_WIDTH_STORAGE_KEY, String(Math.floor(commitListWidthPx)));
   }, [commitListWidthPx]);
@@ -750,7 +906,6 @@ function LiveDroneChangesDock({
         if (!sameRepoChangesPayload(changesRef.current, data)) {
           changesRef.current = data;
           setChanges(data);
-          markModeRefreshed('working-tree');
         }
         setChangesError(null);
         startup.markReady();
@@ -778,7 +933,7 @@ function LiveDroneChangesDock({
       mounted = false;
       poller.stop();
     };
-  }, [dataMode, disabled, droneId, markModeRefreshed, primaryView, refreshNonce, repoAttached, repoPath, startup.markReady]);
+  }, [dataMode, disabled, droneId, primaryView, refreshNonce, repoAttached, repoPath, startup.markReady]);
 
   React.useEffect(() => {
     if (!repoAttached || disabled) {
@@ -834,7 +989,6 @@ function LiveDroneChangesDock({
         if (!sameRepoPullChangesPayload(pullChangesRef.current, data)) {
           pullChangesRef.current = data;
           setPullChanges(data);
-          markModeRefreshed('pull-preview');
         }
         setPullError(null);
       } catch (e: any) {
@@ -854,7 +1008,7 @@ function LiveDroneChangesDock({
       mounted = false;
       if (timer) clearInterval(timer);
     };
-  }, [dataMode, disabled, droneId, markModeRefreshed, primaryView, refreshNonce, repoAttached, repoPath]);
+  }, [dataMode, disabled, droneId, primaryView, refreshNonce, repoAttached, repoPath]);
 
   React.useEffect(() => {
     if (!repoAttached || disabled) {
@@ -915,7 +1069,6 @@ function LiveDroneChangesDock({
         if (!sameRepoPullRequestChangesPayload(pullRequestChangesRef.current, data)) {
           pullRequestChangesRef.current = data;
           setPullRequestChanges(data);
-          markModeRefreshed('pull-request');
         }
         setPullRequestError(null);
       } catch (e: any) {
@@ -938,7 +1091,7 @@ function LiveDroneChangesDock({
     return () => {
       mounted = false;
     };
-  }, [dataMode, disabled, droneId, markModeRefreshed, pullRequestNumber, refreshNonce, repoAttached, repoPath]);
+  }, [dataMode, disabled, droneId, pullRequestNumber, refreshNonce, repoAttached, repoPath]);
 
   React.useEffect(() => {
     if (!repoAttached || disabled) {
@@ -1286,14 +1439,8 @@ function LiveDroneChangesDock({
       remaining: Math.max(0, allEntries.length - viewed),
     };
   }, [allEntries, entryViewedStatus]);
-  const hideViewedButtonLabel =
-    viewedCounts.viewed > 0
-      ? hideViewed
-        ? `Show Viewed (${viewedCounts.viewed})`
-        : `Hide Viewed (${viewedCounts.viewed})`
-      : hideViewed
-        ? 'Show Viewed'
-        : 'Hide Viewed';
+  const hideViewedMenuLabel =
+    viewedCounts.viewed > 0 ? `Hide viewed files (${viewedCounts.viewed})` : 'Hide viewed files';
   const entries = React.useMemo(
     () => (hideViewed ? allEntries.filter((entry) => entryViewedStatus(entry) !== 'viewed') : allEntries),
     [allEntries, entryViewedStatus, hideViewed],
@@ -1461,6 +1608,16 @@ function LiveDroneChangesDock({
 
   const allExplorerTree = React.useMemo(() => buildExplorerTree(allEntries), [allEntries]);
   const explorerTree = React.useMemo(() => buildExplorerTree(entries), [entries]);
+  const stagedEntries = React.useMemo(
+    () => (dataMode === 'working-tree' ? entries.filter(hasStaged) : []),
+    [dataMode, entries],
+  );
+  const unstagedEntries = React.useMemo(
+    () => (dataMode === 'working-tree' ? entries.filter(hasUnstaged) : []),
+    [dataMode, entries],
+  );
+  const stagedExplorerTree = React.useMemo(() => buildExplorerTree(stagedEntries), [stagedEntries]);
+  const unstagedExplorerTree = React.useMemo(() => buildExplorerTree(unstagedEntries), [unstagedEntries]);
   const explorerReviewSummaryByPath = React.useMemo(
     () => (primaryView === 'changes' ? summarizeExplorerReviewState(allExplorerTree, entryViewedStatus) : {}),
     [allExplorerTree, entryViewedStatus, primaryView],
@@ -2327,23 +2484,8 @@ function LiveDroneChangesDock({
     viewMode,
   ]);
 
-  const counts = changes?.counts;
   const pullBase = contextMode === 'pull-request' ? (activePullRequestChanges?.pullRequest.baseSha ?? null) : (pullChanges?.baseSha ?? null);
   const pullHead = contextMode === 'pull-request' ? (activePullRequestChanges?.pullRequest.headSha ?? null) : (pullChanges?.headSha ?? null);
-  const pullHostBranch = normalizeRef(pullChanges?.branchContext?.hostCurrent);
-  const pullDroneCurrentBranch = normalizeRef(pullChanges?.branchContext?.droneCurrent);
-  const pullDroneConfiguredBranch = normalizeRef(pullChanges?.branchContext?.droneConfigured);
-  const pullDroneFromRef = normalizeRef(pullChanges?.branchContext?.droneFromRef);
-  const pullApplyPreviewCount = pullChanges?.applyPreview?.counts.changed ?? null;
-  const pullApplyPreviewDiffers =
-    dataMode === 'pull-preview' &&
-    typeof pullApplyPreviewCount === 'number' &&
-    pullApplyPreviewCount !== (pullChanges?.counts.changed ?? 0);
-  const pullDroneBranch = pullDroneCurrentBranch ?? pullDroneConfiguredBranch;
-  const pullDroneBranchTitle =
-    pullDroneCurrentBranch && pullDroneConfiguredBranch && pullDroneCurrentBranch !== pullDroneConfiguredBranch
-      ? `Current: ${pullDroneCurrentBranch} | configured: ${pullDroneConfiguredBranch}`
-      : pullDroneCurrentBranch ?? pullDroneConfiguredBranch ?? undefined;
   const selectedPullRequestNumber =
     contextMode === 'pull-request' ? Math.max(1, Math.floor(Number(pullRequestNumber ?? 0))) || null : null;
   const loadedPullRequestNumber =
@@ -2366,10 +2508,6 @@ function LiveDroneChangesDock({
     : activePullRequestIsFinalState
       ? `PR is already ${activePullRequestState}.`
       : null;
-  const refreshed = refreshTimeLabel(lastRefreshedByMode[dataMode] ?? null);
-  const commitRepoRootLabel =
-    String(activeCommitDetails?.repoRoot ?? branchCommitList?.repoRoot ?? pullRequestCommitList?.repoRoot ?? repoPath ?? '').trim() || '-';
-
   const mergeActivePullRequest = React.useCallback(async () => {
     if (!activePullRequestNumber || pullRequestActionBusy || activePullRequestIsFinalState) return;
     const mergeMethod = readPullRequestMergeMethod();
@@ -2459,12 +2597,57 @@ function LiveDroneChangesDock({
     [dataMode, onOpenFileInEditor],
   );
 
-  const revealEntryInFiles = React.useCallback(
-    (entry: RepoChangeEntry | null) => {
-      if (!entry) return;
-      onRevealFileInFiles(entry.path);
+  const runWorkingTreeAction = React.useCallback(
+    async (entry: RepoChangeEntry, action: 'stage' | 'unstage' | 'discard') => {
+      if (dataMode !== 'working-tree' || workingTreeActionBusy) return;
+      if (
+        action === 'discard' &&
+        !(await confirm({
+          title: 'Discard file changes?',
+          message: entry.isUntracked
+            ? `${entry.path} is untracked and will be deleted. This cannot be undone.`
+            : `All unstaged changes in ${entry.path} will be permanently discarded.`,
+          confirmLabel: 'Discard Changes',
+          destructive: true,
+        }))
+      ) {
+        return;
+      }
+
+      const busyKey = `${action}:${entry.path}`;
+      setWorkingTreeActionBusy(busyKey);
+      setWorkingTreeActionError(null);
+      try {
+        await requestJson(`/api/drones/${encodeURIComponent(droneId)}/repo/changes/action`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ path: entry.path, originalPath: entry.originalPath, action }),
+        });
+        workingTreeChangesCache.delete(changesCacheKey('working-tree', droneId, repoPath));
+        setDiffByKey((current) =>
+          Object.fromEntries(
+            Object.entries(current).filter(
+              ([key]) =>
+                key !== workingDiffStateKey(entry.path, 'staged') &&
+                key !== workingDiffStateKey(entry.path, 'unstaged'),
+            ),
+          ),
+        );
+        setRefreshNonce((value) => value + 1);
+      } catch (error: any) {
+        setWorkingTreeActionError(error?.message ?? String(error));
+      } finally {
+        setWorkingTreeActionBusy(null);
+      }
     },
-    [onRevealFileInFiles],
+    [
+      confirm,
+      dataMode,
+      droneId,
+      repoPath,
+      workingDiffStateKey,
+      workingTreeActionBusy,
+    ],
   );
 
   const workingTreeExpansionSourceLoader = React.useCallback(
@@ -2596,10 +2779,6 @@ function LiveDroneChangesDock({
           event.preventDefault();
           return;
         }
-        if (key === 'g') {
-          revealEntryInFiles(targetEntry);
-          event.preventDefault();
-        }
         return;
       }
       const targetEntry = hoveredEntry ?? (dockHovered ? selectedEntry : null);
@@ -2610,10 +2789,6 @@ function LiveDroneChangesDock({
         openEntryInEditor(targetEntry);
         event.preventDefault();
         return;
-      }
-      if (key === 'g') {
-        revealEntryInFiles(targetEntry);
-        event.preventDefault();
       }
     };
     document.addEventListener('keydown', onKeyDown);
@@ -2627,32 +2802,36 @@ function LiveDroneChangesDock({
     hoveredEntry,
     openEntryInEditor,
     primaryView,
-    revealEntryInFiles,
     selectedCommitFileEntry,
     selectedCommitSha,
     selectedEntry,
   ]);
 
-  function renderFileQuickActions(entry: RepoChangeEntry, alwaysVisible: boolean = false): React.ReactNode {
+  function renderFileQuickActions(
+    entry: RepoChangeEntry,
+    alwaysVisible: boolean = false,
+    showViewedAction: boolean = true,
+    workingKind?: DiffKind,
+  ): React.ReactNode {
     const canOpenInEditor = entryPathExistsInCurrentTree(entry, dataMode);
     const viewedState = entryViewedStatus(entry);
     const canToggleViewed = primaryView === 'changes' && Boolean(activeReviewScopeId);
-    const buttonClassName = `inline-flex items-center justify-center w-6 h-6 rounded border transition-all ${
+    const buttonClassName = `dh-changes-icon-button ${
       alwaysVisible
-        ? 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-        : 'opacity-0 pointer-events-none group-hover/file:opacity-100 group-hover/file:pointer-events-auto border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+        ? ''
+        : 'opacity-0 pointer-events-none group-hover/file:opacity-100 group-hover/file:pointer-events-auto'
     }`;
     return (
       <div className="shrink-0 inline-flex items-center gap-1">
-        {canToggleViewed ? (
+        {showViewedAction && canToggleViewed ? (
           <button
             type="button"
             onClick={() => setEntryViewedState(entry, viewedState !== 'viewed')}
             className={`${buttonClassName} ${
               viewedState === 'viewed'
-                ? 'border-[var(--accent-muted)] text-[var(--accent)]'
+                ? 'is-active'
                 : viewedState === 'stale'
-                  ? 'border-[var(--yellow-border)] text-[var(--yellow)]'
+                  ? 'is-warning'
                   : ''
             }`}
             title={
@@ -2668,31 +2847,62 @@ function LiveDroneChangesDock({
         ) : null}
         <button
           type="button"
-          onClick={() => revealEntryInFiles(entry)}
-          className={buttonClassName}
-          title="Reveal in Files tab (G)"
-        >
-          <IconFolder size={12} />
-        </button>
-        <button
-          type="button"
           onClick={() => openEntryInEditor(entry)}
           disabled={!canOpenInEditor}
           className={`${buttonClassName} disabled:opacity-35 disabled:cursor-not-allowed`}
           title={canOpenInEditor ? 'Open in editor (E)' : 'This path no longer exists in the current tree.'}
         >
-          <IconPencil className="w-3 h-3" />
+          <OpenFileIcon />
         </button>
+        {dataMode === 'working-tree' && workingKind === 'unstaged' ? (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                void runWorkingTreeAction(entry, 'discard');
+              }}
+              disabled={Boolean(workingTreeActionBusy)}
+              className={`${buttonClassName} text-[var(--muted)] hover:text-[var(--red)] disabled:opacity-35 disabled:cursor-wait`}
+              title="Discard unstaged changes"
+            >
+              <DiscardChangesIcon />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void runWorkingTreeAction(entry, 'stage');
+              }}
+              disabled={Boolean(workingTreeActionBusy)}
+              className={`${buttonClassName} disabled:opacity-35 disabled:cursor-wait`}
+              title="Stage changes"
+            >
+              <StageIcon />
+            </button>
+          </>
+        ) : null}
+        {dataMode === 'working-tree' && workingKind === 'staged' ? (
+          <button
+            type="button"
+            onClick={() => {
+              void runWorkingTreeAction(entry, 'unstage');
+            }}
+            disabled={Boolean(workingTreeActionBusy)}
+            className={`${buttonClassName} disabled:opacity-35 disabled:cursor-wait`}
+            title="Unstage changes"
+          >
+            <StageIcon unstage />
+          </button>
+        ) : null}
       </div>
     );
   }
 
-  function renderExplorer(nodes: ExplorerNode[], depth: number): React.ReactNode {
+  function renderExplorer(nodes: ExplorerNode[], depth: number, workingKind?: DiffKind): React.ReactNode {
     return nodes.map((node) => {
       const indentPx = explorerIndentBasePx + depth * explorerIndentStepPx;
       if (node.kind === 'dir') {
         const open = expandedDirs[node.path] !== false;
-        const reviewSummary = explorerReviewSummaryByPath[node.path];
+        const reviewSummary = workingKind ? undefined : explorerReviewSummaryByPath[node.path];
         const dirAllViewed = Boolean(
           reviewSummary && reviewSummary.viewed > 0 && reviewSummary.unviewed === 0 && reviewSummary.stale === 0,
         );
@@ -2719,12 +2929,12 @@ function LiveDroneChangesDock({
                 onClick={() => {
                   setExpandedDirs((prev) => ({ ...prev, [node.path]: !open }));
                 }}
-                className={`w-full text-left px-1 rounded border transition-colors flex items-center gap-0.5 ${
+                className={`dh-changes-explorer-row w-full rounded-[var(--radius-small)] pr-2 text-left transition-colors flex items-center gap-1.5 font-mono ${
                   dirAllViewed
-                    ? 'border-transparent opacity-65 hover:bg-[var(--surface-soft)]'
+                    ? 'opacity-65 hover:bg-[var(--surface-soft)]'
                     : dirHasChanged
-                      ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] hover:bg-[var(--yellow-subtle)]'
-                      : 'border-transparent hover:bg-[var(--hover)]'
+                      ? 'bg-[var(--yellow-subtle)] hover:bg-[var(--yellow-subtle)]'
+                      : ''
                 }`}
                 style={{
                   height: `${explorerRowHeightPx}px`,
@@ -2759,7 +2969,7 @@ function LiveDroneChangesDock({
                     {reviewSummary.stale} changed
                   </span>
                 ) : null}
-                {dirHasViewed ? (
+                {reviewSummary && dirHasViewed ? (
                   <span
                     className={`inline-flex items-center justify-center rounded border px-1 tabular-nums ${
                       hideViewed
@@ -2781,14 +2991,16 @@ function LiveDroneChangesDock({
                 </span>
               </button>
             </div>
-            {open && node.children && node.children.length > 0 ? renderExplorer(node.children, depth + 1) : null}
+            {open && node.children && node.children.length > 0 ? renderExplorer(node.children, depth + 1, workingKind) : null}
           </React.Fragment>
         );
       }
 
       const entry = node.entry ?? null;
       if (!entry) return null;
-      const active = entry.path === selectedPath;
+      const active =
+        entry.path === selectedPath &&
+        (!workingKind || splitShownKind === workingKind);
       const viewedState = entryViewedStatus(entry);
       const FileIcon = iconForFilePath(entry.path);
       return (
@@ -2801,70 +3013,73 @@ function LiveDroneChangesDock({
             setHoveredFilePath((prev) => (prev === entry.path ? null : prev));
           }}
         >
-          <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedPath(entry.path);
-              if (dataMode === 'working-tree') setSplitKind(defaultKindForEntry(entry));
-            }}
-            className={`flex-1 min-w-0 text-left px-1 rounded border transition-all flex items-center gap-0.5 ${
-              active
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-                : viewedState === 'viewed'
-                  ? 'border-transparent opacity-60 hover:bg-[var(--surface-soft)]'
-                  : viewedState === 'stale'
-                    ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] hover:bg-[var(--yellow-subtle)]'
-                    : 'border-transparent hover:bg-[var(--hover)]'
-            }`}
-            style={{
-              height: `${explorerRowHeightPx}px`,
-              minHeight: `${explorerRowHeightPx}px`,
-            }}
-            title={
-              viewedState === 'viewed'
-                ? `${entry.path} • viewed`
-                : viewedState === 'stale'
-                  ? `${entry.path} • changed since viewed`
-                  : entry.path
-            }
-          >
-            <span
-              className="inline-flex items-center justify-center flex-shrink-0 text-[var(--muted-dim)]"
-              style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
-            >
-              <FileIcon size={explorerIconSizePx} />
-            </span>
-            <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
-              {node.name}
-            </span>
-            {viewedState !== 'unviewed' ? (
-              <span
-                className={`inline-flex items-center justify-center rounded border px-1 font-[var(--weight-semibold)] ${
-                  viewedState === 'viewed'
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
-                }`}
-                style={{ fontSize: `${Math.max(8, explorerMetaTextSizePx - 1)}px`, height: `${explorerBadgeHeightPx}px` }}
-                title={viewedState === 'viewed' ? 'Viewed' : 'Changed since viewed'}
-              >
-                {viewedState === 'viewed' ? 'Viewed' : 'Changed'}
-              </span>
-            ) : null}
-            <span
-              className={`inline-flex items-center justify-center rounded border font-mono ${badgeTone(entry)}`}
-              style={{
-                minWidth: `${explorerBadgeMinWidthPx}px`,
-                height: `${explorerBadgeHeightPx}px`,
-                fontSize: `${explorerMetaTextSizePx}px`,
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedPath(entry.path);
+                if (dataMode === 'working-tree') setSplitKind(workingKind ?? defaultKindForEntry(entry));
               }}
-              title={statusBadgeTitle(entry, dataMode)}
+              aria-selected={active}
+              className={`dh-changes-explorer-row w-full min-w-0 rounded-[var(--radius-small)] pr-2 text-left font-mono transition-all flex items-center gap-1.5 ${
+                active
+                  ? 'is-selected text-[var(--accent)]'
+                  : viewedState === 'viewed'
+                    ? 'opacity-60 hover:bg-[var(--surface-soft)]'
+                    : viewedState === 'stale'
+                      ? 'bg-[var(--yellow-subtle)] hover:bg-[var(--yellow-subtle)]'
+                      : ''
+              }`}
+              style={{
+                height: `${explorerRowHeightPx}px`,
+                minHeight: `${explorerRowHeightPx}px`,
+              }}
+              title={
+                viewedState === 'viewed'
+                  ? `${entry.path} • viewed`
+                  : viewedState === 'stale'
+                    ? `${entry.path} • changed since viewed`
+                    : entry.path
+              }
             >
-              {statusCharLabel(entry.stagedChar)}
-              {statusCharLabel(entry.unstagedChar)}
-            </span>
-          </button>
-            {renderFileQuickActions(entry, active || hoveredFilePath === entry.path)}
+              <span
+                className={`w-3 shrink-0 text-center font-mono font-[var(--weight-bold)] ${changesEntryStatusTextClass(entry, workingKind)}`}
+                style={{ fontSize: `${explorerMetaTextSizePx}px` }}
+                title={statusBadgeTitle(entry, dataMode)}
+              >
+                {changesEntryStatusShortLabel(entry, workingKind)}
+              </span>
+              <span
+                className={`inline-flex items-center justify-center flex-shrink-0 ${
+                  active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
+                }`}
+                style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
+              >
+                <FileIcon size={explorerIconSizePx} />
+              </span>
+              <span
+                className={`truncate flex-1 ${active ? 'text-[var(--accent)]' : 'text-[var(--fg-secondary)]'}`}
+                style={{ fontSize: `${explorerTextSizePx}px` }}
+              >
+                {node.name}
+              </span>
+              {viewedState !== 'unviewed' ? (
+                <span
+                  className={`inline-flex items-center justify-center rounded border px-1 font-[var(--weight-semibold)] ${
+                    viewedState === 'viewed'
+                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                      : 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+                  }`}
+                  style={{ fontSize: `${Math.max(8, explorerMetaTextSizePx - 1)}px`, height: `${explorerBadgeHeightPx}px` }}
+                  title={viewedState === 'viewed' ? 'Viewed' : 'Changed since viewed'}
+                >
+                  {viewedState === 'viewed' ? 'Viewed' : 'Changed'}
+                </span>
+              ) : null}
+            </button>
+            <div className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 rounded bg-[var(--chat-background)] px-0.5 opacity-0 shadow-[-8px_0_12px_var(--chat-background)] transition-opacity group-hover/file:pointer-events-auto group-hover/file:opacity-100 group-focus-within/file:pointer-events-auto group-focus-within/file:opacity-100">
+              {renderFileQuickActions(entry, true, false, workingKind)}
+            </div>
           </div>
         </div>
       );
@@ -2897,7 +3112,7 @@ function LiveDroneChangesDock({
                 onClick={() => {
                   setExpandedCommitDirs((prev) => ({ ...prev, [node.path]: !open }));
                 }}
-                className="w-full text-left px-1 rounded border border-transparent hover:bg-[var(--hover)] flex items-center gap-0.5"
+                className="dh-changes-explorer-row w-full rounded-[var(--radius-small)] pr-2 text-left font-mono flex items-center gap-1.5"
                 style={{
                   height: `${explorerRowHeightPx}px`,
                   minHeight: `${explorerRowHeightPx}px`,
@@ -2929,14 +3144,15 @@ function LiveDroneChangesDock({
       const FileIcon = iconForFilePath(entry.path);
       return (
         <div key={`commit-file:${entry.path}`} className="w-full group/file" style={{ paddingLeft: `${indentPx}px` }}>
-          <div className="flex items-center gap-1">
+          <div className="relative">
             <button
               type="button"
               onClick={() => {
                 setCommitFileSelectedPath(entry.path);
               }}
-              className={`flex-1 min-w-0 text-left px-1 rounded border transition-colors flex items-center gap-0.5 ${
-                active ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]' : 'border-transparent hover:bg-[var(--hover)]'
+              aria-selected={active}
+              className={`dh-changes-explorer-row w-full min-w-0 rounded-[var(--radius-small)] pr-2 text-left font-mono transition-colors flex items-center gap-1.5 ${
+                active ? 'is-selected text-[var(--accent)]' : ''
               }`}
               style={{
                 height: `${explorerRowHeightPx}px`,
@@ -2945,35 +3161,36 @@ function LiveDroneChangesDock({
               title={entry.path}
             >
               <span
-                className="inline-flex items-center justify-center flex-shrink-0 text-[var(--muted-dim)]"
+                className={`w-3 shrink-0 text-center font-mono font-[var(--weight-bold)] ${changesEntryStatusTextClass(entry)}`}
+                style={{ fontSize: `${explorerMetaTextSizePx}px` }}
+                title={statusBadgeTitle(entry, 'pull-preview')}
+              >
+                {changesEntryStatusShortLabel(entry)}
+              </span>
+              <span
+                className={`inline-flex items-center justify-center flex-shrink-0 ${
+                  active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
+                }`}
                 style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
               >
                 <FileIcon size={explorerIconSizePx} />
               </span>
-              <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
+              <span
+                className={`truncate flex-1 ${active ? 'text-[var(--accent)]' : 'text-[var(--fg-secondary)]'}`}
+                style={{ fontSize: `${explorerTextSizePx}px` }}
+              >
                 {node.name}
               </span>
-              <span
-                className={`inline-flex items-center justify-center rounded border font-mono ${badgeTone(entry)}`}
-                style={{
-                  minWidth: `${explorerBadgeMinWidthPx}px`,
-                  height: `${explorerBadgeHeightPx}px`,
-                  fontSize: `${explorerMetaTextSizePx}px`,
-                }}
-                title={statusBadgeTitle(entry, 'pull-preview')}
-              >
-                {statusCharLabel(entry.stagedChar)}
-                {statusCharLabel(entry.unstagedChar)}
-              </span>
             </button>
-            {renderFileQuickActions(entry, active)}
+            <div className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 rounded bg-[var(--chat-background)] px-0.5 opacity-0 shadow-[-8px_0_12px_var(--chat-background)] transition-opacity group-hover/file:pointer-events-auto group-hover/file:opacity-100 group-focus-within/file:pointer-events-auto group-focus-within/file:opacity-100">
+              {renderFileQuickActions(entry, true, false)}
+            </div>
           </div>
         </div>
       );
     });
   }
 
-  const statusLegendTitle = "Status badge uses S/U (staged/unstaged). '-' means no change and '?' means untracked.";
   const unavailableReason = String(repoUnavailableReason ?? '').trim();
   const activeChangesPayload =
     dataMode === 'working-tree'
@@ -3006,7 +3223,8 @@ function LiveDroneChangesDock({
     return (
       <div
         ref={dockRootRef}
-        className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden dh-changes-dock"
+        className="w-full h-full min-h-0 bg-[var(--chat-background)] overflow-hidden dh-changes-dock"
+        style={diffZoomStyle(diffZoom)}
       >
         <PaneLoadingState label={initialLoadingLabel} />
       </div>
@@ -3016,7 +3234,8 @@ function LiveDroneChangesDock({
   return (
     <div
       ref={dockRootRef}
-      className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative dh-changes-dock"
+      className="w-full h-full min-h-0 bg-[var(--chat-background)] overflow-hidden flex flex-col relative dh-changes-dock"
+      style={diffZoomStyle(diffZoom)}
       onMouseEnter={() => setDockHovered(true)}
       onMouseLeave={() => {
         setDockHovered(false);
@@ -3025,20 +3244,13 @@ function LiveDroneChangesDock({
     >
       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
-          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-            Changes
-          </div>
           {repoAttached && !disabled && contextMode === 'branch' && primaryView === 'changes' ? (
-            <div className="inline-flex items-center gap-1 flex-wrap">
+            <div className="dh-changes-segment" aria-label="Branch change source">
               <button
                 type="button"
                 onClick={() => setBranchChangesMode('working-tree')}
-                className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-                  branchChangesMode === 'working-tree'
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
+                aria-pressed={branchChangesMode === 'working-tree'}
+                className={changesSegmentButtonClass(branchChangesMode === 'working-tree')}
                 title="Working tree changes inside the drone (staged/unstaged)"
               >
                 Working
@@ -3046,12 +3258,8 @@ function LiveDroneChangesDock({
               <button
                 type="button"
                 onClick={() => setBranchChangesMode('pull-preview')}
-                className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-                  branchChangesMode === 'pull-preview'
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
+                aria-pressed={branchChangesMode === 'pull-preview'}
+                className={changesSegmentButtonClass(branchChangesMode === 'pull-preview')}
                 title="Apply preview: committed diff from base to drone HEAD (what applying changes would merge)"
               >
                 Apply
@@ -3059,286 +3267,75 @@ function LiveDroneChangesDock({
             </div>
           ) : null}
         </div>
-        <div data-onboarding-id="changes.viewMode" className="inline-flex items-center gap-1 flex-wrap justify-end">
+        <div data-onboarding-id="changes.viewMode" className="dh-changes-toolbar-controls">
           {repoAttached && !disabled ? (
             <>
               {!fixedContextMode ? (
-                <>
-                  <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
-                    Context
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setContextModeState('branch')}
-                    className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-                      contextMode === 'branch'
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Inspect the current branch workspace and branch history"
-                  >
-                    Branch
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!pullRequestNumber) return;
-                      setContextModeState('pull-request');
-                    }}
-                    disabled={!pullRequestNumber}
-                    className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-                      contextMode === 'pull-request'
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title={pullRequestNumber ? `Inspect PR #${pullRequestNumber}` : 'Click a PR title in the PRs tab to enter PR context'}
-                  >
-                    PR
-                  </button>
-                  <span className="mx-1 text-[var(--border-subtle)]">|</span>
-                </>
+                <div className="dh-changes-toolbar-group">
+                  <div className="dh-changes-segment" aria-label="Changes context">
+                    <button
+                      type="button"
+                      onClick={() => setContextModeState('branch')}
+                      aria-pressed={contextMode === 'branch'}
+                      className={changesSegmentButtonClass(contextMode === 'branch')}
+                      title="Branch"
+                    >
+                      Branch
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!pullRequestNumber) return;
+                        setContextModeState('pull-request');
+                      }}
+                      disabled={!pullRequestNumber}
+                      aria-pressed={contextMode === 'pull-request'}
+                      className={changesSegmentButtonClass(contextMode === 'pull-request')}
+                      title={pullRequestNumber ? `PR #${pullRequestNumber}` : 'Open a PR from the PRs tab first'}
+                    >
+                      PR
+                    </button>
+                  </div>
+                </div>
               ) : null}
-              <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
-                View
-              </span>
-              <button
-                type="button"
-                onClick={() => setPrimaryView('changes')}
-                className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-                  primaryView === 'changes'
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title="Inspect the aggregate diff"
-              >
-                Changes
-              </button>
-              <button
-                type="button"
-                onClick={() => setPrimaryView('commits')}
-                className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-                  primaryView === 'commits'
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title="Inspect individual commits"
-              >
-                Commits
-              </button>
-              <span className="mx-1 text-[var(--border-subtle)]">|</span>
+              <div className="dh-changes-toolbar-group">
+                <div className="dh-changes-segment" aria-label="Changes view">
+                  <button
+                    type="button"
+                    onClick={() => setPrimaryView('changes')}
+                    aria-pressed={primaryView === 'changes'}
+                    className={changesSegmentButtonClass(primaryView === 'changes')}
+                    title="Changes"
+                  >
+                    Changes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPrimaryView('commits')}
+                    aria-pressed={primaryView === 'commits'}
+                    className={changesSegmentButtonClass(primaryView === 'commits')}
+                    title="Commits"
+                  >
+                    Commits
+                  </button>
+                </div>
+              </div>
             </>
           ) : null}
-          <button
-            type="button"
-            onClick={() => setViewMode('stacked')}
-            className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-              viewMode === 'stacked'
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-            }`}
-            style={{ fontFamily: 'var(--display)' }}
-            title="PR-style stacked view"
-          >
-            Stacked
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('split')}
-            className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-              viewMode === 'split'
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-            }`}
-            style={{ fontFamily: 'var(--display)' }}
-            title="Explorer + focused diff view"
-          >
-            Explorer
-          </button>
-          <span className="mx-1 text-[var(--border-subtle)]">|</span>
-          <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
-            Diff
-          </span>
-          <button
-            type="button"
-            onClick={() => setDiffViewType('unified')}
-            className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-              diffViewType === 'unified'
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-            }`}
-            style={{ fontFamily: 'var(--display)' }}
-            title="Unified diff view"
-          >
-            Unified
-          </button>
-          <button
-            type="button"
-            onClick={() => setDiffViewType('split')}
-            className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-              diffViewType === 'split'
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-            }`}
-            style={{ fontFamily: 'var(--display)' }}
-            title="Side-by-side diff view"
-          >
-            Side-by-side
-          </button>
-          {primaryView === 'changes' ? (
-            <>
-              <span className="mx-1 text-[var(--border-subtle)]">|</span>
-              <button
-                type="button"
-                onClick={() => setHideViewed((prev) => !prev)}
-                className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-                  hideViewed
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-                title={hideViewed ? 'Show files already marked viewed' : 'Hide files already marked viewed'}
-              >
-                {hideViewedButtonLabel}
-              </button>
-            </>
-          ) : null}
-          <span className="ml-1 text-[var(--text-9)] text-[var(--muted-dim)] font-mono tabular-nums" title={refreshed.title}>
-            Updated {refreshed.text}
-          </span>
-          <button
-            type="button"
-            onClick={() => setRefreshNonce((n) => n + 1)}
-            className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
-            title="Refresh changes"
-          >
-            Refresh
-          </button>
+          <DiffZoomControl value={diffZoom} onChange={setDiffZoom} />
+          <ChangesViewMenu
+            viewMode={viewMode}
+            diffViewType={diffViewType}
+            showViewedControl={primaryView === 'changes'}
+            hideViewed={hideViewed}
+            hideViewedLabel={hideViewedMenuLabel}
+            onViewModeChange={setViewMode}
+            onDiffViewTypeChange={setDiffViewType}
+            onToggleHideViewed={() => setHideViewed((prev) => !prev)}
+          />
         </div>
       </div>
 
-      <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--muted)] flex items-center gap-1.5 min-h-[30px] overflow-x-auto whitespace-nowrap">
-        {!repoAttached ? (
-          <span title={unavailableReason || 'No repo attached'}>
-            {unavailableReason || 'No repo attached.'}
-          </span>
-        ) : disabled ? (
-          <span title={String(hubMessage ?? '').trim() || undefined}>
-            {startup.timedOut ? 'Still provisioning… repo not ready yet.' : 'Provisioning… waiting for repo.'}
-          </span>
-        ) : primaryView === 'commits' ? (
-          commitListLoading && commitList.length === 0 ? (
-            <span>{contextMode === 'pull-request' ? 'Loading pull request commits…' : 'Loading branch commits…'}</span>
-          ) : commitListError ? (
-            <span className="text-[var(--red)]">{commitListError}</span>
-          ) : (
-            <>
-                <span className="truncate max-w-[40ch]" title={commitRepoRootLabel}>
-                  {commitRepoRootLabel}
-                </span>
-              {contextMode === 'pull-request' ? (
-                <MetaChip label="pr" value={`#${pullRequestNumber ?? '-'}`} mono />
-              ) : null}
-              <MetaChip label="commits" value={commitList.length} />
-              {selectedCommit ? (
-                <>
-                  <MetaChip label="selected" value={shortSha(selectedCommit.sha)} title={selectedCommit.subject} mono />
-                  {activeCommitDetails ? <MetaChip label="files" value={activeCommitDetails.counts.changed} /> : null}
-                </>
-              ) : (
-                <span className="text-[var(--muted-dim)]">Select a commit to inspect its patch.</span>
-              )}
-            </>
-          )
-        ) : listLoading &&
-          ((dataMode === 'working-tree' && !changes) || (dataMode === 'pull-preview' && !pullChanges) || (dataMode === 'pull-request' && !pullRequestChanges)) ? (
-          <span>{dataMode === 'pull-request' ? 'Loading pull request…' : dataMode === 'pull-preview' ? 'Loading apply preview…' : 'Loading changes...'}</span>
-        ) : listError ? (
-          <span className="text-[var(--red)]">{listError}</span>
-        ) : (
-          <>
-            {dataMode === 'pull-preview' ? (
-              <>
-                <span className="truncate max-w-[44ch]" title={pullChanges?.repoRoot || repoPath || '-'}>
-                  {pullChanges?.repoRoot || repoPath || '-'}
-                </span>
-                <MetaChip label="files" value={pullChanges?.counts.changed ?? 0} />
-                {pullApplyPreviewDiffers ? (
-                  <MetaChip
-                    label="impact"
-                    value={pullApplyPreviewCount}
-                    title="Host merge preview file count. The file list shows the drone-authored commit range."
-                  />
-                ) : null}
-                <MetaChip label="host" value={shortRefName(pullHostBranch)} title={pullHostBranch ?? ''} mono />
-                <MetaChip label="drone" value={shortRefName(pullDroneBranch)} title={pullDroneBranchTitle} mono />
-                {pullDroneFromRef ? <MetaChip label="from" value={shortRefName(pullDroneFromRef)} title={pullDroneFromRef} mono /> : null}
-                <MetaChip label="base" value={shortSha(pullBase)} title={pullBase ?? ''} mono />
-                <MetaChip label="head" value={shortSha(pullHead)} title={pullHead ?? ''} mono />
-              </>
-            ) : dataMode === 'pull-request' ? (
-              <>
-                <span className="truncate max-w-[38ch]" title={activePullRequestChanges?.repoRoot || repoPath || '-'}>
-                  {activePullRequestChanges?.repoRoot || repoPath || '-'}
-                </span>
-                <MetaChip
-                  label="pr"
-                  value={`#${activePullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? '-'}`}
-                  title={activePullRequestChanges?.pullRequest.title || undefined}
-                  mono
-                />
-                {activePullRequestStatus ? (
-                  <span
-                    className={`inline-flex items-center rounded border px-1.5 py-[1px] text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide ${activePullRequestStatus.className}`}
-                    title={activePullRequestStatus.title}
-                  >
-                    {activePullRequestStatus.label}
-                  </span>
-                ) : null}
-                <MetaChip label="files" value={activePullRequestChanges?.counts.changed ?? 0} />
-                <MetaChip label="+" value={activePullRequestChanges?.counts.additions ?? 0} mono />
-                <MetaChip label="-" value={activePullRequestChanges?.counts.deletions ?? 0} mono />
-                <MetaChip label="base" value={shortSha(pullBase)} title={pullBase ?? ''} mono />
-                <MetaChip label="head" value={shortSha(pullHead)} title={pullHead ?? ''} mono />
-              </>
-            ) : (
-              <>
-                <span className="truncate max-w-[44ch]" title={changes?.repoRoot || repoPath || '-'}>
-                  {changes?.repoRoot || repoPath || '-'}
-                </span>
-                <MetaChip label="changed" value={counts?.changed ?? 0} />
-                <MetaChip label="staged" value={counts?.staged ?? 0} />
-                <MetaChip label="unstaged" value={counts?.unstaged ?? 0} />
-                <MetaChip label="status" value="S/U" title={statusLegendTitle} mono />
-                {changes?.branch.head && (
-                  <span
-                    className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-[var(--text-10)]"
-                    title={changes.branch.head}
-                  >
-                    <span className="uppercase tracking-[0.08em] text-[var(--muted-dim)]">branch</span>
-                    <span className="font-mono text-[var(--fg-secondary)] truncate max-w-[28ch]">
-                      {changes.branch.head}
-                    </span>
-                  </span>
-                )}
-              </>
-            )}
-            {primaryView === 'changes' ? (
-              <>
-                {activeReviewScopeId ? (
-                  <ViewedProgressBadge viewed={viewedCounts.viewed} total={allEntries.length} stale={viewedCounts.stale} />
-                ) : null}
-                {!activeReviewScopeId ? <MetaChip label="remaining" value={viewedCounts.remaining} /> : null}
-                {viewedCounts.stale > 0 ? <MetaChip label="changed" value={viewedCounts.stale} /> : null}
-                {hideViewed ? <MetaChip label="filter" value="hide-viewed" /> : null}
-              </>
-            ) : null}
-          </>
-        )}
-      </div>
       {contextMode === 'pull-request' && awaitingPullRequestDetails ? (
         <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] text-[var(--muted)]">
           Loading PR #{selectedPullRequestNumber} details...
@@ -3535,32 +3532,26 @@ function LiveDroneChangesDock({
         <div className="flex-1 min-h-0 overflow-auto">
           {dataMode === 'working-tree' ? (
             <>
-              <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center gap-1">
-                <span className="text-[var(--text-10)] text-[var(--muted)] mr-1">Prefer:</span>
-                <button
-                  type="button"
-                  onClick={() => setStackedPreferredKind('unstaged')}
-                  className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-                    stackedPreferredKind === 'unstaged'
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  Unstaged
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStackedPreferredKind('staged')}
-                  className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-                    stackedPreferredKind === 'staged'
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  Staged
-                </button>
+              <div className="sticky top-0 z-10 px-2.5 py-1 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center gap-1">
+                <span className="dh-changes-toolbar-label mr-1">Prefer</span>
+                <div className="dh-changes-segment">
+                  <button
+                    type="button"
+                    onClick={() => setStackedPreferredKind('unstaged')}
+                    aria-pressed={stackedPreferredKind === 'unstaged'}
+                    className={changesSegmentButtonClass(stackedPreferredKind === 'unstaged')}
+                  >
+                    Unstaged
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStackedPreferredKind('staged')}
+                    aria-pressed={stackedPreferredKind === 'staged'}
+                    className={changesSegmentButtonClass(stackedPreferredKind === 'staged')}
+                  >
+                    Staged
+                  </button>
+                </div>
               </div>
 
               <div className="px-2 py-2 flex flex-col gap-2">
@@ -3581,14 +3572,13 @@ function LiveDroneChangesDock({
                     >
                       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                         <span
-                          className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[var(--text-10)] font-mono ${badgeTone(entry)}`}
+                          className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${badgeTone(entry)}`}
                           title={statusBadgeTitle(entry, dataMode)}
                         >
-                          {statusCharLabel(entry.stagedChar)}
-                          {statusCharLabel(entry.unstagedChar)}
+                          {changesEntryStatusLabel(entry)}
                         </span>
                         <span className="text-[var(--text-11)] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
-                          {entry.path}
+                          {fileNameForChangesPath(entry.path)}
                         </span>
                         {renderFileQuickActions(entry)}
                         <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -3629,14 +3619,13 @@ function LiveDroneChangesDock({
                   >
                     <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                       <span
-                        className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[var(--text-10)] font-mono ${badgeTone(entry)}`}
+                        className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] ${badgeTone(entry)}`}
                         title={statusBadgeTitle(entry, dataMode)}
                       >
-                        {statusCharLabel(entry.stagedChar)}
-                        {statusCharLabel(entry.unstagedChar)}
+                        {changesEntryStatusLabel(entry)}
                       </span>
                       <span className="text-[var(--text-11)] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
-                        {entry.path}
+                        {fileNameForChangesPath(entry.path)}
                       </span>
                       {renderFileQuickActions(entry)}
                       <button
@@ -3680,44 +3669,38 @@ function LiveDroneChangesDock({
         </div>
       ) : (
         <div ref={splitLayoutRef} className="flex-1 min-h-0 overflow-hidden flex">
-          <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[var(--surface-inset)]">
+          <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[var(--chat-background)]">
             <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center justify-between gap-2">
               <div className="min-w-0 text-[var(--text-10)] text-[var(--muted)] font-mono truncate">
-                {selectedEntry ? selectedEntry.path : 'No file selected'}
+                <span title={selectedEntry?.path}>
+                  {selectedEntry ? fileNameForChangesPath(selectedEntry.path) : 'No file selected'}
+                </span>
               </div>
               <div className="inline-flex items-center gap-1">
                 {selectedEntry ? renderFileQuickActions(selectedEntry, true) : null}
                 {dataMode === 'working-tree' ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setSplitKind('unstaged')}
-                      disabled={!hasUnstaged(selectedEntry)}
-                      className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-                        splitShownKind === 'unstaged'
-                          ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                          : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
-                      }`}
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Unstaged diff"
-                    >
-                      Unstaged
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSplitKind('staged')}
-                      disabled={!hasStaged(selectedEntry)}
-                      className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-                        splitShownKind === 'staged'
-                          ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                          : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
-                      }`}
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Staged diff"
-                    >
-                      Staged
-                    </button>
-                  </>
+                  selectedEntry && hasUnstaged(selectedEntry) && hasStaged(selectedEntry) ? (
+                    <div className="dh-changes-segment" aria-label="Diff source">
+                      <button
+                        type="button"
+                        onClick={() => setSplitKind('unstaged')}
+                        aria-pressed={splitShownKind === 'unstaged'}
+                        className={changesSegmentButtonClass(splitShownKind === 'unstaged')}
+                        title="Changes in the working tree that are not staged"
+                      >
+                        Unstaged
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSplitKind('staged')}
+                        aria-pressed={splitShownKind === 'staged'}
+                        className={changesSegmentButtonClass(splitShownKind === 'staged')}
+                        title="Changes already added to the Git index"
+                      >
+                        Staged
+                      </button>
+                    </div>
+                  ) : null
                 ) : (
                   <div className="text-[var(--text-9)] text-[var(--muted-dim)] font-mono whitespace-nowrap">
                     {dataMode === 'pull-request'
@@ -3777,7 +3760,7 @@ function LiveDroneChangesDock({
           <div
             role="separator"
             aria-orientation="vertical"
-            className={`group relative w-2 shrink-0 cursor-col-resize touch-none ${
+            className={`group relative w-1.5 shrink-0 cursor-col-resize touch-none ${
               explorerResizing ? 'bg-[var(--accent-subtle)]' : 'bg-transparent hover:bg-[var(--hover)]'
             }`}
             title="Drag to resize explorer. Double-click to reset to auto width."
@@ -3796,7 +3779,7 @@ function LiveDroneChangesDock({
           </div>
 
           <div
-            className={`shrink-0 border-l border-[var(--border-subtle)] overflow-hidden flex flex-col ${
+            className={`shrink-0 overflow-hidden flex flex-col ${
               explorerResizing ? '' : 'transition-[width] duration-150 ease-out'
             }`}
             style={{
@@ -3805,42 +3788,89 @@ function LiveDroneChangesDock({
               maxWidth: `${explorerWidthPx}px`,
             }}
           >
-            <div className="shrink-0 px-1.5 py-1 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 flex items-center justify-between gap-1">
-              <span className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                Zoom {explorerZoomPercent}%
+            <div className="shrink-0 h-8 px-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 flex items-center justify-between gap-1">
+              <span className="dh-changes-toolbar-label">
+                Files
               </span>
-              <div className="inline-flex items-center gap-1">
+              <div className="dh-changes-segment" aria-label="Explorer zoom">
                 <button
                   type="button"
                   onClick={decreaseExplorerZoom}
                   disabled={explorerZoom <= EXPLORER_ZOOM_MIN}
-                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-11)] font-[var(--weight-bold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="dh-changes-segment-button w-5 px-0 text-[var(--text-10)]"
                   title="Decrease explorer zoom"
                 >
-                  -
+                  −
+                </button>
+                <button
+                  type="button"
+                  onClick={resetExplorerZoom}
+                  className="dh-changes-segment-button min-w-9 px-1 font-mono"
+                  title="Reset explorer zoom"
+                >
+                  {explorerZoomPercent}%
                 </button>
                 <button
                   type="button"
                   onClick={increaseExplorerZoom}
                   disabled={explorerZoom >= EXPLORER_ZOOM_MAX}
-                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-11)] font-[var(--weight-bold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="dh-changes-segment-button w-5 px-0 text-[var(--text-10)]"
                   title="Increase explorer zoom"
                 >
                   +
                 </button>
-                <button
-                  type="button"
-                  onClick={resetExplorerZoom}
-                  disabled={Math.abs(explorerZoom - EXPLORER_ZOOM_DEFAULT) < 0.001}
-                  className="h-6 px-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Reset explorer zoom"
-                >
-                  100%
-                </button>
               </div>
             </div>
-            <div className="flex-1 min-h-0 overflow-auto px-1.5 py-1">
-              {renderExplorer(explorerTree, 0)}
+            <div role="tree" className="flex-1 min-h-0 overflow-auto py-1">
+              {workingTreeActionError ? (
+                <div className="mx-2 mb-1 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-2 py-1.5 text-[var(--text-10)] text-[var(--red)]">
+                  {workingTreeActionError}
+                </div>
+              ) : null}
+              {dataMode === 'working-tree' ? (
+                <>
+                  {stagedEntries.length > 0 ? (
+                    <section>
+                      <button
+                        type="button"
+                        onClick={() => setStagedSectionOpen((open) => !open)}
+                        aria-expanded={stagedSectionOpen}
+                        className="flex h-7 w-full items-center gap-1 px-2 text-left text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                      >
+                        <IconChevron down={stagedSectionOpen} size={11} />
+                        <span className="min-w-0 flex-1 truncate">Staged Changes</span>
+                        <span className="font-mono text-[var(--text-10)] tabular-nums text-[var(--muted)]">
+                          {stagedEntries.length}
+                        </span>
+                      </button>
+                      {stagedSectionOpen ? (
+                        <div className="px-1.5">{renderExplorer(stagedExplorerTree, 0, 'staged')}</div>
+                      ) : null}
+                    </section>
+                  ) : null}
+                  {unstagedEntries.length > 0 ? (
+                    <section>
+                      <button
+                        type="button"
+                        onClick={() => setUnstagedSectionOpen((open) => !open)}
+                        aria-expanded={unstagedSectionOpen}
+                        className="flex h-7 w-full items-center gap-1 px-2 text-left text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                      >
+                        <IconChevron down={unstagedSectionOpen} size={11} />
+                        <span className="min-w-0 flex-1 truncate">Changes</span>
+                        <span className="font-mono text-[var(--text-10)] tabular-nums text-[var(--muted)]">
+                          {unstagedEntries.length}
+                        </span>
+                      </button>
+                      {unstagedSectionOpen ? (
+                        <div className="px-1.5">{renderExplorer(unstagedExplorerTree, 0, 'unstaged')}</div>
+                      ) : null}
+                    </section>
+                  ) : null}
+                </>
+              ) : (
+                <div className="px-1.5">{renderExplorer(explorerTree, 0)}</div>
+              )}
             </div>
           </div>
         </div>

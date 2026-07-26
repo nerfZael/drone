@@ -449,6 +449,31 @@ describeSocketSuite('host runtime routing api', () => {
     expect(String(diffResp.data?.path ?? '')).toBe('tracked.txt');
     expect(String(diffResp.data?.kind ?? '')).toBe('unstaged');
     expect(String(diffResp.data?.diff ?? '')).toContain('+changed');
+
+    const changeAction = async (filePath: string, action: 'stage' | 'unstage' | 'discard') =>
+      await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/repo/changes/action`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: filePath, action }),
+      });
+
+    const stageResp = await changeAction('tracked.txt', 'stage');
+    expect(stageResp.r.status).toBe(200);
+    expect(stageResp.data?.action).toBe('stage');
+    expect(runGit(repoRoot, ['diff', '--cached', '--name-only'])).toContain('tracked.txt');
+
+    const unstageResp = await changeAction('tracked.txt', 'unstage');
+    expect(unstageResp.r.status).toBe(200);
+    expect(unstageResp.data?.action).toBe('unstage');
+    expect(runGit(repoRoot, ['diff', '--cached', '--name-only']).trim()).toBe('');
+
+    const discardTrackedResp = await changeAction('tracked.txt', 'discard');
+    expect(discardTrackedResp.r.status).toBe(200);
+    expect(fs.readFileSync(trackedPath, 'utf8')).toBe('base\n');
+
+    const discardUntrackedResp = await changeAction('new.txt', 'discard');
+    expect(discardUntrackedResp.r.status).toBe(200);
+    expect(fs.existsSync(path.join(repoRoot, 'new.txt'))).toBe(false);
   });
 
   test('returns host same-repo semantics for pull/push/reseed routes on host runtime', async () => {

@@ -168,6 +168,132 @@ function createRepositoryOperationServiceHandler(
         // here keeps every mutation route coherent, including future routes.
         repoChangesScanCache.invalidate();
       }
+
+      // POST /api/drones/:name/repo/changes/action
+      // Stages, unstages, or discards the working-tree changes for one file.
+      if (
+        method === 'POST' &&
+        parts.length === 6 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo' &&
+        parts[4] === 'changes' &&
+        parts[5] === 'action'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const d = resolved.drone;
+        const droneId = resolved.id;
+        const droneName = String(d?.name ?? droneRef).trim() || droneRef;
+        const runtime = droneRuntime(d);
+        if (!isRepoAttachedDrone(d)) {
+          json(res, 400, { ok: false, error: 'drone has no repo attached' });
+          return;
+        }
+
+        let body: any;
+        try {
+          body = await readJsonBody(req);
+        } catch (error: any) {
+          json(res, 400, { ok: false, error: error?.message ?? 'invalid request body' });
+          return;
+        }
+        const filePath = String(body?.path ?? '').trim();
+        const originalPath = String(body?.originalPath ?? '').trim();
+        const action = String(body?.action ?? '').trim().toLowerCase();
+        const isValidRepoRelativePath = (value: string) =>
+          Boolean(value) &&
+          !value.includes('\0') &&
+          !path.isAbsolute(value) &&
+          !/^[a-zA-Z]:[\\/]/.test(value) &&
+          !value.replace(/\\/g, '/').split('/').includes('..');
+        if (!isValidRepoRelativePath(filePath) || (originalPath && !isValidRepoRelativePath(originalPath))) {
+          json(res, 400, { ok: false, error: 'invalid file path' });
+          return;
+        }
+        if (action !== 'stage' && action !== 'unstage' && action !== 'discard') {
+          json(res, 400, { ok: false, error: 'invalid changes action' });
+          return;
+        }
+
+        try {
+          type GitResult = { code: number; stdout: string; stderr: string };
+          let runGitAction: (args: string[], okCodes?: number[]) => Promise<GitResult>;
+          let repoRoot: string;
+          if (runtime === 'host') {
+            const repoPathRaw = String(d?.repoPath ?? '').trim();
+            if (!repoPathRaw) {
+              json(res, 400, { ok: false, error: 'drone host repo path is not configured' });
+              return;
+            }
+            repoRoot = await gitTopLevel(repoPathRaw);
+            runGitAction = async (args, okCodes = [0]) => {
+              const result = await runHostCommand('git', ['-C', repoRoot, ...args]);
+              if (!okCodes.includes(result.code)) {
+                throw new Error(
+                  String(result.stderr || result.stdout || `git ${args.join(' ')} failed (exit ${result.code})`).trim(),
+                );
+              }
+              return result;
+            };
+          } else {
+            const repoPathInContainer = droneRepoPathInContainer(d);
+            repoRoot = repoPathInContainer;
+            const container = containerNameForDrone(d, droneName);
+            const runGit = createDroneDaemonGitRunner(d);
+            runGitAction = async (args, okCodes = [0]) =>
+              await runGitInDroneOrThrow({
+                container,
+                repoPathInContainer,
+                args,
+                okCodes,
+                runGit,
+              });
+          }
+
+          const filePaths = [...new Set([filePath, originalPath].filter(Boolean))];
+          if (action === 'stage') {
+            await runGitAction(['add', '-A', '--', ...filePaths]);
+          } else if (action === 'unstage') {
+            const head = await runGitAction(['rev-parse', '--verify', 'HEAD'], [0, 128]);
+            if (head.code === 0) {
+              await runGitAction(['restore', '--staged', '--', ...filePaths]);
+            } else {
+              await runGitAction(['rm', '--cached', '--ignore-unmatch', '--', ...filePaths]);
+            }
+          } else {
+            for (const targetPath of filePaths) {
+              const tracked = await runGitAction(['ls-files', '--error-unmatch', '--', targetPath], [0, 1]);
+              if (tracked.code === 0) {
+                await runGitAction(['restore', '--worktree', '--', targetPath]);
+              } else {
+                await runGitAction(['clean', '-f', '--', targetPath]);
+              }
+            }
+          }
+
+          json(res, 200, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            repoRoot,
+            path: filePath,
+            action,
+          });
+          return;
+        } catch (error: any) {
+          const failure = repositoryReadFailure(error, runtime);
+          json(res, failure.status, {
+            ok: false,
+            ...failure.response,
+            id: droneId,
+            name: droneName,
+          });
+          return;
+        }
+      }
+
       if (
         method === 'GET' &&
         parts.length === 5 &&

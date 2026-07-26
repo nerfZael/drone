@@ -252,6 +252,13 @@ export function parentDirPaths(filePath: string): string[] {
   return out;
 }
 
+export function fileNameForChangesPath(filePath: string | null | undefined): string {
+  const path = String(filePath ?? '').trim();
+  if (!path) return '';
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  return normalized.slice(normalized.lastIndexOf('/') + 1) || path;
+}
+
 function lastPathSegment(filePath: string): string {
   const segs = String(filePath ?? '').split('/').filter(Boolean);
   return segs.length > 0 ? segs[segs.length - 1] : String(filePath ?? '');
