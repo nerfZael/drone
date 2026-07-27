@@ -269,14 +269,16 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           return;
         }
         const turnId = activeRunTurnId;
-        artifactBaseline = captureAssistantArtifactRunFileChangesBaseline({ threadId, turnId })
-          .catch((error: any) => {
-            hubLog('warn', 'failed capturing native agent artifact changes baseline', {
-              threadId,
-              error: String(error?.message ?? error ?? 'unknown error'),
-            });
-            return null;
+        artifactBaseline = captureAssistantArtifactRunFileChangesBaseline({
+          threadId,
+          turnId,
+        }).catch((error: any) => {
+          hubLog('warn', 'failed capturing native agent artifact changes baseline', {
+            threadId,
+            error: String(error?.message ?? error ?? 'unknown error'),
           });
+          return null;
+        });
         await artifactBaseline;
       };
       const finishRunFileChanges = async (turnId: string) => {
@@ -332,9 +334,9 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           if (pendingArtifactBaseline && !artifactCleanupHandled) {
             const capturedArtifactBaseline = await pendingArtifactBaseline;
             if (capturedArtifactBaseline) {
-              await discardAssistantArtifactRunFileChangesBaseline(
-                capturedArtifactBaseline,
-              ).catch(() => undefined);
+              await discardAssistantArtifactRunFileChangesBaseline(capturedArtifactBaseline).catch(
+                () => undefined,
+              );
             }
           }
         }
@@ -361,42 +363,48 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         allowedWriteDroneRefs: refsFor(writableDrones),
         allowedDroneIds: readableDrones.map((drone: any) => String(drone.id ?? '')).filter(Boolean),
       });
-      const droneTargets = workspaceDrones.map((drone) => {
-        return new DroneWorkspaceTarget({
-          id: `drone:${drone.id}`,
-          droneId: drone.id,
-          label: drone.name || drone.id,
-          rootLabel: `${drone.name || drone.id} workspace`,
-          capabilities: [
-            ...(drone.canRead ? readableWorkspaceCapabilities : []),
-            ...(drone.canWrite
-              ? ([
-                  'files.write',
-                  'files.delete',
-                  'files.move',
-                  'directories.create',
-                  'directories.delete',
-                  'patch.apply',
-                ] as const)
-              : []),
-            ...(drone.canExecute ? (['shell.execute'] as const) : []),
-          ],
-          execute: async (call) => {
-            if (isMutatingWorkspaceTool(call.tool)) {
-              await captureRunFileChangesBaseline(drone.id);
-            }
-            return await assistantService.executeDroneWorkspaceTool(threadId, drone.id, call, {
+      const droneTargets = workspaceDrones
+        .map((drone) => {
+          return new DroneWorkspaceTarget({
+            id: `drone:${drone.id}`,
+            droneId: drone.id,
+            label: drone.name || drone.id,
+            rootLabel: `${drone.name || drone.id} workspace`,
+            capabilities: [
+              ...(drone.canRead ? readableWorkspaceCapabilities : []),
+              ...(drone.canWrite
+                ? ([
+                    'files.write',
+                    'files.delete',
+                    'files.move',
+                    'directories.create',
+                    'directories.delete',
+                    'patch.apply',
+                  ] as const)
+                : []),
+              ...(drone.canExecute ? (['shell.execute'] as const) : []),
+            ],
+            execute: async (call) => {
+              if (isMutatingWorkspaceTool(call.tool)) {
+                await captureRunFileChangesBaseline(drone.id);
+              }
+              return await assistantService.executeDroneWorkspaceTool(threadId, drone.id, call, {
+                parse: blipTools.parsePatch,
+                applyHunks: blipTools.applyPatchHunks,
+              });
+            },
+          });
+        })
+        .filter((target) => assistantService.workspaceIsEnabled(threadId, target.descriptor.id));
+      const artifactTarget = assistantService.workspaceIsEnabled(threadId, `artifacts:${threadId}`)
+        ? new AssistantArtifactsTarget(
+            threadId,
+            {
               parse: blipTools.parsePatch,
               applyHunks: blipTools.applyPatchHunks,
-            });
-          },
-        });
-      }).filter((target) => assistantService.workspaceIsEnabled(threadId, target.descriptor.id));
-      const artifactTarget = assistantService.workspaceIsEnabled(threadId, `artifacts:${threadId}`)
-        ? new AssistantArtifactsTarget(threadId, {
-            parse: blipTools.parsePatch,
-            applyHunks: blipTools.applyPatchHunks,
-          }, captureRunArtifactChangesBaseline)
+            },
+            captureRunArtifactChangesBaseline,
+          )
         : null;
       const remoteWorkspaceTargets = await deviceMesh.remoteWorkspaceTargets(threadId);
       const targets = [
@@ -436,8 +444,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         {
           name: 'get_system_prompt',
           label: 'Get system prompt',
-          description:
-            'Read the current chat system prompt, global prompt, and runtime appendix.',
+          description: 'Read the current chat system prompt, global prompt, and runtime appendix.',
           parameters: { type: 'object', properties: {}, additionalProperties: false },
           execute: async () => {
             const result = await assistantService.threadSystemPromptSettings(threadId);
@@ -470,9 +477,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           execute: async (_callId: string, args: any) => {
             const result = await assistantService.updateThreadSystemPrompt(threadId, args ?? {});
             return {
-              content: [
-                { type: 'text' as const, text: 'Updated this chat system prompt.' },
-              ],
+              content: [{ type: 'text' as const, text: 'Updated this chat system prompt.' }],
               details: result,
             };
           },
@@ -480,8 +485,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         {
           name: 'set_thinking_level',
           label: 'Set thinking level',
-          description:
-            'Change the thinking level for this chat while keeping its current model.',
+          description: 'Change the thinking level for this chat while keeping its current model.',
           parameters: {
             type: 'object',
             properties: {
@@ -564,9 +568,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       });
       const enabledMcpProvider = {
         id: mcpProvider.id,
-        promptSections: ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES.some((name) =>
-          enabledTools.has(name),
-        )
+        promptSections: ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES.some((name) => enabledTools.has(name))
           ? mcpProvider.promptSections?.bind(mcpProvider)
           : () => [],
         async load(context: any) {
@@ -662,10 +664,9 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             request.callId,
             args,
             request.signal,
+            request.phase,
           );
-          return decision?.block
-            ? { status: 'deny' as const, reason: decision.reason ?? `Denied ${toolName}` }
-            : { status: 'allow' as const };
+          return decision;
         },
         getApiKey: async (provider: string) => {
           const normalized =
@@ -703,29 +704,35 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   deviceMesh.onAssistantPolicyChange((threadIds: string[]) => {
     for (const threadId of threadIds) {
       blipAssistantHost.invalidateThread(threadId);
-      void assistantService.nativeThreadOwner(threadId).then((owner) => {
-        if (!owner) return;
-        return deviceMesh.broadcastDroneChatChange({
-          reason: 'workspace_policy_changed',
-          droneId: owner.droneId,
-          chatName: owner.chatName,
-        });
-      }).catch(() => {});
+      void assistantService
+        .nativeThreadOwner(threadId)
+        .then((owner) => {
+          if (!owner) return;
+          return deviceMesh.broadcastDroneChatChange({
+            reason: 'workspace_policy_changed',
+            droneId: owner.droneId,
+            chatName: owner.chatName,
+          });
+        })
+        .catch(() => {});
     }
   });
   const unsubscribeDeviceMeshAssistantChanges = assistantService.subscribeChanges((event) => {
     if (event.threadId) {
-      void assistantService.nativeThreadOwner(event.threadId).then((owner) => {
-        if (!owner) return;
-        if (event.reason === 'canonical_history_changed') onNativePromptQueueChanged?.(owner);
-        return deviceMesh.broadcastDroneChatChange({
-          sequence: event.sequence,
-          reason: event.reason,
-          droneId: owner.droneId,
-          chatName: owner.chatName,
-          at: event.at,
-        });
-      }).catch(() => {});
+      void assistantService
+        .nativeThreadOwner(event.threadId)
+        .then((owner) => {
+          if (!owner) return;
+          if (event.reason === 'canonical_history_changed') onNativePromptQueueChanged?.(owner);
+          return deviceMesh.broadcastDroneChatChange({
+            sequence: event.sequence,
+            reason: event.reason,
+            droneId: owner.droneId,
+            chatName: owner.chatName,
+            at: event.at,
+          });
+        })
+        .catch(() => {});
     }
   });
   assistantService.setTextPromptDelegate(async (threadId, prompt) => {
@@ -733,6 +740,14 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   });
   assistantService.setRuntimeStopDelegate((threadId) => {
     blipAssistantHost.stopThread(threadId);
+  });
+  assistantService.setApprovalDecisionDelegate(async (threadId, approvalId, approved) => {
+    await blipAssistantHost.beginToolSuspensionResolution(threadId, approvalId, approved);
+  });
+  void blipAssistantHost.restorePendingApprovals().catch((error) => {
+    hubLog('warn', 'failed restoring durable assistant approvals', {
+      error: String(error instanceof Error ? error.message : error),
+    });
   });
   type AssistantPromptInput =
     | string
@@ -807,8 +822,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     const deliveryMode =
       input.deliveryMode ?? (await assistantService.promptDeliveryMode(input.threadId));
     const steerImmediately =
-      deliveryMode === 'asap' &&
-      blipAssistantHost.isThreadRunning(input.threadId);
+      deliveryMode === 'asap' && blipAssistantHost.isThreadRunning(input.threadId);
     const queued = await assistantService.enqueueThreadPrompt(input.threadId, {
       id: input.promptId,
       prompt: input.prompt,

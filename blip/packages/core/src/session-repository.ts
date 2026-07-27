@@ -1,6 +1,12 @@
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { PermissionMode, ToolProfile } from "@blip/tools";
-import type { BlipRuntimeEvent, BlipSessionState, TranscriptEntry } from "./types.js";
+import type { AgentMessage } from '@mariozechner/pi-agent-core';
+import type { PermissionMode, ToolProfile } from '@blip/tools';
+import type {
+  BlipRuntimeEvent,
+  BlipSessionState,
+  BlipToolSuspension,
+  BlipToolSuspensionStatus,
+  TranscriptEntry,
+} from './types.js';
 
 export interface CreateSessionInput {
   provider: string;
@@ -30,6 +36,13 @@ export interface SessionRepository {
   appendEntry(session: BlipSessionState, entry: TranscriptEntry): Promise<void>;
   appendMessage(session: BlipSessionState, message: AgentMessage): Promise<void>;
   appendRuntimeEvent(session: BlipSessionState, event: BlipRuntimeEvent): Promise<void>;
+  appendToolSuspension(session: BlipSessionState, suspension: BlipToolSuspension): Promise<void>;
+  transitionToolSuspension(
+    session: BlipSessionState,
+    suspension: BlipToolSuspension,
+    expectedStatuses: BlipToolSuspensionStatus[],
+  ): Promise<boolean>;
+  readToolSuspensions(session: BlipSessionState): Promise<BlipToolSuspension[]>;
   readTranscript(session: BlipSessionState): Promise<TranscriptEntry[]>;
   readMessages(session: BlipSessionState): Promise<AgentMessage[]>;
   readModelMessages(session: BlipSessionState): Promise<AgentMessage[]>;

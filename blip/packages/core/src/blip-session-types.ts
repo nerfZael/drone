@@ -9,7 +9,7 @@ import type { PermissionMode, ToolProfile } from '@blip/tools';
 import type { CompactionSettings } from './compaction.js';
 import type { SessionRepository } from './session-repository.js';
 import type { AgentRunFileChanges } from '@blip/protocol';
-import type { BlipRuntimeEvent, BlipSessionState } from './types.js';
+import type { BlipRuntimeEvent, BlipSessionState, BlipToolSuspension } from './types.js';
 import type { BlipRuntimeDiagnostics } from './platform.js';
 
 export type BlipEventSink = (event: BlipRuntimeEvent) => Promise<void> | void;
@@ -39,7 +39,10 @@ export interface BlipToolProvider {
 
 export type BlipPromptProvider = (context: BlipSessionContext) => Promise<string> | string;
 
-export type BlipToolPreflightDecision = { status: 'allow' } | { status: 'deny'; reason: string };
+export type BlipToolPreflightDecision =
+  | { status: 'allow' }
+  | { status: 'deny'; reason: string }
+  | { status: 'suspend'; reason: string; details?: unknown; id?: string };
 
 export interface BlipToolPreflightRequest {
   session: BlipSessionState;
@@ -47,6 +50,8 @@ export interface BlipToolPreflightRequest {
   callId: string;
   args: unknown;
   signal?: AbortSignal;
+  phase: 'initial' | 'resume';
+  suspension?: BlipToolSuspension;
 }
 
 export type BlipToolPreflight = (
@@ -97,6 +102,11 @@ export interface BlipSessionHandle {
   steer(input: BlipPromptInput): void;
   enqueue(input: BlipPromptInput): Promise<BlipSessionState>;
   compact(settings?: CompactionSettings): Promise<BlipSessionState>;
+  pendingToolSuspensions(): Promise<BlipToolSuspension[]>;
+  resolveToolSuspension(
+    suspensionId: string,
+    decision: 'approve' | 'deny',
+  ): Promise<BlipSessionState>;
   delete(): Promise<void>;
   clearQueue(): void;
   abort(): void;

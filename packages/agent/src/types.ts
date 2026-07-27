@@ -1,6 +1,7 @@
 import type {
 	AssistantMessage,
 	AssistantMessageEvent,
+	ContextTokenEstimate,
 	ImageContent,
 	Message,
 	Model,
@@ -46,6 +47,26 @@ export type AgentToolCall = Extract<AssistantMessage["content"][number], { type:
  */
 export interface BeforeToolCallResult {
 	block?: boolean;
+	reason?: string;
+	/**
+	 * Deliberately stop the loop without producing a tool-result message.
+	 * A host can durably resolve the call later and continue from the eventual result.
+	 */
+	suspend?: AgentToolSuspension<any>;
+}
+
+export interface BeforeModelCallContext {
+	context: AgentContext;
+	reason: "preflight" | "overflow";
+	attempt: number;
+	estimate: (messages?: AgentMessage[]) => Promise<ContextTokenEstimate>;
+}
+
+export interface BeforeModelCallResult {
+	/** Replacement model context, typically reconstructed from a durable compaction boundary. */
+	messages?: AgentMessage[];
+	/** When true, replacement messages become the agent's canonical in-memory context. */
+	replaceContext?: boolean;
 	reason?: string;
 }
 
@@ -166,6 +187,18 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
 
 	/**
+	 * Stateful preflight invoked immediately before every model request.
+	 *
+	 * Unlike `transformContext`, this hook may persist durable context-management
+	 * state. It is invoked again with `reason: "overflow"` before the loop makes
+	 * its single context-overflow retry.
+	 */
+	beforeModelCall?: (
+		context: BeforeModelCallContext,
+		signal?: AbortSignal,
+	) => Promise<BeforeModelCallResult | undefined>;
+
+	/**
 	 * Resolves an API key dynamically for each LLM call.
 	 *
 	 * Useful for short-lived OAuth tokens (e.g., GitHub Copilot) that may expire
@@ -230,7 +263,10 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Return `{ block: true }` to prevent execution. The loop emits an error tool result instead.
 	 * The hook receives the agent abort signal and is responsible for honoring it.
 	 */
-	beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>;
+	beforeToolCall?: (
+		context: BeforeToolCallContext,
+		signal?: AbortSignal,
+	) => Promise<BeforeToolCallResult | undefined>;
 
 	/**
 	 * Called after a tool finishes executing, before `tool_execution_end` and tool-result message events are emitted.
@@ -244,7 +280,10 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Any omitted fields keep their original values. No deep merge is performed.
 	 * The hook receives the agent abort signal and is responsible for honoring it.
 	 */
-	afterToolCall?: (context: AfterToolCallContext, signal?: AbortSignal) => Promise<AfterToolCallResult | undefined>;
+	afterToolCall?: (
+		context: AfterToolCallContext,
+		signal?: AbortSignal,
+	) => Promise<AfterToolCallResult | undefined>;
 }
 
 /**
@@ -310,6 +349,8 @@ export interface AgentState {
 	readonly pendingToolCalls: ReadonlySet<string>;
 	/** Error message from the most recent failed or aborted assistant turn, if any. */
 	readonly errorMessage?: string;
+	/** Deferred tool call that ended the most recent run, if any. */
+	readonly suspendedToolCall?: AgentToolSuspendedCall;
 }
 
 /** Final or partial result produced by a tool. */
@@ -323,6 +364,28 @@ export interface AgentToolResult<T> {
 	 * Early termination only happens when every finalized tool result in the batch sets this to true.
 	 */
 	terminate?: boolean;
+}
+
+/** A deliberate deferred tool outcome. No tool-result message is emitted yet. */
+export interface AgentToolSuspension<T = unknown> {
+	suspended: true;
+	/** Stable host/runtime identifier for resolving this suspension later. */
+	id: string;
+	reason: string;
+	content?: (TextContent | ImageContent)[];
+	details?: T;
+}
+
+export type AgentToolExecutionResult<T> = AgentToolResult<T> | AgentToolSuspension<T>;
+
+export interface AgentToolSuspendedCall<T = unknown> {
+	id: string;
+	toolCallId: string;
+	toolName: string;
+	args: unknown;
+	reason: string;
+	content?: (TextContent | ImageContent)[];
+	details?: T;
 }
 
 /**
@@ -343,7 +406,10 @@ export class AgentToolResultError<T = any> extends Error {
 export type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T>) => void;
 
 /** Tool definition used by the agent runtime. */
-export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any> extends Tool<TParameters> {
+export interface AgentTool<
+	TParameters extends TSchema = TSchema,
+	TDetails = any,
+> extends Tool<TParameters> {
 	/** Human-readable label for UI display. */
 	label: string;
 	/**
@@ -357,7 +423,7 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
 		params: Static<TParameters>,
 		signal?: AbortSignal,
 		onUpdate?: AgentToolUpdateCallback<TDetails>,
-	) => Promise<AgentToolResult<TDetails>>;
+	) => Promise<AgentToolExecutionResult<TDetails>>;
 	/**
 	 * Per-tool execution mode override.
 	 * - "sequential": this tool must execute one at a time with other tool calls.
@@ -388,16 +454,36 @@ export interface AgentContext {
 export type AgentEvent =
 	// Agent lifecycle
 	| { type: "agent_start" }
-	| { type: "agent_end"; messages: AgentMessage[] }
+	| { type: "agent_end"; messages: AgentMessage[]; suspendedToolCall?: AgentToolSuspendedCall }
 	// Turn lifecycle - a turn is one assistant response + any tool calls/results
 	| { type: "turn_start" }
-	| { type: "turn_end"; message: AgentMessage; toolResults: ToolResultMessage[] }
+	| {
+			type: "turn_end";
+			message: AgentMessage;
+			toolResults: ToolResultMessage[];
+			suspendedToolCall?: AgentToolSuspendedCall;
+	  }
 	// Message lifecycle - emitted for user, assistant, and toolResult messages
 	| { type: "message_start"; message: AgentMessage }
 	// Only emitted for assistant messages during streaming
 	| { type: "message_update"; message: AgentMessage; assistantMessageEvent: AssistantMessageEvent }
 	| { type: "message_end"; message: AgentMessage }
+	| { type: "message_retry"; reason: "context_overflow"; attempt: number }
+	| { type: "context_replaced"; messages: AgentMessage[]; reason?: string }
 	// Tool execution lifecycle
 	| { type: "tool_execution_start"; toolCallId: string; toolName: string; args: any }
-	| { type: "tool_execution_update"; toolCallId: string; toolName: string; args: any; partialResult: any }
-	| { type: "tool_execution_end"; toolCallId: string; toolName: string; result: any; isError: boolean };
+	| {
+			type: "tool_execution_update";
+			toolCallId: string;
+			toolName: string;
+			args: any;
+			partialResult: any;
+	  }
+	| { type: "tool_execution_suspended"; suspension: AgentToolSuspendedCall }
+	| {
+			type: "tool_execution_end";
+			toolCallId: string;
+			toolName: string;
+			result: any;
+			isError: boolean;
+	  };

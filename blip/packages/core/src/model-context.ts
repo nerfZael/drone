@@ -26,6 +26,14 @@ export function modelMessagesFromTranscript(transcript: TranscriptEntry[]): Agen
     },
   ];
 
+  if (!compaction.firstKeptEntryId) {
+    for (let index = compactionIndex + 1; index < transcript.length; index += 1) {
+      const entry = transcript[index];
+      if (entry.type === 'message') messages.push(entry.message);
+    }
+    return messages;
+  }
+
   let foundFirstKept = false;
   for (let index = 0; index < compactionIndex; index += 1) {
     const entry = transcript[index];

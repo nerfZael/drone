@@ -1,5 +1,5 @@
 import { Type } from '@mariozechner/pi-ai';
-import type { AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentToolExecutionResult, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { lstat, mkdir, open, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
@@ -49,12 +49,7 @@ async function writeTransferBytes(
 ): Promise<void> {
   let written = 0;
   while (written < buffer.length) {
-    const result = await handle.write(
-      buffer,
-      written,
-      buffer.length - written,
-      position + written,
-    );
+    const result = await handle.write(buffer, written, buffer.length - written, position + written);
     if (result.bytesWritten <= 0) throw new Error('destination stopped writing transfer data');
     written += result.bytesWritten;
   }
@@ -209,9 +204,12 @@ export class LocalWorkspaceTarget implements WorkspaceTarget {
         ? {
             destination: {
               createDirectory: async (relativePath: string) => {
-                await mkdir(await writableWorkspaceTransferPath(input.workspaceRoot, relativePath), {
-                  recursive: true,
-                });
+                await mkdir(
+                  await writableWorkspaceTransferPath(input.workspaceRoot, relativePath),
+                  {
+                    recursive: true,
+                  },
+                );
               },
               prepareFile: async ({
                 path: relativePath,
@@ -292,7 +290,10 @@ export class LocalWorkspaceTarget implements WorkspaceTarget {
                   const info = await handle.stat();
                   if (info.size === offset + data.length) {
                     const existing = Buffer.alloc(data.length);
-                    if ((await readTransferBytes(handle, existing, offset)) && existing.equals(data))
+                    if (
+                      (await readTransferBytes(handle, existing, offset)) &&
+                      existing.equals(data)
+                    )
                       return { offset: info.size };
                   }
                   if (info.size !== offset)
@@ -370,7 +371,7 @@ export class LocalWorkspaceTarget implements WorkspaceTarget {
     };
   }
 
-  async execute(call: WorkspaceTargetCall): Promise<AgentToolResult<unknown>> {
+  async execute(call: WorkspaceTargetCall): Promise<AgentToolExecutionResult<unknown>> {
     const tool = this.tools.get(call.tool);
     if (!tool)
       throw new Error(`workspace target ${this.descriptor.id} does not support ${call.tool}`);
@@ -459,7 +460,8 @@ export function createWorkspaceTargetTools(input: {
             signal,
             onUpdate: onUpdate as ((result: AgentToolResult<unknown>) => void) | undefined,
           });
-          return withTargetDetails(result, target.descriptor);
+          if ('suspended' in result && result.suspended) return result;
+          return withTargetDetails(result as AgentToolResult<unknown>, target.descriptor);
         } finally {
           invocation?.release();
         }

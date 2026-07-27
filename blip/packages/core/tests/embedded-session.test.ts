@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { AgentMessage, StreamFn } from '@mariozechner/pi-agent-core';
+import type { AgentMessage, AgentTool, StreamFn } from '@mariozechner/pi-agent-core';
 import {
   AssistantMessageEventStream,
+  Type,
   fauxAssistantMessage,
   fauxToolCall,
   registerFauxProvider,
@@ -221,6 +222,443 @@ describe('Embedded Blip session', () => {
         callId: 'call_blocked',
         tool: 'read_file',
         error: 'Denied by host policy',
+      }),
+    );
+    session.close();
+    faux.unregister();
+  });
+
+  test('persists a suspended tool call across restart and resumes the exact call after approval', async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({
+      api: 'faux-durable-approval',
+      provider: 'faux-durable-approval',
+      tokensPerSecond: 0,
+    });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall('mutate', { value: 'original' }, { id: 'call_durable' }), {
+        stopReason: 'toolUse',
+      }),
+      fauxAssistantMessage('Mutation completed after approval.'),
+    ]);
+    const executions: Array<{ callId: string; value: string }> = [];
+    const tool: AgentTool<any> = {
+      name: 'mutate',
+      label: 'Mutate',
+      description: 'Test mutation',
+      parameters: Type.Object({ value: Type.String() }),
+      execute: async (callId, args) => {
+        executions.push({ callId, value: args.value });
+        return { content: [{ type: 'text', text: 'done' }], details: { value: args.value } };
+      },
+    };
+    const repository = new SessionStore(workspace);
+    const firstEvents: BlipRuntimeEvent[] = [];
+    const first = await createBlipSession({
+      workspaceRoot: workspace,
+      model: faux.getModel(),
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: repository,
+      tools: [tool],
+      permissionPreflight: ({ phase }) =>
+        phase === 'resume'
+          ? { status: 'allow' }
+          : {
+              status: 'suspend',
+              reason: 'Needs approval',
+              details: { approval: { label: 'Mutate', args: { value: 'original' } } },
+            },
+      eventSink: (event) => firstEvents.push(event),
+    });
+    await first.prompt('Mutate something');
+    const [pending] = await first.pendingToolSuspensions();
+
+    expect(executions).toEqual([]);
+    expect(pending).toEqual(
+      expect.objectContaining({
+        toolCallId: 'call_durable',
+        toolName: 'mutate',
+        args: { value: 'original' },
+        status: 'pending',
+      }),
+    );
+    expect(firstEvents).toContainEqual(
+      expect.objectContaining({ type: 'session_finished', status: 'suspended' }),
+    );
+    first.close();
+
+    const restoredEvents: BlipRuntimeEvent[] = [];
+    const restored = await createBlipSession({
+      workspaceRoot: workspace,
+      model: faux.getModel(),
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: repository,
+      sessionId: first.state.id,
+      tools: [tool],
+      permissionPreflight: ({ phase }) =>
+        phase === 'resume' ? { status: 'allow' } : { status: 'suspend', reason: 'Needs approval' },
+      eventSink: (event) => restoredEvents.push(event),
+    });
+    expect(await restored.pendingToolSuspensions()).toHaveLength(1);
+    expect(restoredEvents).toContainEqual(
+      expect.objectContaining({
+        type: 'tool_call_suspended',
+        suspensionId: pending!.id,
+        recoveryRequired: false,
+      }),
+    );
+
+    await restored.resolveToolSuspension(pending!.id, 'approve');
+
+    expect(executions).toEqual([{ callId: 'call_durable', value: 'original' }]);
+    expect(await restored.pendingToolSuspensions()).toEqual([]);
+    expect(
+      (await repository.readToolSuspensions(restored.state)).find(
+        (candidate) => candidate.id === pending!.id,
+      )?.status,
+    ).toBe('completed');
+    restored.close();
+    faux.unregister();
+  });
+
+  test('turns a denied suspension into a durable tool result and continues the model', async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({
+      api: 'faux-durable-denial',
+      provider: 'faux-durable-denial',
+      tokensPerSecond: 0,
+    });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall('mutate', { value: 'blocked' }, { id: 'call_denied' }), {
+        stopReason: 'toolUse',
+      }),
+      fauxAssistantMessage('The mutation was denied.'),
+    ]);
+    let executions = 0;
+    const repository = new SessionStore(workspace);
+    const session = await createBlipSession({
+      workspaceRoot: workspace,
+      model: faux.getModel(),
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: repository,
+      tools: [
+        {
+          name: 'mutate',
+          label: 'Mutate',
+          description: 'Test mutation',
+          parameters: Type.Object({ value: Type.String() }),
+          execute: async () => {
+            executions += 1;
+            return { content: [{ type: 'text', text: 'done' }], details: {} };
+          },
+        },
+      ],
+      permissionPreflight: () => ({ status: 'suspend', reason: 'Needs approval' }),
+    });
+    await session.prompt('Mutate');
+    const [pending] = await session.pendingToolSuspensions();
+
+    await session.resolveToolSuspension(pending!.id, 'deny');
+
+    expect(executions).toBe(0);
+    expect(
+      (await repository.readToolSuspensions(session.state)).find(
+        (candidate) => candidate.id === pending!.id,
+      )?.status,
+    ).toBe('denied');
+    expect(await repository.readMessages(session.state)).toContainEqual(
+      expect.objectContaining({
+        role: 'toolResult',
+        toolCallId: 'call_denied',
+        isError: true,
+      }),
+    );
+    session.close();
+    faux.unregister();
+  });
+
+  test('marks an uncertain in-flight mutation interrupted instead of replaying it on restart', async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({
+      api: 'faux-interrupted-approval',
+      provider: 'faux-interrupted-approval',
+      tokensPerSecond: 0,
+    });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall('mutate', { value: 'once' }, { id: 'call_uncertain' }), {
+        stopReason: 'toolUse',
+      }),
+    ]);
+    let executions = 0;
+    const tool: AgentTool<any> = {
+      name: 'mutate',
+      label: 'Mutate',
+      description: 'Test mutation',
+      parameters: Type.Object({ value: Type.String() }),
+      execute: async () => {
+        executions += 1;
+        return { content: [{ type: 'text', text: 'done' }], details: {} };
+      },
+    };
+    const repository = new SessionStore(workspace);
+    const first = await createBlipSession({
+      workspaceRoot: workspace,
+      model: faux.getModel(),
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: repository,
+      tools: [tool],
+      permissionPreflight: () => ({ status: 'suspend', reason: 'Needs approval' }),
+    });
+    await first.prompt('Mutate');
+    const [pending] = await first.pendingToolSuspensions();
+    const at = new Date().toISOString();
+    await repository.transitionToolSuspension(
+      first.state,
+      { ...pending!, status: 'executing', attempt: 1, updatedAt: at },
+      ['pending'],
+    );
+    first.close();
+
+    const events: BlipRuntimeEvent[] = [];
+    const restored = await createBlipSession({
+      workspaceRoot: workspace,
+      model: faux.getModel(),
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: repository,
+      sessionId: first.state.id,
+      tools: [tool],
+      permissionPreflight: () => ({ status: 'suspend', reason: 'Needs approval' }),
+      eventSink: (event) => events.push(event),
+    });
+
+    expect(executions).toBe(0);
+    expect((await restored.pendingToolSuspensions())[0]?.status).toBe('interrupted');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool_call_suspended',
+        recoveryRequired: true,
+      }),
+    );
+    restored.close();
+    faux.unregister();
+  });
+
+  test('continues the model after restart when a durable tool result already proves completion', async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({
+      api: 'faux-completed-recovery',
+      provider: 'faux-completed-recovery',
+      tokensPerSecond: 0,
+    });
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall('mutate', { value: 'done' }, { id: 'call_completed' }), {
+        stopReason: 'toolUse',
+      }),
+      fauxAssistantMessage('Recovered from the persisted tool result.'),
+    ]);
+    let executions = 0;
+    const tool: AgentTool<any> = {
+      name: 'mutate',
+      label: 'Mutate',
+      description: 'Test mutation',
+      parameters: Type.Object({ value: Type.String() }),
+      execute: async () => {
+        executions += 1;
+        return { content: [{ type: 'text', text: 'done' }], details: {} };
+      },
+    };
+    const repository = new SessionStore(workspace);
+    const first = await createBlipSession({
+      workspaceRoot: workspace,
+      model: faux.getModel(),
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: repository,
+      tools: [tool],
+      permissionPreflight: () => ({ status: 'suspend', reason: 'Needs approval' }),
+    });
+    await first.prompt('Mutate');
+    const [pending] = await first.pendingToolSuspensions();
+    const result = {
+      role: 'toolResult' as const,
+      toolCallId: pending!.toolCallId,
+      toolName: pending!.toolName,
+      content: [{ type: 'text' as const, text: 'already completed' }],
+      details: {},
+      isError: false,
+      timestamp: Date.now(),
+    };
+    const at = new Date().toISOString();
+    await repository.transitionToolSuspension(
+      first.state,
+      {
+        ...pending!,
+        status: 'completed',
+        result,
+        completedAt: at,
+        updatedAt: at,
+      },
+      ['pending'],
+    );
+    await repository.appendMessage(first.state, result);
+    first.close();
+
+    const events: BlipRuntimeEvent[] = [];
+    const restored = await createBlipSession({
+      workspaceRoot: workspace,
+      model: faux.getModel(),
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: repository,
+      sessionId: first.state.id,
+      tools: [tool],
+      permissionPreflight: () => ({ status: 'suspend', reason: 'Needs approval' }),
+      eventSink: (event) => events.push(event),
+    });
+
+    expect(executions).toBe(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'assistant_message',
+        text: 'Recovered from the persisted tool result.',
+      }),
+    );
+    restored.close();
+    faux.unregister();
+  });
+
+  test('compacts a large current-turn tool result before the next model request', async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({
+      api: 'faux-mid-loop-compaction',
+      provider: 'faux-mid-loop-compaction',
+      tokensPerSecond: 0,
+    });
+    let finalContext: AgentMessage[] = [];
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall('large_output', {}, { id: 'call_large' }), {
+        stopReason: 'toolUse',
+      }),
+      fauxAssistantMessage('Compacted current turn'),
+      (context) => {
+        finalContext = context.messages;
+        return fauxAssistantMessage('Handled compacted output.');
+      },
+    ]);
+    const events: BlipRuntimeEvent[] = [];
+    const session = await createBlipSession({
+      workspaceRoot: workspace,
+      model: { ...faux.getModel(), contextWindow: 1_000, maxTokens: 200 },
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: new SessionStore(workspace),
+      tools: [
+        {
+          name: 'large_output',
+          label: 'Large output',
+          description: 'Returns large output',
+          parameters: Type.Object({}),
+          execute: async () => ({
+            content: [{ type: 'text', text: 'large '.repeat(2_000) }],
+            details: {},
+          }),
+        },
+      ],
+      compactionSettings: {
+        auto: true,
+        reserveTokens: 200,
+        keepRecentTokens: 100,
+        keepRecentTurns: 1,
+      },
+      eventSink: (event) => events.push(event),
+    });
+
+    await session.prompt('Run the large output tool');
+
+    expect(events.some((event) => event.type === 'compaction_completed')).toBe(true);
+    expect(finalContext).toHaveLength(1);
+    expect(userText(finalContext[0])).toContain('Summary of earlier conversation');
+    session.close();
+    faux.unregister();
+  });
+
+  test('retries one provider context overflow after durable compaction', async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({
+      api: 'faux-overflow-retry',
+      provider: 'faux-overflow-retry',
+      tokensPerSecond: 0,
+    });
+    const repository = new SessionStore(workspace);
+    const seed = await createBlipSession({
+      workspaceRoot: workspace,
+      model: { ...faux.getModel(), contextWindow: 1_000, maxTokens: 200 },
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: repository,
+      compactionSettings: {
+        auto: false,
+        reserveTokens: 200,
+        keepRecentTokens: 10,
+        keepRecentTurns: 1,
+      },
+    });
+    await repository.appendMessage(seed.state, {
+      role: 'user',
+      content: 'Older goal that should be summarized.',
+      timestamp: Date.now(),
+    });
+    await repository.appendMessage(
+      seed.state,
+      fauxAssistantMessage('Older response that should be summarized.'),
+    );
+    seed.close();
+
+    faux.setResponses([
+      fauxAssistantMessage('', {
+        stopReason: 'error',
+        errorMessage: 'input context_length_exceeded',
+      }),
+      fauxAssistantMessage('Overflow recovery summary'),
+      fauxAssistantMessage('Emergency overflow recovery summary'),
+      fauxAssistantMessage('Recovered after one retry.'),
+    ]);
+    const events: BlipRuntimeEvent[] = [];
+    const session = await createBlipSession({
+      workspaceRoot: workspace,
+      model: { ...faux.getModel(), contextWindow: 1_000, maxTokens: 200 },
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: repository,
+      sessionId: seed.state.id,
+      compactionSettings: {
+        auto: false,
+        reserveTokens: 200,
+        keepRecentTokens: 10,
+        keepRecentTurns: 1,
+      },
+      eventSink: (event) => events.push(event),
+    });
+
+    await session.prompt('Current request');
+
+    expect(events.filter((event) => event.type === 'model_retry')).toHaveLength(1);
+    expect(events.some((event) => event.type === 'compaction_completed')).toBe(true);
+    const assistants = (await repository.readMessages(session.state)).filter(
+      (message) => message.role === 'assistant',
+    );
+    expect(assistants.some((message) => message.errorMessage?.includes('context_length'))).toBe(
+      false,
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'assistant_message',
+        text: 'Recovered after one retry.',
       }),
     );
     session.close();

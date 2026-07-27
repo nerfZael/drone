@@ -1,4 +1,5 @@
-import type { AgentMessage } from '@mariozechner/pi-agent-core';
+import type { AgentMessage, AgentToolSuspendedCall } from '@mariozechner/pi-agent-core';
+import type { ToolResultMessage } from '@mariozechner/pi-ai';
 import type { PermissionMode, ToolProfile } from '@blip/tools';
 import type { BlipRuntimeEvent } from '@blip/protocol';
 import type { BlipPromptProvider, BlipToolProvider } from './blip-session-types.js';
@@ -31,9 +32,35 @@ export interface BlipSessionState {
   updatedAt: string;
 }
 
+export type BlipToolSuspensionStatus =
+  | 'pending'
+  | 'approved'
+  | 'executing'
+  | 'interrupted'
+  | 'completed'
+  | 'denied'
+  | 'failed';
+
+export interface BlipToolSuspension extends AgentToolSuspendedCall {
+  status: BlipToolSuspensionStatus;
+  createdAt: string;
+  updatedAt: string;
+  attempt: number;
+  decisionAt?: string;
+  completedAt?: string;
+  error?: string;
+  result?: ToolResultMessage;
+}
+
 export type TranscriptEntry =
   | { type: 'message'; id: string; timestamp: string; message: AgentMessage }
   | { type: 'runtime_event'; id: string; timestamp: string; event: BlipRuntimeEvent }
+  | {
+      type: 'tool_suspension';
+      id: string;
+      timestamp: string;
+      suspension: BlipToolSuspension;
+    }
   | {
       type: 'compaction';
       id: string;
@@ -41,7 +68,10 @@ export type TranscriptEntry =
       trigger: 'manual' | 'auto';
       tokensBefore: number;
       tokensAfterEstimate?: number;
-      firstKeptEntryId: string;
+      fallbackUsed?: boolean;
+      fallbackReason?: string;
+      /** Omitted when emergency compaction summarizes all prior messages. */
+      firstKeptEntryId?: string;
       summary: string;
       details: { readFiles: string[]; modifiedFiles: string[] };
     };

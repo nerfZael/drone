@@ -1,6 +1,13 @@
 import crypto from 'node:crypto';
 import type { AgentMessage, AgentTool } from '@mariozechner/pi-agent-core';
-import type { BlipPromptInput, BlipRuntimeEvent, BlipSessionHandle, BlipToolPreflight, BlipToolProvider, CreateBlipSessionOptions } from '@blip/core';
+import type {
+  BlipPromptInput,
+  BlipRuntimeEvent,
+  BlipSessionHandle,
+  BlipToolPreflight,
+  BlipToolProvider,
+  CreateBlipSessionOptions,
+} from '@blip/core';
 import type { BlipHistoryPage } from '@blip/protocol';
 
 import { HubSessionRepository } from './hub-session-repository';
@@ -26,17 +33,26 @@ export class BlipAssistantHost {
   private readonly repository = new HubSessionRepository();
   private readonly handles = new Map<string, BlipSessionHandle>();
   private readonly handlePromises = new Map<string, Promise<BlipSessionHandle>>();
-  private readonly eventSinks = new Map<string, Set<(event: BlipRuntimeEvent) => Promise<void> | void>>();
+  private readonly eventSinks = new Map<
+    string,
+    Set<(event: BlipRuntimeEvent) => Promise<void> | void>
+  >();
   private readonly invalidatedThreads = new Set<string>();
   private readonly loadedTools = new Map<string, AgentTool<any>[]>();
   private readonly loadedConfigurations = new Map<string, BlipAssistantThreadConfiguration>();
 
   constructor(
     private readonly configuration: (threadId: string) => Promise<BlipAssistantThreadConfiguration>,
-    private readonly eventObserver?: (threadId: string, event: BlipRuntimeEvent) => Promise<void> | void,
+    private readonly eventObserver?: (
+      threadId: string,
+      event: BlipRuntimeEvent,
+    ) => Promise<void> | void,
   ) {}
 
-  subscribeEvents(threadId: string, sink: (event: BlipRuntimeEvent) => Promise<void> | void): () => void {
+  subscribeEvents(
+    threadId: string,
+    sink: (event: BlipRuntimeEvent) => Promise<void> | void,
+  ): () => void {
     const sinks = this.eventSinks.get(threadId) ?? new Set();
     sinks.add(sink);
     this.eventSinks.set(threadId, sinks);
@@ -63,8 +79,7 @@ export class BlipAssistantHost {
       if (handle.running && effectiveDeliveryMode === 'asap') {
         handle.steer(prompt);
         await handle.waitForIdle();
-      }
-      else if (handle.running) await handle.enqueue(prompt);
+      } else if (handle.running) await handle.enqueue(prompt);
       else await handle.prompt(prompt);
     } finally {
       if (onEvent) {
@@ -107,7 +122,10 @@ export class BlipAssistantHost {
     this.handles.get(threadId)?.abort();
   }
 
-  historyPage(threadId: string, input?: { before?: number; limit?: number }): Promise<BlipHistoryPage> {
+  historyPage(
+    threadId: string,
+    input?: { before?: number; limit?: number },
+  ): Promise<BlipHistoryPage> {
     return this.repository.readThreadHistoryPage(threadId, input);
   }
 
@@ -148,7 +166,85 @@ export class BlipAssistantHost {
     if (handle?.running) await handle.waitForIdle();
   }
 
-  async toolCatalog(threadId: string): Promise<Array<{ name: string; description: string; parameters: unknown }>> {
+  async resolveToolSuspension(
+    threadId: string,
+    suspensionId: string,
+    approved: boolean,
+  ): Promise<void> {
+    const handle = await this.handle(threadId);
+    await handle.resolveToolSuspension(suspensionId, approved ? 'approve' : 'deny');
+  }
+
+  async beginToolSuspensionResolution(
+    threadId: string,
+    suspensionId: string,
+    approved: boolean,
+  ): Promise<void> {
+    const handle = await this.handle(threadId);
+    const suspension = (await handle.pendingToolSuspensions()).find(
+      (candidate) => candidate.id === suspensionId,
+    );
+    if (!suspension) throw new Error(`unknown tool suspension: ${suspensionId}`);
+    let settleAccepted: () => void = () => {};
+    let rejectAccepted: (error: unknown) => void = () => {};
+    const accepted = new Promise<void>((resolve, reject) => {
+      settleAccepted = resolve;
+      rejectAccepted = reject;
+    });
+    const unsubscribe = this.subscribeEvents(threadId, (event) => {
+      if (
+        (event.type === 'tool_call_started' &&
+          approved &&
+          event.callId === suspension.toolCallId) ||
+        (event.type === 'tool_call_resolved' && event.suspensionId === suspensionId)
+      ) {
+        settleAccepted();
+      }
+    });
+    const running = handle.resolveToolSuspension(suspensionId, approved ? 'approve' : 'deny');
+    void running.catch(rejectAccepted);
+    try {
+      await accepted;
+    } finally {
+      unsubscribe();
+      void running.catch(() => undefined);
+    }
+  }
+
+  async restorePendingApprovals(): Promise<void> {
+    const recovered = await this.repository.recoverToolSuspensionsByThread();
+    for (const { threadId, suspension } of recovered) {
+      await this.publishEvent(threadId, {
+        version: 1,
+        eventId: crypto.randomUUID(),
+        type: 'tool_call_suspended',
+        sessionId: (
+          await this.repository.load((await this.repository.sessionIdForThread(threadId))!)
+        ).id,
+        timestamp: new Date().toISOString(),
+        suspensionId: suspension.id,
+        callId: suspension.toolCallId,
+        tool: suspension.toolName,
+        reason: suspension.error ?? suspension.reason,
+        details: suspension.details,
+        recoveryRequired: suspension.status === 'interrupted',
+      });
+    }
+    const continuations = await this.repository.threadIdsRequiringToolContinuation();
+    const results = await Promise.allSettled(
+      continuations.map((threadId) => this.handle(threadId)),
+    );
+    const failures = results.filter((result) => result.status === 'rejected');
+    if (failures.length > 0) {
+      throw new Error(
+        `failed resuming ${failures.length} of ${continuations.length} durable tool continuation(s)`,
+      );
+    }
+  }
+
+  async toolCatalog(
+    threadId: string,
+  ): Promise<Array<{ name: string; description: string; parameters: unknown }>> {
     await this.handle(threadId);
     return (this.loadedTools.get(threadId) ?? []).map((tool) => ({
       name: tool.name,
@@ -157,14 +253,30 @@ export class BlipAssistantHost {
     }));
   }
 
-  async executeTool(threadId: string, callId: string, toolName: string, args: any, signal?: AbortSignal): Promise<any> {
+  async executeTool(
+    threadId: string,
+    callId: string,
+    toolName: string,
+    args: any,
+    signal?: AbortSignal,
+  ): Promise<any> {
     await this.handle(threadId);
-    const tool = (this.loadedTools.get(threadId) ?? []).find((candidate) => candidate.name === toolName);
+    const tool = (this.loadedTools.get(threadId) ?? []).find(
+      (candidate) => candidate.name === toolName,
+    );
     if (!tool) throw new Error(`assistant tool unavailable: ${toolName}`);
     const handle = this.handles.get(threadId)!;
     const preflight = this.loadedConfigurations.get(threadId)?.permissionPreflight;
-    const decision = await preflight?.({ session: handle.state, tool: toolName, callId, args, signal });
+    const decision = await preflight?.({
+      session: handle.state,
+      tool: toolName,
+      callId,
+      args,
+      signal,
+      phase: 'initial',
+    });
     if (decision?.status === 'deny') throw new Error(decision.reason);
+    if (decision?.status === 'suspend') throw new Error(decision.reason);
     return tool.execute(callId, args, signal);
   }
 
@@ -174,7 +286,9 @@ export class BlipAssistantHost {
     handle.steer(prompt);
   }
 
-  stopThread(threadId: string): void { this.handles.get(threadId)?.abort(); }
+  stopThread(threadId: string): void {
+    this.handles.get(threadId)?.abort();
+  }
 
   invalidateThread(threadId: string): void {
     const handle = this.handles.get(threadId);
@@ -189,7 +303,8 @@ export class BlipAssistantHost {
   }
 
   invalidateAll(): void {
-    for (const threadId of new Set([...this.handles.keys(), ...this.handlePromises.keys()])) this.invalidateThread(threadId);
+    for (const threadId of new Set([...this.handles.keys(), ...this.handlePromises.keys()]))
+      this.invalidateThread(threadId);
   }
 
   async deleteThread(threadId: string): Promise<void> {
@@ -201,8 +316,7 @@ export class BlipAssistantHost {
         await handle.waitForIdle();
       }
       await handle.delete();
-    }
-    else {
+    } else {
       const sessionId = await this.repository.sessionIdForThread(threadId);
       if (sessionId) await this.repository.delete(sessionId);
     }
@@ -212,11 +326,7 @@ export class BlipAssistantHost {
     await this.disposeConfiguration(threadId);
   }
 
-  async deleteMessage(
-    threadId: string,
-    entryId: string,
-    deleteFollowing: boolean,
-  ): Promise<void> {
+  async deleteMessage(threadId: string, entryId: string, deleteFollowing: boolean): Promise<void> {
     const pending = this.handlePromises.get(threadId);
     const handle = this.handles.get(threadId) ?? (pending ? await pending : null);
     if (handle?.running) throw new Error('Stop the assistant before deleting messages');
@@ -277,10 +387,7 @@ export class BlipAssistantHost {
   }
 
   private async createHandle(threadId: string): Promise<BlipSessionHandle> {
-    const [runtime, nodeRuntime] = await Promise.all([
-      loadBlipRuntime(),
-      loadBlipNodeRuntime(),
-    ]);
+    const [runtime, nodeRuntime] = await Promise.all([loadBlipRuntime(), loadBlipNodeRuntime()]);
     const config = await this.configuration(threadId);
     let handle: BlipSessionHandle | undefined;
     try {
@@ -314,7 +421,11 @@ export class BlipAssistantHost {
         permissionMode: 'workspace-write' as const,
         toolProfile: 'no-shell-workspace-write' as const,
       };
-      const providerTools = (await Promise.all((config.toolProviders ?? []).map((toolProvider) => toolProvider.load(context)))).flat();
+      const providerTools = (
+        await Promise.all(
+          (config.toolProviders ?? []).map((toolProvider) => toolProvider.load(context)),
+        )
+      ).flat();
       this.loadedTools.set(threadId, [...config.tools, ...providerTools]);
       this.loadedConfigurations.set(threadId, config);
       this.handles.set(threadId, handle);

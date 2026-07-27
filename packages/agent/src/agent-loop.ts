@@ -6,7 +6,9 @@
 import {
   type AssistantMessage,
   type Context,
+  estimateContextTokens,
   EventStream,
+  isContextOverflow,
   streamSimple,
   type ToolResultMessage,
   validateToolArguments,
@@ -19,7 +21,9 @@ import {
   type AgentMessage,
   type AgentTool,
   type AgentToolCall,
+  type AgentToolExecutionResult,
   type AgentToolResult,
+  type AgentToolSuspendedCall,
   type StreamFn,
 } from './types.js';
 
@@ -202,6 +206,7 @@ async function runLoop(
       const toolCalls = message.content.filter((c) => c.type === 'toolCall');
 
       const toolResults: ToolResultMessage[] = [];
+      let suspendedToolCall: AgentToolSuspendedCall | undefined;
       hasMoreToolCalls = false;
       if (toolCalls.length > 0) {
         const executedToolBatch = await executeToolCalls(
@@ -212,6 +217,7 @@ async function runLoop(
           emit,
         );
         toolResults.push(...executedToolBatch.messages);
+        suspendedToolCall = executedToolBatch.suspendedToolCall;
         hasMoreToolCalls = !executedToolBatch.terminate;
 
         for (const result of toolResults) {
@@ -220,7 +226,12 @@ async function runLoop(
         }
       }
 
-      await emit({ type: 'turn_end', message, toolResults });
+      await emit({ type: 'turn_end', message, toolResults, suspendedToolCall });
+
+      if (suspendedToolCall) {
+        await emit({ type: 'agent_end', messages: newMessages, suspendedToolCall });
+        return;
+      }
 
       if (
         await config.shouldStopAfterTurn?.({
@@ -263,92 +274,129 @@ async function streamAssistantResponse(
   emit: AgentEventSink,
   streamFn?: StreamFn,
 ): Promise<AssistantMessage> {
-  // Apply context transform if configured (AgentMessage[] → AgentMessage[])
-  let messages = context.messages;
-  if (config.transformContext) {
-    messages = await config.transformContext(messages, signal);
-  }
-
-  // Convert to LLM-compatible messages (AgentMessage[] → Message[])
-  const llmMessages = await config.convertToLlm(messages);
-
-  // Build LLM context
-  const llmContext: Context = {
-    systemPrompt: context.systemPrompt,
-    messages: llmMessages,
-    tools: context.tools,
-  };
-
   const streamFunction = streamFn || streamSimple;
+  let attempt = 0;
+  let reason: 'preflight' | 'overflow' = 'preflight';
 
-  // Resolve API key (important for expiring tokens)
-  const resolvedApiKey =
-    (config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
-
-  const response = await streamFunction(config.model, llmContext, {
-    ...config,
-    apiKey: resolvedApiKey,
-    signal,
-  });
-
-  let partialMessage: AssistantMessage | null = null;
-  let addedPartial = false;
-
-  for await (const event of response) {
-    switch (event.type) {
-      case 'start':
-        partialMessage = event.partial;
-        context.messages.push(partialMessage);
-        addedPartial = true;
-        await emit({ type: 'message_start', message: { ...partialMessage } });
-        break;
-
-      case 'text_start':
-      case 'text_delta':
-      case 'text_end':
-      case 'thinking_start':
-      case 'thinking_delta':
-      case 'thinking_end':
-      case 'toolcall_start':
-      case 'toolcall_delta':
-      case 'toolcall_end':
-        if (partialMessage) {
-          partialMessage = event.partial;
-          context.messages[context.messages.length - 1] = partialMessage;
-          await emit({
-            type: 'message_update',
-            assistantMessageEvent: event,
-            message: { ...partialMessage },
-          });
-        }
-        break;
-
-      case 'done':
-      case 'error': {
-        const finalMessage = await response.result();
-        if (addedPartial) {
-          context.messages[context.messages.length - 1] = finalMessage;
-        } else {
-          context.messages.push(finalMessage);
-        }
-        if (!addedPartial) {
-          await emit({ type: 'message_start', message: { ...finalMessage } });
-        }
-        await emit({ type: 'message_end', message: finalMessage });
-        return finalMessage;
+  while (true) {
+    let requestMessages = context.messages;
+    const estimate = async (messages: AgentMessage[] = requestMessages) => {
+      let transformed = messages;
+      if (config.transformContext) {
+        transformed = await config.transformContext(transformed, signal);
+      }
+      return estimateContextTokens(config.model, {
+        systemPrompt: context.systemPrompt,
+        messages: await config.convertToLlm(transformed),
+        tools: context.tools,
+      });
+    };
+    const prepared = await config.beforeModelCall?.(
+      {
+        context: {
+          ...context,
+          messages: [...context.messages],
+          tools: context.tools?.slice(),
+        },
+        reason,
+        attempt,
+        estimate,
+      },
+      signal,
+    );
+    if (prepared?.messages) {
+      requestMessages = [...prepared.messages];
+      if (prepared.replaceContext) {
+        context.messages = [...requestMessages];
+        await emit({
+          type: 'context_replaced',
+          messages: [...requestMessages],
+          reason: prepared.reason,
+        });
       }
     }
-  }
 
-  const finalMessage = await response.result();
-  if (addedPartial) {
-    context.messages[context.messages.length - 1] = finalMessage;
-  } else {
-    context.messages.push(finalMessage);
-    await emit({ type: 'message_start', message: { ...finalMessage } });
+    let transformedMessages = requestMessages;
+    if (config.transformContext) {
+      transformedMessages = await config.transformContext(transformedMessages, signal);
+    }
+    const llmContext: Context = {
+      systemPrompt: context.systemPrompt,
+      messages: await config.convertToLlm(transformedMessages),
+      tools: context.tools,
+    };
+    const resolvedApiKey =
+      (config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) ||
+      config.apiKey;
+    const response = await streamFunction(config.model, llmContext, {
+      ...config,
+      apiKey: resolvedApiKey,
+      signal,
+    });
+
+    let partialMessage: AssistantMessage | null = null;
+    let addedPartial = false;
+    let finalMessage: AssistantMessage | undefined;
+
+    for await (const event of response) {
+      switch (event.type) {
+        case 'start':
+          partialMessage = event.partial;
+          context.messages.push(partialMessage);
+          addedPartial = true;
+          await emit({ type: 'message_start', message: { ...partialMessage } });
+          break;
+
+        case 'text_start':
+        case 'text_delta':
+        case 'text_end':
+        case 'thinking_start':
+        case 'thinking_delta':
+        case 'thinking_end':
+        case 'toolcall_start':
+        case 'toolcall_delta':
+        case 'toolcall_end':
+          if (partialMessage) {
+            partialMessage = event.partial;
+            context.messages[context.messages.length - 1] = partialMessage;
+            await emit({
+              type: 'message_update',
+              assistantMessageEvent: event,
+              message: { ...partialMessage },
+            });
+          }
+          break;
+
+        case 'done':
+        case 'error':
+          finalMessage = await response.result();
+          break;
+      }
+      if (finalMessage) break;
+    }
+
+    finalMessage ??= await response.result();
+    if (
+      attempt === 0 &&
+      config.beforeModelCall &&
+      isContextOverflow(finalMessage, config.model.contextWindow)
+    ) {
+      if (addedPartial) context.messages.pop();
+      await emit({ type: 'message_retry', reason: 'context_overflow', attempt: 1 });
+      attempt = 1;
+      reason = 'overflow';
+      continue;
+    }
+
+    if (addedPartial) {
+      context.messages[context.messages.length - 1] = finalMessage;
+    } else {
+      context.messages.push(finalMessage);
+      await emit({ type: 'message_start', message: { ...finalMessage } });
+    }
+    await emit({ type: 'message_end', message: finalMessage });
+    return finalMessage;
   }
-  await emit({ type: 'message_end', message: finalMessage });
-  return finalMessage;
 }
 
 /**
@@ -388,6 +436,7 @@ async function executeToolCalls(
 type ExecutedToolCallBatch = {
   messages: ToolResultMessage[];
   terminate: boolean;
+  suspendedToolCall?: AgentToolSuspendedCall;
 };
 
 async function executeToolCallsSequential(
@@ -401,7 +450,8 @@ async function executeToolCallsSequential(
   const finalizedCalls: FinalizedToolCallOutcome[] = [];
   const messages: ToolResultMessage[] = [];
 
-  for (const toolCall of toolCalls) {
+  for (let index = 0; index < toolCalls.length; index += 1) {
+    const toolCall = toolCalls[index]!;
     await emit({
       type: 'tool_execution_start',
       toolCallId: toolCall.id,
@@ -416,6 +466,29 @@ async function executeToolCallsSequential(
       config,
       signal,
     );
+    if (preparation.kind === 'suspended') {
+      await emit({ type: 'tool_execution_suspended', suspension: preparation.suspension });
+      for (const skipped of toolCalls.slice(index + 1)) {
+        await emit({
+          type: 'tool_execution_start',
+          toolCallId: skipped.id,
+          toolName: skipped.name,
+          args: skipped.arguments,
+        });
+        const finalized = skippedToolCall(skipped);
+        await emitToolExecutionEnd(finalized, emit);
+        const message = createToolResultMessage(finalized);
+        await emitToolResultMessage(message, emit);
+        finalizedCalls.push(finalized);
+        messages.push(message);
+      }
+      return {
+        messages,
+        terminate: true,
+        suspendedToolCall: preparation.suspension,
+      };
+    }
+
     let finalized: FinalizedToolCallOutcome;
     if (preparation.kind === 'immediate') {
       finalized = {
@@ -425,6 +498,28 @@ async function executeToolCallsSequential(
       };
     } else {
       const executed = await executePreparedToolCall(preparation, signal, emit);
+      if (executed.kind === 'suspended') {
+        await emit({ type: 'tool_execution_suspended', suspension: executed.suspension });
+        for (const skipped of toolCalls.slice(index + 1)) {
+          await emit({
+            type: 'tool_execution_start',
+            toolCallId: skipped.id,
+            toolName: skipped.name,
+            args: skipped.arguments,
+          });
+          const skippedFinalized = skippedToolCall(skipped);
+          await emitToolExecutionEnd(skippedFinalized, emit);
+          const message = createToolResultMessage(skippedFinalized);
+          await emitToolResultMessage(message, emit);
+          finalizedCalls.push(skippedFinalized);
+          messages.push(message);
+        }
+        return {
+          messages,
+          terminate: true,
+          suspendedToolCall: executed.suspension,
+        };
+      }
       finalized = await finalizeExecutedToolCall(
         currentContext,
         assistantMessage,
@@ -456,9 +551,14 @@ async function executeToolCallsParallel(
   signal: AbortSignal | undefined,
   emit: AgentEventSink,
 ): Promise<ExecutedToolCallBatch> {
-  const finalizedCalls: FinalizedToolCallEntry[] = [];
+  const preparedCalls: Array<
+    | { kind: 'prepared'; preparation: PreparedToolCall }
+    | { kind: 'finalized'; finalized: FinalizedToolCallOutcome }
+  > = [];
+  let preflightSuspension: AgentToolSuspendedCall | undefined;
 
-  for (const toolCall of toolCalls) {
+  for (let index = 0; index < toolCalls.length; index += 1) {
+    const toolCall = toolCalls[index]!;
     await emit({
       type: 'tool_execution_start',
       toolCallId: toolCall.id,
@@ -473,6 +573,18 @@ async function executeToolCallsParallel(
       config,
       signal,
     );
+    if (preparation.kind === 'suspended') {
+      preflightSuspension = preparation.suspension;
+      for (const skipped of toolCalls.slice(index + 1)) {
+        await emit({
+          type: 'tool_execution_start',
+          toolCallId: skipped.id,
+          toolName: skipped.name,
+          args: skipped.arguments,
+        });
+      }
+      break;
+    }
     if (preparation.kind === 'immediate') {
       const finalized = {
         toolCall,
@@ -480,28 +592,84 @@ async function executeToolCallsParallel(
         isError: preparation.isError,
       } satisfies FinalizedToolCallOutcome;
       await emitToolExecutionEnd(finalized, emit);
-      finalizedCalls.push(finalized);
+      preparedCalls.push({ kind: 'finalized', finalized });
       continue;
     }
+    preparedCalls.push({ kind: 'prepared', preparation });
+  }
 
-    finalizedCalls.push(async () => {
-      const executed = await executePreparedToolCall(preparation, signal, emit);
+  if (preflightSuspension) {
+    await emit({ type: 'tool_execution_suspended', suspension: preflightSuspension });
+    const finalizedCalls = preparedCalls.map((entry) =>
+      entry.kind === 'finalized' ? entry.finalized : skippedToolCall(entry.preparation.toolCall),
+    );
+    const preparedIds = new Set(
+      preparedCalls.map((entry) =>
+        entry.kind === 'finalized' ? entry.finalized.toolCall.id : entry.preparation.toolCall.id,
+      ),
+    );
+    for (const toolCall of toolCalls) {
+      if (toolCall.id === preflightSuspension.toolCallId || preparedIds.has(toolCall.id)) continue;
+      finalizedCalls.push(skippedToolCall(toolCall));
+    }
+    for (const finalized of finalizedCalls) {
+      if (
+        !preparedCalls.some((entry) => entry.kind === 'finalized' && entry.finalized === finalized)
+      ) {
+        await emitToolExecutionEnd(finalized, emit);
+      }
+    }
+    const messages: ToolResultMessage[] = [];
+    for (const finalized of finalizedCalls) {
+      const message = createToolResultMessage(finalized);
+      await emitToolResultMessage(message, emit);
+      messages.push(message);
+    }
+    return {
+      messages,
+      terminate: true,
+      suspendedToolCall: preflightSuspension,
+    };
+  }
+
+  const outcomes = await Promise.all(
+    preparedCalls.map(async (entry) => {
+      if (entry.kind === 'finalized')
+        return { kind: 'finalized' as const, finalized: entry.finalized };
+      const outcome = await executePreparedToolCall(entry.preparation, signal, emit);
+      if (outcome.kind === 'suspended') {
+        return outcome;
+      }
       const finalized = await finalizeExecutedToolCall(
         currentContext,
         assistantMessage,
-        preparation,
-        executed,
+        entry.preparation,
+        outcome,
         config,
         signal,
       );
       await emitToolExecutionEnd(finalized, emit);
-      return finalized;
-    });
-  }
-
-  const orderedFinalizedCalls = await Promise.all(
-    finalizedCalls.map((entry) => (typeof entry === 'function' ? entry() : Promise.resolve(entry))),
+      return { kind: 'finalized' as const, finalized };
+    }),
   );
+  let suspended: SuspendedToolCallOutcome | undefined;
+  const orderedFinalizedCalls: FinalizedToolCallOutcome[] = [];
+  for (const outcome of outcomes) {
+    if (outcome.kind === 'finalized') {
+      orderedFinalizedCalls.push(outcome.finalized);
+      continue;
+    }
+    if (!suspended) {
+      suspended = outcome;
+      await emit({ type: 'tool_execution_suspended', suspension: outcome.suspension });
+      continue;
+    }
+    const original = toolCalls.find((toolCall) => toolCall.id === outcome.suspension.toolCallId);
+    if (!original) continue;
+    const finalized = skippedToolCall(original);
+    await emitToolExecutionEnd(finalized, emit);
+    orderedFinalizedCalls.push(finalized);
+  }
   const messages: ToolResultMessage[] = [];
   for (const finalized of orderedFinalizedCalls) {
     const toolResultMessage = createToolResultMessage(finalized);
@@ -511,7 +679,8 @@ async function executeToolCallsParallel(
 
   return {
     messages,
-    terminate: shouldTerminateToolBatch(orderedFinalizedCalls),
+    terminate: Boolean(suspended) || shouldTerminateToolBatch(orderedFinalizedCalls),
+    ...(suspended ? { suspendedToolCall: suspended.suspension } : {}),
   };
 }
 
@@ -528,7 +697,13 @@ type ImmediateToolCallOutcome = {
   isError: boolean;
 };
 
+type SuspendedToolCallOutcome = {
+  kind: 'suspended';
+  suspension: AgentToolSuspendedCall;
+};
+
 type ExecutedToolCallOutcome = {
+  kind: 'executed';
   result: AgentToolResult<any>;
   isError: boolean;
 };
@@ -539,13 +714,46 @@ type FinalizedToolCallOutcome = {
   isError: boolean;
 };
 
-type FinalizedToolCallEntry = FinalizedToolCallOutcome | (() => Promise<FinalizedToolCallOutcome>);
-
 function shouldTerminateToolBatch(finalizedCalls: FinalizedToolCallOutcome[]): boolean {
   return (
     finalizedCalls.length > 0 &&
     finalizedCalls.every((finalized) => finalized.result.terminate === true)
   );
+}
+
+function skippedToolCall(toolCall: AgentToolCall): FinalizedToolCallOutcome {
+  return {
+    toolCall,
+    result: createErrorToolResult(
+      'Tool execution was skipped because another tool call suspended the turn.',
+    ),
+    isError: true,
+  };
+}
+
+function isToolSuspension(
+  result: AgentToolExecutionResult<any>,
+): result is Extract<AgentToolExecutionResult<any>, { suspended: true }> {
+  return 'suspended' in result && result.suspended === true;
+}
+
+function suspendedToolCall(
+  toolCall: AgentToolCall,
+  args: unknown,
+  suspension: Extract<AgentToolExecutionResult<any>, { suspended: true }>,
+): SuspendedToolCallOutcome {
+  return {
+    kind: 'suspended',
+    suspension: {
+      id: suspension.id,
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      args,
+      reason: suspension.reason,
+      content: suspension.content,
+      details: suspension.details,
+    },
+  };
 }
 
 function prepareToolCallArguments(tool: AgentTool<any>, toolCall: AgentToolCall): AgentToolCall {
@@ -568,7 +776,7 @@ async function prepareToolCall(
   toolCall: AgentToolCall,
   config: AgentLoopConfig,
   signal: AbortSignal | undefined,
-): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
+): Promise<PreparedToolCall | ImmediateToolCallOutcome | SuspendedToolCallOutcome> {
   const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
   if (!tool) {
     return {
@@ -598,6 +806,9 @@ async function prepareToolCall(
           isError: true,
         };
       }
+      if (beforeResult?.suspend) {
+        return suspendedToolCall(toolCall, validatedArgs, beforeResult.suspend);
+      }
     }
     return {
       kind: 'prepared',
@@ -618,7 +829,7 @@ async function executePreparedToolCall(
   prepared: PreparedToolCall,
   signal: AbortSignal | undefined,
   emit: AgentEventSink,
-): Promise<ExecutedToolCallOutcome> {
+): Promise<ExecutedToolCallOutcome | SuspendedToolCallOutcome> {
   const updateEvents: Promise<void>[] = [];
   let updateQueue = Promise.resolve();
 
@@ -646,10 +857,14 @@ async function executePreparedToolCall(
     // A progress-listener failure must not turn an already completed side effect
     // into a failed tool result and invite the model to repeat it.
     await Promise.allSettled(updateEvents);
-    return { result, isError: false };
+    if (isToolSuspension(result)) {
+      return suspendedToolCall(prepared.toolCall, prepared.args, result);
+    }
+    return { kind: 'executed', result, isError: false };
   } catch (error) {
     await Promise.allSettled(updateEvents);
     return {
+      kind: 'executed',
       result:
         error instanceof AgentToolResultError
           ? error.result
