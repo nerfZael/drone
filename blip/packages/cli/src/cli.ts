@@ -14,7 +14,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { ReadStream as TtyReadStream, WriteStream as TtyWriteStream } from 'node:tty';
-import type { BlipRuntimeEvent, BlipToolProvider } from '@blip/core';
+import type { BlipRuntimeEvent, BlipSessionStatus, BlipToolProvider } from '@blip/core';
 import {
   defaultToolProfile,
   compactSession,
@@ -1271,7 +1271,7 @@ async function main(): Promise<void> {
     if (options.jsonl) console.log(JSON.stringify(event));
     else humanRenderer(event);
   };
-  let finishedStatus: 'completed' | 'cancelled' | 'error' | undefined;
+  let finishedStatus: BlipSessionStatus | undefined;
   let finishedError = '';
   const emitAndTrack = (event: BlipRuntimeEvent) => {
     if (event.type === 'session_finished') {
