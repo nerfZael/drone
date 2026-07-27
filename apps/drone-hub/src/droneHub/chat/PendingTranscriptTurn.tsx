@@ -182,7 +182,12 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                   ) : null}
                 </div>
               ) : null}
-              <AgentPlanList plan={item.agentPlan} running showTopDivider={false} />
+              <AgentPlanList
+                plan={item.agentPlan}
+                running
+                showTopDivider={false}
+                className={activity ? 'ml-6' : ''}
+              />
               {cancelError ? (
                 <div className="mt-2 whitespace-pre-wrap text-[var(--text-10)] text-[var(--red)]">
                   {stripAnsi(cancelError)}

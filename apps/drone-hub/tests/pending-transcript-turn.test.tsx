@@ -39,6 +39,7 @@ describe('external pending transcript turn', () => {
     expect(html).not.toContain('h-1.5 w-1.5 animate-pulse');
     expect(html).toContain('Read repository instructions');
     expect(html).toContain('Plan');
+    expect(html).not.toContain('ml-6');
     expect(html).not.toContain('>Pending<');
     expect(html).not.toContain('Waiting…');
     expect(html.match(/1m ago/g)).toHaveLength(1);
@@ -68,6 +69,11 @@ describe('external pending transcript turn', () => {
     const html = renderToStaticMarkup(
       <PendingTranscriptTurn
         item={pendingPrompt({
+          agentPlan: {
+            source: 'opencode',
+            updatedAt: new Date().toISOString(),
+            items: [{ id: 'step-1', text: 'Inspect activity output', status: 'in_progress' }],
+          },
           activity: {
             version: 1,
             source: 'opencode',
@@ -98,10 +104,16 @@ describe('external pending transcript turn', () => {
     expect(html).toContain('data-agent-run-activity="opencode"');
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('border-l border-[var(--border-subtle)] px-3');
+    expect(html).toContain('dh-agent-activity-scrollbar');
+    expect(html).toContain('max-h-72');
+    expect(html).toContain('overflow-y-auto');
+    expect(html).toContain('overscroll-contain');
     expect(html).toContain('opacity-[0.82]');
     expect(html).toContain('hover:opacity-100');
     expect(html).toContain('Checking the current state.');
     expect(html).toContain('data-tool-status="pending"');
+    expect(html).toContain('Inspect activity output');
+    expect(html).toContain('ml-6');
     expect(html.match(/Working for/g)).toHaveLength(1);
   });
 

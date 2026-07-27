@@ -100,7 +100,21 @@ describe('desktop sidebar drone presentation', () => {
     );
 
     expect(html).toContain('M4 2.5v7M8 2.5v7');
+    expect(html).toContain('text-[var(--yellow)]');
     expect(html).not.toContain('animate-[spin_1.6s_linear_infinite]');
+  });
+
+  test('uses a dedicated saturated red warning triangle for blocked drones', () => {
+    const html = renderToStaticMarkup(
+      createElement(SidebarItemStateIndicator, { state: 'blocked' }),
+    );
+
+    expect(html).toContain('text-[var(--sidebar-blocked-indicator)]');
+    expect(html).toContain('M6 1.25 11 10.25H1L6 1.25Z');
+    expect(html).toContain('M6 4.15v2.75');
+    expect(html).toContain('cx="6" cy="8.5"');
+    expect(html).not.toContain('rounded-full');
+    expect(html).not.toContain('bg-[var(--green)]');
   });
 
   test('leaves ready drones visually quiet while preserving unread emphasis', () => {
@@ -123,6 +137,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(anchoredReadyHtml).not.toContain('bg-[var(--muted)]');
     expect(unreadHtml).toContain('rounded-full');
     expect(unreadHtml).toContain('bg-[var(--green)]');
+    expect(unreadHtml).toContain('shadow-[0_0_5px_var(--green-border)]');
   });
 
   test('keeps starting in the working color and motion language', () => {

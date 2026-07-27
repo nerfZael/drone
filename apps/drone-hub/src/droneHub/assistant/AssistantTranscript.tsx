@@ -1213,7 +1213,7 @@ export function ToolRunActivity({
         }
       />
       {expanded ? (
-        <div className="mt-1 space-y-1">
+        <div className="dh-agent-activity-scrollbar mt-1 max-h-72 space-y-1 overflow-y-auto overscroll-contain">
           {groupedItems.map((item) =>
             item.type === 'toolGroup' ? (
               <RepeatedToolActivityRow

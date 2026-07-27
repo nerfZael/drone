@@ -158,10 +158,10 @@ export function SidebarItemStateIndicator({
   const approvalRequired = state === 'approval';
   const indicatorToneClass =
     unread && state === 'idle'
-      ? 'bg-[var(--green)]'
+      ? 'bg-[var(--green)] shadow-[0_0_5px_var(--green-border)]'
       : state === 'waiting'
         ? 'bg-[var(--info)]'
-        : state === 'blocked' || state === 'offline'
+        : state === 'offline'
           ? 'bg-[var(--red)]'
           : 'bg-[var(--muted)]';
   return (
@@ -177,6 +177,8 @@ export function SidebarItemStateIndicator({
         <SidebarWorkingStatusIndicator />
       ) : approvalRequired ? (
         <SidebarApprovalStatusIndicator />
+      ) : state === 'blocked' ? (
+        <SidebarBlockedStatusIndicator />
       ) : (
         <span className={`h-1.5 w-1.5 rounded-full ${indicatorToneClass}`} />
       )}
@@ -213,6 +215,25 @@ export function SidebarApprovalStatusIndicator() {
       aria-hidden="true"
     >
       <path d="M4 2.5v7M8 2.5v7" />
+    </svg>
+  );
+}
+
+export function SidebarBlockedStatusIndicator() {
+  return (
+    <svg
+      className="block h-3 w-3 text-[var(--sidebar-blocked-indicator)]"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 1.25 11 10.25H1L6 1.25Z" />
+      <path d="M6 4.15v2.75" />
+      <circle cx="6" cy="8.5" r=".55" fill="currentColor" stroke="none" />
     </svg>
   );
 }

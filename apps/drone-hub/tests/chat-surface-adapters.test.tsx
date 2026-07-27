@@ -961,7 +961,10 @@ describe('agent chat surface adapters', () => {
     expect(html.match(/data-tool-status="pending"/g)).toHaveLength(5);
     expect(html.match(/animate-spin/g)).toHaveLength(5);
     expect(html).not.toContain('data-tool-status="ok"');
-    expect(html).not.toContain('overflow-y-auto');
+    expect(html).toContain('dh-agent-activity-scrollbar');
+    expect(html).toContain('max-h-72');
+    expect(html).toContain('overflow-y-auto');
+    expect(html).toContain('overscroll-contain');
     expect(html).not.toContain('uppercase');
     expect(html).not.toContain('bg-[var(--surface-soft)]');
     expect(html).not.toContain('rounded border');

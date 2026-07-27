@@ -3,6 +3,7 @@ export { StatusBadge } from './StatusBadge';
 export {
   DroneCard,
   SidebarApprovalStatusIndicator,
+  SidebarBlockedStatusIndicator,
   SidebarItemStateIndicator,
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,

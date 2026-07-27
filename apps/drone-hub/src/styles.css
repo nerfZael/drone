@@ -62,6 +62,7 @@
   --sidebar-row-selected-edge: rgba(177, 156, 255, .82);
   --sidebar-row-radius: var(--radius-medium);
   --sidebar-meta-fg: var(--muted-dim);
+  --sidebar-blocked-indicator: #ff5964;
   --sidebar-drone-compact-size: var(--text-10-5);
   --sidebar-drone-size: var(--text-11-5);
   --sidebar-drone-comfortable-size: var(--text-12);
@@ -265,6 +266,7 @@
   --sidebar-row-selected-edge: rgba(203, 166, 247, .78);
   --sidebar-row-radius: .25rem;
   --sidebar-meta-fg: #7f849c;
+  --sidebar-blocked-indicator: #ff596b;
   --sidebar-drone-compact-size: .75rem;
   --sidebar-drone-size: .75rem;
   --sidebar-drone-comfortable-size: .75rem;
@@ -682,15 +684,19 @@ code, pre {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted-dim); }
 
-.dh-changed-files-scrollbar::-webkit-scrollbar { width: 2px; }
-.dh-changed-files-scrollbar::-webkit-scrollbar-button {
+.dh-changed-files-scrollbar::-webkit-scrollbar,
+.dh-agent-activity-scrollbar::-webkit-scrollbar { width: 2px; }
+.dh-changed-files-scrollbar::-webkit-scrollbar-button,
+.dh-agent-activity-scrollbar::-webkit-scrollbar-button {
   -webkit-appearance: none;
   display: none;
   width: 0;
   height: 0;
 }
-.dh-changed-files-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.dh-changed-files-scrollbar::-webkit-scrollbar-thumb {
+.dh-changed-files-scrollbar::-webkit-scrollbar-track,
+.dh-agent-activity-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.dh-changed-files-scrollbar::-webkit-scrollbar-thumb,
+.dh-agent-activity-scrollbar::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 999px;
 }
@@ -718,7 +724,8 @@ code, pre {
 .dh-sidebar-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--border); }
 
 @supports (-moz-appearance: none) {
-  .dh-changed-files-scrollbar {
+  .dh-changed-files-scrollbar,
+  .dh-agent-activity-scrollbar {
     scrollbar-color: var(--border) transparent;
     scrollbar-width: thin;
   }
