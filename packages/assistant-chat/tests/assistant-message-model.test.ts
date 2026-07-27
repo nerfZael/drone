@@ -172,4 +172,55 @@ describe('assistant message model', () => {
       fileChanges: { counts: { changed: 1, additions: 2, deletions: 0 } },
     });
   });
+
+  test('renders a persisted compaction as a dedicated transcript item', () => {
+    const items = renderItemsFromMessages([
+      { role: 'user', content: 'Continue the work' },
+      {
+        id: 'compact-1',
+        role: 'compaction',
+        content: '',
+        timestamp: '2026-07-27T10:00:00.000Z',
+        details: {
+          summaryId: 'compact-1',
+          trigger: 'auto',
+          tokensBefore: 90_000,
+          tokensAfter: 24_000,
+          fallbackUsed: true,
+          fallbackReason: 'Provider summary timed out',
+        },
+      },
+      { role: 'assistant', content: 'Done.' },
+    ]);
+
+    expect(items.map((item) => item.type)).toEqual(['message', 'compaction', 'message']);
+    expect(items[1]).toMatchObject({
+      type: 'compaction',
+      key: 'compaction:compact-1',
+      details: {
+        trigger: 'auto',
+        tokensBefore: 90_000,
+        tokensAfter: 24_000,
+        fallbackUsed: true,
+      },
+      timestamp: '2026-07-27T10:00:00.000Z',
+    });
+  });
+
+  test('rejects malformed compaction metadata instead of coercing it', () => {
+    const items = renderItemsFromMessages([
+      {
+        role: 'compaction',
+        content: '',
+        details: {
+          summaryId: 'compact-1',
+          trigger: 'sometimes',
+          tokensBefore: '90000',
+          tokensAfter: 24_000,
+        },
+      },
+    ]);
+
+    expect(items).toEqual([]);
+  });
 });

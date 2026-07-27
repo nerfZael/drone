@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { mergeWorkspaceTransferProgress } from '@drone/assistant-chat';
 import type {
+  BlipContextUsage,
   BlipHistoryEntry,
   BlipHistoryMessage,
   BlipHistoryPage,
@@ -42,6 +43,16 @@ function mergeEntries(
   return [...bySequence.values()].sort((a, b) => a.sequence - b.sequence);
 }
 
+function messageFromHistoryEntry(
+  entry: BlipHistoryEntry,
+): BlipHistoryMessage & { id: string; createdAt: string } {
+  return {
+    ...entry.message,
+    id: entry.id,
+    createdAt: entry.timestamp,
+  };
+}
+
 type BlipThreadSessionOptions = {
   threadId: string;
   enabled: boolean;
@@ -63,9 +74,13 @@ export function useBlipThreadSession({
   const [olderLoading, setOlderLoading] = React.useState(false);
   const [runtimeThreadId, setRuntimeThreadId] = React.useState('');
   const [running, setRunning] = React.useState(false);
+  const [compactionInProgress, setCompactionInProgress] = React.useState(false);
   const [toolProgress, setToolProgress] = React.useState<Record<string, BlipHistoryMessage>>({});
   const [runError, setRunError] = React.useState<string | null>(null);
   const [historyError, setHistoryError] = React.useState<string | null>(null);
+  const [contextUsage, setContextUsage] = React.useState<BlipContextUsage | null>(
+    initialHistory?.contextUsage ?? null,
+  );
   const threadIdRef = React.useRef(threadId);
   const runEpochRef = React.useRef(0);
   const seenEventKeysRef = React.useRef<string[]>([]);
@@ -76,7 +91,7 @@ export function useBlipThreadSession({
   const bootstrapHistory = initialHistory?.threadId === threadId ? initialHistory : null;
 
   const refreshHistory = React.useCallback(
-    async (options?: { quiet?: boolean }) => {
+    async (options?: { quiet?: boolean; preserveContextUsage?: boolean }) => {
       if (!enabled || !threadId) return;
       const requestId = ++latestHistoryRequestRef.current;
       if (!options?.quiet) setHistoryLoading(true);
@@ -84,6 +99,7 @@ export function useBlipThreadSession({
         const page = await requestHistory(threadId, { limit: ASSISTANT_HISTORY_PAGE_SIZE });
         if (threadIdRef.current !== threadId) return;
         setEntries((current) => mergeEntries(current, page.entries));
+        if (!options?.preserveContextUsage) setContextUsage(page.contextUsage ?? null);
         setEntriesThreadId(threadId);
         const persistedToolCalls = new Set(
           page.entries.flatMap((entry) => {
@@ -126,8 +142,10 @@ export function useBlipThreadSession({
     setHasOlder(bootstrapHistory?.page.hasOlder ?? false);
     setHistoryLoading(false);
     setOlderLoading(false);
+    setContextUsage(bootstrapHistory?.contextUsage ?? null);
     setRuntimeThreadId(threadId);
     setRunning(false);
+    setCompactionInProgress(false);
     setToolProgress({});
     setRunError(null);
     setHistoryError(null);
@@ -173,6 +191,7 @@ export function useBlipThreadSession({
       if (event.type === 'session_started' || event.type === 'turn_started') {
         runEpochRef.current += 1;
         setRunning(true);
+        setCompactionInProgress(false);
         setRunError(null);
         void refreshHistory({ quiet: true });
         return;
@@ -183,11 +202,36 @@ export function useBlipThreadSession({
         return;
       }
       if (event.type === 'session_error') {
+        setCompactionInProgress(false);
         setRunError(event.error);
+        return;
+      }
+      if (event.type === 'compaction_started') {
+        setCompactionInProgress(true);
+        return;
+      }
+      if (event.type === 'compaction_skipped') {
+        setCompactionInProgress(false);
         return;
       }
       if (event.type === 'transcript_changed') {
         void refreshHistory({ quiet: true });
+        return;
+      }
+      if (event.type === 'compaction_completed') {
+        setCompactionInProgress(false);
+        setContextUsage((current) =>
+          current
+            ? {
+                ...current,
+                tokens: event.tokensAfter,
+                percent: (event.tokensAfter / current.contextWindow) * 100,
+                confidence: 'heuristic',
+                breakdown: undefined,
+              }
+            : current,
+        );
+        void refreshHistory({ quiet: true, preserveContextUsage: true });
         return;
       }
       if (
@@ -219,6 +263,8 @@ export function useBlipThreadSession({
         return;
       }
       if (event.type === 'session_finished') {
+        setCompactionInProgress(false);
+        if (event.contextUsage) setContextUsage(event.contextUsage);
         const finishedRunEpoch = runEpochRef.current;
         if (event.status === 'error') setRunError(event.error ?? 'Assistant failed.');
         // The final message is persisted before this event, but the UI history request is async.
@@ -248,6 +294,7 @@ export function useBlipThreadSession({
         if (nextRunning) runEpochRef.current += 1;
         setRuntimeThreadId(threadId);
         setRunning(nextRunning);
+        setCompactionInProgress(false);
         void refreshHistory({ quiet: true });
         return;
       }
@@ -296,16 +343,20 @@ export function useBlipThreadSession({
   );
   const messages = React.useMemo(
     () => [
-      ...visibleEntries.map((entry) => entry.message),
+      ...visibleEntries.map(messageFromHistoryEntry),
       ...(runtimeThreadId === threadId ? Object.values(toolProgress) : []),
     ],
     [runtimeThreadId, threadId, toolProgress, visibleEntries],
   );
   const historyReady =
     !enabled || !threadId || entriesThreadId === threadId || Boolean(bootstrapHistory);
+  const activeContextUsage =
+    entriesThreadId === threadId ? contextUsage : (bootstrapHistory?.contextUsage ?? null);
 
   return {
     messages,
+    contextUsage: activeContextUsage,
+    compactionInProgress: runtimeThreadId === threadId && compactionInProgress,
     running: runtimeThreadId === threadId && running,
     runError: runtimeThreadId === threadId ? runError : null,
     historyError: entriesThreadId === threadId ? historyError : null,

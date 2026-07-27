@@ -102,6 +102,101 @@ describe('Blip assistant host', () => {
     });
   });
 
+  test('projects durable compactions and latest context usage into thread history', async () => {
+    await withTempDroneDataDir('blip-assistant-context-history-', async () => {
+      const repository = new HubSessionRepository();
+      const session = await repository.create({
+        provider: 'faux',
+        model: 'faux-1',
+        permissionMode: 'workspace-write',
+        toolProfile: 'local-trusted-write',
+      });
+      await repository.bindThread('thread-context', session.id);
+      await repository.appendMessage(session, {
+        role: 'user',
+        content: 'Continue',
+        timestamp: Date.now(),
+      });
+      await repository.appendEntry(session, {
+        type: 'compaction',
+        id: 'compact-1',
+        createdAt: '2026-07-27T10:00:00.000Z',
+        trigger: 'auto',
+        tokensBefore: 90_000,
+        tokensAfterEstimate: 24_000,
+        fallbackUsed: true,
+        fallbackReason: 'Provider summary timed out',
+        summary: 'Earlier work was summarized.',
+        details: { readFiles: [], modifiedFiles: [] },
+      });
+      await repository.appendRuntimeEvent(session, {
+        version: 1,
+        eventId: 'finished-1',
+        sessionId: session.id,
+        timestamp: '2026-07-27T10:00:01.000Z',
+        type: 'session_finished',
+        status: 'completed',
+        changedFiles: [],
+        durationMs: 100,
+        contextUsage: {
+          tokens: 24_000,
+          contextWindow: 128_000,
+          // History derives this value from the durable token counts instead of trusting stale data.
+          percent: 99,
+          confidence: 'heuristic',
+          breakdown: {
+            systemPrompt: 1_000,
+            messages: 20_000,
+            toolDefinitions: 2_000,
+            images: 0,
+            providerOverhead: 1_000,
+          },
+        },
+      });
+
+      const page = await repository.readThreadHistoryPage('thread-context');
+      expect(page.entries.map((entry) => entry.message.role)).toEqual(['user', 'compaction']);
+      expect(page.entries[1]).toMatchObject({
+        id: 'compact-1',
+        message: {
+          role: 'compaction',
+          details: {
+            summaryId: 'compact-1',
+            trigger: 'auto',
+            tokensBefore: 90_000,
+            tokensAfter: 24_000,
+            fallbackUsed: true,
+          },
+        },
+      });
+      expect(page.contextUsage).toMatchObject({
+        tokens: 24_000,
+        contextWindow: 128_000,
+        percent: 18.75,
+        confidence: 'heuristic',
+      });
+
+      await repository.appendEntry(session, {
+        type: 'compaction',
+        id: 'compact-2',
+        createdAt: '2026-07-27T10:00:02.000Z',
+        trigger: 'manual',
+        tokensBefore: 72_000,
+        tokensAfterEstimate: 12_000,
+        summary: 'The interrupted run was summarized.',
+        details: { readFiles: [], modifiedFiles: [] },
+      });
+      const recoveredPage = await repository.readThreadHistoryPage('thread-context');
+      expect(recoveredPage.contextUsage).toMatchObject({
+        tokens: 12_000,
+        contextWindow: 128_000,
+        percent: 9.375,
+        confidence: 'heuristic',
+      });
+      repository.close();
+    });
+  });
+
   test('restores a durable approval from SQLite and resolves it after host restart', async () => {
     await withTempDroneDataDir('blip-assistant-durable-approval-', async () => {
       const faux = registerFauxProvider({

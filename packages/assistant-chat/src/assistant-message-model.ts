@@ -1,5 +1,5 @@
 import type { AssistantMessage } from './assistant-message-types';
-import type { AgentRunFileChanges } from '@blip/protocol';
+import type { AgentRunFileChanges, BlipCompactionHistoryDetails } from '@blip/protocol';
 import { isAgentRunFileChanges } from './agent-run-file-changes';
 
 export type AssistantToolCall = { id: string; name: string; args: any };
@@ -19,7 +19,42 @@ export type AssistantRenderItem =
     }
   | AssistantToolRenderItem
   | { type: 'toolGroup'; key: string; items: AssistantToolRenderItem[] }
+  | {
+      type: 'compaction';
+      key: string;
+      details: BlipCompactionHistoryDetails;
+      timestamp?: string | number;
+    }
   | { type: 'runSummary'; key: string; fileChanges: AgentRunFileChanges };
+
+function readCompactionDetails(value: unknown): BlipCompactionHistoryDetails | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const summaryId = String(raw.summaryId ?? '').trim();
+  const tokensBefore = raw.tokensBefore;
+  const tokensAfter = raw.tokensAfter == null ? null : raw.tokensAfter;
+  if (
+    !summaryId ||
+    (raw.trigger !== 'manual' && raw.trigger !== 'auto') ||
+    typeof tokensBefore !== 'number' ||
+    !Number.isFinite(tokensBefore) ||
+    tokensBefore < 0 ||
+    (tokensAfter !== null &&
+      (typeof tokensAfter !== 'number' || !Number.isFinite(tokensAfter) || tokensAfter < 0))
+  ) {
+    return null;
+  }
+  return {
+    summaryId,
+    trigger: raw.trigger,
+    tokensBefore,
+    tokensAfter,
+    ...(raw.fallbackUsed === true ? { fallbackUsed: true } : {}),
+    ...(typeof raw.fallbackReason === 'string' && raw.fallbackReason.trim()
+      ? { fallbackReason: raw.fallbackReason.trim() }
+      : {}),
+  };
+}
 
 export function messageText(message: AssistantMessage): string {
   const content = message.content;
@@ -214,6 +249,18 @@ export function renderItemsFromMessages(messages: AssistantMessage[]): Assistant
   const items: AssistantRenderItem[] = [];
   for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index];
+    if (message.role === 'compaction') {
+      const details = readCompactionDetails(message.details);
+      if (details) {
+        items.push({
+          type: 'compaction',
+          key: `compaction:${message.id ?? details.summaryId}`,
+          details,
+          timestamp: message.timestamp ?? message.createdAt,
+        });
+      }
+      continue;
+    }
     if (message.role === 'runSummary') {
       const fileChanges = (message.details as any)?.fileChanges as AgentRunFileChanges | undefined;
       if (isAgentRunFileChanges(fileChanges)) {

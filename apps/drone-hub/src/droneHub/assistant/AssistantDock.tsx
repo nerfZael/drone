@@ -43,6 +43,11 @@ import { latestActivityHasVisibleAssistantText } from './assistant-streaming-sta
 import { AssistantThreadFilesView, selectDefaultArtifactPath } from './AssistantThreadFilesView';
 import { AssistantWorkspaceAccessView } from './AssistantWorkspaceAccessView';
 import {
+  AssistantCompactionRow,
+  AssistantCompactionWorkingRow,
+  AssistantContextUsageIndicator,
+} from './AssistantContextStatus';
+import {
   AssistantSystemPromptModal,
   AssistantToolsPanel,
   AssistantWorkspacesPanel,
@@ -421,10 +426,12 @@ export function AssistantDock({
       error,
       blipSession.runError,
       blipSession.historyError,
+      blipSession.compactionInProgress,
     ],
     [
       activeThread?.queuedPrompts,
       blipSession.historyError,
+      blipSession.compactionInProgress,
       blipSession.messages,
       blipSession.runError,
       error,
@@ -1567,6 +1574,15 @@ export function AssistantDock({
 
   for (let itemIndex = 0; itemIndex < visibleItems.length; itemIndex += 1) {
     const item = visibleItems[itemIndex]!;
+    if (item.type === 'compaction') {
+      nativeTranscriptItems.push({
+        key: item.key,
+        kind: 'status',
+        latestActivityEligible: false,
+        content: <AssistantCompactionRow details={item.details} timestamp={item.timestamp} />,
+      });
+      continue;
+    }
     if (item.type === 'runSummary') {
       nativeTranscriptItems.push({
         key: item.key,
@@ -1639,7 +1655,7 @@ export function AssistantDock({
     const runStartIndex = itemIndex;
     while (itemIndex < visibleItems.length) {
       const runItem = visibleItems[itemIndex]!;
-      if (runItem.type === 'message' || runItem.type === 'runSummary') break;
+      if (runItem.type === 'message' || runItem.type === 'runSummary' || runItem.type === 'compaction') break;
       if (runItem.type === 'tool') runItems.push(runItem);
       else runItems.push(...runItem.items);
       itemIndex += 1;
@@ -1716,7 +1732,13 @@ export function AssistantDock({
       ),
     });
   }
-  if (showWorking) {
+  if (blipSession.compactionInProgress) {
+    nativeTranscriptItems.push({
+      key: 'native-compaction-working',
+      kind: 'status',
+      content: <AssistantCompactionWorkingRow />,
+    });
+  } else if (showWorking) {
     nativeTranscriptItems.push({
       key: 'native-working',
       kind: 'status',
@@ -1943,6 +1965,11 @@ export function AssistantDock({
               disabled={!activeThread}
               composerContext={nativeComposerContext}
               composerControls={nativeComposerControls}
+              composerStatus={
+                blipSession.contextUsage ? (
+                  <AssistantContextUsageIndicator usage={blipSession.contextUsage} />
+                ) : undefined
+              }
               onStop={() => stop()}
               stopping={assistantStopBusy}
               onSend={async (payload, context) =>
