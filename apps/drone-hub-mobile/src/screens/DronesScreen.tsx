@@ -1617,6 +1617,12 @@ export function DronesScreen({
     nativeTranscriptLoaded: nativeMessages !== null,
     serverChatBusy: Boolean(selected?.busyChats.some((chat) => chat === chatName)),
   });
+  const awaitingApproval =
+    pendingApprovals.length > 0 || nativeThread?.status === 'waiting_for_approval';
+  const approvalStartedAt = pendingApprovals
+    .map((approval) => Date.parse(String(approval.createdAt ?? '')))
+    .filter((timestamp) => Number.isFinite(timestamp))
+    .sort((left, right) => left - right)[0];
   const activeTarget = mesh.devices.find((target) => target.id === targetId);
   const dronesLoading =
     targetReachable && targetSupportsDrones && (!dronesLoaded || busy === 'drones');
@@ -2196,6 +2202,8 @@ export function DronesScreen({
                         messages={transcriptMessages}
                         loading={chatLoading}
                         running={running}
+                        awaitingApproval={awaitingApproval}
+                        approvalStartedAt={approvalStartedAt}
                         emptyTitle="This drone chat is ready."
                         emptyBody="Send a prompt to start the conversation."
                         assistantLabel="Agent"

@@ -91,4 +91,41 @@ describe('desktop remote Drone Hub model', () => {
       { id: 'assistant-1', role: 'assistant', content: 'Working' },
     ]);
   });
+
+  test('keeps durable compaction markers in remote native history', () => {
+    expect(
+      normalizeRemoteChatMessages({
+        historyKind: 'messages',
+        history: {
+          entries: [
+            {
+              id: 'compact-1',
+              timestamp: '2026-07-27T10:00:00.000Z',
+              message: {
+                role: 'compaction',
+                content: '',
+                details: {
+                  summaryId: 'compact-1',
+                  trigger: 'auto',
+                  tokensBefore: 90_000,
+                  tokensAfter: 24_000,
+                },
+              },
+            },
+          ],
+        },
+      }),
+    ).toMatchObject([
+      {
+        id: 'compact-1',
+        role: 'compaction',
+        createdAt: '2026-07-27T10:00:00.000Z',
+        details: {
+          summaryId: 'compact-1',
+          tokensBefore: 90_000,
+          tokensAfter: 24_000,
+        },
+      },
+    ]);
+  });
 });

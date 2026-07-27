@@ -58,6 +58,7 @@ export const colors = {
   accentWash: 'rgba(203, 166, 247, 0.06)',
   sidebarSelectionWash: 'rgba(203, 166, 247, 0.075)',
   sidebarSelectionEdge: 'rgba(203, 166, 247, 0.78)',
+  sidebarBlockedIndicator: '#ff596b',
   selectionWash: 'rgba(147, 153, 178, 0.24)',
   textSelection: 'rgba(147, 153, 178, 0.25)',
   userBubble: catppuccin.surface1,

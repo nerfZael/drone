@@ -99,6 +99,7 @@ function metadataFromMessage(message: AssistantMessage): MobileTranscriptRunMeta
 function itemTimestamp(item: AssistantRenderItem): string | number | undefined {
   if (item.type === 'message') return item.message.createdAt ?? item.message.timestamp;
   if (item.type === 'runSummary') return item.fileChanges.capturedAt;
+  if (item.type === 'compaction') return item.timestamp;
   if (item.type === 'tool') {
     return item.result?.createdAt ?? item.result?.timestamp;
   }
@@ -222,9 +223,7 @@ export function workingDurationLabel(durationMs: number): string {
   return `${seconds}s`;
 }
 
-export function mobileRunIsThinking(
-  run: Pick<MobileTranscriptRun, 'active' | 'items'>,
-): boolean {
+export function mobileRunIsThinking(run: Pick<MobileTranscriptRun, 'active' | 'items'>): boolean {
   if (!run.active) return false;
   const lastItem = [...run.items].reverse().find((item) => item.type !== 'runSummary');
   if (!lastItem) return false;
@@ -243,9 +242,7 @@ export function mobileRunIsThinking(
   return tools.length > 0 && tools.every(toolActivityIsSettled);
 }
 
-export function partitionMobileRunItems(
-  run: Pick<MobileTranscriptRun, 'active' | 'items'>,
-): {
+export function partitionMobileRunItems(run: Pick<MobileTranscriptRun, 'active' | 'items'>): {
   activityItems: AssistantRenderItem[];
   trailingItems: AssistantRenderItem[];
 } {
@@ -267,10 +264,12 @@ export function partitionMobileRunItems(
   }
   return {
     activityItems: run.items.filter(
-      (item, index) => index !== finalResponseIndex && item.type !== 'runSummary',
+      (item, index) =>
+        index !== finalResponseIndex && item.type !== 'runSummary' && item.type !== 'compaction',
     ),
     trailingItems: run.items.filter(
-      (item, index) => index === finalResponseIndex || item.type === 'runSummary',
+      (item, index) =>
+        index === finalResponseIndex || item.type === 'runSummary' || item.type === 'compaction',
     ),
   };
 }

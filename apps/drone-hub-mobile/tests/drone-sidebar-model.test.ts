@@ -507,9 +507,11 @@ describe('mobile drone sidebar model', () => {
       },
     ]);
 
-    expect(messages.some(
-      (message) => message.content === 'Earlier or oversized activity details were trimmed.',
-    )).toBe(true);
+    expect(
+      messages.some(
+        (message) => message.content === 'Earlier or oversized activity details were trimmed.',
+      ),
+    ).toBe(true);
   });
 
   test('ignores stale error text on successful activity-backed turns', () => {
@@ -545,31 +547,34 @@ describe('mobile drone sidebar model', () => {
       counts: { changed: 1, additions: 2, deletions: 0 },
       workspaces: [],
     };
-    const messages = mobileDroneTurnsToAssistantMessages([], [
-      {
-        id: 'pending-activity',
-        at: '2026-07-24T00:00:00.000Z',
-        prompt: 'Implement it',
-        state: 'sent',
-        agentPlan: {
-          source: 'codex',
-          items: [{ text: 'Implement', status: 'in_progress' }],
+    const messages = mobileDroneTurnsToAssistantMessages(
+      [],
+      [
+        {
+          id: 'pending-activity',
+          at: '2026-07-24T00:00:00.000Z',
+          prompt: 'Implement it',
+          state: 'sent',
+          agentPlan: {
+            source: 'codex',
+            items: [{ text: 'Implement', status: 'in_progress' }],
+          },
+          fileChanges,
+          activityMeshTruncated: true,
+          activity: {
+            version: 1,
+            source: 'codex',
+            updatedAt: '2026-07-24T00:00:01.000Z',
+            messages: [
+              {
+                role: 'assistant',
+                content: [{ type: 'thinking', thinking: 'Working through it.' }],
+              },
+            ],
+          },
         },
-        fileChanges,
-        activityMeshTruncated: true,
-        activity: {
-          version: 1,
-          source: 'codex',
-          updatedAt: '2026-07-24T00:00:01.000Z',
-          messages: [
-            {
-              role: 'assistant',
-              content: [{ type: 'thinking', thinking: 'Working through it.' }],
-            },
-          ],
-        },
-      },
-    ]);
+      ],
+    );
 
     expect(messages[0]).toMatchObject({
       id: 'pending-activity:user',
@@ -589,6 +594,81 @@ describe('mobile drone sidebar model', () => {
       details: { fileChanges: { counts: { changed: 1 } } },
     });
     expect(messages.some((message) => message.meshTruncated === true)).toBe(false);
+  });
+
+  test('preserves failed pending activity, settles its tools, and appends the failure', () => {
+    const messages = mobileDroneTurnsToAssistantMessages(
+      [],
+      [
+        {
+          id: 'failed-activity',
+          at: '2026-07-24T00:00:00.000Z',
+          updatedAt: '2026-07-24T00:00:02.000Z',
+          prompt: 'Implement it',
+          state: 'failed',
+          error: 'Agent crashed',
+          activity: {
+            version: 1,
+            source: 'codex',
+            updatedAt: '2026-07-24T00:00:01.000Z',
+            messages: [
+              {
+                role: 'assistant',
+                content: [{ type: 'toolCall', id: 'tool-1', name: 'exec', arguments: {} }],
+              },
+            ],
+          },
+        },
+      ],
+    );
+
+    expect(messages[0]).toMatchObject({
+      id: 'failed-activity:user',
+      role: 'user',
+      details: {
+        mobileRun: {
+          startedAt: '2026-07-24T00:00:00.000Z',
+          completedAt: '2026-07-24T00:00:02.000Z',
+        },
+      },
+    });
+    expect(messages.some((message) => message.role === 'toolResult')).toBe(true);
+    expect(messages.at(-1)).toMatchObject({
+      id: 'failed-activity:assistant',
+      role: 'assistant',
+      isError: true,
+      errorMessage: 'Agent crashed',
+    });
+  });
+
+  test('preserves stopped pending activity without turning the stop into an error message', () => {
+    const messages = mobileDroneTurnsToAssistantMessages(
+      [],
+      [
+        {
+          id: 'stopped-activity',
+          at: '2026-07-24T00:00:00.000Z',
+          updatedAt: '2026-07-24T00:00:02.000Z',
+          prompt: 'Implement it',
+          state: 'failed',
+          error: 'Stopped by user.',
+          activity: {
+            version: 1,
+            source: 'codex',
+            updatedAt: '2026-07-24T00:00:01.000Z',
+            messages: [
+              {
+                role: 'assistant',
+                content: [{ type: 'thinking', thinking: 'Working through it.' }],
+              },
+            ],
+          },
+        },
+      ],
+    );
+
+    expect(messages.map((message) => message.role)).toEqual(['user', 'assistant']);
+    expect(messages.some((message) => message.isError)).toBe(false);
   });
 
   test('normalizes DroneHub transcript metadata for the native chat presentation', () => {

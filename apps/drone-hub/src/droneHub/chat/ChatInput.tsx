@@ -68,6 +68,7 @@ export type ChatInputProps = {
   attachmentMode?: 'images' | 'files';
   composerContext?: ChatComposerContextConfig;
   composerControls?: ChatComposerControlsConfig;
+  composerStatus?: React.ReactNode;
   composerFooter?: React.ReactNode;
   alwaysExpanded?: boolean;
   allowSendWhileWaiting?: boolean;
@@ -94,6 +95,7 @@ export function ChatInput({
   attachmentMode = 'images',
   composerContext,
   composerControls,
+  composerStatus,
   composerFooter,
   alwaysExpanded = false,
   allowSendWhileWaiting = false,
@@ -829,6 +831,14 @@ export function ChatInput({
             />
             {!composerExpanded ? (
               <>
+                {!voiceRecordingActive && composerStatus ? (
+                  <div
+                    data-chat-composer-collapsed-action="true"
+                    onMouseDown={(event) => event.preventDefault()}
+                  >
+                    {composerStatus}
+                  </div>
+                ) : null}
                 <button
                   type="button"
                   data-chat-composer-collapsed-action="true"
@@ -922,6 +932,8 @@ export function ChatInput({
               ) : null}
 
               <div className="min-w-2 flex-1" />
+
+              {!voiceRecordingActive ? composerStatus : null}
 
               {!voiceRecordingActive ? <ChatComposerControls config={composerControls} /> : null}
 

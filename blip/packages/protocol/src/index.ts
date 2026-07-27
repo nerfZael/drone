@@ -221,6 +221,15 @@ export type BlipHistoryMessage = {
   errorMessage?: string;
 };
 
+export type BlipCompactionHistoryDetails = {
+  summaryId: string;
+  trigger: "manual" | "auto";
+  tokensBefore: number;
+  tokensAfter: number | null;
+  fallbackUsed?: boolean;
+  fallbackReason?: string;
+};
+
 export type BlipHistoryEntry = {
   sequence: number;
   id: string;
@@ -233,6 +242,7 @@ export type BlipHistoryPage = {
   threadId: string;
   sessionId: string | null;
   entries: BlipHistoryEntry[];
+  contextUsage?: BlipContextUsage;
   page: {
     limit: number;
     beforeCursor: number | null;

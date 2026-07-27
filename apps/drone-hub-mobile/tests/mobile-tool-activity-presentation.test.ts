@@ -5,6 +5,10 @@ const transcriptSource = readFileSync(
   new URL('../src/local-assistant/LocalAssistantTranscript.tsx', import.meta.url),
   'utf8',
 );
+const dronesScreenSource = readFileSync(
+  new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+  'utf8',
+);
 
 describe('mobile tool activity presentation', () => {
   test('uses compact readable activity rows with native disclosure and status affordances', () => {
@@ -13,10 +17,34 @@ describe('mobile tool activity presentation', () => {
     expect(transcriptSource).toContain('styles.thinkingActivityText}>Thinking…</Text>');
     expect(transcriptSource).toContain("run.active ? 'auto' : 'collapsed'");
     expect(transcriptSource).toContain('limitMobileRunToolItems(activityItems)');
+    expect(transcriptSource).toContain('nestedScrollEnabled');
+    expect(transcriptSource).toContain('style={[styles.activityRail');
+    expect(transcriptSource).toContain('maxHeight: 288');
+    expect(transcriptSource).toContain('const hasRunDetails = hasActivityDetails || hasPlan');
+    expect(transcriptSource).toContain('styles.runDetailsSideBySide');
+    expect(transcriptSource).toContain('styles.activityRailSideBySide');
+    expect(transcriptSource).toContain('styles.runPlanSideBySide');
+    expect(transcriptSource.indexOf('style={[styles.activityRail')).toBeLessThan(
+      transcriptSource.indexOf('style={[styles.runPlan'),
+    );
+    expect(transcriptSource).toContain("setToolExpansion('collapsed')");
+    expect(transcriptSource).not.toContain("'Show plan'");
+    expect(transcriptSource).not.toContain("'Hide plan'");
+    expect(transcriptSource).not.toContain('planWithActivity');
     expect(transcriptSource).toContain('!groupedActiveRun');
     expect(transcriptSource).toContain('disabled={!expandable}');
-    expect(transcriptSource).toContain("accessibilityLabel={expanded ? 'Collapse activity' : 'Expand activity'}");
-    expect(transcriptSource).toContain("status={pending ? 'pending' : partial ? 'partial-error'");
+    expect(transcriptSource).toContain(
+      "accessibilityLabel={expanded ? 'Collapse run details' : 'Expand run details'}",
+    );
+    expect(transcriptSource).toContain("blocked ? 'blocked' : 'pending'");
+    expect(transcriptSource).toContain('<Pause color={colors.warning}');
+    expect(transcriptSource).toContain("'Approval required'");
+    expect(transcriptSource).toContain('awaitingApproval && entry.group.active');
+    expect(transcriptSource).toContain("'Blocked pending approval.'");
+    expect(transcriptSource).toContain("'Context compacted'");
+    expect(transcriptSource).toContain('<MobileCompactionRow key={item.key}');
+    expect(dronesScreenSource).toContain('awaitingApproval={awaitingApproval}');
+    expect(dronesScreenSource).toContain('approvalStartedAt={approvalStartedAt}');
     expect(transcriptSource).toContain('<TriangleAlert color={colors.onAccent}');
     expect(transcriptSource).toContain('<X color={colors.onAccent}');
     expect(transcriptSource).toContain('<ToolStructuredValue value={args} />');
@@ -25,8 +53,10 @@ describe('mobile tool activity presentation', () => {
     expect(transcriptSource).not.toContain('<Text style={styles.detailLabel}>ARGUMENTS</Text>');
     expect(transcriptSource).not.toContain('<Text style={styles.detailLabel}>RESULT</Text>');
 
-    const toolStyle = transcriptSource.match(/  tool: \{([\s\S]*?)\n  \},\n  toolNested:/)?.[1] ?? '';
-    const titleStyle = transcriptSource.match(/  toolTitle: \{([\s\S]*?)\n  \},\n  toolCount:/)?.[1] ?? '';
+    const toolStyle =
+      transcriptSource.match(/  tool: \{([\s\S]*?)\n  \},\n  toolNested:/)?.[1] ?? '';
+    const titleStyle =
+      transcriptSource.match(/  toolTitle: \{([\s\S]*?)\n  \},\n  toolCount:/)?.[1] ?? '';
     expect(toolStyle).not.toContain('borderWidth');
     expect(toolStyle).not.toContain('backgroundColor');
     expect(titleStyle).not.toContain('textTransform');

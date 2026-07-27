@@ -38,9 +38,11 @@ describe('mobile transcript runs', () => {
 
     const visible = limitMobileRunToolItems(items);
     expect(visible[0]).toMatchObject({ type: 'message', key: 'progress' });
-    expect(visible.flatMap((item) => (item.type === 'toolGroup' ? item.items : [item])).map(
-      (item) => item.key,
-    )).toEqual(['progress', 'read-3', 'read-4', 'write-1', 'write-2', 'write-3']);
+    expect(
+      visible
+        .flatMap((item) => (item.type === 'toolGroup' ? item.items : [item]))
+        .map((item) => item.key),
+    ).toEqual(['progress', 'read-3', 'read-4', 'write-1', 'write-2', 'write-3']);
   });
 
   test('groups a user turn with its tool calls and completed response', () => {
@@ -109,6 +111,32 @@ describe('mobile transcript runs', () => {
       type: 'message',
       message: { role: 'assistant' },
     });
+  });
+
+  test('keeps context compaction visible outside collapsed run activity', () => {
+    const [run] = groupMobileTranscriptRuns(
+      renderItemsFromMessages([
+        { role: 'user', content: 'Keep going', timestamp: 1_000 },
+        {
+          id: 'compaction-1',
+          role: 'compaction',
+          timestamp: 2_000,
+          details: {
+            summaryId: 'summary-1',
+            trigger: 'auto',
+            tokensBefore: 90_000,
+            tokensAfter: 24_000,
+          },
+        },
+        { role: 'assistant', content: 'Done', timestamp: 3_000 },
+      ]),
+    );
+
+    expect(run).toMatchObject({ type: 'run', completedAt: 3_000 });
+    if (run?.type !== 'run') throw new Error('Expected a transcript run');
+    const partition = partitionMobileRunItems(run);
+    expect(partition.activityItems).toEqual([]);
+    expect(partition.trailingItems.map((item) => item.type)).toEqual(['compaction', 'message']);
   });
 
   test('keeps the latest run active unless a separate pending prompt owns the working row', () => {
@@ -260,10 +288,6 @@ describe('mobile transcript runs', () => {
       { label: 'older run', atMs: Date.parse('2026-07-20T10:00:00.000Z'), order: 0 },
     ]);
 
-    expect(timeline.map((entry) => entry.label)).toEqual([
-      'older run',
-      'stopped run',
-      'newer run',
-    ]);
+    expect(timeline.map((entry) => entry.label)).toEqual(['older run', 'stopped run', 'newer run']);
   });
 });

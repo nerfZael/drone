@@ -13,12 +13,54 @@ import type {
   SessionRepository,
   TranscriptEntry,
 } from '@blip/core';
-import type { BlipHistoryPage } from '@blip/protocol';
+import type { BlipContextUsage, BlipHistoryPage } from '@blip/protocol';
 
 import { droneRootPath } from '../../host/paths';
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function nonnegativeFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function readContextUsage(value: unknown): BlipContextUsage | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const tokens = nonnegativeFiniteNumber(raw.tokens);
+  const contextWindow = nonnegativeFiniteNumber(raw.contextWindow);
+  if (tokens === undefined || contextWindow === undefined || contextWindow === 0) return undefined;
+  const rawBreakdown = raw.breakdown;
+  let breakdown: BlipContextUsage['breakdown'];
+  if (rawBreakdown && typeof rawBreakdown === 'object' && !Array.isArray(rawBreakdown)) {
+    const candidate = rawBreakdown as Record<string, unknown>;
+    const values = [
+      candidate.systemPrompt,
+      candidate.messages,
+      candidate.toolDefinitions,
+      candidate.images,
+      candidate.providerOverhead,
+    ].map(nonnegativeFiniteNumber);
+    if (values.every((part) => part !== undefined)) {
+      breakdown = {
+        systemPrompt: values[0]!,
+        messages: values[1]!,
+        toolDefinitions: values[2]!,
+        images: values[3]!,
+        providerOverhead: values[4]!,
+      };
+    }
+  }
+  return {
+    tokens,
+    contextWindow,
+    percent: (tokens / contextWindow) * 100,
+    ...(raw.confidence === 'heuristic' ? { confidence: 'heuristic' as const } : {}),
+    ...(breakdown ? { breakdown } : {}),
+  };
 }
 
 function lastToolResultIndex(entries: TranscriptEntry[], callId: string): number {
@@ -454,6 +496,7 @@ export class HubSessionRepository implements SessionRepository {
       WHERE session_id = ?
         AND (
           json_extract(entry_json, '$.type') = 'message'
+          OR json_extract(entry_json, '$.type') = 'compaction'
           OR (
             json_extract(entry_json, '$.type') = 'runtime_event'
             AND json_extract(entry_json, '$.event.type') = 'session_finished'
@@ -481,6 +524,27 @@ export class HubSessionRepository implements SessionRepository {
             },
           ];
         }
+        if (entry.type === 'compaction') {
+          return [
+            {
+              sequence: Number(row.sequence),
+              id: entry.id,
+              timestamp: entry.createdAt,
+              message: {
+                role: 'compaction',
+                content: '',
+                details: {
+                  summaryId: entry.id,
+                  trigger: entry.trigger,
+                  tokensBefore: entry.tokensBefore,
+                  tokensAfter: entry.tokensAfterEstimate ?? null,
+                  ...(entry.fallbackUsed ? { fallbackUsed: true } : {}),
+                  ...(entry.fallbackReason ? { fallbackReason: entry.fallbackReason } : {}),
+                },
+              },
+            },
+          ];
+        }
         if (entry.type === 'runtime_event' && entry.event.type === 'session_finished') {
           return [
             {
@@ -505,11 +569,75 @@ export class HubSessionRepository implements SessionRepository {
         return [];
       }
     });
+    const contextUsageRow = this.db
+      .prepare(
+        `
+      SELECT sequence, entry_json
+      FROM assistant_blip_entries
+      WHERE session_id = ?
+        AND json_extract(entry_json, '$.type') = 'runtime_event'
+        AND json_extract(entry_json, '$.event.type') = 'session_finished'
+        AND json_type(entry_json, '$.event.contextUsage') = 'object'
+      ORDER BY sequence DESC
+      LIMIT 1
+    `,
+      )
+      .get(sessionId) as { sequence: number; entry_json?: string } | undefined;
+    let contextUsage: BlipContextUsage | undefined;
+    if (contextUsageRow?.entry_json) {
+      try {
+        const entry = JSON.parse(contextUsageRow.entry_json) as TranscriptEntry;
+        if (entry.type === 'runtime_event' && entry.event.type === 'session_finished') {
+          contextUsage = readContextUsage(entry.event.contextUsage);
+        }
+      } catch {
+        // Ignore malformed optional usage metadata without hiding valid chat history.
+      }
+    }
+    const contextUsageSequence = contextUsageRow?.sequence;
+    if (contextUsage && contextUsageSequence !== undefined) {
+      const latestCompactionRow = this.db
+        .prepare(
+          `
+        SELECT sequence, entry_json
+        FROM assistant_blip_entries
+        WHERE session_id = ?
+          AND json_extract(entry_json, '$.type') = 'compaction'
+          AND json_type(entry_json, '$.tokensAfterEstimate') IN ('integer', 'real')
+        ORDER BY sequence DESC
+        LIMIT 1
+      `,
+        )
+        .get(sessionId) as { sequence: number; entry_json?: string } | undefined;
+      if (
+        latestCompactionRow?.entry_json &&
+        latestCompactionRow.sequence > contextUsageSequence
+      ) {
+        try {
+          const entry = JSON.parse(latestCompactionRow.entry_json) as TranscriptEntry;
+          const tokensAfter =
+            entry.type === 'compaction'
+              ? nonnegativeFiniteNumber(entry.tokensAfterEstimate)
+              : undefined;
+          if (tokensAfter !== undefined) {
+            contextUsage = {
+              tokens: tokensAfter,
+              contextWindow: contextUsage.contextWindow,
+              percent: (tokensAfter / contextUsage.contextWindow) * 100,
+              confidence: 'heuristic',
+            };
+          }
+        } catch {
+          // The last completed run still provides a safe fallback for malformed compaction data.
+        }
+      }
+    }
     return {
       version: 1,
       threadId,
       sessionId,
       entries,
+      ...(contextUsage ? { contextUsage } : {}),
       page: {
         limit,
         beforeCursor: hasOlder && entries.length > 0 ? entries[0].sequence : null,

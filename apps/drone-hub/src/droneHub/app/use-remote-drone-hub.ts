@@ -87,12 +87,13 @@ function normalizeNativeMessages(value: unknown): AssistantMessage[] {
   return entries.flatMap((entry): AssistantMessage[] => {
     const message = entry?.message && typeof entry.message === 'object' ? entry.message : entry;
     const role = String(message?.role ?? '');
-    if (!['user', 'assistant', 'toolResult', 'runSummary'].includes(role)) return [];
+    if (!['user', 'assistant', 'toolResult', 'runSummary', 'compaction'].includes(role)) return [];
     return [
       {
         ...message,
         role,
         id: text(entry?.id || message.id) || undefined,
+        createdAt: text(message.createdAt ?? entry?.timestamp) || undefined,
         ...(entry?.meshTruncated === true || message.meshTruncated === true
           ? { meshTruncated: true }
           : {}),
