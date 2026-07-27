@@ -42,10 +42,12 @@ export function ChatMessageFrame({
           ? 'rounded-[var(--radius-large)] rounded-tl-sm border border-[var(--red-border)] bg-[var(--red-subtle)] px-4 py-3'
           : 'rounded-[var(--radius-large)] rounded-tl-sm border border-[var(--assistant-bubble-border)] bg-[var(--assistant-bubble)] px-4 py-3';
   const bubble = (
-    <div className={`group/message relative ${showRoleIcon ? (user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'min-w-0 flex-1') : user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'w-full'} min-w-[120px]`}>
-      {(user && at) || hoverActions ? (
+    <div
+      className={`group/message relative ${showRoleIcon ? (user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'min-w-0 flex-1') : user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'w-full'} min-w-[120px]`}
+    >
+      {user && (at || hoverActions) ? (
         <div className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 flex min-h-7 items-center justify-end gap-1.5 opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100">
-          {user && at ? (
+          {at ? (
             <RelativeTimeText
               at={at}
               className="pointer-events-none whitespace-nowrap font-mono text-[var(--text-9)] leading-none text-[var(--chat-user-message-time)]"
@@ -55,24 +57,41 @@ export function ChatMessageFrame({
           {hoverActions}
         </div>
       ) : null}
-      {!user && at ? (
-        <RelativeTimeText
-          at={at}
-          className="pointer-events-none absolute left-0 top-full z-10 mt-1 whitespace-nowrap font-mono text-[var(--text-9)] leading-none text-[var(--chat-message-time)] opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100"
-          title={new Date(at).toLocaleString()}
-        />
+      {!user && (at || hoverActions) ? (
+        <div
+          className={`pointer-events-none absolute left-0 top-full z-10 mt-1 flex min-h-7 w-full items-center gap-2 opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 ${
+            at ? 'justify-between' : 'justify-end'
+          }`}
+        >
+          {at ? (
+            <RelativeTimeText
+              at={at}
+              className="pointer-events-none whitespace-nowrap font-mono text-[var(--text-9)] leading-none text-[var(--chat-message-time)]"
+              title={new Date(at).toLocaleString()}
+            />
+          ) : null}
+          {hoverActions}
+        </div>
       ) : null}
       {showHeader ? (
-        <div className={`mb-1.5 flex items-center gap-2 ${user ? 'justify-end' : 'justify-between'}`}>
+        <div
+          className={`mb-1.5 flex items-center gap-2 ${user ? 'justify-end' : 'justify-between'}`}
+        >
           {!user && showRoleLabel ? (
-            <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]" style={{ fontFamily: 'var(--display)' }}>
+            <span
+              className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]"
+              style={{ fontFamily: 'var(--display)' }}
+            >
               {label}
             </span>
           ) : null}
           <div className="flex items-center gap-1.5">
             {user ? headerEnd : null}
             {user && showRoleLabel ? (
-              <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--user-muted)]" style={{ fontFamily: 'var(--display)' }}>
+              <span
+                className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--user-muted)]"
+                style={{ fontFamily: 'var(--display)' }}
+              >
                 {label}
               </span>
             ) : null}
@@ -80,9 +99,7 @@ export function ChatMessageFrame({
           </div>
         </div>
       ) : null}
-      <div className={`group relative ${surfaceClass} ${className}`}>
-        {children}
-      </div>
+      <div className={`group relative ${surfaceClass} ${className}`}>{children}</div>
     </div>
   );
 

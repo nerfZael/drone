@@ -34,12 +34,14 @@ describe('completed external transcript presentation', () => {
     expect(html).toContain('text-[var(--chat-user-message-time)]');
     expect(html).toContain('aria-label="Copy message"');
     expect(html).toContain('pointer-events-auto opacity-100');
-    expect(html.match(/bottom-full right-0 z-10 mb-1 flex min-h-7/g)).toHaveLength(2);
+    expect(html.match(/bottom-full right-0 z-10 mb-1 flex min-h-7/g)).toHaveLength(1);
+    expect(html).toContain('left-0 top-full z-10 mt-1 flex min-h-7 w-full');
+    expect(html).toContain('justify-end');
     expect(html.match(/aria-label="Copy message"/g)).toHaveLength(2);
     expect(html).not.toContain('data-agent-message-actions="true"');
     expect(html).toContain('group-hover/turn:opacity-100');
     expect(html).toContain('group-focus-within/turn:opacity-100');
-    expect(html).not.toContain('left-0 top-full mt-1 text-[var(--chat-message-time)]');
+    expect(html).not.toContain('bottom-full left-0');
   });
 
   test('collapses completed reasoning and tool activity while keeping the final answer visible', () => {
@@ -55,6 +57,13 @@ describe('completed external transcript presentation', () => {
           logPath: '/tmp/external-session.log',
           ok: true,
           output: 'The file is ready.',
+          agentPlan: {
+            source: 'codex',
+            items: [
+              { id: 'step-1', text: 'Inspect the file', status: 'completed' },
+              { id: 'step-2', text: 'Report the result', status: 'completed' },
+            ],
+          },
           activity: {
             version: 1,
             source: 'codex',
@@ -96,10 +105,12 @@ describe('completed external transcript presentation', () => {
     expect(html).toContain('data-agent-run-activity="codex"');
     expect(html).toContain('Worked for 2s');
     expect(html).toContain('1 tool call');
-    expect(html).toContain('aria-label="Expand activity"');
+    expect(html).toContain('aria-label="Expand run details"');
     expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain('I should inspect the file first.');
     expect(html).not.toContain('Read file');
+    expect(html).not.toContain('Show plan');
+    expect(html).not.toContain('Inspect the file</span>');
     expect(html).not.toContain('data-tool-status="pending"');
     expect(html).toContain('class="mt-1 px-3"');
     expect(html.match(/The file is ready\./g)).toHaveLength(1);

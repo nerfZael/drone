@@ -43,7 +43,7 @@ describe('AgentPlanList', () => {
           updatedAt: '2026-07-11T12:00:00.000Z',
           items: Array.from({ length: 10 }, (_, index) => ({
             text: `Step ${index + 1}`,
-            status: index === 0 ? 'completed' as const : 'pending' as const,
+            status: index === 0 ? ('completed' as const) : ('pending' as const),
           })),
         }}
       />,
@@ -70,7 +70,7 @@ describe('AgentPlanList', () => {
           updatedAt: '2026-07-11T12:00:00.000Z',
           items: Array.from({ length: 10 }, (_, index) => ({
             text: `Step ${index + 1}`,
-            status: index === 0 ? 'in_progress' as const : 'pending' as const,
+            status: index === 0 ? ('in_progress' as const) : ('pending' as const),
           })),
         }}
       />,
@@ -81,5 +81,27 @@ describe('AgentPlanList', () => {
     expect(html).not.toContain('Step 9');
     expect(html).toContain('animate-spin');
     expect(html).toContain('In progress:');
+  });
+
+  test('renders completed steps directly when embedded in run details', () => {
+    const html = renderToStaticMarkup(
+      <AgentPlanList
+        embedded
+        plan={{
+          source: 'codex',
+          items: [
+            { text: 'Inspect the run', status: 'completed' },
+            { text: 'Report results', status: 'completed' },
+          ],
+        }}
+      />,
+    );
+
+    expect(html).toContain('Plan');
+    expect(html).toContain('(2/2)');
+    expect(html).toContain('Inspect the run');
+    expect(html).not.toContain('Show plan');
+    expect(html).not.toContain('Hide plan');
+    expect(html).not.toContain('border-t border-[var(--border-subtle)]');
   });
 });

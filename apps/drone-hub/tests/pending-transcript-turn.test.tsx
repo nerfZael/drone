@@ -102,7 +102,11 @@ describe('external pending transcript turn', () => {
     );
 
     expect(html).toContain('data-agent-run-activity="opencode"');
+    expect(html).toContain('data-agent-run-details="true"');
+    expect(html).toContain('data-agent-run-plan="true"');
     expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-label="Collapse run details"');
+    expect(html).toContain('grid grid-cols-2 items-start gap-2');
     expect(html).toContain('border-l border-[var(--border-subtle)] px-3');
     expect(html).toContain('dh-agent-activity-scrollbar');
     expect(html).toContain('max-h-72');
@@ -113,7 +117,13 @@ describe('external pending transcript turn', () => {
     expect(html).toContain('Checking the current state.');
     expect(html).toContain('data-tool-status="pending"');
     expect(html).toContain('Inspect activity output');
-    expect(html).toContain('ml-6');
+    expect(html).not.toContain('Show plan');
+    expect(html.indexOf('Checking the current state.')).toBeLessThan(
+      html.indexOf('Inspect activity output'),
+    );
+    const planColumnClass = html.match(/data-agent-run-plan="true" class="([^"]+)"/)?.[1] ?? '';
+    expect(planColumnClass).not.toContain('border-l');
+    expect(planColumnClass).not.toContain('pl-4');
     expect(html.match(/Working for/g)).toHaveLength(1);
   });
 

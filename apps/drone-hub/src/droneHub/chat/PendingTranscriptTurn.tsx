@@ -136,7 +136,12 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       />
 
       {activity && !isFailed ? (
-        <AgentRunActivityView activity={activity} active startedAt={item.at} />
+        <AgentRunActivityView
+          activity={activity}
+          active
+          startedAt={item.at}
+          plan={item.agentPlan}
+        />
       ) : null}
       {activity && isFailed ? (
         <AgentRunActivityView
@@ -144,6 +149,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           startedAt={item.at}
           endedAt={item.updatedAt ?? item.at}
           at={item.updatedAt ?? item.at}
+          plan={item.agentPlan}
         />
       ) : null}
 
@@ -183,10 +189,9 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                 </div>
               ) : null}
               <AgentPlanList
-                plan={item.agentPlan}
+                plan={activity ? undefined : item.agentPlan}
                 running
                 showTopDivider={false}
-                className={activity ? 'ml-6' : ''}
               />
               {cancelError ? (
                 <div className="mt-2 whitespace-pre-wrap text-[var(--text-10)] text-[var(--red)]">

@@ -161,6 +161,7 @@ export const TranscriptTurn = React.memo(
             endedAt={agentIso}
             at={agentIso}
             autoExpandFinalMessage={autoExpandAgentMessage}
+            plan={item.agentPlan}
             messageExtras={{
               messageId,
               actionsEnabled: actionsEnabled && item.ok,
@@ -170,7 +171,6 @@ export const TranscriptTurn = React.memo(
               droneHomePath,
               onOpenFileReference,
               onOpenLink,
-              plan: item.agentPlan,
               fileChanges: item.fileChanges,
               initiallyExpandFileChanges,
               initiallyExpandLinkedPullRequests: autoExpandAgentMessage,
@@ -258,7 +258,7 @@ export const TranscriptTurn = React.memo(
               droneHomePath={droneHomePath}
               onOpenFileReference={onOpenFileReference}
               onOpenLink={onOpenLink}
-              plan={item.agentPlan}
+              plan={activity ? undefined : item.agentPlan}
               fileChanges={item.fileChanges}
               initiallyExpandFileChanges={initiallyExpandFileChanges}
               initiallyExpandLinkedPullRequests={autoExpandAgentMessage}

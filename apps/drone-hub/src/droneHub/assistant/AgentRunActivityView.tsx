@@ -7,6 +7,8 @@ import {
 } from '@drone/assistant-chat';
 
 import type { AgentMessageExtrasProps } from '../chat/AgentMessageExtras';
+import { AgentPlanList } from '../chat/AgentPlanList';
+import type { AgentPlan } from '../types';
 import { AgentRunSummaryLine } from '../chat/WorkingElapsedStatus';
 import {
   AssistantMessageRow,
@@ -43,6 +45,7 @@ export function AgentRunActivityView({
   endedAt,
   at,
   autoExpandFinalMessage = false,
+  plan,
   messageExtras,
 }: {
   activity?: AgentRunActivity;
@@ -51,6 +54,7 @@ export function AgentRunActivityView({
   endedAt?: string | number | null;
   at?: string;
   autoExpandFinalMessage?: boolean;
+  plan?: AgentPlan;
   messageExtras?: Omit<AgentMessageExtrasProps, 'text' | 'tasks'>;
 }) {
   const displayActivity = React.useMemo(
@@ -77,8 +81,7 @@ export function AgentRunActivityView({
     }
   }
 
-  const finalAssistantCandidate =
-    finalAssistantIndex >= 0 ? items[finalAssistantIndex] : undefined;
+  const finalAssistantCandidate = finalAssistantIndex >= 0 ? items[finalAssistantIndex] : undefined;
   const finalAssistantItem =
     finalAssistantCandidate?.type === 'message' ? finalAssistantCandidate : null;
   const activityItems = items.filter(
@@ -90,6 +93,10 @@ export function AgentRunActivityView({
     return count;
   }, 0);
   const hasActivityDetails = Boolean(displayActivity?.truncated || activityItems.length > 0);
+  const integratedPlan = plan ?? messageExtras?.plan;
+  const hasPlan = Boolean(integratedPlan?.items.length);
+  const hasRunDetails = hasActivityDetails || hasPlan;
+  const finalMessageExtras = messageExtras ? { ...messageExtras, plan: undefined } : undefined;
   const fallbackStart = React.useRef(Date.now()).current;
   const parsedStart = activityTimestampMs(startedAt) ?? fallbackStart;
   const parsedEnd = activityTimestampMs(endedAt);
@@ -120,56 +127,78 @@ export function AgentRunActivityView({
           durationMs={durationMs}
           at={at}
           detail={detail}
-          trailing={hasActivityDetails ? <ActivityChevron open={expanded} /> : undefined}
+          trailing={hasRunDetails ? <ActivityChevron open={expanded} /> : undefined}
           expanded={expanded}
-          onToggle={hasActivityDetails ? () => setExpanded((value) => !value) : undefined}
-          toggleLabel="activity"
+          onToggle={hasRunDetails ? () => setExpanded((value) => !value) : undefined}
+          toggleLabel="run details"
         />
       </div>
-      {hasActivityDetails && expanded ? (
-        <div className="dh-agent-activity-scrollbar ml-3 max-h-72 overflow-y-auto overscroll-contain border-l border-[var(--border-subtle)] px-3 py-1 opacity-[0.82] transition-opacity hover:opacity-100 focus-within:opacity-100">
-          <div className="space-y-1">
-            {displayActivity?.truncated ? (
-              <div className="py-1 text-[var(--text-10)] text-[var(--muted-dim)]">
-                Earlier or oversized activity details were trimmed.
+      {hasRunDetails && expanded ? (
+        <div
+          data-agent-run-details="true"
+          className={`px-3 py-1 ${
+            hasActivityDetails && hasPlan ? 'grid grid-cols-2 items-start gap-2' : ''
+          }`}
+        >
+          {hasActivityDetails ? (
+            <div className="dh-agent-activity-scrollbar max-h-72 min-w-0 overflow-y-auto overscroll-contain border-l border-[var(--border-subtle)] px-3 opacity-[0.82] transition-opacity hover:opacity-100 focus-within:opacity-100">
+              <div className="space-y-1">
+                {displayActivity?.truncated ? (
+                  <div className="py-1 text-[var(--text-10)] text-[var(--muted-dim)]">
+                    Earlier or oversized activity details were trimmed.
+                  </div>
+                ) : null}
+                {activityItems.map((item) => {
+                  if (item.type === 'message') {
+                    return (
+                      <AssistantMessageRow
+                        key={item.key}
+                        message={item.message}
+                        showToolCalls={false}
+                        showReasoning
+                        autoExpandMessage
+                      />
+                    );
+                  }
+                  if (item.type === 'tool') {
+                    return (
+                      <div className="-mx-3" key={item.key}>
+                        <ToolActivityRow call={item.call} result={item.result} />
+                      </div>
+                    );
+                  }
+                  if (item.type === 'toolGroup') {
+                    return (
+                      <div className="-mx-3" key={item.key}>
+                        <RepeatedToolActivityRow items={item.items} />
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
               </div>
-            ) : null}
-            {activityItems.map((item) => {
-              if (item.type === 'message') {
-                return (
-                  <AssistantMessageRow
-                    key={item.key}
-                    message={item.message}
-                    showToolCalls={false}
-                    showReasoning
-                    autoExpandMessage
-                  />
-                );
-              }
-              if (item.type === 'tool') {
-                return (
-                  <div className="-mx-3" key={item.key}>
-                    <ToolActivityRow call={item.call} result={item.result} />
-                  </div>
-                );
-              }
-              if (item.type === 'toolGroup') {
-                return (
-                  <div className="-mx-3" key={item.key}>
-                    <RepeatedToolActivityRow items={item.items} />
-                  </div>
-                );
-              }
-              return null;
-            })}
-          </div>
+            </div>
+          ) : null}
+          {hasPlan ? (
+            <div
+              data-agent-run-plan="true"
+              className="dh-agent-activity-scrollbar max-h-72 min-w-0 overflow-y-auto overscroll-contain pr-1"
+            >
+              <AgentPlanList
+                embedded
+                plan={integratedPlan}
+                running={active}
+                showTopDivider={false}
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
       {finalAssistantItem ? (
         <div className="mt-1 px-3">
           <AssistantMessageRow
             message={finalAssistantItem.message}
-            messageExtras={messageExtras}
+            messageExtras={finalMessageExtras}
             showToolCalls={false}
             showReasoning={false}
             autoExpandMessage={autoExpandFinalMessage}
