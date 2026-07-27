@@ -119,44 +119,6 @@ export function estimateEntriesTokens(entries: TranscriptEntry[]): number {
     );
 }
 
-export function estimateModelContextTokens(entries: TranscriptEntry[]): number {
-  const latest = latestCompaction(entries);
-  if (!latest) return estimateEntriesTokens(entries);
-
-  let tokens = Math.ceil(latest.entry.summary.length / 4);
-  if (!latest.entry.firstKeptEntryId) {
-    return entries
-      .slice(latest.index + 1)
-      .reduce(
-        (sum, entry) =>
-          entry.type === 'message' ? sum + estimateMessageTokens(entry.message) : sum,
-        tokens,
-      );
-  }
-  let foundFirstKept = false;
-  for (let index = 0; index < latest.index; index += 1) {
-    const entry = entries[index];
-    if (entry.id === latest.entry.firstKeptEntryId) foundFirstKept = true;
-    if (foundFirstKept && entry.type === 'message') tokens += estimateMessageTokens(entry.message);
-  }
-  if (!foundFirstKept) return estimateEntriesTokens(entries);
-  for (let index = latest.index + 1; index < entries.length; index += 1) {
-    const entry = entries[index];
-    if (entry.type === 'message') tokens += estimateMessageTokens(entry.message);
-  }
-  return tokens;
-}
-
-export function shouldAutoCompact(input: {
-  entries: TranscriptEntry[];
-  contextWindow?: number;
-  settings?: CompactionSettings;
-}): boolean {
-  const settings = input.settings ?? DEFAULT_COMPACTION_SETTINGS;
-  if (!settings.auto || !input.contextWindow) return false;
-  return estimateModelContextTokens(input.entries) > input.contextWindow - settings.reserveTokens;
-}
-
 function latestCompaction(
   entries: TranscriptEntry[],
 ): { entry: CompactionEntry; index: number } | undefined {

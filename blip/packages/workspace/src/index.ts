@@ -1,4 +1,4 @@
-import type { AgentToolExecutionResult, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentToolResult } from '@mariozechner/pi-agent-core';
 export * from './transfer.js';
 
 export type WorkspaceCapability =
@@ -73,7 +73,7 @@ export interface WorkspaceTransferAdapter {
 export interface WorkspaceTarget {
   readonly descriptor: WorkspaceTargetDescriptor;
   readonly transfer?: WorkspaceTransferAdapter;
-  execute(call: WorkspaceTargetCall): Promise<AgentToolExecutionResult<unknown>>;
+  execute(call: WorkspaceTargetCall): Promise<AgentToolResult<unknown>>;
 }
 
 const TOOL_CAPABILITY: Record<string, WorkspaceCapability> = {

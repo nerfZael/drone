@@ -13,12 +13,6 @@ export function toolSuspensionsFromTranscript(entries: TranscriptEntry[]): BlipT
   );
 }
 
-export function unresolvedToolSuspensions(entries: TranscriptEntry[]): BlipToolSuspension[] {
-  return toolSuspensionsFromTranscript(entries).filter(
-    (suspension) => !TERMINAL_STATUSES.has(suspension.status),
-  );
-}
-
 export function isTerminalToolSuspension(status: BlipToolSuspensionStatus): boolean {
   return TERMINAL_STATUSES.has(status);
 }

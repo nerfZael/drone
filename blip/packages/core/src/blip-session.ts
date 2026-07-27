@@ -1,10 +1,11 @@
 import {
   Agent,
-  AgentToolResultError,
+  agentToolErrorResult,
   type AgentEvent,
   type AgentMessage,
   type AgentTool,
   type BeforeToolCallContext,
+  executeAgentTool,
 } from '@mariozechner/pi-agent-core/portable';
 import { validateToolArguments } from '@mariozechner/pi-ai/agent-core';
 import type { CompactionSettings } from './compaction.js';
@@ -19,7 +20,7 @@ import type {
 } from './blip-session-types.js';
 import type { BlipRuntimeEvent, BlipSessionState, BlipToolSuspension } from './types.js';
 import { createPortableId } from './platform.js';
-import { isTerminalToolSuspension } from './tool-suspension.js';
+import { ToolSuspensionWorkflow } from './tool-suspension-workflow.js';
 
 type ToolFailure = {
   callId: string;
@@ -45,23 +46,6 @@ type ActivePrompt = {
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function lastToolResultIndex(
-  entries: Awaited<ReturnType<SessionRepository['readTranscript']>>,
-  callId: string,
-): number {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (
-      entry?.type === 'message' &&
-      entry.message.role === 'toolResult' &&
-      entry.message.toolCallId === callId
-    ) {
-      return index;
-    }
-  }
-  return -1;
 }
 
 function eventBase(
@@ -208,6 +192,7 @@ async function resolveSession(
 class BlipSession implements BlipSessionHandle {
   private readonly agent: Agent;
   private readonly contextManager: BlipContextManager;
+  private readonly toolSuspensions: ToolSuspensionWorkflow;
   private readonly unsubscribe: () => void;
   private active?: ActivePrompt;
   private activePromise?: Promise<BlipSessionState>;
@@ -254,6 +239,12 @@ class BlipSession implements BlipSessionHandle {
         this.agent.state.messages = messages;
       },
     });
+    this.toolSuspensions = new ToolSuspensionWorkflow({
+      state,
+      repository: options.sessionRepository,
+      emit: (event) => this.emit(event),
+      activeTurnId: () => this.active?.turnId,
+    });
     this.unsubscribe = this.agent.subscribe((event) => this.onAgentEvent(event));
   }
 
@@ -285,11 +276,12 @@ class BlipSession implements BlipSessionHandle {
       toolProfile: options.toolProfile,
       resumed,
     });
-    const continuationRequired = await instance.recoverToolSuspensions();
-    if (continuationRequired) {
-      const recovery = instance.runRecoveredContinuation();
-      instance.activePromise = recovery;
-      await recovery;
+    const recovery = await instance.toolSuspensions.recover();
+    instance.agent.state.messages = recovery.messages;
+    if (recovery.continuationRequired) {
+      const continuation = instance.runRecoveredContinuation();
+      instance.activePromise = continuation;
+      await continuation;
     }
     return instance;
   }
@@ -332,9 +324,7 @@ class BlipSession implements BlipSessionHandle {
   }
 
   async pendingToolSuspensions(): Promise<BlipToolSuspension[]> {
-    return (await this.options.sessionRepository.readToolSuspensions(this.state)).filter(
-      (suspension) => !isTerminalToolSuspension(suspension.status),
-    );
+    return this.toolSuspensions.pending();
   }
 
   resolveToolSuspension(
@@ -408,75 +398,6 @@ class BlipSession implements BlipSessionHandle {
       }
     }
     this.agent.state.systemPrompt = sections.join('\n\n');
-  }
-
-  private async recoverToolSuspensions(): Promise<boolean> {
-    const transcript = await this.options.sessionRepository.readTranscript(this.state);
-    const results = new Map(
-      transcript.flatMap((entry) =>
-        entry.type === 'message' && entry.message.role === 'toolResult'
-          ? [[entry.message.toolCallId, entry.message] as const]
-          : [],
-      ),
-    );
-    const suspensions = await this.options.sessionRepository.readToolSuspensions(this.state);
-    for (const suspension of suspensions) {
-      const persistedResult = results.get(suspension.toolCallId);
-      if (suspension.status === 'executing' || suspension.status === 'approved') {
-        const updatedAt = nowIso();
-        const next: BlipToolSuspension = persistedResult
-          ? {
-              ...suspension,
-              status: persistedResult.isError ? 'failed' : 'completed',
-              result: persistedResult,
-              completedAt: updatedAt,
-              updatedAt,
-            }
-          : {
-              ...suspension,
-              status: 'interrupted',
-              error:
-                suspension.status === 'executing'
-                  ? 'Execution may have started before the process stopped. Confirm before retrying.'
-                  : 'Approval was recorded before the process stopped. Confirm before executing.',
-              updatedAt,
-            };
-        await this.options.sessionRepository.transitionToolSuspension(this.state, next, [
-          suspension.status,
-        ]);
-      }
-    }
-
-    const recovered = await this.options.sessionRepository.readToolSuspensions(this.state);
-    for (const suspension of recovered) {
-      const result = results.get(suspension.toolCallId);
-      if (isTerminalToolSuspension(suspension.status) && suspension.result && !result) {
-        await this.options.sessionRepository.appendMessage(this.state, suspension.result);
-        results.set(suspension.toolCallId, suspension.result);
-      }
-      if (suspension.status !== 'pending' && suspension.status !== 'interrupted') continue;
-      await this.emit({
-        ...eventBase(this.state.id),
-        type: 'tool_call_suspended',
-        suspensionId: suspension.id,
-        callId: suspension.toolCallId,
-        tool: suspension.toolName,
-        reason: suspension.error ?? suspension.reason,
-        details: suspension.details,
-        recoveryRequired: suspension.status === 'interrupted',
-      });
-    }
-    this.agent.state.messages = await this.options.sessionRepository.readModelMessages(this.state);
-    const repairedTranscript = await this.options.sessionRepository.readTranscript(this.state);
-    const terminal = (await this.options.sessionRepository.readToolSuspensions(this.state))
-      .filter((suspension) => isTerminalToolSuspension(suspension.status) && suspension.result)
-      .at(-1);
-    if (!terminal) return false;
-    const resultIndex = lastToolResultIndex(repairedTranscript, terminal.toolCallId);
-    if (resultIndex < 0) return false;
-    return !repairedTranscript
-      .slice(resultIndex + 1)
-      .some((entry) => entry.type === 'message' && entry.message.role === 'assistant');
   }
 
   private async preflight(
@@ -773,46 +694,6 @@ class BlipSession implements BlipSessionHandle {
     }
   }
 
-  private async appendResolvedToolResult(
-    suspension: BlipToolSuspension,
-    message: Extract<AgentMessage, { role: 'toolResult' }>,
-    status: 'completed' | 'denied' | 'failed',
-  ): Promise<void> {
-    const at = nowIso();
-    const next: BlipToolSuspension = {
-      ...suspension,
-      status,
-      result: message,
-      ...(status === 'denied' ? { decisionAt: at } : {}),
-      completedAt: at,
-      updatedAt: at,
-      ...(status === 'failed' ? { error: messageText(message) } : {}),
-    };
-    const expected: BlipToolSuspension['status'][] =
-      status === 'denied' ? ['pending', 'interrupted'] : ['executing'];
-    const transitioned = await this.options.sessionRepository.transitionToolSuspension(
-      this.state,
-      next,
-      expected,
-    );
-    if (!transitioned) throw new Error(`tool suspension changed concurrently: ${suspension.id}`);
-    await this.options.sessionRepository.appendMessage(this.state, message);
-    await this.emit({
-      ...eventBase(this.state.id, this.active?.turnId),
-      type: 'transcript_changed',
-      role: message.role,
-    });
-    await this.emit({
-      ...eventBase(this.state.id, this.active?.turnId),
-      type: 'tool_call_resolved',
-      suspensionId: suspension.id,
-      callId: suspension.toolCallId,
-      tool: suspension.toolName,
-      decision: status === 'denied' ? 'denied' : 'approved',
-      status,
-    });
-  }
-
   private async runRecoveredContinuation(): Promise<BlipSessionState> {
     const message: AgentMessage = {
       role: 'user',
@@ -843,13 +724,7 @@ class BlipSession implements BlipSessionHandle {
     suspensionId: string,
     decision: 'approve' | 'deny',
   ): Promise<BlipSessionState> {
-    const suspension = (await this.options.sessionRepository.readToolSuspensions(this.state)).find(
-      (candidate) => candidate.id === suspensionId,
-    );
-    if (!suspension) throw new Error(`unknown tool suspension: ${suspensionId}`);
-    if (suspension.status !== 'pending' && suspension.status !== 'interrupted') {
-      throw new Error(`tool suspension is already ${suspension.status}: ${suspensionId}`);
-    }
+    const suspension = await this.toolSuspensions.requireResolvable(suspensionId);
 
     const lifecycleMessage: AgentMessage = {
       role: 'user',
@@ -877,23 +752,9 @@ class BlipSession implements BlipSessionHandle {
           isError: true,
           timestamp: Date.now(),
         };
-        await this.appendResolvedToolResult(suspension, result, 'denied');
+        await this.toolSuspensions.resolve(suspension, result, 'denied');
       } else {
-        const approvedAt = nowIso();
-        const approved: BlipToolSuspension = {
-          ...suspension,
-          status: 'approved',
-          decisionAt: approvedAt,
-          updatedAt: approvedAt,
-        };
-        const approvedTransition = await this.options.sessionRepository.transitionToolSuspension(
-          this.state,
-          approved,
-          ['pending', 'interrupted'],
-        );
-        if (!approvedTransition) {
-          throw new Error(`tool suspension changed concurrently: ${suspension.id}`);
-        }
+        const approved = await this.toolSuspensions.approve(suspension);
 
         const hostDecision = await this.options.permissionPreflight?.({
           session: this.state,
@@ -922,21 +783,7 @@ class BlipSession implements BlipSessionHandle {
           name: suspension.toolName,
           arguments: suspension.args as Record<string, unknown>,
         });
-        const executingAt = nowIso();
-        const executing: BlipToolSuspension = {
-          ...approved,
-          status: 'executing',
-          attempt: approved.attempt + 1,
-          updatedAt: executingAt,
-        };
-        const executingTransition = await this.options.sessionRepository.transitionToolSuspension(
-          this.state,
-          executing,
-          ['approved'],
-        );
-        if (!executingTransition) {
-          throw new Error(`tool suspension changed concurrently: ${suspension.id}`);
-        }
+        const executing = await this.toolSuspensions.beginExecution(approved);
 
         active.timing.recordToolStart(suspension.toolCallId, suspension.toolName);
         await this.emit({
@@ -949,12 +796,13 @@ class BlipSession implements BlipSessionHandle {
         let result;
         let isError = false;
         try {
-          const executed = await tool.execute(
-            suspension.toolCallId,
+          result = await executeAgentTool({
+            tool,
+            toolCallId: suspension.toolCallId,
             args,
-            abortController.signal,
-            (partial) => {
-              void this.emit({
+            signal: abortController.signal,
+            onUpdate: (partial) =>
+              this.emit({
                 ...eventBase(this.state.id, active.turnId),
                 type: 'tool_call_progress',
                 callId: suspension.toolCallId,
@@ -969,13 +817,8 @@ class BlipSession implements BlipSessionHandle {
                   timestamp: Date.now(),
                 }),
                 details: partial.details,
-              });
-            },
-          );
-          if ('suspended' in executed && executed.suspended) {
-            throw new Error('An approved tool call cannot suspend during execution');
-          }
-          result = executed;
+              }),
+          });
         } catch (error) {
           if (
             abortController.signal.aborted ||
@@ -984,18 +827,7 @@ class BlipSession implements BlipSessionHandle {
             throw error;
           }
           isError = true;
-          result =
-            error instanceof AgentToolResultError
-              ? error.result
-              : {
-                  content: [
-                    {
-                      type: 'text' as const,
-                      text: error instanceof Error ? error.message : String(error),
-                    },
-                  ],
-                  details: {},
-                };
+          result = agentToolErrorResult(error);
         }
         const toolResult = {
           role: 'toolResult' as const,
@@ -1024,11 +856,7 @@ class BlipSession implements BlipSessionHandle {
                 result: result.details,
               },
         );
-        await this.appendResolvedToolResult(
-          executing,
-          toolResult,
-          isError ? 'failed' : 'completed',
-        );
+        await this.toolSuspensions.resolve(executing, toolResult, isError ? 'failed' : 'completed');
       }
 
       this.agent.state.messages = await this.options.sessionRepository.readModelMessages(
@@ -1041,25 +869,7 @@ class BlipSession implements BlipSessionHandle {
         await this.agent.continue();
       }
     } catch (error) {
-      const latest = (await this.options.sessionRepository.readToolSuspensions(this.state)).find(
-        (candidate) => candidate.id === suspensionId,
-      );
-      if (latest?.status === 'approved' || latest?.status === 'executing') {
-        const at = nowIso();
-        await this.options.sessionRepository.transitionToolSuspension(
-          this.state,
-          {
-            ...latest,
-            status: 'interrupted',
-            updatedAt: at,
-            error:
-              latest.status === 'executing'
-                ? 'Execution failed or was interrupted after it may have started. Confirm before retrying.'
-                : 'Approved execution did not start successfully. Confirm before retrying.',
-          },
-          [latest.status],
-        );
-      }
+      await this.toolSuspensions.interrupt(suspensionId);
       if (abortController.signal.aborted) {
         active.cancelled = true;
         active.failureMessage = 'Assistant run was aborted';

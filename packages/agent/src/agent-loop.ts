@@ -14,18 +14,18 @@ import {
   validateToolArguments,
 } from '@mariozechner/pi-ai/agent-core';
 import {
-  AgentToolResultError,
   type AgentContext,
   type AgentEvent,
   type AgentLoopConfig,
   type AgentMessage,
   type AgentTool,
   type AgentToolCall,
-  type AgentToolExecutionResult,
   type AgentToolResult,
+  type AgentToolSuspension,
   type AgentToolSuspendedCall,
   type StreamFn,
 } from './types.js';
+import { agentToolErrorResult, executeAgentTool } from './tool-execution.js';
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
@@ -498,28 +498,6 @@ async function executeToolCallsSequential(
       };
     } else {
       const executed = await executePreparedToolCall(preparation, signal, emit);
-      if (executed.kind === 'suspended') {
-        await emit({ type: 'tool_execution_suspended', suspension: executed.suspension });
-        for (const skipped of toolCalls.slice(index + 1)) {
-          await emit({
-            type: 'tool_execution_start',
-            toolCallId: skipped.id,
-            toolName: skipped.name,
-            args: skipped.arguments,
-          });
-          const skippedFinalized = skippedToolCall(skipped);
-          await emitToolExecutionEnd(skippedFinalized, emit);
-          const message = createToolResultMessage(skippedFinalized);
-          await emitToolResultMessage(message, emit);
-          finalizedCalls.push(skippedFinalized);
-          messages.push(message);
-        }
-        return {
-          messages,
-          terminate: true,
-          suspendedToolCall: executed.suspension,
-        };
-      }
       finalized = await finalizeExecutedToolCall(
         currentContext,
         assistantMessage,
@@ -637,9 +615,6 @@ async function executeToolCallsParallel(
       if (entry.kind === 'finalized')
         return { kind: 'finalized' as const, finalized: entry.finalized };
       const outcome = await executePreparedToolCall(entry.preparation, signal, emit);
-      if (outcome.kind === 'suspended') {
-        return outcome;
-      }
       const finalized = await finalizeExecutedToolCall(
         currentContext,
         assistantMessage,
@@ -652,24 +627,7 @@ async function executeToolCallsParallel(
       return { kind: 'finalized' as const, finalized };
     }),
   );
-  let suspended: SuspendedToolCallOutcome | undefined;
-  const orderedFinalizedCalls: FinalizedToolCallOutcome[] = [];
-  for (const outcome of outcomes) {
-    if (outcome.kind === 'finalized') {
-      orderedFinalizedCalls.push(outcome.finalized);
-      continue;
-    }
-    if (!suspended) {
-      suspended = outcome;
-      await emit({ type: 'tool_execution_suspended', suspension: outcome.suspension });
-      continue;
-    }
-    const original = toolCalls.find((toolCall) => toolCall.id === outcome.suspension.toolCallId);
-    if (!original) continue;
-    const finalized = skippedToolCall(original);
-    await emitToolExecutionEnd(finalized, emit);
-    orderedFinalizedCalls.push(finalized);
-  }
+  const orderedFinalizedCalls = outcomes.map((outcome) => outcome.finalized);
   const messages: ToolResultMessage[] = [];
   for (const finalized of orderedFinalizedCalls) {
     const toolResultMessage = createToolResultMessage(finalized);
@@ -679,8 +637,7 @@ async function executeToolCallsParallel(
 
   return {
     messages,
-    terminate: Boolean(suspended) || shouldTerminateToolBatch(orderedFinalizedCalls),
-    ...(suspended ? { suspendedToolCall: suspended.suspension } : {}),
+    terminate: shouldTerminateToolBatch(orderedFinalizedCalls),
   };
 }
 
@@ -731,16 +688,10 @@ function skippedToolCall(toolCall: AgentToolCall): FinalizedToolCallOutcome {
   };
 }
 
-function isToolSuspension(
-  result: AgentToolExecutionResult<any>,
-): result is Extract<AgentToolExecutionResult<any>, { suspended: true }> {
-  return 'suspended' in result && result.suspended === true;
-}
-
 function suspendedToolCall(
   toolCall: AgentToolCall,
   args: unknown,
-  suspension: Extract<AgentToolExecutionResult<any>, { suspended: true }>,
+  suspension: AgentToolSuspension<any>,
 ): SuspendedToolCallOutcome {
   return {
     kind: 'suspended',
@@ -750,7 +701,6 @@ function suspendedToolCall(
       toolName: toolCall.name,
       args,
       reason: suspension.reason,
-      content: suspension.content,
       details: suspension.details,
     },
   };
@@ -829,46 +779,27 @@ async function executePreparedToolCall(
   prepared: PreparedToolCall,
   signal: AbortSignal | undefined,
   emit: AgentEventSink,
-): Promise<ExecutedToolCallOutcome | SuspendedToolCallOutcome> {
-  const updateEvents: Promise<void>[] = [];
-  let updateQueue = Promise.resolve();
-
+): Promise<ExecutedToolCallOutcome> {
   try {
-    const result = await prepared.tool.execute(
-      prepared.toolCall.id,
-      prepared.args as never,
+    const result = await executeAgentTool({
+      tool: prepared.tool,
+      toolCallId: prepared.toolCall.id,
+      args: prepared.args,
       signal,
-      (partialResult) => {
-        const updateEvent = updateQueue.then(() =>
-          Promise.resolve(
-            emit({
-              type: 'tool_execution_update',
-              toolCallId: prepared.toolCall.id,
-              toolName: prepared.toolCall.name,
-              args: prepared.toolCall.arguments,
-              partialResult,
-            }),
-          ),
-        );
-        updateEvents.push(updateEvent);
-        updateQueue = updateEvent.catch(() => undefined);
-      },
-    );
-    // A progress-listener failure must not turn an already completed side effect
-    // into a failed tool result and invite the model to repeat it.
-    await Promise.allSettled(updateEvents);
-    if (isToolSuspension(result)) {
-      return suspendedToolCall(prepared.toolCall, prepared.args, result);
-    }
+      onUpdate: (partialResult) =>
+        emit({
+          type: 'tool_execution_update',
+          toolCallId: prepared.toolCall.id,
+          toolName: prepared.toolCall.name,
+          args: prepared.toolCall.arguments,
+          partialResult,
+        }),
+    });
     return { kind: 'executed', result, isError: false };
   } catch (error) {
-    await Promise.allSettled(updateEvents);
     return {
       kind: 'executed',
-      result:
-        error instanceof AgentToolResultError
-          ? error.result
-          : createErrorToolResult(error instanceof Error ? error.message : String(error)),
+      result: agentToolErrorResult(error),
       isError: true,
     };
   }

@@ -1,5 +1,5 @@
 import { Type } from '@mariozechner/pi-ai';
-import type { AgentToolExecutionResult, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentToolResult } from '@mariozechner/pi-agent-core';
 import { lstat, mkdir, open, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
@@ -371,7 +371,7 @@ export class LocalWorkspaceTarget implements WorkspaceTarget {
     };
   }
 
-  async execute(call: WorkspaceTargetCall): Promise<AgentToolExecutionResult<unknown>> {
+  async execute(call: WorkspaceTargetCall): Promise<AgentToolResult<unknown>> {
     const tool = this.tools.get(call.tool);
     if (!tool)
       throw new Error(`workspace target ${this.descriptor.id} does not support ${call.tool}`);

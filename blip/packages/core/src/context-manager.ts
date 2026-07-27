@@ -63,10 +63,6 @@ export class BlipContextManager {
 
   constructor(private readonly options: ContextManagerOptions) {}
 
-  get running(): boolean {
-    return this.abortController !== undefined;
-  }
-
   abort(): void {
     this.abortController?.abort();
   }
