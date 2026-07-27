@@ -474,6 +474,34 @@ export class PromptQueueRepository {
     );
   }
 
+  listQueuedChatWakeups(): Array<{
+    droneId: string;
+    chatName: string;
+    nextAttemptAt: string;
+  }> {
+    return this.database.read((connection) =>
+      (
+        connection
+          .prepare(
+            `SELECT drone_id, chat_name, MIN(next_attempt_at) AS next_attempt_at
+             FROM prompts
+             WHERE state = 'queued'
+             GROUP BY drone_id, chat_name
+             ORDER BY MIN(sequence)`,
+          )
+          .all() as Array<{
+          drone_id: string;
+          chat_name: string;
+          next_attempt_at: string;
+        }>
+      ).map((row) => ({
+        droneId: row.drone_id,
+        chatName: row.chat_name,
+        nextAttemptAt: row.next_attempt_at,
+      })),
+    );
+  }
+
   async claim(opts: {
     droneId: string;
     chatName: string;

@@ -1,6 +1,6 @@
 export type BlipPermissionMode = "read-only" | "workspace-write" | "full-access";
 export type BlipToolProfile = "local-trusted-write" | "read-only" | "no-shell-workspace-write";
-export type BlipSessionStatus = "completed" | "cancelled" | "error";
+export type BlipSessionStatus = "completed" | "cancelled" | "error" | "suspended";
 
 export interface BlipRuntimeEventBase {
   version: 1;
@@ -27,10 +27,25 @@ export type BlipSessionTiming = {
   toolCallWallMs: number;
   nonToolWallMs: number;
   longestToolCall?: { callId: string; tool: string; durationMs: number };
-  toolCallsByName: Record<string, { count: number; completed: number; failed: number; sumMs: number }>;
+  toolCallsByName: Record<
+    string,
+    { count: number; completed: number; failed: number; sumMs: number }
+  >;
 };
 
-export type BlipContextUsage = { tokens: number; contextWindow: number; percent: number };
+export type BlipContextUsage = {
+  tokens: number;
+  contextWindow: number;
+  percent: number;
+  confidence?: "heuristic";
+  breakdown?: {
+    systemPrompt: number;
+    messages: number;
+    toolDefinitions: number;
+    images: number;
+    providerOverhead: number;
+  };
+};
 
 export type AgentRunFileChangeStatus =
   | "added"
@@ -86,7 +101,9 @@ export type AgentRunFileChangeWorkspaceV2 = {
   metadataTruncated?: boolean;
 };
 
-export type AgentRunFileChangeWorkspace = AgentRunFileChangeWorkspaceV1 | AgentRunFileChangeWorkspaceV2;
+export type AgentRunFileChangeWorkspace =
+  | AgentRunFileChangeWorkspaceV1
+  | AgentRunFileChangeWorkspaceV2;
 
 export type AgentRunFileChangesV1 = {
   version: 1;
@@ -107,23 +124,91 @@ export type AgentRunFileChangesV2 = {
 export type AgentRunFileChanges = AgentRunFileChangesV1 | AgentRunFileChangesV2;
 
 export type BlipRuntimeEvent =
-  | (BlipRuntimeEventBase & { type: "session_started"; workspaceRoot: string; model: string; permissionMode: BlipPermissionMode; toolProfile: BlipToolProfile; resumed: boolean })
+  | (BlipRuntimeEventBase & {
+      type: "session_started";
+      workspaceRoot: string;
+      model: string;
+      permissionMode: BlipPermissionMode;
+      toolProfile: BlipToolProfile;
+      resumed: boolean;
+    })
   | (BlipRuntimeEventBase & { type: "turn_started"; prompt?: string })
   | (BlipRuntimeEventBase & { type: "assistant_delta"; text: string })
   | (BlipRuntimeEventBase & { type: "assistant_message"; messageId: string; text: string })
   | (BlipRuntimeEventBase & { type: "reasoning_delta"; text: string })
   | (BlipRuntimeEventBase & { type: "reasoning_message"; messageId: string; text: string })
   | (BlipRuntimeEventBase & { type: "transcript_changed"; role: string })
-  | (BlipRuntimeEventBase & { type: "tool_call_started"; callId: string; tool: string; args: unknown })
-  | (BlipRuntimeEventBase & { type: "tool_call_progress"; callId: string; tool: string; message: string; details?: unknown })
-  | (BlipRuntimeEventBase & { type: "tool_call_completed"; callId: string; tool: string; result: unknown })
-  | (BlipRuntimeEventBase & { type: "tool_call_failed"; callId: string; tool: string; error: string })
-  | (BlipRuntimeEventBase & { type: "process_diagnostics"; reason: string; activeHandles: Array<{ type: string; count: number }>; activeRequests: Array<{ type: string; count: number }> })
+  | (BlipRuntimeEventBase & {
+      type: "tool_call_started";
+      callId: string;
+      tool: string;
+      args: unknown;
+    })
+  | (BlipRuntimeEventBase & {
+      type: "tool_call_progress";
+      callId: string;
+      tool: string;
+      message: string;
+      details?: unknown;
+    })
+  | (BlipRuntimeEventBase & {
+      type: "tool_call_completed";
+      callId: string;
+      tool: string;
+      result: unknown;
+    })
+  | (BlipRuntimeEventBase & {
+      type: "tool_call_failed";
+      callId: string;
+      tool: string;
+      error: string;
+    })
+  | (BlipRuntimeEventBase & {
+      type: "tool_call_suspended";
+      suspensionId: string;
+      callId: string;
+      tool: string;
+      reason: string;
+      details?: unknown;
+      recoveryRequired: boolean;
+    })
+  | (BlipRuntimeEventBase & {
+      type: "tool_call_resolved";
+      suspensionId: string;
+      callId: string;
+      tool: string;
+      decision: "approved" | "denied";
+      status: "completed" | "denied" | "failed";
+    })
+  | (BlipRuntimeEventBase & { type: "model_retry"; reason: "context_overflow"; attempt: number })
+  | (BlipRuntimeEventBase & {
+      type: "process_diagnostics";
+      reason: string;
+      activeHandles: Array<{ type: string; count: number }>;
+      activeRequests: Array<{ type: string; count: number }>;
+    })
   | (BlipRuntimeEventBase & { type: "compaction_started"; reason: string })
   | (BlipRuntimeEventBase & { type: "compaction_skipped"; reason: string })
-  | (BlipRuntimeEventBase & { type: "compaction_completed"; summaryId: string; tokensBefore: number; tokensAfter: number })
+  | (BlipRuntimeEventBase & {
+      type: "compaction_completed";
+      summaryId: string;
+      tokensBefore: number;
+      tokensAfter: number;
+      fallbackUsed?: boolean;
+      fallbackReason?: string;
+    })
   | (BlipRuntimeEventBase & { type: "session_error"; error: string; recoverable: boolean })
-  | (BlipRuntimeEventBase & { type: "session_finished"; status: BlipSessionStatus; changedFiles: string[]; fileChanges?: AgentRunFileChanges; durationMs: number; timing?: BlipSessionTiming; contextUsage?: BlipContextUsage; error?: string; toolFailures?: Array<{ callId: string; tool: string; error: string }> });
+  | (BlipRuntimeEventBase & {
+      type: "session_finished";
+      status: BlipSessionStatus;
+      changedFiles: string[];
+      fileChanges?: AgentRunFileChanges;
+      durationMs: number;
+      timing?: BlipSessionTiming;
+      contextUsage?: BlipContextUsage;
+      error?: string;
+      toolFailures?: Array<{ callId: string; tool: string; error: string }>;
+    });
 
 export type BlipHistoryMessage = {
   role: string;
@@ -155,7 +240,12 @@ export type BlipHistoryPage = {
   };
 };
 
-export type BlipRuntimeEventEnvelope = { type: "blip_event"; version: 1; threadId: string; event: BlipRuntimeEvent };
+export type BlipRuntimeEventEnvelope = {
+  type: "blip_event";
+  version: 1;
+  threadId: string;
+  event: BlipRuntimeEvent;
+};
 
 export type BlipPromptStreamEvent =
   | BlipRuntimeEventEnvelope

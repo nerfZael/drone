@@ -8,12 +8,18 @@ import type { BlipSessionState, TranscriptEntry } from './types.js';
 import { createPortableId } from './platform.js';
 
 const DEFAULT_TOOL_RESULT_CHARS = 2_000;
+const DEFAULT_MESSAGE_CHARS = 12_000;
+const DEFAULT_SUMMARY_INPUT_CHARS = 120_000;
 
 export interface CompactionSettings {
   auto: boolean;
   reserveTokens: number;
   keepRecentTokens: number;
   keepRecentTurns: number;
+  /** Per-message cap when constructing the summarizer request. */
+  maxSummaryMessageChars?: number;
+  /** Total transcript cap when constructing the summarizer request. */
+  maxSummaryInputChars?: number;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
@@ -21,6 +27,8 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
   reserveTokens: 16_384,
   keepRecentTokens: 20_000,
   keepRecentTurns: 2,
+  maxSummaryMessageChars: DEFAULT_MESSAGE_CHARS,
+  maxSummaryInputChars: DEFAULT_SUMMARY_INPUT_CHARS,
 };
 
 type MessageEntry = Extract<TranscriptEntry, { type: 'message' }>;
@@ -28,8 +36,8 @@ type CompactionEntry = Extract<TranscriptEntry, { type: 'compaction' }>;
 
 export interface CompactionPlan {
   previousSummary?: string;
-  firstKeptEntryId: string;
-  firstKeptEntryIndex: number;
+  firstKeptEntryId?: string;
+  firstKeptEntryIndex?: number;
   entriesToSummarize: MessageEntry[];
   entriesToKeep: MessageEntry[];
   tokensBefore: number;
@@ -111,35 +119,6 @@ export function estimateEntriesTokens(entries: TranscriptEntry[]): number {
     );
 }
 
-export function estimateModelContextTokens(entries: TranscriptEntry[]): number {
-  const latest = latestCompaction(entries);
-  if (!latest) return estimateEntriesTokens(entries);
-
-  let tokens = Math.ceil(latest.entry.summary.length / 4);
-  let foundFirstKept = false;
-  for (let index = 0; index < latest.index; index += 1) {
-    const entry = entries[index];
-    if (entry.id === latest.entry.firstKeptEntryId) foundFirstKept = true;
-    if (foundFirstKept && entry.type === 'message') tokens += estimateMessageTokens(entry.message);
-  }
-  if (!foundFirstKept) return estimateEntriesTokens(entries);
-  for (let index = latest.index + 1; index < entries.length; index += 1) {
-    const entry = entries[index];
-    if (entry.type === 'message') tokens += estimateMessageTokens(entry.message);
-  }
-  return tokens;
-}
-
-export function shouldAutoCompact(input: {
-  entries: TranscriptEntry[];
-  contextWindow?: number;
-  settings?: CompactionSettings;
-}): boolean {
-  const settings = input.settings ?? DEFAULT_COMPACTION_SETTINGS;
-  if (!settings.auto || !input.contextWindow) return false;
-  return estimateModelContextTokens(input.entries) > input.contextWindow - settings.reserveTokens;
-}
-
 function latestCompaction(
   entries: TranscriptEntry[],
 ): { entry: CompactionEntry; index: number } | undefined {
@@ -171,6 +150,7 @@ function chooseFirstKeptIndex(
     entry.message.role === 'user' ? [index] : [],
   );
   const keepRecentTurns = Math.max(1, settings.keepRecentTurns);
+  if (settings.keepRecentTurns <= 0) return messages.length;
   let selected = userIndexes.length
     ? userIndexes[Math.max(0, userIndexes.length - keepRecentTurns)]
     : Math.max(0, messages.length - 1);
@@ -232,13 +212,11 @@ export function prepareCompaction(input: {
   if (messages.length < 2) return undefined;
 
   const firstKeptMessageIndex = chooseFirstKeptIndex(messages, settings);
-  const firstKept = messages[firstKeptMessageIndex];
-  if (!firstKept) return undefined;
-
   const entriesToSummarize = messages.slice(0, firstKeptMessageIndex);
   if (entriesToSummarize.length === 0) return undefined;
 
   const entriesToKeep = messages.slice(firstKeptMessageIndex);
+  const firstKept = messages[firstKeptMessageIndex];
   const summaryTokenEstimate = previous?.entry.summary
     ? Math.ceil(previous.entry.summary.length / 4)
     : 0;
@@ -247,8 +225,12 @@ export function prepareCompaction(input: {
     entriesToKeep.reduce((sum, entry) => sum + estimateMessageTokens(entry.message), 0);
   return {
     previousSummary: previous?.entry.summary,
-    firstKeptEntryId: firstKept.id,
-    firstKeptEntryIndex: firstKept.transcriptIndex,
+    ...(firstKept
+      ? {
+          firstKeptEntryId: firstKept.id,
+          firstKeptEntryIndex: firstKept.transcriptIndex,
+        }
+      : {}),
     entriesToSummarize,
     entriesToKeep,
     tokensBefore: estimateEntriesTokens(input.entries),
@@ -258,17 +240,28 @@ export function prepareCompaction(input: {
   };
 }
 
-function serializeForSummary(entries: MessageEntry[]): string {
-  return entries
-    .map((entry, index) => {
-      const role = entry.message.role;
-      const text = messageText(
-        entry.message,
-        role === 'toolResult' ? DEFAULT_TOOL_RESULT_CHARS : Number.POSITIVE_INFINITY,
-      );
-      return `<message index="${index + 1}" id="${entry.id}" role="${role}">\n${text}\n</message>`;
-    })
-    .join('\n\n');
+function serializeForSummary(entries: MessageEntry[], settings: CompactionSettings): string {
+  const maxTotal = Math.max(1_000, settings.maxSummaryInputChars ?? DEFAULT_SUMMARY_INPUT_CHARS);
+  const maxMessage = Math.max(500, settings.maxSummaryMessageChars ?? DEFAULT_MESSAGE_CHARS);
+  let remaining = maxTotal;
+  const serialized: string[] = [];
+  for (let index = entries.length - 1; index >= 0 && remaining > 0; index -= 1) {
+    const entry = entries[index]!;
+    const role = entry.message.role;
+    const text = messageText(
+      entry.message,
+      Math.min(role === 'toolResult' ? DEFAULT_TOOL_RESULT_CHARS : maxMessage, remaining),
+    );
+    const block = `<message index="${index + 1}" id="${entry.id}" role="${role}">\n${text}\n</message>`;
+    serialized.unshift(block);
+    remaining -= block.length + 2;
+  }
+  if (serialized.length < entries.length) {
+    serialized.unshift(
+      `[summary input truncated: omitted ${entries.length - serialized.length} older message(s)]`,
+    );
+  }
+  return serialized.join('\n\n');
 }
 
 function deterministicSummary(input: { session: BlipSessionState; plan: CompactionPlan }): string {
@@ -332,7 +325,7 @@ function summaryPrompt(plan: CompactionPlan): string {
   return `${previous}
 
 <conversation>
-${serializeForSummary(plan.entriesToSummarize)}
+${serializeForSummary(plan.entriesToSummarize, plan.settings)}
 </conversation>
 
 Use this exact Markdown structure:
@@ -437,6 +430,8 @@ export async function createCompaction(input: {
   if (!plan) return undefined;
 
   let summary: string;
+  let fallbackUsed = !input.model;
+  let fallbackReason: string | undefined = input.model ? undefined : 'no summary model configured';
   try {
     summary = input.model
       ? await modelSummary({
@@ -450,6 +445,8 @@ export async function createCompaction(input: {
       : deterministicSummary({ session: input.session, plan });
   } catch (error) {
     if (input.signal?.aborted) throw error;
+    fallbackUsed = true;
+    fallbackReason = error instanceof Error ? error.message : String(error);
     summary = deterministicSummary({ session: input.session, plan });
   }
   summary = appendFileMetadata(summary, plan.details);
@@ -463,7 +460,9 @@ export async function createCompaction(input: {
     tokensAfterEstimate:
       Math.ceil(summary.length / 4) +
       plan.entriesToKeep.reduce((sum, entry) => sum + estimateMessageTokens(entry.message), 0),
-    firstKeptEntryId: plan.firstKeptEntryId,
+    fallbackUsed,
+    ...(fallbackReason ? { fallbackReason: fallbackReason.slice(0, 500) } : {}),
+    ...(plan.firstKeptEntryId ? { firstKeptEntryId: plan.firstKeptEntryId } : {}),
     summary,
     details: plan.details,
   };
@@ -494,7 +493,9 @@ export function createLocalCompaction(input: {
     tokensAfterEstimate:
       Math.ceil(summary.length / 4) +
       plan.entriesToKeep.reduce((sum, entry) => sum + estimateMessageTokens(entry.message), 0),
-    firstKeptEntryId: plan.firstKeptEntryId,
+    fallbackUsed: true,
+    fallbackReason: 'local deterministic compaction',
+    ...(plan.firstKeptEntryId ? { firstKeptEntryId: plan.firstKeptEntryId } : {}),
     summary,
     details: plan.details,
   };

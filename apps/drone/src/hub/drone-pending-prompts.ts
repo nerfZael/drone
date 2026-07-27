@@ -457,11 +457,13 @@ export function createDronePendingPromptStore(deps: {
     return { disposition: 'retry', nextAttemptAt: deps.nowIso() };
   }
 
-  async function resumePendingPromptChats(): Promise<Array<{ droneId: string; chatName: string }>> {
+  async function resumePendingPromptChats(): Promise<
+    Array<{ droneId: string; chatName: string; nextAttemptAt: string }>
+  > {
     const queue = promptQueueForActiveDrone();
     if (!queue) return [];
     await queue.recoverExpiredLeases();
-    return queue.listQueuedChats();
+    return queue.listQueuedChatWakeups();
   }
 
   async function claimQueuedPendingPromptForSending(opts: { droneId: string; chatName: string; id: string }): Promise<boolean> {

@@ -5,3 +5,4 @@ export * from './model-context.js';
 export * from './platform.js';
 export * from './session-repository.js';
 export * from './types.js';
+export * from './tool-suspension.js';

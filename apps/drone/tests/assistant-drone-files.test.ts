@@ -256,11 +256,11 @@ describe('assistant drone workspace target execution', () => {
             label: 'Desktop · Project',
           },
         }),
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual({ status: 'allow' });
     });
   });
 
-  test('denies an approval immediately when its signal is already aborted', async () => {
+  test('returns a durable suspension even when the original request signal is aborted', async () => {
     await withTempDroneDataDir('assistant-aborted-bash-approval-', async () => {
       const service = new HubAssistantService({ listDrones: async () => [] });
       const created = await ensureTestNativeChat(service, { chatName: 'aborted execute' });
@@ -283,53 +283,53 @@ describe('assistant drone workspace target execution', () => {
           },
           controller.signal,
         ),
-      ).resolves.toEqual({ block: true, reason: 'User denied bash.' });
+      ).resolves.toMatchObject({
+        status: 'suspend',
+        reason: 'Approval required for Execute Bash command.',
+      });
     });
   });
 
-  test('stops the native run before releasing a denied approval', async () => {
+  test('delegates a durable approval decision after a suspension event restores the cache', async () => {
     await withTempDroneDataDir('assistant-denied-approval-stop-', async () => {
       const service = new HubAssistantService({ listDrones: async () => [] });
       const created = await ensureTestNativeChat(service, { chatName: 'deny and stop' });
       const threadId = created.chatId;
-      let preflightSettled = false;
-      let stoppedThreadId = '';
-      let unsubscribe = () => {};
-      const approvalPending = new Promise<void>((resolve) => {
-        unsubscribe = service.subscribeChanges((event) => {
-          if (event.threadId !== threadId || event.reason !== 'approval_pending') return;
-          unsubscribe();
-          resolve();
-        });
+      const preflight = await service.preflightBlipTool(threadId, 'bash', 'call-denied', {
+        command: 'pwd',
+        workspaceTarget: {
+          id: 'remote:desktop:project',
+          kind: 'remote-device',
+          label: 'Desktop · Project',
+        },
       });
-      service.setRuntimeStopDelegate((stoppedId) => {
-        expect(preflightSettled).toBe(false);
-        stoppedThreadId = stoppedId;
+      expect(preflight.status).toBe('suspend');
+      const suspensionId = 'sus-restored';
+      await service.notifyRuntimeEvent(threadId, {
+        type: 'tool_call_suspended',
+        suspensionId,
+        callId: 'call-denied',
+        tool: 'bash',
+        reason: preflight.status === 'suspend' ? preflight.reason : '',
+        details: preflight.status === 'suspend' ? preflight.details : undefined,
+        timestamp: '2026-07-27T00:00:00.000Z',
+        recoveryRequired: true,
       });
-
-      const preflight = service
-        .preflightBlipTool(threadId, 'bash', 'call-denied', {
-          command: 'pwd',
-          workspaceTarget: {
-            id: 'remote:desktop:project',
-            kind: 'remote-device',
-            label: 'Desktop · Project',
-          },
-        })
-        .then((decision) => {
-          preflightSettled = true;
-          return decision;
-        });
-      await approvalPending;
       const approval = (await service.threadSnapshot(threadId)).pendingApprovals[0]!;
-
+      const decisions: Array<{ threadId: string; approvalId: string; approved: boolean }> = [];
+      service.setApprovalDecisionDelegate(async (resolvedThreadId, approvalId, approved) => {
+        decisions.push({ threadId: resolvedThreadId, approvalId, approved });
+        await service.notifyRuntimeEvent(resolvedThreadId, {
+          type: 'tool_call_resolved',
+          suspensionId: approvalId,
+          status: 'denied',
+        });
+      });
       await service.approve(approval.id, false, threadId);
 
-      expect(stoppedThreadId).toBe(threadId);
-      await expect(preflight).resolves.toEqual({
-        block: true,
-        reason: 'User denied bash.',
-      });
+      expect(approval.id).toBe(suspensionId);
+      expect(decisions).toEqual([{ threadId, approvalId: suspensionId, approved: false }]);
+      expect((await service.threadSnapshot(threadId)).pendingApprovals).toEqual([]);
     });
   });
 });

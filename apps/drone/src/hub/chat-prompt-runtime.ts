@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 
+import { DroneApiRequestError } from '../host/api';
 import type { AgentPlan } from './agent-plan';
 import type { ChatImageAttachment, ChatImageAttachmentRef } from './chat-attachments';
 import type {
@@ -11,6 +12,7 @@ import type {
 import { ChatReconciliationQueue } from './chat-reconciliation-queue';
 import { createChatReconciliationExecutor } from './chat-reconciliation-executor';
 import { DaemonPromptEventMonitor } from './daemon-prompt-event-monitor';
+import { DroneDaemonRecovery } from './drone-daemon-recovery';
 import type { PendingPromptState } from './drone-pending-state';
 import {
   nativeAssistantOwnsPromptDelivery,
@@ -41,6 +43,7 @@ type ChatPromptRuntimeDependencyName =
   | 'codexImageAttachmentFlags'
   | 'collectDroneRuntimeDiagnostics'
   | 'compactDiagnosticError'
+  | 'commitDroneMetadataPatch'
   | 'copyChatAttachmentsToContainer'
   | 'copyChatAttachmentsToHost'
   | 'createDronePendingPromptStore'
@@ -52,6 +55,7 @@ type ChatPromptRuntimeDependencyName =
   | 'dronePromptCancel'
   | 'dronePromptEnqueue'
   | 'dronePromptGet'
+  | 'droneStatus'
   | 'droneRuntime'
   | 'dvmExec'
   | 'dvmSessionType'
@@ -76,6 +80,7 @@ type ChatPromptRuntimeDependencyName =
   | 'isNotFoundErrorMessage'
   | 'loadRegistry'
   | 'looksLikeTransientPromptEnqueueError'
+  | 'launchHostDroneDaemon'
   | 'makeClient'
   | 'maybeBootstrapPromptFromTranscript'
   | 'maybeStartDockerSnapshotForTranscriptTurn'
@@ -168,6 +173,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     codexImageAttachmentFlags,
     collectDroneRuntimeDiagnostics,
     compactDiagnosticError,
+    commitDroneMetadataPatch,
     copyChatAttachmentsToContainer,
     copyChatAttachmentsToHost,
     createDronePendingPromptStore,
@@ -179,6 +185,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     dronePromptCancel,
     dronePromptEnqueue,
     dronePromptGet,
+    droneStatus,
     droneRuntime,
     dvmExec,
     dvmSessionType,
@@ -203,6 +210,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     isNotFoundErrorMessage,
     loadRegistry,
     looksLikeTransientPromptEnqueueError,
+    launchHostDroneDaemon,
     makeClient,
     maybeBootstrapPromptFromTranscript,
     maybeStartDockerSnapshotForTranscriptTurn,
@@ -271,6 +279,40 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     withTimeout,
   } = deps;
 
+  const daemonRecovery = new DroneDaemonRecovery({
+    probe: async (client) => {
+      await droneStatus(client, { timeoutMs: 1_000 });
+    },
+    shouldRecoverProbeError: (error) => !(error instanceof DroneApiRequestError),
+    ensureContainer: async ({ containerName, containerPort }) => {
+      await ensureContainerDroneDaemonSession({
+        containerName,
+        containerPort,
+        forceRestart: true,
+      });
+    },
+    launchHost: async ({ droneId, hostPort, token }) =>
+      await launchHostDroneDaemon({ droneId, hostPort, token }),
+    persistHostPid: async ({ droneId, pid }) => {
+      await commitDroneMetadataPatch({
+        droneId,
+        state: 'real',
+        eventType: 'drone.host-daemon.recovered',
+        payload: { pid },
+        transform: (lifecycle: Record<string, any>) => ({
+          ...lifecycle,
+          host: {
+            ...(lifecycle?.host && typeof lifecycle.host === 'object' ? lifecycle.host : {}),
+            pid,
+          },
+        }),
+      });
+    },
+    waitUntilReady: async (client, timeoutMs) => {
+      await waitForDroneDaemonReady(client, timeoutMs);
+    },
+  });
+
   async function enqueueTranscriptPrompt(opts: {
     id?: string;
     drone: any;
@@ -281,6 +323,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     deliveryMode?: 'queue' | 'asap';
   }) {
     const d = opts.drone;
+    const runtime = droneRuntime(d);
+    const droneId = normalizeDroneIdentity(d?.id) || String(d?.name ?? '');
     const containerName = String(d?.containerName ?? d?.name ?? '').trim();
     const token = typeof d.token === 'string' ? d.token : '';
     const hostPort =
@@ -301,8 +345,24 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         ? Math.floor(opts.waitForDaemonMs)
         : Math.max(daemonReadyTimeoutMs, UPGRADE_DAEMON_READY_TIMEOUT_MS);
     const client = makeClient(hostPort, token);
-    await waitForDroneDaemonReady(client, daemonReadyTimeoutMs);
-    const droneId = normalizeDroneIdentity(d?.id) || String(d?.name ?? '');
+    const recovery = await daemonRecovery.ensure({
+      droneId,
+      runtime,
+      client,
+      containerName,
+      containerPort: Number(d?.containerPort ?? hostPort),
+      hostPort,
+      token,
+      readyTimeoutMs: daemonReadyTimeoutMs,
+    });
+    if (recovery.recovered) {
+      hubLog('info', 'recovered drone daemon on demand', {
+        droneId,
+        runtime,
+        containerName,
+        hostPort,
+      });
+    }
     try {
       await dronePromptEnqueue(client, {
         id: String(opts.id ?? ''),
@@ -2209,6 +2269,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       });
     }
 
+    let pendingState: PendingPromptState = 'sending';
     try {
       const enqueueTimeoutMs = Math.max(
         defaultPromptEnqueueTimeoutMs(),
@@ -2241,6 +2302,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           id,
           patch: { state: 'failed', error: String(r?.error ?? 'failed') },
         });
+        pendingState = 'failed';
       } else {
         await updatePendingPrompt({ droneId, chatName, id, patch: { state: 'sent' } });
         enqueueReconcile(droneId, chatName);
@@ -2272,12 +2334,15 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           error: interruptedPromptDeliveryError(errorText),
         });
         if (retry.disposition === 'retry') {
+          pendingState = 'queued';
           const nextMs = retry.nextAttemptAt ? Date.parse(retry.nextAttemptAt) : NaN;
           schedulePendingPromptPumpRetry(
             droneId,
             chatName,
             Number.isFinite(nextMs) ? Math.max(1_000, nextMs - Date.now()) : undefined,
           );
+        } else if (retry.disposition === 'terminal') {
+          pendingState = 'failed';
         }
       } else {
         await updatePendingPrompt({
@@ -2286,12 +2351,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           id,
           patch: { state: 'failed', error: errorText },
         });
+        pendingState = 'failed';
       }
     }
 
     // Best-effort: if there are any deferred follow-ups, try to enqueue now.
     enqueuePendingPromptPump(droneId, chatName);
-    return { id, pendingState: 'sending' };
+    return { id, pendingState };
   }
 
   type PromptEnqueueDisposition = {
@@ -2524,6 +2590,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     daemonPromptEventMonitor,
     dequeueProvisioning,
     enqueuePendingPromptPump,
+    schedulePendingPromptPumpRetry,
     enqueueProvisioning,
     enqueueProvisioningForAllPending,
     enqueueReconcile,

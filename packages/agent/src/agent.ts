@@ -17,7 +17,10 @@ import type {
   AgentLoopConfig,
   AgentMessage,
   AgentState,
+  AgentToolSuspendedCall,
   AgentTool,
+  BeforeModelCallContext,
+  BeforeModelCallResult,
   BeforeToolCallContext,
   BeforeToolCallResult,
   StreamFn,
@@ -57,17 +60,21 @@ type QueueMode = 'all' | 'one-at-a-time';
 
 type MutableAgentState = Omit<
   AgentState,
-  'isStreaming' | 'streamingMessage' | 'pendingToolCalls' | 'errorMessage'
+  'isStreaming' | 'streamingMessage' | 'pendingToolCalls' | 'errorMessage' | 'suspendedToolCall'
 > & {
   isStreaming: boolean;
   streamingMessage?: AgentMessage;
   pendingToolCalls: Set<string>;
   errorMessage?: string;
+  suspendedToolCall?: AgentToolSuspendedCall;
 };
 
 function createMutableAgentState(
   initialState?: Partial<
-    Omit<AgentState, 'pendingToolCalls' | 'isStreaming' | 'streamingMessage' | 'errorMessage'>
+    Omit<
+      AgentState,
+      'pendingToolCalls' | 'isStreaming' | 'streamingMessage' | 'errorMessage' | 'suspendedToolCall'
+    >
   >,
 ): MutableAgentState {
   let tools = initialState?.tools?.slice() ?? [];
@@ -93,16 +100,24 @@ function createMutableAgentState(
     streamingMessage: undefined,
     pendingToolCalls: new Set<string>(),
     errorMessage: undefined,
+    suspendedToolCall: undefined,
   };
 }
 
 /** Options for constructing an {@link Agent}. */
 export interface AgentOptions {
   initialState?: Partial<
-    Omit<AgentState, 'pendingToolCalls' | 'isStreaming' | 'streamingMessage' | 'errorMessage'>
+    Omit<
+      AgentState,
+      'pendingToolCalls' | 'isStreaming' | 'streamingMessage' | 'errorMessage' | 'suspendedToolCall'
+    >
   >;
   convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
   transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+  beforeModelCall?: (
+    context: BeforeModelCallContext,
+    signal?: AbortSignal,
+  ) => Promise<BeforeModelCallResult | undefined>;
   streamFn?: StreamFn;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   onPayload?: SimpleStreamOptions['onPayload'];
@@ -182,6 +197,10 @@ export class Agent {
     messages: AgentMessage[],
     signal?: AbortSignal,
   ) => Promise<AgentMessage[]>;
+  public beforeModelCall?: (
+    context: BeforeModelCallContext,
+    signal?: AbortSignal,
+  ) => Promise<BeforeModelCallResult | undefined>;
   public streamFn: StreamFn;
   public getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   public onPayload?: SimpleStreamOptions['onPayload'];
@@ -210,6 +229,7 @@ export class Agent {
     this._state = createMutableAgentState(options.initialState);
     this.convertToLlm = options.convertToLlm ?? defaultConvertToLlm;
     this.transformContext = options.transformContext;
+    this.beforeModelCall = options.beforeModelCall;
     this.streamFn = options.streamFn ?? streamSimple;
     this.getApiKey = options.getApiKey;
     this.onPayload = options.onPayload;
@@ -326,6 +346,7 @@ export class Agent {
     this._state.streamingMessage = undefined;
     this._state.pendingToolCalls = new Set<string>();
     this._state.errorMessage = undefined;
+    this._state.suspendedToolCall = undefined;
     this.clearFollowUpQueue();
     this.clearSteeringQueue();
   }
@@ -447,6 +468,7 @@ export class Agent {
       afterToolCall: this.afterToolCall,
       convertToLlm: this.convertToLlm,
       transformContext: this.transformContext,
+      beforeModelCall: this.beforeModelCall,
       getApiKey: this.getApiKey,
       getSteeringMessages: async () => {
         if (skipInitialSteeringPoll) {
@@ -474,6 +496,7 @@ export class Agent {
     this._state.isStreaming = true;
     this._state.streamingMessage = undefined;
     this._state.errorMessage = undefined;
+    this._state.suspendedToolCall = undefined;
 
     try {
       await executor(abortController.signal);
@@ -526,6 +549,14 @@ export class Agent {
         this._state.streamingMessage = event.message;
         break;
 
+      case 'message_retry':
+        this._state.streamingMessage = undefined;
+        break;
+
+      case 'context_replaced':
+        this._state.messages = event.messages;
+        break;
+
       case 'message_end':
         this._state.streamingMessage = undefined;
         this._state.messages.push(event.message);
@@ -544,6 +575,10 @@ export class Agent {
         this._state.pendingToolCalls = pendingToolCalls;
         break;
       }
+
+      case 'tool_execution_suspended':
+        this._state.suspendedToolCall = event.suspension;
+        break;
 
       case 'turn_end':
         if (event.message.role === 'assistant' && event.message.errorMessage) {

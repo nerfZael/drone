@@ -41,7 +41,6 @@ import { loadRegistry, registryHasDisplayName, updateRegistry } from './host/reg
 import { readRegistryJsonFromSqlitePath } from './host/sqlite-registry-store';
 import {
   hostDroneDaemonDataPath,
-  hostDroneDaemonLogPath,
   hostDroneDaemonTokenPath,
   hostDroneRootPath,
   hostDroneWorkspacePath,
@@ -56,6 +55,7 @@ import {
 import { ensureHubSetupState } from './host/setup-state';
 import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
 import { readRawBody } from './hub/hub-http';
+import { launchHostDroneDaemon } from './hub/drone-daemon-runtime';
 import { cleanupLegacyRemoteHub } from './hub/legacy-remote-cleanup';
 import {
   upsertCanonicalDroneLifecycle,
@@ -1427,42 +1427,6 @@ async function removeHostRuntimeRootBestEffort(droneIdRaw: unknown): Promise<voi
   }
 }
 
-async function launchHostDroneDaemon(opts: {
-  droneId: string;
-  hostPort: number;
-  token: string;
-}): Promise<number> {
-  const daemonPath = resolveDroneDaemonJsPath();
-  const daemonDataDir = hostDroneDaemonDataPath(opts.droneId);
-  const tokenPath = hostDroneDaemonTokenPath(opts.droneId);
-  const logPath = hostDroneDaemonLogPath(opts.droneId);
-  await fs.mkdir(daemonDataDir, { recursive: true });
-  await fs.writeFile(tokenPath, opts.token, 'utf8');
-  if (process.platform !== 'win32') {
-    try {
-      await fs.chmod(tokenPath, 0o600);
-    } catch {
-      // ignore
-    }
-  }
-  const log = await fs.open(logPath, 'a');
-  let child: ReturnType<typeof spawn> | null = null;
-  try {
-    child = spawn(
-      process.execPath,
-      [daemonPath, '--host', '127.0.0.1', '--port', String(opts.hostPort), '--data-dir', daemonDataDir, '--token-file', tokenPath],
-      { detached: true, stdio: ['ignore', log.fd, log.fd], env: process.env }
-    );
-    child.unref();
-  } finally {
-    await log.close();
-  }
-  if (!child?.pid || !Number.isFinite(child.pid)) {
-    throw new Error('failed to launch host daemon process');
-  }
-  return Math.floor(child.pid);
-}
-
 function makeClient(hostPort: number, token: string) {
   return { baseUrl: `http://127.0.0.1:${hostPort}`, token };
 }
@@ -1584,7 +1548,12 @@ createCommand
         throw new Error(missingHostDependencyMessage('tmux', 'host runtime drones'));
       }
       const hostPort = await getFreeTcpPort();
-      const hostPid = await launchHostDroneDaemon({ droneId: stableId, hostPort, token });
+      const hostPid = await launchHostDroneDaemon({
+        droneId: stableId,
+        hostPort,
+        token,
+        daemonPath: resolveDroneDaemonJsPath(),
+      });
       const workspaceDir = hostDroneWorkspacePath(stableId);
       const defaultCwd = repoPath ? repoPath : workspaceDir;
       const effectiveCwd = cwd || defaultCwd;

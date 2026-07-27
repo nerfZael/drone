@@ -3,7 +3,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { assertDroneDaemonRuntimeReady, resolveDroneDaemonJsPath, resolveDroneDaemonRuntimeDir } from '../src/hub/drone-daemon-runtime';
+import {
+  assertDroneDaemonRuntimeReady,
+  hostDroneDaemonLaunchEnvironment,
+  resolveDroneDaemonJsPath,
+  resolveDroneDaemonRuntimeDir,
+} from '../src/hub/drone-daemon-runtime';
 import { removeRetiredContainerCliScripts } from '../src/host/runtime';
 
 const tmpRoots: string[] = [];
@@ -51,5 +56,19 @@ describe('drone daemon runtime resolution', () => {
 
     await fs.writeFile(path.join(root, 'mcp-http-stdio-bridge.js'), 'module.exports = {};\n');
     await expect(assertDroneDaemonRuntimeReady(root)).resolves.toBeUndefined();
+  });
+
+  test('keeps the node executable directory on the host daemon PATH', () => {
+    const executablePath = path.join(path.sep, 'opt', 'node', 'bin', 'node');
+    const inheritedPath = [path.join(path.sep, 'usr', 'bin'), path.join(path.sep, 'bin')].join(
+      path.delimiter,
+    );
+    const env = hostDroneDaemonLaunchEnvironment(
+      { PATH: inheritedPath, DRONE_TEST_VALUE: 'preserved' },
+      executablePath,
+    );
+
+    expect(env.PATH?.split(path.delimiter)[0]).toBe(path.dirname(executablePath));
+    expect(env.DRONE_TEST_VALUE).toBe('preserved');
   });
 });

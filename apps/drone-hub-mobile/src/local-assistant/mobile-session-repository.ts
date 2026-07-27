@@ -1,8 +1,11 @@
 import {
   createPortableId,
   modelMessagesFromTranscript,
+  toolSuspensionsFromTranscript,
   type BlipRuntimeEvent,
   type BlipSessionState,
+  type BlipToolSuspension,
+  type BlipToolSuspensionStatus,
   type CreateSessionInput,
   type ForkSessionInput,
   type SessionRepository,
@@ -238,6 +241,36 @@ export class MobileSessionRepository implements SessionRepository {
       timestamp: new Date().toISOString(),
       event,
     });
+  }
+
+  async appendToolSuspension(
+    session: BlipSessionState,
+    suspension: BlipToolSuspension,
+  ): Promise<void> {
+    await this.appendEntry(session, {
+      type: 'tool_suspension',
+      id: createPortableId(),
+      timestamp: new Date().toISOString(),
+      suspension,
+    });
+    await this.persist();
+  }
+
+  async transitionToolSuspension(
+    session: BlipSessionState,
+    suspension: BlipToolSuspension,
+    expectedStatuses: BlipToolSuspensionStatus[],
+  ): Promise<boolean> {
+    const latest = toolSuspensionsFromTranscript(this.transcript).find(
+      (candidate) => candidate.id === suspension.id,
+    );
+    if (!latest || !expectedStatuses.includes(latest.status)) return false;
+    await this.appendToolSuspension(session, suspension);
+    return true;
+  }
+
+  async readToolSuspensions(): Promise<BlipToolSuspension[]> {
+    return toolSuspensionsFromTranscript(this.transcript);
   }
 
   async readTranscript(): Promise<TranscriptEntry[]> {

@@ -5,7 +5,11 @@ export * from "./api-registry.js";
 export * from "./env-api-keys.js";
 export * from "./models.js";
 export type { BedrockOptions, BedrockThinkingDisplay } from "./providers/amazon-bedrock.js";
-export type { AnthropicEffort, AnthropicOptions, AnthropicThinkingDisplay } from "./providers/anthropic.js";
+export type {
+	AnthropicEffort,
+	AnthropicOptions,
+	AnthropicThinkingDisplay,
+} from "./providers/anthropic.js";
 export type { AzureOpenAIResponsesOptions } from "./providers/azure-openai-responses.js";
 export * from "./providers/faux.js";
 export type { GoogleOptions } from "./providers/google.js";
@@ -23,6 +27,7 @@ export * from "./session-resources.js";
 export * from "./stream.js";
 export * from "./types.js";
 export * from "./utils/diagnostics.js";
+export * from "./utils/context-tokens.js";
 export * from "./utils/event-stream.js";
 export * from "./utils/json-parse.js";
 export type {

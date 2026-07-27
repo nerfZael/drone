@@ -519,9 +519,10 @@ function cleanOptionalString(raw: unknown): string {
 
 function normalizeAssistantWorkspaceIds(raw: unknown): string[] | undefined {
   if (!Array.isArray(raw)) return undefined;
-  return Array.from(
-    new Set(raw.map((item) => cleanOptionalString(item)).filter(Boolean)),
-  ).slice(0, 100);
+  return Array.from(new Set(raw.map((item) => cleanOptionalString(item)).filter(Boolean))).slice(
+    0,
+    100,
+  );
 }
 
 function normalizeAssistantRenameRequests(
@@ -1146,14 +1147,12 @@ export class HubAssistantService {
   private defaultEnabledTools = [...ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES];
   private changeSequence = 0;
   private readonly changeListeners = new Set<(event: AssistantChangeEvent) => void>();
-  private readonly approvals = new Map<
-    string,
-    AssistantApproval & {
-      resolve: (approved: boolean) => void;
-    }
-  >();
+  private readonly approvals = new Map<string, AssistantApproval>();
   private textPromptDelegate: ((threadId: string, prompt: string) => Promise<void>) | null = null;
   private runtimeStopDelegate: ((threadId: string) => void) | null = null;
+  private approvalDecisionDelegate:
+    | ((threadId: string, approvalId: string, approved: boolean) => Promise<void>)
+    | null = null;
 
   constructor(private readonly tools: AssistantToolCallbacks) {}
 
@@ -1163,6 +1162,12 @@ export class HubAssistantService {
 
   setRuntimeStopDelegate(delegate: (threadId: string) => void): void {
     this.runtimeStopDelegate = delegate;
+  }
+
+  setApprovalDecisionDelegate(
+    delegate: (threadId: string, approvalId: string, approved: boolean) => Promise<void>,
+  ): void {
+    this.approvalDecisionDelegate = delegate;
   }
 
   async notifyCanonicalHistoryChanged(threadId: string): Promise<void> {
@@ -1207,10 +1212,45 @@ export class HubAssistantService {
       emit(`runtime_${type}`);
       return;
     }
+    if (type === 'tool_call_suspended') {
+      const details = event?.details && typeof event.details === 'object' ? event.details : {};
+      const approval =
+        details?.approval && typeof details.approval === 'object' ? details.approval : {};
+      const id = cleanOptionalString(event?.suspensionId);
+      if (id) {
+        this.approvals.set(id, {
+          id,
+          threadId: thread.id,
+          toolCallId: cleanOptionalString(event?.callId),
+          toolName: cleanOptionalString(event?.tool) || 'tool',
+          label:
+            cleanOptionalString(approval?.label) || cleanOptionalString(event?.tool) || 'Run tool',
+          args: sanitizeMessage(approval?.args ?? {}),
+          createdAt: cleanOptionalString(event?.timestamp) || nowIso(),
+          status: 'pending',
+        });
+      }
+      this.runningThreadIds.delete(thread.id);
+      thread.status = 'waiting_for_approval';
+      thread.error = cleanOptionalString(event?.reason) || null;
+      thread.updatedAt = nowIso();
+      await this.persist();
+      emit(event?.recoveryRequired ? 'approval_recovery_required' : 'approval_pending');
+      return;
+    }
+    if (type === 'tool_call_resolved') {
+      this.approvals.delete(cleanOptionalString(event?.suspensionId));
+      thread.status = 'running';
+      thread.error = null;
+      thread.updatedAt = nowIso();
+      emit('approval_resolved');
+      return;
+    }
     if (type === 'session_finished') {
       this.runningThreadIds.delete(thread.id);
       const failed = String(event?.status ?? '').trim() === 'error';
-      thread.status = failed ? 'error' : 'idle';
+      const suspended = String(event?.status ?? '').trim() === 'suspended';
+      thread.status = failed ? 'error' : suspended ? 'waiting_for_approval' : 'idle';
       thread.error = failed
         ? cleanOptionalString(event?.error) || thread.error || 'Built-in agent prompt failed'
         : null;
@@ -2055,7 +2095,9 @@ export class HubAssistantService {
 
   private workspaceEnabled(thread: AssistantThread, workspaceId: string): boolean {
     // Chats created before workspace toggles existed retain their previous access.
-    return !Array.isArray(thread.enabledWorkspaceIds) || thread.enabledWorkspaceIds.includes(workspaceId);
+    return (
+      !Array.isArray(thread.enabledWorkspaceIds) || thread.enabledWorkspaceIds.includes(workspaceId)
+    );
   }
 
   workspaceIsEnabled(threadId: string, workspaceId: string): boolean {
@@ -2445,10 +2487,15 @@ export class HubAssistantService {
     callId: string,
     args: any,
     signal?: AbortSignal,
-  ): Promise<{ block?: boolean; reason?: string } | undefined> {
+    phase: 'initial' | 'resume' = 'initial',
+  ): Promise<
+    | { status: 'allow' }
+    | { status: 'deny'; reason: string }
+    | { status: 'suspend'; reason: string; details: unknown }
+  > {
     return this.beforeToolCall(
       threadId,
-      { toolCall: { id: callId, name: toolName }, args },
+      { toolCall: { id: callId, name: toolName }, args, phase },
       undefined,
       signal,
     );
@@ -2464,19 +2511,23 @@ export class HubAssistantService {
     if (!approval) throw new Error(`unknown approval: ${approvalId}`);
     if (expectedThreadId && approval.threadId !== expectedThreadId)
       throw new Error(`approval does not belong to thread: ${expectedThreadId}`);
+    if (!this.approvalDecisionDelegate) throw new Error('approval runtime is unavailable');
+    await this.approvalDecisionDelegate(approval.threadId, approvalId, approved);
     approval.status = approved ? 'approved' : 'denied';
     this.approvals.delete(approvalId);
-    if (!approved) this.runtimeStopDelegate?.(approval.threadId);
-    approval.resolve(approved);
+    this.runningThreadIds.add(approval.threadId);
+    const thread = this.getThread(approval.threadId);
+    thread.status = 'running';
+    thread.error = null;
+    thread.updatedAt = nowIso();
+    this.emitChange('approval_resolved', approval.threadId);
     return await this.threadSnapshot(approval.threadId);
   }
 
   private resolvePendingApprovalsForThread(threadId: string, approved: boolean): void {
     for (const [id, approval] of [...this.approvals]) {
       if (approval.threadId !== threadId || approval.status !== 'pending') continue;
-      approval.status = approved ? 'approved' : 'denied';
-      this.approvals.delete(id);
-      approval.resolve(approved);
+      void this.approvalDecisionDelegate?.(threadId, id, approved).catch(() => undefined);
     }
   }
 
@@ -2669,8 +2720,7 @@ export class HubAssistantService {
     };
     const migrateWebSearchDefaultTool = stored?.webSearchToolMigrationApplied !== true;
     const migrateFetchContentDefaultTool = stored?.fetchContentToolMigrationApplied !== true;
-    const preserveLegacyImplicitMcpTools =
-      stored?.droneHubMcpDefaultOptInMigrationApplied !== true;
+    const preserveLegacyImplicitMcpTools = stored?.droneHubMcpDefaultOptInMigrationApplied !== true;
     const threads = storedThreads
       .map((thread) =>
         normalizeThread(thread, storedFallback, {
@@ -2794,9 +2844,13 @@ export class HubAssistantService {
   private async beforeToolCall(
     threadId: string,
     ctx: any,
-    onEvent?: (event: AssistantPromptEvent) => void | Promise<void>,
-    signal?: AbortSignal,
-  ): Promise<{ block?: boolean; reason?: string } | undefined> {
+    _onEvent?: (event: AssistantPromptEvent) => void | Promise<void>,
+    _signal?: AbortSignal,
+  ): Promise<
+    | { status: 'allow' }
+    | { status: 'deny'; reason: string }
+    | { status: 'suspend'; reason: string; details: unknown }
+  > {
     const toolName = String(ctx?.toolCall?.name ?? '').trim();
     if (
       toolName !== 'message_drone' &&
@@ -2805,7 +2859,7 @@ export class HubAssistantService {
       toolName !== 'rename_drones' &&
       toolName !== 'bash'
     )
-      return undefined;
+      return { status: 'allow' };
     const label =
       toolName === 'set_drone_group'
         ? 'Set drone group'
@@ -2944,77 +2998,24 @@ export class HubAssistantService {
         }
       } catch (error: any) {
         return {
-          block: true,
+          status: 'deny',
           reason: cleanOptionalString(error?.message ?? error) || `Denied ${toolName}.`,
         };
       }
     }
-    if (this.getThread(threadId).autoApprove) return undefined;
-    const approval = await this.requestApproval({
-      threadId,
-      toolCallId: String(ctx?.toolCall?.id ?? '').trim(),
-      toolName,
-      label,
-      args: approvalArgs,
-      onEvent,
-      signal,
-    });
-    if (approval) return undefined;
-    return { block: true, reason: `User denied ${toolName}.` };
-  }
-
-  private async requestApproval(input: {
-    threadId: string;
-    toolCallId: string;
-    toolName: string;
-    label: string;
-    args: any;
-    onEvent?: (event: AssistantPromptEvent) => void | Promise<void>;
-    signal?: AbortSignal;
-  }): Promise<boolean> {
-    const approvalId = makeAssistantId('approval');
-    const approval: AssistantApproval = {
-      id: approvalId,
-      threadId: input.threadId,
-      toolCallId: input.toolCallId,
-      toolName: input.toolName,
-      label: input.label,
-      args: sanitizeMessage(input.args),
-      createdAt: nowIso(),
-      status: 'pending',
-    };
-    const thread = this.getThread(input.threadId);
-    thread.status = 'waiting_for_approval';
-    await new Promise<void>((resolve) => {
-      let entry: AssistantApproval & { resolve: (approved: boolean) => void };
-      const onAbort = () => {
-        if (!this.approvals.has(approvalId)) return;
-        this.approvals.delete(approvalId);
-        entry.resolve(false);
-      };
-      entry = {
-        ...approval,
-        resolve: (approved: boolean) => {
-          approval.status = approved ? 'approved' : 'denied';
-          thread.status = 'running';
-          input.signal?.removeEventListener('abort', onAbort);
-          this.emitChange('approval_resolved', input.threadId);
-          resolve();
+    if (ctx?.phase === 'resume' || this.getThread(threadId).autoApprove) {
+      return { status: 'allow' };
+    }
+    return {
+      status: 'suspend',
+      reason: `Approval required for ${label}.`,
+      details: {
+        approval: {
+          label,
+          args: sanitizeMessage(approvalArgs),
         },
-      };
-      this.approvals.set(approvalId, entry);
-      void input.onEvent?.({
-        type: 'approval_pending',
-        approval,
-        snapshot: this.snapshotSyncFallback(input.threadId),
-      });
-      this.emitChange('approval_pending', input.threadId);
-      if (input.signal) {
-        input.signal.addEventListener('abort', onAbort, { once: true });
-        if (input.signal.aborted) onAbort();
-      }
-    });
-    return approval.status === 'approved';
+      },
+    };
   }
 
   private snapshotSyncFallback(threadId: string): AssistantSnapshot {

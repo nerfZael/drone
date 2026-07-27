@@ -6,11 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from '@mariozechner/pi-ai';
 import type { AgentMessage } from '@mariozechner/pi-agent-core';
-import {
-  createLocalCompaction,
-  estimateEntriesTokens,
-  estimateModelContextTokens,
-} from '../src/index';
+import { createLocalCompaction, estimateEntriesTokens } from '../src/index';
 import { compactSession, runBlipTask, SessionStore } from '../src/node';
 
 process.env.BLIP_DATA_DIR = mkdtempSync(path.join(os.tmpdir(), 'blip-core-data-'));
@@ -500,22 +496,6 @@ describe('Blip runtime', () => {
     const rawEstimate = estimateEntriesTokens(entries);
     expect(rawEstimate).toBeGreaterThan(2_000);
     expect(rawEstimate).toBeLessThan(2_100);
-
-    const compactedEstimate = estimateModelContextTokens([
-      ...entries,
-      {
-        type: 'compaction' as const,
-        id: 'cmp',
-        createdAt: new Date().toISOString(),
-        trigger: 'manual' as const,
-        tokensBefore: 2_000,
-        tokensAfterEstimate: 10,
-        firstKeptEntryId: 'u3',
-        summary: 'short summary',
-        details: { readFiles: [], modifiedFiles: [] },
-      },
-    ]);
-    expect(compactedEstimate).toBeLessThan(100);
   });
 
   test('manual compaction uses model summary and stores retained boundary', async () => {

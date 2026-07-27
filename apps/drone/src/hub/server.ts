@@ -301,6 +301,7 @@ import { registerWorkflowFeature } from './workflows/workflow-feature';
 import { DroneHubMcpHttpTransport } from './mcp-http-transport';
 import {
   assertDroneDaemonRuntimeReady,
+  launchHostDroneDaemon,
   resolveDroneDaemonRuntimeDir,
 } from './drone-daemon-runtime';
 import { hubChatSessionName } from './terminal-open';
@@ -3080,6 +3081,7 @@ promptRuntime = createChatPromptRuntime({
   codexImageAttachmentFlags,
   collectDroneRuntimeDiagnostics,
   compactDiagnosticError,
+  commitDroneMetadataPatch,
   copyChatAttachmentsToContainer,
   copyChatAttachmentsToHost,
   createDronePendingPromptStore,
@@ -3091,6 +3093,7 @@ promptRuntime = createChatPromptRuntime({
   dronePromptCancel,
   dronePromptEnqueue,
   dronePromptGet,
+  droneStatus,
   droneRuntime,
   dvmExec,
   dvmSessionType,
@@ -3115,6 +3118,7 @@ promptRuntime = createChatPromptRuntime({
   isNotFoundErrorMessage,
   loadRegistry,
   looksLikeTransientPromptEnqueueError,
+  launchHostDroneDaemon,
   makeClient,
   maybeBootstrapPromptFromTranscript,
   maybeStartDockerSnapshotForTranscriptTurn,
@@ -3983,28 +3987,26 @@ export async function startDroneHubApiServer(opts: {
   try {
     const regAny: any = await loadRegistry();
     enqueueProvisioningForAllPending(regAny);
-    // Best-effort: resume any hub-queued prompts after hub restarts.
-    // These are prompts persisted in the registry but not yet enqueued into the daemon
-    // (e.g. Codex/OpenCode follow-ups waiting for session ids to be discovered).
+    // Best-effort: resume only unfinished durable prompts after hub restarts.
+    // Daemons for idle drones are recovered lazily when their next prompt is delivered.
     try {
       const drones =
         regAny?.drones && typeof regAny.drones === 'object' ? Object.entries(regAny.drones) : [];
       const activeDroneIds = new Set(drones.map(([droneId]) => String(droneId)));
       for (const pendingChat of await resumePendingPromptChats()) {
         if (!activeDroneIds.has(pendingChat.droneId)) continue;
-        enqueuePendingPromptPump(pendingChat.droneId, pendingChat.chatName);
-      }
-      for (const [droneName, d] of drones as any[]) {
-        const chats = d?.chats && typeof d.chats === 'object' ? Object.entries(d.chats) : [];
-        for (const [chatName, entry] of chats as any[]) {
-          if (isDraftChatEntry(entry)) continue;
-          const pending = await readPendingPrompts({
-            droneId: String(droneName),
-            chatName: String(chatName),
-          });
-          if (pending.some((p: any) => String(p?.state ?? '') === 'queued')) {
-            enqueuePendingPromptPump(String(droneName), String(chatName));
-          }
+        const nextAttemptMs = Date.parse(pendingChat.nextAttemptAt);
+        const delayMs = Number.isFinite(nextAttemptMs)
+          ? Math.max(0, nextAttemptMs - Date.now())
+          : 0;
+        if (delayMs > 0) {
+          promptRuntime.schedulePendingPromptPumpRetry(
+            pendingChat.droneId,
+            pendingChat.chatName,
+            delayMs,
+          );
+        } else {
+          enqueuePendingPromptPump(pendingChat.droneId, pendingChat.chatName);
         }
       }
     } catch {

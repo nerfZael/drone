@@ -8,8 +8,15 @@ import type {
   ForkSessionInput,
   SessionRepository,
 } from './session-repository.js';
-import type { BlipRuntimeEvent, BlipSessionState, TranscriptEntry } from './types.js';
+import type {
+  BlipRuntimeEvent,
+  BlipSessionState,
+  BlipToolSuspension,
+  BlipToolSuspensionStatus,
+  TranscriptEntry,
+} from './types.js';
 import { modelMessagesFromTranscript } from './model-context.js';
+import { toolSuspensionsFromTranscript } from './tool-suspension.js';
 
 const BLIP_DATA_DIR_ENV = 'BLIP_DATA_DIR';
 
@@ -48,6 +55,7 @@ export class SessionStore implements SessionRepository {
   readonly workspaceRoot: string;
   readonly rootDir: string;
   readonly workspaceDir: string;
+  private readonly suspensionTransitions = new Map<string, Promise<void>>();
 
   constructor(workspaceRoot: string) {
     this.workspaceRoot = path.resolve(workspaceRoot);
@@ -159,6 +167,50 @@ export class SessionStore implements SessionRepository {
       timestamp: nowIso(),
       event,
     });
+  }
+
+  async appendToolSuspension(
+    session: BlipSessionState,
+    suspension: BlipToolSuspension,
+  ): Promise<void> {
+    await this.appendEntry(session, {
+      type: 'tool_suspension',
+      id: randomUUID(),
+      timestamp: nowIso(),
+      suspension,
+    });
+  }
+
+  async transitionToolSuspension(
+    session: BlipSessionState,
+    suspension: BlipToolSuspension,
+    expectedStatuses: BlipToolSuspensionStatus[],
+  ): Promise<boolean> {
+    const key = `${session.id}:${suspension.id}`;
+    const previous = this.suspensionTransitions.get(key) ?? Promise.resolve();
+    let transitioned = false;
+    const current = previous.then(async () => {
+      const latest = (await this.readToolSuspensions(session)).find(
+        (candidate) => candidate.id === suspension.id,
+      );
+      if (!latest || !expectedStatuses.includes(latest.status)) return;
+      await this.appendToolSuspension(session, suspension);
+      transitioned = true;
+    });
+    const queued = current.catch(() => undefined);
+    this.suspensionTransitions.set(key, queued);
+    try {
+      await current;
+      return transitioned;
+    } finally {
+      if (this.suspensionTransitions.get(key) === queued) {
+        this.suspensionTransitions.delete(key);
+      }
+    }
+  }
+
+  async readToolSuspensions(session: BlipSessionState): Promise<BlipToolSuspension[]> {
+    return toolSuspensionsFromTranscript(await this.readTranscript(session));
   }
 
   async readTranscript(session: BlipSessionState): Promise<TranscriptEntry[]> {
