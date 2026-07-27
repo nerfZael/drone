@@ -330,6 +330,23 @@ export class BlipAssistantHost {
     const pending = this.handlePromises.get(threadId);
     const handle = this.handles.get(threadId) ?? (pending ? await pending : null);
     if (handle?.running) throw new Error('Stop the assistant before deleting messages');
+    const sessionId = handle?.state.id ?? (await this.repository.sessionIdForThread(threadId));
+    if (sessionId) {
+      const session = handle?.state ?? (await this.repository.load(sessionId));
+      const unresolved = (
+        handle
+          ? await handle.pendingToolSuspensions()
+          : await this.repository.readToolSuspensions(session)
+      ).filter(
+        (suspension) =>
+          suspension.status !== 'completed' &&
+          suspension.status !== 'denied' &&
+          suspension.status !== 'failed',
+      );
+      if (unresolved.length > 0) {
+        throw new Error('Resolve pending tool approvals before deleting messages');
+      }
+    }
     this.invalidateThread(threadId);
     await this.repository.deleteThreadMessage(threadId, entryId, deleteFollowing);
   }

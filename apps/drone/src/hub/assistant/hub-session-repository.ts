@@ -604,14 +604,17 @@ export class HubSessionRepository implements SessionRepository {
     let dependentToolCallIds = new Set<string>();
     try {
       const selected = JSON.parse(String(target?.entry_json ?? ''))?.message;
-      dependentToolCallIds = new Set(
-        selected?.role === 'assistant' && Array.isArray(selected.content)
-          ? selected.content
-              .filter((part: any) => part?.type === 'toolCall')
-              .map((part: any) => String(part.id ?? '').trim())
-              .filter(Boolean)
-          : [],
-      );
+      if (selected?.role === 'assistant' && Array.isArray(selected.content)) {
+        dependentToolCallIds = new Set(
+          selected.content
+            .filter((part: any) => part?.type === 'toolCall')
+            .map((part: any) => String(part.id ?? '').trim())
+            .filter(Boolean),
+        );
+      } else if (selected?.role === 'toolResult') {
+        const toolCallId = String(selected.toolCallId ?? '').trim();
+        if (toolCallId) dependentToolCallIds.add(toolCallId);
+      }
     } catch {
       // The target row itself is still safe to delete if its optional tool metadata is malformed.
     }
@@ -666,6 +669,31 @@ export class HubSessionRepository implements SessionRepository {
         `,
           )
           .run(sessionId, sequence);
+      }
+      if (dependentToolCallIds.size > 0) {
+        const suspensionRows = this.db
+          .prepare(
+            `
+          SELECT sequence, entry_json
+          FROM assistant_blip_entries
+          WHERE session_id = ?
+            AND json_extract(entry_json, '$.type') = 'tool_suspension'
+        `,
+          )
+          .all(sessionId) as Array<{ sequence: number; entry_json: string }>;
+        const removeEntry = this.db.prepare(
+          'DELETE FROM assistant_blip_entries WHERE session_id = ? AND sequence = ?',
+        );
+        for (const row of suspensionRows) {
+          try {
+            const toolCallId = String(
+              JSON.parse(row.entry_json)?.suspension?.toolCallId ?? '',
+            ).trim();
+            if (dependentToolCallIds.has(toolCallId)) removeEntry.run(sessionId, row.sequence);
+          } catch {
+            // Leave unrelated malformed durable records untouched.
+          }
+        }
       }
 
       const row = this.db

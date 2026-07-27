@@ -470,4 +470,87 @@ describe('Blip assistant host', () => {
       faux.unregister();
     });
   });
+
+  test('does not orphan durable approvals when deleting tool-call history', async () => {
+    await withTempDroneDataDir('blip-assistant-approval-delete-', async () => {
+      const faux = registerFauxProvider({
+        api: 'faux',
+        provider: 'faux',
+        tokensPerSecond: 0,
+      });
+      faux.setResponses([
+        fauxAssistantMessage(
+          fauxToolCall('mutate', { value: 'original' }, { id: 'call-delete-approval' }),
+          { stopReason: 'toolUse' },
+        ),
+        fauxAssistantMessage('The mutation was denied.'),
+        fauxAssistantMessage('Continued without restoring the deleted tool result.'),
+      ]);
+      const tool: AgentTool<any> = {
+        name: 'mutate',
+        label: 'Mutate',
+        description: 'Test mutation',
+        parameters: Type.Object({ value: Type.String() }),
+        execute: async () => ({
+          content: [{ type: 'text', text: 'done' }],
+          details: {},
+        }),
+      };
+      const events: any[] = [];
+      const host = new BlipAssistantHost(
+        async () => ({
+          provider: 'faux',
+          model: faux.getModel().id,
+          thinkingLevel: 'off',
+          systemPrompt: 'Hub host prompt',
+          tools: [tool],
+          permissionPreflight: ({ phase }: any) =>
+            phase === 'resume'
+              ? { status: 'allow' as const }
+              : {
+                  status: 'suspend' as const,
+                  reason: 'Needs approval',
+                  details: { approval: { label: 'Mutate', args: { value: 'original' } } },
+                },
+        }),
+        (_threadId, event) => events.push(event),
+      );
+
+      await host.promptThread('thread-approval-delete', 'Mutate');
+      const pendingPage = await host.historyPage('thread-approval-delete', { limit: 10 });
+      const toolCallMessage = pendingPage.entries.find(
+        (entry) =>
+          entry.message.role === 'assistant' &&
+          Array.isArray(entry.message.content) &&
+          entry.message.content.some((part: any) => part?.type === 'toolCall'),
+      );
+      const suspensionId = events.find((event) => event.type === 'tool_call_suspended')
+        ?.suspensionId;
+
+      await expect(
+        host.deleteMessage('thread-approval-delete', toolCallMessage!.id, false),
+      ).rejects.toThrow('Resolve pending tool approvals');
+
+      await host.resolveToolSuspension('thread-approval-delete', suspensionId, false);
+      await host.deleteMessage('thread-approval-delete', toolCallMessage!.id, false);
+
+      const repository = new HubSessionRepository();
+      const sessionId = await repository.sessionIdForThread('thread-approval-delete');
+      const session = await repository.load(sessionId!);
+      expect(await repository.readToolSuspensions(session)).toEqual([]);
+      expect(
+        (await repository.readMessages(session)).filter(
+          (message) => message.role === 'toolResult',
+        ),
+      ).toEqual([]);
+
+      await host.promptThread('thread-approval-delete', 'Continue');
+      expect(
+        (await repository.readMessages(session)).filter(
+          (message) => message.role === 'toolResult',
+        ),
+      ).toEqual([]);
+      faux.unregister();
+    });
+  });
 });

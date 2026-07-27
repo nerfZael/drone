@@ -162,6 +162,7 @@ export class BlipContextManager {
         reason: context.reason === 'overflow' ? 'context_overflow' : 'auto',
       });
       const apiKey = await this.options.getApiKey?.(this.options.model.provider);
+      let emergencyUsed = false;
       let compaction = await createCompaction({
         session: this.options.state,
         entries,
@@ -180,6 +181,7 @@ export class BlipContextManager {
           apiKey,
           abortController.signal,
         );
+        emergencyUsed = compaction !== undefined;
         if (!compaction) {
           await this.options.emit({
             ...eventBase(this.options.state.id, turnId),
@@ -196,7 +198,7 @@ export class BlipContextManager {
       const hardLimit = Math.max(1, this.options.model.contextWindow - settings.reserveTokens);
       let materiallySmaller = after.inputTokens < before.inputTokens;
       let safe = after.inputTokens <= hardLimit;
-      if (!materiallySmaller || !safe) {
+      if ((!materiallySmaller || !safe) && !emergencyUsed) {
         const emergency = await this.createEmergencyCompaction(
           entries,
           settings,

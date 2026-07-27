@@ -518,6 +518,41 @@ describe('Blip runtime', () => {
     expect(compactedEstimate).toBeLessThan(100);
   });
 
+  test('estimates emergency whole-context compaction without discarded history', () => {
+    const entries = [
+      {
+        type: 'message' as const,
+        id: 'u1',
+        timestamp: new Date().toISOString(),
+        message: user('old ' + 'x'.repeat(20_000)),
+      },
+      {
+        type: 'message' as const,
+        id: 'a1',
+        timestamp: new Date().toISOString(),
+        message: assistant('old response'),
+      },
+      {
+        type: 'compaction' as const,
+        id: 'cmp_emergency',
+        createdAt: new Date().toISOString(),
+        trigger: 'auto' as const,
+        tokensBefore: 5_000,
+        tokensAfterEstimate: 10,
+        summary: 'short emergency summary',
+        details: { readFiles: [], modifiedFiles: [] },
+      },
+      {
+        type: 'message' as const,
+        id: 'u2',
+        timestamp: new Date().toISOString(),
+        message: user('new request'),
+      },
+    ];
+
+    expect(estimateModelContextTokens(entries)).toBeLessThan(100);
+  });
+
   test('manual compaction uses model summary and stores retained boundary', async () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });

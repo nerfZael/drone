@@ -124,6 +124,15 @@ export function estimateModelContextTokens(entries: TranscriptEntry[]): number {
   if (!latest) return estimateEntriesTokens(entries);
 
   let tokens = Math.ceil(latest.entry.summary.length / 4);
+  if (!latest.entry.firstKeptEntryId) {
+    return entries
+      .slice(latest.index + 1)
+      .reduce(
+        (sum, entry) =>
+          entry.type === 'message' ? sum + estimateMessageTokens(entry.message) : sum,
+        tokens,
+      );
+  }
   let foundFirstKept = false;
   for (let index = 0; index < latest.index; index += 1) {
     const entry = entries[index];
