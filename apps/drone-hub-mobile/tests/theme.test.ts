@@ -25,8 +25,7 @@ function composite(foreground: string, background: string): Rgb {
   const backgroundColor = parseColor(background);
   return foregroundColor.rgb.map((channel, index) =>
     Math.round(
-      channel * foregroundColor.alpha +
-        backgroundColor.rgb[index] * (1 - foregroundColor.alpha),
+      channel * foregroundColor.alpha + backgroundColor.rgb[index] * (1 - foregroundColor.alpha),
     ),
   ) as Rgb;
 }
@@ -35,9 +34,7 @@ function relativeLuminance(color: string | Rgb) {
   const rgb = typeof color === 'string' ? parseColor(color).rgb : color;
   const channels = rgb
     .map((channel) => channel / 255)
-    .map((channel) =>
-      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
-    );
+    .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4));
 
   return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
 }
@@ -64,6 +61,7 @@ describe('mobile theme contrast', () => {
     expect(colors.accentWash).toBe('rgba(203, 166, 247, 0.06)');
     expect(colors.sidebarSelectionWash).toBe('rgba(203, 166, 247, 0.075)');
     expect(colors.sidebarSelectionEdge).toBe('rgba(203, 166, 247, 0.78)');
+    expect(colors.sidebarBlockedIndicator).toBe('#ff596b');
     expect(colors.link).toBe('#89b4fa');
     expect(colors.cursor).toBe('#f5e0dc');
     expect(colors.selectionWash).toBe('rgba(147, 153, 178, 0.24)');

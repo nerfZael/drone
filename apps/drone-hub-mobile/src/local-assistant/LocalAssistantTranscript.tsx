@@ -12,9 +12,14 @@ import {
 import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import Pause from 'lucide-react-native/icons/pause';
 import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
 import X from 'lucide-react-native/icons/x';
-import type { AgentRunFileChangeEntry, AgentRunFileChangeWorkspace } from '@blip/protocol';
+import type {
+  AgentRunFileChangeEntry,
+  AgentRunFileChangeWorkspace,
+  BlipCompactionHistoryDetails,
+} from '@blip/protocol';
 import {
   agentRunFileStatusLabel,
   agentRunLineChangeBreakdown,
@@ -603,7 +608,7 @@ function TappableMessageView({
   );
 }
 
-type MobileToolStatus = 'pending' | 'ok' | 'error' | 'partial-error';
+type MobileToolStatus = 'pending' | 'blocked' | 'ok' | 'error' | 'partial-error';
 
 function ToolStatus({
   status,
@@ -613,17 +618,27 @@ function ToolStatus({
   accessibilityLabel?: string;
 }) {
   const pending = status === 'pending';
+  const blocked = status === 'blocked';
   const failed = status === 'error';
   const partial = status === 'partial-error';
   return (
     <View
       accessible={!pending}
       accessibilityLabel={
-        accessibilityLabel ?? (failed ? 'Tool failed' : partial ? 'Some tool calls failed' : undefined)
+        accessibilityLabel ??
+        (blocked
+          ? 'Blocked pending approval'
+          : failed
+            ? 'Tool failed'
+            : partial
+              ? 'Some tool calls failed'
+              : undefined)
       }
       style={styles.toolStatusSlot}
     >
-      {pending ? (
+      {blocked ? (
+        <Pause color={colors.warning} size={12} strokeWidth={2.2} />
+      ) : pending ? (
         <ActivityIndicator accessible={false} color={colors.accent} size={12} />
       ) : (
         <View
@@ -651,10 +666,10 @@ function toolItemFailed(item: AssistantToolRenderItem): boolean {
   const details = item.result?.details;
   return Boolean(
     details &&
-      typeof details === 'object' &&
-      !Array.isArray(details) &&
-      (details as Record<string, unknown>).type === 'workspace_transfer' &&
-      (details as Record<string, unknown>).phase === 'failed',
+    typeof details === 'object' &&
+    !Array.isArray(details) &&
+    (details as Record<string, unknown>).type === 'workspace_transfer' &&
+    (details as Record<string, unknown>).phase === 'failed',
   );
 }
 
@@ -737,17 +752,11 @@ function ToolStructuredValue({
           <View key={index} style={styles.detailArrayRow}>
             <Text style={styles.detailIndex}>{index + 1}</Text>
             <View style={styles.detailValue}>
-              <ToolStructuredValue
-                value={item}
-                depth={depth + 1}
-                ancestors={nextAncestors}
-              />
+              <ToolStructuredValue value={item} depth={depth + 1} ancestors={nextAncestors} />
             </View>
           </View>
         ))}
-        {hidden > 0 ? (
-          <Text style={styles.detailPlaceholder}>+{hidden} more items</Text>
-        ) : null}
+        {hidden > 0 ? <Text style={styles.detailPlaceholder}>+{hidden} more items</Text> : null}
       </View>
     );
   }
@@ -760,16 +769,10 @@ function ToolStructuredValue({
       {visible.map(([key, item]) => (
         <View key={key} style={styles.detailField}>
           <Text style={styles.detailFieldLabel}>{humanizeToolField(key)}</Text>
-          <ToolStructuredValue
-            value={item}
-            depth={depth + 1}
-            ancestors={nextAncestors}
-          />
+          <ToolStructuredValue value={item} depth={depth + 1} ancestors={nextAncestors} />
         </View>
       ))}
-      {hidden > 0 ? (
-        <Text style={styles.detailPlaceholder}>+{hidden} more fields</Text>
-      ) : null}
+      {hidden > 0 ? <Text style={styles.detailPlaceholder}>+{hidden} more fields</Text> : null}
     </View>
   );
 }
@@ -785,9 +788,11 @@ function formatTransferBytes(value: unknown): string {
 function TransferToolRow({
   item,
   nested = false,
+  blocked = false,
 }: {
   item: AssistantToolRenderItem;
   nested?: boolean;
+  blocked?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const progress: any =
@@ -812,26 +817,31 @@ function TransferToolRow({
         ? 'Complete'
         : 'Preparing…';
   const summaryLabel =
-    sourceLabel || destinationLabel
-      ? `${sourceLabel ?? 'Source'} → ${destinationLabel ?? 'Destination'}`
-      : settled
-        ? 'File transfer finished'
-        : 'Scanning files to transfer';
-  const progressLabel = !progress
-    ? failed
-      ? 'Transfer failed'
-      : settled
-        ? 'Transfer complete'
-        : 'Scanning files…'
-    : progress.phase === 'planning'
-      ? 'Scanning folder…'
-      : `${progress.completedFiles ?? 0} of ${progress.fileCount ?? 0} files`;
+    blocked && !settled
+      ? 'Blocked pending approval'
+      : sourceLabel || destinationLabel
+        ? `${sourceLabel ?? 'Source'} → ${destinationLabel ?? 'Destination'}`
+        : settled
+          ? 'File transfer finished'
+          : 'Scanning files to transfer';
+  const progressLabel =
+    blocked && !settled
+      ? 'Approval required'
+      : !progress
+        ? failed
+          ? 'Transfer failed'
+          : settled
+            ? 'Transfer complete'
+            : 'Scanning files…'
+        : progress.phase === 'planning'
+          ? 'Scanning folder…'
+          : `${progress.completedFiles ?? 0} of ${progress.fileCount ?? 0} files`;
   return (
     <View style={[styles.transfer, nested && styles.transferNested]}>
       <Pressable
         accessible={expandable}
         accessibilityRole={expandable ? 'button' : undefined}
-        accessibilityLabel={`Transfer files, ${failed ? 'failed' : settled ? 'completed' : 'running'}`}
+        accessibilityLabel={`Transfer files, ${failed ? 'failed' : settled ? 'completed' : blocked ? 'blocked pending approval' : 'running'}`}
         accessibilityState={expandable ? { expanded: open } : undefined}
         disabled={!expandable}
         hitSlop={4}
@@ -841,7 +851,9 @@ function TransferToolRow({
           pressed && expandable && styles.toolHeadPressed,
         ]}
       >
-        <ToolStatus status={!settled ? 'pending' : failed ? 'error' : 'ok'} />
+        <ToolStatus
+          status={!settled ? (blocked ? 'blocked' : 'pending') : failed ? 'error' : 'ok'}
+        />
         <View style={styles.toolCopy}>
           <View style={styles.transferTitleRow}>
             <View style={styles.toolTitleRow}>
@@ -943,18 +955,24 @@ function TransferToolRow({
   );
 }
 
-function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nested?: boolean }) {
+function ToolRow({
+  item,
+  nested = false,
+  blocked = false,
+}: {
+  item: AssistantToolRenderItem;
+  nested?: boolean;
+  blocked?: boolean;
+}) {
   const [open, setOpen] = React.useState(false);
   if ((item.call?.name ?? item.result?.toolName) === 'transfer_files') {
-    return <TransferToolRow item={item} nested={nested} />;
+    return <TransferToolRow item={item} nested={nested} blocked={blocked} />;
   }
   const failed = toolItemFailed(item);
   const pending = !toolActivityIsSettled(item);
   const rawArgs = item.call?.args;
   const args =
-    typeof rawArgs === 'string'
-      ? (structuredToolValueFromText(rawArgs) ?? rawArgs)
-      : rawArgs;
+    typeof rawArgs === 'string' ? (structuredToolValueFromText(rawArgs) ?? rawArgs) : rawArgs;
   const result = item.result
     ? messageText(item.result).trim() || String(item.result.errorMessage ?? '').trim()
     : '';
@@ -964,13 +982,15 @@ function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nest
     <View style={[styles.tool, nested && styles.toolNested]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${label}, ${pending ? 'running' : failed ? 'failed' : 'completed'}`}
+        accessibilityLabel={`${label}, ${pending ? (blocked ? 'blocked pending approval' : 'running') : failed ? 'failed' : 'completed'}`}
         accessibilityState={{ expanded: open }}
         hitSlop={4}
         onPress={() => setOpen((value) => !value)}
         style={({ pressed }) => [styles.toolHead, pressed && styles.toolHeadPressed]}
       >
-        <ToolStatus status={pending ? 'pending' : failed ? 'error' : 'ok'} />
+        <ToolStatus
+          status={pending ? (blocked ? 'blocked' : 'pending') : failed ? 'error' : 'ok'}
+        />
         <View style={styles.toolCopy}>
           <View style={styles.toolTitleRow}>
             <Text numberOfLines={1} style={styles.toolTitle}>
@@ -1000,7 +1020,12 @@ function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nest
               <ToolStructuredValue value={structuredResult} />
             ) : (
               <Text selectable style={styles.detailText}>
-                {result || (pending ? 'Waiting…' : 'No result payload.')}
+                {result ||
+                  (pending
+                    ? blocked
+                      ? 'Blocked pending approval.'
+                      : 'Waiting…'
+                    : 'No result payload.')}
               </Text>
             )}
           </View>
@@ -1010,7 +1035,13 @@ function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nest
   );
 }
 
-function ToolGroupRow({ item }: { item: Extract<AssistantRenderItem, { type: 'toolGroup' }> }) {
+function ToolGroupRow({
+  item,
+  blocked = false,
+}: {
+  item: Extract<AssistantRenderItem, { type: 'toolGroup' }>;
+  blocked?: boolean;
+}) {
   const [open, setOpen] = React.useState(false);
   const failedCount = item.items.filter(toolItemFailed).length;
   const pending = item.items.some((tool) => !toolActivityIsSettled(tool));
@@ -1018,7 +1049,9 @@ function ToolGroupRow({ item }: { item: Extract<AssistantRenderItem, { type: 'to
   const failed = !pending && failedCount === item.items.length;
   const name = toolLabel(item.items[0]?.call?.name ?? item.items[0]?.result?.toolName);
   const stateLabel = pending
-    ? 'running'
+    ? blocked
+      ? 'blocked pending approval'
+      : 'running'
     : partial
       ? `${failedCount} of ${item.items.length} calls failed`
       : failed
@@ -1035,7 +1068,17 @@ function ToolGroupRow({ item }: { item: Extract<AssistantRenderItem, { type: 'to
         style={({ pressed }) => [styles.toolHead, pressed && styles.toolHeadPressed]}
       >
         <ToolStatus
-          status={pending ? 'pending' : partial ? 'partial-error' : failed ? 'error' : 'ok'}
+          status={
+            pending
+              ? blocked
+                ? 'blocked'
+                : 'pending'
+              : partial
+                ? 'partial-error'
+                : failed
+                  ? 'error'
+                  : 'ok'
+          }
           accessibilityLabel={
             partial
               ? `${failedCount} of ${item.items.length} tool calls failed`
@@ -1064,7 +1107,7 @@ function ToolGroupRow({ item }: { item: Extract<AssistantRenderItem, { type: 'to
       {open ? (
         <View style={styles.groupDetails}>
           {item.items.map((tool) => (
-            <ToolRow key={tool.key} item={tool} nested />
+            <ToolRow key={tool.key} item={tool} nested blocked={blocked && !tool.result} />
           ))}
         </View>
       ) : null}
@@ -1089,6 +1132,36 @@ function visibleMessageText(message: AssistantMessage): string {
     .join('\n');
 }
 
+function compactTokenCount(tokens: number): string {
+  const rounded = Math.max(0, Math.round(tokens));
+  if (rounded < 1_000) return String(rounded);
+  const divisor = rounded >= 1_000_000 ? 1_000_000 : 1_000;
+  const suffix = divisor === 1_000_000 ? 'M' : 'K';
+  return `${(rounded / divisor).toFixed(1).replace(/\.0$/, '')}${suffix}`;
+}
+
+function MobileCompactionRow({ details }: { details: BlipCompactionHistoryDetails }) {
+  const after =
+    details.tokensAfter === null
+      ? 'size unavailable'
+      : `${compactTokenCount(details.tokensAfter)} tokens`;
+  const label = [
+    'Context compacted',
+    `${compactTokenCount(details.tokensBefore)} → ${after}`,
+    details.trigger === 'manual' ? 'Manual' : 'Automatic',
+    details.fallbackUsed ? 'Fallback summary' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <View accessible accessibilityRole="text" accessibilityLabel={label} style={styles.compaction}>
+      <View style={styles.compactionLine} />
+      <Text style={styles.compactionText}>{label}</Text>
+      <View style={styles.compactionLine} />
+    </View>
+  );
+}
+
 function messageTimestamp(message: AssistantMessage): string | number | undefined {
   return message.createdAt ?? message.timestamp;
 }
@@ -1107,6 +1180,8 @@ function AgentRunSummary({
   toolCallCount,
   expanded,
   onToggle,
+  awaitingApproval = false,
+  approvalStartedAt,
 }: {
   active: boolean;
   startedAt?: string | number;
@@ -1114,27 +1189,74 @@ function AgentRunSummary({
   toolCallCount: number;
   expanded: boolean;
   onToggle?: () => void;
+  awaitingApproval?: boolean;
+  approvalStartedAt?: string | number;
 }) {
   const fallbackStart = React.useRef(Date.now()).current;
   const parsedStart = timestampMs(startedAt);
   const start = Number.isFinite(parsedStart) ? parsedStart : fallbackStart;
   const parsedEnd = timestampMs(completedAt);
+  const parsedApprovalStart = timestampMs(approvalStartedAt);
   const [now, setNow] = React.useState(() => Date.now());
+  const [pauseClock, setPauseClock] = React.useState<{
+    accumulatedMs: number;
+    startedAt: number | null;
+  }>(() => ({
+    accumulatedMs: 0,
+    startedAt: awaitingApproval
+      ? Number.isFinite(parsedApprovalStart)
+        ? parsedApprovalStart
+        : Date.now()
+      : null,
+  }));
 
   React.useEffect(() => {
-    if (!active) return;
+    if (!active || awaitingApproval) return;
+    setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(timer);
-  }, [active]);
+  }, [active, awaitingApproval]);
 
-  const end = active ? now : Number.isFinite(parsedEnd) ? parsedEnd : start;
-  const label = `${active ? 'Working' : 'Worked'} for ${workingDurationLabel(end - start)}`;
+  React.useEffect(() => {
+    const timestamp = !active && Number.isFinite(parsedEnd) ? parsedEnd : Date.now();
+    setPauseClock((current) => {
+      if (awaitingApproval) {
+        const startedAt = Number.isFinite(parsedApprovalStart)
+          ? parsedApprovalStart
+          : (current.startedAt ?? timestamp);
+        if (current.startedAt !== null && current.startedAt <= startedAt) return current;
+        return { ...current, startedAt };
+      }
+      if (current.startedAt === null) return current;
+      return {
+        accumulatedMs: current.accumulatedMs + Math.max(0, timestamp - current.startedAt),
+        startedAt: null,
+      };
+    });
+  }, [active, awaitingApproval, parsedApprovalStart, parsedEnd]);
+
+  const rawEnd = active ? now : Number.isFinite(parsedEnd) ? parsedEnd : start;
+  const end = awaitingApproval && pauseClock.startedAt !== null ? pauseClock.startedAt : rawEnd;
+  const resumingPauseMs =
+    !awaitingApproval && pauseClock.startedAt !== null
+      ? Math.max(0, rawEnd - pauseClock.startedAt)
+      : 0;
+  const duration = workingDurationLabel(
+    Math.max(0, end - start - pauseClock.accumulatedMs - resumingPauseMs),
+  );
+  const callLabel =
+    toolCallCount > 0 ? `${toolCallCount} tool ${toolCallCount === 1 ? 'call' : 'calls'}` : '';
+  const label = awaitingApproval
+    ? 'Approval required'
+    : `${active ? 'Working' : 'Worked'} for ${duration}`;
   const content = (
     <>
-      <Text style={styles.runSummaryLabel}>{label}</Text>
+      <Text style={[styles.runSummaryLabel, awaitingApproval && styles.runSummaryLabelApproval]}>
+        {label}
+      </Text>
       {toolCallCount > 0 ? (
         <Text style={styles.runSummaryDetail}>
-          {toolCallCount} tool {toolCallCount === 1 ? 'call' : 'calls'}
+          {awaitingApproval ? `Worked ${duration} · ${callLabel}` : callLabel}
         </Text>
       ) : null}
       {onToggle ? (
@@ -1151,7 +1273,7 @@ function AgentRunSummary({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={expanded ? 'Collapse activity' : 'Expand activity'}
+      accessibilityLabel={expanded ? 'Collapse run details' : 'Expand run details'}
       accessibilityState={{ expanded }}
       onPress={onToggle}
       style={({ pressed }) => [styles.runSummary, pressed && styles.runSummaryPressed]}
@@ -1168,100 +1290,74 @@ function MobileAgentPlanList({
   plan?: MobileAgentPlan;
   running?: boolean;
 }) {
-  const [planExpanded, setPlanExpanded] = React.useState(running);
   const [stepsExpanded, setStepsExpanded] = React.useState(false);
-  React.useEffect(() => {
-    if (running) setPlanExpanded(true);
-  }, [running]);
   if (!plan?.items.length) return null;
   const complete = plan.items.filter((item) => item.status === 'completed').length;
-  const showItems = running || planExpanded;
   const hiddenCount = Math.max(0, plan.items.length - DEFAULT_VISIBLE_PLAN_ITEMS);
   const visibleItems = stepsExpanded ? plan.items : plan.items.slice(0, DEFAULT_VISIBLE_PLAN_ITEMS);
   return (
-    <View accessibilityLabel="Plan" style={styles.plan}>
-      {running ? (
-        <View style={[styles.planToggle, showItems && styles.planToggleExpanded]}>
-          <Text style={styles.planToggleText}>Plan</Text>
-          <Text style={styles.planProgress}>
-            ({complete}/{plan.items.length})
-          </Text>
-        </View>
-      ) : (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={planExpanded ? 'Hide plan' : 'Show plan'}
-          accessibilityState={{ expanded: planExpanded }}
-          onPress={() => setPlanExpanded((value) => !value)}
-          style={({ pressed }) => [
-            styles.planToggle,
-            showItems && styles.planToggleExpanded,
-            pressed && styles.planTogglePressed,
-          ]}
-        >
-          {planExpanded ? (
-            <ChevronDown color={colors.muted} size={13} strokeWidth={1.8} />
-          ) : (
-            <ChevronRight color={colors.muted} size={13} strokeWidth={1.8} />
-          )}
-          <Text style={styles.planToggleText}>{planExpanded ? 'Hide plan' : 'Show plan'}</Text>
-          <Text style={styles.planProgress}>
-            ({complete}/{plan.items.length})
-          </Text>
-        </Pressable>
-      )}
-      {showItems ? (
-        <View style={styles.planItems}>
-          {visibleItems.map((item, index) => {
-            const done = item.status === 'completed';
-            const active = item.status === 'in_progress';
-            const cancelled = item.status === 'cancelled';
-            return (
-              <View key={item.id || `${index}:${item.text}`} style={styles.planItem}>
-                <View style={styles.planStatusSlot}>
-                  {done ? (
-                    <View style={styles.planDone}>
-                      <Check color={colors.online} size={9} strokeWidth={2.6} />
-                    </View>
-                  ) : active && running ? (
-                    <ActivityIndicator color={colors.accent} size={13} />
-                  ) : (
-                    <View
-                      style={[
-                        styles.planDot,
-                        active && styles.planDotActive,
-                        cancelled && styles.planDotCancelled,
-                      ]}
-                    />
-                  )}
-                </View>
-                <Text
-                  style={[
-                    styles.planItemText,
-                    done && styles.planItemDone,
-                    active && styles.planItemActive,
-                    cancelled && styles.planItemCancelled,
-                  ]}
-                >
-                  {item.text}
-                </Text>
+    <View style={styles.plan}>
+      <View
+        accessible
+        accessibilityRole="text"
+        accessibilityLabel={`Plan, ${complete} of ${plan.items.length} steps complete`}
+        style={styles.planToggle}
+      >
+        <Text style={styles.planToggleText}>Plan</Text>
+        <Text style={styles.planProgress}>
+          ({complete}/{plan.items.length})
+        </Text>
+      </View>
+      <View style={styles.planItems}>
+        {visibleItems.map((item, index) => {
+          const done = item.status === 'completed';
+          const active = item.status === 'in_progress';
+          const cancelled = item.status === 'cancelled';
+          return (
+            <View key={item.id || `${index}:${item.text}`} style={styles.planItem}>
+              <View style={styles.planStatusSlot}>
+                {done ? (
+                  <View style={styles.planDone}>
+                    <Check color={colors.online} size={9} strokeWidth={2.6} />
+                  </View>
+                ) : active && running ? (
+                  <ActivityIndicator color={colors.accent} size={13} />
+                ) : (
+                  <View
+                    style={[
+                      styles.planDot,
+                      active && styles.planDotActive,
+                      cancelled && styles.planDotCancelled,
+                    ]}
+                  />
+                )}
               </View>
-            );
-          })}
-          {hiddenCount > 0 ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ expanded: stepsExpanded }}
-              onPress={() => setStepsExpanded((value) => !value)}
-              style={({ pressed }) => pressed && styles.planTogglePressed}
-            >
-              <Text style={styles.planMore}>
-                {stepsExpanded ? 'Show fewer steps' : `Show ${hiddenCount} more`}
+              <Text
+                style={[
+                  styles.planItemText,
+                  done && styles.planItemDone,
+                  active && styles.planItemActive,
+                  cancelled && styles.planItemCancelled,
+                ]}
+              >
+                {item.text}
               </Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
+            </View>
+          );
+        })}
+        {hiddenCount > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: stepsExpanded }}
+            onPress={() => setStepsExpanded((value) => !value)}
+            style={({ pressed }) => pressed && styles.planTogglePressed}
+          >
+            <Text style={styles.planMore}>
+              {stepsExpanded ? 'Show fewer steps' : `Show ${hiddenCount} more`}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -1270,24 +1366,35 @@ function TranscriptRun({
   run,
   renderItem,
   showThinking,
+  awaitingApproval = false,
+  approvalStartedAt,
 }: {
   run: MobileTranscriptRun;
-  renderItem: (item: AssistantRenderItem) => any;
+  renderItem: (item: AssistantRenderItem, blocked?: boolean) => any;
   showThinking: boolean;
+  awaitingApproval?: boolean;
+  approvalStartedAt?: string | number;
 }) {
   const [toolExpansion, setToolExpansion] = React.useState<'auto' | 'manual' | 'collapsed'>(
     run.active ? 'auto' : 'collapsed',
   );
   const userControlledExpansion = React.useRef(false);
   React.useEffect(() => {
+    if (!run.active) {
+      userControlledExpansion.current = false;
+      setToolExpansion('collapsed');
+      return;
+    }
     if (userControlledExpansion.current) return;
-    setToolExpansion(run.active ? 'auto' : 'collapsed');
+    setToolExpansion('auto');
   }, [run.active]);
   const { activityItems, trailingItems } = partitionMobileRunItems(run);
   const activityExpanded = toolExpansion !== 'collapsed';
   const visibleActivityItems =
     toolExpansion === 'auto' ? limitMobileRunToolItems(activityItems) : activityItems;
   const hasActivityDetails = activityItems.length > 0;
+  const hasPlan = Boolean(run.plan?.items.length);
+  const hasRunDetails = hasActivityDetails || hasPlan;
   const thinking = activityExpanded && showThinking && mobileRunIsThinking(run);
   return (
     <View>
@@ -1299,8 +1406,10 @@ function TranscriptRun({
           completedAt={run.completedAt}
           toolCallCount={run.toolCallCount}
           expanded={activityExpanded}
+          awaitingApproval={awaitingApproval}
+          approvalStartedAt={approvalStartedAt}
           onToggle={
-            hasActivityDetails
+            hasRunDetails
               ? () => {
                   userControlledExpansion.current = true;
                   setToolExpansion((current) => (current === 'collapsed' ? 'manual' : 'collapsed'));
@@ -1308,34 +1417,50 @@ function TranscriptRun({
               : undefined
           }
         />
+        {hasRunDetails && activityExpanded ? (
+          <View
+            style={[
+              styles.runDetails,
+              hasActivityDetails && hasPlan && styles.runDetailsSideBySide,
+            ]}
+          >
+            {hasActivityDetails ? (
+              <ScrollView
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+                style={[styles.activityRail, hasPlan && styles.activityRailSideBySide]}
+                contentContainerStyle={styles.activityRailContent}
+              >
+                {visibleActivityItems.map((item) => (
+                  <View key={item.key} style={styles.activityItem}>
+                    {renderItem(item, awaitingApproval)}
+                  </View>
+                ))}
+                {thinking && !awaitingApproval ? (
+                  <View
+                    accessible
+                    accessibilityLabel="Assistant is thinking"
+                    accessibilityLiveRegion="polite"
+                    accessibilityRole="progressbar"
+                    style={styles.thinkingActivity}
+                  >
+                    <ActivityIndicator accessible={false} color={colors.accent} size={12} />
+                    <Text style={styles.thinkingActivityText}>Thinking…</Text>
+                  </View>
+                ) : null}
+              </ScrollView>
+            ) : null}
+            {hasPlan ? (
+              <View style={[styles.runPlan, hasActivityDetails && styles.runPlanSideBySide]}>
+                <MobileAgentPlanList plan={run.plan} running={run.active} />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
       </View>
-      {hasActivityDetails && activityExpanded ? (
-        <View style={styles.activityRail}>
-          {visibleActivityItems.map((item) => (
-            <View key={item.key} style={styles.activityItem}>
-              {renderItem(item)}
-            </View>
-          ))}
-          {thinking ? (
-            <View
-              accessible
-              accessibilityLabel="Assistant is thinking"
-              accessibilityLiveRegion="polite"
-              accessibilityRole="progressbar"
-              style={styles.thinkingActivity}
-            >
-              <ActivityIndicator accessible={false} color={colors.accent} size={12} />
-              <Text style={styles.thinkingActivityText}>Thinking…</Text>
-            </View>
-          ) : null}
-        </View>
-      ) : null}
       {trailingItems.map((item) => (
         <React.Fragment key={item.key}>{renderItem(item)}</React.Fragment>
       ))}
-      <View style={styles.runBody}>
-        <MobileAgentPlanList plan={run.plan} running={run.active} />
-      </View>
     </View>
   );
 }
@@ -1344,6 +1469,8 @@ export function MobileAssistantTranscript({
   messages,
   running = false,
   currentReasoning = '',
+  awaitingApproval = false,
+  approvalStartedAt,
   queuedPrompts = [],
   cancellingPromptId = '',
   onCancelQueuedPrompt,
@@ -1363,6 +1490,8 @@ export function MobileAssistantTranscript({
   messages: AssistantMessage[];
   running?: boolean;
   currentReasoning?: string;
+  awaitingApproval?: boolean;
+  approvalStartedAt?: string | number;
   queuedPrompts?: MobileQueuedPrompt[];
   cancellingPromptId?: string;
   onCancelQueuedPrompt?: (promptId: string) => void;
@@ -1431,10 +1560,11 @@ export function MobileAssistantTranscript({
     latestRunSummaryKey = items[index]!.key;
     break;
   }
-  const renderItem = (item: AssistantRenderItem): any => {
-    if (item.type === 'tool') return <ToolRow key={item.key} item={item} />;
+  const renderItem = (item: AssistantRenderItem, blocked = false): any => {
+    if (item.type === 'tool')
+      return <ToolRow key={item.key} item={item} blocked={blocked && !item.result} />;
     if (item.type === 'toolGroup') {
-      return <ToolGroupRow key={item.key} item={item} />;
+      return <ToolGroupRow key={item.key} item={item} blocked={blocked} />;
     }
     if (item.type === 'runSummary') {
       return (
@@ -1446,6 +1576,9 @@ export function MobileAssistantTranscript({
           initiallyExpanded={item.key === latestRunSummaryKey}
         />
       );
+    }
+    if (item.type === 'compaction') {
+      return <MobileCompactionRow key={item.key} details={item.details} />;
     }
     const text = visibleMessageText(item.message).trim();
     const structuredAssistantContent =
@@ -1640,7 +1773,10 @@ export function MobileAssistantTranscript({
   const activePrompt = activePrompts.at(-1);
   const lastGroup = groups.at(-1);
   const groupedActiveRun = lastGroup?.type === 'run' && lastGroup.active;
-  const showStandaloneReasoning = running && Boolean(currentReasoning.trim()) && !groupedActiveRun;
+  const activePromptReasoning = activePrompt ? currentReasoning.trim() : '';
+  const activePromptHasPlan = Boolean(activePrompt?.agentPlan?.items.length);
+  const showStandaloneReasoning =
+    running && Boolean(currentReasoning.trim()) && !groupedActiveRun && !activePrompt;
   const historicalTimeline = sortMobileTranscriptTimeline([
     ...groups.map((group, order) => ({
       kind: 'group' as const,
@@ -1666,6 +1802,8 @@ export function MobileAssistantTranscript({
             run={entry.group}
             renderItem={renderItem}
             showThinking={!showStandaloneReasoning}
+            awaitingApproval={awaitingApproval && entry.group.active}
+            approvalStartedAt={approvalStartedAt}
           />
         ) : (
           <React.Fragment key={entry.group.key}>{renderItem(entry.group.item)}</React.Fragment>
@@ -1684,9 +1822,36 @@ export function MobileAssistantTranscript({
             active
             startedAt={activePrompt.startedAt}
             toolCallCount={0}
-            expanded={false}
+            expanded={Boolean(activePromptReasoning || activePromptHasPlan)}
           />
-          <MobileAgentPlanList plan={activePrompt.agentPlan} running />
+          {activePromptReasoning || activePromptHasPlan ? (
+            <View
+              style={[
+                styles.runDetails,
+                activePromptReasoning && activePromptHasPlan && styles.runDetailsSideBySide,
+              ]}
+            >
+              {activePromptReasoning ? (
+                <View
+                  style={[
+                    styles.runReasoning,
+                    activePromptHasPlan && styles.runReasoningSideBySide,
+                  ]}
+                >
+                  <View style={styles.reasoningHead}>
+                    <TypingDots label={`${assistantLabel} is working`} />
+                    <Text style={styles.reasoningLabel}>Reasoning</Text>
+                  </View>
+                  <Text style={styles.reasoningText}>{activePromptReasoning}</Text>
+                </View>
+              ) : null}
+              {activePromptHasPlan ? (
+                <View style={[styles.runPlan, activePromptReasoning && styles.runPlanSideBySide]}>
+                  <MobileAgentPlanList plan={activePrompt.agentPlan} running />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
         </View>
       ) : null}
       {showStandaloneReasoning ? (
@@ -1887,14 +2052,60 @@ const styles = StyleSheet.create({
   },
   messages: { gap: 0 },
   runBody: { marginHorizontal: 10 },
+  runDetails: { paddingVertical: 6 },
+  runDetailsSideBySide: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  runPlan: { minWidth: 0, paddingVertical: 3 },
+  runPlanSideBySide: {
+    flex: 1,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.borderSubtle,
+    paddingLeft: 12,
+  },
+  runReasoning: {
+    minWidth: 0,
+    paddingVertical: 5,
+  },
+  runReasoningSideBySide: { flex: 1 },
+  compaction: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+  },
+  compactionLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+  },
+  compactionText: {
+    flexShrink: 1,
+    color: colors.muted,
+    fontSize: 10,
+    lineHeight: 14,
+    textAlign: 'center',
+  },
   activityRail: {
+    maxHeight: 288,
     marginLeft: 10,
     marginRight: 10,
     borderLeftWidth: 1,
     borderLeftColor: colors.borderSubtle,
+    opacity: 0.82,
+  },
+  activityRailSideBySide: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 0,
+    marginRight: 0,
+  },
+  activityRailContent: {
     paddingLeft: 10,
     paddingVertical: 3,
-    opacity: 0.82,
   },
   activityItem: { minWidth: 0 },
   runSummary: {
@@ -1908,20 +2119,17 @@ const styles = StyleSheet.create({
   },
   runSummaryPressed: { opacity: 0.72 },
   runSummaryLabel: { color: colors.muted, fontSize: 14, fontWeight: '600' },
+  runSummaryLabelApproval: { color: colors.warning },
   runSummaryDetail: {
     flex: 1,
     color: colors.mutedDim,
     fontSize: 11,
   },
   plan: {
-    marginTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderSubtle,
-    paddingTop: 9,
-    marginBottom: 9,
+    minWidth: 0,
+    paddingVertical: 3,
   },
   planToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 24 },
-  planToggleExpanded: { marginBottom: 7 },
   planTogglePressed: { opacity: 0.68 },
   planToggleText: { color: colors.muted, fontSize: 11, fontWeight: '600' },
   planProgress: {
@@ -1929,7 +2137,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: 'monospace',
   },
-  planItems: { gap: 6 },
+  planItems: { gap: 6, marginTop: 7 },
   planItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   planStatusSlot: {
     width: 16,

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { renderItemsFromMessages } from '@drone/assistant-chat';
+import { mobileDroneTurnsToAssistantMessages } from '../src/drones/drone-sidebar-model';
 import {
   confirmedMobilePendingPromptState,
   hasActiveMobileDronePendingPrompt,
@@ -7,6 +9,7 @@ import {
   mobileDronePendingPrompts,
   optimisticMobilePendingPrompt,
 } from '../src/drones/mobile-pending-prompts';
+import { groupMobileTranscriptRuns } from '../src/local-assistant/mobile-transcript-runs';
 
 describe('mobile drone pending prompts', () => {
   test('tracks activity-backed pending runs until their completed turn arrives', () => {
@@ -84,6 +87,30 @@ describe('mobile drone pending prompts', () => {
         [],
       ),
     ).toEqual([]);
+  });
+
+  test('leaves empty live activity to the transcript working row without duplicating the prompt', () => {
+    const pending = [
+      {
+        id: 'pending-empty-activity',
+        state: 'sent',
+        prompt: 'Implement it',
+        at: '2026-07-24T00:00:00.000Z',
+        activity: {
+          version: 1,
+          source: 'codex',
+          updatedAt: '2026-07-24T00:00:01.000Z',
+          messages: [],
+        },
+      },
+    ];
+    expect(mobileDronePendingPrompts(pending, [])).toEqual([]);
+    const messages = mobileDroneTurnsToAssistantMessages([], pending);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ role: 'user', content: 'Implement it' });
+    expect(
+      groupMobileTranscriptRuns(renderItemsFromMessages(messages), { running: true }),
+    ).toMatchObject([{ type: 'run', active: true }]);
   });
 
   test('uses the confirmed queued state instead of displaying a follow-up as active', () => {
@@ -252,6 +279,55 @@ describe('mobile drone pending prompts', () => {
         imageCount: 0,
         cancelable: false,
         startedAt: '2026-07-19T10:00:00.000Z',
+        delivered: true,
+      },
+    ]);
+  });
+
+  test('leaves failed activity in the transcript while retaining only a delivered stop notice', () => {
+    const activity = {
+      version: 1,
+      source: 'codex',
+      updatedAt: '2026-07-19T10:00:01.000Z',
+      messages: [],
+    };
+
+    expect(
+      mobileDronePendingPrompts(
+        [
+          {
+            id: 'failed-with-activity',
+            prompt: 'Make the change',
+            state: 'failed',
+            error: 'Agent crashed',
+            activity,
+          },
+        ],
+        [],
+      ),
+    ).toEqual([]);
+
+    expect(
+      mobileDronePendingPrompts(
+        [
+          {
+            id: 'stopped-with-activity',
+            prompt: 'Make the change',
+            state: 'failed',
+            error: 'Stopped by user.',
+            activity,
+          },
+        ],
+        [],
+      ),
+    ).toEqual([
+      {
+        id: 'stopped-with-activity',
+        prompt: 'Make the change',
+        status: 'stopped',
+        error: 'Stopped by user.',
+        imageCount: 0,
+        cancelable: false,
         delivered: true,
       },
     ]);

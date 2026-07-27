@@ -176,17 +176,16 @@ export function mobileDronePendingPrompts(
     // The Hub deliberately retains recently completed pending rows for reconciliation. Once the
     // matching transcript turn is visible, rendering that row again would duplicate the prompt.
     if (state !== 'failed' && completedTurnIds.has(id)) return [];
-    if (
-      (state === 'sending' || state === 'sent') &&
-      normalizeAgentRunActivity(item?.activity)?.messages.length
-    ) {
+    const activity = normalizeAgentRunActivity(item?.activity);
+    const stopped = state === 'failed' && isStoppedRunError(item?.error);
+    if (activity && (state === 'sending' || state === 'sent' || (state === 'failed' && !stopped))) {
       return [];
     }
-    const stopped = state === 'failed' && isStoppedRunError(item?.error);
     const messageId = String(item?.messageId ?? '').trim();
     const delivered =
       stopped &&
-      (completedTurnIds.has(id) ||
+      (Boolean(activity) ||
+        completedTurnIds.has(id) ||
         transcriptMessageIds.has(id) ||
         Boolean(messageId && transcriptMessageIds.has(messageId)));
     const agentPlan = normalizeMobileAgentPlan(item?.agentPlan);

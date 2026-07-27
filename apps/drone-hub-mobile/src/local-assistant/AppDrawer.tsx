@@ -28,7 +28,7 @@ import Folder from 'lucide-react-native/icons/folder';
 import Square from 'lucide-react-native/icons/square';
 import X from 'lucide-react-native/icons/x';
 import Pin from 'lucide-react-native/icons/pin';
-import Svg, { Circle, Line, Rect } from 'react-native-svg';
+import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { Drawer } from 'react-native-drawer-layout';
 import { colors } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -459,12 +459,7 @@ function switchStateLabel(state: SwitchDisplayState): string {
 
 function switchStateColor(state: SwitchDisplayState): string {
   if (state === 'approval') return colors.warning;
-  if (
-    state === 'working' ||
-    state === 'starting' ||
-    state === 'archiving' ||
-    state === 'deleting'
-  )
+  if (state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting')
     return colors.warning;
   if (state === 'waiting') return colors.info;
   if (state === 'blocked' || state === 'offline') return colors.danger;
@@ -481,12 +476,8 @@ function SwitchItemStatusIndicator({
 }) {
   const ready = state === 'idle' && !unread;
   const working =
-    state === 'working' ||
-    state === 'starting' ||
-    state === 'archiving' ||
-    state === 'deleting';
+    state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting';
   const stateColor = switchStateColor(state);
-  const indicatorColor = unread && state === 'idle' ? colors.online : stateColor;
   return (
     <View accessible={false} style={styles.switchItemStatus}>
       {ready ? (
@@ -495,9 +486,13 @@ function SwitchItemStatusIndicator({
         <WorkingStatusIndicator />
       ) : state === 'approval' ? (
         <ApprovalStatusIndicator />
+      ) : state === 'blocked' ? (
+        <BlockedStatusIndicator />
+      ) : unread && state === 'idle' ? (
+        <UnreadStatusIndicator />
       ) : (
         <View accessible={false} style={styles.switchStateIndicator}>
-          <View style={[styles.switchStateDot, { backgroundColor: indicatorColor }]} />
+          <View style={[styles.switchStateDot, { backgroundColor: stateColor }]} />
         </View>
       )}
     </View>
@@ -563,6 +558,29 @@ function ApprovalStatusIndicator() {
           strokeWidth="1.7"
           strokeLinecap="round"
         />
+      </Svg>
+    </View>
+  );
+}
+
+function BlockedStatusIndicator() {
+  return (
+    <View accessible={false} style={styles.stateStatusIndicator}>
+      <Svg height={12} width={12} viewBox="0 0 12 12" fill="none">
+        <Path
+          d="M6 1.25 11 10.25H1L6 1.25Z"
+          stroke={colors.sidebarBlockedIndicator}
+          strokeWidth="1.25"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <Path
+          d="M6 4.15v2.75"
+          stroke={colors.sidebarBlockedIndicator}
+          strokeWidth="1.25"
+          strokeLinecap="round"
+        />
+        <Circle cx="6" cy="8.5" r=".55" fill={colors.sidebarBlockedIndicator} />
       </Svg>
     </View>
   );
@@ -1248,7 +1266,9 @@ function AppDrawerView({
                           pressed && !containsSelectedDrone && styles.sidebarRowPressed,
                         ]}
                       >
-                        {containsSelectedDrone ? <View style={styles.sidebarSelectionEdge} /> : null}
+                        {containsSelectedDrone ? (
+                          <View style={styles.sidebarSelectionEdge} />
+                        ) : null}
                         <FolderGit2 color={colors.mutedDim} size={15} strokeWidth={1.9} />
                         <View style={styles.repoCopy}>
                           <Text numberOfLines={1} style={styles.repoName}>
@@ -1624,7 +1644,17 @@ const styles = StyleSheet.create({
   switchStateDot: { width: 6, height: 6, borderRadius: 3 },
   workingStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   stateStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
-  unreadStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.online },
+  unreadStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.online,
+    shadowColor: colors.onlineBorder,
+    shadowOpacity: 1,
+    shadowRadius: 2.5,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 1,
+  },
   sidebarSelectionEdge: {
     position: 'absolute',
     top: 4,

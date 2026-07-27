@@ -15,8 +15,8 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('<Text numberOfLines={1} style={styles.devicePlatform}>');
     expect(drawerSource).toContain('{devicePlatformLabel(device.platform)}');
     expect(drawerSource).toContain("platform === 'server' || platform === 'desktop'");
-    expect(drawerSource).toContain("deviceOptionsContent: {\n    padding: 0,");
-    expect(drawerSource).not.toContain("deviceOptionsContent: {\n    padding: 5,");
+    expect(drawerSource).toContain('deviceOptionsContent: {\n    padding: 0,');
+    expect(drawerSource).not.toContain('deviceOptionsContent: {\n    padding: 5,');
     expect(shellSource).toContain("detail: 'This device'");
     expect(shellSource).toContain("platform: current?.platform ?? 'android'");
     expect(shellSource).toContain('platform: device.platform');
@@ -35,7 +35,10 @@ describe('mobile sidebar presentation', () => {
       new URL('../src/local-assistant/LocalAssistantTranscript.tsx', import.meta.url),
       'utf8',
     );
-    const socketSource = readFileSync(new URL('../src/mesh/MeshSocket.ts', import.meta.url), 'utf8');
+    const socketSource = readFileSync(
+      new URL('../src/mesh/MeshSocket.ts', import.meta.url),
+      'utf8',
+    );
 
     expect(drawerSource).not.toContain('No mesh route');
     expect(drawerSource).toContain('Drones will appear when it reconnects.');
@@ -64,13 +67,10 @@ describe('mobile sidebar presentation', () => {
       'utf8',
     );
     const mobileDuration = Number(
-      /DRAWER_WORKING_SPIN_DURATION_MS = ([\d_]+)/
-        .exec(mobileSource)?.[1]
-        ?.replaceAll('_', ''),
+      /DRAWER_WORKING_SPIN_DURATION_MS = ([\d_]+)/.exec(mobileSource)?.[1]?.replaceAll('_', ''),
     );
-    const desktopDuration = Number(
-      /animate-\[spin_([\d.]+)s_linear_infinite\]/.exec(desktopSource)?.[1],
-    ) * 1_000;
+    const desktopDuration =
+      Number(/animate-\[spin_([\d.]+)s_linear_infinite\]/.exec(desktopSource)?.[1]) * 1_000;
 
     expect(mobileDuration).toBe(desktopDuration);
     expect(mobileSource.match(/duration: DRAWER_WORKING_SPIN_DURATION_MS/g)).toHaveLength(2);
@@ -136,12 +136,14 @@ describe('mobile sidebar presentation', () => {
     expect(source).not.toContain('styles.switchItemTimeSlot');
     expect(source).not.toContain('styles.chatCount');
     expect(source).toContain('selected ? <View style={styles.sidebarSelectionEdge} /> : null');
-    expect(source).toContain('containsSelectedDrone ? <View style={styles.sidebarSelectionEdge} /> : null');
-    expect(source).toContain('switchItemRowActive: { backgroundColor: colors.sidebarSelectionWash }');
+    expect(source).toContain('containsSelectedDrone ? (');
+    expect(source).toContain(
+      'switchItemRowActive: { backgroundColor: colors.sidebarSelectionWash }',
+    );
     expect(source).toContain('repoRowActive: { backgroundColor: colors.sidebarSelectionWash }');
     expect(source).toContain("droneNode: { position: 'relative', marginBottom: 4 }");
     expect(source).toContain('sidebarRowPressed: { backgroundColor: colors.whiteWash }');
-    expect(source).toContain("droneList: { paddingBottom: 24 }");
+    expect(source).toContain('droneList: { paddingBottom: 24 }');
   });
 
   test('uses the working spinner for starting and operation states with a quiet text label', () => {
@@ -171,6 +173,22 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('opacity: 0.35');
   });
 
+  test('matches the desktop blocked warning and unread glow indicators', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain("state === 'blocked' ? (");
+    expect(source).toContain('<BlockedStatusIndicator />');
+    expect(source).toContain('d="M6 1.25 11 10.25H1L6 1.25Z"');
+    expect(source).toContain('d="M6 4.15v2.75"');
+    expect(source).toContain('cx="6" cy="8.5"');
+    expect(source).toContain('stroke={colors.sidebarBlockedIndicator}');
+    expect(source).toContain('shadowColor: colors.onlineBorder');
+    expect(source).toContain('shadowOffset: { width: 0, height: 0 }');
+  });
+
   test('aligns group and drone labels at the same tree depth', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
@@ -193,9 +211,7 @@ describe('mobile sidebar presentation', () => {
     );
     const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
 
-    expect(drawerSource).toContain(
-      'resolvePinnedSidebarDronesForRepo(',
-    );
+    expect(drawerSource).toContain('resolvePinnedSidebarDronesForRepo(');
     expect(drawerSource).toContain('activeRepo.repoPath');
     expect(drawerSource).toContain('drones={activeRepoPinnedDrones}');
     expect(drawerSource).toContain('<Text style={styles.pinnedHeaderText}>Pinned</Text>');

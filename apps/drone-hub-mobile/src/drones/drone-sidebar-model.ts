@@ -1,6 +1,7 @@
 import {
   agentRunActivityHasResponse,
   isAgentRunFileChanges,
+  isStoppedRunError,
   normalizeAgentRunActivity,
   settleAgentRunActivity,
   type AgentRunActivity,
@@ -673,12 +674,26 @@ export function mobileDroneTurnsToAssistantMessages(
       const id = String(item?.id ?? '').trim();
       const state = String(item?.state ?? '').trim();
       const activity = normalizeAgentRunActivity(item?.activity);
-      if (!id || completedIds.has(id) || !activity || (state !== 'sending' && state !== 'sent')) {
+      if (
+        !id ||
+        completedIds.has(id) ||
+        !activity ||
+        !['sending', 'sent', 'failed'].includes(state)
+      ) {
         return [];
       }
       const at = String(item?.at ?? '').trim();
+      const updatedAt = String(item?.updatedAt ?? at);
+      const stopped = state === 'failed' && isStoppedRunError(item?.error);
+      const displayedActivity =
+        state === 'failed' ? (settleAgentRunActivity(activity) ?? activity) : activity;
       const plan = normalizeMobileAgentPlan(item?.agentPlan);
-      const runDetails = mobileRunDetails({ id, startedAt: at, plan });
+      const runDetails = mobileRunDetails({
+        id,
+        startedAt: at,
+        ...(state === 'failed' ? { completedAt: updatedAt } : {}),
+        plan,
+      });
       const messages: AssistantMessage[] = [
         {
           id: `${id}:user`,
@@ -688,20 +703,31 @@ export function mobileDroneTurnsToAssistantMessages(
           details: runDetails,
         },
         ...mobileActivityMessages({
-          activity,
+          activity: displayedActivity,
           turnId: id,
-          createdAt: String(item?.updatedAt ?? at),
+          createdAt: updatedAt,
           runDetails,
           meshTruncated: item?.activityMeshTruncated === true,
           fullLoadAvailable: false,
         }),
       ];
+      if (state === 'failed' && !stopped) {
+        messages.push({
+          id: `${id}:assistant`,
+          role: 'assistant',
+          content: '',
+          createdAt: updatedAt,
+          details: runDetails,
+          isError: true,
+          errorMessage: String(item?.error ?? '').trim() || 'failed to send',
+        });
+      }
       if (isAgentRunFileChanges(item?.fileChanges)) {
         messages.push({
           id: `${id}:run-summary`,
           role: 'runSummary',
           content: '',
-          createdAt: String(item?.updatedAt ?? at),
+          createdAt: updatedAt,
           details: { fileChanges: item.fileChanges },
         });
       }
