@@ -424,6 +424,37 @@ test('retry scheduling uses bounded backoff and becomes terminal at max attempts
   );
 });
 
+test('startup wakeups retain queued chats whose retry is not due yet', async () => {
+  const queue = repository('future-retry-wakeup');
+  const at = '2026-07-10T09:00:00.000Z';
+  await queue.enqueue({ droneId: 'alpha', chatName: 'default', prompt: prompt('retry', at) });
+  await queue.claim({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'retry',
+    leaseOwner: 'worker',
+    now: at,
+  });
+  await queue.scheduleRetry({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'retry',
+    leaseOwner: 'worker',
+    error: 'temporary',
+    baseDelayMs: 60_000,
+    now: at,
+  });
+
+  assert.deepEqual(queue.listQueuedChats({ now: '2026-07-10T09:00:30.000Z' }), []);
+  assert.deepEqual(queue.listQueuedChatWakeups(), [
+    {
+      droneId: 'alpha',
+      chatName: 'default',
+      nextAttemptAt: '2026-07-10T09:01:00.000Z',
+    },
+  ]);
+});
+
 test('legacy backfill seeds missing rows but never overwrites canonical state', async () => {
   const queue = repository('backfill');
   const at = '2026-07-10T09:00:00.000Z';

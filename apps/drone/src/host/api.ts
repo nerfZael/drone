@@ -300,8 +300,14 @@ export async function health(client: DroneClient) {
   return await req(client, 'GET', '/v1/health');
 }
 
-export async function status(client: DroneClient) {
-  return await req(client, 'GET', '/v1/status');
+export async function status(client: DroneClient, options?: { timeoutMs?: number }) {
+  return await consumeResponse(
+    client,
+    'GET',
+    '/v1/status',
+    options,
+    async (response) => await response.json(),
+  );
 }
 
 export async function procStart(

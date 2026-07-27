@@ -67,4 +67,23 @@ describe('ensureContainerDroneDaemonSession', () => {
       )
     ).rejects.toThrow(/missing drone daemon runtime/i);
   });
+
+  test('force-restarts an existing daemon session after a failed health probe', async () => {
+    let prepScript = '';
+    await ensureContainerDroneDaemonSession(
+      { containerName: 'demo', containerPort: 7777, forceRestart: true },
+      {
+        startContainer: async () => {},
+        execInContainer: async (_containerName, _cmd, args) => {
+          prepScript = args[1] ?? '';
+          return { code: 0, stdout: '', stderr: '' };
+        },
+        sessionStart: async () => {},
+      },
+    );
+
+    expect(prepScript).toContain("tmux has-session -t 'drone-daemon'");
+    expect(prepScript).toContain("tmux kill-session -t 'drone-daemon'");
+    expect(prepScript).not.toContain('pane_dead');
+  });
 });

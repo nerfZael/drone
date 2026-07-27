@@ -18,7 +18,12 @@ const defaultDeps: EnsureContainerDroneDaemonDeps = {
 };
 
 export async function ensureContainerDroneDaemonSession(
-  opts: { containerName: string; containerPort: number; sessionName?: string },
+  opts: {
+    containerName: string;
+    containerPort: number;
+    sessionName?: string;
+    forceRestart?: boolean;
+  },
   deps: EnsureContainerDroneDaemonDeps = defaultDeps
 ): Promise<void> {
   const containerName = String(opts.containerName ?? '').trim();
@@ -30,6 +35,14 @@ export async function ensureContainerDroneDaemonSession(
   }
 
   const sessionName = String(opts.sessionName ?? DRONE_DAEMON_SESSION_NAME).trim() || DRONE_DAEMON_SESSION_NAME;
+  const existingSessionLines = opts.forceRestart
+    ? [`  tmux kill-session -t ${bashQuote(sessionName)} 2>/dev/null || true`]
+    : [
+        `  dead="$(tmux display-message -p -t ${bashQuote(`${sessionName}:0.0`)} '#{pane_dead}' 2>/dev/null || echo 0)"`,
+        '  if [ "$dead" = "1" ]; then',
+        `    tmux kill-session -t ${bashQuote(sessionName)} 2>/dev/null || true`,
+        '  fi',
+      ];
   await deps.startContainer(containerName);
 
   const prepScript = [
@@ -40,10 +53,7 @@ export async function ensureContainerDroneDaemonSession(
     '  exit 21',
     'fi',
     `if command -v tmux >/dev/null 2>&1 && tmux has-session -t ${bashQuote(sessionName)} 2>/dev/null; then`,
-    `  dead="$(tmux display-message -p -t ${bashQuote(`${sessionName}:0.0`)} '#{pane_dead}' 2>/dev/null || echo 0)"`,
-    '  if [ "$dead" = "1" ]; then',
-    `    tmux kill-session -t ${bashQuote(sessionName)} 2>/dev/null || true`,
-    '  fi',
+    ...existingSessionLines,
     'fi',
   ].join('\n');
 

@@ -31,12 +31,17 @@ export interface PendingPromptPumpDependencies {
   run(target: PendingPromptPumpTarget): Promise<void>;
 }
 
+type PendingPromptRetryTimer = {
+  dueAt: number;
+  timer: ReturnType<typeof setTimeout>;
+};
+
 export class PendingPromptPump {
   readonly #tasks = new Map<string, Promise<void>>();
   readonly #queue: PendingPromptPumpTarget[] = [];
   readonly #queued = new Set<string>();
   readonly #retryAfterActive = new Set<string>();
-  readonly #retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  readonly #retryTimers = new Map<string, PendingPromptRetryTimer[]>();
   #active = 0;
   #pumping = false;
 
@@ -47,7 +52,6 @@ export class PendingPromptPump {
     const chatName = this.deps.normalizeChatName(chatNameRaw);
     if (!droneId) return;
     const key = this.#key(droneId, chatName);
-    this.#clearRetry(key);
     if (this.#tasks.has(key)) {
       // Preserve edge-trigger requests that arrive while a task is active.
       this.#retryAfterActive.add(key);
@@ -64,17 +68,26 @@ export class PendingPromptPump {
     const chatName = this.deps.normalizeChatName(chatNameRaw);
     if (!droneId) return;
     const key = this.#key(droneId, chatName);
-    if (this.#retryTimers.has(key)) return;
     const requestedDelay = delayMs ?? this.deps.defaultRetryDelayMs();
     const ms = Number.isFinite(requestedDelay)
       ? Math.max(1_000, Math.floor(requestedDelay))
       : this.deps.defaultRetryDelayMs();
+    const dueAt = Date.now() + ms;
+    const existing = this.#retryTimers.get(key) ?? [];
+    // Coalesce equivalent wakeups while retaining independently scheduled
+    // later retries for other prompts in the same chat.
+    if (existing.some((entry) => Math.abs(entry.dueAt - dueAt) <= 50)) return;
+    let entry: PendingPromptRetryTimer;
     const timer = setTimeout(() => {
-      this.#retryTimers.delete(key);
+      const current = this.#retryTimers.get(key) ?? [];
+      const remaining = current.filter((candidate) => candidate !== entry);
+      if (remaining.length > 0) this.#retryTimers.set(key, remaining);
+      else this.#retryTimers.delete(key);
       this.enqueue(droneId, chatName);
     }, ms);
     (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
-    this.#retryTimers.set(key, timer);
+    entry = { dueAt, timer };
+    this.#retryTimers.set(key, [...existing, entry]);
   }
 
   delete(droneIdRaw: string, chatNameRaw: string): void {
@@ -101,9 +114,12 @@ export class PendingPromptPump {
     if (fromKey === toKey) return;
 
     if (this.#queued.delete(fromKey)) this.#queued.add(toKey);
-    if (this.#retryTimers.has(fromKey)) {
+    const retryDeadlines = (this.#retryTimers.get(fromKey) ?? []).map((entry) => entry.dueAt);
+    if (retryDeadlines.length > 0) {
       this.#clearRetry(fromKey);
-      this.scheduleRetry(droneId, toChatName);
+      for (const dueAt of retryDeadlines) {
+        this.scheduleRetry(droneId, toChatName, Math.max(1_000, dueAt - Date.now()));
+      }
     }
     for (const item of this.#queue) {
       if (this.#key(item.droneId, item.chatName) === fromKey) item.chatName = toChatName;
@@ -114,7 +130,9 @@ export class PendingPromptPump {
     this.#queue.length = 0;
     this.#queued.clear();
     this.#retryAfterActive.clear();
-    for (const timer of this.#retryTimers.values()) clearTimeout(timer);
+    for (const entries of this.#retryTimers.values()) {
+      for (const entry of entries) clearTimeout(entry.timer);
+    }
     this.#retryTimers.clear();
     await Promise.allSettled(Array.from(this.#tasks.values()).map((task) => task.catch(() => {})));
     this.#tasks.clear();
@@ -158,9 +176,9 @@ export class PendingPromptPump {
   }
 
   #clearRetry(key: string): void {
-    const timer = this.#retryTimers.get(key);
-    if (!timer) return;
-    clearTimeout(timer);
+    const entries = this.#retryTimers.get(key);
+    if (!entries) return;
+    for (const entry of entries) clearTimeout(entry.timer);
     this.#retryTimers.delete(key);
   }
 
