@@ -31,6 +31,7 @@ import {
 } from '../app/use-drone-hub-runtime-store';
 import {
   IconPencil,
+  IconNetwork,
   IconSettings,
   IconShieldCheck,
   IconSpinner,
@@ -51,7 +52,6 @@ import {
   AssistantSystemPromptModal,
   AssistantToolsPanel,
   AssistantWorkspacesPanel,
-  ScopeModeControl,
 } from './AssistantSettingsPanels';
 import {
   AssistantQueuedPromptRow,
@@ -125,6 +125,7 @@ import type {
   AssistantWorkspaceSummary,
   PendingAssistantScopeSave,
 } from './assistant-types';
+import { DroneHubPermissionsView } from '../app/DroneHubPermissionsView';
 const ASSISTANT_FILES_OPEN_STORAGE_KEY = 'droneHub.assistant.filesOpen';
 
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
@@ -298,6 +299,7 @@ export function AssistantDock({
   const [scopeExecuteMode, setScopeExecuteMode] = React.useState<AssistantScopeMode>('all');
   const [scopeDrones, setScopeDrones] = React.useState<AssistantScopeDrone[]>([]);
   const [scopeSyncBusy, setScopeSyncBusy] = React.useState(false);
+  const [scopeSyncError, setScopeSyncError] = React.useState<string | null>(null);
   const [droneNameById, setDroneNameById] = React.useState<AssistantDroneNameMap>({});
   const [approvalBusyId, setApprovalBusyId] = React.useState<string | null>(null);
   const [queuedPromptBusyId, setQueuedPromptBusyId] = React.useState<string | null>(null);
@@ -308,6 +310,7 @@ export function AssistantDock({
   const [workspacesPanelOpen, setWorkspacesPanelOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [workspaceAccessOpen, setWorkspaceAccessOpen] = React.useState(false);
+  const [droneHubPermissionsOpen, setDroneHubPermissionsOpen] = React.useState(false);
   const [enabledToolDraftNames, setEnabledToolDraftNames] = React.useState<string[]>([]);
   const [enabledWorkspaceDraftIds, setEnabledWorkspaceDraftIds] = React.useState<string[]>([]);
   const [defaultEnabledToolDraftNames, setDefaultEnabledToolDraftNames] = React.useState<string[]>([]);
@@ -329,10 +332,29 @@ export function AssistantDock({
   const refocusInputWhenIdleRef = React.useRef(false);
   const activeThreadIdRef = React.useRef('');
   const currentScopeKeyRef = React.useRef('');
+  const currentScopeDraftRef = React.useRef<AssistantScopeDraft>({
+    readMode: 'all',
+    writeMode: 'all',
+    executeMode: 'all',
+    drones: [],
+  });
+  const persistedScopeDraftRef = React.useRef<AssistantScopeDraft>({
+    readMode: 'all',
+    writeMode: 'all',
+    executeMode: 'all',
+    drones: [],
+  });
   const lastSyncedScopeKeyRef = React.useRef('');
   const lastSyncedScopeUpdatedAtMsRef = React.useRef(0);
   const scopeSaveRequestIdRef = React.useRef(0);
   const scopeSyncPromiseRef = React.useRef<PendingAssistantScopeSave | null>(null);
+  const queuedScopeSaveRef = React.useRef<{
+    readMode: AssistantScopeMode;
+    writeMode: AssistantScopeMode;
+    executeMode: AssistantScopeMode;
+    droneIds: string[];
+    key: string;
+  } | null>(null);
   const updateThreadRequestRef = React.useRef(0);
   const snapshotRequestSeqRef = React.useRef(0);
   const enabledToolDraftNamesRef = React.useRef<string[]>([]);
@@ -348,6 +370,29 @@ export function AssistantDock({
   const activeThread = snapshot?.threads[0] ?? null;
   const activeThreadId = activeThread?.id ?? '';
   activeThreadIdRef.current = activeThreadId;
+  React.useEffect(() => {
+    scopeSaveRequestIdRef.current += 1;
+    scopeSyncPromiseRef.current = null;
+    queuedScopeSaveRef.current = null;
+    currentScopeKeyRef.current = '';
+    lastSyncedScopeKeyRef.current = '';
+    lastSyncedScopeUpdatedAtMsRef.current = 0;
+    const emptyDraft: AssistantScopeDraft = {
+      readMode: 'all',
+      writeMode: 'all',
+      executeMode: 'all',
+      drones: [],
+    };
+    currentScopeDraftRef.current = emptyDraft;
+    persistedScopeDraftRef.current = emptyDraft;
+    setScopeReadMode('all');
+    setScopeWriteMode('all');
+    setScopeExecuteMode('all');
+    setScopeDrones([]);
+    setScopeSyncBusy(false);
+    setScopeSyncError(null);
+    setDroneHubPermissionsOpen(false);
+  }, [activeThreadId]);
   const autoApprove = Boolean(activeThread?.autoApprove);
   const blipSession = useBlipThreadSession({
     threadId: activeThreadId,
@@ -635,6 +680,7 @@ export function AssistantDock({
   }, []);
 
   const openSystemPromptEditor = React.useCallback(() => {
+    setDroneHubPermissionsOpen(false);
     setSystemPromptMode('thread');
     setSystemPromptOpen(true);
     void loadSystemPromptSettings();
@@ -800,6 +846,14 @@ export function AssistantDock({
     setScopeReadMode(readMode);
     setScopeWriteMode(writeMode);
     setScopeExecuteMode(executeMode);
+    const incomingDraft: AssistantScopeDraft = {
+      readMode,
+      writeMode,
+      executeMode,
+      drones: ids.map((id) => ({ id, name: id })),
+    };
+    currentScopeDraftRef.current = incomingDraft;
+    persistedScopeDraftRef.current = incomingDraft;
     if (ids.length === 0) {
       setScopeDrones([]);
       return;
@@ -807,6 +861,16 @@ export function AssistantDock({
     void resolveScopeDroneNames(ids).then((drones) => {
       if (cancelled) return;
       setScopeDrones(drones);
+      if (currentScopeKeyRef.current === incomingKey) {
+        const resolvedDraft: AssistantScopeDraft = {
+          readMode,
+          writeMode,
+          executeMode,
+          drones,
+        };
+        currentScopeDraftRef.current = resolvedDraft;
+        persistedScopeDraftRef.current = resolvedDraft;
+      }
     });
     return () => {
       cancelled = true;
@@ -830,40 +894,110 @@ export function AssistantDock({
     const scopedDroneIds = assistantScopeDroneIds(readMode, writeMode, executeMode, visibleDrones);
     const syncKey = assistantScopeSyncKey(readMode, writeMode, executeMode, scopedDroneIds);
     currentScopeKeyRef.current = syncKey;
+    currentScopeDraftRef.current = {
+      readMode,
+      writeMode,
+      executeMode,
+      drones: visibleDrones,
+    };
     setScopeReadMode(readMode);
     setScopeWriteMode(writeMode);
     setScopeExecuteMode(executeMode);
     setScopeDrones(visibleDrones);
+    setScopeSyncError(null);
     if (!activeThread) return true;
-    if (lastSyncedScopeKeyRef.current === syncKey && !scopeSyncPromiseRef.current) return true;
-    if (scopeSyncPromiseRef.current?.key === syncKey) return await scopeSyncPromiseRef.current.promise;
+    queuedScopeSaveRef.current = {
+      readMode,
+      writeMode,
+      executeMode,
+      droneIds: scopedDroneIds,
+      key: syncKey,
+    };
+    if (lastSyncedScopeKeyRef.current === syncKey && !scopeSyncPromiseRef.current) {
+      queuedScopeSaveRef.current = null;
+      return true;
+    }
+    if (
+      scopeSyncPromiseRef.current &&
+      scopeSyncPromiseRef.current.threadId !== activeThread.id
+    ) {
+      scopeSaveRequestIdRef.current += 1;
+      scopeSyncPromiseRef.current = null;
+    }
+    if (scopeSyncPromiseRef.current) {
+      scopeSyncPromiseRef.current.key = syncKey;
+      return await scopeSyncPromiseRef.current.promise;
+    }
     const requestId = scopeSaveRequestIdRef.current + 1;
     scopeSaveRequestIdRef.current = requestId;
     const threadId = activeThread.id;
     setScopeSyncBusy(true);
-    const promise = requestJson<AssistantScopeUpdateResult>('/api/assistant/scope', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        threadId,
-        readMode,
-        writeMode,
-        executeMode,
-        droneIds: scopedDroneIds,
-      }),
-    })
-      .then((data) => {
-        if (scopeSaveRequestIdRef.current !== requestId) return true;
-        const savedScope = data.accessScope ?? { readMode, writeMode, executeMode, droneIds: scopedDroneIds, updatedAt: new Date().toISOString() };
-        lastSyncedScopeKeyRef.current = assistantScopeKeyFromScope(savedScope);
-        lastSyncedScopeUpdatedAtMsRef.current = assistantScopeUpdatedAtMs(savedScope);
-        return true;
-      })
-      .catch((err: any) => {
-        if (scopeSaveRequestIdRef.current === requestId) setError(err?.message ?? String(err));
-        return false;
-      })
-      .finally(() => {
+    const promise = (async () => {
+      while (queuedScopeSaveRef.current) {
+        const next = queuedScopeSaveRef.current;
+        queuedScopeSaveRef.current = null;
+        if (lastSyncedScopeKeyRef.current === next.key) continue;
+        try {
+          const data = await requestJson<AssistantScopeUpdateResult>('/api/assistant/scope', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              threadId,
+              readMode: next.readMode,
+              writeMode: next.writeMode,
+              executeMode: next.executeMode,
+              droneIds: next.droneIds,
+            }),
+          });
+          if (scopeSaveRequestIdRef.current !== requestId) return true;
+          const savedScope = data.accessScope ?? {
+            readMode: next.readMode,
+            writeMode: next.writeMode,
+            executeMode: next.executeMode,
+            droneIds: next.droneIds,
+            updatedAt: new Date().toISOString(),
+          };
+          lastSyncedScopeKeyRef.current = assistantScopeKeyFromScope(savedScope);
+          lastSyncedScopeUpdatedAtMsRef.current = assistantScopeUpdatedAtMs(savedScope);
+          const nameById = new Map(
+            currentScopeDraftRef.current.drones.map((drone) => [drone.id, drone.name]),
+          );
+          persistedScopeDraftRef.current = {
+            readMode: savedScope.readMode === 'selected' ? 'selected' : 'all',
+            writeMode: savedScope.writeMode === 'selected' ? 'selected' : 'all',
+            executeMode: savedScope.executeMode === 'selected' ? 'selected' : 'all',
+            drones: cleanAssistantScopeIds(savedScope.droneIds).map((id) => ({
+              id,
+              name: nameById.get(id) || id,
+            })),
+          };
+        } catch (err: any) {
+          if (scopeSaveRequestIdRef.current === requestId) {
+            queuedScopeSaveRef.current = null;
+            const persisted = persistedScopeDraftRef.current;
+            currentScopeDraftRef.current = persisted;
+            currentScopeKeyRef.current = assistantScopeSyncKey(
+              persisted.readMode,
+              persisted.writeMode,
+              persisted.executeMode,
+              assistantScopeDroneIds(
+                persisted.readMode,
+                persisted.writeMode,
+                persisted.executeMode,
+                persisted.drones,
+              ),
+            );
+            setScopeReadMode(persisted.readMode);
+            setScopeWriteMode(persisted.writeMode);
+            setScopeExecuteMode(persisted.executeMode);
+            setScopeDrones(persisted.drones);
+            setScopeSyncError(err?.message ?? String(err));
+          }
+          return false;
+        }
+      }
+      return true;
+    })().finally(() => {
         if (scopeSyncPromiseRef.current?.requestId === requestId) {
           scopeSyncPromiseRef.current = null;
           setScopeSyncBusy(false);
@@ -885,10 +1019,12 @@ export function AssistantDock({
   const addScopeDrones = React.useCallback((drones: AssistantScopeDrone[]) => {
     const clean = cleanAssistantScopeDrones(drones);
     if (clean.length === 0) return;
-    const byId = new Map(scopeDrones.map((drone) => [drone.id, drone]));
+    const byId = new Map(
+      currentScopeDraftRef.current.drones.map((drone) => [drone.id, drone]),
+    );
     for (const drone of clean) byId.set(drone.id, drone);
     void saveScopeDraft({ readMode: 'selected', writeMode: 'selected', executeMode: 'selected', drones: Array.from(byId.values()) });
-  }, [saveScopeDraft, scopeDrones]);
+  }, [saveScopeDraft]);
 
   const addReferencedDrones = React.useCallback((drones: AssistantDroneReference[]) => {
     const clean = cleanAssistantDroneReferences(drones);
@@ -911,25 +1047,24 @@ export function AssistantDock({
   }, []);
 
   const removeScopeDrone = React.useCallback((droneId: string) => {
+    const current = currentScopeDraftRef.current;
     void saveScopeDraft({
-      readMode: scopeReadMode,
-      writeMode: scopeWriteMode,
-      executeMode: scopeExecuteMode,
-      drones: scopeDrones.filter((drone) => drone.id !== droneId),
+      ...current,
+      drones: current.drones.filter((drone) => drone.id !== droneId),
     });
-  }, [saveScopeDraft, scopeDrones, scopeExecuteMode, scopeReadMode, scopeWriteMode]);
+  }, [saveScopeDraft]);
 
   const updateScopeReadMode = React.useCallback((mode: AssistantScopeMode) => {
-    void saveScopeDraft({ readMode: mode, writeMode: scopeWriteMode, executeMode: scopeExecuteMode, drones: scopeDrones });
-  }, [saveScopeDraft, scopeDrones, scopeExecuteMode, scopeWriteMode]);
+    void saveScopeDraft({ ...currentScopeDraftRef.current, readMode: mode });
+  }, [saveScopeDraft]);
 
   const updateScopeWriteMode = React.useCallback((mode: AssistantScopeMode) => {
-    void saveScopeDraft({ readMode: scopeReadMode, writeMode: mode, executeMode: scopeExecuteMode, drones: scopeDrones });
-  }, [saveScopeDraft, scopeDrones, scopeExecuteMode, scopeReadMode]);
+    void saveScopeDraft({ ...currentScopeDraftRef.current, writeMode: mode });
+  }, [saveScopeDraft]);
 
   const updateScopeExecuteMode = React.useCallback((mode: AssistantScopeMode) => {
-    void saveScopeDraft({ readMode: scopeReadMode, writeMode: scopeWriteMode, executeMode: mode, drones: scopeDrones });
-  }, [saveScopeDraft, scopeDrones, scopeReadMode, scopeWriteMode]);
+    void saveScopeDraft({ ...currentScopeDraftRef.current, executeMode: mode });
+  }, [saveScopeDraft]);
 
   useDndMonitor({
     onDragEnd: (event) => {
@@ -940,11 +1075,11 @@ export function AssistantDock({
       if (!target || target.ids.length === 0) return;
       const droppedOnThreadId = activeThreadIdRef.current;
       void resolveScopeDroneNames(target.ids, target.fallbackLabel).then((drones) => {
+        if (activeThreadIdRef.current !== droppedOnThreadId) return;
         if (overId === 'assistant-drone-scope-drop') {
           addScopeDrones(drones);
           return;
         }
-        if (activeThreadIdRef.current !== droppedOnThreadId) return;
         addReferencedDrones(drones);
       });
     },
@@ -1423,6 +1558,7 @@ export function AssistantDock({
       badge: artifactFiles.length > 0 ? (artifactFiles.length > 99 ? '99+' : artifactFiles.length) : undefined,
       active: filesOpen,
       onSelect: () => {
+        setDroneHubPermissionsOpen(false);
         setToolsPanelOpen(false);
         setSettingsOpen(false);
         setWorkspaceAccessOpen(false);
@@ -1443,11 +1579,28 @@ export function AssistantDock({
       disabled: !activeThread,
       active: workspacesPanelOpen || workspaceAccessOpen,
       onSelect: () => {
+        setDroneHubPermissionsOpen(false);
         setFilesOpen(false);
         setToolsPanelOpen(false);
         setSettingsOpen(false);
         setWorkspaceAccessOpen(false);
         setWorkspacesPanelOpen((value) => !value);
+      },
+    },
+    {
+      id: 'drone-hub-permissions',
+      label: 'DroneHub permissions',
+      title: 'Configure what this chat can access through the DroneHub MCP server.',
+      icon: <IconNetwork className="h-3.5 w-3.5" />,
+      disabled: !activeThread,
+      active: droneHubPermissionsOpen,
+      onSelect: () => {
+        setFilesOpen(false);
+        setToolsPanelOpen(false);
+        setSettingsOpen(false);
+        setWorkspaceAccessOpen(false);
+        setWorkspacesPanelOpen(false);
+        setDroneHubPermissionsOpen(true);
       },
     },
     {
@@ -1457,6 +1610,7 @@ export function AssistantDock({
       disabled: !activeThread,
       active: toolsPanelOpen,
       onSelect: () => {
+        setDroneHubPermissionsOpen(false);
         setSettingsOpen(false);
         setWorkspaceAccessOpen(false);
         setWorkspacesPanelOpen(false);
@@ -1469,6 +1623,7 @@ export function AssistantDock({
       icon: <IconSettings className="h-3.5 w-3.5" />,
       active: settingsOpen,
       onSelect: () => {
+        setDroneHubPermissionsOpen(false);
         setToolsPanelOpen(false);
         setWorkspaceAccessOpen(false);
         setWorkspacesPanelOpen(false);
@@ -1867,6 +2022,36 @@ export function AssistantDock({
   return (
     <div data-assistant-dock-root="true" className="flex h-full min-h-0">
       <div className="relative flex min-w-0 flex-1 flex-col outline-none">
+        {droneHubPermissionsOpen && activeThread ? (
+          <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
+            <DroneHubPermissionsView
+              chatLabel={activeThread.title || nativeChatName}
+              available={showExistingDroneAccess}
+              loading={loading}
+              saving={scopeSyncBusy}
+              error={scopeSyncError}
+              unavailableMessage="The DroneHub MCP tools are disabled for this chat. Enable them from Thread tools to use these permissions."
+              readMode={scopeReadMode}
+              writeMode={scopeWriteMode}
+              executeMode={scopeExecuteMode}
+              selectedDrones={scopeDrones.map((drone) => ({
+                id: drone.id,
+                label: drone.name || drone.id,
+                removable: drone.id !== activeThread.ownerDroneId,
+              }))}
+              dropActive={scopeDropActive}
+              dropTargetRef={setScopeDropNodeRef}
+              onModeChange={(kind, mode) => {
+                if (kind === 'read') updateScopeReadMode(mode);
+                else if (kind === 'write') updateScopeWriteMode(mode);
+                else updateScopeExecuteMode(mode);
+              }}
+              onRemoveDrone={removeScopeDrone}
+              onBack={() => setDroneHubPermissionsOpen(false)}
+            />
+          </div>
+        ) : null}
+
         {settingsOpen ? (
           <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
             <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
@@ -1919,64 +2104,6 @@ export function AssistantDock({
               threadTitle={activeThread.title}
               onClose={() => setWorkspaceAccessOpen(false)}
             />
-          </div>
-        ) : null}
-
-        {showExistingDroneAccess ? (
-          <div
-            ref={setScopeDropNodeRef}
-            className={`flex-shrink-0 border-b border-[var(--border)] px-2 py-1.5 transition-colors ${
-              scopeDropActive ? 'bg-[var(--accent-subtle)]' : 'bg-[var(--surface-inset-faint)]'
-            }`}
-          >
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <div
-                className="mr-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                Existing drones
-              </div>
-              <div className="flex flex-shrink-0 items-center gap-1">
-                <ScopeModeControl label="R" mode={scopeReadMode} onChange={updateScopeReadMode} />
-                <ScopeModeControl label="W" mode={scopeWriteMode} onChange={updateScopeWriteMode} />
-                <ScopeModeControl
-                  label="X"
-                  mode={scopeExecuteMode}
-                  onChange={updateScopeExecuteMode}
-                />
-              </div>
-              <div className="min-w-[120px] flex-1 overflow-hidden">
-                {scopeDrones.length === 0 ? (
-                  <div className="truncate text-[var(--text-10)] text-[var(--muted-dim)]">
-                    {scopeReadMode === 'selected' ||
-                    scopeWriteMode === 'selected' ||
-                    scopeExecuteMode === 'selected'
-                      ? 'No selected drones. Drop drones here to allow existing-drone access.'
-                      : 'Drop drones here to limit existing-drone access.'}
-                  </div>
-                ) : (
-                  <div className="flex min-w-0 gap-1 overflow-x-auto no-scrollbar">
-                    {scopeDrones.map((drone) => (
-                      <span
-                        key={drone.id}
-                        className="inline-flex max-w-[150px] flex-shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-1.5 py-0.5 text-[var(--text-10)] text-[var(--fg-secondary)]"
-                      >
-                        <span className="min-w-0 truncate">{drone.name || drone.id}</span>
-                        <button
-                          type="button"
-                          onClick={() => removeScopeDrone(drone.id)}
-                          className="text-[var(--text-11)] leading-none text-[var(--muted-dim)] hover:text-[var(--red)]"
-                          title={`Remove ${drone.name || drone.id} from assistant scope`}
-                          aria-label={`Remove ${drone.name || drone.id} from assistant scope`}
-                        >
-                          x
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         ) : null}
 

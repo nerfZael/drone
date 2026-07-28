@@ -3141,7 +3141,7 @@ export class HubAssistantService {
     const readScope = describeAssistantAccessMode(accessScope.readMode, accessScope.droneIds);
     const writeScope = describeAssistantAccessMode(accessScope.writeMode, accessScope.droneIds);
     const executeScope = describeAssistantAccessMode(accessScope.executeMode, accessScope.droneIds);
-    const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}; execute=${executeScope}. Do not claim access to existing drones outside those scopes. This scope does not restrict enabled global creation tools such as create_drone, clone_drone, or create_group.`;
+    const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}; execute=${executeScope}. Do not claim access to existing drones outside those scopes. create_drone creates a container child of this chat's owner and automatically grants this chat access; clone_drone also requires read access to its source. Neither operation is available when this chat's owner runs directly on the host. create_group remains a global creation tool.`;
     const basePrompt =
       normalizeAssistantSystemPrompt(thread?.systemPrompt) ||
       (thread ? this.defaultSystemPromptForThread(thread) : this.defaultSystemPrompt);

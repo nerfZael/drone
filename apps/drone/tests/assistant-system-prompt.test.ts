@@ -16,7 +16,7 @@ function makeAssistantService(): HubAssistantService {
 }
 
 describe('assistant system prompt settings', () => {
-  test('explains that existing-drone scope does not block global drone creation', async () => {
+  test('explains child-drone creation and clone access policy', async () => {
     await withTempDroneDataDir('assistant-global-create-scope-', async () => {
       const service = makeAssistantService();
       const snapshot = await ensureTestNativeChat(service, { chatName: 'create scope' });
@@ -28,7 +28,8 @@ describe('assistant system prompt settings', () => {
       });
       const prompt = service.resolvedSystemPrompt(snapshot.chatId);
       expect(prompt).toContain('Current existing-drone access scope: read=all drones; write=selected drones (native-test-drone); execute=selected drones (native-test-drone).');
-      expect(prompt).toContain('This scope does not restrict enabled global creation tools such as create_drone, clone_drone, or create_group.');
+      expect(prompt).toContain("create_drone creates a container child of this chat's owner and automatically grants this chat access; clone_drone also requires read access to its source.");
+      expect(prompt).toContain("Neither operation is available when this chat's owner runs directly on the host.");
     });
   });
 

@@ -1,7 +1,9 @@
 import React from 'react';
+import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import {
   ChatInput,
   ChatLoadingState,
+  type ChatComposerControlsConfig,
   type ChatSendContext,
   type ChatSendPayload,
   type DroneHubTask,
@@ -14,7 +16,7 @@ import { requestJson } from '../http';
 import { StatusBadge } from '../overview';
 import { IconSpinner, IconTrash, TypingDots } from '../overview/icons';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
-import { IconChat } from './icons';
+import { IconChat, IconNetwork } from './icons';
 import { fetchJson, isNotFoundError, resolvePollIntervalMs, usePoll } from './hooks';
 import {
   chatInputDraftKeyForDroneChat,
@@ -43,6 +45,10 @@ import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { beginRepoApplyProgress, useLocalChatBusy } from './use-drone-hub-runtime-store';
 import { droneChatEventMatches, fetchDroneChatState, fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
 import { subscribeDroneChatEvents } from './chat-events';
+import { useChatMcpAccess } from './use-chat-mcp-access';
+import { parseDroneHubDragData, useDroneHubActiveDrag } from './drone-hub-dnd';
+import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
+import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 
 const DirtyDroneApplyModal = React.lazy(async () => {
   const { DirtyDroneApplyModal } = await import('./DirtyDroneApplyModal');
@@ -100,6 +106,7 @@ export function GroupMultiChatColumn({
   const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull' | 'push'>(null);
   const [quickActionError, setQuickActionError] = React.useState<string | null>(null);
   const [dirtyDroneApplyModal, setDirtyDroneApplyModal] = React.useState<DirtyDroneApplyModalState | null>(null);
+  const [droneHubPermissionsOpen, setDroneHubPermissionsOpen] = React.useState(false);
   const columnScrollRef = React.useRef<HTMLDivElement | null>(null);
   const transcriptEtagRef = React.useRef<string | null>(null);
   const draftKey = React.useMemo(() => chatInputDraftKeyForDroneChat(drone.id, chatName), [drone.id, chatName]);
@@ -111,6 +118,47 @@ export function GroupMultiChatColumn({
   const quickOpenTabUrl = resolveDroneOpenTabUrl(drone);
   const disabledByProvisioning = isDroneStartingOrSeeding(drone.hubPhase);
   const fullTranscriptLoadedRef = React.useRef(false);
+  const activeDroneHubDrag = useDroneHubActiveDrag();
+  const chatMcpAccess = useChatMcpAccess(drone.id, chatName, true);
+  const chatMcpAccessDropId = `group-chat-mcp-access:${drone.id}:${chatName}`;
+  const { isOver: chatMcpAccessDropIsOver, setNodeRef: setChatMcpAccessDropNodeRef } =
+    useDroppable({ id: chatMcpAccessDropId });
+  const chatMcpAccessDropActive =
+    chatMcpAccessDropIsOver &&
+    assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
+
+  useDndMonitor({
+    onDragEnd(event) {
+      if (
+        chatMcpAccess.loading ||
+        !chatMcpAccess.available ||
+        String(event.over?.id ?? '') !== chatMcpAccessDropId
+      ) {
+        return;
+      }
+      const droneIds = assignedDroneIdsFromData(parseDroneHubDragData(event.active.data.current));
+      if (droneIds.length === 0) return;
+      void chatMcpAccess.addSelectedDrones(droneIds);
+    },
+  });
+
+  React.useEffect(() => {
+    setDroneHubPermissionsOpen(false);
+  }, [chatName, drone.id]);
+
+  const composerControls: ChatComposerControlsConfig = {
+    controls: [],
+    menuActions: [
+      {
+        id: 'drone-hub-permissions',
+        label: 'DroneHub permissions',
+        title: 'Configure what this chat can access through the DroneHub MCP server.',
+        icon: <IconNetwork className="h-3.5 w-3.5" />,
+        active: droneHubPermissionsOpen,
+        onSelect: () => setDroneHubPermissionsOpen(true),
+      },
+    ],
+  };
 
   const scrollColumnToBottom = React.useCallback(() => {
     const el = columnScrollRef.current;
@@ -683,9 +731,33 @@ export function GroupMultiChatColumn({
 
   return (
     <section
-      className="flex-none h-full rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden flex flex-col"
+      className="relative flex-none h-full rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden flex flex-col"
       style={{ width: columnWidthPx, minWidth: columnWidthPx }}
     >
+      {droneHubPermissionsOpen ? (
+        <div className="absolute inset-0 z-30 overflow-y-auto">
+          <DroneHubPermissionsView
+            chatLabel={`${shownName} · ${chatName}`}
+            available={chatMcpAccess.available}
+            loading={chatMcpAccess.loading}
+            saving={chatMcpAccess.saving}
+            error={chatMcpAccess.error}
+            readMode={chatMcpAccess.accessScope.readMode}
+            writeMode={chatMcpAccess.accessScope.writeMode}
+            executeMode={chatMcpAccess.accessScope.executeMode}
+            selectedDrones={chatMcpAccess.accessScope.droneIds.map((droneId) => ({
+              id: droneId,
+              label: droneId === drone.id ? shownName : droneId,
+              removable: droneId !== drone.id,
+            }))}
+            dropActive={chatMcpAccessDropActive}
+            dropTargetRef={setChatMcpAccessDropNodeRef}
+            onModeChange={(kind, mode) => void chatMcpAccess.setMode(kind, mode)}
+            onRemoveDrone={(droneId) => void chatMcpAccess.removeSelectedDrone(droneId)}
+            onBack={() => setDroneHubPermissionsOpen(false)}
+          />
+        </div>
+      ) : null}
       <div className="group/column-header flex-shrink-0 px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)]">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -874,6 +946,7 @@ export function GroupMultiChatColumn({
         disabled={sendingPrompt || isDroneStartingOrSeeding(drone.hubPhase)}
         autoFocus={false}
         modeHint=""
+        composerControls={composerControls}
         onStop={canStopResponse ? stopResponse : undefined}
         stopping={stoppingResponse}
         onSend={sendPrompt}

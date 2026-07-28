@@ -7,6 +7,7 @@ import { BlipAssistantHost } from './assistant/blip-assistant-host';
 import { loadBlipMcp, loadBlipTools } from './assistant/blip-runtime-loader';
 import { ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES } from './assistant/assistant-config';
 import { createInProcessDroneHubMcpClient } from './assistant/in-process-drone-hub-mcp';
+import type { McpTokenIdentity } from './mcp-tokens';
 import { AssistantArtifactsTarget } from './assistant/targets/assistant-artifacts-target';
 import { DroneWorkspaceTarget } from './assistant/targets/workspace-targets';
 import {
@@ -357,11 +358,40 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
               .filter(Boolean),
           ),
         );
+      const ownerDroneId = String(thread.ownerDroneId ?? '').trim();
+      const ownerChatName = String(thread.ownerChatName ?? '').trim() || 'default';
+      const workspaceDroneNameById = new Map(
+        workspaceDrones.map((drone) => [
+          String(drone.id ?? '').trim(),
+          String(drone.name ?? '').trim(),
+        ]),
+      );
+      const nativePrincipal: McpTokenIdentity | undefined = ownerDroneId
+        ? {
+            kind: 'chat',
+            tokenId: `assistant:${threadId}`,
+            name: `Built-in chat ${thread.title || ownerChatName}`,
+            droneId: ownerDroneId,
+            chatName: ownerChatName,
+            chatId: threadId,
+            accessScope: thread.accessScope,
+            selectedDroneRefs: Array.from(
+              new Set(
+                thread.accessScope.droneIds.flatMap((droneId) => [
+                  droneId,
+                  workspaceDroneNameById.get(droneId) || '',
+                ]),
+              ),
+            ).filter(Boolean),
+          }
+        : undefined;
       const mcpClient = await createInProcessDroneHubMcpClient({
         correlationId: threadId,
         allowedDroneRefs: refsFor(readableDrones),
         allowedWriteDroneRefs: refsFor(writableDrones),
         allowedDroneIds: readableDrones.map((drone: any) => String(drone.id ?? '')).filter(Boolean),
+        principal: nativePrincipal,
+        ...(nativePrincipal ? { nativeThreadId: threadId } : {}),
       });
       const droneTargets = workspaceDrones
         .map((drone) => {

@@ -996,7 +996,117 @@ function agentFromPreferenceKey(value: string) {
   return normalizeAgent(String(value || '').replace(/^builtin:/, ''));
 }
 
-function registerTools(server: McpServer) {
+type McpToolRegistrationContext = {
+  principal: McpTokenIdentity;
+  nativeThreadId?: string;
+};
+
+function chatPrincipal(
+  context: McpToolRegistrationContext,
+): Extract<McpTokenIdentity, { kind: 'chat' }> | null {
+  return context.principal.kind === 'chat' ? context.principal : null;
+}
+
+async function requireContainerDroneForManagedChat(
+  context: McpToolRegistrationContext,
+  droneRefRaw: unknown,
+  operation: string,
+): Promise<string | null> {
+  const principal = chatPrincipal(context);
+  if (!principal) return null;
+  const droneRef = cleanString(droneRefRaw);
+  const response = await requestDroneSummaries();
+  const drone = (Array.isArray(response?.drones) ? response.drones : []).find(
+    (candidate: any) =>
+      cleanString(candidate?.id) === droneRef || cleanString(candidate?.name) === droneRef,
+  );
+  if (!drone) throw new Error(`unknown drone: ${droneRef}`);
+  const runtime = cleanString(drone?.runtime, 'container').toLowerCase();
+  if (runtime !== 'container') {
+    throw new Error(
+      `Managed chats cannot ${operation} on host-runtime drone ${cleanString(drone?.name, droneRef)}`,
+    );
+  }
+  return cleanString(drone?.id, droneRef);
+}
+
+async function grantCreatedDroneAccessToManagedChat(
+  context: McpToolRegistrationContext,
+  createdDrone: any,
+): Promise<any | null> {
+  const principal = chatPrincipal(context);
+  if (!principal) return null;
+  const droneId = cleanString(createdDrone?.id || createdDrone?.name);
+  if (!droneId) throw new Error('created drone response did not include an id or name');
+  const hasSelectedMode =
+    principal.accessScope.readMode === 'selected' ||
+    principal.accessScope.writeMode === 'selected' ||
+    principal.accessScope.executeMode === 'selected';
+  if (!hasSelectedMode) return principal.accessScope;
+  const requestedScope = {
+    ...principal.accessScope,
+    droneIds: [...new Set([...principal.accessScope.droneIds, droneId])],
+    updatedAt: new Date().toISOString(),
+  };
+  const response = context.nativeThreadId
+    ? await requestJson('/api/assistant/scope', {
+        method: 'POST',
+        body: JSON.stringify({
+          threadId: context.nativeThreadId,
+          readMode: requestedScope.readMode,
+          writeMode: requestedScope.writeMode,
+          executeMode: requestedScope.executeMode,
+          droneIds: requestedScope.droneIds,
+        }),
+      })
+    : await requestJson(
+        `/api/drones/${encodeURIComponent(principal.droneId)}/chats/${encodeURIComponent(principal.chatName)}/mcp-access`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ accessScope: requestedScope }),
+        },
+      );
+  const accessScope =
+    response?.accessScope && typeof response.accessScope === 'object'
+      ? response.accessScope
+      : requestedScope;
+  context.principal = {
+    ...principal,
+    accessScope,
+    selectedDroneRefs: [
+      ...new Set([
+        ...principal.selectedDroneRefs,
+        droneId,
+        cleanString(createdDrone?.name),
+      ].filter(Boolean)),
+    ],
+  };
+  return accessScope;
+}
+
+async function grantCreatedDroneAccessBestEffort(
+  context: McpToolRegistrationContext,
+  createdDrone: any,
+): Promise<{ accessScope: any | null; accessGrantError: string | null }> {
+  if (!chatPrincipal(context)) return { accessScope: null, accessGrantError: null };
+  let lastError: any = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return {
+        accessScope: await grantCreatedDroneAccessToManagedChat(context, createdDrone),
+        accessGrantError: null,
+      };
+    } catch (error: any) {
+      lastError = error;
+    }
+  }
+  return {
+    accessScope: null,
+    accessGrantError: lastError?.message || String(lastError),
+  };
+}
+
+function registerTools(server: McpServer, context: McpToolRegistrationContext) {
   server.registerTool('list_drones', {
     title: 'List drones',
     description: 'List local Drone Hub drones, optionally filtered by group or names.',
@@ -1319,6 +1429,11 @@ function registerTools(server: McpServer) {
       completion: z.enum(['ready', 'accepted']).optional(),
     },
   }, async (args) => {
+    const fleetParentId = await requireContainerDroneForManagedChat(
+      context,
+      chatPrincipal(context)?.droneId,
+      'create child drones',
+    );
     const resolvedRepo = await resolveRegisteredRepo(args);
     const repoPath = cleanString(resolvedRepo?.path);
     const defaults = await createDronePreferences(repoPath);
@@ -1341,14 +1456,32 @@ function registerTools(server: McpServer) {
       ...(repoPath && repoBranchSource === 'host' ? { pullHostBranchBeforeCreate: args.pullHostBranchBeforeCreate ?? defaults.pullHostBranchBeforeCreate } : {}),
       ...(repoPath && repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
       ...(cleanString(args.initialMessage) ? { seedPrompt: cleanString(args.initialMessage), seedSubmittedAt: new Date().toISOString() } : {}),
+      ...(fleetParentId ? { fleetParentId } : {}),
     };
     const response = await requestJson('/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
+    const { accessScope, accessGrantError } =
+      await grantCreatedDroneAccessBestEffort(context, response);
     const accepted = droneSummary({ ...body, ...response });
     const returnsImmediately = args.draft === true || args.completion === 'accepted';
     const drone = returnsImmediately
       ? accepted
       : await waitForMcpDroneReady(cleanString(response?.id || response?.name, accepted.id || accepted.name));
-    return toolResult({ ok: true, phase: args.draft === true ? 'draft' : returnsImmediately ? 'accepted' : 'ready', drone, raw: response, createDefaults: defaults, repo: resolvedRepo });
+    return toolResult({
+      ok: true,
+      phase: args.draft === true ? 'draft' : returnsImmediately ? 'accepted' : 'ready',
+      drone,
+      raw: response,
+      createDefaults: defaults,
+      repo: resolvedRepo,
+      ...(accessScope ? { accessScope } : {}),
+      ...(accessGrantError
+        ? {
+            accessGrantError,
+            warning:
+              'The drone was created, but this chat could not be granted access automatically.',
+          }
+        : {}),
+    });
   });
 
   server.registerTool('clone_drone', {
@@ -1362,19 +1495,40 @@ function registerTools(server: McpServer) {
       completion: z.enum(['ready', 'accepted']).optional(),
     },
   }, async (args) => {
+    const fleetParentId = await requireContainerDroneForManagedChat(
+      context,
+      chatPrincipal(context)?.droneId,
+      'clone child drones',
+    );
     const body = {
       name: cleanString(args.name),
       runtime: 'container',
       cloneFrom: cleanString(args.source),
       cloneChats: args.cloneChats !== false,
       ...(cleanString(args.group) ? { group: cleanString(args.group) } : {}),
+      ...(fleetParentId ? { fleetParentId } : {}),
     };
     const response = await requestJson('/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
+    const { accessScope, accessGrantError } =
+      await grantCreatedDroneAccessBestEffort(context, response);
     const accepted = droneSummary({ ...body, ...response });
     const drone = args.completion === 'accepted'
       ? accepted
       : await waitForMcpDroneReady(cleanString(response?.id || response?.name, accepted.id || accepted.name));
-    return toolResult({ ok: true, phase: args.completion === 'accepted' ? 'accepted' : 'ready', drone, raw: response });
+    return toolResult({
+      ok: true,
+      phase: args.completion === 'accepted' ? 'accepted' : 'ready',
+      drone,
+      raw: response,
+      ...(accessScope ? { accessScope } : {}),
+      ...(accessGrantError
+        ? {
+            accessGrantError,
+            warning:
+              'The cloned drone was created, but this chat could not be granted access automatically.',
+          }
+        : {}),
+    });
   });
 
   registerWorkflowMcpTools(server, { requestJson, toolResult });
@@ -1416,6 +1570,7 @@ function registerTools(server: McpServer) {
     description: 'Create a chat for a Drone Hub drone.',
     inputSchema: { drone: z.string(), chat: z.string(), draft: z.boolean().optional() },
   }, async (args) => {
+    await requireContainerDroneForManagedChat(context, args.drone, 'create chats');
     let created = true;
     await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
       method: 'POST',
@@ -1440,6 +1595,7 @@ function registerTools(server: McpServer) {
   }, async (args) => {
     const chat = chatName(args.chat);
     if (args.createChat) {
+      await requireContainerDroneForManagedChat(context, args.drone, 'create chats');
       await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
         method: 'POST',
         body: JSON.stringify({ name: chat }),
@@ -1533,8 +1689,7 @@ function registerTools(server: McpServer) {
   });
 }
 
-export type DroneHubMcpServerContext = {
-  principal: McpTokenIdentity;
+export type DroneHubMcpServerContext = McpToolRegistrationContext & {
   correlationId?: string;
   allowedDroneRefs?: string[];
   allowedWriteDroneRefs?: string[];
@@ -1605,7 +1760,7 @@ const DRONE_PRINCIPAL_TOOLS = new Set([
 const DRONE_DEFAULTED_TOOLS = new Set<string>(WORKFLOW_DRONE_DEFAULTED_TOOL_NAMES);
 
 function assertedDroneRefs(args: any): string[] {
-  const direct = [args?.drone, args?.droneId, args?.targetDroneId, args?.id, args?.beforeDrone, args?.afterDrone]
+  const direct = [args?.drone, args?.droneId, args?.targetDroneId, args?.id, args?.beforeDrone, args?.afterDrone, args?.source]
     .map((value) => cleanString(value))
     .filter(Boolean);
   const arrays = [args?.drones, args?.droneIds, args?.targets, args?.renames]
@@ -1689,7 +1844,7 @@ function registerAuthorizedTools(server: McpServer, context: DroneHubMcpServerCo
       authorizeDroneHubMcpTool(context, name, effectiveArgs);
       return projectMcpResultForPrincipal(context, name, await handler(effectiveArgs, extra));
     });
-  registerTools(server);
+  registerTools(server, context);
   (server as any).registerTool = registerTool;
 }
 
@@ -1697,6 +1852,7 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
   const context: DroneHubMcpServerContext = {
     principal: input?.principal ?? { kind: 'legacy', tokenId: 'legacy', name: 'Legacy Drone Hub MCP token' },
     ...(input?.correlationId ? { correlationId: input.correlationId } : {}),
+    ...(input?.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
     ...(input?.allowedDroneRefs ? { allowedDroneRefs: input.allowedDroneRefs } : {}),
     ...(input?.allowedWriteDroneRefs ? { allowedWriteDroneRefs: input.allowedWriteDroneRefs } : {}),
     ...(input?.allowedDroneIds ? { allowedDroneIds: input.allowedDroneIds } : {}),

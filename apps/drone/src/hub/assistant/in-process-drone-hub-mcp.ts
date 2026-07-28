@@ -3,6 +3,7 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import type { Transport, TransportSendOptions } from '@modelcontextprotocol/sdk/shared/transport.js';
 
 import { createDroneHubMcpServer } from '../mcp-server';
+import type { McpTokenIdentity } from '../mcp-tokens';
 
 class LinkedTransport implements Transport {
   peer?: LinkedTransport;
@@ -46,13 +47,25 @@ export async function createInProcessDroneHubMcpClient(input: {
   allowedDroneRefs: string[];
   allowedWriteDroneRefs: string[];
   allowedDroneIds: string[];
+  principal?: McpTokenIdentity;
+  nativeThreadId?: string;
 }): Promise<Client> {
+  const principal = input.principal ?? {
+    kind: 'host' as const,
+    tokenId: `assistant:${input.correlationId}`,
+    name: 'Drone Hub assistant',
+  };
   const server = createDroneHubMcpServer({
-    principal: { kind: 'host', tokenId: `assistant:${input.correlationId}`, name: 'Drone Hub assistant' },
+    principal,
     correlationId: input.correlationId,
-    allowedDroneRefs: input.allowedDroneRefs,
-    allowedWriteDroneRefs: input.allowedWriteDroneRefs,
-    allowedDroneIds: input.allowedDroneIds,
+    ...(input.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
+    ...(principal.kind === 'chat'
+      ? {}
+      : {
+          allowedDroneRefs: input.allowedDroneRefs,
+          allowedWriteDroneRefs: input.allowedWriteDroneRefs,
+          allowedDroneIds: input.allowedDroneIds,
+        }),
   });
   const client = new Client({ name: 'Drone Hub Blip host', version: '0.1.0' });
   const [clientTransport, serverTransport] = linkedTransports();

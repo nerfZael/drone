@@ -93,6 +93,14 @@ describe('Drone Hub MCP principal authorization', () => {
     expect(() => authorizeDroneHubMcpTool(scoped, 'send_message', { drone: 'drone-b' })).toThrow('execute scope');
     expect(() => authorizeDroneHubMcpTool(scoped, 'send_message', { drone: 'Drone A' })).not.toThrow();
     expect(() => authorizeDroneHubMcpTool(scoped, 'create_drone', { name: 'Child' })).not.toThrow();
+    const cloneScoped = {
+      principal: {
+        ...chatPrincipal,
+        accessScope: { ...chatPrincipal.accessScope, readMode: 'selected' as const },
+      },
+    };
+    expect(() => authorizeDroneHubMcpTool(cloneScoped, 'clone_drone', { source: 'drone-b', name: 'Child' })).toThrow('read scope');
+    expect(() => authorizeDroneHubMcpTool(cloneScoped, 'clone_drone', { source: 'drone-a', name: 'Child' })).not.toThrow();
   });
 
   test('uses native defaults and includes the owner whenever a scope is selected', () => {
@@ -223,6 +231,426 @@ describe('Drone Hub assistant MCP transport', () => {
           'POST /api/drones',
         ]);
         expect(requests[1]?.body).toMatchObject({ name: 'New draft', runtime: 'container', draft: true });
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
+  test('parents managed-chat creations and immediately grants all selected access kinds', async () => {
+    await withTempDroneDataDir('drone-managed-chat-child-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const requests: Array<{ pathname: string; method: string; body?: any }> = [];
+      let childCreated = false;
+      let cloneCreated = false;
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+        const method = String(init?.method ?? 'GET').toUpperCase();
+        const body = method !== 'GET' && typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+        requests.push({ pathname: url.pathname, method, ...(body === undefined ? {} : { body }) });
+        if (url.pathname === '/api/drones/summary') {
+          return Response.json({
+            ok: true,
+            drones: [
+              { id: 'owner', name: 'Owner', runtime: 'container' },
+              ...(childCreated ? [{ id: 'child-1', name: 'Child', runtime: 'container' }] : []),
+              ...(cloneCreated ? [{ id: 'clone-1', name: 'Clone', runtime: 'container' }] : []),
+            ],
+          });
+        }
+        if (url.pathname === '/api/settings/ui-preferences') {
+          return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+        }
+        if (url.pathname === '/api/drones' && method === 'POST') {
+          if (body.cloneFrom) {
+            cloneCreated = true;
+            return Response.json({ ok: true, id: 'clone-1', name: 'Clone', runtime: 'container', phase: 'starting' }, { status: 202 });
+          }
+          childCreated = true;
+          return Response.json({ ok: true, id: 'child-1', name: 'Child', runtime: 'container', phase: 'draft', draft: true }, { status: 201 });
+        }
+        if (url.pathname === '/api/drones/owner/chats/default/mcp-access' && method === 'PUT') {
+          return Response.json({ ok: true, available: true, accessScope: body.accessScope });
+        }
+        if (url.pathname === '/api/drones/child-1/chats' && method === 'GET') {
+          return Response.json({ ok: true, chats: ['default'] });
+        }
+        if (url.pathname === '/api/drones/child-1/chats' && method === 'POST') {
+          return Response.json({ ok: true, chat: body.name }, { status: 201 });
+        }
+        if (url.pathname === '/api/drones/child-1/chats/default/prompt' && method === 'POST') {
+          return Response.json({ ok: true, id: 'child-1', promptId: 'prompt-1', pendingState: 'queued' });
+        }
+        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'managed-chat-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'managed-chat-child',
+          allowedDroneRefs: [],
+          allowedWriteDroneRefs: [],
+          allowedDroneIds: [],
+          principal: {
+            kind: 'chat',
+            tokenId: 'chat:owner:default',
+            name: 'Owner / default',
+            droneId: 'owner',
+            chatName: 'default',
+            chatId: 'owner-default',
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['owner'],
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+            selectedDroneRefs: ['owner', 'Owner'],
+          },
+        });
+        const created = await client.callTool({
+          name: 'create_drone',
+          arguments: { name: 'Child', draft: true },
+        });
+        expect(created.structuredContent).toMatchObject({
+          ok: true,
+          phase: 'draft',
+          drone: { id: 'child-1', name: 'Child' },
+          accessScope: {
+            readMode: 'selected',
+            writeMode: 'selected',
+            executeMode: 'selected',
+            droneIds: ['owner', 'child-1'],
+          },
+        });
+        const createRequest = requests.find(
+          (request) => request.pathname === '/api/drones' && request.method === 'POST',
+        );
+        expect(createRequest?.body).toMatchObject({
+          name: 'Child',
+          runtime: 'container',
+          fleetParentId: 'owner',
+        });
+        const scopeRequest = requests.find(
+          (request) =>
+            request.pathname === '/api/drones/owner/chats/default/mcp-access' &&
+            request.method === 'PUT',
+        );
+        expect(scopeRequest?.body?.accessScope?.droneIds).toEqual(['owner', 'child-1']);
+
+        const cloned = await client.callTool({
+          name: 'clone_drone',
+          arguments: { source: 'owner', name: 'Clone', completion: 'accepted' },
+        });
+        expect(cloned.structuredContent).toMatchObject({
+          ok: true,
+          phase: 'accepted',
+          drone: { id: 'clone-1', name: 'Clone' },
+          accessScope: {
+            readMode: 'selected',
+            writeMode: 'selected',
+            executeMode: 'selected',
+            droneIds: ['owner', 'child-1', 'clone-1'],
+          },
+        });
+        const cloneRequest = requests.find(
+          (request) =>
+            request.pathname === '/api/drones' &&
+            request.method === 'POST' &&
+            request.body?.cloneFrom,
+        );
+        expect(cloneRequest?.body).toMatchObject({
+          name: 'Clone',
+          runtime: 'container',
+          cloneFrom: 'owner',
+          fleetParentId: 'owner',
+        });
+
+        const read = await client.callTool({
+          name: 'list_chats',
+          arguments: { drone: 'child-1' },
+        });
+        const write = await client.callTool({
+          name: 'create_chat',
+          arguments: { drone: 'child-1', chat: 'review' },
+        });
+        const execute = await client.callTool({
+          name: 'send_message',
+          arguments: { drone: 'child-1', chat: 'default', message: 'Continue' },
+        });
+        expect(read.isError).not.toBe(true);
+        expect(write.isError).not.toBe(true);
+        expect(execute.isError).not.toBe(true);
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
+  test('persists child access through the native assistant thread scope', async () => {
+    await withTempDroneDataDir('drone-native-chat-child-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const requests: Array<{ pathname: string; method: string; body?: any }> = [];
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+        const method = String(init?.method ?? 'GET').toUpperCase();
+        const body = method !== 'GET' && typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+        requests.push({ pathname: url.pathname, method, ...(body === undefined ? {} : { body }) });
+        if (url.pathname === '/api/drones/summary') {
+          return Response.json({
+            ok: true,
+            drones: [{ id: 'owner', name: 'Owner', runtime: 'container' }],
+          });
+        }
+        if (url.pathname === '/api/settings/ui-preferences') {
+          return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+        }
+        if (url.pathname === '/api/drones' && method === 'POST') {
+          return Response.json(
+            { ok: true, id: 'native-child', name: 'Native child', runtime: 'container', draft: true },
+            { status: 201 },
+          );
+        }
+        if (url.pathname === '/api/assistant/scope' && method === 'POST') {
+          return Response.json({
+            ok: true,
+            accessScope: {
+              readMode: body.readMode,
+              writeMode: body.writeMode,
+              executeMode: body.executeMode,
+              droneIds: body.droneIds,
+              updatedAt: '2026-01-02T00:00:00.000Z',
+            },
+          });
+        }
+        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'native-chat-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'native-thread',
+          nativeThreadId: 'native-thread',
+          allowedDroneRefs: [],
+          allowedWriteDroneRefs: [],
+          allowedDroneIds: [],
+          principal: {
+            kind: 'chat',
+            tokenId: 'assistant:native-thread',
+            name: 'Built-in chat',
+            droneId: 'owner',
+            chatName: 'default',
+            chatId: 'native-thread',
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['owner'],
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+            selectedDroneRefs: ['owner', 'Owner'],
+          },
+        });
+        const result = await client.callTool({
+          name: 'create_drone',
+          arguments: { name: 'Native child', draft: true },
+        });
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          accessScope: { droneIds: ['owner', 'native-child'] },
+        });
+        expect(
+          requests.find(
+            (request) => request.pathname === '/api/drones' && request.method === 'POST',
+          )?.body,
+        ).toMatchObject({ fleetParentId: 'owner' });
+        expect(
+          requests.find(
+            (request) =>
+              request.pathname === '/api/assistant/scope' && request.method === 'POST',
+          )?.body,
+        ).toMatchObject({
+          threadId: 'native-thread',
+          readMode: 'selected',
+          writeMode: 'selected',
+          executeMode: 'selected',
+          droneIds: ['owner', 'native-child'],
+        });
+        expect(
+          requests.some((request) => request.pathname.endsWith('/mcp-access')),
+        ).toBe(false);
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
+  test('does not report a created drone as failed when its automatic access grant fails', async () => {
+    await withTempDroneDataDir('drone-managed-chat-grant-failure-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const requests: Array<{ pathname: string; method: string }> = [];
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+        const method = String(init?.method ?? 'GET').toUpperCase();
+        requests.push({ pathname: url.pathname, method });
+        if (url.pathname === '/api/drones/summary') {
+          return Response.json({
+            ok: true,
+            drones: [{ id: 'owner', name: 'Owner', runtime: 'container' }],
+          });
+        }
+        if (url.pathname === '/api/settings/ui-preferences') {
+          return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+        }
+        if (url.pathname === '/api/drones' && method === 'POST') {
+          return Response.json(
+            { ok: true, id: 'created-once', name: 'Created once', runtime: 'container', draft: true },
+            { status: 201 },
+          );
+        }
+        if (url.pathname === '/api/drones/owner/chats/default/mcp-access') {
+          return Response.json({ ok: false, error: 'scope store unavailable' }, { status: 503 });
+        }
+        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'managed-chat-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'managed-chat-grant-failure',
+          allowedDroneRefs: [],
+          allowedWriteDroneRefs: [],
+          allowedDroneIds: [],
+          principal: {
+            kind: 'chat',
+            tokenId: 'chat:owner:default',
+            name: 'Owner / default',
+            droneId: 'owner',
+            chatName: 'default',
+            chatId: 'owner-default',
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['owner'],
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+            selectedDroneRefs: ['owner', 'Owner'],
+          },
+        });
+        const result = await client.callTool({
+          name: 'create_drone',
+          arguments: { name: 'Created once', draft: true },
+        });
+        expect(result.isError).not.toBe(true);
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          drone: { id: 'created-once' },
+        });
+        expect(String((result.structuredContent as any)?.accessGrantError)).toContain(
+          'scope store unavailable',
+        );
+        expect(
+          requests.filter(
+            (request) => request.pathname === '/api/drones' && request.method === 'POST',
+          ),
+        ).toHaveLength(1);
+        expect(
+          requests.filter((request) => request.pathname.endsWith('/mcp-access')),
+        ).toHaveLength(2);
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
+  test('prevents managed chats on host-runtime drones from creating children or chats', async () => {
+    await withTempDroneDataDir('drone-managed-host-chat-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      globalThis.fetch = (async (input) => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+        if (url.pathname === '/api/drones/summary') {
+          return Response.json({
+            ok: true,
+            drones: [{ id: 'host-owner', name: 'Host owner', runtime: 'host' }],
+          });
+        }
+        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'managed-host-chat-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'managed-host-chat',
+          allowedDroneRefs: [],
+          allowedWriteDroneRefs: [],
+          allowedDroneIds: [],
+          principal: {
+            kind: 'chat',
+            tokenId: 'chat:host-owner:default',
+            name: 'Host owner / default',
+            droneId: 'host-owner',
+            chatName: 'default',
+            chatId: 'host-owner-default',
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['host-owner'],
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+            selectedDroneRefs: ['host-owner', 'Host owner'],
+          },
+        });
+        const childResult = await client.callTool({
+          name: 'create_drone',
+          arguments: { name: 'Blocked child', draft: true },
+        });
+        expect(childResult.isError).toBe(true);
+        expect(JSON.stringify(childResult.content)).toContain(
+          'cannot create child drones on host-runtime drone Host owner',
+        );
+
+        const chatResult = await client.callTool({
+          name: 'create_chat',
+          arguments: { drone: 'host-owner', chat: 'blocked' },
+        });
+        expect(chatResult.isError).toBe(true);
+        expect(JSON.stringify(chatResult.content)).toContain(
+          'cannot create chats on host-runtime drone Host owner',
+        );
       } finally {
         await client?.close();
         globalThis.fetch = previousFetch;
