@@ -162,4 +162,30 @@ describe('changed files card', () => {
     expect(html).not.toContain('hover:bg-[var(--hover)]');
     expect(html).not.toContain('bg-[var(--accent-subtle)]');
   });
+
+  test('shows directory line counts only while the directory is collapsed', () => {
+    const entries = [
+      { path: 'src/changed.ts', status: 'modified' as const, additions: 10, deletions: 4 },
+    ];
+    const renderTree = (defaultDirectoriesExpanded: boolean) =>
+      renderToStaticMarkup(
+        <AgentRunChangedFilesTree
+          entries={entries}
+          expandedDirectories={{}}
+          defaultDirectoriesExpanded={defaultDirectoriesExpanded}
+          onToggleDirectory={() => undefined}
+          onSelectFile={() => undefined}
+        />,
+      );
+
+    const expandedHtml = renderTree(true);
+    const collapsedHtml = renderTree(false);
+
+    expect(expandedHtml.match(/title="Lines added"/g)).toHaveLength(1);
+    expect(expandedHtml.match(/title="Lines deleted"/g)).toHaveLength(1);
+    expect(collapsedHtml.match(/title="Lines added"/g)).toHaveLength(1);
+    expect(collapsedHtml.match(/title="Lines deleted"/g)).toHaveLength(1);
+    expect(expandedHtml).toContain('changed.ts');
+    expect(collapsedHtml).not.toContain('changed.ts');
+  });
 });

@@ -69,14 +69,16 @@ export function MobileChangedFilesTree({
               >
                 {node.name}
               </Text>
-              <View style={[styles.stats, pressed && styles.statsPressed]}>
-                {node.stats.additions > 0 ? (
-                  <Text style={styles.additions}>+{node.stats.additions}</Text>
-                ) : null}
-                {node.stats.deletions > 0 ? (
-                  <Text style={styles.deletions}>-{node.stats.deletions}</Text>
-                ) : null}
-              </View>
+              {collapsed ? (
+                <View style={[styles.stats, pressed && styles.statsPressed]}>
+                  {node.stats.additions > 0 ? (
+                    <Text style={styles.additions}>+{node.stats.additions}</Text>
+                  ) : null}
+                  {node.stats.deletions > 0 ? (
+                    <Text style={styles.deletions}>-{node.stats.deletions}</Text>
+                  ) : null}
+                </View>
+              ) : null}
             </>
           )}
         </Pressable>
