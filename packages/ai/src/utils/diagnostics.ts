@@ -3,6 +3,7 @@ export interface DiagnosticErrorInfo {
 	message: string;
 	stack?: string;
 	code?: string | number;
+	cause?: DiagnosticErrorInfo;
 }
 
 export interface AssistantMessageDiagnostic {
@@ -18,15 +19,31 @@ export function formatThrownValue(value: unknown): string {
 	return String(value);
 }
 
-export function extractDiagnosticError(error: unknown): DiagnosticErrorInfo {
+function extractDiagnosticErrorWithDepth(
+	error: unknown,
+	depth: number,
+	seen: Set<unknown>,
+): DiagnosticErrorInfo {
 	if (!(error instanceof Error)) return { name: "ThrownValue", message: formatThrownValue(error) };
+	if (seen.has(error)) {
+		return { name: error.name || undefined, message: error.message || error.name };
+	}
+	seen.add(error);
 	const code = (error as Error & { code?: unknown }).code;
+	const cause = (error as Error & { cause?: unknown }).cause;
 	return {
 		name: error.name || undefined,
 		message: error.message || error.name,
 		stack: error.stack,
 		code: typeof code === "string" || typeof code === "number" ? code : undefined,
+		...(depth < 3 && cause !== undefined
+			? { cause: extractDiagnosticErrorWithDepth(cause, depth + 1, seen) }
+			: {}),
 	};
+}
+
+export function extractDiagnosticError(error: unknown): DiagnosticErrorInfo {
+	return extractDiagnosticErrorWithDepth(error, 0, new Set());
 }
 
 export function createAssistantMessageDiagnostic(

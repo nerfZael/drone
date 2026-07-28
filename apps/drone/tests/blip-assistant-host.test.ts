@@ -102,6 +102,86 @@ describe('Blip assistant host', () => {
     });
   });
 
+  test('accepts a recoverable retry before waiting for the continued response', async () => {
+    await withTempDroneDataDir('blip-assistant-retry-', async () => {
+      const faux = registerFauxProvider({
+        api: 'faux',
+        provider: 'faux',
+        tokensPerSecond: 0,
+      });
+      let releaseRetry = () => {};
+      const retryReleased = new Promise<void>((resolve) => {
+        releaseRetry = resolve;
+      });
+      faux.setResponses([
+        fauxAssistantMessage('', {
+          stopReason: 'error',
+          errorMessage: 'fetch failed',
+          diagnostics: [
+            {
+              type: 'provider_transport_failure',
+              timestamp: Date.now(),
+              error: {
+                name: 'TypeError',
+                message: 'fetch failed',
+                cause: { name: 'Error', message: 'socket hang up', code: 'ECONNRESET' },
+              },
+              details: { attempts: 4 },
+            },
+          ],
+        }),
+        async () => {
+          await retryReleased;
+          return fauxAssistantMessage('Recovered response');
+        },
+      ]);
+      const host = new BlipAssistantHost(async () => ({
+        provider: 'faux',
+        model: faux.getModel().id,
+        thinkingLevel: 'off',
+        systemPrompt: 'Hub host prompt',
+        tools: [],
+      }));
+
+      await host.promptThread('thread-retry', 'Please respond');
+      expect(
+        (await host.historyPage('thread-retry', { limit: 10 })).entries.at(-1)?.message,
+      ).toMatchObject({
+        role: 'assistant',
+        stopReason: 'error',
+        errorMessage: 'fetch failed',
+      });
+      const repository = new HubSessionRepository();
+      const sessionId = await repository.sessionIdForThread('thread-retry');
+      const modelMessages = await repository.readModelMessages(await repository.load(sessionId!));
+      expect(modelMessages.at(-1)).toMatchObject({
+        role: 'assistant',
+        stopReason: 'error',
+        errorMessage: 'fetch failed',
+      });
+      repository.close();
+      await host.beginRetryThread('thread-retry');
+
+      expect(host.isThreadRunning('thread-retry')).toBe(true);
+      releaseRetry();
+      await host.waitForThreadIdle('thread-retry');
+      expect(
+        (await host.historyPage('thread-retry', { limit: 10 })).entries.map(
+          (entry) => entry.message,
+        ),
+      ).toContainEqual(
+        expect.objectContaining({
+          role: 'assistant',
+          content: expect.arrayContaining([
+            expect.objectContaining({ type: 'text', text: 'Recovered response' }),
+          ]),
+        }),
+      );
+      host.invalidateAll();
+      faux.unregister();
+    });
+  });
+
   test('projects durable compactions and latest context usage into thread history', async () => {
     await withTempDroneDataDir('blip-assistant-context-history-', async () => {
       const repository = new HubSessionRepository();

@@ -1,4 +1,5 @@
 import React from 'react';
+import type { AssistantMessageDiagnosticError } from '@drone/assistant-chat';
 
 import {
   AgentMessageExtras,
@@ -54,6 +55,170 @@ function assistantVisibleText(message: AssistantMessage): string {
     .map((part) => String(part.text ?? ''))
     .filter(Boolean)
     .join('\n');
+}
+
+type NativeAgentFailurePresentation = {
+  recoverable: boolean;
+  title: string;
+  summary: string;
+  code?: string;
+  attempts?: number;
+  technicalMessage: string;
+};
+
+function diagnosticErrorValues(
+  error: AssistantMessageDiagnosticError | undefined,
+): Array<{ message: string; code?: string }> {
+  const values: Array<{ message: string; code?: string }> = [];
+  let current = error;
+  let depth = 0;
+  while (current && depth < 4) {
+    values.push({
+      message: String(current.message ?? ''),
+      ...(current.code != null ? { code: String(current.code) } : {}),
+    });
+    current = current.cause;
+    depth += 1;
+  }
+  return values;
+}
+
+export function nativeAgentFailurePresentation(
+  message: AssistantMessage,
+): NativeAgentFailurePresentation {
+  const diagnostics = message.diagnostics ?? [];
+  const diagnosticErrors = diagnostics.flatMap((diagnostic) =>
+    diagnosticErrorValues(diagnostic.error),
+  );
+  const technicalMessage =
+    String(message.errorMessage ?? '').trim() ||
+    diagnosticErrors.map((error) => error.message).find(Boolean) ||
+    'Unknown native agent failure';
+  const combined = [
+    technicalMessage,
+    ...diagnostics.map((diagnostic) => diagnostic.type),
+    ...diagnosticErrors.flatMap((error) => [error.code ?? '', error.message]),
+  ].join(' ');
+  const code = [...diagnosticErrors].reverse().find((error) => error.code)?.code;
+  const attempts = diagnostics
+    .map((diagnostic) => Number(diagnostic.details?.attempts))
+    .find((value) => Number.isFinite(value) && value > 0);
+  const timedOut =
+    /\b(etimedout|und_err_(?:connect_timeout|headers_timeout|body_timeout))\b/i.test(combined) ||
+    /\btimed? out|timeout\b/i.test(combined);
+  const connectionReset =
+    /\b(econnreset|und_err_socket)\b/i.test(combined) ||
+    /\bconnection reset|socket hang up\b/i.test(combined);
+  const temporaryConnection =
+    diagnostics.some((diagnostic) => diagnostic.type === 'provider_transport_failure') ||
+    /\b(fetch failed|enotfound|eai_again)\b/i.test(combined);
+  const hasPartialToolCall =
+    Array.isArray(message.content) && message.content.some((part) => part.type === 'toolCall');
+  const recoverable =
+    message.stopReason !== 'aborted' &&
+    !hasPartialToolCall &&
+    (timedOut || connectionReset || temporaryConnection);
+
+  return {
+    recoverable,
+    title: recoverable
+      ? timedOut
+        ? 'Native agent timed out'
+        : connectionReset
+          ? 'Native agent connection was reset'
+          : 'Native agent lost its connection'
+      : 'Native agent couldn’t finish the response',
+    summary: recoverable
+      ? 'The model request did not complete. You can continue from the last saved checkpoint.'
+      : technicalMessage,
+    ...(code ? { code } : {}),
+    ...(attempts ? { attempts } : {}),
+    technicalMessage,
+  };
+}
+
+export function NativeAgentFailureCard({
+  message,
+  hasSavedToolResults,
+  retrying,
+  onRetry,
+}: {
+  message: AssistantMessage;
+  hasSavedToolResults: boolean;
+  retrying: boolean;
+  onRetry?: () => void;
+}) {
+  const failure = nativeAgentFailurePresentation(message);
+  const occurredAt = message.createdAt ?? message.timestamp;
+  const occurredAtMs =
+    typeof occurredAt === 'number' ? occurredAt : Date.parse(String(occurredAt ?? ''));
+  const occurredAtLabel = Number.isFinite(occurredAtMs)
+    ? new Date(occurredAtMs).toISOString().replace('T', ' ').replace('.000Z', 'Z')
+    : '';
+
+  return (
+    <div
+      className="mx-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2.5 text-[var(--text-11)]"
+      role="alert"
+      data-native-agent-failure
+    >
+      <div className="font-medium text-[var(--red)]">{failure.title}</div>
+      <div className="mt-1 text-[var(--fg-secondary)]">
+        {hasSavedToolResults
+          ? onRetry
+            ? 'Completed tool results were saved. Continue without rerunning them.'
+            : 'Completed tool results were saved.'
+          : failure.recoverable && !onRetry
+            ? 'The model request did not complete.'
+            : failure.summary}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        {failure.recoverable && onRetry ? (
+          <button
+            type="button"
+            className="rounded border border-[var(--red-border)] bg-[var(--surface)] px-2.5 py-1 font-medium text-[var(--fg)] hover:bg-[var(--surface-strong)] disabled:cursor-wait disabled:opacity-60"
+            disabled={retrying}
+            onClick={onRetry}
+          >
+            {retrying ? 'Continuing…' : hasSavedToolResults ? 'Continue response' : 'Retry'}
+          </button>
+        ) : null}
+        <details className="text-[var(--muted)]">
+          <summary className="cursor-pointer select-none hover:text-[var(--fg-secondary)]">
+            Technical details
+          </summary>
+          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[var(--text-10)]">
+            <dt className="text-[var(--muted-dim)]">Error</dt>
+            <dd className="break-all">{failure.technicalMessage}</dd>
+            {failure.code ? (
+              <>
+                <dt className="text-[var(--muted-dim)]">Code</dt>
+                <dd>{failure.code}</dd>
+              </>
+            ) : null}
+            {failure.attempts ? (
+              <>
+                <dt className="text-[var(--muted-dim)]">Attempts</dt>
+                <dd>{failure.attempts}</dd>
+              </>
+            ) : null}
+            {message.provider || message.model ? (
+              <>
+                <dt className="text-[var(--muted-dim)]">Backend</dt>
+                <dd>{[message.provider, message.model].filter(Boolean).join(' / ')}</dd>
+              </>
+            ) : null}
+            {occurredAtLabel ? (
+              <>
+                <dt className="text-[var(--muted-dim)]">Occurred</dt>
+                <dd>{occurredAtLabel}</dd>
+              </>
+            ) : null}
+          </dl>
+        </details>
+      </div>
+    </div>
+  );
 }
 
 export function AssistantQueuedPromptRow({

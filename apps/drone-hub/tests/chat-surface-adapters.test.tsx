@@ -16,6 +16,7 @@ import {
 } from '../src/droneHub/chat';
 import {
   AssistantMessageRow,
+  NativeAgentFailureCard,
   AssistantQueuedPromptRow,
   AssistantWorkingRow,
   AssistantRunActivity,
@@ -24,9 +25,11 @@ import {
   ToolPayloadDetails,
   ToolRunActivity,
   formatAssistantRunDuration,
+  nativeAgentFailurePresentation,
 } from '../src/droneHub/assistant/AssistantTranscript';
 import { AgentRunActivityView } from '../src/droneHub/assistant/AgentRunActivityView';
 import { buildNativeAgentComposerControls } from '../src/droneHub/assistant/native-agent-composer-controls';
+import { assistantTranscriptHasErrorMessage } from '../src/droneHub/assistant/assistant-message-model';
 import { resolveInlineMediaToggleState } from '../src/droneHub/chat/AgentMessageExtras';
 
 const TRANSCRIPT_ITEMS = [
@@ -734,6 +737,73 @@ describe('agent chat surface adapters', () => {
     );
     expect(failedHtml).toContain('m3 3 4 4M7 3 3 7');
     expect(failedHtml).not.toContain('h-1.5 w-1.5 flex-shrink-0');
+  });
+
+  test('recoverable native failures render one provider-neutral continuation card', () => {
+    const message = {
+      role: 'assistant' as const,
+      content: [],
+      stopReason: 'error',
+      errorMessage: 'fetch failed',
+      provider: 'openai-codex',
+      model: 'gpt-5.6-sol',
+      diagnostics: [
+        {
+          type: 'provider_transport_failure',
+          timestamp: Date.now(),
+          error: {
+            name: 'TypeError',
+            message: 'fetch failed',
+            cause: { name: 'Error', message: 'socket hang up', code: 'ECONNRESET' },
+          },
+          details: { attempts: 4 },
+        },
+      ],
+      createdAt: '2026-07-27T22:21:17.451Z',
+    };
+    const html = renderToStaticMarkup(
+      <NativeAgentFailureCard
+        message={message}
+        hasSavedToolResults
+        retrying={false}
+        onRetry={() => {}}
+      />,
+    );
+
+    expect(nativeAgentFailurePresentation(message)).toMatchObject({
+      recoverable: true,
+      code: 'ECONNRESET',
+      attempts: 4,
+    });
+    expect(html).toContain('Native agent connection was reset');
+    expect(html).toContain('Completed tool results were saved');
+    expect(html).toContain('Continue response');
+    expect(html).toContain('Technical details');
+    expect(html).toContain('ECONNRESET');
+    expect(html).not.toContain('Couldn’t reach Codex');
+    expect(assistantTranscriptHasErrorMessage([message], 'fetch failed')).toBe(true);
+    expect(assistantTranscriptHasErrorMessage([message], 'different failure')).toBe(false);
+    const historicalHtml = renderToStaticMarkup(
+      <NativeAgentFailureCard
+        message={message}
+        hasSavedToolResults
+        retrying={false}
+      />,
+    );
+    expect(historicalHtml).toContain('Completed tool results were saved.');
+    expect(historicalHtml).not.toContain('Continue response');
+    expect(
+      assistantTranscriptHasErrorMessage(
+        [message, { role: 'user', content: 'Try another request' }],
+        'fetch failed',
+      ),
+    ).toBe(false);
+    expect(
+      assistantTranscriptHasErrorMessage(
+        [message, { role: 'assistant', content: 'Recovered successfully.' }],
+        'fetch failed',
+      ),
+    ).toBe(false);
   });
 
   test('tool disclosure chevrons stay beside their label or invocation count', () => {

@@ -9,6 +9,21 @@ export type AssistantMessageContentPart = {
   mimeType?: string;
 };
 
+export type AssistantMessageDiagnosticError = {
+  name?: string;
+  message: string;
+  stack?: string;
+  code?: string | number;
+  cause?: AssistantMessageDiagnosticError;
+};
+
+export type AssistantMessageDiagnostic = {
+  type: string;
+  timestamp: number;
+  error?: AssistantMessageDiagnosticError;
+  details?: Record<string, unknown>;
+};
+
 export type AssistantMessage = {
   id?: string;
   role: 'user' | 'assistant' | 'toolResult' | 'runSummary' | 'compaction';
@@ -17,6 +32,10 @@ export type AssistantMessage = {
   toolCallId?: string;
   isError?: boolean;
   errorMessage?: string;
+  stopReason?: string;
+  provider?: string;
+  model?: string;
+  diagnostics?: AssistantMessageDiagnostic[];
   details?: unknown;
   createdAt?: string;
   timestamp?: string | number;

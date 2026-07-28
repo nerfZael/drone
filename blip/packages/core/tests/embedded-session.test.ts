@@ -665,6 +665,97 @@ describe('Embedded Blip session', () => {
     faux.unregister();
   });
 
+  test('continues from saved tool results after a recoverable transport failure', async () => {
+    const workspace = await tempWorkspace();
+    const faux = registerFauxProvider({
+      api: 'faux-native-retry',
+      provider: 'faux-native-retry',
+      tokensPerSecond: 0,
+    });
+    let executions = 0;
+    let retryContext: AgentMessage[] = [];
+    const tool: AgentTool<any> = {
+      name: 'lookup',
+      label: 'Lookup',
+      description: 'Return a durable lookup result',
+      parameters: Type.Object({}),
+      execute: async () => {
+        executions += 1;
+        return { content: [{ type: 'text', text: 'saved result' }], details: { saved: true } };
+      },
+    };
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall('lookup', {}, { id: 'call_saved' }), {
+        stopReason: 'toolUse',
+      }),
+      fauxAssistantMessage('', {
+        stopReason: 'error',
+        errorMessage: 'fetch failed',
+        diagnostics: [
+          {
+            type: 'provider_transport_failure',
+            timestamp: Date.now(),
+            error: {
+              name: 'TypeError',
+              message: 'fetch failed',
+              cause: { name: 'Error', message: 'socket hang up', code: 'ECONNRESET' },
+            },
+            details: { attempts: 4 },
+          },
+        ],
+      }),
+      (context) => {
+        retryContext = context.messages;
+        return fauxAssistantMessage('Recovered from the saved result.');
+      },
+    ]);
+    const events: BlipRuntimeEvent[] = [];
+    const repository = new SessionStore(workspace);
+    const session = await createBlipSession({
+      workspaceRoot: workspace,
+      model: faux.getModel(),
+      permissionMode: 'workspace-write',
+      toolProfile: 'no-shell-workspace-write',
+      sessionRepository: repository,
+      tools: [tool],
+      eventSink: (event) => events.push(event),
+    });
+
+    await session.prompt('Look this up');
+    expect(executions).toBe(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'session_error',
+        error: 'fetch failed',
+        recoverable: true,
+      }),
+    );
+
+    await session.retry();
+
+    expect(executions).toBe(1);
+    expect(retryContext.at(-1)?.role).toBe('toolResult');
+    expect(
+      retryContext.some(
+        (message) => message.role === 'assistant' && message.errorMessage === 'fetch failed',
+      ),
+    ).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'assistant_message',
+        text: 'Recovered from the saved result.',
+      }),
+    );
+    const durableMessages = await repository.readMessages(session.state);
+    expect(
+      durableMessages.some(
+        (message) => message.role === 'assistant' && message.errorMessage === 'fetch failed',
+      ),
+    ).toBe(true);
+    session.close();
+    faux.unregister();
+  });
+
   test('finishes an aborted prompt with cancelled status', async () => {
     const workspace = await tempWorkspace();
     const faux = registerFauxProvider({

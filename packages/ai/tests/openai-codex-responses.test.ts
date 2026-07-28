@@ -82,6 +82,42 @@ describe("openai codex responses", () => {
 		}
 	});
 
+	test("preserves transport diagnostics after network retries are exhausted", async () => {
+		const model = getModel("openai-codex", "gpt-5.6-luna") as Model<"openai-codex-responses">;
+		const cause = Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+		const fetchMock = vi.fn(async () => {
+			throw new TypeError("fetch failed", { cause });
+		});
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = fetchMock as typeof fetch;
+		vi.useFakeTimers();
+		try {
+			const resultPromise = streamSimpleOpenAICodexResponses(model, context, {
+				apiKey: fakeCodexToken(),
+				transport: "sse",
+			}).result();
+			await vi.runAllTimersAsync();
+			const result = await resultPromise;
+
+			expect(fetchMock).toHaveBeenCalledTimes(4);
+			expect(result.stopReason).toBe("error");
+			expect(result.errorMessage).toBe("fetch failed");
+			expect(result.diagnostics).toContainEqual(
+				expect.objectContaining({
+					type: "provider_transport_failure",
+					error: expect.objectContaining({
+						message: "fetch failed",
+						cause: expect.objectContaining({ code: "ECONNRESET" }),
+					}),
+					details: expect.objectContaining({ attempts: 4, phase: "request" }),
+				}),
+			);
+		} finally {
+			vi.useRealTimers();
+			globalThis.fetch = originalFetch;
+		}
+	});
+
 	test("uses the official Codex client identity headers for SSE", async () => {
 		const model = getModel("openai-codex", "gpt-5.6-luna") as Model<"openai-codex-responses">;
 		let request: Request | undefined;

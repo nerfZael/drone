@@ -107,11 +107,35 @@ function assistantFailure(message: AgentMessage):
   | {
       message: string;
       cancelled: boolean;
+      recoverable: boolean;
     }
   | undefined {
   if (message.role !== 'assistant') return undefined;
   if (message.stopReason !== 'error' && message.stopReason !== 'aborted') return undefined;
   const error = String(message.errorMessage ?? '').trim();
+  const diagnosticText = (message.diagnostics ?? [])
+    .flatMap((diagnostic) => {
+      const values: string[] = [diagnostic.type];
+      let current = diagnostic.error;
+      let depth = 0;
+      while (current && depth < 4) {
+        values.push(String(current.code ?? ''), current.message);
+        current = current.cause;
+        depth += 1;
+      }
+      return values;
+    })
+    .join(' ');
+  const failureText = `${error} ${diagnosticText}`;
+  const recoverable =
+    message.stopReason === 'error' &&
+    (/provider_transport_failure/i.test(diagnosticText) ||
+      /\b(fetch failed|econnreset|etimedout|enotfound|eai_again|und_err_(?:connect_timeout|headers_timeout|body_timeout|socket))\b/i.test(
+        failureText,
+      ) ||
+      /\b(connection reset|socket hang up|timed? out|temporary network|network connection)\b/i.test(
+        failureText,
+      ));
   return {
     message:
       error ||
@@ -119,7 +143,14 @@ function assistantFailure(message: AgentMessage):
         ? 'Assistant run was aborted'
         : 'Assistant run failed without an error message'),
     cancelled: message.stopReason === 'aborted',
+    recoverable,
   };
+}
+
+function retryableAssistantFailure(message: AgentMessage): boolean {
+  const failure = assistantFailure(message);
+  if (!failure?.recoverable || message.role !== 'assistant') return false;
+  return !message.content.some((part) => part.type === 'toolCall');
 }
 
 function bashFailureMessage(details: unknown): string | undefined {
@@ -300,6 +331,21 @@ class BlipSession implements BlipSessionHandle {
     const message = normalizePrompt(input);
     const promise = this.runPrompt(message);
     this.activePromise = promise;
+    return promise;
+  }
+
+  retry(): Promise<BlipSessionState> {
+    if (this.closed) return Promise.reject(new Error('Blip session is closed'));
+    if (this.activePromise) {
+      return Promise.reject(new Error('Blip session is already processing'));
+    }
+    const promise = this.runRetry();
+    this.activePromise = promise;
+    void promise
+      .finally(() => {
+        if (this.activePromise === promise) this.activePromise = undefined;
+      })
+      .catch(() => undefined);
     return promise;
   }
 
@@ -552,7 +598,7 @@ class BlipSession implements BlipSessionHandle {
           active.cancelled = true;
           active.failureMessage = failure.message;
         } else if (failure) {
-          await this.recordFailure(failure.message);
+          await this.recordFailure(failure.message, failure.recoverable);
         }
       }
       return;
@@ -633,7 +679,7 @@ class BlipSession implements BlipSessionHandle {
           active.cancelled = true;
           active.failureMessage = failure.message;
         } else if (failure) {
-          await this.recordFailure(failure.message);
+          await this.recordFailure(failure.message, failure.recoverable);
         }
       }
     }
@@ -708,6 +754,47 @@ class BlipSession implements BlipSessionHandle {
       await this.options.beforePrompt?.({
         ...this.context(),
         prompt: message,
+        turnId: active.turnId,
+      });
+      await this.agent.continue();
+    } catch (error) {
+      await this.recordFailure(error instanceof Error ? error.message : String(error));
+      throw error;
+    } finally {
+      await this.finishActive(active);
+    }
+    return this.state;
+  }
+
+  private async runRetry(): Promise<BlipSessionState> {
+    const messages = await this.options.sessionRepository.readModelMessages(this.state);
+    let removedFailures = 0;
+    while (messages.length > 0 && retryableAssistantFailure(messages[messages.length - 1]!)) {
+      messages.pop();
+      removedFailures += 1;
+    }
+    if (removedFailures === 0) {
+      throw new Error('The latest native agent failure is not retryable');
+    }
+    const resumeFrom = messages[messages.length - 1];
+    if (!resumeFrom || (resumeFrom.role !== 'user' && resumeFrom.role !== 'toolResult')) {
+      throw new Error('The native agent has no safe response checkpoint to continue from');
+    }
+
+    const lifecycleMessage: AgentMessage = {
+      role: 'user',
+      content: 'Continue a recoverable native agent response.',
+      timestamp: Date.now(),
+    };
+    const active = this.createActive(lifecycleMessage);
+    active.currentTurnStarted = true;
+    this.active = active;
+    this.agent.state.messages = messages;
+    try {
+      await this.refreshSystemPrompt();
+      await this.options.beforePrompt?.({
+        ...this.context(),
+        prompt: lifecycleMessage,
         turnId: active.turnId,
       });
       await this.agent.continue();

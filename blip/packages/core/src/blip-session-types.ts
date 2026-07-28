@@ -99,6 +99,7 @@ export interface BlipSessionHandle {
   readonly state: BlipSessionState;
   readonly running: boolean;
   prompt(input: BlipPromptInput): Promise<BlipSessionState>;
+  retry(): Promise<BlipSessionState>;
   steer(input: BlipPromptInput): void;
   enqueue(input: BlipPromptInput): Promise<BlipSessionState>;
   compact(settings?: CompactionSettings): Promise<BlipSessionState>;

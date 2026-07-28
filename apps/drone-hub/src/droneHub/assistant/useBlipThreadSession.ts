@@ -9,6 +9,7 @@ import type {
   BlipRuntimeEvent,
   BlipThreadStreamEvent,
 } from '@blip/protocol';
+import { assistantTranscriptHasErrorMessage } from './assistant-message-model';
 
 const ASSISTANT_HISTORY_PAGE_SIZE = 200;
 
@@ -99,6 +100,14 @@ export function useBlipThreadSession({
         const page = await requestHistory(threadId, { limit: ASSISTANT_HISTORY_PAGE_SIZE });
         if (threadIdRef.current !== threadId) return;
         setEntries((current) => mergeEntries(current, page.entries));
+        setRunError((current) =>
+          assistantTranscriptHasErrorMessage(
+            page.entries.map((entry) => entry.message),
+            current,
+          )
+            ? null
+            : current,
+        );
         if (!options?.preserveContextUsage) setContextUsage(page.contextUsage ?? null);
         setEntriesThreadId(threadId);
         const persistedToolCalls = new Set(

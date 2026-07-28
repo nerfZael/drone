@@ -219,6 +219,23 @@ export type BlipHistoryMessage = {
   timestamp?: number;
   isError?: boolean;
   errorMessage?: string;
+  stopReason?: string;
+  provider?: string;
+  model?: string;
+  diagnostics?: Array<{
+    type: string;
+    timestamp: number;
+    error?: BlipDiagnosticError;
+    details?: Record<string, unknown>;
+  }>;
+};
+
+export type BlipDiagnosticError = {
+  name?: string;
+  message: string;
+  stack?: string;
+  code?: string | number;
+  cause?: BlipDiagnosticError;
 };
 
 export type BlipCompactionHistoryDetails = {

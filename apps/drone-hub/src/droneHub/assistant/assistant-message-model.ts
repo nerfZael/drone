@@ -50,6 +50,26 @@ export type AssistantRunTiming = {
   endedAt?: number;
 };
 
+export function assistantTranscriptHasErrorMessage(
+  messages: ReadonlyArray<{
+    role?: string;
+    errorMessage?: string | null;
+  }>,
+  error: string | null | undefined,
+): boolean {
+  const normalized = String(error ?? '').trim();
+  if (!normalized) return false;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message.role !== 'assistant' && message.role !== 'user') continue;
+    return (
+      message.role === 'assistant' &&
+      String(message.errorMessage ?? '').trim() === normalized
+    );
+  }
+  return false;
+}
+
 export function assistantMessageTimestampMs(
   message: AssistantMessage | undefined,
 ): number | undefined {

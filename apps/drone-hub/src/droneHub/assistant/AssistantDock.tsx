@@ -55,6 +55,7 @@ import {
 } from './AssistantSettingsPanels';
 import {
   AssistantQueuedPromptRow,
+  NativeAgentFailureCard,
   AssistantMessageRow,
   AssistantWorkingRow,
   AssistantRunActivity,
@@ -74,6 +75,7 @@ import {
   assistantHasEnabledMcpGroup,
   assistantMessageTimestampMs,
   assistantPromptHasVisibleUserMessage,
+  assistantTranscriptHasErrorMessage,
   compactPreview,
   directAssistantRunTiming,
   isChatIdleToolName,
@@ -300,6 +302,7 @@ export function AssistantDock({
   const [approvalBusyId, setApprovalBusyId] = React.useState<string | null>(null);
   const [queuedPromptBusyId, setQueuedPromptBusyId] = React.useState<string | null>(null);
   const [assistantStopBusy, setAssistantStopBusy] = React.useState(false);
+  const [assistantRetryBusy, setAssistantRetryBusy] = React.useState(false);
   const [defaultModelBusy, setDefaultModelBusy] = React.useState(false);
   const [toolsPanelOpen, setToolsPanelOpen] = React.useState(false);
   const [workspacesPanelOpen, setWorkspacesPanelOpen] = React.useState(false);
@@ -1061,6 +1064,36 @@ export function AssistantDock({
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
+  const continueResponse = React.useCallback(async () => {
+    if (!activeThread || assistantRetryBusy) return;
+    const requestSeq = beginSnapshotMutation();
+    const endLocalBusy = beginLocalChatBusy(nativeChatNodeId);
+    setAssistantRetryBusy(true);
+    setError(null);
+    scrollAssistantToBottom({ force: true });
+    try {
+      await requestJson<{ ok: true; threadId: string; status: 'running' }>(
+        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/retry`,
+        { method: 'POST' },
+      );
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      await refresh({ silent: true });
+    } catch (err: any) {
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
+    } finally {
+      setAssistantRetryBusy(false);
+      endLocalBusy();
+    }
+  }, [
+    activeThread,
+    assistantRetryBusy,
+    beginSnapshotMutation,
+    nativeChatNodeId,
+    refresh,
+    scrollAssistantToBottom,
+    snapshotMutationCurrent,
+  ]);
+
   const cancelQueuedPrompt = React.useCallback(async (promptId: string) => {
     if (!activeThread) return;
     const requestSeq = beginSnapshotMutation();
@@ -1598,6 +1631,48 @@ export function AssistantDock({
       continue;
     }
     if (item.type === 'message') {
+      if (item.message.role === 'assistant' && item.message.errorMessage) {
+        let hasSavedToolResults = false;
+        for (let previousIndex = itemIndex - 1; previousIndex >= 0; previousIndex -= 1) {
+          const previous = visibleItems[previousIndex]!;
+          if (previous.type === 'message' && previous.message.role === 'user') break;
+          if (previous.type === 'tool' || previous.type === 'toolGroup') {
+            hasSavedToolResults = true;
+            break;
+          }
+        }
+        let hasLaterConversation = false;
+        let supersededLater = false;
+        for (let nextIndex = itemIndex + 1; nextIndex < visibleItems.length; nextIndex += 1) {
+          const next = visibleItems[nextIndex]!;
+          if (next.type !== 'message') continue;
+          if (next.message.role === 'user') {
+            hasLaterConversation = true;
+            break;
+          }
+          if (next.message.role !== 'assistant') continue;
+          hasLaterConversation = true;
+          if (next.message.errorMessage || messageVisibleText(next.message).trim()) {
+            supersededLater = true;
+            break;
+          }
+        }
+        if (supersededLater) continue;
+        nativeTranscriptItems.push({
+          key: item.key,
+          kind: 'status',
+          latestActivityEligible: true,
+          content: (
+            <NativeAgentFailureCard
+              message={item.message}
+              hasSavedToolResults={hasSavedToolResults}
+              retrying={assistantRetryBusy || (running && itemIndex > latestUserItemIndex)}
+              onRetry={hasLaterConversation ? undefined : () => void continueResponse()}
+            />
+          ),
+        });
+        continue;
+      }
       const latestActivityEligible = Boolean(
         item.message.role === 'user' ||
         messageVisibleText(item.message).trim() ||
@@ -1773,7 +1848,11 @@ export function AssistantDock({
     });
   }
   const transcriptError = error ?? blipSession.runError ?? blipSession.historyError;
-  if (transcriptError) {
+  const transcriptErrorAlreadyRendered = assistantTranscriptHasErrorMessage(
+    visibleMessages,
+    transcriptError,
+  );
+  if (transcriptError && !transcriptErrorAlreadyRendered) {
     nativeTranscriptItems.push({
       key: 'native-transcript-error',
       kind: 'status',

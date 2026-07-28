@@ -132,6 +132,33 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 	});
 }
 
+function transportErrorText(error: unknown): string {
+	const values: string[] = [];
+	let current: unknown = error;
+	let depth = 0;
+	while (current && depth < 4) {
+		if (current instanceof Error) {
+			values.push(
+				current.name,
+				current.message,
+				String((current as Error & { code?: unknown }).code ?? ""),
+			);
+			current = (current as Error & { cause?: unknown }).cause;
+		} else {
+			values.push(String(current));
+			break;
+		}
+		depth += 1;
+	}
+	return values.join(" ");
+}
+
+function isLikelyTransportFailure(error: unknown): boolean {
+	return /\b(fetch failed|terminated|econnreset|etimedout|enotfound|eai_again|und_err_(?:connect_timeout|headers_timeout|body_timeout|socket))\b|connection reset|socket hang up/i.test(
+		transportErrorText(error),
+	);
+}
+
 // ============================================================================
 // Main Stream Function
 // ============================================================================
@@ -292,6 +319,16 @@ export const streamOpenAICodexResponses: StreamFunction<"openai-codex-responses"
 						await sleep(delayMs, options?.signal);
 						continue;
 					}
+					appendAssistantMessageDiagnostic(
+						output,
+						createAssistantMessageDiagnostic("provider_transport_failure", lastError, {
+							configuredTransport: transport,
+							transport: "sse",
+							phase: "request",
+							attempts: attempt + 1,
+							requestBytes: new TextEncoder().encode(bodyJson).byteLength,
+						}),
+					);
 					throw lastError;
 				}
 			}
@@ -317,6 +354,20 @@ export const streamOpenAICodexResponses: StreamFunction<"openai-codex-responses"
 			for (const block of output.content) {
 				// partialJson is only a streaming scratch buffer; never persist it.
 				delete (block as { partialJson?: string }).partialJson;
+			}
+			if (
+				!options?.signal?.aborted &&
+				isLikelyTransportFailure(error) &&
+				!output.diagnostics?.some((diagnostic) => diagnostic.type === "provider_transport_failure")
+			) {
+				appendAssistantMessageDiagnostic(
+					output,
+					createAssistantMessageDiagnostic("provider_transport_failure", error, {
+						phase: "response_stream",
+						eventsEmitted: output.content.length > 0,
+						attempts: 1,
+					}),
+				);
 			}
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 			output.errorMessage = error instanceof Error ? error.message : String(error);
