@@ -48,7 +48,97 @@ export type AssistantMessageDroneSummary = {
 export type AssistantRunTiming = {
   startedAt?: number;
   endedAt?: number;
+  durationMs?: number;
 };
+
+export type AssistantRequestRun = {
+  userItemIndex: number;
+  endItemIndex: number;
+  firstToolItemIndex: number;
+  toolItems: AssistantToolRenderItem[];
+  durationMs?: number;
+  fileSummaryItemIndex: number;
+};
+
+function assistantMessageRunDurationMs(message: AssistantMessage): number | undefined {
+  const details = message.details;
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return undefined;
+  const durationMs = Number((details as Record<string, unknown>).runDurationMs);
+  return Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : undefined;
+}
+
+function assistantRequestRun(
+  items: AssistantRenderItem[],
+  userItemIndex: number,
+  endItemIndex: number,
+): AssistantRequestRun {
+  const toolItems: AssistantToolRenderItem[] = [];
+  let firstToolItemIndex = -1;
+  let fileSummaryItemIndex = -1;
+  let durationMs = 0;
+  let hasDuration = false;
+  let projectedRequestDurationMs: number | undefined;
+  for (let index = userItemIndex + 1; index <= endItemIndex; index += 1) {
+    const candidate = items[index]!;
+    if (candidate.type === 'tool') {
+      if (firstToolItemIndex < 0) firstToolItemIndex = index;
+      toolItems.push(candidate);
+    } else if (candidate.type === 'toolGroup') {
+      if (firstToolItemIndex < 0) firstToolItemIndex = index;
+      toolItems.push(...candidate.items);
+    } else if (candidate.type === 'runSummary') {
+      fileSummaryItemIndex = index;
+      if (Number.isFinite(candidate.durationMs)) {
+        durationMs += Math.max(0, Number(candidate.durationMs));
+        hasDuration = true;
+      }
+    } else if (candidate.type === 'message' && candidate.message.role === 'assistant') {
+      projectedRequestDurationMs =
+        assistantMessageRunDurationMs(candidate.message) ?? projectedRequestDurationMs;
+    }
+  }
+  return {
+    userItemIndex,
+    endItemIndex,
+    firstToolItemIndex,
+    toolItems,
+    ...(projectedRequestDurationMs !== undefined
+      ? { durationMs: projectedRequestDurationMs }
+      : hasDuration
+        ? { durationMs }
+        : {}),
+    fileSummaryItemIndex,
+  };
+}
+
+export function assistantRequestRuns(items: AssistantRenderItem[]): AssistantRequestRun[] {
+  const runs: AssistantRequestRun[] = [];
+  const firstUserItemIndex = items.findIndex(
+    (item) => item.type === 'message' && item.message.role === 'user',
+  );
+  if (firstUserItemIndex !== 0) {
+    const endItemIndex = firstUserItemIndex < 0 ? items.length - 1 : firstUserItemIndex - 1;
+    const leadingRun = assistantRequestRun(items, -1, endItemIndex);
+    if (leadingRun.firstToolItemIndex >= 0 || leadingRun.fileSummaryItemIndex >= 0) {
+      runs.push(leadingRun);
+    }
+  }
+  for (let userItemIndex = 0; userItemIndex < items.length; userItemIndex += 1) {
+    const userItem = items[userItemIndex];
+    if (userItem?.type !== 'message' || userItem.message.role !== 'user') continue;
+    let endItemIndex = items.length - 1;
+    for (let index = userItemIndex + 1; index < items.length; index += 1) {
+      const candidate = items[index];
+      if (candidate?.type === 'message' && candidate.message.role === 'user') {
+        endItemIndex = index - 1;
+        break;
+      }
+    }
+    runs.push(assistantRequestRun(items, userItemIndex, endItemIndex));
+    userItemIndex = endItemIndex;
+  }
+  return runs;
+}
 
 export function assistantTranscriptHasErrorMessage(
   messages: ReadonlyArray<{
@@ -62,10 +152,7 @@ export function assistantTranscriptHasErrorMessage(
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]!;
     if (message.role !== 'assistant' && message.role !== 'user') continue;
-    return (
-      message.role === 'assistant' &&
-      String(message.errorMessage ?? '').trim() === normalized
-    );
+    return message.role === 'assistant' && String(message.errorMessage ?? '').trim() === normalized;
   }
   return false;
 }
@@ -89,19 +176,39 @@ export function directAssistantRunTiming(
 
   let hasAssistantReply = false;
   let endedAt: number | undefined;
+  let durationMs = 0;
+  let hasDuration = false;
+  let projectedRequestDurationMs: number | undefined;
   for (let index = userItemIndex + 1; index < items.length; index += 1) {
     const item = items[index]!;
     if (item.type === 'message' && item.message.role === 'user') break;
+    if (item.type === 'runSummary') {
+      if (Number.isFinite(item.durationMs)) {
+        durationMs += Math.max(0, Number(item.durationMs));
+        hasDuration = true;
+      }
+      continue;
+    }
+    if (item.type === 'compaction') continue;
     if (item.type !== 'message') return null;
     if (item.message.role !== 'assistant') continue;
     hasAssistantReply = true;
     endedAt = assistantMessageTimestampMs(item.message) ?? endedAt;
+    const projectedDurationMs = assistantMessageRunDurationMs(item.message);
+    if (projectedDurationMs !== undefined) {
+      projectedRequestDurationMs = projectedDurationMs;
+    }
   }
 
   if (!hasAssistantReply) return null;
   return {
     startedAt: assistantMessageTimestampMs(userItem.message),
     endedAt,
+    ...(projectedRequestDurationMs !== undefined
+      ? { durationMs: projectedRequestDurationMs }
+      : hasDuration
+        ? { durationMs }
+        : {}),
   };
 }
 
@@ -112,10 +219,7 @@ export function assistantHasEnabledMcpGroup(
 ): boolean {
   const enabled = new Set(enabledToolNames);
   return tools.some(
-    (tool) =>
-      tool.group?.kind === 'mcp' &&
-      tool.group.id === groupId &&
-      enabled.has(tool.name),
+    (tool) => tool.group?.kind === 'mcp' && tool.group.id === groupId && enabled.has(tool.name),
   );
 }
 

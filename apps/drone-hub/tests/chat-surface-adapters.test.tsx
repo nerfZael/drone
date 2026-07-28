@@ -1177,6 +1177,29 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('Working for');
   });
 
+  test('approval summaries use persisted active time instead of wall-clock wait time', () => {
+    const approvalStartedAt = Date.now() - 60_000;
+    const html = renderToStaticMarkup(
+      <ToolRunActivity
+        items={[
+          {
+            type: 'tool',
+            key: 'persisted-approval-tool',
+            call: { id: 'persisted-approval-call', name: 'bash', args: {} },
+          },
+        ]}
+        active
+        awaitingApproval
+        startedAt={approvalStartedAt - 60_000}
+        approvalStartedAt={approvalStartedAt}
+        completedDurationMs={4_000}
+      />,
+    );
+
+    expect(html).toContain('Worked 4s · 1 tool call');
+    expect(html).not.toContain('Worked 1m');
+  });
+
   test('the latest native user message is expanded by default', () => {
     const html = renderToStaticMarkup(
       <AssistantMessageRow

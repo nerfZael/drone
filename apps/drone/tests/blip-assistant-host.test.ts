@@ -292,6 +292,7 @@ describe('Blip assistant host', () => {
         fauxAssistantMessage('Approved mutation completed.'),
       ]);
       const executions: Array<{ callId: string; value: string }> = [];
+      const lifecycle: Array<{ phase: 'before' | 'after'; kind: string; status?: string }> = [];
       const tool: AgentTool<any> = {
         name: 'mutate',
         label: 'Mutate',
@@ -308,6 +309,8 @@ describe('Blip assistant host', () => {
         thinkingLevel: 'off' as const,
         systemPrompt: 'Hub host prompt',
         tools: [tool],
+        beforePrompt: ({ kind }: any) => lifecycle.push({ phase: 'before', kind }),
+        afterPrompt: ({ kind, status }: any) => lifecycle.push({ phase: 'after', kind, status }),
         permissionPreflight: ({ phase }: any) =>
           phase === 'resume'
             ? { status: 'allow' as const }
@@ -326,6 +329,11 @@ describe('Blip assistant host', () => {
       const suspended = firstEvents.find((event) => event.type === 'tool_call_suspended');
       expect(suspended).toBeTruthy();
       expect(executions).toEqual([]);
+      expect(lifecycle).toContainEqual({
+        phase: 'after',
+        kind: 'prompt',
+        status: 'suspended',
+      });
       firstHost.invalidateAll();
 
       const restoredEvents: any[] = [];
@@ -342,6 +350,12 @@ describe('Blip assistant host', () => {
       );
       await restoredHost.resolveToolSuspension('thread-durable', suspended.suspensionId, true);
       expect(executions).toEqual([{ callId: 'call-host-durable', value: 'original' }]);
+      expect(lifecycle).toContainEqual({ phase: 'before', kind: 'tool_resolution' });
+      expect(lifecycle).toContainEqual({
+        phase: 'after',
+        kind: 'tool_resolution',
+        status: 'completed',
+      });
       restoredHost.invalidateAll();
       faux.unregister();
     });
@@ -450,6 +464,106 @@ describe('Blip assistant host', () => {
         fileChanges: { counts: { changed: 1, additions: 1, deletions: 0 } },
       });
       faux.unregister();
+    });
+  });
+
+  test('projects approval segments as one active duration and one final file summary', async () => {
+    await withTempDroneDataDir('blip-assistant-approval-summary-', async () => {
+      const repository = new HubSessionRepository();
+      const session = await repository.create({
+        provider: 'faux',
+        model: 'faux-1',
+        permissionMode: 'workspace-write',
+        toolProfile: 'local-trusted-write',
+      });
+      await repository.bindThread('thread-approval-summary', session.id);
+      await repository.appendMessage(session, {
+        role: 'user',
+        content: 'Implement it',
+        timestamp: 1_000,
+      });
+      await repository.appendMessage(session, {
+        role: 'assistant',
+        content: 'First segment',
+        timestamp: 2_000,
+      });
+      await repository.appendRuntimeEvent(session, {
+        version: 1,
+        eventId: 'suspended-segment',
+        sessionId: session.id,
+        turnId: 'turn-1',
+        timestamp: '2026-07-28T10:00:02.000Z',
+        type: 'session_finished',
+        status: 'suspended',
+        changedFiles: [],
+        durationMs: 1_200,
+        fileChanges: {
+          version: 2,
+          capturedAt: '2026-07-28T10:00:02.000Z',
+          counts: { changed: 1, additions: 1, deletions: 0 },
+          workspaces: [
+            {
+              targetId: 'drone:d1',
+              droneId: 'd1',
+              label: 'Drone 1',
+              counts: { changed: 1, additions: 1, deletions: 0 },
+              previewEntries: [
+                { path: 'src/partial.ts', status: 'added', additions: 1, deletions: 0 },
+              ],
+            },
+          ],
+        },
+      });
+      await repository.appendMessage(session, {
+        role: 'assistant',
+        content: 'Finished',
+        timestamp: 100_000,
+      });
+      await repository.appendRuntimeEvent(session, {
+        version: 1,
+        eventId: 'completed-segment',
+        sessionId: session.id,
+        turnId: 'turn-2',
+        timestamp: '2026-07-28T10:01:40.000Z',
+        type: 'session_finished',
+        status: 'completed',
+        changedFiles: [],
+        durationMs: 800,
+        fileChanges: {
+          version: 2,
+          capturedAt: '2026-07-28T10:01:40.000Z',
+          counts: { changed: 2, additions: 4, deletions: 1 },
+          workspaces: [
+            {
+              targetId: 'drone:d1',
+              droneId: 'd1',
+              label: 'Drone 1',
+              counts: { changed: 2, additions: 4, deletions: 1 },
+              previewEntries: [
+                { path: 'src/a.ts', status: 'modified', additions: 3, deletions: 1 },
+                { path: 'src/b.ts', status: 'added', additions: 1, deletions: 0 },
+              ],
+            },
+          ],
+        },
+      });
+
+      const page = await repository.readThreadHistoryPage('thread-approval-summary');
+
+      expect(page.entries.map((entry) => entry.message.role)).toEqual([
+        'user',
+        'assistant',
+        'assistant',
+        'runSummary',
+      ]);
+      expect(page.entries[1]?.message.details).toMatchObject({ runDurationMs: 1_200 });
+      expect(page.entries[2]?.message.details).toMatchObject({ runDurationMs: 2_000 });
+      expect(page.entries[3]?.message.details).toMatchObject({
+        durationMs: 2_000,
+        status: 'completed',
+        fileChanges: { counts: { changed: 2, additions: 4, deletions: 1 } },
+      });
+      repository.close();
     });
   });
 
@@ -699,8 +813,9 @@ describe('Blip assistant host', () => {
           Array.isArray(entry.message.content) &&
           entry.message.content.some((part: any) => part?.type === 'toolCall'),
       );
-      const suspensionId = events.find((event) => event.type === 'tool_call_suspended')
-        ?.suspensionId;
+      const suspensionId = events.find(
+        (event) => event.type === 'tool_call_suspended',
+      )?.suspensionId;
 
       await expect(
         host.deleteMessage('thread-approval-delete', toolCallMessage!.id, false),
@@ -714,16 +829,12 @@ describe('Blip assistant host', () => {
       const session = await repository.load(sessionId!);
       expect(await repository.readToolSuspensions(session)).toEqual([]);
       expect(
-        (await repository.readMessages(session)).filter(
-          (message) => message.role === 'toolResult',
-        ),
+        (await repository.readMessages(session)).filter((message) => message.role === 'toolResult'),
       ).toEqual([]);
 
       await host.promptThread('thread-approval-delete', 'Continue');
       expect(
-        (await repository.readMessages(session)).filter(
-          (message) => message.role === 'toolResult',
-        ),
+        (await repository.readMessages(session)).filter((message) => message.role === 'toolResult'),
       ).toEqual([]);
       faux.unregister();
     });

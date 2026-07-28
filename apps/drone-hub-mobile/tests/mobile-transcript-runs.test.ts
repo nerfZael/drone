@@ -76,6 +76,43 @@ describe('mobile transcript runs', () => {
     });
   });
 
+  test('uses durable active time across approval continuations', () => {
+    const groups = groupMobileTranscriptRuns(
+      renderItemsFromMessages([
+        { role: 'user', content: 'Implement it', timestamp: 1_000 },
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'call-1', name: 'read_file', arguments: {} }],
+          timestamp: 2_000,
+          details: { runDurationMs: 1_200 },
+        },
+        { role: 'toolResult', toolCallId: 'call-1', content: 'Done', timestamp: 3_000 },
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'call-2', name: 'apply_patch', arguments: {} }],
+          timestamp: 100_000,
+        },
+        { role: 'toolResult', toolCallId: 'call-2', content: 'Done', timestamp: 101_000 },
+        {
+          role: 'assistant',
+          content: 'Finished',
+          timestamp: 102_000,
+          details: { runDurationMs: 2_000 },
+        },
+      ]),
+    );
+
+    expect(groups).toMatchObject([
+      {
+        type: 'run',
+        toolCallCount: 2,
+        durationMs: 2_000,
+        startedAt: 1_000,
+        completedAt: 102_000,
+      },
+    ]);
+  });
+
   test('keeps the final answer outside collapsed completed activity', () => {
     const items = renderItemsFromMessages([
       {

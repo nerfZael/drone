@@ -1230,10 +1230,12 @@ export function AssistantRunActivity({
   active,
   startedAt,
   endedAt,
+  completedDurationMs,
 }: {
   active: boolean;
   startedAt?: number;
   endedAt?: number;
+  completedDurationMs?: number;
 }) {
   const fallbackStart = React.useRef(Date.now()).current;
   const [now, setNow] = React.useState(() => Date.now());
@@ -1247,7 +1249,11 @@ export function AssistantRunActivity({
   const start = Number.isFinite(startedAt) ? Number(startedAt) : fallbackStart;
   const end = active ? now : Number.isFinite(endedAt) ? Number(endedAt) : start;
 
-  return <AgentRunSummaryLine active={active} durationMs={Math.max(0, end - start)} />;
+  const durationMs =
+    !active && Number.isFinite(completedDurationMs)
+      ? Math.max(0, Number(completedDurationMs))
+      : Math.max(0, end - start);
+  return <AgentRunSummaryLine active={active} durationMs={durationMs} />;
 }
 
 function ToolRunChevron({ open }: { open: boolean }) {
@@ -1290,6 +1296,7 @@ export function ToolRunActivity({
   active,
   startedAt,
   endedAt,
+  completedDurationMs,
   droneNameById = {},
   initiallyExpanded = active,
   awaitingApproval = false,
@@ -1299,6 +1306,7 @@ export function ToolRunActivity({
   active: boolean;
   startedAt?: number;
   endedAt?: number;
+  completedDurationMs?: number;
   droneNameById?: AssistantDroneNameMap;
   initiallyExpanded?: boolean;
   awaitingApproval?: boolean;
@@ -1352,7 +1360,14 @@ export function ToolRunActivity({
     !awaitingApproval && pauseClock.startedAt !== null
       ? Math.max(0, rawEnd - pauseClock.startedAt)
       : 0;
-  const durationMs = Math.max(0, end - start - pauseClock.accumulatedMs - resumingPauseMs);
+  const measuredDurationMs = Math.max(
+    0,
+    end - start - pauseClock.accumulatedMs - resumingPauseMs,
+  );
+  const durationMs =
+    (!active || awaitingApproval) && Number.isFinite(completedDurationMs)
+      ? Math.max(0, Number(completedDurationMs))
+      : measuredDurationMs;
   const callLabel = `${items.length} tool ${items.length === 1 ? 'call' : 'calls'}`;
   const visibleItems =
     expansionMode === 'auto' ? items.slice(-AUTO_EXPANDED_TOOL_CALL_LIMIT) : items;

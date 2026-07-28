@@ -1,5 +1,9 @@
 import type { AssistantMessage } from './assistant-message-types';
-import type { AgentRunFileChanges, BlipCompactionHistoryDetails } from '@blip/protocol';
+import type {
+  AgentRunFileChanges,
+  BlipCompactionHistoryDetails,
+  BlipSessionStatus,
+} from '@blip/protocol';
 import { isAgentRunFileChanges } from './agent-run-file-changes';
 
 export type AssistantToolCall = { id: string; name: string; args: any };
@@ -25,7 +29,15 @@ export type AssistantRenderItem =
       details: BlipCompactionHistoryDetails;
       timestamp?: string | number;
     }
-  | { type: 'runSummary'; key: string; fileChanges: AgentRunFileChanges };
+  | {
+      type: 'runSummary';
+      key: string;
+      fileChanges: AgentRunFileChanges;
+      durationMs?: number;
+      status?: BlipSessionStatus;
+      turnId?: string;
+      timestamp?: string | number;
+    };
 
 function readCompactionDetails(value: unknown): BlipCompactionHistoryDetails | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -263,11 +275,25 @@ export function renderItemsFromMessages(messages: AssistantMessage[]): Assistant
     }
     if (message.role === 'runSummary') {
       const fileChanges = (message.details as any)?.fileChanges as AgentRunFileChanges | undefined;
+      const durationRaw = Number((message.details as any)?.durationMs);
+      const statusRaw = String((message.details as any)?.status ?? '');
+      const turnId = String((message.details as any)?.turnId ?? '').trim();
+      const status =
+        statusRaw === 'completed' ||
+        statusRaw === 'cancelled' ||
+        statusRaw === 'error' ||
+        statusRaw === 'suspended'
+          ? statusRaw
+          : undefined;
       if (isAgentRunFileChanges(fileChanges)) {
         items.push({
           type: 'runSummary',
           key: `run-summary:${message.id ?? index}`,
           fileChanges,
+          ...(Number.isFinite(durationRaw) && durationRaw >= 0 ? { durationMs: durationRaw } : {}),
+          ...(status ? { status } : {}),
+          ...(turnId ? { turnId } : {}),
+          timestamp: message.createdAt ?? message.timestamp,
         });
       }
       continue;

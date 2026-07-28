@@ -25,6 +25,7 @@ import {
 
 const MAX_TRANSCRIPT_PREVIEW_FILES_PER_WORKSPACE = 10;
 const MAX_BASE_RELATIVE_PATCH_BYTES = 32 * 1024 * 1024;
+const ASSISTANT_ARTIFACT_RUN_CHANGES_TEMP_PREFIX = 'drone-artifact-run-changes-';
 
 type GitResult = { code: number; stdout: string; stderr: string; stdoutTruncated?: boolean };
 type GitRunOptions = { maxStdoutBytes?: number };
@@ -225,15 +226,7 @@ async function baseRelativePatchId(
   if (fromTreeOid === toTreeOid) return 'empty';
   const diff = await gitResultOrThrow(
     runGit,
-    [
-      'diff',
-      '--no-color',
-      '--no-ext-diff',
-      '--binary',
-      '--full-index',
-      fromTreeOid,
-      toTreeOid,
-    ],
+    ['diff', '--no-color', '--no-ext-diff', '--binary', '--full-index', fromTreeOid, toTreeOid],
     undefined,
     { maxStdoutBytes: MAX_BASE_RELATIVE_PATCH_BYTES },
   );
@@ -244,7 +237,11 @@ async function baseRelativePatchId(
     maxBuffer: 1024 * 1024,
   });
   if (result.status !== 0 || result.error) return null;
-  const patchId = String(result.stdout ?? '').trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+  const patchId =
+    String(result.stdout ?? '')
+      .trim()
+      .split(/\s+/)[0]
+      ?.toLowerCase() ?? '';
   return /^[0-9a-f]{40,64}$/.test(patchId) ? patchId : diff.stdout ? null : 'empty';
 }
 
@@ -545,11 +542,7 @@ export async function finalizeDroneRunFileChanges(input: {
     const currentBase = await resolveBaseTree(target.runGit, input.baseline.baseRef);
     if (currentBase && currentBase.treeOid !== input.baseline.baseTreeOid) {
       const [baselinePatchId, currentPatchId] = await Promise.all([
-        baseRelativePatchId(
-          target.runGit,
-          input.baseline.baseTreeOid,
-          input.baseline.treeOid,
-        ),
+        baseRelativePatchId(target.runGit, input.baseline.baseTreeOid, input.baseline.treeOid),
         baseRelativePatchId(target.runGit, currentBase.treeOid, current.treeOid),
       ]);
       if (baselinePatchId && currentPatchId && baselinePatchId === currentPatchId) return null;
@@ -568,6 +561,20 @@ function assistantArtifactGitRunner(gitDir: string, workTree: string): GitRunner
     runHostCommand('git', ['--git-dir', gitDir, '--work-tree', workTree, ...args], env, options);
 }
 
+function validatedAssistantArtifactTemporaryGitDir(rawPath: unknown): string {
+  const temporaryGitDir = path.resolve(String(rawPath ?? ''));
+  const temporaryRoot = path.resolve(os.tmpdir());
+  const basename = path.basename(temporaryGitDir);
+  if (
+    path.dirname(temporaryGitDir) !== temporaryRoot ||
+    basename === ASSISTANT_ARTIFACT_RUN_CHANGES_TEMP_PREFIX ||
+    !basename.startsWith(ASSISTANT_ARTIFACT_RUN_CHANGES_TEMP_PREFIX)
+  ) {
+    throw new Error('invalid assistant artifact run baseline directory');
+  }
+  return temporaryGitDir;
+}
+
 async function captureAssistantArtifactTree(runGit: GitRunner): Promise<string> {
   await gitOrThrow(runGit, ['add', '-A', '--', ':/']);
   const treeOid = (await gitOrThrow(runGit, ['write-tree'])).trim().toLowerCase();
@@ -583,7 +590,9 @@ export async function captureAssistantArtifactRunFileChangesBaseline(input: {
   const turnId = String(input.turnId ?? '').trim();
   if (!threadId || !turnId) throw new Error('threadId and turnId are required');
   const repoRoot = await ensureAssistantArtifactsRoot(threadId);
-  const temporaryGitDir = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-artifact-run-changes-'));
+  const temporaryGitDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), ASSISTANT_ARTIFACT_RUN_CHANGES_TEMP_PREFIX),
+  );
   try {
     await gitOrThrow(
       (args) => runHostCommand('git', args),
@@ -614,8 +623,9 @@ export async function finalizeAssistantArtifactRunFileChanges(input: {
   baseline: AssistantArtifactRunFileChangesBaseline;
 }): Promise<AgentRunFileChangeWorkspaceV2 | null> {
   const baseline = input.baseline;
+  const temporaryGitDir = validatedAssistantArtifactTemporaryGitDir(baseline.temporaryGitDir);
   try {
-    const runGit = assistantArtifactGitRunner(baseline.temporaryGitDir, baseline.repoRoot);
+    const runGit = assistantArtifactGitRunner(temporaryGitDir, baseline.repoRoot);
     const currentTreeOid = await captureAssistantArtifactTree(runGit);
     return await summarizeTrees({
       baseline,
@@ -623,14 +633,15 @@ export async function finalizeAssistantArtifactRunFileChanges(input: {
       runGit,
     });
   } finally {
-    await fs.rm(baseline.temporaryGitDir, { recursive: true, force: true });
+    await fs.rm(temporaryGitDir, { recursive: true, force: true });
   }
 }
 
 export async function discardAssistantArtifactRunFileChangesBaseline(
   baseline: AssistantArtifactRunFileChangesBaseline,
 ): Promise<void> {
-  await fs.rm(baseline.temporaryGitDir, { recursive: true, force: true });
+  const temporaryGitDir = validatedAssistantArtifactTemporaryGitDir(baseline.temporaryGitDir);
+  await fs.rm(temporaryGitDir, { recursive: true, force: true });
 }
 
 export function combineAgentRunFileChanges(

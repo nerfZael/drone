@@ -42,6 +42,7 @@ type ActivePrompt = {
   emittedFailureMessage: string;
   toolFailures: ToolFailure[];
   suspended: boolean;
+  kind: 'prompt' | 'recovered_continuation' | 'retry' | 'tool_resolution';
 };
 
 function nowIso(): string {
@@ -685,7 +686,7 @@ class BlipSession implements BlipSessionHandle {
     }
   }
 
-  private createActive(message: AgentMessage): ActivePrompt {
+  private createActive(message: AgentMessage, kind: ActivePrompt['kind'] = 'prompt'): ActivePrompt {
     const startedAt = Date.now();
     return {
       message,
@@ -701,18 +702,12 @@ class BlipSession implements BlipSessionHandle {
       emittedFailureMessage: '',
       toolFailures: [],
       suspended: false,
+      kind,
     };
   }
 
   private async finishActive(active: ActivePrompt): Promise<void> {
     try {
-      const lifecycleResult = await this.options.afterPrompt?.({
-        ...this.context(),
-        prompt: active.message,
-        turnId: active.turnId,
-      });
-      await this.options.sessionRepository.save(this.state);
-      const finishedAt = Date.now();
       const status = active.cancelled
         ? 'cancelled'
         : active.failed
@@ -720,6 +715,15 @@ class BlipSession implements BlipSessionHandle {
           : active.suspended
             ? 'suspended'
             : 'completed';
+      const lifecycleResult = await this.options.afterPrompt?.({
+        ...this.context(),
+        prompt: active.message,
+        turnId: active.turnId,
+        kind: active.kind,
+        status,
+      });
+      await this.options.sessionRepository.save(this.state);
+      const finishedAt = Date.now();
       const contextUsage = await this.contextManager.contextUsage();
       await this.emit({
         ...eventBase(this.state.id, active.turnId),
@@ -746,7 +750,7 @@ class BlipSession implements BlipSessionHandle {
       content: 'Resume after a durably recovered tool result.',
       timestamp: Date.now(),
     };
-    const active = this.createActive(message);
+    const active = this.createActive(message, 'recovered_continuation');
     // This is a continuation, not a new visible prompt.
     active.currentTurnStarted = true;
     this.active = active;
@@ -755,6 +759,7 @@ class BlipSession implements BlipSessionHandle {
         ...this.context(),
         prompt: message,
         turnId: active.turnId,
+        kind: active.kind,
       });
       await this.agent.continue();
     } catch (error) {
@@ -786,7 +791,7 @@ class BlipSession implements BlipSessionHandle {
       content: 'Continue a recoverable native agent response.',
       timestamp: Date.now(),
     };
-    const active = this.createActive(lifecycleMessage);
+    const active = this.createActive(lifecycleMessage, 'retry');
     active.currentTurnStarted = true;
     this.active = active;
     this.agent.state.messages = messages;
@@ -796,6 +801,7 @@ class BlipSession implements BlipSessionHandle {
         ...this.context(),
         prompt: lifecycleMessage,
         turnId: active.turnId,
+        kind: active.kind,
       });
       await this.agent.continue();
     } catch (error) {
@@ -818,7 +824,7 @@ class BlipSession implements BlipSessionHandle {
       content: `${decision === 'approve' ? 'Approved' : 'Denied'} tool call ${suspension.toolName}.`,
       timestamp: Date.now(),
     };
-    const active = this.createActive(lifecycleMessage);
+    const active = this.createActive(lifecycleMessage, 'tool_resolution');
     this.active = active;
     const abortController = new AbortController();
     this.resolutionAbortController = abortController;
@@ -828,6 +834,7 @@ class BlipSession implements BlipSessionHandle {
         ...this.context(),
         prompt: lifecycleMessage,
         turnId: active.turnId,
+        kind: active.kind,
       });
       if (decision === 'deny') {
         const result = {
@@ -982,6 +989,7 @@ class BlipSession implements BlipSessionHandle {
         ...this.context(),
         prompt: message,
         turnId: active.turnId,
+        kind: active.kind,
       });
       if (active.cancelRequested) active.cancelled = true;
       else await this.agent.prompt(message);

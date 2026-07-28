@@ -32,6 +32,7 @@ export type MobileTranscriptRun = {
   user: Extract<AssistantRenderItem, { type: 'message' }>;
   items: AssistantRenderItem[];
   toolCallCount: number;
+  durationMs?: number;
   startedAt?: string | number;
   completedAt?: string | number;
   plan?: MobileAgentPlan;
@@ -153,17 +154,42 @@ function planFromRunItems(items: AssistantRenderItem[]): MobileAgentPlan | undef
 }
 
 function finishRun(
-  run: Omit<MobileTranscriptRun, 'toolCallCount' | 'startedAt' | 'completedAt' | 'plan' | 'active'>,
+  run: Omit<
+    MobileTranscriptRun,
+    'toolCallCount' | 'durationMs' | 'startedAt' | 'completedAt' | 'plan' | 'active'
+  >,
   active: boolean,
 ): MobileTranscriptRun {
   let metadata: MobileTranscriptRunMetadata | undefined;
+  let durationMs = 0;
+  let hasDuration = false;
+  let projectedDurationMs: number | undefined;
   for (const item of run.items) {
+    if (item.type === 'runSummary' && Number.isFinite(item.durationMs)) {
+      durationMs += Math.max(0, Number(item.durationMs));
+      hasDuration = true;
+      continue;
+    }
     if (item.type !== 'message') continue;
     metadata = metadataFromMessage(item.message) ?? metadata;
+    if (item.message.role === 'assistant') {
+      const details = item.message.details;
+      const projected = Number(
+        details && typeof details === 'object' && !Array.isArray(details)
+          ? (details as Record<string, unknown>).runDurationMs
+          : Number.NaN,
+      );
+      if (Number.isFinite(projected) && projected >= 0) projectedDurationMs = projected;
+    }
   }
   return {
     ...run,
     toolCallCount: run.items.reduce((total, item) => total + toolCount(item), 0),
+    ...(projectedDurationMs !== undefined
+      ? { durationMs: projectedDurationMs }
+      : hasDuration
+        ? { durationMs }
+        : {}),
     startedAt: metadata?.startedAt ?? itemTimestamp(run.user),
     completedAt:
       metadata?.completedAt ??
@@ -185,7 +211,7 @@ export function groupMobileTranscriptRuns(
   const groups: MobileTranscriptGroup[] = [];
   let current: Omit<
     MobileTranscriptRun,
-    'toolCallCount' | 'startedAt' | 'completedAt' | 'plan' | 'active'
+    'toolCallCount' | 'durationMs' | 'startedAt' | 'completedAt' | 'plan' | 'active'
   > | null = null;
 
   const flush = () => {
