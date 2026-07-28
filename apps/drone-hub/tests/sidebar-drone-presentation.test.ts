@@ -84,6 +84,22 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).not.toContain('>container</span>');
   });
 
+  test('shows a persistent to do label at the bottom right of tagged drone rows', () => {
+    const source = readFileSync(
+      new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('data-sidebar-drone-label="to-do"');
+    expect(source).toContain('absolute bottom-1 right-1');
+    expect(source).toContain('border-[var(--yellow-border)]');
+    expect(source).toContain('bg-[var(--yellow-subtle)]');
+    expect(source).toContain('text-[var(--yellow)] opacity-70');
+    expect(source).toContain('group-hover/drone:opacity-0 group-focus-within/drone:opacity-0');
+    expect(source).toContain('aria-label="TODO"');
+    expect(source).toContain('TODO');
+  });
+
   test('matches the mobile working indicator geometry and baseline slot', () => {
     const html = renderToStaticMarkup(
       createElement(SidebarItemStateIndicator, { state: 'working' }),

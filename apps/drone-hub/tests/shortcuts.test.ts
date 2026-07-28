@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { cloneDefaultShortcutBindings } from '../src/droneHub/app/shortcuts';
 
 describe('shortcut defaults', () => {
@@ -43,6 +44,14 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
+    expect(defaults.toggleSelectedDronesToDo).toEqual({
+      key: 'e',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
     expect(defaults.markSelectedDronesUnread).toEqual({
       key: 'z',
       mod: false,
@@ -75,5 +84,15 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
+  });
+
+  test('replaces the Changes editor E binding with the to do action', () => {
+    const changesDockSource = readFileSync(
+      new URL('../src/droneHub/changes/DroneChangesDock.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(changesDockSource).not.toContain("key === 'e'");
+    expect(changesDockSource).not.toContain('Open in editor (E)');
   });
 });

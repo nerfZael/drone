@@ -3295,6 +3295,38 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     }
     return true;
   }, [selectedDrone, selectedDroneIds]);
+  const toggleSelectedDronesToDoFromShortcut = React.useCallback((): boolean => {
+    const availableDroneIds = new Set(
+      [...drones, ...sidebarDrones]
+        .map((drone) => String(drone?.id ?? '').trim())
+        .filter(Boolean),
+    );
+    const selectedIds = Array.from(
+      new Set(
+        selectedDroneIds
+          .map((droneId) => String(droneId ?? '').trim())
+          .filter((droneId) => droneId && availableDroneIds.has(droneId)),
+      ),
+    );
+    const activeDroneId = String(currentDrone?.id ?? selectedDrone ?? '').trim();
+    const targetIds =
+      selectedIds.length > 0
+        ? selectedIds
+        : activeDroneId && availableDroneIds.has(activeDroneId)
+          ? [activeDroneId]
+          : [];
+    if (targetIds.length === 0) return false;
+
+    const uiState = useDroneHubUiStore.getState();
+    const currentToDoIds = new Set(uiState.toDoDroneIds);
+    const removeTag = targetIds.every((droneId) => currentToDoIds.has(droneId));
+    if (removeTag) {
+      uiState.setToDoDroneIds(uiState.toDoDroneIds.filter((droneId) => !targetIds.includes(droneId)));
+    } else {
+      uiState.setToDoDroneIds([...uiState.toDoDroneIds, ...targetIds]);
+    }
+    return true;
+  }, [currentDrone?.id, drones, selectedDrone, selectedDroneIds, sidebarDrones]);
   useDroneHubLifecycleEffects({
     normalizeCreateRepoPath,
     setCreateRepoPath,
@@ -3312,6 +3344,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     createDroneChatFromShortcut,
     toggleSelectedDronePinnedFromShortcut,
     moveSelectedDroneToTopFromShortcut,
+    toggleSelectedDronesToDoFromShortcut,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
     toggleVoiceClipboardRecording,

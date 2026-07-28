@@ -671,8 +671,6 @@ function LiveDroneChangesDock({
   const commitInflightRef = React.useRef<Set<string>>(new Set());
   const mountedRef = React.useRef(true);
   const dockRootRef = React.useRef<HTMLDivElement | null>(null);
-  const [dockHovered, setDockHovered] = React.useState(false);
-  const [hoveredFilePath, setHoveredFilePath] = React.useState<string | null>(null);
   const explorerZoomPercent = Math.round(explorerZoom * 100);
   const explorerRowHeightPx = Math.max(21, Math.round(24 * explorerZoom));
   const explorerIconSizePx = Math.max(12, Math.round(13 * explorerZoom));
@@ -833,7 +831,6 @@ function LiveDroneChangesDock({
     setSelectedPath(null);
     setSelectedCommitSha(null);
     setCommitFileSelectedPath(null);
-    setHoveredFilePath(null);
   }, [droneId]);
 
   React.useEffect(() => {
@@ -1580,12 +1577,6 @@ function LiveDroneChangesDock({
     commitDiffByKeyRef.current = commitDiffByKey;
   }, [commitDiffByKey]);
 
-  React.useEffect(() => {
-    if (!hoveredFilePath) return;
-    if (entries.some((entry) => entry.path === hoveredFilePath)) return;
-    setHoveredFilePath(null);
-  }, [entries, hoveredFilePath]);
-
   const selectedEntry = React.useMemo(
     () => (selectedPath ? entries.find((e) => e.path === selectedPath) ?? null : null),
     [entries, selectedPath],
@@ -2017,7 +2008,6 @@ function LiveDroneChangesDock({
       }
       return changed ? next : prev;
     });
-    setHoveredFilePath((prev) => (prev && !entries.some((entry) => entry.path === prev) ? null : prev));
   }, [entries, validDiffStateKeys]);
   React.useEffect(() => {
     setCommitDiffByKey((prev) => pruneRecordKeys(prev, validCommitDiffStateKeys));
@@ -2731,11 +2721,6 @@ function LiveDroneChangesDock({
     ],
   );
 
-  const hoveredEntry = React.useMemo(
-    () => (hoveredFilePath ? entries.find((entry) => entry.path === hoveredFilePath) ?? null : null),
-    [entries, hoveredFilePath],
-  );
-
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat) return;
@@ -2772,22 +2757,6 @@ function LiveDroneChangesDock({
           event.preventDefault();
           return;
         }
-        const targetEntry = selectedCommitFileEntry;
-        if (!targetEntry) return;
-        if (key === 'e') {
-          openEntryInEditor(targetEntry);
-          event.preventDefault();
-          return;
-        }
-        return;
-      }
-      const targetEntry = hoveredEntry ?? (dockHovered ? selectedEntry : null);
-      if (!targetEntry) return;
-      const key = event.key.toLowerCase();
-      if (key === 'e') {
-        if (!entryPathExistsInCurrentTree(targetEntry, dataMode)) return;
-        openEntryInEditor(targetEntry);
-        event.preventDefault();
         return;
       }
     };
@@ -2797,14 +2766,8 @@ function LiveDroneChangesDock({
     commitEntries,
     commitFileSelectedPath,
     commitList,
-    dataMode,
-    dockHovered,
-    hoveredEntry,
-    openEntryInEditor,
     primaryView,
-    selectedCommitFileEntry,
     selectedCommitSha,
-    selectedEntry,
   ]);
 
   function renderFileQuickActions(
@@ -2850,7 +2813,7 @@ function LiveDroneChangesDock({
           onClick={() => openEntryInEditor(entry)}
           disabled={!canOpenInEditor}
           className={`${buttonClassName} disabled:opacity-35 disabled:cursor-not-allowed`}
-          title={canOpenInEditor ? 'Open in editor (E)' : 'This path no longer exists in the current tree.'}
+          title={canOpenInEditor ? 'Open in editor' : 'This path no longer exists in the current tree.'}
         >
           <OpenFileIcon />
         </button>
@@ -3008,10 +2971,6 @@ function LiveDroneChangesDock({
           key={`file:${entry.path}`}
           className="w-full group/file"
           style={{ paddingLeft: `${indentPx}px` }}
-          onMouseEnter={() => setHoveredFilePath(entry.path)}
-          onMouseLeave={() => {
-            setHoveredFilePath((prev) => (prev === entry.path ? null : prev));
-          }}
         >
           <div className="relative">
             <button
@@ -3236,11 +3195,6 @@ function LiveDroneChangesDock({
       ref={dockRootRef}
       className="w-full h-full min-h-0 bg-[var(--chat-background)] overflow-hidden flex flex-col relative dh-changes-dock"
       style={diffZoomStyle(diffZoom)}
-      onMouseEnter={() => setDockHovered(true)}
-      onMouseLeave={() => {
-        setDockHovered(false);
-        setHoveredFilePath(null);
-      }}
     >
       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
@@ -3565,10 +3519,6 @@ function LiveDroneChangesDock({
                     <section
                       key={`stacked:${entry.path}`}
                       className="group/file rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] overflow-hidden"
-                      onMouseEnter={() => setHoveredFilePath(entry.path)}
-                      onMouseLeave={() => {
-                        setHoveredFilePath((prev) => (prev === entry.path ? null : prev));
-                      }}
                     >
                       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                         <span
@@ -3612,10 +3562,6 @@ function LiveDroneChangesDock({
                   <section
                     key={`${dataMode === 'pull-request' ? 'pr' : 'apply'}:${entry.path}`}
                     className="group/file rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] overflow-hidden"
-                    onMouseEnter={() => setHoveredFilePath(entry.path)}
-                    onMouseLeave={() => {
-                      setHoveredFilePath((prev) => (prev === entry.path ? null : prev));
-                    }}
                   >
                     <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                       <span

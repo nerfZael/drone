@@ -44,6 +44,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   createDroneChatFromShortcut: () => Promise<boolean>;
   toggleSelectedDronePinnedFromShortcut: () => boolean;
   moveSelectedDroneToTopFromShortcut: () => boolean;
+  toggleSelectedDronesToDoFromShortcut: () => boolean;
   openGroupMultiChat: (group: string) => void;
   openSidebarVisibleMultiChat: () => void;
   toggleVoiceClipboardRecording: () => boolean;
@@ -111,6 +112,7 @@ export function useDroneHubLifecycleEffects({
   createDroneChatFromShortcut,
   toggleSelectedDronePinnedFromShortcut,
   moveSelectedDroneToTopFromShortcut,
+  toggleSelectedDronesToDoFromShortcut,
   openGroupMultiChat,
   openSidebarVisibleMultiChat,
   toggleVoiceClipboardRecording,
@@ -298,6 +300,7 @@ export function useDroneHubLifecycleEffects({
       },
       toggleSelectedDronePinned: () => toggleSelectedDronePinnedFromShortcut(),
       moveSelectedDroneToTop: () => moveSelectedDroneToTopFromShortcut(),
+      toggleSelectedDronesToDo: () => toggleSelectedDronesToDoFromShortcut(),
       focusPrimaryChatInput: () => focusPrimaryChatInput(),
       toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
@@ -435,6 +438,7 @@ export function useDroneHubLifecycleEffects({
     createDroneChatFromShortcut,
     toggleSelectedDronePinnedFromShortcut,
     moveSelectedDroneToTopFromShortcut,
+    toggleSelectedDronesToDoFromShortcut,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
     rightPanelBottomTab,

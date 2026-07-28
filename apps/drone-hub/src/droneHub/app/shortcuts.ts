@@ -5,6 +5,7 @@ export type ShortcutActionId =
   | 'createDroneChat'
   | 'toggleSelectedDronePinned'
   | 'moveSelectedDroneToTop'
+  | 'toggleSelectedDronesToDo'
   | 'focusPrimaryChatInput'
   | 'toggleVoiceClipboardRecording'
   | 'markSelectedDronesUnread'
@@ -65,6 +66,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'moveSelectedDroneToTop',
     label: 'Move selected drone to top',
     description: 'Moves the selected drone to the top of its current sidebar level.',
+  },
+  {
+    id: 'toggleSelectedDronesToDo',
+    label: 'Tag selected drones as to do',
+    description: 'Adds or removes the to do label on the selected drones.',
   },
   {
     id: 'focusPrimaryChatInput',
@@ -135,6 +141,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   createDroneChat: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSelectedDronePinned: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   moveSelectedDroneToTop: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleSelectedDronesToDo: { key: 'e', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleVoiceClipboardRecording: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -206,6 +213,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     createDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDroneChat),
     toggleSelectedDronePinned: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronePinned),
     moveSelectedDroneToTop: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.moveSelectedDroneToTop),
+    toggleSelectedDronesToDo: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronesToDo),
     focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
     toggleVoiceClipboardRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleVoiceClipboardRecording),
     markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),

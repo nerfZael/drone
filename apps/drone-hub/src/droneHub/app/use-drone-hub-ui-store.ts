@@ -79,6 +79,7 @@ type DroneHubUiState = {
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarChatOrderByDrone: Record<string, string[]>;
   pinnedDroneIds: string[];
+  toDoDroneIds: string[];
   hiddenSidebarGroups: string[];
   showHiddenSidebarGroups: boolean;
   autoDelete: boolean;
@@ -137,6 +138,7 @@ type DroneHubUiState = {
   setSidebarNodeOrderByParent: (next: Updater<Record<string, string[]>>) => void;
   setSidebarChatOrderByDrone: (next: Updater<Record<string, string[]>>) => void;
   setPinnedDroneIds: (next: Updater<string[]>) => void;
+  setToDoDroneIds: (next: Updater<string[]>) => void;
   setHiddenSidebarGroups: (next: Updater<string[]>) => void;
   setShowHiddenSidebarGroups: (next: Updater<boolean>) => void;
   setAutoDelete: (next: Updater<boolean>) => void;
@@ -289,6 +291,7 @@ type DroneHubUiPersistedState = Pick<
   | 'sidebarNodeOrderByParent'
   | 'sidebarChatOrderByDrone'
   | 'pinnedDroneIds'
+  | 'toDoDroneIds'
   | 'hiddenSidebarGroups'
   | 'autoDelete'
   | 'terminalEmulator'
@@ -605,6 +608,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       sidebarNodeOrderByParent: {},
       sidebarChatOrderByDrone: {},
       pinnedDroneIds: [],
+      toDoDroneIds: [],
       hiddenSidebarGroups: [],
       showHiddenSidebarGroups: false,
       autoDelete: false,
@@ -685,6 +689,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         })),
       setPinnedDroneIds: (next) =>
         set((s) => ({ pinnedDroneIds: normalizeSidebarGroupOrder(resolveNext(s.pinnedDroneIds, next)) })),
+      setToDoDroneIds: (next) =>
+        set((s) => ({ toDoDroneIds: normalizeSidebarGroupOrder(resolveNext(s.toDoDroneIds, next)) })),
       setHiddenSidebarGroups: (next) =>
         set((s) => ({ hiddenSidebarGroups: normalizeSidebarGroupOrder(resolveNext(s.hiddenSidebarGroups, next)) })),
       setShowHiddenSidebarGroups: (next) =>
@@ -915,6 +921,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         terminalEmulator: state.terminalEmulator,
         selectedDrone: state.selectedDrone,
         selectedDroneIds: state.selectedDroneIds,
+        toDoDroneIds: state.toDoDroneIds,
         selectedChat: state.selectedChat,
         groupMultiChatColumnWidth: state.groupMultiChatColumnWidth,
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
@@ -991,6 +998,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ),
           selectedDrone: normalizeTrimmedString(persisted.selectedDrone) || null,
           selectedDroneIds: normalizeSidebarGroupOrder(persisted.selectedDroneIds),
+          toDoDroneIds: normalizeSidebarGroupOrder(persisted.toDoDroneIds),
           selectedChat: normalizeTrimmedString(persisted.selectedChat) || currentState.selectedChat,
           groupMultiChatColumnWidth: clampGroupMultiChatColumnWidthPx(
             Number(persisted.groupMultiChatColumnWidth ?? currentState.groupMultiChatColumnWidth),

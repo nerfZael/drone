@@ -23,6 +23,7 @@ import {
 } from './icons';
 import type { SidebarDensityMode } from '../app/settings-types';
 import { sidebarItemTypeClass, sidebarSelectionEdgeClass } from '../sidebar/presentation';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 
 type DroneCardProps = {
   drone: DroneSummary;
@@ -346,6 +347,7 @@ export const DroneCard = React.memo(function DroneCard({
   showSelectionEdge,
   density = 'default',
 }: DroneCardProps) {
+  const taggedToDo = useDroneHubUiStore((state) => state.toDoDroneIds.includes(drone.id));
   const shownName = String(displayName ?? drone.name).trim() || drone.name;
   const canClone = typeof onClone === 'function';
   const canCreateChat = typeof onCreateChat === 'function';
@@ -476,6 +478,7 @@ export const DroneCard = React.memo(function DroneCard({
             ? 'transition-[padding] duration-150 group-hover/drone:pr-12 group-focus-within/drone:pr-12'
             : ''
         } ${pinActionsVisible || actionMenuOpen ? 'pr-12' : ''}`}
+        style={taggedToDo ? { paddingRight: '3rem' } : undefined}
       >
         {leadingIcon ? <span className="inline-flex flex-shrink-0 items-center">{leadingIcon}</span> : null}
         {isDraftDrone ? (
@@ -566,6 +569,16 @@ export const DroneCard = React.memo(function DroneCard({
           </div>
         </div>
       </div>
+
+      {taggedToDo ? (
+        <span
+          data-sidebar-drone-label="to-do"
+          className="pointer-events-none absolute bottom-1 right-1 inline-flex items-center rounded-[3px] border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-1 py-px text-[.5rem] font-[var(--weight-semibold)] uppercase leading-none tracking-[0.03em] text-[var(--yellow)] opacity-70 transition-opacity duration-150 group-hover/drone:opacity-0 group-focus-within/drone:opacity-0"
+          aria-label="TODO"
+        >
+          TODO
+        </span>
+      ) : null}
 
       {hasActions ? (
         <div
