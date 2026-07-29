@@ -470,6 +470,27 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
   const raw = value as Record<string, unknown>;
   const next = { ...raw };
   let changed = false;
+  const hasCreateDraftGroupBinding = Object.prototype.hasOwnProperty.call(raw, 'createDraftGroup');
+  const usesLegacyToDoShortcut = isExactShortcutBinding(raw.toggleSelectedDronesToDo, {
+    key: 'e',
+    mod: false,
+    ctrl: false,
+    meta: false,
+    alt: false,
+    shift: false,
+  });
+  if (!hasCreateDraftGroupBinding && usesLegacyToDoShortcut) {
+    next.createDraftGroup = {
+      key: 'e',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    };
+    next.toggleSelectedDronesToDo = null;
+    changed = true;
+  }
   const createDraftRaw = raw.createDraftDrone;
   if (createDraftRaw && typeof createDraftRaw === 'object' && !Array.isArray(createDraftRaw)) {
     const binding = createDraftRaw as Record<string, unknown>;

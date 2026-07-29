@@ -47,7 +47,7 @@ export function insertSidebarGroupOrderToken<T extends SidebarGroupOrderRef>(
   order: string[],
   groups: T[],
   group: SidebarGroupOrderRef,
-  placement: SidebarGroupCreatePlacement = 'end',
+  placement: SidebarGroupCreatePlacement = 'start',
 ): string[] {
   const nextToken = sidebarGroupOrderToken(group);
   if (!nextToken) return normalizeSidebarGroupOrder(order);

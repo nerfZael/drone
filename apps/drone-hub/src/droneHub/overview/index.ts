@@ -10,5 +10,6 @@ export {
   sidebarDroneStateLabel,
   sidebarItemStateToneClass,
 } from './DroneCard';
+export type { DroneInlineRenameHandler, DroneInlineRenameResult } from './DroneCard';
 export { DroneLinksDock } from './DroneLinksDock';
 export { DronePreviewDock } from './DronePreviewDock';

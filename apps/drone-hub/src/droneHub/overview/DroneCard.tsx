@@ -25,6 +25,15 @@ import type { SidebarDensityMode } from '../app/settings-types';
 import { sidebarItemTypeClass, sidebarSelectionEdgeClass } from '../sidebar/presentation';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 
+export type DroneInlineRenameResult =
+  | boolean
+  | void
+  | { ok: boolean; error?: string | null };
+
+export type DroneInlineRenameHandler = (
+  newName: string,
+) => Promise<DroneInlineRenameResult> | DroneInlineRenameResult;
+
 type DroneCardProps = {
   drone: DroneSummary;
   displayName?: string;
@@ -42,7 +51,8 @@ type DroneCardProps = {
   onClone?: () => void;
   onCreateChat?: () => void;
   onAddToGroup?: () => void;
-  onRename?: () => void;
+  onRename?: DroneInlineRenameHandler;
+  inlineRenameRequestKey?: number;
   onSetBaseImage?: () => void;
   onTogglePinned?: () => void;
   onDelete?: () => void;
@@ -276,6 +286,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.onCreateChat) === Boolean(b.onCreateChat) &&
     Boolean(a.onAddToGroup) === Boolean(b.onAddToGroup) &&
     Boolean(a.onRename) === Boolean(b.onRename) &&
+    (a.inlineRenameRequestKey ?? 0) === (b.inlineRenameRequestKey ?? 0) &&
     Boolean(a.onSetBaseImage) === Boolean(b.onSetBaseImage) &&
     Boolean(a.onTogglePinned) === Boolean(b.onTogglePinned) &&
     Boolean(a.onDelete) === Boolean(b.onDelete) &&
@@ -321,6 +332,7 @@ export const DroneCard = React.memo(function DroneCard({
   onCreateChat,
   onAddToGroup,
   onRename,
+  inlineRenameRequestKey,
   onSetBaseImage,
   onTogglePinned,
   onDelete,
@@ -365,7 +377,27 @@ export const DroneCard = React.memo(function DroneCard({
   const [actionMenuOpen, setActionMenuOpen] = React.useState(false);
   const [actionMenuPlacement, setActionMenuPlacement] =
     React.useState<DropdownVerticalPlacement>('below');
+  const [inlineRenameOpen, setInlineRenameOpen] = React.useState(false);
+  const [inlineRenameValue, setInlineRenameValue] = React.useState('');
+  const [inlineRenameError, setInlineRenameError] = React.useState<string | null>(null);
+  const [inlineRenamePending, setInlineRenamePending] = React.useState(false);
+  const inlineRenameInputRef = React.useRef<HTMLInputElement | null>(null);
   useDropdownDismiss(actionMenuRef, actionMenuOpen, setActionMenuOpen);
+  React.useEffect(() => {
+    if (!inlineRenameOpen) return;
+    const id = window.requestAnimationFrame(() => {
+      inlineRenameInputRef.current?.focus();
+      inlineRenameInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [inlineRenameOpen]);
+  React.useEffect(() => {
+    if (!inlineRenameRequestKey || !onRename || renameDisabled) return;
+    setActionMenuOpen(false);
+    setInlineRenameValue(shownName);
+    setInlineRenameError(null);
+    setInlineRenameOpen(true);
+  }, [inlineRenameRequestKey]);
   React.useLayoutEffect(() => {
     if (!actionMenuOpen) return;
 
@@ -428,6 +460,41 @@ export const DroneCard = React.memo(function DroneCard({
   };
   const stopActionPressPropagation = (e: React.SyntheticEvent) => {
     e.stopPropagation();
+  };
+  const submitInlineRename = async () => {
+    if (!onRename || inlineRenamePending) return;
+    const nextName = inlineRenameValue.trim();
+    if (!nextName) {
+      setInlineRenameError('Name is required.');
+      return;
+    }
+    if (nextName === shownName) {
+      setInlineRenameOpen(false);
+      setInlineRenameError(null);
+      return;
+    }
+    setInlineRenamePending(true);
+    setInlineRenameError(null);
+    try {
+      const result = await onRename(nextName);
+      const ok =
+        typeof result === 'object' && result !== null && 'ok' in result
+          ? result.ok
+          : result !== false;
+      if (!ok) {
+        const error =
+          typeof result === 'object' && result !== null && 'error' in result
+            ? String(result.error ?? '').trim()
+            : '';
+        setInlineRenameError(error || 'Rename failed.');
+        return;
+      }
+      setInlineRenameOpen(false);
+    } catch (error: any) {
+      setInlineRenameError(String(error?.message ?? error ?? '').trim() || 'Rename failed.');
+    } finally {
+      setInlineRenamePending(false);
+    }
   };
   return (
     <div
@@ -522,12 +589,50 @@ export const DroneCard = React.memo(function DroneCard({
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col justify-center gap-[3px]">
           <div className="flex min-w-0 items-center gap-1.5">
-            <span
-              className={`min-w-0 flex-1 truncate leading-tight ${titleDensityClass} ${sidebarItemTypeClass(selected)}`}
-              title={`${shownName}${shownName !== drone.name ? ` (${drone.name})` : ''} · created ${timeAgo(drone.createdAt)}`}
-            >
-              {shownName}
-            </span>
+            {inlineRenameOpen ? (
+              <input
+                ref={inlineRenameInputRef}
+                value={inlineRenameValue}
+                onChange={(event) => {
+                  setInlineRenameValue(event.target.value);
+                  setInlineRenameError(null);
+                }}
+                onBlur={() => {
+                  setInlineRenameOpen(false);
+                  setInlineRenameError(null);
+                }}
+                onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void submitInlineRename();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setInlineRenameOpen(false);
+                    setInlineRenameError(null);
+                  }
+                }}
+                readOnly={inlineRenamePending}
+                maxLength={80}
+                aria-label="Drone name"
+                aria-invalid={Boolean(inlineRenameError)}
+                title={inlineRenameError || 'Rename drone'}
+                className={`min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 leading-tight shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
+                  inlineRenameError ? 'text-[var(--red)]' : sidebarItemTypeClass(selected)
+                } ${titleDensityClass}`}
+                style={{ border: 0, outline: 'none', boxShadow: 'none' }}
+              />
+            ) : (
+              <span
+                className={`min-w-0 flex-1 truncate leading-tight ${titleDensityClass} ${sidebarItemTypeClass(selected)}`}
+                title={`${shownName}${shownName !== drone.name ? ` (${drone.name})` : ''} · created ${timeAgo(drone.createdAt)}`}
+              >
+                {shownName}
+              </span>
+            )}
             {statusHint ? (
               <span
                 className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
@@ -723,7 +828,9 @@ export const DroneCard = React.memo(function DroneCard({
                     onClick={(event) => {
                       event.stopPropagation();
                       setActionMenuOpen(false);
-                      onRename?.();
+                      setInlineRenameValue(shownName);
+                      setInlineRenameError(null);
+                      setInlineRenameOpen(true);
                     }}
                     className={`${dropdownMenuItemBaseClass} flex items-center gap-2 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-45`}
                   >

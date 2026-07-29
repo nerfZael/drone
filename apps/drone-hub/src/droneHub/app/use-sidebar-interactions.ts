@@ -3,7 +3,13 @@ import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary } from '../types';
 import { joinSidebarGroupPath, isSameOrDescendantSidebarGroupPath, sidebarGroupBaseName, sidebarGroupParentPath } from './sidebar-group-paths';
 import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
-import { sidebarChatSidebarNodeId, sidebarDroneNodeId, sidebarFolderNodeId } from './sidebar-node-order';
+import {
+  placeCreatedSidebarFolderAtTop,
+  sidebarChatSidebarNodeId,
+  sidebarDroneNodeId,
+  sidebarFolderNodeId,
+} from './sidebar-node-order';
+import type { SidebarNodeTreeModel } from './sidebar-node-tree';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import type { MoveDronesToGroupResult } from './use-group-management';
 
@@ -16,6 +22,7 @@ export type FolderEditorState = {
   value: string;
   error: string | null;
   pending: boolean;
+  dismissOnBlur?: boolean;
 };
 
 export type ChatEditorState = {
@@ -64,6 +71,8 @@ type UseSidebarInteractionsArgs = {
   runOptimisticRenameGroup: (group: string, nextName?: string) => Promise<boolean>;
   selectedDrone: string | null;
   setSidebarRepoScopedGroupByPath: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setSidebarNodeOrderByParent: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
+  getRenderedSidebarNodeTree: () => SidebarNodeTreeModel | null;
   sidebarDroneById: Record<string, DroneSummary>;
   visibleSidebarFolderPathSet: Set<string>;
 };
@@ -85,6 +94,8 @@ export function useSidebarInteractions({
   runOptimisticRenameGroup,
   selectedDrone,
   setSidebarRepoScopedGroupByPath,
+  setSidebarNodeOrderByParent,
+  getRenderedSidebarNodeTree,
   sidebarDroneById,
   visibleSidebarFolderPathSet,
 }: UseSidebarInteractionsArgs) {
@@ -205,7 +216,15 @@ export function useSidebarInteractions({
   }, []);
 
   const openFolderCreate = React.useCallback(
-    (parentPathRaw: string | null, opts?: { anchorPath?: string | null; repoGroupPath?: string | null }) => {
+    (
+      parentPathRaw: string | null,
+      opts?: {
+        anchorPath?: string | null;
+        repoGroupPath?: string | null;
+        initialValue?: string;
+        dismissOnBlur?: boolean;
+      },
+    ) => {
       const parentPath = String(parentPathRaw ?? '').trim() || null;
       const anchorPath = String(opts?.anchorPath ?? '').trim() || parentPath;
       const repoGroupPath = String(opts?.repoGroupPath ?? '').trim() || null;
@@ -218,9 +237,10 @@ export function useSidebarInteractions({
         anchorPath,
         targetPath: null,
         repoGroupPath,
-        value: '',
+        value: String(opts?.initialValue ?? ''),
         error: null,
         pending: false,
+        dismissOnBlur: opts?.dismissOnBlur === true,
       });
     },
     [collapsedGroups, onToggleGroupCollapsed],
@@ -312,6 +332,14 @@ export function useSidebarInteractions({
           return { ...prev, [nextPath]: repoGroupPath };
         });
       }
+      setSidebarNodeOrderByParent((prev) =>
+        placeCreatedSidebarFolderAtTop(
+          prev,
+          getRenderedSidebarNodeTree(),
+          nextPath,
+          repoGroupPath,
+        ),
+      );
       setSelectedFolderPath(nextPath);
       setSelectedSidebarNodeId(isRepoGroupingMode ? null : sidebarFolderNodeId(nextPath));
       setFolderEditor(null);
@@ -331,11 +359,23 @@ export function useSidebarInteractions({
       const message = String(error?.message ?? error ?? '').trim();
       setFolderEditor((prev: FolderEditorState | null) => (prev ? { ...prev, pending: false, error: message || 'Rename folder failed.' } : prev));
     }
-  }, [folderEditor, isRepoGroupingMode, runOptimisticCreateGroup, runOptimisticRenameGroup, setSidebarRepoScopedGroupByPath]);
+  }, [
+    folderEditor,
+    getRenderedSidebarNodeTree,
+    isRepoGroupingMode,
+    runOptimisticCreateGroup,
+    runOptimisticRenameGroup,
+    setSidebarNodeOrderByParent,
+    setSidebarRepoScopedGroupByPath,
+  ]);
 
   const blurFolderEditor = React.useCallback(() => {
     const draft = folderEditor;
     if (!draft || draft.pending) return;
+    if (draft.mode === 'rename' || draft.dismissOnBlur) {
+      setFolderEditor(null);
+      return;
+    }
     const segment = String(draft.value ?? '').trim().replace(/^\/+|\/+$/g, '');
     if (!segment) {
       setFolderEditor(null);

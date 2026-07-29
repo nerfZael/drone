@@ -12,6 +12,7 @@ import {
   shouldHandoffDraftChatWorkspace,
 } from './lifecycle-effect-helpers';
 import { useDropdownDismiss } from '../../ui/dropdown';
+import { requestSidebarGroupDraft } from './sidebar-group-draft-events';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -288,6 +289,7 @@ export function useDroneHubLifecycleEffects({
         }
         return true;
       },
+      createDraftGroup: () => requestSidebarGroupDraft(),
       createChildDraftDrone: () => openChildDraftChatComposer(),
       createDroneChat: () => {
         if (!currentDrone) return false;

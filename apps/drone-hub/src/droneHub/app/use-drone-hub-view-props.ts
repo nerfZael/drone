@@ -43,7 +43,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     renameCanvasChat,
     deleteCanvasChat,
     openCloneModal,
-    renameDrone,
+    renameDroneTo,
     setDroneBaseImage,
     setDronePinned,
     deleteDrone,
@@ -106,7 +106,8 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
       await renameCanvasChat(droneId, chatName, newName),
     onDeleteDroneChat: async (droneId, chatName) => await deleteCanvasChat(droneId, chatName),
     onOpenCloneModal: openCloneModal,
-    onRenameDrone: renameDrone,
+    onRenameDrone: async (droneId, newName) =>
+      await renameDroneTo(droneId, newName, { showAlert: false }),
     onSetDroneBaseImage: (droneId) => {
       void setDroneBaseImage(droneId);
     },

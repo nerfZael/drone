@@ -36,18 +36,23 @@ export function rewriteSidebarRepoScopedGroupMapKeysByPrefix(
 export function removeSidebarRepoScopedGroupMapKeysByPrefix(
   map: Record<string, string>,
   groupRaw: string,
+  repoGroupPathRaw?: string | null,
 ): Record<string, string> {
   const group = String(groupRaw ?? '').trim();
+  const repoGroupPath = String(repoGroupPathRaw ?? '').trim();
   if (!group) return map;
 
   let changed = false;
   const out: Record<string, string> = {};
-  for (const [groupPath, repoGroupPath] of Object.entries(map)) {
-    if (isSameOrDescendantSidebarGroupPath(groupPath, group)) {
+  for (const [groupPath, currentRepoGroupPath] of Object.entries(map)) {
+    if (
+      (!repoGroupPath || currentRepoGroupPath === repoGroupPath) &&
+      isSameOrDescendantSidebarGroupPath(groupPath, group)
+    ) {
       changed = true;
       continue;
     }
-    out[groupPath] = repoGroupPath;
+    out[groupPath] = currentRepoGroupPath;
   }
   return changed ? out : map;
 }

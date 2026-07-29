@@ -13,6 +13,7 @@ import {
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
   sidebarDroneStateLabel,
+  type DroneInlineRenameResult,
 } from '../overview';
 import { IconPin } from '../overview/icons';
 import {
@@ -77,8 +78,10 @@ import {
   rewriteSidebarRepoScopedGroupMapKeysByPrefix,
 } from './sidebar-repo-scoped-groups';
 import {
+  removeSidebarRepoScopedNodeOrderByGroupPrefix,
   SIDEBAR_ROOT_PARENT_ID,
   sidebarChatSidebarNodeId,
+  sidebarDroneIdFromNodeId,
   sidebarDroneNodeId,
   sidebarFolderNodeId,
 } from './sidebar-node-order';
@@ -120,6 +123,11 @@ import {
   PinnedDroneReorderItem,
   usePinnedDroneReorder,
 } from './pinned-drone-reorder';
+import { allocateUntitledDisplayName } from './name-helpers';
+import {
+  markSidebarGroupDraftRequestHandled,
+  SIDEBAR_GROUP_DRAFT_REQUEST_EVENT,
+} from './sidebar-group-draft-events';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 308;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -1176,7 +1184,11 @@ function SidebarFolderTreeNode({
                   value={folderEditor.value}
                   onChange={(event) => onFolderEditorValueChange(event.target.value)}
                   onBlur={onBlurFolderEditor}
+                  onClick={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
                   onKeyDown={(event) => {
+                    event.stopPropagation();
                     if (event.key === 'Enter') {
                       event.preventDefault();
                       onSubmitFolderEditor();
@@ -1186,7 +1198,9 @@ function SidebarFolderTreeNode({
                     }
                   }}
                   maxLength={64}
-                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] px-1.5 py-0.5 text-[var(--text-11)] text-[var(--fg)] focus:outline-none"
+                  aria-label="Group name"
+                  className="min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 text-[var(--text-11)] text-[var(--fg)] shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+                  style={{ border: 0, outline: 'none', boxShadow: 'none' }}
                 />
               ) : (
                 <span className={`${sidebarFolderLabelClass} text-[var(--text-11)]`} title={node.path}>
@@ -1430,7 +1444,10 @@ export type DroneSidebarProps = {
     chatName: string,
     newName: string,
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
-  onRenameDrone: (droneId: string) => void;
+  onRenameDrone: (
+    droneId: string,
+    newName: string,
+  ) => Promise<DroneInlineRenameResult> | DroneInlineRenameResult;
   onSetDroneBaseImage: (droneId: string) => void;
   onSetDronePinned: (droneId: string, pinned: boolean) => Promise<boolean>;
   onDeleteDrone: (droneId: string) => void;
@@ -1701,13 +1718,28 @@ export function DroneSidebar({
         opts?.kind === 'group' || !opts?.kind
           ? String(opts?.repoPath ?? activeRepoPath ?? '').trim()
           : '';
-      if (!ok || opts?.kind === 'repo' || scopedRepoPath) return ok;
+      if (!ok || opts?.kind === 'repo') return ok;
+      if (scopedRepoPath) {
+        const repoGroupPath = `repo:${scopedRepoPath}`;
+        setSidebarRepoScopedGroupByPath((prev) =>
+          removeSidebarRepoScopedGroupMapKeysByPrefix(prev, group, repoGroupPath),
+        );
+        setSidebarNodeOrderByParent((prev) =>
+          removeSidebarRepoScopedNodeOrderByGroupPrefix(prev, repoGroupPath, group),
+        );
+        return ok;
+      }
       setSidebarRepoScopedGroupByPath((prev) =>
         removeSidebarRepoScopedGroupMapKeysByPrefix(prev, group),
       );
       return ok;
     },
-    [activeRepoPath, onDeleteGroup, setSidebarRepoScopedGroupByPath],
+    [
+      activeRepoPath,
+      onDeleteGroup,
+      setSidebarNodeOrderByParent,
+      setSidebarRepoScopedGroupByPath,
+    ],
   );
   const {
     optimisticSidebarGroups,
@@ -1834,6 +1866,39 @@ export function DroneSidebar({
       sidebarGroupCreatedAtByName,
     ],
   );
+  const renderedSidebarNodeTreeRef = React.useRef<SidebarNodeTreeModel | null>(null);
+  const getRenderedSidebarNodeTree = React.useCallback(
+    () => renderedSidebarNodeTreeRef.current,
+    [],
+  );
+  const inlineRenameRequestSequenceRef = React.useRef(0);
+  const [inlineRenameDroneRequest, setInlineRenameDroneRequest] = React.useState<{
+    droneId: string;
+    key: number;
+  } | null>(null);
+  const requestInlineDroneRename = React.useCallback(
+    (droneIdRaw: string): boolean => {
+      const droneId = String(droneIdRaw ?? '').trim();
+      if (!droneId || !sidebarDroneById[droneId]) return false;
+      inlineRenameRequestSequenceRef.current += 1;
+      setInlineRenameDroneRequest({
+        droneId,
+        key: inlineRenameRequestSequenceRef.current,
+      });
+      return true;
+    },
+    [sidebarDroneById],
+  );
+  React.useEffect(() => {
+    if (!inlineRenameDroneRequest) return;
+    const requestKey = inlineRenameDroneRequest.key;
+    const id = window.setTimeout(() => {
+      setInlineRenameDroneRequest((current) =>
+        current?.key === requestKey ? null : current,
+      );
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [inlineRenameDroneRequest]);
   const {
     blurChatEditor,
     blurFolderEditor,
@@ -1890,6 +1955,8 @@ export function DroneSidebar({
     runOptimisticRenameGroup,
     selectedDrone,
     setSidebarRepoScopedGroupByPath,
+    setSidebarNodeOrderByParent,
+    getRenderedSidebarNodeTree,
     sidebarDroneById,
     visibleSidebarFolderPathSet,
   });
@@ -2218,6 +2285,40 @@ export function DroneSidebar({
     },
     [onOpenDraftChatComposer, openRepositoryNavigationItem],
   );
+  const openRootGroupDraft = React.useCallback((): boolean => {
+    if (!sidebarCapabilities.actions || isRepoGroupingMode) return false;
+    if (sidebarCapabilities.headerActions && (repositoryOverviewOpen || !activeRepositoryNavigationItem)) {
+      return false;
+    }
+    const topLevelGroupNames = Array.from(visibleSidebarFolderPathSet).filter(
+      (path) => path && !path.includes('/'),
+    );
+    openFolderCreate(null, {
+      repoGroupPath: activeRepositoryNavigationItem?.id ?? null,
+      initialValue: allocateUntitledDisplayName(topLevelGroupNames),
+      dismissOnBlur: true,
+    });
+    setSidebarCollapsed(false);
+    return true;
+  }, [
+    activeRepositoryNavigationItem,
+    isRepoGroupingMode,
+    openFolderCreate,
+    repositoryOverviewOpen,
+    sidebarCapabilities.actions,
+    sidebarCapabilities.headerActions,
+    setSidebarCollapsed,
+    visibleSidebarFolderPathSet,
+  ]);
+  React.useEffect(() => {
+    const onRequest = (event: Event) => {
+      if (event.defaultPrevented) return;
+      if (!openRootGroupDraft()) return;
+      markSidebarGroupDraftRequestHandled(event);
+    };
+    window.addEventListener(SIDEBAR_GROUP_DRAFT_REQUEST_EVENT, onRequest);
+    return () => window.removeEventListener(SIDEBAR_GROUP_DRAFT_REQUEST_EVENT, onRequest);
+  }, [openRootGroupDraft]);
   React.useEffect(() => {
     if (
       !activeSidebarRepoId ||
@@ -2261,8 +2362,14 @@ export function DroneSidebar({
       : activeRepositoryModel?.nodeTree ?? null
     : staticReadOnlyNodeTree;
   React.useLayoutEffect(() => {
+    renderedSidebarNodeTreeRef.current = renderedSidebarNodeTree;
     onRenderedNodeTreeChange?.(renderedSidebarNodeTree);
-    return () => onRenderedNodeTreeChange?.(null);
+    return () => {
+      if (renderedSidebarNodeTreeRef.current === renderedSidebarNodeTree) {
+        renderedSidebarNodeTreeRef.current = null;
+      }
+      onRenderedNodeTreeChange?.(null);
+    };
   }, [onRenderedNodeTreeChange, renderedSidebarNodeTree]);
   const activeRepositoryFolderTree = React.useMemo(
     () =>
@@ -2307,6 +2414,7 @@ export function DroneSidebar({
       onCreateDroneChat,
       onRenameDroneChat,
       onRenameDrone,
+      inlineRenameDroneRequest,
       onSetDroneBaseImage,
       onDeleteDrone,
       onOpenDroneErrorModal,
@@ -2332,6 +2440,7 @@ export function DroneSidebar({
       onPrepareDroneDragStart,
       onRenameDrone,
       onRenameDroneChat,
+      inlineRenameDroneRequest,
       onSelectDroneCard,
       onSelectDroneChat,
       onSetDroneBaseImage,
@@ -2431,14 +2540,28 @@ export function DroneSidebar({
         return;
       }
 
-      if (!selectedFolderPath || !visibleSidebarFolderPathSet.has(selectedFolderPath)) return;
       if (folderEditor) return;
 
-      if (sidebarCapabilities.actions && !isRepoGroupingMode && event.key === 'F2') {
-        event.preventDefault();
-        startRenameFolder(selectedFolderPath);
+      if (sidebarCapabilities.actions && event.key === 'F2') {
+        if (
+          !isRepoGroupingMode &&
+          selectedFolderPath &&
+          visibleSidebarFolderPathSet.has(selectedFolderPath)
+        ) {
+          event.preventDefault();
+          startRenameFolder(selectedFolderPath);
+          return;
+        }
+        const selectedDroneId =
+          sidebarDroneIdFromNodeId(selectedSidebarNodeId ?? '') ??
+          (!selectedFolderPath ? String(selectedDrone ?? '').trim() : '');
+        if (selectedDroneId && requestInlineDroneRename(selectedDroneId)) {
+          event.preventDefault();
+        }
         return;
       }
+
+      if (!selectedFolderPath || !visibleSidebarFolderPathSet.has(selectedFolderPath)) return;
 
       if (event.key === 'ArrowLeft' && !collapsedGroups[selectedFolderPath]) {
         event.preventDefault();
@@ -2460,7 +2583,10 @@ export function DroneSidebar({
     folderEditor,
     isRepoGroupingMode,
     onToggleGroupCollapsed,
+    requestInlineDroneRename,
     sidebarCapabilities.actions,
+    selectedDrone,
+    selectedSidebarNodeId,
     selectedFolderPath,
     startRenameFolder,
     visibleSidebarFolderPathSet,
@@ -2607,6 +2733,20 @@ export function DroneSidebar({
                         {activeRepositoryNavigationItem.stateSummary.working}
                       </span>
                     ) : null}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openRootGroupDraft}
+                  disabled={!sidebarCapabilities.actions}
+                  data-sidebar-create-group="true"
+                  className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Create group (E)"
+                  aria-label="Create group"
+                >
+                  <span className="relative inline-flex h-4 w-4 items-center justify-center">
+                    <IconFolder className="h-4 w-4" />
+                    <IconPlus className="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full bg-[var(--sidebar-bg)]" />
                   </span>
                 </button>
                 <button
@@ -2790,6 +2930,18 @@ export function DroneSidebar({
                   <IconPlus className="opacity-90" />
                   <span className="min-w-0 truncate">New drone</span>
                 </button>
+                {sidebarCapabilities.actions && !isRepoGroupingMode ? (
+                  <button
+                    type="button"
+                    onClick={openRootGroupDraft}
+                    data-sidebar-create-group="true"
+                    className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                    title="Create group (E)"
+                    aria-label="Create group"
+                  >
+                    <IconFolder className="opacity-90" />
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={onOpenCreateModal}
@@ -2859,7 +3011,16 @@ export function DroneSidebar({
                             onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}
                             onClone={sidebarCapabilities.actions ? () => onOpenCloneModal(drone) : undefined}
                             onAddToGroup={sidebarCapabilities.actions ? () => openAddDroneToGroup(drone) : undefined}
-                            onRename={sidebarCapabilities.actions ? () => onRenameDrone(droneId) : undefined}
+                            onRename={
+                              sidebarCapabilities.actions
+                                ? (newName) => onRenameDrone(droneId, newName)
+                                : undefined
+                            }
+                            inlineRenameRequestKey={
+                              inlineRenameDroneRequest?.droneId === droneId
+                                ? inlineRenameDroneRequest.key
+                                : 0
+                            }
                             onSetBaseImage={sidebarCapabilities.actions ? () => onSetDroneBaseImage(droneId) : undefined}
                             onDelete={sidebarCapabilities.actions ? () => onDeleteDrone(droneId) : undefined}
                             onErrorClick={onOpenDroneErrorModal}
@@ -2999,10 +3160,11 @@ export function DroneSidebar({
                         {folderEditor?.mode === 'create' &&
                         folderEditor.parentPath === null &&
                         folderEditor.anchorPath === null ? (
-                          <div className="mb-1 flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5">
-                            <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-80" />
+                          <div className="flex min-h-8 items-center gap-1.5 px-1.5">
+                            <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)]" />
                             <input
                               ref={folderEditorInputRef}
+                              data-sidebar-group-draft-input="true"
                               value={folderEditor.value}
                               onChange={(event) => updateFolderEditorValue(event.target.value)}
                               onBlur={blurFolderEditor}
@@ -3017,7 +3179,9 @@ export function DroneSidebar({
                               }}
                               maxLength={64}
                               placeholder="Folder name"
-                              className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1 text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+                              aria-label="New group name"
+                              className="min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 text-[var(--text-11)] text-[var(--fg)] shadow-none outline-none ring-0 placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+                              style={{ border: 0, outline: 'none', boxShadow: 'none' }}
                             />
                           </div>
                         ) : null}
@@ -3115,6 +3279,7 @@ export function DroneSidebar({
                       onBlurChatEditor={blurChatEditor}
                       onCancelChatEditor={closeChatEditor}
                       onRenameDrone={onRenameDrone}
+                      inlineRenameDroneRequest={inlineRenameDroneRequest}
                       onSetDroneBaseImage={onSetDroneBaseImage}
                       pinnedDroneIdSet={pinnedDroneIdSet}
                       pinningDroneIds={pinningDroneIds}
@@ -3431,6 +3596,24 @@ export function DroneSidebar({
             tabIndex={collapsedRailInteractive ? 0 : -1}
           >
             <IconPlus className="opacity-80" />
+          </SidebarIconButton>
+        ) : null}
+        {sidebarCapabilities.collapsedRailActions &&
+        sidebarCapabilities.actions &&
+        !repositoryOverviewOpen &&
+        !isRepoGroupingMode ? (
+          <SidebarIconButton
+            onClick={() => {
+              setSidebarCollapsed(false);
+              openRootGroupDraft();
+            }}
+            className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
+            title="Create group (E)"
+            ariaLabel="Create group"
+            disabled={!collapsedRailInteractive}
+            tabIndex={collapsedRailInteractive ? 0 : -1}
+          >
+            <IconFolder className="opacity-80" />
           </SidebarIconButton>
         ) : null}
         {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.createDrones ? (

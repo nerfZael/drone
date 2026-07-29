@@ -6,6 +6,7 @@ import {
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
   sidebarDroneStateLabel,
+  type DroneInlineRenameResult,
 } from '../overview';
 import type { DroneSummary } from '../types';
 import { createCanvasChatNodeId } from './app-config';
@@ -87,7 +88,11 @@ export type SidebarDroneTreeListProps = {
     chatName: string,
     newName: string,
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
-  onRenameDrone: (droneId: string) => void;
+  onRenameDrone: (
+    droneId: string,
+    newName: string,
+  ) => Promise<DroneInlineRenameResult> | DroneInlineRenameResult;
+  inlineRenameDroneRequest: { droneId: string; key: number } | null;
   onSetDroneBaseImage: (droneId: string) => void;
   onDeleteDrone: (droneId: string) => void;
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
@@ -135,7 +140,11 @@ type SidebarDroneRowProps = {
   onOpenCloneModal: (drone: DroneSummary) => void;
   onAddDroneToGroup: (drone: DroneSummary) => void;
   onOpenCreateDroneChat: (drone: DroneSummary) => void;
-  onRenameDrone: (droneId: string) => void;
+  onRenameDrone: (
+    droneId: string,
+    newName: string,
+  ) => Promise<DroneInlineRenameResult> | DroneInlineRenameResult;
+  inlineRenameRequestKey: number;
   onSetDroneBaseImage: (droneId: string) => void;
   onDeleteDrone: (droneId: string) => void;
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
@@ -265,6 +274,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
   onAddDroneToGroup,
   onOpenCreateDroneChat,
   onRenameDrone,
+  inlineRenameRequestKey,
   onSetDroneBaseImage,
   onDeleteDrone,
   onOpenDroneErrorModal,
@@ -353,7 +363,8 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           onClone={actionsEnabled ? () => onOpenCloneModal(drone) : undefined}
           onAddToGroup={actionsEnabled ? () => onAddDroneToGroup(drone) : undefined}
           onCreateChat={actionsEnabled ? () => onOpenCreateDroneChat(drone) : undefined}
-          onRename={actionsEnabled ? () => onRenameDrone(drone.id) : undefined}
+          onRename={actionsEnabled ? (newName) => onRenameDrone(drone.id, newName) : undefined}
+          inlineRenameRequestKey={inlineRenameRequestKey}
           onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
           onDelete={actionsEnabled ? handleDeleteDrone : undefined}
           onErrorClick={onOpenDroneErrorModal}
@@ -605,6 +616,7 @@ function SidebarDroneNode({
   onCreateDroneChat,
   onRenameDroneChat,
   onRenameDrone,
+  inlineRenameDroneRequest,
   onSetDroneBaseImage,
   onDeleteDrone,
   onOpenDroneErrorModal,
@@ -727,6 +739,11 @@ function SidebarDroneNode({
         onAddDroneToGroup={onAddDroneToGroup}
         onOpenCreateDroneChat={onOpenCreateDroneChat}
         onRenameDrone={onRenameDrone}
+        inlineRenameRequestKey={
+          inlineRenameDroneRequest?.droneId === drone.id
+            ? inlineRenameDroneRequest.key
+            : 0
+        }
         onSetDroneBaseImage={onSetDroneBaseImage}
         onDeleteDrone={onDeleteDrone}
         onOpenDroneErrorModal={onOpenDroneErrorModal}
@@ -853,6 +870,7 @@ function SidebarDroneNode({
               onCreateDroneChat={onCreateDroneChat}
               onRenameDroneChat={onRenameDroneChat}
               onRenameDrone={onRenameDrone}
+              inlineRenameDroneRequest={inlineRenameDroneRequest}
               onSetDroneBaseImage={onSetDroneBaseImage}
               onDeleteDrone={onDeleteDrone}
               onOpenDroneErrorModal={onOpenDroneErrorModal}
@@ -917,6 +935,7 @@ export function SidebarDroneTreeList({
   onCreateDroneChat,
   onRenameDroneChat,
   onRenameDrone,
+  inlineRenameDroneRequest,
   onSetDroneBaseImage,
   onDeleteDrone,
   onOpenDroneErrorModal,
@@ -1271,6 +1290,7 @@ export function SidebarDroneTreeList({
           onCreateDroneChat={onCreateDroneChat}
           onRenameDroneChat={onRenameDroneChat}
           onRenameDrone={onRenameDrone}
+          inlineRenameDroneRequest={inlineRenameDroneRequest}
           onSetDroneBaseImage={onSetDroneBaseImage}
           onDeleteDrone={onDeleteDrone}
           onOpenDroneErrorModal={onOpenDroneErrorModal}

@@ -6,6 +6,7 @@ import {
   SidebarItemStateIndicator,
   sidebarChatDisplayState,
   sidebarDroneStateLabel,
+  type DroneInlineRenameResult,
 } from '../overview';
 import type { DroneSummary } from '../types';
 import { createCanvasChatNodeId } from './app-config';
@@ -165,7 +166,11 @@ type GroupedSidebarTreeProps = {
   onSubmitChatEditor: () => void;
   onBlurChatEditor: () => void;
   onCancelChatEditor: () => void;
-  onRenameDrone: (droneId: string) => void;
+  onRenameDrone: (
+    droneId: string,
+    newName: string,
+  ) => Promise<DroneInlineRenameResult> | DroneInlineRenameResult;
+  inlineRenameDroneRequest: { droneId: string; key: number } | null;
   onSetDroneBaseImage: (droneId: string) => void;
   pinnedDroneIdSet: ReadonlySet<string>;
   pinningDroneIds: ReadonlySet<string>;
@@ -645,6 +650,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     onCancelChatEditor,
     chatEditorInputRef,
     onRenameDrone,
+    inlineRenameDroneRequest,
     onSetDroneBaseImage,
     pinnedDroneIdSet,
     pinningDroneIds,
@@ -780,7 +786,12 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             onCreateChat={actionsEnabled ? () => onOpenCreateDroneChat(drone) : undefined}
             onClone={actionsEnabled ? () => onOpenCloneModal(drone) : undefined}
             onAddToGroup={actionsEnabled ? () => onAddDroneToGroup(drone) : undefined}
-            onRename={actionsEnabled ? () => onRenameDrone(drone.id) : undefined}
+            onRename={actionsEnabled ? (newName) => onRenameDrone(drone.id, newName) : undefined}
+            inlineRenameRequestKey={
+              inlineRenameDroneRequest?.droneId === drone.id
+                ? inlineRenameDroneRequest.key
+                : 0
+            }
             onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
             pinned={pinnedDroneIdSet.has(drone.id)}
             pinBusy={pinningDroneIds.has(drone.id)}
@@ -1085,7 +1096,9 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
         ) : null}
         <div
           className={`group/folder-row relative flex items-center gap-1 rounded-[var(--radius-medium)] pr-1 transition-colors ${densityClasses.folderRow} ${
-            intoState
+            showEditorInline
+              ? 'border border-transparent'
+              : intoState
               ? 'bg-[var(--accent-subtle)] ring-1 ring-[var(--accent-muted)]'
               : isSelected
                 ? 'border border-[var(--border)] bg-[var(--surface-soft)]'
@@ -1116,7 +1129,9 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                     }
                   }}
                   maxLength={64}
-                  className={`min-w-0 flex-1 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--panel-raised)] text-[var(--fg)] shadow-[var(--glow-accent)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] ${densityClasses.folderInput}`}
+                  aria-label="Group name"
+                  className={`min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 text-[var(--fg)] shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${densityClasses.folderInput}`}
+                  style={{ border: 0, outline: 'none', boxShadow: 'none' }}
                 />
               </div>
             </div>
@@ -2129,6 +2144,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onOpenGroupMultiChat,
       props.onPrepareDroneDragStart,
       props.onRenameDrone,
+      props.inlineRenameDroneRequest,
       props.onRenameDroneChat,
       props.onRenameGroup,
       props.onReparentDronesToParent,

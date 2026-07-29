@@ -179,7 +179,18 @@ export function registerGroupRoutes(router: HubRouter, deps: GroupRouteDependenc
     );
 
     if (targets.length === 0) {
-      if (scopedRepoPath || !groupExists) return fail(404, `unknown group (or empty): ${group}`);
+      if (!groupExists) return fail(404, `unknown group (or empty): ${group}`);
+      if (scopedRepoPath) {
+        json(200, {
+          ok: true,
+          group,
+          repoPath: scopedRepoPath,
+          removed: [],
+          total: 0,
+          deletedGroup: false,
+        });
+        return;
+      }
       await deleteCanonicalGroupArtifacts(group).catch(() => undefined);
       json(200, { ok: true, group, removed: [], total: 0, deletedGroup: true });
       return;

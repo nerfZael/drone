@@ -1,6 +1,7 @@
 import {
   isSameOrDescendantSidebarGroupPath,
   rewriteSidebarGroupPathPrefix,
+  sidebarGroupParentPath,
 } from './sidebar-group-paths';
 import { normalizeSidebarGroupOrder, reorderSidebarEntryOrder, type SidebarGroupDropPlacement } from './sidebar-group-order';
 import {
@@ -27,6 +28,11 @@ export function sidebarChatSidebarNodeId(droneIdRaw: string, chatNameRaw: string
 export function sidebarFolderPathFromNodeId(nodeIdRaw: string): string | null {
   const nodeId = String(nodeIdRaw ?? '').trim();
   return nodeId.startsWith('folder:') ? nodeId.slice('folder:'.length) || null : null;
+}
+
+export function sidebarDroneIdFromNodeId(nodeIdRaw: string): string | null {
+  const nodeId = String(nodeIdRaw ?? '').trim();
+  return nodeId.startsWith('drone:') ? nodeId.slice('drone:'.length) || null : null;
 }
 
 function normalizeNodeOrderMap(value: Record<string, string[]>): Record<string, string[]> {
@@ -108,6 +114,48 @@ export function moveSidebarDroneToTopInNodeOrder(
     firstSiblingId,
     'before',
   );
+}
+
+function repoScopedSidebarFolderNodeId(repoGroupPath: string, groupPath: string): string {
+  return sidebarFolderNodeId(`repo-scope:${repoGroupPath}:${groupPath}`);
+}
+
+export function placeCreatedSidebarFolderAtTop(
+  map: Record<string, string[]>,
+  nodeTree: Pick<SidebarNodeTreeModel, 'childIdsByParent'> | null,
+  groupPathRaw: string,
+  repoGroupPathRaw?: string | null,
+): Record<string, string[]> {
+  const groupPath = String(groupPathRaw ?? '').trim();
+  if (!groupPath) return map;
+  const repoGroupPath = String(repoGroupPathRaw ?? '').trim();
+  const parentPath = sidebarGroupParentPath(groupPath);
+  const nodeId = repoGroupPath
+    ? repoScopedSidebarFolderNodeId(repoGroupPath, groupPath)
+    : sidebarFolderNodeId(groupPath);
+  const parentId = parentPath
+    ? repoGroupPath
+      ? repoScopedSidebarFolderNodeId(repoGroupPath, parentPath)
+      : sidebarFolderNodeId(parentPath)
+    : repoGroupPath
+      ? sidebarFolderNodeId(repoGroupPath)
+      : SIDEBAR_ROOT_PARENT_ID;
+  const visibleSiblingIds = normalizeSidebarGroupOrder(
+    nodeTree?.childIdsByParent[parentId] ?? [],
+  );
+  const visibleSiblingIdSet = new Set(visibleSiblingIds);
+  const hiddenIds = normalizeSidebarGroupOrder(map[parentId] ?? []).filter(
+    (id) => id !== nodeId && !visibleSiblingIdSet.has(id),
+  );
+  const nextOrder = normalizeSidebarGroupOrder([
+    nodeId,
+    ...visibleSiblingIds.filter((id) => id !== nodeId),
+    ...hiddenIds,
+  ]);
+  return normalizeNodeOrderMap({
+    ...map,
+    [parentId]: nextOrder,
+  });
 }
 
 export function moveSidebarNodeIdsBetweenParents(args: {
@@ -208,6 +256,38 @@ export function removeSidebarNodeOrderByParentGroupPrefix(
     if (filtered.length > 0) out[parentIdRaw] = filtered;
   }
   return out;
+}
+
+export function removeSidebarRepoScopedNodeOrderByGroupPrefix(
+  map: Record<string, string[]>,
+  repoGroupPathRaw: string,
+  groupRaw: string,
+): Record<string, string[]> {
+  const repoGroupPath = String(repoGroupPathRaw ?? '').trim();
+  const group = String(groupRaw ?? '').trim();
+  if (!repoGroupPath || !group) return map;
+  const nodePathPrefix = `repo-scope:${repoGroupPath}:${group}`;
+  const matchesGroupNode = (nodeIdRaw: string): boolean => {
+    const nodePath = sidebarFolderPathFromNodeId(nodeIdRaw);
+    return Boolean(
+      nodePath &&
+      (nodePath === nodePathPrefix || nodePath.startsWith(`${nodePathPrefix}/`)),
+    );
+  };
+  let changed = false;
+  const out: Record<string, string[]> = {};
+  for (const [parentId, order] of Object.entries(map)) {
+    if (matchesGroupNode(parentId)) {
+      changed = true;
+      continue;
+    }
+    const filtered = normalizeSidebarGroupOrder(order).filter(
+      (nodeId) => !matchesGroupNode(nodeId),
+    );
+    if (filtered.length !== order.length) changed = true;
+    if (filtered.length > 0) out[parentId] = filtered;
+  }
+  return changed ? out : map;
 }
 
 export function removeDroneIdsFromSidebarNodeOrderByParent(

@@ -110,6 +110,19 @@ describe('sidebar-group-order', () => {
     ).toEqual(['group:Gamma', 'group:Alpha', 'group:Beta', 'group:Hidden']);
   });
 
+  test('places new groups at the top by default', () => {
+    expect(
+      insertSidebarGroupOrderToken(
+        ['group:Alpha', 'group:Beta'],
+        [
+          { group: 'Alpha', kind: 'group' as const },
+          { group: 'Beta', kind: 'group' as const },
+        ],
+        { group: 'Gamma', kind: 'group' },
+      ),
+    ).toEqual(['group:Gamma', 'group:Alpha', 'group:Beta']);
+  });
+
   test('can insert a new child folder after its visible siblings', () => {
     expect(
       insertSidebarGroupOrderToken(

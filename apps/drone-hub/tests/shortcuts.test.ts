@@ -2,10 +2,18 @@ import { readFileSync } from 'node:fs';
 import { cloneDefaultShortcutBindings } from '../src/droneHub/app/shortcuts';
 
 describe('shortcut defaults', () => {
-  test('uses 1/2/3 for creation and Q/W for selected-drone organization', () => {
+  test('uses 1/2/3 for drone creation, E for group creation, and Q/W for selected-drone organization', () => {
     const defaults = cloneDefaultShortcutBindings();
     expect(defaults.createDraftDrone).toEqual({
       key: '1',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    });
+    expect(defaults.createDraftGroup).toEqual({
+      key: 'e',
       mod: false,
       ctrl: false,
       meta: false,
@@ -44,14 +52,7 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
-    expect(defaults.toggleSelectedDronesToDo).toEqual({
-      key: 'e',
-      mod: false,
-      ctrl: false,
-      meta: false,
-      alt: false,
-      shift: false,
-    });
+    expect(defaults.toggleSelectedDronesToDo).toBeNull();
     expect(defaults.markSelectedDronesUnread).toEqual({
       key: 'z',
       mod: false,
@@ -86,7 +87,7 @@ describe('shortcut defaults', () => {
     });
   });
 
-  test('replaces the Changes editor E binding with the to do action', () => {
+  test('keeps the Changes editor E binding available for the global create-group action', () => {
     const changesDockSource = readFileSync(
       new URL('../src/droneHub/changes/DroneChangesDock.tsx', import.meta.url),
       'utf8',

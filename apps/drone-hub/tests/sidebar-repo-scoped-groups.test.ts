@@ -52,6 +52,24 @@ describe('sidebar-repo-scoped-groups', () => {
     });
   });
 
+  test('removes a deleted subtree only from the requested repository', () => {
+    expect(
+      removeSidebarRepoScopedGroupMapKeysByPrefix(
+        {
+          Alpha: 'repo:/work/a',
+          'Alpha/Beta': 'repo:/work/a',
+          Gamma: 'repo:/work/b',
+        },
+        'Alpha',
+        'repo:/work/b',
+      ),
+    ).toEqual({
+      Alpha: 'repo:/work/a',
+      'Alpha/Beta': 'repo:/work/a',
+      Gamma: 'repo:/work/b',
+    });
+  });
+
   test('groups folder paths by repo owner', () => {
     expect(
       groupSidebarRepoScopedGroupsByRepoGroup({

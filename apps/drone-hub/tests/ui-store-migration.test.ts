@@ -204,4 +204,34 @@ describe('drone hub ui store migration', () => {
       markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
     });
   });
+
+  test('moves the former default E shortcut from to-do tagging to group creation', () => {
+    const migrated = migrateDroneHubUiPersistedState(
+      {
+        shortcutBindings: {
+          toggleSelectedDronesToDo: {
+            key: 'e',
+            mod: false,
+            ctrl: false,
+            meta: false,
+            alt: false,
+            shift: false,
+          },
+        },
+      },
+      12,
+    );
+
+    expect(migrated.shortcutBindings).toMatchObject({
+      createDraftGroup: {
+        key: 'e',
+        mod: false,
+        ctrl: false,
+        meta: false,
+        alt: false,
+        shift: false,
+      },
+      toggleSelectedDronesToDo: null,
+    });
+  });
 });

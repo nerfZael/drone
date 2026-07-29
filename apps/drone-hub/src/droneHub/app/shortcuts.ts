@@ -1,6 +1,7 @@
 export type ShortcutActionId =
   | 'openHome'
   | 'createDraftDrone'
+  | 'createDraftGroup'
   | 'createChildDraftDrone'
   | 'createDroneChat'
   | 'toggleSelectedDronePinned'
@@ -46,6 +47,11 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'createDraftDrone',
     label: 'Create new drone',
     description: 'Opens the quick single-drone composer.',
+  },
+  {
+    id: 'createDraftGroup',
+    label: 'Create new group',
+    description: 'Creates a temporary untitled group at the top of the sidebar for inline naming.',
   },
   {
     id: 'createChildDraftDrone',
@@ -137,11 +143,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openHome: { key: 'v', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  createDraftGroup: { key: 'e', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createChildDraftDrone: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDroneChat: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSelectedDronePinned: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   moveSelectedDroneToTop: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  toggleSelectedDronesToDo: { key: 'e', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  toggleSelectedDronesToDo: null,
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleVoiceClipboardRecording: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -209,6 +216,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
   return {
     openHome: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openHome),
     createDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDrone),
+    createDraftGroup: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftGroup),
     createChildDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createChildDraftDrone),
     createDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDroneChat),
     toggleSelectedDronePinned: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSelectedDronePinned),

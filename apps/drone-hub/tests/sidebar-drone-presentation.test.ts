@@ -194,6 +194,22 @@ describe('desktop sidebar drone presentation', () => {
     expect(source).toContain("actionMenuOpen ? 'z-50' : ''");
   });
 
+  test('renames drones through a borderless inline editor that cancels on blur', () => {
+    const source = readFileSync(
+      new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('inlineRenameOpen');
+    expect(source).toContain('inlineRenameInputRef.current?.select()');
+    expect(source).toContain("if (event.key === 'Enter')");
+    expect(source).toContain("if (event.key === 'Escape')");
+    expect(source).toContain('onBlur={() => {');
+    expect(source).toContain('setInlineRenameOpen(false)');
+    expect(source).toContain('appearance-none rounded-none border-0 bg-transparent');
+    expect(source).toContain("style={{ border: 0, outline: 'none', boxShadow: 'none' }}");
+  });
+
   test('uses the existing row height for a title-and-metadata cluster', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {

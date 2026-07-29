@@ -181,6 +181,35 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     expect(registry?.groups?.latest?.name).toBe('latest');
   });
 
+  test('scoped deletion of an existing empty group succeeds without deleting the canonical group', async () => {
+    await apiFetch('/api/groups', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'scoped-empty' }),
+    });
+
+    const deleted = await apiFetch(
+      `/api/groups/scoped-empty?repoPath=${encodeURIComponent('/tmp/repo-a')}`,
+      { method: 'DELETE' },
+    );
+    expect(deleted.r.status).toBe(200);
+    expect(deleted.data).toMatchObject({
+      ok: true,
+      group: 'scoped-empty',
+      repoPath: '/tmp/repo-a',
+      removed: [],
+      total: 0,
+      deletedGroup: false,
+    });
+
+    const listed = await apiFetch('/api/groups');
+    expect(
+      listed.data?.groups?.some(
+        (group: any) => group?.name === 'scoped-empty' && group?.totalCount === 0,
+      ),
+    ).toBe(true);
+  });
+
   test('can assign drones to groups and validates group names', async () => {
     await updateRegistry((reg: any) => {
       reg.drones = reg.drones ?? {};
