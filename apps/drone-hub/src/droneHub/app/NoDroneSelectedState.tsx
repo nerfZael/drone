@@ -1,12 +1,11 @@
 import React from 'react';
-import { IconDrone, IconPlus, IconPlusDouble } from './icons';
+import { IconDrone, IconPlus } from './icons';
 
 export type NoDroneSelectedStateProps = {
   dronesLoading: boolean;
   sidebarDroneCount: number;
   dronesError: string | null | undefined;
   onOpenDraftChatComposer: () => void;
-  onOpenCreateModal: () => void;
 };
 
 export function NoDroneSelectedState({
@@ -14,7 +13,6 @@ export function NoDroneSelectedState({
   sidebarDroneCount,
   dronesError,
   onOpenDraftChatComposer,
-  onOpenCreateModal,
 }: NoDroneSelectedStateProps) {
   const hasDrones = sidebarDroneCount > 0;
   const title = hasDrones ? 'Choose where to work' : 'Start with a drone';
@@ -50,7 +48,7 @@ export function NoDroneSelectedState({
           </div>
         ) : null}
 
-        <div className="mt-8 grid gap-3 sm:grid-cols-2">
+        <div className="mt-8 max-w-[360px]">
           <LaunchAction
             icon={<IconPlus className="h-4 w-4" />}
             eyebrow="Quick start"
@@ -58,13 +56,6 @@ export function NoDroneSelectedState({
             description="Open a fresh chat workspace and start with a prompt."
             primary
             onClick={onOpenDraftChatComposer}
-          />
-          <LaunchAction
-            icon={<IconPlusDouble className="h-4 w-4" />}
-            eyebrow="Batch"
-            title="Create multiple"
-            description="Prepare several workspaces in one pass."
-            onClick={onOpenCreateModal}
           />
         </div>
 

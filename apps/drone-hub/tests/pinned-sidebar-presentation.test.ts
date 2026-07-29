@@ -42,7 +42,7 @@ describe('desktop pinned drone presentation', () => {
       'onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}',
     );
     expect(sidebarSource).toContain(
-      'onClone={sidebarCapabilities.actions ? () => onOpenCloneModal(drone) : undefined}',
+      'onClone={sidebarCapabilities.actions ? () => onCloneDrone(drone) : undefined}',
     );
     expect(sidebarSource).toContain(
       'onDelete={sidebarCapabilities.actions ? () => onDeleteDrone(droneId) : undefined}',

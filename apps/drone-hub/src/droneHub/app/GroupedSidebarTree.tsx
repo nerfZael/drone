@@ -144,7 +144,7 @@ type GroupedSidebarTreeProps = {
     droneId: string,
     chatName: string,
   ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
-  onOpenCloneModal: (drone: DroneSummary) => void;
+  onCloneDrone: (drone: DroneSummary) => void;
   onAddDroneToGroup: (drone: DroneSummary) => void;
   onCreateDroneChat: (
     drone: DroneSummary,
@@ -635,7 +635,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     onSelectDroneCard,
     selectedDrone,
     activeChatName,
-    onOpenCloneModal,
+    onCloneDrone,
     onAddDroneToGroup,
     onOpenCreateDroneChat,
     onChatEditorValueChange,
@@ -778,7 +778,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             dragAttributes={dragDisabled ? undefined : attributes as unknown as Record<string, unknown>}
             dragListeners={dragDisabled ? undefined : listeners as unknown as Record<string, unknown>}
             onCreateChat={actionsEnabled ? () => onOpenCreateDroneChat(drone) : undefined}
-            onClone={actionsEnabled ? () => onOpenCloneModal(drone) : undefined}
+            onClone={actionsEnabled ? () => onCloneDrone(drone) : undefined}
             onAddToGroup={actionsEnabled ? () => onAddDroneToGroup(drone) : undefined}
             onRename={actionsEnabled ? () => onRenameDrone(drone.id) : undefined}
             onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
@@ -2122,7 +2122,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onDeleteGroup,
       props.onFolderEditorValueChange,
       props.onMoveDronesToGroup,
-      props.onOpenCloneModal,
+      props.onCloneDrone,
       props.onOpenCreateDroneChat,
       props.onOpenDroneErrorModal,
       props.onOpenFolderCreate,

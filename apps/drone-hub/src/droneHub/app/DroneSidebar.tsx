@@ -35,7 +35,6 @@ import {
   IconMore,
   IconPencil,
   IconPlus,
-  IconPlusDouble,
   IconSettings,
   IconSidebarCollapse,
   IconSidebarExpand,
@@ -1412,14 +1411,13 @@ export type DroneSidebarProps = {
   uiDroneName: (nameRaw: string) => string;
   draftSidebarPlaceholder: DraftSidebarPlaceholder | null;
   onOpenDraftChatComposer: (opts?: { repoPath?: string | null; group?: string | null }) => void;
-  onOpenCreateModal: () => void;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onDeleteDroneChat: (
     droneId: string,
     chatName: string,
   ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
-  onOpenCloneModal: (drone: DroneSummary) => void;
+  onCloneDrone: (drone: DroneSummary) => void;
   onCreateDroneChat: (
     drone: DroneSummary,
     chatName: string,
@@ -1499,11 +1497,10 @@ export function DroneSidebar({
   uiDroneName,
   draftSidebarPlaceholder,
   onOpenDraftChatComposer,
-  onOpenCreateModal,
   onSelectDroneCard,
   onSelectDroneChat,
   onDeleteDroneChat,
-  onOpenCloneModal,
+  onCloneDrone,
   onCreateDroneChat,
   onRenameDroneChat,
   onRenameDrone,
@@ -2302,7 +2299,7 @@ export function DroneSidebar({
       onSelectDroneCard,
       onSelectDroneChat,
       onDeleteDroneChat,
-      onOpenCloneModal,
+      onCloneDrone,
       onAddDroneToGroup: openAddDroneToGroup,
       onCreateDroneChat,
       onRenameDroneChat,
@@ -2326,7 +2323,7 @@ export function DroneSidebar({
       onCreateDroneChat,
       onDeleteDrone,
       onDeleteDroneChat,
-      onOpenCloneModal,
+      onCloneDrone,
       openAddDroneToGroup,
       onOpenDroneErrorModal,
       onPrepareDroneDragStart,
@@ -2712,21 +2709,6 @@ export function DroneSidebar({
                             Create new drone
                           </span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={onOpenCreateModal}
-                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[var(--text-11)] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
-                          title="Create multiple drones"
-                          aria-label="Create multiple drones"
-                        >
-                          <IconPlusDouble className="opacity-80" />
-                          <span
-                            className="font-[var(--weight-semibold)] uppercase tracking-wide"
-                            style={{ fontFamily: 'var(--display)' }}
-                          >
-                            Create multiple drones
-                          </span>
-                        </button>
                       </>
                     ) : null}
                   </div>
@@ -2790,15 +2772,6 @@ export function DroneSidebar({
                   <IconPlus className="opacity-90" />
                   <span className="min-w-0 truncate">New drone</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={onOpenCreateModal}
-                  className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
-                  title="Create multiple drones"
-                  aria-label="Create multiple drones"
-                >
-                  <IconPlusDouble className="opacity-90" />
-                </button>
               </div>
             )}
           <div className={`flex flex-col gap-0 ${sidebarListSelectClass}`}>
@@ -2857,7 +2830,7 @@ export function DroneSidebar({
                             pinBusy={pinningDroneIds.has(droneId)}
                             onTogglePinned={sidebarCapabilities.actions ? () => void setPinned(droneId, false) : undefined}
                             onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}
-                            onClone={sidebarCapabilities.actions ? () => onOpenCloneModal(drone) : undefined}
+                            onClone={sidebarCapabilities.actions ? () => onCloneDrone(drone) : undefined}
                             onAddToGroup={sidebarCapabilities.actions ? () => openAddDroneToGroup(drone) : undefined}
                             onRename={sidebarCapabilities.actions ? () => onRenameDrone(droneId) : undefined}
                             onSetBaseImage={sidebarCapabilities.actions ? () => onSetDroneBaseImage(droneId) : undefined}
@@ -3101,7 +3074,7 @@ export function DroneSidebar({
                       sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
                       uiDroneName={uiDroneName}
                       onDeleteDroneChat={onDeleteDroneChat}
-                      onOpenCloneModal={onOpenCloneModal}
+                      onCloneDrone={onCloneDrone}
                       onAddDroneToGroup={openAddDroneToGroup}
                       onCreateDroneChat={onCreateDroneChat}
                       onRenameDroneChat={onRenameDroneChat}
@@ -3431,21 +3404,6 @@ export function DroneSidebar({
             tabIndex={collapsedRailInteractive ? 0 : -1}
           >
             <IconPlus className="opacity-80" />
-          </SidebarIconButton>
-        ) : null}
-        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.createDrones ? (
-          <SidebarIconButton
-            onClick={() => {
-              setSidebarCollapsed(false);
-              onOpenCreateModal();
-            }}
-            className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
-            title="Create multiple drones (S)"
-            ariaLabel="Create multiple drones"
-            disabled={!collapsedRailInteractive}
-            tabIndex={collapsedRailInteractive ? 0 : -1}
-          >
-            <IconPlusDouble className="opacity-80" />
           </SidebarIconButton>
         ) : null}
         {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? (

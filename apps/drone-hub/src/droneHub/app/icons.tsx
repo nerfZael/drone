@@ -199,22 +199,6 @@ export function IconPlus({ className }: { className?: string }) {
   );
 }
 
-export function IconPlusDouble({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="14"
-      height="14"
-      viewBox="0 0 16 16"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M5 2.25a.75.75 0 01.75.75v2.5h2.5a.75.75 0 010 1.5h-2.5v2.5a.75.75 0 01-1.5 0V7h-2.5a.75.75 0 010-1.5h2.5V3A.75.75 0 015 2.25z" />
-      <path d="M11 6.25a.75.75 0 01.75.75v2h2a.75.75 0 010 1.5h-2v2a.75.75 0 01-1.5 0v-2h-2a.75.75 0 010-1.5h2V7A.75.75 0 0111 6.25z" />
-    </svg>
-  );
-}
-
 export function IconColumns({ className }: { className?: string }) {
   return (
     <svg
