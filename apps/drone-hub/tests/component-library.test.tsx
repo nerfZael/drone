@@ -3,19 +3,31 @@ import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   UiAlert,
+  UiActionMenu,
   UiBadge,
   UiButton,
   UiChoiceGroup,
+  UiCountBadge,
   UiDialog,
   UiDisclosure,
   UiField,
   UiFileInput,
   UiInput,
   UiKbd,
+  UiNavigationRow,
+  UiPaneState,
+  UiPanel,
+  UiPanelBody,
+  UiPanelHeader,
+  UiPanelStatusStrip,
+  UiPanelToolbar,
   UiProgress,
+  UiResizeHandle,
   UiSelect,
   UiSegmentedControl,
   UiSlider,
+  UiStatusChip,
+  UiStatusDot,
   UiSwitch,
   UiTable,
   UiTableBody,
@@ -24,8 +36,13 @@ import {
   UiTableRow,
   UiTabs,
   UiToast,
+  UiToolbarButton,
+  UiToolbarIconButton,
+  UiToolbarInput,
+  UiToolbarSegmentedControl,
   UiTooltip,
 } from '../src/ui';
+import { ComponentLibraryPatternsPreview } from '../src/droneHub/app/ComponentLibraryPatternsPreview';
 import { SETTINGS_TABS } from '../src/droneHub/app/settings-tabs';
 
 describe('drone hub component library', () => {
@@ -166,5 +183,90 @@ describe('drone hub component library', () => {
     expect(html).toContain('role="tooltip"');
     expect(html).toContain('<kbd');
     expect(html).toContain('<table');
+  });
+
+  test('renders dense application patterns with accessible interaction contracts', () => {
+    const html = renderToStaticMarkup(
+      <div>
+        <UiPanel>
+          <UiPanelHeader
+            title="Changes"
+            density="compact"
+            meta={<UiStatusChip tone="warning">3 files</UiStatusChip>}
+          />
+          <UiPanelStatusStrip tone="warning" dot>Live updates delayed</UiPanelStatusStrip>
+          <UiPanelToolbar aria-label="Changes toolbar">
+            <UiToolbarSegmentedControl
+              label="Changes view"
+              value="changes"
+              onValueChange={() => {}}
+              options={[
+                { value: 'changes', label: 'Changes' },
+                { value: 'commits', label: 'Commits' },
+              ]}
+            />
+            <UiToolbarInput aria-label="Filter files" />
+            <UiToolbarButton pressed>Viewed</UiToolbarButton>
+            <UiToolbarButton pressed={false}>Unviewed</UiToolbarButton>
+            <UiToolbarIconButton label="Refresh changes" icon={<span>↻</span>} />
+          </UiPanelToolbar>
+          <UiPanelBody>
+            <UiNavigationRow
+              label="Panel.tsx"
+              role="treeitem"
+              selected
+              status={<UiStatusDot tone="success" label="Added" />}
+              meta={<UiCountBadge>2</UiCountBadge>}
+            />
+            <UiPaneState kind="empty" title="No more files" compact />
+          </UiPanelBody>
+        </UiPanel>
+        <UiActionMenu
+          label="Panel options"
+          icon={<span>…</span>}
+          open
+          onOpenChange={() => {}}
+          entries={[
+            { id: 'compact', label: 'Compact', selectionRole: 'radio', checked: true },
+            { kind: 'separator', id: 'separator' },
+            { id: 'delete', label: 'Delete', tone: 'danger' },
+          ]}
+          onSelect={() => {}}
+        />
+        <UiResizeHandle
+          orientation="vertical"
+          value={320}
+          min={240}
+          max={720}
+          label="Resize panel"
+          onValueChange={() => {}}
+        />
+      </div>,
+    );
+
+    expect(html).toContain('role="toolbar"');
+    expect(html).toContain('role="radiogroup"');
+    expect(html).toContain('role="radio"');
+    expect(html).toContain('aria-checked="true"');
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('aria-pressed="false"');
+    expect(html).toContain('role="menu"');
+    expect(html).toContain('role="menuitemradio"');
+    expect(html).toContain('role="separator"');
+    expect(html).toContain('aria-valuenow="320"');
+    expect(html).toContain('aria-selected="true"');
+  });
+
+  test('shows sidebar and feature-panel recipes in the settings catalog', () => {
+    const html = renderToStaticMarkup(<ComponentLibraryPatternsPreview />);
+
+    expect(html).toContain('id="patterns"');
+    expect(html).toContain('Sidebar navigation');
+    expect(html).toContain('Panel recipes');
+    expect(html).toContain('Changes');
+    expect(html).toContain('Browser');
+    expect(html).toContain('Canvas');
+    expect(html).toContain('Workflows');
+    expect(html).toContain('Pane-state matrix');
   });
 });
