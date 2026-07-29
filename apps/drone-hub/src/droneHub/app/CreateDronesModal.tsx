@@ -1,6 +1,10 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import type { AgentPermissionMode, ChatAgentConfig } from '../../domain';
+import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
+  ChatAgentConfig,
+} from '../../domain';
 import { isValidDroneNameDashCase } from '../../domain';
 import type { DroneSummary } from '../types';
 import { droneNameHasWhitespace } from './name-helpers';
@@ -60,6 +64,9 @@ type CreateDronesModalProps = {
   onClearSpawnModel: () => void;
   spawnAgentPermissionMode: AgentPermissionMode;
   onSpawnAgentPermissionModeChange: (value: AgentPermissionMode) => void;
+  spawnApprovalPolicy: AgentApprovalPolicy;
+  onSpawnApprovalPolicyChange: (value: AgentApprovalPolicy) => void;
+  spawnAgentApprovalSupported: boolean;
   spawnAgentReadOnlySupported: boolean;
   spawnAgentConfig: ChatAgentConfig;
   createInitialMessage: string;
@@ -123,6 +130,9 @@ export function CreateDronesModal({
   onClearSpawnModel,
   spawnAgentPermissionMode,
   onSpawnAgentPermissionModeChange,
+  spawnApprovalPolicy,
+  onSpawnApprovalPolicyChange,
+  spawnAgentApprovalSupported,
   spawnAgentReadOnlySupported,
   spawnAgentConfig,
   createInitialMessage,
@@ -544,19 +554,6 @@ export function CreateDronesModal({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => onSpawnAgentPermissionModeChange('full-access')}
-                  disabled={spawnAgentAccessDisabled}
-                  className={`h-9 px-3 rounded border text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                    !spawnAgentAccessCopiedFromClone && spawnAgentPermissionMode === 'full-access'
-                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                  } ${spawnAgentAccessDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  Full access
-                </button>
-                <button
-                  type="button"
                   onClick={() => {
                     if (!spawnAgentReadOnlySupported) return;
                     onSpawnAgentPermissionModeChange('read-only');
@@ -572,21 +569,112 @@ export function CreateDronesModal({
                     spawnAgentAccessCopiedFromClone
                       ? 'Access is copied from the source chats.'
                       : spawnAgentReadOnlySupported
-                        ? 'Use read-only permissions for the default chat.'
-                        : 'Read-only mode is currently available for Codex and Blip.'
+                        ? 'Use a read-only sandbox for the default chat.'
+                        : 'Access controls are currently available for native, Codex, and Blip.'
                   }
                 >
-                  Read only
+                  Read
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSpawnAgentPermissionModeChange('workspace-write')}
+                  disabled={spawnAgentAccessDisabled || !spawnAgentReadOnlySupported}
+                  className={`h-9 px-3 rounded border text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
+                    !spawnAgentAccessCopiedFromClone &&
+                    spawnAgentPermissionMode === 'workspace-write'
+                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  } ${spawnAgentAccessDisabled || !spawnAgentReadOnlySupported ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                  title="Allow writes inside the workspace sandbox."
+                >
+                  Write
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSpawnAgentPermissionModeChange('full-access')}
+                  disabled={spawnAgentAccessDisabled}
+                  className={`h-9 px-3 rounded border text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
+                    !spawnAgentAccessCopiedFromClone && spawnAgentPermissionMode === 'full-access'
+                      ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  } ${spawnAgentAccessDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Execute
                 </button>
               </div>
               <span className="text-[var(--text-10)] text-[var(--muted-dim)] block mt-1">
                 {spawnAgentAccessCopiedFromClone
                   ? 'When cloning chats, access is copied from the source chats.'
                   : spawnAgentPermissionMode === 'read-only'
-                  ? 'The default chat will run the next prompt without write permissions.'
+                  ? 'The default chat can inspect files in a read-only sandbox.'
+                  : spawnAgentPermissionMode === 'workspace-write'
+                    ? 'The default chat can write inside the workspace sandbox.'
                   : spawnAgentReadOnlySupported
-                    ? 'Full access matches the current default behavior.'
-                    : 'Read-only is currently available for Codex and Blip.'}
+                    ? 'The default chat can run with full command access.'
+                    : 'Access controls are currently available for native, Codex, and Blip.'}
+              </span>
+            </div>
+
+            <div className="mb-4">
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Approvals
+              </div>
+              <div className="flex items-center gap-2">
+                {([
+                  {
+                    value: 'ask',
+                    label: 'Ask first',
+                    disabled:
+                      spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex',
+                  },
+                  ...(spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex'
+                    ? [{ value: 'agent-decides', label: 'Agent decides' }]
+                    : []),
+                  { value: 'never', label: 'Allow all' },
+                ] as Array<{
+                  value: AgentApprovalPolicy;
+                  label: string;
+                  disabled?: boolean;
+                }>).map(({ value, label, disabled }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => onSpawnApprovalPolicyChange(value)}
+                    disabled={spawnAgentAccessDisabled || !spawnAgentApprovalSupported || disabled}
+                    className={`h-9 px-3 rounded border text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
+                      spawnApprovalPolicy === value
+                        ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                    } ${spawnAgentAccessDisabled || !spawnAgentApprovalSupported || disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    style={{ fontFamily: 'var(--display)' }}
+                    title={
+                      disabled
+                        ? 'Ask first requires an interactive Codex integration.'
+                        : undefined
+                    }
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[var(--text-10)] text-[var(--muted-dim)] block mt-1">
+                {spawnAgentReadOnlySupported &&
+                spawnAgentPermissionMode !== 'full-access' &&
+                (spawnAgentConfig.kind === 'native' ||
+                  (spawnAgentConfig.kind === 'builtin' &&
+                    spawnAgentConfig.id === 'codex'))
+                  ? 'Approvals apply when Access is Execute.'
+                  : !spawnAgentApprovalSupported
+                  ? 'Approval policies are available for native and Codex chats.'
+                  : spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex'
+                    ? 'Ask first requires interactive Codex approvals. Agent decides uses Codex Auto-review.'
+                  : spawnApprovalPolicy === 'never'
+                    ? 'Commands run without waiting for confirmation.'
+                    : spawnApprovalPolicy === 'agent-decides'
+                      ? 'Codex decides when a command needs confirmation.'
+                      : 'The chat asks before approval-gated commands.'}
               </span>
             </div>
 

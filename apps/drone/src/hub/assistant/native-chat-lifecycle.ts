@@ -8,6 +8,8 @@ export type NativeChatIdentity = {
   provider?: string;
   model?: string;
   thinkingLevel?: string;
+  agentPermissionMode?: string;
+  approvalPolicy?: string;
 };
 
 export class NativeChatLifecycle {

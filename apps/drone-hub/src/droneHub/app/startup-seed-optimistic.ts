@@ -1,5 +1,9 @@
 import type React from 'react';
-import type { AgentPermissionMode, ChatAgentConfig } from '../../domain';
+import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
+  ChatAgentConfig,
+} from '../../domain';
 import type { StartupSeedState } from './app-types';
 import { makeId } from './helpers';
 
@@ -17,6 +21,7 @@ export type StartupSeedMutationOptions = {
   model?: string | null;
   reasoning?: string | null;
   agentPermissionMode?: AgentPermissionMode;
+  approvalPolicy?: AgentApprovalPolicy;
   prompt: string;
   chatName?: string;
   group?: string | null;
@@ -24,7 +29,15 @@ export type StartupSeedMutationOptions = {
 };
 
 function normalizeStartupSeedOptions(opts: StartupSeedMutationOptions) {
-  const agentPermissionMode: AgentPermissionMode = opts.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access';
+  const agentPermissionMode: AgentPermissionMode =
+    opts.agentPermissionMode === 'read-only' ||
+    opts.agentPermissionMode === 'workspace-write'
+      ? opts.agentPermissionMode
+      : 'full-access';
+  const approvalPolicy: AgentApprovalPolicy =
+    opts.approvalPolicy === 'agent-decides' || opts.approvalPolicy === 'never'
+      ? opts.approvalPolicy
+      : 'ask';
   return {
     runtime: (opts.runtime === 'host' ? 'host' : 'container') as 'container' | 'host',
     chatName: String(opts.chatName ?? 'default').trim() || 'default',
@@ -32,6 +45,7 @@ function normalizeStartupSeedOptions(opts: StartupSeedMutationOptions) {
     model: String(opts.model ?? '').trim() || null,
     reasoning: String(opts.reasoning ?? '').trim().toLowerCase() || null,
     agentPermissionMode,
+    approvalPolicy,
     prompt: String(opts.prompt ?? '').trim(),
     group: String(opts.group ?? '').trim() || null,
     repoPath: String(opts.repoPath ?? '').trim() || null,
@@ -63,6 +77,7 @@ export function addOptimisticStartupSeeds(
         model: normalized.model,
         reasoning: normalized.reasoning,
         agentPermissionMode: normalized.agentPermissionMode,
+        approvalPolicy: normalized.approvalPolicy,
         prompt: normalized.prompt,
         group: normalized.group,
         repoPath: normalized.repoPath,
@@ -128,6 +143,7 @@ export function replaceOptimisticStartupSeeds(
         model: normalized.model,
         reasoning: normalized.reasoning,
         agentPermissionMode: normalized.agentPermissionMode,
+        approvalPolicy: normalized.approvalPolicy,
         prompt: normalized.prompt,
         group: normalized.group,
         repoPath: normalized.repoPath,

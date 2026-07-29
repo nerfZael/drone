@@ -4,6 +4,8 @@ export type NativeAgentProviderId = 'openai' | 'gemini' | 'codex';
 export type NativeAgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type NativeChatStatus = 'idle' | 'running' | 'waiting_for_approval' | 'error';
 export type NativePromptDeliveryMode = 'queue' | 'asap';
+export type AgentPermissionMode = 'read-only' | 'workspace-write' | 'full-access';
+export type AgentApprovalPolicy = 'ask' | 'never';
 
 export type NativeChatAccessScope = {
   readMode: 'all' | 'selected';
@@ -48,6 +50,8 @@ export type NativeChatThread = {
   /** Missing only on chats created before workspace access became configurable. */
   enabledWorkspaceIds?: string[];
   accessScope: NativeChatAccessScope;
+  agentPermissionMode: AgentPermissionMode;
+  approvalPolicy: AgentApprovalPolicy;
   autoApprove: boolean;
   promptDeliveryMode: NativePromptDeliveryMode;
   queuedPrompts: NativeQueuedPrompt[];

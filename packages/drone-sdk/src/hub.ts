@@ -138,21 +138,43 @@ function normalizeCreateSeedAgent(raw: unknown): SeedAgentBody | undefined {
   throw new ValidationError('agent.kind must be "builtin" or "custom"');
 }
 
-function normalizeCreateAgentPermissionMode(raw: unknown): 'full-access' | 'read-only' | undefined {
+function normalizeCreateAgentPermissionMode(
+  raw: unknown,
+): 'read-only' | 'workspace-write' | 'full-access' | undefined {
   const value = String(raw ?? '').trim();
   if (!value) return undefined;
-  if (value === 'full-access' || value === 'read-only') return value;
-  throw new ValidationError('agentPermissionMode must be "full-access" or "read-only"');
+  if (value === 'full-access' || value === 'workspace-write' || value === 'read-only') return value;
+  throw new ValidationError(
+    'agentPermissionMode must be "full-access", "workspace-write", or "read-only"',
+  );
 }
 
-function resolveCreateSeedFields(input: CreateDroneBatchItem): { seedAgent?: SeedAgentBody; seedModel?: string; seedAgentPermissionMode?: 'full-access' | 'read-only' } {
+function normalizeCreateApprovalPolicy(
+  raw: unknown,
+): 'ask' | 'agent-decides' | 'never' | undefined {
+  const value = String(raw ?? '').trim();
+  if (!value) return undefined;
+  if (value === 'ask' || value === 'agent-decides' || value === 'never') return value;
+  throw new ValidationError(
+    'approvalPolicy must be "ask", "agent-decides", or "never"',
+  );
+}
+
+function resolveCreateSeedFields(input: CreateDroneBatchItem): {
+  seedAgent?: SeedAgentBody;
+  seedModel?: string;
+  seedAgentPermissionMode?: 'read-only' | 'workspace-write' | 'full-access';
+  seedApprovalPolicy?: 'ask' | 'agent-decides' | 'never';
+} {
   const seedAgent = normalizeCreateSeedAgent(input.agent);
   const seedModel = String(input.model ?? '').trim() || undefined;
   const seedAgentPermissionMode = normalizeCreateAgentPermissionMode(input.agentPermissionMode);
+  const seedApprovalPolicy = normalizeCreateApprovalPolicy(input.approvalPolicy);
   return {
     ...(seedAgent ? { seedAgent } : {}),
     ...(seedModel ? { seedModel } : {}),
     ...(seedAgentPermissionMode ? { seedAgentPermissionMode } : {}),
+    ...(seedApprovalPolicy ? { seedApprovalPolicy } : {}),
   };
 }
 
@@ -285,7 +307,8 @@ async function resolveDeleteMode(options: HubTransportOptions, requestOptions?: 
 export function hubTransport(options: HubTransportOptions): DroneTransport {
   return {
     async createDrone(input: CreateDroneBatchItem, requestOptions?: RequestOptions): Promise<DroneRecord> {
-      const { seedAgent, seedModel, seedAgentPermissionMode } = resolveCreateSeedFields(input);
+      const { seedAgent, seedModel, seedAgentPermissionMode, seedApprovalPolicy } =
+        resolveCreateSeedFields(input);
       const body: JsonObject = {
         name: input.name,
         runtime: input.runtime ?? 'container',
@@ -293,6 +316,7 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
       if (seedAgent) body.seedAgent = seedAgent as unknown as JsonObject;
       if (seedModel) body.seedModel = seedModel;
       if (seedAgentPermissionMode) body.seedAgentPermissionMode = seedAgentPermissionMode;
+      if (seedApprovalPolicy) body.seedApprovalPolicy = seedApprovalPolicy;
       if (input.group) body.group = input.group;
       if (input.cwd) body.cwd = input.cwd;
       if (input.repoPath) body.repoPath = input.repoPath;

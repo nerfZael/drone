@@ -8,7 +8,8 @@ export type DesktopNewDronePreferences = {
   spawnAgentKey: string;
   spawnModel: string;
   spawnReasoning: string;
-  spawnAgentPermissionMode: 'full-access' | 'read-only';
+  spawnAgentPermissionMode: 'read-only' | 'workspace-write' | 'full-access';
+  spawnApprovalPolicy: 'ask' | 'agent-decides' | 'never';
   repoBranchSource: 'host' | 'remote';
   repoCreateRemoteBranch: string;
   pullHostBranchBeforeCreate: boolean;
@@ -40,7 +41,15 @@ export function normalizeDesktopNewDronePreferences(
     spawnModel: trimmed(candidate.spawnModel),
     spawnReasoning: trimmed(candidate.spawnReasoning),
     spawnAgentPermissionMode:
-      candidate.spawnAgentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
+      candidate.spawnAgentPermissionMode === 'read-only' ||
+      candidate.spawnAgentPermissionMode === 'workspace-write'
+        ? candidate.spawnAgentPermissionMode
+        : 'full-access',
+    spawnApprovalPolicy:
+      candidate.spawnApprovalPolicy === 'agent-decides' ||
+      candidate.spawnApprovalPolicy === 'never'
+        ? candidate.spawnApprovalPolicy
+        : 'ask',
     repoBranchSource: candidate.repoBranchSource === 'remote' ? 'remote' : 'host',
     repoCreateRemoteBranch: trimmed(candidate.repoCreateRemoteBranch),
     pullHostBranchBeforeCreate: candidate.pullHostBranchBeforeCreate !== false,

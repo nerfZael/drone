@@ -22,6 +22,7 @@ describe('mobile new drone preferences', () => {
       seedModel: 'gpt-5.4',
       seedReasoning: 'high',
       seedAgentPermissionMode: 'read-only',
+      seedApprovalPolicy: 'agent-decides',
       seedPrompt: 'hello',
     });
 
@@ -32,6 +33,7 @@ describe('mobile new drone preferences', () => {
       persistVolume: true,
       agent: 'codex',
       agentPermissionMode: 'read-only',
+      approvalPolicy: 'agent-decides',
       model: 'gpt-5.4',
       provider: '',
       reasoning: 'high',

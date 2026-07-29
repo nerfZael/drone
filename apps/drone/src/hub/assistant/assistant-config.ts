@@ -399,6 +399,27 @@ export const ASSISTANT_WORKSPACE_TOOL_CAPABILITIES = {
   bash: 'shell.execute',
   apply_patch: 'patch.apply',
 } as const;
+export const ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES = new Set([
+  'transfer_files',
+  'create_whiteboard',
+  'update_whiteboard',
+  'create_drone',
+  'clone_drone',
+  'create_chat',
+  'create_group',
+  'reorder_drones',
+  'rename_drones',
+  'set_drone_group',
+  'set_drone_groups',
+  'message_drone',
+  'send_message',
+  'cancel_chat_idle_subscription',
+  'create_workflow',
+  'update_workflow',
+  'delete_workflow',
+  'execute_workflow',
+  'cancel_workflow_run',
+]);
 export const ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_ALL_TOOL_NAMES.filter(
   (name) =>
     name !== 'get_system_prompt' &&

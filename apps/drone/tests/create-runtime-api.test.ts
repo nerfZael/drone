@@ -159,7 +159,9 @@ describeSocketSuite('create runtime api', () => {
       }),
     });
     expect(resp.r.status).toBe(400);
-    expect(String(resp.data?.error ?? '')).toContain('requires a Codex or Blip seed agent');
+    expect(String(resp.data?.error ?? '')).toContain(
+      'require a native, Codex, or Blip seed agent',
+    );
   });
 
   test('batch create persists and rejects read-only seed agent permission mode per item', async () => {
@@ -187,7 +189,9 @@ describeSocketSuite('create runtime api', () => {
     expect(resp.data?.ok).toBe(true);
     expect(resp.data?.accepted).toHaveLength(1);
     expect(resp.data?.rejected).toHaveLength(1);
-    expect(String(resp.data?.rejected?.[0]?.error ?? '')).toContain('Codex and Blip');
+    expect(String(resp.data?.rejected?.[0]?.error ?? '')).toContain(
+      'native, Codex, and Blip',
+    );
 
     const droneId = String(resp.data?.accepted?.[0]?.id ?? '').trim();
     const regAny: any = await loadRegistry();
@@ -196,6 +200,58 @@ describeSocketSuite('create runtime api', () => {
       agent: { kind: 'builtin', id: 'blip' },
       agentPermissionMode: 'read-only',
     });
+  });
+
+  test('single create persists supported access and approval seed settings', async () => {
+    const resp = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'seeded-codex-auto-review',
+        runtime: 'container',
+        seedAgent: { kind: 'builtin', id: 'codex' },
+        seedAgentPermissionMode: 'workspace-write',
+        seedApprovalPolicy: 'agent-decides',
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+
+    const droneId = String(resp.data?.id ?? '').trim();
+    const regAny: any = await loadRegistry();
+    expect(regAny?.pending?.[droneId]?.seed).toMatchObject({
+      chatName: 'default',
+      agent: { kind: 'builtin', id: 'codex' },
+      agentPermissionMode: 'workspace-write',
+      approvalPolicy: 'agent-decides',
+    });
+  });
+
+  test('single create rejects unsupported seed approval settings', async () => {
+    const nativeAutoReview = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'seeded-native-auto-review-invalid',
+        runtime: 'container',
+        seedAgent: { kind: 'native' },
+        seedApprovalPolicy: 'agent-decides',
+      }),
+    });
+    expect(nativeAutoReview.r.status).toBe(400);
+    expect(String(nativeAutoReview.data?.error ?? '')).toContain('only available for Codex');
+
+    const cursorAllowAll = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'seeded-cursor-allow-all-invalid',
+        runtime: 'container',
+        seedAgent: { kind: 'builtin', id: 'cursor' },
+        seedApprovalPolicy: 'never',
+      }),
+    });
+    expect(cursorAllowAll.r.status).toBe(400);
+    expect(String(cursorAllowAll.data?.error ?? '')).toContain('native and Codex');
   });
 
   test('single create honors and validates supplied seed prompt ids', async () => {

@@ -1,5 +1,13 @@
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import Check from 'lucide-react-native/icons/check';
@@ -36,6 +44,8 @@ type HeaderMenuAction = {
   id: string;
   label: string;
   icon?: typeof Trash2;
+  section?: string;
+  selected?: boolean;
   destructive?: boolean;
   disabled?: boolean;
   onPress(): void;
@@ -51,6 +61,8 @@ function HeaderOverflowMenu({
   onClose(): void;
 }) {
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const menuTop = insets.top + 50;
   return (
     <Modal
       visible={open}
@@ -67,42 +79,70 @@ function HeaderOverflowMenu({
           onPress={onClose}
           style={StyleSheet.absoluteFill}
         />
-        <View style={[styles.actionMenu, { top: insets.top + 50 }]}>
-          {actions.map((action) => {
-            const Icon = action.icon ?? (action.destructive ? Trash2 : SlidersHorizontal);
+        <ScrollView
+          style={[
+            styles.actionMenu,
+            {
+              top: menuTop,
+              maxHeight: Math.max(180, height - menuTop - insets.bottom - 10),
+            },
+          ]}
+          contentContainerStyle={styles.actionMenuContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {actions.map((action, index) => {
+            const Icon =
+              action.icon ??
+              (action.selected ? Check : action.destructive ? Trash2 : SlidersHorizontal);
+            const showSection =
+              action.section && action.section !== actions[index - 1]?.section;
             return (
-              <Pressable
-                key={action.id}
-                accessibilityRole="menuitem"
-                accessibilityState={{ disabled: action.disabled }}
-                disabled={action.disabled}
-                onPress={() => {
-                  onClose();
-                  action.onPress();
-                }}
-                style={({ pressed }) => [
-                  styles.actionMenuItem,
-                  action.disabled && styles.headerActionDisabled,
-                  pressed && styles.actionMenuItemPressed,
-                ]}
-              >
-                <Icon
-                  color={action.destructive ? colors.danger : colors.muted}
-                  size={16}
-                  strokeWidth={2}
-                />
-                <Text
-                  style={[
-                    styles.actionMenuItemText,
-                    action.destructive && styles.actionMenuItemTextDanger,
+              <React.Fragment key={action.id}>
+                {showSection ? (
+                  <Text style={styles.actionMenuSection}>{action.section}</Text>
+                ) : null}
+                <Pressable
+                  accessibilityRole="menuitem"
+                  accessibilityState={{
+                    disabled: action.disabled,
+                    selected: action.selected,
+                  }}
+                  disabled={action.disabled}
+                  onPress={() => {
+                    onClose();
+                    action.onPress();
+                  }}
+                  style={({ pressed }) => [
+                    styles.actionMenuItem,
+                    action.disabled && styles.headerActionDisabled,
+                    pressed && styles.actionMenuItemPressed,
                   ]}
                 >
-                  {action.label}
-                </Text>
-              </Pressable>
+                  <Icon
+                    color={
+                      action.destructive
+                        ? colors.danger
+                        : action.selected
+                          ? colors.accent
+                          : colors.muted
+                    }
+                    size={16}
+                    strokeWidth={2}
+                  />
+                  <Text
+                    style={[
+                      styles.actionMenuItemText,
+                      action.selected && styles.actionMenuItemTextSelected,
+                      action.destructive && styles.actionMenuItemTextDanger,
+                    ]}
+                  >
+                    {action.label}
+                  </Text>
+                </Pressable>
+              </React.Fragment>
             );
           })}
-        </View>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -302,6 +342,22 @@ function Shell() {
                 },
               ]
             : []),
+          ...(dronesHeader.agentAccessOptions ?? []).map((option) => ({
+            id: `agent-access-${option.id}`,
+            section: 'Access',
+            label: option.label,
+            selected: option.selected,
+            disabled: option.disabled,
+            onPress: option.onSelect,
+          })),
+          ...(dronesHeader.approvalPolicyOptions ?? []).map((option) => ({
+            id: `approval-policy-${option.id}`,
+            section: 'Approvals',
+            label: option.label,
+            selected: option.selected,
+            disabled: option.disabled,
+            onPress: option.onSelect,
+          })),
         ]
       : []
     : [];
@@ -566,7 +622,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 10,
     width: 210,
-    padding: 5,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
@@ -576,6 +631,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 7 },
+  },
+  actionMenuContent: { padding: 5 },
+  actionMenuSection: {
+    color: colors.muted,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    paddingHorizontal: 11,
+    paddingBottom: 3,
+    paddingTop: 10,
+    textTransform: 'uppercase',
   },
   actionMenuItem: {
     minHeight: 44,
@@ -587,6 +653,7 @@ const styles = StyleSheet.create({
   },
   actionMenuItemPressed: { backgroundColor: colors.whiteWash },
   actionMenuItemText: { color: colors.text, fontSize: 13, fontWeight: '700' },
+  actionMenuItemTextSelected: { color: colors.accent },
   actionMenuItemTextDanger: { color: colors.danger },
   content: { flex: 1 },
   pairBack: { paddingHorizontal: 20, paddingTop: 14 },

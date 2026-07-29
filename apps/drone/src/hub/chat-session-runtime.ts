@@ -9,7 +9,7 @@ import { settleAgentRunActivity } from './builtin-agent-activity';
 
 import type { ChatImageAttachment } from './chat-attachments';
 import { ChatStateMaintenanceScheduler } from './chat-state-maintenance';
-import type { AgentPermissionMode, ChatAgentConfig } from './chat-types';
+import type { AgentApprovalPolicy, AgentPermissionMode, ChatAgentConfig } from './chat-types';
 import type { PendingPrompt } from './drone-pending-prompts';
 import type { DroneRuntime } from '../host/runtime';
 import type { ResolvedOrPendingDrone } from './drone-lifecycle-service';
@@ -438,18 +438,47 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
   }
 
   function assertReadOnlySupportedForAgent(agent: ChatAgentConfig): void {
+    if (agent.kind === 'native') return;
     if (agent.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'blip')) return;
     const label =
-      agent.kind === 'native'
-        ? 'native agent'
-        : agent.kind === 'builtin'
-          ? agent.id
-          : agent.label || agent.id || 'custom agent';
+      agent.kind === 'builtin' ? agent.id : agent.label || agent.id || 'custom agent';
     const error: Error & { statusCode?: number } = new Error(
-      `read-only mode is currently supported for Codex and Blip chats only (selected: ${label})`,
+      `agent access controls are currently supported for native, Codex, and Blip chats only (selected: ${label})`,
     );
     error.statusCode = 400;
     throw error;
+  }
+
+  function supportsApprovalPolicy(agent: ChatAgentConfig): boolean {
+    return (
+      agent.kind === 'native' ||
+      (agent.kind === 'builtin' && agent.id === 'codex')
+    );
+  }
+
+  function assertApprovalPolicySupportedForAgent(
+    policy: AgentApprovalPolicy,
+    agent: ChatAgentConfig,
+  ): void {
+    if (!supportsApprovalPolicy(agent)) {
+      const label =
+        agent.kind === 'builtin' ? agent.id : agent.kind === 'native' ? 'native' : agent.label;
+      const error: Error & { statusCode?: number } = new Error(
+        `approval policies are currently supported for native and Codex chats only (selected: ${label})`,
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+    if (
+      policy === 'agent-decides' &&
+      !(agent.kind === 'builtin' && agent.id === 'codex')
+    ) {
+      const error: Error & { statusCode?: number } = new Error(
+        'agent-decides approval policy is only available for Codex chats',
+      );
+      error.statusCode = 400;
+      throw error;
+    }
   }
 
   async function getChatEntry(opts: { droneId: string; chatName: string }) {
@@ -1253,6 +1282,8 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     reasoning?: string | null;
     setAgentPermissionMode?: boolean;
     agentPermissionMode?: AgentPermissionMode;
+    setApprovalPolicy?: boolean;
+    approvalPolicy?: AgentApprovalPolicy;
     setDockerSnapshotAfterAgentMessageEnabled?: boolean;
     dockerSnapshotAfterAgentMessageEnabled?: boolean;
     setBlipClonesEnabled?: boolean;
@@ -1300,12 +1331,23 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         if (opts.agent) {
           assertChatAgentSupportedForDrone(d, opts.agent);
           cur.agent = opts.agent as any;
-          if (normalizeAgentPermissionMode(cur.agentPermissionMode) === 'read-only') {
+          if (normalizeAgentPermissionMode(cur.agentPermissionMode) !== 'full-access') {
             try {
               assertReadOnlySupportedForAgent(opts.agent);
             } catch {
               delete cur.agentPermissionMode;
             }
+          }
+          const storedApprovalPolicy: AgentApprovalPolicy =
+            cur.approvalPolicy === 'agent-decides' || cur.approvalPolicy === 'never'
+              ? cur.approvalPolicy
+              : 'ask';
+          if (
+            !supportsApprovalPolicy(opts.agent) ||
+            (storedApprovalPolicy === 'agent-decides' &&
+              !(opts.agent.kind === 'builtin' && opts.agent.id === 'codex'))
+          ) {
+            delete cur.approvalPolicy;
           }
         }
         if (opts.setModel) {
@@ -1333,9 +1375,18 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         }
         if (opts.setAgentPermissionMode) {
           const mode = normalizeAgentPermissionMode(opts.agentPermissionMode);
-          if (mode === 'read-only') assertReadOnlySupportedForAgent(effectiveAgent);
-          if (mode === 'read-only') cur.agentPermissionMode = 'read-only';
+          if (mode !== 'full-access') assertReadOnlySupportedForAgent(effectiveAgent);
+          if (mode !== 'full-access') cur.agentPermissionMode = mode;
           else delete cur.agentPermissionMode;
+        }
+        if (opts.setApprovalPolicy) {
+          const policy =
+            opts.approvalPolicy === 'agent-decides' || opts.approvalPolicy === 'never'
+              ? opts.approvalPolicy
+              : 'ask';
+          assertApprovalPolicySupportedForAgent(policy, effectiveAgent);
+          if (policy !== 'ask') cur.approvalPolicy = policy;
+          else delete cur.approvalPolicy;
         }
         if (opts.setDockerSnapshotAfterAgentMessageEnabled) {
           if (opts.dockerSnapshotAfterAgentMessageEnabled) {

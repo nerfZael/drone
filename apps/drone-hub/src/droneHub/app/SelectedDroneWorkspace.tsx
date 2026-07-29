@@ -25,7 +25,7 @@ import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { StatusBadge } from '../overview';
 import { TypingDots } from '../overview/icons';
 import { requestJson } from '../http';
-import type { AgentPermissionMode } from '../../domain';
+import type { AgentApprovalPolicy, AgentPermissionMode } from '../../domain';
 import type {
   DroneSummary,
   PendingPrompt,
@@ -184,6 +184,58 @@ function HeaderMenuToggleRow({
   );
 }
 
+function HeaderMenuChoiceGroup<T extends string>({
+  label,
+  value,
+  options,
+  disabled = false,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: Array<{ value: T; label: string; disabled?: boolean; title?: string }>;
+  disabled?: boolean;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label}>
+      <div className="px-3 pb-1 pt-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+        {label}
+      </div>
+      {options.map((option) => {
+        const selected = option.value === value;
+        const optionDisabled = disabled || option.disabled;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="menuitemradio"
+            aria-checked={selected}
+            disabled={optionDisabled}
+            title={option.title}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              dropdownMenuItemBaseClass,
+              'flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+            )}
+          >
+            <span>{option.label}</span>
+            <span
+              aria-hidden="true"
+              className={cn(
+                'h-2 w-2 rounded-full border',
+                selected
+                  ? 'border-[var(--accent)] bg-[var(--accent)]'
+                  : 'border-[var(--border)] bg-transparent',
+              )}
+            />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 type SelectedDroneWorkspaceProps = {
   currentDrone: DroneSummary;
   deleteMode: DroneDeleteMode;
@@ -217,6 +269,8 @@ type SelectedDroneWorkspaceProps = {
   }) => Promise<void>;
   agentPermissionMode: AgentPermissionMode;
   setChatAgentPermissionMode: (mode: AgentPermissionMode) => Promise<void>;
+  approvalPolicy: AgentApprovalPolicy;
+  setChatApprovalPolicy: (policy: AgentApprovalPolicy) => Promise<void>;
   dockerSnapshotAfterAgentMessageEnabled: boolean;
   setDockerSnapshotAfterAgentMessageEnabled: (enabled: boolean) => Promise<void>;
   setChatInfoError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -318,6 +372,8 @@ export function SelectedDroneWorkspace({
   setChatModelSettings,
   agentPermissionMode,
   setChatAgentPermissionMode,
+  approvalPolicy,
+  setChatApprovalPolicy,
   dockerSnapshotAfterAgentMessageEnabled,
   setDockerSnapshotAfterAgentMessageEnabled,
   setChatInfoError,
@@ -460,7 +516,13 @@ export function SelectedDroneWorkspace({
   }, [currentDrone.id, repoOp?.kind]);
   const hostRuntime = String(currentDrone.runtime ?? '').trim().toLowerCase() === 'host';
   const dockerSnapshotSupported = !hostRuntime && currentDrone.persistVolume === false;
-  const readOnlySupported = currentAgentKey === 'builtin:codex' || currentAgentKey === 'builtin:blip';
+  const readOnlySupported =
+    currentAgentKey === 'native' ||
+    currentAgentKey === 'builtin:codex' ||
+    currentAgentKey === 'builtin:blip';
+  const approvalPolicySupported =
+    agentPermissionMode === 'full-access' &&
+    (currentAgentKey === 'native' || currentAgentKey === 'builtin:codex');
   const [dockerSizeState, setDockerSizeState] = React.useState<{
     droneId: string;
     loading: boolean;
@@ -1338,24 +1400,60 @@ export function SelectedDroneWorkspace({
                     {droneControlsMenuOpen ? (
                       <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-inset-faint)]" role="group" aria-label="Drone controls">
                         {hasChats && chatUiMode === 'transcript' ? (
-                          <HeaderMenuToggleRow
-                            label="Access"
-                            value={agentPermissionMode === 'read-only' ? 'Read only' : 'Full'}
-                            checked={agentPermissionMode === 'read-only'}
-                            disabled={loadingChatInfo || !readOnlySupported}
-                            title={
-                              readOnlySupported
-                                ? 'Run the next prompt with read-only agent permissions.'
-                                : 'Read-only mode is currently available for Codex and Blip chats.'
-                            }
-                            onToggle={() => {
-                              if (!readOnlySupported) return;
-                              const nextMode: AgentPermissionMode = agentPermissionMode === 'read-only' ? 'full-access' : 'read-only';
-                              void setChatAgentPermissionMode(nextMode).catch((err: any) =>
-                                setChatInfoError(err?.message ?? String(err)),
-                              );
-                            }}
-                          />
+                          <>
+                            {readOnlySupported ? (
+                              <HeaderMenuChoiceGroup<AgentPermissionMode>
+                                label="Access"
+                                value={agentPermissionMode}
+                                disabled={loadingChatInfo || chatInputWaiting}
+                                options={[
+                                  { value: 'read-only', label: 'Read' },
+                                  { value: 'workspace-write', label: 'Write' },
+                                  { value: 'full-access', label: 'Execute' },
+                                ]}
+                                onChange={(nextMode) => {
+                                  void setChatAgentPermissionMode(nextMode).catch((err: any) =>
+                                    setChatInfoError(err?.message ?? String(err)),
+                                  );
+                                }}
+                              />
+                            ) : null}
+                            {approvalPolicySupported ? (
+                              <HeaderMenuChoiceGroup<AgentApprovalPolicy>
+                                label="Approvals"
+                                value={approvalPolicy}
+                                disabled={loadingChatInfo || chatInputWaiting}
+                                options={[
+                                  {
+                                    value: 'ask',
+                                    label:
+                                      currentAgentKey === 'builtin:codex'
+                                        ? 'Ask first · unavailable'
+                                        : 'Ask first',
+                                    disabled: currentAgentKey === 'builtin:codex',
+                                    title:
+                                      currentAgentKey === 'builtin:codex'
+                                        ? 'Ask first requires an interactive Codex integration.'
+                                        : undefined,
+                                  },
+                                  ...(currentAgentKey === 'builtin:codex'
+                                    ? [
+                                        {
+                                          value: 'agent-decides' as const,
+                                          label: 'Agent decides',
+                                        },
+                                      ]
+                                    : []),
+                                  { value: 'never', label: 'Allow all' },
+                                ]}
+                                onChange={(nextPolicy) => {
+                                  void setChatApprovalPolicy(nextPolicy).catch((err: any) =>
+                                    setChatInfoError(err?.message ?? String(err)),
+                                  );
+                                }}
+                              />
+                            ) : null}
+                          </>
                         ) : null}
                         {!hostRuntime ? (
                           <div className="flex items-center justify-between gap-4 px-3 py-1.5 text-[var(--text-11)] text-[var(--muted)]" title={dockerSizeTitle}>

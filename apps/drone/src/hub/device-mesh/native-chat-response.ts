@@ -45,6 +45,13 @@ function compactThread(thread: any) {
     provider: String(thread.provider ?? ''),
     model: String(thread.model ?? ''),
     thinkingLevel: String(thread.thinkingLevel ?? ''),
+    agentPermissionMode:
+      thread.agentPermissionMode === 'read-only' ||
+      thread.agentPermissionMode === 'workspace-write'
+        ? thread.agentPermissionMode
+        : 'full-access',
+    approvalPolicy:
+      thread.approvalPolicy === 'never' ? 'never' : 'ask',
     autoApprove: thread.autoApprove === true,
     promptDeliveryMode: thread.promptDeliveryMode === 'asap' ? 'asap' : 'queue',
     queuedPrompts,

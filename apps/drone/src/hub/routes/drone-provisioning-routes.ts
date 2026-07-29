@@ -38,6 +38,7 @@ type DroneProvisioningDependencyName =
   | 'notifyCanonicalDroneRegistryWrite'
   | 'nowIso'
   | 'parseAgentPermissionModeForUpdate'
+  | 'parseAgentApprovalPolicyForUpdate'
   | 'parseChatModelForUpdate'
   | 'parseCreateRuntime'
   | 'parseDraftFlag'

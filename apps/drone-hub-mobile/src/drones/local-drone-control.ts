@@ -275,6 +275,12 @@ function useLocalDroneControlValue() {
             ...(payload.seedReasoning
               ? { thinkingLevel: normalizeLocalAssistantThinkingLevel(payload.seedReasoning) }
               : {}),
+            ...(payload.seedAgentPermissionMode
+              ? { agentPermissionMode: payload.seedAgentPermissionMode }
+              : {}),
+            ...(payload.seedApprovalPolicy === 'never'
+              ? { approvalPolicy: 'never' as const }
+              : {}),
           });
         }
         const drone: LocalDroneRecord = {
@@ -429,7 +435,8 @@ function useLocalDroneControlValue() {
           provider: settings.provider,
           model: thread.model,
           reasoning: thread.thinkingLevel,
-          agentPermissionMode: 'full-access',
+          agentPermissionMode: thread.agentPermissionMode ?? 'full-access',
+          approvalPolicy: thread.approvalPolicy ?? (thread.autoApprove ? 'never' : 'ask'),
           readState: { unread: false },
         };
       }
@@ -483,6 +490,12 @@ function useLocalDroneControlValue() {
               }
             : {}),
           ...(typeof payload.autoApprove === 'boolean' ? { autoApprove: payload.autoApprove } : {}),
+          ...(payload.agentPermissionMode
+            ? { agentPermissionMode: payload.agentPermissionMode }
+            : {}),
+          ...(payload.approvalPolicy === 'never' || payload.approvalPolicy === 'ask'
+            ? { approvalPolicy: payload.approvalPolicy }
+            : {}),
         });
         return { ok: true };
       }
