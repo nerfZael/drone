@@ -127,6 +127,10 @@ import {
   markSidebarGroupDraftRequestHandled,
   SIDEBAR_GROUP_DRAFT_REQUEST_EVENT,
 } from './sidebar-group-draft-events';
+import {
+  resolveSidebarDroneDraftLocation,
+  resolveSidebarGroupDraftLocation,
+} from './sidebar-group-draft-location';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 308;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -2282,17 +2286,45 @@ export function DroneSidebar({
     },
     [onOpenDraftChatComposer, openRepositoryNavigationItem],
   );
-  const openRootGroupDraft = React.useCallback((): boolean => {
+  const selectedCreateContextDrone = React.useMemo(() => {
+    const selectedNodeDroneId =
+      sidebarDroneIdFromNodeId(selectedSidebarNodeId ?? '') ??
+      String(selectedDrone ?? '').trim();
+    return selectedNodeDroneId ? sidebarDroneById[selectedNodeDroneId] ?? null : null;
+  }, [selectedDrone, selectedSidebarNodeId, sidebarDroneById]);
+  const selectedDroneDraftLocation = React.useMemo(
+    () =>
+      resolveSidebarDroneDraftLocation({
+        selectedFolderPath,
+        visibleFolderPaths: visibleSidebarFolderPathSet,
+        selectedDrone: selectedCreateContextDrone,
+        fallbackRepoPath:
+          activeRepositoryNavigationItem?.repoPath ?? activeRepoPath,
+      }),
+    [
+      activeRepoPath,
+      activeRepositoryNavigationItem,
+      selectedCreateContextDrone,
+      selectedFolderPath,
+      visibleSidebarFolderPathSet,
+    ],
+  );
+  const openDraftDroneFromSidebarSelection = React.useCallback(() => {
+    onOpenDraftChatComposer(selectedDroneDraftLocation);
+  }, [onOpenDraftChatComposer, selectedDroneDraftLocation]);
+  const openGroupDraft = React.useCallback((): boolean => {
     if (!sidebarCapabilities.actions || isRepoGroupingMode) return false;
     if (sidebarCapabilities.headerActions && (repositoryOverviewOpen || !activeRepositoryNavigationItem)) {
       return false;
     }
-    const topLevelGroupNames = Array.from(visibleSidebarFolderPathSet).filter(
-      (path) => path && !path.includes('/'),
+    const draftLocation = resolveSidebarGroupDraftLocation(
+      selectedFolderPath,
+      visibleSidebarFolderPathSet,
+      selectedCreateContextDrone?.group,
     );
-    openFolderCreate(null, {
+    openFolderCreate(draftLocation.parentPath, {
       repoGroupPath: activeRepositoryNavigationItem?.id ?? null,
-      initialValue: allocateUntitledDisplayName(topLevelGroupNames),
+      initialValue: allocateUntitledDisplayName(draftLocation.siblingNames),
       dismissOnBlur: true,
     });
     setSidebarCollapsed(false);
@@ -2303,6 +2335,8 @@ export function DroneSidebar({
     openFolderCreate,
     repositoryOverviewOpen,
     sidebarCapabilities.actions,
+    selectedCreateContextDrone,
+    selectedFolderPath,
     sidebarCapabilities.headerActions,
     setSidebarCollapsed,
     visibleSidebarFolderPathSet,
@@ -2310,12 +2344,12 @@ export function DroneSidebar({
   React.useEffect(() => {
     const onRequest = (event: Event) => {
       if (event.defaultPrevented) return;
-      if (!openRootGroupDraft()) return;
+      if (!openGroupDraft()) return;
       markSidebarGroupDraftRequestHandled(event);
     };
     window.addEventListener(SIDEBAR_GROUP_DRAFT_REQUEST_EVENT, onRequest);
     return () => window.removeEventListener(SIDEBAR_GROUP_DRAFT_REQUEST_EVENT, onRequest);
-  }, [openRootGroupDraft]);
+  }, [openGroupDraft]);
   React.useEffect(() => {
     if (
       !activeSidebarRepoId ||
@@ -2734,7 +2768,7 @@ export function DroneSidebar({
                 </button>
                 <button
                   type="button"
-                  onClick={openRootGroupDraft}
+                  onClick={openGroupDraft}
                   disabled={!sidebarCapabilities.actions}
                   data-sidebar-create-group="true"
                   className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-40"
@@ -2748,7 +2782,7 @@ export function DroneSidebar({
                 </button>
                 <button
                   type="button"
-                  onClick={() => createDroneInRepository(activeRepositoryNavigationItem)}
+                  onClick={openDraftDroneFromSidebarSelection}
                   disabled={!sidebarCapabilities.createDrones}
                   className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-40"
                   title={`Create drone in ${activeRepositoryNavigationItem.label}`}
@@ -2836,7 +2870,7 @@ export function DroneSidebar({
                       <>
                         <button
                           type="button"
-                          onClick={() => onOpenDraftChatComposer()}
+                          onClick={openDraftDroneFromSidebarSelection}
                           className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[var(--text-11)] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
                           title="Create new drone"
                           aria-label="Create new drone"
@@ -2904,7 +2938,7 @@ export function DroneSidebar({
               <div className="mb-1.5 flex items-center gap-2 px-1">
                 <button
                   type="button"
-                  onClick={() => onOpenDraftChatComposer()}
+                  onClick={openDraftDroneFromSidebarSelection}
                   className="inline-flex h-7 min-w-0 flex-1 items-center gap-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 dh-type-sidebar-action dh-type-sidebar-action--accent transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
                   title="Create drone"
                   aria-label="Create drone"
@@ -2915,7 +2949,7 @@ export function DroneSidebar({
                 {sidebarCapabilities.actions && !isRepoGroupingMode ? (
                   <button
                     type="button"
-                    onClick={openRootGroupDraft}
+                    onClick={openGroupDraft}
                     data-sidebar-create-group="true"
                     className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
                     title="Create group (E)"
@@ -3560,7 +3594,7 @@ export function DroneSidebar({
           <SidebarIconButton
             onClick={() => {
               setSidebarCollapsed(false);
-              onOpenDraftChatComposer();
+              openDraftDroneFromSidebarSelection();
             }}
             className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
             title="Create drone"
@@ -3578,7 +3612,7 @@ export function DroneSidebar({
           <SidebarIconButton
             onClick={() => {
               setSidebarCollapsed(false);
-              openRootGroupDraft();
+              openGroupDraft();
             }}
             className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
             title="Create group (E)"

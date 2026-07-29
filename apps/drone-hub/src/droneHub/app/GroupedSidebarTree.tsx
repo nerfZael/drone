@@ -1266,10 +1266,11 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           className={`${densityClasses.folderBody} ${intoState ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]' : 'border-[var(--border-subtle)]'}`}
         >
           {actionsEnabled && showCreateInline ? (
-            <div className={`flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] shadow-[var(--glow-accent)] ${densityClasses.folderCreateBody}`}>
-              <IconFolder className={`${densityClasses.icon} flex-shrink-0 text-[var(--accent)] opacity-80`} />
+            <div className="flex min-h-8 items-center gap-1.5 px-1.5">
+              <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)]" />
               <input
                 ref={folderEditorInputRef}
+                data-sidebar-group-draft-input="true"
                 value={folderEditor?.value ?? ''}
                 onChange={(event) => onFolderEditorValueChange(event.target.value)}
                 onBlur={onBlurFolderEditor}
@@ -1284,7 +1285,9 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 }}
                 maxLength={64}
                 placeholder={folderEditor?.parentPath ? 'Subfolder name' : 'Folder name'}
-                className={`min-w-0 flex-1 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--panel-raised)] text-[var(--fg)] shadow-[var(--glow-accent)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] ${densityClasses.folderInput}`}
+                aria-label="New group name"
+                className="min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 text-[var(--text-11)] text-[var(--fg)] shadow-none outline-none ring-0 placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+                style={{ border: 0, outline: 'none', boxShadow: 'none' }}
               />
             </div>
           ) : null}
