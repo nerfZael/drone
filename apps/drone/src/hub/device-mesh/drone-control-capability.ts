@@ -428,14 +428,31 @@ export function createDroneControlCapability(
             };
           }
         }
-        const result = await localHubRequest(access, '/api/drones');
-        const [reposResult, groupsResult, preferencesResult, deleteSettingsResult] =
-          await Promise.all([
-            localHubRequest(access, '/api/repos').catch(() => ({})),
-            localHubRequest(access, '/api/groups').catch(() => ({})),
-            localHubRequest(access, '/api/settings/ui-preferences').catch(() => ({})),
-            localHubRequest(access, '/api/settings/delete-action').catch(() => ({})),
-          ]);
+        const [
+          dronesRequest,
+          reposRequest,
+          groupsRequest,
+          preferencesRequest,
+          deleteSettingsRequest,
+        ] = await Promise.allSettled([
+          localHubRequest(access, '/api/drones'),
+          localHubRequest(access, '/api/repos'),
+          localHubRequest(access, '/api/groups'),
+          localHubRequest(access, '/api/settings/ui-preferences'),
+          localHubRequest(access, '/api/settings/delete-action'),
+        ]);
+        if (dronesRequest.status === 'rejected') throw dronesRequest.reason;
+        const result = dronesRequest.value;
+        const reposResult = reposRequest.status === 'fulfilled' ? reposRequest.value : {};
+        const groupsResult = groupsRequest.status === 'fulfilled' ? groupsRequest.value : {};
+        const preferencesResult =
+          preferencesRequest.status === 'fulfilled' ? preferencesRequest.value : {};
+        const deleteSettingsResult =
+          deleteSettingsRequest.status === 'fulfilled' ? deleteSettingsRequest.value : {};
+        const sidebarSnapshotComplete =
+          reposRequest.status === 'fulfilled' &&
+          groupsRequest.status === 'fulfilled' &&
+          preferencesRequest.status === 'fulfilled';
         const drones: ReturnType<typeof deviceMeshDroneSummary>[] = Array.isArray(result.drones)
           ? result.drones.map(deviceMeshDroneSummary)
           : [];
@@ -459,7 +476,7 @@ export function createDroneControlCapability(
               }))
             : [];
         return {
-          schemaVersion: 6,
+          schemaVersion: 7,
           deleteMode,
           drones,
           repoPathByDroneId: Object.fromEntries(
@@ -468,6 +485,16 @@ export function createDroneControlCapability(
               .filter(([droneId, repoPath]) => Boolean(droneId && repoPath)),
           ),
           sidebar: {
+            snapshotComplete: sidebarSnapshotComplete,
+            preferenceVersion:
+              Number.isSafeInteger(preferencesResult.version) &&
+              Number(preferencesResult.version) >= 0
+                ? Number(preferencesResult.version)
+                : null,
+            preferenceUpdatedAt:
+              typeof preferencesResult.updatedAt === 'string'
+                ? preferencesResult.updatedAt.trim() || null
+                : null,
             registeredRepoPaths: repoPaths,
             groupCreatedAtByName: Object.fromEntries(
               groups

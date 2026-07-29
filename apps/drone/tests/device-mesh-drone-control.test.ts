@@ -92,15 +92,22 @@ describe('device mesh drone summaries', () => {
                     ok: true,
                     groups: [{ name: 'Review', createdAt: '2026-07-13T10:00:00.000Z' }],
                   }
-                : {
-                    ok: true,
-                    uiPreferences: {
-                      sidebarGroupOrder: ['repo:repo:/work/one'],
-                      sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
-                      sidebarNodeOrderByParent: { root: ['drone:one'] },
-                      pinnedDroneIds: ['one'],
-                    },
-                  };
+                : pathname === '/api/settings/ui-preferences'
+                  ? {
+                      ok: true,
+                      version: 12,
+                      updatedAt: '2026-07-14T11:00:00.000Z',
+                      uiPreferences: {
+                        sidebarGroupOrder: ['repo:repo:/work/one'],
+                        sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
+                        sidebarNodeOrderByParent: { root: ['drone:one'] },
+                        pinnedDroneIds: ['one'],
+                      },
+                    }
+                  : {
+                      ok: true,
+                      deleteAction: { mode: 'permanent' },
+                    };
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -114,10 +121,13 @@ describe('device mesh drone summaries', () => {
       await expect(
         capability.invoke('drones.list', { includeCreateOptions: true }),
       ).resolves.toMatchObject({
-        schemaVersion: 6,
+        schemaVersion: 7,
         drones: [{ id: 'one', lastMessageAt: '2026-07-14T10:00:00.000Z' }, { id: 'loose' }],
         repoPathByDroneId: { one: '/work/one' },
         sidebar: {
+          snapshotComplete: true,
+          preferenceVersion: 12,
+          preferenceUpdatedAt: '2026-07-14T11:00:00.000Z',
           registeredRepoPaths: ['/work/one', '/work/empty'],
           groupCreatedAtByName: { Review: '2026-07-13T10:00:00.000Z' },
           sidebarGroupOrder: ['repo:repo:/work/one'],
@@ -158,6 +168,49 @@ describe('device mesh drone summaries', () => {
         },
       });
       expect(requestedPaths).toContain('/api/repos/branches?repoPath=%2Fwork%2Fone');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('marks a sidebar snapshot partial when a canonical source is unavailable', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input) => {
+      const pathname = new URL(String(input)).pathname;
+      if (pathname === '/api/drones') {
+        return Response.json({ ok: true, drones: [{ id: 'one', repoPath: '/work/one' }] });
+      }
+      if (pathname === '/api/groups') {
+        return new Response('unavailable', { status: 503 });
+      }
+      if (pathname === '/api/repos') {
+        return Response.json({ ok: true, repos: [{ path: '/work/one' }] });
+      }
+      if (pathname === '/api/settings/ui-preferences') {
+        return Response.json({
+          ok: true,
+          version: 4,
+          uiPreferences: { pinnedDroneIds: ['one'] },
+        });
+      }
+      return Response.json({ ok: true, deleteAction: { mode: 'permanent' } });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+
+      await expect(capability.invoke('drones.list', {})).resolves.toMatchObject({
+        schemaVersion: 7,
+        sidebar: {
+          snapshotComplete: false,
+          preferenceVersion: 4,
+          registeredRepoPaths: ['/work/one'],
+          groupCreatedAtByName: {},
+          pinnedDroneIds: ['one'],
+        },
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }
