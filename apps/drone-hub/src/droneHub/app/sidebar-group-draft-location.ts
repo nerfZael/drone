@@ -46,6 +46,7 @@ export function resolveSidebarDroneDraftLocation(args: {
   visibleFolderPaths: Iterable<string>;
   selectedDrone?: {
     group?: string | null;
+    repoAttached?: boolean;
     repoPath?: string | null;
   } | null;
   fallbackRepoPath?: string | null;
@@ -61,10 +62,17 @@ export function resolveSidebarDroneDraftLocation(args: {
   const group =
     selectedFolderPath && visibleFolderPathSet.has(selectedFolderPath)
       ? selectedFolderPath
-      : selectedDroneGroup;
-  const repoPath =
-    String(args.selectedDrone?.repoPath ?? '').trim() ||
-    String(args.fallbackRepoPath ?? '').trim();
+      : selectedDroneGroup && visibleFolderPathSet.has(selectedDroneGroup)
+        ? selectedDroneGroup
+        : '';
+  const selectedDroneRepoPath = String(args.selectedDrone?.repoPath ?? '').trim();
+  const selectedDroneRepoAttached =
+    args.selectedDrone?.repoAttached ?? Boolean(selectedDroneRepoPath);
+  const repoPath = args.selectedDrone
+    ? selectedDroneRepoAttached
+      ? selectedDroneRepoPath
+      : ''
+    : String(args.fallbackRepoPath ?? '').trim();
 
   return {
     group,
