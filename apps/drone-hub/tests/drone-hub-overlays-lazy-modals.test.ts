@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const overlaySource = readFileSync(
@@ -10,6 +10,14 @@ const groupMultiChatColumnSource = readFileSync(
   join(import.meta.dir, '../src/droneHub/app/GroupMultiChatColumn.tsx'),
   'utf8',
 );
+const sidebarSource = readFileSync(
+  join(import.meta.dir, '../src/droneHub/app/DroneSidebar.tsx'),
+  'utf8',
+);
+const emptyStateSource = readFileSync(
+  join(import.meta.dir, '../src/droneHub/app/NoDroneSelectedState.tsx'),
+  'utf8',
+);
 
 const modalImports = [
   { name: 'ReposModal', path: './ReposModal' },
@@ -18,7 +26,6 @@ const modalImports = [
   { name: 'DroneDropActionModal', path: './DroneDropActionModal' },
   { name: 'CustomAgentsModal', path: './CustomAgentsModal' },
   { name: 'DraftCreateDroneModal', path: './DraftCreateDroneModal' },
-  { name: 'CreateDronesModal', path: './CreateDronesModal' },
 ];
 
 describe('DroneHubOverlays modal loading', () => {
@@ -30,7 +37,6 @@ describe('DroneHubOverlays modal loading', () => {
   });
 
   test('renders lazy modals only when their existing open state is active', () => {
-    expect(overlaySource).toContain('createDronesModalProps.open && <CreateDronesModal');
     expect(overlaySource).toContain('draftCreateDroneModalProps.open && <DraftCreateDroneModal');
     expect(overlaySource).toContain('customAgentsModalProps.open && <CustomAgentsModal');
     expect(overlaySource).toContain('reposModalProps && <ReposModal');
@@ -45,5 +51,14 @@ describe('DroneHubOverlays modal loading', () => {
     expect(groupMultiChatColumnSource).not.toContain("import { DirtyDroneApplyModal } from './DirtyDroneApplyModal'");
     expect(groupMultiChatColumnSource).toContain('dirtyDroneApplyModal ? (');
     expect(groupMultiChatColumnSource).toContain('<React.Suspense fallback={null}>');
+  });
+
+  test('does not retain the removed batch-create modal or its entry points', () => {
+    expect(
+      existsSync(join(import.meta.dir, '../src/droneHub/app/CreateDronesModal.tsx')),
+    ).toBe(false);
+    expect(overlaySource).not.toContain('CreateDronesModal');
+    expect(sidebarSource).not.toContain('Create multiple drones');
+    expect(emptyStateSource).not.toContain('Create multiple');
   });
 });

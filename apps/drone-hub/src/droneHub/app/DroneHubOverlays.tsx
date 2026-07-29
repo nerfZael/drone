@@ -1,5 +1,4 @@
 import React from 'react';
-import type { CreateDronesModal as CreateDronesModalComponent } from './CreateDronesModal';
 import type { CustomAgentsModal as CustomAgentsModalComponent } from './CustomAgentsModal';
 import type { DirtyDroneApplyModal as DirtyDroneApplyModalComponent } from './DirtyDroneApplyModal';
 import { DroneDeleteConfirmModal } from './DroneDeleteConfirmModal';
@@ -9,11 +8,6 @@ import type { DraftCreateDroneModal as DraftCreateDroneModalComponent } from './
 import type { DroneErrorModal as DroneErrorModalComponent } from './DroneErrorModal';
 import { HubTransientToasts } from './HubTransientToasts';
 import type { ReposModal as ReposModalComponent } from './ReposModal';
-
-const CreateDronesModal = React.lazy(async () => {
-  const { CreateDronesModal } = await import('./CreateDronesModal');
-  return { default: CreateDronesModal };
-});
 
 const CustomAgentsModal = React.lazy(async () => {
   const { CustomAgentsModal } = await import('./CustomAgentsModal');
@@ -46,7 +40,6 @@ const ReposModal = React.lazy(async () => {
 });
 
 export type DroneHubOverlaysProps = {
-  createDronesModalProps: React.ComponentProps<typeof CreateDronesModalComponent>;
   draftCreateDroneModalProps: React.ComponentProps<typeof DraftCreateDroneModalComponent>;
   customAgentsModalProps: React.ComponentProps<typeof CustomAgentsModalComponent>;
   hubTransientToastsProps: React.ComponentProps<typeof HubTransientToasts>;
@@ -59,7 +52,6 @@ export type DroneHubOverlaysProps = {
 };
 
 export function DroneHubOverlays({
-  createDronesModalProps,
   draftCreateDroneModalProps,
   customAgentsModalProps,
   hubTransientToastsProps,
@@ -72,9 +64,6 @@ export function DroneHubOverlays({
 }: DroneHubOverlaysProps) {
   return (
     <>
-      <React.Suspense fallback={null}>
-        {createDronesModalProps.open && <CreateDronesModal {...createDronesModalProps} />}
-      </React.Suspense>
       <React.Suspense fallback={null}>
         {draftCreateDroneModalProps.open && <DraftCreateDroneModal {...draftCreateDroneModalProps} />}
       </React.Suspense>

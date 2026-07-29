@@ -13,8 +13,12 @@ import type {
 } from '../chat/ChatComposerControls';
 import { draftChatInputResetKey, droneChatQueueKey } from './helpers';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
+  ChatAgentConfig,
+} from '../../domain';
 import type { AgentsMdFileSummary } from './settings-types';
-import type { ChatAgentConfig } from '../../domain';
 import type { DraftChatState } from './app-types';
 import type { QueuedPrompt } from './use-queued-prompts-state';
 import type { DroneSummary, RepoRemoteBranchOption } from '../types';
@@ -38,6 +42,12 @@ type DraftChatWorkspaceProps = {
   onCreateAsDraftChange: (value: boolean) => void;
   createPersistVolume: boolean;
   onCreatePersistVolumeChange: (value: boolean) => void;
+  spawnAgentPermissionMode: AgentPermissionMode;
+  onSpawnAgentPermissionModeChange: (value: AgentPermissionMode) => void;
+  spawnApprovalPolicy: AgentApprovalPolicy;
+  onSpawnApprovalPolicyChange: (value: AgentApprovalPolicy) => void;
+  spawnAgentApprovalSupported: boolean;
+  spawnAgentReadOnlySupported: boolean;
   spawnAgentMenuEntries: UiMenuSelectEntry[];
   draftCreating: boolean;
   draftAutoRenaming: boolean;
@@ -85,6 +95,12 @@ export function DraftChatWorkspace({
   onCreateAsDraftChange,
   createPersistVolume,
   onCreatePersistVolumeChange,
+  spawnAgentPermissionMode,
+  onSpawnAgentPermissionModeChange,
+  spawnApprovalPolicy,
+  onSpawnApprovalPolicyChange,
+  spawnAgentApprovalSupported,
+  spawnAgentReadOnlySupported,
   spawnAgentMenuEntries,
   draftCreating,
   draftAutoRenaming,
@@ -287,6 +303,13 @@ export function DraftChatWorkspace({
       onCreateAsDraftChange={onCreateAsDraftChange}
       createPersistVolume={createPersistVolume}
       onCreatePersistVolumeChange={onCreatePersistVolumeChange}
+      spawnAgentPermissionMode={spawnAgentPermissionMode}
+      onSpawnAgentPermissionModeChange={onSpawnAgentPermissionModeChange}
+      spawnApprovalPolicy={spawnApprovalPolicy}
+      onSpawnApprovalPolicyChange={onSpawnApprovalPolicyChange}
+      spawnAgentApprovalSupported={spawnAgentApprovalSupported}
+      spawnAgentReadOnlySupported={spawnAgentReadOnlySupported}
+      spawnAgentConfig={spawnAgentConfig}
       createRepoMenuEntries={createRepoMenuEntries}
       draftCreateRepoPath={draftCreateRepoPath}
       agentsMdLibraryFiles={agentsMdLibraryFiles}

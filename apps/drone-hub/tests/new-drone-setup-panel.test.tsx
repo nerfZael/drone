@@ -11,6 +11,13 @@ const baseProps: React.ComponentProps<typeof NewDroneSetupPanel> = {
   onCreateAsDraftChange: () => {},
   createPersistVolume: false,
   onCreatePersistVolumeChange: () => {},
+  spawnAgentPermissionMode: 'full-access',
+  onSpawnAgentPermissionModeChange: () => {},
+  spawnApprovalPolicy: 'ask',
+  onSpawnApprovalPolicyChange: () => {},
+  spawnAgentApprovalSupported: true,
+  spawnAgentReadOnlySupported: true,
+  spawnAgentConfig: { kind: 'native' },
   createRepoMenuEntries: [],
   draftCreateRepoPath: '/work/repo',
   agentsMdLibraryFiles: [

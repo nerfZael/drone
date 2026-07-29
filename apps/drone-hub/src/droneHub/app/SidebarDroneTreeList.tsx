@@ -76,7 +76,7 @@ export type SidebarDroneTreeListProps = {
     droneId: string,
     chatName: string,
   ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
-  onOpenCloneModal: (drone: DroneSummary) => void;
+  onCloneDrone: (drone: DroneSummary) => void;
   onAddDroneToGroup: (drone: DroneSummary) => void;
   onCreateDroneChat: (
     drone: DroneSummary,
@@ -137,7 +137,7 @@ type SidebarDroneRowProps = {
   dragOverPlacement: SidebarGroupDropPlacement | null;
   uiDroneName: (nameRaw: string) => string;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
-  onOpenCloneModal: (drone: DroneSummary) => void;
+  onCloneDrone: (drone: DroneSummary) => void;
   onAddDroneToGroup: (drone: DroneSummary) => void;
   onOpenCreateDroneChat: (drone: DroneSummary) => void;
   onRenameDrone: (
@@ -270,7 +270,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
   dragOverPlacement,
   uiDroneName,
   onSelectDroneCard,
-  onOpenCloneModal,
+  onCloneDrone,
   onAddDroneToGroup,
   onOpenCreateDroneChat,
   onRenameDrone,
@@ -360,7 +360,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           dragging={isDragging}
           dragAttributes={dragDisabled ? undefined : attributes as unknown as Record<string, unknown>}
           dragListeners={dragDisabled ? undefined : listeners as unknown as Record<string, unknown>}
-          onClone={actionsEnabled ? () => onOpenCloneModal(drone) : undefined}
+          onClone={actionsEnabled ? () => onCloneDrone(drone) : undefined}
           onAddToGroup={actionsEnabled ? () => onAddDroneToGroup(drone) : undefined}
           onCreateChat={actionsEnabled ? () => onOpenCreateDroneChat(drone) : undefined}
           onRename={actionsEnabled ? (newName) => onRenameDrone(drone.id, newName) : undefined}
@@ -611,7 +611,7 @@ function SidebarDroneNode({
   onSelectDroneCard,
   onSelectDroneChat,
   onDeleteDroneChat,
-  onOpenCloneModal,
+  onCloneDrone,
   onAddDroneToGroup,
   onCreateDroneChat,
   onRenameDroneChat,
@@ -735,7 +735,7 @@ function SidebarDroneNode({
         dragOverPlacement={dragOverDrone?.droneId === drone.id ? dragOverDrone.placement : null}
         uiDroneName={uiDroneName}
         onSelectDroneCard={onSelectDroneCard}
-        onOpenCloneModal={onOpenCloneModal}
+        onCloneDrone={onCloneDrone}
         onAddDroneToGroup={onAddDroneToGroup}
         onOpenCreateDroneChat={onOpenCreateDroneChat}
         onRenameDrone={onRenameDrone}
@@ -865,7 +865,7 @@ function SidebarDroneNode({
               onSelectDroneCard={onSelectDroneCard}
               onSelectDroneChat={onSelectDroneChat}
               onDeleteDroneChat={onDeleteDroneChat}
-              onOpenCloneModal={onOpenCloneModal}
+              onCloneDrone={onCloneDrone}
               onAddDroneToGroup={onAddDroneToGroup}
               onCreateDroneChat={onCreateDroneChat}
               onRenameDroneChat={onRenameDroneChat}
@@ -930,7 +930,7 @@ export function SidebarDroneTreeList({
   onSelectDroneCard,
   onSelectDroneChat,
   onDeleteDroneChat,
-  onOpenCloneModal,
+  onCloneDrone,
   onAddDroneToGroup,
   onCreateDroneChat,
   onRenameDroneChat,
@@ -1285,7 +1285,7 @@ export function SidebarDroneTreeList({
           onSelectDroneCard={onSelectDroneCard}
           onSelectDroneChat={onSelectDroneChat}
           onDeleteDroneChat={onDeleteDroneChat}
-          onOpenCloneModal={onOpenCloneModal}
+          onCloneDrone={onCloneDrone}
           onAddDroneToGroup={onAddDroneToGroup}
           onCreateDroneChat={onCreateDroneChat}
           onRenameDroneChat={onRenameDroneChat}
