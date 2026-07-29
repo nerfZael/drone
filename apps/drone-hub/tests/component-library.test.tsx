@@ -269,4 +269,24 @@ describe('drone hub component library', () => {
     expect(html).toContain('Workflows');
     expect(html).toContain('Pane-state matrix');
   });
+
+  test('keeps dock panels flush and menu triggers semantically distinct from toggles', () => {
+    const panelHtml = renderToStaticMarkup(<UiPanel flush>Dock content</UiPanel>);
+    const menuHtml = renderToStaticMarkup(
+      <UiActionMenu
+        label="View options"
+        triggerContent="View"
+        open
+        onOpenChange={() => {}}
+        entries={[{ id: 'stacked', label: 'Stacked' }]}
+        onSelect={() => {}}
+      />,
+    );
+
+    expect(panelHtml).not.toContain('rounded-[var(--radius-large)]');
+    expect(panelHtml).not.toContain('border-[var(--border-subtle)]');
+    expect(menuHtml).toContain('aria-haspopup="menu"');
+    expect(menuHtml).toContain('aria-expanded="true"');
+    expect(menuHtml).not.toContain('aria-pressed');
+  });
 });

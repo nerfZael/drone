@@ -280,6 +280,7 @@ function ChangesPattern() {
           max={220}
           step={10}
           label="Resize changes explorer"
+          reversed
           onValueChange={setExplorerWidth}
           onReset={() => setExplorerWidth(150)}
         />
