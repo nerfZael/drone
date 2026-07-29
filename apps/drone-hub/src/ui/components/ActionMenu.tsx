@@ -92,6 +92,7 @@ export function UiActionMenu({
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const itemRefs = React.useRef(new Map<string, HTMLButtonElement>());
   const menuId = React.useId();
+  const hasTriggerContent = triggerContent !== undefined;
   const [panelPosition, setPanelPosition] = React.useState<{ left: number; top: number } | null>(
     null,
   );
@@ -318,7 +319,7 @@ export function UiActionMenu({
 
   return (
     <div ref={rootRef} className={cn('relative inline-flex', className)}>
-      {triggerContent ? (
+      {hasTriggerContent ? (
         <UiToolbarButton
           ref={triggerRef}
           aria-label={label}
