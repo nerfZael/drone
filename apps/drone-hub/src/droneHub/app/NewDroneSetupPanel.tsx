@@ -5,7 +5,7 @@ import type {
   AgentPermissionMode,
   ChatAgentConfig,
 } from '../../domain';
-import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
+import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/components';
 import type { RepoRemoteBranchOption } from '../types';
 import type { CreateRuntime, RepoBranchSourceMode } from './drone-create-runtime';
 import { NewDroneTargetControls } from './NewDroneTargetControls';

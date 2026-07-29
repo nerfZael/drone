@@ -12,6 +12,7 @@ import {
   UiPanelToolbar,
   UiStatusChip,
   UiStatusDot,
+  UiTextarea,
   UiToolbarButton,
 } from '../../ui/components';
 import {
@@ -360,13 +361,13 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
                       {inputText.trim() === '{}' ? '{}' : 'modified'}
                     </span>
                   </summary>
-                  <textarea
+                  <UiTextarea
                     value={inputText}
                     onChange={(event) => setInputText(event.target.value)}
                     rows={3}
                     spellCheck={false}
                     aria-label="Workflow input JSON"
-                    className="mt-2 w-full resize-y rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-2 font-mono text-[var(--text-10)] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+                    className="mt-2 font-mono text-[var(--text-10)]"
                   />
                 </details>
           </div>

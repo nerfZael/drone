@@ -9,6 +9,13 @@ import {
   type SerializedDockview,
 } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
+import {
+  UiPaneState,
+  UiPanel,
+  UiPanelBody,
+  UiPanelToolbar,
+  UiToolbarSegmentedControl,
+} from '../../ui/components';
 import type { DroneSummary } from '../types';
 import { profileStorageKey } from '../../profile-storage';
 import { RIGHT_PANEL_TAB_LABELS, type RightPanelTab } from './app-config';
@@ -231,7 +238,7 @@ function ChatPanel({ containerApi }: IDockviewPanelProps) {
     const panel = containerApi.getPanel(CHAT_PANEL_ID);
     if (panel) panel.api.setTitle('Agent Chat');
   }, [containerApi]);
-  return <div className="h-full min-w-0 min-h-0 overflow-hidden bg-[var(--panel)] flex flex-col">{content}</div>;
+  return <UiPanel flush className="h-full">{content}</UiPanel>;
 }
 
 function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: RightPanelTab; paneKey?: WorkspacePaneKey }>) {
@@ -249,12 +256,14 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: RightPanelTab; p
   if (!tab) return null;
 
   return (
-    <div
+    <UiPanel
+      flush
+      surface="alternate"
       data-dockview-preview-host={previewHostedHere ? '1' : undefined}
-      className="h-full min-w-0 min-h-0 overflow-hidden bg-[var(--panel-alt)] relative flex flex-col"
+      className="relative h-full"
     >
       {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : ctx.renderToolPane(tab, paneKey)}
-    </div>
+    </UiPanel>
   );
 }
 
@@ -280,9 +289,13 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
 
 function WorkspaceWatermark() {
   return (
-    <div className="h-full flex items-center justify-center bg-[var(--panel)] text-[var(--text-12)] text-[var(--muted)]">
-      Open a pane from the toolbar.
-    </div>
+    <UiPanel flush className="h-full">
+      <UiPaneState
+        kind="empty"
+        title="No pane open"
+        description="Open a pane from the toolbar."
+      />
+    </UiPanel>
   );
 }
 
@@ -578,57 +591,48 @@ export function DockableDroneWorkspace({
   return (
     <DockableDroneWorkspaceContext.Provider value={contextValue}>
       {isMobileViewport ? (
-        <div className="dh-mobile-workspace flex-1 min-h-0 min-w-0 overflow-hidden bg-[var(--panel)] flex flex-col">
+        <UiPanel flush className="dh-mobile-workspace flex-1">
           {toolPaneOpen ? (
-            <div className="dh-mobile-workspace-tabs flex flex-shrink-0 items-center gap-1 overflow-x-auto border-b border-[var(--border)] bg-[var(--panel-alt)] px-2 py-1.5">
-              <button
-                type="button"
-                onClick={() => setMobileActivePanel('chat')}
-                className={`inline-flex h-8 items-center rounded-[var(--radius-medium)] border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
-                  mobileActivePanel === 'chat'
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                Chat
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileActivePanel('tool');
-                  onActiveToolTabChange?.(activeToolTab);
+            <UiPanelToolbar
+              aria-label="Mobile workspace panes"
+              className="dh-mobile-workspace-tabs border-[var(--border)] py-1.5"
+            >
+              <UiToolbarSegmentedControl
+                label="Active workspace pane"
+                value={mobileActivePanel}
+                size="small"
+                options={[
+                  { value: 'chat', label: 'Chat' },
+                  { value: 'tool', label: RIGHT_PANEL_TAB_LABELS[activeToolTab] },
+                ]}
+                onValueChange={(value) => {
+                  setMobileActivePanel(value);
+                  if (value === 'tool') onActiveToolTabChange?.(activeToolTab);
                 }}
-                className={`inline-flex h-8 items-center rounded-[var(--radius-medium)] border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
-                  mobileActivePanel === 'tool'
-                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                {RIGHT_PANEL_TAB_LABELS[activeToolTab]}
-              </button>
-            </div>
+              />
+            </UiPanelToolbar>
           ) : null}
-          <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
+          <UiPanelBody>
             {mobileActivePanel === 'tool' && toolPaneOpen ? (
               activeToolTab === previewTab ? (
-                <div
+                <UiPanel
+                  flush
+                  surface="alternate"
                   data-dockview-preview-host="1"
-                  className="h-full min-w-0 min-h-0 overflow-hidden bg-[var(--panel-alt)] relative flex flex-col"
+                  className="relative h-full"
                 >
                   <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" />
-                </div>
+                </UiPanel>
               ) : (
-                <div className="h-full min-w-0 min-h-0 overflow-hidden bg-[var(--panel-alt)]">
+                <UiPanel flush surface="alternate" className="h-full">
                   {renderToolPane(activeToolTab, 'single')}
-                </div>
+                </UiPanel>
               )
             ) : (
-              <div className="h-full min-w-0 min-h-0 overflow-hidden bg-[var(--panel)] flex flex-col">{chatContent}</div>
+              <UiPanel flush className="h-full">{chatContent}</UiPanel>
             )}
-          </div>
-        </div>
+          </UiPanelBody>
+        </UiPanel>
       ) : (
         <div
           className={`flex-1 min-h-0 min-w-0 overflow-hidden dh-dockable-workspace ${

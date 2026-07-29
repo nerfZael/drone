@@ -16,6 +16,7 @@ import {
   UiIconButton,
   UiInput,
   UiKbd,
+  UiMenuSelect,
   UiProgress,
   UiSearchInput,
   UiSelect,
@@ -36,7 +37,6 @@ import {
   UiToast,
   UiTooltip,
 } from '../../ui/components';
-import { UiMenuSelect } from '../../ui/menuSelect';
 import { DESKTOP_THEMES } from '../../theme';
 import { ComponentLibraryPatternsPreview } from './ComponentLibraryPatternsPreview';
 import { ComponentLibrarySection } from './ComponentLibrarySection';
@@ -155,6 +155,7 @@ const componentInventory = [
   ['UiKbd', 'Keyboard shortcuts'],
   ['UiPanel', 'Dock and panel composition'],
   ['UiToolbarButton', 'Dense panel actions'],
+  ['UiToolbarLink', 'Dense external and internal links'],
   ['UiToolbarSegmentedControl', 'Compact view selection'],
   ['UiActionMenu', 'Keyboard-accessible action menus'],
   ['UiPaneState', 'Loading, empty, and error states'],

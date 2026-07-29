@@ -2,7 +2,7 @@ import React from 'react';
 import type { ChatAgentConfig } from '../../domain';
 import type { ChatModelOption } from './app-types';
 import type { CustomAgentProfile } from '../types';
-import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import type { UiMenuSelectEntry } from '../../ui/components';
 import { repoPathLabel } from './repo-path-label';
 import { formatModelDisplayLabel } from './chat-model-runtime';
 

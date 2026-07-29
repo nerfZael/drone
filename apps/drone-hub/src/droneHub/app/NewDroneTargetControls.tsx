@@ -1,6 +1,6 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
+import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/components';
 import type { RepoRemoteBranchOption } from '../types';
 import type { CreateRuntime, RepoBranchSourceMode } from './drone-create-runtime';
 import { SegmentedToolbarToggle } from './SegmentedToolbarToggle';

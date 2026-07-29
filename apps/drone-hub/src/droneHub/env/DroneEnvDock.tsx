@@ -1,4 +1,13 @@
 import React from 'react';
+import {
+  UiCheckbox,
+  UiPaneState,
+  UiPanel,
+  UiPanelBody,
+  UiPanelHeader,
+  UiPanelStatusStrip,
+  UiToolbarButton,
+} from '../../ui/components';
 import { requestJson } from '../http';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import { createEnvDraftEntry, envDraftEntriesToMap, envValueEntriesToDraftEntries, validateEnvDraftEntries, type EnvDraftEntry } from './env-utils';
@@ -214,56 +223,40 @@ export function DroneEnvDock({
   }, [customVarMap, disabledRepoKeys, droneId, useRepoVars, validationError]);
 
   return (
-    <div className="w-full h-full bg-[var(--panel-alt)] overflow-auto">
-      <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-            Env
-          </div>
-          <div className="text-[var(--text-11)] text-[var(--muted-dim)] truncate" title={droneName}>
-            {droneName}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => void save()}
-          disabled={saving || Boolean(validationError)}
-          className={`h-8 rounded border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase ${
-            saving || validationError
-              ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted-dim)]'
-              : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
-          }`}
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-      </div>
-
-      <div className="px-3 py-3 flex flex-col gap-3 text-[var(--text-11)]">
-        {disabled ? (
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[var(--muted-dim)]">
-            {provisioningText}
-          </div>
-        ) : null}
+    <UiPanel flush surface="alternate" className="h-full w-full">
+      <UiPanelHeader
+        title="Environment"
+        description={droneName}
+        density="compact"
+        actions={
+          <UiToolbarButton
+            tone="accent"
+            active
+            onClick={() => void save()}
+            disabled={saving || Boolean(validationError)}
+            loading={saving}
+          >
+            Save
+          </UiToolbarButton>
+        }
+      />
+      {disabled ? (
+        <UiPanelStatusStrip>{provisioningText}</UiPanelStatusStrip>
+      ) : null}
+      {startup.waiting && !loading ? (
+        <UiPanelStatusStrip tone={startup.timedOut ? 'warning' : 'neutral'}>
+          {startup.timedOut ? 'Environment may still be syncing.' : provisioningText}
+        </UiPanelStatusStrip>
+      ) : null}
+      {error ? (
+        <UiPanelStatusStrip tone="danger">{error}</UiPanelStatusStrip>
+      ) : null}
+      {saveNotice ? (
+        <UiPanelStatusStrip tone="success">{saveNotice}</UiPanelStatusStrip>
+      ) : null}
+      <UiPanelBody scroll className="flex flex-col gap-3 px-3 py-3 text-[var(--text-11)]">
         {loading ? (
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-3 text-[var(--muted-dim)]">
-            Loading environment…
-          </div>
-        ) : null}
-        {startup.waiting && !loading ? (
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[var(--muted-dim)]">
-            {startup.timedOut ? 'Environment may still be syncing.' : provisioningText}
-          </div>
-        ) : null}
-        {error ? (
-          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--red)]">
-            {error}
-          </div>
-        ) : null}
-        {saveNotice ? (
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[var(--muted)]">
-            {saveNotice}
-          </div>
+          <UiPaneState kind="loading" title="Loading environment…" compact />
         ) : null}
         {data ? (
           <>
@@ -282,15 +275,12 @@ export function DroneEnvDock({
                     </div>
                   ) : null}
                 </div>
-                <label className="inline-flex items-center gap-2 text-[var(--text-11)] text-[var(--fg-secondary)]">
-                  <input
-                    type="checkbox"
-                    checked={useRepoVars}
-                    onChange={(event) => setUseRepoVars(event.target.checked)}
-                    disabled={saving}
-                  />
-                  Use repo envs
-                </label>
+                <UiCheckbox
+                  label="Use repo envs"
+                  checked={useRepoVars}
+                  onChange={(event) => setUseRepoVars(event.target.checked)}
+                  disabled={saving}
+                />
               </div>
               <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
                 Repo defaults for new container drones are {data.autoApplyToNewContainerDrones ? 'enabled' : 'disabled'}.
@@ -332,19 +322,12 @@ export function DroneEnvDock({
                       <span className="font-mono text-[var(--text-11)] text-[var(--muted-dim)] truncate" title={entry.value}>
                         {entry.value}
                       </span>
-                      <button
-                        type="button"
+                      <UiToolbarButton
                         onClick={() => setDisabledRepoKeys((prev) => (prev.includes(entry.key) ? prev : [...prev, entry.key].sort()))}
                         disabled={!useRepoVars || saving}
-                        className={`h-8 rounded border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase ${
-                          !useRepoVars || saving
-                            ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                            : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-                        }`}
-                        style={{ fontFamily: 'var(--display)' }}
                       >
                         Exclude
-                      </button>
+                      </UiToolbarButton>
                     </div>
                   ))
                 )}
@@ -359,19 +342,12 @@ export function DroneEnvDock({
                         <span className="font-mono text-[var(--text-11)] text-[var(--muted-dim)] truncate" title={entry.value}>
                           {entry.value}
                         </span>
-                        <button
-                          type="button"
+                        <UiToolbarButton
                           onClick={() => setDisabledRepoKeys((prev) => prev.filter((key) => key !== entry.key))}
                           disabled={saving}
-                          className={`h-8 rounded border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase ${
-                            saving
-                              ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                              : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-                          }`}
-                          style={{ fontFamily: 'var(--display)' }}
                         >
                           Restore
-                        </button>
+                        </UiToolbarButton>
                       </div>
                     ))}
                   </div>
@@ -405,7 +381,7 @@ export function DroneEnvDock({
             </div>
           </>
         ) : null}
-      </div>
-    </div>
+      </UiPanelBody>
+    </UiPanel>
   );
 }
