@@ -85,6 +85,8 @@ export type DvmRepoExportOptions = {
   outRoot: string;
   format?: DvmRepoExportFormat;
   base?: string;
+  head?: string;
+  full?: boolean;
 };
 
 export class DvmApi {
@@ -670,6 +672,8 @@ export class DvmApi {
       outRoot: path.resolve(String(options.outRoot)),
       format,
       base: options.base ? String(options.base) : undefined,
+      head: options.head ? String(options.head) : undefined,
+      full: options.full === true,
     });
 
     return { exportedPath: localOut, base };
@@ -681,6 +685,8 @@ export class DvmApi {
     outRoot: string;
     format: DvmRepoExportFormat;
     base?: string;
+    head?: string;
+    full?: boolean;
   }): Promise<{ localOut: string; base: string }> {
     const containerName = options.containerName;
     const repoPath = this.normalizeContainerPath(options.repoPathInContainer);
@@ -693,8 +699,9 @@ export class DvmApi {
     await this.manager.startContainer(containerName);
     await this.manager.ensureGit(containerName);
 
+    const head = String(options.head ?? 'HEAD').trim() || 'HEAD';
     let base = options.base ? String(options.base) : '';
-    if (!base) {
+    if (!base && !options.full) {
       const readBase = await this.manager.docker.execCommand(containerName, [
         'bash',
         '-lc',
@@ -706,9 +713,10 @@ export class DvmApi {
           .map((l) => l.trim())
           .filter(Boolean)[0] || '';
     }
-    if (!base) {
+    if (!base && !options.full) {
       throw new Error(`Missing base and could not read git config dvm.baseSha from ${repoPath}`);
     }
+    const revision = options.full ? head : `${base}..${head}`;
 
     const containerTmp = `/tmp/dvm-repo-export-${this.safeSlug(containerName)}-${Date.now().toString(36)}`;
     const localOut = path.join(outRoot, `${format}-${this.safeSlug(containerName)}-${stamp}`);
@@ -720,7 +728,7 @@ export class DvmApi {
         `rm -rf ${JSON.stringify(containerTmp)}`,
         `mkdir -p ${JSON.stringify(patchDir)}`,
         `cd ${JSON.stringify(repoPath)}`,
-        `git format-patch -o ${JSON.stringify(patchDir)} ${JSON.stringify(`${base}..HEAD`)}`,
+        `git format-patch -o ${JSON.stringify(patchDir)} ${JSON.stringify(revision)}`,
       ].join('\n');
       await this.manager.docker.execCommand(containerName, ['bash', '-lc', script]);
       await this.manager.docker.copyFromContainer(containerName, patchDir, localOut);
@@ -734,7 +742,7 @@ export class DvmApi {
         `rm -rf ${JSON.stringify(containerTmp)}`,
         `mkdir -p ${JSON.stringify(containerTmp)}`,
         `cd ${JSON.stringify(repoPath)}`,
-        `git bundle create ${JSON.stringify(bundleFile)} ${JSON.stringify(`${base}..HEAD`)}`,
+        `git bundle create ${JSON.stringify(bundleFile)} ${JSON.stringify(revision)}`,
       ].join('\n');
       await this.manager.docker.execCommand(containerName, ['bash', '-lc', script]);
       await this.manager.docker.copyFromContainer(containerName, bundleFile, localOut);
@@ -747,7 +755,7 @@ export class DvmApi {
       `rm -rf ${JSON.stringify(containerTmp)}`,
       `mkdir -p ${JSON.stringify(containerTmp)}`,
       `cd ${JSON.stringify(repoPath)}`,
-      `git diff ${JSON.stringify(`${base}..HEAD`)} > ${JSON.stringify(diffFile)}`,
+      `git diff ${JSON.stringify(revision)} > ${JSON.stringify(diffFile)}`,
     ].join('\n');
     await this.manager.docker.execCommand(containerName, ['bash', '-lc', script]);
     await this.manager.docker.copyFromContainer(containerName, diffFile, localOut);
