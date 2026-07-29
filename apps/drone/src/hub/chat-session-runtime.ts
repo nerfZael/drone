@@ -508,10 +508,13 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     if (!(globalThis as any).Bun) return;
     const droneId = normalizeDroneIdentity(droneIdRaw);
     const chatName = normalizeChatName(chatNameRaw);
-    const stored = readChatFromStore({ droneId, chatName });
-    if (!stored.available || !stored.chat) return;
-    const { turns, pendingPrompts: _canonicalPendingPrompts, ...canonicalMetadata } = stored.chat;
     await updateRegistry((registry: any) => {
+      // Read canonical state only after the registry update has acquired its
+      // serialization lock. Otherwise an older projection can finish last and
+      // overwrite a newer additive update.
+      const stored = readChatFromStore({ droneId, chatName });
+      if (!stored.available || !stored.chat) return;
+      const { turns, pendingPrompts: _canonicalPendingPrompts, ...canonicalMetadata } = stored.chat;
       const drone = registry?.drones?.[droneId];
       const current = drone?.chats?.[chatName];
       if (!drone || !current) return;
@@ -528,13 +531,13 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
   async function projectCanonicalChatsToRegistry(droneIdRaw: string): Promise<void> {
     if (!(globalThis as any).Bun) return;
     const droneId = normalizeDroneIdentity(droneIdRaw);
-    const chats = Object.fromEntries(
-      listChatsFromStore({ droneId }).chats.flatMap((chatName: string) => {
-        const stored = readChatFromStore({ droneId, chatName });
-        return stored.available && stored.chat ? [[chatName, stored.chat]] : [];
-      }),
-    );
     await updateRegistry((registry: any) => {
+      const chats = Object.fromEntries(
+        listChatsFromStore({ droneId }).chats.flatMap((chatName: string) => {
+          const stored = readChatFromStore({ droneId, chatName });
+          return stored.available && stored.chat ? [[chatName, stored.chat]] : [];
+        }),
+      );
       const drone = registry?.drones?.[droneId];
       if (!drone) return;
       drone.chats = chats;
@@ -1290,6 +1293,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     blipClonesEnabled?: boolean;
     setDroneHubMcpAccessScope?: boolean;
     droneHubMcpAccessScope?: unknown;
+    addDroneHubMcpAccessDroneIds?: string[];
   }) {
     const registry: any = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);
@@ -1405,12 +1409,26 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         if (opts.setBlipClonesEnabled) {
           cur.blipClonesEnabled = opts.blipClonesEnabled !== false;
         }
-        if (opts.setDroneHubMcpAccessScope) {
+        if (
+          opts.setDroneHubMcpAccessScope ||
+          (opts.addDroneHubMcpAccessDroneIds?.length ?? 0) > 0
+        ) {
           if (typeof cur.id !== 'string' || !cur.id.trim()) cur.id = crypto.randomUUID();
-          cur.droneHubMcpAccessScope = normalizeMcpChatAccessScope(
-            opts.droneHubMcpAccessScope,
-            droneId,
-          );
+          const currentScope = normalizeMcpChatAccessScope(cur.droneHubMcpAccessScope, droneId);
+          cur.droneHubMcpAccessScope =
+            (opts.addDroneHubMcpAccessDroneIds?.length ?? 0) > 0
+              ? normalizeMcpChatAccessScope(
+                  {
+                    ...currentScope,
+                    droneIds: [
+                      ...currentScope.droneIds,
+                      ...(opts.addDroneHubMcpAccessDroneIds ?? []),
+                    ],
+                    updatedAt: nowIso(),
+                  },
+                  droneId,
+                )
+              : normalizeMcpChatAccessScope(opts.droneHubMcpAccessScope, droneId);
         }
         return cur;
       },

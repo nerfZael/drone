@@ -733,18 +733,29 @@ export function createChatManagementRouteHandler(
           await ensureChatEntry({ droneId, chatName });
           if (method === 'PUT') {
             const body = await readJsonBody(req);
-            if (!body?.accessScope || typeof body.accessScope !== 'object') {
-              json(res, 400, { ok: false, error: 'accessScope must be an object' });
+            const addDroneIds = Array.isArray(body?.addDroneIds)
+              ? body.addDroneIds.map((id: unknown) => String(id ?? '').trim()).filter(Boolean)
+              : [];
+            const replacesAccessScope = body?.accessScope && typeof body.accessScope === 'object';
+            if (!replacesAccessScope && addDroneIds.length === 0) {
+              json(res, 400, {
+                ok: false,
+                error: 'accessScope must be an object or addDroneIds must be non-empty',
+              });
               return;
             }
             await setChatAgentConfig({
               droneId,
               chatName,
-              setDroneHubMcpAccessScope: true,
-              droneHubMcpAccessScope: {
-                ...body.accessScope,
-                updatedAt: new Date().toISOString(),
-              },
+              ...(addDroneIds.length > 0
+                ? { addDroneHubMcpAccessDroneIds: addDroneIds }
+                : {
+                    setDroneHubMcpAccessScope: true,
+                    droneHubMcpAccessScope: {
+                      ...body.accessScope,
+                      updatedAt: new Date().toISOString(),
+                    },
+                  }),
             });
           }
           const { chat } = await getChatEntry({ droneId, chatName });
@@ -764,7 +775,7 @@ export function createChatManagementRouteHandler(
             res,
             /unknown drone|unknown chat/i.test(message)
               ? 404
-              : /accessScope must be an object/i.test(message)
+              : /accessScope must be an object|addDroneIds must be non-empty/i.test(message)
                 ? 400
                 : 500,
             { ok: false, error: message },

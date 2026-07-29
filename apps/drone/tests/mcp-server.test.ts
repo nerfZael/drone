@@ -264,6 +264,109 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('does not report a seeded drone ready before its initial message is durable', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-seed-ready-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      let summaryReads = 0;
+      let stateReads = 0;
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
+        );
+        const method = String(init?.method ?? 'GET').toUpperCase();
+        if (url.pathname === '/api/settings/ui-preferences') {
+          return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+        }
+        if (url.pathname === '/api/drones' && method === 'POST') {
+          return Response.json(
+            {
+              ok: true,
+              id: 'seeded-1',
+              name: 'Seeded child',
+              runtime: 'container',
+              phase: 'starting',
+              initialMessage: {
+                chat: 'default',
+                promptId: 'initial-1',
+                pendingState: 'queued',
+              },
+            },
+            { status: 202 },
+          );
+        }
+        if (url.pathname === '/api/drones/summary') {
+          summaryReads += 1;
+          return Response.json({
+            ok: true,
+            drones: [
+              {
+                id: 'seeded-1',
+                name: 'Seeded child',
+                runtime: 'container',
+                ...(summaryReads === 1 ? { hubPhase: 'seeding' } : {}),
+                status: 'ready',
+              },
+            ],
+          });
+        }
+        if (url.pathname === '/api/drones/seeded-1/chats/default/state') {
+          stateReads += 1;
+          return Response.json({
+            ok: true,
+            pending:
+              stateReads === 1
+                ? []
+                : [
+                    {
+                      id: 'initial-1',
+                      at: '2026-07-29T17:25:33.880Z',
+                      prompt: 'Initial task',
+                      state: 'queued',
+                    },
+                  ],
+            transcripts: [],
+          });
+        }
+        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'assistant-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'thread-seed-ready',
+          allowedDroneRefs: [],
+          allowedWriteDroneRefs: [],
+          allowedDroneIds: [],
+        });
+        const result = await client.callTool({
+          name: 'create_drone',
+          arguments: {
+            name: 'Seeded child',
+            initialMessage: 'Initial task',
+          },
+        });
+
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          phase: 'ready',
+          drone: { id: 'seeded-1', name: 'Seeded child', status: 'ready' },
+        });
+        expect(summaryReads).toBe(3);
+        expect(stateReads).toBe(2);
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
   test('parents managed-chat creations and immediately grants all selected access kinds', async () => {
     await withTempDroneDataDir('drone-managed-chat-child-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
@@ -272,6 +375,13 @@ describe('Drone Hub assistant MCP transport', () => {
       const requests: Array<{ pathname: string; method: string; body?: any }> = [];
       let childCreated = false;
       let cloneCreated = false;
+      let managedAccessScope = {
+        readMode: 'selected',
+        writeMode: 'selected',
+        executeMode: 'selected',
+        droneIds: ['owner'],
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      };
       globalThis.fetch = (async (input, init) => {
         const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
         const method = String(init?.method ?? 'GET').toUpperCase();
@@ -299,7 +409,12 @@ describe('Drone Hub assistant MCP transport', () => {
           return Response.json({ ok: true, id: 'child-1', name: 'Child', runtime: 'container', phase: 'draft', draft: true }, { status: 201 });
         }
         if (url.pathname === '/api/drones/owner/chats/default/mcp-access' && method === 'PUT') {
-          return Response.json({ ok: true, available: true, accessScope: body.accessScope });
+          managedAccessScope = {
+            ...managedAccessScope,
+            droneIds: [...new Set([...managedAccessScope.droneIds, ...(body.addDroneIds ?? [])])],
+            updatedAt: '2026-01-02T00:00:00.000Z',
+          };
+          return Response.json({ ok: true, available: true, accessScope: managedAccessScope });
         }
         if (url.pathname === '/api/drones/child-1/chats' && method === 'GET') {
           return Response.json({ ok: true, chats: ['default'] });
@@ -366,7 +481,7 @@ describe('Drone Hub assistant MCP transport', () => {
             request.pathname === '/api/drones/owner/chats/default/mcp-access' &&
             request.method === 'PUT',
         );
-        expect(scopeRequest?.body?.accessScope?.droneIds).toEqual(['owner', 'child-1']);
+        expect(scopeRequest?.body).toEqual({ addDroneIds: ['child-1'] });
 
         const cloned = await client.callTool({
           name: 'clone_drone',
@@ -422,12 +537,166 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('preserves every selected-scope grant across parallel child creation', async () => {
+    await withTempDroneDataDir('drone-managed-chat-parallel-children-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const childIds = ['child-1', 'child-2', 'child-3', 'child-4'];
+      const createdIds = new Set<string>();
+      let storedDroneIds = ['owner'];
+      let releaseFirstGrant!: () => void;
+      const firstGrantMerged = new Promise<void>((resolve) => {
+        releaseFirstGrant = resolve;
+      });
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
+        );
+        const method = String(init?.method ?? 'GET').toUpperCase();
+        const body =
+          method !== 'GET' && typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+        if (url.pathname === '/api/drones/summary') {
+          return Response.json({
+            ok: true,
+            drones: [
+              { id: 'owner', name: 'Owner', runtime: 'container' },
+              ...[...createdIds].map((id) => ({
+                id,
+                name: id,
+                runtime: 'container',
+              })),
+            ],
+          });
+        }
+        if (url.pathname === '/api/settings/ui-preferences') {
+          return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+        }
+        if (url.pathname === '/api/drones' && method === 'POST') {
+          const id = `child-${Number(String(body.name).split(' ').at(-1))}`;
+          createdIds.add(id);
+          return Response.json(
+            { ok: true, id, name: body.name, runtime: 'container', draft: true },
+            { status: 201 },
+          );
+        }
+        if (url.pathname === '/api/drones/owner/chats/default/mcp-access' && method === 'PUT') {
+          const addedId = String(body?.addDroneIds?.[0] ?? '');
+          if (addedId === 'child-1') {
+            storedDroneIds = [...new Set([...storedDroneIds, addedId])];
+            const responseDroneIds = [...storedDroneIds];
+            releaseFirstGrant();
+            await new Promise((resolve) => setTimeout(resolve, 40));
+            return Response.json({
+              ok: true,
+              accessScope: {
+                readMode: 'all',
+                writeMode: 'all',
+                executeMode: 'all',
+                droneIds: responseDroneIds,
+                updatedAt: '2026-01-02T00:00:00.000Z',
+              },
+            });
+          }
+          await firstGrantMerged;
+          storedDroneIds = [...new Set([...storedDroneIds, addedId])];
+          return Response.json({
+            ok: true,
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: [...storedDroneIds],
+              updatedAt: '2026-01-03T00:00:00.000Z',
+            },
+          });
+        }
+        const promptMatch = url.pathname.match(
+          /^\/api\/drones\/(child-[1-4])\/chats\/default\/prompt$/,
+        );
+        if (promptMatch && method === 'POST') {
+          return Response.json({
+            ok: true,
+            id: promptMatch[1],
+            promptId: `prompt-${promptMatch[1]}`,
+            pendingState: 'queued',
+          });
+        }
+        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'managed-chat-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'managed-chat-parallel-children',
+          allowedDroneRefs: [],
+          allowedWriteDroneRefs: [],
+          allowedDroneIds: [],
+          principal: {
+            kind: 'chat',
+            tokenId: 'chat:owner:default',
+            name: 'Owner / default',
+            droneId: 'owner',
+            chatName: 'default',
+            chatId: 'owner-default',
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['owner'],
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+            selectedDroneRefs: ['owner', 'Owner'],
+          },
+        });
+
+        const creations = await Promise.all(
+          childIds.map((_, index) =>
+            client!.callTool({
+              name: 'create_drone',
+              arguments: { name: `Child ${index + 1}`, draft: true },
+            }),
+          ),
+        );
+        expect(creations.every((result) => result.isError !== true)).toBe(true);
+        expect(storedDroneIds).toEqual(['owner', ...childIds]);
+
+        const followUps = await Promise.all(
+          childIds.map((drone) =>
+            client!.callTool({
+              name: 'send_message',
+              arguments: { drone, chat: 'default', message: 'Continue' },
+            }),
+          ),
+        );
+        expect(followUps.every((result) => result.isError !== true)).toBe(true);
+        const unauthorized = await client.callTool({
+          name: 'send_message',
+          arguments: { drone: 'not-selected', chat: 'default', message: 'Do not send' },
+        });
+        expect(unauthorized.isError).toBe(true);
+        expect(JSON.stringify(unauthorized.content)).toContain(
+          'execute scope does not include the requested drone',
+        );
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
   test('persists child access through the native assistant thread scope', async () => {
     await withTempDroneDataDir('drone-native-chat-child-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
       const previousToken = process.env.DRONE_TOKEN;
       const previousFetch = globalThis.fetch;
       const requests: Array<{ pathname: string; method: string; body?: any }> = [];
+      let nativeDroneIds = ['owner'];
       globalThis.fetch = (async (input, init) => {
         const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
         const method = String(init?.method ?? 'GET').toUpperCase();
@@ -449,13 +718,14 @@ describe('Drone Hub assistant MCP transport', () => {
           );
         }
         if (url.pathname === '/api/assistant/scope' && method === 'POST') {
+          nativeDroneIds = [...new Set([...nativeDroneIds, ...(body.addDroneIds ?? [])])];
           return Response.json({
             ok: true,
             accessScope: {
-              readMode: body.readMode,
-              writeMode: body.writeMode,
-              executeMode: body.executeMode,
-              droneIds: body.droneIds,
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: nativeDroneIds,
               updatedAt: '2026-01-02T00:00:00.000Z',
             },
           });
@@ -509,10 +779,7 @@ describe('Drone Hub assistant MCP transport', () => {
           )?.body,
         ).toMatchObject({
           threadId: 'native-thread',
-          readMode: 'selected',
-          writeMode: 'selected',
-          executeMode: 'selected',
-          droneIds: ['owner', 'native-child'],
+          addDroneIds: ['native-child'],
         });
         expect(
           requests.some((request) => request.pathname.endsWith('/mcp-access')),
@@ -528,12 +795,13 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
-  test('does not report a created drone as failed when its automatic access grant fails', async () => {
+  test('does not report a created drone as failed when its automatic access grant cannot be confirmed', async () => {
     await withTempDroneDataDir('drone-managed-chat-grant-failure-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
       const previousToken = process.env.DRONE_TOKEN;
       const previousFetch = globalThis.fetch;
       const requests: Array<{ pathname: string; method: string }> = [];
+      let accessGrantAttempts = 0;
       globalThis.fetch = (async (input, init) => {
         const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
         const method = String(init?.method ?? 'GET').toUpperCase();
@@ -554,7 +822,20 @@ describe('Drone Hub assistant MCP transport', () => {
           );
         }
         if (url.pathname === '/api/drones/owner/chats/default/mcp-access') {
-          return Response.json({ ok: false, error: 'scope store unavailable' }, { status: 503 });
+          accessGrantAttempts += 1;
+          if (accessGrantAttempts === 1) {
+            return Response.json({ ok: false, error: 'scope store unavailable' }, { status: 503 });
+          }
+          return Response.json({
+            ok: true,
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['owner'],
+              updatedAt: '2026-01-02T00:00:00.000Z',
+            },
+          });
         }
         return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
       }) as typeof fetch;
@@ -594,7 +875,7 @@ describe('Drone Hub assistant MCP transport', () => {
           drone: { id: 'created-once' },
         });
         expect(String((result.structuredContent as any)?.accessGrantError)).toContain(
-          'scope store unavailable',
+          'did not persist created drone created-once',
         );
         expect(
           requests.filter(

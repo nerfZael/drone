@@ -1350,20 +1350,37 @@ export class HubAssistantService {
     writeMode?: unknown;
     executeMode?: unknown;
     droneIds?: unknown;
+    addDroneIds?: unknown;
   }): Promise<AssistantAccessScope> {
     await this.ensureLoaded();
     const threadId = cleanOptionalString(input.threadId);
     if (!threadId) throw new Error('native chat id is required');
     const thread = this.threads.find((item) => item.id === threadId);
     if (!thread) throw new Error(`unknown assistant thread: ${threadId}`);
-    const requestedDroneIds = Array.isArray(input.droneIds) ? input.droneIds : [];
+    const isAdditiveUpdate = Array.isArray(input.addDroneIds) && input.addDroneIds.length > 0;
+    const requestedDroneIds = Array.isArray(input.droneIds)
+      ? input.droneIds
+      : isAdditiveUpdate
+        ? thread.accessScope.droneIds
+        : [];
+    const addedDroneIds = Array.isArray(input.addDroneIds) ? input.addDroneIds : [];
     thread.accessScope = makeAssistantAccessScope({
-      readMode: (input as any).readMode ?? input.mode,
-      writeMode: (input as any).writeMode ?? input.mode,
-      executeMode: (input as any).executeMode ?? (input as any).writeMode ?? input.mode,
+      readMode:
+        (input as any).readMode ??
+        input.mode ??
+        (isAdditiveUpdate ? thread.accessScope.readMode : undefined),
+      writeMode:
+        (input as any).writeMode ??
+        input.mode ??
+        (isAdditiveUpdate ? thread.accessScope.writeMode : undefined),
+      executeMode:
+        (input as any).executeMode ??
+        (input as any).writeMode ??
+        input.mode ??
+        (isAdditiveUpdate ? thread.accessScope.executeMode : undefined),
       droneIds: thread.ownerDroneId
-        ? [...requestedDroneIds, thread.ownerDroneId]
-        : requestedDroneIds,
+        ? [thread.ownerDroneId, ...requestedDroneIds, ...addedDroneIds]
+        : [...requestedDroneIds, ...addedDroneIds],
       updatedAt: nowIso(),
     });
     thread.updatedAt = nowIso();

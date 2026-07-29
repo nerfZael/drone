@@ -566,6 +566,35 @@ describeSocketSuite('chat management api', () => {
       droneIds: ['another-drone', droneId],
     });
 
+    const addedDroneIds = [
+      'parallel-child-1',
+      'parallel-child-2',
+      'parallel-child-3',
+      'parallel-child-4',
+    ];
+    const additiveUpdates = await Promise.all(
+      addedDroneIds.map((addedDroneId) =>
+        apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/mcp-access`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ addDroneIds: [addedDroneId] }),
+        }),
+      ),
+    );
+    expect(additiveUpdates.every(({ r }) => r.status === 200)).toBe(true);
+
+    const afterAdditions = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/mcp-access`,
+    );
+    expect(afterAdditions.data?.accessScope).toMatchObject({
+      readMode: 'selected',
+      writeMode: 'all',
+      executeMode: 'all',
+    });
+    expect(new Set(afterAdditions.data?.accessScope?.droneIds)).toEqual(
+      new Set(['another-drone', droneId, ...addedDroneIds]),
+    );
+
     const registry: any = await loadRegistry();
     const chat = registry?.drones?.[droneId]?.chats?.default;
     expect(String(chat?.id ?? '')).toMatch(/^[0-9a-f-]{36}$/i);
@@ -573,8 +602,10 @@ describeSocketSuite('chat management api', () => {
       readMode: 'selected',
       writeMode: 'all',
       executeMode: 'all',
-      droneIds: ['another-drone', droneId],
     });
+    expect(new Set(chat?.droneHubMcpAccessScope?.droneIds)).toEqual(
+      new Set(['another-drone', droneId, ...addedDroneIds]),
+    );
 
     const invalid = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/chats/default/mcp-access`,
