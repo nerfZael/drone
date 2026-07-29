@@ -41,6 +41,7 @@ import { NativeMarkdown } from './NativeMarkdown';
 import { MobileLoadingState } from './MobileLoadingState';
 import { MobileReasoningBlock } from './MobileReasoningBlock';
 import { MobileChangedFilesTree } from './MobileChangedFilesTree';
+import { MobileChangedFilesReviewModal } from './MobileChangedFilesReviewModal';
 import { nativeMarkdownHasCodeBlock } from './native-markdown-model';
 import {
   parseMobileFileReference,
@@ -129,15 +130,10 @@ function ChangedFilesSummary({
     previousInitiallyExpanded.current = initiallyExpanded;
     setExpanded(initiallyExpanded);
   }, [initiallyExpanded]);
-  const [openDiffKey, setOpenDiffKey] = React.useState('');
-  const [selectedDiff, setSelectedDiff] = React.useState<{
-    key: string;
-    state:
-      | { status: 'loading' }
-      | { status: 'loaded'; patch: string; truncated: boolean }
-      | { status: 'error'; message: string; retryable: boolean };
+  const [reviewSelection, setReviewSelection] = React.useState<{
+    workspaceTargetId: string;
+    entry: AgentRunFileChangeEntry;
   } | null>(null);
-  const diffRequestGeneration = React.useRef(0);
   const [workspaceFiles, setWorkspaceFiles] = React.useState<
     Record<
       string,
@@ -238,61 +234,13 @@ function ChangedFilesSummary({
         }));
       });
   };
-  const openDiff = (artifactId: string, filePath: string, force = false) => {
-    if (!onLoadDiff) return;
-    const key = `${artifactId}\u0000${filePath}`;
-    if (!force && openDiffKey === key) {
-      diffRequestGeneration.current += 1;
-      setOpenDiffKey('');
-      setSelectedDiff(null);
-      return;
-    }
-    setOpenDiffKey(key);
-    const requestGeneration = ++diffRequestGeneration.current;
-    setSelectedDiff({ key, state: { status: 'loading' } });
-    void onLoadDiff({ artifactId, path: filePath })
-      .then((result) => {
-        if (diffRequestGeneration.current !== requestGeneration) return;
-        setSelectedDiff({
-          key,
-          state: {
-            status: 'loaded',
-            patch: String(result.patch ?? ''),
-            truncated: result.truncated === true,
-          },
-        });
-      })
-      .catch((error: any) => {
-        if (diffRequestGeneration.current !== requestGeneration) return;
-        const errorCode = String(error?.code ?? '');
-        const hubStatus = Number(/^HUB_(\d+)$/.exec(errorCode)?.[1] ?? 0);
-        const terminal =
-          errorCode === 'INVALID_REQUEST' ||
-          (hubStatus >= 400 && hubStatus < 500 && hubStatus !== 408 && hubStatus !== 429);
-        setSelectedDiff({
-          key,
-          state: {
-            status: 'error',
-            message: String(error?.message ?? error ?? 'Unable to load historical diff.'),
-            retryable: !terminal,
-          },
-        });
-      });
-  };
   return (
     <View style={styles.changedFilesCard}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${summary.counts.changed} changed files`}
         accessibilityState={{ expanded }}
-        onPress={() => {
-          if (expanded) {
-            diffRequestGeneration.current += 1;
-            setOpenDiffKey('');
-            setSelectedDiff(null);
-          }
-          setExpanded((current) => !current);
-        }}
+        onPress={() => setExpanded((current) => !current)}
         style={({ pressed }) => [
           styles.changedFilesHeader,
           pressed && styles.changedFilesHeaderPressed,
@@ -336,10 +284,6 @@ function ChangedFilesSummary({
               <MobileChangedFilesTree
                 entries={entriesForWorkspace(workspace)}
                 renderFile={(entry, name) => {
-                  const artifactId = workspace.diffArtifactId;
-                  const diffKey = artifactId ? `${artifactId}\u0000${entry.path}` : '';
-                  const open = Boolean(diffKey && openDiffKey === diffKey);
-                  const diff = selectedDiff?.key === diffKey ? selectedDiff.state : undefined;
                   const renderRow = (pressed = false) => (
                     <View style={styles.changedFilesRow}>
                       <Text
@@ -371,82 +315,22 @@ function ChangedFilesSummary({
                             .join(' ')}
                         </Text>
                       ) : null}
-                      {artifactId && onLoadDiff ? (
-                        open ? (
-                          <ChevronDown color={pressed ? colors.accent : colors.muted} size={12} />
-                        ) : (
-                          <ChevronRight color={pressed ? colors.accent : colors.muted} size={12} />
-                        )
-                      ) : null}
+                      <ChevronRight color={pressed ? colors.accent : colors.muted} size={12} />
                     </View>
                   );
                   return (
-                    <View>
-                      {artifactId && onLoadDiff ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`Show the diff captured for ${entry.path}`}
-                          accessibilityState={{ expanded: open }}
-                          onPress={() => openDiff(artifactId, entry.path)}
-                        >
-                          {({ pressed }) => renderRow(pressed)}
-                        </Pressable>
-                      ) : (
-                        renderRow()
-                      )}
-                      {open && diff ? (
-                        <View style={styles.changedFilesDiffPanel}>
-                          {diff.status === 'loading' ? (
-                            <View style={styles.changedFilesDiffLoading}>
-                              <ActivityIndicator color={colors.accent} size="small" />
-                              <Text style={styles.changedFilesDiffHint}>
-                                Loading historical diff…
-                              </Text>
-                            </View>
-                          ) : diff.status === 'error' && diff.retryable ? (
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel="Retry loading historical diff"
-                              onPress={() => openDiff(artifactId!, entry.path, true)}
-                              style={({ pressed }) => [
-                                styles.changedFilesDiffError,
-                                pressed && styles.changedFilesPressed,
-                              ]}
-                            >
-                              <Text style={styles.changedFilesDiffErrorText}>{diff.message}</Text>
-                              <Text style={styles.changedFilesDiffRetry}>Retry</Text>
-                            </Pressable>
-                          ) : diff.status === 'error' ? (
-                            <View style={styles.changedFilesDiffError}>
-                              <Text style={styles.changedFilesDiffErrorText}>{diff.message}</Text>
-                            </View>
-                          ) : (
-                            <>
-                              <ScrollView
-                                nestedScrollEnabled
-                                showsVerticalScrollIndicator
-                                style={styles.changedFilesDiffScroll}
-                              >
-                                <ScrollView
-                                  horizontal
-                                  nestedScrollEnabled
-                                  showsHorizontalScrollIndicator
-                                >
-                                  <Text selectable style={styles.changedFilesDiffText}>
-                                    {diff.patch.slice(0, 80_000)}
-                                  </Text>
-                                </ScrollView>
-                              </ScrollView>
-                              {diff.truncated || diff.patch.length > 80_000 ? (
-                                <Text style={styles.changedFilesDiffHint}>
-                                  Diff preview was limited for performance.
-                                </Text>
-                              ) : null}
-                            </>
-                          )}
-                        </View>
-                      ) : null}
-                    </View>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Review the changes captured for ${entry.path}`}
+                      onPress={() =>
+                        setReviewSelection({
+                          workspaceTargetId: workspace.targetId,
+                          entry,
+                        })
+                      }
+                    >
+                      {({ pressed }) => renderRow(pressed)}
+                    </Pressable>
                   );
                 }}
               />
@@ -495,6 +379,16 @@ function ChangedFilesSummary({
             </View>
           ))}
         </ScrollView>
+      ) : null}
+      {reviewSelection ? (
+        <MobileChangedFilesReviewModal
+          key={`${reviewSelection.workspaceTargetId}\u0000${reviewSelection.entry.path}`}
+          fileChanges={summary}
+          initialSelection={reviewSelection}
+          onClose={() => setReviewSelection(null)}
+          onLoadDiff={onLoadDiff}
+          onLoadFiles={onLoadFiles}
+        />
       ) : null}
     </View>
   );
@@ -2028,13 +1922,6 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
   changedFilesLineCountsPressed: { color: colors.text, opacity: 1 },
-  changedFilesDiffPanel: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface0,
-    paddingVertical: 8,
-  },
-  changedFilesDiffScroll: { maxHeight: 300 },
   changedFilesDiffLoading: {
     minHeight: 42,
     flexDirection: 'row',
@@ -2053,13 +1940,6 @@ const styles = StyleSheet.create({
   },
   changedFilesDiffErrorText: { flex: 1, color: colors.danger, fontSize: 10, lineHeight: 14 },
   changedFilesDiffRetry: { color: colors.accent, fontSize: 10, fontWeight: '600' },
-  changedFilesDiffText: {
-    color: colors.text,
-    fontSize: 9,
-    lineHeight: 14,
-    fontFamily: 'monospace',
-    paddingHorizontal: 12,
-  },
   messages: { gap: 0 },
   runBody: { marginHorizontal: 10 },
   runDetails: { paddingVertical: 6 },
