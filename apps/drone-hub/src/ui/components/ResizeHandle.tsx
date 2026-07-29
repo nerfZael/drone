@@ -35,6 +35,14 @@ export function UiResizeHandle({
   onResizingChange,
   onReset,
   className,
+  onPointerDown: onPointerDownProp,
+  onPointerMove: onPointerMoveProp,
+  onPointerUp: onPointerUpProp,
+  onPointerCancel: onPointerCancelProp,
+  onLostPointerCapture: onLostPointerCaptureProp,
+  onDoubleClick: onDoubleClickProp,
+  onKeyDown: onKeyDownProp,
+  title,
   ...props
 }: UiResizeHandleProps) {
   const dragRef = React.useRef<{
@@ -44,9 +52,11 @@ export function UiResizeHandle({
     liveValue: number;
   } | null>(null);
   const bodyStyleRef = React.useRef<{ cursor: string; userSelect: string } | null>(null);
+  const onResizingChangeRef = React.useRef(onResizingChange);
   const [resizing, setResizing] = React.useState(false);
   const vertical = orientation === 'vertical';
   const direction = reversed ? -1 : 1;
+  onResizingChangeRef.current = onResizingChange;
 
   const stopResizing = (pointerId: number) => {
     const drag = dragRef.current;
@@ -63,6 +73,9 @@ export function UiResizeHandle({
 
   React.useEffect(
     () => () => {
+      const wasResizing = dragRef.current !== null;
+      dragRef.current = null;
+      if (wasResizing) onResizingChangeRef.current?.(false);
       if (!bodyStyleRef.current) return;
       document.body.style.cursor = bodyStyleRef.current.cursor;
       document.body.style.userSelect = bodyStyleRef.current.userSelect;
@@ -83,6 +96,7 @@ export function UiResizeHandle({
 
   return (
     <div
+      {...props}
       role="separator"
       tabIndex={0}
       aria-label={label}
@@ -91,6 +105,8 @@ export function UiResizeHandle({
       aria-valuemax={max}
       aria-valuenow={Math.round(value)}
       onPointerDown={(event) => {
+        onPointerDownProp?.(event);
+        if (event.defaultPrevented) return;
         if (event.button !== 0 || !event.isPrimary || dragRef.current) return;
         event.preventDefault();
         dragRef.current = {
@@ -110,6 +126,8 @@ export function UiResizeHandle({
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
+        onPointerMoveProp?.(event);
+        if (event.defaultPrevented) return;
         const drag = dragRef.current;
         if (
           !drag ||
@@ -128,16 +146,29 @@ export function UiResizeHandle({
         onValueChange(nextValue);
       }}
       onPointerUp={(event) => {
-        if (dragRef.current?.pointerId !== event.pointerId) return;
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId);
+        if (dragRef.current?.pointerId === event.pointerId) {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+          stopResizing(event.pointerId);
         }
-        stopResizing(event.pointerId);
+        onPointerUpProp?.(event);
       }}
-      onPointerCancel={(event) => stopResizing(event.pointerId)}
-      onLostPointerCapture={(event) => stopResizing(event.pointerId)}
-      onDoubleClick={onReset}
+      onPointerCancel={(event) => {
+        stopResizing(event.pointerId);
+        onPointerCancelProp?.(event);
+      }}
+      onLostPointerCapture={(event) => {
+        stopResizing(event.pointerId);
+        onLostPointerCaptureProp?.(event);
+      }}
+      onDoubleClick={(event) => {
+        onDoubleClickProp?.(event);
+        if (!event.defaultPrevented) onReset?.();
+      }}
       onKeyDown={(event) => {
+        onKeyDownProp?.(event);
+        if (event.defaultPrevented) return;
         const nextValue = valueForKey(event.key);
         if (nextValue === null) return;
         event.preventDefault();
@@ -149,8 +180,10 @@ export function UiResizeHandle({
         vertical ? 'w-2 cursor-col-resize' : 'h-2 cursor-row-resize',
         className,
       )}
-      title={`${label}. Use arrow keys to resize${onReset ? '; double-click to reset' : ''}.`}
-      {...props}
+      title={
+        title ??
+        `${label}. Use arrow keys to resize${onReset ? '; double-click to reset' : ''}.`
+      }
     >
       <span
         className={cn(

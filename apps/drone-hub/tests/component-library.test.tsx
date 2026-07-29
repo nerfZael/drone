@@ -282,11 +282,20 @@ describe('drone hub component library', () => {
         onSelect={() => {}}
       />,
     );
+    const numericTriggerHtml = renderToStaticMarkup(
+      <UiActionMenu
+        label="Numeric options"
+        triggerContent={0}
+        entries={[{ id: 'zero', label: 'Zero' }]}
+        onSelect={() => {}}
+      />,
+    );
 
     expect(panelHtml).not.toContain('rounded-[var(--radius-large)]');
     expect(panelHtml).not.toContain('border-[var(--border-subtle)]');
     expect(menuHtml).toContain('aria-haspopup="menu"');
     expect(menuHtml).toContain('aria-expanded="true"');
     expect(menuHtml).not.toContain('aria-pressed');
+    expect(numericTriggerHtml).toContain('>0</span>');
   });
 });
