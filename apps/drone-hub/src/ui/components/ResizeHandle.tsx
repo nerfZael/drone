@@ -108,6 +108,7 @@ export function UiResizeHandle({
         onPointerDownProp?.(event);
         if (event.defaultPrevented) return;
         if (event.button !== 0 || !event.isPrimary || dragRef.current) return;
+        event.currentTarget.focus();
         event.preventDefault();
         dragRef.current = {
           pointerId: event.pointerId,

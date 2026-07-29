@@ -14,6 +14,7 @@ import {
   UiStatusDot,
   UiTextarea,
   UiToolbarButton,
+  type UiToolbarControlTone,
 } from '../../ui/components';
 import {
   approveWorkflowRun,
@@ -44,6 +45,16 @@ type Props = {
 };
 
 type WorkflowLiveStatus = 'connecting' | 'connected' | 'disconnected';
+
+function workflowRunTone(status: string | undefined): UiToolbarControlTone {
+  if (status === 'completed') return 'success';
+  if (status === 'failed' || status === 'cancelled' || status === 'denied') {
+    return 'danger';
+  }
+  if (status === 'pending_approval') return 'warning';
+  if (status) return 'accent';
+  return 'neutral';
+}
 
 function WorkflowGlyph({
   active = false,
@@ -393,20 +404,10 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
                     onClick={() => setSelectedRunId(run.id)}
                     pressed={selectedRunId === run.id}
                     active={selectedRunId === run.id}
+                    tone={workflowRunTone(run.status)}
                     leadingIcon={
-                      <UiStatusDot
-                        tone={
-                          run.status === 'completed'
-                            ? 'success'
-                            : run.status === 'failed' ||
-                                run.status === 'cancelled' ||
-                                run.status === 'denied'
-                              ? 'danger'
-                              : 'warning'
-                        }
-                      />
+                      <UiStatusDot tone={workflowRunTone(run.status)} />
                     }
-                    className={workflowStatusClass(run.status)}
                     title={`Open run requested ${workflowTimeLabel(run.requestedAt)}`}
                   >
                     <span className="capitalize">{workflowStatusLabel(run.status)}</span>
@@ -497,17 +498,7 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
                     meta={
                       <span className="inline-flex items-center gap-1.5">
                         <UiStatusDot
-                          tone={
-                            latest?.status === 'completed'
-                              ? 'success'
-                              : latest?.status === 'failed' ||
-                                  latest?.status === 'cancelled' ||
-                                  latest?.status === 'denied'
-                                ? 'danger'
-                                : latest
-                                  ? 'warning'
-                                  : 'neutral'
-                          }
+                          tone={workflowRunTone(latest?.status)}
                         />
                         <span
                           className={`rounded px-1.5 py-0.5 ${

@@ -631,6 +631,7 @@ function LiveDroneChangesDock({
   });
   const [explorerWidthPx, setExplorerWidthPx] = React.useState(EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX);
   const [explorerResizing, setExplorerResizing] = React.useState(false);
+  const [splitLayoutWidthPx, setSplitLayoutWidthPx] = React.useState(0);
   const explorerDragRef = React.useRef<{ pointerId: number; startX: number; startWidth: number; liveWidth: number } | null>(
     null,
   );
@@ -1650,9 +1651,12 @@ function LiveDroneChangesDock({
 
   const recomputeExplorerWidth = React.useCallback(() => {
     if (viewMode !== 'split') return;
-    if (explorerDragRef.current || explorerResizing) return;
     const splitWidth = splitLayoutRef.current?.clientWidth ?? 0;
     if (splitWidth <= 0) return;
+    setSplitLayoutWidthPx((current) =>
+      current === splitWidth ? current : splitWidth,
+    );
+    if (explorerDragRef.current || explorerResizing) return;
     const bounds = resolveExplorerSidebarWidthBounds(splitWidth, explorerWidthOptions);
     const rows = flattenVisibleExplorerRows(activeExplorerTree, activeExpandedDirs);
     const autoWidth = clampNumber(
@@ -3195,7 +3199,7 @@ function LiveDroneChangesDock({
     </UiToolbarButton>
   ) : undefined;
   const explorerResizeBounds = resolveExplorerSidebarWidthBounds(
-    splitLayoutRef.current?.clientWidth ?? 0,
+    splitLayoutWidthPx,
     explorerWidthOptions,
   );
 

@@ -3422,6 +3422,7 @@ export function DroneSidebar({
                 label="Sidebar options"
                 icon={<IconMore className="opacity-85" />}
                 entries={sidebarOptionsEntries}
+                portal={false}
                 onSelect={(id) => {
                   if (id === 'dock-side') toggleSidebarDockSide();
                   else if (id === 'recent') setShowRecentDronesOnly((prev) => !prev);

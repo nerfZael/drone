@@ -323,4 +323,25 @@ describe('drone hub component library', () => {
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('aria-controls=');
   });
+
+  test('keeps enabled segmented options keyboard reachable when selection is disabled', () => {
+    const html = renderToStaticMarkup(
+      <UiToolbarSegmentedControl
+        label="Context"
+        value="pull-request"
+        onValueChange={() => {}}
+        options={[
+          { value: 'branch', label: 'Branch' },
+          { value: 'pull-request', label: 'Pull request', disabled: true },
+        ]}
+      />,
+    );
+
+    expect(html).toMatch(
+      /role="radio"[^>]*aria-checked="false"[^>]*tabindex="0"[^>]*>.*Branch/,
+    );
+    expect(html).toMatch(
+      /<button[^>]*disabled=""[^>]*role="radio"[^>]*aria-checked="true"[^>]*tabindex="-1"[^>]*>.*Pull request/,
+    );
+  });
 });
