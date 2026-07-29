@@ -1,10 +1,16 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
+  ChatAgentConfig,
+} from '../../domain';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { RepoRemoteBranchOption } from '../types';
 import type { CreateRuntime, RepoBranchSourceMode } from './drone-create-runtime';
 import { NewDroneTargetControls } from './NewDroneTargetControls';
 import { repoPathLabel } from './repo-path-label';
+import { SegmentedToolbarToggle } from './SegmentedToolbarToggle';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type NewDroneSetupPanelProps = {
@@ -14,6 +20,13 @@ type NewDroneSetupPanelProps = {
   onCreateAsDraftChange: (value: boolean) => void;
   createPersistVolume: boolean;
   onCreatePersistVolumeChange: (value: boolean) => void;
+  spawnAgentPermissionMode: AgentPermissionMode;
+  onSpawnAgentPermissionModeChange: (value: AgentPermissionMode) => void;
+  spawnApprovalPolicy: AgentApprovalPolicy;
+  onSpawnApprovalPolicyChange: (value: AgentApprovalPolicy) => void;
+  spawnAgentApprovalSupported: boolean;
+  spawnAgentReadOnlySupported: boolean;
+  spawnAgentConfig: ChatAgentConfig;
   createRepoMenuEntries: UiMenuSelectEntry[];
   draftCreateRepoPath: string;
   repoBranchSource: RepoBranchSourceMode;
@@ -71,6 +84,13 @@ export function NewDroneSetupPanel({
   onCreateAsDraftChange,
   createPersistVolume,
   onCreatePersistVolumeChange,
+  spawnAgentPermissionMode,
+  onSpawnAgentPermissionModeChange,
+  spawnApprovalPolicy,
+  onSpawnApprovalPolicyChange,
+  spawnAgentApprovalSupported,
+  spawnAgentReadOnlySupported,
+  spawnAgentConfig,
   createRepoMenuEntries,
   draftCreateRepoPath,
   repoBranchSource,
@@ -92,6 +112,10 @@ export function NewDroneSetupPanel({
   );
   const advancedPanelId = React.useId();
   const repositoryLabel = chatHeaderRepoPath ? repoPathLabel(chatHeaderRepoPath) : '';
+  const spawnAgentIsCodex =
+    spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex';
+  const spawnAgentSupportsApprovals =
+    spawnAgentConfig.kind === 'native' || spawnAgentIsCodex;
 
   return (
     <div className="px-1 pb-1">
@@ -143,6 +167,85 @@ export function NewDroneSetupPanel({
           </>
         }
       />
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-[var(--border-subtle)] pb-2">
+        <SegmentedToolbarToggle<AgentPermissionMode>
+          label="Chat access"
+          value={spawnAgentPermissionMode}
+          options={[
+            {
+              value: 'read-only',
+              label: 'Read',
+              title: spawnAgentReadOnlySupported
+                ? 'The default chat can inspect files in a read-only sandbox.'
+                : 'Access controls are available for native, Codex, and Blip.',
+              disabled: !spawnAgentReadOnlySupported,
+            },
+            {
+              value: 'workspace-write',
+              label: 'Write',
+              title: spawnAgentReadOnlySupported
+                ? 'The default chat can write inside the workspace sandbox.'
+                : 'Access controls are available for native, Codex, and Blip.',
+              disabled: !spawnAgentReadOnlySupported,
+            },
+            {
+              value: 'full-access',
+              label: 'Execute',
+              title: 'The default chat can run with full command access.',
+            },
+          ]}
+          onChange={onSpawnAgentPermissionModeChange}
+          disabled={controlsLocked}
+          density="compact"
+        />
+
+        <SegmentedToolbarToggle<AgentApprovalPolicy>
+          label="Approvals"
+          value={spawnApprovalPolicy}
+          options={[
+            {
+              value: 'ask',
+              label: 'Ask first',
+              title: spawnAgentIsCodex
+                ? 'Ask first requires an interactive Codex integration.'
+                : 'Ask before approval-gated commands.',
+              disabled: spawnAgentIsCodex,
+            },
+            ...(spawnAgentIsCodex
+              ? [
+                  {
+                    value: 'agent-decides' as const,
+                    label: 'Agent decides',
+                    title: 'Codex decides when a command needs confirmation.',
+                  },
+                ]
+              : []),
+            {
+              value: 'never',
+              label: 'Allow all',
+              title: 'Run commands without waiting for confirmation.',
+            },
+          ]}
+          onChange={onSpawnApprovalPolicyChange}
+          disabled={controlsLocked || !spawnAgentApprovalSupported}
+          density="compact"
+        />
+
+        {!spawnAgentReadOnlySupported ? (
+          <span className="basis-full text-left text-[var(--text-10)] text-[var(--muted-dim)]">
+            Access controls are available for native, Codex, and Blip.
+          </span>
+        ) : !spawnAgentSupportsApprovals ? (
+          <span className="basis-full text-left text-[var(--text-10)] text-[var(--muted-dim)]">
+            Approval policies are available for native and Codex.
+          </span>
+        ) : spawnAgentSupportsApprovals && spawnAgentPermissionMode !== 'full-access' ? (
+          <span className="basis-full text-left text-[var(--text-10)] text-[var(--muted-dim)]">
+            Approvals become available when Chat access is Execute.
+          </span>
+        ) : null}
+      </div>
 
       {advancedOpen ? (
         <div

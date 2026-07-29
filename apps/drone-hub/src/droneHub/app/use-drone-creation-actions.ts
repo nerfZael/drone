@@ -49,20 +49,12 @@ export type StartDraftPromptOptions = {
 type UseDroneCreationActionsArgs = {
   drones: Array<Pick<DroneSummary, 'id' | 'name' | 'runtime' | 'repoPath' | 'repoAttached' | 'persistVolume'>>;
   creating: boolean;
-  createNameRows: string[];
-  createMessageSuffixRows: string[];
-  createGroup: string;
-  createRepoPath: string;
-  createInitialMessage: string;
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
   pullHostBranchBeforeCreate: boolean;
-  createMode: 'create' | 'clone';
   createRuntime: 'container' | 'host';
   createAsDraft: boolean;
   createPersistVolume: boolean;
-  cloneSourceId: string | null;
-  cloneIncludeChats: boolean;
   spawnAgentKey: string;
   spawnModelForSeed: string | null;
   spawnReasoningForSeed: string | null;
@@ -77,7 +69,6 @@ type UseDroneCreationActionsArgs = {
   startupSeedMissingGraceMs: number;
   suggestCloneName: (sourceName: string) => string;
   resolveAgentKeyToConfig: (key: string) => ChatAgentConfig;
-  queueDrones: (list: any[]) => Promise<QueueDronesResponse>;
   enqueueQueuedPrompt: (
     droneIdRaw: string,
     chatNameRaw: string,
@@ -105,21 +96,10 @@ type UseDroneCreationActionsArgs = {
   rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
   rememberNewDronePreferences: (repoPath: string, preferences: DesktopNewDronePreferences) => void;
   setStartupSeedByDrone: React.Dispatch<React.SetStateAction<StartupSeedMap>>;
-  isValidDroneName: (name: string) => boolean;
-  hasWhitespaceInNameRaw: (nameRaw: string) => boolean;
-  setCreateError: React.Dispatch<React.SetStateAction<string | null>>;
   setCreating: React.Dispatch<React.SetStateAction<boolean>>;
-  setCreateName: React.Dispatch<React.SetStateAction<string>>;
-  setCreateMessageSuffixRows: React.Dispatch<React.SetStateAction<string[]>>;
-  setCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setCreateMode: React.Dispatch<React.SetStateAction<'create' | 'clone'>>;
   setCreateRuntime: React.Dispatch<React.SetStateAction<'container' | 'host'>>;
   setCreateAsDraft: React.Dispatch<React.SetStateAction<boolean>>;
   setCreatePersistVolume: React.Dispatch<React.SetStateAction<boolean>>;
-  setCloneSourceId: React.Dispatch<React.SetStateAction<string | null>>;
-  setCreateGroup: React.Dispatch<React.SetStateAction<string>>;
-  setCreateRepoPath: React.Dispatch<React.SetStateAction<string>>;
-  setCreateInitialMessage: React.Dispatch<React.SetStateAction<string>>;
   setDraftChat: React.Dispatch<React.SetStateAction<any>>;
   setDraftCreateError: React.Dispatch<React.SetStateAction<string | null>>;
   setDraftCreateName: React.Dispatch<React.SetStateAction<string>>;
@@ -145,20 +125,12 @@ type UseDroneCreationActionsArgs = {
 export function useDroneCreationActions({
   drones,
   creating,
-  createNameRows,
-  createMessageSuffixRows,
-  createGroup,
-  createRepoPath,
-  createInitialMessage,
   repoBranchSource,
   repoCreateRemoteBranch,
   pullHostBranchBeforeCreate,
-  createMode,
   createRuntime,
   createAsDraft,
   createPersistVolume,
-  cloneSourceId,
-  cloneIncludeChats,
   spawnAgentKey,
   spawnModelForSeed,
   spawnReasoningForSeed,
@@ -173,7 +145,6 @@ export function useDroneCreationActions({
   startupSeedMissingGraceMs,
   suggestCloneName,
   resolveAgentKeyToConfig,
-  queueDrones,
   enqueueQueuedPrompt,
   requestJson,
   suggestAndRenameDraftDrone,
@@ -181,21 +152,10 @@ export function useDroneCreationActions({
   rememberSeenModels,
   rememberNewDronePreferences,
   setStartupSeedByDrone,
-  isValidDroneName,
-  hasWhitespaceInNameRaw,
-  setCreateError,
   setCreating,
-  setCreateName,
-  setCreateMessageSuffixRows,
-  setCreateOpen,
-  setCreateMode,
   setCreateRuntime,
   setCreateAsDraft,
   setCreatePersistVolume,
-  setCloneSourceId,
-  setCreateGroup,
-  setCreateRepoPath,
-  setCreateInitialMessage,
   setDraftChat,
   setDraftCreateError,
   setDraftCreateName,
@@ -273,7 +233,6 @@ export function useDroneCreationActions({
 
       setCreating(true);
       cloneDronePendingRef.current = true;
-      setCreateError(null);
       const optimisticSeeds = addOptimisticStartupSeeds(setStartupSeedByDrone, [name], {
         runtime: 'container',
         agent: null,
@@ -351,7 +310,6 @@ export function useDroneCreationActions({
       replaceOptimisticStartupSeeds,
       requestJson,
       selectionAnchorRef,
-      setCreateError,
       setCreating,
       setSelectedDrone,
       setSelectedDroneIds,
@@ -372,289 +330,6 @@ export function useDroneCreationActions({
     },
     [queueCloneDrone],
   );
-
-  const createDrone = React.useCallback(async (initialMessageOverride?: string) => {
-    const rowSpecs = createNameRows.map((nameRaw, idx) => ({
-      nameRaw: String(nameRaw ?? ''),
-      name: String(nameRaw ?? '').trim(),
-      messageSuffix: String(createMessageSuffixRows[idx] ?? ''),
-    }));
-    const namedRows = rowSpecs.filter((row) => row.name);
-    const names = namedRows.map((row) => row.name);
-    const group = createGroup.trim();
-    const repoPath = createRepoPath.trim();
-    const seedPrompt = String(initialMessageOverride ?? createInitialMessage).trim();
-    const isClone = createMode === 'clone' && Boolean(cloneSourceId);
-    const runtime = createMode === 'clone' ? 'container' : createRuntime;
-    const persistVolume = runtime === 'container' ? createPersistVolume : undefined;
-    const remoteBranch = repoCreateRemoteBranch.trim();
-    const effectiveRepoBranchSource: RepoBranchSourceMode = runtime === 'host' ? 'host' : repoBranchSource;
-    const repoBranchSelection: RepoBranchSelectionState = {
-      repoBranchSource: effectiveRepoBranchSource,
-      pullHostBranchBeforeCreate,
-      remoteBranch,
-    };
-    const seedAgent = isClone && cloneIncludeChats ? null : resolveAgentKeyToConfig(spawnAgentKey);
-    const seedModel = isClone && cloneIncludeChats ? null : spawnModelForSeed;
-    const seedReasoning = isClone && cloneIncludeChats ? null : spawnReasoningForSeed;
-    const seedAgentPermissionMode: AgentPermissionMode = seedAgent ? spawnAgentPermissionMode : 'full-access';
-    const seedApprovalPolicy: AgentApprovalPolicy = seedAgent
-      ? seedAgent.kind === 'builtin' &&
-        seedAgent.id === 'codex' &&
-        spawnApprovalPolicy === 'ask'
-        ? 'agent-decides'
-        : spawnApprovalPolicy
-      : 'ask';
-    if (runtime === 'host' && seedAgent?.kind === 'custom') {
-      setCreateError('Host runtime currently supports builtin agents only.');
-      return;
-    }
-    if (
-      seedAgentPermissionMode !== 'full-access' &&
-      !(
-        seedAgent?.kind === 'native' ||
-        (seedAgent?.kind === 'builtin' &&
-          (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
-      )
-    ) {
-      setCreateError('Agent access controls are available for native, Codex, and Blip chats.');
-      return;
-    }
-    if (names.length === 0) {
-      setCreateError('At least one name is required.');
-      return;
-    }
-
-    const invalid = Array.from(
-      new Set(
-        namedRows
-          .filter((row) => hasWhitespaceInNameRaw(row.nameRaw) || !isValidDroneName(row.name))
-          .map((row) => row.name),
-      ),
-    );
-    if (invalid.length > 0) {
-      const preview = invalid.slice(0, 4).join(', ');
-      const extra = invalid.length > 4 ? ` (+${invalid.length - 4} more)` : '';
-      setCreateError(
-        `Invalid name(s): ${preview}${extra}. Use dash-case (letters/numbers and single hyphens), no spaces, max 48 chars.`,
-      );
-      return;
-    }
-
-    const nameCounts = new Map<string, number>();
-    for (const name of names) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
-    const duplicates = Array.from(nameCounts.entries())
-      .filter(([, count]) => count > 1)
-      .map(([name]) => name);
-    if (duplicates.length > 0) {
-      const preview = duplicates.slice(0, 4).join(', ');
-      const extra = duplicates.length > 4 ? ` (+${duplicates.length - 4} more)` : '';
-      setCreateError(`Duplicate name(s) in list: ${preview}${extra}.`);
-      return;
-    }
-    if (repoPath && !isClone && repoBranchSelection.repoBranchSource === 'remote' && !repoBranchSelection.remoteBranch) {
-      setCreateError('Choose a remote branch before creating a repo drone from a remote branch.');
-      return;
-    }
-
-    setCreating(true);
-    setCreateError(null);
-    const optimisticSeeds = addOptimisticStartupSeeds(
-      setStartupSeedByDrone,
-      namedRows.map((row) => row.name),
-      {
-        runtime,
-        agent: seedAgent,
-        model: seedModel,
-        reasoning: seedReasoning,
-        agentPermissionMode: seedAgentPermissionMode,
-        approvalPolicy: seedApprovalPolicy,
-        prompt: seedPrompt,
-        chatName: 'default',
-        group,
-        repoPath,
-      },
-    );
-    try {
-      const resp = await queueDrones(
-        namedRows.map(({ name, messageSuffix }) => {
-          const suffix = messageSuffix.trim();
-          const combinedSeedPrompt = [seedPrompt || null, suffix || null]
-            .filter((part) => typeof part === 'string' && part.trim().length > 0)
-            .join('\n\n');
-          return {
-            name,
-            runtime,
-            ...(createAsDraft ? { draft: true } : {}),
-            ...(group ? { group } : {}),
-            ...(repoPath ? { repoPath } : {}),
-            ...(typeof persistVolume === 'boolean' ? { persistVolume } : {}),
-            pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
-            repoBranchSource: repoBranchSelection.repoBranchSource,
-            ...(repoBranchSelection.repoBranchSource === 'remote' && repoBranchSelection.remoteBranch
-              ? { remoteBranch: repoBranchSelection.remoteBranch }
-              : {}),
-            ...(isClone && cloneSourceId
-              ? { cloneFrom: cloneSourceId, cloneChats: Boolean(cloneIncludeChats) }
-              : {}),
-            seedChat: 'default',
-            ...(seedAgent ? { seedAgent } : {}),
-            ...(seedModel ? { seedModel } : {}),
-            ...(seedReasoning ? { seedReasoning } : {}),
-            ...(seedAgentPermissionMode !== 'full-access' ? { seedAgentPermissionMode } : {}),
-            ...(seedApprovalPolicy !== 'ask'
-              ? { seedApprovalPolicy }
-              : {}),
-            ...(combinedSeedPrompt ? { seedPrompt: combinedSeedPrompt } : {}),
-            ...(combinedSeedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),
-          };
-        }),
-      );
-
-      const acceptedList = Array.isArray(resp?.accepted) ? resp.accepted : [];
-      const acceptedByName = new Map<string, { id: string; name: string }>();
-      const acceptedNames = new Set<string>();
-      for (const a of acceptedList) {
-        const id = String((a as any)?.id ?? '').trim();
-        const name = String((a as any)?.name ?? '').trim();
-        if (!id || !name) continue;
-        acceptedByName.set(name, { id, name });
-        acceptedNames.add(name);
-      }
-      const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
-
-      if (acceptedByName.size > 0 && !isClone) {
-        rememberNewDronePreferences(repoPath, {
-          mode: 'with-chat',
-          runtime,
-          createAsDraft,
-          persistVolume: persistVolume === true,
-          spawnAgentKey,
-          spawnModel: String(spawnModelForSeed ?? '').trim(),
-          spawnReasoning: String(spawnReasoningForSeed ?? '').trim(),
-          spawnAgentPermissionMode,
-          spawnApprovalPolicy: seedApprovalPolicy,
-          repoBranchSource: repoBranchSelection.repoBranchSource,
-          repoCreateRemoteBranch: repoBranchSelection.remoteBranch ?? '',
-          pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
-        });
-      }
-      if (acceptedByName.size > 0) {
-        if (seedModel) rememberSeenModels([seedModel]);
-        replaceOptimisticStartupSeeds(setStartupSeedByDrone, Array.from(optimisticSeeds), Array.from(acceptedByName.values()), {
-          runtime,
-          agent: seedAgent,
-          model: seedModel,
-          reasoning: seedReasoning,
-          agentPermissionMode: seedAgentPermissionMode,
-          approvalPolicy: seedApprovalPolicy,
-          prompt: seedPrompt,
-          chatName: 'default',
-          group,
-          repoPath,
-        });
-      } else {
-        clearOptimisticStartupSeeds(setStartupSeedByDrone, optimisticSeeds);
-      }
-
-      const firstAccepted = acceptedList.length > 0 ? acceptedList[0] : null;
-      const firstAcceptedId = String((firstAccepted as any)?.id ?? '').trim();
-      if (firstAcceptedId) {
-        preferredSelectedDroneRef.current = firstAcceptedId;
-        preferredSelectedDroneHoldUntilRef.current = Date.now() + startupSeedMissingGraceMs;
-        setSelectedDrone(firstAcceptedId);
-        setSelectedDroneIds([firstAcceptedId]);
-        selectionAnchorRef.current = firstAcceptedId;
-      }
-
-      if (rejected.length > 0) {
-        const byName = new Map<string, string>();
-        for (const r of rejected) {
-          const name = String((r as any)?.name ?? '').trim();
-          if (!name) continue;
-          byName.set(name, String((r as any)?.error ?? 'Failed to queue drone.'));
-        }
-        const pendingRows = namedRows.filter((row) => !acceptedNames.has(row.name));
-        setCreateName(pendingRows.map((row) => row.name).join('\n'));
-        setCreateMessageSuffixRows(pendingRows.map((row) => row.messageSuffix));
-
-        const pendingNames = pendingRows.map((row) => row.name);
-        const topErrors = pendingNames
-          .slice(0, 4)
-          .map((name) => `${name}: ${byName.get(name) ?? 'Failed to queue drone.'}`)
-          .join('\n');
-        const hiddenCount = Math.max(0, pendingNames.length - 4);
-        const moreText = hiddenCount > 0 ? `\n(+${hiddenCount} more)` : '';
-        const queuedText = acceptedNames.size > 0 ? `${acceptedNames.size} queued. ` : '';
-        setCreateError(`${queuedText}${pendingNames.length} failed:\n${topErrors}${moreText}`);
-        return;
-      }
-
-      setCreateOpen(false);
-      setCreateMode('create');
-      setCreateRuntime('container');
-      setCreateAsDraft(false);
-      setCreatePersistVolume(false);
-      setCloneSourceId(null);
-      setCreateName('');
-      setCreateGroup('');
-      setCreateRepoPath('');
-      setCreateInitialMessage('');
-      setCreateMessageSuffixRows(['']);
-    } catch (e: any) {
-      clearOptimisticStartupSeeds(setStartupSeedByDrone, optimisticSeeds);
-      setCreateError(e?.message ?? String(e));
-    } finally {
-      setCreating(false);
-    }
-  }, [
-    cloneIncludeChats,
-    cloneSourceId,
-    createGroup,
-    createInitialMessage,
-    createMessageSuffixRows,
-    createMode,
-    createRuntime,
-    createAsDraft,
-    createPersistVolume,
-    createNameRows,
-    createRepoPath,
-    addOptimisticStartupSeeds,
-    clearOptimisticStartupSeeds,
-    pullHostBranchBeforeCreate,
-    repoBranchSource,
-    repoCreateRemoteBranch,
-    hasWhitespaceInNameRaw,
-    isValidDroneName,
-    preferredSelectedDroneHoldUntilRef,
-    preferredSelectedDroneRef,
-    queueDrones,
-    rememberSeenModels,
-    replaceOptimisticStartupSeeds,
-    resolveAgentKeyToConfig,
-    selectionAnchorRef,
-    setCloneSourceId,
-    setCreateError,
-    setCreateGroup,
-    setCreateInitialMessage,
-    setCreateMessageSuffixRows,
-    setCreateAsDraft,
-    setCreateMode,
-    setCreatePersistVolume,
-    setCreateRuntime,
-    setCreateName,
-    setCreateOpen,
-    setCreateRepoPath,
-    setCreating,
-    setSelectedDrone,
-    setSelectedDroneIds,
-    spawnAgentKey,
-    spawnAgentPermissionMode,
-    spawnApprovalPolicy,
-    spawnModelForSeed,
-    spawnReasoningForSeed,
-    startupSeedMissingGraceMs,
-  ]);
 
   const createDroneFromDraft = React.useCallback(
     async (opts?: {
@@ -1078,7 +753,6 @@ export function useDroneCreationActions({
   return {
     cloneDrone,
     cloneDroneWithoutSelection,
-    createDrone,
     createDroneFromDraft,
     queueDraftPromptDuringCreate,
     startDraftPrompt,

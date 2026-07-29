@@ -1,26 +1,16 @@
 import { create } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
-type CreateMode = 'create' | 'clone';
 type CreateRuntime = 'container' | 'host';
 type DraftCreateMode = 'with-chat' | 'without-chat';
 
 type Updater<T> = T | ((prev: T) => T);
 
 type CreateDraftWorkflowState = {
-  createOpen: boolean;
   creating: boolean;
-  createMode: CreateMode;
   createRuntime: CreateRuntime;
   createAsDraft: boolean;
   createPersistVolume: boolean;
-  cloneSourceId: string | null;
-  cloneIncludeChats: boolean;
-  createError: string | null;
-  createGroup: string;
-  createRepoPath: string;
-  createInitialMessage: string;
-  createRepoMenuOpen: boolean;
   draftCreateOpen: boolean;
   draftCreateMode: DraftCreateMode;
   draftCreateName: string;
@@ -32,19 +22,10 @@ type CreateDraftWorkflowState = {
   draftNameSuggesting: boolean;
   draftSuggestedName: string;
   draftNameSuggestionError: string | null;
-  setCreateOpen: (next: Updater<boolean>) => void;
   setCreating: (next: Updater<boolean>) => void;
-  setCreateMode: (next: Updater<CreateMode>) => void;
   setCreateRuntime: (next: Updater<CreateRuntime>) => void;
   setCreateAsDraft: (next: Updater<boolean>) => void;
   setCreatePersistVolume: (next: Updater<boolean>) => void;
-  setCloneSourceId: (next: Updater<string | null>) => void;
-  setCloneIncludeChats: (next: Updater<boolean>) => void;
-  setCreateError: (next: Updater<string | null>) => void;
-  setCreateGroup: (next: Updater<string>) => void;
-  setCreateRepoPath: (next: Updater<string>) => void;
-  setCreateInitialMessage: (next: Updater<string>) => void;
-  setCreateRepoMenuOpen: (next: Updater<boolean>) => void;
   setDraftCreateOpen: (next: Updater<boolean>) => void;
   setDraftCreateMode: (next: Updater<DraftCreateMode>) => void;
   setDraftCreateName: (next: Updater<string>) => void;
@@ -63,19 +44,10 @@ function resolveNext<T>(prev: T, next: Updater<T>): T {
 }
 
 const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
-  createOpen: false,
   creating: false,
-  createMode: 'create',
   createRuntime: 'container',
   createAsDraft: false,
   createPersistVolume: false,
-  cloneSourceId: null,
-  cloneIncludeChats: true,
-  createError: null,
-  createGroup: '',
-  createRepoPath: '',
-  createInitialMessage: '',
-  createRepoMenuOpen: false,
   draftCreateOpen: false,
   draftCreateMode: 'with-chat',
   draftCreateName: '',
@@ -87,19 +59,10 @@ const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
   draftNameSuggesting: false,
   draftSuggestedName: '',
   draftNameSuggestionError: null,
-  setCreateOpen: (next) => set((s) => ({ createOpen: resolveNext(s.createOpen, next) })),
   setCreating: (next) => set((s) => ({ creating: resolveNext(s.creating, next) })),
-  setCreateMode: (next) => set((s) => ({ createMode: resolveNext(s.createMode, next) })),
   setCreateRuntime: (next) => set((s) => ({ createRuntime: resolveNext(s.createRuntime, next) })),
   setCreateAsDraft: (next) => set((s) => ({ createAsDraft: resolveNext(s.createAsDraft, next) })),
   setCreatePersistVolume: (next) => set((s) => ({ createPersistVolume: resolveNext(s.createPersistVolume, next) })),
-  setCloneSourceId: (next) => set((s) => ({ cloneSourceId: resolveNext(s.cloneSourceId, next) })),
-  setCloneIncludeChats: (next) => set((s) => ({ cloneIncludeChats: resolveNext(s.cloneIncludeChats, next) })),
-  setCreateError: (next) => set((s) => ({ createError: resolveNext(s.createError, next) })),
-  setCreateGroup: (next) => set((s) => ({ createGroup: resolveNext(s.createGroup, next) })),
-  setCreateRepoPath: (next) => set((s) => ({ createRepoPath: resolveNext(s.createRepoPath, next) })),
-  setCreateInitialMessage: (next) => set((s) => ({ createInitialMessage: resolveNext(s.createInitialMessage, next) })),
-  setCreateRepoMenuOpen: (next) => set((s) => ({ createRepoMenuOpen: resolveNext(s.createRepoMenuOpen, next) })),
   setDraftCreateOpen: (next) => set((s) => ({ draftCreateOpen: resolveNext(s.draftCreateOpen, next) })),
   setDraftCreateMode: (next) => set((s) => ({ draftCreateMode: resolveNext(s.draftCreateMode, next) })),
   setDraftCreateName: (next) => set((s) => ({ draftCreateName: resolveNext(s.draftCreateName, next) })),
@@ -117,19 +80,10 @@ const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
 export function useCreateDraftWorkflowState() {
   return useCreateDraftWorkflowStore(
     useShallow((s) => ({
-      createOpen: s.createOpen,
       creating: s.creating,
-      createMode: s.createMode,
       createRuntime: s.createRuntime,
       createAsDraft: s.createAsDraft,
       createPersistVolume: s.createPersistVolume,
-      cloneSourceId: s.cloneSourceId,
-      cloneIncludeChats: s.cloneIncludeChats,
-      createError: s.createError,
-      createGroup: s.createGroup,
-      createRepoPath: s.createRepoPath,
-      createInitialMessage: s.createInitialMessage,
-      createRepoMenuOpen: s.createRepoMenuOpen,
       draftCreateOpen: s.draftCreateOpen,
       draftCreateMode: s.draftCreateMode,
       draftCreateName: s.draftCreateName,
@@ -141,19 +95,10 @@ export function useCreateDraftWorkflowState() {
       draftNameSuggesting: s.draftNameSuggesting,
       draftSuggestedName: s.draftSuggestedName,
       draftNameSuggestionError: s.draftNameSuggestionError,
-      setCreateOpen: s.setCreateOpen,
       setCreating: s.setCreating,
-      setCreateMode: s.setCreateMode,
       setCreateRuntime: s.setCreateRuntime,
       setCreateAsDraft: s.setCreateAsDraft,
       setCreatePersistVolume: s.setCreatePersistVolume,
-      setCloneSourceId: s.setCloneSourceId,
-      setCloneIncludeChats: s.setCloneIncludeChats,
-      setCreateError: s.setCreateError,
-      setCreateGroup: s.setCreateGroup,
-      setCreateRepoPath: s.setCreateRepoPath,
-      setCreateInitialMessage: s.setCreateInitialMessage,
-      setCreateRepoMenuOpen: s.setCreateRepoMenuOpen,
       setDraftCreateOpen: s.setDraftCreateOpen,
       setDraftCreateMode: s.setDraftCreateMode,
       setDraftCreateName: s.setDraftCreateName,

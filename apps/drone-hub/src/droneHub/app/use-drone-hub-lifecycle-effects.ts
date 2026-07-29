@@ -28,8 +28,6 @@ type LlmSettingsLike =
   | undefined;
 
 type UseDroneHubLifecycleEffectsArgs = {
-  normalizeCreateRepoPath: (candidate: string) => string;
-  setCreateRepoPath: Setter<string>;
   terminalMenuRef: React.RefObject<HTMLDivElement | null>;
   terminalMenuOpen: boolean;
   setTerminalMenuOpen: Setter<boolean>;
@@ -48,9 +46,6 @@ type UseDroneHubLifecycleEffectsArgs = {
   openGroupMultiChat: (group: string) => void;
   openSidebarVisibleMultiChat: () => void;
   toggleVoiceClipboardRecording: () => boolean;
-  createOpen: boolean;
-  setCreateRepoMenuOpen: Setter<boolean>;
-  createNameRef: React.RefObject<HTMLInputElement | null>;
   draftCreateOpen: boolean;
   draftCreateNameRef: React.RefObject<HTMLInputElement | null>;
   draftChat: DraftChatState | null;
@@ -96,8 +91,6 @@ type UseDroneHubLifecycleEffectsArgs = {
 };
 
 export function useDroneHubLifecycleEffects({
-  normalizeCreateRepoPath,
-  setCreateRepoPath,
   terminalMenuRef,
   terminalMenuOpen,
   setTerminalMenuOpen,
@@ -116,9 +109,6 @@ export function useDroneHubLifecycleEffects({
   openGroupMultiChat,
   openSidebarVisibleMultiChat,
   toggleVoiceClipboardRecording,
-  createOpen,
-  setCreateRepoMenuOpen,
-  createNameRef,
   draftCreateOpen,
   draftCreateNameRef,
   draftChat,
@@ -165,13 +155,6 @@ export function useDroneHubLifecycleEffects({
   const outputScrollContextRef = React.useRef<string>('');
   useDropdownDismiss(terminalMenuRef, terminalMenuOpen, setTerminalMenuOpen);
   useDropdownDismiss(headerOverflowRef, headerOverflowOpen, setHeaderOverflowOpen);
-
-  React.useEffect(() => {
-    setCreateRepoPath((prev) => {
-      const next = normalizeCreateRepoPath(prev);
-      return next === prev ? prev : next;
-    });
-  }, [normalizeCreateRepoPath, setCreateRepoPath]);
 
   React.useEffect(() => {
     if (!droneErrorModal) return;
@@ -452,21 +435,6 @@ export function useDroneHubLifecycleEffects({
     onMarkSelectedDronesUnreadShortcut,
     toggleVoiceClipboardRecording,
   ]);
-
-  React.useEffect(() => {
-    if (!createOpen) {
-      setCreateRepoMenuOpen(false);
-      return;
-    }
-    setCreateRepoMenuOpen(false);
-    const id = requestAnimationFrame(() => {
-      const el = createNameRef.current;
-      if (!el) return;
-      el.focus();
-      el.select();
-    });
-    return () => cancelAnimationFrame(id);
-  }, [createOpen, createNameRef, setCreateRepoMenuOpen]);
 
   React.useEffect(() => {
     if (!draftCreateOpen) return;
