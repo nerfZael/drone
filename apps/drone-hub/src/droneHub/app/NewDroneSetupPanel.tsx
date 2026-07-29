@@ -264,6 +264,10 @@ export function NewDroneSetupPanel({
           <span className="basis-full text-left text-[var(--text-10)] text-[var(--muted-dim)]">
             Approval policies are available for native and Codex.
           </span>
+        ) : spawnAgentPermissionMode !== 'full-access' ? (
+          <span className="basis-full text-left text-[var(--text-10)] text-[var(--muted-dim)]">
+            Approvals are available when Access is Execute.
+          </span>
         ) : null}
       </div>
 

@@ -50,6 +50,20 @@ describe('sidebar group draft location', () => {
       siblingNames: ['Alpha', 'Beta', 'Untitled 1'],
     });
   });
+
+  test('allocates names around known groups that are not currently visible', () => {
+    expect(
+      resolveSidebarGroupDraftLocation(
+        'Alpha',
+        visibleFolderPaths,
+        null,
+        new Set(['Alpha/Untitled 2']),
+      ),
+    ).toEqual({
+      parentPath: 'Alpha',
+      siblingNames: ['Untitled 1', 'Nested', 'Untitled 2'],
+    });
+  });
 });
 
 describe('sidebar drone draft location', () => {
@@ -84,6 +98,40 @@ describe('sidebar drone draft location', () => {
     ).toEqual({
       group: 'Beta',
       repoPath: '/repos/example',
+    });
+  });
+
+  test('does not create a drone inside a hidden selected group', () => {
+    expect(
+      resolveSidebarDroneDraftLocation({
+        selectedFolderPath: null,
+        visibleFolderPaths,
+        selectedDrone: {
+          group: 'Hidden',
+          repoAttached: true,
+          repoPath: '/repos/example',
+        },
+      }),
+    ).toEqual({
+      group: '',
+      repoPath: '/repos/example',
+    });
+  });
+
+  test('does not reuse a stale repo path from a detached selected drone', () => {
+    expect(
+      resolveSidebarDroneDraftLocation({
+        selectedFolderPath: null,
+        visibleFolderPaths,
+        selectedDrone: {
+          group: 'Beta',
+          repoAttached: false,
+          repoPath: '/repos/stale',
+        },
+        fallbackRepoPath: '/repos/fallback',
+      }),
+    ).toEqual({
+      group: 'Beta',
     });
   });
 

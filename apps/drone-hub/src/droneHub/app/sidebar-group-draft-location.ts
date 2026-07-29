@@ -13,8 +13,17 @@ export function resolveSidebarGroupDraftLocation(
   selectedFolderPathRaw: string | null,
   visibleFolderPaths: Iterable<string>,
   selectedDroneGroupRaw?: string | null,
+  knownFolderPaths: Iterable<string> = visibleFolderPaths,
 ): SidebarGroupDraftLocation {
   const paths = Array.from(visibleFolderPaths, (path) => String(path ?? '').trim()).filter(Boolean);
+  const additionalKnownPaths =
+    knownFolderPaths === visibleFolderPaths
+      ? []
+      : Array.from(
+          knownFolderPaths,
+          (path) => String(path ?? '').trim(),
+        ).filter(Boolean);
+  const knownPaths = Array.from(new Set([...paths, ...additionalKnownPaths]));
   const visiblePathSet = new Set(paths);
   const selectedFolderPath = String(selectedFolderPathRaw ?? '').trim();
   const selectedDroneGroupRawValue = String(selectedDroneGroupRaw ?? '').trim();
@@ -30,7 +39,7 @@ export function resolveSidebarGroupDraftLocation(
 
   return {
     parentPath,
-    siblingNames: paths
+    siblingNames: knownPaths
       .filter((path) => sidebarGroupParentPath(path) === parentPath)
       .map(sidebarGroupBaseName),
   };
@@ -46,6 +55,7 @@ export function resolveSidebarDroneDraftLocation(args: {
   visibleFolderPaths: Iterable<string>;
   selectedDrone?: {
     group?: string | null;
+    repoAttached?: boolean;
     repoPath?: string | null;
   } | null;
   fallbackRepoPath?: string | null;
@@ -61,10 +71,17 @@ export function resolveSidebarDroneDraftLocation(args: {
   const group =
     selectedFolderPath && visibleFolderPathSet.has(selectedFolderPath)
       ? selectedFolderPath
-      : selectedDroneGroup;
-  const repoPath =
-    String(args.selectedDrone?.repoPath ?? '').trim() ||
-    String(args.fallbackRepoPath ?? '').trim();
+      : selectedDroneGroup && visibleFolderPathSet.has(selectedDroneGroup)
+        ? selectedDroneGroup
+        : '';
+  const selectedDroneRepoPath = String(args.selectedDrone?.repoPath ?? '').trim();
+  const selectedDroneRepoAttached =
+    args.selectedDrone?.repoAttached ?? Boolean(selectedDroneRepoPath);
+  const repoPath = args.selectedDrone
+    ? selectedDroneRepoAttached
+      ? selectedDroneRepoPath
+      : ''
+    : String(args.fallbackRepoPath ?? '').trim();
 
   return {
     group,

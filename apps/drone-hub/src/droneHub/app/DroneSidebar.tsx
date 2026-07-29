@@ -2321,6 +2321,7 @@ export function DroneSidebar({
       selectedFolderPath,
       visibleSidebarFolderPathSet,
       selectedCreateContextDrone?.group,
+      Object.keys(sidebarGroupCreatedAtByName),
     );
     openFolderCreate(draftLocation.parentPath, {
       repoGroupPath: activeRepositoryNavigationItem?.id ?? null,
@@ -2338,6 +2339,7 @@ export function DroneSidebar({
     selectedCreateContextDrone,
     selectedFolderPath,
     sidebarCapabilities.headerActions,
+    sidebarGroupCreatedAtByName,
     setSidebarCollapsed,
     visibleSidebarFolderPathSet,
   ]);

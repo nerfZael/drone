@@ -1038,6 +1038,10 @@ export function NewDroneScreen({
                     <Text style={styles.helper}>
                       Approval policies are available for native and Codex.
                     </Text>
+                  ) : agentPermissionMode !== 'full-access' ? (
+                    <Text style={styles.helper}>
+                      Approvals are available when Access is Execute.
+                    </Text>
                   ) : approvalSupported && agent === 'codex' ? (
                     <Text style={styles.helper}>
                       Ask requires interactive Codex approvals. Decide for me uses Codex

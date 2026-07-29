@@ -60,4 +60,19 @@ describe('sidebar inline group editor', () => {
     expect(cardSource).toContain('setInlineRenameValue(shownName)');
     expect(cardSource).toContain('setInlineRenameOpen(true)');
   });
+
+  test('keeps failed inline drone renames visible', () => {
+    const cardSource = readFileSync(
+      new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
+      'utf8',
+    );
+    const inlineRenameInput = cardSource.slice(
+      cardSource.indexOf('{inlineRenameOpen ? ('),
+      cardSource.indexOf(') : (', cardSource.indexOf('{inlineRenameOpen ? (')),
+    );
+
+    expect(inlineRenameInput).toContain('if (inlineRenamePending) return');
+    expect(cardSource).toContain('showInlineRenameError');
+    expect(cardSource).toContain('role="alert"');
+  });
 });

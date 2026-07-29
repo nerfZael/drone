@@ -461,6 +461,10 @@ export const DroneCard = React.memo(function DroneCard({
   const stopActionPressPropagation = (e: React.SyntheticEvent) => {
     e.stopPropagation();
   };
+  const showInlineRenameError = (message: string) => {
+    setInlineRenameError(message);
+    window.requestAnimationFrame(() => inlineRenameInputRef.current?.focus());
+  };
   const submitInlineRename = async () => {
     if (!onRename || inlineRenamePending) return;
     const nextName = inlineRenameValue.trim();
@@ -486,12 +490,14 @@ export const DroneCard = React.memo(function DroneCard({
           typeof result === 'object' && result !== null && 'error' in result
             ? String(result.error ?? '').trim()
             : '';
-        setInlineRenameError(error || 'Rename failed.');
+        showInlineRenameError(error || 'Rename failed.');
         return;
       }
       setInlineRenameOpen(false);
     } catch (error: any) {
-      setInlineRenameError(String(error?.message ?? error ?? '').trim() || 'Rename failed.');
+      showInlineRenameError(
+        String(error?.message ?? error ?? '').trim() || 'Rename failed.',
+      );
     } finally {
       setInlineRenamePending(false);
     }
@@ -598,6 +604,7 @@ export const DroneCard = React.memo(function DroneCard({
                   setInlineRenameError(null);
                 }}
                 onBlur={() => {
+                  if (inlineRenamePending) return;
                   setInlineRenameOpen(false);
                   setInlineRenameError(null);
                 }}
@@ -611,6 +618,7 @@ export const DroneCard = React.memo(function DroneCard({
                     void submitInlineRename();
                   } else if (event.key === 'Escape') {
                     event.preventDefault();
+                    if (inlineRenamePending) return;
                     setInlineRenameOpen(false);
                     setInlineRenameError(null);
                   }
@@ -646,7 +654,15 @@ export const DroneCard = React.memo(function DroneCard({
             data-sidebar-drone-metadata="true"
             className="flex min-w-0 items-center gap-1.5 text-[.5625rem] font-normal leading-none text-[var(--sidebar-meta-fg)]"
           >
-            {isDraftDrone ? (
+            {inlineRenameError ? (
+              <span
+                role="alert"
+                className="min-w-0 truncate text-[var(--red)]"
+                title={inlineRenameError}
+              >
+                {inlineRenameError}
+              </span>
+            ) : isDraftDrone ? (
               <span
                 className="inline-flex flex-shrink-0 items-center rounded-[3px] bg-[var(--accent-subtle)] px-1.5 py-[3px] font-[var(--weight-semibold)] normal-case tracking-[0.02em] text-[var(--accent)]"
                 style={{ fontFamily: 'var(--display)' }}
