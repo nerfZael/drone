@@ -11,6 +11,18 @@ describe('mobile changed files tree', () => {
       new URL('../src/local-assistant/LocalAssistantTranscript.tsx', import.meta.url),
       'utf8',
     );
+    const reviewSource = readFileSync(
+      new URL('../src/local-assistant/MobileChangedFilesReviewModal.tsx', import.meta.url),
+      'utf8',
+    );
+    const browserSource = readFileSync(
+      new URL('../src/local-assistant/MobileChangedFilesBrowser.tsx', import.meta.url),
+      'utf8',
+    );
+    const diffSource = readFileSync(
+      new URL('../src/local-assistant/MobileChangedFilesDiff.tsx', import.meta.url),
+      'utf8',
+    );
 
     expect(treeSource).toContain('buildAgentRunChangeTree(entries)');
     expect(treeSource).toContain("node.kind === 'file'");
@@ -18,5 +30,13 @@ describe('mobile changed files tree', () => {
     expect(treeSource).toMatch(/\{collapsed \? \(\s*<View style=\{\[styles\.stats/);
     expect(transcriptSource).toContain('<MobileChangedFilesTree');
     expect(transcriptSource).toContain('{name}');
+    expect(transcriptSource).toContain('<MobileChangedFilesReviewModal');
+    expect(transcriptSource).not.toContain('diff.patch.slice');
+    expect(reviewSource).toContain('<MobileChangedFilesBrowser');
+    expect(reviewSource).toContain('<MobileChangedFilesDiff');
+    expect(reviewSource).toContain('Previous');
+    expect(reviewSource).toContain('Next');
+    expect(browserSource).toContain('<MobileChangedFilesTree');
+    expect(diffSource).toContain('<DiffLine');
   });
 });
