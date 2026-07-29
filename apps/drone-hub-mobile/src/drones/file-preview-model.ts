@@ -1,6 +1,7 @@
 import type { MobileDroneSummary } from './drone-sidebar-model';
 
 export type MobileFilePreviewKind = 'text' | 'image' | 'video' | 'binary';
+export type MobileHtmlPreviewMode = 'rendered' | 'source';
 
 export type MobileFilePreview = {
   path: string;
@@ -100,6 +101,38 @@ export function isMarkdownPreview(path: string, mime: string): boolean {
   );
 }
 
+export function isHtmlPreview(path: string, mime: string): boolean {
+  const normalizedMime = String(mime ?? '')
+    .trim()
+    .toLowerCase();
+  return (
+    /\.(?:html?|xhtml)$/i.test(mobileFileName(path)) ||
+    normalizedMime === 'text/html' ||
+    normalizedMime === 'application/xhtml+xml' ||
+    normalizedMime.startsWith('text/html;') ||
+    normalizedMime.startsWith('application/xhtml+xml;')
+  );
+}
+
+export function isRenderedHtmlPreviewAvailable(platform: string): boolean {
+  return platform === 'android' || platform === 'ios';
+}
+
+export function mobileHtmlPreviewMode({
+  path,
+  mime,
+  renderingAvailable,
+  selection,
+}: {
+  path: string;
+  mime: string;
+  renderingAvailable: boolean;
+  selection: { path: string; mode: MobileHtmlPreviewMode } | null;
+}): MobileHtmlPreviewMode {
+  if (!renderingAvailable || !isHtmlPreview(path, mime)) return 'source';
+  return selection?.path === path ? selection.mode : 'rendered';
+}
+
 const PLAIN_TEXT_EXTENSIONS = new Set(['txt', 'log', 'csv', 'tsv']);
 
 export function isCodePreview(path: string, mime: string): boolean {
@@ -117,6 +150,8 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   avif: 'image/avif',
   bmp: 'image/bmp',
   gif: 'image/gif',
+  htm: 'text/html',
+  html: 'text/html',
   ico: 'image/x-icon',
   jpeg: 'image/jpeg',
   jpg: 'image/jpeg',
@@ -135,6 +170,7 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   webm: 'video/webm',
   webp: 'image/webp',
   wmv: 'video/x-ms-wmv',
+  xhtml: 'application/xhtml+xml',
 };
 
 export function inferMobilePreviewMime(path: string): string {
