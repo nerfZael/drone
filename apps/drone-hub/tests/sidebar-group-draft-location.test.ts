@@ -87,6 +87,40 @@ describe('sidebar drone draft location', () => {
     });
   });
 
+  test('does not create a drone inside a hidden selected group', () => {
+    expect(
+      resolveSidebarDroneDraftLocation({
+        selectedFolderPath: null,
+        visibleFolderPaths,
+        selectedDrone: {
+          group: 'Hidden',
+          repoAttached: true,
+          repoPath: '/repos/example',
+        },
+      }),
+    ).toEqual({
+      group: '',
+      repoPath: '/repos/example',
+    });
+  });
+
+  test('does not reuse a stale repo path from a detached selected drone', () => {
+    expect(
+      resolveSidebarDroneDraftLocation({
+        selectedFolderPath: null,
+        visibleFolderPaths,
+        selectedDrone: {
+          group: 'Beta',
+          repoAttached: false,
+          repoPath: '/repos/stale',
+        },
+        fallbackRepoPath: '/repos/fallback',
+      }),
+    ).toEqual({
+      group: 'Beta',
+    });
+  });
+
   test('falls back to the active repository at the root', () => {
     expect(
       resolveSidebarDroneDraftLocation({
