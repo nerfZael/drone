@@ -263,9 +263,28 @@ function writeRecord(
 ): CanonicalDroneLifecycleRecord {
   const id = normalizeId(idRaw);
   const pendingBeforePromotion = state === 'real' ? selectById(connection, 'pending', id) : null;
+  const pendingPhase = String(
+    pendingBeforePromotion?.phase ?? pendingBeforePromotion?.lifecycle?.phase ?? '',
+  ).trim();
+  const pendingMessage = String(pendingBeforePromotion?.lifecycle?.message ?? '').trim();
   const promotedEntry =
     pendingBeforePromotion && entryRaw && typeof entryRaw === 'object' && !Array.isArray(entryRaw)
-      ? { ...(entryRaw as Record<string, any>), name: pendingBeforePromotion.name }
+      ? {
+          ...(entryRaw as Record<string, any>),
+          name: pendingBeforePromotion.name,
+          ...(pendingPhase
+            ? {
+                hub: {
+                  ...((entryRaw as Record<string, any>).hub &&
+                  typeof (entryRaw as Record<string, any>).hub === 'object'
+                    ? (entryRaw as Record<string, any>).hub
+                    : {}),
+                  phase: pendingPhase,
+                  ...(pendingMessage ? { message: pendingMessage } : {}),
+                },
+              }
+            : {}),
+        }
       : entryRaw;
   const fields = lifecycleFields(id, promotedEntry, now);
   assertActiveNameAvailable(connection, state, fields.id, fields.name);

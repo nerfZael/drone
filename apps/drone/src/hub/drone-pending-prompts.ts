@@ -358,6 +358,15 @@ export function createDronePendingPromptStore(deps: {
           };
         },
       });
+      const queue = promptQueueForActiveDrone();
+      if (queue) {
+        const inserted = await queue.enqueue({
+          droneId,
+          chatName,
+          prompt: deps.startupPromptToPendingPrompt(next),
+        });
+        if (inserted.inserted) notifyPendingPromptChanged(droneId, chatName);
+      }
       return 'queued';
     } catch (error) {
       const latest: any = await loadRegistry();

@@ -91,7 +91,25 @@ function preservePendingNameOnPromotion(
   }
   const pending = findDroneEntryByIdentity({ drones: registry?.pending }, droneId)?.entry;
   const pendingName = String(pending?.name ?? '').trim();
-  return pendingName ? { ...(entryRaw as Record<string, any>), name: pendingName } : entryRaw;
+  const pendingPhase = String(pending?.phase ?? '').trim();
+  const pendingMessage = String(pending?.message ?? '').trim();
+  if (!pendingName && !pendingPhase) return entryRaw;
+  return {
+    ...(entryRaw as Record<string, any>),
+    ...(pendingName ? { name: pendingName } : {}),
+    ...(pendingPhase
+      ? {
+          hub: {
+            ...((entryRaw as Record<string, any>).hub &&
+            typeof (entryRaw as Record<string, any>).hub === 'object'
+              ? (entryRaw as Record<string, any>).hub
+              : {}),
+            phase: pendingPhase,
+            ...(pendingMessage ? { message: pendingMessage } : {}),
+          },
+        }
+      : {}),
+  };
 }
 
 export async function upsertCanonicalDroneLifecycle(

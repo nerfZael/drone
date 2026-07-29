@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
 import { resetDroneRootDirForTests } from '../src/host/paths';
+import { getPromptQueueRepository } from '../src/host/prompt-queue-repository';
 import { loadRegistry, updateRegistry } from '../src/host/registry';
 import {
   upsertChatInStore,
@@ -288,6 +289,85 @@ describeSocketSuite('chat management api', () => {
     );
     expect(defaultPrompt.r.status).toBe(202);
     expect(defaultPrompt.data?.autoRenameChat).toBe(false);
+  });
+
+  test('queues follow-ups without pumping while a promoted drone is still provisioning', async () => {
+    const droneId = 'drone-promoted-but-seeding';
+    const at = '2026-07-29T22:44:14.325Z';
+    const initialPromptId = 'initial-before-review';
+    await seedDrone(droneId, { runtime: 'host' });
+    await upsertCanonicalDroneLifecycle('real', droneId, {
+      id: droneId,
+      name: droneId,
+      runtime: 'host',
+      createdAt: at,
+      hub: { phase: 'seeding', message: 'Seeding repo…' },
+      chats: {},
+    });
+    const queue = getPromptQueueRepository();
+    const initialPending = {
+      id: initialPromptId,
+      at,
+      prompt: 'Initial task',
+      state: 'queued' as const,
+      updatedAt: at,
+    };
+    if (queue) {
+      await queue.enqueue({
+        droneId,
+        chatName: 'default',
+        prompt: initialPending,
+      });
+    } else {
+      upsertPendingPromptInStore({
+        droneId,
+        chatName: 'default',
+        pending: initialPending,
+      });
+    }
+
+    const followUp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          promptId: 'review-after-initial',
+          submittedAt: '2026-07-29T22:44:26.908Z',
+          prompt: 'Review the changes and make a pull request.',
+        }),
+      },
+    );
+
+    expect(followUp.r.status).toBe(202);
+    expect(followUp.data).toMatchObject({
+      ok: true,
+      promptId: 'review-after-initial',
+      pendingState: 'queued',
+    });
+    if (queue) {
+      const queued = queue.list({
+        droneId,
+        chatName: 'default',
+      });
+      expect(queued.map((prompt) => prompt.id)).toEqual([
+        initialPromptId,
+        'review-after-initial',
+      ]);
+      expect(queued.map((prompt) => prompt.state)).toEqual(['queued', 'queued']);
+    } else {
+      const pending = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+      );
+      expect(pending.data?.pending?.map((prompt: any) => prompt.id)).toEqual([
+        initialPromptId,
+        'review-after-initial',
+      ]);
+      expect(pending.data?.pending?.map((prompt: any) => prompt.state)).toEqual([
+        'queued',
+        'queued',
+      ]);
+    }
   });
 
   test('defaults docker snapshots off for no-volume container chats and preserves explicit choices', async () => {
