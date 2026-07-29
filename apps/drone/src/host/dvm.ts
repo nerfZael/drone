@@ -228,6 +228,8 @@ export async function dvmRepoExport(opts: {
   outDir: string;
   format?: 'patches' | 'bundle' | 'diff';
   base?: string;
+  head?: string;
+  full?: boolean;
 }): Promise<{ exportedPath: string }> {
   const out = await dvm.repoExport({
     containerName: opts.container,
@@ -235,6 +237,8 @@ export async function dvmRepoExport(opts: {
     outRoot: opts.outDir,
     format: opts.format,
     base: opts.base,
+    head: opts.head,
+    full: opts.full,
   });
   return { exportedPath: out.exportedPath };
 }

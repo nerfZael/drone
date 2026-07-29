@@ -288,6 +288,7 @@ import { createDroneLifecycleRouteHandler } from './routes/drone-lifecycle-route
 import { createDroneProvisioningRouteHandler } from './routes/drone-provisioning-routes';
 import { createEditorRouteHandler } from './routes/editor-routes';
 import { createFilesystemRouteHandler } from './routes/filesystem-routes';
+import { createLocalCheckoutRouteHandler } from './routes/local-checkout-routes';
 import { registerFleetRoutes } from './routes/fleet-routes';
 import { registerGroupRoutes } from './routes/group-routes';
 import { registerMessageRoutes } from './routes/message-routes';
@@ -298,6 +299,7 @@ import { registerSettingsRoutes } from './routes/settings-routes';
 import { registerSystemRoutes } from './routes/system-routes';
 import { createTerminalRouteHandler } from './routes/terminal-routes';
 import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
+import { LocalCheckoutService } from './local-checkout-service';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
 import {
   isWorkflowChildDroneEntry,
@@ -5366,6 +5368,24 @@ export async function startDroneHubApiServer(opts: {
     withReadonlyDroneContainer,
   });
 
+  const localCheckoutService = new LocalCheckoutService({
+    loadRegistry,
+    updateRegistry,
+    findDroneIdByRef,
+    droneRuntime,
+    droneRootPath,
+    gitTopLevel,
+    gitIsClean,
+    gitResolveCommitSha,
+    updateHostRef,
+    importBundleHeadToHostRef,
+    dvmExec,
+    dvmRepoExport,
+    runHostCommand,
+    nowIso,
+  });
+  const handleLocalCheckoutRoute = createLocalCheckoutRouteHandler(localCheckoutService);
+
   const handleRepositoryRoute = createRepositoryRouteHandler({
     GITHUB_PULL_REQUEST_LIST_CACHE_TTL_MS,
     PULL_PREVIEW_HOST_MERGE_CACHE_TTL_MS,
@@ -5702,6 +5722,8 @@ export async function startDroneHubApiServer(opts: {
       if (await handleDroneProvisioningRoute({ req, res, url: u, method, parts })) return;
 
       if (await handleFilesystemRoute({ req, res, url: u, method, parts })) return;
+
+      if (await handleLocalCheckoutRoute({ req, res, url: u, method, parts })) return;
 
       if (await handleRepositoryRoute({ req, res, url: u, method, parts })) return;
 

@@ -9,6 +9,11 @@ import {
 import { droneHomePath, isHostRuntimeDrone } from './helpers';
 import { normalizeRepoTransferProbeStatus, type RepoTransferProbeStatus } from './repo-transfer-probe-status';
 import { beginRepoApplyProgress } from './use-drone-hub-runtime-store';
+import {
+  isLocalCheckoutCancellation,
+  useLocalCheckout,
+  type LocalAutoUpdates,
+} from './use-local-checkout';
 
 export type { RepoTransferProbeStatus } from './repo-transfer-probe-status';
 
@@ -439,6 +444,113 @@ export function useWorkspaceActions({
     }
   }, [clearRepoOperationError, currentDrone, postJson, setRepoOperationError, showTransientToast]);
 
+  const handleLocalAutoUpdateError = React.useCallback(
+    (message: string) => setRepoOperationError(message),
+    [setRepoOperationError],
+  );
+  const localCheckout = useLocalCheckout({
+    drones,
+    requestJson,
+    onAutoUpdateError: handleLocalAutoUpdateError,
+  });
+  const handleLocalCheckoutActionError = React.useCallback(
+    (error: unknown) => {
+      if (isLocalCheckoutCancellation(error)) return;
+      setRepoOperationError((error as any)?.message ?? String(error));
+    },
+    [setRepoOperationError],
+  );
+
+  const useRepoLocally = React.useCallback(async () => {
+    if (!currentDrone) return;
+    const droneId = String(currentDrone.id ?? '').trim();
+    if (!droneId) return;
+    clearRepoOperationError();
+    try {
+      const next = await localCheckout.useLocally(droneId);
+      const session = next.session;
+      showTransientToast(
+        session
+          ? `"${session.droneName}" is now active in ${session.repoRoot}.`
+          : 'The drone is now active locally.',
+        'Using drone locally',
+        'success',
+      );
+    } catch (error: any) {
+      handleLocalCheckoutActionError(error);
+    }
+  }, [
+    clearRepoOperationError,
+    currentDrone,
+    handleLocalCheckoutActionError,
+    localCheckout,
+    showTransientToast,
+  ]);
+
+  const updateRepoLocally = React.useCallback(async () => {
+    clearRepoOperationError();
+    try {
+      const next = await localCheckout.update();
+      const session = next.session;
+      showTransientToast(
+        next.changed
+          ? `Updated the local checkout to ${String(session?.snapshotSha ?? '').slice(0, 7)}.`
+          : 'The local checkout is already current.',
+        next.changed ? 'Local checkout updated' : 'Already current',
+        'success',
+      );
+    } catch (error: any) {
+      handleLocalCheckoutActionError(error);
+    }
+  }, [clearRepoOperationError, handleLocalCheckoutActionError, localCheckout, showTransientToast]);
+
+  const setLocalAutoUpdates = React.useCallback(
+    async (mode: LocalAutoUpdates) => {
+      clearRepoOperationError();
+      try {
+        await localCheckout.setAutoUpdates(mode);
+      } catch (error: any) {
+        handleLocalCheckoutActionError(error);
+      }
+    },
+    [clearRepoOperationError, handleLocalCheckoutActionError, localCheckout],
+  );
+
+  const returnRepoLocalCheckout = React.useCallback(async () => {
+    clearRepoOperationError();
+    try {
+      const returnRef = localCheckout.view?.session?.returnRef ?? 'the original branch';
+      await localCheckout.returnToOriginal();
+      showTransientToast(`Returned to ${returnRef}.`, 'Local checkout returned', 'success');
+    } catch (error: any) {
+      handleLocalCheckoutActionError(error);
+    }
+  }, [
+    clearRepoOperationError,
+    handleLocalCheckoutActionError,
+    localCheckout,
+    showTransientToast,
+  ]);
+
+  const applyRepoLocalCheckout = React.useCallback(async () => {
+    if (!currentDrone) return;
+    clearRepoOperationError();
+    try {
+      const prepared = await localCheckout.prepareApply(currentDrone.id);
+      const expectedHeadSha = String(prepared.expectedHeadSha ?? '').trim();
+      if (!expectedHeadSha) throw new Error('DroneHub did not return the tested snapshot SHA.');
+      await executePullRepoChanges({ expectedHeadSha, allowDirty: true });
+    } catch (error: any) {
+      handleLocalCheckoutActionError(error);
+    }
+  }, [
+    clearRepoOperationError,
+    currentDrone,
+    executePullRepoChanges,
+    handleLocalCheckoutActionError,
+    localCheckout,
+  ]);
+
   const pullRepoChanges = React.useCallback(async () => {
     await executePullRepoChanges();
   }, [executePullRepoChanges]);
@@ -645,6 +757,14 @@ export function useWorkspaceActions({
     openDroneEditor,
     pullRepoChanges,
     pushRepoChanges,
+    localCheckout: localCheckout.view,
+    localCheckoutLoading: localCheckout.loading,
+    localCheckoutBusy: localCheckout.busy,
+    useRepoLocally,
+    updateRepoLocally,
+    setLocalAutoUpdates,
+    returnRepoLocalCheckout,
+    applyRepoLocalCheckout,
     probeRepoChangesFromDrone,
     syncRepoChangesIntoDrone,
     reseedRepo,

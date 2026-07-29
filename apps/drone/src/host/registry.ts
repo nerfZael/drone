@@ -153,6 +153,25 @@ type DroneRegistryV1 = {
       autoApplyToNewContainerDrones?: boolean;
       updatedAt?: string;
     };
+    localCheckout?: {
+      autoUpdates?: 'off' | 'commits' | 'all';
+      session?: {
+        droneId?: string;
+        droneName?: string;
+        repoRoot?: string;
+        returnRef?: string;
+        returnSha?: string;
+        returnDetached?: boolean;
+        snapshotSha?: string;
+        snapshotKind?: 'commit' | 'working-tree';
+        sourceHeadSha?: string;
+        sourceTreeSha?: string;
+        sourceDirtyFileCount?: number;
+        activatedAt?: string;
+        updatedAt?: string;
+      } | null;
+      updatedAt?: string;
+    };
   };
   /**
    * Hub-managed shared skills library.

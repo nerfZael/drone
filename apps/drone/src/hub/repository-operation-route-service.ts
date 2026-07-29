@@ -2774,6 +2774,20 @@ function createRepositoryOperationServiceHandler(
         const defaultAutoCommitMessage = 'chore(drone): snapshot working tree before apply changes';
         const requestedAutoCommitMessage = String((body as any)?.commitMessage ?? '').trim();
         const autoCommitMessage = requestedAutoCommitMessage || defaultAutoCommitMessage;
+        const expectedHeadShaRaw = String((body as any)?.expectedHeadSha ?? '')
+          .trim()
+          .toLowerCase();
+        const expectedHeadSha = /^[0-9a-f]{40}$/.test(expectedHeadShaRaw)
+          ? expectedHeadShaRaw
+          : null;
+        if (expectedHeadShaRaw && !expectedHeadSha) {
+          json(res, 400, {
+            ok: false,
+            error: 'expectedHeadSha must be a 40-character Git commit SHA.',
+            code: 'invalid_expected_head',
+          });
+          return;
+        }
 
         let repoRoot = '';
         let fromRef = '';
@@ -3022,6 +3036,22 @@ function createRepositoryOperationServiceHandler(
           }
 
           if (
+            expectedHeadSha &&
+            exportedHeadSha &&
+            exportedHeadSha.toLowerCase() !== expectedHeadSha
+          ) {
+            json(res, 409, {
+              ok: false,
+              error:
+                'The drone changed after the tested local snapshot was prepared. Use it locally again and update before applying.',
+              code: 'drone_head_changed',
+              expectedHeadSha,
+              exportedHeadSha,
+            });
+            return;
+          }
+
+          if (
             exportedHeadSha &&
             droneBaseShaForApply &&
             exportedHeadSha.toLowerCase() === droneBaseShaForApply.toLowerCase()
@@ -3191,6 +3221,21 @@ function createRepositoryOperationServiceHandler(
             }
             throw e;
           }
+          if (
+            expectedHeadSha &&
+            importRefSha.toLowerCase() !== expectedHeadSha
+          ) {
+            json(res, 409, {
+              ok: false,
+              error:
+                'The drone changed while its tested snapshot was being exported. Use it locally again and update before applying.',
+              code: 'drone_head_changed',
+              expectedHeadSha,
+              exportedHeadSha: importRefSha,
+            });
+            return;
+          }
+          if (!exportedHeadSha) exportedHeadSha = importRefSha;
 
           const lastPullForMirror =
             d?.repo?.lastPull && typeof d.repo.lastPull === 'object' ? d.repo.lastPull : null;
