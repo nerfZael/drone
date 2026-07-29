@@ -1,0 +1,277 @@
+import * as React from 'react';
+import { cn } from '../cn';
+import { UiSpinner } from './Feedback';
+
+export type UiToolbarControlTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
+export type UiToolbarControlSize = 'xsmall' | 'small';
+
+const toneClassName: Record<UiToolbarControlTone, { idle: string; active: string }> = {
+  neutral: {
+    idle: 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]',
+    active: 'border-[var(--border)] bg-[var(--surface-strong)] text-[var(--fg-secondary)]',
+  },
+  accent: {
+    idle: 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]',
+    active: 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]',
+  },
+  success: {
+    idle: 'border-[var(--green-border)] bg-transparent text-[var(--green)] hover:bg-[var(--green-subtle)]',
+    active: 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]',
+  },
+  warning: {
+    idle: 'border-[var(--yellow-border)] bg-transparent text-[var(--yellow)] hover:bg-[var(--yellow-subtle)]',
+    active: 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
+  },
+  danger: {
+    idle: 'border-[var(--red-border)] bg-transparent text-[var(--red)] hover:bg-[var(--red-subtle)]',
+    active: 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]',
+  },
+};
+
+const sizeClassName: Record<UiToolbarControlSize, string> = {
+  xsmall: 'h-5 min-w-5 rounded px-1.5 text-[length:var(--text-9)]',
+  small: 'h-7 min-w-7 rounded-[var(--radius-medium)] px-2 text-[length:var(--text-10)]',
+};
+
+export type UiToolbarButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  tone?: UiToolbarControlTone;
+  size?: UiToolbarControlSize;
+  pressed?: boolean;
+  active?: boolean;
+  loading?: boolean;
+  leadingIcon?: React.ReactNode;
+  trailingIcon?: React.ReactNode;
+};
+
+export const UiToolbarButton = React.forwardRef<HTMLButtonElement, UiToolbarButtonProps>(
+  function UiToolbarButton(
+    {
+      tone = 'neutral',
+      size = 'small',
+      pressed,
+      active = false,
+      loading = false,
+      leadingIcon,
+      trailingIcon,
+      disabled,
+      className,
+      children,
+      type = 'button',
+      style,
+      ...props
+    },
+    ref,
+  ) {
+    const unavailable = disabled || loading;
+    const visuallyActive = active || pressed === true;
+    return (
+      <button
+        ref={ref}
+        type={type}
+        disabled={unavailable}
+        aria-pressed={
+          props['aria-pressed'] ?? (typeof pressed === 'boolean' ? pressed : undefined)
+        }
+        aria-busy={loading || undefined}
+        className={cn(
+          'inline-flex shrink-0 items-center justify-center gap-1 border font-[var(--weight-semibold)] transition-[background-color,border-color,color,opacity,transform] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40 enabled:active:translate-y-px',
+          sizeClassName[size],
+          visuallyActive ? toneClassName[tone].active : toneClassName[tone].idle,
+          className,
+        )}
+        style={{ fontFamily: 'var(--display)', ...style }}
+        {...props}
+      >
+        {loading ? <UiSpinner size="small" label={null} inheritColor /> : leadingIcon}
+        {children != null ? <span className="min-w-0 truncate">{children}</span> : null}
+        {trailingIcon}
+      </button>
+    );
+  },
+);
+
+export type UiToolbarIconButtonProps = Omit<
+  UiToolbarButtonProps,
+  'children' | 'leadingIcon' | 'trailingIcon'
+> & {
+  label: string;
+  icon: React.ReactNode;
+};
+
+export const UiToolbarIconButton = React.forwardRef<
+  HTMLButtonElement,
+  UiToolbarIconButtonProps
+>(function UiToolbarIconButton({ label, icon, title, className, ...props }, ref) {
+  return (
+    <UiToolbarButton
+      ref={ref}
+      aria-label={label}
+      title={title ?? label}
+      className={cn('px-0', className)}
+      {...props}
+    >
+      <span className="flex h-3.5 w-3.5 items-center justify-center" aria-hidden="true">
+        {icon}
+      </span>
+    </UiToolbarButton>
+  );
+});
+
+export function UiToolbarGroup({
+  label,
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & { label: string }) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className={cn(
+        'inline-flex shrink-0 items-center overflow-hidden rounded-[var(--radius-medium)] [&>button:not(:first-child)]:-ml-px [&>button:not(:first-child)]:rounded-l-none [&>button:not(:last-child)]:rounded-r-none',
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+export function UiToolbarDivider({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLSpanElement>) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn('mx-0.5 h-4 w-px shrink-0 bg-[var(--border-subtle)]', className)}
+      {...props}
+    />
+  );
+}
+
+export type UiToolbarInputProps = React.InputHTMLAttributes<HTMLInputElement> & {
+  controlSize?: UiToolbarControlSize;
+  invalid?: boolean;
+};
+
+export const UiToolbarInput = React.forwardRef<HTMLInputElement, UiToolbarInputProps>(
+  function UiToolbarInput(
+    { controlSize = 'small', invalid = false, className, ...props },
+    ref,
+  ) {
+    return (
+      <input
+        ref={ref}
+        aria-invalid={invalid || undefined}
+        className={cn(
+          'min-w-0 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 font-mono text-[var(--fg-secondary)] placeholder:text-[var(--muted-dim)] hover:border-[var(--border)] focus:border-[var(--accent-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-border)] read-only:bg-[var(--surface-inset-strong)] read-only:text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-40',
+          controlSize === 'xsmall'
+            ? 'h-5 text-[length:var(--text-9)]'
+            : 'h-7 text-[length:var(--text-10)]',
+          invalid &&
+            'border-[var(--red-border)] focus:border-[var(--red)] focus:ring-[var(--red-border)]',
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+
+export type UiToolbarSegmentOption<T extends string> = {
+  value: T;
+  label: React.ReactNode;
+  disabled?: boolean;
+  tone?: UiToolbarControlTone;
+};
+
+export type UiToolbarSegmentedControlProps<T extends string> = {
+  label: string;
+  value: T;
+  options: ReadonlyArray<UiToolbarSegmentOption<T>>;
+  onValueChange: (value: T) => void;
+  size?: UiToolbarControlSize;
+  disabled?: boolean;
+  className?: string;
+};
+
+export function UiToolbarSegmentedControl<T extends string>({
+  label,
+  value,
+  options,
+  onValueChange,
+  size = 'xsmall',
+  disabled = false,
+  className,
+}: UiToolbarSegmentedControlProps<T>) {
+  const optionRefs = React.useRef(new Map<T, HTMLButtonElement>());
+  const moveSelection = (currentValue: T, key: string) => {
+    const enabledOptions = options.filter((option) => !(disabled || option.disabled));
+    if (enabledOptions.length === 0) return;
+    const currentIndex = Math.max(
+      0,
+      enabledOptions.findIndex((option) => option.value === currentValue),
+    );
+    let nextIndex = currentIndex;
+    if (key === 'ArrowRight' || key === 'ArrowDown') {
+      nextIndex = (currentIndex + 1) % enabledOptions.length;
+    } else if (key === 'ArrowLeft' || key === 'ArrowUp') {
+      nextIndex = (currentIndex - 1 + enabledOptions.length) % enabledOptions.length;
+    } else if (key === 'Home') {
+      nextIndex = 0;
+    } else if (key === 'End') {
+      nextIndex = enabledOptions.length - 1;
+    } else {
+      return;
+    }
+    const nextValue = enabledOptions[nextIndex].value;
+    onValueChange(nextValue);
+    window.requestAnimationFrame(() => optionRefs.current.get(nextValue)?.focus());
+  };
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className={cn(
+        'inline-flex shrink-0 items-center overflow-hidden rounded-[var(--radius-medium)]',
+        className,
+      )}
+    >
+      {options.map((option) => {
+        const selected = value === option.value;
+        return (
+          <UiToolbarButton
+            key={option.value}
+            ref={(element) => {
+              if (element) optionRefs.current.set(option.value, element);
+              else optionRefs.current.delete(option.value);
+            }}
+            role="radio"
+            aria-checked={selected}
+            aria-pressed={undefined}
+            tabIndex={selected ? 0 : -1}
+            size={size}
+            tone={option.tone ?? 'accent'}
+            active={selected}
+            disabled={disabled || option.disabled}
+            onClick={() => onValueChange(option.value)}
+            onKeyDown={(event) => {
+              if (
+                !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(
+                  event.key,
+                )
+              ) {
+                return;
+              }
+              event.preventDefault();
+              moveSelection(option.value, event.key);
+            }}
+            className="rounded-none first:rounded-l-[var(--radius-medium)] last:rounded-r-[var(--radius-medium)] [&:not(:first-child)]:-ml-px"
+          >
+            {option.label}
+          </UiToolbarButton>
+        );
+      })}
+    </div>
+  );
+}

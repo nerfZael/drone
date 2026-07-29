@@ -38,6 +38,8 @@ import {
 } from '../../ui/components';
 import { UiMenuSelect } from '../../ui/menuSelect';
 import { DESKTOP_THEMES } from '../../theme';
+import { ComponentLibraryPatternsPreview } from './ComponentLibraryPatternsPreview';
+import { ComponentLibrarySection } from './ComponentLibrarySection';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type PreviewDensity = 'compact' | 'default' | 'comfortable';
@@ -79,47 +81,13 @@ function CopyIcon() {
   );
 }
 
-function Section({
-  id,
-  eyebrow,
-  title,
-  description,
-  children,
-}: {
-  id: string;
-  eyebrow: string;
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section id={id} className="scroll-mt-16">
-      <div className="mb-4 border-l-2 border-[var(--accent-border)] pl-3">
-        <div
-          className="text-[length:var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--accent)]"
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          {eyebrow}
-        </div>
-        <h2
-          className="mt-1 text-[17px] font-[var(--weight-semibold)] text-[var(--fg-strong)]"
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          {title}
-        </h2>
-        <p className="mt-1 max-w-[72ch] text-[length:var(--text-12)] leading-relaxed text-[var(--muted)]">{description}</p>
-      </div>
-      {children}
-    </section>
-  );
-}
-
 const catalogSections = [
   ['foundation', 'Foundation'],
   ['actions', 'Actions'],
   ['inputs', 'Inputs'],
   ['navigation', 'Navigation'],
   ['feedback', 'Feedback'],
+  ['patterns', 'App patterns'],
   ['composition', 'Composition'],
   ['inventory', 'Inventory'],
 ] as const;
@@ -185,6 +153,14 @@ const componentInventory = [
   ['UiTable', 'Structured settings data'],
   ['UiTooltip', 'Accessible contextual help'],
   ['UiKbd', 'Keyboard shortcuts'],
+  ['UiPanel', 'Dock and panel composition'],
+  ['UiToolbarButton', 'Dense panel actions'],
+  ['UiToolbarSegmentedControl', 'Compact view selection'],
+  ['UiActionMenu', 'Keyboard-accessible action menus'],
+  ['UiPaneState', 'Loading, empty, and error states'],
+  ['UiNavigationRow', 'Sidebar and explorer rows'],
+  ['UiResizeHandle', 'Pointer and keyboard resizing'],
+  ['UiStatusChip', 'Compact operational status'],
 ] as const;
 
 export function ComponentLibraryPreview() {
@@ -254,7 +230,7 @@ export function ComponentLibraryPreview() {
         ))}
       </nav>
 
-      <Section
+      <ComponentLibrarySection
         id="foundation"
         eyebrow="01 · Foundation"
         title="Tokens and typography"
@@ -323,9 +299,9 @@ export function ComponentLibraryPreview() {
             </div>
           </div>
         </UiCard>
-      </Section>
+      </ComponentLibrarySection>
 
-      <Section
+      <ComponentLibrarySection
         id="actions"
         eyebrow="02 · Actions"
         title="Buttons and status"
@@ -361,9 +337,9 @@ export function ComponentLibraryPreview() {
             </div>
           </PreviewCell>
         </div>
-      </Section>
+      </ComponentLibrarySection>
 
-      <Section
+      <ComponentLibrarySection
         id="inputs"
         eyebrow="03 · Inputs"
         title="Forms and preferences"
@@ -492,9 +468,9 @@ export function ComponentLibraryPreview() {
             </UiField>
           </div>
         </UiCard>
-      </Section>
+      </ComponentLibrarySection>
 
-      <Section
+      <ComponentLibrarySection
         id="navigation"
         eyebrow="04 · Navigation and overlays"
         title="Tabs, dialogs, and data"
@@ -571,9 +547,9 @@ export function ComponentLibraryPreview() {
             </UiTable>
           </UiTableContainer>
         </div>
-      </Section>
+      </ComponentLibrarySection>
 
-      <Section
+      <ComponentLibrarySection
         id="feedback"
         eyebrow="05 · Feedback"
         title="System states"
@@ -636,11 +612,13 @@ export function ComponentLibraryPreview() {
             </div>
           </div>
         </div>
-      </Section>
+      </ComponentLibrarySection>
 
-      <Section
+      <ComponentLibraryPatternsPreview />
+
+      <ComponentLibrarySection
         id="composition"
-        eyebrow="06 · Composition"
+        eyebrow="07 · Composition"
         title="A real app pattern"
         description="Primitives are intentionally composable. This agent card uses only library pieces and layout utilities, with no feature-specific component styling."
       >
@@ -663,11 +641,11 @@ export function ComponentLibraryPreview() {
             </div>
           </div>
         </UiCard>
-      </Section>
+      </ComponentLibrarySection>
 
-      <Section
+      <ComponentLibrarySection
         id="inventory"
-        eyebrow="07 · Inventory"
+        eyebrow="08 · Inventory"
         title="Current library surface"
         description="Import primitives from src/ui. Feature components should compose these before introducing new visual APIs."
       >
@@ -688,7 +666,7 @@ export function ComponentLibraryPreview() {
             </div>
           ))}
         </UiCard>
-      </Section>
+      </ComponentLibrarySection>
 
       <UiDialog
         open={dialogOpen}
