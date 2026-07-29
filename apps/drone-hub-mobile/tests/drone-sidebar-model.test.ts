@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
+  EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   buildMobileDroneRepoGroups,
   excludePinnedMobileDrones,
   mobileDroneTurnsToAssistantMessages,
@@ -8,6 +10,7 @@ import {
   normalizeMobileNativeChatHistory,
   normalizeMobileDroneTurns,
   normalizeMobileDrones,
+  resolveMobileDroneListSnapshot,
   suggestNextMobileDroneChatName,
 } from '../src/drones/drone-sidebar-model';
 
@@ -179,6 +182,191 @@ describe('mobile drone sidebar model', () => {
       sidebarNodeOrderByParent: { root: ['drone:mapped'] },
       pinnedDroneIds: ['mapped'],
     });
+    expect(payload.sidebarSnapshotStatus).toBe('legacy');
+  });
+
+  test('preserves the last complete sidebar snapshot across partial refreshes and reconnects', () => {
+    const initialPayload = normalizeMobileDroneListPayload({
+      schemaVersion: 7,
+      drones: [
+        { id: 'first', repoPath: '/repo', status: 'idle' },
+        { id: 'second', repoPath: '/repo', status: 'idle' },
+      ],
+      sidebar: {
+        snapshotComplete: true,
+        preferenceVersion: 8,
+        registeredRepoPaths: ['/repo', '/empty'],
+        sidebarDroneOrderByGroup: { 'group:Ungrouped': ['second', 'first'] },
+        pinnedDroneIds: ['first'],
+      },
+    });
+    const initial = resolveMobileDroneListSnapshot({
+      current: EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
+      targetId: 'hub-a',
+      payload: initialPayload,
+    });
+    const partialPayload = normalizeMobileDroneListPayload({
+      schemaVersion: 7,
+      drones: [
+        { id: 'first', repoPath: '/repo', status: 'working', unreadChats: ['default'] },
+        { id: 'second', repoPath: '/repo', status: 'idle' },
+      ],
+      sidebar: {
+        snapshotComplete: false,
+        registeredRepoPaths: [],
+        sidebarDroneOrderByGroup: {},
+        pinnedDroneIds: [],
+      },
+    });
+    const refreshed = resolveMobileDroneListSnapshot({
+      current: initial,
+      targetId: 'hub-a',
+      payload: partialPayload,
+    });
+    const reconnected = resolveMobileDroneListSnapshot({
+      current: refreshed,
+      targetId: 'hub-a',
+      payload: normalizeMobileDroneListPayload({
+        schemaVersion: 7,
+        drones: partialPayload.drones,
+        sidebar: {
+          snapshotComplete: true,
+          preferenceVersion: 9,
+          registeredRepoPaths: ['/empty', '/repo'],
+          sidebarDroneOrderByGroup: { 'group:Ungrouped': ['first', 'second'] },
+          pinnedDroneIds: ['second'],
+        },
+      }),
+    });
+    const staleRefresh = resolveMobileDroneListSnapshot({
+      current: reconnected,
+      targetId: 'hub-a',
+      payload: normalizeMobileDroneListPayload({
+        schemaVersion: 7,
+        drones: [
+          { id: 'first', repoPath: '/repo', status: 'offline' },
+          { id: 'second', repoPath: '/repo', status: 'idle' },
+        ],
+        sidebar: {
+          snapshotComplete: true,
+          preferenceVersion: 8,
+          registeredRepoPaths: ['/repo'],
+          sidebarDroneOrderByGroup: { 'group:Ungrouped': ['second', 'first'] },
+          pinnedDroneIds: ['first'],
+        },
+      }),
+    });
+    const refreshDuringPinSave = resolveMobileDroneListSnapshot({
+      current: reconnected,
+      targetId: 'hub-a',
+      keepCurrentSidebar: true,
+      payload: normalizeMobileDroneListPayload({
+        schemaVersion: 7,
+        drones: reconnected.drones,
+        sidebar: {
+          snapshotComplete: true,
+          preferenceVersion: 10,
+          registeredRepoPaths: ['/repo'],
+          pinnedDroneIds: [],
+        },
+      }),
+    });
+
+    expect(initial.sidebarSnapshotStatus).toBe('complete');
+    expect(initial.sidebarPreferenceVersion).toBe(8);
+    expect(refreshed.drones[0]).toMatchObject({
+      id: 'first',
+      status: 'working',
+      unreadChats: ['default'],
+    });
+    expect(refreshed.sidebar).toBe(initial.sidebar);
+    expect(refreshed.sidebarSnapshotStatus).toBe('complete');
+    expect(refreshed.sidebarPreferenceVersion).toBe(8);
+    expect(reconnected.sidebarPreferenceVersion).toBe(9);
+    expect(reconnected.sidebar.registeredRepoPaths).toEqual(['/empty', '/repo']);
+    expect(reconnected.sidebar.sidebarDroneOrderByGroup['group:Ungrouped']).toEqual([
+      'first',
+      'second',
+    ]);
+    expect(reconnected.sidebar.pinnedDroneIds).toEqual(['second']);
+    expect(staleRefresh.drones[0]?.status).toBe('offline');
+    expect(staleRefresh.sidebar).toBe(reconnected.sidebar);
+    expect(staleRefresh.sidebarPreferenceVersion).toBe(9);
+    expect(refreshDuringPinSave.sidebar).toBe(reconnected.sidebar);
+    expect(refreshDuringPinSave.sidebarPreferenceVersion).toBe(9);
+  });
+
+  test('uses deterministic compatibility fallbacks for older, missing, and switched-device payloads', () => {
+    const legacyPayload = normalizeMobileDroneListPayload({
+      schemaVersion: 6,
+      drones: [{ id: 'legacy', repoPath: '/legacy' }],
+      sidebar: {
+        registeredRepoPaths: ['/legacy'],
+        pinnedDroneIds: ['legacy'],
+      },
+    });
+    const legacy = resolveMobileDroneListSnapshot({
+      current: EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
+      targetId: 'old-hub',
+      payload: legacyPayload,
+    });
+    const missingPayload = normalizeMobileDroneListPayload({
+      schemaVersion: 6,
+      drones: [{ id: 'new', repoPath: '/new' }],
+    });
+    const switched = resolveMobileDroneListSnapshot({
+      current: legacy,
+      targetId: 'new-hub',
+      payload: missingPayload,
+    });
+
+    expect(legacy.sidebarSnapshotStatus).toBe('legacy');
+    expect(legacy.sidebar.registeredRepoPaths).toEqual(['/legacy']);
+    expect(missingPayload.sidebarSnapshotStatus).toBe('missing');
+    expect(switched.sidebar).toBe(EMPTY_MOBILE_DRONE_SIDEBAR_ORDER);
+    expect(switched.sidebarSnapshotStatus).toBe('missing');
+  });
+
+  test('changes status and unread state without changing saved item order', () => {
+    const sidebar = {
+      snapshotComplete: true,
+      preferenceVersion: 3,
+      registeredRepoPaths: ['/repo'],
+      sidebarDroneOrderByGroup: { 'group:Ungrouped': ['second', 'first'] },
+    };
+    const before = normalizeMobileDroneListPayload({
+      schemaVersion: 7,
+      drones: [
+        { id: 'first', repoPath: '/repo', status: 'idle' },
+        { id: 'second', repoPath: '/repo', status: 'idle' },
+      ],
+      sidebar,
+    });
+    const after = normalizeMobileDroneListPayload({
+      schemaVersion: 7,
+      drones: [
+        {
+          id: 'first',
+          repoPath: '/repo',
+          status: 'working',
+          chats: ['default'],
+          unreadChats: ['default'],
+        },
+        { id: 'second', repoPath: '/repo', status: 'offline' },
+      ],
+      sidebar,
+    });
+
+    expect(
+      buildMobileDroneRepoGroups(before.drones, before.sidebar)[0]?.roots.map(
+        (node) => node.drone.id,
+      ),
+    ).toEqual(['second', 'first']);
+    expect(
+      buildMobileDroneRepoGroups(after.drones, after.sidebar)[0]?.roots.map(
+        (node) => node.drone.id,
+      ),
+    ).toEqual(['second', 'first']);
   });
 
   test('normalizes repo and branch choices for the mobile create screen', () => {
