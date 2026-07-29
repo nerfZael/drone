@@ -17,16 +17,17 @@ import {
 } from '../overview';
 import { IconPin } from '../overview/icons';
 import {
-  dropdownMenuItemBaseClass,
-  dropdownPanelBaseClass,
-  useDropdownDismiss,
-} from '../../ui/dropdown';
+  UiActionMenu,
+  type UiActionMenuEntry,
+  UiPanelStatusStrip,
+  UiPanelToolbar,
+  UiToolbarButton,
+  UiToolbarIconButton,
+} from '../../ui/components';
 import {
-  IconAutoMinimize,
   IconChevron,
   IconChevronDown,
   IconChevronLeft,
-  IconClock,
   IconColumns,
   IconEye,
   IconEyeOff,
@@ -175,17 +176,6 @@ function resolveDroneSidebarCapabilities(
   };
 }
 
-type SidebarIconButtonProps = {
-  title: string;
-  ariaLabel?: string;
-  onClick: () => void;
-  className: string;
-  children: React.ReactNode;
-  ariaPressed?: boolean;
-  disabled?: boolean;
-  tabIndex?: number;
-};
-
 function stepSidebarDensityMode(
   current: SidebarDensityMode,
   direction: -1 | 1,
@@ -197,32 +187,6 @@ function stepSidebarDensityMode(
     Math.min(SIDEBAR_DENSITY_MODE_ORDER.length - 1, safeIndex + direction),
   );
   return SIDEBAR_DENSITY_MODE_ORDER[nextIndex] ?? 'default';
-}
-
-function SidebarIconButton({
-  title,
-  ariaLabel,
-  onClick,
-  className,
-  children,
-  ariaPressed,
-  disabled,
-  tabIndex,
-}: SidebarIconButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex items-center justify-center w-7 h-7 rounded transition-all ${className}`}
-      title={title}
-      aria-label={ariaLabel ?? title}
-      aria-pressed={ariaPressed}
-      disabled={disabled}
-      tabIndex={tabIndex}
-    >
-      {children}
-    </button>
-  );
 }
 
 type DraftSidebarPlaceholder = {
@@ -1601,13 +1565,11 @@ export function DroneSidebar({
     setSidebarCollapsed,
   } = useDroneSidebarUiState();
   const activeDrag = useDroneHubActiveDrag();
-  const footerOptionsMenuRef = React.useRef<HTMLDivElement | null>(null);
   const collapseTimerRef = React.useRef<number | null>(null);
   const expandTimerRef = React.useRef<number | null>(null);
   const sidebarDndIdleTimerRef = React.useRef<number | null>(null);
   const lastAutoCollapsedAtRef = React.useRef<number>(0);
   const sidebarDockDragStartXRef = React.useRef<number | null>(null);
-  const [footerOptionsMenuOpen, setFooterOptionsMenuOpen] = React.useState(false);
   const [addToGroupTarget, setAddToGroupTarget] = React.useState<{
     droneId: string;
     droneName: string;
@@ -2027,8 +1989,6 @@ export function DroneSidebar({
     },
     [clearCollapseTimer, clearExpandTimer],
   );
-  useDropdownDismiss(footerOptionsMenuRef, footerOptionsMenuOpen, setFooterOptionsMenuOpen);
-
   React.useEffect(() => {
     if (sidebarAutoMinimize) return;
     clearCollapseTimer();
@@ -2656,6 +2616,49 @@ export function DroneSidebar({
     activeRepoDroneCount > 0 &&
     sidebarDronesFilteredByRepo.length === 0 &&
     Boolean(activeRepoPath);
+  const sidebarOptionsEntries: UiActionMenuEntry[] = [];
+  if (sidebarCapabilities.collapseControl) {
+    sidebarOptionsEntries.push({
+      id: 'dock-side',
+      label: sidebarDockActionLabel,
+      icon: (
+        <IconSidebarExpand
+          className={`opacity-65 ${sidebarDockSide === 'right' ? 'rotate-180' : ''}`}
+        />
+      ),
+    });
+    sidebarOptionsEntries.push({ kind: 'separator', id: 'dock-separator' });
+  }
+  sidebarOptionsEntries.push({
+    id: 'recent',
+    label: 'Recent drones only',
+    selectionRole: 'checkbox',
+    checked: showRecentDronesOnly,
+  });
+  if (sidebarCapabilities.actions) {
+    sidebarOptionsEntries.push({
+      id: 'hidden',
+      label: `Show hidden groups${
+        sidebarHiddenGroupCount > 0 ? ` (${sidebarHiddenGroupCount})` : ''
+      }`,
+      selectionRole: 'checkbox',
+      checked: showHiddenSidebarGroups,
+    });
+    sidebarOptionsEntries.push({
+      id: 'delete-confirm',
+      label: 'Confirm before deleting',
+      selectionRole: 'checkbox',
+      checked: !autoDelete,
+    });
+  }
+  if (sidebarCapabilities.collapseControl) {
+    sidebarOptionsEntries.push({
+      id: 'auto-minimize',
+      label: 'Auto-minimize sidebar',
+      selectionRole: 'checkbox',
+      checked: sidebarAutoMinimize,
+    });
+  }
   return (
     <>
       {sidebarDockDragActive ? (
@@ -2804,22 +2807,19 @@ export function DroneSidebar({
           }}
         >
           {dronesError && (
-            <div className="mx-2 mb-2 p-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-xs text-[var(--red)]">
+            <UiPanelStatusStrip tone="danger" className="mx-2 mb-2 rounded border">
               Failed to load drones: {dronesError}
-            </div>
+            </UiPanelStatusStrip>
           )}
           {groupMoveError && (
-            <div className="mx-2 mb-2 p-2 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--text-11)] text-[var(--red)]">
+            <UiPanelStatusStrip tone="danger" className="mx-2 mb-2 rounded border">
               Group move failed: {groupMoveError}
-            </div>
+            </UiPanelStatusStrip>
           )}
           {pinError && (
-            <div
-              role="alert"
-              className="mx-2 mb-2 p-2 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--text-11)] text-[var(--red)]"
-            >
+            <UiPanelStatusStrip tone="danger" className="mx-2 mb-2 rounded border">
               {pinError}
-            </div>
+            </UiPanelStatusStrip>
           )}
           {dronesLoading && sidebarDronesFilteredByRepo.length === 0 && !dronesError && (
             <div className="px-3 py-3 flex flex-col gap-4">
@@ -3394,164 +3394,53 @@ export function DroneSidebar({
         {sidebarCapabilities.repoFooter ||
         sidebarCapabilities.sidebarOptions ||
         sidebarCapabilities.collapseControl ? (
-          <div className="flex-shrink-0 border-t border-[var(--border)] bg-[var(--surface-inset)]">
-            <div className="px-2.5 py-1.5 flex items-center gap-1.5">
-              {sidebarCapabilities.repoFooter ? (
-                <button
-                  type="button"
-                  onClick={onOpenReposModal}
-                  className="flex-1 min-w-0 inline-flex items-center gap-2 px-1.5 py-1 rounded text-left dh-type-sidebar-action dh-type-sidebar-action--quiet hover:bg-[var(--hover)] transition-all"
-                  title={`Manage repositories (${repos.length})`}
-                  aria-label="Manage repositories"
-                >
-                  <IconFolderGit className="h-3 w-3 text-[var(--accent)] opacity-80" />
-                  <span className="truncate">Repositories {repositoryNavigationItems.length || ''}</span>
-                </button>
-              ) : null}
-              <div
-                ref={footerOptionsMenuRef}
-                className="relative flex flex-shrink-0 items-center gap-1"
+          <UiPanelToolbar
+            aria-label="Sidebar footer"
+            className="border-b-0 border-t border-[var(--border)] bg-[var(--surface-inset)] px-2.5 py-1.5"
+          >
+            {sidebarCapabilities.repoFooter ? (
+              <UiToolbarButton
+                onClick={onOpenReposModal}
+                leadingIcon={<IconFolderGit className="h-3 w-3 text-[var(--accent)] opacity-80" />}
+                className="min-w-0 flex-1 justify-start"
+                title={`Manage repositories (${repos.length})`}
+                aria-label="Manage repositories"
               >
-                {sidebarCapabilities.sidebarOptions ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFooterOptionsMenuOpen((prev) => !prev);
-                    }}
-                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                      footerOptionsMenuOpen
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                    }`}
-                    title="Sidebar options"
-                    aria-label="Sidebar options"
-                    aria-haspopup="menu"
-                    aria-expanded={footerOptionsMenuOpen}
-                  >
-                    <IconMore className="opacity-85" />
-                  </button>
-                ) : null}
-                {sidebarCapabilities.repoFooter ? (
-                  <button
-                    type="button"
-                    onClick={() => setAppView('settings')}
-                    className={`inline-flex items-center justify-center h-7 w-7 rounded border transition-all ${
-                      settingsViewActive
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
-                    }`}
-                    title="Open settings"
-                    aria-label="Open settings"
-                    aria-pressed={settingsViewActive}
-                  >
-                    <IconSettings className="opacity-70" />
-                  </button>
-                ) : null}
-                {sidebarCapabilities.collapseControl ? (
-                  <SidebarIconButton
-                    onClick={collapseSidebarWithGuard}
-                    className="border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]"
-                    title="Collapse sidebar"
-                    ariaLabel="Collapse sidebar"
-                  >
-                    <IconSidebarCollapse className={sidebarDirectionalIconClass} />
-                  </SidebarIconButton>
-                ) : null}
-                {sidebarCapabilities.sidebarOptions && footerOptionsMenuOpen ? (
-                  <div
-                    className={`absolute right-0 bottom-full mb-2 w-[240px] z-50 ${dropdownPanelBaseClass}`}
-                    role="menu"
-                  >
-                    <div className="py-1">
-                      {sidebarCapabilities.collapseControl ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFooterOptionsMenuOpen(false);
-                            toggleSidebarDockSide();
-                          }}
-                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                          role="menuitem"
-                        >
-                          <span>{sidebarDockActionLabel}</span>
-                          <IconSidebarExpand
-                            className={`opacity-65 ${sidebarDockSide === 'right' ? 'rotate-180' : ''}`}
-                          />
-                        </button>
-                      ) : null}
-                      {sidebarCapabilities.collapseControl ? (
-                        <div className="my-1 border-t border-[var(--border-subtle)]" />
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => setShowRecentDronesOnly((prev) => !prev)}
-                        className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                        role="menuitemcheckbox"
-                        aria-checked={showRecentDronesOnly}
-                      >
-                        <span>Recent drones only</span>
-                        <IconClock
-                          className={
-                            showRecentDronesOnly ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
-                          }
-                        />
-                      </button>
-                      {sidebarCapabilities.actions ? (
-                        <button
-                          type="button"
-                          onClick={() => setShowHiddenSidebarGroups((prev) => !prev)}
-                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                          role="menuitem"
-                        >
-                          <span>
-                            {showHiddenSidebarGroups ? 'Hide hidden groups' : 'Show hidden groups'}
-                            {sidebarHiddenGroupCount > 0 ? ` (${sidebarHiddenGroupCount})` : ''}
-                          </span>
-                          {showHiddenSidebarGroups ? (
-                            <IconEyeOff className="opacity-80 text-[var(--accent)]" />
-                          ) : (
-                            <IconEye className="opacity-65" />
-                          )}
-                        </button>
-                      ) : null}
-                      {sidebarCapabilities.actions ? (
-                        <button
-                          type="button"
-                          onClick={() => setAutoDelete((prev) => !prev)}
-                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                          role="menuitem"
-                        >
-                          <span>{autoDelete ? 'Delete confirm off' : 'Delete confirm on'}</span>
-                          <IconTrash
-                            className={
-                              autoDelete ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
-                            }
-                          />
-                        </button>
-                      ) : null}
-                      {sidebarCapabilities.collapseControl ? (
-                        <button
-                          type="button"
-                          onClick={() => setSidebarAutoMinimize((prev) => !prev)}
-                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                          role="menuitem"
-                        >
-                          <span>
-                            {sidebarAutoMinimize ? 'Disable auto-minimize' : 'Enable auto-minimize'}
-                          </span>
-                          <IconAutoMinimize
-                            className={
-                              sidebarAutoMinimize ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
-                            }
-                          />
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
+                Repositories {repositoryNavigationItems.length || ''}
+              </UiToolbarButton>
+            ) : null}
+            {sidebarCapabilities.sidebarOptions ? (
+              <UiActionMenu
+                label="Sidebar options"
+                icon={<IconMore className="opacity-85" />}
+                entries={sidebarOptionsEntries}
+                onSelect={(id) => {
+                  if (id === 'dock-side') toggleSidebarDockSide();
+                  else if (id === 'recent') setShowRecentDronesOnly((prev) => !prev);
+                  else if (id === 'hidden') setShowHiddenSidebarGroups((prev) => !prev);
+                  else if (id === 'delete-confirm') setAutoDelete((prev) => !prev);
+                  else if (id === 'auto-minimize') setSidebarAutoMinimize((prev) => !prev);
+                }}
+                panelClassName="w-[240px]"
+              />
+            ) : null}
+            {sidebarCapabilities.repoFooter ? (
+              <UiToolbarIconButton
+                onClick={() => setAppView('settings')}
+                label="Open settings"
+                icon={<IconSettings className="opacity-70" />}
+                tone="accent"
+                pressed={settingsViewActive}
+              />
+            ) : null}
+            {sidebarCapabilities.collapseControl ? (
+              <UiToolbarIconButton
+                onClick={collapseSidebarWithGuard}
+                label="Collapse sidebar"
+                icon={<IconSidebarCollapse className={sidebarDirectionalIconClass} />}
+              />
+            ) : null}
+          </UiPanelToolbar>
         ) : null}
       </aside>
 
@@ -3580,66 +3469,56 @@ export function DroneSidebar({
         onPointerLeave={onCollapsedRailPointerLeave}
         aria-hidden={!sidebarCollapsed}
       >
-        <SidebarIconButton
+        <UiToolbarIconButton
           onClick={() => setSidebarCollapsed(false)}
-          className="text-[var(--muted-dim)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)]"
-          title="Expand sidebar"
-          ariaLabel="Expand sidebar"
+          label="Expand sidebar"
+          icon={<IconSidebarExpand className={sidebarDirectionalIconClass} />}
+          tone="accent"
           disabled={!collapsedRailInteractive}
           tabIndex={collapsedRailInteractive ? 0 : -1}
-        >
-          <IconSidebarExpand className={sidebarDirectionalIconClass} />
-        </SidebarIconButton>
+        />
         {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.createDrones ? (
-          <SidebarIconButton
+          <UiToolbarIconButton
             onClick={() => {
               setSidebarCollapsed(false);
               openDraftDroneFromSidebarSelection();
             }}
-            className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
-            title="Create drone"
-            ariaLabel="Create drone"
+            label="Create drone"
+            icon={<IconPlus className="opacity-80" />}
+            tone="accent"
             disabled={!collapsedRailInteractive}
             tabIndex={collapsedRailInteractive ? 0 : -1}
-          >
-            <IconPlus className="opacity-80" />
-          </SidebarIconButton>
+          />
         ) : null}
         {sidebarCapabilities.collapsedRailActions &&
         sidebarCapabilities.actions &&
         !repositoryOverviewOpen &&
         !isRepoGroupingMode ? (
-          <SidebarIconButton
+          <UiToolbarIconButton
             onClick={() => {
               setSidebarCollapsed(false);
               openGroupDraft();
             }}
-            className="border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
+            label="Create group"
+            icon={<IconFolder className="opacity-80" />}
+            tone="accent"
             title="Create group (E)"
-            ariaLabel="Create group"
             disabled={!collapsedRailInteractive}
             tabIndex={collapsedRailInteractive ? 0 : -1}
-          >
-            <IconFolder className="opacity-80" />
-          </SidebarIconButton>
+          />
         ) : null}
         {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? (
-          <SidebarIconButton
+          <UiToolbarIconButton
             onClick={() => {
               setAppView('settings');
             }}
-            className={`border ${
-              settingsViewActive
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-            }`}
-            title="Open settings"
-            ariaLabel="Open settings"
+            label="Open settings"
+            icon={<IconSettings className="opacity-80" />}
+            tone="accent"
+            pressed={settingsViewActive}
             disabled={!collapsedRailInteractive}
             tabIndex={collapsedRailInteractive ? 0 : -1}
-          >
-            <IconSettings className="opacity-80" />
-          </SidebarIconButton>
+          />
         ) : null}
       </div>
     </>

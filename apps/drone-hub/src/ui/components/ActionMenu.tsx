@@ -1,7 +1,11 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../cn';
-import { UiToolbarIconButton, type UiToolbarControlSize } from './Toolbar';
+import {
+  UiToolbarButton,
+  UiToolbarIconButton,
+  type UiToolbarControlSize,
+} from './Toolbar';
 
 export type UiActionMenuItemTone = 'neutral' | 'danger';
 
@@ -35,7 +39,8 @@ export type UiActionMenuEntry =
 
 export type UiActionMenuProps = {
   label: string;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
+  triggerContent?: React.ReactNode;
   entries: ReadonlyArray<UiActionMenuEntry>;
   onSelect: (id: string) => void;
   align?: 'start' | 'end';
@@ -68,6 +73,7 @@ const focusableSelector =
 export function UiActionMenu({
   label,
   icon,
+  triggerContent,
   entries,
   onSelect,
   align = 'end',
@@ -237,6 +243,7 @@ export function UiActionMenu({
           return (
             <div
               key={entry.id}
+              role="presentation"
               className="px-3 py-1 text-[length:var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--muted-dim)]"
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -306,28 +313,54 @@ export function UiActionMenu({
 
   return (
     <div ref={rootRef} className={cn('relative inline-flex', className)}>
-      <UiToolbarIconButton
-        ref={triggerRef}
-        label={label}
-        icon={icon}
-        size={size}
-        pressed={open}
-        disabled={disabled}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        onClick={() => {
-          const nextOpen = !open;
-          setOpen(nextOpen);
-          if (nextOpen) focusEntry('first');
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-          event.preventDefault();
-          if (!open) setOpen(true);
-          focusEntry(event.key === 'ArrowDown' ? 'first' : 'last');
-        }}
-      />
+      {triggerContent ? (
+        <UiToolbarButton
+          ref={triggerRef}
+          aria-label={label}
+          size={size}
+          pressed={open}
+          disabled={disabled}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-controls={open ? menuId : undefined}
+          onClick={() => {
+            const nextOpen = !open;
+            setOpen(nextOpen);
+            if (nextOpen) focusEntry('first');
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            event.preventDefault();
+            if (!open) setOpen(true);
+            focusEntry(event.key === 'ArrowDown' ? 'first' : 'last');
+          }}
+        >
+          {triggerContent}
+        </UiToolbarButton>
+      ) : (
+        <UiToolbarIconButton
+          ref={triggerRef}
+          label={label}
+          icon={icon}
+          size={size}
+          pressed={open}
+          disabled={disabled}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-controls={open ? menuId : undefined}
+          onClick={() => {
+            const nextOpen = !open;
+            setOpen(nextOpen);
+            if (nextOpen) focusEntry('first');
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            event.preventDefault();
+            if (!open) setOpen(true);
+            focusEntry(event.key === 'ArrowDown' ? 'first' : 'last');
+          }}
+        />
+      )}
       {menu && typeof document !== 'undefined' ? createPortal(menu, document.body) : menu}
     </div>
   );

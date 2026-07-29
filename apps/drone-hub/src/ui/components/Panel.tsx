@@ -112,13 +112,13 @@ export function UiPanelToolbar({
   );
 }
 
-export function UiPanelBody({
-  scroll = false,
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement> & { scroll?: boolean }) {
+export const UiPanelBody = React.forwardRef<
+  HTMLDivElement,
+  React.HTMLAttributes<HTMLDivElement> & { scroll?: boolean }
+>(function UiPanelBody({ scroll = false, className, ...props }, ref) {
   return (
     <div
+      ref={ref}
       className={cn(
         'min-h-0 min-w-0 flex-1',
         scroll ? 'overflow-auto' : 'overflow-hidden',
@@ -127,7 +127,7 @@ export function UiPanelBody({
       {...props}
     />
   );
-}
+});
 
 export type UiPanelStatusTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
 

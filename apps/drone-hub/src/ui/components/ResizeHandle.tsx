@@ -11,7 +11,9 @@ export type UiResizeHandleProps = Omit<
   max: number;
   step?: number;
   label: string;
+  reversed?: boolean;
   onValueChange: (value: number) => void;
+  onResizingChange?: (resizing: boolean) => void;
   onReset?: () => void;
 };
 
@@ -26,20 +28,44 @@ export function UiResizeHandle({
   max,
   step = 10,
   label,
+  reversed = false,
   onValueChange,
+  onResizingChange,
   onReset,
   className,
   ...props
 }: UiResizeHandleProps) {
   const dragRef = React.useRef<{ pointer: number; value: number } | null>(null);
+  const bodyStyleRef = React.useRef<{ cursor: string; userSelect: string } | null>(null);
   const [resizing, setResizing] = React.useState(false);
   const vertical = orientation === 'vertical';
+  const direction = reversed ? -1 : 1;
+
+  const stopResizing = () => {
+    dragRef.current = null;
+    setResizing(false);
+    onResizingChange?.(false);
+    if (!bodyStyleRef.current) return;
+    document.body.style.cursor = bodyStyleRef.current.cursor;
+    document.body.style.userSelect = bodyStyleRef.current.userSelect;
+    bodyStyleRef.current = null;
+  };
+
+  React.useEffect(
+    () => () => {
+      if (!bodyStyleRef.current) return;
+      document.body.style.cursor = bodyStyleRef.current.cursor;
+      document.body.style.userSelect = bodyStyleRef.current.userSelect;
+      bodyStyleRef.current = null;
+    },
+    [],
+  );
 
   const changeByKey = (key: string) => {
     const decrease = vertical ? key === 'ArrowLeft' : key === 'ArrowUp';
     const increase = vertical ? key === 'ArrowRight' : key === 'ArrowDown';
-    if (decrease) onValueChange(clamp(value - step, min, max));
-    else if (increase) onValueChange(clamp(value + step, min, max));
+    if (decrease) onValueChange(clamp(value - step * direction, min, max));
+    else if (increase) onValueChange(clamp(value + step * direction, min, max));
     else if (key === 'Home') onValueChange(min);
     else if (key === 'End') onValueChange(max);
     else return false;
@@ -62,28 +88,34 @@ export function UiResizeHandle({
           value,
         };
         setResizing(true);
+        onResizingChange?.(true);
+        bodyStyleRef.current = {
+          cursor: document.body.style.cursor,
+          userSelect: document.body.style.userSelect,
+        };
+        document.body.style.cursor = vertical ? 'col-resize' : 'row-resize';
+        document.body.style.userSelect = 'none';
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
         if (!dragRef.current || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
         const pointer = vertical ? event.clientX : event.clientY;
-        onValueChange(clamp(dragRef.current.value + pointer - dragRef.current.pointer, min, max));
+        onValueChange(
+          clamp(
+            dragRef.current.value + (pointer - dragRef.current.pointer) * direction,
+            min,
+            max,
+          ),
+        );
       }}
       onPointerUp={(event) => {
-        dragRef.current = null;
-        setResizing(false);
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId);
         }
+        stopResizing();
       }}
-      onPointerCancel={() => {
-        dragRef.current = null;
-        setResizing(false);
-      }}
-      onLostPointerCapture={() => {
-        dragRef.current = null;
-        setResizing(false);
-      }}
+      onPointerCancel={stopResizing}
+      onLostPointerCapture={stopResizing}
       onDoubleClick={onReset}
       onKeyDown={(event) => {
         if (!changeByKey(event.key)) return;
