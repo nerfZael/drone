@@ -386,15 +386,76 @@ async function requestDroneSummaries() {
   }
 }
 
-async function waitForMcpDroneReady(droneRef: string, timeoutMs = 10 * 60_000) {
+type McpInitialMessageReadiness = {
+  chat: string;
+  promptId: string;
+};
+
+function initialMessageReadiness(raw: any): McpInitialMessageReadiness | null {
+  const promptId = cleanString(raw?.promptId);
+  if (!promptId) return null;
+  return {
+    chat: chatName(raw?.chat),
+    promptId,
+  };
+}
+
+async function mcpInitialMessageIsMaterialized(
+  droneRef: string,
+  expected: McpInitialMessageReadiness,
+): Promise<boolean> {
+  try {
+    const state = await requestJson(
+      `/api/drones/${encodeURIComponent(droneRef)}/chats/${encodeURIComponent(expected.chat)}/state?turn=last`,
+      { method: 'GET' },
+    );
+    const rows = [
+      ...(Array.isArray(state?.pending) ? state.pending : []),
+      ...(Array.isArray(state?.transcripts) ? state.transcripts : []),
+    ];
+    return rows.some(
+      (row: any) => cleanString(row?.id || row?.promptId || row?.turnId) === expected.promptId,
+    );
+  } catch (error: any) {
+    if (error?.status === 404) return false;
+    throw error;
+  }
+}
+
+async function waitForMcpDroneReady(
+  droneRef: string,
+  opts?: {
+    timeoutMs?: number;
+    initialMessage?: McpInitialMessageReadiness | null;
+  },
+) {
+  const timeoutMs = opts?.timeoutMs ?? 10 * 60_000;
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const response = await requestDroneSummaries();
     const drones = Array.isArray(response?.drones) ? response.drones : [];
-    const drone = drones.find((candidate: any) => cleanString(candidate?.id) === droneRef || cleanString(candidate?.name) === droneRef);
-    const phase = cleanString(drone?.hub?.phase || drone?.phase || drone?.status).toLowerCase();
-    if (drone && (phase === 'ready' || phase === 'running' || phase === 'idle')) return droneSummary(drone);
-    if (phase === 'error' || phase === 'failed') throw new Error(`drone failed while becoming ready: ${droneRef}`);
+    const drone = drones.find(
+      (candidate: any) =>
+        cleanString(candidate?.id) === droneRef || cleanString(candidate?.name) === droneRef,
+    );
+    const phase = cleanString(
+      drone?.hub?.phase || drone?.hubPhase || drone?.phase || drone?.status,
+    ).toLowerCase();
+    if (phase === 'error' || phase === 'failed')
+      throw new Error(`drone failed while becoming ready: ${droneRef}`);
+    const phaseReady =
+      phase === 'ready' ||
+      phase === 'running' ||
+      phase === 'idle' ||
+      (Boolean(opts?.initialMessage) && phase === 'busy');
+    if (
+      drone &&
+      phaseReady &&
+      (!opts?.initialMessage ||
+        (await mcpInitialMessageIsMaterialized(droneRef, opts.initialMessage)))
+    ) {
+      return droneSummary(drone);
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`timed out waiting for drone to be ready: ${droneRef}`);
@@ -1043,42 +1104,55 @@ async function grantCreatedDroneAccessToManagedChat(
     principal.accessScope.writeMode === 'selected' ||
     principal.accessScope.executeMode === 'selected';
   if (!hasSelectedMode) return principal.accessScope;
-  const requestedScope = {
-    ...principal.accessScope,
-    droneIds: [...new Set([...principal.accessScope.droneIds, droneId])],
-    updatedAt: new Date().toISOString(),
-  };
   const response = context.nativeThreadId
     ? await requestJson('/api/assistant/scope', {
         method: 'POST',
         body: JSON.stringify({
           threadId: context.nativeThreadId,
-          readMode: requestedScope.readMode,
-          writeMode: requestedScope.writeMode,
-          executeMode: requestedScope.executeMode,
-          droneIds: requestedScope.droneIds,
+          addDroneIds: [droneId],
         }),
       })
     : await requestJson(
         `/api/drones/${encodeURIComponent(principal.droneId)}/chats/${encodeURIComponent(principal.chatName)}/mcp-access`,
         {
           method: 'PUT',
-          body: JSON.stringify({ accessScope: requestedScope }),
+          body: JSON.stringify({ addDroneIds: [droneId] }),
         },
       );
-  const accessScope =
-    response?.accessScope && typeof response.accessScope === 'object'
+  const persistedAccessScope =
+    response?.accessScope &&
+    typeof response.accessScope === 'object' &&
+    !Array.isArray(response.accessScope)
       ? response.accessScope
-      : requestedScope;
+      : null;
+  if (!persistedAccessScope) {
+    throw new Error('Drone Hub access grant response did not include an access scope');
+  }
+  const persistedDroneIds = Array.isArray(persistedAccessScope.droneIds)
+    ? persistedAccessScope.droneIds.map((value: unknown) => cleanString(value)).filter(Boolean)
+    : [];
+  if (!persistedDroneIds.includes(droneId)) {
+    throw new Error(`Drone Hub access grant did not persist created drone ${droneId}`);
+  }
+  const latestPrincipal = chatPrincipal(context) ?? principal;
+  const confirmedDroneIds = [
+    ...new Set([...latestPrincipal.accessScope.droneIds, ...persistedDroneIds]),
+  ];
+  const accessScope = {
+    // Additive grants must not replace the active MCP session's access modes.
+    // A delayed response may contain an older, broader policy snapshot.
+    ...latestPrincipal.accessScope,
+    droneIds: confirmedDroneIds,
+  };
   context.principal = {
-    ...principal,
+    ...latestPrincipal,
     accessScope,
     selectedDroneRefs: [
-      ...new Set([
-        ...principal.selectedDroneRefs,
-        droneId,
-        cleanString(createdDrone?.name),
-      ].filter(Boolean)),
+      ...new Set(
+        [...latestPrincipal.selectedDroneRefs, droneId, cleanString(createdDrone?.name)].filter(
+          Boolean,
+        ),
+      ),
     ],
   };
   return accessScope;
@@ -1472,7 +1546,10 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     const returnsImmediately = args.draft === true || args.completion === 'accepted';
     const drone = returnsImmediately
       ? accepted
-      : await waitForMcpDroneReady(cleanString(response?.id || response?.name, accepted.id || accepted.name));
+      : await waitForMcpDroneReady(
+          cleanString(response?.id || response?.name, accepted.id || accepted.name),
+          { initialMessage: initialMessageReadiness(response?.initialMessage) },
+        );
     return toolResult({
       ok: true,
       phase: args.draft === true ? 'draft' : returnsImmediately ? 'accepted' : 'ready',

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
 import { resetDroneRootDirForTests } from '../src/host/paths';
+import { getPromptQueueRepository } from '../src/host/prompt-queue-repository';
 import { loadRegistry, updateRegistry } from '../src/host/registry';
 import {
   upsertChatInStore,
@@ -290,6 +291,85 @@ describeSocketSuite('chat management api', () => {
     expect(defaultPrompt.data?.autoRenameChat).toBe(false);
   });
 
+  test('queues follow-ups without pumping while a promoted drone is still provisioning', async () => {
+    const droneId = 'drone-promoted-but-seeding';
+    const at = '2026-07-29T22:44:14.325Z';
+    const initialPromptId = 'initial-before-review';
+    await seedDrone(droneId, { runtime: 'host' });
+    await upsertCanonicalDroneLifecycle('real', droneId, {
+      id: droneId,
+      name: droneId,
+      runtime: 'host',
+      createdAt: at,
+      hub: { phase: 'seeding', message: 'Seeding repo…' },
+      chats: {},
+    });
+    const queue = getPromptQueueRepository();
+    const initialPending = {
+      id: initialPromptId,
+      at,
+      prompt: 'Initial task',
+      state: 'queued' as const,
+      updatedAt: at,
+    };
+    if (queue) {
+      await queue.enqueue({
+        droneId,
+        chatName: 'default',
+        prompt: initialPending,
+      });
+    } else {
+      upsertPendingPromptInStore({
+        droneId,
+        chatName: 'default',
+        pending: initialPending,
+      });
+    }
+
+    const followUp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          promptId: 'review-after-initial',
+          submittedAt: '2026-07-29T22:44:26.908Z',
+          prompt: 'Review the changes and make a pull request.',
+        }),
+      },
+    );
+
+    expect(followUp.r.status).toBe(202);
+    expect(followUp.data).toMatchObject({
+      ok: true,
+      promptId: 'review-after-initial',
+      pendingState: 'queued',
+    });
+    if (queue) {
+      const queued = queue.list({
+        droneId,
+        chatName: 'default',
+      });
+      expect(queued.map((prompt) => prompt.id)).toEqual([
+        initialPromptId,
+        'review-after-initial',
+      ]);
+      expect(queued.map((prompt) => prompt.state)).toEqual(['queued', 'queued']);
+    } else {
+      const pending = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+      );
+      expect(pending.data?.pending?.map((prompt: any) => prompt.id)).toEqual([
+        initialPromptId,
+        'review-after-initial',
+      ]);
+      expect(pending.data?.pending?.map((prompt: any) => prompt.state)).toEqual([
+        'queued',
+        'queued',
+      ]);
+    }
+  });
+
   test('defaults docker snapshots off for no-volume container chats and preserves explicit choices', async () => {
     const droneId = 'drone-chat-snapshot-default';
     await seedDrone(droneId, { runtime: 'container', persistVolume: false });
@@ -566,6 +646,35 @@ describeSocketSuite('chat management api', () => {
       droneIds: ['another-drone', droneId],
     });
 
+    const addedDroneIds = [
+      'parallel-child-1',
+      'parallel-child-2',
+      'parallel-child-3',
+      'parallel-child-4',
+    ];
+    const additiveUpdates = await Promise.all(
+      addedDroneIds.map((addedDroneId) =>
+        apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/mcp-access`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ addDroneIds: [addedDroneId] }),
+        }),
+      ),
+    );
+    expect(additiveUpdates.every(({ r }) => r.status === 200)).toBe(true);
+
+    const afterAdditions = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/mcp-access`,
+    );
+    expect(afterAdditions.data?.accessScope).toMatchObject({
+      readMode: 'selected',
+      writeMode: 'all',
+      executeMode: 'all',
+    });
+    expect(new Set(afterAdditions.data?.accessScope?.droneIds)).toEqual(
+      new Set(['another-drone', droneId, ...addedDroneIds]),
+    );
+
     const registry: any = await loadRegistry();
     const chat = registry?.drones?.[droneId]?.chats?.default;
     expect(String(chat?.id ?? '')).toMatch(/^[0-9a-f-]{36}$/i);
@@ -573,8 +682,10 @@ describeSocketSuite('chat management api', () => {
       readMode: 'selected',
       writeMode: 'all',
       executeMode: 'all',
-      droneIds: ['another-drone', droneId],
     });
+    expect(new Set(chat?.droneHubMcpAccessScope?.droneIds)).toEqual(
+      new Set(['another-drone', droneId, ...addedDroneIds]),
+    );
 
     const invalid = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/chats/default/mcp-access`,

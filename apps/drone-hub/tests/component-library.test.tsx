@@ -14,6 +14,7 @@ import {
   UiFileInput,
   UiInput,
   UiKbd,
+  UiMenuSelect,
   UiNavigationRow,
   UiPaneState,
   UiPanel,
@@ -39,6 +40,7 @@ import {
   UiToolbarButton,
   UiToolbarIconButton,
   UiToolbarInput,
+  UiToolbarLink,
   UiToolbarSegmentedControl,
   UiTooltip,
 } from '../src/ui';
@@ -209,6 +211,7 @@ describe('drone hub component library', () => {
             <UiToolbarButton pressed>Viewed</UiToolbarButton>
             <UiToolbarButton pressed={false}>Unviewed</UiToolbarButton>
             <UiToolbarIconButton label="Refresh changes" icon={<span>↻</span>} />
+            <UiToolbarLink href="/pull/42" tone="accent">Open pull request</UiToolbarLink>
           </UiPanelToolbar>
           <UiPanelBody>
             <UiNavigationRow
@@ -245,6 +248,7 @@ describe('drone hub component library', () => {
     );
 
     expect(html).toContain('role="toolbar"');
+    expect(html).toContain('href="/pull/42"');
     expect(html).toContain('role="radiogroup"');
     expect(html).toContain('role="radio"');
     expect(html).toContain('aria-checked="true"');
@@ -282,12 +286,42 @@ describe('drone hub component library', () => {
         onSelect={() => {}}
       />,
     );
+    const numericTriggerHtml = renderToStaticMarkup(
+      <UiActionMenu
+        label="Numeric options"
+        triggerContent={0}
+        entries={[{ id: 'zero', label: 'Zero' }]}
+        onSelect={() => {}}
+      />,
+    );
 
     expect(panelHtml).not.toContain('rounded-[var(--radius-large)]');
     expect(panelHtml).not.toContain('border-[var(--border-subtle)]');
     expect(menuHtml).toContain('aria-haspopup="menu"');
     expect(menuHtml).toContain('aria-expanded="true"');
     expect(menuHtml).not.toContain('aria-pressed');
+    expect(numericTriggerHtml).toContain('>0</span>');
+  });
+
+  test('exposes menu selection with listbox semantics', () => {
+    const html = renderToStaticMarkup(
+      <UiMenuSelect
+        value="squash"
+        open
+        onOpenChange={() => {}}
+        onValueChange={() => {}}
+        entries={[
+          { value: 'merge', label: 'Merge' },
+          { value: 'squash', label: 'Squash' },
+        ]}
+      />,
+    );
+
+    expect(html).toContain('aria-haspopup="listbox"');
+    expect(html).toContain('role="listbox"');
+    expect(html).toContain('role="option"');
+    expect(html).toContain('aria-selected="true"');
+    expect(html).toContain('aria-controls=');
   });
 
   test('keeps enabled segmented options keyboard reachable when selection is disabled', () => {

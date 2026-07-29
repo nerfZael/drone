@@ -1,7 +1,12 @@
 import React from 'react';
 import type { TerminalPaneSessionsState } from '../terminal/terminal-tabs-state';
 import type { ChatAgentConfig } from '../../domain';
-import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import {
+  UiPaneState,
+  UiPanel,
+  UiToolbarButton,
+  type UiMenuSelectEntry,
+} from '../../ui/components';
 import type {
   DroneFsEntry,
   DronePortMapping,
@@ -14,7 +19,6 @@ import { DroneFilesDock } from '../files/DroneFilesDock';
 import { DronePullRequestsDock } from '../pullRequests/DronePullRequestsDock';
 import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-state';
 import { WhiteboardDock } from '../whiteboard/WhiteboardDock';
-import { PaneLoadingState } from '../../ui/PaneLoadingState';
 import {
   RIGHT_PANEL_TAB_LABELS,
   RIGHT_PANEL_TABS,
@@ -44,9 +48,9 @@ export function RightPanelPaneLoadingFallback({ tab }: { tab: RightPanelTab }) {
   const label = RIGHT_PANEL_TAB_LABELS[tab] ?? 'Pane';
   const loadingLabel = tab === 'env' ? 'environment' : label.toLowerCase();
   return (
-    <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden">
-      <PaneLoadingState label={`Loading ${loadingLabel}…`} />
-    </div>
+    <UiPanel flush surface="alternate" className="h-full w-full">
+      <UiPaneState kind="loading" title={`Loading ${loadingLabel}…`} />
+    </UiPanel>
   );
 }
 
@@ -61,21 +65,18 @@ export function RightPanelPaneLoadError({
 }) {
   const label = RIGHT_PANEL_TAB_LABELS[tab] ?? 'Pane';
   return (
-    <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex items-start px-2.5 py-2">
-      <div className="w-full rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-3 text-[var(--text-12)] text-[var(--fg)]">
-        <div className="text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--red)]" style={{ fontFamily: 'var(--display)' }}>
-          {label}
-        </div>
-        <div className="mt-1">{message}</div>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-3 rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-2.5 py-1 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--red)] hover:bg-[var(--danger-panel)]"
-        >
-          Retry
-        </button>
-      </div>
-    </div>
+    <UiPanel flush surface="alternate" className="h-full w-full">
+      <UiPaneState
+        kind="error"
+        title={`${label} failed to load`}
+        description={message}
+        action={
+          <UiToolbarButton tone="danger" onClick={onRetry}>
+            Retry
+          </UiToolbarButton>
+        }
+      />
+    </UiPanel>
   );
 }
 

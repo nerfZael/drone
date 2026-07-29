@@ -119,6 +119,26 @@ export type MobileDroneSidebarOrder = {
   pinnedDroneIds: string[];
 };
 
+export type MobileDroneSidebarSnapshotStatus = 'complete' | 'legacy' | 'partial' | 'missing';
+
+export type NormalizedMobileDroneListPayload = {
+  drones: MobileDroneSummary[];
+  schemaVersion: number | null;
+  sidebar: MobileDroneSidebarOrder;
+  sidebarSnapshotStatus: MobileDroneSidebarSnapshotStatus;
+  sidebarPreferenceVersion: number | null;
+  createRepos: MobileDroneCreateRepo[];
+  deleteMode: 'archive' | 'permanent';
+};
+
+export type MobileDroneListSnapshot = {
+  targetId: string;
+  drones: MobileDroneSummary[];
+  sidebar: MobileDroneSidebarOrder;
+  sidebarSnapshotStatus: MobileDroneSidebarSnapshotStatus;
+  sidebarPreferenceVersion: number | null;
+};
+
 export type MobileDroneCreateBranch = {
   name: string;
   remote: string;
@@ -212,6 +232,14 @@ export const EMPTY_MOBILE_DRONE_SIDEBAR_ORDER: MobileDroneSidebarOrder = {
   sidebarDroneOrderByGroup: {},
   sidebarNodeOrderByParent: {},
   pinnedDroneIds: [],
+};
+
+export const EMPTY_MOBILE_DRONE_LIST_SNAPSHOT: MobileDroneListSnapshot = {
+  targetId: '',
+  drones: [],
+  sidebar: EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+  sidebarSnapshotStatus: 'missing',
+  sidebarPreferenceVersion: null,
 };
 
 export function suggestNextMobileDroneChatName(
@@ -363,27 +391,34 @@ export function excludePinnedMobileDrones(
   return drones.filter((drone) => !pinnedIds.has(drone.id));
 }
 
-export function normalizeMobileDroneListPayload(raw: unknown): {
-  drones: MobileDroneSummary[];
-  schemaVersion: number | null;
-  sidebar: MobileDroneSidebarOrder;
-  createRepos: MobileDroneCreateRepo[];
-  deleteMode: 'archive' | 'permanent';
-} {
+export function normalizeMobileDroneListPayload(raw: unknown): NormalizedMobileDroneListPayload {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return {
       drones: [],
       schemaVersion: null,
       sidebar: EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+      sidebarSnapshotStatus: 'missing',
+      sidebarPreferenceVersion: null,
       createRepos: [],
       deleteMode: 'permanent',
     };
   }
   const value = raw as Record<string, unknown>;
-  const sidebar =
-    value.sidebar && typeof value.sidebar === 'object' && !Array.isArray(value.sidebar)
-      ? (value.sidebar as Record<string, unknown>)
-      : {};
+  const hasSidebar =
+    value.sidebar != null && typeof value.sidebar === 'object' && !Array.isArray(value.sidebar);
+  const sidebar = hasSidebar ? (value.sidebar as Record<string, unknown>) : {};
+  const schemaVersion =
+    typeof value.schemaVersion === 'number' && Number.isFinite(value.schemaVersion)
+      ? value.schemaVersion
+      : null;
+  const sidebarSnapshotStatus: MobileDroneSidebarSnapshotStatus =
+    schemaVersion != null && schemaVersion >= 7
+      ? sidebar.snapshotComplete === true
+        ? 'complete'
+        : 'partial'
+      : hasSidebar
+        ? 'legacy'
+        : 'missing';
   const repoPathByDroneId =
     value.repoPathByDroneId &&
     typeof value.repoPathByDroneId === 'object' &&
@@ -421,10 +456,7 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
   const createRepos = [...createRepoByPath.values()];
   return {
     drones,
-    schemaVersion:
-      typeof value.schemaVersion === 'number' && Number.isFinite(value.schemaVersion)
-        ? value.schemaVersion
-        : null,
+    schemaVersion,
     sidebar: {
       registeredRepoPaths,
       groupCreatedAtByName: nullableStringMap(sidebar.groupCreatedAtByName),
@@ -433,8 +465,63 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
       sidebarNodeOrderByParent: stringListMap(sidebar.sidebarNodeOrderByParent),
       pinnedDroneIds: stringList(sidebar.pinnedDroneIds),
     },
+    sidebarSnapshotStatus,
+    sidebarPreferenceVersion:
+      Number.isSafeInteger(sidebar.preferenceVersion) && Number(sidebar.preferenceVersion) >= 0
+        ? Number(sidebar.preferenceVersion)
+        : null,
     createRepos,
     deleteMode: value.deleteMode === 'archive' ? 'archive' : 'permanent',
+  };
+}
+
+export function resolveMobileDroneListSnapshot({
+  current,
+  targetId,
+  payload,
+  keepCurrentSidebar = false,
+}: {
+  current: MobileDroneListSnapshot;
+  targetId: string;
+  payload: NormalizedMobileDroneListPayload;
+  keepCurrentSidebar?: boolean;
+}): MobileDroneListSnapshot {
+  const payloadHasUsableSidebar =
+    payload.sidebarSnapshotStatus === 'complete' || payload.sidebarSnapshotStatus === 'legacy';
+  const currentHasUsableSidebar =
+    current.sidebarSnapshotStatus === 'complete' || current.sidebarSnapshotStatus === 'legacy';
+  const payloadHasOlderPreferenceVersion =
+    current.targetId === targetId &&
+    current.sidebarSnapshotStatus === 'complete' &&
+    payload.sidebarSnapshotStatus === 'complete' &&
+    current.sidebarPreferenceVersion != null &&
+    payload.sidebarPreferenceVersion != null &&
+    payload.sidebarPreferenceVersion < current.sidebarPreferenceVersion;
+  const usePayloadSidebar =
+    payloadHasUsableSidebar && !payloadHasOlderPreferenceVersion && !keepCurrentSidebar;
+  const preserveCurrentSidebar =
+    current.targetId === targetId &&
+    currentHasUsableSidebar &&
+    (!payloadHasUsableSidebar || payloadHasOlderPreferenceVersion || keepCurrentSidebar);
+
+  return {
+    targetId,
+    drones: payload.drones,
+    sidebar: usePayloadSidebar
+      ? payload.sidebar
+      : preserveCurrentSidebar
+        ? current.sidebar
+        : EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+    sidebarSnapshotStatus: usePayloadSidebar
+      ? payload.sidebarSnapshotStatus
+      : preserveCurrentSidebar
+        ? current.sidebarSnapshotStatus
+        : payload.sidebarSnapshotStatus,
+    sidebarPreferenceVersion: usePayloadSidebar
+      ? payload.sidebarPreferenceVersion
+      : preserveCurrentSidebar
+        ? current.sidebarPreferenceVersion
+        : null,
   };
 }
 

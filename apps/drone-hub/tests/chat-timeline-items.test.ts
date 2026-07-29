@@ -32,13 +32,16 @@ describe('chat timeline items', () => {
     ]);
   });
 
-  test('keeps a prompt being delivered ahead of locally queued prompts', () => {
-    const items = buildChatTimelineItems([], [
-      pending('queued', '2026-01-01T10:00:00.000Z', 'queued'),
-      pending('active', '2026-01-01T10:01:00.000Z', 'sending', '2026-01-01T10:02:00.000Z'),
-    ]);
+  test('keeps user messages in submission order while an older startup prompt is still queued', () => {
+    const items = buildChatTimelineItems(
+      [],
+      [
+        pending('review', '2026-07-29T17:26:20.768Z', 'sent', '2026-07-29T17:35:03.335Z'),
+        pending('initial-task', '2026-07-29T17:25:33.880Z', 'queued'),
+      ],
+    );
 
-    expect(items.map((item) => item.item.id)).toEqual(['active', 'queued']);
+    expect(items.map((item) => item.item.id)).toEqual(['initial-task', 'review']);
   });
 
   test('orders active prompts by submission time rather than status update time', () => {

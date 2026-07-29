@@ -196,6 +196,9 @@ describe('DroneLifecycleRepository', () => {
     assert.equal(repository.list('pending').length, 0);
     assert.equal(repository.get('promoted').state, 'real');
     assert.equal(repository.get('promoted').name, 'file-transfer-tool');
+    assert.deepEqual(repository.get('promoted').lifecycle.hub, {
+      phase: 'creating',
+    });
   });
 
   test('commits lifecycle state and outbox events atomically', async () => {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
+import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/components';
 import type { RepoBranchSourceMode } from './drone-create-runtime';
 
 type RepoRemoteBranchOption = {

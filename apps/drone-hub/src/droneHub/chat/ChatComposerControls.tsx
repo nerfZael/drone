@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
+import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/components';
 import { ChatComposerMenu, type ChatComposerMenuAction } from './ChatComposerMenu';
 import {
   ChatComposerModelPicker,

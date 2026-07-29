@@ -15,6 +15,9 @@ const { looksLikeTransientPromptEnqueueError } = require('../../dist/hub/pending
 const { createDronePendingPromptStore } = require('../../dist/hub/drone-pending-prompts.js');
 const { createPendingDroneStateHelpers } = require('../../dist/hub/drone-pending-state.js');
 const {
+  reserveInitialPromptQueuePosition,
+} = require('../../dist/hub/drone-provisioning-route-service.js');
+const {
   resetTranscriptStoreForTests,
   upsertChatInStore,
 } = require('../../dist/hub/transcript-store.js');
@@ -68,6 +71,43 @@ test('enqueue is idempotent by request key and keeps the original payload', asyn
   assert.equal(duplicate.prompt.id, 'p-1');
   assert.equal(duplicate.prompt.prompt, 'original');
   assert.equal(queue.list({ droneId: 'alpha', chatName: 'default' }).length, 1);
+});
+
+test('reserves a seed queue position before an immediate follow-up', async () => {
+  const queue = repository('seed-reservation');
+  await reserveInitialPromptQueuePosition({
+    droneId: 'seeded-drone',
+    chatName: 'default',
+    promptId: 'initial-task',
+    at: '2026-07-29T22:44:14.325Z',
+    prompt: 'Initial task',
+  });
+  await queue.enqueue({
+    droneId: 'seeded-drone',
+    chatName: 'default',
+    prompt: prompt(
+      'review-follow-up',
+      '2026-07-29T22:44:26.908Z',
+      'Review the changes and make a pull request.',
+    ),
+  });
+
+  // Provisioning materializes the seed again. The reservation must remain the
+  // original row and therefore retain the first FIFO sequence.
+  await reserveInitialPromptQueuePosition({
+    droneId: 'seeded-drone',
+    chatName: 'default',
+    promptId: 'initial-task',
+    at: '2026-07-29T22:44:14.325Z',
+    prompt: 'Initial task',
+  });
+
+  const queued = queue.list({ droneId: 'seeded-drone', chatName: 'default' });
+  assert.deepEqual(
+    queued.map((item) => item.id),
+    ['initial-task', 'review-follow-up'],
+  );
+  assert.equal(queue.nextQueued({ droneId: 'seeded-drone', chatName: 'default' }).id, 'initial-task');
 });
 
 test('drops retired automation metadata from prompt payloads', async () => {

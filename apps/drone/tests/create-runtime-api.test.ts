@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
 import { loadRegistry, updateRegistry } from '../src/host/registry';
 import { resetDroneRootDirForTests } from '../src/host/paths';
+import { getPromptQueueRepository } from '../src/host/prompt-queue-repository';
 import { getSocketListenSupport } from './socket-listen-support';
 
 const listenSupport = getSocketListenSupport();
@@ -116,6 +117,24 @@ describeSocketSuite('create runtime api', () => {
     });
     expect(promptId).not.toBe('');
 
+    const queue = getPromptQueueRepository();
+    if (queue) {
+      const reserved = queue.get({
+        droneId,
+        chatName: 'default',
+        promptId,
+      });
+      expect(reserved).not.toBeNull();
+      if (!reserved) throw new Error('initial prompt queue reservation is missing');
+      expect(reserved).toMatchObject({
+        id: promptId,
+        at: '2026-06-21T12:00:00.000Z',
+        prompt: 'Start this work',
+        state: 'queued',
+      });
+      expect(Number(reserved.sequence)).toBeGreaterThan(0);
+    }
+
     const regAny: any = await loadRegistry();
     expect(regAny?.pending?.[droneId]?.seed).toMatchObject({
       chatName: 'default',
@@ -123,6 +142,112 @@ describeSocketSuite('create runtime api', () => {
       promptId,
       submittedAt: '2026-06-21T12:00:00.000Z',
     });
+  });
+
+  test('single draft keeps one stable initial prompt identity for publication', async () => {
+    const resp = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'seeded-draft-state',
+        runtime: 'container',
+        draft: true,
+        seedPrompt: 'Start after publication',
+        seedSubmittedAt: '2026-06-21T12:01:00.000Z',
+      }),
+    });
+    expect(resp.r.status).toBe(201);
+    const droneId = String(resp.data?.id ?? '').trim();
+    const promptId = String(resp.data?.initialMessage?.promptId ?? '').trim();
+    expect(droneId).not.toBe('');
+    expect(promptId).not.toBe('');
+
+    const regAny: any = await loadRegistry();
+    expect(regAny?.pending?.[droneId]?.startupQueuedPrompts).toEqual([
+      expect.objectContaining({
+        id: promptId,
+        chatName: 'default',
+        prompt: 'Start after publication',
+        state: 'queued',
+      }),
+    ]);
+
+    const queue = getPromptQueueRepository();
+    if (queue) {
+      const reserved = queue.get({ droneId, chatName: 'default', promptId });
+      expect(reserved).not.toBeNull();
+      if (!reserved) throw new Error('draft initial prompt queue reservation is missing');
+      expect(reserved.state).toBe('queued');
+    }
+  });
+
+  test('batch creation keeps stable initial prompt identities for drafts and immediate starts', async () => {
+    const resp = await apiFetch('/api/drones/batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        drones: [
+          {
+            name: 'seeded-batch-draft-state',
+            runtime: 'container',
+            draft: true,
+            seedPrompt: 'Batch initial task',
+            seedSubmittedAt: '2026-06-21T12:02:00.000Z',
+          },
+          {
+            name: 'seeded-batch-start-state',
+            runtime: 'container',
+            seedPrompt: 'Batch immediate task',
+            seedSubmittedAt: '2026-06-21T12:03:00.000Z',
+          },
+        ],
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+    expect(resp.data?.accepted).toHaveLength(2);
+    const draftAccepted = resp.data?.accepted?.find(
+      (item: any) => item?.name === 'seeded-batch-draft-state',
+    );
+    const startingAccepted = resp.data?.accepted?.find(
+      (item: any) => item?.name === 'seeded-batch-start-state',
+    );
+    const draftDroneId = String(draftAccepted?.id ?? '').trim();
+    const startingDroneId = String(startingAccepted?.id ?? '').trim();
+    const draftPromptId = String(draftAccepted?.initialMessage?.promptId ?? '').trim();
+    const startingPromptId = String(startingAccepted?.initialMessage?.promptId ?? '').trim();
+    expect(draftDroneId).not.toBe('');
+    expect(startingDroneId).not.toBe('');
+    expect(draftPromptId).not.toBe('');
+    expect(startingPromptId).not.toBe('');
+
+    const regAny: any = await loadRegistry();
+    const startup = regAny?.pending?.[draftDroneId]?.startupQueuedPrompts?.[0];
+    expect(startup).toMatchObject({
+      id: draftPromptId,
+      chatName: 'default',
+      prompt: 'Batch initial task',
+      state: 'queued',
+    });
+    if (regAny?.pending?.[startingDroneId]) {
+      expect(regAny.pending[startingDroneId].seed).toMatchObject({
+        chatName: 'default',
+        promptId: startingPromptId,
+        prompt: 'Batch immediate task',
+      });
+    }
+
+    const queue = getPromptQueueRepository();
+    if (queue) {
+      for (const [droneId, promptId] of [
+        [draftDroneId, draftPromptId],
+        [startingDroneId, startingPromptId],
+      ]) {
+        const reserved = queue.get({ droneId, chatName: 'default', promptId });
+        expect(reserved).not.toBeNull();
+        if (!reserved) throw new Error('batch initial prompt queue reservation is missing');
+        expect(reserved.state).toBe('queued');
+      }
+    }
   });
 
   test('single create persists supported read-only seed agent permission mode', async () => {

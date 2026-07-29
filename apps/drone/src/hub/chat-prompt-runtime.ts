@@ -2421,6 +2421,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     containerPort?: number | null;
   };
 
+  function droneIsProvisioning(drone: any): boolean {
+    const phase = String(drone?.hub?.phase ?? drone?.phase ?? '')
+      .trim()
+      .toLowerCase();
+    return phase === 'starting' || phase === 'creating' || phase === 'seeding';
+  }
+
   async function createOrEnqueuePromptUnified(opts: {
     id?: string;
     droneId: string;
@@ -2458,6 +2465,37 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       let liveDroneEntry = regSnap?.drones?.[droneId] ?? null;
       if (!liveDroneEntry)
         return { kind: 'error', status: 404, error: `unknown drone: ${droneId}` };
+      if (droneIsProvisioning(liveDroneEntry)) {
+        if (attachments.length > 0) {
+          return {
+            kind: 'error',
+            status: 409,
+            error: `drone "${droneId}" is still starting (attachments require a ready drone)`,
+          };
+        }
+        const submittedAt = normalizeSubmittedAtIso(opts.submittedAt);
+        await pushPendingPrompt({
+          droneId,
+          chatName,
+          pending: {
+            id: fallbackId,
+            at: submittedAt,
+            prompt,
+            ...(opts.cwd != null ? { cwd: opts.cwd } : {}),
+            ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
+            state: 'queued',
+            updatedAt: submittedAt,
+          },
+        });
+        opts.mark?.('persistProvisioningPending');
+        // Provisioning owns the first pump. Starting it here could dispatch a
+        // follow-up before the repo and initial prompt have been materialized.
+        return {
+          kind: 'enqueued',
+          id: fallbackId,
+          pendingState: 'queued',
+        };
+      }
       let chatEntry = liveDroneEntry?.chats?.[chatName] ?? null;
       if (chatHasActiveDockerSnapshot(chatEntry)) {
         await failStaleDockerSnapshotsForChat({ droneId, chatName });

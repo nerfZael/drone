@@ -5,6 +5,7 @@ import {
   chatInfoForSelection,
 } from '../src/droneHub/app/chat-selection-model';
 import {
+  chatHasInFlightPrompt,
   localQueuedPromptStateWhileFlushing,
   shouldFlushLocalQueuedPrompts,
   visiblePendingPromptsForAgent,
@@ -17,6 +18,16 @@ const drone = {
 } as any;
 
 describe('native chat selection state', () => {
+  test('keeps an in-flight send scoped to its originating drone chat', () => {
+    const inFlightByChat = {
+      'drone-a::default': 1,
+    };
+
+    expect(chatHasInFlightPrompt(inFlightByChat, 'drone-a', 'default')).toBe(true);
+    expect(chatHasInFlightPrompt(inFlightByChat, 'drone-b', 'default')).toBe(false);
+    expect(chatHasInFlightPrompt(inFlightByChat, 'drone-a', 'review')).toBe(false);
+  });
+
   test('allows hidden workflow chats to load their runtime metadata', () => {
     expect(
       chatNamesForConfigSelection({

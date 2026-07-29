@@ -22,9 +22,18 @@ import {
 import { colors, radii } from '../theme';
 import { ConfirmDialog } from '../components/Ui';
 import type { MobileLinkedPullRequestContext } from './use-drone-linked-pull-requests';
+import {
+  MOBILE_PULL_REQUEST_MERGE_METHOD_OPTIONS,
+  mobilePullRequestMergeFailureMessage,
+  mobilePullRequestMergePresentation,
+  type MobilePullRequestMergeMethod,
+} from './linked-pull-request-model';
 
 type StatusTone = 'accent' | 'danger' | 'muted' | 'success' | 'warning';
-type PullRequestConfirmation = 'merge' | 'close' | null;
+type PullRequestConfirmation =
+  | { action: 'merge'; method: MobilePullRequestMergeMethod }
+  | { action: 'close' }
+  | null;
 
 function stop(event: GestureResponderEvent): void {
   event.stopPropagation();
@@ -66,6 +75,18 @@ function LinkedPullRequestRow({
   const isOpen = state === 'open';
   const blockedReason = pullRequest ? githubPullRequestMergeBlockedReason(pullRequest) : null;
   const forceReason = pullRequest ? githubPullRequestForceMergeReason(pullRequest) : null;
+  const mergePresentation = mobilePullRequestMergePresentation({
+    method:
+      confirmation?.action === 'merge' ? confirmation.method : context.mergeMethod,
+    blockedReason,
+    forceReason,
+    confirmation: pullRequestMergeConfirmation({
+      pullNumber: pullRequest?.number ?? link.pullNumber,
+      baseRefName: pullRequest?.baseRefName,
+      method: confirmation?.action === 'merge' ? confirmation.method : context.mergeMethod,
+      forceReason,
+    }),
+  });
   const busy = context.busyAction?.pullNumber === link.pullNumber;
   const anyActionBusy = context.busyAction != null;
   const showActions = isOpen && sameRepo && (context.canMerge || context.canClose);
@@ -79,14 +100,9 @@ function LinkedPullRequestRow({
         ? 'External repository'
         : 'Status unavailable';
   const confirmationCopy =
-    confirmation === 'close'
+    confirmation?.action === 'close'
       ? pullRequestCloseConfirmation({ pullNumber: pullRequest?.number ?? link.pullNumber })
-      : pullRequestMergeConfirmation({
-          pullNumber: pullRequest?.number ?? link.pullNumber,
-          baseRefName: pullRequest?.baseRefName,
-          method: 'merge',
-          forceReason,
-        });
+      : mergePresentation.confirmation;
 
   React.useEffect(() => {
     setActionError(null);
@@ -105,23 +121,36 @@ function LinkedPullRequestRow({
 
   const requestMerge = (event: GestureResponderEvent) => {
     stop(event);
-    if (!pullRequest || blockedReason || anyActionBusy) return;
-    setConfirmation('merge');
+    if (!pullRequest || !mergePresentation.canRequestMerge || anyActionBusy) return;
+    setConfirmation({ action: 'merge', method: context.mergeMethod });
   };
 
   const requestClose = (event: GestureResponderEvent) => {
     stop(event);
     if (!pullRequest || anyActionBusy) return;
-    setConfirmation('close');
+    setConfirmation({ action: 'close' });
   };
 
   const confirmAction = () => {
     if (!pullRequest || !confirmation || confirmationBusy || anyActionBusy) return;
     const action = confirmation;
+    if (action.action === 'merge' && blockedReason) {
+      setActionError(
+        mobilePullRequestMergeFailureMessage({
+          pullNumber: pullRequest.number,
+          method: action.method,
+          error: blockedReason,
+        }),
+      );
+      setConfirmation(null);
+      return;
+    }
     setConfirmationBusy(true);
     setActionError(null);
     setActionNotice(null);
-    void (action === 'merge' ? context.merge(pullRequest.number) : context.close(pullRequest.number))
+    void (action.action === 'merge'
+      ? context.merge(pullRequest.number, action.method)
+      : context.close(pullRequest.number))
       .then(setActionNotice)
       .catch((error) => setActionError(error instanceof Error ? error.message : String(error)))
       .finally(() => {
@@ -175,6 +204,47 @@ function LinkedPullRequestRow({
         ) : null}
         {pullRequest?.authorLogin ? <Text style={styles.author}>by {pullRequest.authorLogin}</Text> : null}
       </View>
+      {isOpen && sameRepo && context.canMerge ? (
+        <View style={styles.mergeMethodSection}>
+          <Text style={styles.mergeMethodLabel}>MERGE METHOD</Text>
+          <View
+            accessibilityRole="radiogroup"
+            accessibilityLabel="Pull request merge method"
+            style={[styles.mergeMethods, anyActionBusy && styles.disabled]}
+          >
+            {MOBILE_PULL_REQUEST_MERGE_METHOD_OPTIONS.map((option) => {
+              const selected = context.mergeMethod === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`${option.label} merge method`}
+                  accessibilityState={{ selected, disabled: anyActionBusy }}
+                  disabled={anyActionBusy}
+                  onPress={(event) => {
+                    stop(event);
+                    context.setMergeMethod(option.value);
+                  }}
+                  style={({ pressed }) => [
+                    styles.mergeMethod,
+                    selected && styles.mergeMethodSelected,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.mergeMethodText,
+                      selected && styles.mergeMethodTextSelected,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
       {isOpen ? (
         <View style={styles.statusActionsRow}>
           {pullRequest ? (
@@ -210,15 +280,18 @@ function LinkedPullRequestRow({
               {context.canMerge ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={blockedReason ? `Merge blocked: ${blockedReason}` : forceReason ? `Force merge pull request ${link.pullNumber}` : `Merge pull request ${link.pullNumber}`}
-                  accessibilityState={{ disabled: Boolean(blockedReason) || anyActionBusy, busy }}
-                  disabled={Boolean(blockedReason) || anyActionBusy}
+                  accessibilityLabel={`${mergePresentation.accessibilityLabel} for pull request ${link.pullNumber}`}
+                  accessibilityState={{
+                    disabled: !mergePresentation.canRequestMerge || anyActionBusy,
+                    busy,
+                  }}
+                  disabled={!mergePresentation.canRequestMerge || anyActionBusy}
                   hitSlop={{ top: 4, bottom: 4 }}
                   onPress={requestMerge}
                   style={({ pressed }) => [
                     styles.actionButton,
                     styles.mergeButton,
-                    (blockedReason || anyActionBusy) && styles.disabled,
+                    (!mergePresentation.canRequestMerge || anyActionBusy) && styles.disabled,
                     pressed && styles.pressed,
                   ]}
                 >
@@ -226,13 +299,22 @@ function LinkedPullRequestRow({
                     <ActivityIndicator color={colors.online} size={12} />
                   ) : null}
                   <Text style={styles.mergeText}>
-                    {blockedReason ? 'Blocked' : forceReason ? 'Force merge' : 'Merge'}
+                    {mergePresentation.buttonLabel}
                   </Text>
                 </Pressable>
               ) : null}
             </View>
           ) : null}
         </View>
+      ) : null}
+      {isOpen && sameRepo && blockedReason ? (
+        <Text style={styles.actionHint}>Merge blocked: {blockedReason}.</Text>
+      ) : null}
+      {isOpen && sameRepo && context.mergeUnavailableReason ? (
+        <Text style={styles.actionHint}>{context.mergeUnavailableReason}</Text>
+      ) : null}
+      {isOpen && sameRepo && context.closeUnavailableReason ? (
+        <Text style={styles.actionHint}>{context.closeUnavailableReason}</Text>
       ) : null}
       {actionNotice ? (
         <Text accessibilityLiveRegion="polite" style={styles.notice}>
@@ -344,6 +426,32 @@ const styles = StyleSheet.create({
   repo: { color: colors.subtle, fontSize: 8, fontFamily: 'monospace' },
   branch: { color: colors.muted, fontSize: 8, lineHeight: 12, fontFamily: 'monospace' },
   author: { color: colors.subtle, fontSize: 8 },
+  mergeMethodSection: { gap: 5, marginTop: 9 },
+  mergeMethodLabel: {
+    color: colors.subtle,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.65,
+  },
+  mergeMethods: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.small,
+    backgroundColor: colors.whiteWashSoft,
+  },
+  mergeMethod: {
+    flex: 1,
+    minHeight: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  mergeMethodSelected: { backgroundColor: colors.accentDark },
+  mergeMethodText: { color: colors.muted, fontSize: 9, fontWeight: '700' },
+  mergeMethodTextSelected: { color: colors.accent },
   statusActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -374,6 +482,7 @@ const styles = StyleSheet.create({
   closeButton: { minWidth: 52, borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
   mergeText: { color: colors.online, fontSize: 10, fontWeight: '700' },
   closeText: { color: colors.danger, fontSize: 10, fontWeight: '700' },
+  actionHint: { color: colors.muted, fontSize: 9, lineHeight: 13, marginTop: 6 },
   notice: { color: colors.online, fontSize: 9, lineHeight: 13, marginTop: 7 },
   error: { color: colors.danger, fontSize: 9, lineHeight: 13, marginTop: 7 },
   errorRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

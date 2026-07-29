@@ -21,6 +21,7 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs = 1500): Promise
 
 function createControllerHarness(opts?: {
   duringRunNodeCli?: (context: { droneId: string; displayName: string }) => Promise<void>;
+  duringPostCreateSync?: (context: { droneId: string; stage: string }) => Promise<void>;
 }) {
   const pendingStateHelpers = createPendingDroneStateHelpers({
     normalizeChatName: (raw: any) => String(raw ?? 'default').trim() || 'default',
@@ -88,20 +89,24 @@ function createControllerHarness(opts?: {
       setChatAgentConfigCalls.push(opts);
     },
     startupPromptToPendingPrompt: pendingStateHelpers.startupPromptToPendingPrompt,
-    syncRepoAgentsInstructionsForDrone: async (opts) => {
-      syncRepoAgentsCalls.push(opts);
+    syncRepoAgentsInstructionsForDrone: async (syncOpts) => {
+      syncRepoAgentsCalls.push(syncOpts);
+      await opts?.duringPostCreateSync?.({ droneId: syncOpts.droneId, stage: 'repo-agents' });
       events.push('sync:repo-agents');
     },
-    syncSkillLibraryForDrone: async (opts) => {
-      syncSkillLibraryCalls.push(opts);
+    syncSkillLibraryForDrone: async (syncOpts) => {
+      syncSkillLibraryCalls.push(syncOpts);
+      await opts?.duringPostCreateSync?.({ droneId: syncOpts.droneId, stage: 'skills' });
       events.push('sync:skills');
     },
-    syncMcpServersForDrone: async (opts) => {
-      syncMcpServersCalls.push(opts);
+    syncMcpServersForDrone: async (syncOpts) => {
+      syncMcpServersCalls.push(syncOpts);
+      await opts?.duringPostCreateSync?.({ droneId: syncOpts.droneId, stage: 'mcp' });
       events.push('sync:mcp');
     },
-    syncSharedPathsToDrone: async (opts) => {
-      syncSharedPathsCalls.push(opts);
+    syncSharedPathsToDrone: async (syncOpts) => {
+      syncSharedPathsCalls.push(syncOpts);
+      await opts?.duringPostCreateSync?.({ droneId: syncOpts.droneId, stage: 'shared-paths' });
       events.push('sync:shared-paths');
     },
   });
@@ -165,6 +170,59 @@ describe('drone provisioning controller', () => {
       expect(harness.syncSharedPathsCalls).toHaveLength(1);
       expect(harness.syncRepoAgentsCalls).toHaveLength(1);
       expect(harness.syncSharedPathsCalls).toHaveLength(1);
+    });
+  });
+
+  test('keeps the provisioning marker through post-create synchronization', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-sync-gate': {
+            id: 'drone-sync-gate',
+            name: 'sync-gate',
+            runtime: 'host',
+            repoPath: '',
+            build: false,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+            seed: {
+              chatName: 'default',
+              promptId: 'sync-gate-initial',
+              submittedAt: '2026-03-26T11:01:00.000Z',
+              prompt: 'Begin after synchronization',
+              agent: { kind: 'builtin', id: 'codex' },
+            },
+          },
+        };
+      });
+
+      const observed: Array<{ stage: string; phase: string }> = [];
+      const harness = createControllerHarness({
+        duringPostCreateSync: async ({ droneId, stage }) => {
+          const registry: any = await loadRegistry();
+          observed.push({
+            stage,
+            phase: String(registry?.drones?.[droneId]?.hub?.phase ?? ''),
+          });
+        },
+      });
+      harness.controller.enqueueProvisioning('drone-sync-gate');
+
+      await waitFor(async () => harness.pendingPromptPumpCalls.length > 0);
+
+      expect(observed).toEqual([
+        { stage: 'skills', phase: 'seeding' },
+        { stage: 'mcp', phase: 'seeding' },
+        { stage: 'shared-paths', phase: 'seeding' },
+        { stage: 'repo-agents', phase: 'seeding' },
+      ]);
+      const registry: any = await loadRegistry();
+      expect(registry?.drones?.['drone-sync-gate']?.hub ?? null).toBeNull();
+      expect(harness.events.indexOf('pump:drone-sync-gate:default')).toBeGreaterThan(
+        harness.events.indexOf('sync:repo-agents'),
+      );
     });
   });
 

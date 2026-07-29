@@ -19,6 +19,7 @@ import { IconPin } from '../overview/icons';
 import {
   UiActionMenu,
   type UiActionMenuEntry,
+  UiNavigationRow,
   UiPanelStatusStrip,
   UiPanelToolbar,
   UiToolbarButton,
@@ -264,20 +265,24 @@ function ReadOnlySidebarGroups({
         const collapsed = Boolean(groupKey && collapsedGroups[groupKey]);
         return (
           <section key={`${group.kind}:${group.group}`} className="flex flex-col gap-0.5">
-            <button
-              type="button"
-              className={`relative flex w-full items-center gap-1 rounded-[var(--radius-medium)] border border-transparent px-1.5 pr-2 text-left ${densityClasses.folderRow}`}
-              onClick={() => {
+            <UiNavigationRow
+              density="compact"
+              className={densityClasses.folderRow}
+              label={
+                <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`}>
+                  {group.label}
+                </span>
+              }
+              leading={
+                <IconFolder className={`${densityClasses.icon} text-[var(--muted-dim)] opacity-80`} />
+              }
+              expandable={Boolean(groupKey)}
+              open={!collapsed}
+              onOpenChange={() => {
                 if (groupKey) toggleGroupCollapsed(groupKey);
               }}
-              aria-expanded={!collapsed}
               title={group.group}
-            >
-              <IconFolder className={`${densityClasses.icon} flex-shrink-0 text-[var(--muted-dim)] opacity-80`} />
-              <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`}>
-                {group.label}
-              </span>
-            </button>
+            />
             {!collapsed ? (
               <div className="flex flex-col gap-0">
                 {group.items.map((drone) => {
@@ -340,28 +345,31 @@ function ReadOnlySidebarGroups({
                             );
                             const chatStateLabel = sidebarDroneStateLabel(chatState, false);
                             return (
-                              <button
+                              <UiNavigationRow
                                 key={chatName}
-                                type="button"
-                                className={`relative flex items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ active })}`}
+                                density="compact"
+                                className={`${densityClasses.chatRow} ${
+                                  active
+                                    ? 'text-[var(--sidebar-drone-fg)]'
+                                    : 'text-[var(--sidebar-subitem-fg)]'
+                                }`}
+                                label={<span className={sidebarChatLabelClass}>{chatName}</span>}
+                                status={
+                                  <span
+                                    className={sidebarChatStateClass}
+                                    title={chatStateLabel}
+                                    role="img"
+                                    aria-label={chatStateLabel}
+                                  >
+                                    <SidebarItemStateIndicator state={chatState} />
+                                  </span>
+                                }
+                                current={active}
                                 onClick={() => {
                                   if (droneId) onSelectDroneChat(droneId, chatName);
                                 }}
                                 aria-label={`${displayName} / ${chatName}`}
-                                aria-current={active ? 'page' : undefined}
-                              >
-                                <span
-                                  className={sidebarChatStateClass}
-                                  title={chatStateLabel}
-                                  role="img"
-                                  aria-label={chatStateLabel}
-                                >
-                                  <SidebarItemStateIndicator state={chatState} />
-                                </span>
-                                <span className={sidebarChatLabelClass}>
-                                  {chatName}
-                                </span>
-                              </button>
+                              />
                             );
                           })}
                         </div>

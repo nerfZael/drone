@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AgentApprovalPolicy, AgentPermissionMode } from './chat-types';
 import { parseDroneAgentsMdOverride } from './agents-config';
 import { readJsonBody, sendJson as json } from './hub-http';
+import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 import type { DroneRuntime } from '../host/runtime';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
 
@@ -23,6 +24,34 @@ function assertSeedApprovalPolicySupported(
   }
   if (agent.kind === 'native' || (agent.kind === 'builtin' && agent.id === 'codex')) return;
   throw new Error('approval policies are available for native and Codex seed agents only');
+}
+
+type InitialPromptQueueReservation = {
+  droneId: string;
+  chatName: string;
+  promptId: string;
+  at: string;
+  prompt: string;
+  cwd?: string | null;
+};
+
+export async function reserveInitialPromptQueuePosition(
+  opts: InitialPromptQueueReservation,
+): Promise<void> {
+  const queue = getPromptQueueRepository();
+  if (!queue) return;
+  await queue.enqueue({
+    droneId: opts.droneId,
+    chatName: opts.chatName,
+    prompt: {
+      id: opts.promptId,
+      at: opts.at,
+      prompt: opts.prompt,
+      ...(typeof opts.cwd === 'string' || opts.cwd === null ? { cwd: opts.cwd } : {}),
+      state: 'queued',
+      updatedAt: opts.at,
+    },
+  });
 }
 
 export class DroneProvisioningService {
@@ -529,6 +558,16 @@ function createDroneProvisioningServiceHandler(
           }
           throw error;
         }
+        if (seedPrompt && seedPromptId) {
+          await reserveInitialPromptQueuePosition({
+            droneId,
+            chatName: seedChatName,
+            promptId: seedPromptId,
+            at: seedSubmittedAt,
+            prompt: seedPrompt,
+            ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
+          });
+        }
         notifyCanonicalDroneRegistryWrite();
 
         if (!createAsDraft) enqueueProvisioning(droneId);
@@ -730,6 +769,12 @@ function createDroneProvisioningServiceHandler(
           name: string;
           phase: 'draft' | 'starting';
           draft?: boolean;
+          initialMessage?: {
+            chat: string;
+            promptId: string;
+            pendingState: 'queued';
+            status: 'queued';
+          };
         }> = [];
         let rejected: Array<{ name: string; error: string; status?: number }> = [];
         try {
@@ -739,6 +784,7 @@ function createDroneProvisioningServiceHandler(
             (await resolveEffectiveLlmProvider()).provider ?? '',
           ).trim();
           const pendingEntries: Array<{ state: 'pending'; droneId: string; entry: any }> = [];
+          const initialPromptReservations: InitialPromptQueueReservation[] = [];
           const groupsToEnsure = new Set<string>();
           const result = (() => {
             regAny.pending = regAny.pending ?? {};
@@ -747,6 +793,12 @@ function createDroneProvisioningServiceHandler(
               name: string;
               phase: 'draft' | 'starting';
               draft?: boolean;
+              initialMessage?: {
+                chat: string;
+                promptId: string;
+                pendingState: 'queued';
+                status: 'queued';
+              };
             }> = [];
             const rejected: Array<{ name: string; error: string; status?: number }> = [];
             const seenInRequest = new Set<string>();
@@ -1052,12 +1104,15 @@ function createDroneProvisioningServiceHandler(
 
               const id = makeDroneIdentity();
               const at = nowIso();
+              const seedPromptId = seedPrompt
+                ? crypto.randomBytes(9).toString('hex')
+                : '';
               if (group) groupsToEnsure.add(group);
               const startupQueuedPrompts =
                 createAsDraft && seedPrompt
                   ? [
                       {
-                        id: crypto.randomBytes(9).toString('hex'),
+                        id: seedPromptId,
                         chatName: seedChatName,
                         at: seedSubmittedAt,
                         prompt: seedPrompt,
@@ -1123,6 +1178,7 @@ function createDroneProvisioningServiceHandler(
                         ...(seedApprovalPolicy !== 'ask'
                           ? { approvalPolicy: seedApprovalPolicy }
                           : {}),
+                        ...(!createAsDraft && seedPromptId ? { promptId: seedPromptId } : {}),
                         ...(!createAsDraft && seedPrompt ? { prompt: seedPrompt } : {}),
                         ...(!createAsDraft && seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
                         ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
@@ -1133,12 +1189,32 @@ function createDroneProvisioningServiceHandler(
               };
               regAny.pending[id] = pendingEntry;
               pendingEntries.push({ state: 'pending', droneId: id, entry: pendingEntry });
+              if (seedPrompt && seedPromptId) {
+                initialPromptReservations.push({
+                  droneId: id,
+                  chatName: seedChatName,
+                  promptId: seedPromptId,
+                  at: seedSubmittedAt,
+                  prompt: seedPrompt,
+                  ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
+                });
+              }
 
               accepted.push({
                 id,
                 name,
                 phase: createAsDraft ? 'draft' : 'starting',
                 ...(createAsDraft ? { draft: true } : {}),
+                ...(seedPromptId
+                  ? {
+                      initialMessage: {
+                        chat: seedChatName,
+                        promptId: seedPromptId,
+                        pendingState: 'queued' as const,
+                        status: 'queued' as const,
+                      },
+                    }
+                  : {}),
               });
             }
 
@@ -1146,6 +1222,9 @@ function createDroneProvisioningServiceHandler(
           })();
           for (const groupName of groupsToEnsure) await ensureCanonicalGroup(groupName);
           await upsertCanonicalDroneLifecycleBatch(pendingEntries);
+          for (const reservation of initialPromptReservations) {
+            await reserveInitialPromptQueuePosition(reservation);
+          }
           notifyCanonicalDroneRegistryWrite();
           accepted = result.accepted;
           rejected = result.rejected;

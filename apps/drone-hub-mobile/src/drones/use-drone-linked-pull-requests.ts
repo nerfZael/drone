@@ -7,11 +7,21 @@ import {
 } from '@drone/assistant-chat';
 import { isGranted } from '@drone/device-protocol';
 import { useMesh } from '../mesh/MeshContext';
+import {
+  mobilePullRequestActionGuardError,
+  mobilePullRequestActionUnavailableReason,
+  mobilePullRequestMergeFailureMessage,
+  normalizeMobilePullRequestMergeMethod,
+  performMobilePullRequestMerge,
+  type MobilePullRequestAction,
+  type MobilePullRequestMergeMethod,
+} from './linked-pull-request-model';
+import {
+  loadMobilePullRequestMergeMethod,
+  saveMobilePullRequestMergeMethod,
+} from './linked-pull-request-preferences';
 
-export type MobilePullRequestAction = {
-  pullNumber: number;
-  action: 'merge' | 'close';
-};
+export type { MobilePullRequestAction, MobilePullRequestMergeMethod };
 
 export type MobileLinkedPullRequestContext = {
   data: GithubPullRequestsResult | null;
@@ -20,8 +30,12 @@ export type MobileLinkedPullRequestContext = {
   busyAction: MobilePullRequestAction | null;
   canMerge: boolean;
   canClose: boolean;
+  mergeUnavailableReason: string | null;
+  closeUnavailableReason: string | null;
+  mergeMethod: MobilePullRequestMergeMethod;
+  setMergeMethod(method: MobilePullRequestMergeMethod): void;
   refresh(): Promise<void>;
-  merge(pullNumber: number, method?: 'merge' | 'squash' | 'rebase'): Promise<string>;
+  merge(pullNumber: number, method?: MobilePullRequestMergeMethod): Promise<string>;
   close(pullNumber: number): Promise<string>;
 };
 
@@ -51,10 +65,13 @@ export function useDroneLinkedPullRequests({
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [busyAction, setBusyAction] = React.useState<MobilePullRequestAction | null>(null);
+  const [mergeMethod, setMergeMethodState] =
+    React.useState<MobilePullRequestMergeMethod>('merge');
   const [appIsActive, setAppIsActive] = React.useState(AppState.currentState === 'active');
   const requestVersion = React.useRef(0);
   const loadAbort = React.useRef<AbortController | null>(null);
   const busyActionRef = React.useRef<MobilePullRequestAction | null>(null);
+  const mergeMethodVersion = React.useRef(0);
   const targetCapability = mesh.profile?.capabilitiesByDevice[targetDeviceId]?.find(
     (capability) => capability.id === 'drone-control' && capability.version === 1,
   );
@@ -65,10 +82,22 @@ export function useDroneLinkedPullRequests({
     Boolean(selfDevice && isGranted(selfDevice.grants, 'drone-control', 1, operation));
   const supportsRead = supportsOperation('repo.pull-requests.read');
   const canRead = supportsRead && grantsOperation('repo.pull-requests.read');
-  const canMerge =
-    supportsOperation('repo.pull-requests.merge') && grantsOperation('repo.pull-requests.merge');
-  const canClose =
-    supportsOperation('repo.pull-requests.close') && grantsOperation('repo.pull-requests.close');
+  const supportsMerge = supportsOperation('repo.pull-requests.merge');
+  const grantsMerge = grantsOperation('repo.pull-requests.merge');
+  const supportsClose = supportsOperation('repo.pull-requests.close');
+  const grantsClose = grantsOperation('repo.pull-requests.close');
+  const mergeUnavailableReason = mobilePullRequestActionUnavailableReason({
+    action: 'merge',
+    supported: supportsMerge,
+    granted: grantsMerge,
+  });
+  const closeUnavailableReason = mobilePullRequestActionUnavailableReason({
+    action: 'close',
+    supported: supportsClose,
+    granted: grantsClose,
+  });
+  const canMerge = !mergeUnavailableReason;
+  const canClose = !closeUnavailableReason;
   const hasLinkedRequests = Boolean(targetDeviceId && droneId && links.length > 0);
   const readUnavailableError = !hasLinkedRequests
     ? null
@@ -80,9 +109,35 @@ export function useDroneLinkedPullRequests({
   const enabled = hasLinkedRequests && !readUnavailableError;
   const actionScope = `${targetDeviceId}\u0000${droneId}`;
   const currentActionScope = React.useRef(actionScope);
-  const currentActionPermissions = React.useRef({ merge: canMerge, close: canClose });
+  const currentActionUnavailableReasons = React.useRef({
+    merge: mergeUnavailableReason,
+    close: closeUnavailableReason,
+  });
   currentActionScope.current = actionScope;
-  currentActionPermissions.current = { merge: canMerge, close: canClose };
+  currentActionUnavailableReasons.current = {
+    merge: mergeUnavailableReason,
+    close: closeUnavailableReason,
+  };
+
+  React.useEffect(() => {
+    let active = true;
+    const version = mergeMethodVersion.current;
+    void loadMobilePullRequestMergeMethod().then((storedMethod) => {
+      if (active && version === mergeMethodVersion.current) {
+        setMergeMethodState(storedMethod);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const setMergeMethod = React.useCallback((nextMethod: MobilePullRequestMergeMethod) => {
+    const normalized = normalizeMobilePullRequestMergeMethod(nextMethod);
+    mergeMethodVersion.current += 1;
+    setMergeMethodState(normalized);
+    void saveMobilePullRequestMergeMethod(normalized).catch(() => undefined);
+  }, []);
 
   const load = React.useCallback(
     async (quiet = false, bypassAvailability = false) => {
@@ -205,12 +260,13 @@ export function useDroneLinkedPullRequests({
 
   const beginAction = React.useCallback(
     (action: MobilePullRequestAction) => {
-      if (currentActionScope.current !== actionScope)
-        throw new Error('The selected drone changed. Open the pull request and try again.');
-      if (!currentActionPermissions.current[action.action])
-        throw new Error(`This phone has not been granted pull request ${action.action} access.`);
-      if (busyActionRef.current)
-        throw new Error('Another pull request action is already in progress.');
+      const guardError = mobilePullRequestActionGuardError({
+        expectedScope: actionScope,
+        currentScope: currentActionScope.current,
+        unavailableReason: currentActionUnavailableReasons.current[action.action],
+        busyAction: busyActionRef.current,
+      });
+      if (guardError) throw new Error(guardError);
       busyActionRef.current = action;
       setBusyAction(action);
       return action;
@@ -225,23 +281,30 @@ export function useDroneLinkedPullRequests({
   }, []);
 
   const merge = React.useCallback(
-    async (pullNumber: number, method: 'merge' | 'squash' | 'rebase' = 'merge') => {
-      const action = beginAction({ pullNumber, action: 'merge' });
+    async (pullNumber: number, method: MobilePullRequestMergeMethod = 'merge') => {
+      const normalizedMethod = normalizeMobilePullRequestMergeMethod(method);
+      let action: MobilePullRequestAction;
       try {
-        const result = await mesh.request(
-          targetDeviceId,
-          'drone-control',
-          'repo.pull-requests.merge',
-          { droneId, pullNumber, method },
+        action = beginAction({ pullNumber, action: 'merge' });
+      } catch (actionError) {
+        throw new Error(
+          mobilePullRequestMergeFailureMessage({
+            pullNumber,
+            method: normalizedMethod,
+            error: actionError,
+          }),
         );
-        if (result?.ok !== true || result?.merged !== true)
-          throw new Error(
-            String(
-              result?.message ?? result?.error ?? `GitHub did not merge PR #${pullNumber}`,
-            ),
-          );
+      }
+      try {
+        const notice = await performMobilePullRequestMerge({
+          request: mesh.request,
+          targetDeviceId,
+          droneId,
+          pullNumber,
+          method: normalizedMethod,
+        });
         if (currentActionScope.current === actionScope) await load(true);
-        return String(result?.message ?? `Merged PR #${pullNumber}`);
+        return notice;
       } finally {
         finishAction(action);
       }
@@ -277,6 +340,10 @@ export function useDroneLinkedPullRequests({
     busyAction,
     canMerge,
     canClose,
+    mergeUnavailableReason,
+    closeUnavailableReason,
+    mergeMethod,
+    setMergeMethod,
     // Retry is also an explicit probe in case cached capability or grant data is stale.
     refresh: () => load(false, true),
     merge,

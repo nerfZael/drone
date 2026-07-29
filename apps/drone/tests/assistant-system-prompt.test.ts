@@ -16,6 +16,68 @@ function makeAssistantService(): HubAssistantService {
 }
 
 describe('assistant system prompt settings', () => {
+  test('preserves parallel additive grants in native chat access scope', async () => {
+    await withTempDroneDataDir('assistant-parallel-scope-grants-', async () => {
+      const service = makeAssistantService();
+      const created = await ensureTestNativeChat(service, { chatName: 'parallel grants' });
+      await service.updateAccessScope({
+        threadId: created.chatId,
+        readMode: 'selected',
+        writeMode: 'selected',
+        executeMode: 'selected',
+        droneIds: [],
+      });
+      const addedDroneIds = [
+        'parallel-child-1',
+        'parallel-child-2',
+        'parallel-child-3',
+        'parallel-child-4',
+      ];
+
+      await Promise.all(
+        addedDroneIds.map((droneId) =>
+          service.updateAccessScope({
+            threadId: created.chatId,
+            addDroneIds: [droneId],
+          }),
+        ),
+      );
+
+      const expectedDroneIds = new Set(['native-test-drone', ...addedDroneIds]);
+      expect(new Set((await service.threadSnapshot(created.chatId)).accessScope.droneIds)).toEqual(
+        expectedDroneIds,
+      );
+      const reloaded = makeAssistantService();
+      expect(new Set((await reloaded.threadSnapshot(created.chatId)).accessScope.droneIds)).toEqual(
+        expectedDroneIds,
+      );
+    });
+  });
+
+  test('keeps the native chat owner in a selected scope at the id limit', async () => {
+    await withTempDroneDataDir('assistant-owner-scope-limit-', async () => {
+      const service = makeAssistantService();
+      const created = await ensureTestNativeChat(service, { chatName: 'scope limit' });
+      const requestedDroneIds = Array.from(
+        { length: 100 },
+        (_, index) => `selected-drone-${index + 1}`,
+      );
+
+      const accessScope = await service.updateAccessScope({
+        threadId: created.chatId,
+        readMode: 'selected',
+        writeMode: 'selected',
+        executeMode: 'selected',
+        droneIds: requestedDroneIds,
+      });
+
+      expect(accessScope.droneIds).toHaveLength(100);
+      expect(accessScope.droneIds[0]).toBe('native-test-drone');
+      expect(accessScope.droneIds).toContain('selected-drone-99');
+      expect(accessScope.droneIds).not.toContain('selected-drone-100');
+    });
+  });
+
   test('explains child-drone creation and clone access policy', async () => {
     await withTempDroneDataDir('assistant-global-create-scope-', async () => {
       const service = makeAssistantService();

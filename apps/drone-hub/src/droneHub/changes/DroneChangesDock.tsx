@@ -14,6 +14,8 @@ import {
   UiPanelToolbar,
   UiResizeHandle,
   UiToolbarButton,
+  UiToolbarGroup,
+  UiToolbarIconButton,
   UiToolbarSegmentedControl,
 } from '../../ui/components';
 import { IconChevron, IconFolder, iconForFilePath } from '../icons';
@@ -2775,7 +2777,7 @@ function LiveDroneChangesDock({
     const canOpenInEditor = entryPathExistsInCurrentTree(entry, dataMode);
     const viewedState = entryViewedStatus(entry);
     const canToggleViewed = primaryView === 'changes' && Boolean(activeReviewScopeId);
-    const buttonClassName = `dh-changes-icon-button ${
+    const buttonClassName = `${
       alwaysVisible
         ? ''
         : 'opacity-0 pointer-events-none group-hover/file:opacity-100 group-hover/file:pointer-events-auto'
@@ -2783,16 +2785,14 @@ function LiveDroneChangesDock({
     return (
       <div className="shrink-0 inline-flex items-center gap-1">
         {showViewedAction && canToggleViewed ? (
-          <button
-            type="button"
+          <UiToolbarIconButton
+            size="xsmall"
+            label={viewedState === 'viewed' ? 'Mark file unviewed' : 'Mark file viewed'}
+            icon={viewedState === 'viewed' ? <IconEyeOff className="w-3 h-3" /> : <IconEye className="w-3 h-3" />}
             onClick={() => setEntryViewedState(entry, viewedState !== 'viewed')}
-            className={`${buttonClassName} ${
-              viewedState === 'viewed'
-                ? 'is-active'
-                : viewedState === 'stale'
-                  ? 'is-warning'
-                  : ''
-            }`}
+            className={buttonClassName}
+            active={viewedState === 'viewed' || viewedState === 'stale'}
+            tone={viewedState === 'stale' ? 'warning' : 'accent'}
             title={
               viewedState === 'viewed'
                 ? 'Mark file unviewed'
@@ -2800,57 +2800,58 @@ function LiveDroneChangesDock({
                   ? 'File changed since it was viewed. Mark viewed again.'
                   : 'Mark file viewed'
             }
-          >
-            {viewedState === 'viewed' ? <IconEyeOff className="w-3 h-3" /> : <IconEye className="w-3 h-3" />}
-          </button>
+          />
         ) : null}
-        <button
-          type="button"
+        <UiToolbarIconButton
+          size="xsmall"
+          label="Open file in editor"
+          icon={<OpenFileIcon />}
           onClick={() => openEntryInEditor(entry)}
           disabled={!canOpenInEditor}
-          className={`${buttonClassName} disabled:opacity-35 disabled:cursor-not-allowed`}
+          className={buttonClassName}
           title={canOpenInEditor ? 'Open in editor' : 'This path no longer exists in the current tree.'}
-        >
-          <OpenFileIcon />
-        </button>
+        />
         {dataMode === 'working-tree' && workingKind === 'unstaged' ? (
           <>
-            <button
-              type="button"
+            <UiToolbarIconButton
+              size="xsmall"
+              tone="danger"
+              label="Discard unstaged changes"
+              icon={<DiscardChangesIcon />}
               onClick={() => {
                 void runWorkingTreeAction(entry, 'discard');
               }}
               disabled={Boolean(workingTreeActionBusy)}
-              className={`${buttonClassName} text-[var(--muted)] hover:text-[var(--red)] disabled:opacity-35 disabled:cursor-wait`}
+              className={buttonClassName}
               title="Discard unstaged changes"
-            >
-              <DiscardChangesIcon />
-            </button>
-            <button
-              type="button"
+            />
+            <UiToolbarIconButton
+              size="xsmall"
+              tone="success"
+              label="Stage changes"
+              icon={<StageIcon />}
               onClick={() => {
                 void runWorkingTreeAction(entry, 'stage');
               }}
               disabled={Boolean(workingTreeActionBusy)}
-              className={`${buttonClassName} disabled:opacity-35 disabled:cursor-wait`}
+              className={buttonClassName}
               title="Stage changes"
-            >
-              <StageIcon />
-            </button>
+            />
           </>
         ) : null}
         {dataMode === 'working-tree' && workingKind === 'staged' ? (
-          <button
-            type="button"
+          <UiToolbarIconButton
+            size="xsmall"
+            tone="warning"
+            label="Unstage changes"
+            icon={<StageIcon unstage />}
             onClick={() => {
               void runWorkingTreeAction(entry, 'unstage');
             }}
             disabled={Boolean(workingTreeActionBusy)}
-            className={`${buttonClassName} disabled:opacity-35 disabled:cursor-wait`}
+            className={buttonClassName}
             title="Unstage changes"
-          >
-            <StageIcon unstage />
-          </button>
+          />
         ) : null}
       </div>
     );
@@ -3469,24 +3470,15 @@ function LiveDroneChangesDock({
             <>
               <div className="sticky top-0 z-10 px-2.5 py-1 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center gap-1">
                 <span className="dh-changes-toolbar-label mr-1">Prefer</span>
-                <div className="dh-changes-segment">
-                  <button
-                    type="button"
-                    onClick={() => setStackedPreferredKind('unstaged')}
-                    aria-pressed={stackedPreferredKind === 'unstaged'}
-                    className={changesSegmentButtonClass(stackedPreferredKind === 'unstaged')}
-                  >
-                    Unstaged
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStackedPreferredKind('staged')}
-                    aria-pressed={stackedPreferredKind === 'staged'}
-                    className={changesSegmentButtonClass(stackedPreferredKind === 'staged')}
-                  >
-                    Staged
-                  </button>
-                </div>
+                <UiToolbarSegmentedControl
+                  label="Preferred change source"
+                  value={stackedPreferredKind}
+                  onValueChange={setStackedPreferredKind}
+                  options={[
+                    { value: 'unstaged', label: 'Unstaged' },
+                    { value: 'staged', label: 'Staged' },
+                  ]}
+                />
               </div>
 
               <div className="px-2 py-2 flex flex-col gap-2">
@@ -3607,26 +3599,15 @@ function LiveDroneChangesDock({
                 {selectedEntry ? renderFileQuickActions(selectedEntry, true) : null}
                 {dataMode === 'working-tree' ? (
                   selectedEntry && hasUnstaged(selectedEntry) && hasStaged(selectedEntry) ? (
-                    <div className="dh-changes-segment" aria-label="Diff source">
-                      <button
-                        type="button"
-                        onClick={() => setSplitKind('unstaged')}
-                        aria-pressed={splitShownKind === 'unstaged'}
-                        className={changesSegmentButtonClass(splitShownKind === 'unstaged')}
-                        title="Changes in the working tree that are not staged"
-                      >
-                        Unstaged
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSplitKind('staged')}
-                        aria-pressed={splitShownKind === 'staged'}
-                        className={changesSegmentButtonClass(splitShownKind === 'staged')}
-                        title="Changes already added to the Git index"
-                      >
-                        Staged
-                      </button>
-                    </div>
+                    <UiToolbarSegmentedControl<DiffKind>
+                      label="Diff source"
+                      value={splitShownKind ?? 'unstaged'}
+                      onValueChange={setSplitKind}
+                      options={[
+                        { value: 'unstaged', label: 'Unstaged' },
+                        { value: 'staged', label: 'Staged' },
+                      ]}
+                    />
                   ) : null
                 ) : (
                   <div className="text-[var(--text-9)] text-[var(--muted-dim)] font-mono whitespace-nowrap">
@@ -3714,34 +3695,34 @@ function LiveDroneChangesDock({
               <span className="dh-changes-toolbar-label">
                 Files
               </span>
-              <div className="dh-changes-segment" aria-label="Explorer zoom">
-                <button
-                  type="button"
+              <UiToolbarGroup label="Explorer zoom">
+                <UiToolbarButton
+                  size="xsmall"
                   onClick={decreaseExplorerZoom}
                   disabled={explorerZoom <= EXPLORER_ZOOM_MIN}
-                  className="dh-changes-segment-button w-5 px-0 text-[var(--text-10)]"
+                  className="w-5 px-0"
                   title="Decrease explorer zoom"
                 >
                   −
-                </button>
-                <button
-                  type="button"
+                </UiToolbarButton>
+                <UiToolbarButton
+                  size="xsmall"
                   onClick={resetExplorerZoom}
-                  className="dh-changes-segment-button min-w-9 px-1 font-mono"
+                  className="min-w-9 px-1 font-mono"
                   title="Reset explorer zoom"
                 >
                   {explorerZoomPercent}%
-                </button>
-                <button
-                  type="button"
+                </UiToolbarButton>
+                <UiToolbarButton
+                  size="xsmall"
                   onClick={increaseExplorerZoom}
                   disabled={explorerZoom >= EXPLORER_ZOOM_MAX}
-                  className="dh-changes-segment-button w-5 px-0 text-[var(--text-10)]"
+                  className="w-5 px-0"
                   title="Increase explorer zoom"
                 >
                   +
-                </button>
-              </div>
+                </UiToolbarButton>
+              </UiToolbarGroup>
             </div>
             <div role="tree" className="flex-1 min-h-0 overflow-auto py-1">
               {workingTreeActionError ? (

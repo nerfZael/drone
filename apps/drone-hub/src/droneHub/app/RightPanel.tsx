@@ -1,4 +1,11 @@
 import React from 'react';
+import {
+  UiPaneState,
+  UiPanelToolbar,
+  UiResizeHandle,
+  UiToolbarDivider,
+  UiToolbarSegmentedControl,
+} from '../../ui/components';
 import type { DroneSummary } from '../types';
 import { resolveRightPanelWidthStyleValue, type RightPanelWidthMode } from './right-panel-width';
 
@@ -23,7 +30,6 @@ export type RightPanelProps = {
   rightPanelWidthMode: RightPanelWidthMode;
   rightPanelWidthMax: number;
   rightPanelMinWidth: number;
-  rightPanelResizing: boolean;
   rightPanelSplit: boolean;
   rightPanelTab: RightPanelTabId;
   rightPanelBottomTab: RightPanelTabId;
@@ -31,7 +37,7 @@ export type RightPanelProps = {
   rightPanelTabLabels: Record<RightPanelTabId, string>;
   onRightPanelTabChange: (tab: RightPanelTabId) => void;
   onRightPanelBottomTabChange: (tab: RightPanelTabId) => void;
-  onStartResize: React.MouseEventHandler<HTMLDivElement>;
+  onWidthChange: (width: number) => void;
   onResetWidth: () => void;
   renderTabContent: (drone: DroneSummary, tab: RightPanelTabId, pane: RightPanelPaneId) => React.ReactNode;
   persistentPreviewHostPane: RightPanelPaneId | null;
@@ -49,7 +55,6 @@ export function RightPanel({
   rightPanelWidthMode,
   rightPanelWidthMax,
   rightPanelMinWidth,
-  rightPanelResizing,
   rightPanelSplit,
   rightPanelTab,
   rightPanelBottomTab,
@@ -57,7 +62,7 @@ export function RightPanel({
   rightPanelTabLabels,
   onRightPanelTabChange,
   onRightPanelBottomTabChange,
-  onStartResize,
+  onWidthChange,
   onResetWidth,
   renderTabContent,
   persistentPreviewHostPane,
@@ -144,9 +149,12 @@ export function RightPanel({
           ) : null}
           {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : null}
           {previewHostedElsewhere ? (
-            <div className="absolute inset-0 min-h-0 overflow-hidden flex items-center justify-center bg-[var(--surface-inset-faint)] px-4 text-center text-[var(--text-11)] text-[var(--muted-dim)]">
-              This Browser session is already active in the other preview pane.
-            </div>
+            <UiPaneState
+              kind="unavailable"
+              title="Browser active in another pane"
+              description="This Browser session is already active in the other preview pane."
+              className="absolute inset-0 bg-[var(--surface-inset-faint)]"
+            />
           ) : null}
         </div>
       );
@@ -171,90 +179,80 @@ export function RightPanel({
       style={rightPanelStyle}
     >
       {visible ? (
-        <div
-          role="separator"
-          aria-label="Resize right panel"
-          aria-orientation="vertical"
-          onMouseDown={onStartResize}
-          onDoubleClick={onResetWidth}
-          className="absolute left-0 top-0 bottom-0 w-2 -translate-x-1/2 z-30 cursor-col-resize group"
-          title="Drag to resize panel. Double-click to reset."
-        >
-          <div
-            className={`absolute left-1/2 top-0 h-full -translate-x-1/2 w-px transition-colors ${
-              rightPanelResizing
-                ? 'bg-[var(--accent)]'
-                : 'bg-transparent group-hover:bg-[var(--accent-muted)]'
-            }`}
-          />
-        </div>
+        <UiResizeHandle
+          orientation="vertical"
+          value={rightPanelWidth}
+          min={rightPanelMinWidth}
+          max={rightPanelWidthMax}
+          label="Resize right panel"
+          reversed
+          onValueChange={onWidthChange}
+          onReset={onResetWidth}
+          className="absolute inset-y-0 left-0 z-30 -translate-x-1/2"
+        />
       ) : null}
-      <div className={`flex-1 min-h-0 overflow-hidden flex flex-col ${rightPanelSplit ? '' : 'hidden'}`}>
-        <div className="flex-1 min-h-0 overflow-hidden flex flex-col" data-right-panel-pane="top">
-          <div className="flex-shrink-0 px-2 py-1 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] flex items-center gap-2">
-            <span className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
-              Top Pane
-            </span>
-            <div className="w-[2px] h-3.5 rounded-full bg-[var(--muted)] opacity-65 shadow-[0_0_0_1px_var(--border-subtle)]" />
-            <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto pr-1">
-              {rightPanelTabs.map((tab) => {
-                const active = rightPanelTab === tab;
-                return (
-                  <button
-                    key={`top-pane-${tab}`}
-                    type="button"
-                    onClick={() => onRightPanelTabChange(tab)}
-                    data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
-                    className={`px-1.5 py-0.5 rounded text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase whitespace-nowrap transition-all ${
-                      active
-                        ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
-                        : 'text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] border border-transparent'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    {rightPanelTabLabels[tab]}
-                  </button>
-                );
-              })}
+      {visible ? (
+        <>
+          <div className={`flex-1 min-h-0 overflow-hidden flex flex-col ${rightPanelSplit ? '' : 'hidden'}`}>
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col" data-right-panel-pane="top">
+              <UiPanelToolbar aria-label="Top pane tabs" className="gap-2 bg-[var(--surface-softest)]">
+                <span className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+                  Top Pane
+                </span>
+                <UiToolbarDivider />
+                <UiToolbarSegmentedControl
+                  label="Top pane"
+                  value={rightPanelTab}
+                  options={rightPanelTabs.map((tab) => ({
+                    value: tab,
+                    label:
+                      tab === 'changes' ? (
+                        <span data-onboarding-id="rightPanel.tab.changes">
+                          {rightPanelTabLabels[tab]}
+                        </span>
+                      ) : (
+                        rightPanelTabLabels[tab]
+                      ),
+                  }))}
+                  onValueChange={onRightPanelTabChange}
+                  className="min-w-0 overflow-x-auto"
+                />
+              </UiPanelToolbar>
+              {renderPaneContent(rightPanelTab, 'top', rightPanelSplit)}
+            </div>
+            <div className="h-px bg-[var(--border)]" />
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col" data-right-panel-pane="bottom">
+              <UiPanelToolbar aria-label="Bottom pane tabs" className="gap-2 bg-[var(--surface-softest)]">
+                <span className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+                  Bottom Pane
+                </span>
+                <UiToolbarDivider />
+                <UiToolbarSegmentedControl
+                  label="Bottom pane"
+                  value={rightPanelBottomTab}
+                  options={rightPanelTabs.map((tab) => ({
+                    value: tab,
+                    label:
+                      tab === 'changes' ? (
+                        <span data-onboarding-id="rightPanel.tab.changes">
+                          {rightPanelTabLabels[tab]}
+                        </span>
+                      ) : (
+                        rightPanelTabLabels[tab]
+                      ),
+                  }))}
+                  onValueChange={onRightPanelBottomTabChange}
+                  className="min-w-0 overflow-x-auto"
+                />
+              </UiPanelToolbar>
+              {renderPaneContent(rightPanelBottomTab, 'bottom', rightPanelSplit)}
             </div>
           </div>
-          {renderPaneContent(rightPanelTab, 'top', rightPanelSplit)}
-        </div>
-        <div className="h-px bg-[var(--border)]" />
-        <div className="flex-1 min-h-0 overflow-hidden flex flex-col" data-right-panel-pane="bottom">
-          <div className="flex-shrink-0 px-2 py-1 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] flex items-center gap-2">
-            <span className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
-              Bottom Pane
-            </span>
-            <div className="w-[2px] h-3.5 rounded-full bg-[var(--muted)] opacity-65 shadow-[0_0_0_1px_var(--border-subtle)]" />
-            <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto pr-1">
-              {rightPanelTabs.map((tab) => {
-                const active = rightPanelBottomTab === tab;
-                return (
-                  <button
-                    key={`bottom-pane-${tab}`}
-                    type="button"
-                    onClick={() => onRightPanelBottomTabChange(tab)}
-                    data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
-                    className={`px-1.5 py-0.5 rounded text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase whitespace-nowrap transition-all ${
-                      active
-                        ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)]'
-                        : 'text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] border border-transparent'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    {rightPanelTabLabels[tab]}
-                  </button>
-                );
-              })}
-            </div>
+          <div className={`flex-1 min-h-0 overflow-hidden flex-col ${rightPanelSplit ? 'hidden' : 'flex'}`}>
+            {renderPaneContent(rightPanelTab, 'single', !rightPanelSplit)}
           </div>
-          {renderPaneContent(rightPanelBottomTab, 'bottom', rightPanelSplit)}
-        </div>
-      </div>
-      <div className={`flex-1 min-h-0 overflow-hidden flex-col ${rightPanelSplit ? 'hidden' : 'flex'}`}>
-        {renderPaneContent(rightPanelTab, 'single', !rightPanelSplit)}
-      </div>
+        </>
+      ) : null}
     </aside>
   );
 }

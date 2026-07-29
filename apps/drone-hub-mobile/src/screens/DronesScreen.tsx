@@ -50,6 +50,7 @@ import {
   saveMobileDroneCreatePreferences,
 } from '../drones/create-preferences-storage';
 import {
+  EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneCreateRepo,
@@ -57,10 +58,12 @@ import {
   normalizeMobileDrone,
   normalizeMobileNativeChatHistory,
   normalizeMobileDroneListPayload,
+  resolveMobileDroneListSnapshot,
   suggestNextMobileDroneChatName,
   type MobileDroneCreateRepo,
   type MobileDroneCreateModel,
   type MobileChatHistoryPage,
+  type MobileDroneListSnapshot,
   type MobileDroneSidebarOrder,
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
@@ -242,14 +245,57 @@ export function DronesScreen({
         : mesh.request(destinationId, 'drone-control', operation, payload),
     [localDroneControl.request, mesh.identity?.id, mesh.request],
   );
-  const [drones, setDrones] = React.useState<MobileDroneSummary[]>([]);
-  const [droneSidebarOrder, setDroneSidebarOrder] = React.useState<MobileDroneSidebarOrder>(
-    EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+  const [droneListSnapshot, setDroneListSnapshot] = React.useState<MobileDroneListSnapshot>(
+    EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
   );
+  const droneListSnapshotRef = React.useRef<MobileDroneListSnapshot>(
+    EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
+  );
+  const activeDroneListSnapshot =
+    droneListSnapshot.targetId === targetId
+      ? droneListSnapshot
+      : {
+          ...EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
+          targetId,
+        };
+  const drones = activeDroneListSnapshot.drones;
+  const droneSidebarOrder = activeDroneListSnapshot.sidebar;
   const droneSidebarOrderRef = React.useRef<MobileDroneSidebarOrder>(
     EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   );
+  const commitDroneListSnapshot = React.useCallback((next: MobileDroneListSnapshot) => {
+    droneListSnapshotRef.current = next;
+    droneSidebarOrderRef.current = next.sidebar;
+    setDroneListSnapshot(next);
+  }, []);
+  const setDrones = React.useCallback(
+    (update: React.SetStateAction<MobileDroneSummary[]>) => {
+      const current = droneListSnapshotRef.current;
+      if (current.targetId !== targetId) return;
+      const nextDrones =
+        typeof update === 'function'
+          ? (update as (value: MobileDroneSummary[]) => MobileDroneSummary[])(current.drones)
+          : update;
+      commitDroneListSnapshot({ ...current, drones: nextDrones });
+    },
+    [commitDroneListSnapshot, targetId],
+  );
+  const setDroneSidebarOrder = React.useCallback(
+    (sidebar: MobileDroneSidebarOrder, preferenceVersion?: number | null) => {
+      const current = droneListSnapshotRef.current;
+      if (current.targetId !== targetId) return;
+      commitDroneListSnapshot({
+        ...current,
+        sidebar,
+        ...(preferenceVersion !== undefined
+          ? { sidebarPreferenceVersion: preferenceVersion }
+          : {}),
+      });
+    },
+    [commitDroneListSnapshot, targetId],
+  );
   const pinWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const pendingPinWriteCountRef = React.useRef(0);
   const [selected, setSelected] = React.useState<MobileDroneSummary | null>(null);
   const [chats, setChats] = React.useState<string[]>([]);
   const [chatName, setChatName] = React.useState('default');
@@ -386,9 +432,14 @@ export function DronesScreen({
           });
         }
         loadedDronesTargetIdRef.current = targetId;
-        setDrones(nextDrones);
-        droneSidebarOrderRef.current = normalized.sidebar;
-        setDroneSidebarOrder(normalized.sidebar);
+        commitDroneListSnapshot(
+          resolveMobileDroneListSnapshot({
+            current: droneListSnapshotRef.current,
+            targetId,
+            payload: normalized,
+            keepCurrentSidebar: pendingPinWriteCountRef.current > 0,
+          }),
+        );
         const currentSelected = selectedRef.current;
         const nextSelected = currentSelected
           ? (nextDrones.find((drone) => drone.id === currentSelected.id) ?? null)
@@ -488,16 +539,17 @@ export function DronesScreen({
           setBusy('');
       }
     },
-    [requestDroneControl, targetId, targetSupportsDrones],
+    [commitDroneListSnapshot, requestDroneControl, targetId, targetSupportsDrones],
   );
   loadDronesRef.current = loadDrones;
 
   React.useEffect(() => {
     const createDefaultsVersion = ++createDefaultsRequestVersion.current;
     selectedRef.current = null;
-    setDrones([]);
-    droneSidebarOrderRef.current = EMPTY_MOBILE_DRONE_SIDEBAR_ORDER;
-    setDroneSidebarOrder(EMPTY_MOBILE_DRONE_SIDEBAR_ORDER);
+    commitDroneListSnapshot({
+      ...EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
+      targetId,
+    });
     setSelected(null);
     setChats([]);
     setChatName('default');
@@ -566,7 +618,7 @@ export function DronesScreen({
         setNewDroneScreenVersion((value) => value + 1);
       });
     }
-  }, [targetId, targetSupportsDrones]);
+  }, [commitDroneListSnapshot, targetId, targetSupportsDrones]);
   React.useEffect(() => {
     if (targetReachable && targetSupportsDrones) {
       // Callback identities change while the local assistant and mesh hydrate. Refresh only when
@@ -1688,6 +1740,7 @@ export function DronesScreen({
       const destinationId = targetId;
       const write = async () => {
         if (targetIdRef.current !== destinationId) return;
+        pendingPinWriteCountRef.current += 1;
         const previousIds = droneSidebarOrderRef.current.pinnedDroneIds;
         const nextIds = pinned
           ? previousIds.includes(droneId)
@@ -1715,7 +1768,11 @@ export function DronesScreen({
           if (targetIdRef.current === destinationId) {
             const savedOrder = { ...droneSidebarOrderRef.current, pinnedDroneIds: savedIds };
             droneSidebarOrderRef.current = savedOrder;
-            setDroneSidebarOrder(savedOrder);
+            const savedPreferenceVersion =
+              Number.isSafeInteger(result?.version) && Number(result.version) >= 0
+                ? Number(result.version)
+                : undefined;
+            setDroneSidebarOrder(savedOrder, savedPreferenceVersion);
           }
         } catch (nextError: any) {
           if (targetIdRef.current === destinationId) {
@@ -1728,6 +1785,7 @@ export function DronesScreen({
             setError(nextError?.message ?? String(nextError));
           }
         } finally {
+          pendingPinWriteCountRef.current = Math.max(0, pendingPinWriteCountRef.current - 1);
           setPinningDroneIds((current) => {
             const next = new Set(current);
             next.delete(droneId);
@@ -2109,8 +2167,10 @@ export function DronesScreen({
           setDronesLoaded(false);
           setDroneListError(null);
           onDeviceChange(deviceId);
-          setDrones([]);
-          setDroneSidebarOrder(EMPTY_MOBILE_DRONE_SIDEBAR_ORDER);
+          commitDroneListSnapshot({
+            ...EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
+            targetId: deviceId,
+          });
           setSelected(null);
         }}
         onSelectDroneChat={(droneId, nextChat) => {

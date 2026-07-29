@@ -117,6 +117,49 @@ export const UiToolbarIconButton = React.forwardRef<
   );
 });
 
+export type UiToolbarLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+  tone?: UiToolbarControlTone;
+  size?: UiToolbarControlSize;
+  active?: boolean;
+  leadingIcon?: React.ReactNode;
+  trailingIcon?: React.ReactNode;
+};
+
+export const UiToolbarLink = React.forwardRef<HTMLAnchorElement, UiToolbarLinkProps>(
+  function UiToolbarLink(
+    {
+      tone = 'neutral',
+      size = 'small',
+      active = false,
+      leadingIcon,
+      trailingIcon,
+      className,
+      children,
+      style,
+      ...props
+    },
+    ref,
+  ) {
+    return (
+      <a
+        ref={ref}
+        className={cn(
+          'inline-flex shrink-0 items-center justify-center gap-1 border font-[var(--weight-semibold)] transition-[background-color,border-color,color,opacity,transform] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] active:translate-y-px',
+          sizeClassName[size],
+          active ? toneClassName[tone].active : toneClassName[tone].idle,
+          className,
+        )}
+        style={{ fontFamily: 'var(--display)', ...style }}
+        {...props}
+      >
+        {leadingIcon}
+        {children != null ? <span className="min-w-0 truncate">{children}</span> : null}
+        {trailingIcon}
+      </a>
+    );
+  },
+);
+
 export function UiToolbarGroup({
   label,
   className,

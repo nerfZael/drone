@@ -437,7 +437,6 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
           }),
         });
 
-        await setDroneHubMetaByIdentity({ droneId: pendingDroneId, hub: null });
       } catch (e: any) {
         const msg = e?.message ?? String(e);
         await setDroneHubMetaByIdentity({
@@ -667,7 +666,6 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
               : {}),
           });
         }
-        await setDroneHubMetaByIdentity({ droneId: pendingDroneId, hub: null });
       } catch (e: any) {
         await setDroneHubMetaByIdentity({
           droneId: pendingDroneId,
@@ -693,7 +691,15 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       });
     }
 
-    for (const chatNameToPump of startupQueuedPromptChats) {
+    const chatsToPump = new Set(startupQueuedPromptChats.map(String));
+    const queue = getPromptQueueRepository();
+    if (queue) {
+      for (const queuedChat of queue.listQueuedChats()) {
+        if (queuedChat.droneId === pendingDroneId) chatsToPump.add(queuedChat.chatName);
+      }
+    }
+    await setDroneHubMetaByIdentity({ droneId: pendingDroneId, hub: null });
+    for (const chatNameToPump of chatsToPump) {
       deps.enqueuePendingPromptPump(pendingDroneId, String(chatNameToPump));
     }
   }
