@@ -184,7 +184,8 @@ export function DronePreviewDock({
   return (
     <UiPanel
       surface="alternate"
-      className="relative h-full w-full rounded-none border-0"
+      flush
+      className="relative h-full w-full"
     >
       <UiPanelHeader
         title="Browser"
@@ -382,11 +383,6 @@ export function DronePreviewDock({
               kind="offline"
               title="Port looks offline"
               description="The saved URL is preserved while the service is unavailable."
-              action={
-                <UiToolbarButton tone="accent" onClick={refreshPreview}>
-                  Try again
-                </UiToolbarButton>
-              }
             />
           </div>
         ) : iframeLoadFailed ? (

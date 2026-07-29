@@ -1914,7 +1914,8 @@ export function DroneCanvasDock({
   return (
     <UiPanel
       surface="alternate"
-      className="h-full w-full rounded-none border-0"
+      flush
+      className="h-full w-full"
     >
         <UiPanelToolbar aria-label="Canvas controls" className="px-3 py-2">
           <UiToolbarIconButton

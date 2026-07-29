@@ -266,7 +266,7 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
   };
 
   return (
-    <UiPanel className="dh-workflows-dock h-full rounded-none border-0">
+    <UiPanel flush className="dh-workflows-dock h-full">
       {error ? (
         <UiPanelStatusStrip tone="danger">
           {error}
@@ -310,7 +310,7 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
           />
         </UiPanelBody>
       ) : selectedWorkflow ? (
-        <UiPanelBody className="flex flex-col">
+        <UiPanelBody role="main" className="flex flex-col">
           <UiPanelHeader
             eyebrow="Workflow"
             title={selectedWorkflow.name}
@@ -466,7 +466,7 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
           />
         </UiPanelBody>
       ) : (
-        <UiPanelBody scroll>
+        <UiPanelBody role="main" scroll>
           <UiPanelHeader
             title="Workflows"
             description="Reusable multi-agent processes and their latest execution state."

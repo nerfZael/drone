@@ -1648,7 +1648,7 @@ function LiveDroneChangesDock({
 
   const recomputeExplorerWidth = React.useCallback(() => {
     if (viewMode !== 'split') return;
-    if (explorerDragRef.current) return;
+    if (explorerDragRef.current || explorerResizing) return;
     const splitWidth = splitLayoutRef.current?.clientWidth ?? 0;
     if (splitWidth <= 0) return;
     const bounds = resolveExplorerSidebarWidthBounds(splitWidth, explorerWidthOptions);
@@ -1667,7 +1667,15 @@ function LiveDroneChangesDock({
       if (outOfBounds || Math.abs(prev - nextWidth) >= EXPLORER_WIDTH_UPDATE_THRESHOLD_PX) return nextWidth;
       return prev;
     });
-  }, [activeExpandedDirs, activeExplorerTree, explorerManualWidthPx, explorerWidthOptions, explorerZoom, viewMode]);
+  }, [
+    activeExpandedDirs,
+    activeExplorerTree,
+    explorerManualWidthPx,
+    explorerResizing,
+    explorerWidthOptions,
+    explorerZoom,
+    viewMode,
+  ]);
 
   const restoreResizeBodyStyles = React.useCallback(() => {
     const styles = explorerResizeBodyStyleRef.current;
@@ -3194,7 +3202,8 @@ function LiveDroneChangesDock({
     return (
       <UiPanel
         ref={dockRootRef}
-        className="h-full w-full rounded-none border-0 dh-changes-dock"
+        flush
+        className="h-full w-full dh-changes-dock"
         surface="alternate"
         style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
       >
@@ -3206,7 +3215,8 @@ function LiveDroneChangesDock({
   return (
     <UiPanel
       ref={dockRootRef}
-      className="relative h-full w-full rounded-none border-0 dh-changes-dock"
+      flush
+      className="relative h-full w-full dh-changes-dock"
       surface="alternate"
       style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
     >
@@ -3678,10 +3688,10 @@ function LiveDroneChangesDock({
             step={10}
             label="Resize changes explorer"
             reversed
-            onValueChange={(nextWidth) => {
-              setExplorerWidthPx(nextWidth);
-              setExplorerManualWidthPx(Math.floor(nextWidth));
-            }}
+            onValueChange={setExplorerWidthPx}
+            onValueCommit={(nextWidth) =>
+              setExplorerManualWidthPx(Math.floor(nextWidth))
+            }
             onResizingChange={setExplorerResizing}
             onReset={resetExplorerWidthPreference}
           />

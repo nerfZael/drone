@@ -185,8 +185,13 @@ export function UiActionMenu({
   const leaveMenu = (backwards: boolean) => {
     const trigger = triggerRef.current;
     if (!trigger) return;
-    const focusable = Array.from(document.querySelectorAll<HTMLElement>(focusableSelector)).filter(
-      (element) => !panelRef.current?.contains(element),
+    const focusable = Array.from(
+      document.querySelectorAll<HTMLElement>(focusableSelector),
+    ).filter(
+      (element) =>
+        !panelRef.current?.contains(element) &&
+        element.getClientRects().length > 0 &&
+        !element.closest('[inert], [aria-hidden="true"]'),
     );
     const triggerIndex = focusable.indexOf(trigger);
     const nextIndex = triggerIndex + (backwards ? -1 : 1);
@@ -318,7 +323,7 @@ export function UiActionMenu({
           ref={triggerRef}
           aria-label={label}
           size={size}
-          pressed={open}
+          active={open}
           disabled={disabled}
           aria-haspopup="menu"
           aria-expanded={open}
@@ -343,7 +348,7 @@ export function UiActionMenu({
           label={label}
           icon={icon}
           size={size}
-          pressed={open}
+          active={open}
           disabled={disabled}
           aria-haspopup="menu"
           aria-expanded={open}

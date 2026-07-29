@@ -12,17 +12,19 @@ const surfaceClassName: Record<UiPanelSurface, string> = {
 
 export type UiPanelProps = React.HTMLAttributes<HTMLDivElement> & {
   surface?: UiPanelSurface;
+  flush?: boolean;
 };
 
 export const UiPanel = React.forwardRef<HTMLDivElement, UiPanelProps>(function UiPanel(
-  { surface = 'default', className, ...props },
+  { surface = 'default', flush = false, className, ...props },
   ref,
 ) {
   return (
     <div
       ref={ref}
       className={cn(
-        'flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[var(--radius-large)] border border-[var(--border-subtle)]',
+        'flex min-h-0 min-w-0 flex-col overflow-hidden',
+        !flush && 'rounded-[var(--radius-large)] border border-[var(--border-subtle)]',
         surfaceClassName[surface],
         className,
       )}
