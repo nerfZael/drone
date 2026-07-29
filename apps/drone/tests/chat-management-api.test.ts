@@ -725,7 +725,71 @@ describeSocketSuite('chat management api', () => {
       body: JSON.stringify({ agentPermissionMode: 'read-only' }),
     });
     expect(updated.r.status).toBe(400);
-    expect(String(updated.data?.error ?? '')).toContain('Codex and Blip');
+    expect(String(updated.data?.error ?? '')).toContain('native, Codex, and Blip');
+  });
+
+  test('stores supported approval policies and rejects invalid agent combinations', async () => {
+    const droneId = 'drone-chat-approval-policy';
+    await seedDrone(droneId);
+
+    const codex = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          agent: { kind: 'builtin', id: 'codex' },
+          agentPermissionMode: 'workspace-write',
+          approvalPolicy: 'agent-decides',
+        }),
+      },
+    );
+    expect(codex.r.status).toBe(200);
+    expect(codex.data?.agentPermissionMode).toBe('workspace-write');
+    expect(codex.data?.approvalPolicy).toBe('agent-decides');
+
+    const chatInfo = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default`,
+    );
+    expect(chatInfo.data?.agentPermissionMode).toBe('workspace-write');
+    expect(chatInfo.data?.approvalPolicy).toBe('agent-decides');
+
+    const native = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agent: { kind: 'native' } }),
+      },
+    );
+    expect(native.r.status).toBe(200);
+
+    const afterSwitch = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default`,
+    );
+    expect(afterSwitch.data?.approvalPolicy).toBe('ask');
+
+    const invalidNative = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ approvalPolicy: 'agent-decides' }),
+      },
+    );
+    expect(invalidNative.r.status).toBe(400);
+    expect(String(invalidNative.data?.error ?? '')).toContain('only available for Codex');
+
+    const nativeAllowAll = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ approvalPolicy: 'never' }),
+      },
+    );
+    expect(nativeAllowAll.r.status).toBe(200);
+    expect(nativeAllowAll.data?.approvalPolicy).toBe('never');
   });
 
   test('returns conditional transcript reads as 304 when unchanged', async () => {

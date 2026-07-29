@@ -287,7 +287,8 @@ describe('drone-sdk core', () => {
     await transport.createDrone({
       name: 'alpha',
       agent: 'codex',
-      agentPermissionMode: 'read-only',
+      agentPermissionMode: 'workspace-write',
+      approvalPolicy: 'agent-decides',
     });
     await transport.createDrones([
       {
@@ -304,7 +305,8 @@ describe('drone-sdk core', () => {
           name: 'alpha',
           runtime: 'container',
           seedAgent: { kind: 'builtin', id: 'codex' },
-          seedAgentPermissionMode: 'read-only',
+          seedAgentPermissionMode: 'workspace-write',
+          seedApprovalPolicy: 'agent-decides',
         },
       },
       {

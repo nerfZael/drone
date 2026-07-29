@@ -1,5 +1,6 @@
 import type {
   MobileDroneAgentId,
+  MobileDroneApprovalPolicy,
   MobileDroneAgentPermissionMode,
   MobileDroneCreateDefaults,
   MobileDroneCreatePayload,
@@ -12,6 +13,7 @@ export type MobileDroneCreatePreferences = {
   persistVolume: boolean;
   agent: MobileDroneAgentId;
   agentPermissionMode: MobileDroneAgentPermissionMode;
+  approvalPolicy: MobileDroneApprovalPolicy;
   model: string;
   provider: string;
   reasoning: string;
@@ -51,7 +53,14 @@ export function normalizeMobileDroneCreatePreferences(
     persistVolume: candidate.persistVolume === true,
     agent,
     agentPermissionMode:
-      candidate.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
+      candidate.agentPermissionMode === 'read-only' ||
+      candidate.agentPermissionMode === 'workspace-write'
+        ? candidate.agentPermissionMode
+        : 'full-access',
+    approvalPolicy:
+      candidate.approvalPolicy === 'agent-decides' || candidate.approvalPolicy === 'never'
+        ? candidate.approvalPolicy
+        : 'ask',
     model: trimmed(candidate.model),
     provider: trimmed(candidate.provider),
     reasoning: trimmed(candidate.reasoning),
@@ -74,7 +83,14 @@ export function mobileDroneCreatePreferencesFromPayload(
     persistVolume: payload.runtime === 'container' && payload.persistVolume === true,
     agent,
     agentPermissionMode:
-      payload.seedAgentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
+      payload.seedAgentPermissionMode === 'read-only' ||
+      payload.seedAgentPermissionMode === 'workspace-write'
+        ? payload.seedAgentPermissionMode
+        : 'full-access',
+    approvalPolicy:
+      payload.seedApprovalPolicy === 'agent-decides' || payload.seedApprovalPolicy === 'never'
+        ? payload.seedApprovalPolicy
+        : 'ask',
     model: trimmed(payload.seedModel),
     provider: trimmed(payload.seedProvider),
     reasoning: trimmed(payload.seedReasoning),

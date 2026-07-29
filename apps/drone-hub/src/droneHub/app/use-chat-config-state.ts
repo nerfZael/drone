@@ -1,5 +1,10 @@
 import React from 'react';
-import type { AgentPermissionMode, ChatAgentConfig, ChatInfo } from '../../domain';
+import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
+  ChatAgentConfig,
+  ChatInfo,
+} from '../../domain';
 import { normalizeChatInfoPayload } from '../../domain';
 import type { DroneSummary } from '../types';
 import {
@@ -179,7 +184,11 @@ export function useChatConfigState({
     async (agent: ChatAgentConfig) => {
       if (!selectedDrone) return;
       const chat = selectedChat || 'default';
-      const readOnlySupported = agent.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'blip');
+      const readOnlySupported =
+        agent.kind === 'native' ||
+        (agent.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'blip'));
+      const approvalSupported =
+        agent.kind === 'native' || (agent.kind === 'builtin' && agent.id === 'codex');
       await requestJson(
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(
           chat,
@@ -198,6 +207,14 @@ export function useChatConfigState({
         model: prev?.model ?? null,
         reasoning: prev?.reasoning ?? null,
         agentPermissionMode: readOnlySupported ? prev?.agentPermissionMode ?? 'full-access' : 'full-access',
+        approvalPolicy:
+          approvalSupported &&
+          !(
+            prev?.approvalPolicy === 'agent-decides' &&
+            !(agent.kind === 'builtin' && agent.id === 'codex')
+          )
+            ? prev?.approvalPolicy ?? 'ask'
+            : 'ask',
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
@@ -237,6 +254,7 @@ export function useChatConfigState({
         model: hasModel ? model : prev?.model ?? null,
         reasoning: hasReasoning ? reasoning : prev?.reasoning ?? null,
         agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
+        approvalPolicy: prev?.approvalPolicy ?? 'ask',
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
@@ -268,7 +286,41 @@ export function useChatConfigState({
         model: prev?.model ?? null,
         reasoning: prev?.reasoning ?? null,
         agentPermissionMode,
+        approvalPolicy: prev?.approvalPolicy ?? 'ask',
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
+        sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
+        createdAt: prev?.createdAt ?? new Date().toISOString(),
+      }));
+      setChatInfoError(null);
+    },
+    [requestJson, selectedChat, selectedDrone],
+  );
+
+  const setChatApprovalPolicy = React.useCallback(
+    async (approvalPolicy: AgentApprovalPolicy) => {
+      if (!selectedDrone) return;
+      const chat = selectedChat || 'default';
+      await requestJson(
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(
+          chat,
+        )}/config`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ approvalPolicy }),
+        },
+      );
+      setChatInfo((prev) => ({
+        name: selectedDrone,
+        chat,
+        agent: prev?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig),
+        agentLocked: prev?.agentLocked ?? false,
+        model: prev?.model ?? null,
+        reasoning: prev?.reasoning ?? null,
+        agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
+        approvalPolicy,
+        dockerSnapshotAfterAgentMessageEnabled:
+          prev?.dockerSnapshotAfterAgentMessageEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -299,6 +351,7 @@ export function useChatConfigState({
         model: prev?.model ?? null,
         reasoning: prev?.reasoning ?? null,
         agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
+        approvalPolicy: prev?.approvalPolicy ?? 'ask',
         dockerSnapshotAfterAgentMessageEnabled: enabled,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
@@ -329,6 +382,7 @@ export function useChatConfigState({
     setChatAgent,
     setChatModelSettings,
     setChatAgentPermissionMode,
+    setChatApprovalPolicy,
     setDockerSnapshotAfterAgentMessageEnabled,
     handleSetAgentFailure,
   };

@@ -90,7 +90,12 @@ import {
 } from '../host/api';
 import { suggestDroneNameFromMessage } from './drone-name-from-message';
 import { buildAutoRenamedChatCandidate, isGeneratedChatName } from './chat-auto-rename';
-import type { AgentPermissionMode, BuiltinAgentId, ChatAgentConfig } from './chat-types';
+import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
+  BuiltinAgentId,
+  ChatAgentConfig,
+} from './chat-types';
 import { createDeviceMeshService } from './device-mesh';
 import {
   canonicalRepositoriesMap,
@@ -1336,6 +1341,8 @@ let nativeChatPromptHandler: (input: {
   provider?: string;
   model?: string;
   thinkingLevel?: string;
+  agentPermissionMode?: AgentPermissionMode;
+  approvalPolicy?: AgentApprovalPolicy;
   deliveryMode?: 'queue' | 'asap';
   prompt: string;
   attachments?: ChatImageAttachment[];
@@ -2398,13 +2405,25 @@ function isValidDroneNameDashCase(raw: string): boolean {
 }
 
 function normalizeAgentPermissionMode(raw: unknown): AgentPermissionMode {
-  return String(raw ?? '').trim() === 'read-only' ? 'read-only' : 'full-access';
+  const value = String(raw ?? '').trim();
+  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
 }
 
 function parseAgentPermissionModeForUpdate(raw: unknown): AgentPermissionMode {
   const value = String(raw ?? '').trim();
-  if (value === 'full-access' || value === 'read-only') return value;
-  throw new Error('agentPermissionMode must be full-access or read-only');
+  if (value === 'full-access' || value === 'workspace-write' || value === 'read-only') return value;
+  throw new Error('agentPermissionMode must be full-access, workspace-write, or read-only');
+}
+
+function normalizeAgentApprovalPolicy(raw: unknown): AgentApprovalPolicy {
+  const value = String(raw ?? '').trim();
+  return value === 'agent-decides' || value === 'never' ? value : 'ask';
+}
+
+function parseAgentApprovalPolicyForUpdate(raw: unknown): AgentApprovalPolicy {
+  const value = String(raw ?? '').trim();
+  if (value === 'ask' || value === 'agent-decides' || value === 'never') return value;
+  throw new Error('approvalPolicy must be ask, agent-decides, or never');
 }
 
 type TranscriptTurn = {
@@ -3136,6 +3155,7 @@ promptRuntime = createChatPromptRuntime({
   maybeBootstrapPromptFromTranscript,
   maybeStartDockerSnapshotForTranscriptTurn,
   normalizeAgentPermissionMode,
+  normalizeAgentApprovalPolicy,
   normalizeBuiltinAgentId,
   normalizeChatModel,
   normalizeChatName,
@@ -4114,6 +4134,8 @@ export async function startDroneHubApiServer(opts: {
     provider,
     model,
     thinkingLevel,
+    agentPermissionMode,
+    approvalPolicy,
     deliveryMode,
     prompt,
     attachments,
@@ -4126,6 +4148,8 @@ export async function startDroneHubApiServer(opts: {
       provider,
       model,
       thinkingLevel,
+      agentPermissionMode,
+      approvalPolicy,
     });
     const nativeAttachments = Array.isArray(attachments) ? attachments : [];
     const promptImages = validateAssistantPromptImages(
@@ -5537,6 +5561,7 @@ export async function startDroneHubApiServer(opts: {
       }
     },
     normalizeAgentPermissionMode,
+    normalizeAgentApprovalPolicy,
     normalizeBuiltinAgentId,
     normalizeChatImageAttachments,
     normalizeChatModel,
@@ -5547,6 +5572,7 @@ export async function startDroneHubApiServer(opts: {
     normalizeSubmittedAtIso,
     nowIso,
     parseAgentPermissionModeForUpdate,
+    parseAgentApprovalPolicyForUpdate,
     parseChatModelForUpdate,
     parseChatReasoningForUpdate,
     parseChatNameForMutation,
@@ -5618,6 +5644,7 @@ export async function startDroneHubApiServer(opts: {
     notifyCanonicalDroneRegistryWrite,
     nowIso,
     parseAgentPermissionModeForUpdate,
+    parseAgentApprovalPolicyForUpdate,
     parseChatModelForUpdate,
     parseCreateRuntime,
     parseDraftFlag,

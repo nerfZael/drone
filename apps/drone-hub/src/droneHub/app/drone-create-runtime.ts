@@ -1,4 +1,8 @@
-import type { AgentPermissionMode, ChatAgentConfig } from '../../domain';
+import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
+  ChatAgentConfig,
+} from '../../domain';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
 
 export type CreateRuntime = 'container' | 'host';
@@ -122,6 +126,7 @@ type BuildDraftDroneCreatePayloadArgs = {
   seedReasoning?: string | null;
   seedAgentPermissionMode?: AgentPermissionMode;
   agentsMd?: string;
+  seedApprovalPolicy?: AgentApprovalPolicy;
   prompt?: string | null;
 };
 
@@ -139,6 +144,7 @@ export function buildDraftDroneCreatePayload({
   seedReasoning,
   seedAgentPermissionMode,
   agentsMd,
+  seedApprovalPolicy,
   prompt,
 }: BuildDraftDroneCreatePayloadArgs) {
   const trimmedName = String(name ?? '').trim();
@@ -168,7 +174,10 @@ export function buildDraftDroneCreatePayload({
     ...(seedAgent ? { seedAgent } : {}),
     ...(trimmedModel ? { seedModel: trimmedModel } : {}),
     ...(trimmedReasoning ? { seedReasoning: trimmedReasoning } : {}),
-    ...(seedAgentPermissionMode === 'read-only' ? { seedAgentPermissionMode } : {}),
+    ...(seedAgentPermissionMode && seedAgentPermissionMode !== 'full-access'
+      ? { seedAgentPermissionMode }
+      : {}),
+    ...(seedApprovalPolicy && seedApprovalPolicy !== 'ask' ? { seedApprovalPolicy } : {}),
     ...(trimmedPrompt ? { seedPrompt: trimmedPrompt } : {}),
     ...(trimmedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),
   };

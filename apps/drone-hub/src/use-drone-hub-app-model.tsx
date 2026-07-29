@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  type AgentApprovalPolicy,
   type AgentPermissionMode,
   type ChatAgentConfig,
   isValidDroneNameDashCase,
@@ -719,6 +720,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setChatAgent,
     setChatModelSettings,
     setChatAgentPermissionMode,
+    setChatApprovalPolicy,
     setDockerSnapshotAfterAgentMessageEnabled,
     handleSetAgentFailure,
   } = useChatConfigState({
@@ -769,6 +771,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
 
   const spawnAgentConfig = React.useMemo(() => resolveAgentKeyToConfig(spawnAgentKey), [resolveAgentKeyToConfig, spawnAgentKey]);
+  const spawnAgentIsCodex =
+    spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex';
   const spawnModelValue = React.useMemo(() => {
     const value = String(spawnModel ?? '').trim();
     return value || null;
@@ -781,12 +785,28 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       ? String(spawnReasoning ?? '').trim() || null
       : null;
   const [spawnAgentPermissionMode, setSpawnAgentPermissionMode] = React.useState<AgentPermissionMode>('full-access');
-  const spawnAgentReadOnlySupported = spawnAgentConfig.kind === 'builtin' && (spawnAgentConfig.id === 'codex' || spawnAgentConfig.id === 'blip');
+  const [spawnApprovalPolicy, setSpawnApprovalPolicy] =
+    React.useState<AgentApprovalPolicy>('ask');
+  const spawnAgentReadOnlySupported =
+    spawnAgentConfig.kind === 'native' ||
+    (spawnAgentConfig.kind === 'builtin' &&
+      (spawnAgentConfig.id === 'codex' || spawnAgentConfig.id === 'blip'));
+  const spawnAgentApprovalSupported =
+    spawnAgentPermissionMode === 'full-access' &&
+    (spawnAgentConfig.kind === 'native' ||
+      (spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex'));
   React.useEffect(() => {
-    if (!spawnAgentReadOnlySupported && spawnAgentPermissionMode === 'read-only') {
+    if (!spawnAgentReadOnlySupported && spawnAgentPermissionMode !== 'full-access') {
       setSpawnAgentPermissionMode('full-access');
     }
   }, [spawnAgentPermissionMode, spawnAgentReadOnlySupported]);
+  React.useEffect(() => {
+    if (!spawnAgentApprovalSupported) setSpawnApprovalPolicy('ask');
+    else if (spawnAgentIsCodex && spawnApprovalPolicy === 'ask')
+      setSpawnApprovalPolicy('agent-decides');
+    else if (!spawnAgentIsCodex && spawnApprovalPolicy === 'agent-decides')
+      setSpawnApprovalPolicy('ask');
+  }, [spawnAgentApprovalSupported, spawnAgentIsCodex, spawnApprovalPolicy]);
 
   const rememberStartupSeed = React.useCallback((
     drones: Array<{ id: string; name: string }>,
@@ -795,7 +815,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       agent: ChatAgentConfig | null;
       model?: string | null;
       reasoning?: string | null;
-      agentPermissionMode?: 'full-access' | 'read-only';
+      agentPermissionMode?: AgentPermissionMode;
+      approvalPolicy?: AgentApprovalPolicy;
       prompt: string;
       chatName?: string;
       group?: string | null;
@@ -816,10 +837,25 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     const runtime = opts.runtime === 'host' ? 'host' : 'container';
     const model = String(opts.model ?? '').trim() || null;
     const reasoning = String(opts.reasoning ?? '').trim().toLowerCase() || null;
-    const agentPermissionMode = opts.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access';
+    const agentPermissionMode: AgentPermissionMode =
+      opts.agentPermissionMode === 'read-only' ||
+      opts.agentPermissionMode === 'workspace-write'
+        ? opts.agentPermissionMode
+        : 'full-access';
+    const approvalPolicy: AgentApprovalPolicy =
+      opts.approvalPolicy === 'agent-decides' || opts.approvalPolicy === 'never'
+        ? opts.approvalPolicy
+        : 'ask';
     const group = String(opts.group ?? '').trim() || null;
     const repoPath = String(opts.repoPath ?? '').trim() || null;
-    if (!prompt && !opts.agent && !model && agentPermissionMode === 'full-access') return;
+    if (
+      !prompt &&
+      !opts.agent &&
+      !model &&
+      agentPermissionMode === 'full-access' &&
+      approvalPolicy === 'ask'
+    )
+      return;
     const submittedAt = String(opts.at ?? '').trim();
     const at = Number.isFinite(Date.parse(submittedAt)) ? submittedAt : new Date().toISOString();
     setStartupSeedByDrone((prev) => {
@@ -833,6 +869,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           model,
           reasoning,
           agentPermissionMode,
+          approvalPolicy,
           prompt,
           group,
           repoPath,
@@ -855,7 +892,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     persistVolume?: boolean;
     seedAgent?: ChatAgentConfig;
     seedModel?: string | null;
-    seedAgentPermissionMode?: 'full-access' | 'read-only';
+    seedAgentPermissionMode?: AgentPermissionMode;
     seedChat?: string;
     seedPrompt?: string;
     seedCwd?: string;
@@ -1513,6 +1550,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       spawnModelForSeed,
       spawnReasoningForSeed,
       spawnAgentPermissionMode,
+      spawnApprovalPolicy,
       draftChat,
       draftCreateMode,
       draftCreateName,
@@ -2268,6 +2306,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           model: startupSeedForCurrentDrone.model ?? null,
           reasoning: startupSeedForCurrentDrone.reasoning ?? null,
           agentPermissionMode: startupSeedForCurrentDrone.agentPermissionMode ?? 'full-access',
+          approvalPolicy: startupSeedForCurrentDrone.approvalPolicy ?? 'ask',
           dockerSnapshotAfterAgentMessageEnabled: false,
           sessionName: `drone-hub-chat-${startupSeedForCurrentDrone.chatName || selectedChat || 'default'}`,
           createdAt: startupSeedForCurrentDrone.at || new Date().toISOString(),
@@ -2337,6 +2376,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         spawnReasoning: preferences.spawnReasoning,
       });
       setSpawnAgentPermissionMode(preferences.spawnAgentPermissionMode);
+      setSpawnApprovalPolicy(preferences.spawnApprovalPolicy);
       setRepoBranchSource(preferences.repoBranchSource);
       setRepoCreateRemoteBranch(preferences.repoCreateRemoteBranch);
       setPullHostBranchBeforeCreate(preferences.pullHostBranchBeforeCreate);
@@ -3026,11 +3066,24 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           ? String(overrides.model ?? spawnModel ?? '').trim() || null
           : null;
       const seedAgentPermissionMode: AgentPermissionMode = seedAgent ? spawnAgentPermissionMode : 'full-access';
+      const seedApprovalPolicy: AgentApprovalPolicy =
+        seedAgent.kind === 'builtin' &&
+        seedAgent.id === 'codex' &&
+        spawnApprovalPolicy === 'ask'
+          ? 'agent-decides'
+          : spawnApprovalPolicy;
       if (
-        seedAgentPermissionMode === 'read-only' &&
-        !(seedAgent.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
+        seedAgentPermissionMode !== 'full-access' &&
+        !(
+          seedAgent.kind === 'native' ||
+          (seedAgent.kind === 'builtin' &&
+            (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
+        )
       ) {
-        return { ok: false, error: 'Read-only mode is currently supported for Codex and Blip chats only.' };
+        return {
+          ok: false,
+          error: 'Agent access controls are available for native, Codex, and Blip chats.',
+        };
       }
       const repoPath = String(overrides.repoPath ?? chatHeaderRepoPath ?? '').trim();
       const group = String(overrides.group ?? draftCreateGroup ?? '').trim();
@@ -3050,7 +3103,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           seedChat: 'default',
           ...(seedAgent ? { seedAgent } : {}),
           ...(seedModel ? { seedModel } : {}),
-          ...(seedAgentPermissionMode === 'read-only' ? { seedAgentPermissionMode } : {}),
+          ...(seedAgentPermissionMode !== 'full-access' ? { seedAgentPermissionMode } : {}),
+          ...(seedApprovalPolicy !== 'ask' ? { seedApprovalPolicy } : {}),
           seedPrompt: prompt,
           seedSubmittedAt,
         };
@@ -3072,6 +3126,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           agent: seedAgent,
           model: seedModel,
           agentPermissionMode: seedAgentPermissionMode,
+          approvalPolicy: seedApprovalPolicy,
           prompt,
           chatName: 'default',
           group,
@@ -3094,6 +3149,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       resolveAgentKeyToConfig,
       spawnAgentKey,
       spawnAgentPermissionMode,
+      spawnApprovalPolicy,
       spawnModel,
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
@@ -4033,6 +4089,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSpawnModel,
     spawnAgentPermissionMode,
     setSpawnAgentPermissionMode,
+    spawnApprovalPolicy,
+    setSpawnApprovalPolicy,
+    spawnAgentApprovalSupported,
     spawnAgentReadOnlySupported,
     spawnAgentConfig,
     createInitialMessage,
@@ -4223,6 +4282,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setChatModelSettings,
     agentPermissionMode: effectiveChatInfo?.agentPermissionMode ?? 'full-access',
     setChatAgentPermissionMode,
+    approvalPolicy: effectiveChatInfo?.approvalPolicy ?? 'ask',
+    setChatApprovalPolicy,
     dockerSnapshotAfterAgentMessageEnabled: effectiveChatInfo?.dockerSnapshotAfterAgentMessageEnabled === true,
     setDockerSnapshotAfterAgentMessageEnabled,
     setChatInfoError,

@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
   NativeAgentDefaultModel,
   NativeAgentDefaultSettings,
   NativeAgentWorkspaceSummary,
@@ -61,6 +63,7 @@ import {
   ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES,
   ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES,
   ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES,
+  ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES,
   ASSISTANT_WORKSPACE_TOOL_CAPABILITIES,
   ASSISTANT_MODEL_OPTIONS,
 } from './assistant/assistant-config';
@@ -324,6 +327,16 @@ function normalizeAssistantAutoApprove(raw: unknown): boolean {
       .toLowerCase() === 'true' ||
     String(raw ?? '').trim() === '1'
   );
+}
+
+function normalizeAssistantAgentPermissionMode(raw: unknown): AgentPermissionMode {
+  const value = String(raw ?? '').trim();
+  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+}
+
+function normalizeAssistantApprovalPolicy(raw: unknown): AgentApprovalPolicy {
+  const value = String(raw ?? '').trim();
+  return value === 'never' ? 'never' : 'ask';
 }
 
 function makeAssistantUserMessage(
@@ -1066,6 +1079,9 @@ function normalizeThread(
   const createdAt = String(raw.createdAt ?? '').trim() || nowIso();
   const updatedAt = String(raw.updatedAt ?? '').trim() || createdAt;
   const thinkingLevel = allowedThinkingLevelForModel(provider, model, raw.thinkingLevel);
+  const approvalPolicy = normalizeAssistantApprovalPolicy(
+    raw.approvalPolicy ?? (normalizeAssistantAutoApprove(raw.autoApprove) ? 'never' : 'ask'),
+  );
   return {
     id,
     ...(cleanOptionalString(raw.ownerDroneId)
@@ -1099,7 +1115,9 @@ function normalizeThread(
       ? { enabledWorkspaceIds: normalizeAssistantWorkspaceIds(raw.enabledWorkspaceIds) ?? [] }
       : {}),
     accessScope: makeAssistantAccessScope(raw.accessScope),
-    autoApprove: normalizeAssistantAutoApprove(raw.autoApprove),
+    agentPermissionMode: normalizeAssistantAgentPermissionMode(raw.agentPermissionMode),
+    approvalPolicy,
+    autoApprove: approvalPolicy === 'never',
     promptDeliveryMode: normalizeAssistantPromptDeliveryMode(raw.promptDeliveryMode),
     status: raw.status === 'error' ? 'error' : 'idle',
     error: typeof raw.error === 'string' && raw.error.trim() ? raw.error : null,
@@ -1365,7 +1383,10 @@ export class HubAssistantService {
     threadId?: string,
   ): Set<string> | null {
     if (!threadId) throw new Error('native chat id is required');
-    const accessScope = this.activeAccessScope(threadId);
+    const thread = this.getThread(threadId);
+    if (kind === 'write' && thread.agentPermissionMode === 'read-only') return new Set();
+    if (kind === 'execute' && thread.agentPermissionMode !== 'full-access') return new Set();
+    const accessScope = thread.accessScope;
     const mode =
       kind === 'write'
         ? accessScope.writeMode
@@ -1621,6 +1642,8 @@ export class HubAssistantService {
     provider?: unknown;
     model?: unknown;
     thinkingLevel?: unknown;
+    agentPermissionMode?: unknown;
+    approvalPolicy?: unknown;
   }): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const id = cleanOptionalString(input.id);
@@ -1651,6 +1674,24 @@ export class HubAssistantService {
       if (requestedTitle && existing.title !== requestedTitle) {
         existing.title = requestedTitle;
         metadataChanged = true;
+      }
+      if (input.agentPermissionMode != null) {
+        const requestedPermissionMode = normalizeAssistantAgentPermissionMode(
+          input.agentPermissionMode,
+        );
+        if (existing.agentPermissionMode !== requestedPermissionMode) {
+          existing.agentPermissionMode = requestedPermissionMode;
+          metadataChanged = true;
+        }
+      }
+      if (input.approvalPolicy != null) {
+        const requestedApprovalPolicy = normalizeAssistantApprovalPolicy(input.approvalPolicy);
+        if (existing.approvalPolicy !== requestedApprovalPolicy) {
+          existing.approvalPolicy = requestedApprovalPolicy;
+          existing.autoApprove = requestedApprovalPolicy === 'never';
+          if (existing.autoApprove) this.resolvePendingApprovalsForThread(existing.id, true);
+          metadataChanged = true;
+        }
       }
       if (!existing.accessScope.droneIds.includes(ownerDroneId)) {
         existing.accessScope = makeAssistantAccessScope({
@@ -1685,6 +1726,8 @@ export class HubAssistantService {
         model,
         cleanOptionalString(input.thinkingLevel) || this.defaultModelSelection.thinkingLevel,
       ),
+      agentPermissionMode: normalizeAssistantAgentPermissionMode(input.agentPermissionMode),
+      approvalPolicy: normalizeAssistantApprovalPolicy(input.approvalPolicy),
       accessScope: makeAssistantAccessScope({
         readMode: 'selected',
         writeMode: 'selected',
@@ -1815,6 +1858,8 @@ export class HubAssistantService {
         updatedAt: nowIso(),
       }),
       systemPrompt: source.systemPrompt,
+      agentPermissionMode: source.agentPermissionMode,
+      approvalPolicy: source.approvalPolicy,
       ...(clonedEnabledWorkspaceIds ? { enabledWorkspaceIds: clonedEnabledWorkspaceIds } : {}),
     });
     thread.systemPromptUpdatedAt = source.systemPromptUpdatedAt;
@@ -1894,6 +1939,8 @@ export class HubAssistantService {
       provider?: unknown;
       thinkingLevel?: unknown;
       autoApprove?: unknown;
+      agentPermissionMode?: unknown;
+      approvalPolicy?: unknown;
       promptDeliveryMode?: unknown;
       enabledTools?: unknown;
       enabledWorkspaceIds?: unknown;
@@ -1915,6 +1962,20 @@ export class HubAssistantService {
     }
     if (patch.autoApprove != null) {
       thread.autoApprove = normalizeAssistantAutoApprove(patch.autoApprove);
+      thread.approvalPolicy = thread.autoApprove ? 'never' : 'ask';
+      if (thread.autoApprove) this.resolvePendingApprovalsForThread(thread.id, true);
+    }
+    if (patch.agentPermissionMode != null) {
+      thread.agentPermissionMode = normalizeAssistantAgentPermissionMode(
+        patch.agentPermissionMode,
+      );
+    }
+    if (patch.approvalPolicy != null) {
+      if (String(patch.approvalPolicy).trim() === 'agent-decides')
+        throw new Error('agent-decides approval policy is only available for Codex chats');
+      const approvalPolicy = normalizeAssistantApprovalPolicy(patch.approvalPolicy);
+      thread.approvalPolicy = approvalPolicy;
+      thread.autoApprove = approvalPolicy === 'never';
       if (thread.autoApprove) this.resolvePendingApprovalsForThread(thread.id, true);
     }
     if (patch.promptDeliveryMode != null)
@@ -2046,14 +2107,18 @@ export class HubAssistantService {
     Array<AssistantDroneSummary & { canRead: boolean; canWrite: boolean; canExecute: boolean }>
   > {
     await this.ensureLoaded();
-    this.getThread(threadId);
+    const thread = this.getThread(threadId);
     const readScope = this.allowedDroneIdSet('read', threadId);
     const writeScope = this.allowedDroneIdSet('write', threadId);
     const executeScope = this.allowedDroneIdSet('execute', threadId);
     return (await this.tools.listDrones()).flatMap((drone) => {
       const canRead = readScope === null || readScope.has(drone.id);
-      const canWrite = writeScope === null || writeScope.has(drone.id);
-      const canExecute = executeScope === null || executeScope.has(drone.id);
+      const canWrite =
+        thread.agentPermissionMode !== 'read-only' &&
+        (writeScope === null || writeScope.has(drone.id));
+      const canExecute =
+        thread.agentPermissionMode === 'full-access' &&
+        (executeScope === null || executeScope.has(drone.id));
       return canRead || canWrite || canExecute ? [{ ...drone, canRead, canWrite, canExecute }] : [];
     });
   }
@@ -2088,7 +2153,10 @@ export class HubAssistantService {
         label: 'Artifacts',
         kind: 'artifacts' as const,
         description: 'Private files for this chat',
-        capabilities: ['read', 'write'] as Array<'read' | 'write'>,
+        capabilities: [
+          'read',
+          ...(thread.agentPermissionMode === 'read-only' ? [] : (['write'] as const)),
+        ] as Array<'read' | 'write'>,
       },
     ];
   }
@@ -2747,6 +2815,8 @@ export class HubAssistantService {
     thinkingLevel?: AssistantThinkingLevel;
     title?: string;
     accessScope?: AssistantAccessScope;
+    agentPermissionMode?: AgentPermissionMode;
+    approvalPolicy?: AgentApprovalPolicy;
     enabledWorkspaceIds?: string[];
     systemPrompt?: string;
   }): AssistantThread {
@@ -2774,10 +2844,12 @@ export class HubAssistantService {
       systemPromptUpdatedAt: null,
       enabledTools: normalizeAssistantEnabledTools(this.defaultEnabledTools),
       accessScope: input?.accessScope ?? this.defaultAccessScopeForNewThread(),
+      agentPermissionMode: normalizeAssistantAgentPermissionMode(input?.agentPermissionMode),
+      approvalPolicy: normalizeAssistantApprovalPolicy(input?.approvalPolicy),
       ...(Array.isArray(input?.enabledWorkspaceIds)
         ? { enabledWorkspaceIds: normalizeAssistantWorkspaceIds(input.enabledWorkspaceIds) ?? [] }
         : {}),
-      autoApprove: false,
+      autoApprove: normalizeAssistantApprovalPolicy(input?.approvalPolicy) === 'never',
       promptDeliveryMode: 'queue',
       status: 'idle',
       error: null,
@@ -2851,7 +2923,25 @@ export class HubAssistantService {
     | { status: 'deny'; reason: string }
     | { status: 'suspend'; reason: string; details: unknown }
   > {
-    const toolName = String(ctx?.toolCall?.name ?? '').trim();
+    const toolName = String(ctx?.toolCall?.name ?? '')
+      .trim()
+      .replace(/^drone_hub__/, '');
+    const permissionMode = this.getThread(threadId).agentPermissionMode;
+    if (
+      permissionMode === 'read-only' &&
+      ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES.has(toolName)
+    ) {
+      return {
+        status: 'deny',
+        reason: `${toolName} is unavailable while this chat is read only.`,
+      };
+    }
+    if (permissionMode !== 'full-access' && toolName === 'bash') {
+      return {
+        status: 'deny',
+        reason: 'Command execution is unavailable for this chat.',
+      };
+    }
     if (
       toolName !== 'message_drone' &&
       toolName !== 'set_drone_group' &&
@@ -3139,8 +3229,14 @@ export class HubAssistantService {
     const thread = this.threads.find((item) => item.id === threadId) ?? null;
     const accessScope = this.activeAccessScope(threadId);
     const readScope = describeAssistantAccessMode(accessScope.readMode, accessScope.droneIds);
-    const writeScope = describeAssistantAccessMode(accessScope.writeMode, accessScope.droneIds);
-    const executeScope = describeAssistantAccessMode(accessScope.executeMode, accessScope.droneIds);
+    const writeScope =
+      thread?.agentPermissionMode === 'read-only'
+        ? 'none (chat is read only)'
+        : describeAssistantAccessMode(accessScope.writeMode, accessScope.droneIds);
+    const executeScope =
+      thread?.agentPermissionMode === 'full-access'
+        ? describeAssistantAccessMode(accessScope.executeMode, accessScope.droneIds)
+        : 'none (command execution is disabled)';
     const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}; execute=${executeScope}. Do not claim access to existing drones outside those scopes. create_drone creates a container child of this chat's owner and automatically grants this chat access; clone_drone also requires read access to its source. Neither operation is available when this chat's owner runs directly on the host. create_group remains a global creation tool.`;
     const basePrompt =
       normalizeAssistantSystemPrompt(thread?.systemPrompt) ||

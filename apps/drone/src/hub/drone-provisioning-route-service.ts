@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import type { AgentPermissionMode } from './chat-types';
+import type { AgentApprovalPolicy, AgentPermissionMode } from './chat-types';
 import { parseDroneAgentsMdOverride } from './agents-config';
 import { readJsonBody, sendJson as json } from './hub-http';
 import type { DroneRuntime } from '../host/runtime';
@@ -10,6 +10,20 @@ import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes
 type RepoBranchSourceMode = 'host' | 'remote';
 
 import type { DroneProvisioningRouteDependencies } from './routes/drone-provisioning-routes';
+
+function assertSeedApprovalPolicySupported(
+  policy: AgentApprovalPolicy,
+  agent: any,
+): void {
+  if (policy === 'ask') return;
+  if (!agent) throw new Error('approval policy requires a native or Codex seed agent');
+  if (policy === 'agent-decides') {
+    if (agent.kind === 'builtin' && agent.id === 'codex') return;
+    throw new Error('agent-decides approval policy is only available for Codex seed agents');
+  }
+  if (agent.kind === 'native' || (agent.kind === 'builtin' && agent.id === 'codex')) return;
+  throw new Error('approval policies are available for native and Codex seed agents only');
+}
 
 export class DroneProvisioningService {
   readonly handle: LegacyRouteHandler;
@@ -59,6 +73,7 @@ function createDroneProvisioningServiceHandler(
     notifyCanonicalDroneRegistryWrite,
     nowIso,
     parseAgentPermissionModeForUpdate,
+    parseAgentApprovalPolicyForUpdate,
     parseChatModelForUpdate,
     parseCreateRuntime,
     parseDraftFlag,
@@ -184,6 +199,7 @@ function createDroneProvisioningServiceHandler(
         );
         const seedAgent = parseSeedAgent(body?.seedAgent ?? body?.agent ?? body?.seed?.agent);
         let seedAgentPermissionMode: AgentPermissionMode = 'full-access';
+        let seedApprovalPolicy: AgentApprovalPolicy = 'ask';
         try {
           const seedPermissionRaw =
             body?.seedAgentPermissionMode ??
@@ -193,6 +209,17 @@ function createDroneProvisioningServiceHandler(
             seedPermissionRaw == null || String(seedPermissionRaw).trim() === ''
               ? 'full-access'
               : parseAgentPermissionModeForUpdate(seedPermissionRaw);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        try {
+          const seedApprovalRaw =
+            body?.seedApprovalPolicy ?? body?.approvalPolicy ?? body?.seed?.approvalPolicy;
+          seedApprovalPolicy =
+            seedApprovalRaw == null || String(seedApprovalRaw).trim() === ''
+              ? 'ask'
+              : parseAgentApprovalPolicyForUpdate(seedApprovalRaw);
         } catch (e: any) {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
@@ -261,9 +288,10 @@ function createDroneProvisioningServiceHandler(
           });
           return;
         }
-        if (seedAgentPermissionMode === 'read-only') {
+        if (seedAgentPermissionMode !== 'full-access') {
           try {
-            if (!seedAgent) throw new Error('read-only mode requires a Codex or Blip seed agent');
+            if (!seedAgent)
+              throw new Error('agent access controls require a native, Codex, or Blip seed agent');
             assertReadOnlySupportedForAgent(seedAgent);
           } catch (e: any) {
             json(res, Number(e?.statusCode ?? 0) || 400, {
@@ -272,6 +300,12 @@ function createDroneProvisioningServiceHandler(
             });
             return;
           }
+        }
+        try {
+          assertSeedApprovalPolicySupported(seedApprovalPolicy, seedAgent);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
         }
         const seedCwdRaw =
           typeof body?.seedCwd === 'string'
@@ -465,15 +499,19 @@ function createDroneProvisioningServiceHandler(
             seedProvider ||
             seedModel ||
             seedReasoning ||
-            seedAgentPermissionMode === 'read-only'
+            seedAgentPermissionMode !== 'full-access' ||
+            seedApprovalPolicy !== 'ask'
               ? {
                   seed: {
                     chatName: seedChatName,
                     ...(seedProvider ? { provider: seedProvider } : {}),
                     ...(seedModel ? { model: seedModel } : {}),
                     ...(seedReasoning ? { reasoning: seedReasoning } : {}),
-                    ...(seedAgentPermissionMode === 'read-only'
+                    ...(seedAgentPermissionMode !== 'full-access'
                       ? { agentPermissionMode: seedAgentPermissionMode }
+                      : {}),
+                    ...(seedApprovalPolicy !== 'ask'
+                      ? { approvalPolicy: seedApprovalPolicy }
                       : {}),
                     ...(!createAsDraft && seedPromptId ? { promptId: seedPromptId } : {}),
                     ...(!createAsDraft && seedPrompt ? { prompt: seedPrompt } : {}),
@@ -839,6 +877,7 @@ function createDroneProvisioningServiceHandler(
                 seedProvider = assumedNativeProvider;
               }
               let seedAgentPermissionMode: AgentPermissionMode = 'full-access';
+              let seedApprovalPolicy: AgentApprovalPolicy = 'ask';
               try {
                 const seedPermissionRaw =
                   raw?.seedAgentPermissionMode ??
@@ -848,6 +887,17 @@ function createDroneProvisioningServiceHandler(
                   seedPermissionRaw == null || String(seedPermissionRaw).trim() === ''
                     ? 'full-access'
                     : parseAgentPermissionModeForUpdate(seedPermissionRaw);
+              } catch (e: any) {
+                rejected.push({ name, error: e?.message ?? String(e), status: 400 });
+                continue;
+              }
+              try {
+                const seedApprovalRaw =
+                  raw?.seedApprovalPolicy ?? raw?.approvalPolicy ?? raw?.seed?.approvalPolicy;
+                seedApprovalPolicy =
+                  seedApprovalRaw == null || String(seedApprovalRaw).trim() === ''
+                    ? 'ask'
+                    : parseAgentApprovalPolicyForUpdate(seedApprovalRaw);
               } catch (e: any) {
                 rejected.push({ name, error: e?.message ?? String(e), status: 400 });
                 continue;
@@ -884,10 +934,12 @@ function createDroneProvisioningServiceHandler(
                 });
                 continue;
               }
-              if (seedAgentPermissionMode === 'read-only') {
+              if (seedAgentPermissionMode !== 'full-access') {
                 try {
                   if (!seedAgent)
-                    throw new Error('read-only mode requires a Codex or Blip seed agent');
+                    throw new Error(
+                      'agent access controls require a native, Codex, or Blip seed agent',
+                    );
                   assertReadOnlySupportedForAgent(seedAgent);
                 } catch (e: any) {
                   rejected.push({
@@ -897,6 +949,12 @@ function createDroneProvisioningServiceHandler(
                   });
                   continue;
                 }
+              }
+              try {
+                assertSeedApprovalPolicySupported(seedApprovalPolicy, seedAgent);
+              } catch (e: any) {
+                rejected.push({ name, error: e?.message ?? String(e), status: 400 });
+                continue;
               }
               const seedCwdRaw =
                 typeof raw?.seedCwd === 'string'
@@ -1051,15 +1109,19 @@ function createDroneProvisioningServiceHandler(
                 seedProvider ||
                 seedModel ||
                 seedReasoning ||
-                seedAgentPermissionMode === 'read-only'
+                seedAgentPermissionMode !== 'full-access' ||
+                seedApprovalPolicy !== 'ask'
                   ? {
                       seed: {
                         chatName: seedChatName,
                         ...(seedProvider ? { provider: seedProvider } : {}),
                         ...(seedModel ? { model: seedModel } : {}),
                         ...(seedReasoning ? { reasoning: seedReasoning } : {}),
-                        ...(seedAgentPermissionMode === 'read-only'
+                        ...(seedAgentPermissionMode !== 'full-access'
                           ? { agentPermissionMode: seedAgentPermissionMode }
+                          : {}),
+                        ...(seedApprovalPolicy !== 'ask'
+                          ? { approvalPolicy: seedApprovalPolicy }
                           : {}),
                         ...(!createAsDraft && seedPrompt ? { prompt: seedPrompt } : {}),
                         ...(!createAsDraft && seedPrompt ? { submittedAt: seedSubmittedAt } : {}),

@@ -1,5 +1,9 @@
 import React from 'react';
-import type { AgentPermissionMode, ChatAgentConfig } from '../../domain';
+import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
+  ChatAgentConfig,
+} from '../../domain';
 import type { DroneSummary } from '../types';
 import type { ChatSendPayload } from '../chat';
 import type { DraftChatState } from './app-types';
@@ -70,6 +74,7 @@ type UseDroneCreationActionsArgs = {
   spawnModelForSeed: string | null;
   spawnReasoningForSeed: string | null;
   spawnAgentPermissionMode: AgentPermissionMode;
+  spawnApprovalPolicy: AgentApprovalPolicy;
   draftChat: DraftChatState | null;
   draftCreateMode: 'with-chat' | 'without-chat';
   draftCreateName: string;
@@ -97,7 +102,9 @@ type UseDroneCreationActionsArgs = {
       runtime?: 'container' | 'host';
       agent: ChatAgentConfig | null;
       model?: string | null;
+      reasoning?: string | null;
       agentPermissionMode?: AgentPermissionMode;
+      approvalPolicy?: AgentApprovalPolicy;
       prompt: string;
       chatName?: string;
       group?: string | null;
@@ -175,6 +182,7 @@ export function useDroneCreationActions({
   spawnModelForSeed,
   spawnReasoningForSeed,
   spawnAgentPermissionMode,
+  spawnApprovalPolicy,
   draftChat,
   draftCreateMode,
   draftCreateName,
@@ -432,15 +440,26 @@ export function useDroneCreationActions({
       runtime,
       isClone,
     });
+    const seedApprovalPolicy: AgentApprovalPolicy = seedAgent
+      ? seedAgent.kind === 'builtin' &&
+        seedAgent.id === 'codex' &&
+        spawnApprovalPolicy === 'ask'
+        ? 'agent-decides'
+        : spawnApprovalPolicy
+      : 'ask';
     if (runtime === 'host' && seedAgent?.kind === 'custom') {
       setCreateError('Host runtime currently supports builtin agents only.');
       return;
     }
     if (
-      seedAgentPermissionMode === 'read-only' &&
-      !(seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
+      seedAgentPermissionMode !== 'full-access' &&
+      !(
+        seedAgent?.kind === 'native' ||
+        (seedAgent?.kind === 'builtin' &&
+          (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
+      )
     ) {
-      setCreateError('Read-only mode is currently supported for Codex and Blip chats only.');
+      setCreateError('Agent access controls are available for native, Codex, and Blip chats.');
       return;
     }
     if (names.length === 0) {
@@ -491,6 +510,7 @@ export function useDroneCreationActions({
         model: seedModel,
         reasoning: seedReasoning,
         agentPermissionMode: seedAgentPermissionMode,
+        approvalPolicy: seedApprovalPolicy,
         prompt: seedPrompt,
         chatName: 'default',
         group,
@@ -534,7 +554,10 @@ export function useDroneCreationActions({
             ...(seedAgent ? { seedAgent } : {}),
             ...(seedModel ? { seedModel } : {}),
             ...(seedReasoning ? { seedReasoning } : {}),
-            ...(seedAgentPermissionMode === 'read-only' ? { seedAgentPermissionMode } : {}),
+            ...(seedAgentPermissionMode !== 'full-access' ? { seedAgentPermissionMode } : {}),
+            ...(seedApprovalPolicy !== 'ask'
+              ? { seedApprovalPolicy }
+              : {}),
             ...(combinedSeedPrompt ? { seedPrompt: combinedSeedPrompt } : {}),
             ...(combinedSeedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),
           };
@@ -563,6 +586,7 @@ export function useDroneCreationActions({
           spawnModel: String(spawnModelForSeed ?? '').trim(),
           spawnReasoning: String(spawnReasoningForSeed ?? '').trim(),
           spawnAgentPermissionMode,
+          spawnApprovalPolicy: seedApprovalPolicy,
           repoBranchSource: repoBranchSelection.repoBranchSource,
           repoCreateRemoteBranch: repoBranchSelection.remoteBranch ?? '',
           pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
@@ -574,7 +598,9 @@ export function useDroneCreationActions({
           runtime,
           agent: seedAgent,
           model: seedModel,
+          reasoning: seedReasoning,
           agentPermissionMode: seedAgentPermissionMode,
+          approvalPolicy: seedApprovalPolicy,
           prompt: seedPrompt,
           chatName: 'default',
           group,
@@ -687,6 +713,7 @@ export function useDroneCreationActions({
     setSelectedDroneIds,
     spawnAgentKey,
     spawnAgentPermissionMode,
+    spawnApprovalPolicy,
     spawnModelForSeed,
     spawnReasoningForSeed,
     startupSeedMissingGraceMs,
@@ -774,15 +801,26 @@ export function useDroneCreationActions({
 
       const seedAgent = createWithoutChat ? null : resolveAgentKeyToConfig(spawnAgentKey);
       const seedAgentPermissionMode: AgentPermissionMode = seedAgent ? spawnAgentPermissionMode : 'full-access';
+      const seedApprovalPolicy: AgentApprovalPolicy = seedAgent
+        ? seedAgent.kind === 'builtin' &&
+          seedAgent.id === 'codex' &&
+          spawnApprovalPolicy === 'ask'
+          ? 'agent-decides'
+          : spawnApprovalPolicy
+        : 'ask';
       if (!runtimeSupportsCustomAgents(runtime) && seedAgent?.kind === 'custom') {
         setDraftCreateError('Host runtime currently supports builtin agents only.');
         return false;
       }
       if (
-        seedAgentPermissionMode === 'read-only' &&
-        !(seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
+        seedAgentPermissionMode !== 'full-access' &&
+        !(
+          seedAgent?.kind === 'native' ||
+          (seedAgent?.kind === 'builtin' &&
+            (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
+        )
       ) {
-        setDraftCreateError('Read-only mode is currently supported for Codex and Blip chats only.');
+        setDraftCreateError('Agent access controls are available for native, Codex, and Blip chats.');
         return false;
       }
       beginDraftCreate();
@@ -802,6 +840,7 @@ export function useDroneCreationActions({
             model: seedModel,
             reasoning: seedReasoning,
             agentPermissionMode: seedAgentPermissionMode,
+            approvalPolicy: seedApprovalPolicy,
             prompt: shouldSeedPromptViaCreate ? prompt : '',
             chatName: 'default',
             group,
@@ -839,6 +878,7 @@ export function useDroneCreationActions({
             seedReasoning,
             seedAgentPermissionMode,
             agentsMd: agentsMdOverride,
+            seedApprovalPolicy,
             prompt: shouldSeedPromptViaCreate ? prompt : '',
           });
           if (createAsDraft) (body as any).draft = true;
@@ -863,6 +903,7 @@ export function useDroneCreationActions({
             spawnModel: String(spawnModelForSeed ?? '').trim(),
             spawnReasoning: String(spawnReasoningForSeed ?? '').trim(),
             spawnAgentPermissionMode,
+            spawnApprovalPolicy: seedApprovalPolicy,
             repoBranchSource: effectiveRepoBranchSource,
             repoCreateRemoteBranch: remoteBranch,
             pullHostBranchBeforeCreate,
@@ -873,7 +914,9 @@ export function useDroneCreationActions({
               runtime,
               agent: seedAgent,
               model: seedModel,
+              reasoning: seedReasoning,
               agentPermissionMode: seedAgentPermissionMode,
+              approvalPolicy: seedApprovalPolicy,
               prompt: shouldSeedPromptViaCreate ? prompt : '',
               chatName: 'default',
               group,
@@ -885,7 +928,9 @@ export function useDroneCreationActions({
               runtime,
               agent: seedAgent,
               model: seedModel,
+              reasoning: seedReasoning,
               agentPermissionMode: seedAgentPermissionMode,
+              approvalPolicy: seedApprovalPolicy,
               prompt,
               chatName: 'default',
               group,
@@ -1043,6 +1088,7 @@ export function useDroneCreationActions({
       setSelectedDroneIds,
       spawnAgentKey,
       spawnAgentPermissionMode,
+      spawnApprovalPolicy,
       spawnModelForSeed,
       spawnReasoningForSeed,
       startupSeedMissingGraceMs,

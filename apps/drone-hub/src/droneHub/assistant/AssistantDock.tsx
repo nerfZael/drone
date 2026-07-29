@@ -1637,7 +1637,23 @@ export function AssistantDock({
       icon: <IconShieldCheck className="h-4 w-4" />,
       disabled: !activeThread,
       active: autoApprove,
-      onSelect: () => void updateThread({ autoApprove: !autoApprove }),
+      onSelect: () =>
+        void (async () => {
+          const nextAutoApprove = !autoApprove;
+          await requestJson(
+            `/api/drones/${encodeURIComponent(nativeDroneId)}/chats/${encodeURIComponent(
+              nativeChatName,
+            )}/config`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                approvalPolicy: nextAutoApprove ? 'never' : 'ask',
+              }),
+            },
+          );
+          await updateThread({ autoApprove: nextAutoApprove });
+        })(),
     },
   ];
 

@@ -36,7 +36,8 @@ export type SubscribeMessagesInput = StreamOptions & {
 export type CreateDroneInput = {
   agent?: CreateDroneAgentInput;
   model?: string;
-  agentPermissionMode?: 'full-access' | 'read-only';
+  agentPermissionMode?: 'read-only' | 'workspace-write' | 'full-access';
+  approvalPolicy?: 'ask' | 'agent-decides' | 'never';
   cloneFrom?: string;
   cloneChats?: boolean;
   group?: string;

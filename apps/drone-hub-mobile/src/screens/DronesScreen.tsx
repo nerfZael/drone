@@ -35,6 +35,7 @@ import { colors } from '../theme';
 import {
   NewDroneScreen,
   type MobileDroneAgentId,
+  type MobileDroneApprovalPolicy,
   type MobileDroneAgentPermissionMode,
   type MobileDroneCreateDefaults,
   type MobileDroneCreatePayload,
@@ -178,6 +179,16 @@ export type DronesAppHeaderState = {
   onToggleAccess?(): void;
   autoApprove?: boolean;
   onToggleAutoApprove?(): void;
+  agentAccessOptions?: DronesHeaderChoice[];
+  approvalPolicyOptions?: DronesHeaderChoice[];
+};
+
+export type DronesHeaderChoice = {
+  id: string;
+  label: string;
+  selected: boolean;
+  disabled?: boolean;
+  onSelect(): void;
 };
 
 function mobileDroneAgentId(value: unknown): MobileDroneAgentId | null {
@@ -248,6 +259,8 @@ export function DronesScreen({
   const [chatAgentId, setChatAgentId] = React.useState<MobileDroneAgentId | null>(null);
   const [chatAgentPermissionMode, setChatAgentPermissionMode] =
     React.useState<MobileDroneAgentPermissionMode>('full-access');
+  const [chatApprovalPolicy, setChatApprovalPolicy] =
+    React.useState<MobileDroneApprovalPolicy>('ask');
   const [chatModels, setChatModels] = React.useState<AssistantModelChoice[]>([]);
   const [modelOpen, setModelOpen] = React.useState(false);
   const [modelBusy, setModelBusy] = React.useState(false);
@@ -493,6 +506,7 @@ export function DronesScreen({
     setChatModelProvider('drone');
     setChatAgentId(null);
     setChatAgentPermissionMode('full-access');
+    setChatApprovalPolicy('ask');
     setChatModels([]);
     setTurns([]);
     setNativeMessages(null);
@@ -576,6 +590,7 @@ export function DronesScreen({
       setChatReasoning('');
       setChatAgentId(null);
       setChatAgentPermissionMode('full-access');
+      setChatApprovalPolicy('ask');
       setChatModels([]);
       setTurns([]);
       setNativeMessages(null);
@@ -621,7 +636,17 @@ export function DronesScreen({
           : mobileDroneAgentId(result?.agent?.id),
     );
     setChatAgentPermissionMode(
-      result?.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
+      result?.agentPermissionMode === 'read-only' ||
+        result?.agentPermissionMode === 'workspace-write'
+        ? result.agentPermissionMode
+        : 'full-access',
+    );
+    setChatApprovalPolicy(
+      result?.approvalPolicy === 'agent-decides' || result?.approvalPolicy === 'never'
+        ? result.approvalPolicy
+        : result?.thread?.approvalPolicy === 'never' || result?.thread?.autoApprove === true
+          ? 'never'
+          : 'ask',
     );
     setChatModelProvider(
       String(
@@ -1155,8 +1180,12 @@ export function DronesScreen({
             payload.seedAgent?.kind === 'builtin' ? mobileDroneAgentId(payload.seedAgent.id) : null,
           );
           setChatAgentPermissionMode(
-            payload.seedAgentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
+            payload.seedAgentPermissionMode === 'read-only' ||
+              payload.seedAgentPermissionMode === 'workspace-write'
+              ? payload.seedAgentPermissionMode
+              : 'full-access',
           );
+          setChatApprovalPolicy(payload.seedApprovalPolicy ?? 'ask');
           setTurns([]);
           setNativeMessages(null);
           setNativeChatId('');
@@ -1433,6 +1462,7 @@ export function DronesScreen({
     setChatModelProvider('drone');
     setChatAgentId(null);
     setChatAgentPermissionMode('full-access');
+    setChatApprovalPolicy('ask');
     setChatModels([]);
     setTurns([]);
     setNativeMessages(null);
@@ -1457,6 +1487,7 @@ export function DronesScreen({
       repoPath: selected.repoPath,
       ...(chatAgentId ? { agent: chatAgentId } : {}),
       agentPermissionMode: chatAgentPermissionMode,
+      approvalPolicy: chatApprovalPolicy,
       ...(chatModelProvider ? { provider: chatModelProvider } : {}),
       ...(chatModel ? { model: chatModel } : {}),
       ...(chatReasoning ? { reasoning: chatReasoning } : {}),
@@ -1761,16 +1792,83 @@ export function DronesScreen({
                         },
                       }
                     : {}),
-                  autoApprove: nativeThread?.autoApprove === true,
-                  onToggleAutoApprove: () => {
-                    const destinationId = targetId;
-                    void requestDroneControl(destinationId, 'chat.update', {
-                      droneId: selected.id,
-                      chatName,
-                      nativeChatId,
-                      autoApprove: nativeThread?.autoApprove !== true,
-                    }).then(() => readChat(selected.id, chatName));
-                  },
+                }
+              : {}),
+            ...((nativeMessages !== null ||
+              chatAgentId === 'codex' ||
+              chatAgentId === 'blip')
+              ? {
+                  agentAccessOptions: (
+                    [
+                      ['read-only', 'Read'],
+                      ['workspace-write', 'Write'],
+                      ['full-access', 'Execute'],
+                    ] as Array<[MobileDroneAgentPermissionMode, string]>
+                  ).map(([mode, label]) => ({
+                    id: mode,
+                    label,
+                    selected: chatAgentPermissionMode === mode,
+                    disabled: running,
+                    onSelect: () => {
+                      void requestDroneControl(targetId, 'chat.update', {
+                        droneId: selected.id,
+                        chatName,
+                        nativeChatId,
+                        agentPermissionMode: mode,
+                      })
+                        .then(() => readChat(selected.id, chatName))
+                        .catch((nextError: any) =>
+                          setError(nextError?.message ?? String(nextError)),
+                        );
+                    },
+                  })),
+                }
+              : {}),
+            ...(chatAgentPermissionMode === 'full-access' &&
+            (nativeMessages !== null || chatAgentId === 'codex')
+              ? {
+                  approvalPolicyOptions: (
+                    [
+                      {
+                        policy: 'ask',
+                        label:
+                          chatAgentId === 'codex'
+                            ? 'Ask first · unavailable'
+                            : 'Ask first',
+                        disabled: chatAgentId === 'codex',
+                      },
+                      ...(chatAgentId === 'codex'
+                        ? [
+                            {
+                              policy: 'agent-decides' as const,
+                              label: 'Agent decides',
+                            },
+                          ]
+                        : []),
+                      { policy: 'never', label: 'Allow all' },
+                    ] as Array<{
+                      policy: MobileDroneApprovalPolicy;
+                      label: string;
+                      disabled?: boolean;
+                    }>
+                  ).map(({ policy, label, disabled }) => ({
+                    id: policy,
+                    label,
+                    selected: chatApprovalPolicy === policy,
+                    disabled: running || disabled,
+                    onSelect: () => {
+                      void requestDroneControl(targetId, 'chat.update', {
+                        droneId: selected.id,
+                        chatName,
+                        nativeChatId,
+                        approvalPolicy: policy,
+                      })
+                        .then(() => readChat(selected.id, chatName))
+                        .catch((nextError: any) =>
+                          setError(nextError?.message ?? String(nextError)),
+                        );
+                    },
+                  })),
                 }
               : {}),
           }
@@ -1795,6 +1893,7 @@ export function DronesScreen({
     selected?.runtime,
     chatAgentId,
     chatAgentPermissionMode,
+    chatApprovalPolicy,
     chatModel,
     chatReasoning,
     chatName,

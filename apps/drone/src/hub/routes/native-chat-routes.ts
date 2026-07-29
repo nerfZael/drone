@@ -70,6 +70,8 @@ export function registerNativeChatRoutes(
           provider: chat?.nativeProvider,
           model: chat?.model,
           thinkingLevel: chat?.reasoning,
+          agentPermissionMode: chat?.agentPermissionMode,
+          approvalPolicy: chat?.approvalPolicy,
         });
         const includeHistory = url.searchParams.get('includeHistory') === '1';
         const initialHistory = includeHistory
