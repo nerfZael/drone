@@ -48,6 +48,7 @@ export type UiActionMenuProps = {
   disabled?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  portal?: boolean;
   className?: string;
   panelClassName?: string;
 };
@@ -81,6 +82,7 @@ export function UiActionMenu({
   disabled = false,
   open: openProp,
   onOpenChange,
+  portal = true,
   className,
   panelClassName,
 }: UiActionMenuProps) {
@@ -366,7 +368,9 @@ export function UiActionMenu({
           }}
         />
       )}
-      {menu && typeof document !== 'undefined' ? createPortal(menu, document.body) : menu}
+      {menu && portal && typeof document !== 'undefined'
+        ? createPortal(menu, document.body)
+        : menu}
     </div>
   );
 }

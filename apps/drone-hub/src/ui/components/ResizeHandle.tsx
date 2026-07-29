@@ -44,9 +44,14 @@ export function UiResizeHandle({
     liveValue: number;
   } | null>(null);
   const bodyStyleRef = React.useRef<{ cursor: string; userSelect: string } | null>(null);
+  const onResizingChangeRef = React.useRef(onResizingChange);
   const [resizing, setResizing] = React.useState(false);
   const vertical = orientation === 'vertical';
   const direction = reversed ? -1 : 1;
+
+  React.useEffect(() => {
+    onResizingChangeRef.current = onResizingChange;
+  }, [onResizingChange]);
 
   const stopResizing = (pointerId: number) => {
     const drag = dragRef.current;
@@ -63,6 +68,9 @@ export function UiResizeHandle({
 
   React.useEffect(
     () => () => {
+      const wasResizing = Boolean(dragRef.current);
+      dragRef.current = null;
+      if (wasResizing) onResizingChangeRef.current?.(false);
       if (!bodyStyleRef.current) return;
       document.body.style.cursor = bodyStyleRef.current.cursor;
       document.body.style.userSelect = bodyStyleRef.current.userSelect;
@@ -92,6 +100,7 @@ export function UiResizeHandle({
       aria-valuenow={Math.round(value)}
       onPointerDown={(event) => {
         if (event.button !== 0 || !event.isPrimary || dragRef.current) return;
+        event.currentTarget.focus();
         event.preventDefault();
         dragRef.current = {
           pointerId: event.pointerId,

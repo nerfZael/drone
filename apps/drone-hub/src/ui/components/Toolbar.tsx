@@ -204,18 +204,21 @@ export function UiToolbarSegmentedControl<T extends string>({
   className,
 }: UiToolbarSegmentedControlProps<T>) {
   const optionRefs = React.useRef(new Map<T, HTMLButtonElement>());
+  const enabledOptions = options.filter((option) => !(disabled || option.disabled));
+  const selectedOptionEnabled = enabledOptions.some((option) => option.value === value);
+  const tabStopValue = selectedOptionEnabled ? value : enabledOptions[0]?.value;
+
   const moveSelection = (currentValue: T, key: string) => {
-    const enabledOptions = options.filter((option) => !(disabled || option.disabled));
     if (enabledOptions.length === 0) return;
-    const currentIndex = Math.max(
-      0,
-      enabledOptions.findIndex((option) => option.value === currentValue),
-    );
+    const currentIndex = enabledOptions.findIndex((option) => option.value === currentValue);
     let nextIndex = currentIndex;
     if (key === 'ArrowRight' || key === 'ArrowDown') {
-      nextIndex = (currentIndex + 1) % enabledOptions.length;
+      nextIndex = (currentIndex + 1 + enabledOptions.length) % enabledOptions.length;
     } else if (key === 'ArrowLeft' || key === 'ArrowUp') {
-      nextIndex = (currentIndex - 1 + enabledOptions.length) % enabledOptions.length;
+      nextIndex =
+        currentIndex < 0
+          ? enabledOptions.length - 1
+          : (currentIndex - 1 + enabledOptions.length) % enabledOptions.length;
     } else if (key === 'Home') {
       nextIndex = 0;
     } else if (key === 'End') {
@@ -249,7 +252,7 @@ export function UiToolbarSegmentedControl<T extends string>({
             role="radio"
             aria-checked={selected}
             aria-pressed={undefined}
-            tabIndex={selected ? 0 : -1}
+            tabIndex={option.value === tabStopValue ? 0 : -1}
             size={size}
             tone={option.tone ?? 'accent'}
             active={selected}
