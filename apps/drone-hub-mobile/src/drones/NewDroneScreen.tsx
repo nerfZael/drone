@@ -39,7 +39,11 @@ import {
 export type MobileDroneCreateMode = 'with-chat' | 'without-chat';
 export type MobileDroneCreateRuntime = 'container' | 'host';
 export type MobileDroneCreateBranchSource = 'host' | 'remote';
-export type MobileDroneAgentPermissionMode = 'full-access' | 'read-only';
+export type MobileDroneAgentPermissionMode =
+  | 'read-only'
+  | 'workspace-write'
+  | 'full-access';
+export type MobileDroneApprovalPolicy = 'ask' | 'agent-decides' | 'never';
 export type MobileDroneAgentId = 'native' | 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
 
 type ExternalAgentId = Exclude<MobileDroneAgentId, 'native'>;
@@ -69,6 +73,7 @@ export type MobileDroneCreatePayload = {
   seedModel?: string;
   seedReasoning?: string;
   seedAgentPermissionMode?: MobileDroneAgentPermissionMode;
+  seedApprovalPolicy?: MobileDroneApprovalPolicy;
   seedPrompt?: string;
   seedSubmittedAt?: string;
   autoRename?: boolean;
@@ -86,6 +91,7 @@ export type MobileDroneCreateDefaults = {
   pullHostBranchBeforeCreate?: boolean;
   agent?: MobileDroneAgentId;
   agentPermissionMode?: MobileDroneAgentPermissionMode;
+  approvalPolicy?: MobileDroneApprovalPolicy;
   model?: string;
   provider?: string;
   reasoning?: string;
@@ -99,7 +105,7 @@ function Segmented<T extends string>({
   onChange,
 }: {
   value: T;
-  options: Array<{ value: T; label: string }>;
+  options: Array<{ value: T; label: string; disabled?: boolean }>;
   label?: string;
   disabled?: boolean;
   onChange(value: T): void;
@@ -108,20 +114,28 @@ function Segmented<T extends string>({
     <View style={[styles.segmented, !label && disabled && styles.disabled]}>
       {options.map((option) => {
         const active = option.value === value;
+        const optionDisabled = disabled || option.disabled;
         return (
           <Pressable
             key={option.value}
             accessibilityRole="button"
-            accessibilityState={{ selected: active, disabled }}
-            disabled={disabled}
+            accessibilityState={{ selected: active, disabled: optionDisabled }}
+            disabled={optionDisabled}
             onPress={() => onChange(option.value)}
             style={({ pressed }) => [
               styles.segment,
               active && styles.segmentActive,
+              option.disabled && styles.segmentDisabled,
               pressed && styles.pressed,
             ]}
           >
-            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+            <Text
+              style={[
+                styles.segmentText,
+                active && styles.segmentTextActive,
+                option.disabled && styles.segmentTextDisabled,
+              ]}
+            >
               {option.label}
             </Text>
           </Pressable>
@@ -301,6 +315,9 @@ export function NewDroneScreen({
     React.useState<MobileDroneAgentPermissionMode>(
       initialValues?.agentPermissionMode ?? 'full-access',
     );
+  const [approvalPolicy, setApprovalPolicy] = React.useState<MobileDroneApprovalPolicy>(
+    initialValues?.approvalPolicy ?? 'ask',
+  );
   const [model, setModel] = React.useState(initialValues?.model ?? '');
   const [modelProvider, setModelProvider] = React.useState(initialValues?.provider ?? '');
   const [reasoning, setReasoning] = React.useState(initialValues?.reasoning ?? '');
@@ -332,7 +349,10 @@ export function NewDroneScreen({
   const composerFocusedRef = React.useRef(false);
   const selectedRepo = repos.find((repo) => repo.path === repoPath) ?? null;
   const agentMode: MobileDroneAgentMode = agent === 'native' ? 'builtin' : 'external';
-  const readOnlySupported = agent === 'codex' || agent === 'blip';
+  const readOnlySupported = agent === 'native' || agent === 'codex' || agent === 'blip';
+  const approvalAgentSupported = agent === 'native' || agent === 'codex';
+  const approvalSupported =
+    agentPermissionMode === 'full-access' && approvalAgentSupported;
   const selectedModel =
     models.find(
       (option) => option.id === model && (!modelProvider || option.provider === modelProvider),
@@ -471,10 +491,17 @@ export function NewDroneScreen({
   }, [reasoning, selectedModel]);
 
   React.useEffect(() => {
-    if (!readOnlySupported && agentPermissionMode === 'read-only') {
+    if (!readOnlySupported && agentPermissionMode !== 'full-access') {
       setAgentPermissionMode('full-access');
     }
   }, [agentPermissionMode, readOnlySupported]);
+  React.useEffect(() => {
+    if (!approvalSupported) setApprovalPolicy('ask');
+    else if (agent === 'codex' && approvalPolicy === 'ask')
+      setApprovalPolicy('agent-decides');
+    else if (agent !== 'codex' && approvalPolicy === 'agent-decides')
+      setApprovalPolicy('ask');
+  }, [agent, approvalPolicy, approvalSupported]);
 
   React.useEffect(() => {
     if (loadingOptions || repos.some((repo) => repo.path === repoPath)) return;
@@ -494,6 +521,7 @@ export function NewDroneScreen({
     setAgent('native');
     setAgentPickerOpen(false);
     setAgentPermissionMode('full-access');
+    setApprovalPolicy('ask');
     setModels([]);
     setModel('');
     setModelProvider('');
@@ -512,7 +540,8 @@ export function NewDroneScreen({
       if (!localDevice && remembered.agent !== 'native') {
         setLastExternalAgent(remembered.agent);
       }
-      setAgentPermissionMode(localDevice ? 'full-access' : remembered.agentPermissionMode);
+      setAgentPermissionMode(remembered.agentPermissionMode);
+      setApprovalPolicy(remembered.approvalPolicy);
       setModel(remembered.model);
       setModelProvider(remembered.provider);
       setReasoning(remembered.reasoning);
@@ -567,6 +596,12 @@ export function NewDroneScreen({
     }
     setFormError(null);
     const effectiveBranchSource = runtime === 'host' ? 'host' : branchSource;
+    const effectiveApprovalPolicy: MobileDroneApprovalPolicy =
+      agent === 'codex' &&
+      agentPermissionMode === 'full-access' &&
+      approvalPolicy === 'ask'
+        ? 'agent-decides'
+        : approvalPolicy;
     const payload: MobileDroneCreatePayload = {
       runtime,
       ...(name.trim() ? { name: name.trim() } : {}),
@@ -587,8 +622,11 @@ export function NewDroneScreen({
               : {}),
             ...(model.trim() ? { seedModel: model.trim() } : {}),
             ...(reasoning.trim() ? { seedReasoning: reasoning.trim() } : {}),
-            ...(agentPermissionMode === 'read-only'
-              ? { seedAgentPermissionMode: 'read-only' as const }
+            ...(agentPermissionMode !== 'full-access'
+              ? { seedAgentPermissionMode: agentPermissionMode }
+              : {}),
+            ...(effectiveApprovalPolicy !== 'ask'
+              ? { seedApprovalPolicy: effectiveApprovalPolicy }
               : {}),
             seedPrompt: prompt,
             seedSubmittedAt: new Date().toISOString(),
@@ -605,6 +643,7 @@ export function NewDroneScreen({
         persistVolume: runtime === 'container' && persistVolume,
         agent,
         agentPermissionMode,
+        approvalPolicy: effectiveApprovalPolicy,
         model,
         provider: modelProvider,
         reasoning,
@@ -947,13 +986,37 @@ export function NewDroneScreen({
                       disabled={busy}
                       options={
                         [
-                          { value: 'full-access', label: 'Full' },
-                          { value: 'read-only', label: 'Read only' },
+                          { value: 'read-only', label: 'Read' },
+                          { value: 'workspace-write', label: 'Write' },
+                          { value: 'full-access', label: 'Execute' },
                         ].filter(
-                          (option) => option.value !== 'read-only' || readOnlySupported,
+                          (option) => option.value === 'full-access' || readOnlySupported,
                         ) as Array<{
                           value: MobileDroneAgentPermissionMode;
                           label: string;
+                        }>
+                      }
+                    />
+                    <Segmented<MobileDroneApprovalPolicy>
+                      label="Approvals"
+                      value={approvalPolicy}
+                      onChange={setApprovalPolicy}
+                      disabled={busy || !approvalSupported}
+                      options={
+                        [
+                          {
+                            value: 'ask',
+                            label: 'Ask first',
+                            disabled: agent === 'codex',
+                          },
+                          ...(agent === 'codex'
+                            ? [{ value: 'agent-decides' as const, label: 'Agent decides' }]
+                            : []),
+                          { value: 'never', label: 'Allow all' },
+                        ] as Array<{
+                          value: MobileDroneApprovalPolicy;
+                          label: string;
+                          disabled?: boolean;
                         }>
                       }
                     />
@@ -968,7 +1031,21 @@ export function NewDroneScreen({
                   />
                   {!readOnlySupported ? (
                     <Text style={styles.helper}>
-                      Read-only access is available for Codex and Blip.
+                      Access controls are available for native, Codex, and Blip.
+                    </Text>
+                  ) : null}
+                  {approvalAgentSupported && agentPermissionMode !== 'full-access' ? (
+                    <Text style={styles.helper}>
+                      Approvals apply when Access is Execute.
+                    </Text>
+                  ) : !approvalSupported ? (
+                    <Text style={styles.helper}>
+                      Approval policies are available for native and Codex.
+                    </Text>
+                  ) : agent === 'codex' ? (
+                    <Text style={styles.helper}>
+                      Ask first requires interactive Codex approvals. Agent decides uses Codex
+                      Auto-review.
                     </Text>
                   ) : null}
                   {modelsError ? (
@@ -1060,8 +1137,10 @@ const styles = StyleSheet.create({
   segmentActive: {
     backgroundColor: colors.accent,
   },
+  segmentDisabled: { opacity: 0.38 },
   segmentText: { color: colors.text, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
   segmentTextActive: { color: colors.onAccent },
+  segmentTextDisabled: { color: colors.muted },
   labeledSegmented: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   segmentedLabel: {
     color: colors.accent,

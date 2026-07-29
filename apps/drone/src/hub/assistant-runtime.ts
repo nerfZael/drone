@@ -5,7 +5,10 @@ import { normalizeDroneRuntime } from '../host/runtime';
 import { HubAssistantService, type AssistantDroneSummary } from './assistant';
 import { BlipAssistantHost } from './assistant/blip-assistant-host';
 import { loadBlipMcp, loadBlipTools } from './assistant/blip-runtime-loader';
-import { ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES } from './assistant/assistant-config';
+import {
+  ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES,
+  ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES,
+} from './assistant/assistant-config';
 import { createInProcessDroneHubMcpClient } from './assistant/in-process-drone-hub-mcp';
 import type { McpTokenIdentity } from './mcp-tokens';
 import { AssistantArtifactsTarget } from './assistant/targets/assistant-artifacts-target';
@@ -459,17 +462,31 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           includeShell: true,
           catalog: targetCatalog,
         })
-        .filter((tool) => {
+        .filter((tool: any) => {
           if (!enabledTools.has(tool.name)) return false;
           const capability = blipTools.capabilityForWorkspaceTool(tool.name);
+          if (
+            thread.agentPermissionMode === 'read-only' &&
+            capability &&
+            !readableWorkspaceCapabilities.includes(capability as any)
+          )
+            return false;
+          if (
+            thread.agentPermissionMode !== 'full-access' &&
+            capability === 'shell.execute'
+          )
+            return false;
           return !capability || supportedWorkspaceCapabilities.has(capability);
         });
       const targetTools = blipTools
         .createWorkspaceTargetSelectionTools(targetCatalog)
-        .filter((tool) => enabledTools.has(tool.name));
+        .filter((tool: any) => enabledTools.has(tool.name));
       const transferTools = blipTools
         .createWorkspaceTransferTools(targetCatalog)
-        .filter((tool) => enabledTools.has(tool.name));
+        .filter(
+          (tool: any) =>
+            thread.agentPermissionMode !== 'read-only' && enabledTools.has(tool.name),
+        );
       const tools = [
         {
           name: 'get_system_prompt',
@@ -587,7 +604,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         ...targetTools,
         ...transferTools,
         ...workspaceTools,
-      ].filter((tool) => enabledTools.has(tool.name));
+      ].filter((tool: any) => enabledTools.has(tool.name));
       const mcpProvider = createMcpToolProvider({
         id: 'drone-hub',
         namePrefix: 'drone_hub',
@@ -604,7 +621,13 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         async load(context: any) {
           return (await mcpProvider.load(context)).filter((tool) => {
             const unqualified = tool.name.replace(/^drone_hub__/, '');
-            return enabledTools.has(unqualified);
+            return (
+              enabledTools.has(unqualified) &&
+              !(
+                thread.agentPermissionMode === 'read-only' &&
+                ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES.has(unqualified)
+              )
+            );
           });
         },
       };
@@ -673,15 +696,11 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           }
         },
         permissionPreflight: async (request) => {
-          let toolName = request.tool;
+          let toolName = request.tool.replace(/^drone_hub__/, '');
           let args: any = request.args && typeof request.args === 'object' ? request.args : {};
-          if (toolName === 'drone_hub__send_message') {
+          if (toolName === 'send_message') {
             toolName = 'message_drone';
             args = { ...args, droneId: args.drone, chatName: args.chat };
-          } else if (toolName === 'drone_hub__set_drone_group') {
-            toolName = 'set_drone_group';
-          } else if (toolName === 'drone_hub__rename_drones') {
-            toolName = 'rename_drones';
           } else if (blipTools.capabilityForWorkspaceTool(toolName)) {
             const target = targetCatalog.resolve(args.target);
             if (targetCatalog.size() > 1) args.target = target.descriptor.id;

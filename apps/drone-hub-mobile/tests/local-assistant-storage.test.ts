@@ -63,7 +63,33 @@ describe('local assistant storage', () => {
     expect(threads?.[0]).toMatchObject({
       id: 'legacy-thread',
       title: 'Existing conversation',
+      agentPermissionMode: 'full-access',
+      approvalPolicy: 'ask',
+      autoApprove: false,
       messages: [{ id: 'message-1', content: 'Do not lose this' }],
+    });
+  });
+
+  test('prefers an explicit approval policy over a stale legacy auto-approve flag', () => {
+    const threads = parseLocalAssistantThreads(
+      JSON.stringify([
+        {
+          id: 'policy-thread',
+          title: 'Policy',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          model: 'gpt-5',
+          thinkingLevel: 'medium',
+          approvalPolicy: 'ask',
+          autoApprove: true,
+          messages: [],
+        },
+      ]),
+    );
+
+    expect(threads?.[0]).toMatchObject({
+      approvalPolicy: 'ask',
+      autoApprove: false,
     });
   });
 

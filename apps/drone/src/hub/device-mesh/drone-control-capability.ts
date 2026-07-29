@@ -522,8 +522,13 @@ export function createDroneControlCapability(
           ...(optionalText(payload.seedReasoning)
             ? { seedReasoning: optionalText(payload.seedReasoning) }
             : {}),
-          ...(payload.seedAgentPermissionMode === 'read-only'
-            ? { seedAgentPermissionMode: 'read-only' }
+          ...(payload.seedAgentPermissionMode === 'read-only' ||
+          payload.seedAgentPermissionMode === 'workspace-write'
+            ? { seedAgentPermissionMode: payload.seedAgentPermissionMode }
+            : {}),
+          ...(payload.seedApprovalPolicy === 'agent-decides' ||
+          payload.seedApprovalPolicy === 'never'
+            ? { seedApprovalPolicy: payload.seedApprovalPolicy }
             : {}),
           ...(optionalText(payload.seedPrompt)
             ? {
@@ -868,7 +873,12 @@ export function createDroneControlCapability(
             model: nativeResponse.thread?.model ?? result.model ?? null,
             reasoning: nativeResponse.thread?.thinkingLevel ?? null,
             readState: marked?.readState ?? result?.readState ?? null,
-            agentPermissionMode: 'full-access',
+            agentPermissionMode:
+              nativeResponse.thread?.agentPermissionMode ??
+              result.agentPermissionMode ??
+              'full-access',
+            approvalPolicy:
+              nativeResponse.thread?.approvalPolicy ?? result.approvalPolicy ?? 'ask',
           };
         }
         const turnId = optionalText(payload.turnId);
@@ -907,7 +917,14 @@ export function createDroneControlCapability(
           pending: compactPendingPrompts(pendingResult?.pending),
           readState: marked?.readState ?? result?.readState ?? null,
           agentPermissionMode:
-            result.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
+            result.agentPermissionMode === 'read-only' ||
+            result.agentPermissionMode === 'workspace-write'
+              ? result.agentPermissionMode
+              : 'full-access',
+          approvalPolicy:
+            result.approvalPolicy === 'agent-decides' || result.approvalPolicy === 'never'
+              ? result.approvalPolicy
+              : 'ask',
         };
       }
       if (operation === 'chat.models') {
@@ -959,6 +976,22 @@ export function createDroneControlCapability(
         const requestedNativeChatId = optionalText(payload.nativeChatId);
         if (requestedNativeChatId) {
           const { nativeChatId } = await resolveNativeChat(requestedNativeChatId);
+          if (
+            payload.agentPermissionMode !== undefined ||
+            payload.approvalPolicy !== undefined
+          ) {
+            await localHubRequest(access, `${chatPath}/config`, {
+              method: 'POST',
+              body: JSON.stringify({
+                ...(payload.agentPermissionMode !== undefined
+                  ? { agentPermissionMode: payload.agentPermissionMode }
+                  : {}),
+                ...(payload.approvalPolicy !== undefined
+                  ? { approvalPolicy: payload.approvalPolicy }
+                  : {}),
+              }),
+            });
+          }
           return await localHubRequest(
             access,
             `/api/assistant/threads/${encodeURIComponent(nativeChatId)}`,
@@ -975,13 +1008,27 @@ export function createDroneControlCapability(
                 ...(typeof payload.autoApprove === 'boolean'
                   ? { autoApprove: payload.autoApprove }
                   : {}),
+                ...(payload.agentPermissionMode !== undefined
+                  ? { agentPermissionMode: payload.agentPermissionMode }
+                  : {}),
+                ...(payload.approvalPolicy !== undefined
+                  ? { approvalPolicy: payload.approvalPolicy }
+                  : {}),
               }),
             },
           );
         }
         return await localHubRequest(access, `${chatPath}/config`, {
           method: 'POST',
-          body: JSON.stringify({ model: model || null }),
+          body: JSON.stringify({
+            ...(payload.model !== undefined ? { model: model || null } : {}),
+            ...(payload.agentPermissionMode !== undefined
+              ? { agentPermissionMode: payload.agentPermissionMode }
+              : {}),
+            ...(payload.approvalPolicy !== undefined
+              ? { approvalPolicy: payload.approvalPolicy }
+              : {}),
+          }),
         });
       }
       if (operation === 'chat.approval.resolve') {

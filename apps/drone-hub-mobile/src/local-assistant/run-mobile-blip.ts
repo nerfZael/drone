@@ -165,15 +165,39 @@ export async function runMobileBlip(input: {
       finishedError = event.status === 'error' ? String(event.error ?? 'Assistant run failed') : '';
     }
   };
+  const readOnlyDeniedTools = new Set([
+    'write_file',
+    'delete_file',
+    'create_directory',
+    'delete_directory',
+    'move_path',
+    'apply_patch',
+    'transfer_files',
+  ]);
+  const agentPermissionMode = input.thread.agentPermissionMode ?? 'full-access';
   const handle = await createBlipSession({
     workspaceRoot: 'mobile-mesh',
     model,
-    permissionMode: 'workspace-write',
-    toolProfile: 'no-shell-workspace-write',
+    permissionMode:
+      agentPermissionMode === 'read-only'
+        ? 'read-only'
+        : agentPermissionMode === 'full-access'
+          ? 'full-access'
+          : 'workspace-write',
+    toolProfile:
+      agentPermissionMode === 'read-only'
+        ? 'read-only'
+        : agentPermissionMode === 'full-access'
+          ? 'local-trusted-write'
+          : 'no-shell-workspace-write',
     sessionRepository: repository,
     sessionId: repository.state.id,
     reasoning: input.thread.thinkingLevel,
-    tools: workspaceAgentTools(input.workspaceRuntime),
+    tools: workspaceAgentTools(input.workspaceRuntime).filter((tool) => {
+      if (agentPermissionMode !== 'full-access' && tool.name === 'bash') return false;
+      if (agentPermissionMode !== 'read-only') return true;
+      return !readOnlyDeniedTools.has(tool.name);
+    }),
     permissionPreflight: async (request) => {
       if (request.tool !== 'bash') return { status: 'allow' };
       const toolArgs = (request.args ?? {}) as Record<string, unknown>;

@@ -1,4 +1,8 @@
-import type { AgentPermissionMode, ChatAgentConfig } from '../../domain';
+import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
+  ChatAgentConfig,
+} from '../../domain';
 import type { ChatImageAttachmentPayload } from '../chat';
 import type { PendingPrompt } from '../types';
 import type { RepoPullConflict } from './helpers';
@@ -22,6 +26,7 @@ export type StartupSeedState = {
   model: string | null;
   reasoning: string | null;
   agentPermissionMode: AgentPermissionMode;
+  approvalPolicy: AgentApprovalPolicy;
   prompt: string;
   group: string | null;
   repoPath: string | null;

@@ -260,6 +260,41 @@ describe('assistant drone workspace target execution', () => {
     });
   });
 
+  test('enforces native read, write, and execute access before tool calls', async () => {
+    await withTempDroneDataDir('assistant-agent-access-', async () => {
+      const service = new HubAssistantService({ listDrones: async () => [] });
+      const created = await ensureTestNativeChat(service, { chatName: 'agent access' });
+      const threadId = created.chatId;
+
+      await service.updateThread(threadId, { agentPermissionMode: 'read-only' });
+      await expect(
+        service.preflightBlipTool(
+          threadId,
+          'drone_hub__create_drone',
+          'call-create',
+          {},
+        ),
+      ).resolves.toMatchObject({ status: 'deny' });
+      await expect(
+        service.preflightBlipTool(threadId, 'transfer_files', 'call-transfer', {}),
+      ).resolves.toMatchObject({ status: 'deny' });
+      await expect(
+        service.preflightBlipTool(threadId, 'bash', 'call-read-bash', {
+          command: 'pwd',
+          workspaceTarget: { id: 'remote:test', label: 'Test' },
+        }),
+      ).resolves.toMatchObject({ status: 'deny' });
+
+      await service.updateThread(threadId, { agentPermissionMode: 'workspace-write' });
+      await expect(
+        service.preflightBlipTool(threadId, 'bash', 'call-write-bash', {
+          command: 'pwd',
+          workspaceTarget: { id: 'remote:test', label: 'Test' },
+        }),
+      ).resolves.toMatchObject({ status: 'deny' });
+    });
+  });
+
   test('returns a durable suspension even when the original request signal is aborted', async () => {
     await withTempDroneDataDir('assistant-aborted-bash-approval-', async () => {
       const service = new HubAssistantService({ listDrones: async () => [] });

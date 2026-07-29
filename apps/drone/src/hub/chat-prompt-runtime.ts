@@ -85,6 +85,7 @@ type ChatPromptRuntimeDependencyName =
   | 'maybeBootstrapPromptFromTranscript'
   | 'maybeStartDockerSnapshotForTranscriptTurn'
   | 'normalizeAgentPermissionMode'
+  | 'normalizeAgentApprovalPolicy'
   | 'normalizeBuiltinAgentId'
   | 'normalizeChatModel'
   | 'normalizeChatName'
@@ -215,6 +216,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     maybeBootstrapPromptFromTranscript,
     maybeStartDockerSnapshotForTranscriptTurn,
     normalizeAgentPermissionMode,
+    normalizeAgentApprovalPolicy,
     normalizeBuiltinAgentId,
     normalizeChatModel,
     normalizeChatName,
@@ -458,7 +460,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       const chatModel = normalizeChatModel((chat as any)?.model);
       const chatReasoning = normalizeChatReasoning((chat as any)?.reasoning);
       const agentPermissionMode = normalizeAgentPermissionMode((chat as any)?.agentPermissionMode);
-      if (agentPermissionMode === 'read-only') assertReadOnlySupportedForAgent(agent);
+      const approvalPolicy = normalizeAgentApprovalPolicy((chat as any)?.approvalPolicy);
+      if (agentPermissionMode !== 'full-access') assertReadOnlySupportedForAgent(agent);
       const managedEnv = resolveDroneEnvironmentConfig(regLatest, d).resolvedVars;
       const managedEnvLines = buildEnvExportLines(managedEnv);
       const managedChatMcpEnv = await resolveManagedChatMcpEnv({
@@ -502,6 +505,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           prompt: String(opts.prompt ?? '').trim(),
           attachments,
           deliveryMode: opts.deliveryMode,
+          agentPermissionMode,
+          approvalPolicy,
         });
         return {
           ok: true as const,
@@ -579,7 +584,22 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         const reasoningArg = chatReasoning
           ? ` -c ${bashQuote(`model_reasoning_effort="${chatReasoning}"`)}`
           : '';
-        const sandboxArg = agentPermissionMode === 'read-only' ? 'read-only' : 'danger-full-access';
+        const sandboxArg =
+          agentPermissionMode === 'read-only'
+            ? 'read-only'
+            : agentPermissionMode === 'workspace-write'
+              ? 'workspace-write'
+              : 'danger-full-access';
+        const approvalArg =
+          approvalPolicy === 'agent-decides'
+            ? 'on-request'
+            : approvalPolicy === 'never'
+              ? 'never'
+              : 'untrusted';
+        const approvalReviewerArg =
+          approvalPolicy === 'agent-decides'
+            ? ` -c ${bashQuote('approvals_reviewer="auto_review"')}`
+            : '';
         const existingThreadId = readBuiltinTranscriptSessionId(chat, 'codex');
         if (!existingThreadId) {
           const script = [
@@ -589,7 +609,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             ...managedChatMcpEnvLines,
             `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
             cdCommand,
-            `codex --ask-for-approval never${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never${codexImageArgs} ${bashQuote(promptWithHistory)}`,
+            `codex --ask-for-approval ${approvalArg}${approvalReviewerArg}${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never${codexImageArgs} ${bashQuote(promptWithHistory)}`,
           ].join('\n');
           await enqueueTranscriptPrompt({
             id: opts.id,
@@ -617,7 +637,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
-          `codex --ask-for-approval never${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never resume${codexImageArgs} ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
+          `codex --ask-for-approval ${approvalArg}${approvalReviewerArg}${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never resume${codexImageArgs} ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({
           id: opts.id,
@@ -747,7 +767,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           workflowBlipPermissionArgs(chat) ??
           (agentPermissionMode === 'read-only'
             ? '--permission read-only --profile read-only'
-            : '--permission full-access --profile local-trusted-write');
+            : agentPermissionMode === 'workspace-write'
+              ? '--permission workspace-write --profile no-shell-workspace-write'
+              : '--permission full-access --profile local-trusted-write');
         const blipSessionId = readBuiltinTranscriptSessionId(chat, 'blip');
         const sessionArg = blipSessionId ? ` --session ${bashQuote(blipSessionId)}` : '';
         const blipCommand = resolveBlipPromptCommand(runtime);

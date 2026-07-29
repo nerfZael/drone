@@ -49,6 +49,8 @@ export type LocalAssistantContextValue = {
       thinkingLevel?: LocalAssistantThinkingLevel;
       workspaceTargets?: LocalWorkspaceTarget[];
       autoApprove?: boolean;
+      agentPermissionMode?: 'read-only' | 'workspace-write' | 'full-access';
+      approvalPolicy?: 'ask' | 'never';
       artifactWorkspace?: boolean;
     },
   ): Promise<void>;
@@ -196,6 +198,8 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         error: null,
         workspaceTargets: [],
         autoApprove: false,
+        agentPermissionMode: 'full-access',
+        approvalPolicy: 'ask',
         messages: [],
         queuedPrompts: [],
       };
@@ -278,6 +282,8 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         thinkingLevel?: LocalAssistantThinkingLevel;
         workspaceTargets?: LocalWorkspaceTarget[];
         autoApprove?: boolean;
+        agentPermissionMode?: 'read-only' | 'workspace-write' | 'full-access';
+        approvalPolicy?: 'ask' | 'never';
         artifactWorkspace?: boolean;
       },
     ) => {
@@ -291,13 +297,27 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         ...(patch.workspaceTargets !== undefined
           ? { workspaceTargets: cleanLocalWorkspaceTargets(patch.workspaceTargets) }
           : {}),
-        ...(patch.autoApprove !== undefined ? { autoApprove: patch.autoApprove === true } : {}),
+        ...(patch.autoApprove !== undefined
+          ? {
+              autoApprove: patch.autoApprove === true,
+              approvalPolicy: patch.autoApprove === true ? 'never' : 'ask',
+            }
+          : {}),
+        ...(patch.agentPermissionMode !== undefined
+          ? { agentPermissionMode: patch.agentPermissionMode }
+          : {}),
+        ...(patch.approvalPolicy !== undefined
+          ? {
+              approvalPolicy: patch.approvalPolicy,
+              autoApprove: patch.approvalPolicy === 'never',
+            }
+          : {}),
         ...(patch.artifactWorkspace !== undefined
           ? { artifactWorkspace: patch.artifactWorkspace === true }
           : {}),
         updatedAt: new Date().toISOString(),
       });
-      if (patch.autoApprove === true) {
+      if (patch.autoApprove === true || patch.approvalPolicy === 'never') {
         // Resolve from the authoritative map rather than the rendered approval list. Header
         // actions can retain an older callback while an approval is being added, and using the
         // state snapshot here would leave that already-pending tool call blocked indefinitely.

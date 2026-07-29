@@ -232,6 +232,14 @@ function cleanThread(value: any): LocalAssistantThread | null {
       }),
     )
     .filter((prompt: LocalAssistantQueuedPrompt) => Boolean(prompt.id && prompt.prompt));
+  const approvalPolicy =
+    value.approvalPolicy === 'never'
+      ? 'never'
+      : value.approvalPolicy === 'ask'
+        ? 'ask'
+        : value.autoApprove === true
+          ? 'never'
+          : 'ask';
   return {
     id: String(value.id).slice(0, 100),
     title: String(value.title ?? 'Phone assistant').slice(0, 160),
@@ -241,7 +249,13 @@ function cleanThread(value: any): LocalAssistantThread | null {
     thinkingLevel: normalizeLocalAssistantThinkingLevel(value.thinkingLevel),
     status: value.status === 'error' ? 'error' : 'idle',
     error: value.status === 'error' && value.error ? String(value.error).slice(0, 2_000) : null,
-    autoApprove: value.autoApprove === true,
+    autoApprove: approvalPolicy === 'never',
+    agentPermissionMode:
+      value.agentPermissionMode === 'read-only' ||
+      value.agentPermissionMode === 'workspace-write'
+        ? value.agentPermissionMode
+        : 'full-access',
+    approvalPolicy,
     artifactWorkspace: value.artifactWorkspace === true,
     workspaceTargets,
     messages,
