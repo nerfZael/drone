@@ -1,11 +1,21 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const productionSurfaces = [
   {
     name: 'Sidebar',
     path: '../src/droneHub/app/DroneSidebar.tsx',
-    components: ['UiActionMenu', 'UiPanelToolbar', 'UiToolbarIconButton'],
+    components: ['UiActionMenu', 'UiNavigationRow', 'UiPanelToolbar', 'UiToolbarIconButton'],
+  },
+  {
+    name: 'Right panel',
+    path: '../src/droneHub/app/RightPanel.tsx',
+    components: ['UiPaneState', 'UiResizeHandle', 'UiToolbarSegmentedControl'],
+  },
+  {
+    name: 'Dockable workspace chrome',
+    path: '../src/droneHub/app/DockableDroneWorkspace.tsx',
+    components: ['UiPaneState', 'UiPanel', 'UiPanelToolbar', 'UiToolbarSegmentedControl'],
   },
   {
     name: 'Changes',
@@ -26,12 +36,42 @@ const productionSurfaces = [
   {
     name: 'Canvas',
     path: '../src/droneHub/canvas/DroneCanvasDock.tsx',
-    components: ['UiPaneState', 'UiPanel', 'UiPanelToolbar', 'UiToolbarButton'],
+    components: ['UiMenuSelect', 'UiPaneState', 'UiPanel', 'UiPanelToolbar', 'UiToolbarButton'],
   },
   {
     name: 'Workflows',
     path: '../src/droneHub/workflows/DroneWorkflowsDock.tsx',
-    components: ['UiNavigationRow', 'UiPanelHeader', 'UiPanelStatusStrip', 'UiStatusDot'],
+    components: ['UiNavigationRow', 'UiPanelHeader', 'UiPanelStatusStrip', 'UiStatusDot', 'UiTextarea'],
+  },
+  {
+    name: 'Environment',
+    path: '../src/droneHub/env/DroneEnvDock.tsx',
+    components: ['UiCheckbox', 'UiPaneState', 'UiPanel', 'UiPanelHeader', 'UiPanelStatusStrip'],
+  },
+  {
+    name: 'Files',
+    path: '../src/droneHub/files/DroneFilesDock.tsx',
+    components: ['UiPaneState', 'UiPanel', 'UiPanelStatusStrip'],
+  },
+  {
+    name: 'Links',
+    path: '../src/droneHub/overview/DroneLinksDock.tsx',
+    components: ['UiPaneState', 'UiPanel', 'UiPanelHeader', 'UiStatusDot'],
+  },
+  {
+    name: 'Pull requests',
+    path: '../src/droneHub/pullRequests/DronePullRequestsDock.tsx',
+    components: ['UiMenuSelect', 'UiPaneState', 'UiPanel', 'UiPanelHeader', 'UiPanelToolbar'],
+  },
+  {
+    name: 'Terminal',
+    path: '../src/droneHub/terminal/DroneTerminalDock.tsx',
+    components: ['UiPaneState', 'UiPanel', 'UiPanelBody', 'UiPanelStatusStrip'],
+  },
+  {
+    name: 'Whiteboard',
+    path: '../src/droneHub/whiteboard/WhiteboardDock.tsx',
+    components: ['UiMenuSelect', 'UiPaneState', 'UiPanel', 'UiPanelHeader', 'UiPanelToolbar'],
   },
 ] as const;
 
@@ -46,4 +86,12 @@ describe('application pattern adoption', () => {
       }
     });
   }
+
+  test('keeps the menu select inside the shared component library', () => {
+    const sharedMenuSelect = new URL('../src/ui/components/MenuSelect.tsx', import.meta.url);
+    const legacyMenuSelect = new URL('../src/ui/menuSelect.tsx', import.meta.url);
+
+    expect(existsSync(sharedMenuSelect)).toBe(true);
+    expect(existsSync(legacyMenuSelect)).toBe(false);
+  });
 });

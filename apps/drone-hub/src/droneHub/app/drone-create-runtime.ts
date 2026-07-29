@@ -3,7 +3,7 @@ import type {
   AgentPermissionMode,
   ChatAgentConfig,
 } from '../../domain';
-import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import type { UiMenuSelectEntry } from '../../ui/components';
 
 export type CreateRuntime = 'container' | 'host';
 export type RepoBranchSourceMode = 'host' | 'remote';

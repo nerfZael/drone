@@ -1,4 +1,9 @@
 import React from 'react';
+import {
+  UiPaneState,
+  UiPanel,
+  UiPanelStatusStrip,
+} from '../../ui/components';
 import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 import { invalidateFsListCachesForDrone } from '../app/use-files-and-ports-pane-state';
 import { requestJson, requestJsonWithTimeout } from '../http';
@@ -952,9 +957,11 @@ export function DroneFilesDock({
     ? 'Still waiting for the filesystem to come online. If this keeps happening, the drone may be stuck provisioning.'
     : 'Waiting for filesystem…';
   return (
-    <div
+    <UiPanel
       ref={explorerRef}
-      className={`w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative ${
+      flush
+      surface="alternate"
+      className={`relative h-full w-full ${
         dragActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''
       }`}
       onDragEnter={readOnly ? undefined : onPanelDragEnter}
@@ -964,29 +971,19 @@ export function DroneFilesDock({
       onKeyDown={handleExplorerKeyDown}
     >
       {uploadStatus ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-[var(--radius-medium)] bg-[var(--info-subtle)] border border-[var(--info-border)] text-[var(--text-12)] text-[var(--fg-secondary)]">
-          {uploadStatus}
-        </div>
+        <UiPanelStatusStrip tone="info">{uploadStatus}</UiPanelStatusStrip>
       ) : null}
       {actionStatus ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-[var(--radius-medium)] bg-[var(--info-subtle)] border border-[var(--info-border)] text-[var(--text-12)] text-[var(--fg-secondary)]">
-          {actionStatus}
-        </div>
+        <UiPanelStatusStrip tone="info">{actionStatus}</UiPanelStatusStrip>
       ) : null}
       {actionError ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-[var(--radius-medium)] bg-[var(--red-subtle)] border border-[var(--red-border)] text-[var(--text-12)] text-[var(--red)]">
-          {actionError}
-        </div>
+        <UiPanelStatusStrip tone="danger">{actionError}</UiPanelStatusStrip>
       ) : null}
       {uploadError ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-[var(--radius-medium)] bg-[var(--red-subtle)] border border-[var(--red-border)] text-[var(--text-12)] text-[var(--red)]">
-          {uploadError}
-        </div>
+        <UiPanelStatusStrip tone="danger">{uploadError}</UiPanelStatusStrip>
       ) : null}
       {error ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-[var(--radius-medium)] bg-[var(--red-subtle)] border border-[var(--red-border)] text-[var(--text-12)] text-[var(--red)]">
-          {error}
-        </div>
+        <UiPanelStatusStrip tone="danger">{error}</UiPanelStatusStrip>
       ) : null}
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
@@ -1009,21 +1006,23 @@ export function DroneFilesDock({
             }}
           >
             {showStartupPlaceholder ? (
-              <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-12)] text-[var(--muted)]">
-                <div className="text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                  {startupLabel}
-                </div>
-                <div className="mt-1">{startupText}</div>
-                {startupDetail ? <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">{startupDetail}</div> : null}
-              </div>
+              <UiPaneState
+                kind={startup?.timedOut ? 'warning' : 'loading'}
+                title={startupLabel}
+                description={[startupText, startupDetail].filter(Boolean).join(' ')}
+                compact
+                role="treeitem"
+              />
             ) : !error && loading && entries.length === 0 ? (
-              <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-12)] text-[var(--muted)]">
-                Loading files...
-              </div>
+              <UiPaneState kind="loading" title="Loading files…" compact role="treeitem" />
             ) : !error && !loading && entries.length === 0 ? (
-              <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-12)] text-[var(--muted)]">
-                {readOnly ? 'Directory is empty.' : 'Directory is empty. Right-click to create a file or folder.'}
-              </div>
+              <UiPaneState
+                kind="empty"
+                title="Directory is empty"
+                description={readOnly ? undefined : 'Right-click to create a file or folder.'}
+                compact
+                role="treeitem"
+              />
             ) : (
               renderExplorer(explorerTree, 0)
             )}
@@ -1087,6 +1086,6 @@ export function DroneFilesDock({
           </div>
         </div>
       ) : null}
-    </div>
+    </UiPanel>
   );
 }

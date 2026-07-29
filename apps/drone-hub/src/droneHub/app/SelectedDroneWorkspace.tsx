@@ -52,7 +52,7 @@ import { isDroneProvisioningPhase } from '../hub-phase';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
-import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import type { UiMenuSelectEntry } from '../../ui/components';
 import { fetchDroneChatTranscript } from './chat-api';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { CliPendingPromptStrip } from './CliPendingPromptStrip';

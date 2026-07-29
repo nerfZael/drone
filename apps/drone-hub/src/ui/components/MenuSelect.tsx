@@ -1,10 +1,14 @@
 import * as React from 'react';
-import { cn } from './cn';
-import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from './dropdown';
+import { cn } from '../cn';
+import {
+  dropdownMenuItemBaseClass,
+  dropdownPanelBaseClass,
+  useDropdownDismiss,
+} from '../dropdown';
 
-type UiMenuSelectVariant = 'form' | 'toolbar';
+export type UiMenuSelectVariant = 'form' | 'toolbar';
 
-type UiMenuSelectOptionEntry = {
+export type UiMenuSelectOptionEntry = {
   kind?: 'option';
   value: string;
   label: React.ReactNode;
@@ -16,7 +20,7 @@ type UiMenuSelectOptionEntry = {
   inactiveClassName?: string;
 };
 
-type UiMenuSelectSeparatorEntry = {
+export type UiMenuSelectSeparatorEntry = {
   kind: 'separator';
   key?: string;
   className?: string;
@@ -24,7 +28,7 @@ type UiMenuSelectSeparatorEntry = {
 
 export type UiMenuSelectEntry = UiMenuSelectOptionEntry | UiMenuSelectSeparatorEntry;
 
-type UiMenuSelectProps = {
+export type UiMenuSelectProps = {
   value: string;
   onValueChange: (next: string) => void;
   entries: UiMenuSelectEntry[];
@@ -33,6 +37,7 @@ type UiMenuSelectProps = {
   onOpenChange?: (next: boolean) => void;
   disabled?: boolean;
   title?: string;
+  containerClassName?: string;
   triggerClassName?: string;
   panelClassName?: string;
   menuClassName?: string;
@@ -46,7 +51,7 @@ type UiMenuSelectProps = {
   triggerLabelClassName?: string;
   chevron?: (open: boolean) => React.ReactNode;
   role?: 'menu' | 'listbox';
-  itemRole?: 'menuitem' | 'option';
+  itemRole?: 'menuitem' | 'menuitemradio' | 'option';
 };
 
 const triggerBaseClassNameByVariant: Record<UiMenuSelectVariant, string> = {
@@ -146,6 +151,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
     onOpenChange,
     disabled = false,
     title,
+    containerClassName,
     triggerClassName,
     panelClassName,
     menuClassName,
@@ -158,8 +164,8 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
     triggerLabel,
     triggerLabelClassName,
     chevron,
-    role = 'menu',
-    itemRole = 'menuitem',
+    role = 'listbox',
+    itemRole,
   } = props;
 
   const isControlled = typeof openProp === 'boolean';
@@ -183,7 +189,34 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
   }, [disabled, open, setOpen]);
 
   const menuRef = React.useRef<HTMLDivElement | null>(null);
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const listRef = React.useRef<HTMLDivElement | null>(null);
+  const listId = React.useId();
   useDropdownDismiss(menuRef, open, setOpen);
+
+  const focusableOptions = React.useCallback(
+    () =>
+      Array.from(
+        listRef.current?.querySelectorAll<HTMLButtonElement>(
+          '[role="option"]:not(:disabled), [role="menuitem"]:not(:disabled), [role="menuitemradio"]:not(:disabled)',
+        ) ?? [],
+      ),
+    [],
+  );
+
+  React.useEffect(() => {
+    if (!open || searchable) return;
+    const frame = window.requestAnimationFrame(() => {
+      const options = focusableOptions();
+      const selected = options.find(
+        (option) =>
+          option.getAttribute('aria-selected') === 'true' ||
+          option.getAttribute('aria-checked') === 'true',
+      );
+      (selected ?? options[0])?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusableOptions, open, searchable]);
 
   const selectedEntry = React.useMemo(
     () => entries.find((entry) => isOptionEntry(entry) && entry.value === value) as UiMenuSelectOptionEntry | undefined,
@@ -204,10 +237,16 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
   }, [entries, searchQuery, searchable]);
 
   const resolvedTriggerLabel = triggerLabel ?? selectedEntry?.label ?? '';
+  const resolvedItemRole = itemRole ?? (role === 'listbox' ? 'option' : 'menuitemradio');
+  const firstEnabledOption = filteredEntries.find(
+    (entry): entry is UiMenuSelectOptionEntry =>
+      isOptionEntry(entry) && !entry.disabled,
+  );
 
   return (
-    <div ref={menuRef} className="relative">
+    <div ref={menuRef} className={cn('relative', containerClassName)}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => {
           if (disabled) return;
@@ -217,6 +256,22 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
         title={title}
         aria-haspopup={role}
         aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+          event.preventDefault();
+          setOpen(true);
+          window.requestAnimationFrame(() => {
+            if (searchable) {
+              menuRef.current?.querySelector<HTMLInputElement>('input')?.focus();
+              return;
+            }
+            const options = focusableOptions();
+            const target =
+              event.key === 'ArrowUp' ? options[options.length - 1] : options[0];
+            target?.focus();
+          });
+        }}
         className={cn(
           triggerBaseClassNameByVariant[variant],
           variant === 'form'
@@ -234,7 +289,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
       </button>
 
       {open && (
-        <div className={cn(panelPositionClassNameByVariant[variant], dropdownPanelBaseClass, panelClassName)} role={role}>
+        <div className={cn(panelPositionClassNameByVariant[variant], dropdownPanelBaseClass, panelClassName)}>
           {header ? (
             <div
               className={cn(
@@ -252,15 +307,73 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
                 autoFocus
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setOpen(false);
+                    triggerRef.current?.focus();
+                    return;
+                  }
+                  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                  const options = focusableOptions();
+                  const target =
+                    event.key === 'ArrowUp'
+                      ? options[options.length - 1]
+                      : options[0];
+                  if (!target) return;
+                  event.preventDefault();
+                  target.focus();
+                }}
                 placeholder={searchPlaceholder}
                 className="w-full h-[var(--control-height-compact)] rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 text-[length:var(--text-11)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus-visible:outline-none focus-visible:border-[var(--accent-muted)] focus-visible:ring-2 focus-visible:ring-[var(--accent-border)]"
               />
             </div>
           ) : null}
-          <div className={cn('py-1', menuClassName)}>
+          <div
+            ref={listRef}
+            id={listId}
+            role={role}
+            className={cn('py-1', menuClassName)}
+            onKeyDown={(event) => {
+              if (event.key === 'Tab') {
+                window.setTimeout(() => setOpen(false), 0);
+                return;
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                setOpen(false);
+                triggerRef.current?.focus();
+                return;
+              }
+              if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+              const options = focusableOptions();
+              if (options.length === 0) return;
+              event.preventDefault();
+              const currentIndex = options.findIndex(
+                (option) => option === document.activeElement,
+              );
+              const nextIndex =
+                event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? options.length - 1
+                    : event.key === 'ArrowDown'
+                      ? (Math.max(currentIndex, -1) + 1) % options.length
+                      : (currentIndex <= 0 ? options.length : currentIndex) - 1;
+              options[nextIndex]?.focus();
+            }}
+          >
             {filteredEntries.map((entry, index) => {
               if (!isOptionEntry(entry)) {
-                return <div key={entry.key ?? `separator-${index}`} className={cn('my-1 border-t border-[var(--border-subtle)]', entry.className)} />;
+                return (
+                  <div
+                    key={entry.key ?? `separator-${index}`}
+                    role={role === 'menu' ? 'separator' : 'presentation'}
+                    className={cn('my-1 border-t border-[var(--border-subtle)]', entry.className)}
+                  />
+                );
               }
               const active = entry.value === value;
               return (
@@ -271,6 +384,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
                     if (entry.disabled) return;
                     setOpen(false);
                     onValueChange(entry.value);
+                    triggerRef.current?.focus();
                   }}
                   className={cn(
                     dropdownMenuItemBaseClass,
@@ -280,7 +394,12 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
                     entry.className
                   )}
                   title={entry.title}
-                  role={itemRole}
+                  role={resolvedItemRole}
+                  aria-selected={resolvedItemRole === 'option' ? active : undefined}
+                  aria-checked={resolvedItemRole === 'menuitemradio' ? active : undefined}
+                  tabIndex={
+                    active || entry.value === firstEnabledOption?.value ? 0 : -1
+                  }
                   disabled={entry.disabled}
                 >
                   {entry.label}
@@ -288,7 +407,10 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
               );
             })}
             {filteredEntries.every((entry) => !isOptionEntry(entry)) ? (
-              <div className="px-3 py-3 text-[length:var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]">
+              <div
+                role="presentation"
+                className="px-3 py-3 text-[length:var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
+              >
                 {emptySearchLabel}
               </div>
             ) : null}

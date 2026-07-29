@@ -1,4 +1,10 @@
 import React from 'react';
+import {
+  UiPaneState,
+  UiPanel,
+  UiPanelBody,
+  UiPanelStatusStrip,
+} from '../../ui/components';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
@@ -810,14 +816,14 @@ export function DroneTerminalDock({
   );
 
   return (
-    <div
+    <UiPanel
       ref={dockRootRef}
-      className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative"
+      flush
+      surface="alternate"
+      className="relative h-full w-full"
     >
       {error && (
-        <div className="px-3 py-1 text-[var(--text-10)] text-[var(--red)] truncate max-w-full border-b border-[var(--border-subtle)] bg-[var(--red-subtle)]">
-          {error}
-        </div>
+        <UiPanelStatusStrip tone="danger">{error}</UiPanelStatusStrip>
       )}
 
       <DroneTerminalTabsBar
@@ -832,31 +838,25 @@ export function DroneTerminalDock({
         onCreateSession={handleCreateSession}
       />
 
-      <div className="flex-1 min-h-0 bg-[var(--bg)] relative pt-1 pl-1">
+      <UiPanelBody className="relative bg-[var(--bg)] pt-1 pl-1">
         {!disabled && sessionsState.initialized && sessionsState.sessions.length === 0 ? (
           <DroneTerminalEmptyState onCreateSession={handleCreateSession} />
         ) : null}
         {disabled && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center text-center px-6">
-            <div className="max-w-[360px] rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] backdrop-blur px-4 py-3">
-              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                {provisioningLabel(hubPhase)}
-              </div>
-              <div className="mt-1 text-[var(--text-12)] text-[var(--muted)]">
-                {startup.timedOut
-                  ? 'Still waiting for the terminal to become available.'
-                  : 'Connecting terminal…'}
-              </div>
-              {String(hubMessage ?? '').trim() ? (
-                <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
-              ) : null}
-              {startup.timedOut ? (
-                <div className="mt-2 text-[var(--text-11)] text-[var(--muted-dim)]">
-                  If this persists, check the drone status/error details in the sidebar.
-                </div>
-              ) : null}
-            </div>
-          </div>
+          <UiPaneState
+            kind={startup.timedOut ? 'warning' : 'loading'}
+            title={provisioningLabel(hubPhase)}
+            description={[
+              startup.timedOut
+                ? 'Still waiting for the terminal to become available.'
+                : 'Connecting terminal…',
+              String(hubMessage ?? '').trim(),
+              startup.timedOut
+                ? 'If this persists, check the drone status details in the sidebar.'
+                : '',
+            ].filter(Boolean).join(' ')}
+            className="absolute inset-0 z-10 bg-[var(--surface-inset-strong)]/80 backdrop-blur"
+          />
         )}
         <div
           ref={terminalHostRef}
@@ -865,7 +865,7 @@ export function DroneTerminalDock({
             terminalRef.current?.focus();
           }}
         />
-      </div>
-    </div>
+      </UiPanelBody>
+    </UiPanel>
   );
 }

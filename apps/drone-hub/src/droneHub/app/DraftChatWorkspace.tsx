@@ -12,7 +12,7 @@ import type {
   ChatComposerControlsConfig,
 } from '../chat/ChatComposerControls';
 import { draftChatInputResetKey, droneChatQueueKey } from './helpers';
-import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import type { UiMenuSelectEntry } from '../../ui/components';
 import type {
   AgentApprovalPolicy,
   AgentPermissionMode,
