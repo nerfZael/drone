@@ -5,6 +5,7 @@ export * from './Card';
 export * from './Dialog';
 export * from './Feedback';
 export * from './FormControls';
+export * from './MenuSelect';
 export * from './Navigation';
 export * from './NavigationRow';
 export * from './PaneState';

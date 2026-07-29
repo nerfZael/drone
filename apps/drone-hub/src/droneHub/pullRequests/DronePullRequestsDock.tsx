@@ -3,6 +3,16 @@ import {
   pullRequestCloseConfirmation,
   pullRequestMergeConfirmation,
 } from '@drone/assistant-chat';
+import {
+  UiMenuSelect,
+  UiPaneState,
+  UiPanel,
+  UiPanelHeader,
+  UiPanelStatusStrip,
+  UiPanelToolbar,
+  UiToolbarButton,
+  UiToolbarLink,
+} from '../../ui/components';
 import { requestJson } from '../http';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
@@ -494,108 +504,100 @@ export function DronePullRequestsDock({
   }, [droneId]);
 
   return (
-    <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative">
-      <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
-        <div className="min-w-0 flex items-center gap-2">
-          <div
-            className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.12em] uppercase"
-            style={{ fontFamily: 'var(--display)' }}
-            title={droneName}
-          >
-            Pull Requests
-          </div>
-          {activePullRequestNumber ? (
-            <div className="min-w-0 text-[var(--text-10)] text-[var(--muted)] font-mono truncate" title={activePullRequest?.title || `PR #${activePullRequestNumber}`}>
-              / #{activePullRequestNumber}
-            </div>
-          ) : null}
-        </div>
-        {activePullRequestNumber ? (
-          <div className="inline-flex items-center gap-1">
-            <button
-              type="button"
-              onClick={closeDetailView}
-              className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
-              style={{ fontFamily: 'var(--display)' }}
-              title="Return to the pull request list"
-            >
-              Back to List
-            </button>
-            {activePullRequest?.htmlUrl ? (
-              <a
-                href={activePullRequest.htmlUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
-                style={{ fontFamily: 'var(--display)' }}
-                title="Open PR on GitHub"
+    <UiPanel flush surface="alternate" className="relative h-full w-full">
+      <UiPanelHeader
+        title={activePullRequestNumber ? `Pull Request #${activePullRequestNumber}` : 'Pull Requests'}
+        description={activePullRequest?.title || droneName}
+        density="compact"
+        actions={
+          activePullRequestNumber ? (
+            <>
+              <UiToolbarButton
+                size="xsmall"
+                onClick={closeDetailView}
+                title="Return to the pull request list"
               >
-                Open
-              </a>
-            ) : null}
-          </div>
-        ) : (
-          <div className="inline-flex items-center gap-1">
-            <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
-              Merge
-            </span>
-            <select
-              value={mergeMethod}
-              onChange={(event) => setMergeMethod(event.currentTarget.value as RepoPullRequestMergeMethod)}
-              className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]"
-              title="Default merge method"
-            >
-              <option value="merge">merge</option>
-              <option value="squash">squash</option>
-              <option value="rebase">rebase</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => {
-                void mergeAllPullRequests();
-              }}
-              disabled={!repoAttached || disabled || mergeablePullRequests.length === 0 || anyBusy || Boolean(listError)}
-              className="h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
-              style={{ fontFamily: 'var(--display)' }}
-              title={
-                mergeablePullRequests.length > 0
-                  ? `Merge all mergeable PRs with "${mergeMethod}"${
-                      blockedMergeCount > 0 ? ` (${blockedMergeCount} blocked skipped: ${blockedConflictCount} conflicts, ${blockedPolicyCount} policy)` : ''
-                    }`
-                  : 'No mergeable PRs (all blocked)'
-              }
-            >
-              {bulkAction?.kind === 'merge' ? `Merging ${bulkAction.done}/${bulkAction.total}` : 'Merge All'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void closeAllPullRequests();
-              }}
-              disabled={!repoAttached || disabled || pullRequests.length === 0 || anyBusy || Boolean(listError)}
-              className="h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
-              style={{ fontFamily: 'var(--display)' }}
-              title="Close all open PRs without merging"
-            >
-              {bulkAction?.kind === 'close' ? `Closing ${bulkAction.done}/${bulkAction.total}` : 'Close All'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setRefreshNonce((n) => n + 1)}
-              className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
-              title="Refresh pull requests"
-            >
-              Refresh
-            </button>
-          </div>
-        )}
-      </div>
+                Back to List
+              </UiToolbarButton>
+              {activePullRequest?.htmlUrl ? (
+                <UiToolbarLink
+                  href={activePullRequest.htmlUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  size="xsmall"
+                  title="Open PR on GitHub"
+                >
+                  Open
+                </UiToolbarLink>
+              ) : null}
+            </>
+          ) : null
+        }
+      />
+      {!activePullRequestNumber ? (
+        <UiPanelToolbar
+          aria-label="Pull request actions"
+          className="flex-wrap overflow-visible"
+        >
+          <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
+            Merge
+          </span>
+          <UiMenuSelect
+            variant="toolbar"
+            value={mergeMethod}
+            onValueChange={(value) => setMergeMethod(value as RepoPullRequestMergeMethod)}
+            entries={[
+              { value: 'merge', label: 'merge' },
+              { value: 'squash', label: 'squash' },
+              { value: 'rebase', label: 'rebase' },
+            ]}
+            title="Default merge method"
+          />
+          <UiToolbarButton
+            size="xsmall"
+            tone="success"
+            active
+            loading={bulkAction?.kind === 'merge'}
+            onClick={() => {
+              void mergeAllPullRequests();
+            }}
+            disabled={!repoAttached || disabled || mergeablePullRequests.length === 0 || anyBusy || Boolean(listError)}
+            title={
+              mergeablePullRequests.length > 0
+                ? `Merge all mergeable PRs with "${mergeMethod}"${
+                    blockedMergeCount > 0 ? ` (${blockedMergeCount} blocked skipped: ${blockedConflictCount} conflicts, ${blockedPolicyCount} policy)` : ''
+                  }`
+                : 'No mergeable PRs (all blocked)'
+            }
+          >
+            {bulkAction?.kind === 'merge' ? `${bulkAction.done}/${bulkAction.total}` : 'Merge All'}
+          </UiToolbarButton>
+          <UiToolbarButton
+            size="xsmall"
+            tone="danger"
+            active
+            loading={bulkAction?.kind === 'close'}
+            onClick={() => {
+              void closeAllPullRequests();
+            }}
+            disabled={!repoAttached || disabled || pullRequests.length === 0 || anyBusy || Boolean(listError)}
+            title="Close all open PRs without merging"
+          >
+            {bulkAction?.kind === 'close' ? `${bulkAction.done}/${bulkAction.total}` : 'Close All'}
+          </UiToolbarButton>
+          <UiToolbarButton
+            size="xsmall"
+            onClick={() => setRefreshNonce((n) => n + 1)}
+            title="Refresh pull requests"
+          >
+            Refresh
+          </UiToolbarButton>
+        </UiPanelToolbar>
+      ) : null}
       {activePullRequestNumber ? (
         <React.Suspense
           fallback={
-            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
-              Loading pull request changes...
-            </div>
+            <UiPaneState kind="loading" title="Loading pull request changes…" />
           }
         >
           <LazyDroneChangesDock
@@ -613,7 +615,7 @@ export function DronePullRequestsDock({
         </React.Suspense>
       ) : (
         <>
-          <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--muted)] flex items-center gap-1.5 min-h-[30px] overflow-x-auto whitespace-nowrap">
+          <UiPanelStatusStrip>
             {!repoAttached ? (
               <span title={unavailableReason || 'No repo attached'}>
                 {unavailableReason || 'No repo attached.'}
@@ -637,66 +639,64 @@ export function DronePullRequestsDock({
                 <MetaChip label="open" value={pullRequests.length} />
               </>
             )}
-          </div>
+          </UiPanelStatusStrip>
 
           {actionNotice ? (
-            <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--green)] bg-[var(--green-subtle)]">{actionNotice}</div>
+            <UiPanelStatusStrip tone="success">{actionNotice}</UiPanelStatusStrip>
           ) : null}
           {actionError ? (
-            <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--red)] bg-[var(--red-subtle)]">{actionError}</div>
+            <UiPanelStatusStrip tone="danger">{actionError}</UiPanelStatusStrip>
           ) : null}
           {bulkActionLabel ? (
-            <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--muted)] bg-[var(--surface-softest)]">
-              {bulkActionLabel}
-            </div>
+            <UiPanelStatusStrip tone="info">{bulkActionLabel}</UiPanelStatusStrip>
           ) : null}
 
           {!repoAttached ? (
-            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
-              {unavailableReason || 'Attach a repo to manage pull requests.'}
-            </div>
+            <UiPaneState
+              kind="unavailable"
+              title="Repository unavailable"
+              description={unavailableReason || 'Attach a repo to manage pull requests.'}
+            />
           ) : disabled ? (
-            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
-              <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                  {provisioningLabel(hubPhase)}
-                </div>
-                <div className="mt-1">
-                  {startup.timedOut
-                    ? 'Still waiting for the repository to become available.'
-                    : 'Waiting for repository...'}
-                </div>
-                {String(hubMessage ?? '').trim() ? (
-                  <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
-                ) : null}
-              </div>
-            </div>
+            <UiPaneState
+              kind={startup.timedOut ? 'warning' : 'loading'}
+              title={provisioningLabel(hubPhase)}
+              description={[
+                startup.timedOut
+                  ? 'Still waiting for the repository to become available.'
+                  : 'Waiting for repository…',
+                String(hubMessage ?? '').trim(),
+              ].filter(Boolean).join(' ')}
+            />
           ) : listError ? (
-            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--red)]">
-              <div>{listError}</div>
-              {listErrorCode ? (
-                <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)] font-mono">
-                  code: {listErrorCode}
-                </div>
-              ) : null}
-              {listErrorDiagnostics?.repoRoot ? (
-                <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)] font-mono break-all">
-                  repo: {listErrorDiagnostics.repoRoot}
-                </div>
-              ) : null}
-              {listErrorDiagnostics?.origin ? (
-                <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)] font-mono break-all">
-                  origin: {listErrorDiagnostics.origin}
-                </div>
-              ) : null}
-              {listErrorDiagnostics?.github ? (
-                <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)] font-mono">
-                  github: {listErrorDiagnostics.github.owner}/{listErrorDiagnostics.github.repo}
-                </div>
-              ) : null}
-            </div>
+            <UiPaneState
+              kind="error"
+              title="Could not load pull requests"
+              description={
+                <span>
+                  {listError}
+                  {listErrorCode ? ` Code: ${listErrorCode}.` : ''}
+                  {listErrorDiagnostics?.repoRoot ? ` Repo: ${listErrorDiagnostics.repoRoot}.` : ''}
+                  {listErrorDiagnostics?.origin ? ` Origin: ${listErrorDiagnostics.origin}.` : ''}
+                  {listErrorDiagnostics?.github
+                    ? ` GitHub: ${listErrorDiagnostics.github.owner}/${listErrorDiagnostics.github.repo}.`
+                    : ''}
+                </span>
+              }
+              action={
+                <UiToolbarButton onClick={() => setRefreshNonce((n) => n + 1)}>
+                  Try again
+                </UiToolbarButton>
+              }
+            />
+          ) : listLoading && !listData ? (
+            <UiPaneState kind="loading" title="Loading pull requests…" />
           ) : pullRequests.length === 0 && !listLoading ? (
-            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">No open pull requests.</div>
+            <UiPaneState
+              kind="empty"
+              title="No open pull requests"
+              description="New pull requests for this repository will appear here."
+            />
           ) : (
             <PullRequestListView
               pullRequests={pullRequests}
@@ -714,6 +714,6 @@ export function DronePullRequestsDock({
           )}
         </>
       )}
-    </div>
+    </UiPanel>
   );
 }

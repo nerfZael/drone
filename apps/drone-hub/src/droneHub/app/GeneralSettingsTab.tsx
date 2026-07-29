@@ -1,5 +1,5 @@
 import React from 'react';
-import { UiMenuSelect } from '../../ui/menuSelect';
+import { UiMenuSelect } from '../../ui/components';
 import { bytesToMaxMiB, bytesToMinMiB, bytesToNearestMiB, miBToBytes } from './filesystem-size-utils';
 import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
 import type { UseGithubSettingsResult } from './use-github-settings';

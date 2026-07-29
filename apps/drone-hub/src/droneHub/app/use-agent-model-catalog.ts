@@ -1,5 +1,5 @@
 import React from 'react';
-import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import type { UiMenuSelectEntry } from '../../ui/components';
 import { profileStorageKey } from '../../profile-storage';
 import { formatModelDisplayLabel } from './chat-model-runtime';
 

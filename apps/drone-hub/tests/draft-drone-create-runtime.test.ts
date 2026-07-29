@@ -8,7 +8,7 @@ import {
   runtimeSupportsCustomAgents,
   shouldAutoRenameDraftDrone,
 } from '../src/droneHub/app/drone-create-runtime';
-import type { UiMenuSelectEntry } from '../src/ui/menuSelect';
+import type { UiMenuSelectEntry } from '../src/ui/components';
 
 describe('draft drone create runtime support', () => {
   test('auto-renames blank chat drone names when callers omit the option', () => {

@@ -1,4 +1,12 @@
 import React from 'react';
+import {
+  UiPaneState,
+  UiPanel,
+  UiPanelBody,
+  UiPanelHeader,
+  UiStatusChip,
+  UiStatusDot,
+} from '../../ui/components';
 import type { DronePortMapping, PortReachabilityByHostPort } from '../types';
 
 export type DroneLinksContentProps = {
@@ -18,9 +26,21 @@ export function DroneLinksContent({
 }: DroneLinksContentProps) {
   return (
     <div className="px-3 py-2 text-[var(--text-11)]">
-      {portsError && <div className="truncate text-[var(--text-11)] text-[var(--red)]" title={portsError}>{portsError}</div>}
+      {portsError ? (
+        <UiPaneState
+          kind="error"
+          title="Could not load mapped ports"
+          description={portsError}
+          compact
+        />
+      ) : null}
       {!portsError && portRows.length === 0 && (
-        <div className="text-[var(--text-11)] text-[var(--muted-dim)]">No mapped ports</div>
+        <UiPaneState
+          kind="empty"
+          title="No mapped ports"
+          description="Published services will appear here."
+          compact
+        />
       )}
       {!portsError && portRows.length > 0 && (
         <div className="flex max-h-[164px] flex-col gap-1.5 overflow-auto pr-1">
@@ -31,14 +51,24 @@ export function DroneLinksContent({
             return (
               <div key={`${p.containerPort}:${p.hostPort}`} className="flex items-center justify-between gap-3">
                 <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[var(--text-10)] tabular-nums text-[var(--muted-dim)]" title="container → host">
-                  {isReachable ? (
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-[var(--accent)] animate-pulse-dot"
-                      title={`Container port ${p.containerPort} looks reachable`}
-                    />
-                  ) : (
-                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--border)]" />
-                  )}
+                  <UiStatusDot
+                    tone={
+                      reachability === 'up'
+                        ? 'accent'
+                        : reachability === 'checking'
+                          ? 'info'
+                          : 'neutral'
+                    }
+                    pulse={isReachable}
+                    label={
+                      reachability === 'up'
+                        ? `Container port ${p.containerPort} looks reachable`
+                        : reachability === 'checking'
+                          ? `Checking container port ${p.containerPort}`
+                          : `Container port ${p.containerPort} is not reachable`
+                    }
+                    className="h-1.5 w-1.5 [&>span]:h-1.5 [&>span]:w-1.5"
+                  />
                   {p.containerPort}→{p.hostPort}
                 </span>
                 <div className="flex min-w-0 items-center gap-1.5 font-mono text-[var(--text-10)]">
@@ -101,17 +131,19 @@ export function DroneLinksDock({
   );
 
   return (
-    <div className="w-full h-full bg-[var(--panel-alt)] overflow-auto relative">
-
-      <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
-        <div
-          className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.12em] uppercase"
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          Links
-        </div>
-        <div
-          className="text-[var(--text-10)] text-[var(--muted-dim)] tabular-nums font-mono"
+    <UiPanel
+      flush
+      surface="alternate"
+      className="h-full w-full"
+      data-drone-id={droneId}
+    >
+      <UiPanelHeader
+        title="Links"
+        description={droneName}
+        density="compact"
+        meta={
+          <UiStatusChip
+            tone={portsError ? 'danger' : portsLoading ? 'info' : upCount > 0 ? 'success' : 'neutral'}
           title={
             portsLoading
               ? 'Loading ports…'
@@ -119,18 +151,24 @@ export function DroneLinksDock({
                 ? `Ports error: ${portsError}`
                 : `${upCount}/${portRows.length} reachable port${portRows.length !== 1 ? 's' : ''}`
           }
-        >
-          {portsLoading ? '…' : portsError ? 'error' : `${upCount}/${portRows.length}`}
-        </div>
-      </div>
-
-      <DroneLinksContent
-        agentLabel={agentLabel}
-        chatName={chatName}
-        portRows={portRows}
-        portReachabilityByHostPort={portReachabilityByHostPort}
-        portsError={portsError}
+          >
+            {portsLoading ? 'Loading' : portsError ? 'Error' : `${upCount}/${portRows.length}`}
+          </UiStatusChip>
+        }
       />
-    </div>
+      <UiPanelBody scroll>
+        {portsLoading && portRows.length === 0 && !portsError ? (
+          <UiPaneState kind="loading" title="Loading mapped ports…" />
+        ) : (
+          <DroneLinksContent
+            agentLabel={agentLabel}
+            chatName={chatName}
+            portRows={portRows}
+            portReachabilityByHostPort={portReachabilityByHostPort}
+            portsError={portsError}
+          />
+        )}
+      </UiPanelBody>
+    </UiPanel>
   );
 }

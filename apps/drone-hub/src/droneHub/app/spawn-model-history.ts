@@ -1,4 +1,4 @@
-import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import type { UiMenuSelectEntry } from '../../ui/components';
 import { formatModelDisplayLabel } from './chat-model-runtime';
 
 export const SEEN_SPAWN_MODEL_LIMIT = 40;

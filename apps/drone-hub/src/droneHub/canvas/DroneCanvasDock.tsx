@@ -3,6 +3,8 @@ import { useDndMonitor, useDroppable, type DragEndEvent, type DragMoveEvent, typ
 import { useShallow } from 'zustand/react/shallow';
 import type { ChatAgentConfig } from '../../domain';
 import {
+  UiMenuSelect,
+  type UiMenuSelectEntry,
   UiPaneState,
   UiPanel,
   UiPanelBody,
@@ -11,7 +13,6 @@ import {
   UiToolbarIconButton,
   UiToolbarInput,
 } from '../../ui/components';
-import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { DroneSummary } from '../types';
 import { IconTune } from '../app/icons';
 import {
@@ -2055,24 +2056,16 @@ export function DroneCanvasDock({
                 Clear
               </UiToolbarButton>
             </div>
-            <label
-              className={`inline-flex items-center gap-1.5 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                controlsDisabled
-                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] cursor-pointer'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
+            <UiToolbarButton
+              pressed={pullHostBranchBeforeCreate}
+              onClick={() =>
+                onPullHostBranchBeforeCreateChange(!pullHostBranchBeforeCreate)
+              }
+              disabled={controlsDisabled}
               title="Before creating a repo-attached drone, run a host git pull --ff-only on the current branch."
             >
-              <input
-                type="checkbox"
-                checked={pullHostBranchBeforeCreate}
-                onChange={(event) => onPullHostBranchBeforeCreateChange(event.target.checked)}
-                disabled={controlsDisabled}
-                className="h-3.5 w-3.5 accent-[var(--accent)]"
-              />
               Pull host branch
-            </label>
+            </UiToolbarButton>
           </UiPanelToolbar>
         ) : null}
 
