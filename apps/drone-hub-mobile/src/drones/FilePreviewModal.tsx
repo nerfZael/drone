@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,7 +26,16 @@ import {
   NativeMarkdown,
   type NativeMarkdownExpansionCommand,
 } from '../local-assistant/NativeMarkdown';
-import { isCodePreview, isMarkdownPreview, type MobileFilePreview } from './file-preview-model';
+import {
+  isCodePreview,
+  isHtmlPreview,
+  isMarkdownPreview,
+  isRenderedHtmlPreviewAvailable,
+  mobileHtmlPreviewMode,
+  type MobileFilePreview,
+  type MobileHtmlPreviewMode,
+} from './file-preview-model';
+import { RenderedHtmlPreview } from './RenderedHtmlPreview';
 import { ZoomableImageStage } from './ZoomableImageStage';
 
 function MediaUnavailable({ message }: { message: string }) {
@@ -169,13 +179,33 @@ export function FilePreviewModal({
 }) {
   const [markdownExpansionCommand, setMarkdownExpansionCommand] =
     React.useState<NativeMarkdownExpansionCommand | null>(null);
+  const [htmlModeSelection, setHtmlModeSelection] = React.useState<{
+    path: string;
+    mode: MobileHtmlPreviewMode;
+  } | null>(null);
   const markdownPreview = Boolean(
     preview?.kind === 'text' && isMarkdownPreview(preview.path, preview.mime),
   );
+  const htmlPreview = Boolean(
+    preview?.kind === 'text' && isHtmlPreview(preview.path, preview.mime),
+  );
+  const htmlRenderingAvailable = isRenderedHtmlPreviewAvailable(Platform.OS);
+  const htmlMode = preview
+    ? mobileHtmlPreviewMode({
+        path: preview.path,
+        mime: preview.mime,
+        renderingAvailable: htmlRenderingAvailable,
+        selection: htmlModeSelection,
+      })
+    : 'source';
 
   React.useEffect(() => {
     setMarkdownExpansionCommand(null);
   }, [preview?.path, visible]);
+
+  React.useEffect(() => {
+    if (!visible) setHtmlModeSelection(null);
+  }, [visible]);
 
   return (
     <Modal
@@ -243,56 +273,109 @@ export function FilePreviewModal({
           </View>
 
           <View style={styles.content}>
-            {loading ? (
-              <View style={styles.centerState}>
-                <ActivityIndicator color={colors.accent} size="large" />
-                <Text style={styles.stateTitle}>Opening preview</Text>
-                <Text style={styles.stateBody}>Reading the file from the selected drone…</Text>
-              </View>
-            ) : error ? (
-              <View style={styles.centerState}>
-                <FileQuestion color={colors.danger} size={34} strokeWidth={1.7} />
-                <Text style={styles.stateTitle}>Preview unavailable</Text>
-                <Text style={styles.stateBody}>{error}</Text>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={onRetry}
-                  style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
+            {htmlPreview && !loading && !error && preview ? (
+              <View style={styles.htmlModeBar}>
+                <View
+                  accessibilityRole="tablist"
+                  accessibilityLabel="HTML preview mode"
+                  style={styles.htmlModeTabs}
                 >
-                  <RotateCcw color={colors.onAccent} size={15} strokeWidth={2.2} />
-                  <Text style={styles.retryText}>Try again</Text>
-                </Pressable>
-              </View>
-            ) : preview?.kind === 'text' ? (
-              <TextPreview
-                preview={preview}
-                line={line}
-                markdownExpansionCommand={markdownExpansionCommand}
-              />
-            ) : preview?.kind === 'image' && preview.mime === 'image/svg+xml' && preview.content ? (
-              <ZoomableImageStage resetKey={`${preview.path}:${preview.content.length}`}>
-                <SvgXml
-                  xml={preview.content}
-                  width="100%"
-                  height="100%"
-                  fallback={
-                    <MediaUnavailable message="This SVG file could not be displayed on this phone." />
-                  }
-                />
-              </ZoomableImageStage>
-            ) : preview?.kind === 'image' && preview.uri ? (
-              <PreviewImage uri={preview.uri} />
-            ) : preview?.kind === 'video' && preview.uri ? (
-              <PreviewVideo uri={preview.uri} />
-            ) : preview ? (
-              <View style={styles.centerState}>
-                <FileQuestion color={colors.muted} size={34} strokeWidth={1.7} />
-                <Text style={styles.stateTitle}>No visual preview</Text>
-                <Text style={styles.stateBody}>
-                  This file is available, but its binary format cannot be displayed yet.
-                </Text>
+                  {(['rendered', 'source'] as const).map((mode) => {
+                    const disabled = mode === 'rendered' && !htmlRenderingAvailable;
+                    const selected = htmlMode === mode;
+                    return (
+                      <Pressable
+                        key={mode}
+                        accessibilityRole="tab"
+                        accessibilityState={{ selected, disabled }}
+                        disabled={disabled}
+                        onPress={() => setHtmlModeSelection({ path: preview.path, mode })}
+                        style={({ pressed }) => [
+                          styles.htmlModeButton,
+                          selected && styles.htmlModeButtonSelected,
+                          disabled && styles.htmlModeButtonDisabled,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text
+                          style={[styles.htmlModeText, selected && styles.htmlModeTextSelected]}
+                        >
+                          {mode === 'rendered' ? 'Rendered' : 'Source'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {!htmlRenderingAvailable ? (
+                  <Text style={styles.htmlFallback}>
+                    Rendered HTML is unavailable on this platform. Showing source.
+                  </Text>
+                ) : null}
               </View>
             ) : null}
+            <View style={styles.previewBody}>
+              {loading ? (
+                <View style={styles.centerState}>
+                  <ActivityIndicator color={colors.accent} size="large" />
+                  <Text style={styles.stateTitle}>Opening preview</Text>
+                  <Text style={styles.stateBody}>Reading the file from the selected drone…</Text>
+                </View>
+              ) : error ? (
+                <View style={styles.centerState}>
+                  <FileQuestion color={colors.danger} size={34} strokeWidth={1.7} />
+                  <Text style={styles.stateTitle}>Preview unavailable</Text>
+                  <Text style={styles.stateBody}>{error}</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={onRetry}
+                    style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
+                  >
+                    <RotateCcw color={colors.onAccent} size={15} strokeWidth={2.2} />
+                    <Text style={styles.retryText}>Try again</Text>
+                  </Pressable>
+                </View>
+              ) : preview?.kind === 'text' && htmlPreview && htmlMode === 'rendered' ? (
+                preview.content ? (
+                  <RenderedHtmlPreview source={preview.content} />
+                ) : (
+                  <View style={styles.centerState}>
+                    <Text style={styles.stateTitle}>Empty HTML file</Text>
+                    <Text style={styles.stateBody}>There is no markup to render.</Text>
+                  </View>
+                )
+              ) : preview?.kind === 'text' ? (
+                <TextPreview
+                  preview={preview}
+                  line={line}
+                  markdownExpansionCommand={markdownExpansionCommand}
+                />
+              ) : preview?.kind === 'image' &&
+                preview.mime === 'image/svg+xml' &&
+                preview.content ? (
+                <ZoomableImageStage resetKey={`${preview.path}:${preview.content.length}`}>
+                  <SvgXml
+                    xml={preview.content}
+                    width="100%"
+                    height="100%"
+                    fallback={
+                      <MediaUnavailable message="This SVG file could not be displayed on this phone." />
+                    }
+                  />
+                </ZoomableImageStage>
+              ) : preview?.kind === 'image' && preview.uri ? (
+                <PreviewImage uri={preview.uri} />
+              ) : preview?.kind === 'video' && preview.uri ? (
+                <PreviewVideo uri={preview.uri} />
+              ) : preview ? (
+                <View style={styles.centerState}>
+                  <FileQuestion color={colors.muted} size={34} strokeWidth={1.7} />
+                  <Text style={styles.stateTitle}>No visual preview</Text>
+                  <Text style={styles.stateBody}>
+                    This file is available, but its binary format cannot be displayed yet.
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           </View>
         </SafeAreaView>
       </GestureHandlerRootView>
@@ -345,6 +428,35 @@ const styles = StyleSheet.create({
   },
   path: { color: colors.muted, fontFamily: 'monospace', fontSize: 9, marginTop: 3 },
   content: { flex: 1, minHeight: 0 },
+  previewBody: { flex: 1, minHeight: 0 },
+  htmlModeBar: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.mantle,
+  },
+  htmlModeTabs: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    padding: 2,
+    borderRadius: 8,
+    backgroundColor: colors.surface0,
+  },
+  htmlModeButton: {
+    minWidth: 78,
+    minHeight: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  htmlModeButtonSelected: { backgroundColor: colors.accentWash },
+  htmlModeButtonDisabled: { opacity: 0.42 },
+  htmlModeText: { color: colors.muted, fontSize: 11, fontWeight: '800' },
+  htmlModeTextSelected: { color: colors.accent },
+  htmlFallback: { color: colors.mutedDim, fontSize: 10, lineHeight: 14 },
   centerState: {
     flex: 1,
     alignItems: 'center',

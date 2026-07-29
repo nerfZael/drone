@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import {
   inferMobilePreviewMime,
   isCodePreview,
+  isHtmlPreview,
   isMarkdownPreview,
+  isRenderedHtmlPreviewAvailable,
+  mobileHtmlPreviewMode,
   mobileWorkspaceRelativeFilePath,
   resolveMobileDroneFilePath,
 } from '../src/drones/file-preview-model';
@@ -86,8 +89,61 @@ describe('mobile file preview model', () => {
     expect(isCodePreview('/work/repo/notes.txt', 'text/plain')).toBe(false);
   });
 
+  test('detects HTML by supported path or MIME type', () => {
+    expect(isHtmlPreview('/work/repo/report.html', 'text/plain')).toBe(true);
+    expect(isHtmlPreview('/work/repo/report.HTM', 'text/plain')).toBe(true);
+    expect(isHtmlPreview('/work/repo/report.xhtml', 'text/plain')).toBe(true);
+    expect(isHtmlPreview('/work/repo/report', 'text/html; charset=utf-8')).toBe(true);
+    expect(isHtmlPreview('/work/repo/report.xml', 'application/xhtml+xml')).toBe(true);
+    expect(isHtmlPreview('/work/repo/report.ts', 'text/plain')).toBe(false);
+  });
+
+  test('defaults HTML to rendered mode and preserves source mode across refreshes', () => {
+    expect(
+      mobileHtmlPreviewMode({
+        path: '/work/repo/report.html',
+        mime: 'text/html',
+        renderingAvailable: true,
+        selection: null,
+      }),
+    ).toBe('rendered');
+
+    const sourceSelection = { path: '/work/repo/report.html', mode: 'source' as const };
+    expect(
+      mobileHtmlPreviewMode({
+        path: '/work/repo/report.html',
+        mime: 'text/html',
+        renderingAvailable: true,
+        selection: sourceSelection,
+      }),
+    ).toBe('source');
+    expect(
+      mobileHtmlPreviewMode({
+        path: '/work/repo/next.html',
+        mime: 'text/html',
+        renderingAvailable: true,
+        selection: sourceSelection,
+      }),
+    ).toBe('rendered');
+  });
+
+  test('uses a source-only fallback where rendered HTML is unavailable', () => {
+    expect(isRenderedHtmlPreviewAvailable('android')).toBe(true);
+    expect(isRenderedHtmlPreviewAvailable('ios')).toBe(true);
+    expect(isRenderedHtmlPreviewAvailable('web')).toBe(false);
+    expect(
+      mobileHtmlPreviewMode({
+        path: '/work/repo/report.html',
+        mime: 'text/html',
+        renderingAvailable: false,
+        selection: { path: '/work/repo/report.html', mode: 'rendered' },
+      }),
+    ).toBe('source');
+  });
+
   test('recognizes the supported image and video extensions', () => {
     expect(inferMobilePreviewMime('assets/icon.tiff')).toBe('image/tiff');
     expect(inferMobilePreviewMime('recordings/demo.mkv')).toBe('video/x-matroska');
+    expect(inferMobilePreviewMime('reports/demo.html')).toBe('text/html');
   });
 });
