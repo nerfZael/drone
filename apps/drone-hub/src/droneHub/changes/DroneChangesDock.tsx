@@ -6,8 +6,16 @@ import {
 } from '@drone/assistant-chat';
 import { requestJson } from '../http';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
-import { PaneLoadingState } from '../../ui/PaneLoadingState';
-import { dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
+import {
+  UiActionMenu,
+  UiPaneState,
+  UiPanel,
+  UiPanelStatusStrip,
+  UiPanelToolbar,
+  UiResizeHandle,
+  UiToolbarButton,
+  UiToolbarSegmentedControl,
+} from '../../ui/components';
 import { IconChevron, IconFolder, iconForFilePath } from '../icons';
 import { IconEye, IconEyeOff } from '../app/icons';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
@@ -260,87 +268,63 @@ function ChangesViewMenu({
   onDiffViewTypeChange: (viewType: DiffViewType) => void;
   onToggleHideViewed: () => void;
 }) {
-  const [open, setOpen] = React.useState(false);
-  const menuRef = React.useRef<HTMLDivElement | null>(null);
-  useDropdownDismiss(menuRef, open, setOpen);
-
-  const option = (
-    label: string,
-    active: boolean,
-    onClick: () => void,
-  ) => (
-    <button
-      type="button"
-      role="menuitemradio"
-      aria-checked={active}
-      onClick={() => {
-        onClick();
-        setOpen(false);
-      }}
-      className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[var(--text-11)] transition-colors ${
-        active
-          ? 'bg-[var(--surface-soft)] text-[var(--fg)]'
-          : 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-      }`}
-    >
-      <span>{label}</span>
-      <span className={`text-[var(--accent)] ${active ? 'opacity-100' : 'opacity-0'}`} aria-hidden="true">
-        ✓
-      </span>
-    </button>
-  );
-
   return (
-    <div ref={menuRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="dh-changes-menu-trigger"
-        aria-haspopup="menu"
-        aria-expanded={open}
-      >
-        View
-        <IconChevron down={open} size={11} />
-      </button>
-      {open ? (
-        <div
-          role="menu"
-          className={`absolute right-0 top-full z-50 mt-1 w-48 ${dropdownPanelBaseClass}`}
-        >
-          <div className="px-3 pb-1 pt-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
-            Layout
-          </div>
-          {option('Stacked', viewMode === 'stacked', () => onViewModeChange('stacked'))}
-          {option('Explorer', viewMode === 'split', () => onViewModeChange('split'))}
-          <div className="mx-2 my-1 border-t border-[var(--border-subtle)]" />
-          <div className="px-3 pb-1 pt-1 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
-            Diff
-          </div>
-          {option('Unified', diffViewType === 'unified', () => onDiffViewTypeChange('unified'))}
-          {option('Side by side', diffViewType === 'split', () => onDiffViewTypeChange('split'))}
-          {showViewedControl ? (
-            <>
-              <div className="mx-2 my-1 border-t border-[var(--border-subtle)]" />
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={hideViewed}
-                onClick={() => {
-                  onToggleHideViewed();
-                  setOpen(false);
-                }}
-                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[var(--text-11)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)]"
-              >
-                <span>{hideViewedLabel}</span>
-                <span className={`text-[var(--accent)] ${hideViewed ? 'opacity-100' : 'opacity-0'}`} aria-hidden="true">
-                  ✓
-                </span>
-              </button>
-            </>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
+    <UiActionMenu
+      label="Changes view options"
+      triggerContent={
+        <>
+          View
+          <IconChevron size={11} />
+        </>
+      }
+      entries={[
+        { kind: 'label', id: 'layout-label', label: 'Layout' },
+        {
+          id: 'layout-stacked',
+          label: 'Stacked',
+          selectionRole: 'radio',
+          checked: viewMode === 'stacked',
+        },
+        {
+          id: 'layout-explorer',
+          label: 'Explorer',
+          selectionRole: 'radio',
+          checked: viewMode === 'split',
+        },
+        { kind: 'separator', id: 'diff-separator' },
+        { kind: 'label', id: 'diff-label', label: 'Diff' },
+        {
+          id: 'diff-unified',
+          label: 'Unified',
+          selectionRole: 'radio',
+          checked: diffViewType === 'unified',
+        },
+        {
+          id: 'diff-split',
+          label: 'Side by side',
+          selectionRole: 'radio',
+          checked: diffViewType === 'split',
+        },
+        ...(showViewedControl
+          ? [
+              { kind: 'separator' as const, id: 'viewed-separator' },
+              {
+                id: 'toggle-viewed',
+                label: hideViewedLabel,
+                selectionRole: 'checkbox' as const,
+                checked: hideViewed,
+              },
+            ]
+          : []),
+      ]}
+      onSelect={(id) => {
+        if (id === 'layout-stacked') onViewModeChange('stacked');
+        else if (id === 'layout-explorer') onViewModeChange('split');
+        else if (id === 'diff-unified') onDiffViewTypeChange('unified');
+        else if (id === 'diff-split') onDiffViewTypeChange('split');
+        else if (id === 'toggle-viewed') onToggleHideViewed();
+      }}
+    />
   );
 }
 
@@ -1664,7 +1648,7 @@ function LiveDroneChangesDock({
 
   const recomputeExplorerWidth = React.useCallback(() => {
     if (viewMode !== 'split') return;
-    if (explorerDragRef.current) return;
+    if (explorerDragRef.current || explorerResizing) return;
     const splitWidth = splitLayoutRef.current?.clientWidth ?? 0;
     if (splitWidth <= 0) return;
     const bounds = resolveExplorerSidebarWidthBounds(splitWidth, explorerWidthOptions);
@@ -1683,7 +1667,15 @@ function LiveDroneChangesDock({
       if (outOfBounds || Math.abs(prev - nextWidth) >= EXPLORER_WIDTH_UPDATE_THRESHOLD_PX) return nextWidth;
       return prev;
     });
-  }, [activeExpandedDirs, activeExplorerTree, explorerManualWidthPx, explorerWidthOptions, explorerZoom, viewMode]);
+  }, [
+    activeExpandedDirs,
+    activeExplorerTree,
+    explorerManualWidthPx,
+    explorerResizing,
+    explorerWidthOptions,
+    explorerZoom,
+    viewMode,
+  ]);
 
   const restoreResizeBodyStyles = React.useCallback(() => {
     const styles = explorerResizeBodyStyleRef.current;
@@ -3177,103 +3169,101 @@ function LiveDroneChangesDock({
         : dataMode === 'pull-preview'
           ? 'Loading apply preview…'
           : 'Loading changes…';
+  const allVisibleChangesViewed = allEntries.length > 0 && hideViewed;
+  const emptyChangesTitle = allVisibleChangesViewed
+    ? 'All visible files are viewed'
+    : dataMode === 'pull-request'
+      ? pullRequestNumber
+        ? `No changes in PR #${pullRequestNumber}`
+        : 'No pull request selected'
+      : dataMode === 'pull-preview'
+        ? 'No apply changes to preview'
+        : 'Working tree is clean';
+  const emptyChangesDescription = allVisibleChangesViewed
+    ? 'Turn off Hide Viewed to revisit files in this view.'
+    : dataMode === 'pull-preview'
+      ? 'This view only shows committed changes from the drone base to HEAD. Open Working Tree to review uncommitted files.'
+      : undefined;
+  const emptyChangesAction = allVisibleChangesViewed ? (
+    <UiToolbarButton tone="accent" onClick={() => setHideViewed(false)}>
+      Show viewed files
+    </UiToolbarButton>
+  ) : dataMode === 'pull-preview' ? (
+    <UiToolbarButton tone="accent" onClick={() => setBranchChangesMode('working-tree')}>
+      Open working tree
+    </UiToolbarButton>
+  ) : undefined;
+  const explorerResizeBounds = resolveExplorerSidebarWidthBounds(
+    splitLayoutRef.current?.clientWidth ?? 0,
+    explorerWidthOptions,
+  );
 
   if (showingInitialLoad) {
     return (
-      <div
+      <UiPanel
         ref={dockRootRef}
-        className="w-full h-full min-h-0 bg-[var(--chat-background)] overflow-hidden dh-changes-dock"
-        style={diffZoomStyle(diffZoom)}
+        flush
+        className="h-full w-full dh-changes-dock"
+        surface="alternate"
+        style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
       >
-        <PaneLoadingState label={initialLoadingLabel} />
-      </div>
+        <UiPaneState kind="loading" title={initialLoadingLabel} />
+      </UiPanel>
     );
   }
 
   return (
-    <div
+    <UiPanel
       ref={dockRootRef}
-      className="w-full h-full min-h-0 bg-[var(--chat-background)] overflow-hidden flex flex-col relative dh-changes-dock"
-      style={diffZoomStyle(diffZoom)}
+      flush
+      className="relative h-full w-full dh-changes-dock"
+      surface="alternate"
+      style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
     >
-      <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
+      <UiPanelToolbar aria-label="Changes controls" className="px-2.5 py-1.5">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
           {repoAttached && !disabled && contextMode === 'branch' && primaryView === 'changes' ? (
-            <div className="dh-changes-segment" aria-label="Branch change source">
-              <button
-                type="button"
-                onClick={() => setBranchChangesMode('working-tree')}
-                aria-pressed={branchChangesMode === 'working-tree'}
-                className={changesSegmentButtonClass(branchChangesMode === 'working-tree')}
-                title="Working tree changes inside the drone (staged/unstaged)"
-              >
-                Working
-              </button>
-              <button
-                type="button"
-                onClick={() => setBranchChangesMode('pull-preview')}
-                aria-pressed={branchChangesMode === 'pull-preview'}
-                className={changesSegmentButtonClass(branchChangesMode === 'pull-preview')}
-                title="Apply preview: committed diff from base to drone HEAD (what applying changes would merge)"
-              >
-                Apply
-              </button>
-            </div>
+            <UiToolbarSegmentedControl
+              label="Branch change source"
+              value={branchChangesMode}
+              onValueChange={setBranchChangesMode}
+              options={[
+                { value: 'working-tree', label: 'Working' },
+                { value: 'pull-preview', label: 'Apply' },
+              ]}
+            />
           ) : null}
         </div>
-        <div data-onboarding-id="changes.viewMode" className="dh-changes-toolbar-controls">
+        <div
+          data-onboarding-id="changes.viewMode"
+          className="ml-auto flex shrink-0 items-center gap-1.5"
+        >
           {repoAttached && !disabled ? (
             <>
               {!fixedContextMode ? (
-                <div className="dh-changes-toolbar-group">
-                  <div className="dh-changes-segment" aria-label="Changes context">
-                    <button
-                      type="button"
-                      onClick={() => setContextModeState('branch')}
-                      aria-pressed={contextMode === 'branch'}
-                      className={changesSegmentButtonClass(contextMode === 'branch')}
-                      title="Branch"
-                    >
-                      Branch
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!pullRequestNumber) return;
-                        setContextModeState('pull-request');
-                      }}
-                      disabled={!pullRequestNumber}
-                      aria-pressed={contextMode === 'pull-request'}
-                      className={changesSegmentButtonClass(contextMode === 'pull-request')}
-                      title={pullRequestNumber ? `PR #${pullRequestNumber}` : 'Open a PR from the PRs tab first'}
-                    >
-                      PR
-                    </button>
-                  </div>
-                </div>
+                <UiToolbarSegmentedControl
+                  label="Changes context"
+                  value={contextMode}
+                  onValueChange={setContextModeState}
+                  options={[
+                    { value: 'branch', label: 'Branch' },
+                    {
+                      value: 'pull-request',
+                      label: 'PR',
+                      disabled: !pullRequestNumber,
+                    },
+                  ]}
+                />
               ) : null}
-              <div className="dh-changes-toolbar-group">
-                <div className="dh-changes-segment" aria-label="Changes view">
-                  <button
-                    type="button"
-                    onClick={() => setPrimaryView('changes')}
-                    aria-pressed={primaryView === 'changes'}
-                    className={changesSegmentButtonClass(primaryView === 'changes')}
-                    title="Changes"
-                  >
-                    Changes
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPrimaryView('commits')}
-                    aria-pressed={primaryView === 'commits'}
-                    className={changesSegmentButtonClass(primaryView === 'commits')}
-                    title="Commits"
-                  >
-                    Commits
-                  </button>
-                </div>
-              </div>
+              <UiToolbarSegmentedControl
+                label="Changes view"
+                value={primaryView}
+                onValueChange={setPrimaryView}
+                options={[
+                  { value: 'changes', label: 'Changes' },
+                  { value: 'commits', label: 'Commits' },
+                ]}
+              />
             </>
           ) : null}
           <DiffZoomControl value={diffZoom} onChange={setDiffZoom} />
@@ -3288,12 +3278,12 @@ function LiveDroneChangesDock({
             onToggleHideViewed={() => setHideViewed((prev) => !prev)}
           />
         </div>
-      </div>
+      </UiPanelToolbar>
 
       {contextMode === 'pull-request' && awaitingPullRequestDetails ? (
-        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] text-[var(--muted)]">
+        <UiPanelStatusStrip>
           Loading PR #{selectedPullRequestNumber} details...
-        </div>
+        </UiPanelStatusStrip>
       ) : null}
       {contextMode === 'pull-request' && hasLoadedActivePullRequest && activePullRequestNumber ? (
         <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] flex items-start justify-between gap-3">
@@ -3363,48 +3353,61 @@ function LiveDroneChangesDock({
         </div>
       ) : null}
       {contextMode === 'pull-request' && pullRequestActionNotice ? (
-        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--green)] bg-[var(--green-subtle)]">{pullRequestActionNotice}</div>
+        <UiPanelStatusStrip tone="success">
+          {pullRequestActionNotice}
+        </UiPanelStatusStrip>
       ) : null}
       {contextMode === 'pull-request' && pullRequestActionError ? (
-        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--red)] bg-[var(--red-subtle)]">{pullRequestActionError}</div>
+        <UiPanelStatusStrip tone="danger">
+          {pullRequestActionError}
+        </UiPanelStatusStrip>
       ) : null}
 
       {!repoAttached ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
-          {unavailableReason || 'Attach a repo to see source-control changes.'}
-        </div>
+        <UiPaneState
+          kind="unavailable"
+          title="Repository unavailable"
+          description={unavailableReason || 'Attach a repo to see source-control changes.'}
+        />
       ) : disabled ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
-          <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-              {provisioningLabel(hubPhase)}
-            </div>
-            <div className="mt-1">
+        <UiPaneState
+          kind={startup.timedOut ? 'warning' : 'loading'}
+          title={provisioningLabel(hubPhase)}
+          description={
+            <>
               {startup.timedOut
                 ? 'Still waiting for the repository to become available.'
                 : 'Waiting for repository…'}
-            </div>
             {String(hubMessage ?? '').trim() ? (
-              <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
+              <span className="mt-1 block">{String(hubMessage ?? '').trim()}</span>
             ) : null}
             {startup.timedOut ? (
-              <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
+              <span className="mt-2 block">
                 If this persists, check the drone status/error details in the sidebar.
-              </div>
+              </span>
             ) : null}
-          </div>
-        </div>
+            </>
+          }
+        />
       ) : primaryView === 'commits' ? (
         commitListError ? (
-          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--red)]">{commitListError}</div>
+          <UiPaneState
+            kind="error"
+            title="Could not load commits"
+            description={commitListError}
+          />
         ) : commitList.length === 0 && !commitListLoading ? (
-          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
-            {contextMode === 'pull-request'
+          <UiPaneState
+            kind="empty"
+            title="No commits found"
+            description={
+              contextMode === 'pull-request'
               ? pullRequestNumber
                 ? `No commits found for PR #${pullRequestNumber}.`
                 : 'No pull request selected.'
-              : 'No commits found for this branch context.'}
-          </div>
+                : 'No commits found for this branch context.'
+            }
+          />
         ) : (
           <CommitInspectionView
             contextMode={contextMode}
@@ -3448,40 +3451,14 @@ function LiveDroneChangesDock({
           />
         )
       ) : listError ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--red)]">{listError}</div>
+        <UiPaneState kind="error" title="Could not load changes" description={listError} />
       ) : entries.length === 0 && !listLoading ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
-          {allEntries.length > 0 && hideViewed ? (
-            <div className="inline-flex flex-col items-start gap-2">
-              <span>All files in this view are marked viewed. Turn off Hide Viewed to revisit them.</span>
-              <button
-                type="button"
-                onClick={() => setHideViewed(false)}
-                className="h-7 px-2.5 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--accent)] hover:bg-[var(--selected)]"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                Show Viewed Files
-              </button>
-            </div>
-          ) : dataMode === 'pull-request' ? (
-            pullRequestNumber ? `No file changes found for PR #${pullRequestNumber}.` : 'No pull request selected.'
-          ) : dataMode === 'pull-preview' ? (
-            <div className="inline-flex flex-col items-start gap-2">
-              <span>No apply changes to preview. This view only shows committed changes from the drone base to HEAD.</span>
-              <span>If you just cancelled Apply because of uncommitted files, open Working Tree to review them there.</span>
-              <button
-                type="button"
-                onClick={() => setBranchChangesMode('working-tree')}
-                className="h-7 px-2.5 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--accent)] hover:bg-[var(--selected)]"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                Open Working Tree
-              </button>
-            </div>
-          ) : (
-            'Working tree is clean.'
-          )}
-        </div>
+        <UiPaneState
+          kind="empty"
+          title={emptyChangesTitle}
+          description={emptyChangesDescription}
+          action={emptyChangesAction}
+        />
       ) : viewMode === 'stacked' ? (
         <div className="flex-1 min-h-0 overflow-auto">
           {dataMode === 'working-tree' ? (
@@ -3703,26 +3680,21 @@ function LiveDroneChangesDock({
             )}
           </div>
 
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            className={`group relative w-1.5 shrink-0 cursor-col-resize touch-none ${
-              explorerResizing ? 'bg-[var(--accent-subtle)]' : 'bg-transparent hover:bg-[var(--hover)]'
-            }`}
-            title="Drag to resize explorer. Double-click to reset to auto width."
-            onPointerDown={startExplorerResize}
-            onPointerMove={moveExplorerResize}
-            onPointerUp={finishExplorerResize}
-            onPointerCancel={finishExplorerResize}
-            onLostPointerCapture={finishExplorerResize}
-            onDoubleClick={resetExplorerWidthPreference}
-          >
-            <span
-              className={`pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 w-px ${
-                explorerResizing ? 'bg-[var(--accent)]' : 'bg-[var(--border-subtle)] group-hover:bg-[var(--accent-muted)]'
-              }`}
-            />
-          </div>
+          <UiResizeHandle
+            orientation="vertical"
+            value={explorerWidthPx}
+            min={explorerResizeBounds.minWidthPx}
+            max={explorerResizeBounds.maxWidthPx}
+            step={10}
+            label="Resize changes explorer"
+            reversed
+            onValueChange={setExplorerWidthPx}
+            onValueCommit={(nextWidth) =>
+              setExplorerManualWidthPx(Math.floor(nextWidth))
+            }
+            onResizingChange={setExplorerResizing}
+            onReset={resetExplorerWidthPreference}
+          />
 
           <div
             className={`shrink-0 overflow-hidden flex flex-col ${
@@ -3821,6 +3793,6 @@ function LiveDroneChangesDock({
           </div>
         </div>
       )}
-    </div>
+    </UiPanel>
   );
 }

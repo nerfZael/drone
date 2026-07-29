@@ -2,6 +2,15 @@ import React from 'react';
 import { useDndMonitor, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
 import { useShallow } from 'zustand/react/shallow';
 import type { ChatAgentConfig } from '../../domain';
+import {
+  UiPaneState,
+  UiPanel,
+  UiPanelBody,
+  UiPanelToolbar,
+  UiToolbarButton,
+  UiToolbarIconButton,
+  UiToolbarInput,
+} from '../../ui/components';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { DroneSummary } from '../types';
 import { IconTune } from '../app/icons';
@@ -1903,54 +1912,46 @@ export function DroneCanvasDock({
   );
 
   return (
-    <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] flex flex-col overflow-hidden">
-      <div className="flex-shrink-0 border-b border-[var(--border-subtle)]">
-        <div className="px-3 py-2 flex items-center gap-2 overflow-x-auto">
-          <button
-            type="button"
+    <UiPanel
+      surface="alternate"
+      flush
+      className="h-full w-full"
+    >
+        <UiPanelToolbar aria-label="Canvas controls" className="px-3 py-2">
+          <UiToolbarIconButton
             onClick={() => setCanvasControlsExpanded((expanded) => !expanded)}
-            className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border transition-all ${
-              canvasControlsExpanded
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
-            }`}
+            label={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
+            icon={<IconTune className="h-3.5 w-3.5" />}
+            tone="accent"
+            active={canvasControlsExpanded}
             title={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
-            aria-label={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
             aria-expanded={canvasControlsExpanded}
-          >
-            <IconTune className="h-3.5 w-3.5" />
-          </button>
+          />
           <div className="flex min-w-0 flex-1 items-center gap-1">
-            <label
-              className="inline-flex h-7 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded border border-[var(--border-subtle)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-              style={{ fontFamily: 'var(--display)' }}
+            <UiToolbarButton
+              pressed={showCanvasLastMessagePreviews}
+              onClick={() =>
+                setShowCanvasLastMessagePreviews(!showCanvasLastMessagePreviews)
+              }
               title="Show the latest agent reply above canvas nodes."
             >
-              <input
-                type="checkbox"
-                checked={showCanvasLastMessagePreviews}
-                onChange={(event) => setShowCanvasLastMessagePreviews(event.target.checked)}
-                className="h-3.5 w-3.5 accent-[var(--accent)]"
-              />
               Last msgs
-            </label>
+            </UiToolbarButton>
           </div>
           <div className="ml-auto flex flex-shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={resetViewport}
-              className="h-7 rounded border border-[var(--border-subtle)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-              title="Reset canvas view"
-            >
+            <UiToolbarButton onClick={resetViewport} title="Reset canvas view">
               Reset
-            </button>
+            </UiToolbarButton>
             <span className="w-[48px] text-right text-[var(--text-10)] font-mono text-[var(--muted-dim)]" title="Current zoom">
               {Math.round(scale * 100)}%
             </span>
           </div>
-        </div>
+        </UiPanelToolbar>
         {canvasControlsExpanded ? (
-          <div className="px-3 pb-2 flex items-center gap-2 flex-wrap">
+          <UiPanelToolbar
+            aria-label="Canvas creation defaults"
+            className="flex-wrap overflow-visible px-3 py-2"
+          >
             <div className="flex items-center gap-1.5">
               <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Agent
@@ -1965,20 +1966,13 @@ export function DroneCanvasDock({
                 panelClassName="w-[300px]"
                 title="Choose agent for canvas-created drones."
               />
-              <button
-                type="button"
+              <UiToolbarButton
                 onClick={onOpenCustomAgentModal}
                 disabled={controlsDisabled}
-                className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                  controlsDisabled
-                    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
-                    : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
                 title="Manage custom agents"
               >
                 Custom
-              </button>
+              </UiToolbarButton>
             </div>
             {spawnAgentConfig.kind === 'builtin' ? (
               <div className="flex items-center gap-1.5">
@@ -2000,7 +1994,7 @@ export function DroneCanvasDock({
                   searchable
                   searchPlaceholder="Search models"
                 />
-                <input
+                <UiToolbarInput
                   value={normalizedSpawnModel}
                   onChange={(event) => onSpawnModelChange(event.target.value)}
                   onKeyDown={(event) => {
@@ -2008,27 +2002,16 @@ export function DroneCanvasDock({
                   }}
                   disabled={controlsDisabled}
                   placeholder="Default model"
-                  className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-11)] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
-                    controlsDisabled
-                      ? 'opacity-40 cursor-not-allowed'
-                      : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
-                  }`}
+                  className="w-[150px]"
                   title="Set default model for canvas-created drones."
                 />
-                <button
-                  type="button"
+                <UiToolbarButton
                   onClick={() => onSpawnModelChange('')}
                   disabled={controlsDisabled || !normalizedSpawnModel.trim()}
-                  className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                    controlsDisabled || !normalizedSpawnModel.trim()
-                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
-                      : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
                   title="Clear model override"
                 >
                   Clear
-                </button>
+                </UiToolbarButton>
               </div>
             ) : null}
             <div className="flex items-center gap-1.5">
@@ -2053,7 +2036,7 @@ export function DroneCanvasDock({
               <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Group
               </span>
-              <input
+              <UiToolbarInput
                 value={normalizedCreateGroup}
                 onChange={(event) => onCreateGroupChange(event.target.value)}
                 onKeyDown={(event) => {
@@ -2061,27 +2044,16 @@ export function DroneCanvasDock({
                 }}
                 disabled={controlsDisabled}
                 placeholder="Optional group"
-                className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-11)] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
-                  controlsDisabled
-                    ? 'opacity-40 cursor-not-allowed'
-                    : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
-                }`}
+                className="w-[150px]"
                 title="Set group for canvas-created drones."
               />
-              <button
-                type="button"
+              <UiToolbarButton
                 onClick={() => onCreateGroupChange('')}
                 disabled={controlsDisabled || !normalizedCreateGroup.trim()}
-                className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                  controlsDisabled || !normalizedCreateGroup.trim()
-                    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
-                    : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
                 title="Clear group"
               >
                 Clear
-              </button>
+              </UiToolbarButton>
             </div>
             <label
               className={`inline-flex items-center gap-1.5 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
@@ -2101,11 +2073,10 @@ export function DroneCanvasDock({
               />
               Pull host branch
             </label>
-          </div>
+          </UiPanelToolbar>
         ) : null}
-      </div>
 
-      <div
+      <UiPanelBody
         ref={setViewportNodeRef}
         tabIndex={0}
         data-shortcut-capture="true"
@@ -2392,37 +2363,31 @@ export function DroneCanvasDock({
         />
 
         {nodes.length === 0 ? (
-          <div className="absolute inset-0 grid place-items-center px-5 text-center pointer-events-none">
-            <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-overlay-soft)] px-4 py-3 max-w-[380px]">
-              <div className="text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                Drone Canvas
-              </div>
-              <div className="mt-1 text-[var(--text-12)] text-[var(--muted)]">
-                Drag one or more chats from the sidebar and drop them here.
-              </div>
-              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
-                Double-click to create an untitled draft card.
-              </div>
-              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
-                Ctrl-click toggles selection. Left drag draws a selection box.
-              </div>
-              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
-                Esc clears selection. Delete removes selected cards. Shift+Delete deletes selected chats.
-              </div>
-              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
-                Ctrl/Cmd+A selects all nodes.
-              </div>
-              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
-                Right-click drag pans. Mouse wheel zooms.
-              </div>
-            </div>
-          </div>
+          <UiPaneState
+            kind="empty"
+            title="Drone Canvas"
+            description={
+              <>
+                <span className="block">Drag one or more chats from the sidebar and drop them here.</span>
+                <span className="mt-1 block">
+                  Double-click creates a draft. Ctrl-click toggles selection; left drag selects.
+                </span>
+                <span className="mt-1 block">
+                  Esc clears selection. Delete removes cards. Shift+Delete deletes chats.
+                </span>
+                <span className="mt-1 block">
+                  Ctrl/Cmd+A selects all nodes. Right-click drag pans; the wheel zooms.
+                </span>
+              </>
+            }
+            className="pointer-events-none absolute inset-0"
+          />
         ) : null}
 
         {dragOverCanvas ? (
           <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)]" />
         ) : null}
-      </div>
-    </div>
+      </UiPanelBody>
+    </UiPanel>
   );
 }
