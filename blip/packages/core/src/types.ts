@@ -28,6 +28,8 @@ export interface BlipSessionState {
   forkedFromEntryId?: string;
   providerSessionId?: string;
   providerThreadId?: string;
+  /** Host-owned durable state that must survive suspended-run continuations. */
+  extensions?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }

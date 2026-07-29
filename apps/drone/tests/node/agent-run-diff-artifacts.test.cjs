@@ -17,6 +17,7 @@ const {
 const {
   captureAssistantArtifactRunFileChangesBaseline,
   captureDroneRunFileChangesBaseline,
+  discardAssistantArtifactRunFileChangesBaseline,
   finalizeAssistantArtifactRunFileChanges,
   finalizeDroneRunFileChanges,
 } = require('../../dist/hub/run-file-changes.js');
@@ -282,6 +283,16 @@ describe('agent run diff artifacts', () => {
     assert.match(historical.patch, /-before[\s\S]*\+after/);
     assert.deepEqual(historical.owner, { threadId: 'thread-1', turnId: 'turn-1' });
     assert.equal(fs.existsSync(baseline.temporaryGitDir), false);
+  });
+
+  test('rejects unsafe restored assistant artifact baseline directories', async () => {
+    await assert.rejects(
+      discardAssistantArtifactRunFileChangesBaseline({
+        temporaryGitDir: os.tmpdir(),
+      }),
+      /invalid assistant artifact run baseline directory/,
+    );
+    assert.equal(fs.existsSync(os.tmpdir()), true);
   });
 
   test('expires old artifacts and removes their files', async () => {

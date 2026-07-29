@@ -75,6 +75,7 @@ import { useChatMcpAccess } from './use-chat-mcp-access';
 import { parseDroneHubDragData } from './drone-hub-dnd';
 import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
+import type { LocalAutoUpdates, LocalCheckoutView } from './use-local-checkout';
 
 type LaunchHint =
   | {
@@ -184,6 +185,41 @@ function HeaderMenuToggleRow({
   );
 }
 
+function HeaderMenuRadioRow({
+  label,
+  checked,
+  disabled = false,
+  onSelect,
+}: {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onSelect}
+      className={cn(
+        dropdownMenuItemBaseClass,
+        'flex items-center justify-between gap-4 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+      )}
+    >
+      <span>{label}</span>
+      <span
+        aria-hidden="true"
+        className={cn(
+          'h-2 w-2 rounded-full',
+          checked ? 'bg-[var(--accent)]' : 'bg-transparent',
+        )}
+      />
+    </button>
+  );
+}
+
 function HeaderMenuChoiceGroup<T extends string>({
   label,
   value,
@@ -287,6 +323,14 @@ type SelectedDroneWorkspaceProps = {
   openingEditor: { editor: 'code' | 'cursor' } | null;
   pullRepoChanges: () => Promise<void>;
   pushRepoChanges: () => Promise<void>;
+  localCheckout: LocalCheckoutView | null;
+  localCheckoutLoading: boolean;
+  localCheckoutBusy: boolean;
+  useRepoLocally: () => Promise<void>;
+  updateRepoLocally: () => Promise<void>;
+  setLocalAutoUpdates: (mode: LocalAutoUpdates) => Promise<void>;
+  returnRepoLocalCheckout: () => Promise<void>;
+  applyRepoLocalCheckout: () => Promise<void>;
   onRequestDropActions: (targetDroneId: string, sourceDroneIds: string[]) => { ok: boolean; error?: string | null };
   repoOp: { kind: 'pull' | 'push' | 'reseed' | 'pull-from-drone' | 'push-to-drone' } | null;
   headerOverflowRef: React.RefObject<HTMLDivElement | null>;
@@ -389,6 +433,14 @@ export function SelectedDroneWorkspace({
   openingEditor,
   pullRepoChanges,
   pushRepoChanges,
+  localCheckout,
+  localCheckoutLoading,
+  localCheckoutBusy,
+  useRepoLocally,
+  updateRepoLocally,
+  setLocalAutoUpdates,
+  returnRepoLocalCheckout,
+  applyRepoLocalCheckout,
   onRequestDropActions,
   repoOp,
   headerOverflowRef,
@@ -600,8 +652,20 @@ export function SelectedDroneWorkspace({
             : repoOp?.kind === 'reseed'
               ? 'Reseeding'
               : 'Sync';
+  const localSession = localCheckout?.session ?? null;
+  const localActiveForCurrentDrone = localSession?.droneId === currentDrone.id;
+  const localActiveForAnotherDrone = Boolean(localSession && !localActiveForCurrentDrone);
+  const localActionDisabled = localCheckoutLoading || Boolean(repoOp);
+  const syncButtonLabel = localCheckoutBusy
+    ? 'Working…'
+    : localActiveForCurrentDrone
+      ? 'Local'
+      : repoSyncBusyLabel;
   const syncDisabled =
-    isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp);
+    isDroneStartingOrSeeding(currentDrone.hubPhase) ||
+    Boolean(openingEditor) ||
+    Boolean(openingTerminal) ||
+    Boolean(repoOp);
   const {
     fleetBadgeAssigning,
     fleetBadgeDropActive,
@@ -1180,36 +1244,183 @@ export function SelectedDroneWorkspace({
                 aria-expanded={syncMenuOpen}
                 className="dh-type-header-action--emphasis"
               >
-                <span>{hostRuntime ? 'Sync (host)' : repoSyncBusyLabel}</span>
+                <span>{hostRuntime ? 'Sync (host)' : syncButtonLabel}</span>
                 <IconChevron down={!syncMenuOpen} className="opacity-75" />
               </HeaderActionButton>
               {syncMenuOpen && !syncDisabled ? (
-                <HeaderDropdownPortal open={syncMenuOpen} anchorRef={syncMenuRef} width={220}>
+                <HeaderDropdownPortal open={syncMenuOpen} anchorRef={syncMenuRef} width={260}>
                   <div className="py-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSyncMenuOpen(false);
-                        void pullRepoChanges();
-                      }}
-                      className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]')}
-                      role="menuitem"
-                      title={hostRuntime ? 'Host runtime uses the host repository directly; this action is a no-op.' : 'Apply this drone repo into the host repo'}
-                    >
-                      Apply to host
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSyncMenuOpen(false);
-                        void pushRepoChanges();
-                      }}
-                      className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]')}
-                      role="menuitem"
-                      title={hostRuntime ? 'Host runtime uses the host repository directly; this action is a no-op.' : 'Pull the current host branch into this drone repo'}
-                    >
-                      Pull from host
-                    </button>
+                    {hostRuntime ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSyncMenuOpen(false);
+                            void pullRepoChanges();
+                          }}
+                          className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]')}
+                          role="menuitem"
+                          title="Host runtime uses the host repository directly; this action is a no-op."
+                        >
+                          Apply to host
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSyncMenuOpen(false);
+                            void pushRepoChanges();
+                          }}
+                          className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]')}
+                          role="menuitem"
+                          title="Host runtime uses the host repository directly; this action is a no-op."
+                        >
+                          Pull from host
+                        </button>
+                      </>
+                    ) : localActiveForCurrentDrone ? (
+                      <>
+                        <div className="px-3 py-2 text-[var(--text-10)] text-[var(--muted)]">
+                          <div className="text-[var(--fg-secondary)]">Using this drone locally</div>
+                          <div className="mt-0.5">
+                            {localSession?.snapshotKind === 'working-tree'
+                              ? `${localSession.sourceDirtyFileCount} uncommitted ${
+                                  localSession.sourceDirtyFileCount === 1 ? 'file' : 'files'
+                                } included`
+                              : 'Committed changes'}
+                          </div>
+                        </div>
+                        <div className="my-1 border-t border-[var(--border)]" />
+                        <button
+                          type="button"
+                          disabled={localActionDisabled}
+                          onClick={() => {
+                            setSyncMenuOpen(false);
+                            void updateRepoLocally();
+                          }}
+                          className={cn(
+                            dropdownMenuItemBaseClass,
+                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                          )}
+                          role="menuitem"
+                          title="Refresh the host working tree from this drone"
+                        >
+                          Update
+                        </button>
+                        <button
+                          type="button"
+                          disabled={localActionDisabled}
+                          onClick={() => {
+                            setSyncMenuOpen(false);
+                            void applyRepoLocalCheckout();
+                          }}
+                          className={cn(
+                            dropdownMenuItemBaseClass,
+                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                          )}
+                          role="menuitem"
+                          title="Apply this exact version through the normal host merge flow"
+                        >
+                          Apply
+                        </button>
+                        <button
+                          type="button"
+                          disabled={localActionDisabled}
+                          onClick={() => {
+                            setSyncMenuOpen(false);
+                            void returnRepoLocalCheckout();
+                          }}
+                          className={cn(
+                            dropdownMenuItemBaseClass,
+                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                          )}
+                          role="menuitem"
+                          title="Return to the branch that was checked out before using this drone locally"
+                        >
+                          Return
+                        </button>
+                        <div className="my-1 border-t border-[var(--border)]" />
+                        <div className="px-3 pb-1 pt-2 text-[var(--text-10)] uppercase tracking-wide text-[var(--muted)]">
+                          Auto-updates
+                        </div>
+                        {([
+                          ['off', 'Off'],
+                          ['commits', 'Commits only'],
+                          ['all', 'All changes'],
+                        ] as const).map(([mode, label]) => (
+                          <HeaderMenuRadioRow
+                            key={mode}
+                            label={label}
+                            checked={(localCheckout?.autoUpdates ?? 'off') === mode}
+                            disabled={localActionDisabled}
+                            onSelect={() => {
+                              setSyncMenuOpen(false);
+                              void setLocalAutoUpdates(mode);
+                            }}
+                          />
+                        ))}
+                      </>
+                    ) : (
+                      <>
+                        {localActiveForAnotherDrone ? (
+                          <div className="px-3 py-2 text-[var(--text-10)] text-[var(--muted)]">
+                            Switches local use from {localSession?.droneName || 'the other drone'}.
+                          </div>
+                        ) : null}
+                        <button
+                          type="button"
+                          disabled={localActionDisabled}
+                          onClick={() => {
+                            setSyncMenuOpen(false);
+                            void useRepoLocally();
+                          }}
+                          className={cn(
+                            dropdownMenuItemBaseClass,
+                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                          )}
+                          role="menuitem"
+                          title={
+                            localCheckout?.autoUpdates === 'all'
+                              ? "Use this drone's committed and uncommitted code in the current host working tree"
+                              : "Use this drone's committed code in the current host working tree"
+                          }
+                        >
+                          Use locally
+                        </button>
+                        <div className="my-1 border-t border-[var(--border)]" />
+                        <button
+                          type="button"
+                          disabled={localCheckoutBusy}
+                          onClick={() => {
+                            setSyncMenuOpen(false);
+                            void pullRepoChanges();
+                          }}
+                          className={cn(
+                            dropdownMenuItemBaseClass,
+                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                          )}
+                          role="menuitem"
+                          title="Apply this drone repo into the host repo"
+                        >
+                          Apply to host
+                        </button>
+                        <button
+                          type="button"
+                          disabled={localCheckoutBusy}
+                          onClick={() => {
+                            setSyncMenuOpen(false);
+                            void pushRepoChanges();
+                          }}
+                          className={cn(
+                            dropdownMenuItemBaseClass,
+                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                          )}
+                          role="menuitem"
+                          title="Pull the current host branch into this drone repo"
+                        >
+                          Pull from host
+                        </button>
+                      </>
+                    )}
                   </div>
                 </HeaderDropdownPortal>
               ) : null}

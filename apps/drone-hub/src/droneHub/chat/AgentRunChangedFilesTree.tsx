@@ -148,11 +148,13 @@ export function AgentRunChangedFilesTree({
             <span className={`min-w-0 truncate ${panelAppearance ? 'text-[var(--text-12)]' : 'font-mono text-[var(--text-10)]'}`}>
               {node.name}
             </span>
-            <DiffStats
-              additions={node.stats.additions}
-              deletions={node.stats.deletions}
-              appearance={appearance}
-            />
+            {!open ? (
+              <DiffStats
+                additions={node.stats.additions}
+                deletions={node.stats.deletions}
+                appearance={appearance}
+              />
+            ) : null}
           </button>
           {open ? node.children.map((child) => renderNode(child, depth + 1)) : null}
         </div>

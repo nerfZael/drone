@@ -16,6 +16,9 @@ type CreateDraftWorkflowState = {
   draftCreateName: string;
   draftCreateGroup: string;
   draftCreateParentDroneId: string | null;
+  draftAgentsMdLibraryFileId: string;
+  draftAgentsMdOverrideEnabled: boolean;
+  draftAgentsMdOverride: string;
   draftCreateError: string | null;
   draftCreating: boolean;
   draftAutoRenaming: boolean;
@@ -31,6 +34,9 @@ type CreateDraftWorkflowState = {
   setDraftCreateName: (next: Updater<string>) => void;
   setDraftCreateGroup: (next: Updater<string>) => void;
   setDraftCreateParentDroneId: (next: Updater<string | null>) => void;
+  setDraftAgentsMdLibraryFileId: (next: Updater<string>) => void;
+  setDraftAgentsMdOverrideEnabled: (next: Updater<boolean>) => void;
+  setDraftAgentsMdOverride: (next: Updater<string>) => void;
   setDraftCreateError: (next: Updater<string | null>) => void;
   setDraftCreating: (next: Updater<boolean>) => void;
   setDraftAutoRenaming: (next: Updater<boolean>) => void;
@@ -53,6 +59,9 @@ const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
   draftCreateName: '',
   draftCreateGroup: '',
   draftCreateParentDroneId: null,
+  draftAgentsMdLibraryFileId: '',
+  draftAgentsMdOverrideEnabled: false,
+  draftAgentsMdOverride: '',
   draftCreateError: null,
   draftCreating: false,
   draftAutoRenaming: false,
@@ -68,6 +77,16 @@ const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
   setDraftCreateName: (next) => set((s) => ({ draftCreateName: resolveNext(s.draftCreateName, next) })),
   setDraftCreateGroup: (next) => set((s) => ({ draftCreateGroup: resolveNext(s.draftCreateGroup, next) })),
   setDraftCreateParentDroneId: (next) => set((s) => ({ draftCreateParentDroneId: resolveNext(s.draftCreateParentDroneId, next) })),
+  setDraftAgentsMdLibraryFileId: (next) =>
+    set((s) => ({
+      draftAgentsMdLibraryFileId: resolveNext(s.draftAgentsMdLibraryFileId, next),
+    })),
+  setDraftAgentsMdOverrideEnabled: (next) =>
+    set((s) => ({
+      draftAgentsMdOverrideEnabled: resolveNext(s.draftAgentsMdOverrideEnabled, next),
+    })),
+  setDraftAgentsMdOverride: (next) =>
+    set((s) => ({ draftAgentsMdOverride: resolveNext(s.draftAgentsMdOverride, next) })),
   setDraftCreateError: (next) => set((s) => ({ draftCreateError: resolveNext(s.draftCreateError, next) })),
   setDraftCreating: (next) => set((s) => ({ draftCreating: resolveNext(s.draftCreating, next) })),
   setDraftAutoRenaming: (next) => set((s) => ({ draftAutoRenaming: resolveNext(s.draftAutoRenaming, next) })),
@@ -89,6 +108,9 @@ export function useCreateDraftWorkflowState() {
       draftCreateName: s.draftCreateName,
       draftCreateGroup: s.draftCreateGroup,
       draftCreateParentDroneId: s.draftCreateParentDroneId,
+      draftAgentsMdLibraryFileId: s.draftAgentsMdLibraryFileId,
+      draftAgentsMdOverrideEnabled: s.draftAgentsMdOverrideEnabled,
+      draftAgentsMdOverride: s.draftAgentsMdOverride,
       draftCreateError: s.draftCreateError,
       draftCreating: s.draftCreating,
       draftAutoRenaming: s.draftAutoRenaming,
@@ -104,6 +126,9 @@ export function useCreateDraftWorkflowState() {
       setDraftCreateName: s.setDraftCreateName,
       setDraftCreateGroup: s.setDraftCreateGroup,
       setDraftCreateParentDroneId: s.setDraftCreateParentDroneId,
+      setDraftAgentsMdLibraryFileId: s.setDraftAgentsMdLibraryFileId,
+      setDraftAgentsMdOverrideEnabled: s.setDraftAgentsMdOverrideEnabled,
+      setDraftAgentsMdOverride: s.setDraftAgentsMdOverride,
       setDraftCreateError: s.setDraftCreateError,
       setDraftCreating: s.setDraftCreating,
       setDraftAutoRenaming: s.setDraftAutoRenaming,

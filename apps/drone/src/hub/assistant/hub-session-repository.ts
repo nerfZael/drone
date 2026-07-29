@@ -22,9 +22,7 @@ function nowIso(): string {
 }
 
 function nonnegativeFiniteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
-    ? value
-    : undefined;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function readContextUsage(value: unknown): BlipContextUsage | undefined {
@@ -500,6 +498,7 @@ export class HubSessionRepository implements SessionRepository {
           OR (
             json_extract(entry_json, '$.type') = 'runtime_event'
             AND json_extract(entry_json, '$.event.type') = 'session_finished'
+            AND json_extract(entry_json, '$.event.status') != 'suspended'
             AND COALESCE(json_extract(entry_json, '$.event.fileChanges.counts.changed'), 0) > 0
           )
         )
@@ -511,16 +510,88 @@ export class HubSessionRepository implements SessionRepository {
       .all(sessionId, before, before, limit + 1) as Array<{ sequence: number; entry_json: string }>;
     const hasOlder = rows.length > limit;
     const selected = (hasOlder ? rows.slice(0, limit) : rows).reverse();
+    const previousUserSequence = this.db.prepare(`
+      SELECT MAX(sequence) AS sequence
+      FROM assistant_blip_entries
+      WHERE session_id = ?
+        AND sequence < ?
+        AND json_extract(entry_json, '$.type') = 'message'
+        AND json_extract(entry_json, '$.message.role') = 'user'
+    `);
+    const nextConversationBoundary = this.db.prepare(`
+      SELECT sequence, entry_json
+      FROM assistant_blip_entries
+      WHERE session_id = ?
+        AND sequence > ?
+        AND (
+          (
+            json_extract(entry_json, '$.type') = 'message'
+            AND json_extract(entry_json, '$.message.role') IN ('user', 'assistant')
+          )
+          OR (
+            json_extract(entry_json, '$.type') = 'runtime_event'
+            AND json_extract(entry_json, '$.event.type') = 'session_finished'
+          )
+        )
+      ORDER BY sequence
+      LIMIT 1
+    `);
+    const requestDurationThrough = this.db.prepare(`
+      SELECT COALESCE(SUM(json_extract(entry_json, '$.event.durationMs')), 0) AS duration_ms
+      FROM assistant_blip_entries
+      WHERE session_id = ?
+        AND sequence > ?
+        AND sequence <= ?
+        AND json_extract(entry_json, '$.type') = 'runtime_event'
+        AND json_extract(entry_json, '$.event.type') = 'session_finished'
+    `);
+    const durationThrough = (sequence: number): number | undefined => {
+      const previous = previousUserSequence.get(sessionId, sequence) as
+        | { sequence?: number }
+        | undefined;
+      const result = requestDurationThrough.get(
+        sessionId,
+        Math.max(0, Number(previous?.sequence) || 0),
+        sequence,
+      ) as { duration_ms?: number } | undefined;
+      const durationMs = Number(result?.duration_ms);
+      return Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : undefined;
+    };
     const entries = selected.flatMap<BlipHistoryPage['entries'][number]>((row) => {
       try {
         const entry = JSON.parse(row.entry_json) as TranscriptEntry;
         if (entry.type === 'message') {
+          let message = entry.message;
+          if (message.role === 'assistant') {
+            const next = nextConversationBoundary.get(sessionId, row.sequence) as
+              | { sequence: number; entry_json?: string }
+              | undefined;
+            if (next?.entry_json) {
+              const boundary = JSON.parse(next.entry_json) as TranscriptEntry;
+              if (boundary.type === 'runtime_event' && boundary.event.type === 'session_finished') {
+                const durationMs = durationThrough(next.sequence);
+                if (durationMs !== undefined) {
+                  const messageDetails = (message as any).details;
+                  const details =
+                    messageDetails &&
+                    typeof messageDetails === 'object' &&
+                    !Array.isArray(messageDetails)
+                      ? messageDetails
+                      : {};
+                  message = {
+                    ...message,
+                    details: { ...details, runDurationMs: durationMs },
+                  } as typeof message;
+                }
+              }
+            }
+          }
           return [
             {
               sequence: Number(row.sequence),
               id: entry.id,
               timestamp: entry.timestamp,
-              message: entry.message,
+              message,
             },
           ];
         }
@@ -546,6 +617,7 @@ export class HubSessionRepository implements SessionRepository {
           ];
         }
         if (entry.type === 'runtime_event' && entry.event.type === 'session_finished') {
+          const durationMs = durationThrough(row.sequence) ?? entry.event.durationMs;
           return [
             {
               sequence: Number(row.sequence),
@@ -557,8 +629,8 @@ export class HubSessionRepository implements SessionRepository {
                 details: {
                   turnId: entry.event.turnId,
                   status: entry.event.status,
-                  durationMs: entry.event.durationMs,
-                  fileChanges: entry.event.fileChanges,
+                  durationMs,
+                  ...(entry.event.fileChanges ? { fileChanges: entry.event.fileChanges } : {}),
                 },
               },
             },
@@ -609,10 +681,7 @@ export class HubSessionRepository implements SessionRepository {
       `,
         )
         .get(sessionId) as { sequence: number; entry_json?: string } | undefined;
-      if (
-        latestCompactionRow?.entry_json &&
-        latestCompactionRow.sequence > contextUsageSequence
-      ) {
+      if (latestCompactionRow?.entry_json && latestCompactionRow.sequence > contextUsageSequence) {
         try {
           const entry = JSON.parse(latestCompactionRow.entry_json) as TranscriptEntry;
           const tokensAfter =

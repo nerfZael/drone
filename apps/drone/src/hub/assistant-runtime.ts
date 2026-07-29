@@ -1,4 +1,5 @@
 import type http from 'node:http';
+import type { BlipSessionState } from '@blip/core';
 
 import { loadRegistry } from '../host/registry';
 import { normalizeDroneRuntime } from '../host/runtime';
@@ -220,24 +221,105 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         loadBlipTools(),
       ]);
       const workspaceDrones = await assistantService.workspaceDrones(threadId);
+      const runFileChangesExtensionKey = 'droneHub.nativeRunFileChanges';
       let activeRunTurnId = '';
+      let activeRunSession: BlipSessionState | null = null;
       const baselineByDroneId = new Map<
         string,
         Promise<{ baseline: AgentRunFileChangesBaseline; drone: any } | null>
       >();
+      const capturedBaselineByDroneId = new Map<string, AgentRunFileChangesBaseline>();
       let artifactBaseline: Promise<AssistantArtifactRunFileChangesBaseline | null> | null = null;
-      const beginRunFileChanges = (turnId: string) => {
-        const staleArtifactBaseline = artifactBaseline;
+      let capturedArtifactBaseline: AssistantArtifactRunFileChangesBaseline | null = null;
+
+      type DurableRunFileChangesState = {
+        version: 1;
+        turnId: string;
+        droneBaselines: AgentRunFileChangesBaseline[];
+        artifactBaseline?: AssistantArtifactRunFileChangesBaseline;
+      };
+
+      const durableRunFileChangesState = (
+        session: BlipSessionState,
+      ): DurableRunFileChangesState | null => {
+        const value = session.extensions?.[runFileChangesExtensionKey];
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+        const candidate = value as Partial<DurableRunFileChangesState>;
+        if (candidate.version !== 1 || !String(candidate.turnId ?? '').trim()) return null;
+        return {
+          version: 1,
+          turnId: String(candidate.turnId),
+          droneBaselines: Array.isArray(candidate.droneBaselines)
+            ? candidate.droneBaselines.filter((baseline) => baseline?.version === 1)
+            : [],
+          ...(candidate.artifactBaseline?.version === 1
+            ? { artifactBaseline: candidate.artifactBaseline }
+            : {}),
+        };
+      };
+
+      const persistRunFileChangesState = () => {
+        if (!activeRunSession || !activeRunTurnId) return;
+        activeRunSession.extensions = {
+          ...(activeRunSession.extensions ?? {}),
+          [runFileChangesExtensionKey]: {
+            version: 1,
+            turnId: activeRunTurnId,
+            droneBaselines: Array.from(capturedBaselineByDroneId.values()),
+            ...(capturedArtifactBaseline ? { artifactBaseline: capturedArtifactBaseline } : {}),
+          } satisfies DurableRunFileChangesState,
+        };
+      };
+
+      const clearDurableRunFileChangesState = (session: BlipSessionState | null) => {
+        if (!session?.extensions || !(runFileChangesExtensionKey in session.extensions)) return;
+        const extensions = { ...session.extensions };
+        delete extensions[runFileChangesExtensionKey];
+        session.extensions = extensions;
+      };
+
+      const beginRunFileChanges = async (session: BlipSessionState, turnId: string) => {
+        const staleState = durableRunFileChangesState(session);
+        const staleArtifactBaseline =
+          staleState?.artifactBaseline ??
+          (artifactBaseline ? await artifactBaseline.catch(() => null) : null);
         artifactBaseline = null;
         if (staleArtifactBaseline) {
-          void staleArtifactBaseline.then((baseline) =>
-            baseline
-              ? discardAssistantArtifactRunFileChangesBaseline(baseline).catch(() => undefined)
-              : undefined,
+          await discardAssistantArtifactRunFileChangesBaseline(staleArtifactBaseline).catch(
+            () => undefined,
           );
         }
+        clearDurableRunFileChangesState(session);
+        activeRunSession = session;
         activeRunTurnId = turnId;
         baselineByDroneId.clear();
+        capturedBaselineByDroneId.clear();
+        capturedArtifactBaseline = null;
+        persistRunFileChangesState();
+      };
+
+      const continueRunFileChanges = async (session: BlipSessionState, turnId: string) => {
+        activeRunSession = session;
+        const durable = durableRunFileChangesState(session);
+        if (!durable) {
+          await beginRunFileChanges(session, turnId);
+          return;
+        }
+        activeRunTurnId = durable.turnId;
+        baselineByDroneId.clear();
+        capturedBaselineByDroneId.clear();
+        for (const baseline of durable.droneBaselines) {
+          const settled = { baseline, drone: null };
+          const capture = Promise.resolve(settled);
+          if (baseline.droneId) {
+            baselineByDroneId.set(baseline.droneId, capture);
+            capturedBaselineByDroneId.set(baseline.droneId, baseline);
+          }
+        }
+        capturedArtifactBaseline = durable.artifactBaseline ?? null;
+        artifactBaseline = durable.artifactBaseline
+          ? Promise.resolve(durable.artifactBaseline)
+          : null;
       };
       const captureRunFileChangesBaseline = async (droneId: string) => {
         if (!activeRunTurnId || baselineByDroneId.has(droneId)) {
@@ -264,6 +346,10 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             });
             return null;
           });
+        void capture.then((settled) => {
+          if (settled?.baseline) capturedBaselineByDroneId.set(droneId, settled.baseline);
+          persistRunFileChangesState();
+        });
         baselineByDroneId.set(droneId, capture);
         await capture;
       };
@@ -272,10 +358,9 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           await artifactBaseline;
           return;
         }
-        const turnId = activeRunTurnId;
         artifactBaseline = captureAssistantArtifactRunFileChangesBaseline({
           threadId,
-          turnId,
+          turnId: activeRunTurnId,
         }).catch((error: any) => {
           hubLog('warn', 'failed capturing native agent artifact changes baseline', {
             threadId,
@@ -283,10 +368,15 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           });
           return null;
         });
+        const capture = artifactBaseline;
+        void capture.then((settled) => {
+          capturedArtifactBaseline = settled;
+          persistRunFileChangesState();
+        });
         await artifactBaseline;
       };
-      const finishRunFileChanges = async (turnId: string) => {
-        if (!turnId || turnId !== activeRunTurnId) return null;
+      const finishRunFileChanges = async () => {
+        if (!activeRunTurnId) return null;
         const pendingArtifactBaseline = artifactBaseline;
         let artifactCleanupHandled = false;
         try {
@@ -330,11 +420,13 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           const workspaces = await Promise.all(workspaceCaptures);
           return combineAgentRunFileChanges(workspaces.filter((workspace) => workspace !== null));
         } finally {
-          if (activeRunTurnId === turnId) {
-            activeRunTurnId = '';
-            baselineByDroneId.clear();
-            artifactBaseline = null;
-          }
+          clearDurableRunFileChangesState(activeRunSession);
+          activeRunTurnId = '';
+          activeRunSession = null;
+          baselineByDroneId.clear();
+          capturedBaselineByDroneId.clear();
+          artifactBaseline = null;
+          capturedArtifactBaseline = null;
           if (pendingArtifactBaseline && !artifactCleanupHandled) {
             const capturedArtifactBaseline = await pendingArtifactBaseline;
             if (capturedArtifactBaseline) {
@@ -682,10 +774,14 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             },
           );
         },
-        beforePrompt: ({ turnId }) => beginRunFileChanges(turnId),
-        afterPrompt: async ({ turnId }) => {
+        beforePrompt: ({ session, turnId, kind }) =>
+          kind === 'prompt'
+            ? beginRunFileChanges(session, turnId)
+            : continueRunFileChanges(session, turnId),
+        afterPrompt: async ({ status }) => {
+          if (status === 'suspended') return undefined;
           try {
-            const fileChanges = await finishRunFileChanges(turnId);
+            const fileChanges = await finishRunFileChanges();
             return fileChanges ? { fileChanges } : undefined;
           } catch (error: any) {
             hubLog('warn', 'failed collecting native agent run file changes', {

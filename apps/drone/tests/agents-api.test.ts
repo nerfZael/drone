@@ -73,6 +73,56 @@ describeSocketSuite('agents api', () => {
     expect((reg as any).settings?.agents?.content).toBeUndefined();
   });
 
+  test('creates, updates, reads, and deletes named AGENTS.md files', async () => {
+    const created = await apiFetch('/api/settings/agents/files', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Backend work',
+        content: '# Backend instructions\r\nRun the focused tests.',
+      }),
+    });
+
+    expect(created.r.status).toBe(201);
+    expect(created.data.file).toMatchObject({
+      name: 'Backend work',
+      content: '# Backend instructions\nRun the focused tests.\n',
+    });
+    expect(created.data.files).toHaveLength(1);
+    expect(created.data.files[0]).not.toHaveProperty('content');
+    const fileId = String(created.data.file.id);
+
+    const read = await apiFetch(`/api/settings/agents/files/${encodeURIComponent(fileId)}`);
+    expect(read.r.status).toBe(200);
+    expect(read.data.file.content).toBe('# Backend instructions\nRun the focused tests.\n');
+
+    const updated = await apiFetch(
+      `/api/settings/agents/files/${encodeURIComponent(fileId)}`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Backend work', content: '# Updated' }),
+      },
+    );
+    expect(updated.r.status).toBe(200);
+    expect(updated.data.file.content).toBe('# Updated\n');
+
+    const duplicate = await apiFetch('/api/settings/agents/files', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'backend work', content: '# Duplicate' }),
+    });
+    expect(duplicate.r.status).toBe(400);
+    expect(String(duplicate.data.error)).toContain('already exists');
+
+    const removed = await apiFetch(
+      `/api/settings/agents/files/${encodeURIComponent(fileId)}`,
+      { method: 'DELETE' },
+    );
+    expect(removed.r.status).toBe(200);
+    expect(removed.data.files).toEqual([]);
+  });
+
   test('stores per-repo override mode and resolves effective content', async () => {
     const save = await apiFetch('/api/repo-agents', {
       method: 'POST',

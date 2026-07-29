@@ -94,6 +94,10 @@ export function SettingsView({
     llm.savingLlmProvider ||
     agents.agentsSettingsLoading ||
     agents.savingAgentsSettings ||
+    agents.agentsFileLoading ||
+    agents.savingAgentsFile ||
+    agents.deletingAgentsFile ||
+    agents.importingAgentsFiles ||
     skillLibrary.skillsLoading ||
     skillLibrary.skillSourcesLoading ||
     skillLibrary.sourceSkillsLoading ||
@@ -117,7 +121,9 @@ export function SettingsView({
     Boolean(profile.activatingProfileName) ||
     Boolean(profile.deletingProfileName);
   const activeTabMeta = SETTINGS_TABS.find((tab) => tab.id === activeTab) ?? SETTINGS_TABS[0];
-  const agentsDraftDirty = agents.agentsContentDraft !== (agents.agentsSettings?.agents.content ?? '');
+  const agentsDraftDirty =
+    agents.agentsContentDraft !== (agents.agentsSettings?.agents.content ?? '') ||
+    agents.agentsFileDraftDirty;
 
   React.useEffect(() => {
     settingsScrollRef.current?.scrollTo({ top: 0 });

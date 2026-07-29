@@ -9,8 +9,10 @@ import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import type { RepoRemoteBranchOption } from '../types';
 import type { CreateRuntime, RepoBranchSourceMode } from './drone-create-runtime';
 import { NewDroneTargetControls } from './NewDroneTargetControls';
+import { AgentsMdCreateSelector } from './AgentsMdCreateSelector';
 import { repoPathLabel } from './repo-path-label';
 import { SegmentedToolbarToggle } from './SegmentedToolbarToggle';
+import type { AgentsMdFileSummary } from './settings-types';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type NewDroneSetupPanelProps = {
@@ -29,6 +31,15 @@ type NewDroneSetupPanelProps = {
   spawnAgentConfig: ChatAgentConfig;
   createRepoMenuEntries: UiMenuSelectEntry[];
   draftCreateRepoPath: string;
+  agentsMdLibraryFiles: AgentsMdFileSummary[];
+  agentsMdLibraryLoading: boolean;
+  agentsMdLibraryError: string | null;
+  draftAgentsMdLibraryFileId: string;
+  onDraftAgentsMdLibraryFileIdChange: (fileId: string) => void;
+  draftAgentsMdOverrideEnabled: boolean;
+  onDraftAgentsMdOverrideEnabledChange: (value: boolean) => void;
+  draftAgentsMdOverride: string;
+  onDraftAgentsMdOverrideChange: (value: string) => void;
   repoBranchSource: RepoBranchSourceMode;
   onRepoBranchSourceChange: (value: RepoBranchSourceMode) => void;
   repoCreateRemoteBranch: string;
@@ -93,6 +104,15 @@ export function NewDroneSetupPanel({
   spawnAgentConfig,
   createRepoMenuEntries,
   draftCreateRepoPath,
+  agentsMdLibraryFiles,
+  agentsMdLibraryLoading,
+  agentsMdLibraryError,
+  draftAgentsMdLibraryFileId,
+  onDraftAgentsMdLibraryFileIdChange,
+  draftAgentsMdOverrideEnabled,
+  onDraftAgentsMdOverrideEnabledChange,
+  draftAgentsMdOverride,
+  onDraftAgentsMdOverrideChange,
   repoBranchSource,
   onRepoBranchSourceChange,
   repoCreateRemoteBranch,
@@ -103,7 +123,9 @@ export function NewDroneSetupPanel({
   draftRepoBranchesError,
   controlsLocked,
 }: NewDroneSetupPanelProps) {
-  const [advancedOpen, setAdvancedOpen] = React.useState(false);
+  const [advancedOpen, setAdvancedOpen] = React.useState(
+    draftAgentsMdOverrideEnabled || Boolean(draftAgentsMdLibraryFileId),
+  );
   const { chatHeaderRepoPath, setChatHeaderRepoPath } = useDroneHubUiStore(
     useShallow((state) => ({
       chatHeaderRepoPath: state.chatHeaderRepoPath,
@@ -294,6 +316,23 @@ export function NewDroneSetupPanel({
               </section>
             ) : null}
           </div>
+
+          <AgentsMdCreateSelector
+            runtime={createRuntime}
+            repoPath={draftCreateRepoPath}
+            files={agentsMdLibraryFiles}
+            loading={agentsMdLibraryLoading}
+            error={agentsMdLibraryError}
+            selectedFileId={draftAgentsMdLibraryFileId}
+            customOverrideEnabled={draftAgentsMdOverrideEnabled}
+            customOverride={draftAgentsMdOverride}
+            onSelectedFileIdChange={onDraftAgentsMdLibraryFileIdChange}
+            onCustomOverrideEnabledChange={onDraftAgentsMdOverrideEnabledChange}
+            onCustomOverrideChange={onDraftAgentsMdOverrideChange}
+            disabled={controlsLocked}
+            scopeLabel="this drone"
+            className="mt-4 border-t border-[var(--border-subtle)] pt-4"
+          />
         </div>
       ) : null}
     </div>

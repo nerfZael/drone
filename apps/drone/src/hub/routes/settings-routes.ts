@@ -53,6 +53,10 @@ export interface SettingsRouteDependencies {
   defaultAgentsPayload: ServiceFunction;
   normalizeAgentsMarkdown: ServiceFunction;
   upsertCanonicalDefaultAgentsConfig: ServiceFunction;
+  resolveCanonicalAgentsLibraryFile: ServiceFunction;
+  createCanonicalAgentsLibraryFile: ServiceFunction;
+  updateCanonicalAgentsLibraryFile: ServiceFunction;
+  deleteCanonicalAgentsLibraryFile: ServiceFunction;
   loadRegistry: ServiceFunction;
   syncSetService: SyncSetRouteService;
   parseSyncSetMutationInput: ServiceFunction;
@@ -118,6 +122,10 @@ export function registerSettingsRoutes(
     defaultAgentsPayload,
     normalizeAgentsMarkdown,
     upsertCanonicalDefaultAgentsConfig,
+    resolveCanonicalAgentsLibraryFile,
+    createCanonicalAgentsLibraryFile,
+    updateCanonicalAgentsLibraryFile,
+    deleteCanonicalAgentsLibraryFile,
     loadRegistry,
     syncSetService,
     parseSyncSetMutationInput,
@@ -349,6 +357,46 @@ export function registerSettingsRoutes(
     await upsertCanonicalDefaultAgentsConfig(normalizeAgentsMarkdown(body?.content));
     respond(200, await defaultAgentsPayload(await loadRegistry()));
   });
+
+  apiRouter.get('/api/settings/agents/files/:fileId', async ({ params, fail, json: respond }) => {
+    const file = await resolveCanonicalAgentsLibraryFile(params.fileId);
+    if (!file) return fail(404, `unknown AGENTS.md file: ${params.fileId}`);
+    respond(200, { ok: true, file });
+  });
+
+  apiRouter.post('/api/settings/agents/files', async ({ readJson, fail, json: respond }) => {
+    const body = await readJson<any>();
+    try {
+      const file = await createCanonicalAgentsLibraryFile(body);
+      respond(201, { ...(await defaultAgentsPayload(await loadRegistry())), file });
+    } catch (error: any) {
+      fail(400, error?.message ?? String(error));
+    }
+  });
+
+  apiRouter.put(
+    '/api/settings/agents/files/:fileId',
+    async ({ params, readJson, fail, json: respond }) => {
+      const body = await readJson<any>();
+      try {
+        const file = await updateCanonicalAgentsLibraryFile(params.fileId, body);
+        if (!file) return fail(404, `unknown AGENTS.md file: ${params.fileId}`);
+        respond(200, { ...(await defaultAgentsPayload(await loadRegistry())), file });
+      } catch (error: any) {
+        fail(400, error?.message ?? String(error));
+      }
+    },
+  );
+
+  apiRouter.delete(
+    '/api/settings/agents/files/:fileId',
+    async ({ params, fail, json: respond }) => {
+      if (!(await deleteCanonicalAgentsLibraryFile(params.fileId))) {
+        return fail(404, `unknown AGENTS.md file: ${params.fileId}`);
+      }
+      respond(200, await defaultAgentsPayload(await loadRegistry()));
+    },
+  );
 
   const syncSetsResponse = async () => {
     const registry: any = await loadRegistry();

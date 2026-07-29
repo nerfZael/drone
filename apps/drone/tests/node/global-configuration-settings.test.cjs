@@ -13,7 +13,11 @@ const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const { readRegistryJsonFromSqlite } = require('../../dist/host/sqlite-registry-store.js');
 const { saveRegistry, updateRegistry } = require('../../dist/host/registry.js');
 const {
+  createCanonicalAgentsLibraryFile,
+  deleteCanonicalAgentsLibraryFile,
+  resolveCanonicalAgentsLibrary,
   resolveCanonicalDefaultAgentsConfig,
+  updateCanonicalAgentsLibraryFile,
   upsertCanonicalDefaultAgentsConfig,
 } = require('../../dist/hub/agents-config.js');
 const {
@@ -117,4 +121,41 @@ test('canonical writes and clears do not rewrite or resurrect the registry snaps
   });
   assert.deepEqual((await resolveCanonicalNonRepoEnvironmentConfig()).vars, {});
   assert.equal(readRegistryJsonFromSqlite(), registryBefore);
+});
+
+test('named AGENTS files persist canonically and support atomic updates', async () => {
+  useRoot('agents-library');
+  await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {} });
+
+  const created = await createCanonicalAgentsLibraryFile({
+    name: 'Backend work',
+    content: '# Backend instructions\r\n',
+  });
+  assert.equal(created.content, '# Backend instructions\n');
+  await assert.rejects(
+    createCanonicalAgentsLibraryFile({
+      name: 'backend work',
+      content: '# Duplicate',
+    }),
+    /already exists/,
+  );
+
+  await resetHubDatabaseForTests();
+  resetHubSettingsRepositoryForTests();
+  assert.deepEqual(
+    (await resolveCanonicalAgentsLibrary()).map(({ id, name, content }) => ({
+      id,
+      name,
+      content,
+    })),
+    [{ id: created.id, name: 'Backend work', content: '# Backend instructions\n' }],
+  );
+
+  const updated = await updateCanonicalAgentsLibraryFile(created.id, {
+    name: 'Backend work',
+    content: '# Updated',
+  });
+  assert.equal(updated.content, '# Updated\n');
+  assert.equal(await deleteCanonicalAgentsLibraryFile(created.id), true);
+  assert.deepEqual(await resolveCanonicalAgentsLibrary(), []);
 });

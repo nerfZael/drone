@@ -167,11 +167,17 @@ import { createAgentModelCatalogStore } from './agent-model-catalog/store';
 import type { AgentModelCatalogTarget } from './agent-model-catalog/types';
 import { registerAgentModelCatalogRoutes } from './agent-model-catalog/routes';
 import {
+  createCanonicalAgentsLibraryFile,
+  deleteCanonicalAgentsLibraryFile,
   normalizeAgentsMarkdown,
+  parseDroneAgentsMdOverride,
   normalizeRepoAgentsMode,
+  resolveCanonicalAgentsLibrary,
+  resolveCanonicalAgentsLibraryFile,
   resolveCanonicalDefaultAgentsConfig,
   resolveCanonicalRepoAgentsConfig,
   resolveRepoAgentsConfig,
+  updateCanonicalAgentsLibraryFile,
   upsertCanonicalDefaultAgentsConfig,
 } from './agents-config';
 import {
@@ -287,6 +293,7 @@ import { createDroneLifecycleRouteHandler } from './routes/drone-lifecycle-route
 import { createDroneProvisioningRouteHandler } from './routes/drone-provisioning-routes';
 import { createEditorRouteHandler } from './routes/editor-routes';
 import { createFilesystemRouteHandler } from './routes/filesystem-routes';
+import { createLocalCheckoutRouteHandler } from './routes/local-checkout-routes';
 import { registerFleetRoutes } from './routes/fleet-routes';
 import { registerGroupRoutes } from './routes/group-routes';
 import { registerMessageRoutes } from './routes/message-routes';
@@ -297,6 +304,7 @@ import { registerSettingsRoutes } from './routes/settings-routes';
 import { registerSystemRoutes } from './routes/system-routes';
 import { createTerminalRouteHandler } from './routes/terminal-routes';
 import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
+import { LocalCheckoutService } from './local-checkout-service';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
 import {
   isWorkflowChildDroneEntry,
@@ -1234,6 +1242,7 @@ async function repoEnvironmentPayload(regAny: any, repoPathRaw: unknown) {
 
 async function defaultAgentsPayload(regAny: any) {
   const agents = await resolveCanonicalDefaultAgentsConfig(regAny);
+  const files = await resolveCanonicalAgentsLibrary();
   return {
     ok: true as const,
     agents: {
@@ -1241,6 +1250,7 @@ async function defaultAgentsPayload(regAny: any) {
       enabled: agents.enabled,
       updatedAt: agents.updatedAt,
     },
+    files: files.map(({ content: _content, ...file }) => file),
   };
 }
 
@@ -1953,9 +1963,12 @@ async function syncRepoAgentsInstructionsForDrone(opts: {
   if (!isRepoAttachedDrone(droneEntry)) return;
 
   const regAny: any = await loadRegistry();
-  const repoAgents = await resolveCanonicalRepoAgentsConfig(regAny, (droneEntry as any)?.repoPath);
-  const effectiveContent = repoAgents.effectiveContent;
-  if (!effectiveContent) return;
+  const hasDroneOverride = typeof (droneEntry as any)?.agentsMdOverride === 'string';
+  const effectiveContent = hasDroneOverride
+    ? parseDroneAgentsMdOverride((droneEntry as any).agentsMdOverride)
+    : (await resolveCanonicalRepoAgentsConfig(regAny, (droneEntry as any)?.repoPath))
+        .effectiveContent;
+  if (effectiveContent == null || (!hasDroneOverride && !effectiveContent)) return;
 
   const requestedDroneName = String((droneEntry as any)?.name ?? droneId).trim() || droneId;
   const repoRoot = droneRepoPathInContainer(droneEntry);
@@ -5106,6 +5119,10 @@ export async function startDroneHubApiServer(opts: {
     defaultAgentsPayload,
     normalizeAgentsMarkdown,
     upsertCanonicalDefaultAgentsConfig,
+    resolveCanonicalAgentsLibraryFile,
+    createCanonicalAgentsLibraryFile,
+    updateCanonicalAgentsLibraryFile,
+    deleteCanonicalAgentsLibraryFile,
     loadRegistry,
     syncSetService,
     parseSyncSetMutationInput,
@@ -5374,6 +5391,24 @@ export async function startDroneHubApiServer(opts: {
     withLockedDroneContainer,
     withReadonlyDroneContainer,
   });
+
+  const localCheckoutService = new LocalCheckoutService({
+    loadRegistry,
+    updateRegistry,
+    findDroneIdByRef,
+    droneRuntime,
+    droneRootPath,
+    gitTopLevel,
+    gitIsClean,
+    gitResolveCommitSha,
+    updateHostRef,
+    importBundleHeadToHostRef,
+    dvmExec,
+    dvmRepoExport,
+    runHostCommand,
+    nowIso,
+  });
+  const handleLocalCheckoutRoute = createLocalCheckoutRouteHandler(localCheckoutService);
 
   const handleRepositoryRoute = createRepositoryRouteHandler({
     GITHUB_PULL_REQUEST_LIST_CACHE_TTL_MS,
@@ -5714,6 +5749,8 @@ export async function startDroneHubApiServer(opts: {
       if (await handleDroneProvisioningRoute({ req, res, url: u, method, parts })) return;
 
       if (await handleFilesystemRoute({ req, res, url: u, method, parts })) return;
+
+      if (await handleLocalCheckoutRoute({ req, res, url: u, method, parts })) return;
 
       if (await handleRepositoryRoute({ req, res, url: u, method, parts })) return;
 

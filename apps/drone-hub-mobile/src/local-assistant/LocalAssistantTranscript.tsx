@@ -1177,6 +1177,7 @@ function AgentRunSummary({
   active,
   startedAt,
   completedAt,
+  completedDurationMs,
   toolCallCount,
   expanded,
   onToggle,
@@ -1186,6 +1187,7 @@ function AgentRunSummary({
   active: boolean;
   startedAt?: string | number;
   completedAt?: string | number;
+  completedDurationMs?: number;
   toolCallCount: number;
   expanded: boolean;
   onToggle?: () => void;
@@ -1241,9 +1243,15 @@ function AgentRunSummary({
     !awaitingApproval && pauseClock.startedAt !== null
       ? Math.max(0, rawEnd - pauseClock.startedAt)
       : 0;
-  const duration = workingDurationLabel(
-    Math.max(0, end - start - pauseClock.accumulatedMs - resumingPauseMs),
+  const measuredDurationMs = Math.max(
+    0,
+    end - start - pauseClock.accumulatedMs - resumingPauseMs,
   );
+  const durationMs =
+    (!active || awaitingApproval) && Number.isFinite(completedDurationMs)
+      ? Math.max(0, Number(completedDurationMs))
+      : measuredDurationMs;
+  const duration = workingDurationLabel(durationMs);
   const callLabel =
     toolCallCount > 0 ? `${toolCallCount} tool ${toolCallCount === 1 ? 'call' : 'calls'}` : '';
   const label = awaitingApproval
@@ -1376,18 +1384,18 @@ function TranscriptRun({
   approvalStartedAt?: string | number;
 }) {
   const [toolExpansion, setToolExpansion] = React.useState<'auto' | 'manual' | 'collapsed'>(
-    run.active ? 'auto' : 'collapsed',
+    run.active || awaitingApproval ? 'auto' : 'collapsed',
   );
   const userControlledExpansion = React.useRef(false);
   React.useEffect(() => {
-    if (!run.active) {
+    if (!run.active && !awaitingApproval) {
       userControlledExpansion.current = false;
       setToolExpansion('collapsed');
       return;
     }
     if (userControlledExpansion.current) return;
     setToolExpansion('auto');
-  }, [run.active]);
+  }, [awaitingApproval, run.active]);
   const { activityItems, trailingItems } = partitionMobileRunItems(run);
   const activityExpanded = toolExpansion !== 'collapsed';
   const visibleActivityItems =
@@ -1404,6 +1412,7 @@ function TranscriptRun({
           active={run.active}
           startedAt={run.startedAt}
           completedAt={run.completedAt}
+          completedDurationMs={run.durationMs}
           toolCallCount={run.toolCallCount}
           expanded={activityExpanded}
           awaitingApproval={awaitingApproval}
@@ -1772,6 +1781,7 @@ export function MobileAssistantTranscript({
   });
   const activePrompt = activePrompts.at(-1);
   const lastGroup = groups.at(-1);
+  const latestRunGroup = [...groups].reverse().find((group) => group.type === 'run');
   const groupedActiveRun = lastGroup?.type === 'run' && lastGroup.active;
   const activePromptReasoning = activePrompt ? currentReasoning.trim() : '';
   const activePromptHasPlan = Boolean(activePrompt?.agentPlan?.items.length);
@@ -1802,7 +1812,7 @@ export function MobileAssistantTranscript({
             run={entry.group}
             renderItem={renderItem}
             showThinking={!showStandaloneReasoning}
-            awaitingApproval={awaitingApproval && entry.group.active}
+            awaitingApproval={awaitingApproval && entry.group.key === latestRunGroup?.key}
             approvalStartedAt={approvalStartedAt}
           />
         ) : (

@@ -9,7 +9,12 @@ import type { PermissionMode, ToolProfile } from '@blip/tools';
 import type { CompactionSettings } from './compaction.js';
 import type { SessionRepository } from './session-repository.js';
 import type { AgentRunFileChanges } from '@blip/protocol';
-import type { BlipRuntimeEvent, BlipSessionState, BlipToolSuspension } from './types.js';
+import type {
+  BlipRuntimeEvent,
+  BlipSessionState,
+  BlipSessionStatus,
+  BlipToolSuspension,
+} from './types.js';
 import type { BlipRuntimeDiagnostics } from './platform.js';
 
 export type BlipEventSink = (event: BlipRuntimeEvent) => Promise<void> | void;
@@ -61,6 +66,9 @@ export type BlipToolPreflight = (
 export interface BlipPromptLifecycleContext extends BlipSessionContext {
   prompt: AgentMessage;
   turnId: string;
+  kind: 'prompt' | 'recovered_continuation' | 'retry' | 'tool_resolution';
+  /** Set for afterPrompt, once the runtime knows how this segment ended. */
+  status?: BlipSessionStatus;
 }
 
 export type BlipPromptLifecycleResult = { fileChanges?: AgentRunFileChanges };

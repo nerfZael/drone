@@ -75,6 +75,7 @@ import {
   assistantHasEnabledMcpGroup,
   assistantMessageTimestampMs,
   assistantPromptHasVisibleUserMessage,
+  assistantRequestRuns,
   assistantTranscriptHasErrorMessage,
   compactPreview,
   directAssistantRunTiming,
@@ -96,7 +97,6 @@ import {
   type AssistantMessageDroneSummary,
   type AssistantRenderItem,
   type AssistantToolCall,
-  type AssistantToolRenderItem,
   type AssistantWaitTargetLabel,
 } from './assistant-message-model';
 import type {
@@ -567,6 +567,7 @@ export function AssistantDock({
   const visibleItems = React.useMemo(() => {
     return renderItemsFromMessages(visibleMessages);
   }, [visibleMessages]);
+  const requestRuns = React.useMemo(() => assistantRequestRuns(visibleItems), [visibleItems]);
   const latestActivityItemKey = React.useMemo(() => {
     return visibleItems[visibleItems.length - 1]?.key ?? '';
   }, [visibleItems]);
@@ -1763,18 +1764,38 @@ export function AssistantDock({
     if (timestamp === undefined) continue;
     for (const call of toolCalls(message)) toolCallStartedAt.set(call.id, timestamp);
   }
-  let lastToolItemIndex = -1;
   let lastRunSummaryItemIndex = -1;
   for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
-    const itemType = visibleItems[index]?.type;
-    if (lastToolItemIndex < 0 && (itemType === 'tool' || itemType === 'toolGroup')) {
-      lastToolItemIndex = index;
-    }
-    if (lastRunSummaryItemIndex < 0 && itemType === 'runSummary') {
+    const candidate = visibleItems[index];
+    if (
+      lastRunSummaryItemIndex < 0 &&
+      candidate?.type === 'runSummary' &&
+      candidate.fileChanges
+    ) {
       lastRunSummaryItemIndex = index;
     }
-    if (lastToolItemIndex >= 0 && lastRunSummaryItemIndex >= 0) break;
+    if (lastRunSummaryItemIndex >= 0) break;
   }
+  const requestRunByFirstToolItemIndex = new Map(
+    requestRuns
+      .filter((run) => run.firstToolItemIndex >= 0)
+      .map((run) => [run.firstToolItemIndex, run] as const),
+  );
+  const requestRunToolItemIndexes = new Set(
+    requestRuns.flatMap((run) => {
+      const indexes: number[] = [];
+      for (let index = run.userItemIndex + 1; index <= run.endItemIndex; index += 1) {
+        const candidate = visibleItems[index];
+        if (candidate?.type === 'tool' || candidate?.type === 'toolGroup') indexes.push(index);
+      }
+      return indexes;
+    }),
+  );
+  const visibleRunSummaryItemIndexes = new Set(
+    requestRuns
+      .map((run) => run.fileSummaryItemIndex)
+      .filter((index) => index >= 0),
+  );
 
   for (let itemIndex = 0; itemIndex < visibleItems.length; itemIndex += 1) {
     const item = visibleItems[itemIndex]!;
@@ -1788,6 +1809,7 @@ export function AssistantDock({
       continue;
     }
     if (item.type === 'runSummary') {
+      if (!visibleRunSummaryItemIndexes.has(itemIndex) || !item.fileChanges) continue;
       nativeTranscriptItems.push({
         key: item.key,
         kind: 'status',
@@ -1889,6 +1911,7 @@ export function AssistantDock({
                 active={directRunActive}
                 startedAt={directRun.startedAt}
                 endedAt={directRun.endedAt}
+                completedDurationMs={directRun.durationMs}
               />
             ),
           });
@@ -1897,58 +1920,33 @@ export function AssistantDock({
       continue;
     }
 
-    const runItems: AssistantToolRenderItem[] = [];
-    const runStartIndex = itemIndex;
-    while (itemIndex < visibleItems.length) {
-      const runItem = visibleItems[itemIndex]!;
-      if (runItem.type === 'message' || runItem.type === 'runSummary' || runItem.type === 'compaction') break;
-      if (runItem.type === 'tool') runItems.push(runItem);
-      else runItems.push(...runItem.items);
-      itemIndex += 1;
-    }
-    const runEndIndex = itemIndex - 1;
-    itemIndex = runEndIndex;
-
-    let precedingUserAt: number | undefined;
-    let precedingAssistantAt: number | undefined;
-    for (let previousIndex = runStartIndex - 1; previousIndex >= 0; previousIndex -= 1) {
-      const previous = visibleItems[previousIndex];
-      if (previous?.type !== 'message') continue;
-      if (previous.message.role === 'user') {
-        precedingUserAt = assistantMessageTimestampMs(previous.message);
-        break;
-      }
-      if (previous.message.role === 'assistant') {
-        precedingAssistantAt = assistantMessageTimestampMs(previous.message) ?? precedingAssistantAt;
-      }
-    }
+    if (!requestRunToolItemIndexes.has(itemIndex)) continue;
+    const requestRun = requestRunByFirstToolItemIndex.get(itemIndex);
+    if (!requestRun) continue;
+    const runItems = requestRun.toolItems;
+    const runStartIndex = requestRun.firstToolItemIndex;
+    const userItem = visibleItems[requestRun.userItemIndex];
+    const precedingUserAt =
+      userItem?.type === 'message'
+        ? assistantMessageTimestampMs(userItem.message)
+        : undefined;
     const callStartedAt = runItems
       .map((runItem) => toolCallStartedAt.get(String(runItem.call?.id ?? '')))
       .filter((timestamp): timestamp is number => timestamp !== undefined);
     const resultEndedAt = runItems
       .map((runItem) => assistantMessageTimestampMs(runItem.result))
       .filter((timestamp): timestamp is number => timestamp !== undefined);
-    let followingAssistantAt: number | undefined;
-    let hasFollowingAssistantActivity = false;
-    for (let nextIndex = runEndIndex + 1; nextIndex < visibleItems.length; nextIndex += 1) {
-      const next = visibleItems[nextIndex];
-      if (next?.type !== 'message') continue;
-      if (next.message.role === 'user') break;
-      if (next.message.role !== 'assistant') continue;
-      hasFollowingAssistantActivity = Boolean(
-        messageVisibleText(next.message).trim() ||
-        messageImageParts(next.message).length > 0 ||
-        next.message.errorMessage ||
-        latestThinkingText(next.message).trim(),
-      );
-      followingAssistantAt ??= assistantMessageTimestampMs(next.message);
-      if (hasFollowingAssistantActivity) break;
+    let finalAssistantAt: number | undefined;
+    for (let index = requestRun.userItemIndex + 1; index <= requestRun.endItemIndex; index += 1) {
+      const candidate = visibleItems[index];
+      if (candidate?.type !== 'message' || candidate.message.role !== 'assistant') continue;
+      finalAssistantAt = assistantMessageTimestampMs(candidate.message) ?? finalAssistantAt;
     }
     const startedAt =
       precedingUserAt ??
-      (callStartedAt.length > 0 ? Math.min(...callStartedAt) : precedingAssistantAt);
+      (callStartedAt.length > 0 ? Math.min(...callStartedAt) : undefined);
     const endedAt =
-      followingAssistantAt ??
+      finalAssistantAt ??
       (resultEndedAt.length > 0
         ? Math.max(...resultEndedAt)
         : callStartedAt.length > 0
@@ -1956,23 +1954,25 @@ export function AssistantDock({
           : undefined);
     const runActive =
       running &&
-      !hasFollowingAssistantActivity &&
-      runEndIndex === lastToolItemIndex &&
-      runEndIndex > latestUserItemIndex;
-    const runKey = `tool-run:${runItems[0]?.key ?? runStartIndex}:${runStartIndex}`;
+      requestRun.userItemIndex === latestUserItemIndex;
+    const runAwaitingApproval =
+      requestRun.userItemIndex === latestUserItemIndex &&
+      activePendingApprovals.length > 0;
+    const runKey = `tool-run:${userItem?.key ?? runStartIndex}`;
     nativeTranscriptItems.push({
       key: runKey,
       kind: 'tool',
       content: ({ isLatestActivity }) => (
         <ToolRunActivity
-          key={isLatestActivity ? 'latest' : 'history'}
+          key={runKey}
           items={runItems}
           active={runActive}
           startedAt={startedAt}
           endedAt={endedAt}
+          completedDurationMs={requestRun.durationMs}
           droneNameById={droneNameById}
-          initiallyExpanded={isLatestActivity}
-          awaitingApproval={runActive && activePendingApprovals.length > 0}
+          initiallyExpanded={runActive || runAwaitingApproval || isLatestActivity}
+          awaitingApproval={runAwaitingApproval}
           approvalStartedAt={activeApprovalStartedAt}
         />
       ),

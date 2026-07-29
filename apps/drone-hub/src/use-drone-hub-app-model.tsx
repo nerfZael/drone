@@ -32,6 +32,7 @@ import { dispatchFleetAssignmentUpdated } from './droneHub/app/fleet-assignment-
 import { assignFleetTargets } from './droneHub/fleet/fleet-api';
 import { useHubLogs } from './droneHub/app/use-hub-logs';
 import { useCreateDraftWorkflowState } from './droneHub/app/use-create-draft-workflow-store';
+import { useAgentsMdLibraryCatalog } from './droneHub/app/use-agents-md-library-catalog';
 import { useDroneCreationActions } from './droneHub/app/use-drone-creation-actions';
 import { useChatRuntimeOrchestration } from './droneHub/app/use-chat-runtime-orchestration';
 import { useDroneErrorModalActions } from './droneHub/app/use-drone-error-modal-actions';
@@ -344,6 +345,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     draftCreateName,
     draftCreateGroup,
     draftCreateParentDroneId,
+    draftAgentsMdLibraryFileId,
+    draftAgentsMdOverrideEnabled,
+    draftAgentsMdOverride,
     draftCreateError,
     draftCreating,
     draftAutoRenaming,
@@ -359,6 +363,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftCreateName,
     setDraftCreateGroup,
     setDraftCreateParentDroneId,
+    setDraftAgentsMdLibraryFileId,
+    setDraftAgentsMdOverrideEnabled,
+    setDraftAgentsMdOverride,
     setDraftCreateError,
     setDraftCreating,
     setDraftAutoRenaming,
@@ -366,6 +373,24 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftSuggestedName,
     setDraftNameSuggestionError,
   } = useCreateDraftWorkflowState();
+  const {
+    files: agentsMdLibraryFiles,
+    loading: agentsMdLibraryLoading,
+    error: agentsMdLibraryError,
+  } = useAgentsMdLibraryCatalog(requestJson, Boolean(draftChat));
+  React.useEffect(() => {
+    if (agentsMdLibraryLoading || agentsMdLibraryError) return;
+    const availableIds = new Set(agentsMdLibraryFiles.map((file) => file.id));
+    if (draftAgentsMdLibraryFileId && !availableIds.has(draftAgentsMdLibraryFileId)) {
+      setDraftAgentsMdLibraryFileId('');
+    }
+  }, [
+    agentsMdLibraryError,
+    agentsMdLibraryFiles,
+    agentsMdLibraryLoading,
+    draftAgentsMdLibraryFileId,
+    setDraftAgentsMdLibraryFileId,
+  ]);
   const repoBranchOptionsByPath = useRepoBranchOptions({
     requestJson,
     repoPaths: [chatHeaderRepoPath],
@@ -840,6 +865,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     seedChat?: string;
     seedPrompt?: string;
     seedCwd?: string;
+    agentsMd?: string;
   };
 
   const queueDrones = React.useCallback(async (list: DroneQueueSpec[]) => {
@@ -1206,6 +1232,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setDraftCreateName,
       setDraftCreateGroup,
       setDraftCreateParentDroneId,
+      setDraftAgentsMdLibraryFileId,
+      setDraftAgentsMdOverrideEnabled,
+      setDraftAgentsMdOverride,
       setDraftCreateError,
       setDraftCreating,
       setDraftAutoRenaming,
@@ -1226,8 +1255,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const closeDraftCreateSurface = React.useCallback(() => {
     setDraftChat(null);
     setDraftCreateOpen(false);
+    setDraftAgentsMdLibraryFileId('');
+    setDraftAgentsMdOverrideEnabled(false);
+    setDraftAgentsMdOverride('');
     setDraftCreateError(null);
   }, [
+    setDraftAgentsMdOverride,
+    setDraftAgentsMdOverrideEnabled,
+    setDraftAgentsMdLibraryFileId,
     setDraftChat,
     setDraftCreateError,
     setDraftCreateOpen,
@@ -1445,6 +1480,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       draftCreateName,
       draftCreateGroup,
       draftCreateParentDroneId,
+      draftAgentsMdLibraryFileId,
+      draftAgentsMdOverrideEnabled,
+      draftAgentsMdOverride,
       draftCreateRepoPath: chatHeaderRepoPath,
       startupSeedMissingGraceMs: STARTUP_SEED_MISSING_GRACE_MS,
       suggestCloneName,
@@ -1465,6 +1503,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setDraftCreateName,
       setDraftCreateGroup,
       setDraftCreateParentDroneId,
+      setDraftAgentsMdLibraryFileId,
+      setDraftAgentsMdOverrideEnabled,
+      setDraftAgentsMdOverride,
       setDraftSuggestedName,
       setDraftNameSuggesting,
       setDraftNameSuggestionError,
@@ -1806,6 +1847,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openDroneEditor,
     pullRepoChanges,
     pushRepoChanges,
+    localCheckout,
+    localCheckoutLoading,
+    localCheckoutBusy,
+    useRepoLocally,
+    updateRepoLocally,
+    setLocalAutoUpdates,
+    returnRepoLocalCheckout,
+    applyRepoLocalCheckout,
     reseedRepo,
   } = useWorkspaceActions({
     autoDelete,
@@ -3972,6 +4021,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     spawnAgentConfig,
     createRepoMenuEntries,
     draftCreateRepoPath: chatHeaderRepoPath,
+    agentsMdLibraryFiles,
+    agentsMdLibraryLoading,
+    agentsMdLibraryError,
+    draftAgentsMdLibraryFileId,
+    setDraftAgentsMdLibraryFileId,
+    draftAgentsMdOverrideEnabled,
+    setDraftAgentsMdOverrideEnabled,
+    draftAgentsMdOverride,
+    setDraftAgentsMdOverride,
     draftRepoBranchOptions: repoBranchOptionsByPath[String(chatHeaderRepoPath ?? '').trim()] ?? null,
     setCustomAgentModalOpen,
     draftCreateName,
@@ -4063,6 +4121,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openingEditor,
     pullRepoChanges,
     pushRepoChanges,
+    localCheckout,
+    localCheckoutLoading,
+    localCheckoutBusy,
+    useRepoLocally,
+    updateRepoLocally,
+    setLocalAutoUpdates,
+    returnRepoLocalCheckout,
+    applyRepoLocalCheckout,
     openDroneDropActionModal,
     repoOp,
     headerOverflowRef,

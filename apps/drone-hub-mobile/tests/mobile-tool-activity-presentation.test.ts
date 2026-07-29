@@ -15,7 +15,7 @@ describe('mobile tool activity presentation', () => {
     expect(transcriptSource).toContain('<Text style={styles.detailLabel}>Arguments</Text>');
     expect(transcriptSource).toContain('<Text style={styles.detailLabel}>Result</Text>');
     expect(transcriptSource).toContain('styles.thinkingActivityText}>Thinking…</Text>');
-    expect(transcriptSource).toContain("run.active ? 'auto' : 'collapsed'");
+    expect(transcriptSource).toContain("run.active || awaitingApproval ? 'auto' : 'collapsed'");
     expect(transcriptSource).toContain('limitMobileRunToolItems(activityItems)');
     expect(transcriptSource).toContain('nestedScrollEnabled');
     expect(transcriptSource).toContain('style={[styles.activityRail');
@@ -39,7 +39,10 @@ describe('mobile tool activity presentation', () => {
     expect(transcriptSource).toContain("blocked ? 'blocked' : 'pending'");
     expect(transcriptSource).toContain('<Pause color={colors.warning}');
     expect(transcriptSource).toContain("'Approval required'");
-    expect(transcriptSource).toContain('awaitingApproval && entry.group.active');
+    expect(transcriptSource).toContain(
+      'awaitingApproval && entry.group.key === latestRunGroup?.key',
+    );
+    expect(transcriptSource).toContain('completedDurationMs={run.durationMs}');
     expect(transcriptSource).toContain("'Blocked pending approval.'");
     expect(transcriptSource).toContain("'Context compacted'");
     expect(transcriptSource).toContain('<MobileCompactionRow key={item.key}');
