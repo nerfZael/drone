@@ -219,6 +219,7 @@ export function NewDroneSetupPanel({
           ]}
           onChange={onSpawnAgentPermissionModeChange}
           disabled={controlsLocked}
+          tone="accent"
           density="compact"
         />
 
@@ -228,9 +229,9 @@ export function NewDroneSetupPanel({
           options={[
             {
               value: 'ask',
-              label: 'Ask first',
+              label: 'Ask',
               title: spawnAgentIsCodex
-                ? 'Ask first requires an interactive Codex integration.'
+                ? 'Ask requires an interactive Codex integration.'
                 : 'Ask before approval-gated commands.',
               disabled: spawnAgentIsCodex,
             },
@@ -238,19 +239,20 @@ export function NewDroneSetupPanel({
               ? [
                   {
                     value: 'agent-decides' as const,
-                    label: 'Agent decides',
+                    label: 'Decide for me',
                     title: 'Codex decides when a command needs confirmation.',
                   },
                 ]
               : []),
             {
               value: 'never',
-              label: 'Allow all',
+              label: 'Always Allow',
               title: 'Run commands without waiting for confirmation.',
             },
           ]}
           onChange={onSpawnApprovalPolicyChange}
           disabled={controlsLocked || !spawnAgentApprovalSupported}
+          tone="accent"
           density="compact"
         />
 
@@ -261,10 +263,6 @@ export function NewDroneSetupPanel({
         ) : !spawnAgentSupportsApprovals ? (
           <span className="basis-full text-left text-[var(--text-10)] text-[var(--muted-dim)]">
             Approval policies are available for native and Codex.
-          </span>
-        ) : spawnAgentSupportsApprovals && spawnAgentPermissionMode !== 'full-access' ? (
-          <span className="basis-full text-left text-[var(--text-10)] text-[var(--muted-dim)]">
-            Approvals become available when Chat access is Execute.
           </span>
         ) : null}
       </div>

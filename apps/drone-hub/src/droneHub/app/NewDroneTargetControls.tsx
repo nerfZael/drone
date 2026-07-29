@@ -80,13 +80,11 @@ export function NewDroneTargetControls({
               value: 'container',
               label: 'Container',
               title: 'Create the new drone in a managed container.',
-              tone: 'accent',
             },
             {
               value: 'host',
               label: 'Host',
               title: 'Create the new drone directly on the host machine.',
-              tone: 'yellow',
             },
           ]}
           onChange={onCreateRuntimeChange}

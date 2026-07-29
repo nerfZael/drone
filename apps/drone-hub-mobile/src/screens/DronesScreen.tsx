@@ -1833,19 +1833,19 @@ export function DronesScreen({
                         policy: 'ask',
                         label:
                           chatAgentId === 'codex'
-                            ? 'Ask first · unavailable'
-                            : 'Ask first',
+                            ? 'Ask · unavailable'
+                            : 'Ask',
                         disabled: chatAgentId === 'codex',
                       },
                       ...(chatAgentId === 'codex'
                         ? [
                             {
                               policy: 'agent-decides' as const,
-                              label: 'Agent decides',
+                              label: 'Decide for me',
                             },
                           ]
                         : []),
-                      { policy: 'never', label: 'Allow all' },
+                      { policy: 'never', label: 'Always Allow' },
                     ] as Array<{
                       policy: MobileDroneApprovalPolicy;
                       label: string;

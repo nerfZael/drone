@@ -1006,13 +1006,13 @@ export function NewDroneScreen({
                         [
                           {
                             value: 'ask',
-                            label: 'Ask first',
+                            label: 'Ask',
                             disabled: agent === 'codex',
                           },
                           ...(agent === 'codex'
-                            ? [{ value: 'agent-decides' as const, label: 'Agent decides' }]
+                            ? [{ value: 'agent-decides' as const, label: 'Decide for me' }]
                             : []),
-                          { value: 'never', label: 'Allow all' },
+                          { value: 'never', label: 'Always Allow' },
                         ] as Array<{
                           value: MobileDroneApprovalPolicy;
                           label: string;
@@ -1034,17 +1034,13 @@ export function NewDroneScreen({
                       Access controls are available for native, Codex, and Blip.
                     </Text>
                   ) : null}
-                  {approvalAgentSupported && agentPermissionMode !== 'full-access' ? (
-                    <Text style={styles.helper}>
-                      Approvals apply when Access is Execute.
-                    </Text>
-                  ) : !approvalSupported ? (
+                  {!approvalAgentSupported ? (
                     <Text style={styles.helper}>
                       Approval policies are available for native and Codex.
                     </Text>
-                  ) : agent === 'codex' ? (
+                  ) : approvalSupported && agent === 'codex' ? (
                     <Text style={styles.helper}>
-                      Ask first requires interactive Codex approvals. Agent decides uses Codex
+                      Ask requires interactive Codex approvals. Decide for me uses Codex
                       Auto-review.
                     </Text>
                   ) : null}

@@ -1639,23 +1639,23 @@ export function SelectedDroneWorkspace({
                                     value: 'ask',
                                     label:
                                       currentAgentKey === 'builtin:codex'
-                                        ? 'Ask first · unavailable'
-                                        : 'Ask first',
+                                        ? 'Ask · unavailable'
+                                        : 'Ask',
                                     disabled: currentAgentKey === 'builtin:codex',
                                     title:
                                       currentAgentKey === 'builtin:codex'
-                                        ? 'Ask first requires an interactive Codex integration.'
+                                        ? 'Ask requires an interactive Codex integration.'
                                         : undefined,
                                   },
                                   ...(currentAgentKey === 'builtin:codex'
                                     ? [
                                         {
                                           value: 'agent-decides' as const,
-                                          label: 'Agent decides',
+                                          label: 'Decide for me',
                                         },
                                       ]
                                     : []),
-                                  { value: 'never', label: 'Allow all' },
+                                  { value: 'never', label: 'Always Allow' },
                                 ]}
                                 onChange={(nextPolicy) => {
                                   void setChatApprovalPolicy(nextPolicy).catch((err: any) =>
