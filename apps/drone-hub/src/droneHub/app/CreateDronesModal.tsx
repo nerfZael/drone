@@ -13,6 +13,8 @@ import { RepoBranchSourceControls } from './RepoBranchSourceControls';
 import { repoPathLabel } from './repo-path-label';
 import type { RepoRemoteBranchOption } from '../types';
 import { InitialMessageVoiceControls, type InitialMessageVoiceControlsHandle } from './InitialMessageVoiceControls';
+import { AgentsMdCreateSelector } from './AgentsMdCreateSelector';
+import type { AgentsMdFileSummary } from './settings-types';
 
 type CreateDronesModalProps = {
   open: boolean;
@@ -34,6 +36,15 @@ type CreateDronesModalProps = {
   createRepoPath: string;
   onCreateRepoPathChange: (value: string) => void;
   onClearCreateRepoPath: () => void;
+  agentsMdLibraryFiles: AgentsMdFileSummary[];
+  agentsMdLibraryLoading: boolean;
+  agentsMdLibraryError: string | null;
+  createAgentsMdLibraryFileId: string;
+  onCreateAgentsMdLibraryFileIdChange: (fileId: string) => void;
+  createAgentsMdOverrideEnabled: boolean;
+  onCreateAgentsMdOverrideEnabledChange: (checked: boolean) => void;
+  createAgentsMdOverride: string;
+  onCreateAgentsMdOverrideChange: (value: string) => void;
   createRepoMenuEntries: UiMenuSelectEntry[];
   createRepoMenuOpen: boolean;
   onCreateRepoMenuOpenChange: (open: boolean) => void;
@@ -97,6 +108,15 @@ export function CreateDronesModal({
   createRepoPath,
   onCreateRepoPathChange,
   onClearCreateRepoPath,
+  agentsMdLibraryFiles,
+  agentsMdLibraryLoading,
+  agentsMdLibraryError,
+  createAgentsMdLibraryFileId,
+  onCreateAgentsMdLibraryFileIdChange,
+  createAgentsMdOverrideEnabled,
+  onCreateAgentsMdOverrideEnabledChange,
+  createAgentsMdOverride,
+  onCreateAgentsMdOverrideChange,
   createRepoMenuEntries,
   createRepoMenuOpen,
   onCreateRepoMenuOpenChange,
@@ -481,6 +501,25 @@ export function CreateDronesModal({
                 </div>
               ) : null}
             </div>
+
+            {createMode === 'create' ? (
+              <AgentsMdCreateSelector
+                runtime={createRuntime}
+                repoPath={createRepoPath}
+                files={agentsMdLibraryFiles}
+                loading={agentsMdLibraryLoading}
+                error={agentsMdLibraryError}
+                selectedFileId={createAgentsMdLibraryFileId}
+                customOverrideEnabled={createAgentsMdOverrideEnabled}
+                customOverride={createAgentsMdOverride}
+                onSelectedFileIdChange={onCreateAgentsMdLibraryFileIdChange}
+                onCustomOverrideEnabledChange={onCreateAgentsMdOverrideEnabledChange}
+                onCustomOverrideChange={onCreateAgentsMdOverrideChange}
+                disabled={creating}
+                scopeLabel="these drones"
+                className="mb-4"
+              />
+            ) : null}
 
             {createMode === 'clone' && (
               <div className="mb-4">

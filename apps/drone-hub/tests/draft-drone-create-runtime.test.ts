@@ -2,6 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildDraftDroneCreatePayload,
   filterSpawnAgentMenuEntriesForRuntime,
+  materializeAgentsMdForCreate,
+  resolveAgentsMdLibraryFileIdForCreate,
+  resolveAgentsMdOverrideForCreate,
   runtimeSupportsCustomAgents,
   shouldAutoRenameDraftDrone,
 } from '../src/droneHub/app/drone-create-runtime';
@@ -139,6 +142,29 @@ describe('draft drone create runtime support', () => {
     });
   });
 
+  test('includes an AGENTS.md override in the primary draft-composer payload', () => {
+    const payload = buildDraftDroneCreatePayload({
+      name: 'guided-drone',
+      repoPath: '/work/repo',
+      runtime: 'container',
+      repoBranchSelection: {
+        repoBranchSource: 'host',
+        pullHostBranchBeforeCreate: false,
+      },
+      seedAgent: null,
+      seedModel: null,
+      agentsMd: '# Instructions for this drone',
+      prompt: '',
+    });
+
+    expect(payload).toMatchObject({
+      name: 'guided-drone',
+      repoPath: '/work/repo',
+      runtime: 'container',
+      agentsMd: '# Instructions for this drone',
+    });
+  });
+
   test('filters custom agents out of host runtime menus', () => {
     const entries: UiMenuSelectEntry[] = [
       { kind: 'item', value: 'builtin:cursor', label: 'Cursor' },
@@ -152,5 +178,88 @@ describe('draft drone create runtime support', () => {
     expect(filterSpawnAgentMenuEntriesForRuntime('host', entries)).toEqual([
       { kind: 'item', value: 'builtin:cursor', label: 'Cursor' },
     ]);
+  });
+
+  test('includes AGENTS.md overrides only for repo-attached container creates', () => {
+    expect(
+      resolveAgentsMdOverrideForCreate({
+        enabled: true,
+        content: '# Per-drone instructions',
+        repoPath: '/work/repo',
+        runtime: 'container',
+        isClone: false,
+      }),
+    ).toBe('# Per-drone instructions');
+    expect(
+      resolveAgentsMdOverrideForCreate({
+        enabled: true,
+        content: '',
+        repoPath: '/work/repo',
+        runtime: 'container',
+        isClone: false,
+      }),
+    ).toBe('');
+    expect(
+      resolveAgentsMdOverrideForCreate({
+        enabled: true,
+        content: '# Ignored',
+        repoPath: '',
+        runtime: 'container',
+        isClone: false,
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveAgentsMdOverrideForCreate({
+        enabled: true,
+        content: '# Ignored',
+        repoPath: '/work/repo',
+        runtime: 'host',
+        isClone: false,
+      }),
+    ).toBeUndefined();
+  });
+
+  test('selects a saved AGENTS.md file only when a custom override is not active', () => {
+    expect(
+      resolveAgentsMdLibraryFileIdForCreate({
+        fileId: 'backend',
+        customOverrideEnabled: false,
+        repoPath: '/work/repo',
+        runtime: 'container',
+        isClone: false,
+      }),
+    ).toBe('backend');
+    expect(
+      resolveAgentsMdLibraryFileIdForCreate({
+        fileId: 'backend',
+        customOverrideEnabled: true,
+        repoPath: '/work/repo',
+        runtime: 'container',
+        isClone: false,
+      }),
+    ).toBeUndefined();
+  });
+
+  test('materializes saved content while giving a custom override precedence', async () => {
+    const loadedIds: string[] = [];
+    const loadLibraryFile = async (fileId: string) => {
+      loadedIds.push(fileId);
+      return '# Saved instructions\n';
+    };
+
+    expect(
+      await materializeAgentsMdForCreate({
+        libraryFileId: 'backend',
+        loadLibraryFile,
+      }),
+    ).toBe('# Saved instructions\n');
+    expect(
+      await materializeAgentsMdForCreate({
+        customOverride: '',
+        libraryFileId: 'backend',
+        loadLibraryFile,
+      }),
+    ).toBe('');
+    expect(loadedIds).toEqual(['backend']);
   });
 });

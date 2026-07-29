@@ -1,8 +1,14 @@
+import crypto from 'node:crypto';
+
 import { canonicalRepositoriesMap } from './groups-repositories';
 import { getHubSettingsRepository } from '../host/hub-settings-repository';
 import { loadRegistry } from '../host/registry';
 
 const DEFAULT_AGENTS_SETTING_KEY = 'agents.default';
+const AGENTS_LIBRARY_SETTING_KEY = 'agents.library';
+const MAX_DRONE_AGENTS_OVERRIDE_BYTES = 2 * 1024 * 1024;
+const MAX_AGENTS_LIBRARY_FILES = 50;
+const MAX_AGENTS_LIBRARY_TOTAL_BYTES = 20 * 1024 * 1024;
 
 export type RepoAgentsMode = 'inherit' | 'override' | 'disabled';
 
@@ -22,6 +28,21 @@ export type ResolvedRepoAgentsConfig = {
   effectiveContent: string | null;
   effectiveSource: 'repo' | 'default' | null;
 };
+
+export type AgentsLibraryFile = {
+  id: string;
+  name: string;
+  content: string;
+  sizeBytes: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type StoredAgentsLibrary = {
+  files?: unknown;
+};
+
+class AgentsLibraryFileNotFoundError extends Error {}
 
 function pathLabel(repoPathRaw: unknown): string {
   const repoPath = String(repoPathRaw ?? '').trim();
@@ -49,6 +70,188 @@ function findRepoEntry(rawRepos: unknown, repoPathRaw: unknown): any | null {
 
 export function normalizeAgentsMarkdown(raw: unknown): string {
   return typeof raw === 'string' ? raw.replace(/\r\n?/g, '\n') : '';
+}
+
+export function parseDroneAgentsMdOverride(raw: unknown): string {
+  if (typeof raw !== 'string') throw new Error('agentsMd must be a string');
+  const normalized = normalizeAgentsMarkdown(raw);
+  const managedContent = !normalized || normalized.endsWith('\n') ? normalized : `${normalized}\n`;
+  if (Buffer.byteLength(managedContent, 'utf8') > MAX_DRONE_AGENTS_OVERRIDE_BYTES) {
+    throw new Error('agentsMd must be at most 2 MiB');
+  }
+  return managedContent;
+}
+
+function normalizeAgentsLibraryFileName(raw: unknown): string {
+  if (typeof raw !== 'string') throw new Error('AGENTS.md file name must be a string');
+  const name = raw.trim();
+  if (!name) throw new Error('AGENTS.md file name is required');
+  if (name.length > 80) throw new Error('AGENTS.md file name must be at most 80 characters');
+  if (/[\r\n]/.test(name)) throw new Error('AGENTS.md file name cannot contain newlines');
+  return name;
+}
+
+function normalizeAgentsLibraryFile(raw: unknown): AgentsLibraryFile | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const id = String((raw as any).id ?? '').trim();
+  if (!/^[a-zA-Z0-9_-]{1,100}$/.test(id)) return null;
+  let name: string;
+  let content: string;
+  try {
+    name = normalizeAgentsLibraryFileName((raw as any).name);
+    content = parseDroneAgentsMdOverride((raw as any).content);
+  } catch {
+    return null;
+  }
+  const createdAt = String((raw as any).createdAt ?? '').trim();
+  const updatedAt = String((raw as any).updatedAt ?? '').trim();
+  return {
+    id,
+    name,
+    content,
+    sizeBytes: Buffer.byteLength(content, 'utf8'),
+    createdAt: createdAt || updatedAt,
+    updatedAt: updatedAt || createdAt,
+  };
+}
+
+function normalizeAgentsLibrary(raw: unknown): AgentsLibraryFile[] {
+  const candidates =
+    raw && typeof raw === 'object' && !Array.isArray(raw) && Array.isArray((raw as any).files)
+      ? (raw as any).files
+      : [];
+  const files: AgentsLibraryFile[] = [];
+  const ids = new Set<string>();
+  for (const candidate of candidates) {
+    const file = normalizeAgentsLibraryFile(candidate);
+    if (!file || ids.has(file.id)) continue;
+    ids.add(file.id);
+    files.push(file);
+  }
+  return files;
+}
+
+function ensureAgentsLibraryCapacity(files: AgentsLibraryFile[]): void {
+  if (files.length > MAX_AGENTS_LIBRARY_FILES) {
+    throw new Error(`AGENTS.md library can contain at most ${MAX_AGENTS_LIBRARY_FILES} files`);
+  }
+  const totalBytes = files.reduce((total, file) => total + file.sizeBytes, 0);
+  if (totalBytes > MAX_AGENTS_LIBRARY_TOTAL_BYTES) {
+    throw new Error('AGENTS.md library content must total at most 20 MiB');
+  }
+}
+
+function ensureUniqueAgentsLibraryName(
+  files: AgentsLibraryFile[],
+  name: string,
+  exceptId?: string,
+): void {
+  if (
+    files.some(
+      (file) =>
+        file.id !== exceptId &&
+        file.name.localeCompare(name, undefined, { sensitivity: 'accent' }) === 0,
+    )
+  ) {
+    throw new Error(`An AGENTS.md file named "${name}" already exists`);
+  }
+}
+
+export async function resolveCanonicalAgentsLibrary(): Promise<AgentsLibraryFile[]> {
+  const record = (await getHubSettingsRepository()).get<StoredAgentsLibrary>(
+    AGENTS_LIBRARY_SETTING_KEY,
+  );
+  return normalizeAgentsLibrary(record?.value);
+}
+
+export async function resolveCanonicalAgentsLibraryFile(
+  fileIdRaw: unknown,
+): Promise<AgentsLibraryFile | null> {
+  const fileId = String(fileIdRaw ?? '').trim();
+  if (!fileId) return null;
+  return (await resolveCanonicalAgentsLibrary()).find((file) => file.id === fileId) ?? null;
+}
+
+export async function createCanonicalAgentsLibraryFile(input: {
+  name?: unknown;
+  content?: unknown;
+}): Promise<AgentsLibraryFile> {
+  const name = normalizeAgentsLibraryFileName(input?.name);
+  const content = parseDroneAgentsMdOverride(input?.content);
+  const at = new Date().toISOString();
+  const created: AgentsLibraryFile = {
+    id: crypto.randomUUID(),
+    name,
+    content,
+    sizeBytes: Buffer.byteLength(content, 'utf8'),
+    createdAt: at,
+    updatedAt: at,
+  };
+  await (
+    await getHubSettingsRepository()
+  ).update<StoredAgentsLibrary>(AGENTS_LIBRARY_SETTING_KEY, (current) => {
+    const files = normalizeAgentsLibrary(current?.value);
+    ensureUniqueAgentsLibraryName(files, name);
+    const next = [...files, created];
+    ensureAgentsLibraryCapacity(next);
+    return { files: next };
+  });
+  return created;
+}
+
+export async function updateCanonicalAgentsLibraryFile(
+  fileIdRaw: unknown,
+  input: { name?: unknown; content?: unknown },
+): Promise<AgentsLibraryFile | null> {
+  const fileId = String(fileIdRaw ?? '').trim();
+  if (!fileId) return null;
+  const name = normalizeAgentsLibraryFileName(input?.name);
+  const content = parseDroneAgentsMdOverride(input?.content);
+  let updated: AgentsLibraryFile | null = null;
+  try {
+    await (
+      await getHubSettingsRepository()
+    ).update<StoredAgentsLibrary>(AGENTS_LIBRARY_SETTING_KEY, (current) => {
+      const files = normalizeAgentsLibrary(current?.value);
+      const index = files.findIndex((file) => file.id === fileId);
+      if (index < 0) throw new AgentsLibraryFileNotFoundError();
+      ensureUniqueAgentsLibraryName(files, name, fileId);
+      updated = {
+        ...files[index],
+        name,
+        content,
+        sizeBytes: Buffer.byteLength(content, 'utf8'),
+        updatedAt: new Date().toISOString(),
+      };
+      const next = [...files];
+      next[index] = updated;
+      ensureAgentsLibraryCapacity(next);
+      return { files: next };
+    });
+  } catch (error) {
+    if (error instanceof AgentsLibraryFileNotFoundError) return null;
+    throw error;
+  }
+  return updated;
+}
+
+export async function deleteCanonicalAgentsLibraryFile(fileIdRaw: unknown): Promise<boolean> {
+  const fileId = String(fileIdRaw ?? '').trim();
+  if (!fileId) return false;
+  try {
+    await (
+      await getHubSettingsRepository()
+    ).update<StoredAgentsLibrary>(AGENTS_LIBRARY_SETTING_KEY, (current) => {
+      const files = normalizeAgentsLibrary(current?.value);
+      const next = files.filter((file) => file.id !== fileId);
+      if (next.length === files.length) throw new AgentsLibraryFileNotFoundError();
+      return { files: next };
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof AgentsLibraryFileNotFoundError) return false;
+    throw error;
+  }
 }
 
 export function normalizeRepoAgentsMode(raw: unknown): RepoAgentsMode {

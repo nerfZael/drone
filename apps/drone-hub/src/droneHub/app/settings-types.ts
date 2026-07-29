@@ -125,6 +125,18 @@ export type RegistryBackupSettingsResponse = {
   createdBackup?: RegistryBackupManifest | null;
 };
 
+export type AgentsMdFileSummary = {
+  id: string;
+  name: string;
+  sizeBytes: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentsMdFile = AgentsMdFileSummary & {
+  content: string;
+};
+
 export type AgentsSettingsResponse = {
   ok: true;
   agents: {
@@ -132,6 +144,11 @@ export type AgentsSettingsResponse = {
     enabled: boolean;
     updatedAt: string | null;
   };
+  files: AgentsMdFileSummary[];
+};
+
+export type AgentsFileResponse = AgentsSettingsResponse & {
+  file: AgentsMdFile;
 };
 
 export type GithubSettingsResponse = {

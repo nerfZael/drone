@@ -148,6 +148,64 @@ describeSocketSuite('create runtime api', () => {
     });
   });
 
+  test('single create persists a normalized per-drone AGENTS.md override', async () => {
+    const resp = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'agents-override-single',
+        runtime: 'container',
+        repoPath: '/tmp/agents-override-single',
+        pullHostBranchBeforeCreate: false,
+        draft: true,
+        agentsMd: '# Drone instructions\r\n\r\nUse the local workflow.',
+      }),
+    });
+    expect(resp.r.status).toBe(201);
+    expect(resp.data?.ok).toBe(true);
+
+    const droneId = String(resp.data?.id ?? '').trim();
+    const regAny: any = await loadRegistry();
+    expect(regAny?.pending?.[droneId]?.agentsMdOverride).toBe(
+      '# Drone instructions\n\nUse the local workflow.\n',
+    );
+  });
+
+  test('batch create accepts an empty AGENTS.md override and rejects it without a repo', async () => {
+    const resp = await apiFetch('/api/drones/batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        drones: [
+          {
+            name: 'agents-override-empty',
+            runtime: 'container',
+            repoPath: '/tmp/agents-override-empty',
+            pullHostBranchBeforeCreate: false,
+            draft: true,
+            agentsMd: '',
+          },
+          {
+            name: 'agents-override-no-repo',
+            runtime: 'container',
+            draft: true,
+            agentsMd: '# Invalid without a repo',
+          },
+        ],
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+    expect(resp.data?.accepted).toHaveLength(1);
+    expect(resp.data?.rejected).toHaveLength(1);
+    expect(String(resp.data?.rejected?.[0]?.error ?? '')).toContain(
+      'repo-attached container drones',
+    );
+
+    const droneId = String(resp.data?.accepted?.[0]?.id ?? '').trim();
+    const regAny: any = await loadRegistry();
+    expect(regAny?.pending?.[droneId]).toHaveProperty('agentsMdOverride', '');
+  });
+
   test('single create rejects read-only seed permission without a supported seed agent', async () => {
     const resp = await apiFetch('/api/drones', {
       method: 'POST',

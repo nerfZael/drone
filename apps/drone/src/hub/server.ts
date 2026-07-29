@@ -162,11 +162,17 @@ import { createAgentModelCatalogStore } from './agent-model-catalog/store';
 import type { AgentModelCatalogTarget } from './agent-model-catalog/types';
 import { registerAgentModelCatalogRoutes } from './agent-model-catalog/routes';
 import {
+  createCanonicalAgentsLibraryFile,
+  deleteCanonicalAgentsLibraryFile,
   normalizeAgentsMarkdown,
+  parseDroneAgentsMdOverride,
   normalizeRepoAgentsMode,
+  resolveCanonicalAgentsLibrary,
+  resolveCanonicalAgentsLibraryFile,
   resolveCanonicalDefaultAgentsConfig,
   resolveCanonicalRepoAgentsConfig,
   resolveRepoAgentsConfig,
+  updateCanonicalAgentsLibraryFile,
   upsertCanonicalDefaultAgentsConfig,
 } from './agents-config';
 import {
@@ -1229,6 +1235,7 @@ async function repoEnvironmentPayload(regAny: any, repoPathRaw: unknown) {
 
 async function defaultAgentsPayload(regAny: any) {
   const agents = await resolveCanonicalDefaultAgentsConfig(regAny);
+  const files = await resolveCanonicalAgentsLibrary();
   return {
     ok: true as const,
     agents: {
@@ -1236,6 +1243,7 @@ async function defaultAgentsPayload(regAny: any) {
       enabled: agents.enabled,
       updatedAt: agents.updatedAt,
     },
+    files: files.map(({ content: _content, ...file }) => file),
   };
 }
 
@@ -1946,9 +1954,12 @@ async function syncRepoAgentsInstructionsForDrone(opts: {
   if (!isRepoAttachedDrone(droneEntry)) return;
 
   const regAny: any = await loadRegistry();
-  const repoAgents = await resolveCanonicalRepoAgentsConfig(regAny, (droneEntry as any)?.repoPath);
-  const effectiveContent = repoAgents.effectiveContent;
-  if (!effectiveContent) return;
+  const hasDroneOverride = typeof (droneEntry as any)?.agentsMdOverride === 'string';
+  const effectiveContent = hasDroneOverride
+    ? parseDroneAgentsMdOverride((droneEntry as any).agentsMdOverride)
+    : (await resolveCanonicalRepoAgentsConfig(regAny, (droneEntry as any)?.repoPath))
+        .effectiveContent;
+  if (effectiveContent == null || (!hasDroneOverride && !effectiveContent)) return;
 
   const requestedDroneName = String((droneEntry as any)?.name ?? droneId).trim() || droneId;
   const repoRoot = droneRepoPathInContainer(droneEntry);
@@ -5082,6 +5093,10 @@ export async function startDroneHubApiServer(opts: {
     defaultAgentsPayload,
     normalizeAgentsMarkdown,
     upsertCanonicalDefaultAgentsConfig,
+    resolveCanonicalAgentsLibraryFile,
+    createCanonicalAgentsLibraryFile,
+    updateCanonicalAgentsLibraryFile,
+    deleteCanonicalAgentsLibraryFile,
     loadRegistry,
     syncSetService,
     parseSyncSetMutationInput,

@@ -8,11 +8,15 @@ import { resolveRepoSeedFromParentDroneId } from './child-drone-repo-seed';
 import { createDraftQueuedPrompt, createSubmittedDraftChat } from './draft-chat-queue';
 import {
   buildDraftDroneCreatePayload,
+  materializeAgentsMdForCreate,
+  resolveAgentsMdLibraryFileIdForCreate,
+  resolveAgentsMdOverrideForCreate,
   runtimeSupportsCustomAgents,
   shouldAutoRenameDraftDrone,
   type RepoBranchSelectionState,
   type RepoBranchSourceMode,
 } from './drone-create-runtime';
+import type { AgentsMdFile } from './settings-types';
 import { makeId, newDraftChatFocusKey } from './helpers';
 import { allocateUntitledDisplayName } from './name-helpers';
 import type { DesktopNewDronePreferences } from './new-drone-preferences';
@@ -49,6 +53,9 @@ type UseDroneCreationActionsArgs = {
   createMessageSuffixRows: string[];
   createGroup: string;
   createRepoPath: string;
+  createAgentsMdLibraryFileId: string;
+  createAgentsMdOverrideEnabled: boolean;
+  createAgentsMdOverride: string;
   createInitialMessage: string;
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
@@ -68,6 +75,9 @@ type UseDroneCreationActionsArgs = {
   draftCreateName: string;
   draftCreateGroup: string;
   draftCreateParentDroneId: string | null;
+  draftAgentsMdLibraryFileId: string;
+  draftAgentsMdOverrideEnabled: boolean;
+  draftAgentsMdOverride: string;
   draftCreateRepoPath: string;
   startupSeedMissingGraceMs: number;
   suggestCloneName: (sourceName: string) => string;
@@ -112,12 +122,18 @@ type UseDroneCreationActionsArgs = {
   setCloneSourceId: React.Dispatch<React.SetStateAction<string | null>>;
   setCreateGroup: React.Dispatch<React.SetStateAction<string>>;
   setCreateRepoPath: React.Dispatch<React.SetStateAction<string>>;
+  setCreateAgentsMdLibraryFileId: React.Dispatch<React.SetStateAction<string>>;
+  setCreateAgentsMdOverrideEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  setCreateAgentsMdOverride: React.Dispatch<React.SetStateAction<string>>;
   setCreateInitialMessage: React.Dispatch<React.SetStateAction<string>>;
   setDraftChat: React.Dispatch<React.SetStateAction<any>>;
   setDraftCreateError: React.Dispatch<React.SetStateAction<string | null>>;
   setDraftCreateName: React.Dispatch<React.SetStateAction<string>>;
   setDraftCreateGroup: React.Dispatch<React.SetStateAction<string>>;
   setDraftCreateParentDroneId: React.Dispatch<React.SetStateAction<string | null>>;
+  setDraftAgentsMdLibraryFileId: React.Dispatch<React.SetStateAction<string>>;
+  setDraftAgentsMdOverrideEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  setDraftAgentsMdOverride: React.Dispatch<React.SetStateAction<string>>;
   setDraftSuggestedName: React.Dispatch<React.SetStateAction<string>>;
   setDraftNameSuggesting: React.Dispatch<React.SetStateAction<boolean>>;
   setDraftNameSuggestionError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -142,6 +158,9 @@ export function useDroneCreationActions({
   createMessageSuffixRows,
   createGroup,
   createRepoPath,
+  createAgentsMdLibraryFileId,
+  createAgentsMdOverrideEnabled,
+  createAgentsMdOverride,
   createInitialMessage,
   repoBranchSource,
   repoCreateRemoteBranch,
@@ -161,6 +180,9 @@ export function useDroneCreationActions({
   draftCreateName,
   draftCreateGroup,
   draftCreateParentDroneId,
+  draftAgentsMdLibraryFileId,
+  draftAgentsMdOverrideEnabled,
+  draftAgentsMdOverride,
   draftCreateRepoPath,
   startupSeedMissingGraceMs,
   suggestCloneName,
@@ -187,12 +209,18 @@ export function useDroneCreationActions({
   setCloneSourceId,
   setCreateGroup,
   setCreateRepoPath,
+  setCreateAgentsMdLibraryFileId,
+  setCreateAgentsMdOverrideEnabled,
+  setCreateAgentsMdOverride,
   setCreateInitialMessage,
   setDraftChat,
   setDraftCreateError,
   setDraftCreateName,
   setDraftCreateGroup,
   setDraftCreateParentDroneId,
+  setDraftAgentsMdLibraryFileId,
+  setDraftAgentsMdOverrideEnabled,
+  setDraftAgentsMdOverride,
   setDraftSuggestedName,
   setDraftNameSuggesting,
   setDraftNameSuggestionError,
@@ -390,6 +418,20 @@ export function useDroneCreationActions({
     const seedModel = isClone && cloneIncludeChats ? null : spawnModelForSeed;
     const seedReasoning = isClone && cloneIncludeChats ? null : spawnReasoningForSeed;
     const seedAgentPermissionMode: AgentPermissionMode = seedAgent ? spawnAgentPermissionMode : 'full-access';
+    const customAgentsMdOverride = resolveAgentsMdOverrideForCreate({
+      enabled: createAgentsMdOverrideEnabled,
+      content: createAgentsMdOverride,
+      repoPath,
+      runtime,
+      isClone,
+    });
+    const agentsMdLibraryFileId = resolveAgentsMdLibraryFileIdForCreate({
+      fileId: createAgentsMdLibraryFileId,
+      customOverrideEnabled: createAgentsMdOverrideEnabled,
+      repoPath,
+      runtime,
+      isClone,
+    });
     if (runtime === 'host' && seedAgent?.kind === 'custom') {
       setCreateError('Host runtime currently supports builtin agents only.');
       return;
@@ -456,6 +498,16 @@ export function useDroneCreationActions({
       },
     );
     try {
+      const agentsMdOverride = await materializeAgentsMdForCreate({
+        customOverride: customAgentsMdOverride,
+        libraryFileId: agentsMdLibraryFileId,
+        loadLibraryFile: async (fileId) =>
+          (
+            await requestJson<{ ok: true; file: AgentsMdFile }>(
+              `/api/settings/agents/files/${encodeURIComponent(fileId)}`,
+            )
+          ).file.content,
+      });
       const resp = await queueDrones(
         namedRows.map(({ name, messageSuffix }) => {
           const suffix = messageSuffix.trim();
@@ -468,6 +520,7 @@ export function useDroneCreationActions({
             ...(createAsDraft ? { draft: true } : {}),
             ...(group ? { group } : {}),
             ...(repoPath ? { repoPath } : {}),
+            ...(agentsMdOverride !== undefined ? { agentsMd: agentsMdOverride } : {}),
             ...(typeof persistVolume === 'boolean' ? { persistVolume } : {}),
             pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
             repoBranchSource: repoBranchSelection.repoBranchSource,
@@ -573,6 +626,9 @@ export function useDroneCreationActions({
       setCreateName('');
       setCreateGroup('');
       setCreateRepoPath('');
+      setCreateAgentsMdLibraryFileId('');
+      setCreateAgentsMdOverrideEnabled(false);
+      setCreateAgentsMdOverride('');
       setCreateInitialMessage('');
       setCreateMessageSuffixRows(['']);
     } catch (e: any) {
@@ -590,6 +646,9 @@ export function useDroneCreationActions({
     createMode,
     createRuntime,
     createAsDraft,
+    createAgentsMdLibraryFileId,
+    createAgentsMdOverride,
+    createAgentsMdOverrideEnabled,
     createPersistVolume,
     createNameRows,
     createRepoPath,
@@ -603,12 +662,16 @@ export function useDroneCreationActions({
     preferredSelectedDroneHoldUntilRef,
     preferredSelectedDroneRef,
     queueDrones,
+    requestJson,
     rememberSeenModels,
     replaceOptimisticStartupSeeds,
     resolveAgentKeyToConfig,
     selectionAnchorRef,
     setCloneSourceId,
     setCreateError,
+    setCreateAgentsMdLibraryFileId,
+    setCreateAgentsMdOverride,
+    setCreateAgentsMdOverrideEnabled,
     setCreateGroup,
     setCreateInitialMessage,
     setCreateMessageSuffixRows,
@@ -674,6 +737,20 @@ export function useDroneCreationActions({
       });
       const remoteBranch = String(repoCreateRemoteBranch ?? '').trim();
       const effectiveRepoBranchSource: RepoBranchSourceMode = createRuntime === 'host' ? 'host' : repoBranchSource;
+      const customAgentsMdOverride = resolveAgentsMdOverrideForCreate({
+        enabled: draftAgentsMdOverrideEnabled,
+        content: draftAgentsMdOverride,
+        repoPath,
+        runtime,
+        isClone: false,
+      });
+      const agentsMdLibraryFileId = resolveAgentsMdLibraryFileIdForCreate({
+        fileId: draftAgentsMdLibraryFileId,
+        customOverrideEnabled: draftAgentsMdOverrideEnabled,
+        repoPath,
+        runtime,
+        isClone: false,
+      });
       if (!createWithoutChat && !prompt && !hasDraftAttachments) {
         setDraftCreateError('Send a first message before creating a drone.');
         return false;
@@ -734,6 +811,16 @@ export function useDroneCreationActions({
 
       const runCreate = async (): Promise<boolean> => {
         try {
+          const agentsMdOverride = await materializeAgentsMdForCreate({
+            customOverride: customAgentsMdOverride,
+            libraryFileId: agentsMdLibraryFileId,
+            loadLibraryFile: async (fileId) =>
+              (
+                await requestJson<{ ok: true; file: AgentsMdFile }>(
+                  `/api/settings/agents/files/${encodeURIComponent(fileId)}`,
+                )
+              ).file.content,
+          });
           const body = buildDraftDroneCreatePayload({
             name,
             group,
@@ -751,6 +838,7 @@ export function useDroneCreationActions({
             seedModel,
             seedReasoning,
             seedAgentPermissionMode,
+            agentsMd: agentsMdOverride,
             prompt: shouldSeedPromptViaCreate ? prompt : '',
           });
           if (createAsDraft) (body as any).draft = true;
@@ -860,6 +948,9 @@ export function useDroneCreationActions({
             setDraftCreateName('');
             setDraftCreateGroup('');
             setDraftCreateParentDroneId(null);
+            setDraftAgentsMdLibraryFileId('');
+            setDraftAgentsMdOverrideEnabled(false);
+            setDraftAgentsMdOverride('');
             setCreateAsDraft(false);
             setDraftCreateError(postCreateError);
             setDraftNameSuggestionError(null);
@@ -909,6 +1000,9 @@ export function useDroneCreationActions({
       draftCreateGroup,
       draftCreateName,
       draftCreateParentDroneId,
+      draftAgentsMdLibraryFileId,
+      draftAgentsMdOverride,
+      draftAgentsMdOverrideEnabled,
       createRuntime,
       createAsDraft,
       createPersistVolume,
@@ -932,6 +1026,9 @@ export function useDroneCreationActions({
       endDraftCreate,
       setDraftAutoRenaming,
       setCreateAsDraft,
+      setDraftAgentsMdLibraryFileId,
+      setDraftAgentsMdOverride,
+      setDraftAgentsMdOverrideEnabled,
       setDraftChat,
       setDraftCreateError,
       setDraftCreateGroup,

@@ -1411,7 +1411,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
 
   server.registerTool('create_drone', {
     title: 'Create drone',
-    description: 'Create a new Drone Hub container drone. Drafts return immediately; other drones return when ready unless completion is accepted.',
+    description: 'Create a new Drone Hub container drone. Drafts return immediately; other drones return when ready unless completion is accepted. For repo-attached drones, agentsMd overrides the AGENTS.md content inherited from Drone Hub settings.',
     inputSchema: {
       name: z.string(),
       group: z.string().optional(),
@@ -1424,6 +1424,12 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       repoBranchSource: z.enum(['host', 'remote']).optional(),
       remoteBranch: z.string().optional(),
       pullHostBranchBeforeCreate: z.boolean().optional(),
+      agentsMd: z
+        .string()
+        .describe(
+          'Optional AGENTS.md content for this repo-attached drone, limited to 2 MiB of UTF-8 text. Pass an empty string to override inherited content with an empty file.',
+        )
+        .optional(),
       initialMessage: z.string().optional(),
       draft: z.boolean().optional(),
       completion: z.enum(['ready', 'accepted']).optional(),
@@ -1455,6 +1461,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       ...(repoPath ? { repoPath, repoBranchSource } : {}),
       ...(repoPath && repoBranchSource === 'host' ? { pullHostBranchBeforeCreate: args.pullHostBranchBeforeCreate ?? defaults.pullHostBranchBeforeCreate } : {}),
       ...(repoPath && repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
+      ...(args.agentsMd !== undefined ? { agentsMd: args.agentsMd } : {}),
       ...(cleanString(args.initialMessage) ? { seedPrompt: cleanString(args.initialMessage), seedSubmittedAt: new Date().toISOString() } : {}),
       ...(fleetParentId ? { fleetParentId } : {}),
     };

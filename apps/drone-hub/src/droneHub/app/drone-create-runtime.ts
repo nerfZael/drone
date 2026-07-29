@@ -10,6 +10,65 @@ export type RepoBranchSelectionState = {
   remoteBranch?: string | null;
 };
 
+export function resolveAgentsMdOverrideForCreate({
+  enabled,
+  content,
+  repoPath,
+  runtime,
+  isClone,
+}: {
+  enabled: boolean;
+  content: string;
+  repoPath?: string | null;
+  runtime: CreateRuntime;
+  isClone: boolean;
+}): string | undefined {
+  if (!enabled || isClone || runtime !== 'container' || !String(repoPath ?? '').trim()) {
+    return undefined;
+  }
+  return String(content ?? '');
+}
+
+export function resolveAgentsMdLibraryFileIdForCreate({
+  fileId,
+  customOverrideEnabled,
+  repoPath,
+  runtime,
+  isClone,
+}: {
+  fileId?: string | null;
+  customOverrideEnabled: boolean;
+  repoPath?: string | null;
+  runtime: CreateRuntime;
+  isClone: boolean;
+}): string | undefined {
+  const normalizedFileId = String(fileId ?? '').trim();
+  if (
+    !normalizedFileId ||
+    customOverrideEnabled ||
+    isClone ||
+    runtime !== 'container' ||
+    !String(repoPath ?? '').trim()
+  ) {
+    return undefined;
+  }
+  return normalizedFileId;
+}
+
+export async function materializeAgentsMdForCreate({
+  customOverride,
+  libraryFileId,
+  loadLibraryFile,
+}: {
+  customOverride?: string;
+  libraryFileId?: string;
+  loadLibraryFile: (fileId: string) => Promise<string>;
+}): Promise<string | undefined> {
+  if (customOverride !== undefined) return customOverride;
+  if (!libraryFileId) return undefined;
+  return await loadLibraryFile(libraryFileId);
+}
+
 export function runtimeSupportsCustomAgents(runtime: CreateRuntime): boolean {
   return runtime !== 'host';
 }
@@ -62,6 +121,7 @@ type BuildDraftDroneCreatePayloadArgs = {
   seedModel?: string | null;
   seedReasoning?: string | null;
   seedAgentPermissionMode?: AgentPermissionMode;
+  agentsMd?: string;
   prompt?: string | null;
 };
 
@@ -78,6 +138,7 @@ export function buildDraftDroneCreatePayload({
   seedModel,
   seedReasoning,
   seedAgentPermissionMode,
+  agentsMd,
   prompt,
 }: BuildDraftDroneCreatePayloadArgs) {
   const trimmedName = String(name ?? '').trim();
@@ -102,6 +163,7 @@ export function buildDraftDroneCreatePayload({
     pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
     repoBranchSource,
     ...(repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
+    ...(agentsMd !== undefined ? { agentsMd } : {}),
     ...(hasChatSeed ? { seedChat: 'default' } : {}),
     ...(seedAgent ? { seedAgent } : {}),
     ...(trimmedModel ? { seedModel: trimmedModel } : {}),

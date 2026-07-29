@@ -132,6 +132,7 @@ describe('drone provisioning controller', () => {
             runtime: 'host',
             repoPath: '',
             build: false,
+            agentsMdOverride: '# Per-drone instructions\n',
             createdAt: '2026-03-26T11:00:00.000Z',
             updatedAt: '2026-03-26T11:00:00.000Z',
             phase: 'starting',
@@ -157,6 +158,7 @@ describe('drone provisioning controller', () => {
       expect(reg?.drones?.['drone-1']).toMatchObject({
         id: 'drone-1',
         name: 'auth-bugfix',
+        agentsMdOverride: '# Per-drone instructions\n',
       });
       expect(harness.syncSkillLibraryCalls).toHaveLength(1);
       expect(harness.syncMcpServersCalls).toHaveLength(1);

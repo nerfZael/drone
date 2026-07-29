@@ -13,6 +13,7 @@ import type {
 } from '../chat/ChatComposerControls';
 import { draftChatInputResetKey, droneChatQueueKey } from './helpers';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
+import type { AgentsMdFileSummary } from './settings-types';
 import type { ChatAgentConfig } from '../../domain';
 import type { DraftChatState } from './app-types';
 import type { QueuedPrompt } from './use-queued-prompts-state';
@@ -44,6 +45,15 @@ type DraftChatWorkspaceProps = {
   spawnAgentConfig: ChatAgentConfig;
   createRepoMenuEntries: UiMenuSelectEntry[];
   draftCreateRepoPath: string;
+  agentsMdLibraryFiles: AgentsMdFileSummary[];
+  agentsMdLibraryLoading: boolean;
+  agentsMdLibraryError: string | null;
+  draftAgentsMdLibraryFileId: string;
+  onDraftAgentsMdLibraryFileIdChange: (value: string) => void;
+  draftAgentsMdOverrideEnabled: boolean;
+  onDraftAgentsMdOverrideEnabledChange: (value: boolean) => void;
+  draftAgentsMdOverride: string;
+  onDraftAgentsMdOverrideChange: (value: string) => void;
   repoBranchSource: RepoBranchSourceMode;
   onRepoBranchSourceChange: (value: RepoBranchSourceMode) => void;
   repoCreateRemoteBranch: string;
@@ -82,6 +92,15 @@ export function DraftChatWorkspace({
   spawnAgentConfig,
   createRepoMenuEntries,
   draftCreateRepoPath,
+  agentsMdLibraryFiles,
+  agentsMdLibraryLoading,
+  agentsMdLibraryError,
+  draftAgentsMdLibraryFileId,
+  onDraftAgentsMdLibraryFileIdChange,
+  draftAgentsMdOverrideEnabled,
+  onDraftAgentsMdOverrideEnabledChange,
+  draftAgentsMdOverride,
+  onDraftAgentsMdOverrideChange,
   repoBranchSource,
   onRepoBranchSourceChange,
   repoCreateRemoteBranch,
@@ -270,6 +289,15 @@ export function DraftChatWorkspace({
       onCreatePersistVolumeChange={onCreatePersistVolumeChange}
       createRepoMenuEntries={createRepoMenuEntries}
       draftCreateRepoPath={draftCreateRepoPath}
+      agentsMdLibraryFiles={agentsMdLibraryFiles}
+      agentsMdLibraryLoading={agentsMdLibraryLoading}
+      agentsMdLibraryError={agentsMdLibraryError}
+      draftAgentsMdLibraryFileId={draftAgentsMdLibraryFileId}
+      onDraftAgentsMdLibraryFileIdChange={onDraftAgentsMdLibraryFileIdChange}
+      draftAgentsMdOverrideEnabled={draftAgentsMdOverrideEnabled}
+      onDraftAgentsMdOverrideEnabledChange={onDraftAgentsMdOverrideEnabledChange}
+      draftAgentsMdOverride={draftAgentsMdOverride}
+      onDraftAgentsMdOverrideChange={onDraftAgentsMdOverrideChange}
       repoBranchSource={repoBranchSource}
       onRepoBranchSourceChange={onRepoBranchSourceChange}
       repoCreateRemoteBranch={repoCreateRemoteBranch}

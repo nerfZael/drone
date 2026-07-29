@@ -1,8 +1,22 @@
 import { describe, expect, test } from 'bun:test';
 
-import { resolveDefaultAgentsConfig, resolveRepoAgentsConfig } from '../src/hub/agents-config';
+import {
+  parseDroneAgentsMdOverride,
+  resolveDefaultAgentsConfig,
+  resolveRepoAgentsConfig,
+} from '../src/hub/agents-config';
 
 describe('agents config resolution', () => {
+  test('allows per-drone AGENTS.md overrides up to 2 MiB', () => {
+    const twoMiB = `${'a'.repeat(2 * 1024 * 1024 - 1)}\n`;
+
+    expect(parseDroneAgentsMdOverride(twoMiB)).toBe(twoMiB);
+    expect(() => parseDroneAgentsMdOverride(42)).toThrow('agentsMd must be a string');
+    expect(() => parseDroneAgentsMdOverride('a'.repeat(2 * 1024 * 1024))).toThrow(
+      'agentsMd must be at most 2 MiB',
+    );
+  });
+
   test('treats blank default content as disabled', () => {
     const resolved = resolveDefaultAgentsConfig({
       settings: {

@@ -23,6 +23,9 @@ type UseWorkspaceNavigationActionsArgs = {
   setDraftCreateName: React.Dispatch<React.SetStateAction<string>>;
   setDraftCreateGroup: React.Dispatch<React.SetStateAction<string>>;
   setDraftCreateParentDroneId: React.Dispatch<React.SetStateAction<string | null>>;
+  setDraftAgentsMdLibraryFileId: React.Dispatch<React.SetStateAction<string>>;
+  setDraftAgentsMdOverrideEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  setDraftAgentsMdOverride: React.Dispatch<React.SetStateAction<string>>;
   setDraftCreateError: React.Dispatch<React.SetStateAction<string | null>>;
   setDraftCreating: React.Dispatch<React.SetStateAction<boolean>>;
   setDraftAutoRenaming: React.Dispatch<React.SetStateAction<boolean>>;
@@ -72,6 +75,9 @@ export function useWorkspaceNavigationActions({
   setDraftCreateName,
   setDraftCreateGroup,
   setDraftCreateParentDroneId,
+  setDraftAgentsMdLibraryFileId,
+  setDraftAgentsMdOverrideEnabled,
+  setDraftAgentsMdOverride,
   setDraftCreateError,
   setDraftCreating,
   setDraftAutoRenaming,
@@ -113,8 +119,14 @@ export function useWorkspaceNavigationActions({
   const resetDraftCreateState = React.useCallback(() => {
     setDraftCreateOpen(false);
     setDraftCreateParentDroneId(null);
+    setDraftAgentsMdLibraryFileId('');
+    setDraftAgentsMdOverrideEnabled(false);
+    setDraftAgentsMdOverride('');
     setDraftCreateError(null);
   }, [
+    setDraftAgentsMdOverride,
+    setDraftAgentsMdOverrideEnabled,
+    setDraftAgentsMdLibraryFileId,
     setDraftCreateError,
     setDraftCreateOpen,
     setDraftCreateParentDroneId,

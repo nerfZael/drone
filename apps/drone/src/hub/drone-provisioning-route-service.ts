@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import type { AgentPermissionMode } from './chat-types';
+import { parseDroneAgentsMdOverride } from './agents-config';
 import { readJsonBody, sendJson as json } from './hub-http';
 import type { DroneRuntime } from '../host/runtime';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
@@ -136,6 +137,23 @@ function createDroneProvisioningServiceHandler(
             error: 'persistVolume is only supported for container runtime drones',
           });
           return;
+        }
+        const hasAgentsMdOverride = Object.prototype.hasOwnProperty.call(body ?? {}, 'agentsMd');
+        let agentsMdOverride: string | undefined;
+        if (hasAgentsMdOverride) {
+          try {
+            agentsMdOverride = parseDroneAgentsMdOverride(body?.agentsMd);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          if (runtime !== 'container' || !repoPath) {
+            json(res, 400, {
+              ok: false,
+              error: 'agentsMd is only supported for repo-attached container drones',
+            });
+            return;
+          }
         }
 
         const droneCli = resolveDroneCliPath();
@@ -412,6 +430,7 @@ function createDroneProvisioningServiceHandler(
             group: group ?? undefined,
             repoPath,
             runtime,
+            ...(hasAgentsMdOverride ? { agentsMdOverride } : {}),
             containerPort,
             build,
             createdAt: at,
@@ -745,6 +764,27 @@ function createDroneProvisioningServiceHandler(
                 rejected.push({ name, error: e?.message ?? String(e), status: 400 });
                 continue;
               }
+              const hasAgentsMdOverride = Object.prototype.hasOwnProperty.call(
+                raw ?? {},
+                'agentsMd',
+              );
+              let agentsMdOverride: string | undefined;
+              if (hasAgentsMdOverride) {
+                try {
+                  agentsMdOverride = parseDroneAgentsMdOverride(raw?.agentsMd);
+                } catch (e: any) {
+                  rejected.push({ name, error: e?.message ?? String(e), status: 400 });
+                  continue;
+                }
+                if (runtime !== 'container' || !repoPath) {
+                  rejected.push({
+                    name,
+                    error: 'agentsMd is only supported for repo-attached container drones',
+                    status: 400,
+                  });
+                  continue;
+                }
+              }
               const build = raw?.build === true;
               const createAsDraft = parseDraftFlag(raw?.draft ?? raw?.isDraft);
               const createdEnvironment = deriveCreatedDroneEnvironmentConfig(
@@ -976,6 +1016,7 @@ function createDroneProvisioningServiceHandler(
                 group: group ?? undefined,
                 repoPath,
                 runtime,
+                ...(hasAgentsMdOverride ? { agentsMdOverride } : {}),
                 containerPort,
                 build,
                 createdAt: at,

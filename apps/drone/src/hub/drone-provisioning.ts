@@ -283,6 +283,9 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
             updatedAt: typeof (environment as any)?.updatedAt === 'string' ? String((environment as any).updatedAt).trim() || null : null,
           };
         }
+        if (typeof pendingLatest?.agentsMdOverride === 'string') {
+          d.agentsMdOverride = pendingLatest.agentsMdOverride;
+        }
         if (cloneSourceLatest && typeof cloneSourceLatest === 'object') {
           const cloneSourceCwd =
             typeof (cloneSourceLatest as any)?.cwd === 'string'

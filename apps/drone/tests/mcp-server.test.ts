@@ -195,6 +195,7 @@ describe('Drone Hub assistant MCP transport', () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
       const previousToken = process.env.DRONE_TOKEN;
       const previousFetch = globalThis.fetch;
+      const repoPath = process.cwd();
       const requests: Array<{ pathname: string; method: string; body?: any }> = [];
       globalThis.fetch = (async (input, init) => {
         const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
@@ -203,6 +204,12 @@ describe('Drone Hub assistant MCP transport', () => {
         requests.push({ pathname: url.pathname, method, ...(body === undefined ? {} : { body }) });
         if (url.pathname === '/api/settings/ui-preferences') {
           return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+        }
+        if (url.pathname === '/api/repos' && method === 'GET') {
+          return Response.json({
+            ok: true,
+            repos: [{ path: repoPath, label: 'drone' }],
+          });
         }
         if (url.pathname === '/api/drones' && method === 'POST') {
           return Response.json({ ok: true, id: 'draft-1', name: 'New draft', runtime: 'container', phase: 'draft', draft: true }, { status: 201 });
@@ -219,7 +226,15 @@ describe('Drone Hub assistant MCP transport', () => {
           allowedWriteDroneRefs: [],
           allowedDroneIds: [],
         });
-        const result = await client.callTool({ name: 'create_drone', arguments: { name: 'New draft', draft: true } });
+        const result = await client.callTool({
+          name: 'create_drone',
+          arguments: {
+            name: 'New draft',
+            draft: true,
+            repoPath,
+            agentsMd: '# Draft-specific instructions',
+          },
+        });
         expect(result.structuredContent).toMatchObject({
           ok: true,
           phase: 'draft',
@@ -227,10 +242,17 @@ describe('Drone Hub assistant MCP transport', () => {
           raw: { draft: true, phase: 'draft' },
         });
         expect(requests.map((request) => `${request.method} ${request.pathname}`)).toEqual([
+          'GET /api/repos',
           'GET /api/settings/ui-preferences',
           'POST /api/drones',
         ]);
-        expect(requests[1]?.body).toMatchObject({ name: 'New draft', runtime: 'container', draft: true });
+        expect(requests[2]?.body).toMatchObject({
+          name: 'New draft',
+          runtime: 'container',
+          draft: true,
+          repoPath,
+          agentsMd: '# Draft-specific instructions',
+        });
       } finally {
         await client?.close();
         globalThis.fetch = previousFetch;
