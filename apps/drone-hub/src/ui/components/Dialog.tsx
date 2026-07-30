@@ -93,7 +93,7 @@ export function UiDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-[var(--scrim)] px-4 py-6 backdrop-blur-sm"
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-[var(--scrim)] px-4 py-6 backdrop-blur-sm animate-overlay-in motion-reduce:animate-none"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
@@ -129,13 +129,13 @@ export function UiDialog({
         ref={panelRef}
         tabIndex={-1}
         className={cn(
-          'w-full overflow-hidden rounded-[var(--radius-xlarge)] border bg-[var(--panel-overlay)] shadow-[0_24px_80px_var(--shadow-color)] animate-slide-up focus:outline-none motion-reduce:animate-none',
+          'w-full overflow-hidden rounded-[var(--radius-xlarge)] border bg-[var(--panel-overlay)] shadow-[var(--edge-highlight),var(--shadow-dialog)] animate-dialog-in focus:outline-none motion-reduce:animate-none',
           sizeClassName[size],
           toneClassName[tone],
           className,
         )}
       >
-        <div className="flex items-start gap-3 border-b border-[var(--border-subtle)] px-5 py-4">
+        <div className="flex items-start gap-3 border-b border-[var(--border-subtle)] bg-[linear-gradient(180deg,var(--surface-softest),transparent)] px-5 py-4">
           {icon ? (
             <div className={cn('mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-large)] border', iconToneClassName[tone])}>
               {icon}

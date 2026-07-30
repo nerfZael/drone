@@ -1,7 +1,7 @@
 import * as React from 'react';
 
 export const dropdownPanelBaseClass =
-  'rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] shadow-[0_16px_48px_var(--shadow-color)] overflow-hidden animate-slide-up';
+  'rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] shadow-[var(--edge-highlight),var(--shadow-menu)] backdrop-blur-md overflow-hidden animate-menu-in motion-reduce:animate-none';
 
 export const dropdownMenuItemBaseClass = 'w-full text-left px-3 py-2.5 text-[length:var(--text-11)] font-[var(--weight-semibold)] transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:bg-[var(--hover)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]';
 

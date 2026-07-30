@@ -21,14 +21,19 @@ export function UiBadge({ tone = 'neutral', dot = false, className, children, st
   return (
     <span
       className={cn(
-        'inline-flex h-5 max-w-full items-center gap-1.5 rounded-full border px-2 text-[length:var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.07em]',
+        'inline-flex h-5 max-w-full items-center gap-1.5 rounded-full border px-2 text-[length:var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] shadow-[var(--edge-highlight)]',
         toneClassName[tone],
         className,
       )}
       style={{ fontFamily: 'var(--display)', ...style }}
       {...props}
     >
-      {dot ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" /> : null}
+      {dot ? (
+        <span
+          className="h-1.5 w-1.5 shrink-0 rounded-full bg-current shadow-[0_0_5px_currentColor]"
+          aria-hidden="true"
+        />
+      ) : null}
       <span className="truncate">{children}</span>
     </span>
   );

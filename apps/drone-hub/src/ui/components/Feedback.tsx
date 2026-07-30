@@ -84,7 +84,7 @@ export function UiAlert({ tone = 'info', title, action, className, children, ...
   return (
     <div
       role={tone === 'danger' ? 'alert' : 'status'}
-      className={cn('flex items-start gap-3 rounded-[var(--radius-large)] border px-3.5 py-3', alertToneClassName[tone], className)}
+      className={cn('flex items-start gap-3 rounded-[var(--radius-large)] border px-3.5 py-3 shadow-[var(--edge-highlight)]', alertToneClassName[tone], className)}
       {...props}
     >
       <span className="mt-0.5 shrink-0">
@@ -110,7 +110,7 @@ export function UiSkeleton({
   return (
     <div
         className={cn(
-        'relative h-3 overflow-hidden rounded bg-[var(--surface-strong)] before:absolute before:inset-0 before:animate-[shimmer-bar_1.5s_ease-in-out_infinite] before:bg-gradient-to-r before:from-transparent before:via-[var(--hover)] before:to-transparent motion-reduce:before:animate-none',
+        'relative h-3 overflow-hidden rounded-[4px] bg-[var(--surface-strong)] before:absolute before:inset-0 before:animate-[shimmer-bar_1.5s_ease-in-out_infinite] before:bg-gradient-to-r before:from-transparent before:via-[var(--hover)] before:to-transparent motion-reduce:before:animate-none',
         className,
       )}
       aria-hidden="true"
@@ -122,10 +122,10 @@ export function UiSkeleton({
 export type UiProgressTone = 'accent' | 'success' | 'warning' | 'danger';
 
 const progressToneClassName: Record<UiProgressTone, string> = {
-  accent: 'bg-[var(--accent)]',
-  success: 'bg-[var(--green)]',
-  warning: 'bg-[var(--yellow)]',
-  danger: 'bg-[var(--red)]',
+  accent: 'bg-[var(--accent)] shadow-[0_0_10px_-2px_var(--accent)]',
+  success: 'bg-[var(--green)] shadow-[0_0_10px_-2px_var(--green)]',
+  warning: 'bg-[var(--yellow)] shadow-[0_0_10px_-2px_var(--yellow)]',
+  danger: 'bg-[var(--red)] shadow-[0_0_10px_-2px_var(--red)]',
 };
 
 export type UiProgressProps = {
@@ -163,7 +163,7 @@ export function UiProgress({
         aria-valuemin={determinate ? 0 : undefined}
         aria-valuemax={determinate ? safeMax : undefined}
         aria-valuenow={determinate ? clampedValue : undefined}
-        className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-strong)]"
+        className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-strong)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent)]"
       >
         <div
           className={cn(
@@ -186,6 +186,13 @@ export type UiToastProps = React.HTMLAttributes<HTMLDivElement> & {
   onDismiss?: () => void;
 };
 
+const toastRailClassName: Record<UiAlertTone, string> = {
+  info: 'bg-[var(--info)]',
+  success: 'bg-[var(--green)]',
+  warning: 'bg-[var(--yellow)]',
+  danger: 'bg-[var(--red)]',
+};
+
 export function UiToast({
   tone = 'info',
   title,
@@ -199,15 +206,15 @@ export function UiToast({
     <div
       role={tone === 'danger' ? 'alert' : 'status'}
       className={cn(
-        'flex w-full max-w-[24rem] items-start gap-3 rounded-[var(--radius-large)] border bg-[var(--panel-overlay)] p-3 shadow-[0_12px_36px_var(--shadow-color)]',
-        tone === 'info' && 'border-[var(--info-border)]',
-        tone === 'success' && 'border-[var(--green-border)]',
-        tone === 'warning' && 'border-[var(--yellow-border)]',
-        tone === 'danger' && 'border-[var(--red-border)]',
+        'relative flex w-full max-w-[24rem] items-start gap-3 overflow-hidden rounded-[var(--radius-large)] border border-[var(--border)] bg-[var(--panel-overlay)] p-3 pl-4 shadow-[var(--edge-highlight),var(--shadow-toast)] backdrop-blur-md animate-toast-in motion-reduce:animate-none',
         className,
       )}
       {...props}
     >
+      <span
+        aria-hidden="true"
+        className={cn('absolute inset-y-0 left-0 w-[3px]', toastRailClassName[tone])}
+      />
       <span className={cn(
         'mt-0.5 shrink-0',
         tone === 'info' && 'text-[var(--info)]',
@@ -247,7 +254,7 @@ export function UiEmptyState({ icon, title, description, action, className, ...p
   return (
     <div className={cn('flex flex-col items-center justify-center px-5 py-6 text-center', className)} {...props}>
       {icon ? (
-        <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted)]">
+        <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-[var(--radius-large)] border border-dashed border-[var(--border)] bg-[var(--surface-softest)] text-[var(--muted)] shadow-[var(--edge-highlight)]">
           {icon}
         </div>
       ) : null}

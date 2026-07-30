@@ -6,7 +6,7 @@ export type UiPanelSurface = 'default' | 'alternate' | 'raised' | 'inset';
 const surfaceClassName: Record<UiPanelSurface, string> = {
   default: 'bg-[var(--panel)]',
   alternate: 'bg-[var(--panel-alt)]',
-  raised: 'bg-[var(--panel-raised)] shadow-[0_10px_28px_var(--shadow-color)]',
+  raised: 'bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-raised)]',
   inset: 'bg-[var(--surface-inset)]',
 };
 
@@ -57,7 +57,7 @@ export function UiPanelHeader({
   return (
     <div
       className={cn(
-        'flex shrink-0 items-start gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)]',
+        'flex shrink-0 items-start gap-2 border-b border-[var(--border-subtle)] bg-[linear-gradient(180deg,var(--surface-soft),var(--surface-softest))]',
         density === 'compact' ? 'min-h-8 px-2.5 py-1.5' : 'min-h-11 px-3 py-2.5',
         className,
       )}

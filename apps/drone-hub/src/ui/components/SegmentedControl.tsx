@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { cn } from '../cn';
+import { useSlidingIndicator } from '../use-sliding-indicator';
 
 export type UiSegmentedControlOption<T extends string> = {
   value: T;
@@ -25,6 +26,7 @@ export function UiSegmentedControl<T extends string>({
   className,
 }: UiSegmentedControlProps<T>) {
   const optionRefs = React.useRef(new Map<T, HTMLButtonElement>());
+  const { containerRef, indicator } = useSlidingIndicator(value, optionRefs);
   const moveSelection = (currentValue: T, key: string) => {
     const enabledOptions = options.filter((option) => !(disabled || option.disabled));
     if (enabledOptions.length === 0) return;
@@ -42,13 +44,21 @@ export function UiSegmentedControl<T extends string>({
 
   return (
     <div
+      ref={containerRef}
       role="radiogroup"
       aria-label={label}
       className={cn(
-        'inline-grid min-w-0 grid-flow-col auto-cols-fr gap-1 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-1',
+        'relative inline-grid min-w-0 grid-flow-col auto-cols-fr gap-1 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-1 shadow-[inset_0_1px_3px_color-mix(in_srgb,var(--shadow-color)_45%,transparent)]',
         className,
       )}
     >
+      {indicator ? (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-1 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),0_1px_3px_var(--shadow-color)] transition-[left,width] duration-200 ease-[cubic-bezier(.2,.9,.25,1)] motion-reduce:transition-none"
+          style={{ left: indicator.left, width: indicator.width }}
+        />
+      ) : null}
       {options.map((option) => {
         const selected = option.value === value;
         const optionDisabled = disabled || option.disabled;
@@ -71,10 +81,10 @@ export function UiSegmentedControl<T extends string>({
               else optionRefs.current.delete(option.value);
             }}
             className={cn(
-              'h-7 min-w-[4.5rem] rounded-[var(--radius-medium)] border px-2.5 text-[length:var(--text-10)] font-[var(--weight-semibold)] transition-[background-color,border-color,color,box-shadow,transform] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40 enabled:active:translate-y-px',
+              'relative z-[1] h-7 min-w-[4.5rem] rounded-[var(--radius-medium)] px-2.5 text-[length:var(--text-10)] font-[var(--weight-semibold)] transition-colors duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
               selected
-                ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_1px_4px_var(--shadow-color)]'
-                : 'border-transparent bg-transparent text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]',
+                ? 'text-[var(--fg)]'
+                : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]',
             )}
             style={{ fontFamily: 'var(--display)' }}
           >

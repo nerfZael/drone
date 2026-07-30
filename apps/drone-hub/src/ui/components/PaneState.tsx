@@ -75,7 +75,7 @@ export function UiPaneState({
     >
       <div
         className={cn(
-          'flex items-center justify-center rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)]',
+          'flex items-center justify-center rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] shadow-[var(--edge-highlight)]',
           compact ? 'h-8 w-8' : 'h-10 w-10',
           kindClassName[kind],
         )}

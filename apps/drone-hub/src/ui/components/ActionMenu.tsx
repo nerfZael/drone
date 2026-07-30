@@ -210,7 +210,7 @@ export function UiActionMenu({
       role="menu"
       aria-label={label}
       className={cn(
-        'z-[200] max-h-[calc(100vh-0.75rem)] min-w-52 max-w-[calc(100vw-0.75rem)] overflow-y-auto rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] py-1 shadow-[0_16px_48px_var(--shadow-color)]',
+        'z-[200] max-h-[calc(100vh-0.75rem)] min-w-52 max-w-[calc(100vw-0.75rem)] overflow-y-auto rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] p-1 shadow-[var(--edge-highlight),var(--shadow-menu)] backdrop-blur-md animate-menu-in motion-reduce:animate-none',
         typeof document === 'undefined' ? 'absolute top-full mt-1.5' : 'fixed',
         typeof document === 'undefined' && (align === 'end' ? 'right-0' : 'left-0'),
         panelClassName,
@@ -243,7 +243,7 @@ export function UiActionMenu({
             <div
               key={entry.id}
               role="separator"
-              className="my-1 border-t border-[var(--border-subtle)]"
+              className="-mx-1 my-1 border-t border-[var(--border-subtle)]"
             />
           );
         }
@@ -252,7 +252,7 @@ export function UiActionMenu({
             <div
               key={entry.id}
               role="presentation"
-              className="px-3 py-1 text-[length:var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--muted-dim)]"
+              className="px-2.5 py-1 text-[length:var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--muted-dim)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               {entry.label}
@@ -298,7 +298,7 @@ export function UiActionMenu({
               }
             }}
             className={cn(
-              'flex min-h-8 w-full items-center gap-2 px-3 py-1.5 text-left text-[length:var(--text-10)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
+              'flex min-h-8 w-full items-center gap-2 rounded-[5px] px-2.5 py-1.5 text-left text-[length:var(--text-10)] transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
               entry.tone === 'danger'
                 ? 'text-[var(--red)] hover:bg-[var(--red-subtle)]'
                 : 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]',

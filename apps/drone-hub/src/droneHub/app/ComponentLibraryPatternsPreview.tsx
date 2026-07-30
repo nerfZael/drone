@@ -20,14 +20,30 @@ import {
   UiToolbarInput,
   UiToolbarSegmentedControl,
 } from '../../ui/components';
-import { IconChat, IconDrone, IconFolder } from '../icons';
+import { IconFolder } from '../icons';
 import {
+  IconChevronDown,
   IconFolderGit,
   IconMore,
   IconPlus,
   IconSettings,
   IconTune,
 } from './icons';
+import {
+  SidebarApprovalStatusIndicator,
+  SidebarItemStateIndicator,
+  SidebarWorkingStatusIndicator,
+} from '../overview';
+import {
+  sidebarChatLabelClass,
+  sidebarChatRowTone,
+  sidebarChatStateClass,
+  sidebarCountClass,
+  sidebarDensityClasses,
+  sidebarFolderLabelClass,
+  sidebarItemTypeClass,
+  sidebarSelectionEdgeClass,
+} from '../sidebar/presentation';
 import { ComponentLibrarySection } from './ComponentLibrarySection';
 
 type PreviewPattern = 'changes' | 'browser' | 'canvas' | 'workflows';
@@ -69,140 +85,243 @@ const panelOptions = [
   { value: 'workflows', label: 'Workflows' },
 ] as const;
 
+/* The rows below intentionally reuse the exact presentation classes from
+   `../sidebar/presentation` and the real status indicators from `../overview`,
+   so this recipe renders identically to the workspace sidebar. */
+function PreviewDroneRow({
+  indicator,
+  name,
+  meta,
+  selected = false,
+  actions,
+}: {
+  indicator: React.ReactNode;
+  name: string;
+  meta: React.ReactNode;
+  selected?: boolean;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`dh-sidebar-row-interactive group/drone relative flex min-h-[48px] w-full items-center rounded-[var(--sidebar-row-radius)] border py-1.5 pl-1.5 pr-1.5 text-left transition-colors duration-150 focus:outline-none ${
+        selected
+          ? 'dh-sidebar-row-selected border-[var(--sidebar-row-selected-border)]'
+          : 'border-transparent'
+      }`}
+    >
+      {selected ? <div className={sidebarSelectionEdgeClass} /> : null}
+      <div
+        className={`flex min-w-0 flex-1 items-center gap-1.5 self-stretch ${
+          actions
+            ? 'transition-[padding] duration-150 group-hover/drone:pr-10 group-focus-within/drone:pr-10'
+            : ''
+        }`}
+      >
+        <span className="inline-flex flex-shrink-0" aria-hidden="true">
+          {indicator}
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-[3px]">
+          <span
+            className={`min-w-0 truncate leading-tight text-[var(--sidebar-drone-size)] ${sidebarItemTypeClass(selected)}`}
+          >
+            {name}
+          </span>
+          <div className="flex min-w-0 items-center gap-1.5 text-[.5625rem] font-normal leading-none text-[var(--sidebar-meta-fg)]">
+            {meta}
+          </div>
+        </div>
+      </div>
+      {actions ? (
+        <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition-opacity duration-150 group-hover/drone:opacity-100 group-focus-within/drone:opacity-100">
+          {actions}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PreviewChatRow({
+  label,
+  selected = false,
+  state,
+  count,
+}: {
+  label: string;
+  selected?: boolean;
+  state: React.ReactNode;
+  count?: React.ReactNode;
+}) {
+  const density = sidebarDensityClasses('default');
+  return (
+    <button
+      type="button"
+      className={`relative flex w-full items-center gap-1.5 rounded border text-left transition-colors ${density.chatRow} ${sidebarChatRowTone({ selected })}`}
+    >
+      {selected ? <span className={sidebarSelectionEdgeClass} /> : null}
+      <span className={sidebarChatStateClass} aria-hidden="true">
+        {state}
+      </span>
+      <span className={sidebarChatLabelClass}>{label}</span>
+      {count != null ? <span className={sidebarCountClass}>{count}</span> : null}
+    </button>
+  );
+}
+
 function SidebarPattern() {
   const [groupOpen, setGroupOpen] = React.useState(true);
   const [recentOnly, setRecentOnly] = React.useState(false);
+  const density = sidebarDensityClasses('default');
 
   return (
-    <UiCard padding="none" className="overflow-visible">
+    <UiCard padding="none" className="overflow-hidden">
       <div className="border-b border-[var(--border-subtle)] px-4 py-3">
         <UiCardHeader
           title="Sidebar navigation"
-          description="Shell, nested rows, operational status, hover actions, and the collapsed rail."
+          description="The workspace sidebar shell: brand header, grouped drone tree with chat rows and hover actions, and the repository footer."
         />
       </div>
-      <div className="grid min-h-[24rem] grid-cols-[minmax(0,1fr)_3rem] overflow-visible">
-        <UiPanel className="m-3 mr-0 rounded-r-none" surface="alternate">
-          <UiPanelHeader
-            title="Drone Hub"
-            density="compact"
-            meta={<UiStatusChip tone="success" dot>Local</UiStatusChip>}
-            actions={
-              <UiToolbarIconButton
-                label="Create drone"
-                icon={<IconPlus className="h-3.5 w-3.5" />}
-                tone="accent"
-              />
-            }
-          />
-          <UiPanelBody scroll className="p-1.5">
-            <UiNavigationRow
-              label="drone"
-              description="/work/drone"
-              leading={<IconFolderGit className="h-3.5 w-3.5" />}
-              status={<UiCountBadge>3</UiCountBadge>}
-              expandable
-              open
-              selected
-              current
-            />
-            <UiNavigationRow
-              label="Release readiness"
-              leading={<IconFolder size={13} />}
-              depth={1}
-              expandable
-              open={groupOpen}
-              onOpenChange={setGroupOpen}
-              actions={
-                <UiToolbarIconButton
-                  label="Add drone to group"
-                  icon={<IconPlus className="h-3 w-3" />}
-                  size="xsmall"
-                  tone="accent"
+      <div className="flex h-[26rem] flex-col overflow-hidden bg-[var(--sidebar-bg)]">
+        <div className="flex h-[3.25rem] flex-shrink-0 select-none items-center border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] pl-3.5 pr-2">
+          <div className="flex w-full items-center justify-between gap-2">
+            <span className="flex-shrink-0 text-left dh-type-sidebar-brand">DRONE HUB</span>
+            <UiToolbarButton
+              leadingIcon={
+                <span
+                  className="h-1.5 w-1.5 rounded-full bg-[var(--green)] shadow-[0_0_5px_var(--green-border)]"
+                  aria-hidden="true"
                 />
               }
-            />
-            {groupOpen ? (
-              <>
-                <UiNavigationRow
-                  label="workspace-scout"
-                  description="Reviewing component coverage"
-                  leading={<IconDrone size={13} />}
-                  depth={2}
-                  selected
-                  status={<UiStatusDot tone="warning" pulse label="Working" />}
-                  meta="2m"
+              trailingIcon={<IconChevronDown className="h-3 w-3 opacity-70" />}
+            >
+              Local
+            </UiToolbarButton>
+          </div>
+        </div>
+        <div className="dh-sidebar-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-1.5 [--sidebar-selection-edge-offset:-0.5rem]">
+          <div className={`group/folder-row relative flex w-full items-center rounded ${density.folderRow}`}>
+            <button
+              type="button"
+              aria-expanded={groupOpen}
+              onClick={() => setGroupOpen((current) => !current)}
+              className={`min-w-0 flex-1 rounded text-left focus-visible:outline-none ${density.folderPaddingX}`}
+            >
+              <div className="flex min-w-0 items-center gap-1.5">
+                <IconChevronDown
+                  className={`h-3 w-3 flex-shrink-0 text-[var(--muted-dim)] transition-transform duration-150 ${groupOpen ? '' : '-rotate-90'}`}
                 />
-                <UiNavigationRow
-                  label="release-check"
-                  description="Approval required"
-                  leading={<IconChat size={12} />}
-                  depth={2}
-                  status={<UiStatusChip tone="warning">Approve</UiStatusChip>}
-                  actions={
-                    <UiActionMenu
-                      label="Chat actions"
-                      icon={<IconMore className="h-3 w-3" />}
-                      size="xsmall"
-                      align="end"
-                      entries={[
-                        { id: 'rename', label: 'Rename chat' },
-                        { id: 'move', label: 'Move to group' },
-                        { kind: 'separator', id: 'danger' },
-                        { id: 'delete', label: 'Delete chat', tone: 'danger' },
-                      ]}
-                      onSelect={() => {}}
-                    />
+                <IconFolder className={`flex-shrink-0 ${density.icon}`} />
+                <span className={`${sidebarFolderLabelClass} ${density.folderLabel}`}>
+                  Release readiness
+                </span>
+                <span className={sidebarCountClass}>3</span>
+              </div>
+            </button>
+            <div className="flex flex-shrink-0 items-center opacity-0 transition-opacity duration-150 group-hover/folder-row:opacity-100 group-focus-within/folder-row:opacity-100">
+              <UiToolbarIconButton
+                label="Add drone to group"
+                icon={<IconPlus className="h-3 w-3" />}
+                size="xsmall"
+              />
+            </div>
+          </div>
+          {groupOpen ? (
+            <div className={`${density.folderBody} border-[var(--border-subtle)]`}>
+              <PreviewDroneRow
+                indicator={<SidebarWorkingStatusIndicator />}
+                name="workspace-scout"
+                meta={
+                  <>
+                    <span className="truncate">Reviewing component coverage</span>
+                    <span aria-hidden="true">·</span>
+                    <span>2m</span>
+                  </>
+                }
+                selected
+              />
+              <div className={`${density.chatIndent} flex flex-col gap-0.5`}>
+                <PreviewChatRow
+                  label="default"
+                  selected
+                  state={
+                    <span className="h-1.5 w-1.5 rounded-full border border-[var(--muted-dim)] opacity-35" />
                   }
                 />
-                <UiNavigationRow
-                  label="docs-pass"
-                  leading={<IconChat size={12} />}
-                  depth={2}
-                  status={<UiStatusDot tone="success" label="Unread response" />}
-                  meta={<UiCountBadge>1</UiCountBadge>}
+                <PreviewChatRow
+                  label="ui-polish"
+                  state={
+                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--green)] shadow-[0_0_5px_var(--green-border)]" />
+                  }
+                  count={2}
                 />
-              </>
-            ) : null}
-            <UiNavigationRow
-              label="Archived"
-              leading={<IconFolder size={13} />}
-              depth={1}
-              expandable
-              open={false}
-              disabled
-            />
-          </UiPanelBody>
-          <UiPanelToolbar aria-label="Sidebar footer" className="border-b-0 border-t">
-            <UiToolbarButton className="min-w-0 flex-1 justify-start" leadingIcon={<IconFolderGit className="h-3.5 w-3.5" />}>
-              Repositories
-            </UiToolbarButton>
-            <UiActionMenu
-              label="Sidebar options"
-              icon={<IconMore className="h-3.5 w-3.5" />}
-              entries={[
-                {
-                  id: 'recent',
-                  label: 'Recent drones only',
-                  selectionRole: 'checkbox',
-                  checked: recentOnly,
-                },
-                { id: 'hidden', label: 'Show hidden groups' },
-                { kind: 'separator', id: 'layout' },
-                { id: 'side', label: 'Dock sidebar right' },
-              ]}
-              onSelect={(id) => {
-                if (id === 'recent') setRecentOnly((current) => !current);
-              }}
-            />
-            <UiToolbarIconButton label="Open settings" icon={<IconSettings className="h-3.5 w-3.5" />} />
-          </UiPanelToolbar>
-        </UiPanel>
-        <div className="my-3 mr-3 flex flex-col items-center gap-2 rounded-r-[var(--radius-large)] border border-l-0 border-[var(--border-subtle)] bg-[var(--surface-inset)] pt-2">
-          <UiToolbarIconButton label="Expand sidebar" icon={<IconDrone size={13} />} tone="accent" />
-          <UiToolbarIconButton label="Create drone" icon={<IconPlus className="h-3.5 w-3.5" />} />
-          <UiToolbarIconButton label="Open settings" icon={<IconSettings className="h-3.5 w-3.5" />} />
+              </div>
+              <PreviewDroneRow
+                indicator={<SidebarApprovalStatusIndicator />}
+                name="release-check"
+                meta={<span className="truncate">Approval required</span>}
+                actions={
+                  <UiActionMenu
+                    label="Drone actions"
+                    icon={<IconMore className="h-3 w-3" />}
+                    size="xsmall"
+                    align="end"
+                    entries={[
+                      { id: 'rename', label: 'Rename drone' },
+                      { id: 'move', label: 'Move to group' },
+                      { kind: 'separator', id: 'danger' },
+                      { id: 'delete', label: 'Delete drone', tone: 'danger' },
+                    ]}
+                    onSelect={() => {}}
+                  />
+                }
+              />
+              <PreviewDroneRow
+                indicator={<SidebarItemStateIndicator state="idle" unread />}
+                name="docs-pass"
+                meta={<span className="truncate">Response ready</span>}
+              />
+            </div>
+          ) : null}
+          <div className={`relative flex w-full items-center rounded opacity-60 ${density.folderRow}`}>
+            <div className={`flex min-w-0 flex-1 items-center gap-1.5 ${density.folderPaddingX}`}>
+              <IconChevronDown className="h-3 w-3 flex-shrink-0 -rotate-90 text-[var(--muted-dim)]" />
+              <IconFolder className={`flex-shrink-0 ${density.icon}`} />
+              <span className={`${sidebarFolderLabelClass} ${density.folderLabel}`}>Archived</span>
+              <span className={sidebarCountClass}>4</span>
+            </div>
+          </div>
         </div>
+        <UiPanelToolbar
+          aria-label="Sidebar footer"
+          className="border-b-0 border-t border-[var(--border)] bg-[var(--surface-inset)] px-2.5 py-1.5"
+        >
+          <UiToolbarButton
+            leadingIcon={<IconFolderGit className="h-3 w-3 text-[var(--accent)] opacity-80" />}
+            className="min-w-0 flex-1 justify-start"
+          >
+            Repositories 2
+          </UiToolbarButton>
+          <UiActionMenu
+            label="Sidebar options"
+            icon={<IconMore className="opacity-85" />}
+            entries={[
+              {
+                id: 'recent',
+                label: 'Recent drones only',
+                selectionRole: 'checkbox',
+                checked: recentOnly,
+              },
+              { id: 'hidden', label: 'Show hidden groups' },
+              { kind: 'separator', id: 'layout' },
+              { id: 'side', label: 'Dock sidebar right' },
+            ]}
+            onSelect={(id) => {
+              if (id === 'recent') setRecentOnly((current) => !current);
+            }}
+          />
+          <UiToolbarIconButton label="Open settings" icon={<IconSettings className="h-3.5 w-3.5" />} />
+        </UiPanelToolbar>
       </div>
     </UiCard>
   );

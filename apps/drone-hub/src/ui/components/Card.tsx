@@ -5,9 +5,9 @@ export type UiCardSurface = 'default' | 'raised' | 'inset';
 export type UiCardPadding = 'none' | 'small' | 'medium' | 'large';
 
 const surfaceClassName: Record<UiCardSurface, string> = {
-  default: 'bg-[var(--surface-softest)]',
-  raised: 'bg-[var(--panel-raised)] shadow-[0_8px_24px_var(--shadow-color)]',
-  inset: 'bg-[var(--surface-inset)]',
+  default: 'bg-[var(--surface-softest)] shadow-[var(--edge-highlight)]',
+  raised: 'bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-raised)]',
+  inset: 'bg-[var(--surface-inset)] shadow-[inset_0_1px_3px_color-mix(in_srgb,var(--shadow-color)_45%,transparent)]',
 };
 
 const paddingClassName: Record<UiCardPadding, string> = {
@@ -35,7 +35,7 @@ export const UiCard = React.forwardRef<HTMLDivElement, UiCardProps>(function UiC
         surfaceClassName[surface],
         paddingClassName[padding],
         interactive &&
-          'transition-[background-color,border-color,box-shadow,transform] hover:-translate-y-px hover:border-[var(--border)] hover:bg-[var(--surface-soft)] hover:shadow-[0_8px_24px_var(--shadow-color)] motion-reduce:transform-none',
+          'transition-[background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-[var(--border)] hover:bg-[var(--surface-soft)] hover:shadow-[var(--edge-highlight),var(--shadow-raised)] motion-reduce:transform-none',
         className,
       )}
       {...props}

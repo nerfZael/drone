@@ -77,7 +77,7 @@ export const UiNavigationRow = React.forwardRef<HTMLButtonElement, UiNavigationR
       >
         {selected ? (
           <span
-            className="pointer-events-none absolute inset-y-1 left-0 w-0.5 rounded-full bg-[var(--accent)]"
+            className="pointer-events-none absolute inset-y-1 left-0 w-0.5 rounded-full bg-[var(--accent)] shadow-[0_0_6px_var(--accent-border)]"
             aria-hidden="true"
           />
         ) : null}

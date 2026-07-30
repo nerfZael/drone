@@ -1,30 +1,35 @@
 import * as React from 'react';
 import { cn } from '../cn';
+import { useSlidingIndicator } from '../use-sliding-indicator';
 import { UiSpinner } from './Feedback';
 
 export type UiToolbarControlTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
 export type UiToolbarControlSize = 'xsmall' | 'small';
 
+/* Toolbar controls are quiet chrome: they inherit the theme's toolbar-control
+   tokens (fully transparent in Catppuccin, faint in Monolith) so shared
+   primitives render exactly like the hand-built dock toolbars. Color arrives
+   only on hover, activation, or an explicit semantic tone. */
 const toneClassName: Record<UiToolbarControlTone, { idle: string; active: string }> = {
   neutral: {
-    idle: 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]',
-    active: 'border-[var(--border)] bg-[var(--surface-strong)] text-[var(--fg-secondary)]',
+    idle: 'border-[var(--toolbar-control-border)] bg-[var(--toolbar-control-bg)] text-[var(--muted)] hover:border-[var(--toolbar-control-hover-border)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]',
+    active: 'border-[var(--toolbar-control-hover-border)] bg-[var(--surface-strong)] text-[var(--fg)]',
   },
   accent: {
-    idle: 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]',
-    active: 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]',
+    idle: 'border-[var(--toolbar-control-border)] bg-[var(--toolbar-control-bg)] text-[var(--muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
+    active: 'border-[var(--toolbar-control-border)] bg-[var(--accent-subtle)] text-[var(--accent)]',
   },
   success: {
-    idle: 'border-[var(--green-border)] bg-transparent text-[var(--green)] hover:bg-[var(--green-subtle)]',
-    active: 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]',
+    idle: 'border-transparent bg-transparent text-[var(--green)] hover:bg-[var(--green-subtle)]',
+    active: 'border-transparent bg-[var(--green-subtle)] text-[var(--green)]',
   },
   warning: {
-    idle: 'border-[var(--yellow-border)] bg-transparent text-[var(--yellow)] hover:bg-[var(--yellow-subtle)]',
-    active: 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
+    idle: 'border-transparent bg-transparent text-[var(--yellow)] hover:bg-[var(--yellow-subtle)]',
+    active: 'border-transparent bg-[var(--yellow-subtle)] text-[var(--yellow)]',
   },
   danger: {
-    idle: 'border-[var(--red-border)] bg-transparent text-[var(--red)] hover:bg-[var(--red-subtle)]',
-    active: 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]',
+    idle: 'border-transparent bg-transparent text-[var(--red)] hover:bg-[var(--red-subtle)]',
+    active: 'border-transparent bg-[var(--red-subtle)] text-[var(--red)]',
   },
 };
 
@@ -74,7 +79,7 @@ export const UiToolbarButton = React.forwardRef<HTMLButtonElement, UiToolbarButt
         }
         aria-busy={loading || undefined}
         className={cn(
-          'inline-flex shrink-0 items-center justify-center gap-1 border font-[var(--weight-semibold)] transition-[background-color,border-color,color,opacity,transform] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40 enabled:active:translate-y-px',
+          'inline-flex shrink-0 items-center justify-center gap-1 border font-[var(--weight-semibold)] transition-[background-color,border-color,color,opacity,transform] duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40 enabled:active:translate-y-px',
           sizeClassName[size],
           visuallyActive ? toneClassName[tone].active : toneClassName[tone].idle,
           className,
@@ -206,7 +211,7 @@ export const UiToolbarInput = React.forwardRef<HTMLInputElement, UiToolbarInputP
         ref={ref}
         aria-invalid={invalid || undefined}
         className={cn(
-          'min-w-0 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 font-mono text-[var(--fg-secondary)] placeholder:text-[var(--muted-dim)] hover:border-[var(--border)] focus:border-[var(--accent-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-border)] read-only:bg-[var(--surface-inset-strong)] read-only:text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-40',
+          'min-w-0 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 font-mono text-[var(--fg-secondary)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_45%,transparent)] transition-[border-color,box-shadow] duration-150 placeholder:text-[var(--muted-dim)] hover:border-[var(--border)] focus:border-[var(--accent-muted)] focus:outline-none focus:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_45%,transparent),0_0_0_3px_var(--accent-subtle)] read-only:bg-[var(--surface-inset-strong)] read-only:text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-40',
           controlSize === 'xsmall'
             ? 'h-5 text-[length:var(--text-9)]'
             : 'h-7 text-[length:var(--text-10)]',
@@ -274,32 +279,36 @@ export function UiToolbarSegmentedControl<T extends string>({
     window.requestAnimationFrame(() => optionRefs.current.get(nextValue)?.focus());
   };
 
+  const { containerRef, indicator } = useSlidingIndicator(value, optionRefs);
+
   return (
     <div
+      ref={containerRef}
       role="radiogroup"
       aria-label={label}
-      className={cn(
-        'inline-flex shrink-0 items-center overflow-hidden rounded-[var(--radius-medium)]',
-        className,
-      )}
+      className={cn('relative inline-flex shrink-0 items-center', className)}
     >
+      {indicator ? (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-0 h-[2px] rounded-full bg-[var(--accent)] shadow-[0_0_8px_var(--accent-border)] transition-[left,width] duration-200 ease-[cubic-bezier(.2,.9,.25,1)] motion-reduce:transition-none"
+          style={{ left: indicator.left, width: indicator.width }}
+        />
+      ) : null}
       {options.map((option) => {
         const selected = value === option.value;
         return (
-          <UiToolbarButton
+          <button
             key={option.value}
             ref={(element) => {
               if (element) optionRefs.current.set(option.value, element);
               else optionRefs.current.delete(option.value);
             }}
+            type="button"
+            disabled={disabled || option.disabled}
             role="radio"
             aria-checked={selected}
-            aria-pressed={undefined}
             tabIndex={option.value === tabStopValue ? 0 : -1}
-            size={size}
-            tone={option.tone ?? 'accent'}
-            active={selected}
-            disabled={disabled || option.disabled}
             onClick={() => onValueChange(option.value)}
             onKeyDown={(event) => {
               if (
@@ -312,10 +321,21 @@ export function UiToolbarSegmentedControl<T extends string>({
               event.preventDefault();
               moveSelection(option.value, event.key);
             }}
-            className="rounded-none first:rounded-l-[var(--radius-medium)] last:rounded-r-[var(--radius-medium)] [&:not(:first-child)]:-ml-px"
+            className={cn(
+              'relative inline-flex shrink-0 items-center justify-center gap-1 rounded-t font-[var(--weight-semibold)] transition-colors duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
+              size === 'xsmall'
+                ? 'h-5 px-1.5 text-[length:var(--text-9)]'
+                : 'h-7 px-2 text-[length:var(--text-10)]',
+              selected
+                ? 'text-[var(--fg)]'
+                : 'text-[var(--muted)] enabled:hover:bg-[var(--hover)] enabled:hover:text-[var(--fg-secondary)]',
+              // Static fallback underline until the sliding indicator mounts.
+              selected && !indicator && 'shadow-[inset_0_-2px_0_var(--accent)]',
+            )}
+            style={{ fontFamily: 'var(--display)' }}
           >
             {option.label}
-          </UiToolbarButton>
+          </button>
         );
       })}
     </div>

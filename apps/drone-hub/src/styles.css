@@ -185,6 +185,17 @@
   --radius-large: 8px;
   --radius-xlarge: 12px;
 
+  /* ── Elevation ──
+     Layered shadows plus a crisp 1px inner highlight give surfaces a
+     machined edge instead of a flat border. All depths derive from
+     --shadow-color so palette themes keep control of intensity. */
+  --edge-highlight: inset 0 1px 0 rgba(255, 255, 255, .05);
+  --shadow-low: 0 1px 2px color-mix(in srgb, var(--shadow-color) 65%, transparent);
+  --shadow-raised: 0 1px 2px color-mix(in srgb, var(--shadow-color) 55%, transparent), 0 10px 32px -6px var(--shadow-color);
+  --shadow-menu: 0 1px 2px color-mix(in srgb, var(--shadow-color) 80%, transparent), 0 14px 40px -6px var(--shadow-color);
+  --shadow-dialog: 0 2px 6px color-mix(in srgb, var(--shadow-color) 70%, transparent), 0 32px 90px -12px var(--shadow-color);
+  --shadow-toast: 0 2px 6px color-mix(in srgb, var(--shadow-color) 70%, transparent), 0 18px 48px -10px var(--shadow-color);
+
   /* ── Glow ── */
   --glow-accent: 0 0 20px rgba(177, 156, 255, .12), 0 0 60px rgba(177, 156, 255, .04);
   --glow-accent-strong: 0 0 20px rgba(177, 156, 255, .20), 0 0 80px rgba(177, 156, 255, .08);
@@ -557,6 +568,41 @@ code, pre {
 @keyframes status-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: .45; }
+}
+
+/* Overlay motion: quick, damped, and directional. Menus drop in from their
+   anchor; dialogs rise from below; toasts slide up from the screen edge. */
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-menu-in {
+  animation: menu-in .16s cubic-bezier(.2, .9, .25, 1) both;
+  transform-origin: top;
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-overlay-in { animation: overlay-in .18s ease-out both; }
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(14px) scale(.965); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-dialog-in { animation: dialog-in .26s cubic-bezier(.16, 1, .3, 1) both; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-toast-in { animation: toast-in .3s cubic-bezier(.16, 1, .3, 1) both; }
+
+@keyframes check-pop {
+  0% { opacity: 0; transform: scale(.5); }
+  70% { transform: scale(1.12); }
+  100% { opacity: 1; transform: scale(1); }
 }
 
 /* ──────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { cn } from '../cn';
+import { useSlidingIndicator } from '../use-sliding-indicator';
 import { UiBadge, type UiBadgeTone } from './Badge';
 
 export type UiTabOption<T extends string> = {
@@ -31,6 +32,7 @@ export function UiTabs<T extends string>({
   className,
 }: UiTabsProps<T>) {
   const tabRefs = React.useRef(new Map<T, HTMLButtonElement>());
+  const { containerRef, indicator } = useSlidingIndicator(value, tabRefs);
   const moveSelection = (currentValue: T, key: string) => {
     const enabledOptions = options.filter((option) => !option.disabled);
     if (enabledOptions.length === 0) return;
@@ -48,10 +50,18 @@ export function UiTabs<T extends string>({
 
   return (
     <div
+      ref={containerRef}
       role="tablist"
       aria-label={label}
-      className={cn('flex min-w-0 items-end gap-1 border-b border-[var(--border-subtle)]', className)}
+      className={cn('relative flex min-w-0 items-end gap-1 border-b border-[var(--border-subtle)]', className)}
     >
+      {indicator ? (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-px h-[2px] rounded-full bg-[var(--accent)] shadow-[0_0_8px_var(--accent-border)] transition-[left,width] duration-200 ease-[cubic-bezier(.2,.9,.25,1)] motion-reduce:transition-none"
+          style={{ left: indicator.left, width: indicator.width }}
+        />
+      ) : null}
       {options.map((option) => {
         const selected = option.value === value;
         return (
@@ -75,11 +85,11 @@ export function UiTabs<T extends string>({
               else tabRefs.current.delete(option.value);
             }}
             className={cn(
-              'relative inline-flex min-w-0 items-center justify-center gap-1.5 border-b-2 font-[var(--weight-semibold)] transition-[background-color,border-color,color,box-shadow] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
+              'relative inline-flex min-w-0 items-center justify-center gap-1.5 rounded-t-[var(--radius-medium)] font-[var(--weight-semibold)] transition-[background-color,color,box-shadow] duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
               size === 'small' ? 'h-7 px-2 text-[length:var(--text-9)]' : 'h-9 px-3 text-[length:var(--text-12)]',
               selected
-                ? 'border-[var(--accent)] text-[var(--accent)]'
-                : 'border-transparent text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg-secondary)]',
+                ? 'text-[var(--accent)]'
+                : 'text-[var(--muted)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg-secondary)]',
             )}
             style={{ fontFamily: 'var(--display)' }}
           >

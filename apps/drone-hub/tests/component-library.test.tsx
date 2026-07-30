@@ -67,7 +67,7 @@ describe('drone hub component library', () => {
       </div>,
     );
 
-    expect(html).toContain('bg-[var(--accent)]');
+    expect(html).toContain('bg-[linear-gradient(180deg,var(--accent),var(--accent-muted))]');
     expect(html).toContain('text-[var(--accent-fg)]');
     expect(html).toContain('text-[length:var(--text-11)]');
     expect(html).not.toContain('text-[var(--text-');

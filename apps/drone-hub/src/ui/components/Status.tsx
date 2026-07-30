@@ -47,7 +47,7 @@ export function UiStatusDot({
           aria-hidden="true"
         />
       ) : null}
-      <span className="relative h-2 w-2 rounded-full bg-current" aria-hidden="true" />
+      <span className="relative h-2 w-2 rounded-full bg-current shadow-[0_0_6px_currentColor]" aria-hidden="true" />
     </span>
   );
 }

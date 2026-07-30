@@ -55,7 +55,7 @@ export type UiMenuSelectProps = {
 };
 
 const triggerBaseClassNameByVariant: Record<UiMenuSelectVariant, string> = {
-  form: 'w-full h-[var(--control-height)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[length:var(--text-13)] focus-visible:outline-none focus-visible:border-[var(--accent-muted)] focus-visible:ring-2 focus-visible:ring-[var(--accent-border)] transition-[background-color,border-color,box-shadow] flex items-center justify-between gap-2',
+  form: 'w-full h-[var(--control-height)] rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[length:var(--text-13)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent)] focus-visible:outline-none focus-visible:border-[var(--accent-muted)] focus-visible:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent),0_0_0_3px_var(--accent-subtle)] transition-[background-color,border-color,box-shadow] duration-150 flex items-center justify-between gap-2',
   toolbar:
     'inline-flex items-center gap-1.5 h-[28px] pl-2 pr-1.5 rounded border border-[var(--toolbar-control-border)] bg-[var(--toolbar-control-bg)] text-[length:var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)] focus-visible:outline-none focus-visible:border-[var(--accent-muted)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] transition-all',
 };

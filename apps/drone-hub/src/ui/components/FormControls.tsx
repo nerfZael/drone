@@ -49,7 +49,10 @@ export function UiField({ label, htmlFor, description, error, required, children
 }
 
 const controlClassName =
-  'w-full rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] transition-[background-color,border-color,box-shadow] hover:border-[var(--border)] focus:border-[var(--accent-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-border)] disabled:cursor-not-allowed disabled:opacity-40';
+  'w-full rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--fg)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent)] placeholder:text-[var(--muted-dim)] transition-[background-color,border-color,box-shadow] duration-150 hover:border-[var(--border)] focus:border-[var(--accent-muted)] focus:outline-none focus:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent),0_0_0_3px_var(--accent-subtle)] disabled:cursor-not-allowed disabled:opacity-40';
+
+const invalidControlClassName =
+  'border-[var(--red-border)] focus:border-[var(--red)] focus:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent),0_0_0_3px_var(--red-subtle)]';
 
 export type UiInputProps = React.InputHTMLAttributes<HTMLInputElement> & {
   invalid?: boolean;
@@ -66,7 +69,7 @@ export const UiInput = React.forwardRef<HTMLInputElement, UiInputProps>(function
       className={cn(
         controlClassName,
         'h-[var(--control-height)] px-3 text-[length:var(--text-12)]',
-        invalid && 'border-[var(--red-border)] focus:border-[var(--red)] focus:ring-[var(--red-border)]',
+        invalid && invalidControlClassName,
         className,
       )}
       {...props}
@@ -136,7 +139,7 @@ export const UiTextarea = React.forwardRef<HTMLTextAreaElement, UiTextareaProps>
       className={cn(
         controlClassName,
         'resize-y px-3 py-2 text-[length:var(--text-12)] leading-relaxed',
-        invalid && 'border-[var(--red-border)] focus:border-[var(--red)] focus:ring-[var(--red-border)]',
+        invalid && invalidControlClassName,
         className,
       )}
       {...props}
@@ -178,16 +181,16 @@ export function UiSwitch({
     >
       <span
         className={cn(
-          'mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full border p-0.5 transition-[background-color,border-color]',
+          'mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full border p-0.5 transition-[background-color,border-color,box-shadow] duration-200',
           checked
-            ? 'border-[var(--accent)] bg-[var(--accent)]'
-            : 'border-[var(--border)] bg-[var(--surface-inset-strong)] group-hover:border-[var(--muted-dim)]',
+            ? 'border-[var(--accent-muted)] bg-[linear-gradient(180deg,var(--accent),var(--accent-muted))] shadow-[inset_0_1px_1px_rgba(255,255,255,.18)]'
+            : 'border-[var(--border)] bg-[var(--surface-inset-strong)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_55%,transparent)] group-hover:border-[var(--muted-dim)]',
         )}
         aria-hidden="true"
       >
         <span
           className={cn(
-            'h-3.5 w-3.5 rounded-full shadow-[0_1px_3px_var(--shadow-color)] transition-transform',
+            'h-3.5 w-3.5 rounded-full shadow-[0_1px_3px_var(--shadow-color)] transition-transform duration-200 ease-[cubic-bezier(.2,.9,.25,1)]',
             checked ? 'translate-x-4 bg-[var(--accent-fg)]' : 'translate-x-0 bg-[var(--muted)]',
           )}
         />
@@ -218,10 +221,10 @@ export const UiCheckbox = React.forwardRef<HTMLInputElement, UiCheckboxProps>(fu
         {...props}
       />
       <span
-        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border border-[var(--border)] bg-[var(--surface-inset)] text-transparent transition-[background-color,border-color,color,box-shadow] peer-checked:border-[var(--accent)] peer-checked:bg-[var(--accent)] peer-checked:text-[var(--accent-fg)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--focus-ring)] peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--panel)]"
+        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border border-[var(--border)] bg-[var(--surface-inset)] text-transparent shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_45%,transparent)] transition-[background-color,border-color,color,box-shadow] duration-150 peer-checked:border-[var(--accent-muted)] peer-checked:bg-[linear-gradient(180deg,var(--accent),var(--accent-muted))] peer-checked:text-[var(--accent-fg)] peer-checked:shadow-[0_0_10px_-3px_var(--accent)] peer-checked:[&>svg]:opacity-100 peer-checked:[&>svg]:[animation:check-pop_.18s_cubic-bezier(.2,.9,.25,1)] peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--focus-ring)] peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--panel)]"
         aria-hidden="true"
       >
-        <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3">
+        <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3 opacity-0 motion-reduce:[animation:none]">
           <path d="m3.5 8 3 3 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </span>

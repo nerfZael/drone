@@ -2,7 +2,7 @@ import * as React from 'react';
 import { cn } from '../cn';
 
 const selectBaseClassName =
-  'w-full appearance-none rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] bg-[linear-gradient(45deg,transparent_50%,var(--muted-dim)_50%),linear-gradient(135deg,var(--muted-dim)_50%,transparent_50%)] bg-[position:calc(100%-13px)_50%,calc(100%-9px)_50%] bg-[size:4px_4px,4px_4px] bg-no-repeat px-3 pr-8 text-[var(--fg)] transition-[background-color,border-color,box-shadow] hover:border-[var(--border)] focus:border-[var(--accent-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-border)] disabled:cursor-not-allowed disabled:opacity-40';
+  'w-full appearance-none rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] bg-[linear-gradient(45deg,transparent_50%,var(--muted-dim)_50%),linear-gradient(135deg,var(--muted-dim)_50%,transparent_50%)] bg-[position:calc(100%-13px)_50%,calc(100%-9px)_50%] bg-[size:4px_4px,4px_4px] bg-no-repeat px-3 pr-8 text-[var(--fg)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent)] transition-[background-color,border-color,box-shadow] duration-150 hover:border-[var(--border)] focus:border-[var(--accent-muted)] focus:outline-none focus:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent),0_0_0_3px_var(--accent-subtle)] disabled:cursor-not-allowed disabled:opacity-40';
 
 export type UiSelectProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
   invalid?: boolean;
@@ -20,7 +20,8 @@ export const UiSelect = React.forwardRef<HTMLSelectElement, UiSelectProps>(funct
       className={cn(
         selectBaseClassName,
         size === 'small' ? 'h-7 text-[length:var(--text-10)]' : 'h-[var(--control-height)] text-[length:var(--text-12)]',
-        invalid && 'border-[var(--red-border)] focus:border-[var(--red)] focus:ring-[var(--red-border)]',
+        invalid &&
+          'border-[var(--red-border)] focus:border-[var(--red)] focus:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent),0_0_0_3px_var(--red-subtle)]',
         className,
       )}
       {...props}
@@ -109,18 +110,20 @@ export function UiChoiceGroup<T extends string>({
             className={cn(
               'flex min-w-0 items-start gap-3 rounded-[var(--radius-large)] border p-3 text-left transition-[background-color,border-color,box-shadow,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-40 enabled:active:translate-y-px',
               selected
-                ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] shadow-[0_1px_6px_var(--shadow-color)]'
+                ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] shadow-[var(--edge-highlight),0_1px_6px_var(--shadow-color)]'
                 : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:border-[var(--border)] hover:bg-[var(--surface-soft)]',
             )}
           >
             <span
               className={cn(
-                'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors duration-150',
                 selected ? 'border-[var(--accent)]' : 'border-[var(--border)]',
               )}
               aria-hidden="true"
             >
-              {selected ? <span className="h-2 w-2 rounded-full bg-[var(--accent)]" /> : null}
+              {selected ? (
+                <span className="h-2 w-2 rounded-full bg-[var(--accent)] shadow-[0_0_6px_var(--accent)] [animation:check-pop_.16s_cubic-bezier(.2,.9,.25,1)] motion-reduce:[animation:none]" />
+              ) : null}
             </span>
             {option.icon ? <span className={cn('mt-0.5 shrink-0', selected ? 'text-[var(--accent)]' : 'text-[var(--muted)]')}>{option.icon}</span> : null}
             <span className="min-w-0 flex-1">
