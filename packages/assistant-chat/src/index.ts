@@ -1,3 +1,4 @@
+export * from './agent-plan';
 export * from './assistant-message-model';
 export * from './assistant-message-types';
 export * from './agent-run-activity';

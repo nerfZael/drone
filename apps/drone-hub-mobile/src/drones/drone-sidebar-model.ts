@@ -2,8 +2,10 @@ import {
   agentRunActivityHasResponse,
   isAgentRunFileChanges,
   isStoppedRunError,
+  normalizeAgentPlan,
   normalizeAgentRunActivity,
   settleAgentRunActivity,
+  type AgentPlan,
   type AgentRunActivity,
   type AssistantMessage,
 } from '@drone/assistant-chat';
@@ -15,11 +17,7 @@ import {
   type SidebarNodeTreeModel,
   type SidebarTreeFolderNode,
 } from '@drone/hub-model/sidebar';
-import {
-  mobileRunDetails,
-  normalizeMobileAgentPlan,
-  type MobileAgentPlan,
-} from '../local-assistant/mobile-transcript-runs';
+import { mobileRunDetails } from '../local-assistant/mobile-transcript-runs';
 
 export type MobileDroneSummary = {
   id: string;
@@ -65,7 +63,7 @@ export type MobileDroneTurn = {
   model: string;
   reasoning: string;
   activity?: AgentRunActivity;
-  agentPlan?: MobileAgentPlan;
+  agentPlan?: AgentPlan;
   fileChanges?: AgentRunFileChanges;
   attachments: Array<{ name: string; mime: string; size: number | null }>;
   promptTruncated?: boolean;
@@ -774,7 +772,7 @@ export function mobileDroneTurnsToAssistantMessages(
       const stopped = state === 'failed' && isStoppedRunError(item?.error);
       const displayedActivity =
         state === 'failed' ? (settleAgentRunActivity(activity) ?? activity) : activity;
-      const plan = normalizeMobileAgentPlan(item?.agentPlan);
+      const plan = normalizeAgentPlan(item?.agentPlan);
       const runDetails = mobileRunDetails({
         id,
         startedAt: at,
@@ -882,7 +880,7 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
     const turn = item as Record<string, unknown>;
     const turnNumber = Number(turn.turn);
     const at = text(turn.at);
-    const agentPlan = normalizeMobileAgentPlan(turn.agentPlan);
+    const agentPlan = normalizeAgentPlan(turn.agentPlan);
     const activity = settleAgentRunActivity(turn.activity);
     const fileChanges =
       turn.fileChanges && typeof turn.fileChanges === 'object' && !Array.isArray(turn.fileChanges)

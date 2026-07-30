@@ -3,6 +3,7 @@ import {
   agentRunActivityHasResponse,
   isStoppedRunError,
   normalizeAgentRunActivity,
+  sameAgentPlan,
   toolCalls,
 } from '@drone/assistant-chat';
 import { stripAnsi } from '../../domain';
@@ -330,9 +331,7 @@ export const TranscriptTurn = React.memo(
     a.item.session === b.item.session &&
     a.item.logPath === b.item.logPath &&
     a.item.output === b.item.output &&
-    JSON.stringify(a.item.agentPlan?.items ?? []) ===
-      JSON.stringify(b.item.agentPlan?.items ?? []) &&
-    (a.item.agentPlan?.source ?? '') === (b.item.agentPlan?.source ?? '') &&
+    sameAgentPlan(a.item.agentPlan, b.item.agentPlan) &&
     (a.item.error ?? '') === (b.item.error ?? '') &&
     a.onSpawnDroneHubTask === b.onSpawnDroneHubTask &&
     a.messageId === b.messageId &&

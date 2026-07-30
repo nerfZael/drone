@@ -62,6 +62,24 @@ describe('chat api transcript equality', () => {
     expect(sameTranscriptItem(pending, completed)).toBe(false);
   });
 
+  test('does not treat an agent plan timestamp refresh as a transcript change', () => {
+    const before = transcriptItem({
+      agentPlan: {
+        source: 'codex',
+        updatedAt: '2026-06-16T18:34:45.000Z',
+        items: [{ text: 'Run tests', status: 'in_progress' }],
+      },
+    });
+    const after = transcriptItem({
+      agentPlan: {
+        ...before.agentPlan!,
+        updatedAt: '2026-06-16T18:34:46.000Z',
+      },
+    });
+
+    expect(sameTranscriptItem(before, after)).toBe(true);
+  });
+
   test('detects a finalized changed-files summary', () => {
     const before = transcriptItem();
     const after = transcriptItem({

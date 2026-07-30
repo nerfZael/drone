@@ -30,6 +30,7 @@ import {
   renderItemsFromMessages,
   toolActivityIsSettled,
   toolLabel,
+  type AgentPlan,
   type AssistantMessage,
   type AssistantRenderItem,
   type AssistantToolRenderItem,
@@ -60,7 +61,6 @@ import {
   partitionMobileRunItems,
   sortMobileTranscriptTimeline,
   workingDurationLabel,
-  type MobileAgentPlan,
   type MobileTranscriptRun,
 } from './mobile-transcript-runs';
 import { shouldToggleMessageTimestamp } from './message-touch-model';
@@ -1189,7 +1189,7 @@ function MobileAgentPlanList({
   plan,
   running = false,
 }: {
-  plan?: MobileAgentPlan;
+  plan?: AgentPlan;
   running?: boolean;
 }) {
   const [stepsExpanded, setStepsExpanded] = React.useState(false);
