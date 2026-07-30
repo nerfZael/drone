@@ -245,6 +245,37 @@ describe('LocalCheckoutService', () => {
     expect(harness.hostHead()).toBe(A_HEAD);
   });
 
+  test('activates a drone with the requested Auto-updates mode atomically', async () => {
+    const harness = createHarness();
+
+    const allChanges = await harness.service.useLocally('a', {
+      autoUpdates: 'all',
+    });
+    expect(allChanges.autoUpdates).toBe('all');
+    expect(allChanges.session.snapshotKind).toBe('working-tree');
+    expect(harness.hostHead()).toBe(A_WORKING);
+
+    const commitsOnly = await harness.service.useLocally('a', {
+      autoUpdates: 'commits',
+    });
+    expect(commitsOnly.autoUpdates).toBe('commits');
+    expect(commitsOnly.session.snapshotKind).toBe('commit');
+    expect(harness.hostHead()).toBe(A_HEAD);
+  });
+
+  test('uses the requested mode instead of the previous drone mode when switching', async () => {
+    const harness = createHarness();
+    await harness.service.useLocally('a', { autoUpdates: 'all' });
+
+    const switched = await harness.service.useLocally('b', {
+      autoUpdates: 'commits',
+    });
+    expect(switched.autoUpdates).toBe('commits');
+    expect(switched.session.droneId).toBe('b');
+    expect(switched.session.snapshotKind).toBe('commit');
+    expect(harness.hostHead()).toBe(B_HEAD);
+  });
+
   test('restores the first repository when switching local use across repositories', async () => {
     const harness = createHarness();
     await harness.service.useLocally('a');
@@ -331,6 +362,17 @@ describe('LocalCheckoutService', () => {
     const harness = createHarness();
 
     await expect(harness.service.setAutoUpdates('everything')).rejects.toMatchObject({
+      code: 'invalid_auto_updates',
+      status: 400,
+    });
+  });
+
+  test('rejects invalid Auto-updates values while activating', async () => {
+    const harness = createHarness();
+
+    await expect(
+      harness.service.useLocally('a', { autoUpdates: 'everything' }),
+    ).rejects.toMatchObject({
       code: 'invalid_auto_updates',
       status: 400,
     });

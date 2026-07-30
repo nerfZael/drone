@@ -31,7 +31,16 @@ import type {
   PendingPrompt,
   TranscriptItem,
 } from '../types';
-import { IconChat, IconChevron, IconNetwork, IconSidebarExpand } from './icons';
+import {
+  IconChat,
+  IconChevron,
+  IconCirclePause,
+  IconFileDiff,
+  IconGitCommitHorizontal,
+  IconMonitor,
+  IconNetwork,
+  IconSidebarExpand,
+} from './icons';
 import {
   DockableDroneWorkspace,
   readWorkspacePaneHeaderMode,
@@ -47,7 +56,13 @@ import type { RepoOpErrorMeta } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
 import { requestChangesPullRequest } from '../changes/navigation';
 import { copyText, downloadTextFile } from './clipboard';
-import { chatInputDraftKeyForDroneChat, droneHomePath, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
+import {
+  chatInputDraftKeyForDroneChat,
+  droneHomePath,
+  isHostRuntimeDrone,
+  isDroneStartingOrSeeding,
+  resolveChatNameForDrone,
+} from './helpers';
 import { isDroneProvisioningPhase } from '../hub-phase';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
@@ -220,6 +235,135 @@ function HeaderMenuRadioRow({
   );
 }
 
+const LOCAL_AUTO_UPDATE_OPTIONS = [
+  { mode: 'off', label: 'Off' },
+  { mode: 'commits', label: 'Commits only' },
+  { mode: 'all', label: 'All changes' },
+] as const satisfies ReadonlyArray<{
+  mode: LocalAutoUpdates;
+  label: string;
+}>;
+
+function LocalAutoUpdateIcon({ mode }: { mode: LocalAutoUpdates }) {
+  if (mode === 'off') return <IconCirclePause />;
+  if (mode === 'commits') return <IconGitCommitHorizontal />;
+  return <IconFileDiff />;
+}
+
+function LocalAutoUpdatesControl({
+  active,
+  activeForAnotherDroneName,
+  mode,
+  disabled,
+  onSelect,
+}: {
+  active: boolean;
+  activeForAnotherDroneName: string | null;
+  mode: LocalAutoUpdates;
+  disabled: boolean;
+  onSelect: (mode: LocalAutoUpdates) => void;
+}) {
+  const localStatusTitle = active
+    ? 'This drone is being used locally'
+    : activeForAnotherDroneName
+      ? `${activeForAnotherDroneName} is currently being used locally`
+      : 'This drone is not being used locally';
+  const optionRefs = React.useRef(
+    new Map<LocalAutoUpdates, HTMLButtonElement>(),
+  );
+  const moveSelection = (currentMode: LocalAutoUpdates, key: string) => {
+    const currentIndex = LOCAL_AUTO_UPDATE_OPTIONS.findIndex(
+      (option) => option.mode === currentMode,
+    );
+    let nextIndex = currentIndex;
+    if (key === 'ArrowRight' || key === 'ArrowDown') {
+      nextIndex = (currentIndex + 1) % LOCAL_AUTO_UPDATE_OPTIONS.length;
+    } else if (key === 'ArrowLeft' || key === 'ArrowUp') {
+      nextIndex =
+        (currentIndex - 1 + LOCAL_AUTO_UPDATE_OPTIONS.length) %
+        LOCAL_AUTO_UPDATE_OPTIONS.length;
+    } else if (key === 'Home') {
+      nextIndex = 0;
+    } else if (key === 'End') {
+      nextIndex = LOCAL_AUTO_UPDATE_OPTIONS.length - 1;
+    } else {
+      return;
+    }
+    const nextMode = LOCAL_AUTO_UPDATE_OPTIONS[nextIndex].mode;
+    onSelect(nextMode);
+    window.requestAnimationFrame(() => optionRefs.current.get(nextMode)?.focus());
+  };
+
+  return (
+    <div className="inline-flex h-[30px] overflow-hidden rounded border border-[var(--border)] bg-[var(--surface-strong)] shadow-[0_1px_3px_var(--shadow-color)] dh-type-header-action">
+      <span
+        role="status"
+        className="inline-flex items-center gap-1.5 border-r border-[var(--border)] px-2.5"
+        aria-label={`Local status: ${localStatusTitle}`}
+        title={localStatusTitle}
+      >
+        <IconMonitor
+          className={cn(
+            active
+              ? 'text-[var(--accent)] drop-shadow-[0_0_4px_var(--accent-muted)]'
+              : 'text-[var(--muted-dim)]',
+          )}
+        />
+        <span className={active ? 'text-[var(--fg-secondary)]' : 'text-[var(--muted)]'}>Local</span>
+      </span>
+      <div className="inline-flex" role="radiogroup" aria-label="Local auto-updates">
+        {LOCAL_AUTO_UPDATE_OPTIONS.map((option) => {
+          const selected = option.mode === mode;
+          const action = active
+            ? `Set local auto-updates to ${option.label}`
+            : `Use this drone locally with auto-updates ${option.label.toLowerCase()}`;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={action}
+              title={action}
+              tabIndex={selected ? 0 : -1}
+              disabled={disabled}
+              onClick={() => onSelect(option.mode)}
+              onKeyDown={(event) => {
+                if (
+                  ![
+                    'ArrowLeft',
+                    'ArrowRight',
+                    'ArrowUp',
+                    'ArrowDown',
+                    'Home',
+                    'End',
+                  ].includes(event.key)
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                moveSelection(option.mode, event.key);
+              }}
+              ref={(element) => {
+                if (element) optionRefs.current.set(option.mode, element);
+                else optionRefs.current.delete(option.mode);
+              }}
+              className={cn(
+                'inline-flex w-8 items-center justify-center border-r border-[var(--border)] transition-colors last:border-r-0 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40',
+                selected
+                  ? 'bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[inset_0_0_0_1px_var(--accent-muted)]'
+                  : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]',
+              )}
+            >
+              <LocalAutoUpdateIcon mode={option.mode} />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function HeaderMenuChoiceGroup<T extends string>({
   label,
   value,
@@ -326,7 +470,7 @@ type SelectedDroneWorkspaceProps = {
   localCheckout: LocalCheckoutView | null;
   localCheckoutLoading: boolean;
   localCheckoutBusy: boolean;
-  useRepoLocally: () => Promise<void>;
+  useRepoLocally: (mode?: LocalAutoUpdates) => Promise<void>;
   updateRepoLocally: () => Promise<void>;
   setLocalAutoUpdates: (mode: LocalAutoUpdates) => Promise<void>;
   returnRepoLocalCheckout: () => Promise<void>;
@@ -566,7 +710,7 @@ export function SelectedDroneWorkspace({
   React.useEffect(() => {
     setSyncMenuOpen(false);
   }, [currentDrone.id, repoOp?.kind]);
-  const hostRuntime = String(currentDrone.runtime ?? '').trim().toLowerCase() === 'host';
+  const hostRuntime = isHostRuntimeDrone(currentDrone);
   const dockerSnapshotSupported = !hostRuntime && currentDrone.persistVolume === false;
   const readOnlySupported =
     currentAgentKey === 'native' ||
@@ -655,17 +799,24 @@ export function SelectedDroneWorkspace({
   const localSession = localCheckout?.session ?? null;
   const localActiveForCurrentDrone = localSession?.droneId === currentDrone.id;
   const localActiveForAnotherDrone = Boolean(localSession && !localActiveForCurrentDrone);
-  const localActionDisabled = localCheckoutLoading || Boolean(repoOp);
+  const localActionDisabled = localCheckoutLoading || localCheckoutBusy || Boolean(repoOp);
   const syncButtonLabel = localCheckoutBusy
     ? 'Working…'
-    : localActiveForCurrentDrone
-      ? 'Local'
-      : repoSyncBusyLabel;
+    : repoSyncBusyLabel;
   const syncDisabled =
     isDroneStartingOrSeeding(currentDrone.hubPhase) ||
     Boolean(openingEditor) ||
     Boolean(openingTerminal) ||
-    Boolean(repoOp);
+    Boolean(repoOp) ||
+    localCheckoutBusy;
+  const selectLocalAutoUpdates = (mode: LocalAutoUpdates) => {
+    if (localActiveForCurrentDrone) {
+      if ((localCheckout?.autoUpdates ?? 'off') === mode) return;
+      void setLocalAutoUpdates(mode);
+      return;
+    }
+    void useRepoLocally(mode);
+  };
   const {
     fleetBadgeAssigning,
     fleetBadgeDropActive,
@@ -1230,54 +1381,43 @@ export function SelectedDroneWorkspace({
           data-drone-header-toolbar="true"
           className="absolute right-5 top-1/2 flex max-w-[calc(100%-22rem)] -translate-y-1/2 flex-wrap items-center justify-end gap-2"
         >
-          {currentDroneRepoAttached && (
-            <div ref={syncMenuRef} className="relative">
-              <HeaderActionButton
-                onClick={() => {
-                  setHeaderOverflowOpen(false);
-                  setTerminalMenuOpen(false);
-                  setSyncMenuOpen((open) => !open);
-                }}
-                disabled={syncDisabled}
-                title="Sync this drone repo with the host"
-                aria-haspopup="menu"
-                aria-expanded={syncMenuOpen}
-                className="dh-type-header-action--emphasis"
-              >
-                <span>{hostRuntime ? 'Sync (host)' : syncButtonLabel}</span>
-                <IconChevron down={!syncMenuOpen} className="opacity-75" />
-              </HeaderActionButton>
-              {syncMenuOpen && !syncDisabled ? (
-                <HeaderDropdownPortal open={syncMenuOpen} anchorRef={syncMenuRef} width={260}>
-                  <div className="py-1">
-                    {hostRuntime ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSyncMenuOpen(false);
-                            void pullRepoChanges();
-                          }}
-                          className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]')}
-                          role="menuitem"
-                          title="Host runtime uses the host repository directly; this action is a no-op."
-                        >
-                          Apply to host
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSyncMenuOpen(false);
-                            void pushRepoChanges();
-                          }}
-                          className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]')}
-                          role="menuitem"
-                          title="Host runtime uses the host repository directly; this action is a no-op."
-                        >
-                          Pull from host
-                        </button>
-                      </>
-                    ) : localActiveForCurrentDrone ? (
+          {currentDroneRepoAttached && !hostRuntime && (
+            <>
+              <LocalAutoUpdatesControl
+                active={localActiveForCurrentDrone}
+                activeForAnotherDroneName={
+                  localActiveForAnotherDrone
+                    ? localSession?.droneName || 'Another drone'
+                    : null
+                }
+                mode={
+                  localActiveForCurrentDrone
+                    ? localCheckout?.autoUpdates ?? 'off'
+                    : 'off'
+                }
+                disabled={syncDisabled || localActionDisabled}
+                onSelect={selectLocalAutoUpdates}
+              />
+              <div ref={syncMenuRef} className="relative">
+                <HeaderActionButton
+                  onClick={() => {
+                    setHeaderOverflowOpen(false);
+                    setTerminalMenuOpen(false);
+                    setSyncMenuOpen((open) => !open);
+                  }}
+                  disabled={syncDisabled}
+                  title="Sync this drone repo with the host"
+                  aria-haspopup="menu"
+                  aria-expanded={syncMenuOpen}
+                  className="dh-type-header-action--emphasis"
+                >
+                  <span>{syncButtonLabel}</span>
+                  <IconChevron down={!syncMenuOpen} className="opacity-75" />
+                </HeaderActionButton>
+                {syncMenuOpen && !syncDisabled ? (
+                  <HeaderDropdownPortal open={syncMenuOpen} anchorRef={syncMenuRef} width={260}>
+                    <div className="py-1">
+                      {localActiveForCurrentDrone ? (
                       <>
                         <div className="px-3 py-2 text-[var(--text-10)] text-[var(--muted)]">
                           <div className="text-[var(--fg-secondary)]">Using this drone locally</div>
@@ -1342,11 +1482,7 @@ export function SelectedDroneWorkspace({
                         <div className="px-3 pb-1 pt-2 text-[var(--text-10)] uppercase tracking-wide text-[var(--muted)]">
                           Auto-updates
                         </div>
-                        {([
-                          ['off', 'Off'],
-                          ['commits', 'Commits only'],
-                          ['all', 'All changes'],
-                        ] as const).map(([mode, label]) => (
+                        {LOCAL_AUTO_UPDATE_OPTIONS.map(({ mode, label }) => (
                           <HeaderMenuRadioRow
                             key={mode}
                             label={label}
@@ -1354,7 +1490,7 @@ export function SelectedDroneWorkspace({
                             disabled={localActionDisabled}
                             onSelect={() => {
                               setSyncMenuOpen(false);
-                              void setLocalAutoUpdates(mode);
+                              selectLocalAutoUpdates(mode);
                             }}
                           />
                         ))}
@@ -1420,11 +1556,12 @@ export function SelectedDroneWorkspace({
                           Pull from host
                         </button>
                       </>
-                    )}
-                  </div>
-                </HeaderDropdownPortal>
-              ) : null}
-            </div>
+                      )}
+                    </div>
+                  </HeaderDropdownPortal>
+                ) : null}
+              </div>
+            </>
           )}
           {/* Overflow menu */}
           <div ref={headerOverflowRef as React.RefObject<HTMLDivElement>} className="relative">

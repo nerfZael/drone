@@ -49,7 +49,10 @@ export type LocalCheckoutController = {
   loading: boolean;
   busy: boolean;
   refresh: () => Promise<LocalCheckoutView | null>;
-  useLocally: (droneId: string) => Promise<LocalCheckoutView>;
+  useLocally: (
+    droneId: string,
+    autoUpdates?: LocalAutoUpdates,
+  ) => Promise<LocalCheckoutView>;
   update: (includeDirty?: boolean) => Promise<LocalCheckoutView>;
   setAutoUpdates: (mode: LocalAutoUpdates) => Promise<LocalCheckoutView>;
   returnToOriginal: () => Promise<LocalCheckoutView>;
@@ -133,11 +136,13 @@ export function useLocalCheckout(options: {
   );
 
   const useLocally = React.useCallback(
-    async (droneId: string) => {
+    async (droneId: string, autoUpdates?: LocalAutoUpdates) => {
       const next = await run(`/api/drones/${encodeURIComponent(droneId)}/repo/local/use`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(
+          autoUpdates === undefined ? {} : { autoUpdates },
+        ),
       });
       markAutoUpdateCurrent(next);
       return next;

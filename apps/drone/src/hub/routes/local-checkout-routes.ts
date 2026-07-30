@@ -89,7 +89,14 @@ export function createLocalCheckoutRouteHandler(
       parts[5] === 'use'
     ) {
       try {
-        json(res, 200, await service.useLocally(decodeURIComponent(parts[2])));
+        const body = await readJsonBody(req);
+        json(
+          res,
+          200,
+          await service.useLocally(decodeURIComponent(parts[2]), {
+            autoUpdates: body?.autoUpdates,
+          }),
+        );
       } catch (error) {
         sendFailure(res, error);
       }

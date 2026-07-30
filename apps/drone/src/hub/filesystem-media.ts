@@ -28,7 +28,7 @@ export const VIDEO_FILE_EXTENSIONS = new Set([
 ]);
 export const FS_THUMB_MAX_BYTES = 8 * 1024 * 1024;
 export const FS_MEDIA_MAX_BYTES = 96 * 1024 * 1024;
-export const FS_EDITOR_MAX_BYTES = 2 * 1024 * 1024;
+export const FS_EDITOR_MAX_BYTES = 10 * 1024 * 1024;
 export const FS_TEXT_CHUNK_MAX_BYTES = 512 * 1024;
 export const FS_QUICK_OPEN_MAX_RESULTS = 200;
 export const FS_LIST_TIMEOUT_MS = 10_000;

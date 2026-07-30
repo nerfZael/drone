@@ -78,11 +78,28 @@ export class LocalCheckoutService {
     };
   }
 
-  useLocally(droneRef: string): Promise<any> {
+  useLocally(
+    droneRef: string,
+    options: { autoUpdates?: unknown } = {},
+  ): Promise<any> {
+    const requestedAutoUpdates = options.autoUpdates;
+    if (
+      requestedAutoUpdates !== undefined &&
+      !isLocalAutoUpdates(requestedAutoUpdates)
+    ) {
+      return Promise.reject(
+        new LocalCheckoutError(
+          'invalid_auto_updates',
+          'Auto-updates must be Off, Commits only, or All changes.',
+          400,
+        ),
+      );
+    }
     return this.runLatest('use', droneRef, async (generation) => {
       const currentState = await this.readState();
       const current = currentState.session;
       if (current) await this.assertActiveHost(current);
+      const autoUpdates = requestedAutoUpdates ?? currentState.autoUpdates;
 
       const target = await this.resolveDrone(droneRef);
       const targetRepoRoot = await this.deps.gitTopLevel(String(target.drone.repoPath ?? '').trim());
@@ -118,7 +135,7 @@ export class LocalCheckoutService {
         }
         return await this.rollbackAfterFailure(error, context, actions);
       };
-      const includeDirty = currentState.autoUpdates === 'all';
+      const includeDirty = autoUpdates === 'all';
       const snapshot = await this.snapshots.captureAndImport({
         droneId: target.id,
         drone: target.drone,
@@ -154,7 +171,12 @@ export class LocalCheckoutService {
         updatedAt: now,
       };
       try {
-        await this.writeState({ ...currentState, session, updatedAt: now });
+        await this.writeState({
+          ...currentState,
+          autoUpdates,
+          session,
+          updatedAt: now,
+        });
       } catch (error) {
         await rollbackSwitch(error, 'saving the local drone switch');
       }

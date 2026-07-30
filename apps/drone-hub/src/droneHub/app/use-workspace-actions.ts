@@ -461,13 +461,13 @@ export function useWorkspaceActions({
     [setRepoOperationError],
   );
 
-  const useRepoLocally = React.useCallback(async () => {
+  const useRepoLocally = React.useCallback(async (mode?: LocalAutoUpdates) => {
     if (!currentDrone) return;
     const droneId = String(currentDrone.id ?? '').trim();
     if (!droneId) return;
     clearRepoOperationError();
     try {
-      const next = await localCheckout.useLocally(droneId);
+      const next = await localCheckout.useLocally(droneId, mode);
       const session = next.session;
       showTransientToast(
         session
