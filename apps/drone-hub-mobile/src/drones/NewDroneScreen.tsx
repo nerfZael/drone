@@ -1,4 +1,5 @@
 import React from 'react';
+import { buildModelCatalogChoices } from '@drone/assistant-chat';
 import {
   ActivityIndicator,
   Keyboard,
@@ -358,17 +359,7 @@ export function NewDroneScreen({
       (option) => option.id === model && (!modelProvider || option.provider === modelProvider),
     ) ?? null;
   const modelChoices = React.useMemo<AssistantModelChoice[]>(
-    () =>
-      models.flatMap((option) =>
-        option.reasoningLevels.length > 0
-          ? option.reasoningLevels.map((thinkingLevel) => ({
-              provider: option.provider || agent,
-              id: option.id,
-              name: option.label,
-              thinkingLevel,
-            }))
-          : [{ provider: option.provider || agent, id: option.id, name: option.label }],
-      ),
+    () => buildModelCatalogChoices(models, agent),
     [agent, models],
   );
 

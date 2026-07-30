@@ -7,6 +7,7 @@ import {
   mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneListPayload,
   normalizeMobileDroneCreateModelCatalog,
+  normalizeMobileDroneChatModelCatalog,
   normalizeMobileNativeChatHistory,
   normalizeMobileDroneTurns,
   normalizeMobileDrones,
@@ -58,6 +59,33 @@ describe('mobile drone sidebar model', () => {
       },
     ]);
   });
+
+  test('normalizes chat models with the agent as a fallback provider', () => {
+    expect(
+      normalizeMobileDroneChatModelCatalog(
+        {
+          models: [
+            {
+              id: 'gpt-chat',
+              name: 'GPT Chat',
+              thinkingLevel: 'HIGH',
+            },
+            { id: 'gpt-chat', label: 'duplicate' },
+          ],
+        },
+        'codex',
+      ),
+    ).toEqual([
+      {
+        provider: 'codex',
+        id: 'gpt-chat',
+        label: 'GPT Chat',
+        reasoningLevels: ['high'],
+        defaultReasoningLevel: 'high',
+      },
+    ]);
+  });
+
   test('names a newly cloned chat after the highest existing chat number', () => {
     expect(suggestNextMobileDroneChatName([])).toBe('chat-1');
     expect(suggestNextMobileDroneChatName(['default'])).toBe('chat-2');

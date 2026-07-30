@@ -1,4 +1,8 @@
 import type { ChatModelOption } from './app-types';
+export {
+  formatModelDisplayLabel,
+  formatReasoningLabel,
+} from '@drone/assistant-chat';
 
 export type DisplayedChatModel = {
   label: string;
@@ -116,35 +120,4 @@ export function formatAgentModelMetadata(
   const agentLabel = String(agentLabelRaw ?? '').trim() || 'Not reported';
   const reasoning = String(reasoningRaw ?? '').trim();
   return `${agentLabel} (${model.label}${reasoning ? ` ${reasoning}` : ''})`;
-}
-
-export function formatReasoningLabel(valueRaw: string | null | undefined): string {
-  const value = String(valueRaw ?? '').trim().toLowerCase();
-  if (!value) return '';
-  if (value === 'off') return 'Off';
-  if (value === 'xhigh') return 'X-high';
-  return `${value[0]?.toUpperCase() ?? ''}${value.slice(1)}`;
-}
-
-export function formatModelDisplayLabel(valueRaw: string | null | undefined): string {
-  const value = String(valueRaw ?? '')
-    .trim()
-    .replace(/\s+\(custom\)$/i, '');
-  if (!value) return '';
-  if (/^gpt\s+/i.test(value)) return `GPT ${value.replace(/^gpt\s+/i, '')}`;
-  if (!/^gpt(?:[-_\s]|$)/i.test(value)) return value;
-
-  const suffix = value
-    .replace(/^gpt[-_\s]*/i, '')
-    .replace(/[-_]+/g, ' ')
-    .trim();
-  if (!suffix) return 'GPT';
-  const [version, ...variantParts] = suffix.split(/\s+/).filter(Boolean);
-  const formattedVersion = /^[0-9]/.test(version)
-    ? `GPT-${version}`
-    : `GPT ${version.toUpperCase()}`;
-  const variant = variantParts
-    .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1).toLowerCase()}`)
-    .join(' ');
-  return `${formattedVersion}${variant ? ` ${variant}` : ''}`;
 }

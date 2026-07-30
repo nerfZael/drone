@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatReasoningLabel } from '@drone/assistant-chat';
 
 import { useDropdownDismiss } from '../../ui/dropdown';
 
@@ -51,13 +52,6 @@ function modelName(value: string): string {
       index === 0 ? part : `${part[0]?.toUpperCase() ?? ''}${part.slice(1).toLowerCase()}`,
     )
     .join(' ');
-}
-
-function reasoningName(value: string): string {
-  if (!value) return '';
-  if (value === 'off') return 'Off';
-  if (value === 'xhigh') return 'X-high';
-  return `${value[0]?.toUpperCase() ?? ''}${value.slice(1).toLowerCase()}`;
 }
 
 function CheckIcon() {
@@ -154,7 +148,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
     : models;
   const triggerLabel =
     triggerLabelOverride ??
-    `${modelName(currentName)}${showReasoning ? ` (${reasoningName(selectedReasoning)})` : ''}`;
+    `${modelName(currentName)}${showReasoning ? ` (${formatReasoningLabel(selectedReasoning)})` : ''}`;
   const customModelId =
     allowCustomModel &&
     normalizedQuery &&
@@ -243,7 +237,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
                         : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
                     }`}
                   >
-                    {reasoningName(level)}
+                    {formatReasoningLabel(level)}
                     {active ? <span className="text-[var(--accent)]"><CheckIcon /></span> : null}
                   </button>
                 );

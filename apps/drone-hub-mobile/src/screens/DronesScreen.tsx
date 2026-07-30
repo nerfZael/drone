@@ -1,6 +1,9 @@
 import React from 'react';
 import { fromByteArray } from 'base64-js';
-import type { AssistantMessage } from '@drone/assistant-chat';
+import {
+  buildModelCatalogChoices,
+  type AssistantMessage,
+} from '@drone/assistant-chat';
 import {
   ActivityIndicator,
   Alert,
@@ -55,6 +58,7 @@ import {
   mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneCreateRepo,
   normalizeMobileDroneCreateModelCatalog,
+  normalizeMobileDroneChatModelCatalog,
   normalizeMobileDrone,
   normalizeMobileNativeChatHistory,
   normalizeMobileDroneListPayload,
@@ -1392,7 +1396,7 @@ export function DronesScreen({
       });
       if (targetIdRef.current !== destinationId) return [];
       const catalog = result?.createModelCatalog;
-      const models = normalizeMobileDroneCreateModelCatalog(catalog);
+      const models = normalizeMobileDroneCreateModelCatalog(catalog, agent);
       if (models.length === 0 && catalog?.error) {
         throw new Error(String(catalog.error));
       }
@@ -1989,24 +1993,10 @@ export function DronesScreen({
         return;
       const fallbackProvider =
         String(result?.agent?.id ?? result?.agent?.kind ?? chatModelProvider).trim() || 'drone';
-      const options = (Array.isArray(result?.models) ? result.models : [])
-        .flatMap((model: any): AssistantModelChoice[] => {
-          const provider = String(model?.provider ?? fallbackProvider).trim() || fallbackProvider;
-          const base = {
-            provider,
-            id: String(model?.id ?? '').trim(),
-            name: String(model?.label ?? model?.name ?? model?.id ?? '').trim(),
-          };
-          const levels = Array.isArray(model?.reasoningLevels)
-            ? model.reasoningLevels
-                .map((level: unknown) => String(level ?? '').trim())
-                .filter(Boolean)
-            : [];
-          return levels.length > 0
-            ? levels.map((thinkingLevel: string) => ({ ...base, thinkingLevel }))
-            : [{ ...base, thinkingLevel: String(model?.thinkingLevel ?? '').trim() || undefined }];
-        })
-        .filter((model: AssistantModelChoice) => Boolean(model.id));
+      const options: AssistantModelChoice[] = buildModelCatalogChoices(
+        normalizeMobileDroneChatModelCatalog(result, fallbackProvider),
+        fallbackProvider,
+      );
       setChatModels(options);
       const configuredModel = String(result?.model ?? '').trim() || options[0]?.id || '';
       if (configuredModel) setChatModel(configuredModel);

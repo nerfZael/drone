@@ -1,12 +1,10 @@
+import {
+  modelCatalogReasoning,
+  normalizeExternalModelCatalogModels,
+} from '@drone/assistant-chat';
 import type { AgentModelCatalogModel } from './types';
 
 const MODEL_ID_MAX_LENGTH = 160;
-
-function normalizeReasoning(raw: unknown): string | null {
-  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
-  if (!value || value.length > 32 || !/^[a-z0-9._-]+$/.test(value)) return null;
-  return value;
-}
 
 function stripAnsi(text: string): string {
   // eslint-disable-next-line no-control-regex
@@ -22,42 +20,7 @@ function reasoningMetadata(value: any): Pick<
   AgentModelCatalogModel,
   'reasoningLevels' | 'defaultReasoningLevel'
 > {
-  const rawLevels =
-    value?.reasoningLevels ??
-    value?.reasoning_levels ??
-    value?.supportedReasoningLevels ??
-    value?.supported_reasoning_levels ??
-    value?.supportedReasoningEfforts ??
-    value?.supported_reasoning_efforts;
-  const reasoningLevels: string[] = [];
-  const seen = new Set<string>();
-  if (Array.isArray(rawLevels)) {
-    for (const item of rawLevels) {
-      const raw =
-        typeof item === 'string'
-          ? item
-          : item && typeof item === 'object'
-            ? item.reasoning_effort ?? item.reasoningEffort ?? item.effort ?? item.level ?? item.name
-            : '';
-      const level = normalizeReasoning(raw);
-      if (!level || seen.has(level)) continue;
-      seen.add(level);
-      reasoningLevels.push(level);
-    }
-  }
-  const defaultReasoningLevel = normalizeReasoning(
-    value?.defaultReasoningLevel ??
-      value?.default_reasoning_level ??
-      value?.defaultReasoningEffort ??
-      value?.default_reasoning_effort,
-  );
-  if (defaultReasoningLevel && !seen.has(defaultReasoningLevel)) {
-    reasoningLevels.push(defaultReasoningLevel);
-  }
-  return {
-    ...(reasoningLevels.length > 0 ? { reasoningLevels } : {}),
-    ...(defaultReasoningLevel ? { defaultReasoningLevel } : {}),
-  };
+  return modelCatalogReasoning(value);
 }
 
 function createCollector() {
@@ -72,18 +35,15 @@ function createCollector() {
     if (!id || id.length > MODEL_ID_MAX_LENGTH || seen.has(id)) return;
     seen.add(id);
     const label = String(labelRaw ?? '').trim() || id;
-    models.push({
+    const [model] = normalizeExternalModelCatalogModels([{
       id,
       label,
       ...(metadata.isDefault ? { isDefault: true } : {}),
       ...(metadata.isCurrent ? { isCurrent: true } : {}),
-      ...(metadata.reasoningLevels?.length
-        ? { reasoningLevels: metadata.reasoningLevels }
-        : {}),
-      ...(metadata.defaultReasoningLevel
-        ? { defaultReasoningLevel: metadata.defaultReasoningLevel }
-        : {}),
-    });
+      reasoningLevels: metadata.reasoningLevels ?? [],
+      defaultReasoningLevel: metadata.defaultReasoningLevel ?? '',
+    }]);
+    if (model) models.push(model);
   };
   return { models, add };
 }

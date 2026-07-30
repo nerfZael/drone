@@ -102,14 +102,20 @@ describe('agent model catalog', () => {
       {
         id: 'gpt-chatgpt-only',
         label: 'GPT ChatGPT Only',
+        reasoningLevels: [],
+        defaultReasoningLevel: '',
       },
       {
         id: 'gpt-5.6-sol',
         label: 'GPT-5.6-Sol',
+        reasoningLevels: [],
+        defaultReasoningLevel: '',
       },
       {
         id: 'gpt-legacy',
         label: 'GPT Legacy',
+        reasoningLevels: [],
+        defaultReasoningLevel: '',
       },
     ]);
   });
@@ -212,6 +218,50 @@ describe('agent model catalog', () => {
     expect(cached.models[0]?.id).toBe('stable-model');
     expect(cached.error).toContain('No models discovered');
     expect(modelListCalls).toBe(callsAfterFailure);
+  });
+
+  test('normalizes catalogs loaded from older persisted cache entries', async () => {
+    const discoveredAt = new Date().toISOString();
+    const runtime: AgentModelCatalogRuntime = {
+      async runContainer() {
+        return { code: 1 };
+      },
+      async runHost() {
+        return { code: 1 };
+      },
+      async readHostFile() {
+        throw new Error('not found');
+      },
+      hostHomeDirectory: () => '/tmp',
+      hostModelListCommand: () => null,
+      timeoutMs: () => 1_000,
+    };
+    const service = new AgentModelCatalogService(runtime, {
+      read: () => ({
+        key: 'v2:host:codex',
+        agentId: 'codex',
+        runtime: 'host',
+        models: [{ id: 'cached-model', label: 'Cached Model' }] as any,
+        discoveredAt,
+      }),
+      async write() {},
+    });
+
+    expect(
+      (
+        await service.get({
+          agentId: 'codex',
+          target: { runtime: 'host' },
+        })
+      ).models,
+    ).toEqual([
+      {
+        id: 'cached-model',
+        label: 'Cached Model',
+        reasoningLevels: [],
+        defaultReasoningLevel: '',
+      },
+    ]);
   });
 
   test('does not parse failed command output as a model', async () => {

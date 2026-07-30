@@ -1,4 +1,5 @@
 import type { ChatComposerControlsConfig } from '../chat';
+import { buildModelCatalogChoices } from '@drone/assistant-chat';
 import type { ChatModelOption } from './app-types';
 import {
   displayedChatModelTitle,
@@ -81,16 +82,7 @@ export function buildExternalAgentComposerControls(opts: {
         ];
   const modelChoices = [
     ...autoChoices,
-    ...opts.models.flatMap((model) =>
-      model.reasoningLevels?.length
-        ? model.reasoningLevels.map((thinkingLevel) => ({
-            provider: 'external',
-            id: model.id,
-            name: model.label,
-            thinkingLevel,
-          }))
-        : [{ provider: 'external', id: model.id, name: model.label }],
-    ),
+    ...buildModelCatalogChoices(opts.models, 'external'),
   ];
   const statusMessage = opts.error
     ? `${opts.models.length > 0 ? 'Using the last detected catalog. ' : ''}${opts.error}`

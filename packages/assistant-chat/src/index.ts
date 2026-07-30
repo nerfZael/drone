@@ -7,6 +7,7 @@ export * from './chat-attachment-context.js';
 export * from './chat-attachment-policy.js';
 export * from './github-pull-request.js';
 export * from './merge-workspace-transfer-progress.js';
+export * from './model-catalog.js';
 export * from './native-chat-types.js';
 export * from './pending-prompts.js';
 export * from './pull-request-confirmation.js';
