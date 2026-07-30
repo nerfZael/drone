@@ -1,10 +1,10 @@
-import type { AssistantMessage } from './assistant-message-types';
+import type { AssistantMessage } from './assistant-message-types.js';
 import type {
   AgentRunFileChanges,
   BlipCompactionHistoryDetails,
   BlipSessionStatus,
 } from '@blip/protocol';
-import { isAgentRunFileChanges } from './agent-run-file-changes';
+import { isAgentRunFileChanges } from './agent-run-file-changes.js';
 
 export type AssistantToolCall = { id: string; name: string; args: any };
 export type AssistantToolRenderItem = {

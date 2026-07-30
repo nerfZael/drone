@@ -1,5 +1,5 @@
-import type { AssistantMessage } from './assistant-message-types';
-import { messageVisibleText } from './assistant-message-model';
+import type { AssistantMessage } from './assistant-message-types.js';
+import { messageVisibleText } from './assistant-message-model.js';
 
 export type AgentRunActivitySource = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
 
