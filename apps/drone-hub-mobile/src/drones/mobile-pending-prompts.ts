@@ -2,7 +2,16 @@ import {
   normalizeMobileAgentPlan,
   type MobileAgentPlan,
 } from '../local-assistant/mobile-transcript-runs';
-import { isStoppedRunError, normalizeAgentRunActivity } from '@drone/assistant-chat';
+import {
+  completedTurnIds,
+  filterCompletedPendingPrompts,
+  hasActivePendingPrompt,
+  isStoppedRunError,
+  mergeOptimisticPendingPrompts,
+  normalizeAgentRunActivity,
+  replaceOptimisticPendingPromptId,
+  type PendingPromptState,
+} from '@drone/assistant-chat';
 
 export type MobileDronePendingPrompt = {
   id: string;
@@ -21,7 +30,7 @@ export type MobileOptimisticPendingPrompt = {
   id: string;
   at: string;
   prompt: string;
-  state: 'queued' | 'sending' | 'sent' | 'failed';
+  state: PendingPromptState;
   attachmentCount?: number;
   imageCount: number;
   error?: string;
@@ -61,58 +70,51 @@ export function mergeOptimisticMobilePendingPrompts(input: {
   nowMs?: number;
 }): any[] {
   const server = Array.isArray(input.serverPrompts) ? input.serverPrompts : [];
-  const local = Array.isArray(input.localPrompts) ? input.localPrompts : [];
-  const completedIds = new Set(
-    (Array.isArray(input.turns) ? input.turns : [])
-      .map((turn: any) => String(turn?.id ?? '').trim())
-      .filter(Boolean),
+  const local = (Array.isArray(input.localPrompts) ? input.localPrompts : []).filter(
+    (prompt: any) => prompt?.optimisticSent === true,
   );
   const nowMs = input.nowMs ?? Date.now();
-  const optimisticById = new Map(
-    local
-      .filter((prompt: any) => prompt?.optimisticSent === true)
-      .map((prompt: any) => [String(prompt.id ?? '').trim(), prompt] as const)
-      .filter(([id]) => Boolean(id)),
-  );
-  const merged = server.map((prompt: any) => {
-    const id = String(prompt?.id ?? '').trim();
-    const optimistic = optimisticById.get(id);
-    if (!optimistic) return prompt;
-    optimisticById.delete(id);
-    if (completedIds.has(id)) return null;
-    const serverState = String(prompt?.state ?? '');
-    const reconciledState =
-      optimistic.state === 'sending' && serverState === 'queued'
-        ? 'sending'
-        : serverState === 'queued' ||
-            serverState === 'sending' ||
-            serverState === 'sent' ||
-            serverState === 'failed'
-          ? serverState
-          : serverState === 'running'
-            ? 'sending'
-            : optimistic.state;
-    return {
-      ...optimistic,
-      ...prompt,
-      state: reconciledState,
+  const merged = mergeOptimisticPendingPrompts<any>({
+    serverPrompts: server,
+    optimisticPrompts: local,
+    nowMs,
+    optimisticGraceMs: OPTIMISTIC_PENDING_GRACE_MS,
+    mergeMatched: ({ optimisticPrompt, serverPrompt, state }) => ({
+      ...optimisticPrompt,
+      ...serverPrompt,
+      state:
+        String(serverPrompt?.state ?? '').trim() === 'running'
+          ? 'sending'
+          : state,
       optimisticSent: true,
-    };
+    }),
   });
-  for (const [id, prompt] of optimisticById) {
-    if (completedIds.has(id)) continue;
-    // A locally failed upload/send has no server row to reconcile with. Keep its actionable error
-    // visible until the user leaves the chat instead of aging it out like an unconfirmed send.
-    if (prompt?.state === 'failed') {
-      merged.push(prompt);
-      continue;
-    }
-    const submittedAtMs = Date.parse(String(prompt?.at ?? ''));
-    if (Number.isFinite(submittedAtMs) && nowMs - submittedAtMs > OPTIMISTIC_PENDING_GRACE_MS)
-      continue;
-    merged.push(prompt);
-  }
-  return merged.filter(Boolean);
+  return filterCompletedPendingPrompts(merged.filter(Boolean), input.turns);
+}
+
+export function confirmOptimisticMobilePendingPrompt(
+  prompts: any[],
+  input: {
+    optimisticId: string;
+    confirmedId: string;
+    state: PendingPromptState;
+  },
+): any[] {
+  const optimisticId = String(input.optimisticId ?? '').trim();
+  const replaced = replaceOptimisticPendingPromptId(
+    prompts,
+    optimisticId,
+    input.confirmedId,
+  );
+  return replaced.map((prompt, index) =>
+    String(prompts[index]?.id ?? '').trim() === optimisticId
+      ? {
+          ...prompt,
+          state: input.state,
+          optimisticSent: true,
+        }
+      : prompt,
+  );
 }
 
 export function confirmedMobilePendingPromptState(input: {
@@ -128,21 +130,8 @@ export function confirmedMobilePendingPromptState(input: {
   return 'sending';
 }
 
-function completedMobileTurnIds(turnsRaw: unknown): Set<string> {
-  return new Set(
-    (Array.isArray(turnsRaw) ? turnsRaw : [])
-      .map((turn: any) => String(turn?.id ?? '').trim())
-      .filter(Boolean),
-  );
-}
-
 export function hasActiveMobileDronePendingPrompt(raw: unknown, turnsRaw: unknown): boolean {
-  const completedTurnIds = completedMobileTurnIds(turnsRaw);
-  return (Array.isArray(raw) ? raw : []).some((item: any) => {
-    const state = String(item?.state ?? '').trim();
-    const id = String(item?.id ?? '').trim();
-    return Boolean(id && (state === 'sending' || state === 'sent') && !completedTurnIds.has(id));
-  });
+  return hasActivePendingPrompt(raw, turnsRaw);
 }
 
 export function mobileChatRespondingStatus(input: {
@@ -163,7 +152,7 @@ export function mobileDronePendingPrompts(
   turnsRaw: unknown,
   messagesRaw: unknown = [],
 ): MobileDronePendingPrompt[] {
-  const completedTurnIds = completedMobileTurnIds(turnsRaw);
+  const completedIds = completedTurnIds(turnsRaw);
   const transcriptMessageIds = new Set(
     (Array.isArray(messagesRaw) ? messagesRaw : [])
       .map((message: any) => String(message?.id ?? '').trim())
@@ -175,7 +164,7 @@ export function mobileDronePendingPrompts(
     if (!id || !['queued', 'sending', 'sent', 'failed'].includes(state)) return [];
     // The Hub deliberately retains recently completed pending rows for reconciliation. Once the
     // matching transcript turn is visible, rendering that row again would duplicate the prompt.
-    if (state !== 'failed' && completedTurnIds.has(id)) return [];
+    if (state !== 'failed' && completedIds.has(id)) return [];
     const activity = normalizeAgentRunActivity(item?.activity);
     const stopped = state === 'failed' && isStoppedRunError(item?.error);
     if (activity && (state === 'sending' || state === 'sent' || (state === 'failed' && !stopped))) {
@@ -185,7 +174,7 @@ export function mobileDronePendingPrompts(
     const delivered =
       stopped &&
       (Boolean(activity) ||
-        completedTurnIds.has(id) ||
+        completedIds.has(id) ||
         transcriptMessageIds.has(id) ||
         Boolean(messageId && transcriptMessageIds.has(messageId)));
     const agentPlan = normalizeMobileAgentPlan(item?.agentPlan);

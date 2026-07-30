@@ -5,5 +5,6 @@ export * from './agent-run-file-changes';
 export * from './github-pull-request';
 export * from './merge-workspace-transfer-progress';
 export * from './native-chat-types';
+export * from './pending-prompts';
 export * from './pull-request-confirmation';
 export * from './run-stop';

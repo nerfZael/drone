@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { renderItemsFromMessages } from '@drone/assistant-chat';
 import { mobileDroneTurnsToAssistantMessages } from '../src/drones/drone-sidebar-model';
 import {
+  confirmOptimisticMobilePendingPrompt,
   confirmedMobilePendingPromptState,
   hasActiveMobileDronePendingPrompt,
   mergeOptimisticMobilePendingPrompts,
@@ -16,6 +17,7 @@ describe('mobile drone pending prompts', () => {
     const pending = [{ id: 'pending-1', state: 'sent', activity: { messages: [] } }];
     expect(hasActiveMobileDronePendingPrompt(pending, [])).toBe(true);
     expect(hasActiveMobileDronePendingPrompt(pending, [{ id: 'pending-1' }])).toBe(false);
+    expect(hasActiveMobileDronePendingPrompt([{ state: 'sent' }], [])).toBe(false);
   });
 
   test('ignores stale server busy state for completed external transcripts', () => {
@@ -151,6 +153,39 @@ describe('mobile drone pending prompts', () => {
     ).toEqual([{ ...local, state: 'sending' }]);
   });
 
+  test('normalizes the legacy running server state to active sending', () => {
+    const local = optimisticMobilePendingPrompt({
+      id: 'legacy-running',
+      prompt: 'Keep working',
+      state: 'queued',
+    });
+
+    expect(
+      mergeOptimisticMobilePendingPrompts({
+        serverPrompts: [{ id: 'legacy-running', prompt: 'Keep working', state: 'running' }],
+        localPrompts: [local],
+        turns: [],
+      }),
+    ).toEqual([{ ...local, state: 'sending' }]);
+  });
+
+  test('replaces the optimistic id while retaining mobile attachment counts', () => {
+    const local = optimisticMobilePendingPrompt({
+      id: 'optimistic-1',
+      prompt: 'Review both files',
+      attachmentCount: 2,
+      imageCount: 1,
+    });
+
+    expect(
+      confirmOptimisticMobilePendingPrompt([local], {
+        optimisticId: 'optimistic-1',
+        confirmedId: 'server-1',
+        state: 'sent',
+      }),
+    ).toEqual([{ ...local, id: 'server-1', state: 'sent' }]);
+  });
+
   test('shows a follow-up as queued immediately while the active prompt is running', () => {
     const queued = optimisticMobilePendingPrompt({
       id: 'queued-local',
@@ -202,6 +237,33 @@ describe('mobile drone pending prompts', () => {
         nowMs: Date.parse('2026-07-19T10:05:00.000Z'),
       }),
     ).toEqual([failed]);
+  });
+
+  test('retains stopped and failed outcomes after their completed turn arrives', () => {
+    const stopped = {
+      ...optimisticMobilePendingPrompt({
+        id: 'stopped-local',
+        prompt: 'Stop this',
+      }),
+      state: 'failed' as const,
+      error: 'Stopped by user.',
+    };
+    const failed = {
+      ...optimisticMobilePendingPrompt({
+        id: 'failed-local',
+        prompt: 'Run this',
+      }),
+      state: 'failed' as const,
+      error: 'Agent crashed',
+    };
+
+    expect(
+      mergeOptimisticMobilePendingPrompts({
+        serverPrompts: [],
+        localPrompts: [stopped, failed],
+        turns: [{ id: 'stopped-local' }, { id: 'failed-local' }],
+      }),
+    ).toEqual([stopped, failed]);
   });
 
   test('keeps server order and makes queued prompts cancelable', () => {

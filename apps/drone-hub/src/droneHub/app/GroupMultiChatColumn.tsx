@@ -1,4 +1,5 @@
 import React from 'react';
+import { filterCompletedPendingPrompts } from '@drone/assistant-chat';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import {
   ChatInput,
@@ -28,6 +29,7 @@ import {
 import {
   appendOptimisticPendingPrompt,
   createOptimisticPendingPrompt,
+  mergeDesktopOptimisticPendingPrompts,
   normalizePendingPromptState,
   optimisticPendingPromptState,
   pendingPromptShowsWorkingState,
@@ -348,20 +350,15 @@ export function GroupMultiChatColumn({
   const pendingPrompts = React.useMemo(() => {
     const initial = initialPendingResp?.key === chatCacheKey ? initialPendingResp.pending : [];
     const server = pendingResp?.key === chatCacheKey && Array.isArray(pendingResp.pending) ? pendingResp.pending : initial;
-    const byId = new Map<string, PendingPrompt>();
-    for (const p of server) {
-      if (p?.id) byId.set(p.id, p);
-    }
-    for (const p of optimisticPendingPrompts) {
-      if (p?.id && !byId.has(p.id)) byId.set(p.id, p);
-    }
-    return Array.from(byId.values()).slice(-60);
+    return mergeDesktopOptimisticPendingPrompts({
+      serverPrompts: server,
+      optimisticPrompts: optimisticPendingPrompts,
+      nowMs: Date.now(),
+    }).slice(-60);
   }, [chatCacheKey, initialPendingResp, optimisticPendingPrompts, pendingResp]);
 
   const visiblePendingPrompts = React.useMemo(() => {
-    const ts = Array.isArray(transcripts) ? transcripts : [];
-    const ids = new Set(ts.map((t) => String((t as any)?.id ?? '')).filter(Boolean));
-    return pendingPrompts.filter((p) => p.state === 'failed' || !ids.has(p.id));
+    return filterCompletedPendingPrompts(pendingPrompts, transcripts);
   }, [pendingPrompts, transcripts]);
 
   const waitingForAgent = React.useMemo(() => {

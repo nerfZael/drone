@@ -1,6 +1,11 @@
+import {
+  normalizePendingPromptState as normalizeSharedPendingPromptState,
+  type PendingPromptState,
+} from '@drone/assistant-chat';
+
 export type PendingPhase = 'draft' | 'starting' | 'creating' | 'seeding' | 'error';
 
-export type PendingPromptState = 'queued' | 'sending' | 'sent' | 'failed';
+export type { PendingPromptState } from '@drone/assistant-chat';
 
 export type PendingStartupPrompt = {
   id: string;
@@ -70,9 +75,7 @@ export function createPendingDroneStateHelpers(deps: {
   }
 
   function normalizePendingPromptState(raw: unknown): PendingPromptState {
-    const value = String(raw ?? '').trim();
-    if (value === 'queued' || value === 'sending' || value === 'sent' || value === 'failed') return value;
-    return 'queued';
+    return normalizeSharedPendingPromptState(raw, 'queued');
   }
 
   function normalizePendingPromptText(raw: unknown): string {

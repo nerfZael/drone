@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   appendOptimisticPendingPrompt,
   createOptimisticPendingPrompt,
+  mergeDesktopOptimisticPendingPrompts,
+  normalizePendingPromptState,
   optimisticPendingPromptState,
   pendingPromptShowsWorkingState,
   reconcileOptimisticPendingPrompt,
@@ -19,6 +21,11 @@ describe('optimistic pending prompt helpers', () => {
     expect(pendingPromptShowsWorkingState({ state: 'sending' })).toBe(true);
     expect(pendingPromptShowsWorkingState({ state: 'sent' })).toBe(true);
     expect(pendingPromptShowsWorkingState({ state: 'failed' })).toBe(false);
+  });
+
+  test('keeps the desktop sending fallback for unknown server states', () => {
+    expect(normalizePendingPromptState('running')).toBe('sending');
+    expect(normalizePendingPromptState('running', 'queued')).toBe('queued');
   });
 
   test('does not leave external responding dots active after transcript completion', () => {
@@ -270,5 +277,71 @@ describe('optimistic pending prompt helpers', () => {
 
     expect(appendOptimisticPendingPrompt([], item)).toEqual([item]);
     expect(appendOptimisticPendingPrompt([item], item)).toEqual([item]);
+  });
+
+  test('merges server order with optimistic attachment previews intact', () => {
+    const optimistic = createOptimisticPendingPrompt({
+      id: 'shared',
+      prompt: '',
+      attachments: [{ name: 'shot.png', mime: 'image/png', size: 42, dataBase64: 'abc123' }],
+      state: 'sending',
+    });
+    if (!optimistic?.attachments?.[0]) throw new Error('expected optimistic attachment');
+
+    const merged = mergeDesktopOptimisticPendingPrompts({
+      serverPrompts: [
+        {
+          id: 'server-first',
+          at: '2026-07-29T10:00:00.000Z',
+          prompt: 'first',
+          state: 'sent',
+        },
+        {
+          id: 'shared',
+          at: '2026-07-29T10:00:01.000Z',
+          prompt: '[image attachment]',
+          state: 'queued',
+          attachments: [
+            {
+              name: 'shot.png',
+              mime: 'image/png',
+              size: 42,
+              path: '/work/repo/shot.png',
+            },
+          ],
+        },
+      ],
+      optimisticPrompts: [optimistic],
+      nowMs: Date.parse('2026-07-29T10:00:02.000Z'),
+    });
+
+    expect(merged.map((prompt) => prompt.id)).toEqual(['server-first', 'shared']);
+    expect(merged[1]).toMatchObject({
+      state: 'sending',
+      attachments: [
+        {
+          path: '/work/repo/shot.png',
+          previewDataUrl: optimistic.attachments[0].previewDataUrl,
+        },
+      ],
+    });
+    expect(merged[1]?.attachmentPayloads).toEqual(optimistic.attachmentPayloads);
+  });
+
+  test('does not surface malformed pending rows without an id', () => {
+    expect(
+      mergeDesktopOptimisticPendingPrompts({
+        serverPrompts: [
+          {
+            id: '',
+            at: '2026-07-29T10:00:00.000Z',
+            prompt: 'invalid',
+            state: 'sent',
+          },
+        ],
+        optimisticPrompts: [],
+        nowMs: Date.parse('2026-07-29T10:00:01.000Z'),
+      }),
+    ).toEqual([]);
   });
 });

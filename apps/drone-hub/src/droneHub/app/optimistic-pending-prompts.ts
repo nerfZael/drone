@@ -2,6 +2,12 @@ import type { ChatSendPayload } from '../chat';
 import type { ChatImageAttachmentRef, PendingPrompt } from '../types';
 import { attachmentRefsFromPayload, normalizeChatImageAttachmentPayloads } from './chat-attachment-payloads';
 import { makeId } from './helpers';
+import {
+  isActivePendingPrompt,
+  mergeOptimisticPendingPrompts,
+  normalizePendingPromptState as normalizeSharedPendingPromptState,
+  replaceOptimisticPendingPromptId,
+} from '@drone/assistant-chat';
 
 function attachmentOnlyPromptText(attachmentPayloads: ReturnType<typeof normalizeChatImageAttachmentPayloads>): string {
   if (attachmentPayloads.length === 0) return '';
@@ -71,9 +77,7 @@ export function normalizePendingPromptState(
   raw: unknown,
   fallback: PendingPrompt['state'] = 'sending',
 ): PendingPrompt['state'] {
-  const state = String(raw ?? '').trim();
-  if (state === 'queued' || state === 'sending' || state === 'sent' || state === 'failed') return state;
-  return fallback;
+  return normalizeSharedPendingPromptState(raw, fallback);
 }
 
 export function optimisticPendingPromptState(
@@ -85,7 +89,7 @@ export function optimisticPendingPromptState(
 export function pendingPromptShowsWorkingState(
   item: Pick<PendingPrompt, 'state'> | null | undefined,
 ): boolean {
-  return item?.state === 'sending' || item?.state === 'sent';
+  return isActivePendingPrompt(item);
 }
 
 export function selectedChatRespondingStatus(args: {
@@ -140,6 +144,20 @@ export function appendOptimisticPendingPrompt(prev: PendingPrompt[], item: Pendi
   return [...prev, item];
 }
 
+export function mergeDesktopOptimisticPendingPrompts(args: {
+  serverPrompts: PendingPrompt[];
+  optimisticPrompts: PendingPrompt[];
+  nowMs: number;
+}): PendingPrompt[] {
+  return mergeOptimisticPendingPrompts({
+    serverPrompts: args.serverPrompts,
+    optimisticPrompts: args.optimisticPrompts,
+    nowMs: args.nowMs,
+    mergeMatched: ({ optimisticPrompt, serverPrompt, state }) =>
+      mergeDesktopPendingPromptRecords(optimisticPrompt, serverPrompt, state),
+  });
+}
+
 export function reconcileOptimisticPendingPrompt(
   prev: PendingPrompt[],
   args: {
@@ -164,20 +182,25 @@ export function reconcileOptimisticPendingPrompt(
   if (!base) return prev;
 
   const nextState = normalizePendingPromptState(args.state, base.state);
-  const nextItem: PendingPrompt = {
-    ...base,
-    ...(optimisticItem ?? {}),
-    ...(duplicateItem ?? {}),
+  const replaced = replaceOptimisticPendingPromptId(prev, optimisticId, targetId);
+  const replacedOptimisticItem =
+    optimisticIndex >= 0 ? replaced[optimisticIndex] : null;
+  const optimisticForMerge: PendingPrompt = {
+    ...(replacedOptimisticItem ?? base),
     id: targetId,
     state: nextState,
     updatedAt: now,
   };
-  const mergedAttachments = mergeAttachmentRefs(duplicateItem?.attachments, optimisticItem?.attachments);
-  const mergedAttachmentPayloads = pickPreferredArray(optimisticItem?.attachmentPayloads, duplicateItem?.attachmentPayloads);
-  if (mergedAttachments) nextItem.attachments = mergedAttachments;
-  else delete nextItem.attachments;
-  if (mergedAttachmentPayloads) nextItem.attachmentPayloads = mergedAttachmentPayloads;
-  else delete nextItem.attachmentPayloads;
+  const serverForMerge = duplicateItem
+    ? [{ ...duplicateItem, id: targetId, state: nextState, updatedAt: now }]
+    : [];
+  const nextItem = mergeDesktopOptimisticPendingPrompts({
+    serverPrompts: serverForMerge,
+    optimisticPrompts: [optimisticForMerge],
+    nowMs: Date.parse(now),
+  })[0];
+  if (!nextItem) return prev;
+
   const error = String(args.error ?? '').trim();
   if (error) nextItem.error = error;
   else if (nextState !== 'failed') delete nextItem.error;
@@ -188,5 +211,30 @@ export function reconcileOptimisticPendingPrompt(
     next.push(prev[index]);
   }
   next.push(nextItem);
+  return next;
+}
+
+function mergeDesktopPendingPromptRecords(
+  optimisticPrompt: PendingPrompt,
+  serverPrompt: PendingPrompt,
+  state: PendingPrompt['state'],
+): PendingPrompt {
+  const next: PendingPrompt = {
+    ...optimisticPrompt,
+    ...serverPrompt,
+    state,
+  };
+  const attachments = mergeAttachmentRefs(
+    serverPrompt.attachments,
+    optimisticPrompt.attachments,
+  );
+  const attachmentPayloads = pickPreferredArray(
+    optimisticPrompt.attachmentPayloads,
+    serverPrompt.attachmentPayloads,
+  );
+  if (attachments) next.attachments = attachments;
+  else delete next.attachments;
+  if (attachmentPayloads) next.attachmentPayloads = attachmentPayloads;
+  else delete next.attachmentPayloads;
   return next;
 }
