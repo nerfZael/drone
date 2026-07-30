@@ -1,5 +1,4 @@
-import type { AgentPlan } from './agent-plan';
-import type { AgentRunActivity } from '@drone/assistant-chat';
+import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
 import type { PendingPrompt } from './drone-pending-prompts';
 import { finalizeDroneRunFileChanges } from './run-file-changes';
 

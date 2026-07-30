@@ -10,6 +10,7 @@ import { URL } from 'node:url';
 
 import { WebSocket } from 'ws';
 import { BaseConfigManager } from 'dvm';
+import { normalizeAgentPlan, sameAgentPlan } from '@drone/assistant-chat';
 
 import { ensureContainerDroneDaemonSession } from '../host/container-daemon';
 import {
@@ -161,7 +162,6 @@ import {
   readBuiltinTranscriptSessionId,
   type AgentTurnRuntimeMetadata,
 } from './builtin-transcript-sessions';
-import { normalizeAgentPlan, sameAgentPlan } from './agent-plan';
 import { AgentModelCatalogService } from './agent-model-catalog/service';
 import { createAgentModelCatalogStore } from './agent-model-catalog/store';
 import type { AgentModelCatalogTarget } from './agent-model-catalog/types';

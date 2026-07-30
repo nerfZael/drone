@@ -1,3 +1,4 @@
+import { sameAgentPlan } from '@drone/assistant-chat';
 import type { ChatSendPayload } from '../chat';
 import type { PendingPrompt, TranscriptItem } from '../types';
 
@@ -91,12 +92,6 @@ function sameDockerSnapshot(
     sameOptionalText(left.error, right.error) &&
     left.sizeBytes === right.sizeBytes
   );
-}
-
-function sameAgentPlan(left: TranscriptItem['agentPlan'], right: TranscriptItem['agentPlan']): boolean {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  return left.source === right.source && JSON.stringify(left.items) === JSON.stringify(right.items);
 }
 
 function sameFileChanges(left: TranscriptItem['fileChanges'], right: TranscriptItem['fileChanges']): boolean {

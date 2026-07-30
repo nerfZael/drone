@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 
+import type { AgentPlan } from '@drone/assistant-chat';
 import { DroneApiRequestError } from '../host/api';
-import type { AgentPlan } from './agent-plan';
 import type { ChatImageAttachment, ChatImageAttachmentRef } from './chat-attachments';
 import type {
   AgentPermissionMode,

@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { renderItemsFromMessages, type AssistantMessage } from '@drone/assistant-chat';
+import {
+  normalizeAgentPlan,
+  renderItemsFromMessages,
+  type AssistantMessage,
+} from '@drone/assistant-chat';
 import {
   groupMobileTranscriptRuns,
   limitMobileRunToolItems,
   mobileRunIsThinking,
   mobileRunDetails,
-  normalizeMobileAgentPlan,
   partitionMobileRunItems,
   sortMobileTranscriptTimeline,
   workingDurationLabel,
@@ -231,7 +234,7 @@ describe('mobile transcript runs', () => {
   });
 
   test('accepts external-agent plan metadata and matches desktop duration formatting', () => {
-    const plan = normalizeMobileAgentPlan({
+    const plan = normalizeAgentPlan({
       items: [{ id: 'one', text: 'Review output', status: 'completed' }],
       source: 'codex',
     });
