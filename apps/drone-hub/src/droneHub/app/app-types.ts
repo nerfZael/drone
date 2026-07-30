@@ -1,3 +1,4 @@
+import type { ExternalAgentModelCatalogModel } from '@drone/assistant-chat';
 import type {
   AgentApprovalPolicy,
   AgentPermissionMode,
@@ -7,14 +8,7 @@ import type { ChatImageAttachmentPayload } from '../chat';
 import type { PendingPrompt } from '../types';
 import type { RepoPullConflict } from './helpers';
 
-export type ChatModelOption = {
-  id: string;
-  label: string;
-  isDefault?: boolean;
-  isCurrent?: boolean;
-  reasoningLevels?: string[];
-  defaultReasoningLevel?: string;
-};
+export type ChatModelOption = ExternalAgentModelCatalogModel;
 
 export type AppView = 'workspace' | 'settings';
 

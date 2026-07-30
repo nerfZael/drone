@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { normalizeExternalModelCatalogModels } from '@drone/assistant-chat';
 
 import { agentModelCatalogAdapter, modelListCommands } from './adapters';
 import { parseAgentModelList, parseCodexModelCache } from './parsers';
@@ -90,8 +91,13 @@ export class AgentModelCatalogService {
     const memoryEntry = this.memory.get(key);
     if (memoryEntry) return memoryEntry;
     const stored = this.store?.read(key) ?? null;
-    if (stored) this.memory.set(key, stored);
-    return stored;
+    if (!stored) return null;
+    const normalized = {
+      ...stored,
+      models: normalizeExternalModelCatalogModels(stored.models),
+    };
+    this.memory.set(key, normalized);
+    return normalized;
   }
 
   private refresh(

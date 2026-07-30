@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatReasoningLabel } from '@drone/assistant-chat';
 import {
   ActivityIndicator,
   Modal,
@@ -173,7 +174,7 @@ export function AssistantModelPicker({
                     style={[styles.reasoningChoice, active && styles.choiceActive]}
                   >
                     <Text style={[styles.reasoningName, active && styles.activeText]}>
-                      {level === 'off' ? 'Off' : `${level[0].toUpperCase()}${level.slice(1)}`}
+                      {formatReasoningLabel(level)}
                     </Text>
                     {active ? <Check color={colors.accent} size={14} strokeWidth={2.8} /> : null}
                   </Pressable>

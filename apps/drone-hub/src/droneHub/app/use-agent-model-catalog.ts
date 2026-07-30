@@ -1,16 +1,13 @@
 import React from 'react';
+import {
+  formatModelDisplayLabel,
+  normalizeExternalModelCatalog,
+  type ExternalAgentModelCatalogModel,
+} from '@drone/assistant-chat';
 import type { UiMenuSelectEntry } from '../../ui/components';
 import { profileStorageKey } from '../../profile-storage';
-import { formatModelDisplayLabel } from './chat-model-runtime';
 
-export type AgentModelCatalogOption = {
-  id: string;
-  label: string;
-  isDefault?: boolean;
-  isCurrent?: boolean;
-  reasoningLevels: string[];
-  defaultReasoningLevel: string;
-};
+export type AgentModelCatalogOption = ExternalAgentModelCatalogModel;
 
 const STORAGE_KEY = profileStorageKey('droneHub.agentModelCatalog.v3');
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
@@ -20,31 +17,7 @@ function text(value: unknown): string {
 }
 
 export function normalizeAgentModelCatalog(value: unknown): AgentModelCatalogOption[] {
-  const models = value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as any).models
-    : null;
-  if (!Array.isArray(models)) return [];
-  const seen = new Set<string>();
-  return models.flatMap((raw: any) => {
-    const id = text(raw?.id);
-    if (!id || seen.has(id)) return [];
-    seen.add(id);
-    const reasoningLevels = Array.isArray(raw?.reasoningLevels)
-      ? [...new Set(raw.reasoningLevels.map(text).filter(Boolean))] as string[]
-      : [];
-    const requestedDefault = text(raw?.defaultReasoningLevel);
-    if (requestedDefault && !reasoningLevels.includes(requestedDefault)) {
-      reasoningLevels.push(requestedDefault);
-    }
-    return [{
-      id,
-      label: formatModelDisplayLabel(text(raw?.label) || id),
-      ...(raw?.isDefault ? { isDefault: true } : {}),
-      ...(raw?.isCurrent ? { isCurrent: true } : {}),
-      reasoningLevels,
-      defaultReasoningLevel: requestedDefault || reasoningLevels[0] || '',
-    }];
-  });
+  return normalizeExternalModelCatalog(value, { formatLabels: true });
 }
 
 function readCache(): Record<string, AgentModelCatalogOption[]> {

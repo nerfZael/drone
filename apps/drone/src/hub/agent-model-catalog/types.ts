@@ -1,14 +1,8 @@
+import type { ExternalAgentModelCatalogModel } from '@drone/assistant-chat';
 import type { DroneRuntime } from '../../host/runtime';
 import type { BuiltinAgentId } from '../chat-types';
 
-export type AgentModelCatalogModel = {
-  id: string;
-  label: string;
-  isDefault?: boolean;
-  isCurrent?: boolean;
-  reasoningLevels?: string[];
-  defaultReasoningLevel?: string;
-};
+export type AgentModelCatalogModel = ExternalAgentModelCatalogModel;
 
 export type AgentModelCatalogSource = 'live' | 'cache' | 'none';
 

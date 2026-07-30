@@ -2,12 +2,14 @@ import {
   agentRunActivityHasResponse,
   isAgentRunFileChanges,
   isStoppedRunError,
+  normalizeProviderModelCatalog,
   normalizeAgentPlan,
   normalizeAgentRunActivity,
   settleAgentRunActivity,
   type AgentPlan,
   type AgentRunActivity,
   type AssistantMessage,
+  type ProviderModelCatalogModel,
 } from '@drone/assistant-chat';
 import type { AgentRunFileChanges } from '@blip/protocol';
 import {
@@ -185,42 +187,20 @@ export function normalizeMobileDroneCreateRepo(raw: unknown): MobileDroneCreateR
   };
 }
 
-export type MobileDroneCreateModel = {
-  provider: string;
-  id: string;
-  label: string;
-  reasoningLevels: string[];
-  defaultReasoningLevel: string;
-};
+export type MobileDroneCreateModel = ProviderModelCatalogModel;
 
-export function normalizeMobileDroneCreateModelCatalog(raw: unknown): MobileDroneCreateModel[] {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
-  const models = (raw as Record<string, unknown>).models;
-  if (!Array.isArray(models)) return [];
-  const seen = new Set<string>();
-  return models.flatMap((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
-    const value = item as Record<string, unknown>;
-    const provider = text(value.provider);
-    const id = text(value.id);
-    const key = `${provider}\u0000${id}`;
-    if (!id || seen.has(key)) return [];
-    seen.add(key);
-    const reasoningLevels = stringList(value.reasoningLevels);
-    const defaultReasoningLevel = text(value.defaultReasoningLevel);
-    return [
-      {
-        provider,
-        id,
-        label: text(value.label) || id,
-        reasoningLevels,
-        defaultReasoningLevel:
-          defaultReasoningLevel && reasoningLevels.includes(defaultReasoningLevel)
-            ? defaultReasoningLevel
-            : (reasoningLevels[0] ?? ''),
-      },
-    ];
-  });
+export function normalizeMobileDroneCreateModelCatalog(
+  raw: unknown,
+  fallbackProvider = '',
+): MobileDroneCreateModel[] {
+  return normalizeProviderModelCatalog(raw, fallbackProvider);
+}
+
+export function normalizeMobileDroneChatModelCatalog(
+  raw: unknown,
+  fallbackProvider = '',
+): ProviderModelCatalogModel[] {
+  return normalizeProviderModelCatalog(raw, fallbackProvider);
 }
 
 export const EMPTY_MOBILE_DRONE_SIDEBAR_ORDER: MobileDroneSidebarOrder = {

@@ -57,7 +57,12 @@ export function useDroneHubToolbarMenuState({
       map.set(id, m);
     }
     if (currentModel && !map.has(currentModel)) {
-      map.set(currentModel, { id: currentModel, label: formatModelDisplayLabel(currentModel) });
+      map.set(currentModel, {
+        id: currentModel,
+        label: formatModelDisplayLabel(currentModel),
+        reasoningLevels: [],
+        defaultReasoningLevel: '',
+      });
     }
     return Array.from(map.values());
   }, [chatModels, currentModel]);

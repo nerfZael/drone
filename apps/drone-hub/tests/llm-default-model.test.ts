@@ -43,8 +43,14 @@ describe('LLM default model picker', () => {
         id: 'gpt-primary',
         label: 'GPT Primary',
         reasoningLevels: ['off', 'high'],
+        defaultReasoningLevel: 'off',
       },
-      { id: 'gpt-fast', label: 'GPT Fast', reasoningLevels: ['low'] },
+      {
+        id: 'gpt-fast',
+        label: 'GPT Fast',
+        reasoningLevels: ['low'],
+        defaultReasoningLevel: 'low',
+      },
     ]);
   });
 

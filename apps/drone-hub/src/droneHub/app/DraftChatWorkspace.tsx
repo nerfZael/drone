@@ -1,4 +1,5 @@
 import React from 'react';
+import { buildModelCatalogChoices } from '@drone/assistant-chat';
 import { useShallow } from 'zustand/react/shallow';
 import {
   ChatInput,
@@ -188,16 +189,7 @@ export function DraftChatWorkspace({
         id: '',
         name: 'Auto',
       },
-      ...modelCatalog.models.flatMap((model) =>
-        model.reasoningLevels.length > 0
-          ? model.reasoningLevels.map((thinkingLevel) => ({
-              provider: modelProvider,
-              id: model.id,
-              name: model.label,
-              thinkingLevel,
-            }))
-          : [{ provider: modelProvider, id: model.id, name: model.label }],
-      ),
+      ...buildModelCatalogChoices(modelCatalog.models, modelProvider),
     ],
     [modelCatalog.models, modelProvider],
   );
