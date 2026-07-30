@@ -1,6 +1,11 @@
-export const CHAT_INPUT_MAX_IMAGES = 8;
-export const CHAT_INPUT_MAX_BYTES_EACH = 6 * 1024 * 1024;
-export const CHAT_INPUT_MAX_BYTES_TOTAL = 20 * 1024 * 1024;
+import {
+  CHAT_ATTACHMENT_POLICY,
+  normalizeChatAttachmentMime,
+} from '@drone/assistant-chat';
+
+export const CHAT_INPUT_MAX_IMAGES = CHAT_ATTACHMENT_POLICY.maxCount;
+export const CHAT_INPUT_MAX_BYTES_EACH = CHAT_ATTACHMENT_POLICY.maxBytesEach;
+export const CHAT_INPUT_MAX_BYTES_TOTAL = CHAT_ATTACHMENT_POLICY.maxBytesTotal;
 export const CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS = 50_000;
 
 export type DraftImageAttachment = {
@@ -49,18 +54,10 @@ export function isLikelyImageFile(f: File): boolean {
 }
 
 export function mimeForChatAttachmentFile(file: File): string {
-  const mime = String((file as any)?.type ?? '').trim().toLowerCase();
-  if (mime && mime !== 'application/octet-stream') return mime;
-  const name = String((file as any)?.name ?? '').trim().toLowerCase();
-  if (/\.(jpe?g)$/.test(name)) return 'image/jpeg';
-  if (/\.gif$/.test(name)) return 'image/gif';
-  if (/\.webp$/.test(name)) return 'image/webp';
-  if (/\.svg$/.test(name)) return 'image/svg+xml';
-  if (/\.avif$/.test(name)) return 'image/avif';
-  if (/\.bmp$/.test(name)) return 'image/bmp';
-  if (/\.tiff?$/.test(name)) return 'image/tiff';
-  if (/\.png$/.test(name)) return 'image/png';
-  return mime || 'application/octet-stream';
+  return normalizeChatAttachmentMime(
+    (file as any)?.type,
+    (file as any)?.name,
+  );
 }
 
 function fileIdentity(file: File): string {

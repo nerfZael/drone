@@ -2,9 +2,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import type http from 'node:http';
 import path from 'node:path';
+import {
+  CHAT_ATTACHMENT_POLICY,
+  validateChatAttachments,
+  type ChatAttachmentValidationIssue,
+} from '@drone/assistant-chat';
 import { MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
 
-const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 const MAX_ACTIVE_UPLOADS_PER_DEVICE = 16;
 const MAX_ACTIVE_UPLOAD_BYTES_PER_DEVICE = 40 * 1024 * 1024;
 const UPLOAD_TTL_MS = 30 * 60_000;
@@ -47,24 +51,13 @@ function attachmentName(value: unknown): string {
   return name.slice(0, 240);
 }
 
-function attachmentMime(value: unknown): string {
-  const mime = String(value ?? '')
-    .trim()
-    .toLowerCase();
-  if (
-    mime.length > 120 ||
-    !/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u.test(mime)
-  ) {
-    throw new Error('attachment MIME type is invalid');
+function attachmentPolicyError(issue: ChatAttachmentValidationIssue): Error {
+  if (issue.code === 'invalid_mime') {
+    return new Error('attachment MIME type is invalid');
   }
-  return mime === 'image/jpg' ? 'image/jpeg' : mime;
-}
-
-function expectedSize(value: unknown): number {
-  const size = Number(value);
-  if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_ATTACHMENT_BYTES)
-    throw new Error(`attachment size must be between 1 and ${MAX_ATTACHMENT_BYTES} bytes`);
-  return size;
+  return new Error(
+    `attachment size must be between 1 and ${CHAT_ATTACHMENT_POLICY.maxBytesEach} bytes`,
+  );
 }
 
 export class MeshChatAttachmentStore {
@@ -100,8 +93,15 @@ export class MeshChatAttachmentStore {
     const droneId = cleanId(input.droneId, 'droneId');
     const chatName = cleanId(input.chatName, 'chatName');
     const name = attachmentName(input.name);
-    const mime = attachmentMime(input.mime);
-    const size = expectedSize(input.size);
+    const attachmentPolicy = validateChatAttachments([
+      {
+        name,
+        mime: String(input.mime ?? ''),
+        size: Number(input.size),
+      },
+    ]);
+    if (!attachmentPolicy.ok) throw attachmentPolicyError(attachmentPolicy.issue);
+    const { mime, size } = attachmentPolicy.attachments[0]!;
     const sha256 =
       String(input.sha256 ?? '')
         .trim()
@@ -250,17 +250,28 @@ export class MeshChatAttachmentStore {
     attachmentIds: unknown,
   ) {
     const rawIds = Array.isArray(attachmentIds) ? attachmentIds : [];
-    if (rawIds.length > 8) throw new Error('too many prompt attachments (max 8)');
+    if (rawIds.length > CHAT_ATTACHMENT_POLICY.maxCount)
+      throw new Error(
+        `too many prompt attachments (max ${CHAT_ATTACHMENT_POLICY.maxCount})`,
+      );
     const ids = [...new Set(rawIds.map((value) => String(value ?? '').trim()).filter(Boolean))];
     const uploads = ids.map((id) => this.forSource(id, sourceDeviceId));
-    let total = 0;
     for (const upload of uploads) {
       if (!upload.committed) throw new Error(`attachment upload is not committed: ${upload.id}`);
       if (upload.droneId !== droneId || upload.chatName !== chatName)
         throw new Error('attachment upload belongs to another chat');
-      total += upload.size;
-      if (total > 20 * 1024 * 1024)
+    }
+    const attachmentPolicy = validateChatAttachments(uploads);
+    if (!attachmentPolicy.ok) {
+      if (attachmentPolicy.issue.code === 'attachments_too_large') {
         throw new Error('prompt attachments exceed 20 MiB in total');
+      }
+      if (attachmentPolicy.issue.code === 'too_many_attachments') {
+        throw new Error(
+          `too many prompt attachments (max ${CHAT_ATTACHMENT_POLICY.maxCount})`,
+        );
+      }
+      throw attachmentPolicyError(attachmentPolicy.issue);
     }
     return await Promise.all(
       uploads.map(async (upload) => ({

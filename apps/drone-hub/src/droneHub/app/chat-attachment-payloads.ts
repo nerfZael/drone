@@ -1,13 +1,18 @@
+import {
+  chatAttachmentKind,
+  normalizeChatAttachmentMime,
+  validateChatAttachments,
+} from '@drone/assistant-chat';
 import type { ChatImageAttachmentPayload } from '../chat';
 import type { ChatImageAttachmentRef } from '../types';
 
 function isSupportedAttachmentMime(mimeRaw: unknown): boolean {
-  const mime = String(mimeRaw ?? '').trim().toLowerCase();
-  return mime.startsWith('image/') || mime === 'text/plain';
+  const kind = chatAttachmentKind({ mime: normalizeChatAttachmentMime(mimeRaw) });
+  return kind === 'image' || kind === 'text';
 }
 
 function isImageAttachmentMime(mimeRaw: unknown): boolean {
-  return String(mimeRaw ?? '').trim().toLowerCase().startsWith('image/');
+  return chatAttachmentKind({ mime: normalizeChatAttachmentMime(mimeRaw) }) === 'image';
 }
 
 export function normalizeChatImageAttachmentPayloads(raw: unknown): ChatImageAttachmentPayload[] {
@@ -16,18 +21,26 @@ export function normalizeChatImageAttachmentPayloads(raw: unknown): ChatImageAtt
   for (const item of list) {
     if (!item || typeof item !== 'object') continue;
     const name = String((item as any).name ?? '').trim();
-    const mime = String((item as any).mime ?? '').trim().toLowerCase();
+    const mime = normalizeChatAttachmentMime((item as any).mime, name);
     const sizeNum = Number((item as any).size ?? 0);
     const dataBase64 = String((item as any).dataBase64 ?? '').trim();
     if (!name || !isSupportedAttachmentMime(mime) || !Number.isFinite(sizeNum) || sizeNum <= 0 || !dataBase64) continue;
+    const policy = validateChatAttachments([
+      ...out.map(({ name, mime, size }) => ({ name, mime, size })),
+      { name, mime, size: Math.floor(sizeNum) },
+    ]);
+    if (!policy.ok) {
+      if (policy.issue.code === 'too_many_attachments') break;
+      continue;
+    }
     out.push({
       name,
-      mime,
+      mime: policy.attachments[policy.attachments.length - 1]!.mime,
       size: Math.floor(sizeNum),
       dataBase64,
     });
   }
-  return out.slice(0, 8);
+  return out;
 }
 
 export function attachmentRefsFromPayload(raw: unknown): ChatImageAttachmentRef[] {

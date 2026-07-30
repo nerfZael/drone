@@ -1,9 +1,8 @@
 import { fromByteArray } from 'base64-js';
+import { validateChatAttachments } from '@drone/assistant-chat';
 import { MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
 
 type MeshRequest = (payload: Record<string, unknown>) => Promise<any>;
-
-const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 
 function positiveChunkSize(value: unknown): number {
   const size = Number(value);
@@ -22,17 +21,28 @@ export async function uploadMeshChatAttachment(input: {
   request: MeshRequest;
   fetchImpl?: typeof fetch;
 }): Promise<{ attachmentId: string; name: string; mime: string; size: number }> {
-  if (input.bytes.length === 0 || input.bytes.length > MAX_ATTACHMENT_BYTES) {
+  const policy = validateChatAttachments([
+    {
+      name: input.name,
+      mime: input.mime,
+      size: input.bytes.length,
+    },
+  ]);
+  if (!policy.ok) {
+    if (policy.issue.code === 'invalid_mime') {
+      throw new Error('The attachment has an invalid MIME type.');
+    }
     throw new Error('The attachment must be between 1 byte and 6 MiB.');
   }
+  const metadata = policy.attachments[0]!;
   const prepare = async () => {
     const result = await input.request({
       droneId: input.droneId,
       chatName: input.chatName,
       attachmentTransfer: {
         action: 'prepare',
-        name: input.name,
-        mime: input.mime,
+        name: metadata.name,
+        mime: metadata.mime,
         size: input.bytes.length,
       },
     });
