@@ -1,5 +1,9 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import {
+  completedTurnIds as createCompletedTurnIds,
+  normalizePendingPromptState,
+} from '@drone/assistant-chat';
 import type {
   AgentApprovalPolicy,
   AgentPermissionMode,
@@ -868,17 +872,14 @@ function buildChatTimelineMessages(
   }
 
   const pending = Array.isArray(chat.pendingPrompts) ? chat.pendingPrompts : [];
-  const completedTurnIds = new Set(
-    turns.map((turn: any) => String(turn?.id ?? '').trim()).filter(Boolean),
-  );
+  const completedTurnIds = createCompletedTurnIds(turns);
   for (const item of pending as any[]) {
     const id = String(item?.id ?? '').trim();
     if (!id || completedTurnIds.has(id)) continue;
-    const state = String(item?.state ?? '').trim();
-    const status: ChatTimelineMessage['status'] =
-      state === 'queued' || state === 'sending' || state === 'sent' || state === 'failed'
-        ? state
-        : 'queued';
+    const status: ChatTimelineMessage['status'] = normalizePendingPromptState(
+      item?.state,
+      'queued',
+    );
     out.push({
       id: `user:${id}`,
       role: 'user',

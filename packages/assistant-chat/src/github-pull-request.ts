@@ -1,5 +1,5 @@
-import { messageText } from './assistant-message-model';
-import type { AssistantMessage } from './assistant-message-types';
+import { messageText } from './assistant-message-model.js';
+import type { AssistantMessage } from './assistant-message-types.js';
 
 export type GithubPullRequestLink = {
   owner: string;

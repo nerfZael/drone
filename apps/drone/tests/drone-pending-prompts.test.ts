@@ -25,6 +25,16 @@ const pendingPromptStore = createDronePendingPromptStore({
 });
 
 describe('drone pending prompt store', () => {
+  test('keeps the Hub queued fallback while using canonical pending states', () => {
+    expect(pendingStateHelpers.normalizePendingPromptState(' sent ')).toBe('sent');
+    expect(pendingStateHelpers.normalizePendingPromptState('running')).toBe('queued');
+    expect(
+      pendingPromptStore.transcriptTurnIdsFromEntry({
+        turns: [{ id: ' turn-1 ' }, { id: '' }, {}],
+      }),
+    ).toEqual(new Set(['turn-1']));
+  });
+
   test('finds a durable queued seed prompt without treating submitted work as queued', () => {
     const drone = {
       chats: {

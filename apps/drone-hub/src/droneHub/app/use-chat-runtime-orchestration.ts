@@ -1,4 +1,5 @@
 import React from 'react';
+import { filterCompletedPendingPrompts } from '@drone/assistant-chat';
 import type { ChatAgentConfig, ChatInfo } from '../../domain';
 import { stripAnsi } from '../../domain';
 import type { ChatSendContext, ChatSendPayload } from '../chat';
@@ -8,6 +9,7 @@ import { formatDroneRuntimeError, isTransientDroneStartupError } from './chat-st
 import {
   appendOptimisticPendingPrompt,
   createOptimisticPendingPrompt,
+  mergeDesktopOptimisticPendingPrompts,
   normalizePendingPromptState,
   optimisticPendingPromptState,
   pendingPromptShowsWorkingState,
@@ -155,12 +157,9 @@ export function visiblePendingPromptsForAgent(opts: {
   // message disappear.
   if ((!opts.agentKind || opts.agentKind === 'native') && !opts.isDraftChat) return [];
   if (opts.chatUiMode !== 'transcript') return opts.pendingPrompts;
-  const ids = new Set(
-    (Array.isArray(opts.transcripts) ? opts.transcripts : [])
-      .map((turn) => String((turn as any)?.id ?? '').trim())
-      .filter(Boolean),
-  );
-  return opts.pendingPrompts.filter((prompt) => !ids.has(prompt.id));
+  return filterCompletedPendingPrompts(opts.pendingPrompts, opts.transcripts, {
+    keepTerminal: false,
+  });
 }
 
 export function useChatRuntimeOrchestration({
@@ -521,18 +520,15 @@ export function useChatRuntimeOrchestration({
   const pendingPrompts: PendingPrompt[] = React.useMemo(() => {
     const cachedPending = readFreshChatRuntimeCache(chatPendingCache, selectedChatCacheKey);
     const server = pendingRespForChat?.key === selectedChatCacheKey ? pendingRespForChat.pending : (cachedPending?.pending ?? []);
-    const byId = new Map<string, PendingPrompt>();
-    for (const p of server) {
-      if (p?.id) byId.set(p.id, p);
-    }
     const optimisticForSelectedChat =
       optimisticPendingPromptsChatKeyRef.current === selectedChatCacheKey
         ? optimisticPendingPrompts
         : [];
-    for (const p of optimisticForSelectedChat) {
-      if (p?.id && !byId.has(p.id)) byId.set(p.id, p);
-    }
-    return Array.from(byId.values()).slice(-60);
+    return mergeDesktopOptimisticPendingPrompts({
+      serverPrompts: server,
+      optimisticPrompts: optimisticForSelectedChat,
+      nowMs: Date.now(),
+    }).slice(-60);
   }, [optimisticPendingPrompts, pendingRespForChat, selectedChatCacheKey]);
 
   const visiblePendingPrompts = React.useMemo(() => {

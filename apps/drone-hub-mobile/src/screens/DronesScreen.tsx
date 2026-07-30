@@ -72,6 +72,7 @@ import {
   withOptimisticMobileBusyChat,
 } from '../drones/drone-state-summary';
 import {
+  confirmOptimisticMobilePendingPrompt,
   confirmedMobilePendingPromptState,
   hasActiveMobileDronePendingPrompt,
   mergeOptimisticMobilePendingPrompts,
@@ -1115,16 +1116,11 @@ export function DronesScreen({
       });
       if (acceptedPromptId)
         setPendingPrompts((current) =>
-          current.map((item) =>
-            item?.id === optimisticId
-              ? {
-                  ...item,
-                  id: acceptedPromptId,
-                  state: acceptedPromptState,
-                  optimisticSent: true,
-                }
-              : item,
-          ),
+          confirmOptimisticMobilePendingPrompt(current, {
+            optimisticId,
+            confirmedId: acceptedPromptId,
+            state: acceptedPromptState,
+          }),
         );
       if (targetIdRef.current !== destinationId) return;
       await readChat(droneId, activeChat);
@@ -1288,16 +1284,11 @@ export function DronesScreen({
           });
           if (acceptedPromptId && optimisticPromptId) {
             setPendingPrompts((current) =>
-              current.map((item) =>
-                item?.id === optimisticPromptId
-                  ? {
-                      ...item,
-                      id: acceptedPromptId,
-                      state: acceptedPromptState,
-                      optimisticSent: true,
-                    }
-                  : item,
-              ),
+              confirmOptimisticMobilePendingPrompt(current, {
+                optimisticId: optimisticPromptId,
+                confirmedId: acceptedPromptId,
+                state: acceptedPromptState,
+              }),
             );
           }
         }

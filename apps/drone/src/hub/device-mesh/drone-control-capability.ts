@@ -1,4 +1,5 @@
 import { DRONE_CONTROL_CAPABILITY, MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
+import { normalizePendingPromptState } from '@drone/assistant-chat';
 import type { CapabilityHandler } from './device-mesh-types';
 import { scheduleCreatedDroneAutoRename } from './auto-rename-created-drone';
 import {
@@ -75,9 +76,7 @@ function compactPendingPrompts(value: unknown): any[] {
       id: String(prompt?.id ?? '').slice(0, 160),
       at: String(prompt?.at ?? ''),
       prompt: truncateUtf8(prompt?.prompt, promptLimit),
-      state: ['queued', 'sending', 'sent', 'failed'].includes(String(prompt?.state ?? ''))
-        ? String(prompt.state)
-        : 'queued',
+      state: normalizePendingPromptState(prompt?.state, 'queued'),
       ...(prompt?.error ? { error: truncateUtf8(prompt.error, errorLimit) } : {}),
       attachmentCount: attachments.length,
       imageCount: attachments.filter((attachment: any) =>

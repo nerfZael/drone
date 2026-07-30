@@ -1,4 +1,4 @@
-import type { AssistantMessage } from './assistant-message-types';
+import type { AssistantMessage } from './assistant-message-types.js';
 
 export type NativeAgentProviderId = 'openai' | 'gemini' | 'codex';
 export type NativeAgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';

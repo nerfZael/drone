@@ -1,5 +1,8 @@
 import {
+  completedTurnIds,
+  isTerminalPendingPrompt,
   normalizeAgentPlan,
+  normalizePendingPromptState as normalizeSharedPendingPromptState,
   type AgentPlan,
   type AgentRunActivity,
 } from '@drone/assistant-chat';
@@ -111,7 +114,7 @@ export function createDronePendingPromptStore(deps: {
     const nowMs = typeof opts?.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
 
     return list.filter((item) => {
-      if (item.state === 'failed') return true;
+      if (isTerminalPendingPrompt(item)) return true;
       const turn = turnById.get(item.id);
       if (!turn) return true;
       if (!keepRecentlyCompleted) return false;
@@ -129,8 +132,7 @@ export function createDronePendingPromptStore(deps: {
   }
 
   function transcriptTurnIdsFromEntry(entry: any): Set<string> {
-    const turns = Array.isArray(entry?.turns) ? entry.turns : [];
-    return new Set(turns.map((turn: any) => String(turn?.id ?? '').trim()).filter(Boolean));
+    return completedTurnIds(entry?.turns);
   }
 
   function pendingPromptsFromChatEntry(entry: any, opts?: { keepRecentlyCompleted?: boolean }): PendingPrompt[] {
@@ -146,10 +148,7 @@ export function createDronePendingPromptStore(deps: {
           cwd: typeof p?.cwd === 'string' ? String(p.cwd) : p?.cwd === null ? null : undefined,
           attachments: deps.normalizeChatImageAttachmentRefs(p?.attachments),
           deliveryMode: p?.deliveryMode === 'asap' ? 'asap' : 'queue',
-          state:
-            p?.state === 'sent' || p?.state === 'failed' || p?.state === 'sending' || p?.state === 'queued'
-              ? (p.state as PendingPromptState)
-              : 'sending',
+          state: normalizeSharedPendingPromptState(p?.state),
           error: typeof p?.error === 'string' ? p.error : undefined,
           observability: normalizeObservability((p as any)?.observability),
           activity: normalizeAgentRunActivity((p as any)?.activity),

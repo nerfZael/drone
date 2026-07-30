@@ -1,6 +1,12 @@
+import {
+  isActivePendingPrompt,
+  isTerminalPendingPrompt,
+  type PendingPromptState,
+} from '@drone/assistant-chat';
+
 export type BuiltinTranscriptAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
 
-export type PendingPromptState = 'queued' | 'sending' | 'sent' | 'failed';
+export type { PendingPromptState } from '@drone/assistant-chat';
 
 export type PendingPromptLike = {
   id: string;
@@ -94,8 +100,7 @@ export function hasActivePriorPendingPrompt(opts: {
     const id = String(p?.id ?? '').trim();
     if (!id) continue;
     if (done.has(id)) continue;
-    const st = String(p?.state ?? '').trim();
-    if (st === 'failed') continue;
+    if (isTerminalPendingPrompt(p)) continue;
     return true;
   }
   return false;
@@ -109,8 +114,7 @@ export function hasInFlightPriorPendingPrompt(opts: {
   for (const prompt of opts.priorPendingPrompts ?? []) {
     const id = String(prompt?.id ?? '').trim();
     if (!id || done.has(id)) continue;
-    const state = String(prompt?.state ?? '').trim();
-    if (state === 'sending' || state === 'sent') return true;
+    if (isActivePendingPrompt(prompt)) return true;
   }
   return false;
 }
@@ -176,9 +180,8 @@ export function shouldDeferQueuedTranscriptPrompt(opts: {
     const id = String(p?.id ?? '').trim();
     if (!id) continue;
     if (done.has(id)) continue;
-    const st = String(p?.state ?? '').trim();
-    if (st === 'failed') continue;
-    if (st === 'sent' || st === 'sending') return true;
+    if (isTerminalPendingPrompt(p)) continue;
+    if (isActivePendingPrompt(p)) return true;
   }
   return false;
 }

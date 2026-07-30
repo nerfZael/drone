@@ -1,6 +1,10 @@
 import type { ChatAgentConfig } from '../domain';
 import type { AgentRunFileChanges } from '@blip/protocol';
-import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
+import type {
+  AgentPlan,
+  AgentRunActivity,
+  PendingPromptState,
+} from '@drone/assistant-chat';
 
 export type { AgentPlan } from '@drone/assistant-chat';
 
@@ -598,8 +602,8 @@ export type PendingPrompt = {
     dataBase64: string;
   }>;
   deliveryMode?: 'queue' | 'asap';
-  // `queued` is a local-only UI state used when a drone is still provisioning.
-  state: 'queued' | 'sending' | 'sent' | 'failed';
+  // `queued` is waiting for earlier work or for a provisioning drone to become ready.
+  state: PendingPromptState;
   error?: string;
   observability?: {
     state: 'status-unavailable';

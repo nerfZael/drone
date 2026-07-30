@@ -1,4 +1,4 @@
-import { chatAttachmentKind, type ChatAttachmentMetadata } from './chat-attachment-policy';
+import { chatAttachmentKind, type ChatAttachmentMetadata } from './chat-attachment-policy.js';
 
 export type ChatAttachmentContextDescriptor = ChatAttachmentMetadata & {
   path: string;
