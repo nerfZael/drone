@@ -23,6 +23,16 @@ function mcpBridgeBundleArgs(root) {
   ];
 }
 
+function daemonBundleArgs(root) {
+  return [
+    'build',
+    path.join(root, 'src', 'daemon.ts'),
+    '--target=node',
+    '--format=cjs',
+    `--outfile=${path.join(root, 'dist', 'daemon.js')}`,
+  ];
+}
+
 function workspaceBuildArgs(packageName) {
   return ['run', '--filter', packageName, 'build'];
 }
@@ -71,6 +81,14 @@ async function assertBlipBundleHasErrorDetails(root) {
   }
 }
 
+async function assertDaemonBundleIsSelfContained(root) {
+  const bundlePath = path.join(root, 'dist', 'daemon.js');
+  const content = await fs.readFile(bundlePath, 'utf8');
+  if (content.includes('@drone/assistant-chat')) {
+    throw new Error(`non-portable daemon bundle: ${bundlePath} retains a workspace dependency`);
+  }
+}
+
 async function ensureBlipBundleDependenciesBuilt(root) {
   const repoRoot = path.resolve(root, '../..');
   runOrThrow('bun', workspaceBuildArgs('@mariozechner/pi-ai'), { cwd: repoRoot });
@@ -109,11 +127,14 @@ async function main() {
   const root = path.resolve(__dirname, '..');
   await removeFileBestEffort(path.join(root, 'dist', 'fleet.js'));
   await removeFileBestEffort(path.join(root, 'dist', 'tasks.js'));
+  await removeFileBestEffort(path.join(root, 'dist', 'daemon.js'));
   await removeFileBestEffort(path.join(root, 'dist', 'blip.js'));
   await removeFileBestEffort(path.join(root, 'dist', 'mcp-http-stdio-bridge.js'));
   await ensureBlipBundleDependenciesBuilt(root);
+  runOrThrow('bun', daemonBundleArgs(root), { cwd: root });
   runOrThrow('bun', blipBundleArgs(root), { cwd: root });
   runOrThrow('bun', mcpBridgeBundleArgs(root), { cwd: root });
+  await assertDaemonBundleIsSelfContained(root);
   await assertBlipBundleHasErrorDetails(root);
   await copyDroneHubElectronMain(root);
   await copyBuiltDroneHubUi(root);
@@ -126,6 +147,7 @@ async function main() {
 
 module.exports = {
   blipBundleArgs,
+  daemonBundleArgs,
   mcpBridgeBundleArgs,
 };
 

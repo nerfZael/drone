@@ -94,12 +94,12 @@ export function IconMonitor({ className }: { className?: string }) {
   return (
     <svg
       className={className}
-      width="14"
-      height="14"
+      width="16"
+      height="16"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.9"
+      strokeWidth="2.1"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -114,12 +114,12 @@ export function IconCirclePause({ className }: { className?: string }) {
   return (
     <svg
       className={className}
-      width="14"
-      height="14"
+      width="16"
+      height="16"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.9"
+      strokeWidth="2.1"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -134,12 +134,12 @@ export function IconGitCommitHorizontal({ className }: { className?: string }) {
   return (
     <svg
       className={className}
-      width="14"
-      height="14"
+      width="16"
+      height="16"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.9"
+      strokeWidth="2.1"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -154,12 +154,12 @@ export function IconFileDiff({ className }: { className?: string }) {
   return (
     <svg
       className={className}
-      width="14"
-      height="14"
+      width="16"
+      height="16"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.9"
+      strokeWidth="2.1"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

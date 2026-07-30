@@ -21,20 +21,10 @@ type SegmentedToolbarToggleProps<T extends string> = {
   density?: 'default' | 'compact';
 };
 
-function activeToneClass(tone: SegmentedToolbarToggleTone, compact: boolean): string {
-  if (tone === 'green') {
-    return compact
-      ? 'bg-[var(--green-subtle)] text-[var(--green)]'
-      : 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] shadow-[0_1px_3px_var(--shadow-color)]';
-  }
-  if (tone === 'yellow') {
-    return compact
-      ? 'bg-[var(--yellow-subtle)] text-[var(--yellow)]'
-      : 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)] shadow-[0_1px_3px_var(--shadow-color)]';
-  }
-  return compact
-    ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-    : 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_1px_3px_var(--shadow-color)]';
+function activeToneClass(tone: SegmentedToolbarToggleTone): string {
+  if (tone === 'green') return 'bg-[var(--green-subtle)] text-[var(--green)]';
+  if (tone === 'yellow') return 'bg-[var(--yellow-subtle)] text-[var(--yellow)]';
+  return 'bg-[var(--accent-subtle)] text-[var(--accent)]';
 }
 
 export function SegmentedToolbarToggle<T extends string>({
@@ -56,16 +46,16 @@ export function SegmentedToolbarToggle<T extends string>({
         </span>
       )}
       <div
-        className={`grid min-w-0 flex-1 grid-flow-col auto-cols-fr border border-[var(--border-subtle)] bg-[var(--surface-soft)] ${
+        className={`grid min-w-0 flex-1 grid-flow-col auto-cols-fr gap-0.5 bg-[var(--surface-inset)] ${
           compact
-            ? 'gap-0 overflow-hidden rounded-[var(--radius-medium)] p-0'
-            : 'gap-1 rounded-[var(--radius-large)] p-1'
+            ? 'rounded-[var(--radius-medium)] p-0.5'
+            : 'rounded-[var(--radius-large)] p-1'
         }`}
       >
-        {options.map((option, index) => {
+        {options.map((option) => {
           const active = value === option.value;
           const optionDisabled = disabled || option.disabled;
-          const activeClass = activeToneClass(option.tone ?? tone, compact);
+          const activeClass = activeToneClass(option.tone ?? tone);
           return (
             <button
               key={option.value}
@@ -73,17 +63,15 @@ export function SegmentedToolbarToggle<T extends string>({
               onClick={() => onChange(option.value)}
               disabled={optionDisabled}
               aria-pressed={active}
-              className={`flex items-center justify-center font-[var(--weight-semibold)] transition-[background-color,border-color,color,box-shadow,transform] ${
+              className={`flex items-center justify-center border border-transparent font-[var(--weight-semibold)] transition-colors ${
                 compact
-                  ? `h-7 px-2.5 text-[var(--text-10)] ${
-                      index > 0 ? 'border-l border-l-[var(--border-subtle)]' : ''
-                    }`
-                  : 'h-9 rounded-[calc(var(--radius-large)-0.25rem)] border px-3 text-[var(--text-11)]'
+                  ? 'h-7 rounded-[calc(var(--radius-medium)-1px)] px-2.5 text-[var(--text-10)]'
+                  : 'h-9 rounded-[calc(var(--radius-large)-0.25rem)] px-3 text-[var(--text-11)]'
               } ${
                 active
                   ? activeClass
-                  : 'border-transparent bg-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
-              } ${optionDisabled ? 'cursor-not-allowed opacity-40' : 'active:translate-y-px'}`}
+                  : 'bg-transparent text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+              } ${optionDisabled ? 'cursor-not-allowed opacity-40' : ''}`}
               title={option.title}
             >
               {option.label}

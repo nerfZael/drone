@@ -106,7 +106,7 @@ export function UiPanelToolbar({
     <div
       role={props.role ?? 'toolbar'}
       className={cn(
-        'flex min-h-8 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[var(--border-subtle)] bg-[var(--panel-alt)] px-2 py-1',
+        'flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-[var(--border-subtle)] bg-[var(--panel-alt)] px-2.5 py-1.5',
         className,
       )}
       {...props}

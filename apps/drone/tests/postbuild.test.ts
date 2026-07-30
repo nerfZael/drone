@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import path from 'node:path';
 
-const { blipBundleArgs, mcpBridgeBundleArgs } = require('../scripts/postbuild.cjs');
+const { blipBundleArgs, daemonBundleArgs, mcpBridgeBundleArgs } = require('../scripts/postbuild.cjs');
 
 describe('postbuild bundles', () => {
   test('bundles blip for Node into dist/blip.js', () => {
@@ -23,6 +23,17 @@ describe('postbuild bundles', () => {
       '--target=node',
       '--format=cjs',
       `--outfile=${path.join(root, 'dist', 'mcp-http-stdio-bridge.js')}`,
+    ]);
+  });
+
+  test('bundles the container daemon with its workspace dependencies', () => {
+    const root = path.resolve(__dirname, '..');
+    expect(daemonBundleArgs(root)).toEqual([
+      'build',
+      path.join(root, 'src', 'daemon.ts'),
+      '--target=node',
+      '--format=cjs',
+      `--outfile=${path.join(root, 'dist', 'daemon.js')}`,
     ]);
   });
 });

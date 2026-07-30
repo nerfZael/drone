@@ -273,10 +273,11 @@ function ChangesViewMenu({
   return (
     <UiActionMenu
       label="Changes view options"
+      size="small"
       triggerContent={
         <>
           View
-          <IconChevron size={11} />
+          <IconChevron size={13} />
         </>
       }
       entries={[
@@ -3225,8 +3226,8 @@ function LiveDroneChangesDock({
       surface="alternate"
       style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
     >
-      <UiPanelToolbar aria-label="Changes controls" className="px-2.5 py-1.5">
-        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+      <UiPanelToolbar aria-label="Changes controls" className="px-3 py-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2.5">
           {repoAttached && !disabled && contextMode === 'branch' && primaryView === 'changes' ? (
             <UiToolbarSegmentedControl
               label="Branch change source"
@@ -3241,7 +3242,7 @@ function LiveDroneChangesDock({
         </div>
         <div
           data-onboarding-id="changes.viewMode"
-          className="ml-auto flex shrink-0 items-center gap-1.5"
+          className="ml-auto flex shrink-0 items-center gap-2"
         >
           {repoAttached && !disabled ? (
             <>

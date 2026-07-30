@@ -245,9 +245,10 @@ const LOCAL_AUTO_UPDATE_OPTIONS = [
 }>;
 
 function LocalAutoUpdateIcon({ mode }: { mode: LocalAutoUpdates }) {
-  if (mode === 'off') return <IconCirclePause />;
-  if (mode === 'commits') return <IconGitCommitHorizontal />;
-  return <IconFileDiff />;
+  const iconClassName = 'h-4 w-4';
+  if (mode === 'off') return <IconCirclePause className={iconClassName} />;
+  if (mode === 'commits') return <IconGitCommitHorizontal className={iconClassName} />;
+  return <IconFileDiff className={iconClassName} />;
 }
 
 function LocalAutoUpdatesControl({
@@ -295,23 +296,24 @@ function LocalAutoUpdatesControl({
   };
 
   return (
-    <div className="inline-flex h-[30px] overflow-hidden rounded border border-[var(--border)] bg-[var(--surface-strong)] shadow-[0_1px_3px_var(--shadow-color)] dh-type-header-action">
+    <div className="inline-flex h-8 items-center gap-0.5 rounded-[var(--radius-medium)] bg-[var(--surface-inset)] p-0.5 dh-type-header-action">
       <span
         role="status"
-        className="inline-flex items-center gap-1.5 border-r border-[var(--border)] px-2.5"
+        className="inline-flex items-center gap-1.5 rounded-[calc(var(--radius-medium)-1px)] px-2.5"
         aria-label={`Local status: ${localStatusTitle}`}
         title={localStatusTitle}
       >
         <IconMonitor
           className={cn(
+            'h-4 w-4',
             active
-              ? 'text-[var(--accent)] drop-shadow-[0_0_4px_var(--accent-muted)]'
+              ? 'text-[var(--accent)]'
               : 'text-[var(--muted-dim)]',
           )}
         />
         <span className={active ? 'text-[var(--fg-secondary)]' : 'text-[var(--muted)]'}>Local</span>
       </span>
-      <div className="inline-flex" role="radiogroup" aria-label="Local auto-updates">
+      <div className="inline-flex items-center gap-0.5" role="radiogroup" aria-label="Local auto-updates">
         {LOCAL_AUTO_UPDATE_OPTIONS.map((option) => {
           const selected = option.mode === mode;
           const action = active
@@ -349,10 +351,10 @@ function LocalAutoUpdatesControl({
                 else optionRefs.current.delete(option.mode);
               }}
               className={cn(
-                'inline-flex w-8 items-center justify-center border-r border-[var(--border)] transition-colors last:border-r-0 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40',
+                'inline-flex h-7 w-8 items-center justify-center rounded-[calc(var(--radius-medium)-1px)] transition-colors focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
                 selected
-                  ? 'bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[inset_0_0_0_1px_var(--accent-muted)]'
-                  : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]',
+                  ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+                  : 'text-[var(--muted)] hover:text-[var(--fg-secondary)]',
               )}
             >
               <LocalAutoUpdateIcon mode={option.mode} />

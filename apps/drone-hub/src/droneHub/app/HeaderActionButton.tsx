@@ -15,10 +15,10 @@ export const HeaderActionButton = React.forwardRef<HTMLButtonElement, HeaderActi
         disabled={disabled}
         data-unavailable={disabled ? 'true' : undefined}
         className={cn(
-          'inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 dh-type-header-action transition-all focus-visible:border-[var(--accent-muted)] focus-visible:outline-none',
+          'inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-medium)] border border-transparent px-3 dh-type-header-action transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
           disabled
-            ? 'cursor-not-allowed border-[var(--toolbar-control-border)] bg-[var(--toolbar-control-bg)] opacity-40'
-            : 'border-[var(--toolbar-control-border)] bg-[var(--toolbar-control-bg)] hover:border-[var(--toolbar-control-hover-border)] hover:bg-[var(--hover)]',
+            ? 'cursor-not-allowed opacity-40'
+            : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]',
           className,
         )}
         {...props}

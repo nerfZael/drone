@@ -31,7 +31,7 @@ export function DiffZoomControl({
         type="button"
         onClick={() => onChange(clampDiffZoom(zoom - DIFF_ZOOM_STEP))}
         disabled={zoom <= DIFF_ZOOM_MIN}
-        className="dh-changes-segment-button w-5 px-0 text-[var(--text-10)]"
+        className="dh-changes-segment-button w-7 px-0 text-[var(--text-11)]"
         title="Decrease code zoom"
       >
         −
@@ -39,7 +39,7 @@ export function DiffZoomControl({
       <button
         type="button"
         onClick={() => onChange(DIFF_ZOOM_DEFAULT)}
-        className="dh-changes-segment-button min-w-10 px-1 font-mono"
+        className="dh-changes-segment-button min-w-12 px-1.5 font-mono"
         title="Reset code zoom"
       >
         {percent}%
@@ -48,7 +48,7 @@ export function DiffZoomControl({
         type="button"
         onClick={() => onChange(clampDiffZoom(zoom + DIFF_ZOOM_STEP))}
         disabled={zoom >= DIFF_ZOOM_MAX}
-        className="dh-changes-segment-button w-5 px-0 text-[var(--text-10)]"
+        className="dh-changes-segment-button w-7 px-0 text-[var(--text-11)]"
         title="Increase code zoom"
       >
         +
