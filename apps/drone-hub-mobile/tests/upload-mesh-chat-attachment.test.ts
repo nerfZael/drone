@@ -2,6 +2,40 @@ import { describe, expect, test } from 'bun:test';
 import { uploadMeshChatAttachment } from '../src/mesh/upload-mesh-chat-attachment';
 
 describe('mesh chat attachment upload', () => {
+  test('applies attachment metadata policy before opening a mesh session', async () => {
+    let requested = false;
+    await expect(
+      uploadMeshChatAttachment({
+        droneId: 'drone-1',
+        chatName: 'default',
+        name: 'empty.txt',
+        mime: 'text/plain',
+        bytes: new Uint8Array(),
+        request: async () => {
+          requested = true;
+        },
+      }),
+    ).rejects.toThrow('between 1 byte and 6 MiB');
+    expect(requested).toBe(false);
+  });
+
+  test('reports invalid MIME metadata before opening a mesh session', async () => {
+    let requested = false;
+    await expect(
+      uploadMeshChatAttachment({
+        droneId: 'drone-1',
+        chatName: 'default',
+        name: 'notes.txt',
+        mime: 'invalid',
+        bytes: new Uint8Array([1]),
+        request: async () => {
+          requested = true;
+        },
+      }),
+    ).rejects.toThrow('invalid MIME type');
+    expect(requested).toBe(false);
+  });
+
   test('aborts the upload session when a relay chunk fails', async () => {
     const actions: string[] = [];
     await expect(

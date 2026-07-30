@@ -1,5 +1,6 @@
 import React from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { chatAttachmentTypeLabel } from '@drone/assistant-chat';
 import X from 'lucide-react-native/icons/x';
 import FileText from 'lucide-react-native/icons/file-text';
 import { colors } from '../theme';
@@ -29,7 +30,8 @@ export function ChatAttachmentStrip({
       contentContainerStyle={styles.strip}
     >
       {attachments.map((attachment, index) => {
-        const isImage = attachment.mime.startsWith('image/');
+        const typeLabel = chatAttachmentTypeLabel(attachment);
+        const isImage = typeLabel === 'Image';
         return (
           <View key={attachment.id} style={styles.card}>
             {isImage ? (
@@ -44,7 +46,8 @@ export function ChatAttachmentStrip({
                 {attachment.name}
               </Text>
               <Text style={styles.meta}>
-                {isImage ? 'IMAGE' : 'FILE'} {index + 1} · {attachmentSize(attachment.size)}
+                {typeLabel.toUpperCase()} {index + 1} ·{' '}
+                {attachmentSize(attachment.size)}
               </Text>
             </View>
             <Pressable

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { chatAttachmentPreviewLabel } from '@drone/assistant-chat';
 
 import { DroneApiRequestError } from '../host/api';
 import type { AgentPlan } from './agent-plan';
@@ -973,27 +974,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   function attachmentOnlyPromptLabel(
     attachmentsRaw: ChatImageAttachment[] | ChatImageAttachmentRef[],
   ): string {
-    const attachments = Array.isArray(attachmentsRaw) ? attachmentsRaw : [];
-    if (attachments.length === 0) return '';
-    const imageCount = attachments.filter((item) =>
-      String(item?.mime ?? '')
-        .trim()
-        .toLowerCase()
-        .startsWith('image/'),
-    ).length;
-    const textCount = attachments.filter(
-      (item) =>
-        String(item?.mime ?? '')
-          .trim()
-          .toLowerCase() === 'text/plain',
-    ).length;
-    if (imageCount === attachments.length) {
-      return imageCount === 1 ? '[image attachment]' : `[${imageCount} image attachments]`;
-    }
-    if (textCount === attachments.length) {
-      return textCount === 1 ? '[text attachment]' : `[${textCount} text attachments]`;
-    }
-    return attachments.length === 1 ? '[attachment]' : `[${attachments.length} attachments]`;
+    return chatAttachmentPreviewLabel(Array.isArray(attachmentsRaw) ? attachmentsRaw : []);
   }
 
   const {

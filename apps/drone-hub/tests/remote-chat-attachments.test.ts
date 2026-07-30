@@ -94,4 +94,40 @@ describe('desktop remote chat attachments', () => {
     });
     expect(sentAttachmentIds).toEqual(['attachment-file']);
   });
+
+  test('normalizes MIME aliases before preparing a remote upload', async () => {
+    const attachment = { ...imageAttachment(1), mime: 'image/jpg' };
+    await sendRemoteChatPrompt({
+      droneId: 'drone-1',
+      chatName: 'default',
+      prompt: '',
+      attachments: [attachment],
+      request: async (payload: any) => {
+        const action = payload.attachmentTransfer?.action;
+        if (action === 'prepare') {
+          expect(payload.attachmentTransfer.mime).toBe('image/jpeg');
+          return { uploadId: 'upload-1' };
+        }
+        if (action === 'write') return { offset: 1 };
+        if (action === 'commit') return { attachmentId: 'attachment-1' };
+        return { accepted: true };
+      },
+    });
+  });
+
+  test('rejects selections over the shared attachment count before transport', async () => {
+    let requested = false;
+    await expect(
+      sendRemoteChatPrompt({
+        droneId: 'drone-1',
+        chatName: 'default',
+        prompt: '',
+        attachments: Array.from({ length: 9 }, () => imageAttachment(1)),
+        request: async () => {
+          requested = true;
+        },
+      }),
+    ).rejects.toThrow('up to 8 attachments');
+    expect(requested).toBe(false);
+  });
 });

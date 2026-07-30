@@ -1,4 +1,11 @@
 import React from 'react';
+import {
+  CHAT_ATTACHMENT_POLICY,
+  chatAttachmentPreviewLabel,
+  chatAttachmentTypeLabel,
+  isValidChatAttachmentMime,
+  normalizeChatAttachmentMime,
+} from '@drone/assistant-chat';
 import type { ChatImageAttachmentRef } from '../types';
 import type { MarkdownFileReference } from './MarkdownMessage';
 
@@ -56,15 +63,15 @@ export function normalizeImageAttachmentRefs(raw: unknown): ChatImageAttachmentR
   const list = Array.isArray(raw) ? raw : [];
   const out: ChatImageAttachmentRef[] = [];
   for (const item of list) {
+    if (out.length >= CHAT_ATTACHMENT_POLICY.maxCount) break;
     if (!item || typeof item !== 'object') continue;
     const name = String((item as any).name ?? '').trim();
-    const mime = String((item as any).mime ?? '').trim().toLowerCase();
+    const mime = normalizeChatAttachmentMime((item as any).mime, name);
     const sizeNum = Number((item as any).size ?? 0);
     const previewDataUrl = String((item as any).previewDataUrl ?? '').trim();
     if (
       !name ||
-      mime.length > 120 ||
-      !/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u.test(mime) ||
+      !isValidChatAttachmentMime(mime) ||
       !Number.isFinite(sizeNum) ||
       sizeNum <= 0
     )
@@ -80,27 +87,14 @@ export function normalizeImageAttachmentRefs(raw: unknown): ChatImageAttachmentR
       ...(previewDataUrl ? { previewDataUrl } : {}),
     });
   }
-  return out.slice(0, 8);
+  return out;
 }
 
 export function isAttachmentOnlyPrompt(promptRaw: string, attachments: ChatImageAttachmentRef[]): boolean {
   const prompt = String(promptRaw ?? '').trim();
   if (!prompt || attachments.length === 0) return false;
-  const imageCount = attachments.filter((item) => item.mime.startsWith('image/')).length;
-  const textCount = attachments.filter((item) => item.mime === 'text/plain').length;
   if (prompt === '[attachment]') return attachments.length === 1;
-  if (imageCount === attachments.length) {
-    if (prompt === '[image attachment]') return attachments.length === 1;
-    const match = /^\[(\d+)\s+image attachments\]$/i.exec(prompt);
-    return Boolean(match && Number(match[1]) === attachments.length);
-  }
-  if (textCount === attachments.length) {
-    if (prompt === '[text attachment]') return attachments.length === 1;
-    const match = /^\[(\d+)\s+text attachments\]$/i.exec(prompt);
-    return Boolean(match && Number(match[1]) === attachments.length);
-  }
-  const match = /^\[(\d+)\s+attachments\]$/i.exec(prompt);
-  return Boolean(match && Number(match[1]) === attachments.length);
+  return prompt.toLowerCase() === chatAttachmentPreviewLabel(attachments).toLowerCase();
 }
 
 function toFileRef(pathRaw: string): MarkdownFileReference | null {
@@ -128,7 +122,8 @@ export function ImageAttachmentChips({
         const key = `${a.name}:${a.size}:${a.path ?? ''}:${a.relativePath ?? ''}:${idx}`;
         const previewDataUrlRaw = String((a as any).previewDataUrl ?? '').trim();
         const hasPreviewDataUrl = /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i.test(previewDataUrlRaw);
-        const isImage = a.mime.startsWith('image/');
+        const typeLabel = chatAttachmentTypeLabel(a);
+        const isImage = typeLabel === 'Image';
         const pathFromRelative = resolveAttachmentPath(a.relativePath, droneHomePath);
         const absolutePath = normalizePath(a.path ?? '');
         const path = pathFromRelative || absolutePath;
@@ -174,7 +169,7 @@ export function ImageAttachmentChips({
                 className="inline-flex h-6 items-center rounded border border-[var(--border-subtle)] px-1.5 text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
-                {isImage ? 'Image' : a.mime === 'text/plain' ? 'Text' : 'File'}
+                {typeLabel}
               </span>
             )}
             <span className="truncate max-w-[220px]">{a.name}</span>

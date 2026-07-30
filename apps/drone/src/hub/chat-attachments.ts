@@ -1,13 +1,16 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  CHAT_ATTACHMENT_POLICY,
+  chatAttachmentKind,
+  normalizeChatAttachmentMime,
+  promptWithChatAttachmentContext,
+  validateChatAttachments,
+} from '@drone/assistant-chat';
 
 import { dvmCopyToContainer, dvmExec } from '../host/dvm';
 import { bashQuote, normalizeContainerPath } from './hub-format';
-
-const CHAT_ATTACHMENTS_MAX_IMAGES = 8;
-const CHAT_ATTACHMENTS_MAX_BYTES_EACH = 6 * 1024 * 1024;
-const CHAT_ATTACHMENTS_MAX_BYTES_TOTAL = 20 * 1024 * 1024;
 
 type ChatImageAttachmentInput = {
   name?: unknown;
@@ -36,11 +39,11 @@ export type ChatImageAttachmentRef = {
 const CHAT_ATTACHMENTS_DIR_NAME = '.drone-hub/attachments';
 
 function isImageAttachmentMime(mimeRaw: string): boolean {
-  return String(mimeRaw ?? '').trim().toLowerCase().startsWith('image/');
+  return chatAttachmentKind({ mime: mimeRaw }) === 'image';
 }
 
 function isTextAttachmentMime(mimeRaw: string): boolean {
-  return String(mimeRaw ?? '').trim().toLowerCase() === 'text/plain';
+  return chatAttachmentKind({ mime: mimeRaw }) === 'text';
 }
 
 function isSupportedAttachmentMime(mimeRaw: string): boolean {
@@ -77,7 +80,7 @@ function base64DecodedByteLength(b64Raw: string): number {
 }
 
 function extForAttachmentMime(mimeRaw: string): string {
-  const mime = String(mimeRaw ?? '').trim().toLowerCase();
+  const mime = normalizeChatAttachmentMime(mimeRaw);
   switch (mime) {
     case 'image/png':
       return 'png';
@@ -145,13 +148,12 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
 
   const out: ChatImageAttachment[] = [];
   const usedFileNames = new Set<string>();
-  let total = 0;
 
   for (let i = 0; i < raw.length; i++) {
     const item = raw[i] as ChatImageAttachmentInput;
     if (!item || typeof item !== 'object') continue;
 
-    const mime = String(item.mime ?? '').trim().toLowerCase();
+    const mime = normalizeChatAttachmentMime(item.mime, item.name);
     if (!isSupportedAttachmentMime(mime)) throw new Error('only image and text attachments are supported');
 
     const dataBase64 = String(item.dataBase64 ?? '').replace(/\s+/g, '');
@@ -167,15 +169,32 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
     const size = Number.isFinite(declared) && declared > 0 ? Math.floor(declared) : sizeFromB64;
     const effectiveSize = sizeFromB64 > 0 ? sizeFromB64 : size;
     if (!effectiveSize || effectiveSize <= 0) throw new Error('attachment size is invalid');
-    if (effectiveSize > CHAT_ATTACHMENTS_MAX_BYTES_EACH) {
-      throw new Error(`attachment too large (${effectiveSize} bytes, max ${CHAT_ATTACHMENTS_MAX_BYTES_EACH})`);
-    }
-    if (isImageAttachmentMime(mime) && out.filter((entry) => isImageAttachmentMime(entry.mime)).length >= CHAT_ATTACHMENTS_MAX_IMAGES) {
-      throw new Error(`too many attachments (max ${CHAT_ATTACHMENTS_MAX_IMAGES})`);
-    }
-    total += effectiveSize;
-    if (total > CHAT_ATTACHMENTS_MAX_BYTES_TOTAL) {
-      throw new Error(`attachments too large in total (max ${CHAT_ATTACHMENTS_MAX_BYTES_TOTAL} bytes)`);
+    const policy = validateChatAttachments([
+      ...out,
+      {
+        name: String(item.name ?? '').trim(),
+        mime,
+        size: effectiveSize,
+      },
+    ]);
+    if (!policy.ok) {
+      if (policy.issue.code === 'too_many_attachments') {
+        throw new Error(`too many attachments (max ${CHAT_ATTACHMENT_POLICY.maxCount})`);
+      }
+      if (policy.issue.code === 'attachment_too_large') {
+        throw new Error(
+          `attachment too large (${effectiveSize} bytes, max ${CHAT_ATTACHMENT_POLICY.maxBytesEach})`,
+        );
+      }
+      if (policy.issue.code === 'attachments_too_large') {
+        throw new Error(
+          `attachments too large in total (max ${CHAT_ATTACHMENT_POLICY.maxBytesTotal} bytes)`,
+        );
+      }
+      if (policy.issue.code === 'invalid_mime') {
+        throw new Error('only image and text attachments are supported');
+      }
+      throw new Error('attachment size is invalid');
     }
 
     const ext = extForAttachmentMime(mime);
@@ -193,31 +212,7 @@ export function promptWithImageAttachments(
   promptRaw: string,
   files: Array<{ name: string; mime: string; size: number; path: string; relativePath?: string }>
 ): string {
-  const prompt = String(promptRaw ?? '').trim();
-  if (!files || files.length === 0) return prompt;
-  const imageFiles = files.filter((item) => isImageAttachmentMime(item.mime));
-  const textFiles = files.filter((item) => isTextAttachmentMime(item.mime));
-  const otherFiles = files.filter((item) => !isImageAttachmentMime(item.mime) && !isTextAttachmentMime(item.mime));
-  const formatLine = (f: { name: string; mime: string; size: number; path: string; relativePath?: string }, i: number) => {
-    const absPath = String(f.path ?? '').trim();
-    const relPath = String(f.relativePath ?? '').trim();
-    const shownPath = relPath && relPath !== absPath ? `${relPath} (absolute: ${absPath})` : relPath || absPath;
-    return `${i + 1}. ${f.name} (${f.mime}, ${f.size} bytes): ${shownPath}`;
-  };
-  const blocks: string[] = [];
-  if (textFiles.length > 0) {
-    blocks.push(
-      `${textFiles.length === 1 ? 'Text attachment:' : 'Text attachments:'}\n${textFiles.map(formatLine).join('\n')}\nRead the text attachment file${textFiles.length === 1 ? '' : 's'} and treat the content as part of the user's message/context.`,
-    );
-  }
-  if (imageFiles.length > 0) {
-    blocks.push(`${imageFiles.length === 1 ? 'Image attachment:' : 'Image attachments:'}\n${imageFiles.map(formatLine).join('\n')}`);
-  }
-  if (otherFiles.length > 0) {
-    blocks.push(`${otherFiles.length === 1 ? 'Attachment:' : 'Attachments:'}\n${otherFiles.map(formatLine).join('\n')}`);
-  }
-  const block = blocks.join('\n\n');
-  return prompt ? `${prompt}\n\n${block}` : block;
+  return promptWithChatAttachmentContext(promptRaw, files);
 }
 
 export function codexImageAttachmentFlags(files: Array<{ mime: string; path: string }>): string {

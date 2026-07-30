@@ -2,6 +2,8 @@ export * from './assistant-message-model';
 export * from './assistant-message-types';
 export * from './agent-run-activity';
 export * from './agent-run-file-changes';
+export * from './chat-attachment-context';
+export * from './chat-attachment-policy';
 export * from './github-pull-request';
 export * from './merge-workspace-transfer-progress';
 export * from './native-chat-types';
