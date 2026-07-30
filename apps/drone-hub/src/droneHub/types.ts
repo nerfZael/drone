@@ -1,6 +1,12 @@
 import type { ChatAgentConfig } from '../domain';
 import type { AgentRunFileChanges } from '@blip/protocol';
-import type { AgentRunActivity, PendingPromptState } from '@drone/assistant-chat';
+import type {
+  AgentPlan,
+  AgentRunActivity,
+  PendingPromptState,
+} from '@drone/assistant-chat';
+
+export type { AgentPlan } from '@drone/assistant-chat';
 
 export type DroneSummary = {
   id: string;
@@ -609,16 +615,6 @@ export type PendingPrompt = {
   agentPlan?: AgentPlan;
   fileChanges?: AgentRunFileChanges;
   updatedAt?: string;
-};
-
-export type AgentPlan = {
-  items: Array<{
-    id?: string;
-    text: string;
-    status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
-  }>;
-  updatedAt: string;
-  source: 'cursor' | 'codex' | 'claude' | 'opencode';
 };
 
 export type CustomAgentProfile = { id: string; label: string; command: string };

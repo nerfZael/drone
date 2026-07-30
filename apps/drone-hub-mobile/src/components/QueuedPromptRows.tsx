@@ -2,9 +2,8 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import X from 'lucide-react-native/icons/x';
 import Square from 'lucide-react-native/icons/square';
-import { stoppedRunDetail } from '@drone/assistant-chat';
+import { stoppedRunDetail, type AgentPlan } from '@drone/assistant-chat';
 import { colors } from '../theme';
-import type { MobileAgentPlan } from '../local-assistant/mobile-transcript-runs';
 
 export type MobileQueuedPrompt = {
   id: string;
@@ -15,7 +14,7 @@ export type MobileQueuedPrompt = {
   imageCount?: number;
   cancelable?: boolean;
   startedAt?: string;
-  agentPlan?: MobileAgentPlan;
+  agentPlan?: AgentPlan;
   delivered?: boolean;
 };
 

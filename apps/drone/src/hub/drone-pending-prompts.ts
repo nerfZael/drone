@@ -1,10 +1,17 @@
+import {
+  completedTurnIds,
+  isTerminalPendingPrompt,
+  normalizeAgentPlan,
+  normalizePendingPromptState as normalizeSharedPendingPromptState,
+  type AgentPlan,
+  type AgentRunActivity,
+} from '@drone/assistant-chat';
 import { loadRegistry, updateRegistry } from '../host/registry';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
 import { commitDroneMetadataPatch } from './drone-metadata-commands';
 import type { PendingPromptState, PendingStartupPrompt } from './drone-pending-state';
 import type { ChatImageAttachmentRef } from './chat-attachments';
-import { normalizeAgentPlan, type AgentPlan } from './agent-plan';
 import {
   cancelQueuedPendingPromptInStore,
   claimQueuedPendingPromptInStore,
@@ -17,12 +24,6 @@ import {
 import { resolveCanonicalDroneOrPendingForReadRef } from './drone-lifecycle-service';
 import type { AgentRunFileChanges } from '@blip/protocol';
 import type { AgentRunFileChangesBaseline } from './run-file-changes';
-import {
-  completedTurnIds,
-  isTerminalPendingPrompt,
-  normalizePendingPromptState as normalizeSharedPendingPromptState,
-  type AgentRunActivity,
-} from '@drone/assistant-chat';
 import { normalizeAgentRunActivity } from './builtin-agent-activity';
 
 export type PendingPrompt = {

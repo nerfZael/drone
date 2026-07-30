@@ -131,4 +131,23 @@ describe('normalizeChatImageAttachments', () => {
 
     expect(attachments.map((attachment) => attachment.fileName)).toEqual(['image.png', 'image-2.png', 'IMAGE-3.png']);
   });
+
+  test('uses the shared MIME and count policy', () => {
+    expect(
+      normalizeChatImageAttachments([
+        { name: 'photo.jpg', mime: 'image/jpg', size: 5, dataBase64: 'aGVsbG8=' },
+      ])[0]?.mime,
+    ).toBe('image/jpeg');
+
+    expect(() =>
+      normalizeChatImageAttachments(
+        Array.from({ length: 9 }, (_, index) => ({
+          name: `notes-${index}.txt`,
+          mime: 'text/plain',
+          size: 1,
+          dataBase64: 'IQ==',
+        })),
+      ),
+    ).toThrow('too many attachments (max 8)');
+  });
 });

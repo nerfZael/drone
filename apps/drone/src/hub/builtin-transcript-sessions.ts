@@ -1,6 +1,5 @@
-import type { AgentRunActivity } from '@drone/assistant-chat';
+import { normalizeAgentPlan, type AgentPlan, type AgentRunActivity } from '@drone/assistant-chat';
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
-import { normalizeAgentPlan, type AgentPlan } from './agent-plan';
 import { BuiltinAgentActivityCollector, normalizeAgentRunActivity } from './builtin-agent-activity';
 
 export function readBuiltinTranscriptSessionId(

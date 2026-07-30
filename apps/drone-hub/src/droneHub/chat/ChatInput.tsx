@@ -1,11 +1,13 @@
 import React from 'react';
+import {
+  CHAT_ATTACHMENT_POLICY,
+  validateChatAttachments,
+  type ChatAttachmentValidationIssue,
+} from '@drone/assistant-chat';
 import { ChatComposerContext, type ChatComposerContextConfig } from './ChatComposerContext';
 import { ChatComposerControls, type ChatComposerControlsConfig } from './ChatComposerControls';
 import { chatResponseStopVisible } from './chat-response-stop-visible';
 import {
-  CHAT_INPUT_MAX_BYTES_EACH,
-  CHAT_INPUT_MAX_BYTES_TOTAL,
-  CHAT_INPUT_MAX_IMAGES,
   CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS,
   blobToBase64,
   fileToBase64,
@@ -31,6 +33,25 @@ import {
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
+
+function attachmentPolicyError(
+  issue: ChatAttachmentValidationIssue,
+  kind: 'image' | 'file' | 'text',
+): string {
+  if (issue.code === 'too_many_attachments') {
+    return `Too many attachments. Max is ${CHAT_ATTACHMENT_POLICY.maxCount}.`;
+  }
+  if (issue.code === 'attachment_too_large') {
+    const label = kind === 'text' ? 'Pasted text' : kind === 'file' ? 'File' : 'Image';
+    const subject = kind === 'text' ? 'attachment' : kind;
+    return `${label} too large (${formatBytes(issue.actual)}). Max per ${subject} is ${formatBytes(CHAT_ATTACHMENT_POLICY.maxBytesEach)}.`;
+  }
+  if (issue.code === 'attachments_too_large') {
+    return `Attachments too large in total. Max total is ${formatBytes(CHAT_ATTACHMENT_POLICY.maxBytesTotal)}.`;
+  }
+  if (issue.code === 'invalid_mime') return 'One of the selected files has an invalid type.';
+  return `One of the selected ${kind === 'image' ? 'images' : 'files'} is empty or unreadable.`;
+}
 
 export type ChatAttachmentPayload = {
   name: string;
@@ -318,7 +339,6 @@ export function ChatInput({
     setAttachmentError(null);
     setAttachments((prev) => {
       const next = prev.slice();
-      let total = next.reduce((sum, a) => sum + (Number(a?.size) || 0), 0);
 
       for (const f of list) {
         if (!f) continue;
@@ -328,29 +348,24 @@ export function ChatInput({
           continue;
         }
         const size = Number((f as any).size ?? 0);
-        if (!Number.isFinite(size) || size <= 0) {
-          setAttachmentError(`One of the selected ${attachmentMode === 'files' ? 'files' : 'images'} is empty or unreadable.`);
-          continue;
-        }
-        if (size > CHAT_INPUT_MAX_BYTES_EACH) {
-          setAttachmentError(
-            `${attachmentMode === 'files' ? 'File' : 'Image'} too large (${formatBytes(size)}). Max per ${attachmentMode === 'files' ? 'file' : 'image'} is ${formatBytes(CHAT_INPUT_MAX_BYTES_EACH)}.`,
-          );
-          continue;
-        }
-        if (next.length >= CHAT_INPUT_MAX_IMAGES) {
-          setAttachmentError(`Too many attachments. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
-          break;
-        }
-        if (total + size > CHAT_INPUT_MAX_BYTES_TOTAL) {
-          setAttachmentError(
-            `Attachments too large in total. Max total is ${formatBytes(CHAT_INPUT_MAX_BYTES_TOTAL)}.`,
-          );
-          break;
-        }
-
         const mime = mimeForChatAttachmentFile(f);
         const name = String((f as any).name ?? '').trim() || `attachment-${next.length + 1}`;
+        const policy = validateChatAttachments([
+          ...next.map(({ name, mime, size }) => ({ name, mime, size })),
+          { name, mime, size },
+        ]);
+        if (!policy.ok) {
+          setAttachmentError(
+            attachmentPolicyError(policy.issue, attachmentMode === 'files' ? 'file' : 'image'),
+          );
+          if (
+            policy.issue.code === 'too_many_attachments' ||
+            policy.issue.code === 'attachments_too_large'
+          ) {
+            break;
+          }
+          continue;
+        }
         const disposition = options.source === 'paste' && image ? 'prompt' : 'artifact';
         if (image) {
           const previewUrl = URL.createObjectURL(f);
@@ -375,7 +390,6 @@ export function ChatInput({
             disposition,
           });
         }
-        total += size;
       }
 
       return next;
@@ -389,27 +403,23 @@ export function ChatInput({
     const size = textByteLength(text);
     setAttachmentError(null);
     setAttachments((prev) => {
-      const total = prev.reduce((sum, attachment) => sum + (Number(attachment.size) || 0), 0);
-      if (prev.length >= CHAT_INPUT_MAX_IMAGES) {
-        setAttachmentError(`Too many attachments. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
-        return prev;
-      }
-      if (size > CHAT_INPUT_MAX_BYTES_EACH) {
-        setAttachmentError(`Pasted text too large (${formatBytes(size)}). Max per attachment is ${formatBytes(CHAT_INPUT_MAX_BYTES_EACH)}.`);
-        return prev;
-      }
-      if (total + size > CHAT_INPUT_MAX_BYTES_TOTAL) {
-        setAttachmentError(`Attachments too large in total. Max total is ${formatBytes(CHAT_INPUT_MAX_BYTES_TOTAL)}.`);
-        return prev;
-      }
       const textCount = prev.filter((attachment) => attachment.kind === 'text').length;
+      const name = makePastedTextAttachmentName(textCount);
+      const policy = validateChatAttachments([
+        ...prev.map(({ name, mime, size }) => ({ name, mime, size })),
+        { name, mime: 'text/plain', size },
+      ]);
+      if (!policy.ok) {
+        setAttachmentError(attachmentPolicyError(policy.issue, 'text'));
+        return prev;
+      }
       return [
         ...prev,
         {
           kind: 'text',
           id: makeDraftImageAttachmentId(),
           text,
-          name: makePastedTextAttachmentName(textCount),
+          name,
           mime: 'text/plain',
           size,
           disposition: 'artifact',

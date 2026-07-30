@@ -45,4 +45,18 @@ describe('chat attachment payload helpers', () => {
       },
     ]);
   });
+
+  test('normalizes MIME aliases and applies the shared count policy', () => {
+    const payloads = normalizeChatImageAttachmentPayloads(
+      Array.from({ length: 9 }, (_, index) => ({
+        name: `photo-${index}.jpg`,
+        mime: 'image/jpg',
+        size: 1,
+        dataBase64: 'YQ==',
+      })),
+    );
+
+    expect(payloads).toHaveLength(8);
+    expect(payloads.every((payload) => payload.mime === 'image/jpeg')).toBe(true);
+  });
 });

@@ -1,15 +1,13 @@
 import {
-  normalizeMobileAgentPlan,
-  type MobileAgentPlan,
-} from '../local-assistant/mobile-transcript-runs';
-import {
   completedTurnIds,
   filterCompletedPendingPrompts,
   hasActivePendingPrompt,
   isStoppedRunError,
   mergeOptimisticPendingPrompts,
+  normalizeAgentPlan,
   normalizeAgentRunActivity,
   replaceOptimisticPendingPromptId,
+  type AgentPlan,
   type PendingPromptState,
 } from '@drone/assistant-chat';
 
@@ -22,7 +20,7 @@ export type MobileDronePendingPrompt = {
   imageCount: number;
   cancelable: boolean;
   startedAt?: string;
-  agentPlan?: MobileAgentPlan;
+  agentPlan?: AgentPlan;
   delivered?: boolean;
 };
 
@@ -177,7 +175,7 @@ export function mobileDronePendingPrompts(
         completedIds.has(id) ||
         transcriptMessageIds.has(id) ||
         Boolean(messageId && transcriptMessageIds.has(messageId)));
-    const agentPlan = normalizeMobileAgentPlan(item?.agentPlan);
+    const agentPlan = normalizeAgentPlan(item?.agentPlan);
     const attachmentCount = positiveCount(
       item?.attachmentCount ??
         item?.imageCount ??

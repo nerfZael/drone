@@ -1,26 +1,14 @@
-import type { ChatSendPayload } from '../chat';
-import type { ChatImageAttachmentRef, PendingPrompt } from '../types';
-import { attachmentRefsFromPayload, normalizeChatImageAttachmentPayloads } from './chat-attachment-payloads';
-import { makeId } from './helpers';
 import {
+  chatAttachmentPreviewLabel,
   isActivePendingPrompt,
   mergeOptimisticPendingPrompts,
   normalizePendingPromptState as normalizeSharedPendingPromptState,
   replaceOptimisticPendingPromptId,
 } from '@drone/assistant-chat';
-
-function attachmentOnlyPromptText(attachmentPayloads: ReturnType<typeof normalizeChatImageAttachmentPayloads>): string {
-  if (attachmentPayloads.length === 0) return '';
-  const imageCount = attachmentPayloads.filter((item) => item.mime.startsWith('image/')).length;
-  const textCount = attachmentPayloads.filter((item) => item.mime === 'text/plain').length;
-  if (imageCount === attachmentPayloads.length) {
-    return imageCount === 1 ? '[image attachment]' : `[${imageCount} image attachments]`;
-  }
-  if (textCount === attachmentPayloads.length) {
-    return textCount === 1 ? '[text attachment]' : `[${textCount} text attachments]`;
-  }
-  return attachmentPayloads.length === 1 ? '[attachment]' : `[${attachmentPayloads.length} attachments]`;
-}
+import type { ChatSendPayload } from '../chat';
+import type { ChatImageAttachmentRef, PendingPrompt } from '../types';
+import { attachmentRefsFromPayload, normalizeChatImageAttachmentPayloads } from './chat-attachment-payloads';
+import { makeId } from './helpers';
 
 function pickPreferredArray<T>(primaryRaw: T[] | undefined, fallbackRaw: T[] | undefined): T[] | undefined {
   const primary = Array.isArray(primaryRaw) ? primaryRaw : [];
@@ -135,7 +123,7 @@ export function pendingPromptPreviewText(
   const prompt = String(promptRaw ?? '').trim();
   if (prompt) return prompt;
   const attachmentPayloads = normalizeChatImageAttachmentPayloads(attachmentsRaw);
-  return attachmentOnlyPromptText(attachmentPayloads);
+  return chatAttachmentPreviewLabel(attachmentPayloads);
 }
 
 export function appendOptimisticPendingPrompt(prev: PendingPrompt[], item: PendingPrompt | null): PendingPrompt[] {

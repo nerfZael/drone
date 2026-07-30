@@ -10,9 +10,8 @@ import {
 } from '../host/hub-database';
 import { appendHubOutboxEvent, initializeHubOutbox } from '../host/hub-outbox';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
-import type { AgentPlan } from './agent-plan';
 import type { AgentRunFileChanges } from '@blip/protocol';
-import type { AgentRunActivity } from '@drone/assistant-chat';
+import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
 import { normalizeAgentRunActivity } from './builtin-agent-activity';
 import type { AgentRunFileChangesBaseline } from './run-file-changes';
 

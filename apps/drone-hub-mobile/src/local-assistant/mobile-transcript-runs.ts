@@ -1,29 +1,19 @@
 import {
   messageImageParts,
   messageVisibleText,
+  normalizeAgentPlan,
   toolActivityIsSettled,
+  type AgentPlan,
   type AssistantMessage,
   type AssistantRenderItem,
   type AssistantToolRenderItem,
 } from '@drone/assistant-chat';
 
-export type MobileAgentPlanItem = {
-  id?: string;
-  text: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
-};
-
-export type MobileAgentPlan = {
-  items: MobileAgentPlanItem[];
-  updatedAt?: string;
-  source?: string;
-};
-
 export type MobileTranscriptRunMetadata = {
   id?: string;
   startedAt?: string | number;
   completedAt?: string | number;
-  plan?: MobileAgentPlan;
+  plan?: AgentPlan;
 };
 
 export type MobileTranscriptRun = {
@@ -35,7 +25,7 @@ export type MobileTranscriptRun = {
   durationMs?: number;
   startedAt?: string | number;
   completedAt?: string | number;
-  plan?: MobileAgentPlan;
+  plan?: AgentPlan;
   active: boolean;
 };
 
@@ -44,34 +34,6 @@ export type MobileTranscriptGroup =
   | { type: 'standalone'; key: string; item: AssistantRenderItem };
 
 export const AUTO_EXPANDED_MOBILE_TOOL_CALL_LIMIT = 5;
-
-const PLAN_STATUSES = new Set(['pending', 'in_progress', 'completed', 'cancelled']);
-
-export function normalizeMobileAgentPlan(value: unknown): MobileAgentPlan | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const source = value as Record<string, unknown>;
-  if (!Array.isArray(source.items) && !Array.isArray(source.plan)) return undefined;
-  const rawItems: unknown[] = Array.isArray(source.items)
-    ? source.items
-    : (source.plan as unknown[]);
-  const items = rawItems.flatMap((raw): MobileAgentPlanItem[] => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
-    const item = raw as Record<string, unknown>;
-    const text = String(item.text ?? item.step ?? '').trim();
-    const status = String(item.status ?? 'pending').trim();
-    if (!text || !PLAN_STATUSES.has(status)) return [];
-    const id = String(item.id ?? '').trim();
-    return [{ ...(id ? { id } : {}), text, status: status as MobileAgentPlanItem['status'] }];
-  });
-  if (items.length === 0) return undefined;
-  const updatedAt = String(source.updatedAt ?? '').trim();
-  const planSource = String(source.source ?? '').trim();
-  return {
-    items,
-    ...(updatedAt ? { updatedAt } : {}),
-    ...(planSource ? { source: planSource } : {}),
-  };
-}
 
 export function mobileRunDetails(metadata: MobileTranscriptRunMetadata): Record<string, unknown> {
   return { mobileRun: metadata };
@@ -93,7 +55,7 @@ function metadataFromMessage(message: AssistantMessage): MobileTranscriptRunMeta
       typeof run.completedAt === 'string' || typeof run.completedAt === 'number'
         ? run.completedAt
         : undefined,
-    plan: normalizeMobileAgentPlan(run.plan),
+    plan: normalizeAgentPlan(run.plan),
   };
 }
 
@@ -134,13 +96,13 @@ function toolCount(item: AssistantRenderItem): number {
   return item.type === 'toolGroup' ? item.items.length : 0;
 }
 
-function planFromTool(item: AssistantToolRenderItem): MobileAgentPlan | undefined {
+function planFromTool(item: AssistantToolRenderItem): AgentPlan | undefined {
   if (String(item.call?.name ?? item.result?.toolName ?? '') !== 'update_plan') return undefined;
-  return normalizeMobileAgentPlan(item.call?.args);
+  return normalizeAgentPlan(item.call?.args);
 }
 
-function planFromRunItems(items: AssistantRenderItem[]): MobileAgentPlan | undefined {
-  let plan: MobileAgentPlan | undefined;
+function planFromRunItems(items: AssistantRenderItem[]): AgentPlan | undefined {
+  let plan: AgentPlan | undefined;
   for (const item of items) {
     if (item.type === 'message') {
       plan = metadataFromMessage(item.message)?.plan ?? plan;

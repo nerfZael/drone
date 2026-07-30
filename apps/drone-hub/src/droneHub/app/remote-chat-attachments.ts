@@ -1,8 +1,9 @@
+import {
+  CHAT_ATTACHMENT_POLICY,
+  validateChatAttachments,
+  type ChatAttachmentValidationIssue,
+} from '@drone/assistant-chat';
 import type { ChatAttachmentPayload } from '../chat/ChatInput';
-
-const MAX_ATTACHMENTS = 8;
-const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
-const MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 
 // Desktop uploads travel through the local JSON bridge before entering the mesh. Keep the
 // encoded chunk comfortably below that bridge's 128 KiB request limit.
@@ -23,36 +24,37 @@ function decodedBase64Bytes(encoded: string): number {
   return Math.floor((encoded.length * 3) / 4) - padding;
 }
 
+function remoteAttachmentPolicyError(issue: ChatAttachmentValidationIssue): Error {
+  if (issue.code === 'too_many_attachments') {
+    return new Error(
+      `A prompt can include up to ${CHAT_ATTACHMENT_POLICY.maxCount} attachments.`,
+    );
+  }
+  if (issue.code === 'invalid_mime') {
+    return new Error('An attachment has an invalid MIME type.');
+  }
+  if (issue.code === 'attachments_too_large') {
+    return new Error('Remote prompt attachments must be 20 MiB or smaller in total.');
+  }
+  return new Error('Each remote prompt attachment must be between 1 byte and 6 MiB.');
+}
+
 function validateAttachments(
   attachments: readonly ChatAttachmentPayload[],
 ): Array<ChatAttachmentPayload & { dataBase64: string }> {
-  if (attachments.length > MAX_ATTACHMENTS) {
-    throw new Error(`A prompt can include up to ${MAX_ATTACHMENTS} attachments.`);
-  }
-  let total = 0;
-  return attachments.map((attachment) => {
-    const mime = String(attachment.mime ?? '')
-      .trim()
-      .toLowerCase();
-    if (
-      mime.length > 120 ||
-      !/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u.test(mime)
-    ) {
-      throw new Error('An attachment has an invalid MIME type.');
-    }
+  const policy = validateChatAttachments(attachments);
+  if (!policy.ok) throw remoteAttachmentPolicyError(policy.issue);
+  return attachments.map((attachment, index) => {
+    const metadata = policy.attachments[index]!;
     const dataBase64 = normalizedBase64(attachment.dataBase64);
     const size = decodedBase64Bytes(dataBase64);
-    if (size <= 0 || size > MAX_ATTACHMENT_BYTES) {
+    if (size <= 0 || size > CHAT_ATTACHMENT_POLICY.maxBytesEach) {
       throw new Error('Each remote prompt attachment must be between 1 byte and 6 MiB.');
     }
-    if (Number(attachment.size) !== size) {
+    if (metadata.size !== size) {
       throw new Error(`The attachment size changed while reading ${attachment.name}.`);
     }
-    total += size;
-    if (total > MAX_TOTAL_ATTACHMENT_BYTES) {
-      throw new Error('Remote prompt attachments must be 20 MiB or smaller in total.');
-    }
-    return { ...attachment, mime: mime === 'image/jpg' ? 'image/jpeg' : mime, size, dataBase64 };
+    return { ...attachment, mime: metadata.mime, size, dataBase64 };
   });
 }
 
