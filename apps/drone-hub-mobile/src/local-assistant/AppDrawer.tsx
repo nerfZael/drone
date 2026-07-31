@@ -26,7 +26,6 @@ import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronUp from 'lucide-react-native/icons/chevron-up';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import FolderGit2 from 'lucide-react-native/icons/folder-git-2';
-import Folder from 'lucide-react-native/icons/folder';
 import Square from 'lucide-react-native/icons/square';
 import X from 'lucide-react-native/icons/x';
 import Pin from 'lucide-react-native/icons/pin';
@@ -34,7 +33,6 @@ import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import { Drawer } from 'react-native-drawer-layout';
 import { colors } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
 import {
   formatMobileVoiceDuration,
@@ -111,8 +109,8 @@ type RegisterDrawer = (props: AppDrawerProps | null) => void;
 const AppDrawerHostContext = React.createContext<RegisterDrawer | null>(null);
 const DrawerWorkingPhaseContext = React.createContext<Animated.Value | null>(null);
 const DRAWER_WORKING_SPIN_DURATION_MS = 1_600;
-const DRAWER_TREE_ROW_PADDING_LEFT = 7;
-const DRAWER_TREE_DEPTH_INDENT = 14;
+const DRAWER_TREE_ROW_PADDING_LEFT = 12;
+const DRAWER_TREE_DEPTH_INDENT = 10;
 const DRAWER_TREE_LEADING_SLOT_WIDTH = 12;
 const DRAWER_TREE_LEADING_GAP = 6;
 const PINNED_SIDEBAR_PLACEMENT_KEY = 'droneHubMobile.pinnedSidebarPlacement';
@@ -567,6 +565,8 @@ function ApprovalStatusIndicator() {
 }
 
 function BlockedStatusIndicator() {
+  // Desktop can reveal its quiet blocked icon on hover. Mobile has no equivalent hover state,
+  // so keep the error color visible instead of leaving a persistent failure muted.
   return (
     <View accessible={false} style={styles.stateStatusIndicator}>
       <Svg height={12} width={12} viewBox="0 0 12 12" fill="none">
@@ -651,34 +651,17 @@ function DrawerDroneNode({
         {selected ? <View style={styles.sidebarSelectionEdge} /> : null}
         <View style={styles.switchItemMain}>
           <SwitchItemStatusIndicator state={displayState} unread={unread} />
-          <View style={styles.switchItemCopy}>
-            <Text numberOfLines={1} style={[styles.switchItemTitle, selected && styles.activeText]}>
-              {drone.name}
+          <Text
+            numberOfLines={1}
+            style={[styles.switchItemTitle, selected && styles.switchItemTitleActive]}
+          >
+            {drone.name}
+          </Text>
+          {contextLabel ? (
+            <Text numberOfLines={1} style={styles.switchItemContextBadge}>
+              {contextLabel}
             </Text>
-            <View style={styles.switchItemMeta}>
-              <Text style={styles.switchItemState}>{stateLabel}</Text>
-              {contextLabel ? (
-                <>
-                  <Text style={styles.switchItemMetaSeparator}>·</Text>
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.switchItemState, styles.switchItemContext]}
-                  >
-                    {contextLabel}
-                  </Text>
-                </>
-              ) : null}
-              {drone.lastMessageAt ? (
-                <>
-                  <Text style={styles.switchItemMetaSeparator}>·</Text>
-                  <RelativeMessageTimestamp
-                    timestamp={drone.lastMessageAt}
-                    style={styles.switchItemTime}
-                  />
-                </>
-              ) : null}
-            </View>
-          </View>
+          ) : null}
         </View>
       </Pressable>
       {node.children.length > 0 ? (
@@ -721,6 +704,7 @@ function DrawerDroneFolder({
 }) {
   const collapsed = collapsedFolderIds.has(folder.id);
   const Chevron = collapsed ? ChevronRight : ChevronDown;
+  const hasSelectedDirectDrone = folder.roots.some((node) => node.drone.id === activeDroneId);
   return (
     <View>
       <Pressable
@@ -730,21 +714,27 @@ function DrawerDroneFolder({
         style={({ pressed }) => [
           styles.groupRow,
           { paddingLeft: drawerTreeRowPaddingLeft(depth) },
-          pressed && styles.pressed,
+          pressed && styles.sidebarRowPressed,
         ]}
       >
-        <View style={styles.folderGroupIcon}>
-          <Folder color={colors.muted} size={15} strokeWidth={1.8} />
-          <View style={styles.groupChevron}>
-            <Chevron color={colors.muted} size={10} strokeWidth={2.3} />
-          </View>
+        <View style={styles.folderChevronSlot}>
+          <Chevron color={colors.mutedDim} size={16} strokeWidth={1.25} />
         </View>
         <Text numberOfLines={1} style={styles.groupName}>
           {folder.label}
         </Text>
       </Pressable>
       {!collapsed ? (
-        <>
+        <View style={styles.groupChildren}>
+          {hasSelectedDirectDrone ? (
+            <View
+              pointerEvents="none"
+              style={[
+                styles.groupChildrenGuide,
+                { left: drawerTreeRowPaddingLeft(depth) + 8 },
+              ]}
+            />
+          ) : null}
           {folder.entries.map((entry) => (
             <DrawerDroneEntry
               key={
@@ -762,7 +752,7 @@ function DrawerDroneFolder({
               onSelect={onSelect}
             />
           ))}
-        </>
+        </View>
       ) : null}
     </View>
   );
@@ -836,7 +826,7 @@ function DrawerPinnedDrones({
       accessibilityLabel="Pinned drones"
     >
       <View style={styles.pinnedHeader}>
-        <Pin color={colors.mutedDim} size={13} strokeWidth={1.7} />
+        <Pin color={colors.mutedDim} size={14} strokeWidth={1.7} />
         <Text style={styles.pinnedHeaderText}>Pinned</Text>
         <Pressable
           accessibilityRole="button"
@@ -862,7 +852,7 @@ function DrawerPinnedDrones({
           key={`pinned:${drone.id}`}
           node={{ drone, children: [] }}
           depth={0}
-          contextLabel={repoLabelByPath.get(drone.repoPath) ?? 'No repo'}
+          contextLabel={repoLabelByPath.get(drone.repoPath) ?? 'Ungrouped'}
           activeDroneId={activeDroneId}
           activeChatName={activeChatName}
           droneOperationById={droneOperationById}
@@ -1275,7 +1265,7 @@ function AppDrawerView({
                         style={({ pressed }) => [styles.repoNavigationBack, pressed && styles.pressed]}
                       >
                         <View style={styles.groupIcon}>
-                          <FolderGit2 color={colors.mutedDim} size={16} strokeWidth={1.9} />
+                          <FolderGit2 color={colors.mutedDim} size={14} strokeWidth={1.9} />
                           <View style={styles.groupChevron}>
                             <ChevronLeft color={colors.mutedDim} size={10} strokeWidth={2.3} />
                           </View>
@@ -1304,7 +1294,7 @@ function AppDrawerView({
                           pressed && styles.pressed,
                         ]}
                       >
-                        <Plus color={colors.accent} size={18} strokeWidth={2.2} />
+                        <Plus color={colors.accent} size={16} strokeWidth={2.2} />
                       </Pressable>
                     </View>
                   </>
@@ -1331,7 +1321,7 @@ function AppDrawerView({
                     droneTreeContains(group.roots, activeDroneId) ||
                     group.folders.some((folder) => droneFolderContains(folder, activeDroneId));
                   return (
-                    <View style={styles.repoGroup}>
+                    <View>
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={`Open ${group.label} repository`}
@@ -1345,20 +1335,33 @@ function AppDrawerView({
                         {containsSelectedDrone ? (
                           <View style={styles.sidebarSelectionEdge} />
                         ) : null}
-                        <FolderGit2 color={colors.mutedDim} size={15} strokeWidth={1.9} />
+                        <FolderGit2
+                          color={colors.mutedDim}
+                          size={14}
+                          strokeWidth={1.9}
+                          style={styles.repoIcon}
+                        />
                         <View style={styles.repoCopy}>
-                          <Text numberOfLines={1} style={styles.repoName}>
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.repoName,
+                              containsSelectedDrone && styles.repoNameActive,
+                            ]}
+                          >
                             {group.label}
                           </Text>
                         </View>
                         <DroneStateCounts summary={stateSummary} compact />
-                        <ChevronRight color={colors.muted} size={15} strokeWidth={2} />
                       </Pressable>
                     </View>
                   );
                 }}
                 ListHeaderComponent={
-                  pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null
+                  <>
+                    {pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null}
+                    <View style={styles.repoListSpacer} />
+                  </>
                 }
                 ListFooterComponent={listStatus}
                 initialNumToRender={10}
@@ -1399,11 +1402,11 @@ const styles = StyleSheet.create({
   },
   drawerContent: { flex: 1, backgroundColor: colors.panel },
   header: {
-    minHeight: 64,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
     backgroundColor: colors.panel,
@@ -1412,9 +1415,9 @@ const styles = StyleSheet.create({
   headerCopy: { flex: 1, minWidth: 0 },
   title: {
     color: colors.textStrong,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
-    letterSpacing: 0.6,
+    letterSpacing: 0.4,
     textTransform: 'uppercase',
   },
   navigation: {
@@ -1576,28 +1579,29 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   repoNavigationHead: {
-    minHeight: 56,
+    height: 40,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 8,
+    gap: 6,
+    paddingRight: 6,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
+    backgroundColor: colors.whiteWashSoft,
   },
   repoNavigationHeadBelowPinned: {
     borderTopWidth: 1,
     borderTopColor: colors.borderSubtle,
   },
   repoNavigationBack: {
-    minHeight: 56,
+    height: 40,
     flex: 1,
     minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 2,
+    gap: 6,
+    paddingHorizontal: 8,
   },
-  repoNavigationTitle: { color: colors.text, fontSize: 13, fontWeight: '600' },
+  repoNavigationTitle: { color: colors.text, fontSize: 12, fontWeight: '600' },
   repoCreate: {
     width: 36,
     height: 36,
@@ -1621,28 +1625,31 @@ const styles = StyleSheet.create({
   fleetStateTextWorking: { color: colors.warning },
   fleetStateTextUnread: { color: colors.online },
   droneList: { paddingBottom: 24 },
+  repoListSpacer: { height: 4 },
   pinnedSection: {
-    paddingBottom: 0,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
   },
   pinnedSectionBottom: {
     flexShrink: 0,
     borderTopWidth: 1,
     borderTopColor: colors.borderSubtle,
+    borderBottomWidth: 0,
   },
   pinnedHeader: {
     minHeight: 32,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingLeft: 6,
-    paddingRight: 9,
+    paddingLeft: 12,
+    paddingRight: 8,
   },
   pinnedHeaderText: {
     flex: 1,
     color: colors.mutedDim,
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 0.2,
+    fontSize: 10.5,
+    fontWeight: '400',
   },
   pinnedPlacementToggle: {
     width: 28,
@@ -1652,26 +1659,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 5,
   },
-  repoGroup: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.whiteWash,
-  },
   repoRow: {
-    minHeight: 56,
+    height: 36,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 7,
-    paddingLeft: 9,
-    paddingRight: 8,
+    gap: 6,
+    paddingHorizontal: 14,
     position: 'relative',
   },
   repoRowActive: { backgroundColor: colors.sidebarSelectionWash },
   repoCopy: { flex: 1, minWidth: 0, justifyContent: 'center' },
-  repoName: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
-  droneNode: { position: 'relative', marginBottom: 4 },
+  repoIcon: { opacity: 0.85 },
+  repoName: { color: colors.secondary, fontSize: 12, fontWeight: '500' },
+  repoNameActive: { color: colors.text, fontWeight: '600' },
+  droneNode: { position: 'relative' },
   switchItemRow: {
-    minHeight: 48,
+    height: 36,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
@@ -1686,45 +1689,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: DRAWER_TREE_LEADING_GAP,
   },
-  switchItemCopy: {
+  switchItemTitle: {
     flex: 1,
     minWidth: 0,
-    justifyContent: 'center',
-    gap: 3,
-  },
-  switchItemTitle: {
-    minWidth: 0,
-    color: colors.secondary,
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  switchItemMeta: {
-    minHeight: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  switchItemState: {
-    color: colors.mutedDim,
-    fontSize: 9,
-    lineHeight: 10,
+    color: colors.textSecondary,
+    fontSize: 13,
     fontWeight: '400',
   },
-  switchItemContext: {
+  switchItemTitleActive: { color: colors.text },
+  switchItemContextBadge: {
+    maxWidth: 96,
     flexShrink: 1,
-  },
-  switchItemMetaSeparator: {
     color: colors.mutedDim,
-    fontSize: 9,
+    fontSize: 8,
+    fontWeight: '600',
     lineHeight: 10,
-    opacity: 0.55,
-  },
-  switchItemTime: {
-    color: colors.mutedDim,
-    fontSize: 9,
-    lineHeight: 10,
-    fontFamily: 'monospace',
-    fontWeight: '400',
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    borderRadius: 3,
+    backgroundColor: colors.whiteWashSoft,
   },
   switchItemStatus: {
     width: DRAWER_TREE_LEADING_SLOT_WIDTH,
@@ -1773,29 +1760,29 @@ const styles = StyleSheet.create({
   sidebarRowPressed: { backgroundColor: colors.whiteWash },
   droneChildren: {},
   groupRow: {
-    minHeight: 34,
+    minHeight: 36,
     flexDirection: 'row',
     alignItems: 'center',
     gap: DRAWER_TREE_LEADING_GAP,
-    paddingRight: 8,
-    borderRadius: 3,
+    paddingRight: 6,
+    borderRadius: 4,
   },
   groupIcon: {
-    width: 20,
-    height: 20,
+    width: 16,
+    height: 16,
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
-  folderGroupIcon: {
-    width: DRAWER_TREE_LEADING_SLOT_WIDTH,
-    height: 20,
-    alignItems: 'flex-end',
+  folderChevronSlot: {
+    width: 16,
+    height: 16,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   groupChevron: {
     position: 'absolute',
-    left: -1,
-    top: 5,
+    left: -4,
+    top: 2,
     width: 10,
     height: 10,
     alignItems: 'center',
@@ -1803,7 +1790,15 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: colors.panel,
   },
-  groupName: { color: colors.secondary, fontSize: 11, fontWeight: '500', flex: 1 },
+  groupName: { color: colors.secondary, fontSize: 13, fontWeight: '400', flex: 1 },
+  groupChildren: { position: 'relative' },
+  groupChildrenGuide: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: colors.borderSubtle,
+  },
   drawerFill: { flex: 1 },
   voiceFooter: {
     flexShrink: 0,
