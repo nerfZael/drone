@@ -1,4 +1,5 @@
 import React from 'react';
+import { MarkerType, type ReactFlowInstance } from '@xyflow/react';
 
 import {
   buildWorkflowGraphLayout,
@@ -8,6 +9,11 @@ import {
   type WorkflowGraphLayout,
   type WorkflowGraphNode,
 } from './workflow-graph-layout';
+import {
+  WorkflowGraphCanvas,
+  type WorkflowCanvasEdge,
+  type WorkflowCanvasNode,
+} from './WorkflowGraphCanvas';
 import { workflowStatusLabel } from './workflow-presentation';
 import type { DroneWorkflow, WorkflowInvocation, WorkflowRun } from './workflow-types';
 
@@ -26,13 +32,6 @@ type NodeExecutionStatus =
   | 'failed'
   | 'cancelled'
   | 'skipped';
-
-type GraphPanDragState = {
-  startClientX: number;
-  startClientY: number;
-  startPanX: number;
-  startPanY: number;
-};
 
 type GraphViewportState = {
   scale: number;
@@ -55,22 +54,6 @@ type Props = {
 
 function clampScale(value: number): number {
   return Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.round(value * 100) / 100));
-}
-
-export function workflowZoomPanOffset({
-  panOffset,
-  anchorOffset,
-  currentScale,
-  nextScale,
-}: {
-  panOffset: number;
-  anchorOffset: number;
-  currentScale: number;
-  nextScale: number;
-}): number {
-  if (!Number.isFinite(currentScale) || currentScale <= 0) return panOffset;
-  const worldOffset = (anchorOffset - panOffset) / currentScale;
-  return anchorOffset - worldOffset * nextScale;
 }
 
 export function workflowFitViewport({
@@ -358,13 +341,7 @@ function WorkflowGraphCard({
       data-workflow-graph-node={node.type}
       aria-pressed={selected}
       onClick={onSelect}
-      className={`group absolute overflow-visible text-left outline-none transition-[transform,opacity] duration-150 hover:-translate-y-0.5 focus-visible:-translate-y-0.5 ${dimmed ? 'opacity-20' : 'opacity-100'}`}
-      style={{
-        left: node.x,
-        top: node.y,
-        width: WORKFLOW_GRAPH_NODE_WIDTH,
-        height: WORKFLOW_GRAPH_NODE_HEIGHT,
-      }}
+      className={`nodrag nopan group relative h-full w-full overflow-visible text-left outline-none transition-[transform,opacity] duration-150 hover:-translate-y-0.5 focus-visible:-translate-y-0.5 ${dimmed ? 'opacity-20' : 'opacity-100'}`}
       title={`${node.eyebrow}: ${node.label}`}
     >
       <span
@@ -1231,10 +1208,10 @@ export function WorkflowDefinitionView({
     () => buildWorkflowNodeExecutionMap(layout, invocations),
     [invocations, layout],
   );
-  const viewportRef = React.useRef<HTMLDivElement | null>(null);
-  const panDragRef = React.useRef<GraphPanDragState | null>(null);
+  const viewportContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const reactFlowRef =
+    React.useRef<ReactFlowInstance<WorkflowCanvasNode, WorkflowCanvasEdge> | null>(null);
   const viewportInteractedRef = React.useRef(false);
-  const markerPrefix = React.useId().replace(/:/g, '');
   const agentIds = React.useMemo(
     () => Object.keys(workflow.definition.agents),
     [workflow.definition.agents],
@@ -1246,13 +1223,7 @@ export function WorkflowDefinitionView({
   const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(null);
   const [runConversationsOpen, setRunConversationsOpen] = React.useState(false);
   const [inspectorTab, setInspectorTab] = React.useState<InspectorTab>('overview');
-  const [viewportState, setViewportState] = React.useState<GraphViewportState>({
-    scale: 1,
-    panX: 0,
-    panY: 0,
-  });
-  const [panning, setPanning] = React.useState(false);
-  const { scale, panX, panY } = viewportState;
+  const [scale, setScale] = React.useState(1);
   const nodesByKey = React.useMemo(
     () => new Map(layout.nodes.map((node) => [node.key, node])),
     [layout.nodes],
@@ -1277,14 +1248,12 @@ export function WorkflowDefinitionView({
 
   React.useEffect(() => {
     viewportInteractedRef.current = false;
-    setViewportState({ scale: 1, panX: 0, panY: 0 });
-    setPanning(false);
+    setScale(1);
     setSelectedNodeKey(null);
     setSelectedAgentId(null);
     setRunConversationsOpen(false);
     setMode('definition');
     setQuery('');
-    panDragRef.current = null;
   }, [workflow.id]);
 
   React.useEffect(() => {
@@ -1304,76 +1273,34 @@ export function WorkflowDefinitionView({
     if (matchingNode) setSelectedNodeKey(matchingNode.key);
   }, [invocations, layout.nodes, run?.id]);
 
-  React.useEffect(() => {
-    const onWindowMouseMove = (event: MouseEvent) => {
-      const drag = panDragRef.current;
-      if (!drag) return;
-      setViewportState((current) => ({
-        ...current,
-        panX: drag.startPanX + event.clientX - drag.startClientX,
-        panY: drag.startPanY + event.clientY - drag.startClientY,
-      }));
-    };
-    const finishPan = () => {
-      if (!panDragRef.current) return;
-      panDragRef.current = null;
-      setPanning(false);
-    };
-    window.addEventListener('mousemove', onWindowMouseMove);
-    window.addEventListener('mouseup', finishPan);
-    window.addEventListener('blur', finishPan);
-    return () => {
-      window.removeEventListener('mousemove', onWindowMouseMove);
-      window.removeEventListener('mouseup', finishPan);
-      window.removeEventListener('blur', finishPan);
-    };
+  const zoomBy = React.useCallback((delta: number) => {
+    const instance = reactFlowRef.current;
+    if (!instance) return;
+    const currentScale = instance.getZoom();
+    const nextScale = clampScale(currentScale + delta);
+    if (nextScale === currentScale) return;
+    void instance.zoomTo(nextScale);
   }, []);
 
-  const zoomAt = React.useCallback(
-    (resolveScale: (currentScale: number) => number, clientX?: number, clientY?: number) => {
-      const viewport = viewportRef.current;
-      if (!viewport) return;
-      const rect = viewport.getBoundingClientRect();
-      const anchorX = clientX == null ? viewport.clientWidth / 2 : clientX - rect.left;
-      const anchorY = clientY == null ? viewport.clientHeight / 2 : clientY - rect.top;
-      setViewportState((current) => {
-        const nextScale = clampScale(resolveScale(current.scale));
-        if (nextScale === current.scale) return current;
-        return {
-          scale: nextScale,
-          panX: workflowZoomPanOffset({
-            panOffset: current.panX,
-            anchorOffset: anchorX,
-            currentScale: current.scale,
-            nextScale,
-          }),
-          panY: workflowZoomPanOffset({
-            panOffset: current.panY,
-            anchorOffset: anchorY,
-            currentScale: current.scale,
-            nextScale,
-          }),
-        };
-      });
-    },
-    [],
-  );
-
   const fitGraph = React.useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport || viewport.clientWidth <= 0 || viewport.clientHeight <= 0) return;
-    setViewportState(
-      workflowFitViewport({
-        viewportWidth: viewport.clientWidth,
-        viewportHeight: viewport.clientHeight,
-        graphWidth: layout.width,
-        graphHeight: layout.height,
-      }),
-    );
+    const viewport = viewportContainerRef.current;
+    const instance = reactFlowRef.current;
+    if (!viewport || !instance || viewport.clientWidth <= 0 || viewport.clientHeight <= 0) return;
+    const fitted = workflowFitViewport({
+      viewportWidth: viewport.clientWidth,
+      viewportHeight: viewport.clientHeight,
+      graphWidth: layout.width,
+      graphHeight: layout.height,
+    });
+    void instance.setViewport({
+      x: fitted.panX,
+      y: fitted.panY,
+      zoom: fitted.scale,
+    });
   }, [layout.height, layout.width]);
 
   React.useEffect(() => {
-    const viewport = viewportRef.current;
+    const viewport = viewportContainerRef.current;
     if (!viewport) return;
     let frame = 0;
     const fitBeforeInteraction = () => {
@@ -1395,46 +1322,16 @@ export function WorkflowDefinitionView({
     };
   }, [fitGraph, selectedNodeKey, workflow.id]);
 
-  const onViewportMouseDown = React.useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
-      if (event.button !== 2 && event.button !== 1) return;
-      const viewport = viewportRef.current;
-      if (!viewport) return;
-      event.preventDefault();
-      viewportInteractedRef.current = true;
-      viewport.focus({ preventScroll: true });
-      panDragRef.current = {
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        startPanX: panX,
-        startPanY: panY,
-      };
-      setPanning(true);
-    },
-    [panX, panY],
-  );
-
-  const onViewportWheel = React.useCallback(
-    (event: React.WheelEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      const delta = event.deltaY || event.deltaX;
-      if (!delta) return;
-      viewportInteractedRef.current = true;
-      zoomAt((currentScale) => currentScale * Math.exp(-delta * 0.0015), event.clientX, event.clientY);
-    },
-    [zoomAt],
-  );
-
   const onViewportKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       if (event.key === '+' || event.key === '=') {
         event.preventDefault();
         viewportInteractedRef.current = true;
-        zoomAt((currentScale) => currentScale + SCALE_STEP);
+        zoomBy(SCALE_STEP);
       } else if (event.key === '-' || event.key === '_') {
         event.preventDefault();
         viewportInteractedRef.current = true;
-        zoomAt((currentScale) => currentScale - SCALE_STEP);
+        zoomBy(-SCALE_STEP);
       } else if (event.key === '0') {
         event.preventDefault();
         viewportInteractedRef.current = true;
@@ -1445,7 +1342,7 @@ export function WorkflowDefinitionView({
         setRunConversationsOpen(false);
       }
     },
-    [fitGraph, zoomAt],
+    [fitGraph, zoomBy],
   );
 
   const openInvocationChat = React.useCallback(
@@ -1457,6 +1354,227 @@ export function WorkflowDefinitionView({
       );
     },
     [onOpenChat, ownerDroneId],
+  );
+
+  const canvasNodes = React.useMemo<WorkflowCanvasNode[]>(() => {
+    const phaseNodes: WorkflowCanvasNode[] = layout.phaseRegions.map((region) => {
+      const summary = summarizeInvocations(
+        invocations.filter((invocation) => invocation.phaseId === region.phaseId),
+      );
+      const completedInPhase = summary.invocations.filter(
+        (invocation) => invocation.status === 'completed',
+      ).length;
+      return {
+        id: region.key,
+        type: 'phase',
+        position: { x: region.x, y: region.y },
+        data: {
+          content: (
+            <div
+              data-workflow-phase-region={region.phaseId}
+              className="h-full w-full overflow-hidden rounded-[14px] border bg-[var(--surface-faint)]"
+              style={{
+                borderColor:
+                  mode === 'run' && summary.status !== 'idle'
+                    ? `color-mix(in srgb, ${executionStatusColor(summary.status)} 32%, var(--border-subtle))`
+                    : 'var(--canvas-related-subtle)',
+              }}
+            >
+              <div className="flex h-[38px] min-w-0 items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel-overlay-soft)] px-3">
+                <span
+                  className="flex-none whitespace-nowrap text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.14em] text-[var(--canvas-related)]"
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  {String(region.index + 1).padStart(2, '0')}
+                </span>
+                <span className="min-w-0 truncate text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                  {region.label}
+                </span>
+                {mode === 'run' ? (
+                  <span
+                    className="ml-auto flex h-5 flex-none items-center gap-1.5 rounded-full px-2 text-[var(--text-8)] uppercase tracking-wide"
+                    style={{
+                      color: executionStatusColor(summary.status),
+                      background: `color-mix(in srgb, ${executionStatusColor(summary.status)} 9%, transparent)`,
+                    }}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ background: executionStatusColor(summary.status) }}
+                    />
+                    {executionStatusLabel(summary.status)}
+                    {summary.invocations.length > 0 ? (
+                      <span className="font-mono opacity-70">
+                        · {completedInPhase}/{summary.invocations.length}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : (
+                  <span className="ml-auto flex-none whitespace-nowrap font-mono text-[var(--text-8)] text-[var(--muted-dim)]">
+                    {region.nodeCount} nodes
+                  </span>
+                )}
+              </div>
+            </div>
+          ),
+        },
+        style: { width: region.width, height: region.height, pointerEvents: 'none' },
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        zIndex: -1,
+      };
+    });
+
+    const graphNodes: WorkflowCanvasNode[] = layout.nodes.map((node) => {
+      const summary =
+        executionByNode.get(node.key) ?? { status: 'idle' as const, invocations: [] };
+      const matches =
+        !normalizedQuery ||
+        `${node.label} ${node.sourceId} ${node.agentId ?? ''} ${node.prompt ?? ''}`
+          .toLowerCase()
+          .includes(normalizedQuery);
+      return {
+        id: node.key,
+        type: 'workflow',
+        position: { x: node.x, y: node.y },
+        data: {
+          content: (
+            <WorkflowGraphCard
+              node={node}
+              mode={mode}
+              summary={summary}
+              selected={
+                selectedNodeKey === node.key ||
+                Boolean(selectedAgentId && node.agentId === selectedAgentId)
+              }
+              showDetails={showDetails}
+              dimmed={!matches || Boolean(selectedAgentId && node.agentId !== selectedAgentId)}
+              onSelect={() => {
+                setSelectedAgentId(null);
+                setRunConversationsOpen(false);
+                setSelectedNodeKey(node.key);
+                setInspectorTab('overview');
+              }}
+              onOpenChat={onOpenChat ? openInvocationChat : undefined}
+            />
+          ),
+        },
+        style: {
+          width: WORKFLOW_GRAPH_NODE_WIDTH,
+          height: WORKFLOW_GRAPH_NODE_HEIGHT,
+          pointerEvents: 'auto',
+        },
+        draggable: false,
+        selectable: false,
+        focusable: false,
+        zIndex: 2,
+        ariaLabel: `${node.eyebrow}: ${node.label}`,
+      };
+    });
+
+    return [...phaseNodes, ...graphNodes];
+  }, [
+    executionByNode,
+    invocations,
+    layout.nodes,
+    layout.phaseRegions,
+    mode,
+    normalizedQuery,
+    onOpenChat,
+    openInvocationChat,
+    selectedAgentId,
+    selectedNodeKey,
+    showDetails,
+  ]);
+
+  const canvasEdges = React.useMemo<WorkflowCanvasEdge[]>(
+    () =>
+      layout.edges.flatMap((edge) => {
+        const source = nodesByKey.get(edge.from);
+        const target = nodesByKey.get(edge.to);
+        if (!source || !target) return [];
+        const sourceSummary =
+          executionByNode.get(source.key) ?? { status: 'idle' as const, invocations: [] };
+        const targetSummary =
+          executionByNode.get(target.key) ?? { status: 'idle' as const, invocations: [] };
+        const runColor =
+          targetSummary.status === 'failed'
+            ? 'var(--red)'
+            : targetSummary.status === 'running'
+              ? 'var(--accent)'
+              : sourceSummary.status === 'completed' && targetSummary.status === 'completed'
+                ? 'var(--green)'
+                : 'var(--muted-dim)';
+        const definitionColor =
+          edge.variant === 'loop'
+            ? 'var(--yellow)'
+            : edge.variant === 'branch'
+              ? 'var(--accent)'
+              : 'var(--canvas-related-muted)';
+        const color = mode === 'run' ? runColor : definitionColor;
+        const active = mode === 'run' && targetSummary.status === 'running';
+        const labelPosition = edge.label
+          ? edgeLabelPosition(source, target, edge.variant)
+          : undefined;
+        return [
+          {
+            id: edge.key,
+            type: 'workflow',
+            source: edge.from,
+            target: edge.to,
+            sourceHandle:
+              edge.variant === 'phase' || edge.variant === 'loop'
+                ? 'right-source'
+                : 'bottom-source',
+            targetHandle:
+              edge.variant === 'phase'
+                ? 'left-target'
+                : edge.variant === 'loop'
+                  ? 'right-target'
+                  : 'top-target',
+            data: {
+              path: edgePath(edge, source, target),
+              label: edge.label,
+              labelX: labelPosition?.x,
+              labelY: labelPosition?.y,
+            },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color,
+              width: 12,
+              height: 12,
+            },
+            style: {
+              stroke: color,
+              strokeWidth: active ? 2.5 : edge.variant === 'phase' ? 1.7 : 1.8,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round',
+              strokeDasharray:
+                edge.variant === 'loop'
+                  ? '5 6'
+                  : mode === 'run' && targetSummary.status === 'idle'
+                    ? '3 7'
+                    : undefined,
+              opacity: mode === 'run' && targetSummary.status === 'idle' ? 0.42 : 0.9,
+            },
+            selectable: false,
+            focusable: false,
+            deletable: false,
+            reconnectable: false,
+            zIndex: 0,
+          } satisfies WorkflowCanvasEdge,
+        ];
+      }),
+    [executionByNode, layout.edges, mode, nodesByKey],
+  );
+
+  const onGraphInit = React.useCallback(
+    (instance: ReactFlowInstance<WorkflowCanvasNode, WorkflowCanvasEdge>) => {
+      reactFlowRef.current = instance;
+      requestAnimationFrame(() => fitGraph());
+    },
+    [fitGraph],
   );
 
   return (
@@ -1629,7 +1747,7 @@ export function WorkflowDefinitionView({
             type="button"
             onClick={() => {
               viewportInteractedRef.current = true;
-              zoomAt((currentScale) => currentScale - SCALE_STEP);
+              zoomBy(-SCALE_STEP);
             }}
             disabled={scale <= MIN_SCALE}
             className="flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-12)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)] disabled:opacity-35"
@@ -1652,7 +1770,7 @@ export function WorkflowDefinitionView({
             type="button"
             onClick={() => {
               viewportInteractedRef.current = true;
-              zoomAt((currentScale) => currentScale + SCALE_STEP);
+              zoomBy(SCALE_STEP);
             }}
             disabled={scale >= MAX_SCALE}
             className="flex h-7 w-7 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-12)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)] disabled:opacity-35"
@@ -1664,238 +1782,29 @@ export function WorkflowDefinitionView({
       </div>
       <div className="flex min-h-0 flex-1">
         <div
-          ref={viewportRef}
+          ref={viewportContainerRef}
           tabIndex={0}
           role="region"
-          aria-label="Workflow graph. Use the mouse wheel to zoom, middle or right drag to pan, and select a node to inspect it."
+          aria-label="Workflow graph. Drag to pan, use the mouse wheel or pinch gesture to zoom, and select a node to inspect it."
           data-workflow-graph-viewport="1"
-          className={`relative min-h-0 min-w-0 flex-1 select-none overflow-hidden outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)] ${panning ? 'cursor-grabbing' : 'cursor-default'}`}
+          className="relative min-h-0 min-w-0 flex-1 select-none overflow-hidden bg-[var(--panel)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
           style={{
-            backgroundColor: 'var(--panel)',
             backgroundImage:
-              'radial-gradient(circle, rgba(var(--canvas-dot-rgb), .16) 0.6px, transparent 0.8px), linear-gradient(180deg, color-mix(in srgb, var(--canvas-related) 3%, transparent), transparent 36%)',
-            backgroundPosition: `${panX + 13 * scale}px ${panY + 13 * scale}px, 0 0`,
-            backgroundSize: `${26 * scale}px ${26 * scale}px, 100% 100%`,
+              'linear-gradient(180deg, color-mix(in srgb, var(--canvas-related) 3%, transparent), transparent 36%)',
           }}
-          onMouseDown={onViewportMouseDown}
-          onWheel={onViewportWheel}
           onKeyDown={onViewportKeyDown}
-          onContextMenu={(event) => event.preventDefault()}
-          onDragStart={(event) => event.preventDefault()}
         >
-          <div
-            className="absolute left-0 top-0"
-            style={{
-              width: layout.width,
-              height: layout.height,
-              transform: `translate3d(${panX}px, ${panY}px, 0) scale(${scale})`,
-              transformOrigin: '0 0',
+          <WorkflowGraphCanvas
+            nodes={canvasNodes}
+            edges={canvasEdges}
+            minZoom={MIN_SCALE}
+            maxZoom={MAX_SCALE}
+            onInit={onGraphInit}
+            onMoveStart={(event) => {
+              if (event) viewportInteractedRef.current = true;
             }}
-          >
-            {layout.phaseRegions.map((region) => {
-              const summary = summarizeInvocations(
-                invocations.filter((invocation) => invocation.phaseId === region.phaseId),
-              );
-              const completedInPhase = summary.invocations.filter(
-                (invocation) => invocation.status === 'completed',
-              ).length;
-              return (
-                <div
-                  key={region.key}
-                  data-workflow-phase-region={region.phaseId}
-                  className="pointer-events-none absolute overflow-hidden rounded-[14px] border bg-[var(--surface-faint)]"
-                  style={{
-                    left: region.x,
-                    top: region.y,
-                    width: region.width,
-                    height: region.height,
-                    borderColor:
-                      mode === 'run' && summary.status !== 'idle'
-                        ? `color-mix(in srgb, ${executionStatusColor(summary.status)} 32%, var(--border-subtle))`
-                        : 'var(--canvas-related-subtle)',
-                  }}
-                >
-                  <div className="flex h-[38px] min-w-0 items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--panel-overlay-soft)] px-3">
-                    <span
-                      className="flex-none whitespace-nowrap text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.14em] text-[var(--canvas-related)]"
-                      style={{ fontFamily: 'var(--display)' }}
-                    >
-                      {String(region.index + 1).padStart(2, '0')}
-                    </span>
-                    <span className="min-w-0 truncate text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg)]">
-                      {region.label}
-                    </span>
-                    {mode === 'run' ? (
-                      <span
-                        className="ml-auto flex h-5 flex-none items-center gap-1.5 rounded-full px-2 text-[var(--text-8)] uppercase tracking-wide"
-                        style={{
-                          color: executionStatusColor(summary.status),
-                          background: `color-mix(in srgb, ${executionStatusColor(summary.status)} 9%, transparent)`,
-                        }}
-                      >
-                        <span
-                          className="h-1.5 w-1.5 rounded-full"
-                          style={{ background: executionStatusColor(summary.status) }}
-                        />
-                        {executionStatusLabel(summary.status)}
-                        {summary.invocations.length > 0 ? (
-                          <span className="font-mono opacity-70">
-                            · {completedInPhase}/{summary.invocations.length}
-                          </span>
-                        ) : null}
-                      </span>
-                    ) : (
-                      <span className="ml-auto flex-none whitespace-nowrap font-mono text-[var(--text-8)] text-[var(--muted-dim)]">
-                        {region.nodeCount} nodes
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            <svg
-              className="pointer-events-none absolute inset-0 overflow-visible"
-              width={layout.width}
-              height={layout.height}
-              aria-hidden="true"
-            >
-              <defs>
-                {(['flow', 'branch', 'loop', 'phase'] as const).map((variant) => (
-                  <marker
-                    key={variant}
-                    id={`${markerPrefix}-${variant}`}
-                    viewBox="0 0 10 10"
-                    refX="8"
-                    refY="5"
-                    markerWidth="5"
-                    markerHeight="5"
-                    orient="auto"
-                  >
-                    <path
-                      d="M 0 0 L 10 5 L 0 10 z"
-                      fill={
-                        variant === 'loop'
-                          ? 'var(--yellow)'
-                          : variant === 'branch'
-                            ? 'var(--accent)'
-                            : 'var(--canvas-related)'
-                      }
-                    />
-                  </marker>
-                ))}
-              </defs>
-              {layout.edges.map((edge) => {
-                const source = nodesByKey.get(edge.from);
-                const target = nodesByKey.get(edge.to);
-                if (!source || !target) return null;
-                const sourceSummary =
-                  executionByNode.get(source.key) ?? { status: 'idle' as const, invocations: [] };
-                const targetSummary =
-                  executionByNode.get(target.key) ?? { status: 'idle' as const, invocations: [] };
-                const runColor =
-                  targetSummary.status === 'failed'
-                    ? 'var(--red)'
-                    : targetSummary.status === 'running'
-                      ? 'var(--accent)'
-                      : sourceSummary.status === 'completed' &&
-                          targetSummary.status === 'completed'
-                        ? 'var(--green)'
-                        : 'var(--muted-dim)';
-                const definitionColor =
-                  edge.variant === 'loop'
-                    ? 'var(--yellow)'
-                    : edge.variant === 'branch'
-                      ? 'var(--accent)'
-                      : 'var(--canvas-related-muted)';
-                const color = mode === 'run' ? runColor : definitionColor;
-                const active = mode === 'run' && targetSummary.status === 'running';
-                return (
-                  <path
-                    key={edge.key}
-                    d={edgePath(edge, source, target)}
-                    fill="none"
-                    stroke={color}
-                    strokeWidth={active ? 2.5 : edge.variant === 'phase' ? 1.7 : 1.8}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeDasharray={
-                      edge.variant === 'loop'
-                        ? '5 6'
-                        : mode === 'run' && targetSummary.status === 'idle'
-                          ? '3 7'
-                          : undefined
-                    }
-                    markerEnd={`url(#${markerPrefix}-${edge.variant})`}
-                    opacity={mode === 'run' && targetSummary.status === 'idle' ? 0.42 : 0.9}
-                  />
-                );
-              })}
-              {layout.edges.map((edge) => {
-                if (!edge.label) return null;
-                const source = nodesByKey.get(edge.from);
-                const target = nodesByKey.get(edge.to);
-                if (!source || !target) return null;
-                const position = edgeLabelPosition(source, target, edge.variant);
-                return (
-                  <g key={`${edge.key}:label`}>
-                    <rect
-                      x={position.x - Math.max(18, edge.label.length * 3.4)}
-                      y={position.y - 7}
-                      width={Math.max(36, edge.label.length * 6.8)}
-                      height={14}
-                      rx={4}
-                      fill="var(--panel-overlay)"
-                      stroke="var(--border-subtle)"
-                    />
-                    <text
-                      x={position.x}
-                      y={position.y + 0.5}
-                      dominantBaseline="middle"
-                      textAnchor="middle"
-                      fill="var(--muted)"
-                      fontSize="8"
-                      fontFamily="var(--display)"
-                      letterSpacing=".08em"
-                    >
-                      {edge.label.toUpperCase()}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
-            {layout.nodes.map((node) => {
-              const summary =
-                executionByNode.get(node.key) ?? { status: 'idle' as const, invocations: [] };
-              const matches =
-                !normalizedQuery ||
-                `${node.label} ${node.sourceId} ${node.agentId ?? ''} ${node.prompt ?? ''}`
-                  .toLowerCase()
-                  .includes(normalizedQuery);
-              return (
-                <WorkflowGraphCard
-                  key={node.key}
-                  node={node}
-                  mode={mode}
-                  summary={summary}
-                  selected={
-                    selectedNodeKey === node.key ||
-                    Boolean(selectedAgentId && node.agentId === selectedAgentId)
-                  }
-                  showDetails={showDetails}
-                  dimmed={
-                    !matches || Boolean(selectedAgentId && node.agentId !== selectedAgentId)
-                  }
-                  onSelect={() => {
-                    setSelectedAgentId(null);
-                    setRunConversationsOpen(false);
-                    setSelectedNodeKey(node.key);
-                    setInspectorTab('overview');
-                  }}
-                  onOpenChat={onOpenChat ? openInvocationChat : undefined}
-                />
-              );
-            })}
-          </div>
+            onMove={(_event, viewport) => setScale(viewport.zoom)}
+          />
           <div className="pointer-events-none absolute bottom-2.5 left-2.5 flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2.5 py-1.5 text-[var(--text-8)] text-[var(--muted-dim)] shadow-[0_8px_24px_var(--shadow-color)] backdrop-blur">
             {mode === 'run' ? (
               <>
@@ -1912,7 +1821,7 @@ export function WorkflowDefinitionView({
                 )}
               </>
             ) : (
-              <>Wheel to zoom · middle/right drag to pan · select any step to inspect</>
+              <>Drag to pan · wheel or pinch to zoom · select any step to inspect</>
             )}
           </div>
         </div>
