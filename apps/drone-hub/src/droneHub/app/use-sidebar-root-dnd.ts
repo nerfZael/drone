@@ -23,8 +23,6 @@ type UseSidebarRootDndArgs = {
   isRepoGroupingMode: boolean;
   moveFolderIntoGroup: (sourceGroup: string, targetGroup: string) => Promise<boolean>;
   runOptimisticMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
-  setCreateGroupInlineError: React.Dispatch<React.SetStateAction<string | null>>;
-  setCreateGroupTargetDroneIds: React.Dispatch<React.SetStateAction<string[] | null>>;
   setSidebarGroupOrder: React.Dispatch<React.SetStateAction<string[]>>;
   sidebarGroupOrder: string[];
   sidebarGroups: SidebarGroup[];
@@ -36,14 +34,11 @@ export function useSidebarRootDnd({
   isRepoGroupingMode,
   moveFolderIntoGroup,
   runOptimisticMoveDronesToGroup,
-  setCreateGroupInlineError,
-  setCreateGroupTargetDroneIds,
   setSidebarGroupOrder,
   sidebarGroupOrder,
   sidebarGroups,
   sidebarHasUngroupedGroup,
 }: UseSidebarRootDndArgs) {
-  const [dragOverCreateGroup, setDragOverCreateGroup] = React.useState(false);
   const [dragOverGroup, setDragOverGroup] = React.useState<string | null>(null);
   const [dragOverUngrouped, setDragOverUngrouped] = React.useState(false);
   const [dragOverSidebarGroup, setDragOverSidebarGroup] = React.useState<{
@@ -59,7 +54,6 @@ export function useSidebarRootDnd({
     setDragOverSidebarGroup(null);
     setDragOverGroup(null);
     setDragOverUngrouped(false);
-    setDragOverCreateGroup(false);
   }, []);
 
   const currentPlacementFromEvent = React.useCallback(
@@ -123,7 +117,6 @@ export function useSidebarRootDnd({
           const dropTarget = currentSidebarGroupTargetFromEvent(event, activeData.groupRef, target);
           setDragOverGroup(null);
           setDragOverUngrouped(false);
-          setDragOverCreateGroup(false);
           setDragOverSidebarGroup({
             token: dropTarget.overId,
             placement: dropTarget.placement,
@@ -153,7 +146,6 @@ export function useSidebarRootDnd({
         ) {
           setDragOverSidebarGroup(null);
           setDragOverUngrouped(false);
-          setDragOverCreateGroup(false);
           setDragOverGroup(target.group);
           return;
         }
@@ -173,7 +165,6 @@ export function useSidebarRootDnd({
         ) {
           setDragOverSidebarGroup(null);
           setDragOverUngrouped(false);
-          setDragOverCreateGroup(false);
           setDragOverGroup(targetGroup);
           return;
         }
@@ -188,22 +179,13 @@ export function useSidebarRootDnd({
           }
           setDragOverSidebarGroup(null);
           setDragOverUngrouped(false);
-          setDragOverCreateGroup(false);
           setDragOverGroup(moveTargetGroup);
           return;
         }
         if (overData?.type === 'sidebar-ungrouped-drop' && !sidebarHasUngroupedGroup) {
           setDragOverSidebarGroup(null);
           setDragOverGroup(null);
-          setDragOverCreateGroup(false);
           setDragOverUngrouped(true);
-          return;
-        }
-        if (overData?.type === 'sidebar-create-group-drop') {
-          setDragOverSidebarGroup(null);
-          setDragOverGroup(null);
-          setDragOverUngrouped(false);
-          setDragOverCreateGroup(true);
           return;
         }
       }
@@ -313,12 +295,6 @@ export function useSidebarRootDnd({
           clearSidebarDragState();
           return;
         }
-        if (overData?.type === 'sidebar-create-group-drop') {
-          setCreateGroupTargetDroneIds(draggedDroneIds);
-          setCreateGroupInlineError(null);
-          clearSidebarDragState();
-          return;
-        }
       }
 
       clearSidebarDragState();
@@ -327,7 +303,6 @@ export function useSidebarRootDnd({
 
   return {
     activeDraggedDroneIds,
-    dragOverCreateGroup,
     dragOverGroup,
     dragOverSidebarGroup,
     dragOverUngrouped,

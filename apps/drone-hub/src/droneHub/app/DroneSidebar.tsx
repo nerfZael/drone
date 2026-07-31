@@ -43,7 +43,6 @@ import {
   IconSidebarCollapse,
   IconSidebarExpand,
   IconSpinner,
-  IconTrash,
   SkeletonLine,
 } from './icons';
 import { DesktopDevicePicker } from './DesktopDevicePicker';
@@ -222,7 +221,9 @@ function SidebarRepositoryStateCount({
       <span className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center leading-none">
         {indicator}
       </span>
-      <span className="relative top-px inline-flex h-3 items-center leading-none">{count}</span>
+      <span className="relative top-px inline-flex h-3 min-w-[2ch] items-center leading-none tabular-nums">
+        {count}
+      </span>
     </span>
   );
 }
@@ -719,11 +720,6 @@ type SidebarGroupSectionProps = {
   onRenameGroup: (group: string) => void;
   toggleSidebarGroupHidden: (target: SidebarDragGroupRef) => void;
   onOpenGroupMultiChat: (group: string) => void;
-  onDeleteGroup: (
-    group: string,
-    count: number,
-    opts?: { kind?: 'group' | 'repo'; label?: string; repoPath?: string | null },
-  ) => Promise<boolean> | boolean;
 };
 
 function stopGroupHeaderActionInteraction(event: React.SyntheticEvent) {
@@ -758,7 +754,6 @@ function SidebarGroupSection({
   onRenameGroup,
   toggleSidebarGroupHidden,
   onOpenGroupMultiChat,
-  onDeleteGroup,
 }: SidebarGroupSectionProps) {
   const clickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const groupDragData = React.useMemo<SidebarGroupDragData | null>(() => {
@@ -811,9 +806,9 @@ function SidebarGroupSection({
     ? 'opacity-100 pointer-events-auto'
     : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto';
   const actionRailWidthClass = canRenameGroup
-    ? 'group-hover/group-header:w-[124px]'
-    : 'group-hover/group-header:w-[92px]';
-  const pinnedActionRailWidthClass = canRenameGroup ? 'w-[124px]' : 'w-[92px]';
+    ? 'group-hover/group-header:w-[92px]'
+    : 'group-hover/group-header:w-[60px]';
+  const pinnedActionRailWidthClass = canRenameGroup ? 'w-[92px]' : 'w-[60px]';
   const clearClickTimer = React.useCallback(() => {
     if (clickTimerRef.current) {
       clearTimeout(clickTimerRef.current);
@@ -956,43 +951,6 @@ function SidebarGroupSection({
                 >
                   <IconColumns className="opacity-90" />
                 </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onDeleteGroup(groupRef.group, actualItems.length, {
-                      kind,
-                      label: groupLabel,
-                      repoPath: isVirtualGroup ? hoveredRepoPath || null : null,
-                    })
-                  }
-                  disabled={isDeletingGroup || isRenamingGroup}
-                  aria-busy={isDeletingGroup}
-                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                    isDeletingGroup || isRenamingGroup
-                      ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
-                  }`}
-                  title={
-                    isDeletingGroup
-                      ? `Deleting group "${groupLabel}"…`
-                      : isVirtualGroup
-                        ? `Delete all drones in "${groupLabel}"`
-                        : `Delete group "${groupLabel}" (and all drones inside)`
-                  }
-                  aria-label={
-                    isDeletingGroup
-                      ? `Deleting group "${groupLabel}"`
-                      : isVirtualGroup
-                        ? `Delete all drones in "${groupLabel}"`
-                        : `Delete group "${groupLabel}" (and all drones inside)`
-                  }
-                >
-                  {isDeletingGroup ? (
-                    <IconSpinner className="opacity-90" />
-                  ) : (
-                    <IconTrash className="opacity-90" />
-                  )}
-                </button>
               </>
             ) : null}
           </div>
@@ -1054,11 +1012,6 @@ type SidebarFolderTreeNodeProps = {
   onCancelFolderEditor: () => void;
   toggleSidebarGroupHidden: (target: SidebarDragGroupRef) => void;
   onOpenGroupMultiChat: (group: string) => void;
-  onDeleteGroup: (
-    group: string,
-    count: number,
-    opts?: { kind?: 'group' | 'repo'; label?: string; repoPath?: string | null },
-  ) => Promise<boolean> | boolean;
 };
 
 function SidebarFolderTreeNode({
@@ -1087,7 +1040,6 @@ function SidebarFolderTreeNode({
   onCancelFolderEditor,
   toggleSidebarGroupHidden,
   onOpenGroupMultiChat,
-  onDeleteGroup,
 }: SidebarFolderTreeNodeProps) {
   const groupRef = React.useMemo<SidebarDragGroupRef>(
     () => ({ groupId: node.groupId, group: node.path, kind: 'group' }),
@@ -1103,7 +1055,6 @@ function SidebarFolderTreeNode({
   const isHiddenGroup = hiddenSidebarGroupTokenSet.has(groupToken);
   const isSelected = selectedFolderPath === node.path;
   const canRenameGroup = !isUngroupedGroupName(node.path);
-  const canDeleteGroup = !isUngroupedGroupName(node.path);
   const showEditorInline = folderEditor?.targetPath === node.path && folderEditor.mode === 'rename';
   const showCreateInline =
     (folderEditor?.anchorPath ?? folderEditor?.parentPath) === node.path &&
@@ -1217,7 +1168,7 @@ function SidebarFolderTreeNode({
           </button>
           <div
             className={`relative flex-shrink-0 transition-[width] duration-150 ${
-              pinGroupActionsVisible ? 'w-[120px]' : 'w-0 group-hover/folder-row:w-[120px]'
+              pinGroupActionsVisible ? 'w-[92px]' : 'w-0 group-hover/folder-row:w-[92px]'
             }`}
           >
             <div
@@ -1285,31 +1236,6 @@ function SidebarFolderTreeNode({
               >
                 <IconColumns className="opacity-90" />
               </button>
-              {canDeleteGroup ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    onDeleteGroup(node.path, node.totalDroneCount, {
-                      kind: 'group',
-                      label: node.path,
-                    })
-                  }
-                  disabled={isDeletingGroup || isRenamingGroup}
-                  className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
-                    isDeletingGroup || isRenamingGroup
-                      ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
-                  }`}
-                  title={`Delete folder "${groupLabel}"`}
-                  aria-label={`Delete folder "${groupLabel}"`}
-                >
-                  {isDeletingGroup ? (
-                    <IconSpinner className="opacity-90" />
-                  ) : (
-                    <IconTrash className="opacity-90" />
-                  )}
-                </button>
-              ) : null}
             </div>
           </div>
         </div>
@@ -1345,7 +1271,6 @@ function SidebarFolderTreeNode({
               onCancelFolderEditor={onCancelFolderEditor}
               toggleSidebarGroupHidden={toggleSidebarGroupHidden}
               onOpenGroupMultiChat={onOpenGroupMultiChat}
-              onDeleteGroup={onDeleteGroup}
             />
           ))}
           {showCreateInline && folderEditor ? (
@@ -1927,14 +1852,8 @@ export function DroneSidebar({
     chatEditor,
     chatEditorInputRef,
     closeChatEditor,
-    closeCreateGroupInline,
     closeFolderEditor,
     collapsedDroneSections,
-    createGroupInlineError,
-    createGroupInputRef,
-    createGroupName,
-    createGroupTargetDroneIds,
-    creatingGroupMove,
     folderEditor,
     folderEditorInputRef,
     clearGroupedFolderSelection,
@@ -1942,15 +1861,11 @@ export function DroneSidebar({
     handleGroupedSelectDroneChat,
     handleGroupedSelectFolder,
     moveFolderIntoGroup,
-    onSubmitCreateGroupInline,
     openDroneChatCreate,
     openFolderCreate,
     selectedFolderPath,
     selectedSidebarNodeId,
     setCollapsedDroneSections,
-    setCreateGroupInlineError,
-    setCreateGroupName,
-    setCreateGroupTargetDroneIds,
     setSelectedSidebarNodeId,
     startRenameDroneChat,
     startRenameFolder,
@@ -1973,7 +1888,6 @@ export function DroneSidebar({
     onToggleGroupCollapsed,
     optimisticSidebarDronesFilteredByRepo,
     runOptimisticCreateGroup,
-    runOptimisticCreateGroupAndMove,
     runOptimisticRenameGroup,
     selectedDrone,
     setSidebarRepoScopedGroupByPath,
@@ -2011,7 +1925,6 @@ export function DroneSidebar({
   );
   const {
     activeDraggedDroneIds,
-    dragOverCreateGroup,
     dragOverGroup,
     dragOverSidebarGroup,
     dragOverUngrouped,
@@ -2021,8 +1934,6 @@ export function DroneSidebar({
     isRepoGroupingMode,
     moveFolderIntoGroup,
     runOptimisticMoveDronesToGroup,
-    setCreateGroupInlineError,
-    setCreateGroupTargetDroneIds,
     setSidebarGroupOrder,
     sidebarGroupOrder,
     sidebarGroups,
@@ -2182,11 +2093,6 @@ export function DroneSidebar({
     id: 'sidebar-ungrouped-drop',
     data: { type: 'sidebar-ungrouped-drop' },
     disabled: !sidebarDndEnabled || !showExternalMoveTargets || sidebarHasUngroupedGroup,
-  });
-  const { setNodeRef: setCreateGroupDropNodeRef } = useDroppable({
-    id: 'sidebar-create-group-drop',
-    data: { type: 'sidebar-create-group-drop' },
-    disabled: !sidebarDndEnabled || isRepoGroupingMode,
   });
   const settingsViewActive = appView === 'settings';
   const summarizeSidebarFleet = React.useCallback((drones: readonly DroneSummary[]) => {
@@ -2596,6 +2502,44 @@ export function DroneSidebar({
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) return;
+
+      if (
+        !folderEditor &&
+        !event.repeat &&
+        sidebarCapabilities.actions &&
+        event.key === 'Delete'
+      ) {
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[role="dialog"], [role="menu"]')
+        ) return;
+        if (!selectedFolderPath || !visibleSidebarFolderPathSet.has(selectedFolderPath)) return;
+        if (deletingGroups[selectedFolderPath] || renamingGroups[selectedFolderPath]) return;
+        const nodeTree = getRenderedSidebarNodeTree() ?? staticReadOnlyNodeTree;
+        const selectedFolder = nodeTree.folderNodeByPath[selectedFolderPath];
+        if (!selectedFolder) return;
+        if (
+          selectedFolder.groupKind === 'group' &&
+          isUngroupedGroupName(selectedFolder.groupPath ?? selectedFolderPath)
+        ) return;
+
+        event.preventDefault();
+        const repoPath = selectedFolder.groupKind === 'repo'
+          ? selectedFolder.path.startsWith('repo:') && selectedFolder.path !== 'repo:ungrouped'
+            ? selectedFolder.path.slice('repo:'.length)
+            : null
+          : activeRepoPath;
+        const folderPath = selectedFolderPath;
+        void handleDeleteGroup(folderPath, selectedFolder.totalDroneCount, {
+          kind: selectedFolder.groupKind,
+          label: selectedFolder.label,
+          repoPath,
+        }).then((deleted) => {
+          if (deleted) clearGroupedFolderSelection(folderPath);
+        });
+        return;
+      }
+
       const sidebarHovered = Boolean(
         document.querySelector('[data-drone-sidebar-root="true"]:hover'),
       );
@@ -2645,16 +2589,23 @@ export function DroneSidebar({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
+    activeRepoPath,
+    clearGroupedFolderSelection,
     closeFolderEditor,
     collapsedGroups,
+    deletingGroups,
     folderEditor,
+    getRenderedSidebarNodeTree,
+    handleDeleteGroup,
     isRepoGroupingMode,
     onToggleGroupCollapsed,
     requestInlineDroneRename,
+    renamingGroups,
     sidebarCapabilities.actions,
     selectedDrone,
     selectedSidebarNodeId,
     selectedFolderPath,
+    staticReadOnlyNodeTree,
     startRenameFolder,
     visibleSidebarFolderPathSet,
   ]);
@@ -3381,77 +3332,6 @@ export function DroneSidebar({
                       </div>
                     )}
                 </div>
-                {sidebarCapabilities.actions &&
-                  !isRepoGroupingMode &&
-                  (showExternalMoveTargets ||
-                    (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)) && (
-                    <div
-                      ref={setCreateGroupDropNodeRef}
-                      className={`mt-1 rounded-[var(--radius-medium)] border border-dashed px-3 py-2 transition-colors ${
-                        dragOverCreateGroup ||
-                        (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)
-                          ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-                          : 'border-[var(--border-subtle)] bg-[var(--surface-inset)]'
-                      }`}
-                    >
-                      <div
-                        className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
-                        style={{ fontFamily: 'var(--display)' }}
-                      >
-                        {createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0
-                          ? `Create new folder (${createGroupTargetDroneIds.length} drone${createGroupTargetDroneIds.length === 1 ? '' : 's'})`
-                          : 'Drop here to create a new folder'}
-                      </div>
-                      {createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0 && (
-                        <form
-                          className="mt-2 flex flex-col gap-2"
-                          onSubmit={onSubmitCreateGroupInline}
-                        >
-                          <input
-                            ref={createGroupInputRef}
-                            value={createGroupName}
-                            onChange={(event) => setCreateGroupName(event.target.value)}
-                            disabled={creatingGroupMove}
-                            maxLength={64}
-                            placeholder="Folder name"
-                            className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1.5 text-[var(--text-11)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
-                          />
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="submit"
-                              disabled={creatingGroupMove}
-                              className={`inline-flex h-7 items-center rounded px-2 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                                creatingGroupMove
-                                  ? 'cursor-not-allowed border border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                  : 'border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
-                              }`}
-                              style={{ fontFamily: 'var(--display)' }}
-                            >
-                              {creatingGroupMove ? 'Creating…' : 'Create & move'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={closeCreateGroupInline}
-                              disabled={creatingGroupMove}
-                              className={`inline-flex h-7 items-center rounded px-2 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                                creatingGroupMove
-                                  ? 'cursor-not-allowed border border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                  : 'border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-                              }`}
-                              style={{ fontFamily: 'var(--display)' }}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                          {createGroupInlineError && (
-                            <div className="text-[var(--text-10)] text-[var(--red)]">
-                              {createGroupInlineError}
-                            </div>
-                          )}
-                        </form>
-                      )}
-                    </div>
-                  )}
               </>
             )}
           </div>

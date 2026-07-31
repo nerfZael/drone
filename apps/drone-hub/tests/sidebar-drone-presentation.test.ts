@@ -95,7 +95,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(source).toContain('border-[var(--yellow-border)]');
     expect(source).toContain('bg-[var(--yellow-subtle)]');
     expect(source).toContain('text-[var(--yellow)] opacity-70');
-    expect(source).toContain('group-hover/drone:opacity-0 group-focus-within/drone:opacity-0');
+    expect(source).not.toContain('group-hover/drone:opacity-0 group-focus-within/drone:opacity-0');
     expect(source).toContain('aria-label="TODO"');
     expect(source).toContain('TODO');
   });
@@ -172,7 +172,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).toContain('text-[var(--yellow)]');
   });
 
-  test('keeps delete as the only drone hover action', () => {
+  test('keeps destructive drone actions out of the hover rail', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
         drone: drone(),
@@ -186,7 +186,8 @@ describe('desktop sidebar drone presentation', () => {
       }),
     );
 
-    expect(html).toContain('aria-label="Delete &quot;worker&quot;"');
+    expect(html).not.toContain('aria-label="Delete &quot;worker&quot;"');
+    expect(html).not.toContain('data-onboarding-id="sidebar.droneCard.actions"');
     expect(html).not.toContain('aria-label="More actions for &quot;worker&quot;"');
     expect(html).not.toContain('aria-label="Create chat on');
     expect(html).not.toContain('aria-label="Clone &quot;worker&quot;"');
@@ -255,12 +256,13 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).toContain('h-7 px-1.5');
     expect(html).not.toContain('grid-rows-[1fr_1fr]');
     expect(html).not.toContain('flex min-w-0 flex-1 flex-col');
-    expect(html).toContain('group-hover/drone:pr-7 group-focus-within/drone:pr-7');
+    expect(html).not.toContain('group-hover/drone:pr-7 group-focus-within/drone:pr-7');
+    expect(html).not.toContain('data-onboarding-id="sidebar.droneCard.actions"');
     expect(html).not.toContain('data-sidebar-drone-metadata="true"');
     expect(html).toContain('· Ready · created');
     expect(html).not.toContain('min-w-[2.75rem]');
     expect(html).not.toContain('data-sidebar-runtime');
-    expect(html).toContain('absolute right-1 top-1/2');
+    expect(html).not.toContain('absolute right-1 top-1/2');
     expect(html).not.toContain('Last message');
   });
 

@@ -384,7 +384,6 @@ export const DroneCard = React.memo(function DroneCard({
     canSetBaseImage ||
     canDelete;
   const activeOperationLabel = String(operationLabel ?? '').trim();
-  const pinActionsVisible = Boolean(pinBusy) || Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
   const [actionMenuPosition, setActionMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
   const [inlineRenameOpen, setInlineRenameOpen] = React.useState(false);
   const [inlineRenameValue, setInlineRenameValue] = React.useState('');
@@ -653,11 +652,7 @@ export const DroneCard = React.memo(function DroneCard({
       ) : null}
 
       <div
-        className={`flex min-w-0 flex-1 items-center gap-1.5 self-stretch ${
-          canDelete
-            ? 'transition-[padding] duration-150 group-hover/drone:pr-7 group-focus-within/drone:pr-7'
-            : ''
-        } ${pinActionsVisible ? 'pr-7' : ''}`}
+        className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch"
         style={taggedToDo ? { paddingRight: '3rem' } : undefined}
       >
         {leadingIcon ? <span className="inline-flex flex-shrink-0 items-center">{leadingIcon}</span> : null}
@@ -777,44 +772,13 @@ export const DroneCard = React.memo(function DroneCard({
       {taggedToDo ? (
         <span
           data-sidebar-drone-label="to-do"
-          className="pointer-events-none absolute right-1 top-1/2 inline-flex -translate-y-1/2 items-center rounded-[3px] border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-1 py-px text-[.5rem] font-[var(--weight-semibold)] uppercase leading-none tracking-[0.03em] text-[var(--yellow)] opacity-70 transition-opacity duration-150 group-hover/drone:opacity-0 group-focus-within/drone:opacity-0"
+          className="pointer-events-none absolute right-1 top-1/2 inline-flex -translate-y-1/2 items-center rounded-[3px] border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-1 py-px text-[.5rem] font-[var(--weight-semibold)] uppercase leading-none tracking-[0.03em] text-[var(--yellow)] opacity-70"
           aria-label="TODO"
         >
           TODO
         </span>
       ) : null}
 
-      {canDelete ? (
-        <div
-          data-onboarding-id="sidebar.droneCard.actions"
-          className={`absolute right-1 top-1/2 flex -translate-y-1/2 items-center transition-opacity duration-150 ${
-            pinActionsVisible
-              ? 'opacity-100 pointer-events-auto'
-              : 'opacity-0 pointer-events-none group-hover/drone:opacity-100 group-hover/drone:pointer-events-auto group-focus-within/drone:opacity-100 group-focus-within/drone:pointer-events-auto'
-          }`}
-        >
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete?.();
-            }}
-            onMouseDown={stopActionPressPropagation}
-            onPointerDown={stopActionPressPropagation}
-            disabled={Boolean(deleteDisabled)}
-            aria-busy={Boolean(deleteBusy)}
-            className={`inline-flex h-5 w-5 items-center justify-center rounded border transition-colors ${
-              deleteDisabled
-                ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-50'
-                : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:bg-[var(--danger-panel)]'
-            }`}
-            title={deleteBusy ? `Deleting "${shownName}"…` : `Delete "${shownName}"`}
-            aria-label={deleteBusy ? `Deleting "${shownName}"` : `Delete "${shownName}"`}
-          >
-            {deleteBusy ? <IconSpinner className="h-3 w-3" /> : <IconTrash className="h-3 w-3" />}
-          </button>
-        </div>
-      ) : null}
       {actionMenuPosition ? (
         <SidebarContextMenu
           x={actionMenuPosition.x}

@@ -1213,6 +1213,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     {
       id: 'delete',
       label: 'Delete group',
+      shortcut: 'Delete',
       separatorBefore: true,
       icon: deletingGroups[folderPath] ? (
         <IconSpinner className="h-3.5 w-3.5" />

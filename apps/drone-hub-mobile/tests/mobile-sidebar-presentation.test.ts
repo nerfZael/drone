@@ -106,6 +106,16 @@ describe('mobile sidebar presentation', () => {
     );
   });
 
+  test('keeps repository state indicators aligned across one- and two-digit counts', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('fleetStateText: {\n    minWidth: 11,');
+    expect(source).toContain("fontFamily: 'monospace',\n    textAlign: 'left',");
+  });
+
   test('derives the selected drone approval state from the active native thread', () => {
     const source = readFileSync(
       new URL('../src/screens/DronesScreen.tsx', import.meta.url),

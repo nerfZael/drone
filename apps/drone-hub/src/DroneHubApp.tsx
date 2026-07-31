@@ -35,26 +35,24 @@ function LocalDroneHubAppContent() {
   const sidebar = <DroneSidebar {...sidebarProps} />;
   const workspace = <DroneHubWorkspaceContent {...workspaceContentProps} />;
   return (
-    <AppConfirmDialogProvider>
-      <DroneHubDndProvider>
-        <div data-drone-app-shell="true" className="flex h-screen overflow-hidden fixed inset-0">
-          {sidebarDockSide === 'right' ? (
-            <>
-              {workspace}
-              {sidebar}
-            </>
-          ) : (
-            <>
-              {sidebar}
-              {workspace}
-            </>
-          )}
-          <DroneHubOverlays {...overlaysProps} />
-          <GuidedOnboarding />
-          <FrontendUpdatePrompt />
-        </div>
-      </DroneHubDndProvider>
-    </AppConfirmDialogProvider>
+    <DroneHubDndProvider>
+      <div data-drone-app-shell="true" className="flex h-screen overflow-hidden fixed inset-0">
+        {sidebarDockSide === 'right' ? (
+          <>
+            {workspace}
+            {sidebar}
+          </>
+        ) : (
+          <>
+            {sidebar}
+            {workspace}
+          </>
+        )}
+        <DroneHubOverlays {...overlaysProps} />
+        <GuidedOnboarding />
+        <FrontendUpdatePrompt />
+      </div>
+    </DroneHubDndProvider>
   );
 }
 
@@ -75,7 +73,9 @@ function DroneHubAppContent() {
 export default function DroneHubApp() {
   return (
     <DesktopDeviceProvider>
-      <DroneHubAppContent />
+      <AppConfirmDialogProvider>
+        <DroneHubAppContent />
+      </AppConfirmDialogProvider>
     </DesktopDeviceProvider>
   );
 }

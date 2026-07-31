@@ -11,7 +11,6 @@ import {
 } from './sidebar-node-order';
 import type { SidebarNodeTreeModel } from './sidebar-node-tree';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
-import type { MoveDronesToGroupResult } from './use-group-management';
 
 export type FolderEditorState = {
   mode: 'create' | 'rename';
@@ -65,10 +64,6 @@ type UseSidebarInteractionsArgs = {
     group: string,
     opts?: { placement?: 'start' | 'end' },
   ) => Promise<CreateGroupResult>;
-  runOptimisticCreateGroupAndMove: (
-    group: string,
-    droneIds: string[],
-  ) => Promise<MoveDronesToGroupResult>;
   runOptimisticRenameGroup: (group: string, nextName?: string) => Promise<boolean>;
   selectedDrone: string | null;
   setSidebarRepoScopedGroupByPath: React.Dispatch<React.SetStateAction<Record<string, string>>>;
@@ -91,7 +86,6 @@ export function useSidebarInteractions({
   onToggleGroupCollapsed,
   optimisticSidebarDronesFilteredByRepo,
   runOptimisticCreateGroup,
-  runOptimisticCreateGroupAndMove,
   runOptimisticRenameGroup,
   selectedDrone,
   setSidebarRepoScopedGroupByPath,
@@ -100,27 +94,13 @@ export function useSidebarInteractions({
   sidebarDroneById,
   visibleSidebarFolderPathSet,
 }: UseSidebarInteractionsArgs) {
-  const [createGroupTargetDroneIds, setCreateGroupTargetDroneIds] = React.useState<string[] | null>(null);
-  const [createGroupName, setCreateGroupName] = React.useState('');
-  const [createGroupInlineError, setCreateGroupInlineError] = React.useState<string | null>(null);
-  const [creatingGroupMove, setCreatingGroupMove] = React.useState(false);
   const [selectedSidebarNodeId, setSelectedSidebarNodeId] = React.useState<string | null>(null);
   const [selectedFolderPath, setSelectedFolderPath] = React.useState<string | null>(null);
   const [folderEditor, setFolderEditor] = React.useState<FolderEditorState | null>(null);
   const [chatEditor, setChatEditor] = React.useState<ChatEditorState | null>(null);
   const [collapsedDroneSections, setCollapsedDroneSections] = React.useState<Record<string, boolean>>({});
-  const createGroupInputRef = React.useRef<HTMLInputElement | null>(null);
   const folderEditorInputRef = React.useRef<HTMLInputElement>(null);
   const chatEditorInputRef = React.useRef<HTMLInputElement>(null);
-
-  React.useEffect(() => {
-    if (!createGroupTargetDroneIds || createGroupTargetDroneIds.length === 0) return;
-    const id = window.requestAnimationFrame(() => {
-      createGroupInputRef.current?.focus();
-      createGroupInputRef.current?.select();
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [createGroupTargetDroneIds]);
 
   const folderEditorFocusKey = React.useMemo(
     () =>
@@ -152,13 +132,6 @@ export function useSidebarInteractions({
     });
     return () => window.cancelAnimationFrame(id);
   }, [chatEditorFocusKey]);
-
-  const closeCreateGroupInline = React.useCallback(() => {
-    if (creatingGroupMove) return;
-    setCreateGroupTargetDroneIds(null);
-    setCreateGroupName('');
-    setCreateGroupInlineError(null);
-  }, [creatingGroupMove]);
 
   const closeFolderEditor = React.useCallback(() => {
     setFolderEditor(null);
@@ -267,41 +240,6 @@ export function useSidebarInteractions({
       pending: false,
     });
   }, []);
-
-  const onSubmitCreateGroupInline = React.useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      if (creatingGroupMove) return;
-      const ids = createGroupTargetDroneIds ?? [];
-      const group = String(createGroupName ?? '').trim();
-      if (!group) {
-        setCreateGroupInlineError('Group name is required.');
-        return;
-      }
-      if (ids.length === 0) {
-        setCreateGroupInlineError('No drones selected for group move.');
-        return;
-      }
-
-      setCreatingGroupMove(true);
-      setCreateGroupInlineError(null);
-      try {
-        const result = await runOptimisticCreateGroupAndMove(group, ids);
-        if (!result.ok) {
-          setCreateGroupInlineError(result.error || 'Failed to create group.');
-          return;
-        }
-        setCreateGroupTargetDroneIds(null);
-        setCreateGroupName('');
-      } catch (error: any) {
-        const msg = String(error?.message ?? error ?? '').trim();
-        setCreateGroupInlineError(msg || 'Failed to create group.');
-      } finally {
-        setCreatingGroupMove(false);
-      }
-    },
-    [createGroupName, createGroupTargetDroneIds, creatingGroupMove, runOptimisticCreateGroupAndMove],
-  );
 
   const submitFolderEditor = React.useCallback(async () => {
     const draft = folderEditor;
@@ -582,14 +520,8 @@ export function useSidebarInteractions({
     chatEditor,
     chatEditorInputRef,
     closeChatEditor,
-    closeCreateGroupInline,
     closeFolderEditor,
     collapsedDroneSections,
-    createGroupInlineError,
-    createGroupInputRef,
-    createGroupName,
-    createGroupTargetDroneIds,
-    creatingGroupMove,
     folderEditor,
     folderEditorInputRef,
     clearGroupedFolderSelection,
@@ -597,15 +529,11 @@ export function useSidebarInteractions({
     handleGroupedSelectDroneChat,
     handleGroupedSelectFolder,
     moveFolderIntoGroup,
-    onSubmitCreateGroupInline,
     openDroneChatCreate,
     openFolderCreate,
     selectedFolderPath,
     selectedSidebarNodeId,
     setCollapsedDroneSections,
-    setCreateGroupInlineError,
-    setCreateGroupName,
-    setCreateGroupTargetDroneIds,
     setSelectedSidebarNodeId,
     startRenameDroneChat,
     startRenameFolder,

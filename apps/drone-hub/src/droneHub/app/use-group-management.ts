@@ -2,7 +2,9 @@ import React from 'react';
 import { requestJson } from '../http';
 import type { DroneSummary } from '../types';
 import { isUngroupedGroupName } from '../../domain';
+import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { isNotFoundError } from './hooks';
+import { buildSidebarGroupDeleteConfirmation } from './sidebar-group-delete-confirmation';
 import {
   renameSidebarEntryOrderMapKeysByPrefix,
   renameSidebarGroupTokenListByPrefix,
@@ -69,6 +71,7 @@ export function useGroupManagement({
   const [movingDroneGroups, setMovingDroneGroups] = React.useState(false);
   const [deletingGroups, setDeletingGroups] = React.useState<Record<string, boolean>>({});
   const [renamingGroups, setRenamingGroups] = React.useState<Record<string, boolean>>({});
+  const confirmDelete = useAppConfirmDialog();
 
   const shouldConfirmDelete = React.useCallback(() => !autoDelete, [autoDelete]);
 
@@ -175,14 +178,12 @@ export function useGroupManagement({
           ? String(opts?.repoPath ?? activeRepoPath ?? '').trim()
           : '';
       if (shouldConfirmDelete()) {
-        const n = typeof countHint === 'number' && Number.isFinite(countHint) ? countHint : null;
-        const ok = window.confirm(targetKind === 'repo'
-          ? targetRepoPath
-            ? `Are you sure you want to delete repo group "${groupLabel}"${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones attached to:\n${targetRepoPath}`
-            : `Are you sure you want to delete ungrouped repo drones${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones not attached to a repo path.`
-          : scopedRepoPath
-            ? `Are you sure you want to delete group "${group}"${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''} from this repo?\n\nThis will delete ONLY drones inside the group attached to:\n${scopedRepoPath}`
-            : `Are you sure you want to delete group "${group}"${n != null ? ` (${n} drone${n === 1 ? '' : 's'})` : ''}?\n\nThis will delete ALL drones inside the group (containers + registry entries).`);
+        const ok = await confirmDelete(buildSidebarGroupDeleteConfirmation({
+          kind: targetKind,
+          label: groupLabel,
+          countHint,
+          repoPath: targetKind === 'repo' ? targetRepoPath : scopedRepoPath,
+        }));
         if (!ok) return false;
       }
       const wantsUngroupedGroup = targetKind === 'group' && isUngroupedGroupName(group);
@@ -330,6 +331,7 @@ export function useGroupManagement({
       setSidebarNodeOrderByParent,
       setSidebarGroupOrder,
       setHiddenSidebarGroups,
+      confirmDelete,
       shouldConfirmDelete,
     ],
   );

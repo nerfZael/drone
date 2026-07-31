@@ -57,9 +57,43 @@ describe('sidebar group creation actions', () => {
     expect(treeSource).toContain("label: isHiddenGroup ? 'Unhide group' : 'Hide group'");
     expect(treeSource).toContain("label: 'Open multi-chat'");
     expect(treeSource).toContain("label: 'Delete group'");
+    expect(treeSource).toContain("shortcut: 'Delete'");
     expect(treeSource).toContain('shortcutBindings.createDraftGroup');
     expect(treeSource).toContain('shortcutBindings.openHoveredGroupMultiChat');
     expect(treeSource).toContain('separatorBefore: true');
     expect(treeSource).not.toContain('data-sidebar-folder-actions');
+  });
+
+  test('deletes a selected group with the Delete key without requiring pointer hover', () => {
+    const source = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+
+    const deleteShortcutIndex = source.indexOf("event.key === 'Delete'");
+    const hoverGuardIndex = source.indexOf(
+      "document.querySelector('[data-drone-sidebar-root=\"true\"]:hover')",
+      deleteShortcutIndex,
+    );
+    expect(deleteShortcutIndex).toBeGreaterThan(-1);
+    expect(hoverGuardIndex).toBeGreaterThan(deleteShortcutIndex);
+    expect(source).toContain('handleDeleteGroup(folderPath, selectedFolder.totalDroneCount');
+    expect(source).not.toContain('<IconTrash className="opacity-90" />');
+  });
+
+  test('does not offer folder creation as a drone drop target', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+    const dndSource = readFileSync(
+      new URL('../src/droneHub/app/use-sidebar-root-dnd.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(sidebarSource).not.toContain('Drop here to create a new folder');
+    expect(sidebarSource).not.toContain('sidebar-create-group-drop');
+    expect(dndSource).not.toContain('sidebar-create-group-drop');
+    expect(dndSource).not.toContain('dragOverCreateGroup');
   });
 });

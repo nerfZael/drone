@@ -291,7 +291,7 @@ describe('sidebar presentation', () => {
       'className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center leading-none"',
     );
     expect(sidebarSource).toContain(
-      'className="relative top-px inline-flex h-3 items-center leading-none"',
+      'className="relative top-px inline-flex h-3 min-w-[2ch] items-center leading-none tabular-nums"',
     );
   });
 });
