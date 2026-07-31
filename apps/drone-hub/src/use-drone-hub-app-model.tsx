@@ -30,6 +30,10 @@ import type { DroneHubWorkspaceContentProps } from './droneHub/app/DroneHubWorks
 import { RightPanelTabContent } from './droneHub/app/RightPanelTabContent';
 import { dispatchFleetAssignmentUpdated } from './droneHub/app/fleet-assignment-events';
 import { assignFleetTargets } from './droneHub/fleet/fleet-api';
+import {
+  applySpeechPlaybackSettings,
+  enqueueBase64SpeechAudio,
+} from './droneHub/media/speech-playback';
 import { useHubLogs } from './droneHub/app/use-hub-logs';
 import { useCreateDraftWorkflowState } from './droneHub/app/use-create-draft-workflow-store';
 import { useAgentsMdLibraryCatalog } from './droneHub/app/use-agents-md-library-catalog';
@@ -108,6 +112,7 @@ import {
   useDroneHubWorkspaceContentProps,
 } from './droneHub/app/use-drone-hub-view-props';
 import type { MarkdownFileReference } from './droneHub/chat/MarkdownMessage';
+import type { ChatSendContext, ChatSendPayload } from './droneHub/chat';
 import { ASSISTANT_OPEN_DRONE_CHAT_EVENT, type AssistantOpenDroneChatEventDetail } from './droneHub/assistant/open-drone-chat-event';
 import { buildDroneHubTaskQueueSpec, type DroneHubTaskSpawnMode } from './droneHub/chat/drone-hub-task-spawn';
 import {
@@ -116,6 +121,7 @@ import {
   isSuggestedChatRenameConflict,
   isSuggestedChatRenameRetriable,
 } from './droneHub/app/chat-name-suggestions';
+import { sendDroneChatPrompt } from './droneHub/app/chat-api';
 import {
   chatInputDraftKeyForDroneChat,
   droneHomePath,
@@ -1450,12 +1456,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
   const selectDroneCard = React.useCallback(
     (droneIdRaw: string, opts?: DroneSelectionClickOptions) => {
+      if (!opts?.toggle && !opts?.range) setSelectedGroupMultiChat(null);
       selectDroneCardBase(droneIdRaw, opts);
       if (!opts?.toggle && !opts?.range) {
         setChatOpenRequestRevision((revision) => revision + 1);
       }
     },
-    [selectDroneCardBase],
+    [selectDroneCardBase, setSelectedGroupMultiChat],
   );
   const selectDroneChat = React.useCallback(
     (droneIdRaw: string, chatNameRaw: string) => {
@@ -1616,6 +1623,34 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
       const action = data?.uiAction && typeof data.uiAction === 'object' ? data.uiAction : null;
       if (!action) return;
+      if (action.type === 'play_audio') {
+        void enqueueBase64SpeechAudio({
+          data: action.data,
+          mimeType: action.mimeType,
+          volume: action.volume,
+        }).catch((error) => {
+          showShortcutToast(
+            String(error instanceof Error ? error.message : error ?? 'Audio playback was blocked.'),
+            'Speech playback failed',
+          );
+        });
+        return;
+      }
+      if (action.type === 'speech_error') {
+        showShortcutToast(
+          String(action.message ?? '').trim() || 'GROQ could not synthesize the requested speech.',
+          'Speech synthesis failed',
+        );
+        return;
+      }
+      if (action.type === 'speech_settings_changed') {
+        applySpeechPlaybackSettings({
+          enabled: action.enabled,
+          muted: action.muted,
+          volume: action.volume,
+        });
+        return;
+      }
       if (action.type === 'reload_ui_preferences') {
         void reloadUiPreferences();
         return;
@@ -1667,7 +1702,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       closed = true;
       source.close();
     };
-  }, [expandGroupsForDroneIds, reloadPinnedDrones, reloadUiPreferences, requestRightPanelTab, rightPanelBottomTab, rightPanelTab, selectDroneChat]);
+  }, [expandGroupsForDroneIds, reloadPinnedDrones, reloadUiPreferences, requestRightPanelTab, rightPanelBottomTab, rightPanelTab, selectDroneChat, showShortcutToast]);
   React.useEffect(
     () => () => {
       if (typeof window === 'undefined') return;
@@ -3220,7 +3255,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     async (
       drone: DroneSummary,
       chatNameRaw: string,
-      opts?: { draft?: boolean },
+      opts?: { draft?: boolean; select?: boolean; copyFromChat?: string },
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const droneId = String(drone?.id ?? '').trim();
       if (!droneId) return { ok: false, error: 'Missing drone id.' };
@@ -3229,10 +3264,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (!chatName) {
         return { ok: false, error: 'Chat name is required.' };
       }
-      const copyFromChat =
+      const requestedCopyFromChat = String(opts?.copyFromChat ?? '').trim();
+      const copyFromChat = requestedCopyFromChat || (
         selectedDrone === droneId
           ? (String(selectedChat ?? '').trim() || 'default')
-          : (availableChats.includes('default') ? 'default' : availableChats[0] ?? 'default');
+          : (availableChats.includes('default') ? 'default' : availableChats[0] ?? 'default')
+      );
       try {
         await requestJson<{ ok: true }>(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
           method: 'POST',
@@ -3243,8 +3280,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             ...(opts?.draft === true ? { draft: true } : {}),
           }),
         });
-        setSelectedDrone(droneId);
-        setSelectedChat(chatName);
+        if (opts?.select !== false) {
+          setSelectedDrone(droneId);
+          setSelectedChat(chatName);
+        }
         return { ok: true, chatName, error: null };
       } catch (err: any) {
         return { ok: false, error: err?.message ?? String(err) };
@@ -3252,18 +3291,99 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [requestJson, selectedChat, selectedDrone, setSelectedChat, setSelectedDrone],
   );
+  const createUntitledDroneChat = React.useCallback(
+    async (
+      drone: DroneSummary,
+      opts?: { select?: boolean; copyFromChat?: string },
+    ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
+      const latestDrone = droneByIdRef.current[drone.id] ?? drone;
+      const unavailableChatNames = [...(latestDrone.chats ?? [])];
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const candidate = suggestNextDroneChatName(unavailableChatNames);
+        const created = await createDroneChat(latestDrone, candidate, opts);
+        if (created.ok) return { ok: true, chatName: candidate, error: null };
+        const createError = String(created.error ?? '').trim();
+        if (!/already exists/i.test(createError)) {
+          return { ok: false, error: createError || 'The new chat could not be created.' };
+        }
+        unavailableChatNames.push(candidate);
+      }
+      return { ok: false, error: 'Could not find an available untitled chat name.' };
+    },
+    [createDroneChat],
+  );
+  const sendPromptInNewDroneChat = React.useCallback(
+    async (
+      drone: DroneSummary,
+      payload: ChatSendPayload,
+      context: ChatSendContext,
+      sourceChatNameRaw?: string,
+    ): Promise<boolean> => {
+      const droneId = String(drone?.id ?? '').trim();
+      const prompt = String(payload?.prompt ?? '').trim();
+      const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
+      if (!droneId || (!prompt && attachments.length === 0)) return false;
+
+      const latestDrone = droneByIdRef.current[droneId] ?? drone;
+      const requestedSourceChatName = String(sourceChatNameRaw ?? '').trim();
+      const sourceChatName = resolveChatNameForDrone(
+        latestDrone,
+        requestedSourceChatName || selectedChat,
+      );
+      const created = await createUntitledDroneChat(latestDrone, {
+        select: false,
+        copyFromChat: sourceChatName,
+      });
+      const chatName = String(created.chatName ?? '').trim();
+      if (!created.ok || !chatName) {
+        showShortcutToast(
+          created.error || 'The new chat could not be created.',
+          'New chat failed',
+        );
+        return false;
+      }
+
+      try {
+        await sendDroneChatPrompt(requestJson, {
+          droneId,
+          chatName,
+          prompt,
+          attachments,
+          deliveryMode: context.deliveryMode,
+          autoRenameHandledByClient: Boolean(prompt),
+        });
+        selectDroneChat(droneId, chatName);
+        if (prompt) void suggestAndRenameDroneChatFromMessage(droneId, chatName, prompt);
+        return true;
+      } catch (error: any) {
+        showShortcutToast(
+          `Created "${chatName}", but could not send the message: ${error?.message ?? String(error)}`,
+          'Message not sent',
+        );
+        return false;
+      }
+    },
+    [
+      createUntitledDroneChat,
+      requestJson,
+      selectDroneChat,
+      selectedChat,
+      showShortcutToast,
+      suggestAndRenameDroneChatFromMessage,
+    ],
+  );
   const createDroneChatFromShortcut = React.useCallback(async (): Promise<boolean> => {
     if (!currentDrone) return false;
     const sourceChatName = resolveChatNameForDrone(currentDrone, selectedChat);
     const sourceDraftKey = chatInputDraftKeyForDroneChat(currentDrone.id, sourceChatName);
     const sourcePrompt = String(useDroneHubUiStore.getState().chatInputDrafts[sourceDraftKey] ?? '').trim();
-    const chatName = suggestNextDroneChatName(currentDrone.chats);
-    const result = await createDroneChat(currentDrone, chatName);
-    if (result.ok && sourcePrompt) {
+    const result = await createUntitledDroneChat(currentDrone, { copyFromChat: sourceChatName });
+    const chatName = String(result.chatName ?? '').trim();
+    if (result.ok && chatName && sourcePrompt) {
       void suggestAndRenameDroneChatFromMessage(currentDrone.id, chatName, sourcePrompt);
     }
     return result.ok === true;
-  }, [createDroneChat, currentDrone, selectedChat, suggestAndRenameDroneChatFromMessage]);
+  }, [createUntitledDroneChat, currentDrone, selectedChat, suggestAndRenameDroneChatFromMessage]);
   const toggleSelectedDronePinnedFromShortcut = React.useCallback((): boolean => {
     if (selectedDronePinShortcutBusyRef.current) return true;
     const mutation = resolveSelectedDronePinMutation({
@@ -4070,6 +4190,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     groupBroadcastPromptError,
     groupBroadcastSending,
     sendGroupBroadcastPrompt,
+    sendPromptInNewDroneChat,
     handleAutoRenameChatFromFirstPrompt,
     publishSelectedDraft,
     publishingDraft,

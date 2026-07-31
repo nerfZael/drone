@@ -96,6 +96,9 @@ export type AssistantUiAction =
   | { type: 'highlight_drones'; droneIds: string[]; durationMs: number; at: string }
   | { type: 'open_whiteboard'; whiteboardId: string; at: string }
   | { type: 'close_whiteboard'; at: string }
+  | { type: 'play_audio'; jobId: string; data: string; mimeType: 'audio/wav'; volume: number; at: string }
+  | { type: 'speech_error'; jobId: string; message: string; at: string }
+  | { type: 'speech_settings_changed'; enabled: boolean; muted: boolean; volume: number; at: string }
   | { type: 'reload_ui_preferences'; at: string }
   | { type: 'reload_pinned_drones'; at: string };
 

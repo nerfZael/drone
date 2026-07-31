@@ -1164,6 +1164,7 @@ export class HubAssistantService {
     thinkingLevel: 'off',
   };
   private defaultEnabledTools = [...ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES];
+  private speechToolEnabled = true;
   private changeSequence = 0;
   private readonly changeListeners = new Set<(event: AssistantChangeEvent) => void>();
   private readonly approvals = new Map<string, AssistantApproval>();
@@ -1187,6 +1188,12 @@ export class HubAssistantService {
     delegate: (threadId: string, approvalId: string, approved: boolean) => Promise<void>,
   ): void {
     this.approvalDecisionDelegate = delegate;
+  }
+
+  setSpeechToolEnabled(enabled: boolean): void {
+    if (this.speechToolEnabled === enabled) return;
+    this.speechToolEnabled = enabled;
+    this.emitChange('speech_settings_changed');
   }
 
   async notifyCanonicalHistoryChanged(threadId: string): Promise<void> {
@@ -2232,6 +2239,7 @@ export class HubAssistantService {
       workspaces.some((workspace) => workspace.capabilities.includes('read')) &&
       workspaces.some((workspace) => workspace.capabilities.includes('write'));
     return ASSISTANT_TOOL_SUMMARIES.filter((tool) => {
+      if (tool.name === 'speak' && !this.speechToolEnabled) return false;
       if (tool.name === 'transfer_files') return canTransfer;
       if (multiTargetTools.has(tool.name)) return workspaceCount > 1;
       const capability =

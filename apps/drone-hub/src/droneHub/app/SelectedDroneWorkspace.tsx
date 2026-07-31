@@ -562,6 +562,7 @@ type SelectedDroneWorkspaceProps = {
   promptError: string | null;
   sendingPrompt: boolean;
   sendPromptText: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
+  onSendPromptInNewChat: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   publishSelectedDraft: () => Promise<boolean>;
   publishingDraft: boolean;
   canStopResponse: boolean;
@@ -667,6 +668,7 @@ export function SelectedDroneWorkspace({
   promptError,
   sendingPrompt,
   sendPromptText,
+  onSendPromptInNewChat,
   publishSelectedDraft,
   publishingDraft,
   canStopResponse,
@@ -2131,6 +2133,7 @@ export function SelectedDroneWorkspace({
                     : null
                 }
                 onStartupPromptReconciled={() => clearStartupSeedForDrone(currentDrone.id)}
+                onSendPromptInNewChat={onSendPromptInNewChat}
                 messageFeatures={{
                   onSpawnTask: spawnCurrentDroneHubTask,
                   linkedPullRequestContext,
@@ -2249,6 +2252,7 @@ export function SelectedDroneWorkspace({
                 if (sent && chatUiMode === 'transcript') scrollTranscriptToBottom({ force: true });
                 return sent;
               }}
+              onSendInNewChat={onSendPromptInNewChat}
             />
           ) : null}
           {fileOpenToast ? (

@@ -9,6 +9,7 @@ import { createInProcessDroneHubMcpClient } from '../src/hub/assistant/in-proces
 import { normalizeMcpChatAccessScope } from '../src/hub/mcp-chat-access';
 import { authorizeDroneHubMcpTool, imageToolResult } from '../src/hub/mcp-server';
 import { droneStatusSummary } from '../src/hub/mcp-summaries';
+import { upsertStoredSpeechSettings } from '../src/hub/hub-settings';
 import { withTempDroneDataDir } from './test-helpers';
 
 describe('Drone Hub MCP server summaries', () => {
@@ -186,6 +187,20 @@ describe('Drone Hub assistant MCP transport', () => {
       const catalogNames = catalog.tools.map((tool) => tool.name).sort();
       const displayedMcpNames = ASSISTANT_TOOL_SUMMARIES.filter((tool) => tool.group?.kind === 'mcp' && tool.group.id === 'drone-hub').map((tool) => tool.name).sort();
       expect(displayedMcpNames).toEqual(catalogNames);
+      await client.close();
+    });
+  });
+
+  test('hides speak from new Built-in MCP catalogs when speech is disabled globally', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-speech-disabled-', async () => {
+      await upsertStoredSpeechSettings({ enabled: false });
+      const client = await createInProcessDroneHubMcpClient({
+        correlationId: 'thread-speech-disabled',
+        allowedDroneRefs: [],
+        allowedWriteDroneRefs: [],
+        allowedDroneIds: [],
+      });
+      expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain('speak');
       await client.close();
     });
   });

@@ -17,12 +17,16 @@ function shortcut(key: string, overrides: Partial<Parameters<typeof chatSendShor
 describe('chat send shortcuts', () => {
   test('sends Enter as ASAP', () => {
     expect(shortcut('Enter')).toBe('asap');
+    expect(shortcut('Enter', { altKey: true })).toBe('asap');
   });
 
-  test('queues with Tab, Ctrl+Enter, or Command+Enter', () => {
+  test('queues with Tab', () => {
     expect(shortcut('Tab')).toBe('queue');
-    expect(shortcut('Enter', { ctrlKey: true })).toBe('queue');
-    expect(shortcut('Enter', { metaKey: true })).toBe('queue');
+  });
+
+  test('starts a new chat with Ctrl+Enter or Command+Enter', () => {
+    expect(shortcut('Enter', { ctrlKey: true })).toBe('new-chat');
+    expect(shortcut('Enter', { metaKey: true })).toBe('new-chat');
   });
 
   test('keeps Shift+Enter and Shift+Tab available to the editor', () => {

@@ -6,9 +6,12 @@ describe('chat auto rename', () => {
   test('only recognizes untouched generated chat names', () => {
     expect(isGeneratedChatName('chat-2')).toBe(true);
     expect(isGeneratedChatName('chat-42')).toBe(true);
+    expect(isGeneratedChatName('Untitled 1')).toBe(true);
+    expect(isGeneratedChatName('Untitled 42')).toBe(true);
     expect(isGeneratedChatName('default')).toBe(false);
     expect(isGeneratedChatName('chat-0')).toBe(true);
     expect(isGeneratedChatName('Chat-2')).toBe(false);
+    expect(isGeneratedChatName('untitled 2')).toBe(false);
     expect(isGeneratedChatName('chat-2-notes')).toBe(false);
     expect(isGeneratedChatName('my-chat-2')).toBe(false);
   });

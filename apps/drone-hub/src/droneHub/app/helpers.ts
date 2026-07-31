@@ -10,6 +10,7 @@ import {
   parseIsoTimestampMs,
 } from '@drone/hub-model/sidebar';
 import { isDroneProvisioningPhase } from '../hub-phase';
+import { allocateUntitledDisplayName } from './name-helpers';
 
 export { parseIsoTimestampMs };
 
@@ -87,22 +88,7 @@ export function chatInputDraftKeyForDroneChat(droneIdRaw: string, chatNameRaw: s
 }
 
 export function suggestNextDroneChatName(chats: readonly string[] | null | undefined): string {
-  const availableChats = Array.isArray(chats) ? chats : [];
-  const taken = new Set(
-    availableChats
-      .map((chat) => String(chat ?? '').trim())
-      .filter(Boolean),
-  );
-  let nextIndex = Math.max(1, taken.size + 1);
-  for (const chat of taken) {
-    const match = chat.match(/^chat-(\d+)$/i);
-    if (!match) continue;
-    const index = Number(match[1]);
-    if (!Number.isFinite(index) || index < 1) continue;
-    nextIndex = Math.max(nextIndex, index + 1);
-  }
-  while (taken.has(`chat-${nextIndex}`)) nextIndex += 1;
-  return `chat-${nextIndex}`;
+  return allocateUntitledDisplayName(Array.isArray(chats) ? chats : []);
 }
 
 export function newDraftChatFocusKey(nowMs: number = Date.now(), randomSeed: number = Math.random()): string {

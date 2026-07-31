@@ -45,6 +45,9 @@ export interface SettingsRouteDependencies {
   resolveFilesystemSettingsResponse: ServiceFunction;
   parseFilesystemUploadMaxBytes: ServiceFunction;
   upsertStoredFilesystemSettings: ServiceFunction;
+  resolveSpeechSettingsResponse: ServiceFunction;
+  upsertStoredSpeechSettings: ServiceFunction;
+  notifySpeechSettingsChanged: ServiceFunction;
   FILESYSTEM_UPLOAD_MAX_BYTES_MIN: number;
   FILESYSTEM_UPLOAD_MAX_BYTES_MAX: number;
   resolveRegistryBackupStatusResponse: ServiceFunction;
@@ -114,6 +117,9 @@ export function registerSettingsRoutes(
     resolveFilesystemSettingsResponse,
     parseFilesystemUploadMaxBytes,
     upsertStoredFilesystemSettings,
+    resolveSpeechSettingsResponse,
+    upsertStoredSpeechSettings,
+    notifySpeechSettingsChanged,
     FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
     FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
     resolveRegistryBackupStatusResponse,
@@ -317,6 +323,27 @@ export function registerSettingsRoutes(
     }
     await upsertStoredFilesystemSettings({ uploadMaxBytes });
     respond(200, await resolveFilesystemSettingsResponse());
+  });
+
+  apiRouter.get('/api/settings/speech', async ({ json: respond }) => {
+    respond(200, await resolveSpeechSettingsResponse());
+  });
+
+  apiRouter.post('/api/settings/speech', async ({ readJson, fail, json: respond }) => {
+    const body = await readJson<any>();
+    try {
+      await upsertStoredSpeechSettings({
+        enabled: body?.enabled,
+        muted: body?.muted,
+        volume: body?.volume,
+        voice: body?.voice,
+      });
+      const settings = await resolveSpeechSettingsResponse();
+      notifySpeechSettingsChanged(settings.speech);
+      respond(200, settings);
+    } catch (error: any) {
+      fail(400, error?.message ?? String(error));
+    }
   });
 
   apiRouter.get('/api/settings/backups', async ({ json: respond }) => {
