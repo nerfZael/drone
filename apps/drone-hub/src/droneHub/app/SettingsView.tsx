@@ -25,6 +25,7 @@ import { useMcpServers } from './use-mcp-servers';
 import { useProfileSettings } from './use-profile-settings';
 import { useRegistryBackupSettings } from './use-registry-backup-settings';
 import { useSkillLibrary } from './use-skill-library';
+import { useSpeechSettings } from './use-speech-settings';
 import { useSyncSets } from './use-sync-sets';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
@@ -78,6 +79,7 @@ export function SettingsView({
   const skillLibrary = useSkillLibrary(requestJson);
   const mcpServers = useMcpServers(requestJson);
   const filesystem = useFilesystemSettings(requestJson);
+  const speech = useSpeechSettings(requestJson);
   const syncSets = useSyncSets(requestJson);
   const profile = useProfileSettings(requestJson);
   const backups = useRegistryBackupSettings(requestJson);
@@ -88,6 +90,7 @@ export function SettingsView({
     llm.llmSettingsLoading ||
     deleteAction.deleteSettingsLoading ||
     filesystem.filesystemSettingsLoading ||
+    speech.speechSettingsLoading ||
     syncSets.syncSetsLoading ||
     profile.profileSettingsLoading ||
     backups.backupSettingsLoading ||
@@ -119,6 +122,7 @@ export function SettingsView({
     mcpServers.mcpAccessTokensSaving ||
     deleteAction.savingDeleteSettings ||
     filesystem.savingFilesystemSettings ||
+    speech.speechSettingsSaving ||
     syncSets.creatingSyncSet ||
     backups.savingBackupSettings ||
     backups.runningBackup ||
@@ -165,6 +169,7 @@ export function SettingsView({
     void github.loadGithubSettings();
     void deleteAction.loadDeleteSettings();
     void filesystem.loadFilesystemSettings();
+    void speech.loadSpeechSettings();
     void syncSets.loadSyncSets();
     void agents.loadAgentsSettings();
     void deleteAction.loadArchivedDrones();
@@ -175,7 +180,7 @@ export function SettingsView({
     void skillLibrary.loadSkills();
     void skillLibrary.loadSkillSources();
     void mcpServers.loadMcpServers();
-  }, [agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, filesystem, github, hubLogsState, llm, mcpServers, profile, skillLibrary, syncSets]);
+  }, [agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, filesystem, github, hubLogsState, llm, mcpServers, profile, skillLibrary, speech, syncSets]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
@@ -184,6 +189,7 @@ export function SettingsView({
           github={github}
           llm={llm}
           filesystem={filesystem}
+          speech={speech}
           onReplayOnboarding={onReplayOnboarding}
           onResetOnboarding={onResetOnboarding}
         />

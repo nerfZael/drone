@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
@@ -15,6 +16,7 @@ import type { McpTokenIdentity } from './mcp-tokens';
 
 import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameSync } from '../host/profiles';
 import { McpIdleSubscriptionStore } from './assistant/mcp-idle-subscription-store';
+import { GROQ_SPEECH_MAX_CHARS, GROQ_SPEECH_VOICES } from './groq-speech';
 import { droneSummary } from './mcp-summaries';
 import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
 import { isWorkflowChildDroneEntry } from './workflows/workflow-child-drone-metadata';
@@ -1155,6 +1157,8 @@ function agentFromPreferenceKey(value: string) {
 type McpToolRegistrationContext = {
   principal: McpTokenIdentity;
   nativeThreadId?: string;
+  speechEnabled?: boolean;
+  onSpeechToolRegistered?: (tool: RegisteredTool) => void;
 };
 
 function chatPrincipal(
@@ -1486,6 +1490,28 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     const response = await emitUiAction({ type: 'highlight_drones', droneIds, durationMs });
     return toolResult({ ok: true, droneIds, durationMs, uiAction: response?.uiAction ?? null });
   });
+
+  const speechTool = server.registerTool('speak', {
+    title: 'Speak',
+    description:
+      'Queue text-to-speech with GROQ and play it in the open Drone Hub UI. Returns immediately while synthesis and playback continue in the background.',
+    inputSchema: {
+      text: z.string().min(1).max(GROQ_SPEECH_MAX_CHARS),
+      voice: z.enum(GROQ_SPEECH_VOICES).optional(),
+    },
+  }, async (args) => {
+    const response = await requestJson('/api/audio/speech', {
+      method: 'POST',
+      body: JSON.stringify({
+        text: args.text,
+        ...(args.voice ? { voice: args.voice } : {}),
+        ...(context.nativeThreadId ? { threadId: context.nativeThreadId } : {}),
+      }),
+    });
+    return toolResult(response);
+  });
+  context.onSpeechToolRegistered?.(speechTool);
+  if (context.speechEnabled === false) speechTool.disable();
 
   server.registerTool('list_whiteboards', {
     title: 'List whiteboards',
@@ -1933,6 +1959,7 @@ export type DroneHubMcpServerContext = McpToolRegistrationContext & {
 
 export type DroneHubMcpServer = McpServer & {
   setPrincipal: (principal: McpTokenIdentity) => void;
+  setSpeechEnabled: (enabled: boolean) => void;
 };
 
 const WRITE_SCOPED_TOOLS = new Set([
@@ -1948,6 +1975,7 @@ const CHAT_EXECUTE_SCOPED_TOOLS = new Set([
   'open_drone_chat',
   'open_drone',
   'highlight_drones',
+  'speak',
   'open_whiteboard',
   'close_whiteboard',
   'send_message',
@@ -1976,6 +2004,7 @@ const DRONE_PRINCIPAL_TOOLS = new Set([
   'open_drone_chat',
   'open_drone',
   'highlight_drones',
+  'speak',
   'list_whiteboards',
   'read_whiteboard',
   'create_whiteboard',
@@ -2040,7 +2069,7 @@ export function authorizeDroneHubMcpTool(context: DroneHubMcpServerContext, tool
     throw new Error(`MCP principal ${principal.name} is not authorized for ${tool}`);
   }
   const refs = assertedDroneRefs(args);
-  if (tool === 'list_drones' && refs.length === 0) return;
+  if ((tool === 'list_drones' || tool === 'speak') && refs.length === 0) return;
   if (refs.length === 0 || refs.some((ref) => ref !== scopedDroneId)) {
     throw new Error(`MCP principal ${principal.name} is scoped to drone ${scopedDroneId}`);
   }
@@ -2084,6 +2113,7 @@ function registerAuthorizedTools(server: McpServer, context: DroneHubMcpServerCo
 }
 
 export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext>): DroneHubMcpServer {
+  let speechTool: RegisteredTool | null = null;
   const context: DroneHubMcpServerContext = {
     principal: input?.principal ?? { kind: 'legacy', tokenId: 'legacy', name: 'Legacy Drone Hub MCP token' },
     ...(input?.correlationId ? { correlationId: input.correlationId } : {}),
@@ -2091,6 +2121,10 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
     ...(input?.allowedDroneRefs ? { allowedDroneRefs: input.allowedDroneRefs } : {}),
     ...(input?.allowedWriteDroneRefs ? { allowedWriteDroneRefs: input.allowedWriteDroneRefs } : {}),
     ...(input?.allowedDroneIds ? { allowedDroneIds: input.allowedDroneIds } : {}),
+    speechEnabled: input?.speechEnabled !== false,
+    onSpeechToolRegistered: (tool) => {
+      speechTool = tool;
+    },
   };
   const server = new McpServer(
     { name: 'Drone Hub MCP Server', version: '0.1.0' },
@@ -2099,13 +2133,26 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
   server.setPrincipal = (principal) => {
     context.principal = principal;
   };
+  server.setSpeechEnabled = (enabled) => {
+    if (context.speechEnabled === enabled) return;
+    context.speechEnabled = enabled;
+    if (enabled) speechTool?.enable();
+    else speechTool?.disable();
+  };
   registerAuthorizedTools(server, context);
   restoreIdleSubscriptions(server);
   return server;
 }
 
 export async function startDroneHubMcpServer() {
-  const server = createDroneHubMcpServer();
+  let speechEnabled = true;
+  try {
+    const response = await requestJson('/api/settings/speech', { method: 'GET' }, 1_000);
+    speechEnabled = response?.speech?.enabled !== false;
+  } catch {
+    // Keep the tool available if an older Hub does not expose speech settings yet.
+  }
+  const server = createDroneHubMcpServer({ speechEnabled });
   await server.connect(new StdioServerTransport());
   return server;
 }

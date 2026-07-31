@@ -25,8 +25,16 @@ export class DroneHubMcpHttpTransport {
     private readonly opts: {
       signingSecret: string;
       log: (level: 'warn', message: string, details?: Record<string, unknown>) => void;
+      speechEnabled?: boolean;
     },
   ) {}
+
+  setSpeechEnabled(enabled: boolean): void {
+    this.opts.speechEnabled = enabled;
+    for (const session of this.sessions.values()) {
+      session.server.setSpeechEnabled(enabled);
+    }
+  }
 
   private async closeSession(sessionId: string | undefined): Promise<void> {
     if (!sessionId) return;
@@ -101,7 +109,10 @@ export class DroneHubMcpHttpTransport {
         }
 
         let transport: StreamableHTTPServerTransport;
-        const server = createDroneHubMcpServer({ principal: identity });
+        const server = createDroneHubMcpServer({
+          principal: identity,
+          speechEnabled: this.opts.speechEnabled !== false,
+        });
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => crypto.randomUUID(),
           onsessioninitialized: (nextSessionId) => {

@@ -390,12 +390,15 @@ import {
   resolveEffectiveProviderApiKeySettings,
   resolveNameSuggestionLlmSettings,
   resolveExaApiKeySettings,
+  resolveEffectiveSpeechSettings,
   resolveGroqApiKeySettings,
   resolveLlmSettingsResponse,
+  resolveSpeechSettingsResponse,
   resolveUiPreferencesSettingsResponse,
   startCodexLogin,
   upsertStoredDeleteActionSettings,
   upsertStoredFilesystemSettings,
+  upsertStoredSpeechSettings,
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
   upsertStoredUiPreferencesSettings,
@@ -5045,9 +5048,12 @@ export async function startDroneHubApiServer(opts: {
     Number.isFinite(containerMcpPort) && containerMcpPort > 0 ? Math.floor(containerMcpPort) : 0;
   let containerMcpActualUrl = '';
   const containerMcpSockets = new Set<any>();
+  const initialSpeechSettings = await resolveEffectiveSpeechSettings();
+  assistantService.setSpeechToolEnabled(initialSpeechSettings.enabled);
   const mcpHttpTransport = new DroneHubMcpHttpTransport({
     signingSecret: mcpToken,
     log: hubLog,
+    speechEnabled: initialSpeechSettings.enabled,
   });
   const handleDroneHubMcpRequest = (
     req: http.IncomingMessage,
@@ -5113,6 +5119,19 @@ export async function startDroneHubApiServer(opts: {
     resolveFilesystemSettingsResponse,
     parseFilesystemUploadMaxBytes,
     upsertStoredFilesystemSettings,
+    resolveSpeechSettingsResponse,
+    upsertStoredSpeechSettings,
+    notifySpeechSettingsChanged: (speechSettings) => {
+      assistantService.setSpeechToolEnabled(speechSettings.enabled);
+      mcpHttpTransport.setSpeechEnabled(speechSettings.enabled);
+      assistantService.emitExternalUiAction({
+        type: 'speech_settings_changed',
+        enabled: speechSettings.enabled,
+        muted: speechSettings.muted,
+        volume: speechSettings.volume,
+        at: nowIso(),
+      });
+    },
     FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
     FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
     resolveRegistryBackupStatusResponse,
@@ -5288,6 +5307,10 @@ export async function startDroneHubApiServer(opts: {
     loadCanonicalActiveModel,
     summarizeAssistantChatIdle,
     resolveGroqApiKeySettings,
+    resolveSpeechSettings: resolveEffectiveSpeechSettings,
+    emitAssistantUiAction: (uiAction, threadId) =>
+      assistantService.emitExternalUiAction(uiAction, threadId),
+    hubLog,
   });
 
   registerFleetRoutes(apiRouter, {

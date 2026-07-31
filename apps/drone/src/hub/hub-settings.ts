@@ -12,6 +12,7 @@ import {
 } from '../host/hub-settings-repository';
 import { loadRegistry, updateRegistry, type DroneRegistry } from '../host/registry';
 import { createCodexLoginManager } from './codex-login-manager';
+import { GROQ_SPEECH_VOICES, type GroqSpeechVoice } from './groq-speech';
 
 const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
 
@@ -112,6 +113,12 @@ export type EffectiveFilesystemSettings = {
   uploadMaxBytes: number;
   uploadMaxBytesSource: FilesystemSettingsSource;
 };
+export type SpeechSettings = {
+  enabled: boolean;
+  muted: boolean;
+  volume: number;
+  voice: GroqSpeechVoice;
+};
 export type UiPreferencesSettings = {
   sidebarGroupingMode: SidebarGroupingMode;
   sidebarDensityMode: 'compact' | 'default' | 'comfortable';
@@ -146,6 +153,12 @@ const DEFAULT_PULL_HOST_BRANCH_BEFORE_CREATE = true;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_MIN = 1 * 1024 * 1024;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_MAX = 8 * 1024 * 1024 * 1024;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT = 2 * 1024 * 1024 * 1024;
+export const DEFAULT_SPEECH_SETTINGS: SpeechSettings = {
+  enabled: true,
+  muted: false,
+  volume: 1,
+  voice: 'troy',
+};
 
 export function parseLlmProvider(raw: unknown): LlmProviderId | null {
   const s = String(raw ?? '')
@@ -212,6 +225,19 @@ export function parseFilesystemUploadMaxBytes(raw: unknown): number | null {
   const i = Math.floor(n);
   if (i < FILESYSTEM_UPLOAD_MAX_BYTES_MIN || i > FILESYSTEM_UPLOAD_MAX_BYTES_MAX) return null;
   return i;
+}
+
+export function parseSpeechVolume(raw: unknown): number | null {
+  const volume = Number(raw);
+  if (!Number.isFinite(volume) || volume < 0 || volume > 1) return null;
+  return volume;
+}
+
+export function parseSpeechVoice(raw: unknown): GroqSpeechVoice | null {
+  const voice = String(raw ?? '').trim().toLowerCase();
+  return (GROQ_SPEECH_VOICES as readonly string[]).includes(voice)
+    ? (voice as GroqSpeechVoice)
+    : null;
 }
 
 function normalizeApiKey(raw: unknown): string {
@@ -303,6 +329,7 @@ const SETTING_KEYS = {
   llmProvider: 'llm.provider',
   deleteAction: 'delete-action',
   filesystem: 'filesystem',
+  speech: 'speech',
 } as const;
 
 type LegacySetting<T> = { value: T; updatedAt: string | null };
@@ -809,6 +836,51 @@ export async function resolveFilesystemSettingsResponse(): Promise<{
       minUploadMaxBytes: FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
       maxUploadMaxBytes: FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
       defaultUploadMaxBytes: FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT,
+    },
+  };
+}
+
+export async function resolveEffectiveSpeechSettings(): Promise<SpeechSettings> {
+  const record = await getCanonicalSetting<Partial<SpeechSettings>>(SETTING_KEYS.speech, () => null);
+  const stored = record?.value;
+  return {
+    enabled: typeof stored?.enabled === 'boolean' ? stored.enabled : DEFAULT_SPEECH_SETTINGS.enabled,
+    muted: typeof stored?.muted === 'boolean' ? stored.muted : DEFAULT_SPEECH_SETTINGS.muted,
+    volume: parseSpeechVolume(stored?.volume) ?? DEFAULT_SPEECH_SETTINGS.volume,
+    voice: parseSpeechVoice(stored?.voice) ?? DEFAULT_SPEECH_SETTINGS.voice,
+  };
+}
+
+export async function upsertStoredSpeechSettings(input: Partial<SpeechSettings>): Promise<void> {
+  if (input.enabled != null && typeof input.enabled !== 'boolean') {
+    throw new Error('enabled must be a boolean');
+  }
+  if (input.muted != null && typeof input.muted !== 'boolean') {
+    throw new Error('muted must be a boolean');
+  }
+  const volume = input.volume == null ? null : parseSpeechVolume(input.volume);
+  if (input.volume != null && volume == null) throw new Error('volume must be between 0 and 1');
+  const voice = input.voice == null ? null : parseSpeechVoice(input.voice);
+  if (input.voice != null && !voice) throw new Error('voice is not supported');
+
+  const current = await resolveEffectiveSpeechSettings();
+  await putCanonicalSetting(SETTING_KEYS.speech, {
+    enabled: input.enabled ?? current.enabled,
+    muted: input.muted ?? current.muted,
+    volume: volume ?? current.volume,
+    voice: voice ?? current.voice,
+  });
+}
+
+export async function resolveSpeechSettingsResponse(): Promise<{
+  ok: true;
+  speech: SpeechSettings & { voices: readonly GroqSpeechVoice[] };
+}> {
+  return {
+    ok: true,
+    speech: {
+      ...(await resolveEffectiveSpeechSettings()),
+      voices: GROQ_SPEECH_VOICES,
     },
   };
 }

@@ -319,6 +319,12 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     description: 'Temporarily highlight one or more drones in the Drone Hub UI.',
   },
   {
+    name: 'speak',
+    label: 'Speak',
+    category: 'actions',
+    description: 'Queue a short GROQ-generated spoken message in the Drone Hub UI.',
+  },
+  {
     name: 'create_group',
     label: 'Create group',
     category: 'actions',
@@ -360,6 +366,7 @@ const DRONE_HUB_MCP_TOOL_NAMES = new Set([
   'open_drone_chat',
   'open_drone',
   'highlight_drones',
+  'speak',
   'list_whiteboards',
   'read_whiteboard',
   'create_whiteboard',

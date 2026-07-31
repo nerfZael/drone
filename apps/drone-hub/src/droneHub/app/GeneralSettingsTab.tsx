@@ -1,9 +1,10 @@
 import React from 'react';
-import { UiButton, UiMenuSelect, UiSegmentedControl } from '../../ui/components';
+import { UiButton, UiMenuSelect, UiSegmentedControl, UiSlider, UiSwitch } from '../../ui/components';
 import { bytesToMaxMiB, bytesToMinMiB, bytesToNearestMiB, miBToBytes } from './filesystem-size-utils';
 import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
 import type { UseGithubSettingsResult } from './use-github-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
+import type { UseSpeechSettingsResult } from './use-speech-settings';
 import type { LlmProviderId } from './settings-types';
 import { CodexConnectControl } from './CodexConnectControl';
 import { DESKTOP_THEMES } from '../../theme';
@@ -25,6 +26,7 @@ type GeneralSettingsTabProps = {
   github: UseGithubSettingsResult;
   llm: UseLlmSettingsResult;
   filesystem: UseFilesystemSettingsResult;
+  speech: UseSpeechSettingsResult;
   onReplayOnboarding: () => void;
   onResetOnboarding: () => void;
 };
@@ -111,6 +113,7 @@ export function GeneralSettingsTab({
   github,
   llm,
   filesystem,
+  speech,
   onReplayOnboarding,
   onResetOnboarding,
 }: GeneralSettingsTabProps) {
@@ -163,6 +166,22 @@ export function GeneralSettingsTab({
     saveFilesystemSettings,
   } = filesystem;
   const currentUploadMaxBytes = filesystemSettings?.filesystem.uploadMaxBytes ?? null;
+  const {
+    speechSettings,
+    speechSettingsLoading,
+    speechSettingsSaving,
+    speechSettingsError,
+    speechSettingsNotice,
+    enabledDraft: speechEnabledDraft,
+    mutedDraft: speechMutedDraft,
+    volumeDraft: speechVolumeDraft,
+    voiceDraft: speechVoiceDraft,
+    setEnabledDraft: setSpeechEnabledDraft,
+    setMutedDraft: setSpeechMutedDraft,
+    setVolumeDraft: setSpeechVolumeDraft,
+    setVoiceDraft: setSpeechVoiceDraft,
+    saveSpeechSettings,
+  } = speech;
   const currentDefaultModel = llmDefaultModelSettings?.defaultModel;
   const llmProviderDefaultsDirty =
     llmProviderDraft !== (llmSettings?.provider.selected ?? 'openai') ||
@@ -176,6 +195,13 @@ export function GeneralSettingsTab({
     Number.isFinite(draftUploadMaxMiB) && draftUploadMaxMiB > 0 ? miBToBytes(draftUploadMaxMiB) : null;
   const filesystemDirty =
     currentUploadMaxBytes != null && draftUploadMaxBytes != null && draftUploadMaxBytes !== currentUploadMaxBytes;
+  const speechDirty = Boolean(
+    speechSettings &&
+      (speechEnabledDraft !== speechSettings.speech.enabled ||
+        speechMutedDraft !== speechSettings.speech.muted ||
+        speechVolumeDraft !== Math.round(speechSettings.speech.volume * 100) ||
+        speechVoiceDraft !== speechSettings.speech.voice),
+  );
   const filesystemMinMiB =
     filesystemSettings != null ? bytesToMinMiB(filesystemSettings.filesystem.minUploadMaxBytes) : 1;
   const filesystemMaxMiB =
@@ -301,7 +327,7 @@ export function GeneralSettingsTab({
                 {llmSettings?.groq.hasKey ? llmSettings.groq.keyHint ?? 'Configured' : 'Not configured'}
               </div>
               <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
-                {llmSettings?.groq.updatedAt ? `Updated ${new Date(llmSettings.groq.updatedAt).toLocaleString()}` : 'Required for voice transcription'}
+                {llmSettings?.groq.updatedAt ? `Updated ${new Date(llmSettings.groq.updatedAt).toLocaleString()}` : 'Required for transcription and speech'}
               </div>
             </div>
           </div>
@@ -461,7 +487,7 @@ export function GeneralSettingsTab({
           keyHint={llmSettings?.groq.keyHint}
           updatedAt={llmSettings?.groq.updatedAt}
           emptyLabel="No GROQ key configured."
-          description="Used only for the voice-to-clipboard shortcut transcription."
+          description="Used for voice transcription and the Drone Hub speak tool."
           draft={groqSettingsDraft}
           name="groq-api-key"
           placeholder="gsk_..."
@@ -474,6 +500,87 @@ export function GeneralSettingsTab({
           onSave={() => void mutateApiKeySettings('groq', 'save')}
           onClear={() => void mutateApiKeySettings('groq', 'clear')}
         />
+      </div>
+
+      <div className="dh-settings-section">
+        <div>
+          <div className="dh-type-heading">Speech</div>
+          <div className="mt-1 dh-type-supporting">
+            Configure the GROQ voice used by speak. External MCP clients receive the tool automatically when enabled; Built-in chats still use their normal per-chat tool selection.
+          </div>
+        </div>
+        {speechSettingsError ? (
+          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
+            {speechSettingsError}
+          </div>
+        ) : null}
+        {speechSettingsNotice ? (
+          <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
+            {speechSettingsNotice}
+          </div>
+        ) : null}
+        {speechSettingsLoading && !speechSettings ? (
+          <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading speech settings…</div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="flex flex-col gap-4">
+              <UiSwitch
+                checked={speechEnabledDraft}
+                onCheckedChange={setSpeechEnabledDraft}
+                disabled={speechSettingsLoading || speechSettingsSaving}
+                label="Enable speak tool"
+                description="Hide the tool from MCP catalogs and reject new speech calls when disabled."
+              />
+              <UiSwitch
+                checked={speechMutedDraft}
+                onCheckedChange={setSpeechMutedDraft}
+                disabled={speechSettingsLoading || speechSettingsSaving}
+                label="Mute speech"
+                description="Keep the tool available, but skip synthesis and playback."
+              />
+            </div>
+            <div className="flex flex-col gap-4">
+              <label className="flex flex-col gap-1.5">
+                <span className="dh-type-label">Default voice</span>
+                <UiMenuSelect
+                  value={speechVoiceDraft}
+                  onValueChange={setSpeechVoiceDraft}
+                  disabled={speechSettingsLoading || speechSettingsSaving}
+                  entries={(speechSettings?.speech.voices ?? [speechVoiceDraft]).map((voice) => ({
+                    value: voice,
+                    label: voice.charAt(0).toUpperCase() + voice.slice(1),
+                  }))}
+                  header="GROQ voice"
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="flex items-center justify-between gap-3 dh-type-label">
+                  <span>Volume</span>
+                  <span className="font-mono text-[var(--fg-secondary)]">{speechVolumeDraft}%</span>
+                </span>
+                <UiSlider
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={speechVolumeDraft}
+                  onChange={(event) => setSpeechVolumeDraft(Number(event.target.value))}
+                  disabled={speechSettingsLoading || speechSettingsSaving}
+                  aria-label="Speech volume"
+                />
+              </label>
+            </div>
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <UiButton
+            variant="primary"
+            onClick={() => void saveSpeechSettings()}
+            disabled={!speechDirty || speechSettingsLoading || speechSettingsSaving}
+            loading={speechSettingsSaving}
+          >
+            Save speech settings
+          </UiButton>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">

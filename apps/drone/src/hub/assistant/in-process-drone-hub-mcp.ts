@@ -4,6 +4,7 @@ import type { Transport, TransportSendOptions } from '@modelcontextprotocol/sdk/
 
 import { createDroneHubMcpServer } from '../mcp-server';
 import type { McpTokenIdentity } from '../mcp-tokens';
+import { resolveEffectiveSpeechSettings } from '../hub-settings';
 
 class LinkedTransport implements Transport {
   peer?: LinkedTransport;
@@ -50,6 +51,7 @@ export async function createInProcessDroneHubMcpClient(input: {
   principal?: McpTokenIdentity;
   nativeThreadId?: string;
 }): Promise<Client> {
+  const speechSettings = await resolveEffectiveSpeechSettings();
   const principal = input.principal ?? {
     kind: 'host' as const,
     tokenId: `assistant:${input.correlationId}`,
@@ -57,6 +59,7 @@ export async function createInProcessDroneHubMcpClient(input: {
   };
   const server = createDroneHubMcpServer({
     principal,
+    speechEnabled: speechSettings.enabled,
     correlationId: input.correlationId,
     ...(input.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
     ...(principal.kind === 'chat'

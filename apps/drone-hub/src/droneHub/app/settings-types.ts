@@ -68,6 +68,17 @@ export type FilesystemSettingsResponse = {
   };
 };
 
+export type SpeechSettingsResponse = {
+  ok: true;
+  speech: {
+    enabled: boolean;
+    muted: boolean;
+    volume: number;
+    voice: string;
+    voices: readonly string[];
+  };
+};
+
 export type RegistryBackupKind = 'hourly' | 'daily' | 'manual' | 'suspect';
 
 export type RegistryBackupManifest = {
