@@ -211,9 +211,13 @@ describe('mobile sidebar presentation', () => {
     );
     const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
 
-    expect(drawerSource).toContain('resolvePinnedSidebarDronesForRepo(');
-    expect(drawerSource).toContain('activeRepo.repoPath');
-    expect(drawerSource).toContain('drones={activeRepoPinnedDrones}');
+    expect(drawerSource).toContain(
+      'resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds)',
+    );
+    expect(drawerSource).not.toContain('resolvePinnedSidebarDronesForRepo(');
+    expect(drawerSource).not.toContain('excludePinnedMobileDrones');
+    expect(drawerSource).toContain('data={activeRepo.entries}');
+    expect(drawerSource).toContain('drones={globalPinnedDrones}');
     expect(drawerSource).toContain('<Text style={styles.pinnedHeaderText}>Pinned</Text>');
     expect(drawerSource).toContain('pinnedSection: {\n    paddingBottom: 0,');
     expect(drawerSource).toContain('pinnedHeader: {\n    minHeight: 32,');
@@ -222,7 +226,7 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).not.toContain('styles.pinnedCount');
     expect(drawerSource).not.toContain('<Text style={styles.pinnedCount}>{drones.length}</Text>');
     expect(drawerSource).not.toContain('accessibilityLabel={pinned ? `Unpin ${drone.name}`');
-    expect(drawerSource.match(/<DrawerPinnedDrones/g)).toHaveLength(1);
+    expect(drawerSource.match(/<DrawerPinnedDrones/g)).toHaveLength(2);
     expect(dronesSource).toContain('onTogglePinned: () =>');
     expect(dronesSource).toContain('void setDronePinned(');
     expect(shellSource).toContain("id: 'toggle-pin'");

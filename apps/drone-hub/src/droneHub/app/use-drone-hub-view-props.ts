@@ -66,6 +66,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     dronesError,
     groupMoveError,
     dronesLoading,
+    allDrones: drones,
     sidebarDronesFilteredByRepo,
     sidebarDrones,
     pinnedDroneIds,

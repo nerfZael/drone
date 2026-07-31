@@ -11,13 +11,29 @@ describe('desktop pinned drone presentation', () => {
       new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
       'utf8',
     );
+    const viewPropsSource = readFileSync(
+      new URL('../src/droneHub/app/use-drone-hub-view-props.ts', import.meta.url),
+      'utf8',
+    );
+    const appModelSource = readFileSync(
+      new URL('../src/use-drone-hub-app-model.tsx', import.meta.url),
+      'utf8',
+    );
 
     expect(sidebarSource).toContain(
-      'resolvePinnedSidebarDronesForRepo(',
+      'resolvePinnedSidebarDrones(allDrones, pinnedDroneIds)',
     );
-    expect(sidebarSource).toContain('repositoryOverviewOpen || !activeRepositoryNavigationItem');
-    expect(sidebarSource).toContain('activeRepositoryNavigationItem.repoPath');
-    expect(sidebarSource).toContain('activeRepositoryPinnedDrones.map((drone) =>');
+    expect(sidebarSource).not.toContain('resolvePinnedSidebarDronesForRepo(');
+    expect(sidebarSource).toContain('globalPinnedDrones.map((drone) =>');
+    expect(sidebarSource).toContain('optimisticSidebarGroups,');
+    expect(sidebarSource).not.toContain('excludePinnedSidebarGroupItems');
+    expect(viewPropsSource).toContain('allDrones: drones,');
+    expect(appModelSource).toContain('for (const droneId of pinnedDroneIds)');
+    expect(appModelSource).toContain('selectableIds.add(droneId)');
+    expect(appModelSource).toContain('retainedDroneIds: pinnedDroneIds');
+    expect(sidebarSource).toContain(
+      "(drone) => String(drone.repoPath ?? '').trim() === repoPath",
+    );
     expect(sidebarSource).toContain('aria-label="Pinned drones"');
     expect(sidebarSource).toContain(
       'className="border-b border-[var(--border-subtle)]" aria-label="Pinned drones"',
@@ -26,6 +42,7 @@ describe('desktop pinned drone presentation', () => {
     expect(sidebarSource).toContain('<PinnedDroneReorderItem');
     expect(sidebarSource).toContain('draggable={dragProps.draggable}');
     expect(sidebarSource).toContain('dragging={dragProps.dragging}');
+    expect(sidebarSource).toContain('orderedDroneIds: globalPinnedDroneIds');
     expect(sidebarSource).not.toContain('leadingIcon={<IconPin');
     expect(sidebarSource).toContain(
       'className="flex min-h-8 items-center gap-1.5 px-1"',

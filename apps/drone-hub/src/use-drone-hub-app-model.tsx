@@ -614,8 +614,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     });
   }, [dronesError, dronesLoading, setLastAgentSnippetByChatNodeId, validChatNodeIdSet]);
   const sidebarSelectableDroneIdSet = React.useMemo(
-    () => new Set(sidebarDronesFilteredByRepo.map((drone) => drone.id)),
-    [sidebarDronesFilteredByRepo],
+    () => {
+      const selectableIds = new Set(sidebarDronesFilteredByRepo.map((drone) => drone.id));
+      const availableDroneIds = new Set(drones.map((drone) => drone.id));
+      for (const droneId of pinnedDroneIds) {
+        if (availableDroneIds.has(droneId)) selectableIds.add(droneId);
+      }
+      return selectableIds;
+    },
+    [drones, pinnedDroneIds, sidebarDronesFilteredByRepo],
   );
 
   /* ── Layout state ── */
@@ -1423,6 +1430,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     droneById,
     dronesFilteredByRepoIdSet,
     visibleDronesFilteredByRepo: sidebarDronesFilteredByRepo,
+    retainedDroneIds: pinnedDroneIds,
     startupSeedByDrone,
     selectionAnchorRef,
     preferredSelectedDroneRef,

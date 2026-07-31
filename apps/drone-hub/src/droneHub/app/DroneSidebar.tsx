@@ -2,7 +2,7 @@ import React from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import {
   buildRepoSidebarModel,
-  resolvePinnedSidebarDronesForRepo,
+  resolvePinnedSidebarDrones,
 } from '@drone/hub-model/sidebar';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, RepoSummary } from '../types';
@@ -118,7 +118,6 @@ import { useSidebarRootDnd } from './use-sidebar-root-dnd';
 import { useDroneHubRuntimeStore } from './use-drone-hub-runtime-store';
 import { isDroneStartingOrSeeding } from './helpers';
 import { AddDroneToGroupDialog } from './AddDroneToGroupDialog';
-import { excludePinnedSidebarGroupItems } from './pinned-drone-selection';
 import {
   resolveSidebarFolderDroneSelection,
   type SidebarFolderSelectionOptions,
@@ -145,6 +144,16 @@ const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
 const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
 const SIDEBAR_DND_IDLE_DISABLE_DELAY_MS = 1500;
 const SIDEBAR_DENSITY_MODE_ORDER: SidebarDensityMode[] = ['compact', 'default', 'comfortable'];
+
+function pinnedDroneRepoLabel(repoPathRaw: string, navigationLabel?: string): string {
+  const navigationName = String(navigationLabel ?? '').trim();
+  if (navigationName) return navigationName;
+  const repoPath = String(repoPathRaw ?? '').trim();
+  if (!repoPath) return 'Ungrouped';
+  const parts = repoPath.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? repoPath;
+}
+
 export type DroneSidebarCapabilities = {
   actions: boolean;
   createDrones: boolean;
@@ -1394,6 +1403,7 @@ export type DroneSidebarProps = {
   dronesError: string | null | undefined;
   groupMoveError: string | null;
   dronesLoading: boolean;
+  allDrones: DroneSummary[];
   sidebarDronesFilteredByRepo: DroneSummary[];
   sidebarDrones: DroneSummary[];
   pinnedDroneIds: string[];
@@ -1489,6 +1499,7 @@ export function DroneSidebar({
   dronesError,
   groupMoveError,
   dronesLoading,
+  allDrones,
   sidebarDronesFilteredByRepo,
   sidebarDrones,
   pinnedDroneIds,
@@ -1817,10 +1828,6 @@ export function DroneSidebar({
   const draftSidebarPlaceholderNodeId = draftSidebarPlaceholderDrone
     ? sidebarDroneNodeId(DRAFT_SIDEBAR_PLACEHOLDER_ID)
     : null;
-  const unpinnedOptimisticSidebarGroups = React.useMemo(
-    () => excludePinnedSidebarGroupItems(optimisticSidebarGroups, pinnedDroneIdSet),
-    [optimisticSidebarGroups, pinnedDroneIdSet],
-  );
   const {
     renderSidebarGroups,
     sidebarFolderTree,
@@ -1831,7 +1838,7 @@ export function DroneSidebar({
     hiddenSidebarGroupTokenSet,
     isRepoGroupingMode,
     optimisticSidebarDronesFilteredByRepo,
-    optimisticSidebarGroups: unpinnedOptimisticSidebarGroups,
+    optimisticSidebarGroups,
     repoScopedGroupPathsByRepoGroup,
     showHiddenSidebarGroups,
     sidebarGroupOrder,
@@ -2249,34 +2256,22 @@ export function DroneSidebar({
     () => repositoryNavigationItems.find((item) => item.id === activeSidebarRepoId) ?? null,
     [activeSidebarRepoId, repositoryNavigationItems],
   );
-  const activeRepositoryPinnedDrones = React.useMemo(
-    () =>
-      repositoryOverviewOpen || !activeRepositoryNavigationItem
-        ? []
-        : resolvePinnedSidebarDronesForRepo(
-            sidebarDrones,
-            pinnedDroneIds,
-            activeRepositoryNavigationItem.repoPath,
-          ),
-    [
-      activeRepositoryNavigationItem,
-      pinnedDroneIds,
-      repositoryOverviewOpen,
-      sidebarDrones,
-    ],
+  const globalPinnedDrones = React.useMemo(
+    () => resolvePinnedSidebarDrones(allDrones, pinnedDroneIds),
+    [allDrones, pinnedDroneIds],
   );
-  const activeRepositoryPinnedDroneIds = React.useMemo(
-    () => activeRepositoryPinnedDrones.map((drone) => drone.id),
-    [activeRepositoryPinnedDrones],
+  const globalPinnedDroneIds = React.useMemo(
+    () => globalPinnedDrones.map((drone) => drone.id),
+    [globalPinnedDrones],
   );
   const pinnedDroneReorderEnabled =
     sidebarDndEnabled &&
-    activeRepositoryPinnedDroneIds.length > 1 &&
+    globalPinnedDroneIds.length > 1 &&
     pinningDroneIds.size === 0 &&
     !movingDroneGroups;
   const pinnedDroneDropTarget = usePinnedDroneReorder({
     enabled: pinnedDroneReorderEnabled,
-    visibleDroneIds: activeRepositoryPinnedDroneIds,
+    visibleDroneIds: globalPinnedDroneIds,
     setPinnedDroneIds,
     onPrepareDroneDragStart,
   });
@@ -2292,6 +2287,22 @@ export function DroneSidebar({
       setActiveRepoPath(item.repoPath);
     },
     [setActiveRepoPath],
+  );
+  const selectPinnedDroneCard = React.useCallback(
+    (drone: DroneSummary, opts?: DroneSelectionClickOptions) => {
+      if (!opts?.toggle && !opts?.range) {
+        const repoPath = String(drone.repoPath ?? '').trim();
+        const repoItem = repositoryNavigationItems.find((item) => item.repoPath === repoPath);
+        if (repoItem) openRepositoryNavigationItem(repoItem);
+      }
+      onSelectDroneCard(drone.id, { ...opts, orderedDroneIds: globalPinnedDroneIds });
+    },
+    [
+      globalPinnedDroneIds,
+      onSelectDroneCard,
+      openRepositoryNavigationItem,
+      repositoryNavigationItems,
+    ],
   );
   const createDroneInRepository = React.useCallback(
     (item: (typeof repositoryNavigationItems)[number]) => {
@@ -2387,9 +2398,7 @@ export function DroneSidebar({
     if (!activeRepositoryNavigationItem) return null;
     const repoPath = activeRepositoryNavigationItem.repoPath;
     const activeDrones = Object.values(sidebarDroneById).filter(
-      (drone) =>
-        String(drone.repoPath ?? '').trim() === repoPath &&
-        !pinnedDroneIdSet.has(String(drone.id ?? '').trim()),
+      (drone) => String(drone.repoPath ?? '').trim() === repoPath,
     );
     return buildRepoSidebarModel({
       drones: activeDrones,
@@ -2403,7 +2412,6 @@ export function DroneSidebar({
     });
   }, [
     activeRepositoryNavigationItem,
-    pinnedDroneIdSet,
     repoScopedGroupPathsByRepoGroup,
     sidebarDroneById,
     sidebarDroneOrderByGroup,
@@ -3032,7 +3040,7 @@ export function DroneSidebar({
               </div>
             )}
           <div className={`flex flex-col gap-0 ${sidebarListSelectClass}`}>
-            {activeRepositoryPinnedDrones.length > 0 ? (
+            {globalPinnedDrones.length > 0 ? (
               <section className="border-b border-[var(--border-subtle)]" aria-label="Pinned drones">
                 <div className="flex min-h-8 items-center gap-1.5 px-1">
                   <IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
@@ -3041,8 +3049,15 @@ export function DroneSidebar({
                   </span>
                 </div>
                 <div className="flex flex-col gap-0.5 pb-1">
-                  {activeRepositoryPinnedDrones.map((drone) => {
+                  {globalPinnedDrones.map((drone) => {
                     const droneId = String(drone.id ?? '').trim();
+                    const pinnedRepoPath = String(drone.repoPath ?? '').trim();
+                    const pinnedRepositoryItem = repositoryNavigationItems.find(
+                      (item) => item.repoPath === pinnedRepoPath,
+                    );
+                    const pinnedDroneIsInActiveRepository =
+                      !repositoryOverviewOpen &&
+                      activeRepositoryNavigationItem?.repoPath === pinnedRepoPath;
                     const chats = Array.isArray(drone.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
                     const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
                     const defaultChatNodeId = createCanvasChatNodeId(droneId, 'default');
@@ -3083,13 +3098,24 @@ export function DroneSidebar({
                                 : undefined
                             }
                             unreadAgentMessage={hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true}
+                            statusHint={pinnedDroneRepoLabel(pinnedRepoPath, pinnedRepositoryItem?.label)}
                             pinned
                             pinBusy={pinningDroneIds.has(droneId)}
                             onTogglePinned={sidebarCapabilities.actions ? () => void setPinned(droneId, false) : undefined}
                             onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}
                             onClone={sidebarCapabilities.actions ? () => onCloneDrone(drone) : undefined}
-                            onAddToGroup={sidebarCapabilities.actions ? () => openAddDroneToGroup(drone) : undefined}
-                            onCreateGroup={sidebarCapabilities.actions ? () => openGroupDraftBeforeDrone(drone) : undefined}
+                            onAddToGroup={
+                              sidebarCapabilities.actions && pinnedDroneIsInActiveRepository
+                                ? () => openAddDroneToGroup(drone)
+                                : undefined
+                            }
+                            onCreateGroup={
+                              sidebarCapabilities.actions &&
+                              pinnedDroneIsInActiveRepository &&
+                              Boolean(sidebarDroneById[droneId])
+                                ? () => openGroupDraftBeforeDrone(drone)
+                                : undefined
+                            }
                             onRename={
                               sidebarCapabilities.actions
                                 ? (newName) => onRenameDrone(droneId, newName)
@@ -3116,7 +3142,7 @@ export function DroneSidebar({
                             setBaseImageBusy={Boolean(settingBaseImages[droneId])}
                             deleteDisabled={isOptimistic || droneMutationBusy}
                             deleteBusy={Boolean(deletingDrones[droneId])}
-                            onClick={(rowOpts) => onSelectDroneCard(droneId, { ...rowOpts, orderedDroneIds: activeRepositoryPinnedDroneIds })}
+                            onClick={(rowOpts) => selectPinnedDroneCard(drone, rowOpts)}
                             dragNodeRef={dragProps.dragNodeRef}
                             dragAttributes={dragProps.dragAttributes}
                             dragListeners={dragProps.dragListeners}

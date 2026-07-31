@@ -19,7 +19,7 @@ describe('pinned sidebar drones', () => {
     ).toEqual(['two', 'one']);
   });
 
-  test('returns only pins belonging to the open repository', () => {
+  test('returns pins across repositories in one global order', () => {
     const drones = [
       { id: 'alpha', name: 'Alpha', repoPath: '/work/alpha' },
       { id: 'beta', name: 'Beta', repoPath: '/work/beta' },
@@ -28,12 +28,20 @@ describe('pinned sidebar drones', () => {
     const pinnedIds = ['beta', 'detached', 'alpha'];
 
     expect(
-      resolvePinnedSidebarDronesForRepo(drones, pinnedIds, '/work/alpha').map(
+      resolvePinnedSidebarDrones(drones, pinnedIds).map((drone) => drone.id),
+    ).toEqual(['beta', 'detached', 'alpha']);
+  });
+
+  test('retains the repo-scoped resolver for callers that need a filtered projection', () => {
+    const drones = [
+      { id: 'alpha', name: 'Alpha', repoPath: '/work/alpha' },
+      { id: 'beta', name: 'Beta', repoPath: '/work/beta' },
+    ];
+
+    expect(
+      resolvePinnedSidebarDronesForRepo(drones, ['beta', 'alpha'], '/work/alpha').map(
         (drone) => drone.id,
       ),
     ).toEqual(['alpha']);
-    expect(
-      resolvePinnedSidebarDronesForRepo(drones, pinnedIds, '').map((drone) => drone.id),
-    ).toEqual(['detached']);
   });
 });

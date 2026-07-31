@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  excludePinnedSidebarGroupItems,
   resolveSelectedDronePinMutation,
 } from '../src/droneHub/app/pinned-drone-selection';
 
@@ -60,20 +59,5 @@ describe('selected drone pin mutation', () => {
         pinnedDroneIds: [],
       }),
     ).toBeNull();
-  });
-});
-
-describe('pinned drone tree membership', () => {
-  test('removes pinned drones from ordinary groups without losing the groups', () => {
-    const groups = [
-      { group: 'One', items: [{ id: 'one' }, { id: 'two' }] },
-      { group: 'Two', items: [{ id: 'three' }] },
-    ];
-
-    expect(excludePinnedSidebarGroupItems(groups, new Set(['two', 'three']))).toEqual([
-      { group: 'One', items: [{ id: 'one' }] },
-      { group: 'Two', items: [] },
-    ]);
-    expect(groups[0]?.items).toEqual([{ id: 'one' }, { id: 'two' }]);
   });
 });

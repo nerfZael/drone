@@ -362,14 +362,6 @@ export function normalizeMobileDrones(raw: unknown): MobileDroneSummary[] {
   });
 }
 
-export function excludePinnedMobileDrones(
-  drones: readonly MobileDroneSummary[],
-  pinnedDroneIds: readonly string[],
-): MobileDroneSummary[] {
-  const pinnedIds = new Set(pinnedDroneIds.map(text).filter(Boolean));
-  return drones.filter((drone) => !pinnedIds.has(drone.id));
-}
-
 export function normalizeMobileDroneListPayload(raw: unknown): NormalizedMobileDroneListPayload {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return {

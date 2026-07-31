@@ -3,7 +3,6 @@ import {
   EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   buildMobileDroneRepoGroups,
-  excludePinnedMobileDrones,
   mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneListPayload,
   normalizeMobileDroneCreateModelCatalog,
@@ -16,17 +15,6 @@ import {
 } from '../src/drones/drone-sidebar-model';
 
 describe('mobile drone sidebar model', () => {
-  test('keeps pinned drones out of the ordinary repository tree', () => {
-    const drones = normalizeMobileDrones([
-      { id: 'pinned', name: 'Pinned', repoPath: '/work/repo' },
-      { id: 'ordinary', name: 'Ordinary', repoPath: '/work/repo' },
-    ]);
-
-    expect(excludePinnedMobileDrones(drones, ['pinned']).map((drone) => drone.id)).toEqual([
-      'ordinary',
-    ]);
-  });
-
   test('normalizes detected create models and their supported reasoning levels', () => {
     expect(
       normalizeMobileDroneCreateModelCatalog({

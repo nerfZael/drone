@@ -36,14 +36,3 @@ export function resolveSelectedDronePinMutation(args: {
     pinned: !droneIds.every((id) => pinnedDroneIdSet.has(id)),
   };
 }
-
-export function excludePinnedSidebarGroupItems<
-  TDrone extends { id: string },
-  TGroup extends { items: TDrone[] },
->(groups: readonly TGroup[], pinnedDroneIds: ReadonlySet<string>): TGroup[] {
-  if (pinnedDroneIds.size === 0) return groups.slice();
-  return groups.map((group) => {
-    const items = group.items.filter((drone) => !pinnedDroneIds.has(String(drone?.id ?? '').trim()));
-    return items.length === group.items.length ? group : { ...group, items };
-  });
-}

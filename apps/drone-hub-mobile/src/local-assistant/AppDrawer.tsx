@@ -41,7 +41,6 @@ import {
 import {
   buildMobileDroneRepoGroups,
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
-  excludePinnedMobileDrones,
   type MobileDroneGroupFolder,
   type MobileDroneRepoGroup,
   type MobileDroneSidebarEntry,
@@ -49,7 +48,7 @@ import {
   type MobileDroneSummary,
   type MobileDroneTreeNode,
 } from '../drones/drone-sidebar-model';
-import { resolvePinnedSidebarDronesForRepo } from '@drone/hub-model/sidebar';
+import { resolvePinnedSidebarDrones } from '@drone/hub-model/sidebar';
 import {
   addMobileDroneToStateSummary,
   EMPTY_MOBILE_DRONE_STATE_SUMMARY,
@@ -597,6 +596,7 @@ function UnreadStatusIndicator() {
 function DrawerDroneNode({
   node,
   depth,
+  contextLabel,
   activeDroneId,
   activeChatName,
   droneOperationById,
@@ -604,6 +604,7 @@ function DrawerDroneNode({
 }: {
   node: MobileDroneTreeNode;
   depth: number;
+  contextLabel?: string;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
@@ -623,6 +624,7 @@ function DrawerDroneNode({
     stateLabel,
     unread && stateLabel !== 'Unread' ? 'unread chat' : '',
     `${runtimeLabel} runtime`,
+    contextLabel ? `${contextLabel} repository` : '',
     chats.length > 1 ? `${chats.length} chats` : '',
   ]
     .filter(Boolean)
@@ -651,6 +653,17 @@ function DrawerDroneNode({
             </Text>
             <View style={styles.switchItemMeta}>
               <Text style={styles.switchItemState}>{stateLabel}</Text>
+              {contextLabel ? (
+                <>
+                  <Text style={styles.switchItemMetaSeparator}>·</Text>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.switchItemState, styles.switchItemContext]}
+                  >
+                    {contextLabel}
+                  </Text>
+                </>
+              ) : null}
               {drone.lastMessageAt ? (
                 <>
                   <Text style={styles.switchItemMetaSeparator}>·</Text>
@@ -795,12 +808,14 @@ function DrawerDroneEntry({
 
 function DrawerPinnedDrones({
   drones,
+  repoLabelByPath,
   activeDroneId,
   activeChatName,
   droneOperationById,
   onSelect,
 }: {
   drones: MobileDroneSummary[];
+  repoLabelByPath: ReadonlyMap<string, string>;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
@@ -818,6 +833,7 @@ function DrawerPinnedDrones({
           key={`pinned:${drone.id}`}
           node={{ drone, children: [] }}
           depth={0}
+          contextLabel={repoLabelByPath.get(drone.repoPath) ?? 'No repo'}
           activeDroneId={activeDroneId}
           activeChatName={activeChatName}
           droneOperationById={droneOperationById}
@@ -1023,12 +1039,6 @@ function AppDrawerView({
     () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
     [droneSidebarOrder, drones],
   );
-  const unpinnedDroneGroups = React.useMemo(() => {
-    return buildMobileDroneRepoGroups(
-      excludePinnedMobileDrones(drones, droneSidebarOrder.pinnedDroneIds),
-      droneSidebarOrder,
-    );
-  }, [droneSidebarOrder, drones]);
   const repoStateSummaries = React.useMemo(
     () =>
       new Map(
@@ -1049,17 +1059,22 @@ function AppDrawerView({
     });
   }, []);
   const activeRepo = droneGroups.find((group) => group.id === activeRepoId) ?? null;
-  const activeUnpinnedRepo = unpinnedDroneGroups.find((group) => group.id === activeRepoId) ?? null;
-  const activeRepoPinnedDrones = React.useMemo(
-    () =>
-      activeRepo
-        ? resolvePinnedSidebarDronesForRepo(
-            drones,
-            droneSidebarOrder.pinnedDroneIds,
-            activeRepo.repoPath,
-          )
-        : [],
-    [activeRepo, droneSidebarOrder.pinnedDroneIds, drones],
+  const globalPinnedDrones = React.useMemo(
+    () => resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds),
+    [droneSidebarOrder.pinnedDroneIds, drones],
+  );
+  const repoLabelByPath = React.useMemo(
+    () => new Map(droneGroups.map((group) => [group.repoPath, group.label])),
+    [droneGroups],
+  );
+  const selectPinnedDroneChat = React.useCallback(
+    (droneId: string, chatName: string) => {
+      const drone = drones.find((candidate) => candidate.id === droneId);
+      const repo = droneGroups.find((group) => group.repoPath === drone?.repoPath);
+      if (repo) setActiveRepoId(repo.id);
+      onSelectDroneChat?.(droneId, chatName);
+    },
+    [droneGroups, drones, onSelectDroneChat],
   );
   React.useEffect(() => {
     if (activeRepoId && !droneGroups.some((group) => group.id === activeRepoId)) {
@@ -1206,7 +1221,7 @@ function AppDrawerView({
                 key={`repo:${activeRepo.id}`}
                 style={styles.scroll}
                 contentContainerStyle={styles.droneList}
-                data={activeUnpinnedRepo?.entries ?? []}
+                data={activeRepo.entries}
                 keyExtractor={(entry) =>
                   entry.kind === 'drone'
                     ? `drone:${entry.node.drone.id}`
@@ -1226,11 +1241,12 @@ function AppDrawerView({
                 )}
                 ListHeaderComponent={
                   <DrawerPinnedDrones
-                    drones={activeRepoPinnedDrones}
+                    drones={globalPinnedDrones}
+                    repoLabelByPath={repoLabelByPath}
                     activeDroneId={activeDroneId}
                     activeChatName={activeChatName}
                     droneOperationById={droneOperationById}
-                    onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
+                    onSelect={selectPinnedDroneChat}
                   />
                 }
                 ListFooterComponent={listStatus}
@@ -1281,6 +1297,16 @@ function AppDrawerView({
                     </View>
                   );
                 }}
+                ListHeaderComponent={
+                  <DrawerPinnedDrones
+                    drones={globalPinnedDrones}
+                    repoLabelByPath={repoLabelByPath}
+                    activeDroneId={activeDroneId}
+                    activeChatName={activeChatName}
+                    droneOperationById={droneOperationById}
+                    onSelect={selectPinnedDroneChat}
+                  />
+                }
                 ListFooterComponent={listStatus}
                 initialNumToRender={10}
                 maxToRenderPerBatch={8}
@@ -1607,6 +1633,9 @@ const styles = StyleSheet.create({
     fontSize: 9,
     lineHeight: 10,
     fontWeight: '400',
+  },
+  switchItemContext: {
+    flexShrink: 1,
   },
   switchItemMetaSeparator: {
     color: colors.mutedDim,

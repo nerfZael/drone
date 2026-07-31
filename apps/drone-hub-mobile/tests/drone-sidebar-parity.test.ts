@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildRepoSidebarModel,
-  resolvePinnedSidebarDronesForRepo,
+  resolvePinnedSidebarDrones,
   sidebarFolderNodeId,
   type SidebarNodeTreeModel,
 } from '@drone/hub-model/sidebar';
@@ -160,10 +160,8 @@ describe('mobile sidebar tree parity', () => {
       'repo:/empty',
     ]);
     expect(
-      resolvePinnedSidebarDronesForRepo(drones, order.pinnedDroneIds, '/repo').map(
-        (drone) => drone.id,
-      ),
-    ).toEqual(['plan', 'direct-old']);
+      resolvePinnedSidebarDrones(drones, order.pinnedDroneIds).map((drone) => drone.id),
+    ).toEqual(['plan', 'direct-old', 'other']);
   });
 
   test('uses the same deterministic fallback when no repositories are registered', () => {

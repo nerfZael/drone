@@ -31,6 +31,7 @@ type UseDroneSelectionStateArgs = {
   droneById: Record<string, DroneSummary>;
   dronesFilteredByRepoIdSet: Set<string>;
   visibleDronesFilteredByRepo: DroneSummary[];
+  retainedDroneIds: readonly string[];
   startupSeedByDrone: Record<string, StartupSeedState>;
   selectionAnchorRef: React.MutableRefObject<string | null>;
   preferredSelectedDroneRef: React.MutableRefObject<string | null>;
@@ -59,6 +60,7 @@ export function useDroneSelectionState({
   droneById,
   dronesFilteredByRepoIdSet,
   visibleDronesFilteredByRepo,
+  retainedDroneIds,
   startupSeedByDrone,
   selectionAnchorRef,
   preferredSelectedDroneRef,
@@ -79,6 +81,15 @@ export function useDroneSelectionState({
   const lastSelectedChatByDroneRef = React.useRef<Record<string, string>>({});
   const pendingSelectedChatUntilByDroneRef = React.useRef<Record<string, number>>({});
   const manualEmptySelectionRef = React.useRef(false);
+  const retainedDroneIdSet = React.useMemo(
+    () =>
+      new Set(
+        retainedDroneIds
+          .map((droneId) => String(droneId ?? '').trim())
+          .filter((droneId) => droneId && Boolean(droneById[droneId])),
+      ),
+    [droneById, retainedDroneIds],
+  );
   const clearSelectedDroneState = React.useCallback(() => {
     manualEmptySelectionRef.current = false;
     if (selectedDrone) setSelectedDrone(null);
@@ -236,6 +247,7 @@ export function useDroneSelectionState({
 
   React.useEffect(() => {
     const valid = new Set(visibleDronesFilteredByRepo.map((d) => d.id));
+    for (const droneId of retainedDroneIdSet) valid.add(droneId);
     for (const drone of Object.values(droneById)) {
       if (isWorkflowChildDrone(drone)) valid.add(drone.id);
     }
@@ -247,7 +259,7 @@ export function useDroneSelectionState({
       if (next.length === prev.length && next.every((id, idx) => id === prev[idx])) return prev;
       return next;
     });
-  }, [droneById, selectedDrone, setSelectedDroneIds, visibleDronesFilteredByRepo]);
+  }, [droneById, retainedDroneIdSet, selectedDrone, setSelectedDroneIds, visibleDronesFilteredByRepo]);
 
   // Auto-select first drone (and recover from deletions).
   React.useEffect(() => {
@@ -264,6 +276,7 @@ export function useDroneSelectionState({
     const selectedExistsInRepo = Boolean(
       selectedDrone &&
         (dronesFilteredByRepoIdSet.has(selectedDrone) ||
+          retainedDroneIdSet.has(selectedDrone) ||
           isWorkflowChildDrone(droneById[selectedDrone])),
     );
     if (visibleDronesFilteredByRepo.length === 0) {
@@ -317,6 +330,7 @@ export function useDroneSelectionState({
     visibleDronesFilteredByRepo,
     preferredSelectedDroneHoldUntilRef,
     preferredSelectedDroneRef,
+    retainedDroneIdSet,
     resolveChatForDrone,
     resetGroupDndState,
     selectedDrone,
