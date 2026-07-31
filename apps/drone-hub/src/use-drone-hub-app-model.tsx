@@ -30,6 +30,10 @@ import type { DroneHubWorkspaceContentProps } from './droneHub/app/DroneHubWorks
 import { RightPanelTabContent } from './droneHub/app/RightPanelTabContent';
 import { dispatchFleetAssignmentUpdated } from './droneHub/app/fleet-assignment-events';
 import { assignFleetTargets } from './droneHub/fleet/fleet-api';
+import {
+  applySpeechPlaybackSettings,
+  enqueueBase64SpeechAudio,
+} from './droneHub/media/speech-playback';
 import { useHubLogs } from './droneHub/app/use-hub-logs';
 import { useCreateDraftWorkflowState } from './droneHub/app/use-create-draft-workflow-store';
 import { useAgentsMdLibraryCatalog } from './droneHub/app/use-agents-md-library-catalog';
@@ -1616,6 +1620,34 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
       const action = data?.uiAction && typeof data.uiAction === 'object' ? data.uiAction : null;
       if (!action) return;
+      if (action.type === 'play_audio') {
+        void enqueueBase64SpeechAudio({
+          data: action.data,
+          mimeType: action.mimeType,
+          volume: action.volume,
+        }).catch((error) => {
+          showShortcutToast(
+            String(error instanceof Error ? error.message : error ?? 'Audio playback was blocked.'),
+            'Speech playback failed',
+          );
+        });
+        return;
+      }
+      if (action.type === 'speech_error') {
+        showShortcutToast(
+          String(action.message ?? '').trim() || 'GROQ could not synthesize the requested speech.',
+          'Speech synthesis failed',
+        );
+        return;
+      }
+      if (action.type === 'speech_settings_changed') {
+        applySpeechPlaybackSettings({
+          enabled: action.enabled,
+          muted: action.muted,
+          volume: action.volume,
+        });
+        return;
+      }
       if (action.type === 'reload_ui_preferences') {
         void reloadUiPreferences();
         return;
@@ -1667,7 +1699,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       closed = true;
       source.close();
     };
-  }, [expandGroupsForDroneIds, reloadPinnedDrones, reloadUiPreferences, requestRightPanelTab, rightPanelBottomTab, rightPanelTab, selectDroneChat]);
+  }, [expandGroupsForDroneIds, reloadPinnedDrones, reloadUiPreferences, requestRightPanelTab, rightPanelBottomTab, rightPanelTab, selectDroneChat, showShortcutToast]);
   React.useEffect(
     () => () => {
       if (typeof window === 'undefined') return;

@@ -131,6 +131,9 @@ describe('extracted Hub route modules', () => {
         idle: true,
       }),
       resolveGroqApiKeySettings: async () => ({ apiKey: null }),
+      resolveSpeechSettings: async () => ({ enabled: true, muted: false, volume: 1, voice: 'troy' }),
+      emitAssistantUiAction: () => {},
+      hubLog: () => {},
     });
 
     expect(await request('POST', '/api/chats/idle/status')).toBe(true);
@@ -145,6 +148,195 @@ describe('extracted Hub route modules', () => {
         },
       },
     ]);
+  });
+
+  test('returns a queued speech job before GROQ synthesis finishes', async () => {
+    const originalFetch = globalThis.fetch;
+    let resolveFetch: ((response: Response) => void) | null = null;
+    const synthesisResponse = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    globalThis.fetch = (() => synthesisResponse) as typeof fetch;
+    const emittedActions: any[] = [];
+    const { router, request, responses } = routeHarness({
+      text: 'Background speech.',
+      voice: 'hannah',
+      threadId: 'thread-one',
+    });
+    registerOperationalRoutes(router, {
+      resolveDroneOrPendingForReadRef: async () => null,
+      loadCanonicalActiveModel: async () => ({ drones: {} }),
+      summarizeAssistantChatIdle: () => null,
+      resolveGroqApiKeySettings: async () => ({ apiKey: 'groq-secret' }),
+      resolveSpeechSettings: async () => ({ enabled: true, muted: false, volume: 0.75, voice: 'troy' }),
+      emitAssistantUiAction: (action: unknown, threadId: string) => {
+        emittedActions.push({ action, threadId });
+      },
+      hubLog: () => {},
+    });
+
+    try {
+      expect(await request('POST', '/api/audio/speech')).toBe(true);
+      expect(responses).toHaveLength(1);
+      expect(responses[0]).toMatchObject({
+        status: 202,
+        body: {
+          ok: true,
+          status: 'queued',
+          model: 'canopylabs/orpheus-v1-english',
+          voice: 'hannah',
+        },
+      });
+      expect(String(responses[0]?.body?.jobId)).toStartWith('speech_');
+      expect(emittedActions).toEqual([]);
+
+      resolveFetch?.(new Response(new Uint8Array([1, 2, 3]), { status: 200 }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(emittedActions).toHaveLength(1);
+      expect(emittedActions[0]).toMatchObject({
+        action: {
+          type: 'play_audio',
+          data: 'AQID',
+          mimeType: 'audio/wav',
+          volume: 0.75,
+        },
+        threadId: 'thread-one',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('returns muted speech without requiring a GROQ API key', async () => {
+    let groqSettingsLookups = 0;
+    const { router, request, responses } = routeHarness({ text: 'Muted speech.' });
+    registerOperationalRoutes(router, {
+      resolveDroneOrPendingForReadRef: async () => null,
+      loadCanonicalActiveModel: async () => ({ drones: {} }),
+      summarizeAssistantChatIdle: () => null,
+      resolveGroqApiKeySettings: async () => {
+        groqSettingsLookups += 1;
+        return { apiKey: null };
+      },
+      resolveSpeechSettings: async () => ({
+        enabled: true,
+        muted: true,
+        volume: 1,
+        voice: 'troy',
+      }),
+      emitAssistantUiAction: () => {},
+      hubLog: () => {},
+    });
+
+    expect(await request('POST', '/api/audio/speech')).toBe(true);
+    expect(groqSettingsLookups).toBe(0);
+    expect(responses).toHaveLength(1);
+    expect(responses[0]).toMatchObject({
+      status: 202,
+      body: { ok: true, status: 'muted', voice: 'troy' },
+    });
+  });
+
+  test('respects mute changes made while speech is being synthesized', async () => {
+    const originalFetch = globalThis.fetch;
+    let resolveFetch: ((response: Response) => void) | null = null;
+    const synthesisResponse = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    globalThis.fetch = (() => synthesisResponse) as typeof fetch;
+    let muted = false;
+    const emittedActions: any[] = [];
+    const { router, request } = routeHarness({ text: 'Mute me before playback.' });
+    registerOperationalRoutes(router, {
+      resolveDroneOrPendingForReadRef: async () => null,
+      loadCanonicalActiveModel: async () => ({ drones: {} }),
+      summarizeAssistantChatIdle: () => null,
+      resolveGroqApiKeySettings: async () => ({ apiKey: 'groq-secret' }),
+      resolveSpeechSettings: async () => ({ enabled: true, muted, volume: 1, voice: 'troy' }),
+      emitAssistantUiAction: (action: unknown) => emittedActions.push(action),
+      hubLog: () => {},
+    });
+
+    try {
+      expect(await request('POST', '/api/audio/speech')).toBe(true);
+      muted = true;
+      resolveFetch?.(new Response(new Uint8Array([1]), { status: 200 }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(emittedActions).toEqual([]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('synthesizes simultaneous speech calls one at a time in call order', async () => {
+    const originalFetch = globalThis.fetch;
+    const speechSettings = { enabled: true, muted: false, volume: 1, voice: 'troy' };
+    let resolveFirstSettings: ((settings: typeof speechSettings) => void) | null = null;
+    const firstSettings = new Promise<typeof speechSettings>((resolve) => {
+      resolveFirstSettings = resolve;
+    });
+    let settingsLookupCount = 0;
+    let resolveFirstFetch: ((response: Response) => void) | null = null;
+    const firstFetch = new Promise<Response>((resolve) => {
+      resolveFirstFetch = resolve;
+    });
+    let fetchCount = 0;
+    const synthesizedTexts: string[] = [];
+    globalThis.fetch = ((_url, init) => {
+      fetchCount += 1;
+      synthesizedTexts.push(JSON.parse(String(init?.body)).input);
+      return fetchCount === 1
+        ? firstFetch
+        : Promise.resolve(new Response(new Uint8Array([2]), { status: 200 }));
+    }) as typeof fetch;
+    const emittedActions: any[] = [];
+    const responses = new Map<string, any>();
+    const router = new HubRouter(
+      (res: any, status, body) => responses.set(res.requestId, { status, body }),
+      async (req: any) => req.body,
+    );
+    registerOperationalRoutes(router, {
+      resolveDroneOrPendingForReadRef: async () => null,
+      loadCanonicalActiveModel: async () => ({ drones: {} }),
+      summarizeAssistantChatIdle: () => null,
+      resolveGroqApiKeySettings: async () => ({ apiKey: 'groq-secret' }),
+      resolveSpeechSettings: async () => {
+        settingsLookupCount += 1;
+        return settingsLookupCount === 1 ? await firstSettings : speechSettings;
+      },
+      emitAssistantUiAction: (action: unknown) => emittedActions.push(action),
+      hubLog: () => {},
+    });
+    const request = (requestId: string, text: string) =>
+      router.handle(
+        { method: 'POST', headers: {}, body: { text } } as any,
+        { requestId } as any,
+        new URL('/api/audio/speech', 'http://hub.test'),
+      );
+
+    try {
+      const firstRequest = request('first', 'First speech.');
+      const secondRequest = request('second', 'Second speech.');
+      await secondRequest;
+      expect(responses.get('second')?.body.queuePosition).toBe(2);
+      expect(fetchCount).toBe(0);
+
+      resolveFirstSettings?.(speechSettings);
+      await firstRequest;
+      expect(responses.get('first')?.body.queuePosition).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fetchCount).toBe(1);
+      expect(synthesizedTexts).toEqual(['First speech.']);
+      expect(emittedActions).toEqual([]);
+
+      resolveFirstFetch?.(new Response(new Uint8Array([1]), { status: 200 }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fetchCount).toBe(2);
+      expect(synthesizedTexts).toEqual(['First speech.', 'Second speech.']);
+      expect(emittedActions.map((action) => action.data)).toEqual(['AQ==', 'Ag==']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test('serves fleet actor reads from the fleet router', async () => {
@@ -235,5 +427,37 @@ describe('extracted Hub route modules', () => {
         },
       },
     ]);
+  });
+
+  test('saves speech settings and notifies active MCP sessions', async () => {
+    const requested = {
+      enabled: false,
+      muted: true,
+      volume: 0.4,
+      voice: 'hannah',
+    };
+    const { router, request, responses } = routeHarness(requested);
+    let stored: any = null;
+    let notified: any = null;
+    registerSettingsRoutes(router, {
+      upsertStoredSpeechSettings: async (input: unknown) => {
+        stored = input;
+      },
+      resolveSpeechSettingsResponse: async () => ({
+        ok: true,
+        speech: { ...requested, voices: ['hannah', 'troy'] },
+      }),
+      notifySpeechSettingsChanged: (speech: unknown) => {
+        notified = speech;
+      },
+    } as any);
+
+    expect(await request('POST', '/api/settings/speech')).toBe(true);
+    expect(stored).toEqual(requested);
+    expect(notified).toEqual({ ...requested, voices: ['hannah', 'troy'] });
+    expect(responses).toEqual([{
+      status: 200,
+      body: { ok: true, speech: { ...requested, voices: ['hannah', 'troy'] } },
+    }]);
   });
 });
