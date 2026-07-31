@@ -178,7 +178,7 @@ export function SidebarItemStateIndicator({
         showReadyAnchor ? (
           <span
             data-sidebar-ready-anchor="true"
-            className="h-1.5 w-1.5 rounded-full border border-[var(--muted-dim)] opacity-35"
+            className="h-1.5 w-1.5 rounded-full border border-[var(--sidebar-item-icon)] opacity-70"
           />
         ) : null
       ) : working ? (
@@ -234,7 +234,7 @@ export function SidebarBlockedStatusIndicator({ emphasized = false }: { emphasiz
       className={`block h-3 w-3 transition-[color,opacity] ${
         emphasized
           ? 'text-[var(--sidebar-blocked-indicator)] opacity-100'
-          : 'text-[var(--muted-dim)] opacity-60 group-hover/drone:text-[var(--sidebar-blocked-indicator)] group-hover/drone:opacity-100 group-hover/chat-row:text-[var(--sidebar-blocked-indicator)] group-hover/chat-row:opacity-100'
+          : 'text-[var(--sidebar-item-icon)] opacity-70 group-hover/drone:text-[var(--sidebar-blocked-indicator)] group-hover/drone:opacity-100 group-hover/chat-row:text-[var(--sidebar-blocked-indicator)] group-hover/chat-row:opacity-100'
       }`}
       viewBox="0 0 12 12"
       fill="none"

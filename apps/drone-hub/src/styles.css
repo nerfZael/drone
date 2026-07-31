@@ -34,7 +34,7 @@
   --header-control-fg: #949daf;
   --field-bg: rgba(0, 0, 0, .18);
   --field-border: #3b4557;
-  --field-focus-border: color-mix(in srgb, var(--accent-muted) 62%, var(--field-border));
+  --field-focus-border: color-mix(in srgb, var(--accent-muted) 86%, var(--field-border));
   --field-fg: var(--fg);
   --field-placeholder: var(--muted);
   --sidebar-fg: var(--fg-secondary);
@@ -67,6 +67,7 @@
   --sidebar-row-selected-edge: rgba(177, 156, 255, .82);
   --sidebar-row-radius: var(--radius-medium);
   --sidebar-meta-fg: var(--muted-dim);
+  --sidebar-item-icon: var(--info);
   --sidebar-blocked-indicator: #ff5964;
   --sidebar-drone-compact-size: var(--type-compact);
   --sidebar-drone-size: var(--type-ui);
@@ -266,7 +267,7 @@
   --header-control-fg: #9298b2;
   --field-bg: rgba(49, 50, 68, .46);
   --field-border: rgba(69, 71, 90, .72);
-  --field-focus-border: rgba(180, 190, 254, .62);
+  --field-focus-border: rgba(180, 190, 254, .88);
   --field-fg: #cdd6f4;
   --field-placeholder: #9399b2;
   --sidebar-fg: #a6adc8;

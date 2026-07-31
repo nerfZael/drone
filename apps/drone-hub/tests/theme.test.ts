@@ -103,7 +103,7 @@ describe('desktop themes', () => {
       '--muted-dim': '#9399b2',
       '--field-bg': 'rgba(49, 50, 68, .46)',
       '--field-border': 'rgba(69, 71, 90, .72)',
-      '--field-focus-border': 'rgba(180, 190, 254, .62)',
+      '--field-focus-border': 'rgba(180, 190, 254, .88)',
       '--field-fg': '#cdd6f4',
       '--field-placeholder': '#9399b2',
       '--border-subtle': 'rgba(49, 50, 68, .78)',

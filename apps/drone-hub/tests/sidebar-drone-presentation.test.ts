@@ -120,7 +120,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).not.toContain('animate-[spin_1.6s_linear_infinite]');
   });
 
-  test('keeps persistent blocked triangles quiet and reserves red for emphasis', () => {
+  test('uses a quiet leaf accent for blocked triangles and reserves red for emphasis', () => {
     const quietHtml = renderToStaticMarkup(
       createElement(SidebarItemStateIndicator, { state: 'blocked' }),
     );
@@ -129,7 +129,7 @@ describe('desktop sidebar drone presentation', () => {
     );
 
     expect(quietHtml).toContain('data-sidebar-blocked-indicator="quiet"');
-    expect(quietHtml).toContain('text-[var(--muted-dim)] opacity-60');
+    expect(quietHtml).toContain('text-[var(--sidebar-item-icon)] opacity-70');
     expect(quietHtml).toContain('group-hover/drone:text-[var(--sidebar-blocked-indicator)]');
     expect(emphasizedHtml).toContain('data-sidebar-blocked-indicator="emphasized"');
     expect(emphasizedHtml).toContain('text-[var(--sidebar-blocked-indicator)] opacity-100');
@@ -140,7 +140,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(quietHtml).not.toContain('bg-[var(--green)]');
   });
 
-  test('leaves ready drones visually quiet while preserving unread emphasis', () => {
+  test('gives ready drones a quiet leaf accent while preserving unread emphasis', () => {
     const readyHtml = renderToStaticMarkup(
       createElement(SidebarItemStateIndicator, { state: 'idle' }),
     );
@@ -156,7 +156,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(readyHtml).not.toContain('bg-[var(--muted)]');
     expect(anchoredReadyHtml).toContain('data-sidebar-ready-anchor="true"');
     expect(anchoredReadyHtml).toContain('h-1.5 w-1.5 rounded-full border');
-    expect(anchoredReadyHtml).toContain('border-[var(--muted-dim)] opacity-35');
+    expect(anchoredReadyHtml).toContain('border-[var(--sidebar-item-icon)] opacity-70');
     expect(anchoredReadyHtml).not.toContain('bg-[var(--muted)]');
     expect(unreadHtml).toContain('rounded-full');
     expect(unreadHtml).toContain('bg-[var(--green)]');
