@@ -13,6 +13,7 @@ import {
   type AgentChatTranscriptItem,
   type ChatComposerMenuAction,
   type ChatComposerContextConfig,
+  type ChatSendContext,
   type ChatSendPayload,
   type DroneHubTask,
   type DroneHubTaskSpawnMode,
@@ -265,12 +266,17 @@ export function AssistantDock({
   onHistoryChange,
   startupPrompt,
   onStartupPromptReconciled,
+  onSendPromptInNewChat,
 }: {
   nativeChat: NativeChatBinding;
   messageFeatures: AssistantMessageFeatures;
   onHistoryChange?: (hasHistory: boolean) => void;
   startupPrompt?: AssistantStartupPrompt | null;
   onStartupPromptReconciled?: () => void;
+  onSendPromptInNewChat?: (
+    payload: ChatSendPayload,
+    context: ChatSendContext,
+  ) => Promise<boolean>;
 }) {
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
   const nativeDroneId = nativeChat.droneId;
@@ -1184,6 +1190,28 @@ export function AssistantDock({
       endLocalBusy();
     }
   }, [activeThread, beginSnapshotMutation, blipSession, nativeChatNodeId, refresh, scrollAssistantToBottom, snapshotMutationCurrent, waitForScopeSave]);
+
+  const sendPromptInNewChat = React.useCallback(
+    async (sharedPayload: ChatSendPayload, context: ChatSendContext): Promise<boolean> => {
+      if (!onSendPromptInNewChat) return false;
+      const referencedDroneSnapshot = referencedDronesRef.current.slice();
+      const prompt = appendAssistantDroneReferences(
+        sharedPayload.prompt,
+        referencedDroneSnapshot,
+      );
+      if (!prompt && sharedPayload.attachments.length === 0) return false;
+      setError(null);
+      setAttachmentError(null);
+      if (!(await waitForScopeSave())) return false;
+      const sent = await onSendPromptInNewChat(
+        { ...sharedPayload, prompt },
+        context,
+      );
+      if (sent) setReferencedDrones([]);
+      return sent;
+    },
+    [onSendPromptInNewChat, waitForScopeSave],
+  );
 
   const stop = React.useCallback(async () => {
     if (!activeThread) return;
@@ -2197,6 +2225,7 @@ export function AssistantDock({
               onSend={async (payload, context) =>
                 await sendPrompt(payload, context.deliveryMode)
               }
+              onSendInNewChat={onSendPromptInNewChat ? sendPromptInNewChat : undefined}
             />
           </div>
         )}

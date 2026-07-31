@@ -1,7 +1,7 @@
 const CHAT_NAME_MAX_LEN = 64;
 
 export function isGeneratedChatName(raw: unknown): boolean {
-  return /^chat-\d+$/.test(String(raw ?? '').trim());
+  return /^(?:chat-\d+|Untitled\s+\d+)$/.test(String(raw ?? '').trim());
 }
 
 export function buildSuggestedChatNameCandidate(baseRaw: string, attempt: number): string {

@@ -1,4 +1,5 @@
 export type ChatMessageDeliveryMode = 'asap' | 'queue';
+export type ChatComposerShortcutAction = ChatMessageDeliveryMode | 'new-chat';
 
 export type ChatSendShortcutInput = {
   key: string;
@@ -9,10 +10,11 @@ export type ChatSendShortcutInput = {
   hasContent: boolean;
 };
 
-export function chatSendShortcut(input: ChatSendShortcutInput): ChatMessageDeliveryMode | null {
+export function chatSendShortcut(input: ChatSendShortcutInput): ChatComposerShortcutAction | null {
   if (!input.hasContent) return null;
   if (input.key === 'Tab' && !input.shiftKey && !input.ctrlKey && !input.metaKey && !input.altKey)
     return 'queue';
   if (input.key !== 'Enter' || input.shiftKey) return null;
-  return input.ctrlKey || input.metaKey ? 'queue' : 'asap';
+  if (input.ctrlKey || input.metaKey) return 'new-chat';
+  return 'asap';
 }
