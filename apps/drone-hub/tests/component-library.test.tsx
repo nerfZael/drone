@@ -42,6 +42,7 @@ import {
   UiToolbarInput,
   UiToolbarLink,
   UiToolbarSegmentedControl,
+  UiTextarea,
   UiTooltip,
 } from '../src/ui';
 import { ComponentLibraryPatternsPreview } from '../src/droneHub/app/ComponentLibraryPatternsPreview';
@@ -69,7 +70,8 @@ describe('drone hub component library', () => {
 
     expect(html).toContain('bg-[linear-gradient(180deg,var(--accent),var(--accent-muted))]');
     expect(html).toContain('text-[var(--accent-fg)]');
-    expect(html).toContain('text-[length:var(--text-11)]');
+    expect(html).toContain('dh-type-control');
+    expect(html).toContain('dh-type-badge');
     expect(html).not.toContain('text-[var(--text-');
     expect(html).toContain('focus-visible:ring-2');
     expect(html).toContain('aria-busy="true"');
@@ -84,6 +86,7 @@ describe('drone hub component library', () => {
         <UiField label="Repository" htmlFor="repo" error="Required">
           <UiInput id="repo" invalid />
         </UiField>
+        <UiTextarea aria-label="Instructions" />
         <UiSwitch checked onCheckedChange={() => {}} label="Start after creation" />
         <UiSegmentedControl
           label="Density"
@@ -100,6 +103,8 @@ describe('drone hub component library', () => {
     expect(html).toContain('for="repo"');
     expect(html).toContain('aria-invalid="true"');
     expect(html).toContain('aria-describedby=');
+    expect(html).toContain('dh-field-control');
+    expect(html).not.toContain('0_0_0_3px');
     expect(html).toContain('role="switch"');
     expect(html).toContain('aria-checked="true"');
     expect(html).toContain('role="radiogroup"');
@@ -137,6 +142,7 @@ describe('drone hub component library', () => {
     );
 
     expect(html).toContain('<select');
+    expect(html).toContain('dh-field-control');
     expect(html).toContain('role="radiogroup"');
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-selected="true"');
@@ -322,6 +328,7 @@ describe('drone hub component library', () => {
     expect(html).toContain('role="option"');
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('aria-controls=');
+    expect(html).toContain('dh-field-control');
   });
 
   test('keeps enabled segmented options keyboard reachable when selection is disabled', () => {

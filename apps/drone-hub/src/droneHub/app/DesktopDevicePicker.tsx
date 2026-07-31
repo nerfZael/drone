@@ -35,7 +35,7 @@ export function DesktopDevicePicker() {
     >
       <button
         type="button"
-        className="flex h-8 min-w-0 items-center rounded-[var(--radius-medium)] pl-1.5 pr-0.5 text-left text-[var(--text-11)] font-semibold text-[var(--fg)] transition-colors hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]"
+        className="flex h-7 min-w-0 items-center rounded-[var(--radius-medium)] pl-1.5 pr-0.5 text-left dh-type-control-compact text-[var(--fg)] transition-colors hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]"
         title={`Switch device. Current device: ${name}`}
         aria-label={`Current device: ${name}, ${selectedHasRoute ? 'online' : 'offline'}. Choose another device.`}
         aria-haspopup="menu"
@@ -83,16 +83,16 @@ export function DesktopDevicePicker() {
                   ) : null}
                   <DeviceConnectionIndicator online={hasRoute} />
                   <span className="flex min-w-0 flex-1 flex-col justify-center">
-                    <span className="block truncate text-[var(--text-10-5)] font-semibold">
+                    <span className="block truncate dh-type-control-compact">
                       {device.name}
                     </span>
                     {local ? (
-                      <span className="mt-px block truncate text-[7px] font-semibold uppercase tracking-[0.09em] text-[var(--sidebar-meta-fg)]">
+                      <span className="mt-px block truncate text-[var(--type-micro)] font-normal text-[var(--sidebar-meta-fg)]">
                         This device
                       </span>
                     ) : null}
                   </span>
-                  <span className="w-[3.25rem] flex-shrink-0 text-right text-[var(--text-9)] font-medium text-[var(--sidebar-meta-fg)]">
+                  <span className="w-[3.25rem] flex-shrink-0 text-right dh-type-menu-meta !text-[var(--sidebar-meta-fg)]">
                     {platformLabel(device.platform)}
                   </span>
                 </button>

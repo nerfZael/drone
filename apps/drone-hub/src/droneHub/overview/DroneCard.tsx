@@ -1,20 +1,10 @@
 import React from 'react';
 import { timeAgo } from '../../domain';
 import type { DroneSummary } from '../types';
-import { RelativeTimeText } from '../chat/RelativeTimeText';
-import {
-  chooseDropdownVerticalPlacement,
-  dropdownMenuItemBaseClass,
-  dropdownPanelBaseClass,
-  dropdownViewportBounds,
-  type DropdownVerticalPlacement,
-  useDropdownDismiss,
-} from '../../ui/dropdown';
 import {
   IconBaseImage,
   IconClone,
   IconFolder,
-  IconMore,
   IconPin,
   IconPlus,
   IconRename,
@@ -24,6 +14,8 @@ import {
 import type { SidebarDensityMode } from '../app/settings-types';
 import { sidebarItemTypeClass, sidebarSelectionEdgeClass } from '../sidebar/presentation';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
+import { SidebarContextMenu, type SidebarContextMenuItem } from '../app/SidebarContextMenu';
+import { formatShortcutBinding } from '../app/shortcuts';
 
 export type DroneInlineRenameResult =
   | boolean
@@ -51,6 +43,7 @@ type DroneCardProps = {
   onClone?: () => void;
   onCreateChat?: () => void;
   onAddToGroup?: () => void;
+  onCreateGroup?: () => void;
   onRename?: DroneInlineRenameHandler;
   inlineRenameRequestKey?: number;
   onSetBaseImage?: () => void;
@@ -91,6 +84,8 @@ export type SidebarDroneDisplayState =
   | 'idle'
   | 'archiving'
   | 'deleting';
+
+const RECENT_BLOCKED_EMPHASIS_MS = 30_000;
 
 function sidebarDroneInactiveDisplayState(drone: DroneSummary): SidebarDroneDisplayState {
   const rawState = `${drone.hubPhase ?? ''} ${drone.hubMessage ?? ''} ${drone.statusError ?? ''}`.toLowerCase();
@@ -159,10 +154,12 @@ export function SidebarItemStateIndicator({
   state,
   unread = false,
   showReadyAnchor = false,
+  emphasized = false,
 }: {
   state: SidebarDroneDisplayState;
   unread?: boolean;
   showReadyAnchor?: boolean;
+  emphasized?: boolean;
 }) {
   const ready = state === 'idle' && !unread;
   const working = state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting';
@@ -189,7 +186,7 @@ export function SidebarItemStateIndicator({
       ) : approvalRequired ? (
         <SidebarApprovalStatusIndicator />
       ) : state === 'blocked' ? (
-        <SidebarBlockedStatusIndicator />
+        <SidebarBlockedStatusIndicator emphasized={emphasized} />
       ) : (
         <span className={`h-1.5 w-1.5 rounded-full ${indicatorToneClass}`} />
       )}
@@ -230,10 +227,15 @@ export function SidebarApprovalStatusIndicator() {
   );
 }
 
-export function SidebarBlockedStatusIndicator() {
+export function SidebarBlockedStatusIndicator({ emphasized = false }: { emphasized?: boolean }) {
   return (
     <svg
-      className="block h-3 w-3 text-[var(--sidebar-blocked-indicator)]"
+      data-sidebar-blocked-indicator={emphasized ? 'emphasized' : 'quiet'}
+      className={`block h-3 w-3 transition-[color,opacity] ${
+        emphasized
+          ? 'text-[var(--sidebar-blocked-indicator)] opacity-100'
+          : 'text-[var(--muted-dim)] opacity-60 group-hover/drone:text-[var(--sidebar-blocked-indicator)] group-hover/drone:opacity-100 group-hover/chat-row:text-[var(--sidebar-blocked-indicator)] group-hover/chat-row:opacity-100'
+      }`}
       viewBox="0 0 12 12"
       fill="none"
       stroke="currentColor"
@@ -285,6 +287,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.onClone) === Boolean(b.onClone) &&
     Boolean(a.onCreateChat) === Boolean(b.onCreateChat) &&
     Boolean(a.onAddToGroup) === Boolean(b.onAddToGroup) &&
+    Boolean(a.onCreateGroup) === Boolean(b.onCreateGroup) &&
     Boolean(a.onRename) === Boolean(b.onRename) &&
     (a.inlineRenameRequestKey ?? 0) === (b.inlineRenameRequestKey ?? 0) &&
     Boolean(a.onSetBaseImage) === Boolean(b.onSetBaseImage) &&
@@ -331,6 +334,7 @@ export const DroneCard = React.memo(function DroneCard({
   onClone,
   onCreateChat,
   onAddToGroup,
+  onCreateGroup,
   onRename,
   inlineRenameRequestKey,
   onSetBaseImage,
@@ -360,29 +364,33 @@ export const DroneCard = React.memo(function DroneCard({
   density = 'default',
 }: DroneCardProps) {
   const taggedToDo = useDroneHubUiStore((state) => state.toDoDroneIds.includes(drone.id));
+  const shortcutBindings = useDroneHubUiStore((state) => state.shortcutBindings);
   const shownName = String(displayName ?? drone.name).trim() || drone.name;
   const canClone = typeof onClone === 'function';
   const canCreateChat = typeof onCreateChat === 'function';
   const canAddToGroup = typeof onAddToGroup === 'function';
+  const canCreateGroup = typeof onCreateGroup === 'function';
   const canRename = typeof onRename === 'function';
   const canSetBaseImage = typeof onSetBaseImage === 'function';
   const canTogglePinned = typeof onTogglePinned === 'function';
   const canDelete = typeof onDelete === 'function';
-  const hasSecondaryActions = canTogglePinned || canClone || canCreateChat || canAddToGroup || canRename || canSetBaseImage;
-  const hasActions = hasSecondaryActions || canDelete;
+  const hasContextMenuActions =
+    canTogglePinned ||
+    canClone ||
+    canCreateChat ||
+    canAddToGroup ||
+    canCreateGroup ||
+    canRename ||
+    canSetBaseImage ||
+    canDelete;
   const activeOperationLabel = String(operationLabel ?? '').trim();
   const pinActionsVisible = Boolean(pinBusy) || Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
-  const actionMenuRef = React.useRef<HTMLDivElement | null>(null);
-  const actionMenuPanelRef = React.useRef<HTMLDivElement | null>(null);
-  const [actionMenuOpen, setActionMenuOpen] = React.useState(false);
-  const [actionMenuPlacement, setActionMenuPlacement] =
-    React.useState<DropdownVerticalPlacement>('below');
+  const [actionMenuPosition, setActionMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
   const [inlineRenameOpen, setInlineRenameOpen] = React.useState(false);
   const [inlineRenameValue, setInlineRenameValue] = React.useState('');
   const [inlineRenameError, setInlineRenameError] = React.useState<string | null>(null);
   const [inlineRenamePending, setInlineRenamePending] = React.useState(false);
   const inlineRenameInputRef = React.useRef<HTMLInputElement | null>(null);
-  useDropdownDismiss(actionMenuRef, actionMenuOpen, setActionMenuOpen);
   React.useEffect(() => {
     if (!inlineRenameOpen) return;
     const id = window.requestAnimationFrame(() => {
@@ -393,40 +401,11 @@ export const DroneCard = React.memo(function DroneCard({
   }, [inlineRenameOpen]);
   React.useEffect(() => {
     if (!inlineRenameRequestKey || !onRename || renameDisabled) return;
-    setActionMenuOpen(false);
+    setActionMenuPosition(null);
     setInlineRenameValue(shownName);
     setInlineRenameError(null);
     setInlineRenameOpen(true);
   }, [inlineRenameRequestKey]);
-  React.useLayoutEffect(() => {
-    if (!actionMenuOpen) return;
-
-    const updatePlacement = () => {
-      const anchor = actionMenuRef.current;
-      const panel = actionMenuPanelRef.current;
-      if (!anchor || !panel) return;
-      const anchorRect = anchor.getBoundingClientRect();
-      const viewport = dropdownViewportBounds(anchor);
-      const nextPlacement = chooseDropdownVerticalPlacement({
-        anchorTop: anchorRect.top,
-        anchorBottom: anchorRect.bottom,
-        panelHeight: panel.getBoundingClientRect().height,
-        viewportTop: viewport.top,
-        viewportBottom: viewport.bottom,
-      });
-      setActionMenuPlacement((current) =>
-        current === nextPlacement ? current : nextPlacement,
-      );
-    };
-
-    updatePlacement();
-    window.addEventListener('resize', updatePlacement);
-    window.addEventListener('scroll', updatePlacement, true);
-    return () => {
-      window.removeEventListener('resize', updatePlacement);
-      window.removeEventListener('scroll', updatePlacement, true);
-    };
-  }, [actionMenuOpen]);
   const isDraftDrone = drone.draft === true || drone.hubPhase === 'draft';
   const unread = !isDraftDrone && (Boolean(unreadAgentMessage) || (drone.unreadChats?.length ?? 0) > 0);
   const displayState = sidebarDroneDisplayState(
@@ -435,6 +414,23 @@ export const DroneCard = React.memo(function DroneCard({
     activeOperationLabel,
     Boolean(approvalRequired),
   );
+  const previousDisplayStateRef = React.useRef<SidebarDroneDisplayState>(displayState);
+  const [recentlyBlocked, setRecentlyBlocked] = React.useState(false);
+  React.useEffect(() => {
+    const previousDisplayState = previousDisplayStateRef.current;
+    previousDisplayStateRef.current = displayState;
+    if (displayState !== 'blocked') {
+      setRecentlyBlocked(false);
+      return;
+    }
+    if (previousDisplayState === 'blocked') return;
+    setRecentlyBlocked(true);
+    const timeoutId = window.setTimeout(
+      () => setRecentlyBlocked(false),
+      RECENT_BLOCKED_EMPHASIS_MS,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [displayState]);
   const stateLabel = sidebarDroneStateLabel(displayState, unread);
   const showActiveIndicator = Boolean(active) && !unread;
   const renderActiveEdge = showActiveIndicator && activeIndicatorStyle === 'edge';
@@ -444,10 +440,10 @@ export const DroneCard = React.memo(function DroneCard({
   const renderSelectionEdge = showSelectionEdge !== false;
   const rowDensityClass =
     density === 'compact'
-      ? 'min-h-[42px] py-1 pl-1 pr-1'
+      ? 'h-6 px-1'
       : density === 'comfortable'
-        ? 'min-h-[52px] py-2 pl-2 pr-1.5'
-        : 'min-h-[48px] py-1.5 pl-1.5 pr-1.5';
+        ? 'h-8 px-2'
+        : 'h-7 px-1.5';
   const titleDensityClass =
     density === 'compact'
       ? 'text-[var(--sidebar-drone-compact-size)]'
@@ -496,6 +492,117 @@ export const DroneCard = React.memo(function DroneCard({
       setInlineRenamePending(false);
     }
   };
+  const actionMenuItems: SidebarContextMenuItem[] = [];
+  if (canTogglePinned) {
+    actionMenuItems.push({
+      id: 'pin',
+      label: pinned ? 'Unpin from top' : 'Pin to top',
+      shortcut: shortcutBindings.toggleSelectedDronePinned
+        ? formatShortcutBinding(shortcutBindings.toggleSelectedDronePinned)
+        : undefined,
+      icon: pinBusy ? (
+        <IconSpinner className="h-3.5 w-3.5 text-[var(--accent)]" />
+      ) : (
+        <IconPin className="h-3.5 w-3.5 text-[var(--accent)]" filled={Boolean(pinned)} />
+      ),
+      disabled: Boolean(pinBusy),
+      onSelect: () => onTogglePinned?.(),
+    });
+  }
+  if (canCreateChat) {
+    actionMenuItems.push({
+      id: 'create-chat',
+      label: 'Create chat',
+      shortcut: shortcutBindings.createDroneChat
+        ? formatShortcutBinding(shortcutBindings.createDroneChat)
+        : undefined,
+      separatorBefore: actionMenuItems.length > 0,
+      icon: <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />,
+      disabled: Boolean(createChatDisabled),
+      onSelect: () => onCreateChat?.(),
+    });
+  }
+  if (canAddToGroup) {
+    actionMenuItems.push({
+      id: 'add-to-group',
+      label: 'Add to group',
+      separatorBefore: canTogglePinned && !canCreateChat,
+      icon: <IconFolder className="h-3.5 w-3.5 text-[var(--accent)]" />,
+      disabled: Boolean(addToGroupDisabled),
+      onSelect: () => onAddToGroup?.(),
+    });
+  }
+  if (canCreateGroup) {
+    actionMenuItems.push({
+      id: 'new-group',
+      label: 'New group',
+      shortcut: shortcutBindings.createDraftGroup
+        ? formatShortcutBinding(shortcutBindings.createDraftGroup)
+        : undefined,
+      separatorBefore: canTogglePinned && !canCreateChat && !canAddToGroup,
+      icon: <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />,
+      onSelect: () => onCreateGroup?.(),
+    });
+  }
+  if (canClone) {
+    actionMenuItems.push({
+      id: 'clone',
+      label: 'Clone drone',
+      separatorBefore: actionMenuItems.length > 0,
+      icon: <IconClone className="h-3.5 w-3.5 text-[var(--accent)]" />,
+      disabled: Boolean(cloneDisabled),
+      onSelect: () => onClone?.(),
+    });
+  }
+  if (canRename) {
+    actionMenuItems.push({
+      id: 'rename',
+      label: 'Rename',
+      shortcut: 'F2',
+      separatorBefore: !canClone && actionMenuItems.length > 0,
+      icon: renameBusy ? (
+        <IconSpinner className="h-3.5 w-3.5 text-[var(--info)]" />
+      ) : (
+        <IconRename className="h-3.5 w-3.5 text-[var(--info)]" />
+      ),
+      disabled: Boolean(renameDisabled),
+      onSelect: () => {
+        setInlineRenameValue(shownName);
+        setInlineRenameError(null);
+        setInlineRenameOpen(true);
+      },
+    });
+  }
+  if (canSetBaseImage) {
+    actionMenuItems.push({
+      id: 'set-base-image',
+      label: 'Set as base image',
+      separatorBefore: !canClone && !canRename && actionMenuItems.length > 0,
+      icon: setBaseImageBusy ? (
+        <IconSpinner className="h-3.5 w-3.5 text-[var(--yellow)]" />
+      ) : (
+        <IconBaseImage className="h-3.5 w-3.5 text-[var(--yellow)]" />
+      ),
+      disabled: Boolean(setBaseImageDisabled),
+      onSelect: () => onSetBaseImage?.(),
+    });
+  }
+  if (canDelete) {
+    actionMenuItems.push({
+      id: 'delete',
+      label: 'Delete drone',
+      shortcut: 'Delete',
+      separatorBefore: actionMenuItems.length > 0,
+      icon: deleteBusy ? (
+        <IconSpinner className="h-3.5 w-3.5" />
+      ) : (
+        <IconTrash className="h-3.5 w-3.5" />
+      ),
+      disabled: Boolean(deleteDisabled) || Boolean(deleteBusy),
+      tone: 'danger',
+      onSelect: () => onDelete?.(),
+    });
+  }
   return (
     <div
       ref={dragNodeRef}
@@ -510,6 +617,12 @@ export const DroneCard = React.memo(function DroneCard({
         if (disabled) return;
         onClick({ toggle: e.metaKey || e.ctrlKey, range: e.shiftKey });
       }}
+      onContextMenu={(event) => {
+        if (disabled || !hasContextMenuActions) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setActionMenuPosition({ x: event.clientX, y: event.clientY });
+      }}
       onKeyDown={(e) => {
         if (disabled) return;
         if (e.target !== e.currentTarget) return;
@@ -518,7 +631,7 @@ export const DroneCard = React.memo(function DroneCard({
           onClick();
         }
       }}
-      className={`dh-sidebar-row-interactive ${highlighted ? 'dh-sidebar-row-highlighted' : ''} ${actionMenuOpen ? 'z-50' : ''} w-full text-left ${rowDensityClass} flex items-center rounded-[var(--sidebar-row-radius)] border transition-colors duration-150 group/drone relative ${
+      className={`dh-sidebar-row-interactive ${highlighted ? 'dh-sidebar-row-highlighted' : ''} w-full text-left ${rowDensityClass} flex items-center rounded-[var(--sidebar-row-radius)] border transition-colors duration-150 group/drone relative ${
         highlighted
           ? 'bg-[var(--yellow-subtle)] border-[var(--yellow-border)]'
           : selected
@@ -541,10 +654,10 @@ export const DroneCard = React.memo(function DroneCard({
 
       <div
         className={`flex min-w-0 flex-1 items-center gap-1.5 self-stretch ${
-          hasActions
-            ? 'transition-[padding] duration-150 group-hover/drone:pr-12 group-focus-within/drone:pr-12'
+          canDelete
+            ? 'transition-[padding] duration-150 group-hover/drone:pr-7 group-focus-within/drone:pr-7'
             : ''
-        } ${pinActionsVisible || actionMenuOpen ? 'pr-12' : ''}`}
+        } ${pinActionsVisible ? 'pr-7' : ''}`}
         style={taggedToDo ? { paddingRight: '3rem' } : undefined}
       >
         {leadingIcon ? <span className="inline-flex flex-shrink-0 items-center">{leadingIcon}</span> : null}
@@ -567,7 +680,12 @@ export const DroneCard = React.memo(function DroneCard({
             title={`${stateLabel}: view full error details`}
             aria-label={`${stateLabel}: view full error details`}
           >
-            <SidebarItemStateIndicator state={displayState} unread={unread} showReadyAnchor />
+            <SidebarItemStateIndicator
+              state={displayState}
+              unread={unread}
+              showReadyAnchor
+              emphasized={recentlyBlocked || selected || Boolean(active) || Boolean(highlighted)}
+            />
           </button>
         ) : (
           <span
@@ -576,7 +694,12 @@ export const DroneCard = React.memo(function DroneCard({
             title={errText || stateLabel}
             aria-label={stateLabel}
           >
-            <SidebarItemStateIndicator state={displayState} unread={unread} showReadyAnchor />
+            <SidebarItemStateIndicator
+              state={displayState}
+              unread={unread}
+              showReadyAnchor
+              emphasized={recentlyBlocked || selected || Boolean(active) || Boolean(highlighted)}
+            />
           </span>
         )}
         {showActiveIndicator && !renderActiveEdge ? (
@@ -587,277 +710,119 @@ export const DroneCard = React.memo(function DroneCard({
             aria-label="Open chat"
           />
         ) : null}
-        <div className="flex min-w-0 flex-1 flex-col justify-center gap-[3px]">
-          <div className="flex min-w-0 items-center gap-1.5">
-            {inlineRenameOpen ? (
-              <input
-                ref={inlineRenameInputRef}
-                value={inlineRenameValue}
-                onChange={(event) => {
-                  setInlineRenameValue(event.target.value);
-                  setInlineRenameError(null);
-                }}
-                onBlur={() => {
-                  setInlineRenameOpen(false);
-                  setInlineRenameError(null);
-                }}
-                onClick={(event) => event.stopPropagation()}
-                onPointerDown={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-                onKeyDown={(event) => {
-                  event.stopPropagation();
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    void submitInlineRename();
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    setInlineRenameOpen(false);
-                    setInlineRenameError(null);
-                  }
-                }}
-                readOnly={inlineRenamePending}
-                maxLength={80}
-                aria-label="Drone name"
-                aria-invalid={Boolean(inlineRenameError)}
-                title={inlineRenameError || 'Rename drone'}
-                className={`min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 leading-tight shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
-                  inlineRenameError ? 'text-[var(--red)]' : sidebarItemTypeClass(selected)
-                } ${titleDensityClass}`}
-                style={{ border: 0, outline: 'none', boxShadow: 'none' }}
-              />
-            ) : (
-              <span
-                className={`min-w-0 flex-1 truncate leading-tight ${titleDensityClass} ${sidebarItemTypeClass(selected)}`}
-                title={`${shownName}${shownName !== drone.name ? ` (${drone.name})` : ''} · created ${timeAgo(drone.createdAt)}`}
-              >
-                {shownName}
-              </span>
-            )}
-            {statusHint ? (
-              <span
-                className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
-                title={statusHint}
-              >
-                {statusHint}
-              </span>
-            ) : null}
-          </div>
-          <div
-            data-sidebar-drone-metadata="true"
-            className="flex min-w-0 items-center gap-1.5 text-[.5625rem] font-normal leading-none text-[var(--sidebar-meta-fg)]"
+        {inlineRenameOpen ? (
+          <input
+            ref={inlineRenameInputRef}
+            value={inlineRenameValue}
+            onChange={(event) => {
+              setInlineRenameValue(event.target.value);
+              setInlineRenameError(null);
+            }}
+            onBlur={() => {
+              setInlineRenameOpen(false);
+              setInlineRenameError(null);
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void submitInlineRename();
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                setInlineRenameOpen(false);
+                setInlineRenameError(null);
+              }
+            }}
+            readOnly={inlineRenamePending}
+            maxLength={80}
+            aria-label="Drone name"
+            aria-invalid={Boolean(inlineRenameError)}
+            title={inlineRenameError || 'Rename drone'}
+            className={`min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 leading-tight shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 ${
+              inlineRenameError ? 'text-[var(--red)]' : sidebarItemTypeClass(selected)
+            } ${titleDensityClass}`}
+            style={{ border: 0, outline: 'none', boxShadow: 'none' }}
+          />
+        ) : (
+          <span
+            className={`min-w-0 flex-1 truncate leading-tight ${titleDensityClass} ${sidebarItemTypeClass(selected)}`}
+            title={`${shownName}${shownName !== drone.name ? ` (${drone.name})` : ''} · ${stateLabel} · created ${timeAgo(drone.createdAt)}`}
           >
-            {isDraftDrone ? (
-              <span
-                className="inline-flex flex-shrink-0 items-center rounded-[3px] bg-[var(--accent-subtle)] px-1.5 py-[3px] font-[var(--weight-semibold)] normal-case tracking-[0.02em] text-[var(--accent)]"
-                style={{ fontFamily: 'var(--display)' }}
-                title="Draft drone · queued messages run after publishing"
-                aria-label="Draft drone"
-              >
-                Draft
-              </span>
-            ) : (
-              <>
-                <span className="min-w-0 truncate">{stateLabel}</span>
-                {drone.lastMessageAt ? (
-                  <>
-                    <span className="opacity-55" aria-hidden="true">·</span>
-                    <RelativeTimeText
-                      at={drone.lastMessageAt}
-                      compact
-                      className="flex-shrink-0 font-mono"
-                      title={`Last message ${timeAgo(drone.lastMessageAt)}`}
-                    />
-                  </>
-                ) : null}
-              </>
-            )}
-          </div>
-        </div>
+            {shownName}
+          </span>
+        )}
+        {isDraftDrone ? (
+          <span
+            className="inline-flex flex-shrink-0 items-center rounded-[3px] bg-[var(--accent-subtle)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] normal-case leading-none tracking-[0.02em] text-[var(--accent)]"
+            style={{ fontFamily: 'var(--display)' }}
+            title="Draft drone · queued messages run after publishing"
+            aria-label="Draft drone"
+          >
+            Draft
+          </span>
+        ) : null}
+        {statusHint ? (
+          <span
+            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] leading-none tracking-wide uppercase text-[var(--muted-dim)]"
+            title={statusHint}
+          >
+            {statusHint}
+          </span>
+        ) : null}
       </div>
 
       {taggedToDo ? (
         <span
           data-sidebar-drone-label="to-do"
-          className="pointer-events-none absolute bottom-1 right-1 inline-flex items-center rounded-[3px] border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-1 py-px text-[.5rem] font-[var(--weight-semibold)] uppercase leading-none tracking-[0.03em] text-[var(--yellow)] opacity-70 transition-opacity duration-150 group-hover/drone:opacity-0 group-focus-within/drone:opacity-0"
+          className="pointer-events-none absolute right-1 top-1/2 inline-flex -translate-y-1/2 items-center rounded-[3px] border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-1 py-px text-[.5rem] font-[var(--weight-semibold)] uppercase leading-none tracking-[0.03em] text-[var(--yellow)] opacity-70 transition-opacity duration-150 group-hover/drone:opacity-0 group-focus-within/drone:opacity-0"
           aria-label="TODO"
         >
           TODO
         </span>
       ) : null}
 
-      {hasActions ? (
+      {canDelete ? (
         <div
-          ref={actionMenuRef}
           data-onboarding-id="sidebar.droneCard.actions"
-          className={`absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-1 transition-opacity duration-150 ${
-            pinActionsVisible || actionMenuOpen
+          className={`absolute right-1 top-1/2 flex -translate-y-1/2 items-center transition-opacity duration-150 ${
+            pinActionsVisible
               ? 'opacity-100 pointer-events-auto'
               : 'opacity-0 pointer-events-none group-hover/drone:opacity-100 group-hover/drone:pointer-events-auto group-focus-within/drone:opacity-100 group-focus-within/drone:pointer-events-auto'
           }`}
         >
-          {canDelete ? (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onDelete?.();
-              }}
-              onMouseDown={stopActionPressPropagation}
-              onPointerDown={stopActionPressPropagation}
-              disabled={Boolean(deleteDisabled)}
-              aria-busy={Boolean(deleteBusy)}
-              className={`inline-flex h-5 w-5 items-center justify-center rounded border transition-colors ${
-                deleteDisabled
-                  ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-50'
-                  : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:bg-[var(--danger-panel)]'
-              }`}
-              title={deleteBusy ? `Deleting "${shownName}"…` : `Delete "${shownName}"`}
-              aria-label={deleteBusy ? `Deleting "${shownName}"` : `Delete "${shownName}"`}
-            >
-              {deleteBusy ? <IconSpinner className="h-3 w-3" /> : <IconTrash className="h-3 w-3" />}
-            </button>
-          ) : null}
-          {hasSecondaryActions ? (
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setActionMenuOpen((open) => !open);
-              }}
-              onMouseDown={stopActionPressPropagation}
-              onPointerDown={stopActionPressPropagation}
-              className={`inline-flex h-5 w-5 items-center justify-center rounded border transition-colors ${
-                actionMenuOpen
-                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
-              }`}
-              title={`More actions for "${shownName}"`}
-              aria-label={`More actions for "${shownName}"`}
-              aria-haspopup="menu"
-              aria-expanded={actionMenuOpen}
-            >
-              {renameBusy || setBaseImageBusy ? (
-                <IconSpinner className="h-3 w-3" />
-              ) : (
-                <IconMore className="h-3 w-3" />
-              )}
-            </button>
-          ) : null}
-          {hasSecondaryActions && actionMenuOpen ? (
-            <div
-              ref={actionMenuPanelRef}
-              className={`absolute right-0 z-50 w-[11.5rem] ${
-                actionMenuPlacement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'
-              } ${dropdownPanelBaseClass}`}
-              role="menu"
-              aria-label={`Actions for ${shownName}`}
-              onClick={(event) => event.stopPropagation()}
-              onMouseDown={stopActionPressPropagation}
-              onPointerDown={stopActionPressPropagation}
-            >
-              <div className="py-1">
-                {canTogglePinned ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={Boolean(pinBusy)}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setActionMenuOpen(false);
-                      onTogglePinned?.();
-                    }}
-                    className={`${dropdownMenuItemBaseClass} flex items-center gap-2 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-45`}
-                  >
-                    {pinBusy ? <IconSpinner className="h-3.5 w-3.5 text-[var(--accent)]" /> : <IconPin className="h-3.5 w-3.5 text-[var(--accent)]" filled={Boolean(pinned)} />}
-                    <span>{pinned ? 'Unpin from top' : 'Pin to top'}</span>
-                  </button>
-                ) : null}
-                {canCreateChat ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={Boolean(createChatDisabled)}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setActionMenuOpen(false);
-                      onCreateChat?.();
-                    }}
-                    className={`${dropdownMenuItemBaseClass} flex items-center gap-2 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-45`}
-                  >
-                    <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />
-                    <span>Create chat</span>
-                  </button>
-                ) : null}
-                {canAddToGroup ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={Boolean(addToGroupDisabled)}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setActionMenuOpen(false);
-                      onAddToGroup?.();
-                    }}
-                    className={`${dropdownMenuItemBaseClass} flex items-center gap-2 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-45`}
-                  >
-                    <IconFolder className="h-3.5 w-3.5 text-[var(--accent)]" />
-                    <span>Add to group</span>
-                  </button>
-                ) : null}
-                {canClone ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={Boolean(cloneDisabled)}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setActionMenuOpen(false);
-                      onClone?.();
-                    }}
-                    className={`${dropdownMenuItemBaseClass} flex items-center gap-2 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-45`}
-                  >
-                    <IconClone className="h-3.5 w-3.5 text-[var(--accent)]" />
-                    <span>Clone drone</span>
-                  </button>
-                ) : null}
-                {canRename ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={Boolean(renameDisabled)}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setActionMenuOpen(false);
-                      setInlineRenameValue(shownName);
-                      setInlineRenameError(null);
-                      setInlineRenameOpen(true);
-                    }}
-                    className={`${dropdownMenuItemBaseClass} flex items-center gap-2 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-45`}
-                  >
-                    {renameBusy ? <IconSpinner className="h-3.5 w-3.5 text-[var(--info)]" /> : <IconRename className="h-3.5 w-3.5 text-[var(--info)]" />}
-                    <span>Rename</span>
-                  </button>
-                ) : null}
-                {canSetBaseImage ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={Boolean(setBaseImageDisabled)}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setActionMenuOpen(false);
-                      onSetBaseImage?.();
-                    }}
-                    className={`${dropdownMenuItemBaseClass} flex items-center gap-2 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-45`}
-                  >
-                    {setBaseImageBusy ? <IconSpinner className="h-3.5 w-3.5 text-[var(--yellow)]" /> : <IconBaseImage className="h-3.5 w-3.5 text-[var(--yellow)]" />}
-                    <span>Set as base image</span>
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete?.();
+            }}
+            onMouseDown={stopActionPressPropagation}
+            onPointerDown={stopActionPressPropagation}
+            disabled={Boolean(deleteDisabled)}
+            aria-busy={Boolean(deleteBusy)}
+            className={`inline-flex h-5 w-5 items-center justify-center rounded border transition-colors ${
+              deleteDisabled
+                ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-50'
+                : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:bg-[var(--danger-panel)]'
+            }`}
+            title={deleteBusy ? `Deleting "${shownName}"…` : `Delete "${shownName}"`}
+            aria-label={deleteBusy ? `Deleting "${shownName}"` : `Delete "${shownName}"`}
+          >
+            {deleteBusy ? <IconSpinner className="h-3 w-3" /> : <IconTrash className="h-3 w-3" />}
+          </button>
         </div>
+      ) : null}
+      {actionMenuPosition ? (
+        <SidebarContextMenu
+          x={actionMenuPosition.x}
+          y={actionMenuPosition.y}
+          label={`Actions for ${shownName}`}
+          items={actionMenuItems}
+          onClose={() => setActionMenuPosition(null)}
+        />
       ) : null}
     </div>
   );

@@ -34,6 +34,7 @@ import {
   IconEyeOff,
   IconFolder,
   IconFolderGit,
+  IconFolderOutline,
   IconList,
   IconMore,
   IconPencil,
@@ -190,6 +191,31 @@ function stepSidebarDensityMode(
   return SIDEBAR_DENSITY_MODE_ORDER[nextIndex] ?? 'default';
 }
 
+function SidebarRepositoryStateCount({
+  count,
+  indicator,
+  label,
+  toneClassName,
+}: {
+  count: number;
+  indicator: React.ReactNode;
+  label: string;
+  toneClassName: string;
+}) {
+  return (
+    <span
+      className={`inline-flex h-3 items-center gap-1 ${toneClassName}`}
+      title={`${count} ${label}`}
+      aria-label={`${count} ${label}`}
+    >
+      <span className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center leading-none">
+        {indicator}
+      </span>
+      <span className="relative top-px inline-flex h-3 items-center leading-none">{count}</span>
+    </span>
+  );
+}
+
 type DraftSidebarPlaceholder = {
   name: string;
   repoPath: string;
@@ -272,9 +298,6 @@ function ReadOnlySidebarGroups({
                 <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`}>
                   {group.label}
                 </span>
-              }
-              leading={
-                <IconFolder className={`${densityClasses.icon} text-[var(--muted-dim)] opacity-80`} />
               }
               expandable={Boolean(groupKey)}
               open={!collapsed}
@@ -609,8 +632,9 @@ function StaticReadOnlySidebarTree({
           }}
           title={folderPath || node.label}
         >
-          <IconFolder
-            className={`${densityClasses.icon} flex-shrink-0 text-[var(--muted-dim)] opacity-80`}
+          <IconChevron
+            down={!collapsed}
+            className={`${densityClasses.icon} flex-shrink-0 text-[var(--muted-dim)]`}
           />
           <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`}>
             {node.label}
@@ -839,7 +863,7 @@ function SidebarGroupSection({
         >
           <IconChevron down={!collapsed} className="flex-shrink-0 text-[var(--muted-dim)]" />
           <IconFolder className="flex-shrink-0 text-[var(--muted-dim)] opacity-50" />
-          <span className={`${sidebarFolderLabelClass} text-[var(--text-11)] font-medium`}>
+          <span className={`${sidebarFolderLabelClass} text-[var(--text-11)] font-normal`}>
             {groupLabel}
           </span>
         </button>
@@ -1010,7 +1034,7 @@ type SidebarFolderTreeNodeProps = {
   onToggleGroupCollapsed: (group: string) => void;
   onOpenFolderCreate: (
     parentPath: string | null,
-    opts?: { anchorPath?: string | null; repoGroupPath?: string | null },
+    opts?: { anchorPath?: string | null; beforeNodeId?: string | null; repoGroupPath?: string | null },
   ) => void;
   onStartRenameFolder: (group: string) => void;
   onFolderEditorValueChange: (next: string) => void;
@@ -1140,19 +1164,15 @@ function SidebarFolderTreeNode({
             type="button"
             className={`min-w-0 flex-1 rounded px-1 py-1 text-left ${sidebarDndEnabled ? 'cursor-grab touch-none active:cursor-grabbing' : ''}`}
             onClick={() => {
-              if (selectedFolderPath === node.path) {
-                onToggleGroupCollapsed(node.path);
-                return;
-              }
               onSelectFolder(node.path);
+              onToggleGroupCollapsed(node.path);
             }}
-            onDoubleClick={() => onToggleGroupCollapsed(node.path)}
             {...(attributes as unknown as Record<string, unknown>)}
             {...(listeners as unknown as Record<string, unknown>)}
             title={collapsed ? `Expand ${groupLabel}` : `Collapse ${groupLabel}`}
           >
             <div className="flex min-w-0 items-center gap-1.5">
-              <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-80" />
+              <IconChevron down={!collapsed} className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)]" />
               {showEditorInline && folderEditor ? (
                 <input
                   ref={folderEditorInputRef}
@@ -1319,7 +1339,7 @@ function SidebarFolderTreeNode({
           ))}
           {showCreateInline && folderEditor ? (
             <div className="flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5">
-              <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-80" />
+              <IconChevron className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-80" />
               <input
                 ref={folderEditorInputRef}
                 value={folderEditor.value}
@@ -1448,7 +1468,10 @@ export type DroneSidebarProps = {
   ) => Promise<boolean> | boolean;
   onPrepareDroneDragStart: (droneId: string) => void;
   onOpenReposModal: () => void;
-  onSetDroneSelectionFromFolder: (droneIds: readonly string[]) => void;
+  onSetDroneSelectionFromFolder: (
+    droneIds: readonly string[],
+    opts?: { preserveActive?: boolean },
+  ) => void;
   onRenderedNodeTreeChange?: (nodeTree: SidebarNodeTreeModel | null) => void;
   capabilities?: Partial<DroneSidebarCapabilities>;
   sidebarGroupingModeOverride?: SidebarGroupingMode;
@@ -1948,7 +1971,7 @@ export function DroneSidebar({
       } else {
         handleGroupedSelectFolder(path);
       }
-      onSetDroneSelectionFromFolder(next);
+      onSetDroneSelectionFromFolder(next, { preserveActive: Boolean(opts?.toggle) });
     },
     [
       clearGroupedFolderSelection,
@@ -2280,17 +2303,19 @@ export function DroneSidebar({
   const openDraftDroneFromSidebarSelection = React.useCallback(() => {
     onOpenDraftChatComposer(selectedDroneDraftLocation);
   }, [onOpenDraftChatComposer, selectedDroneDraftLocation]);
-  const openGroupDraft = React.useCallback((): boolean => {
+  const openGroupDraftAtNode = React.useCallback((anchorNodeId: string | null): boolean => {
     if (!sidebarCapabilities.actions || isRepoGroupingMode) return false;
     if (sidebarCapabilities.headerActions && (repositoryOverviewOpen || !activeRepositoryNavigationItem)) {
       return false;
     }
-    const draftLocation = resolveSidebarGroupDraftLocation(
-      selectedFolderPath,
-      visibleSidebarFolderPathSet,
-      selectedCreateContextDrone?.group,
-    );
+    const draftLocation = resolveSidebarGroupDraftLocation({
+      selectedSidebarNodeId: anchorNodeId,
+      selectedDroneId: selectedCreateContextDrone?.id ?? null,
+      nodeTree: getRenderedSidebarNodeTree(),
+      visibleFolderPaths: visibleSidebarFolderPathSet,
+    });
     openFolderCreate(draftLocation.parentPath, {
+      beforeNodeId: draftLocation.beforeNodeId,
       repoGroupPath: activeRepositoryNavigationItem?.id ?? null,
       initialValue: allocateUntitledDisplayName(draftLocation.siblingNames),
       dismissOnBlur: true,
@@ -2299,16 +2324,26 @@ export function DroneSidebar({
     return true;
   }, [
     activeRepositoryNavigationItem,
+    getRenderedSidebarNodeTree,
     isRepoGroupingMode,
     openFolderCreate,
     repositoryOverviewOpen,
     sidebarCapabilities.actions,
     selectedCreateContextDrone,
-    selectedFolderPath,
     sidebarCapabilities.headerActions,
     setSidebarCollapsed,
     visibleSidebarFolderPathSet,
   ]);
+  const openGroupDraft = React.useCallback(
+    (): boolean => openGroupDraftAtNode(selectedSidebarNodeId),
+    [openGroupDraftAtNode, selectedSidebarNodeId],
+  );
+  const openGroupDraftBeforeDrone = React.useCallback(
+    (drone: DroneSummary): void => {
+      openGroupDraftAtNode(sidebarDroneNodeId(drone.id));
+    },
+    [openGroupDraftAtNode],
+  );
   React.useEffect(() => {
     const onRequest = (event: Event) => {
       if (event.defaultPrevented) return;
@@ -2704,7 +2739,7 @@ export function DroneSidebar({
         onWheel={sidebarCapabilities.sidebarOptions ? onSidebarWheel : undefined}
       >
         <div
-          className={`relative flex h-[3.25rem] flex-shrink-0 select-none items-center border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] pl-3.5 pr-2 ${
+          className={`relative flex h-11 flex-shrink-0 select-none items-center border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] pl-3 pr-2 ${
             sidebarDockDragEnabled
               ? `touch-none ${sidebarDockDragActive ? 'cursor-grabbing' : 'cursor-grab'}`
               : ''
@@ -2734,46 +2769,49 @@ export function DroneSidebar({
         {sidebarCapabilities.headerActions ? (
           <>
             {!repositoryOverviewOpen && activeRepositoryNavigationItem ? (
-              <div className="group/active-repository flex min-h-14 w-full flex-shrink-0 items-center border-b border-[var(--border)] pr-2 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)]">
+              <div className="group/active-repository flex h-10 w-full flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--surface-inset)] pr-1.5 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)]">
                 <button
                   type="button"
                   onClick={openRepositoryOverview}
-                  className="flex min-h-14 min-w-0 flex-1 items-center gap-2 px-2.5 text-left"
+                  className="flex h-10 min-w-0 flex-1 items-center gap-1.5 px-2 text-left"
                   title="Back to repositories"
                   aria-label="Back to repositories"
                 >
-                  <span className="relative inline-flex h-5 w-5 flex-shrink-0 items-center justify-end text-[var(--sidebar-action-fg)]">
-                    <IconFolderGit className="h-4 w-4" />
-                    <span className="absolute -left-0.5 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-[var(--sidebar-bg)]">
+                  <span className="relative inline-flex h-4 w-4 flex-shrink-0 items-center justify-end text-[var(--sidebar-action-fg)]">
+                    <IconFolderGit className="h-3.5 w-3.5" />
+                    <span className="absolute -left-1 top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-[var(--surface-inset)] transition-colors group-hover/active-repository:bg-[var(--hover)] group-focus-within/active-repository:bg-[var(--hover)]">
                       <IconChevronLeft className="h-2.5 w-2.5" />
                     </span>
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[.8125rem] font-semibold text-[var(--fg)]">
+                    <span className="block truncate text-[var(--text-12)] font-semibold text-[var(--fg)]">
                       {activeRepositoryNavigationItem.label}
                     </span>
                   </span>
                   <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem] leading-none">
                     {activeRepositoryNavigationItem.stateSummary.approval > 0 ? (
-                      <span
-                        className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]"
-                        title={`${activeRepositoryNavigationItem.stateSummary.approval} awaiting approval`}
-                      >
-                        <SidebarApprovalStatusIndicator />
-                        {activeRepositoryNavigationItem.stateSummary.approval}
-                      </span>
+                      <SidebarRepositoryStateCount
+                        count={activeRepositoryNavigationItem.stateSummary.approval}
+                        indicator={<SidebarApprovalStatusIndicator />}
+                        label="awaiting approval"
+                        toneClassName="text-[var(--yellow)]"
+                      />
                     ) : null}
                     {activeRepositoryNavigationItem.stateSummary.unread > 0 ? (
-                      <span className="inline-flex items-center gap-1 text-[var(--green)]">
-                        <SidebarItemStateIndicator state="idle" unread />
-                        {activeRepositoryNavigationItem.stateSummary.unread}
-                      </span>
+                      <SidebarRepositoryStateCount
+                        count={activeRepositoryNavigationItem.stateSummary.unread}
+                        indicator={<SidebarItemStateIndicator state="idle" unread />}
+                        label="unread"
+                        toneClassName="text-[var(--green)]"
+                      />
                     ) : null}
                     {activeRepositoryNavigationItem.stateSummary.working > 0 ? (
-                      <span className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]">
-                        <SidebarWorkingStatusIndicator />
-                        {activeRepositoryNavigationItem.stateSummary.working}
-                      </span>
+                      <SidebarRepositoryStateCount
+                        count={activeRepositoryNavigationItem.stateSummary.working}
+                        indicator={<SidebarWorkingStatusIndicator />}
+                        label="working"
+                        toneClassName="text-[var(--yellow)]"
+                      />
                     ) : null}
                   </span>
                 </button>
@@ -2782,12 +2820,12 @@ export function DroneSidebar({
                   onClick={openGroupDraft}
                   disabled={!sidebarCapabilities.actions}
                   data-sidebar-create-group="true"
-                  className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="group/create-group inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-40"
                   title="Create group (E)"
                   aria-label="Create group"
                 >
-                  <span className="relative inline-flex h-4 w-4 items-center justify-center">
-                    <IconFolder className="h-4 w-4" />
+                  <span className="relative inline-flex h-4 w-4 items-center justify-center opacity-70 transition-opacity group-hover/create-group:opacity-100 group-focus-visible/create-group:opacity-100">
+                    <IconFolderOutline className="h-4 w-4" />
                     <IconPlus className="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full bg-[var(--sidebar-bg)]" />
                   </span>
                 </button>
@@ -2795,7 +2833,7 @@ export function DroneSidebar({
                   type="button"
                   onClick={openDraftDroneFromSidebarSelection}
                   disabled={!sidebarCapabilities.createDrones}
-                  className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-40"
                   title={`Create drone in ${activeRepositoryNavigationItem.label}`}
                   aria-label={`Create drone in ${activeRepositoryNavigationItem.label}`}
                 >
@@ -2973,7 +3011,7 @@ export function DroneSidebar({
               <section className="border-b border-[var(--border-subtle)]" aria-label="Pinned drones">
                 <div className="flex min-h-8 items-center gap-1.5 px-1">
                   <IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
-                  <span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-medium text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">
+                  <span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-normal text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">
                     Pinned
                   </span>
                 </div>
@@ -3026,6 +3064,7 @@ export function DroneSidebar({
                             onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}
                             onClone={sidebarCapabilities.actions ? () => onCloneDrone(drone) : undefined}
                             onAddToGroup={sidebarCapabilities.actions ? () => openAddDroneToGroup(drone) : undefined}
+                            onCreateGroup={sidebarCapabilities.actions ? () => openGroupDraftBeforeDrone(drone) : undefined}
                             onRename={
                               sidebarCapabilities.actions
                                 ? (newName) => onRenameDrone(droneId, newName)
@@ -3067,13 +3106,13 @@ export function DroneSidebar({
               </section>
             ) : null}
             {sidebarCapabilities.headerActions && repositoryOverviewOpen ? (
-              <div className="flex flex-col pb-6">
+              <div className="flex flex-col py-1 pb-6">
                 {repositoryNavigationItems.map((item) => {
                   const containsSelectedDrone = Boolean(selectedDrone) && item.repoPath === selectedDroneRepoPath;
                   return (
                     <div
                       key={item.id}
-                      className={`dh-sidebar-row-interactive group/repository-row relative flex min-h-14 w-full items-center border-b border-[var(--surface-soft)] transition-colors ${
+                      className={`dh-sidebar-row-interactive group/repository-row relative flex h-9 w-full items-center rounded-[var(--sidebar-row-radius)] transition-colors ${
                         containsSelectedDrone ? 'dh-sidebar-row-selected' : ''
                       }`}
                     >
@@ -3081,39 +3120,46 @@ export function DroneSidebar({
                       <button
                         type="button"
                         onClick={() => openRepositoryNavigationItem(item)}
-                        className="flex min-h-14 min-w-0 flex-1 items-center gap-2 px-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
+                        className="flex h-9 min-w-0 flex-1 items-center gap-1.5 px-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
                         title={item.repoPath || item.label}
                         aria-label={`Open ${item.label} repository`}
                       >
-                        <IconFolderGit className="h-[.9375rem] w-[.9375rem] flex-shrink-0 text-[var(--sidebar-action-fg)]" />
+                        <IconFolderGit className="h-3.5 w-3.5 flex-shrink-0 text-[var(--sidebar-action-fg)] opacity-85" />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[.75rem] font-semibold text-[var(--fg)]">
+                          <span className={`block truncate text-[var(--text-12)] group-hover/repository-row:text-[var(--fg)] ${
+                            containsSelectedDrone
+                              ? 'font-semibold text-[var(--fg)]'
+                              : 'font-medium text-[var(--fg-secondary)]'
+                          }`}>
                             {item.label}
                           </span>
                         </span>
                       </button>
-                      <div className="relative mr-1 h-8 w-8 flex-shrink-0">
+                      <div className="relative mr-0.5 h-7 w-7 flex-shrink-0">
                         <span className="pointer-events-none absolute inset-0 inline-flex items-center justify-end gap-1.5 whitespace-nowrap pr-2 font-mono text-[.5625rem] leading-none transition-opacity duration-150 group-hover/repository-row:opacity-0 group-focus-within/repository-row:opacity-0">
                           {item.stateSummary.approval > 0 ? (
-                            <span
-                              className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]"
-                              title={`${item.stateSummary.approval} awaiting approval`}
-                            >
-                              <SidebarApprovalStatusIndicator />
-                              {item.stateSummary.approval}
-                            </span>
+                            <SidebarRepositoryStateCount
+                              count={item.stateSummary.approval}
+                              indicator={<SidebarApprovalStatusIndicator />}
+                              label="awaiting approval"
+                              toneClassName="text-[var(--yellow)]"
+                            />
                           ) : null}
                           {item.stateSummary.unread > 0 ? (
-                            <span className="inline-flex items-center gap-1 text-[var(--green)]">
-                              <SidebarItemStateIndicator state="idle" unread />
-                              {item.stateSummary.unread}
-                            </span>
+                            <SidebarRepositoryStateCount
+                              count={item.stateSummary.unread}
+                              indicator={<SidebarItemStateIndicator state="idle" unread />}
+                              label="unread"
+                              toneClassName="text-[var(--green)]"
+                            />
                           ) : null}
                           {item.stateSummary.working > 0 ? (
-                            <span className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]">
-                              <SidebarWorkingStatusIndicator />
-                              {item.stateSummary.working}
-                            </span>
+                            <SidebarRepositoryStateCount
+                              count={item.stateSummary.working}
+                              indicator={<SidebarWorkingStatusIndicator />}
+                              label="working"
+                              toneClassName="text-[var(--yellow)]"
+                            />
                           ) : null}
                         </span>
                         <button
@@ -3170,46 +3216,6 @@ export function DroneSidebar({
               <>
                 <div className="flex flex-col gap-0">
                   <>
-                    {sidebarCapabilities.actions && !isRepoGroupingMode ? (
-                      <>
-                        {folderEditor?.mode === 'create' &&
-                        folderEditor.parentPath === null &&
-                        folderEditor.anchorPath === null ? (
-                          <div className="flex min-h-8 items-center gap-1.5 px-1.5">
-                            <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)]" />
-                            <input
-                              ref={folderEditorInputRef}
-                              data-sidebar-group-draft-input="true"
-                              value={folderEditor.value}
-                              onChange={(event) => updateFolderEditorValue(event.target.value)}
-                              onBlur={blurFolderEditor}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter') {
-                                  event.preventDefault();
-                                  submitFolderEditor();
-                                } else if (event.key === 'Escape') {
-                                  event.preventDefault();
-                                  closeFolderEditor();
-                                }
-                              }}
-                              maxLength={64}
-                              placeholder="Folder name"
-                              aria-label="New group name"
-                              className="min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 text-[var(--text-11)] text-[var(--fg)] shadow-none outline-none ring-0 placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
-                              style={{ border: 0, outline: 'none', boxShadow: 'none' }}
-                            />
-                          </div>
-                        ) : null}
-                        {folderEditor?.mode === 'create' &&
-                        folderEditor.parentPath === null &&
-                        folderEditor.anchorPath === null &&
-                        folderEditor.error ? (
-                          <div className="mb-1 px-1 text-[var(--text-10)] text-[var(--red)]">
-                            {folderEditor.error}
-                          </div>
-                        ) : null}
-                      </>
-                    ) : null}
                     <GroupedSidebarTree
                       sidebarGroups={
                         sidebarCapabilities.headerActions && activeRepositoryModel
@@ -3282,6 +3288,7 @@ export function DroneSidebar({
                       onDeleteDroneChat={onDeleteDroneChat}
                       onCloneDrone={onCloneDrone}
                       onAddDroneToGroup={openAddDroneToGroup}
+                      onCreateGroupBeforeDrone={openGroupDraftBeforeDrone}
                       onCreateDroneChat={onCreateDroneChat}
                       onRenameDroneChat={onRenameDroneChat}
                       chatEditor={chatEditor}

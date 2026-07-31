@@ -17,14 +17,16 @@ describe('sidebar inline group editor', () => {
       expect(source).toContain("style={{ border: 0, outline: 'none', boxShadow: 'none' }}");
     }
 
-    const nestedCreateEditor = groupedTreeSource.slice(
-      groupedTreeSource.indexOf('{actionsEnabled && showCreateInline ? ('),
-      groupedTreeSource.indexOf('{(!actionsEnabled || !showCreateInline)', groupedTreeSource.indexOf('{actionsEnabled && showCreateInline ? (')),
+    const groupDraftEditor = groupedTreeSource.slice(
+      groupedTreeSource.indexOf('function GroupedSidebarGroupDraftRow()'),
+      groupedTreeSource.indexOf('function GroupedSidebarChildEntries('),
     );
-    expect(nestedCreateEditor).toContain('data-sidebar-group-draft-input="true"');
-    expect(nestedCreateEditor).toContain('appearance-none rounded-none border-0 bg-transparent');
-    expect(nestedCreateEditor).not.toContain('border border-dashed');
-    expect(nestedCreateEditor).not.toContain('bg-[var(--panel-raised)]');
+    expect(groupDraftEditor).toContain('data-sidebar-group-draft-input="true"');
+    expect(groupDraftEditor).toContain('<IconChevron');
+    expect(groupDraftEditor).not.toContain('<IconFolder');
+    expect(groupDraftEditor).toContain('appearance-none rounded-none border-0 bg-transparent');
+    expect(groupDraftEditor).not.toContain('border border-dashed');
+    expect(groupDraftEditor).not.toContain('bg-[var(--panel-raised)]');
   });
 
   test('cancels group renaming when the editor loses focus', () => {

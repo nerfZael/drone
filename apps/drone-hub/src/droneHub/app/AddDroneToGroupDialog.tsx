@@ -276,7 +276,7 @@ export function AddDroneToGroupDialog({
                 maxLength={80}
                 disabled={busy}
                 placeholder="e.g. Platform or Client work"
-                className="mt-2 h-10 w-full rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] outline-none transition-colors placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)] focus:ring-1 focus:ring-[var(--focus-ring)] disabled:opacity-60"
+                className="dh-field-control mt-2 h-10 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-[var(--text-13)] text-[var(--field-fg)] transition-colors placeholder:text-[var(--field-placeholder)] disabled:opacity-60"
               />
               <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">Use “/” to create a nested group path.</div>
               <div className="mt-5 flex items-center justify-end gap-2">
@@ -304,7 +304,7 @@ export function AddDroneToGroupDialog({
                   }}
                   disabled={busy}
                   placeholder="Search groups"
-                  className="h-10 w-full rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] pl-9 pr-3 text-[var(--text-13)] text-[var(--fg)] outline-none transition-colors placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)] focus:ring-1 focus:ring-[var(--focus-ring)] disabled:opacity-60"
+                  className="dh-field-control h-10 w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] pl-9 pr-3 text-[var(--text-13)] text-[var(--field-fg)] transition-colors placeholder:text-[var(--field-placeholder)] disabled:opacity-60"
                 />
               </div>
               <div className="mt-3 overflow-hidden rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)]">

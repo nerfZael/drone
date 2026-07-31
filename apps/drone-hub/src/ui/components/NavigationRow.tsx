@@ -96,7 +96,7 @@ export const UiNavigationRow = React.forwardRef<HTMLButtonElement, UiNavigationR
           }}
           className={cn(
             'flex min-w-0 flex-1 items-center gap-1.5 self-stretch rounded-[var(--sidebar-row-radius)] pr-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed',
-            density === 'compact' ? 'text-[length:var(--text-10)]' : 'text-[length:var(--text-11)]',
+            density === 'compact' ? 'dh-type-control-compact' : 'dh-type-control',
           )}
           style={{ paddingLeft: `${8 + Math.max(0, depth) * 14}px`, ...style }}
           {...props}
@@ -115,16 +115,16 @@ export const UiNavigationRow = React.forwardRef<HTMLButtonElement, UiNavigationR
           ) : null}
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate font-[var(--weight-semibold)]">{label}</span>
+              <span className="truncate">{label}</span>
               {status ? <span className="shrink-0">{status}</span> : null}
             </span>
             {description ? (
-              <span className="block truncate text-[length:var(--text-9)] text-[var(--muted-dim)]">
+              <span className="block truncate dh-type-supporting !text-[var(--text-11)]">
                 {description}
               </span>
             ) : null}
           </span>
-          {meta ? <span className="shrink-0 text-[length:var(--text-9)] text-[var(--muted-dim)]">{meta}</span> : null}
+          {meta ? <span className="shrink-0 dh-type-menu-meta">{meta}</span> : null}
         </button>
         {actions && !disabled ? (
           <div className="mr-1 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/navigation-row:opacity-100 group-focus-within/navigation-row:opacity-100">

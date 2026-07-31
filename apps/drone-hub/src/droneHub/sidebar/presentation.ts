@@ -3,7 +3,7 @@ import type { SidebarDensityMode } from '../app/settings-types';
 
 export type SidebarDensityClasses = {
   icon: string;
-  emptyHint: string;
+  folderChevron: string;
   chatRow: string;
   chatDeleteWidth: string;
   chatIndent: string;
@@ -17,18 +17,15 @@ export type SidebarDensityClasses = {
   folderPaddingX: string;
   folderLabel: string;
   folderInput: string;
-  folderActionButton: string;
   folderBody: string;
-  folderCreateBody: string;
   folderDepthPaddingPx: number;
 };
 
 const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses> = {
   compact: {
     icon: 'h-3 w-3 text-[var(--muted-dim)] opacity-72',
-    emptyHint:
-      'flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--border)] bg-[var(--surface-softest)] px-2 py-1 text-[9.5px] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
-    chatRow: 'h-6 px-1.5 text-[var(--text-10)]',
+    folderChevron: 'h-3.5 w-3.5 translate-x-px text-[var(--muted-dim)] opacity-72',
+    chatRow: 'h-6 px-1.5 text-[var(--sidebar-item-compact-size)]',
     chatDeleteWidth: 'w-6',
     chatIndent: 'ml-3 mr-1',
     chatBlockIndent: 'ml-3 mr-1',
@@ -39,18 +36,15 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
     draftText: 'text-[var(--text-11)]',
     folderRow: 'min-h-6',
     folderPaddingX: 'px-1 py-0.5',
-    folderLabel: 'text-[var(--text-10)]',
-    folderInput: 'px-1.5 py-0.5 text-[var(--text-10)]',
-    folderActionButton: 'h-[18px] w-[18px]',
-    folderBody: 'ml-0.5 flex flex-col gap-0.5 border-l pl-1',
-    folderCreateBody: 'px-2 py-1',
+    folderLabel: 'text-[var(--sidebar-item-compact-size)]',
+    folderInput: 'px-1.5 py-0.5 text-[var(--sidebar-item-compact-size)]',
+    folderBody: 'ml-[9px] flex flex-col gap-0 border-l pl-0',
     folderDepthPaddingPx: 4,
   },
   default: {
     icon: 'h-3.5 w-3.5 text-[var(--muted-dim)] opacity-72',
-    emptyHint:
-      'flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--border)] bg-[var(--surface-softest)] px-2 py-1.5 text-[var(--text-10)] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
-    chatRow: 'h-[25px] px-1.5 text-[var(--text-10-5)]',
+    folderChevron: 'h-4 w-4 translate-x-px text-[var(--muted-dim)] opacity-72',
+    chatRow: 'h-[25px] px-1.5 text-[var(--sidebar-item-size)]',
     chatDeleteWidth: 'w-6',
     chatIndent: 'ml-[14px] mr-1',
     chatBlockIndent: 'ml-[14px] mr-1',
@@ -61,18 +55,15 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
     draftText: 'text-[var(--text-11-5)]',
     folderRow: 'min-h-7',
     folderPaddingX: 'px-1 py-0.5',
-    folderLabel: 'text-[var(--text-10-5)]',
-    folderInput: 'px-2 py-1 text-[var(--text-10-5)]',
-    folderActionButton: 'h-5 w-5',
-    folderBody: 'ml-1 flex flex-col gap-0.5 border-l pl-1.5',
-    folderCreateBody: 'px-2 py-1.5',
+    folderLabel: 'text-[var(--sidebar-item-size)]',
+    folderInput: 'px-2 py-1 text-[var(--sidebar-item-size)]',
+    folderBody: 'ml-2.5 flex flex-col gap-0 border-l pl-0',
     folderDepthPaddingPx: 5,
   },
   comfortable: {
     icon: 'h-[15px] w-[15px] text-[var(--muted-dim)] opacity-72',
-    emptyHint:
-      'flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--border)] bg-[var(--surface-softest)] px-2.5 py-2 text-[var(--text-10-5)] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
-    chatRow: 'h-7 px-2 text-[var(--text-11)]',
+    folderChevron: 'h-[17px] w-[17px] translate-x-px text-[var(--muted-dim)] opacity-72',
+    chatRow: 'h-7 px-2 text-[var(--sidebar-item-comfortable-size)]',
     chatDeleteWidth: 'w-7',
     chatIndent: 'ml-[18px] mr-1',
     chatBlockIndent: 'ml-[18px] mr-1',
@@ -83,11 +74,9 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
     draftText: 'text-[var(--text-12)]',
     folderRow: 'min-h-8',
     folderPaddingX: 'px-1.5 py-1',
-    folderLabel: 'text-[var(--text-11)]',
-    folderInput: 'px-2 py-1 text-[var(--text-11)]',
-    folderActionButton: 'h-5 w-5',
-    folderBody: 'ml-1.5 flex flex-col gap-0.5 border-l pl-2',
-    folderCreateBody: 'px-2.5 py-2',
+    folderLabel: 'text-[var(--sidebar-item-comfortable-size)]',
+    folderInput: 'px-2 py-1 text-[var(--sidebar-item-comfortable-size)]',
+    folderBody: 'ml-3 flex flex-col gap-0 border-l pl-0',
     folderDepthPaddingPx: 6,
   },
 };

@@ -100,7 +100,12 @@ describe('desktop themes', () => {
       '--border': 'rgba(69, 71, 90, .56)',
       '--fg-strong': '#cdd6f4',
       '--muted': '#a6adc8',
-      '--muted-dim': '#7f849c',
+      '--muted-dim': '#9399b2',
+      '--field-bg': 'rgba(49, 50, 68, .46)',
+      '--field-border': 'rgba(69, 71, 90, .72)',
+      '--field-focus-border': 'rgba(180, 190, 254, .62)',
+      '--field-fg': '#cdd6f4',
+      '--field-placeholder': '#9399b2',
       '--border-subtle': 'rgba(49, 50, 68, .78)',
       '--assistant-message-fg': '#bac2de',
       '--chat-list-marker': '#7f849c',
@@ -139,11 +144,13 @@ describe('desktop themes', () => {
       '--sidebar-brand-fg': '#cdd6f4',
       '--sidebar-brand-size': '.875rem',
       '--sidebar-brand-weight': '700',
-      '--sidebar-heading-weight': '600',
-      '--sidebar-drone-fg': '#a6adc8',
+      '--sidebar-heading-weight': '400',
+      '--sidebar-drone-fg': '#bac2de',
       '--sidebar-drone-active-fg': '#cdd6f4',
-      '--sidebar-drone-size': '.75rem',
-      '--sidebar-drone-weight': '500',
+      '--sidebar-drone-compact-size': '.75rem',
+      '--sidebar-drone-size': '.8125rem',
+      '--sidebar-drone-comfortable-size': '.875rem',
+      '--sidebar-drone-weight': '400',
       '--sidebar-row-selected-bg': 'rgba(203, 166, 247, .075)',
       '--sidebar-meta-fg': '#7f849c',
       '--selected': 'rgba(147, 153, 178, .24)',
@@ -166,6 +173,8 @@ describe('desktop themes', () => {
       '--syntax-variable': '#eba0ac',
       '--glow-accent': 'none',
     });
+    expect(css).toContain('/* Fields use one quiet 1px border');
+    expect(css).toContain('border-color: var(--field-focus-border);\n  outline: none;\n  box-shadow: none;');
     const catppuccinTokenNames = Array.from(catppuccinCss.matchAll(/(--[a-z0-9-]+)\s*:/g), (match) => match[1]);
     const presentationTokenPrefixes = [
       '--body-',
@@ -176,6 +185,9 @@ describe('desktop themes', () => {
       '--sidebar-item-',
     ];
     const presentationTokenNames = new Set([
+      '--ui',
+      '--prose',
+      '--brand-display',
       '--display',
       '--sans',
       '--code',

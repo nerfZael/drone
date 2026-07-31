@@ -84,18 +84,17 @@ export function UiPaneState({
       </div>
       <div
         className={cn(
-          'font-[var(--weight-semibold)] text-[var(--fg-secondary)]',
-          compact ? 'mt-2 text-[length:var(--text-10)]' : 'mt-3 text-[length:var(--text-12)]',
+          'text-[var(--fg-secondary)]',
+          compact ? 'mt-2 dh-type-control-compact' : 'mt-3 dh-type-heading',
         )}
-        style={{ fontFamily: 'var(--display)' }}
       >
         {title}
       </div>
       {description ? (
         <div
           className={cn(
-            'mt-1 max-w-[44ch] leading-relaxed text-[var(--muted)]',
-            compact ? 'text-[length:var(--text-9)]' : 'text-[length:var(--text-11)]',
+            'mt-1 max-w-[44ch] dh-type-supporting !text-[var(--muted)]',
+            compact && '!text-[var(--text-11)]',
           )}
         >
           {description}

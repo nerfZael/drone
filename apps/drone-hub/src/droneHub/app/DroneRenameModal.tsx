@@ -110,7 +110,7 @@ export function DroneRenameModal({
               setName(event.target.value);
               onNameChange?.();
             }}
-            className="mt-2 h-10 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] outline-none transition-colors placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)] focus:ring-1 focus:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="dh-field-control mt-2 h-10 w-full rounded border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-[var(--text-13)] text-[var(--field-fg)] transition-colors placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed disabled:opacity-60"
           />
           <div
             id="rename-drone-hint"

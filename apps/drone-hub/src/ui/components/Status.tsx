@@ -68,11 +68,11 @@ export function UiStatusChip({
   return (
     <span
       className={cn(
-        'inline-flex h-5 max-w-full items-center gap-1 rounded border px-1.5 text-[length:var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.06em]',
+        'inline-flex h-5 max-w-full items-center gap-1 rounded border px-1.5 dh-type-badge',
         statusChipClassName[tone],
         className,
       )}
-      style={{ fontFamily: 'var(--display)', ...style }}
+      style={style}
       {...props}
     >
       {dot ? <UiStatusDot tone={tone} className="h-1.5 w-1.5 [&>span]:h-1.5 [&>span]:w-1.5" /> : null}
@@ -89,7 +89,7 @@ export function UiCountBadge({
   return (
     <span
       className={cn(
-        'inline-flex min-w-4 items-center justify-center rounded-full bg-[var(--surface-strong)] px-1 font-mono text-[length:var(--text-8)] tabular-nums text-[var(--muted)]',
+        'inline-flex min-w-4 items-center justify-center rounded-full bg-[var(--surface-strong)] px-1 font-mono text-[length:var(--text-11)] tabular-nums text-[var(--muted)]',
         className,
       )}
       {...props}

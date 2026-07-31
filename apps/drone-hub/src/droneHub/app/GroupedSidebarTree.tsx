@@ -13,7 +13,7 @@ import { createCanvasChatNodeId } from './app-config';
 import { droneChatRequiresApproval, normalizedDroneChats } from './chat-node-helpers';
 import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag, type SidebarDroneDragData } from './drone-hub-dnd';
 import { isDroneStartingOrSeeding } from './helpers';
-import { IconColumns, IconEye, IconEyeOff, IconFolder, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
+import { IconChevron, IconColumns, IconEye, IconEyeOff, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
 import { canReorderSidebarDroneSelectionAtParent } from './sidebar-drone-drop';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import type { SidebarFolderSelectionOptions } from './sidebar-folder-selection';
@@ -46,6 +46,9 @@ import type { DroneDeleteMode, SidebarDensityMode } from './settings-types';
 import { useChatApprovalRequired } from './use-drone-hub-runtime-store';
 import type { MoveDronesToGroupResult } from './use-group-management';
 import type { SidebarGroup } from './use-sidebar-view-model';
+import { SidebarContextMenu, type SidebarContextMenuItem } from './SidebarContextMenu';
+import { formatShortcutBinding } from './shortcuts';
+import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import {
   sidebarChatLabelClass,
   sidebarChatRowTone,
@@ -55,12 +58,11 @@ import {
   sidebarSelectionEdgeClass,
 } from '../sidebar/presentation';
 
-const GROUPED_FOLDER_SINGLE_CLICK_DELAY_MS = 180;
-
 type FolderEditorState = {
   mode: 'create' | 'rename';
   parentPath: string | null;
   anchorPath: string | null;
+  beforeNodeId: string | null;
   targetPath: string | null;
   value: string;
   error: string | null;
@@ -115,7 +117,7 @@ type GroupedSidebarTreeProps = {
   selectedGroupMultiChat: string | null;
   onOpenFolderCreate: (
     parentPath: string | null,
-    opts?: { anchorPath?: string | null; repoGroupPath?: string | null },
+    opts?: { anchorPath?: string | null; beforeNodeId?: string | null; repoGroupPath?: string | null },
   ) => void;
   onStartRenameFolder: (path: string) => void;
   onFolderEditorValueChange: (next: string) => void;
@@ -147,6 +149,7 @@ type GroupedSidebarTreeProps = {
   ) => Promise<{ ok: boolean; deletedDrone?: boolean; error?: string | null }>;
   onCloneDrone: (drone: DroneSummary) => void;
   onAddDroneToGroup: (drone: DroneSummary) => void;
+  onCreateGroupBeforeDrone: (drone: DroneSummary) => void;
   onCreateDroneChat: (
     drone: DroneSummary,
     chatName: string,
@@ -190,7 +193,6 @@ type TreeDropPlacement = SidebarGroupDropPlacement | 'into';
 
 type GroupedSidebarTreeContextValue = GroupedSidebarTreeProps & {
   nodeTree: SidebarNodeTreeModel;
-  displayDepthOffset: number;
   droneTreeByGroupPath: Record<string, SidebarDroneTree>;
   visibleDroneOrder: string[];
   dragOverTreeTarget: { nodeId: string; placement: TreeDropPlacement } | null;
@@ -642,6 +644,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     activeChatName,
     onCloneDrone,
     onAddDroneToGroup,
+    onCreateGroupBeforeDrone,
     onOpenCreateDroneChat,
     onChatEditorValueChange,
     onChatEditorCreateAsDraftChange,
@@ -747,7 +750,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   return (
     <div
       data-sidebar-drone-unit="true"
-      className={`mb-1 flex flex-col gap-0.5 transition-[margin] duration-150 ${nested ? densityClasses.nestedDroneIndent : ''} ${reorderPreviewClass}`}
+      className={`flex flex-col gap-0 transition-[margin] duration-150 ${nested ? densityClasses.nestedDroneIndent : ''} ${reorderPreviewClass}`}
     >
       <div ref={droneDropDisabled ? undefined : setDropNodeRef} data-sidebar-node-anchor-id={node.id} className="relative">
         {dragOverTreeTarget?.nodeId === node.id &&
@@ -786,6 +789,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             onCreateChat={actionsEnabled ? () => onOpenCreateDroneChat(drone) : undefined}
             onClone={actionsEnabled ? () => onCloneDrone(drone) : undefined}
             onAddToGroup={actionsEnabled ? () => onAddDroneToGroup(drone) : undefined}
+            onCreateGroup={actionsEnabled ? () => onCreateGroupBeforeDrone(drone) : undefined}
             onRename={actionsEnabled ? (newName) => onRenameDrone(drone.id, newName) : undefined}
             inlineRenameRequestKey={
               inlineRenameDroneRequest?.droneId === drone.id
@@ -854,7 +858,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
         <div
           ref={chatTailDropDisabled ? undefined : setChatTailDropNodeRef}
           data-sidebar-chat-rail="true"
-          className={`${densityClasses.chatBlockIndent} flex flex-col gap-0.5 border-l border-[var(--border-subtle)]`}
+          className={`${densityClasses.chatBlockIndent} flex flex-col gap-0 border-l border-[var(--border-subtle)]`}
         >
           {showCreateChatEditor ? (
             <div className="flex flex-col gap-0.5">
@@ -904,7 +908,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
         </div>
       ) : null}
       {childDroneIds.length > 0 ? (
-        <div className={`${densityClasses.nestedDroneRail} flex flex-col gap-0.5 border-l border-[var(--border-subtle)]`}>
+        <div className={`${densityClasses.nestedDroneRail} flex flex-col gap-0 border-l border-[var(--border-subtle)]`}>
           {childDroneIds.map((childNode) => (
             <GroupedSidebarDroneRow
               key={childNode.id}
@@ -919,15 +923,97 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   );
 });
 
+function GroupedSidebarGroupDraftRow() {
+  const {
+    folderEditor,
+    folderEditorInputRef,
+    onFolderEditorValueChange,
+    onSubmitFolderEditor,
+    onBlurFolderEditor,
+    onCancelFolderEditor,
+  } = useGroupedSidebarTreeContext();
+  if (!folderEditor || folderEditor.mode !== 'create') return null;
+
+  return (
+    <div className="flex flex-col gap-0">
+      <div className="flex min-h-8 items-center gap-1.5 px-1.5">
+        <IconChevron
+          strokeWidth={1.25}
+          className="h-4 w-4 translate-x-px flex-shrink-0 text-[var(--muted-dim)] opacity-72"
+        />
+        <input
+          ref={folderEditorInputRef}
+          data-sidebar-group-draft-input="true"
+          value={folderEditor.value}
+          onChange={(event) => onFolderEditorValueChange(event.target.value)}
+          onBlur={onBlurFolderEditor}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              onSubmitFolderEditor();
+            } else if (event.key === 'Escape') {
+              event.preventDefault();
+              onCancelFolderEditor();
+            }
+          }}
+          maxLength={64}
+          placeholder={folderEditor.parentPath ? 'Subfolder name' : 'Folder name'}
+          aria-label="New group name"
+          className="min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 text-[var(--text-11)] text-[var(--fg)] shadow-none outline-none ring-0 placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+          style={{ border: 0, outline: 'none', boxShadow: 'none' }}
+        />
+      </div>
+      {folderEditor.error ? (
+        <div className="px-1 text-[var(--text-10)] text-[var(--red)]">{folderEditor.error}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function GroupedSidebarChildEntries({
+  childIds,
+  groupPath,
+  showCreateInline,
+}: {
+  childIds: string[];
+  groupPath: string | null;
+  showCreateInline: boolean;
+}) {
+  const { folderEditor } = useGroupedSidebarTreeContext();
+  const beforeNodeId = showCreateInline ? folderEditor?.beforeNodeId ?? null : null;
+  const renderDraftFirst =
+    showCreateInline && (!beforeNodeId || !childIds.includes(beforeNodeId));
+
+  return (
+    <>
+      {renderDraftFirst ? <GroupedSidebarGroupDraftRow /> : null}
+      {childIds.map((childId) => (
+        <React.Fragment key={childId}>
+          {showCreateInline && beforeNodeId === childId ? (
+            <GroupedSidebarGroupDraftRow />
+          ) : null}
+          <div data-sidebar-node-id={childId}>
+            <GroupedSidebarNodeEntry nodeId={childId} groupPath={groupPath} />
+          </div>
+        </React.Fragment>
+      ))}
+    </>
+  );
+}
+
 function GroupedSidebarFolderBodyDropZone({
   nodeId,
   disabled,
   className,
+  selectedDirectChild,
+  dropActive,
   children,
 }: {
   nodeId: string;
   disabled: boolean;
   className: string;
+  selectedDirectChild: boolean;
+  dropActive: boolean;
   children: React.ReactNode;
 }) {
   const dropDisabled = disabled;
@@ -941,15 +1027,21 @@ function GroupedSidebarFolderBodyDropZone({
   });
 
   return (
-    <div ref={dropDisabled ? undefined : setNodeRef} data-sidebar-folder-body={nodeId} className={className}>
+    <div
+      ref={dropDisabled ? undefined : setNodeRef}
+      data-sidebar-folder-body={nodeId}
+      data-sidebar-guide-selected={selectedDirectChild ? 'true' : undefined}
+      data-sidebar-guide-drop-active={dropActive ? 'true' : undefined}
+      className={className}
+    >
       {children}
     </div>
   );
 }
 
 function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
-  const clickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeDrag = useDroneHubActiveDrag();
+  const shortcutBindings = useDroneHubUiStore((state) => state.shortcutBindings);
   const {
     sidebarDensityMode,
     collapsedGroups,
@@ -961,6 +1053,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     selectedFolderPath,
     selectedDroneIds,
     selectedDroneSet,
+    selectedDrone,
     setSelectedSidebarNodeId,
     onSelectFolder,
     onToggleGroupCollapsed,
@@ -977,10 +1070,8 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     onStartRenameFolder,
     toggleSidebarGroupHidden,
     onOpenGroupMultiChat,
-    selectedGroupMultiChat,
     onDeleteGroup,
     shouldSuppressClick,
-    displayDepthOffset,
     actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
@@ -1001,6 +1092,14 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   const showEditorInline = folderEditor?.targetPath === folderPath && folderEditor.mode === 'rename';
   const showCreateInline = (folderEditor?.anchorPath ?? folderEditor?.parentPath) === folderPath && folderEditor?.mode === 'create';
   const childIds = nodeTree.childIdsByParent[node.id] ?? [];
+  const hasSelectedDirectChild = childIds.some((childId) => {
+    const child = nodeTree.nodesById[childId];
+    if (!child) return false;
+    if (selectedSidebarNodeId === childId) return true;
+    return child.kind === 'drone' &&
+      (selectedDroneSet.has(child.droneId) || selectedDrone === child.droneId);
+  });
+  const [contextMenuPosition, setContextMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
   const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
     id: `sidebar-folder:${node.id}`,
     data:
@@ -1045,72 +1144,130 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           ? 'pb-3'
           : ''
       : '';
-  const clearClickTimer = React.useCallback(() => {
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-    }
-  }, []);
-  React.useEffect(() => clearClickTimer, [clearClickTimer]);
-  const runFolderSingleClick = React.useCallback((opts?: SidebarFolderSelectionOptions) => {
+  const handleFolderClick = React.useCallback((opts?: SidebarFolderSelectionOptions) => {
     if (shouldSuppressClick()) return;
-    if (isSelected && !opts?.selectDrones) {
-      onSelectFolder(folderPath, opts);
-      onToggleGroupCollapsed(folderPath);
-      return;
-    }
     setSelectedSidebarNodeId(node.id);
     onSelectFolder(folderPath, opts);
-  }, [folderPath, isSelected, node.id, onSelectFolder, onToggleGroupCollapsed, setSelectedSidebarNodeId, shouldSuppressClick]);
-  const scheduleFolderSingleClick = React.useCallback((opts?: SidebarFolderSelectionOptions) => {
-    clearClickTimer();
-    clickTimerRef.current = setTimeout(() => {
-      clickTimerRef.current = null;
-      runFolderSingleClick(opts);
-    }, GROUPED_FOLDER_SINGLE_CLICK_DELAY_MS);
-  }, [clearClickTimer, runFolderSingleClick]);
-  const handleFolderDoubleClick = React.useCallback(
-    (event: React.MouseEvent<HTMLElement>) => {
-      if (
-        event.target instanceof Element &&
-        (event.target.closest('[data-sidebar-folder-actions="true"]') || event.target.closest('input,textarea,select'))
-      ) {
-        return;
-      }
-      if (shouldSuppressClick()) return;
-      event.preventDefault();
-      clearClickTimer();
-      setSelectedSidebarNodeId(node.id);
-      onSelectFolder(folderPath);
+    if (!opts?.selectDrones) {
       onToggleGroupCollapsed(folderPath);
+    }
+  }, [folderPath, node.id, onSelectFolder, onToggleGroupCollapsed, setSelectedSidebarNodeId, shouldSuppressClick]);
+  const contextMenuItems: SidebarContextMenuItem[] = [
+    {
+      id: 'new-group',
+      label: isVirtualGroup ? 'New group' : 'New subfolder',
+      shortcut: shortcutBindings.createDraftGroup
+        ? formatShortcutBinding(shortcutBindings.createDraftGroup)
+        : undefined,
+      icon: <IconPlus className="h-3.5 w-3.5 text-[var(--accent)]" />,
+      onSelect: () =>
+        onOpenFolderCreate(
+          isVirtualGroup ? null : folderPath,
+          isVirtualGroup
+            ? { anchorPath: folderPath, repoGroupPath: node.repoGroupPath }
+            : node.repoGroupPath
+              ? { repoGroupPath: node.repoGroupPath }
+              : undefined,
+        ),
     },
-    [clearClickTimer, folderPath, node.id, onSelectFolder, onToggleGroupCollapsed, setSelectedSidebarNodeId, shouldSuppressClick],
-  );
+    ...(!isVirtualGroup
+      ? [{
+          id: 'rename',
+          label: 'Rename',
+          shortcut: 'F2',
+          separatorBefore: true,
+          icon: renamingGroups[folderPath] ? (
+            <IconSpinner className="h-3.5 w-3.5 text-[var(--info)]" />
+          ) : (
+            <IconPencil className="h-3.5 w-3.5 text-[var(--info)]" />
+          ),
+          disabled: Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath]),
+          onSelect: () => onStartRenameFolder(folderPath),
+        } satisfies SidebarContextMenuItem]
+      : []),
+    {
+      id: 'visibility',
+      label: isHiddenGroup ? 'Unhide group' : 'Hide group',
+      separatorBefore: isVirtualGroup,
+      icon: isHiddenGroup ? (
+        <IconEye className="h-3.5 w-3.5 text-[var(--accent)]" />
+      ) : (
+        <IconEyeOff className="h-3.5 w-3.5 text-[var(--muted)]" />
+      ),
+      onSelect: () => toggleSidebarGroupHidden(groupRef),
+    },
+    {
+      id: 'multi-chat',
+      label: 'Open multi-chat',
+      shortcut: shortcutBindings.openHoveredGroupMultiChat
+        ? formatShortcutBinding(shortcutBindings.openHoveredGroupMultiChat)
+        : undefined,
+      separatorBefore: true,
+      icon: <IconColumns className="h-3.5 w-3.5 text-[var(--accent)]" />,
+      onSelect: () => onOpenGroupMultiChat(folderPath),
+    },
+    {
+      id: 'delete',
+      label: 'Delete group',
+      separatorBefore: true,
+      icon: deletingGroups[folderPath] ? (
+        <IconSpinner className="h-3.5 w-3.5" />
+      ) : (
+        <IconTrash className="h-3.5 w-3.5" />
+      ),
+      disabled: Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath]),
+      tone: 'danger',
+      onSelect: () => {
+        void onDeleteGroup(folderPath, node.totalDroneCount, {
+          kind: node.groupKind,
+          label: node.label,
+          repoPath:
+            isVirtualGroup && node.path.startsWith('repo:') && node.path !== 'repo:ungrouped'
+              ? node.path.slice('repo:'.length)
+              : null,
+        });
+      },
+    },
+  ];
 
   return (
-    <div className={`flex flex-col gap-0.5 transition-[margin] duration-150 ${reorderPreviewClass}`}>
+    <div
+      data-sidebar-folder-node={node.id}
+      className={`flex flex-col gap-0 transition-[margin] duration-150 ${reorderPreviewClass}`}
+    >
       <div ref={setHeaderRef} data-sidebar-node-anchor-id={node.id} className="relative">
         {dragOverTreeTarget?.nodeId === node.id &&
         (dragOverTreeTarget.placement === 'before' || dragOverTreeTarget.placement === 'after') ? (
           <TreeDropGuide placement={dragOverTreeTarget.placement} />
         ) : null}
         <div
-          className={`group/folder-row relative flex items-center gap-1 rounded-[var(--radius-medium)] pr-1 transition-colors ${densityClasses.folderRow} ${
+          className={`dh-sidebar-row-interactive group/folder-row relative flex items-center gap-1 rounded-[var(--sidebar-row-radius)] pr-1 transition-colors ${densityClasses.folderRow} ${
             showEditorInline
               ? 'border border-transparent'
               : intoState
               ? 'bg-[var(--accent-subtle)] ring-1 ring-[var(--accent-muted)]'
               : isSelected
-                ? 'border border-[var(--border)] bg-[var(--surface-soft)]'
-                : 'border border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)]'
+                ? 'dh-sidebar-row-selected border border-transparent'
+                : 'border border-transparent'
           } ${isDragging ? 'opacity-60' : isHiddenGroup ? 'opacity-70' : ''}`}
-          style={{ paddingLeft: `${Math.max(0, node.depth - displayDepthOffset) * densityClasses.folderDepthPaddingPx}px` }}
-          onDoubleClick={handleFolderDoubleClick}
+          onContextMenu={(event) => {
+            if (!actionsEnabled || event.target instanceof HTMLInputElement) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (!isSelected) onSelectFolder(folderPath);
+            setSelectedSidebarNodeId(node.id);
+            setContextMenuPosition({ x: event.clientX, y: event.clientY });
+          }}
         >
+          {isSelected ? <span className={sidebarSelectionEdgeClass} /> : null}
           {showEditorInline && folderEditor ? (
             <div className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX}`}>
               <div className="flex min-w-0 items-center gap-1.5">
-                <IconFolder className={`flex-shrink-0 ${densityClasses.icon}`} />
+                <IconChevron
+                  down={!collapsed}
+                  strokeWidth={1.25}
+                  className={`flex-shrink-0 ${densityClasses.folderChevron}`}
+                />
                 <input
                   ref={folderEditorInputRef}
                   value={folderEditor.value}
@@ -1139,10 +1296,11 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
             <button
               type="button"
               className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX}`}
+              aria-expanded={!collapsed}
+              aria-selected={isSelected}
               onClick={(event) => {
-                if (event.detail > 1) return;
                 const toggle = event.metaKey || event.ctrlKey;
-                scheduleFolderSingleClick({
+                handleFolderClick({
                   selectDrones: toggle || event.shiftKey,
                   toggle,
                 });
@@ -1151,186 +1309,41 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               {...(folderDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
             >
               <div className="flex min-w-0 items-center gap-1.5">
-                <IconFolder className={`flex-shrink-0 ${densityClasses.icon}`} />
+                <IconChevron
+                  down={!collapsed}
+                  strokeWidth={1.25}
+                  className={`flex-shrink-0 ${densityClasses.folderChevron}`}
+                />
                 <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`} title={folderPath}>
                   {node.label}
                 </span>
               </div>
             </button>
           )}
-          <div
-            className={`relative ml-2 flex flex-shrink-0 items-center justify-end transition-[min-width] duration-150 ${
-              actionsEnabled ? (isVirtualGroup ? 'group-hover/folder-row:min-w-[72px]' : 'group-hover/folder-row:min-w-[112px]') : ''
-            }`}
-          >
-            {actionsEnabled ? <div data-sidebar-folder-actions="true" className="absolute inset-y-0 right-0 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/folder-row:opacity-100">
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onOpenFolderCreate(
-                    isVirtualGroup ? null : folderPath,
-                    isVirtualGroup
-                      ? { anchorPath: folderPath, repoGroupPath: node.repoGroupPath }
-                      : node.repoGroupPath
-                        ? { repoGroupPath: node.repoGroupPath }
-                        : undefined,
-                  );
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-                className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]`}
-                title={isVirtualGroup ? `New top-level folder from "${node.label}"` : `New subfolder in "${node.label}"`}
-              >
-                <IconPlus className="opacity-90" />
-              </button>
-              {!isVirtualGroup ? (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onStartRenameFolder(folderPath);
-                  }}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  disabled={Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath])}
-                  className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border bg-[var(--accent-subtle)] border-[var(--accent-border)] text-[var(--accent)] transition-colors hover:bg-[var(--accent-subtle)] disabled:opacity-50`}
-                  title={`Rename folder "${node.label}"`}
-                >
-                  {renamingGroups[folderPath] ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  toggleSidebarGroupHidden(groupRef);
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-                className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border transition-colors ${
-                  isHiddenGroup
-                    ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:bg-[var(--hover)] hover:text-[var(--muted)]'
-                }`}
-                title={isHiddenGroup ? `Unhide "${node.label}"` : `Hide "${node.label}"`}
-              >
-                {isHiddenGroup ? <IconEye className="opacity-90" /> : <IconEyeOff className="opacity-90" />}
-              </button>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onOpenGroupMultiChat(folderPath);
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-                className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border transition-colors ${
-                  selectedGroupMultiChat === folderPath
-                    ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
-                }`}
-                title={`Open "${node.label}" multi-chat`}
-              >
-                <IconColumns className="opacity-90" />
-              </button>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDeleteGroup(folderPath, node.totalDroneCount, {
-                    kind: node.groupKind,
-                    label: node.label,
-                    repoPath:
-                      isVirtualGroup && node.path.startsWith('repo:') && node.path !== 'repo:ungrouped'
-                        ? node.path.slice('repo:'.length)
-                        : null,
-                  });
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-                disabled={Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath])}
-                className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-colors hover:bg-[var(--red-subtle)] disabled:opacity-50`}
-                title={`Delete folder "${node.label}"`}
-              >
-                {deletingGroups[folderPath] ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
-              </button>
-            </div> : null}
-          </div>
         </div>
+        {contextMenuPosition ? (
+          <SidebarContextMenu
+            x={contextMenuPosition.x}
+            y={contextMenuPosition.y}
+            label={`Actions for ${node.label}`}
+            items={contextMenuItems}
+            onClose={() => setContextMenuPosition(null)}
+          />
+        ) : null}
       </div>
       {!collapsed ? (
         <GroupedSidebarFolderBodyDropZone
           nodeId={node.id}
           disabled={!sidebarDndEnabled || isVirtualGroup}
-          className={`${densityClasses.folderBody} ${intoState ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]' : 'border-[var(--border-subtle)]'}`}
+          className={`${densityClasses.folderBody} dh-sidebar-folder-body ${intoState ? 'bg-[var(--accent-subtle)]' : ''}`}
+          selectedDirectChild={hasSelectedDirectChild}
+          dropActive={intoState}
         >
-          {actionsEnabled && showCreateInline ? (
-            <div className="flex min-h-8 items-center gap-1.5 px-1.5">
-              <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)]" />
-              <input
-                ref={folderEditorInputRef}
-                data-sidebar-group-draft-input="true"
-                value={folderEditor?.value ?? ''}
-                onChange={(event) => onFolderEditorValueChange(event.target.value)}
-                onBlur={onBlurFolderEditor}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    onSubmitFolderEditor();
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    onCancelFolderEditor();
-                  }
-                }}
-                maxLength={64}
-                placeholder={folderEditor?.parentPath ? 'Subfolder name' : 'Folder name'}
-                aria-label="New group name"
-                className="min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 text-[var(--text-11)] text-[var(--fg)] shadow-none outline-none ring-0 placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
-                style={{ border: 0, outline: 'none', boxShadow: 'none' }}
-              />
-            </div>
-          ) : null}
-          {(!actionsEnabled || !showCreateInline) && childIds.length === 0 ? (
-            isVirtualGroup && node.totalDroneCount === 0 ? (
-              <div className={densityClasses.emptyHint}>
-                <IconFolder className={densityClasses.icon} />
-                <span className="truncate">No drones in this repo yet.</span>
-              </div>
-            ) : actionsEnabled ? (
-              <button
-                type="button"
-                onClick={() =>
-                  onOpenFolderCreate(
-                    isVirtualGroup ? null : folderPath,
-                    isVirtualGroup
-                      ? { anchorPath: folderPath, repoGroupPath: node.repoGroupPath }
-                      : node.repoGroupPath
-                        ? { repoGroupPath: node.repoGroupPath }
-                        : undefined,
-                  )
-                }
-                className={densityClasses.emptyHint}
-                title={isVirtualGroup ? `Create a top-level folder from "${node.label}"` : `Create a subfolder in "${node.label}"`}
-              >
-                <IconPlus className="opacity-85" />
-                <span className="truncate">
-                  {isVirtualGroup ? 'Create a top-level folder' : 'Empty folder. Create a subfolder or drop drones here.'}
-                </span>
-              </button>
-            ) : (
-              <div className={densityClasses.emptyHint}>
-                <IconFolder className={densityClasses.icon} />
-                <span className="truncate">No drones in this folder.</span>
-              </div>
-            )
-          ) : null}
-          {childIds.map((childId) => (
-            <div key={childId} data-sidebar-node-id={childId}>
-              <GroupedSidebarNodeEntry nodeId={childId} groupPath={folderPath} />
-            </div>
-          ))}
-          {showCreateInline && folderEditor?.error ? <div className="text-[var(--text-10)] text-[var(--red)]">{folderEditor.error}</div> : null}
+          <GroupedSidebarChildEntries
+            childIds={childIds}
+            groupPath={folderPath}
+            showCreateInline={actionsEnabled && showCreateInline}
+          />
         </GroupedSidebarFolderBodyDropZone>
       ) : null}
       {showEditorInline && folderEditor?.error ? <div className="ml-5 text-[var(--text-10)] text-[var(--red)]">{folderEditor.error}</div> : null}
@@ -1397,11 +1410,6 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
         : nodeTree.rootChildIds,
     [displayRootNodeId, nodeTree],
   );
-  const displayDepthOffset = React.useMemo(() => {
-    if (!displayRootNodeId) return 0;
-    const displayRoot = nodeTree.nodesById[displayRootNodeId];
-    return displayRoot?.kind === 'folder' ? displayRoot.depth + 1 : 0;
-  }, [displayRootNodeId, nodeTree]);
   const visibleDroneOrder = React.useMemo(
     () => flattenVisibleDroneOrderFromNodeTree(nodeTree, props.collapsedGroups, displayedRootChildIds),
     [displayedRootChildIds, nodeTree, props.collapsedGroups],
@@ -2102,7 +2110,6 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     () => ({
       ...props,
       nodeTree,
-      displayDepthOffset,
       droneTreeByGroupPath,
       dragOverTreeTarget,
       dragOverFolderBodyId,
@@ -2141,6 +2148,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onFolderEditorValueChange,
       props.onMoveDronesToGroup,
       props.onCloneDrone,
+      props.onCreateGroupBeforeDrone,
       props.onOpenCreateDroneChat,
       props.onOpenDroneErrorModal,
       props.onOpenFolderCreate,
@@ -2190,7 +2198,6 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.uiDroneName,
       props.unreadAgentMessageByChatNodeId,
       deletingChats,
-      displayDepthOffset,
       dragOverChat,
       dragOverFolderBodyId,
       dragOverTreeTarget,
@@ -2204,9 +2211,15 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
 
   return (
     <GroupedSidebarTreeContext.Provider value={contextValue}>
-      {displayedRootChildIds.map((nodeId) => (
-        <GroupedSidebarNodeEntry key={nodeId} nodeId={nodeId} groupPath={null} />
-      ))}
+      <GroupedSidebarChildEntries
+        childIds={displayedRootChildIds}
+        groupPath={null}
+        showCreateInline={
+          props.actionsEnabled !== false &&
+          props.folderEditor?.mode === 'create' &&
+          props.folderEditor.parentPath === null
+        }
+      />
     </GroupedSidebarTreeContext.Provider>
   );
 }

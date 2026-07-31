@@ -40,7 +40,7 @@ export function TrashBehaviorSettingsTab({ deleteAction }: TrashBehaviorSettings
     archiveRuntimePolicyDraft !== (deleteSettings?.deleteAction.archiveRuntimePolicy ?? 'keep-running');
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+    <div className="dh-settings-section">
       <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
         Trash behavior
       </div>
@@ -92,7 +92,7 @@ export function TrashBehaviorSettingsTab({ deleteAction }: TrashBehaviorSettings
 
       {deleteModeDraft === 'archive' && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 flex flex-col gap-2">
+          <div className="dh-settings-subsection">
             <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Archived runtime</div>
             <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Choose whether archived drones keep running until their retention window expires.</div>
             <select
@@ -109,7 +109,7 @@ export function TrashBehaviorSettingsTab({ deleteAction }: TrashBehaviorSettings
             </select>
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 flex flex-col gap-2">
+          <div className="dh-settings-subsection">
             <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Retention window</div>
             <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Auto-delete archived drones and chats after the selected amount of time.</div>
             <select

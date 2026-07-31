@@ -183,7 +183,7 @@ function SidebarPattern() {
         />
       </div>
       <div className="flex h-[26rem] flex-col overflow-hidden bg-[var(--sidebar-bg)]">
-        <div className="flex h-[3.25rem] flex-shrink-0 select-none items-center border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] pl-3.5 pr-2">
+        <div className="flex h-11 flex-shrink-0 select-none items-center border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] pl-3 pr-2">
           <div className="flex w-full items-center justify-between gap-2">
             <span className="flex-shrink-0 text-left dh-type-sidebar-brand">DRONE HUB</span>
             <UiToolbarButton

@@ -55,7 +55,7 @@ function LogPanel({
   fallbackMaxBytes,
 }: LogPanelProps) {
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+    <div className="dh-settings-section">
       <div
         role="button"
         tabIndex={0}

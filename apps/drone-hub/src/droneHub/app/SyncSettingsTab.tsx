@@ -106,7 +106,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
       ) : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)] gap-4">
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-4 py-4 flex flex-col gap-4">
+        <div className="dh-settings-section">
           <div className="flex flex-col gap-2">
             <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               New sync set
@@ -136,7 +136,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
           </button>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-4 py-4 flex flex-col gap-3">
+        <div className="dh-settings-section">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -172,7 +172,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                   (editDraft.sourceType === 'hub-managed' || Boolean(String(editDraft.sourcePath).trim()));
 
                 return (
-                  <div key={syncSet.id} className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-4">
+                  <div key={syncSet.id} className="dh-settings-row px-1 py-4">
                     <div className="flex flex-col gap-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
@@ -311,7 +311,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                         />
                       ) : (
                         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,220px)_minmax(0,1fr)] gap-3">
-                          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3">
+                          <div className="dh-settings-subsection">
                             <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Status</div>
                             <div className="mt-3 flex flex-wrap gap-2">
                               <span className={`rounded-full border px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${syncStatusBadgeClass('synced')}`}>
@@ -329,7 +329,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                             </div>
                           </div>
 
-                          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-2">
+                          <div className="dh-settings-subsection">
                             <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Recent target state</div>
                             {syncSet.targetStatus.length === 0 ? (
                               <div className="text-[var(--text-11)] text-[var(--muted-dim)]">

@@ -21,11 +21,11 @@ export function UiBadge({ tone = 'neutral', dot = false, className, children, st
   return (
     <span
       className={cn(
-        'inline-flex h-5 max-w-full items-center gap-1.5 rounded-full border px-2 text-[length:var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] shadow-[var(--edge-highlight)]',
+        'inline-flex h-5 max-w-full items-center gap-1.5 rounded-full border px-2 dh-type-badge shadow-[var(--edge-highlight)]',
         toneClassName[tone],
         className,
       )}
-      style={{ fontFamily: 'var(--display)', ...style }}
+      style={style}
       {...props}
     >
       {dot ? (

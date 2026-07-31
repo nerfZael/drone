@@ -55,9 +55,9 @@ export type UiMenuSelectProps = {
 };
 
 const triggerBaseClassNameByVariant: Record<UiMenuSelectVariant, string> = {
-  form: 'w-full h-[var(--control-height)] rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[length:var(--text-13)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent)] focus-visible:outline-none focus-visible:border-[var(--accent-muted)] focus-visible:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent),0_0_0_3px_var(--accent-subtle)] transition-[background-color,border-color,box-shadow] duration-150 flex items-center justify-between gap-2',
+  form: 'dh-field-control w-full h-[var(--control-height)] rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 dh-type-control text-[var(--field-fg)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_42%,transparent)] transition-[background-color,border-color,box-shadow] duration-150 flex items-center justify-between gap-2',
   toolbar:
-    'inline-flex items-center gap-1.5 h-[28px] pl-2 pr-1.5 rounded border border-[var(--toolbar-control-border)] bg-[var(--toolbar-control-bg)] text-[length:var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)] focus-visible:outline-none focus-visible:border-[var(--accent-muted)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] transition-all',
+    'inline-flex items-center gap-1.5 h-[28px] pl-2 pr-1.5 rounded border border-[var(--toolbar-control-border)] bg-[var(--toolbar-control-bg)] dh-type-control-compact text-[var(--muted)] focus-visible:outline-none focus-visible:border-[var(--accent-muted)] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] transition-all',
 };
 
 const panelPositionClassNameByVariant: Record<UiMenuSelectVariant, string> = {
@@ -293,7 +293,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
           {header ? (
             <div
               className={cn(
-                'px-3 py-2 text-[length:var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.12em] uppercase border-b border-[var(--border-subtle)]',
+                'px-3 py-2 dh-type-eyebrow border-b border-[var(--border-subtle)]',
                 headerClassName
               )}
               style={headerStyle}
@@ -326,7 +326,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
                   target.focus();
                 }}
                 placeholder={searchPlaceholder}
-                className="w-full h-[var(--control-height-compact)] rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 text-[length:var(--text-11)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus-visible:outline-none focus-visible:border-[var(--accent-muted)] focus-visible:ring-2 focus-visible:ring-[var(--accent-border)]"
+                className="dh-field-control w-full h-[var(--control-height-compact)] rounded border border-[var(--field-border)] bg-[var(--field-bg)] px-2 text-[length:var(--text-11)] text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)]"
               />
             </div>
           ) : null}
@@ -409,7 +409,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
             {filteredEntries.every((entry) => !isOptionEntry(entry)) ? (
               <div
                 role="presentation"
-                className="px-3 py-3 text-[length:var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
+                className="px-3 py-3 dh-type-supporting"
               >
                 {emptySearchLabel}
               </div>

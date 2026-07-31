@@ -32,8 +32,8 @@ const toneClassName: Record<UiToolbarControlTone, { idle: string; active: string
 };
 
 const sizeClassName: Record<UiToolbarControlSize, string> = {
-  xsmall: 'h-6 min-w-6 rounded-[var(--radius-medium)] px-2 text-[length:var(--text-10)]',
-  small: 'h-8 min-w-8 rounded-[var(--radius-medium)] px-2.5 text-[length:var(--text-11)]',
+  xsmall: 'h-6 min-w-6 rounded-[var(--radius-medium)] px-2 dh-type-control-compact',
+  small: 'h-8 min-w-8 rounded-[var(--radius-medium)] px-2.5 dh-type-control-compact',
 };
 
 const iconSlotClassName: Record<UiToolbarControlSize, string> = {
@@ -82,12 +82,12 @@ export const UiToolbarButton = React.forwardRef<HTMLButtonElement, UiToolbarButt
         }
         aria-busy={loading || undefined}
         className={cn(
-          'inline-flex shrink-0 items-center justify-center gap-1.5 border font-[var(--weight-semibold)] transition-[background-color,border-color,color,opacity] duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
+          'inline-flex shrink-0 items-center justify-center gap-1.5 border transition-[background-color,border-color,color,opacity] duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
           sizeClassName[size],
           visuallyActive ? toneClassName[tone].active : toneClassName[tone].idle,
           className,
         )}
-        style={{ fontFamily: 'var(--display)', ...style }}
+        style={style}
         {...props}
       >
         {loading ? <UiSpinner size="small" label={null} inheritColor /> : leadingIcon}
@@ -156,12 +156,12 @@ export const UiToolbarLink = React.forwardRef<HTMLAnchorElement, UiToolbarLinkPr
       <a
         ref={ref}
         className={cn(
-          'inline-flex shrink-0 items-center justify-center gap-1.5 border font-[var(--weight-semibold)] transition-[background-color,border-color,color,opacity] duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
+          'inline-flex shrink-0 items-center justify-center gap-1.5 border transition-[background-color,border-color,color,opacity] duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
           sizeClassName[size],
           active ? toneClassName[tone].active : toneClassName[tone].idle,
           className,
         )}
-        style={{ fontFamily: 'var(--display)', ...style }}
+        style={style}
         {...props}
       >
         {leadingIcon}
@@ -215,12 +215,11 @@ export const UiToolbarInput = React.forwardRef<HTMLInputElement, UiToolbarInputP
         ref={ref}
         aria-invalid={invalid || undefined}
         className={cn(
-          'min-w-0 rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-inset)] px-2.5 font-mono text-[var(--fg-secondary)] transition-[border-color,background-color,box-shadow] duration-150 placeholder:text-[var(--muted-dim)] hover:bg-[var(--surface-inset-strong)] focus:border-[var(--accent-muted)] focus:outline-none focus:shadow-[0_0_0_3px_var(--accent-subtle)] read-only:text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-40',
+          'dh-field-control min-w-0 rounded-[var(--radius-medium)] border border-transparent bg-[var(--surface-inset)] px-2.5 font-mono text-[var(--fg-secondary)] transition-[border-color,background-color,box-shadow] duration-150 placeholder:text-[var(--muted-dim)] hover:bg-[var(--surface-inset-strong)] read-only:text-[var(--muted)] disabled:cursor-not-allowed disabled:opacity-40',
           controlSize === 'xsmall'
-            ? 'h-6 text-[length:var(--text-10)]'
-            : 'h-8 text-[length:var(--text-11)]',
-          invalid &&
-            'border-[var(--red-border)] focus:border-[var(--red)] focus:shadow-[0_0_0_3px_var(--red-subtle)]',
+            ? 'h-6 dh-type-control-compact'
+            : 'h-8 dh-type-control-compact',
+          invalid && 'border-[var(--red-border)]',
           className,
         )}
         {...props}
@@ -329,17 +328,16 @@ export function UiToolbarSegmentedControl<T extends string>({
               moveSelection(option.value, event.key);
             }}
             className={cn(
-              'relative z-[1] inline-flex shrink-0 items-center justify-center gap-1 rounded-[calc(var(--radius-medium)-1px)] font-[var(--weight-semibold)] transition-colors duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
+              'relative z-[1] inline-flex shrink-0 items-center justify-center gap-1 rounded-[calc(var(--radius-medium)-1px)] dh-type-control-compact transition-colors duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
               size === 'xsmall'
-                ? 'h-6 px-2.5 text-[length:var(--text-10)]'
-                : 'h-7 px-3 text-[length:var(--text-11)]',
+                ? 'h-6 px-2.5'
+                : 'h-7 px-3',
               selected
                 ? 'text-[var(--accent)]'
                 : 'text-[var(--muted)] enabled:hover:text-[var(--fg-secondary)]',
               // Static fallback fill until the sliding indicator mounts.
               selected && !indicator && 'bg-[var(--accent-subtle)]',
             )}
-            style={{ fontFamily: 'var(--display)' }}
           >
             {option.label}
           </button>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { UiMenuSelect } from '../../ui/components';
+import { UiButton, UiMenuSelect, UiSegmentedControl } from '../../ui/components';
 import { bytesToMaxMiB, bytesToMinMiB, bytesToNearestMiB, miBToBytes } from './filesystem-size-utils';
 import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
 import type { UseGithubSettingsResult } from './use-github-settings';
@@ -28,6 +28,84 @@ type GeneralSettingsTabProps = {
   onReplayOnboarding: () => void;
   onResetOnboarding: () => void;
 };
+
+type ApiKeySettingsCardProps = {
+  title: string;
+  hasKey: boolean;
+  keyHint?: string | null;
+  updatedAt?: string | null;
+  emptyLabel: string;
+  description?: string;
+  draft: string;
+  name: string;
+  placeholder: string;
+  showKey: boolean;
+  revealing: boolean;
+  saving: boolean;
+  clearing: boolean;
+  onDraftChange: (value: string) => void;
+  onToggleVisibility: () => void;
+  onSave: () => void;
+  onClear: () => void;
+};
+
+function ApiKeySettingsCard({
+  title,
+  hasKey,
+  keyHint,
+  updatedAt,
+  emptyLabel,
+  description,
+  draft,
+  name,
+  placeholder,
+  showKey,
+  revealing,
+  saving,
+  clearing,
+  onDraftChange,
+  onToggleVisibility,
+  onSave,
+  onClear,
+}: ApiKeySettingsCardProps) {
+  const busy = saving || clearing || revealing;
+  return (
+    <section className="dh-settings-section">
+      <div className="dh-type-heading">{title}</div>
+      <div className="dh-type-supporting">
+        {hasKey
+          ? `${keyHint ?? 'Hidden'}${updatedAt ? ` • Updated ${new Date(updatedAt).toLocaleString()}` : ''}`
+          : emptyLabel}
+      </div>
+      {description ? <div className="dh-type-supporting !text-[var(--muted)]">{description}</div> : null}
+      <div className="flex items-center gap-2">
+        <input
+          value={draft}
+          onChange={(event) => onDraftChange(event.target.value)}
+          type="text"
+          autoComplete="off"
+          name={name}
+          spellCheck={false}
+          style={({ WebkitTextSecurity: showKey ? 'none' : 'disc' } as React.CSSProperties)}
+          className="h-9 min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 font-mono text-[var(--type-ui)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] transition-colors focus:border-[var(--accent-muted)] focus:outline-none"
+          placeholder={placeholder}
+          disabled={busy}
+        />
+        <UiButton onClick={onToggleVisibility} disabled={busy}>
+          {revealing ? 'Loading…' : showKey ? 'Hide' : 'Show'}
+        </UiButton>
+      </div>
+      <div className="flex items-center gap-2">
+        <UiButton variant="primary" onClick={onSave} disabled={!draft.trim() || busy} loading={saving}>
+          Save
+        </UiButton>
+        <UiButton variant="danger" onClick={onClear} disabled={!hasKey || busy} loading={clearing}>
+          Clear
+        </UiButton>
+      </div>
+    </section>
+  );
+}
 
 export function GeneralSettingsTab({
   github,
@@ -137,31 +215,31 @@ export function GeneralSettingsTab({
         </div>
       )}
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3">
+      <div className="dh-settings-section">
         {github.githubSettingsLoading && !github.githubSettings ? (
           <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading GitHub status…</div>
         ) : (
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
-              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">GitHub pull requests</div>
-              <div className="text-[var(--text-12)] text-[var(--muted)]">Hub PR actions use the GitHub API. Host `gh` is used only as an optional auth source.</div>
+              <div className="dh-type-heading">GitHub pull requests</div>
+              <div className="dh-type-supporting !text-[var(--muted)]">Hub PR actions use the GitHub API. Host `gh` is used only as an optional auth source.</div>
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">PR transport</div>
-                <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
+              <div className="dh-settings-row px-3 py-3">
+                <div className="dh-type-label">PR transport</div>
+                <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                   {githubStatus?.pullRequestTransport === 'github-api' ? 'GitHub API' : 'Unknown'}
                 </div>
                 <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">List, inspect, merge, and close PRs without shelling out to container `gh`.</div>
               </div>
-              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Effective auth</div>
-                <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">{githubAuthLabel}</div>
+              <div className="dh-settings-row px-3 py-3">
+                <div className="dh-type-label">Effective auth</div>
+                <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">{githubAuthLabel}</div>
                 <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">{githubStatus?.authDetail ?? 'Loading GitHub auth status…'}</div>
               </div>
-              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Host gh CLI</div>
-                <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">{githubCliLabel}</div>
+              <div className="dh-settings-row px-3 py-3">
+                <div className="dh-type-label">Host gh CLI</div>
+                <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">{githubCliLabel}</div>
                 <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
                   {githubStatus?.ghCliVersion ?? (githubStatus?.ghCliInstalled ? 'Version unavailable' : 'Install gh if you want Hub to reuse host GitHub login state.')}
                 </div>
@@ -172,14 +250,14 @@ export function GeneralSettingsTab({
         )}
       </div>
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3">
+      <div className="dh-settings-section">
         {llmSettingsLoading && !llmSettings ? (
           <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading settings…</div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-5 gap-3">
-            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Active provider</div>
-              <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
+            <div className="dh-settings-row px-3 py-3">
+              <div className="dh-type-label">Active provider</div>
+              <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmProviderLabel(llmSettings?.provider.selected)}
               </div>
               <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
@@ -190,36 +268,36 @@ export function GeneralSettingsTab({
                     : 'Using default'}
               </div>
             </div>
-            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">OpenAI key</div>
-              <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
+            <div className="dh-settings-row px-3 py-3">
+              <div className="dh-type-label">OpenAI key</div>
+              <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmSettings?.openai.hasKey ? llmSettings.openai.keyHint ?? 'Configured' : 'Not configured'}
               </div>
               <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
                 {llmSettings?.openai.updatedAt ? `Updated ${new Date(llmSettings.openai.updatedAt).toLocaleString()}` : 'Stored only when set in Hub'}
               </div>
             </div>
-            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Gemini key</div>
-              <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
+            <div className="dh-settings-row px-3 py-3">
+              <div className="dh-type-label">Gemini key</div>
+              <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmSettings?.gemini.hasKey ? llmSettings.gemini.keyHint ?? 'Configured' : 'Not configured'}
               </div>
               <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
                 {llmSettings?.gemini.updatedAt ? `Updated ${new Date(llmSettings.gemini.updatedAt).toLocaleString()}` : 'Stored only when set in Hub'}
               </div>
             </div>
-            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Codex login</div>
-              <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
+            <div className="dh-settings-row px-3 py-3">
+              <div className="dh-type-label">Codex login</div>
+              <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmSettings?.codex.hasKey ? llmSettings.codex.keyHint ?? 'Configured' : 'Not configured'}
               </div>
               <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
                 {llmSettings?.codex.updatedAt ? `Refreshed ${new Date(llmSettings.codex.updatedAt).toLocaleString()}` : 'Uses local Codex CLI auth'}
               </div>
             </div>
-            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">GROQ key</div>
-              <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
+            <div className="dh-settings-row px-3 py-3">
+              <div className="dh-type-label">GROQ key</div>
+              <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">
                 {llmSettings?.groq.hasKey ? llmSettings.groq.keyHint ?? 'Configured' : 'Not configured'}
               </div>
               <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
@@ -230,54 +308,24 @@ export function GeneralSettingsTab({
         )}
       </div>
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3">
-        <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase mb-2" style={{ fontFamily: 'var(--display)' }}>
+      <div className="dh-settings-section">
+        <div className="mb-2 dh-type-heading">
           Active provider
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setLlmProviderDraft('openai')}
-            disabled={savingLlmProvider || llmSettingsLoading}
-            className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-              llmProviderDraft === 'openai'
-                ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-            } ${savingLlmProvider || llmSettingsLoading ? 'opacity-40 cursor-not-allowed' : ''}`}
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            OpenAI
-          </button>
-          <button
-            type="button"
-            onClick={() => setLlmProviderDraft('gemini')}
-            disabled={savingLlmProvider || llmSettingsLoading}
-            className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-              llmProviderDraft === 'gemini'
-                ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-            } ${savingLlmProvider || llmSettingsLoading ? 'opacity-40 cursor-not-allowed' : ''}`}
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            Gemini
-          </button>
-          <button
-            type="button"
-            onClick={() => setLlmProviderDraft('codex')}
-            disabled={savingLlmProvider || llmSettingsLoading}
-            className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-              llmProviderDraft === 'codex'
-                ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-            } ${savingLlmProvider || llmSettingsLoading ? 'opacity-40 cursor-not-allowed' : ''}`}
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            Codex
-          </button>
-        </div>
+        <UiSegmentedControl
+          label="Active provider"
+          value={llmProviderDraft}
+          options={[
+            { value: 'openai', label: 'OpenAI' },
+            { value: 'gemini', label: 'Gemini' },
+            { value: 'codex', label: 'Codex' },
+          ]}
+          onValueChange={setLlmProviderDraft}
+          disabled={savingLlmProvider || llmSettingsLoading}
+        />
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_180px_auto] md:items-end">
           <div className="flex min-w-0 flex-col gap-1.5">
-            <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+            <span className="dh-type-label">
               Default model
             </span>
             <UiMenuSelect
@@ -297,7 +345,7 @@ export function GeneralSettingsTab({
             />
           </div>
           <div className="flex min-w-0 flex-col gap-1.5">
-            <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+            <span className="dh-type-label">
               Default reasoning
             </span>
             <UiMenuSelect
@@ -316,8 +364,8 @@ export function GeneralSettingsTab({
               header="Reasoning"
             />
           </div>
-          <button
-            type="button"
+          <UiButton
+            variant="primary"
             onClick={() => void saveLlmProviderSettings()}
             disabled={
               savingLlmProvider ||
@@ -325,18 +373,10 @@ export function GeneralSettingsTab({
               !llmProviderDefaultsDirty ||
               !selectedDefaultModel
             }
-            className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-              savingLlmProvider ||
-              llmSettingsLoading ||
-              !llmProviderDefaultsDirty ||
-              !selectedDefaultModel
-                ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-            }`}
-            style={{ fontFamily: 'var(--display)' }}
+            loading={savingLlmProvider}
           >
-            {savingLlmProvider ? 'Saving…' : 'Save defaults'}
-          </button>
+            Save defaults
+          </UiButton>
         </div>
         <div className="mt-2 text-[var(--text-11)] leading-relaxed text-[var(--muted-dim)]">
           New Built-in chats use this model and reasoning whenever {llmProviderLabel(llmProviderDraft)} is the active provider.
@@ -344,19 +384,19 @@ export function GeneralSettingsTab({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+        <div className="dh-settings-section">
+          <div className="dh-type-heading">
             Codex subscription auth
           </div>
           {llmSettings?.codex.hasKey ? (
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
+            <div className="dh-type-supporting">
               {llmSettings.codex.keyHint ?? 'Codex CLI login found'}
               {llmSettings.codex.updatedAt ? ` • Refreshed ${new Date(llmSettings.codex.updatedAt).toLocaleString()}` : ''}
             </div>
           ) : (
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">No Codex CLI login found for the Hub process.</div>
+            <div className="dh-type-supporting">No Codex CLI login found for the Hub process.</div>
           )}
-          <div className="text-[var(--text-12)] leading-relaxed text-[var(--fg-secondary)]">
+          <div className="dh-type-supporting !text-[var(--fg-secondary)]">
             The Built-in agent uses the local file-based Codex login. Connecting here opens
             OpenAI and finishes automatically through a temporary localhost callback.
           </div>
@@ -366,240 +406,82 @@ export function GeneralSettingsTab({
           />
           {llmSettings?.codex.hasKey ? (
             <div className="flex items-center gap-2">
-              <button
-                type="button"
+              <UiButton
                 onClick={() => void loadLlmSettings()}
                 disabled={llmSettingsLoading}
-                className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                  llmSettingsLoading
-                    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
+                loading={llmSettingsLoading}
               >
                 Refresh
-              </button>
+              </UiButton>
             </div>
           ) : null}
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-            OpenAI API key
-          </div>
-          {llmSettings?.openai.hasKey ? (
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
-              {llmSettings.openai.keyHint ?? 'hidden'}
-              {llmSettings.openai.updatedAt ? ` • Updated ${new Date(llmSettings.openai.updatedAt).toLocaleString()}` : ''}
-            </div>
-          ) : (
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">No OpenAI key configured.</div>
-          )}
-          <div className="flex items-center gap-2">
-            <input
-              value={openAiSettingsDraft}
-              onChange={(e) => updateOpenAiSettingsDraft(e.target.value)}
-              type="text"
-              autoComplete="off"
-              name="openai-api-key"
-              spellCheck={false}
-              style={({ WebkitTextSecurity: showOpenAiKey ? 'none' : 'disc' } as React.CSSProperties)}
-              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
-              placeholder="sk-..."
-              disabled={savingOpenAiSettings || clearingOpenAiSettings || revealingOpenAiKey}
-            />
-            <button
-              type="button"
-              onClick={() => void toggleApiKeyVisibility('openai')}
-              disabled={savingOpenAiSettings || clearingOpenAiSettings || revealingOpenAiKey}
-              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                savingOpenAiSettings || clearingOpenAiSettings || revealingOpenAiKey
-                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {revealingOpenAiKey ? 'Loading…' : showOpenAiKey ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void mutateApiKeySettings('openai', 'save')}
-              disabled={!openAiSettingsDraft.trim() || savingOpenAiSettings || clearingOpenAiSettings}
-              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                !openAiSettingsDraft.trim() || savingOpenAiSettings || clearingOpenAiSettings
-                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {savingOpenAiSettings ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void mutateApiKeySettings('openai', 'clear')}
-              disabled={clearingOpenAiSettings || savingOpenAiSettings || !llmSettings?.openai.hasKey}
-              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                clearingOpenAiSettings || savingOpenAiSettings || !llmSettings?.openai.hasKey
-                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {clearingOpenAiSettings ? 'Clearing…' : 'Clear'}
-            </button>
-          </div>
-        </div>
+        <ApiKeySettingsCard
+          title="OpenAI API key"
+          hasKey={Boolean(llmSettings?.openai.hasKey)}
+          keyHint={llmSettings?.openai.keyHint}
+          updatedAt={llmSettings?.openai.updatedAt}
+          emptyLabel="No OpenAI key configured."
+          draft={openAiSettingsDraft}
+          name="openai-api-key"
+          placeholder="sk-..."
+          showKey={showOpenAiKey}
+          revealing={revealingOpenAiKey}
+          saving={savingOpenAiSettings}
+          clearing={clearingOpenAiSettings}
+          onDraftChange={updateOpenAiSettingsDraft}
+          onToggleVisibility={() => void toggleApiKeyVisibility('openai')}
+          onSave={() => void mutateApiKeySettings('openai', 'save')}
+          onClear={() => void mutateApiKeySettings('openai', 'clear')}
+        />
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-            Gemini API key
-          </div>
-          {llmSettings?.gemini.hasKey ? (
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
-              {llmSettings.gemini.keyHint ?? 'hidden'}
-              {llmSettings.gemini.updatedAt ? ` • Updated ${new Date(llmSettings.gemini.updatedAt).toLocaleString()}` : ''}
-            </div>
-          ) : (
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">No Gemini key configured.</div>
-          )}
-          <div className="flex items-center gap-2">
-            <input
-              value={geminiSettingsDraft}
-              onChange={(e) => updateGeminiSettingsDraft(e.target.value)}
-              type="text"
-              autoComplete="off"
-              name="gemini-api-key"
-              spellCheck={false}
-              style={({ WebkitTextSecurity: showGeminiKey ? 'none' : 'disc' } as React.CSSProperties)}
-              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
-              placeholder="AIza..."
-              disabled={savingGeminiSettings || clearingGeminiSettings || revealingGeminiKey}
-            />
-            <button
-              type="button"
-              onClick={() => void toggleApiKeyVisibility('gemini')}
-              disabled={savingGeminiSettings || clearingGeminiSettings || revealingGeminiKey}
-              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                savingGeminiSettings || clearingGeminiSettings || revealingGeminiKey
-                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {revealingGeminiKey ? 'Loading…' : showGeminiKey ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void mutateApiKeySettings('gemini', 'save')}
-              disabled={!geminiSettingsDraft.trim() || savingGeminiSettings || clearingGeminiSettings}
-              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                !geminiSettingsDraft.trim() || savingGeminiSettings || clearingGeminiSettings
-                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {savingGeminiSettings ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void mutateApiKeySettings('gemini', 'clear')}
-              disabled={clearingGeminiSettings || savingGeminiSettings || !llmSettings?.gemini.hasKey}
-              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                clearingGeminiSettings || savingGeminiSettings || !llmSettings?.gemini.hasKey
-                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {clearingGeminiSettings ? 'Clearing…' : 'Clear'}
-            </button>
-          </div>
-        </div>
+        <ApiKeySettingsCard
+          title="Gemini API key"
+          hasKey={Boolean(llmSettings?.gemini.hasKey)}
+          keyHint={llmSettings?.gemini.keyHint}
+          updatedAt={llmSettings?.gemini.updatedAt}
+          emptyLabel="No Gemini key configured."
+          draft={geminiSettingsDraft}
+          name="gemini-api-key"
+          placeholder="AIza..."
+          showKey={showGeminiKey}
+          revealing={revealingGeminiKey}
+          saving={savingGeminiSettings}
+          clearing={clearingGeminiSettings}
+          onDraftChange={updateGeminiSettingsDraft}
+          onToggleVisibility={() => void toggleApiKeyVisibility('gemini')}
+          onSave={() => void mutateApiKeySettings('gemini', 'save')}
+          onClear={() => void mutateApiKeySettings('gemini', 'clear')}
+        />
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-            GROQ API key
-          </div>
-          {llmSettings?.groq.hasKey ? (
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
-              {llmSettings.groq.keyHint ?? 'hidden'}
-              {llmSettings.groq.updatedAt ? ` • Updated ${new Date(llmSettings.groq.updatedAt).toLocaleString()}` : ''}
-            </div>
-          ) : (
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">No GROQ key configured.</div>
-          )}
-          <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
-            Used only for the voice-to-clipboard shortcut transcription.
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              value={groqSettingsDraft}
-              onChange={(e) => updateGroqSettingsDraft(e.target.value)}
-              type="text"
-              autoComplete="off"
-              name="groq-api-key"
-              spellCheck={false}
-              style={({ WebkitTextSecurity: showGroqKey ? 'none' : 'disc' } as React.CSSProperties)}
-              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
-              placeholder="gsk_..."
-              disabled={savingGroqSettings || clearingGroqSettings || revealingGroqKey}
-            />
-            <button
-              type="button"
-              onClick={() => void toggleApiKeyVisibility('groq')}
-              disabled={savingGroqSettings || clearingGroqSettings || revealingGroqKey}
-              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                savingGroqSettings || clearingGroqSettings || revealingGroqKey
-                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {revealingGroqKey ? 'Loading…' : showGroqKey ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void mutateApiKeySettings('groq', 'save')}
-              disabled={!groqSettingsDraft.trim() || savingGroqSettings || clearingGroqSettings}
-              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                !groqSettingsDraft.trim() || savingGroqSettings || clearingGroqSettings
-                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {savingGroqSettings ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void mutateApiKeySettings('groq', 'clear')}
-              disabled={clearingGroqSettings || savingGroqSettings || !llmSettings?.groq.hasKey}
-              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                clearingGroqSettings || savingGroqSettings || !llmSettings?.groq.hasKey
-                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {clearingGroqSettings ? 'Clearing…' : 'Clear'}
-            </button>
-          </div>
-        </div>
+        <ApiKeySettingsCard
+          title="GROQ API key"
+          hasKey={Boolean(llmSettings?.groq.hasKey)}
+          keyHint={llmSettings?.groq.keyHint}
+          updatedAt={llmSettings?.groq.updatedAt}
+          emptyLabel="No GROQ key configured."
+          description="Used only for the voice-to-clipboard shortcut transcription."
+          draft={groqSettingsDraft}
+          name="groq-api-key"
+          placeholder="gsk_..."
+          showKey={showGroqKey}
+          revealing={revealingGroqKey}
+          saving={savingGroqSettings}
+          clearing={clearingGroqSettings}
+          onDraftChange={updateGroqSettingsDraft}
+          onToggleVisibility={() => void toggleApiKeyVisibility('groq')}
+          onSave={() => void mutateApiKeySettings('groq', 'save')}
+          onClear={() => void mutateApiKeySettings('groq', 'clear')}
+        />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+        <div className="dh-settings-section">
+          <div className="dh-type-heading">
             Filesystem uploads
           </div>
-          <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
+          <div className="dh-type-supporting">
             Configure the max size for a single uploaded file. Oversized uploads show an error and point users back to this setting.
           </div>
           {filesystemSettingsError && (
@@ -625,7 +507,7 @@ export function GeneralSettingsTab({
               </div>
               <div className="flex flex-wrap items-end gap-2">
                 <label className="flex flex-col gap-1">
-                  <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Max file size (MiB)</span>
+                  <span className="dh-type-label">Max file size (MiB)</span>
                   <input
                     value={uploadMaxMiBDraft}
                     onChange={(e) => setUploadMaxMiBDraft(e.target.value.replace(/[^\d]/g, ''))}
@@ -636,32 +518,20 @@ export function GeneralSettingsTab({
                     disabled={filesystemSettingsLoading || savingFilesystemSettings}
                   />
                 </label>
-                <button
-                  type="button"
+                <UiButton
                   onClick={() => setUploadMaxMiBDraft(String(filesystemDefaultMiB))}
                   disabled={filesystemSettingsLoading || savingFilesystemSettings}
-                  className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                    filesystemSettingsLoading || savingFilesystemSettings
-                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
                 >
                   Use default
-                </button>
-                <button
-                  type="button"
+                </UiButton>
+                <UiButton
+                  variant="primary"
                   onClick={() => void saveFilesystemSettings()}
                   disabled={!filesystemDirty || filesystemSettingsLoading || savingFilesystemSettings}
-                  className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                    !filesystemDirty || filesystemSettingsLoading || savingFilesystemSettings
-                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
+                  loading={savingFilesystemSettings}
                 >
-                  {savingFilesystemSettings ? 'Saving…' : 'Save upload limit'}
-                </button>
+                  Save upload limit
+                </UiButton>
               </div>
               <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
                 Allowed range: {filesystemMinMiB.toLocaleString()} to {filesystemMaxMiB.toLocaleString()} MiB.
@@ -671,12 +541,12 @@ export function GeneralSettingsTab({
         </div>
 
         <div className="flex flex-col gap-4">
-          <section className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+          <section className="dh-settings-section">
             <div>
-              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <div className="dh-type-heading">
                 Appearance
               </div>
-              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
+              <div className="mt-1 dh-type-supporting">
                 Choose the desktop color theme. Both options are dark and the preference is saved for this profile.
               </div>
             </div>
@@ -698,10 +568,10 @@ export function GeneralSettingsTab({
                   >
                     <span className="flex items-start justify-between gap-3">
                       <span>
-                        <span className="block text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>
+                        <span className="block dh-type-control text-[var(--fg-strong)]">
                           {theme.label}
                         </span>
-                        <span className="mt-1 block text-[var(--text-10)] leading-relaxed text-[var(--muted)]">
+                        <span className="mt-1 block dh-type-supporting !text-[var(--muted)]">
                           {theme.description}
                         </span>
                       </span>
@@ -725,40 +595,35 @@ export function GeneralSettingsTab({
             </div>
           </section>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
-            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="dh-settings-section">
+            <div className="dh-type-heading">
               Onboarding
             </div>
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
+            <div className="dh-type-supporting">
               Clear onboarding dismissal state and replay the guided tips from step 1.
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
+              <UiButton
+                variant="primary"
                 onClick={() => {
                   const ok = window.confirm('Replay onboarding from the beginning? This will clear onboarding dismissal state.');
                   if (!ok) return;
                   onReplayOnboarding();
                 }}
-                className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110"
-                style={{ fontFamily: 'var(--display)' }}
                 title="Reset onboarding and replay guided tips"
               >
                 Replay onboarding
-              </button>
-              <button
-                type="button"
+              </UiButton>
+              <UiButton
                 onClick={() => {
                   const ok = window.confirm('Clear onboarding state?');
                   if (!ok) return;
                   onResetOnboarding();
                 }}
-                className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-                style={{ fontFamily: 'var(--display)' }}
                 title="Clear onboarding dismissals without opening tips"
               >
                 Reset only
-              </button>
+              </UiButton>
             </div>
           </div>
         </div>

@@ -330,7 +330,7 @@ export function DraftChatWorkspace({
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-      <div className="flex h-[3.25rem] flex-shrink-0 items-center border-b border-[var(--border)] bg-[var(--panel-alt)] px-4">
+      <div className="flex h-11 flex-shrink-0 items-center border-b border-[var(--border)] bg-[var(--panel-alt)] px-3">
         <div className="flex w-full items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2.5">
             <span className="max-w-[min(34vw,360px)] truncate dh-type-title dh-type-workspace-title">

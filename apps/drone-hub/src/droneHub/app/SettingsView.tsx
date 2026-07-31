@@ -1,5 +1,5 @@
 import React from 'react';
-import { UiBadge, UiButton } from '../../ui/components';
+import { UiBadge, UiToolbarButton } from '../../ui/components';
 import { AgentsSettingsSection } from './AgentsSettingsSection';
 import { ArchiveSettingsTab } from './ArchiveSettingsTab';
 import { BackupsSettingsTab } from './BackupsSettingsTab';
@@ -44,11 +44,19 @@ type SettingsViewProps = {
 };
 
 function settingsNavButtonClass(active: boolean) {
-  return `w-full rounded border px-3 py-3 text-left transition-all ${
+  return `relative min-h-8 w-full rounded-[var(--radius-medium)] px-2.5 py-1.5 text-left dh-type-control transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] ${
     active
-      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] shadow-[var(--glow-accent)]'
-      : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:bg-[var(--hover)]'
+      ? 'bg-[var(--selected)] text-[var(--fg)] before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-[var(--accent)]'
+      : 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] hover:text-[var(--fg)]'
   }`;
+}
+
+function BackIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4" aria-hidden="true">
+      <path d="M9.75 3.5 5.25 8l4.5 4.5" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 export function SettingsView({
@@ -196,85 +204,63 @@ export function SettingsView({
   };
 
   return (
-    <div ref={settingsScrollRef} className="flex-1 overflow-y-auto">
-      <div className="w-full min-h-full px-4 py-5 sm:px-5 sm:py-6 lg:px-6 lg:py-8">
-        <div className="grid grid-cols-1 xl:grid-cols-[240px_minmax(0,1fr)] gap-4 items-start min-h-full">
-          <aside className="xl:sticky xl:top-5">
-            <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden">
-              <div className="px-4 py-4 border-b border-[var(--border)]">
-                <div className="text-[length:var(--text-10)] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-[var(--weight-semibold)]" style={{ fontFamily: 'var(--display)' }}>
-                  Drone Hub
-                </div>
-                <div className="text-[18px] font-[var(--weight-semibold)] text-[var(--fg-strong)] mt-1" style={{ fontFamily: 'var(--display)' }}>
-                  Settings
-                </div>
-                <div className="text-[length:var(--text-12)] text-[var(--muted)] mt-1 leading-relaxed">
-                  Split by area so archive controls, shortcuts, and the skill library each have room.
-                </div>
-              </div>
-
-              <div className="p-3 flex flex-col gap-2">
-                {SETTINGS_TABS.map((tab) => {
-                  const active = tab.id === activeTab;
-                  return (
-                    <button key={tab.id} type="button" onClick={() => handleSelectTab(tab.id)} className={settingsNavButtonClass(active)}>
-                      <div
-                        className={`text-[length:var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${
-                          active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
-                        }`}
-                        style={{ fontFamily: 'var(--display)' }}
-                      >
-                        {tab.label}
-                      </div>
-                      <div className={`text-[length:var(--text-11)] mt-1 leading-relaxed ${active ? 'text-[var(--fg-secondary)]' : 'text-[var(--muted-dim)]'}`}>
-                        {tab.description}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="px-3 pb-3">
-                <UiButton
-                  onClick={onBackToWorkspace}
-                  fullWidth
-                  size="large"
-                  className="uppercase"
-                >
-                  Back to drones
-                </UiButton>
-              </div>
+    <div ref={settingsScrollRef} className="dh-settings-view flex-1 overflow-y-auto">
+      <div className="min-h-full w-full px-4 py-3 sm:px-6 lg:px-8 lg:py-4">
+        <div className="grid min-h-full grid-cols-1 items-start xl:grid-cols-[208px_minmax(0,1fr)]">
+          <aside className="min-w-0 border-b border-[var(--border-subtle)] pb-3 xl:sticky xl:top-4 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-4">
+            <div className="mb-2 flex h-9 items-center gap-1 px-1">
+              <button
+                type="button"
+                onClick={onBackToWorkspace}
+                aria-label="Back to drones"
+                title="Back to drones"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-medium)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
+              >
+                <BackIcon />
+              </button>
+              <h1 className="text-[18px] font-medium text-[var(--fg-strong)]">Settings</h1>
             </div>
+
+            <nav aria-label="Settings" className="flex gap-0.5 overflow-x-auto pb-1 xl:flex-col xl:overflow-visible">
+              {SETTINGS_TABS.map((tab) => {
+                const active = tab.id === activeTab;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    aria-current={active ? 'page' : undefined}
+                    onClick={() => handleSelectTab(tab.id)}
+                    className={`${settingsNavButtonClass(active)} shrink-0 xl:shrink`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </nav>
           </aside>
 
-          <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden min-w-0">
-            <div className="px-5 py-4 border-b border-[var(--border)] flex flex-wrap items-start justify-between gap-3">
+          <main className="min-w-0 xl:pl-6">
+            <div className="flex min-h-12 flex-wrap items-center justify-between gap-3 border-b border-[var(--border-subtle)] py-2">
               <div className="min-w-0">
-                <div className="text-[length:var(--text-10)] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-[var(--weight-semibold)]" style={{ fontFamily: 'var(--display)' }}>
-                  {activeTabMeta.label}
-                </div>
-                <h1 className="text-[18px] font-[var(--weight-semibold)] text-[var(--fg-strong)] mt-1" style={{ fontFamily: 'var(--display)' }}>
+                <h2 className="text-[18px] font-medium text-[var(--fg-strong)]">
                   {activeTabMeta.title}
-                </h1>
-                <p className="text-[length:var(--text-12)] text-[var(--muted)] mt-1 max-w-[72ch]">{activeTabMeta.description}</p>
+                </h2>
               </div>
               {activeTab === 'components' ? (
-                <UiBadge tone="success" dot className="mt-1">Live preview</UiBadge>
+                <UiBadge tone="success" dot>Live preview</UiBadge>
               ) : (
-                <UiButton
+                <UiToolbarButton
                   onClick={handleRefreshAll}
                   disabled={settingsBusy}
-                  size="medium"
-                  className="uppercase"
                   title="Refresh settings and logs"
                 >
                   Refresh
-                </UiButton>
+                </UiToolbarButton>
               )}
             </div>
 
-            <div className="px-5 py-4 flex flex-col gap-4 min-w-0">{renderActiveTab()}</div>
-          </div>
+            <div className="dh-settings-content flex min-w-0 flex-col gap-5 py-3">{renderActiveTab()}</div>
+          </main>
         </div>
       </div>
     </div>

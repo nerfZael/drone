@@ -252,8 +252,7 @@ export function UiActionMenu({
             <div
               key={entry.id}
               role="presentation"
-              className="px-2.5 py-1 text-[length:var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--muted-dim)]"
-              style={{ fontFamily: 'var(--display)' }}
+              className="px-2.5 py-1 dh-type-eyebrow"
             >
               {entry.label}
             </div>
@@ -298,7 +297,7 @@ export function UiActionMenu({
               }
             }}
             className={cn(
-              'flex min-h-8 w-full items-center gap-2 rounded-[5px] px-2.5 py-1.5 text-left text-[length:var(--text-10)] transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
+              'flex min-h-8 w-full items-center gap-2 rounded-[5px] px-2.5 py-1.5 text-left dh-type-menu-item transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
               entry.tone === 'danger'
                 ? 'text-[var(--red)] hover:bg-[var(--red-subtle)]'
                 : 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]',
@@ -309,7 +308,7 @@ export function UiActionMenu({
             </span>
             <span className="min-w-0 flex-1 truncate">{entry.label}</span>
             {entry.meta ? (
-              <span className="shrink-0 text-[length:var(--text-8)] text-[var(--muted-dim)]">
+              <span className="shrink-0 dh-type-menu-meta">
                 {entry.meta}
               </span>
             ) : null}

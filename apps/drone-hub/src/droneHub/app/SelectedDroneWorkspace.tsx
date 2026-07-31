@@ -32,14 +32,26 @@ import type {
   TranscriptItem,
 } from '../types';
 import {
+  IconBoard,
   IconChat,
   IconChevron,
+  IconChevronLeft,
   IconCirclePause,
+  IconCopy,
+  IconCursorApp,
+  IconDownload,
   IconFileDiff,
+  IconFolder,
   IconGitCommitHorizontal,
+  IconGitPullRequest,
   IconMonitor,
   IconNetwork,
+  IconRefresh,
   IconSidebarExpand,
+  IconTerminal,
+  IconTreeView,
+  IconTune,
+  IconVsCode,
 } from './icons';
 import {
   DockableDroneWorkspace,
@@ -66,7 +78,12 @@ import {
 import { isDroneProvisioningPhase } from '../hub-phase';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
-import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
+import {
+  contextMenuItemBaseClass as dropdownMenuItemBaseClass,
+  contextMenuPanelBaseClass,
+  contextMenuSeparatorClass,
+  useDropdownDismiss,
+} from '../../ui/dropdown';
 import type { UiMenuSelectEntry } from '../../ui/components';
 import { fetchDroneChatTranscript } from './chat-api';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
@@ -150,7 +167,7 @@ function HeaderDropdownPortal({
 
   return createPortal(
     <div
-      className={cn('fixed z-[11000]', dropdownPanelBaseClass)}
+      className={cn('fixed z-[11000]', contextMenuPanelBaseClass)}
       style={{ top: position.top, left: position.left, width }}
       onMouseDown={(event) => event.stopPropagation()}
       role="menu"
@@ -197,6 +214,17 @@ function HeaderMenuToggleRow({
         </span>
       </span>
     </button>
+  );
+}
+
+function HeaderMenuItemIcon({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      className="flex h-4 w-4 shrink-0 items-center justify-center text-[var(--muted-dim)]"
+      aria-hidden="true"
+    >
+      {children}
+    </span>
   );
 }
 
@@ -416,6 +444,32 @@ function HeaderMenuChoiceGroup<T extends string>({
       })}
     </div>
   );
+}
+
+function WorkspaceToolIcon({ tab }: { tab: RightPanelTab }) {
+  const className = 'h-3.5 w-3.5';
+  switch (tab) {
+    case 'terminal':
+      return <IconTerminal className={className} />;
+    case 'env':
+      return <IconTune className={className} />;
+    case 'files':
+      return <IconFolder className={className} />;
+    case 'preview':
+      return <IconMonitor className={className} />;
+    case 'changes':
+      return <IconFileDiff className={className} />;
+    case 'prs':
+      return <IconGitPullRequest className={className} />;
+    case 'canvas':
+      return <IconNetwork className={className} />;
+    case 'whiteboard':
+      return <IconBoard className={className} />;
+    case 'workflows':
+      return <IconTreeView className={className} />;
+    default:
+      return null;
+  }
 }
 
 type SelectedDroneWorkspaceProps = {
@@ -708,10 +762,14 @@ export function SelectedDroneWorkspace({
   );
   const syncMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [syncMenuOpen, setSyncMenuOpen] = React.useState(false);
+  const workspaceToolsMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const [workspaceToolsMenuOpen, setWorkspaceToolsMenuOpen] = React.useState(false);
   useDropdownDismiss(syncMenuRef, syncMenuOpen, setSyncMenuOpen);
+  useDropdownDismiss(workspaceToolsMenuRef, workspaceToolsMenuOpen, setWorkspaceToolsMenuOpen);
   React.useEffect(() => {
     setSyncMenuOpen(false);
   }, [currentDrone.id, repoOp?.kind]);
+  React.useEffect(() => setWorkspaceToolsMenuOpen(false), [currentDrone.id]);
   const hostRuntime = isHostRuntimeDrone(currentDrone);
   const dockerSnapshotSupported = !hostRuntime && currentDrone.persistVolume === false;
   const readOnlySupported =
@@ -1139,6 +1197,7 @@ export function SelectedDroneWorkspace({
 
   const openWorkspacePane = React.useCallback(
     (tab: RightPanelTab) => {
+      setWorkspaceToolsMenuOpen(false);
       requestRightPanelTab(tab);
     },
     [requestRightPanelTab],
@@ -1249,7 +1308,7 @@ export function SelectedDroneWorkspace({
     <>
       {/* Header - spans full workspace width */}
       <DroneWorkspaceHeaderFrame selectedHeader>
-        <div className="flex h-[3.25rem] items-center px-4">
+        <div className="flex h-11 items-center px-3">
           <div className="flex w-full items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
               {sidebarCollapsed && (
@@ -1264,7 +1323,7 @@ export function SelectedDroneWorkspace({
               )}
               <div className="flex min-w-0 flex-col justify-center">
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="max-w-[min(34vw,360px)] truncate dh-type-title dh-type-workspace-title !text-[.9375rem]">
+                  <span className="max-w-[min(34vw,360px)] truncate dh-type-title dh-type-workspace-title !text-[.875rem]">
                     {currentDroneLabel}
                   </span>
                   {showRespondingAsStatusInHeader ? (
@@ -1381,7 +1440,7 @@ export function SelectedDroneWorkspace({
       {/* Tier 2: Toolbar */}
         <div
           data-drone-header-toolbar="true"
-          className="absolute right-5 top-1/2 flex max-w-[calc(100%-22rem)] -translate-y-1/2 flex-wrap items-center justify-end gap-2"
+          className="absolute right-3 top-1/2 flex max-w-[calc(100%-22rem)] -translate-y-1/2 flex-wrap items-center justify-end gap-1.5"
         >
           {currentDroneRepoAttached && !hostRuntime && (
             <>
@@ -1418,7 +1477,7 @@ export function SelectedDroneWorkspace({
                 </HeaderActionButton>
                 {syncMenuOpen && !syncDisabled ? (
                   <HeaderDropdownPortal open={syncMenuOpen} anchorRef={syncMenuRef} width={260}>
-                    <div className="py-1">
+                    <div>
                       {localActiveForCurrentDrone ? (
                       <>
                         <div className="px-3 py-2 text-[var(--text-10)] text-[var(--muted)]">
@@ -1431,7 +1490,7 @@ export function SelectedDroneWorkspace({
                               : 'Committed changes'}
                           </div>
                         </div>
-                        <div className="my-1 border-t border-[var(--border)]" />
+                        <div className={contextMenuSeparatorClass} />
                         <button
                           type="button"
                           disabled={localActionDisabled}
@@ -1446,7 +1505,8 @@ export function SelectedDroneWorkspace({
                           role="menuitem"
                           title="Refresh the host working tree from this drone"
                         >
-                          Update
+                          <HeaderMenuItemIcon><IconRefresh className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                          <span>Update</span>
                         </button>
                         <button
                           type="button"
@@ -1462,7 +1522,8 @@ export function SelectedDroneWorkspace({
                           role="menuitem"
                           title="Apply this exact version through the normal host merge flow"
                         >
-                          Apply
+                          <HeaderMenuItemIcon><IconFileDiff className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                          <span>Apply</span>
                         </button>
                         <button
                           type="button"
@@ -1478,9 +1539,10 @@ export function SelectedDroneWorkspace({
                           role="menuitem"
                           title="Return to the branch that was checked out before using this drone locally"
                         >
-                          Return
+                          <HeaderMenuItemIcon><IconChevronLeft className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                          <span>Return</span>
                         </button>
-                        <div className="my-1 border-t border-[var(--border)]" />
+                        <div className={contextMenuSeparatorClass} />
                         <div className="px-3 pb-1 pt-2 text-[var(--text-10)] uppercase tracking-wide text-[var(--muted)]">
                           Auto-updates
                         </div>
@@ -1522,9 +1584,10 @@ export function SelectedDroneWorkspace({
                               : "Use this drone's committed code in the current host working tree"
                           }
                         >
-                          Use locally
+                          <HeaderMenuItemIcon><IconMonitor className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                          <span>Use locally</span>
                         </button>
-                        <div className="my-1 border-t border-[var(--border)]" />
+                        <div className={contextMenuSeparatorClass} />
                         <button
                           type="button"
                           disabled={localCheckoutBusy}
@@ -1539,7 +1602,8 @@ export function SelectedDroneWorkspace({
                           role="menuitem"
                           title="Apply this drone repo into the host repo"
                         >
-                          Apply to host
+                          <HeaderMenuItemIcon><IconFileDiff className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                          <span>Apply to host</span>
                         </button>
                         <button
                           type="button"
@@ -1555,7 +1619,8 @@ export function SelectedDroneWorkspace({
                           role="menuitem"
                           title="Pull the current host branch into this drone repo"
                         >
-                          Pull from host
+                          <HeaderMenuItemIcon><IconGitPullRequest className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                          <span>Pull from host</span>
                         </button>
                       </>
                       )}
@@ -1569,8 +1634,10 @@ export function SelectedDroneWorkspace({
           <div ref={headerOverflowRef as React.RefObject<HTMLDivElement>} className="relative">
             <HeaderActionButton
               onClick={() => {
+                setSyncMenuOpen(false);
                 setTerminalMenuOpen(false);
                 setDroneControlsMenuOpen(false);
+                setWorkspaceToolsMenuOpen(false);
                 setHeaderOverflowOpen((v) => !v);
               }}
               title="More actions"
@@ -1583,7 +1650,7 @@ export function SelectedDroneWorkspace({
             </HeaderActionButton>
             {headerOverflowOpen && (
               <HeaderDropdownPortal open={headerOverflowOpen} anchorRef={headerOverflowRef} width={280}>
-                <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto py-1">
+                <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto">
                   <button
                     type="button"
                     onClick={() => {
@@ -1595,7 +1662,8 @@ export function SelectedDroneWorkspace({
                     role="menuitem"
                     title={`SSH into "${currentDroneLabel}"`}
                   >
-                    SSH
+                    <HeaderMenuItemIcon><IconTerminal className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <span>SSH</span>
                   </button>
                   <button
                     type="button"
@@ -1608,9 +1676,10 @@ export function SelectedDroneWorkspace({
                     role="menuitem"
                     title={quickOpenTabUrl ? `Open ${quickOpenTabUrl} in a new browser tab` : 'No preview port selected yet'}
                   >
-                    Open default tab
+                    <HeaderMenuItemIcon><IconMonitor className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <span>Open default tab</span>
                   </button>
-                  <div className="my-1 border-t border-[var(--border-subtle)]" />
+                  <div className={contextMenuSeparatorClass} />
                   <button
                     type="button"
                     onClick={() => {
@@ -1622,7 +1691,8 @@ export function SelectedDroneWorkspace({
                     role="menuitem"
                     title={transcriptExportDisabled ? 'No completed transcript turns are available yet.' : 'Copy the current chat transcript as Markdown'}
                   >
-                    Copy transcript
+                    <HeaderMenuItemIcon><IconCopy className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <span>Copy transcript</span>
                   </button>
                   <button
                     type="button"
@@ -1635,9 +1705,10 @@ export function SelectedDroneWorkspace({
                     role="menuitem"
                     title={transcriptExportDisabled ? 'No completed transcript turns are available yet.' : 'Download the current chat transcript as JSON'}
                   >
-                    Download transcript
+                    <HeaderMenuItemIcon><IconDownload className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <span>Download transcript</span>
                   </button>
-                  <div className="my-1 border-t border-[var(--border-subtle)]" />
+                  <div className={contextMenuSeparatorClass} />
                   <button
                     type="button"
                     onClick={() => {
@@ -1648,7 +1719,8 @@ export function SelectedDroneWorkspace({
                     className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
                     role="menuitem"
                   >
-                    SSH + Agent session
+                    <HeaderMenuItemIcon><IconChat className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <span>SSH + Agent session</span>
                   </button>
                   <button
                     type="button"
@@ -1660,7 +1732,8 @@ export function SelectedDroneWorkspace({
                     className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
                     role="menuitem"
                   >
-                    Open VS Code
+                    <HeaderMenuItemIcon><IconVsCode className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <span>Open VS Code</span>
                   </button>
                   <button
                     type="button"
@@ -1672,11 +1745,12 @@ export function SelectedDroneWorkspace({
                     className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
                     role="menuitem"
                   >
-                    Open Cursor
+                    <HeaderMenuItemIcon><IconCursorApp className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <span>Open Cursor</span>
                   </button>
                   {currentDroneRepoAttached && (
                     <>
-                      <div className="my-1 border-t border-[var(--border-subtle)]" />
+                      <div className={contextMenuSeparatorClass} />
                       <button
                         type="button"
                         onClick={() => {
@@ -1688,11 +1762,12 @@ export function SelectedDroneWorkspace({
                         role="menuitem"
                         title={hostRuntime ? 'Host runtime uses the host repository directly; this action is a no-op.' : undefined}
                       >
-                        {hostRuntime ? 'Reseed repo (noop)' : 'Reseed repo'}
+                        <HeaderMenuItemIcon><IconRefresh className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                        <span>{hostRuntime ? 'Reseed repo (noop)' : 'Reseed repo'}</span>
                       </button>
                     </>
                   )}
-                  <div className="my-1 border-t border-[var(--border-subtle)]" />
+                  <div className={contextMenuSeparatorClass} />
                   <div ref={terminalMenuRef as React.RefObject<HTMLDivElement>} className="relative">
                     <button
                       type="button"
@@ -1703,7 +1778,10 @@ export function SelectedDroneWorkspace({
                       className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] flex items-center justify-between')}
                       role="menuitem"
                     >
-                      <span>Terminal: {terminalLabel}</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <HeaderMenuItemIcon><IconTerminal className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                        <span className="truncate">Terminal: {terminalLabel}</span>
+                      </span>
                       <IconChevron down={!terminalMenuOpen} className="text-[var(--muted-dim)] opacity-60" />
                     </button>
                     {terminalMenuOpen && (
@@ -1731,7 +1809,7 @@ export function SelectedDroneWorkspace({
                       </div>
                     )}
                   </div>
-                  <div className="my-1 border-t border-[var(--border-subtle)]" />
+                  <div className={contextMenuSeparatorClass} />
                   <div className="relative">
                     <button
                       type="button"
@@ -1744,7 +1822,10 @@ export function SelectedDroneWorkspace({
                       aria-haspopup="menu"
                       aria-expanded={droneControlsMenuOpen}
                     >
-                      <span>Drone controls</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <HeaderMenuItemIcon><IconTune className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                        <span>Drone controls</span>
+                      </span>
                       <IconChevron down={!droneControlsMenuOpen} className="text-[var(--muted-dim)] opacity-60" />
                     </button>
                     {droneControlsMenuOpen ? (
@@ -1863,31 +1944,71 @@ export function SelectedDroneWorkspace({
           </div>
           {/* Workspace pane controls */}
           <div className="w-px h-4 bg-[var(--border-subtle)] ml-1" />
-          <div className="flex items-center gap-0.5">
-            {rightPanelHeaderTabs(rightPanelTabs).map((tab) => {
-              const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
-              return (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => openWorkspacePane(tab)}
-                  data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
-                  className="inline-flex items-center rounded border border-transparent px-2 py-1 text-[var(--text-10)] font-medium text-[var(--chrome-muted)] transition-all hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-                  title={
-                    tab === 'prs' && prCount > 0
-                      ? `Open ${rightPanelTabLabels[tab]} pane (${prCount} open)`
-                      : `Open ${rightPanelTabLabels[tab]} pane`
-                  }
-                >
-                  <span>{rightPanelTabLabels[tab]}</span>
-                  {tab === 'prs' && prCount > 0 ? (
-                    <span className="ml-1 font-mono text-[var(--text-9)] leading-none tabular-nums text-[var(--accent)]">
-                      ({prCount > 99 ? '99+' : prCount})
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
+          <div ref={workspaceToolsMenuRef} className="relative">
+            <HeaderActionButton
+              onClick={() => {
+                setSyncMenuOpen(false);
+                setTerminalMenuOpen(false);
+                setDroneControlsMenuOpen(false);
+                setHeaderOverflowOpen(false);
+                setWorkspaceToolsMenuOpen((open) => !open);
+              }}
+              title="Open a workspace tool"
+              aria-haspopup="menu"
+              aria-expanded={workspaceToolsMenuOpen}
+              className="dh-type-header-action--emphasis"
+            >
+              <span>Tools</span>
+              <IconChevron down={!workspaceToolsMenuOpen} className="opacity-75" />
+            </HeaderActionButton>
+            {workspaceToolsMenuOpen ? (
+              <HeaderDropdownPortal open={workspaceToolsMenuOpen} anchorRef={workspaceToolsMenuRef} width={220}>
+                <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto">
+                  {rightPanelHeaderTabs(rightPanelTabs).map((tab) => {
+                    const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
+                    const active = tab === rightPanelTab;
+                    return (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => openWorkspacePane(tab)}
+                        data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
+                        className={cn(
+                          dropdownMenuItemBaseClass,
+                          'flex items-center justify-between gap-3 hover:bg-[var(--hover)]',
+                          active ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--fg-secondary)]',
+                        )}
+                        role="menuitem"
+                        aria-current={active ? 'true' : undefined}
+                        title={
+                          tab === 'prs' && prCount > 0
+                            ? `Open ${rightPanelTabLabels[tab]} pane (${prCount} open)`
+                            : `Open ${rightPanelTabLabels[tab]} pane`
+                        }
+                      >
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                          <span
+                            className={cn(
+                              'flex h-4 w-4 shrink-0 items-center justify-center',
+                              active ? 'text-[var(--accent)]' : 'text-[var(--muted-dim)]',
+                            )}
+                            aria-hidden="true"
+                          >
+                            <WorkspaceToolIcon tab={tab} />
+                          </span>
+                          <span className="truncate">{rightPanelTabLabels[tab]}</span>
+                        </span>
+                        {tab === 'prs' && prCount > 0 ? (
+                          <span className="font-mono text-[var(--text-9)] leading-none tabular-nums text-[var(--accent)]">
+                            {prCount > 99 ? '99+' : prCount}
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </HeaderDropdownPortal>
+            ) : null}
           </div>
         </div>
       </DroneWorkspaceHeaderFrame>

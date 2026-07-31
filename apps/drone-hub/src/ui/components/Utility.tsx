@@ -5,7 +5,7 @@ export function UiKbd({ className, children, ...props }: React.HTMLAttributes<HT
   return (
     <kbd
       className={cn(
-        'inline-flex min-w-[1.5rem] items-center justify-center rounded-[4px] border border-[var(--border)] bg-[linear-gradient(180deg,var(--surface-strong),var(--surface-inset))] px-1.5 py-0.5 font-mono text-[length:var(--text-9)] font-[var(--weight-semibold)] leading-none text-[var(--fg-secondary)] shadow-[var(--edge-highlight),0_1.5px_0_var(--border),0_2px_3px_-1px_var(--shadow-color)]',
+        'inline-flex min-w-[1.5rem] items-center justify-center rounded-[4px] border border-[var(--border)] bg-[linear-gradient(180deg,var(--surface-strong),var(--surface-inset))] px-1.5 py-0.5 font-mono text-[length:var(--text-11)] font-medium leading-none text-[var(--fg-secondary)] shadow-[var(--edge-highlight),0_1.5px_0_var(--border),0_2px_3px_-1px_var(--shadow-color)]',
         className,
       )}
       {...props}
@@ -32,7 +32,7 @@ export function UiTooltip({ content, children, side = 'top', className }: UiTool
         id={tooltipId}
         role="tooltip"
         className={cn(
-          'pointer-events-none absolute left-1/2 z-[150] w-max max-w-[16rem] -translate-x-1/2 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel-overlay)] px-2 py-1 text-center text-[length:var(--text-9)] leading-relaxed text-[var(--fg-secondary)] opacity-0 shadow-[var(--edge-highlight),var(--shadow-menu)] backdrop-blur-md transition-[opacity,transform] duration-150 group-hover/tooltip:translate-y-0 group-hover/tooltip:opacity-100 group-hover/tooltip:delay-300 group-focus-within/tooltip:translate-y-0 group-focus-within/tooltip:opacity-100',
+          'pointer-events-none absolute left-1/2 z-[150] w-max max-w-[16rem] -translate-x-1/2 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel-overlay)] px-2 py-1 text-center dh-type-control-compact leading-relaxed text-[var(--fg-secondary)] opacity-0 shadow-[var(--edge-highlight),var(--shadow-menu)] backdrop-blur-md transition-[opacity,transform] duration-150 group-hover/tooltip:translate-y-0 group-hover/tooltip:opacity-100 group-hover/tooltip:delay-300 group-focus-within/tooltip:translate-y-0 group-focus-within/tooltip:opacity-100',
           side === 'top'
             ? 'bottom-[calc(100%+0.45rem)] translate-y-0.5'
             : 'top-[calc(100%+0.45rem)] -translate-y-0.5',

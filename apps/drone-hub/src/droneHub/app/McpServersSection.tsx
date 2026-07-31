@@ -116,15 +116,12 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
   }, []);
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-6">
+      <div className="dh-settings-section">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
               Drone Hub MCP access
-            </div>
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1 leading-relaxed">
-              Named tokens identify host agents and container drones when they connect to Drone Hub over MCP.
             </div>
           </div>
           <button type="button" onClick={() => void loadMcpAccessTokens()} disabled={mcpAccessTokensLoading} className={buttonClassName('secondary', mcpAccessTokensLoading)} style={{ fontFamily: 'var(--display)' }}>
@@ -158,7 +155,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
           </div>
         )}
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] overflow-hidden">
+        <div className="overflow-x-auto">
           {mcpAccessTokens.length === 0 ? (
             <div className="px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
               No MCP access tokens yet.
@@ -243,13 +240,10 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Global MCP servers
-          </div>
-          <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1 leading-relaxed">
-            Drone Hub writes these into each drone's global agent config before Codex, Cursor, Claude, or OpenCode chats run.
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -289,8 +283,8 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[260px_minmax(0,1fr)] gap-3 min-w-0">
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-2 flex flex-col gap-2 min-w-0">
+      <div className="grid min-w-0 grid-cols-1 xl:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="min-w-0 border-b border-[var(--border-subtle)] pb-3 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-3">
           <div className="flex items-center justify-between gap-2 px-1">
             <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Servers
@@ -299,7 +293,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
           </div>
           <div className="flex flex-col gap-1 max-h-[70vh] overflow-y-auto pr-1">
             {mcpServers.length === 0 ? (
-              <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
+              <div className="px-2 py-6 text-center text-[var(--text-11)] text-[var(--muted-dim)]">
                 No global MCP servers yet.
               </div>
             ) : (
@@ -310,10 +304,10 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
                     key={server.id}
                     type="button"
                     onClick={() => handleSelect(server.id)}
-                    className={`w-full text-left rounded border px-3 py-2 transition-colors ${
+                    className={`w-full text-left rounded-[var(--radius-medium)] border-l-2 px-2.5 py-2 transition-colors ${
                       active
-                        ? 'border-[var(--accent)] bg-[var(--surface-soft)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--surface-faint)] hover:bg-[var(--hover)]'
+                        ? 'border-[var(--accent)] bg-[var(--selected)]'
+                        : 'border-transparent hover:bg-[var(--hover)]'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -323,9 +317,6 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
                       </div>
                     </div>
                     <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono mt-1 truncate">{server.transport}</div>
-                    <div className="text-[var(--text-10)] text-[var(--muted-dim)] mt-2 line-clamp-2">
-                      {server.description || server.command || server.url || 'No description'}
-                    </div>
                   </button>
                 );
               })
@@ -333,13 +324,10 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
           </div>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-4 min-w-0">
+        <div className="flex min-w-0 flex-col gap-4 pt-4 xl:pl-4 xl:pt-0">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)] truncate">{mcpDraft.id ? mcpDraft.name || 'Untitled MCP server' : 'New MCP server draft'}</div>
-              <div className="text-[var(--text-10)] text-[var(--muted-dim)] mt-1">
-                Projects to global user config only. Repo files are not changed.
-              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className={`text-[var(--text-10)] uppercase tracking-[0.08em] ${mcpDraftDirty ? 'text-[var(--accent)]' : 'text-[var(--muted-dim)]'}`}>
@@ -401,7 +389,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
             </label>
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
+          <div className="dh-settings-subsection">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Agents</div>

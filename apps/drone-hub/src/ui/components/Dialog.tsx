@@ -143,19 +143,18 @@ export function UiDialog({
           ) : null}
           <div className="min-w-0 flex-1">
             {eyebrow ? (
-              <div className="text-[length:var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              <div className="dh-type-eyebrow">
                 {eyebrow}
               </div>
             ) : null}
             <h2
               id={titleId}
-              className={cn('text-[17px] font-[var(--weight-semibold)] leading-6 text-[var(--fg-strong)]', Boolean(eyebrow) && 'mt-1')}
-              style={{ fontFamily: 'var(--display)' }}
+              className={cn('text-[17px] font-medium leading-6 text-[var(--fg-strong)]', Boolean(eyebrow) && 'mt-1')}
             >
               {title}
             </h2>
             {description ? (
-              <p id={descriptionId} className="mt-1 text-[length:var(--text-11)] leading-relaxed text-[var(--muted)]">
+              <p id={descriptionId} className="mt-1 dh-type-supporting !text-[var(--muted)]">
                 {description}
               </p>
             ) : null}

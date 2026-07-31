@@ -128,7 +128,7 @@ const colorTokens = [
 const componentInventory = [
   ['UiButton', 'Actions and icon actions'],
   ['UiBadge', 'Status and metadata'],
-  ['UiCard', 'Grouped content surfaces'],
+  ['UiCard', 'Flat sections and explicit raised surfaces'],
   ['UiField', 'Labels and validation'],
   ['UiInput', 'Single-line input'],
   ['UiSearchInput', 'Search and clear actions'],
@@ -287,15 +287,15 @@ export function ComponentLibraryPreview() {
         <UiCard className="mt-3">
           <div className="grid gap-5 md:grid-cols-3">
             <div>
-              <div className="text-[length:var(--text-9)] uppercase tracking-[0.1em] text-[var(--muted-dim)]">Display · Chakra Petch</div>
-              <div className="mt-2 text-[20px] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>Build with drones.</div>
+              <div className="dh-type-eyebrow">Brand · Chakra Petch</div>
+              <div className="mt-2 text-[20px] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--brand-display)' }}>Build with drones.</div>
             </div>
             <div>
-              <div className="text-[length:var(--text-9)] uppercase tracking-[0.1em] text-[var(--muted-dim)]">Body · IBM Plex Sans</div>
-              <div className="mt-2 text-[length:var(--text-13)] text-[var(--fg-secondary)]">Clear, compact copy for dense desktop workflows.</div>
+              <div className="dh-type-eyebrow">UI · System font</div>
+              <div className="mt-2 dh-type-control text-[var(--fg-secondary)]">Clear, compact copy for dense desktop workflows.</div>
             </div>
             <div>
-              <div className="text-[length:var(--text-9)] uppercase tracking-[0.1em] text-[var(--muted-dim)]">Code · JetBrains Mono</div>
+              <div className="dh-type-eyebrow">Code · JetBrains Mono</div>
               <code className="mt-2 block text-[length:var(--text-12)] text-[var(--accent)]">drone.run({`{ agent: "codex" }`})</code>
             </div>
           </div>

@@ -5,9 +5,10 @@ export type UiCardSurface = 'default' | 'raised' | 'inset';
 export type UiCardPadding = 'none' | 'small' | 'medium' | 'large';
 
 const surfaceClassName: Record<UiCardSurface, string> = {
-  default: 'bg-[var(--surface-softest)] shadow-[var(--edge-highlight)]',
-  raised: 'bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-raised)]',
-  inset: 'bg-[var(--surface-inset)] shadow-[inset_0_1px_3px_color-mix(in_srgb,var(--shadow-color)_45%,transparent)]',
+  default: 'bg-transparent',
+  raised:
+    'rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] shadow-[var(--edge-highlight),var(--shadow-raised)]',
+  inset: 'rounded-[var(--radius-large)] bg-[var(--surface-inset)]',
 };
 
 const paddingClassName: Record<UiCardPadding, string> = {
@@ -31,11 +32,10 @@ export const UiCard = React.forwardRef<HTMLDivElement, UiCardProps>(function UiC
     <div
       ref={ref}
       className={cn(
-        'rounded-[var(--radius-large)] border border-[var(--border-subtle)]',
         surfaceClassName[surface],
         paddingClassName[padding],
         interactive &&
-          'transition-[background-color,border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-[var(--border)] hover:bg-[var(--surface-soft)] hover:shadow-[var(--edge-highlight),var(--shadow-raised)] motion-reduce:transform-none',
+          'rounded-[var(--radius-medium)] transition-[background-color,color] duration-150 hover:bg-[var(--hover)]',
         className,
       )}
       {...props}
@@ -62,21 +62,15 @@ export function UiCardHeader({
     <div className={cn('flex min-w-0 items-start justify-between gap-4', className)} {...props}>
       <div className="min-w-0">
         {eyebrow ? (
-          <div
-            className="mb-1 text-[length:var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--muted-dim)]"
-            style={{ fontFamily: 'var(--display)' }}
-          >
+          <div className="mb-1 dh-type-eyebrow">
             {eyebrow}
           </div>
         ) : null}
-        <div
-          className="text-[length:var(--text-14)] font-[var(--weight-semibold)] leading-5 text-[var(--fg-strong)]"
-          style={{ fontFamily: 'var(--display)' }}
-        >
+        <div className="dh-type-heading">
           {title}
         </div>
         {description ? (
-          <div className="mt-1 text-[length:var(--text-11)] leading-relaxed text-[var(--muted)]">{description}</div>
+          <div className="mt-1 dh-type-supporting !text-[var(--muted)]">{description}</div>
         ) : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}

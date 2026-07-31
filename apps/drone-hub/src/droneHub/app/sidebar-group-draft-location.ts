@@ -3,33 +3,44 @@ import {
   sidebarGroupBaseName,
   sidebarGroupParentPath,
 } from './sidebar-group-paths';
+import type { SidebarNodeTreeModel } from './sidebar-node-tree';
+import { sidebarDroneNodeId } from './sidebar-node-order';
 
 export type SidebarGroupDraftLocation = {
   parentPath: string | null;
+  beforeNodeId: string | null;
   siblingNames: string[];
 };
 
-export function resolveSidebarGroupDraftLocation(
-  selectedFolderPathRaw: string | null,
-  visibleFolderPaths: Iterable<string>,
-  selectedDroneGroupRaw?: string | null,
-): SidebarGroupDraftLocation {
-  const paths = Array.from(visibleFolderPaths, (path) => String(path ?? '').trim()).filter(Boolean);
-  const visiblePathSet = new Set(paths);
-  const selectedFolderPath = String(selectedFolderPathRaw ?? '').trim();
-  const selectedDroneGroupRawValue = String(selectedDroneGroupRaw ?? '').trim();
-  const selectedDroneGroup = isUngroupedGroupName(selectedDroneGroupRawValue)
-    ? ''
-    : selectedDroneGroupRawValue;
+export function resolveSidebarGroupDraftLocation(args: {
+  selectedSidebarNodeId?: string | null;
+  selectedDroneId?: string | null;
+  nodeTree?: SidebarNodeTreeModel | null;
+  visibleFolderPaths: Iterable<string>;
+}): SidebarGroupDraftLocation {
+  const paths = Array.from(args.visibleFolderPaths, (path) => String(path ?? '').trim()).filter(Boolean);
+  const selectedSidebarNodeId = String(args.selectedSidebarNodeId ?? '').trim();
+  const selectedDroneId = String(args.selectedDroneId ?? '').trim();
+  const nodeTree = args.nodeTree ?? null;
+  let anchorNode = selectedSidebarNodeId ? nodeTree?.nodesById[selectedSidebarNodeId] : null;
+  if (!anchorNode && selectedSidebarNodeId.startsWith('chat:') && selectedDroneId) {
+    anchorNode = nodeTree?.nodesById[sidebarDroneNodeId(selectedDroneId)] ?? null;
+  }
+
+  while (anchorNode?.kind === 'drone') {
+    const parent = nodeTree?.nodesById[anchorNode.parentId];
+    if (!parent || parent.kind !== 'drone') break;
+    anchorNode = parent;
+  }
+
+  const parentNode = anchorNode ? nodeTree?.nodesById[anchorNode.parentId] : null;
   const parentPath =
-    selectedFolderPath && visiblePathSet.has(selectedFolderPath)
-      ? selectedFolderPath
-      : selectedDroneGroup && visiblePathSet.has(selectedDroneGroup)
-        ? selectedDroneGroup
-        : null;
+    parentNode?.kind === 'folder' ? String(parentNode.groupPath ?? '').trim() || null : null;
+  const beforeNodeId = anchorNode?.id ?? null;
 
   return {
     parentPath,
+    beforeNodeId,
     siblingNames: paths
       .filter((path) => sidebarGroupParentPath(path) === parentPath)
       .map(sidebarGroupBaseName),

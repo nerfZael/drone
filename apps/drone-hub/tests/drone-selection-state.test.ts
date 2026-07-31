@@ -136,7 +136,7 @@ describe('resolveDroneCardSelection', () => {
       }),
     ).toEqual({
       selectedDroneIds: ['alpha', 'bravo', 'charlie'],
-      activeDroneId: 'charlie',
+      activeDroneId: 'bravo',
       selectionAnchor: 'charlie',
     });
 
@@ -153,6 +153,23 @@ describe('resolveDroneCardSelection', () => {
       selectedDroneIds: ['alpha', 'charlie'],
       activeDroneId: 'charlie',
       selectionAnchor: 'bravo',
+    });
+  });
+
+  test('ctrl click extends selection without opening the clicked drone', () => {
+    expect(
+      resolveDroneCardSelection({
+        droneId: 'charlie',
+        selectedDrone: 'alpha',
+        selectedDroneIds: ['alpha'],
+        orderedDroneIds: ['alpha', 'bravo', 'charlie'],
+        selectionAnchor: 'alpha',
+        opts: { toggle: true },
+      }),
+    ).toEqual({
+      selectedDroneIds: ['alpha', 'charlie'],
+      activeDroneId: 'alpha',
+      selectionAnchor: 'charlie',
     });
   });
 

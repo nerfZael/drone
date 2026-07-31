@@ -88,7 +88,7 @@ export function ShortcutSettingsSection() {
   );
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+    <div className="dh-settings-section">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
@@ -118,7 +118,7 @@ export function ShortcutSettingsSection() {
           const isCapturing = capturingActionId === def.id;
           const hasConflict = conflictingActionIds.has(def.id);
           return (
-            <div key={def.id} className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-2">
+            <div key={def.id} className="dh-settings-row flex flex-col gap-2 px-1 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[var(--text-12)] text-[var(--fg-secondary)] font-[var(--weight-semibold)]">{def.label}</div>

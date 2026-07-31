@@ -16,19 +16,13 @@ export function ComponentLibrarySection({
   return (
     <section id={id} className="scroll-mt-16">
       <div className="mb-4 border-l-2 border-[var(--accent-border)] pl-3">
-        <div
-          className="text-[length:var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--accent)]"
-          style={{ fontFamily: 'var(--display)' }}
-        >
+        <div className="dh-type-eyebrow !text-[var(--accent)]">
           {eyebrow}
         </div>
-        <h2
-          className="mt-1 text-[17px] font-[var(--weight-semibold)] text-[var(--fg-strong)]"
-          style={{ fontFamily: 'var(--display)' }}
-        >
+        <h2 className="mt-1 text-[17px] font-medium text-[var(--fg-strong)]">
           {title}
         </h2>
-        <p className="mt-1 max-w-[72ch] text-[length:var(--text-12)] leading-relaxed text-[var(--muted)]">
+        <p className="mt-1 max-w-[72ch] dh-type-supporting !text-[var(--muted)]">
           {description}
         </p>
       </div>

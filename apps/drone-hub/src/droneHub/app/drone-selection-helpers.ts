@@ -94,7 +94,10 @@ export function resolveDroneCardSelection({
     }
     return {
       selectedDroneIds: [...currentSelectedIds, id],
-      activeDroneId: id,
+      // Modifier-click changes the selection set without navigating away from the
+      // workspace that is already open. This mirrors desktop explorer behavior.
+      activeDroneId:
+        selectedDrone && currentSelectedIds.includes(selectedDrone) ? selectedDrone : id,
       selectionAnchor: id,
     };
   }

@@ -1,13 +1,20 @@
 import React from 'react';
 import { SKILL_FILE_KIND_OPTIONS, type SkillFileDraft, type SkillFileKind } from './skill-library-model';
 import { SkillSourceImportSection } from './SkillSourceImportSection';
+import {
+  SettingsDetail,
+  SettingsEmptyState,
+  SettingsList,
+  SettingsListRow,
+  SettingsSection,
+  SettingsSplitView,
+} from './SettingsSurface';
 import { buttonClassName, inputClassName, textareaClassName } from './skill-library-ui';
 import type { UseSkillLibraryResult } from './use-skill-library';
 
 export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLibraryResult }) {
   const {
     skills,
-    skillsLoading,
     skillsSaving,
     skillsDeleting,
     skillsError,
@@ -20,8 +27,6 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
     appendDraftFile,
     updateDraftFile,
     removeDraftFile,
-    loadSkills,
-    refreshSkillSources,
     startNewSkill,
     saveDraft,
     deleteSelectedSkill,
@@ -52,17 +57,6 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
     startNewSkill();
   }, [draftDirty, startNewSkill]);
 
-  const handleRefresh = React.useCallback(() => {
-    if (draftDirty) {
-      const ok = window.confirm('Discard unsaved skill edits and reload the library?');
-      if (!ok) return;
-    }
-    void (async () => {
-      await loadSkills();
-      await refreshSkillSources();
-    })();
-  }, [draftDirty, loadSkills, refreshSkillSources]);
-
   const handleReset = React.useCallback(() => {
     if (!draftDirty) return;
     const ok = window.confirm('Discard unsaved changes?');
@@ -79,29 +73,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
   }, [deleteSelectedSkill, draft.id, draft.name, draft.slug]);
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-            Skill library
-          </div>
-          <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1 leading-relaxed">
-            Author portable `SKILL.md` packages once, then let the Hub project them into Codex, Claude, Cursor, OpenCode, and Pi-compatible skill roots.
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={handleRefresh} disabled={skillsLoading} className={buttonClassName('secondary', skillsLoading)} style={{ fontFamily: 'var(--display)' }}>
-            {skillsLoading ? 'Refreshing…' : 'Refresh'}
-          </button>
-          <button type="button" onClick={handleCreateNew} disabled={skillsSaving || skillsDeleting} className={buttonClassName('secondary', skillsSaving || skillsDeleting)} style={{ fontFamily: 'var(--display)' }}>
-            New skill
-          </button>
-          <button type="button" onClick={() => void saveDraft()} disabled={skillsSaving || skillsDeleting} className={buttonClassName('primary', skillsSaving || skillsDeleting)} style={{ fontFamily: 'var(--display)' }}>
-            {skillsSaving ? 'Saving…' : draft.id ? 'Save skill' : 'Create skill'}
-          </button>
-        </div>
-      </div>
-
+    <div className="flex min-w-0 flex-col gap-5">
       {(skillsError || skillsNotice) && (
         <div className="flex flex-col gap-2">
           {skillsError && (
@@ -146,50 +118,46 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
         importSourceSkill={skillLibrary.importSourceSkill}
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[240px_minmax(0,1fr)] gap-3 min-w-0">
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-2 flex flex-col gap-2 min-w-0">
-          <div className="flex items-center justify-between gap-2 px-1">
-            <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-              Skills
+      <SettingsSection
+        title="Skills"
+        actions={(
+          <>
+            <span className="mr-1 dh-type-menu-meta">{skills.length}</span>
+            <button type="button" onClick={handleCreateNew} disabled={skillsSaving || skillsDeleting} className={buttonClassName('secondary', skillsSaving || skillsDeleting)} style={{ fontFamily: 'var(--display)' }}>
+              New skill
+            </button>
+            <button type="button" onClick={() => void saveDraft()} disabled={skillsSaving || skillsDeleting} className={buttonClassName('primary', skillsSaving || skillsDeleting)} style={{ fontFamily: 'var(--display)' }}>
+              {skillsSaving ? 'Saving…' : draft.id ? 'Save skill' : 'Create skill'}
+            </button>
+          </>
+        )}
+      >
+        <SettingsSplitView>
+          <SettingsList className="max-h-[70vh] overflow-y-auto">
+            <div className="flex flex-col gap-0.5 pr-1">
+              {skills.length === 0 ? (
+                <SettingsEmptyState>No skills yet.</SettingsEmptyState>
+              ) : (
+                skills.map((skill) => {
+                  const active = skill.id === selectedSkillId;
+                  return (
+                    <SettingsListRow
+                      key={skill.id}
+                      selected={active}
+                      title={skill.name}
+                      detail={skill.slug}
+                      onClick={() => handleSelectSkill(skill.id)}
+                    />
+                  );
+                })
+              )}
             </div>
-            <div className="text-[var(--text-10)] text-[var(--muted-dim)]">{skills.length}</div>
-          </div>
-          <div className="flex flex-col gap-1 max-h-[70vh] overflow-y-auto pr-1">
-            {skills.length === 0 ? (
-              <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
-                No skills yet. Start a new one from the editor.
-              </div>
-            ) : (
-              skills.map((skill) => {
-                const active = skill.id === selectedSkillId;
-                return (
-                  <button
-                    key={skill.id}
-                    type="button"
-                    onClick={() => handleSelectSkill(skill.id)}
-                    className={`w-full text-left rounded border px-3 py-2 transition-colors ${
-                      active
-                        ? 'border-[var(--accent)] bg-[var(--surface-soft)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--surface-faint)] hover:bg-[var(--hover)]'
-                    }`}
-                  >
-                    <div className="text-[var(--text-12)] text-[var(--fg-secondary)] font-medium truncate">{skill.name}</div>
-                    <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono mt-1 truncate">{skill.slug}</div>
-                    <div className="text-[var(--text-10)] text-[var(--muted-dim)] mt-2 line-clamp-2">{skill.description}</div>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
+          </SettingsList>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-4 min-w-0">
+        <SettingsDetail className="flex flex-col gap-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)] truncate">{draft.id ? draft.name || 'Untitled skill' : 'New skill draft'}</div>
-              <div className="text-[var(--text-10)] text-[var(--muted-dim)] mt-1">
-                Projects to `.agents/skills` (shared by Codex and Pi), `.claude/skills`, `.cursor/skills`, and `.opencode/skills`.
-              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className={`text-[var(--text-10)] uppercase tracking-[0.08em] ${draftDirty ? 'text-[var(--accent)]' : 'text-[var(--muted-dim)]'}`}>
@@ -206,29 +174,29 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="flex flex-col gap-1">
-              <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Name</span>
+              <span className="dh-type-label">Name</span>
               <input value={draft.name} onChange={(e) => updateDraftField('name', e.target.value)} className={inputClassName()} placeholder="Repo Review" />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Slug</span>
+              <span className="dh-type-label">Slug</span>
               <input value={draft.slug} onChange={(e) => updateDraftField('slug', e.target.value)} className={`${inputClassName()} font-mono`} placeholder="repo-review" />
             </label>
             <label className="md:col-span-2 flex flex-col gap-1">
-              <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Description</span>
+              <span className="dh-type-label">Description</span>
               <input value={draft.description} onChange={(e) => updateDraftField('description', e.target.value)} className={inputClassName()} placeholder="Short description used for skill discovery." />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">License</span>
+              <span className="dh-type-label">License</span>
               <input value={draft.license} onChange={(e) => updateDraftField('license', e.target.value)} className={inputClassName()} placeholder="MIT" />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Compatibility</span>
+              <span className="dh-type-label">Compatibility</span>
               <input value={draft.compatibility} onChange={(e) => updateDraftField('compatibility', e.target.value)} className={inputClassName()} placeholder="codex,claude,cursor,opencode,pi" />
             </label>
           </div>
 
           <label className="flex flex-col gap-1">
-            <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Skill body</span>
+            <span className="dh-type-label">Skill body</span>
             <textarea
               value={draft.markdownBody}
               onChange={(e) => updateDraftField('markdownBody', e.target.value)}
@@ -237,16 +205,9 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
             />
           </label>
 
-          <div className="flex flex-col gap-3 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
+          <SettingsSection compact title="Package files" description="SKILL.md is generated automatically." actions={<span className="dh-type-menu-meta">{fileCountLabel}</span>}>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Package files</div>
-                <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
-                  Add scripts, references, assets, or other files. `SKILL.md` is generated automatically.
-                </div>
-              </div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[var(--text-10)] text-[var(--muted-dim)]">{fileCountLabel}</span>
                 {SKILL_FILE_KIND_OPTIONS.map((option) => (
                   <button
                     key={option.value}
@@ -263,17 +224,15 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
             </div>
             <div className="flex flex-col gap-3">
               {draft.files.length === 0 ? (
-                <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
-                  No extra files. Use references for docs, scripts for runnable helpers, and assets for examples or templates.
-                </div>
+                <SettingsEmptyState className="text-left">No extra files.</SettingsEmptyState>
               ) : (
                 draft.files.map((file: SkillFileDraft) => {
                   const option = SKILL_FILE_KIND_OPTIONS.find((entry) => entry.value === file.kind) ?? SKILL_FILE_KIND_OPTIONS[3];
                   return (
-                    <div key={file.localId} className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-3">
+                    <div key={file.localId} className="flex flex-col gap-3 border-t border-[var(--border-subtle)] pt-3 first:border-t-0 first:pt-0">
                       <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_140px_auto] gap-2 items-end">
                         <label className="flex flex-col gap-1">
-                          <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Path</span>
+                          <span className="dh-type-label">Path</span>
                           <input
                             value={file.path}
                             onChange={(e) => updateDraftFile(file.localId, { path: e.target.value })}
@@ -282,7 +241,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
                           />
                         </label>
                         <label className="flex flex-col gap-1">
-                          <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Kind</span>
+                          <span className="dh-type-label">Kind</span>
                           <select
                             value={file.kind}
                             onChange={(e) => updateDraftFile(file.localId, { kind: e.target.value as SkillFileKind })}
@@ -315,12 +274,12 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
                 })
               )}
             </div>
-          </div>
+          </SettingsSection>
 
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-              <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Codex</div>
-              <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Optional `agents/openai.yaml` overlay.</div>
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-3 xl:divide-x xl:divide-[var(--border-subtle)]">
+            <div className="flex flex-col gap-3 xl:pr-4">
+              <div className="dh-type-label">Codex</div>
+              <div className="dh-type-supporting">Optional `agents/openai.yaml` overlay.</div>
               <textarea
                 value={draft.codexOpenaiYaml}
                 onChange={(e) => updateDraftField('codexOpenaiYaml', e.target.value)}
@@ -329,8 +288,8 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
               />
             </div>
 
-            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-              <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Claude</div>
+            <div className="flex flex-col gap-3 xl:px-4">
+              <div className="dh-type-label">Claude</div>
               <div className="grid grid-cols-1 gap-2">
                 <input value={draft.claudeArgumentHint} onChange={(e) => updateDraftField('claudeArgumentHint', e.target.value)} className={inputClassName()} placeholder="Argument hint" />
                 <input value={draft.claudeAllowedTools} onChange={(e) => updateDraftField('claudeAllowedTools', e.target.value)} className={inputClassName()} placeholder="Allowed tools (comma-separated)" />
@@ -354,13 +313,13 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
               </div>
             </div>
 
-            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-              <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Cursor + advanced</div>
+            <div className="flex flex-col gap-3 xl:pl-4">
+              <div className="dh-type-label">Cursor + advanced</div>
               <label className="inline-flex items-center gap-2 text-[var(--text-11)] text-[var(--muted)]">
                 <input type="checkbox" checked={draft.cursorDisableModelInvocation} onChange={(e) => updateDraftField('cursorDisableModelInvocation', e.target.checked)} />
                 Disable model invocation
               </label>
-              <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Optional portable metadata object.</div>
+              <div className="dh-type-supporting">Optional portable metadata object.</div>
               <textarea
                 value={draft.metadataJson}
                 onChange={(e) => updateDraftField('metadataJson', e.target.value)}
@@ -369,8 +328,9 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
               />
             </div>
           </div>
-        </div>
-      </div>
+        </SettingsDetail>
+        </SettingsSplitView>
+      </SettingsSection>
     </div>
   );
 }

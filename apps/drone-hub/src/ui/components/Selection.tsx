@@ -2,7 +2,7 @@ import * as React from 'react';
 import { cn } from '../cn';
 
 const selectBaseClassName =
-  'w-full appearance-none rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] bg-[linear-gradient(45deg,transparent_50%,var(--muted-dim)_50%),linear-gradient(135deg,var(--muted-dim)_50%,transparent_50%)] bg-[position:calc(100%-13px)_50%,calc(100%-9px)_50%] bg-[size:4px_4px,4px_4px] bg-no-repeat px-3 pr-8 text-[var(--fg)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent)] transition-[background-color,border-color,box-shadow] duration-150 hover:border-[var(--border)] focus:border-[var(--accent-muted)] focus:outline-none focus:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent),0_0_0_3px_var(--accent-subtle)] disabled:cursor-not-allowed disabled:opacity-40';
+  'dh-field-control w-full appearance-none rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] bg-[linear-gradient(45deg,transparent_50%,var(--muted-dim)_50%),linear-gradient(135deg,var(--muted-dim)_50%,transparent_50%)] bg-[position:calc(100%-13px)_50%,calc(100%-9px)_50%] bg-[size:4px_4px,4px_4px] bg-no-repeat px-3 pr-8 text-[var(--field-fg)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent)] transition-[background-color,border-color,box-shadow] duration-150 hover:border-[var(--border)] disabled:cursor-not-allowed disabled:opacity-40';
 
 export type UiSelectProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
   invalid?: boolean;
@@ -19,9 +19,8 @@ export const UiSelect = React.forwardRef<HTMLSelectElement, UiSelectProps>(funct
       aria-invalid={invalid || undefined}
       className={cn(
         selectBaseClassName,
-        size === 'small' ? 'h-7 text-[length:var(--text-10)]' : 'h-[var(--control-height)] text-[length:var(--text-12)]',
-        invalid &&
-          'border-[var(--red-border)] focus:border-[var(--red)] focus:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent),0_0_0_3px_var(--red-subtle)]',
+        size === 'small' ? 'h-7 dh-type-control-compact' : 'h-[var(--control-height)] dh-type-control',
+        invalid && 'border-[var(--red-border)]',
         className,
       )}
       {...props}
@@ -128,10 +127,10 @@ export function UiChoiceGroup<T extends string>({
             {option.icon ? <span className={cn('mt-0.5 shrink-0', selected ? 'text-[var(--accent)]' : 'text-[var(--muted)]')}>{option.icon}</span> : null}
             <span className="min-w-0 flex-1">
               <span className="flex items-center justify-between gap-2">
-                <span className="text-[length:var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">{option.title}</span>
-                {option.meta ? <span className="shrink-0 text-[length:var(--text-9)] text-[var(--muted-dim)]">{option.meta}</span> : null}
+                <span className="dh-type-control text-[var(--fg-secondary)]">{option.title}</span>
+                {option.meta ? <span className="shrink-0 dh-type-menu-meta">{option.meta}</span> : null}
               </span>
-              {option.description ? <span className="mt-0.5 block text-[length:var(--text-10)] leading-relaxed text-[var(--muted-dim)]">{option.description}</span> : null}
+              {option.description ? <span className="mt-0.5 block dh-type-supporting">{option.description}</span> : null}
             </span>
           </button>
         );

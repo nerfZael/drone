@@ -126,9 +126,26 @@ export function placeCreatedSidebarFolderAtTop(
   groupPathRaw: string,
   repoGroupPathRaw?: string | null,
 ): Record<string, string[]> {
+  return placeCreatedSidebarFolderBeforeNode(
+    map,
+    nodeTree,
+    groupPathRaw,
+    repoGroupPathRaw,
+    null,
+  );
+}
+
+export function placeCreatedSidebarFolderBeforeNode(
+  map: Record<string, string[]>,
+  nodeTree: Pick<SidebarNodeTreeModel, 'childIdsByParent'> | null,
+  groupPathRaw: string,
+  repoGroupPathRaw?: string | null,
+  beforeNodeIdRaw?: string | null,
+): Record<string, string[]> {
   const groupPath = String(groupPathRaw ?? '').trim();
   if (!groupPath) return map;
   const repoGroupPath = String(repoGroupPathRaw ?? '').trim();
+  const beforeNodeId = String(beforeNodeIdRaw ?? '').trim();
   const parentPath = sidebarGroupParentPath(groupPath);
   const nodeId = repoGroupPath
     ? repoScopedSidebarFolderNodeId(repoGroupPath, groupPath)
@@ -147,11 +164,10 @@ export function placeCreatedSidebarFolderAtTop(
   const hiddenIds = normalizeSidebarGroupOrder(map[parentId] ?? []).filter(
     (id) => id !== nodeId && !visibleSiblingIdSet.has(id),
   );
-  const nextOrder = normalizeSidebarGroupOrder([
-    nodeId,
-    ...visibleSiblingIds.filter((id) => id !== nodeId),
-    ...hiddenIds,
-  ]);
+  const nextVisibleSiblingIds = visibleSiblingIds.filter((id) => id !== nodeId);
+  const beforeIndex = beforeNodeId ? nextVisibleSiblingIds.indexOf(beforeNodeId) : -1;
+  nextVisibleSiblingIds.splice(beforeIndex >= 0 ? beforeIndex : 0, 0, nodeId);
+  const nextOrder = normalizeSidebarGroupOrder([...nextVisibleSiblingIds, ...hiddenIds]);
   return normalizeNodeOrderMap({
     ...map,
     [parentId]: nextOrder,

@@ -17,9 +17,9 @@ const variantClassName: Record<UiButtonVariant, string> = {
 };
 
 const sizeClassName: Record<UiButtonSize, string> = {
-  small: 'h-7 gap-1.5 rounded-[var(--radius-medium)] px-2.5 text-[length:var(--text-10)]',
-  medium: 'h-[var(--control-height-compact)] gap-2 rounded-[var(--radius-medium)] px-3 text-[length:var(--text-11)]',
-  large: 'h-[var(--control-height)] gap-2 rounded-[var(--radius-large)] px-4 text-[length:var(--text-12)]',
+  small: 'h-7 gap-1.5 rounded-[var(--radius-medium)] px-2.5 dh-type-control-compact',
+  medium: 'h-[var(--control-height-compact)] gap-2 rounded-[var(--radius-medium)] px-3 dh-type-control',
+  large: 'h-[var(--control-height)] gap-2 rounded-[var(--radius-large)] px-4 dh-type-control',
 };
 
 export type UiButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -56,14 +56,14 @@ export const UiButton = React.forwardRef<HTMLButtonElement, UiButtonProps>(funct
       disabled={unavailable}
       aria-busy={loading || undefined}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center border font-[var(--weight-semibold)] tracking-[0.01em] transition-[background-color,border-color,color,box-shadow,opacity,transform,filter] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] disabled:cursor-not-allowed enabled:active:translate-y-px',
+        'inline-flex shrink-0 items-center justify-center border transition-[background-color,border-color,color,box-shadow,opacity,transform,filter] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)] disabled:cursor-not-allowed enabled:active:translate-y-px',
         variantClassName[variant],
         sizeClassName[size],
         loading ? 'opacity-75' : disabled ? 'opacity-40' : null,
         fullWidth && 'w-full',
         className,
       )}
-      style={{ fontFamily: 'var(--display)', ...style }}
+      style={style}
       {...props}
     >
       {loading ? <UiSpinner size="small" label={null} inheritColor /> : leadingIcon}

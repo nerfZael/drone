@@ -32,27 +32,26 @@ export function UiField({ label, htmlFor, description, error, required, children
     <div className={cn('min-w-0', className)}>
       <label
         htmlFor={htmlFor}
-        className="mb-1.5 block text-[length:var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.07em] text-[var(--muted)]"
-        style={{ fontFamily: 'var(--display)' }}
+        className="mb-1.5 block dh-type-label"
       >
         {label}
         {required ? <span className="ml-1 text-[var(--red)]" aria-hidden="true">*</span> : null}
       </label>
       {connectedChild}
       {error ? (
-        <div id={messageId} role="alert" className="mt-1.5 text-[length:var(--text-10)] leading-relaxed text-[var(--red)]">{error}</div>
+        <div id={messageId} role="alert" className="mt-1.5 dh-type-supporting !text-[var(--red)]">{error}</div>
       ) : description ? (
-        <div id={messageId} className="mt-1.5 text-[length:var(--text-10)] leading-relaxed text-[var(--muted-dim)]">{description}</div>
+        <div id={messageId} className="mt-1.5 dh-type-supporting">{description}</div>
       ) : null}
     </div>
   );
 }
 
 const controlClassName =
-  'w-full rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--fg)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent)] placeholder:text-[var(--muted-dim)] transition-[background-color,border-color,box-shadow] duration-150 hover:border-[var(--border)] focus:border-[var(--accent-muted)] focus:outline-none focus:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent),0_0_0_3px_var(--accent-subtle)] disabled:cursor-not-allowed disabled:opacity-40';
+  'dh-field-control w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] text-[var(--field-fg)] shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_42%,transparent)] placeholder:text-[var(--field-placeholder)] transition-[background-color,border-color,box-shadow] duration-150 hover:border-[var(--border)] disabled:cursor-not-allowed disabled:opacity-40';
 
 const invalidControlClassName =
-  'border-[var(--red-border)] focus:border-[var(--red)] focus:shadow-[inset_0_1px_2px_color-mix(in_srgb,var(--shadow-color)_50%,transparent),0_0_0_3px_var(--red-subtle)]';
+  'border-[var(--red-border)]';
 
 export type UiInputProps = React.InputHTMLAttributes<HTMLInputElement> & {
   invalid?: boolean;
@@ -68,7 +67,7 @@ export const UiInput = React.forwardRef<HTMLInputElement, UiInputProps>(function
       aria-invalid={invalid || undefined}
       className={cn(
         controlClassName,
-        'h-[var(--control-height)] px-3 text-[length:var(--text-12)]',
+        'h-[var(--control-height)] px-3 dh-type-control',
         invalid && invalidControlClassName,
         className,
       )}
@@ -138,7 +137,7 @@ export const UiTextarea = React.forwardRef<HTMLTextAreaElement, UiTextareaProps>
       aria-invalid={invalid || undefined}
       className={cn(
         controlClassName,
-        'resize-y px-3 py-2 text-[length:var(--text-12)] leading-relaxed',
+        'resize-y px-3 py-2 dh-type-control leading-relaxed',
         invalid && invalidControlClassName,
         className,
       )}
@@ -196,8 +195,8 @@ export function UiSwitch({
         />
       </span>
       <span className="min-w-0">
-        <span className="block text-[length:var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">{label}</span>
-        {description ? <span className="mt-0.5 block text-[length:var(--text-10)] leading-relaxed text-[var(--muted-dim)]">{description}</span> : null}
+        <span className="block dh-type-control text-[var(--fg-secondary)]">{label}</span>
+        {description ? <span className="mt-0.5 block dh-type-supporting">{description}</span> : null}
       </span>
     </button>
   );
@@ -229,8 +228,8 @@ export const UiCheckbox = React.forwardRef<HTMLInputElement, UiCheckboxProps>(fu
         </svg>
       </span>
       <span className="min-w-0">
-        <span className="block text-[length:var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">{label}</span>
-        {description ? <span className="mt-0.5 block text-[length:var(--text-10)] leading-relaxed text-[var(--muted-dim)]">{description}</span> : null}
+        <span className="block dh-type-control-compact text-[var(--fg-secondary)]">{label}</span>
+        {description ? <span className="mt-0.5 block dh-type-supporting">{description}</span> : null}
       </span>
     </label>
   );
@@ -274,7 +273,7 @@ export const UiFileInput = React.forwardRef<HTMLInputElement, UiFileInputProps>(
       type="file"
       disabled={disabled}
       className={cn(
-        'block h-[var(--control-height)] w-full cursor-pointer rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[length:var(--text-11)] text-[var(--muted)] transition-[border-color,box-shadow] file:mr-3 file:h-full file:cursor-pointer file:border-0 file:border-r file:border-solid file:border-[var(--border-subtle)] file:bg-[var(--surface-softest)] file:px-3 file:text-[length:var(--text-10)] file:font-[var(--weight-semibold)] file:text-[var(--fg-secondary)] hover:border-[var(--border)] hover:file:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40 disabled:file:cursor-not-allowed',
+        'dh-field-control block h-[var(--control-height)] w-full cursor-pointer rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] dh-type-control-compact text-[var(--muted)] transition-[border-color,box-shadow] file:mr-3 file:h-full file:cursor-pointer file:border-0 file:border-r file:border-solid file:border-[var(--border-subtle)] file:bg-[var(--surface-softest)] file:px-3 file:text-[length:var(--text-12)] file:font-normal file:text-[var(--fg-secondary)] hover:border-[var(--border)] hover:file:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40 disabled:file:cursor-not-allowed',
         className,
       )}
       {...props}

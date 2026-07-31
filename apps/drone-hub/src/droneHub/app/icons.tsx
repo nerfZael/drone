@@ -12,6 +12,25 @@ export {
   IconTrash,
 } from '../icons';
 
+export function IconFolderOutline({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2.25 2.5h2.6c.44 0 .84.21 1.08.58l.78 1.17h7.04c.69 0 1.25.56 1.25 1.25v6.75c0 .69-.56 1.25-1.25 1.25H2.25c-.69 0-1.25-.56-1.25-1.25v-8.5c0-.69.56-1.25 1.25-1.25Z" />
+    </svg>
+  );
+}
+
 export function IconSettings({ className }: { className?: string }) {
   return (
     <svg
@@ -166,6 +185,87 @@ export function IconFileDiff({ className }: { className?: string }) {
     >
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
       <path d="M14 2v6h6M8 13h4M10 11v4M8 18h4" />
+    </svg>
+  );
+}
+
+export function IconTerminal({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+      <path d="m4.5 6 2 2-2 2M8.5 10h3" />
+    </svg>
+  );
+}
+
+export function IconGitPullRequest({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="4" cy="3" r="1.5" />
+      <circle cx="4" cy="13" r="1.5" />
+      <circle cx="12" cy="13" r="1.5" />
+      <path d="M4 4.5v7M8 4h1a3 3 0 0 1 3 3v4.5M8 2 6 4l2 2" />
+    </svg>
+  );
+}
+
+export function IconRefresh({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M13.25 5.75A5.5 5.5 0 1 0 13 10.8" />
+      <path d="M13.25 2.75v3h-3" />
+    </svg>
+  );
+}
+
+export function IconDownload({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M8 2.5v7M5.25 7 8 9.75 10.75 7M3 12.75h10" />
     </svg>
   );
 }

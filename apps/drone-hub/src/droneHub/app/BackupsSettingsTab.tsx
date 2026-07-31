@@ -62,7 +62,7 @@ function ToggleButton({
 
 function BackupStat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-2">
+    <div className="dh-settings-row px-1 py-3">
       <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">{label}</div>
       <div className="mt-1 text-[var(--text-12)] text-[var(--fg-secondary)] break-words">{value}</div>
     </div>
@@ -72,7 +72,7 @@ function BackupStat({ label, value }: { label: string; value: React.ReactNode })
 function BackupManifestRow({ manifest }: { manifest: RegistryBackupManifest }) {
   return (
     <div
-      className={`grid grid-cols-1 gap-2 rounded border px-3 py-3 text-[var(--text-11)] md:grid-cols-[110px_130px_minmax(0,1fr)_110px] ${
+      className={`dh-settings-row grid grid-cols-1 gap-2 px-1 py-3 text-[var(--text-11)] md:grid-cols-[110px_130px_minmax(0,1fr)_110px] ${
         manifest.suspect
           ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)]'
           : 'border-[var(--border-subtle)] bg-[var(--surface-softest)]'
@@ -130,7 +130,7 @@ export function BackupsSettingsTab({ backups }: BackupsSettingsTabProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3">
+      <div className="dh-settings-section">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -182,7 +182,7 @@ export function BackupsSettingsTab({ backups }: BackupsSettingsTabProps) {
         </div>
       </div>
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3">
+      <div className="dh-settings-section">
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_260px]">
           <div className="flex flex-wrap gap-2">
             <ToggleButton active={backupsEnabledDraft} disabled={disabled} onClick={() => setBackupsEnabledDraft((v) => !v)} label="Enabled" />
@@ -229,7 +229,7 @@ export function BackupsSettingsTab({ backups }: BackupsSettingsTabProps) {
         </div>
       </div>
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3">
+      <div className="dh-settings-section">
         <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
           Recent backups
         </div>
@@ -237,7 +237,7 @@ export function BackupsSettingsTab({ backups }: BackupsSettingsTabProps) {
           {backupSettings?.recent.length ? (
             backupSettings.recent.map((manifest) => <BackupManifestRow key={manifest.id} manifest={manifest} />)
           ) : (
-            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-12)] text-[var(--muted)]">
+            <div className="py-4 text-[var(--text-12)] text-[var(--muted)]">
               No backups recorded yet.
             </div>
           )}

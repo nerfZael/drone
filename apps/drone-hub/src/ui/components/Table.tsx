@@ -14,7 +14,7 @@ export function UiTableContainer({ className, ...props }: React.HTMLAttributes<H
 }
 
 export function UiTable({ className, ...props }: React.TableHTMLAttributes<HTMLTableElement>) {
-  return <table className={cn('w-full border-collapse text-left text-[length:var(--text-11)]', className)} {...props} />;
+  return <table className={cn('w-full border-collapse text-left dh-type-control-compact', className)} {...props} />;
 }
 
 export function UiTableHead({ className, ...props }: React.HTMLAttributes<HTMLTableSectionElement>) {
@@ -29,14 +29,13 @@ export function UiTableRow({ className, ...props }: React.HTMLAttributes<HTMLTab
   return <tr className={cn('transition-colors duration-100 hover:bg-[var(--surface-soft)]', className)} {...props} />;
 }
 
-export function UiTableHeaderCell({ className, style, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
+export function UiTableHeaderCell({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
       className={cn(
-        'border-b border-[var(--border-subtle)] px-3 py-2 text-[length:var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em]',
+        'border-b border-[var(--border-subtle)] px-3 py-2 dh-type-label',
         className,
       )}
-      style={{ fontFamily: 'var(--display)', ...style }}
       {...props}
     />
   );

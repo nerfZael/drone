@@ -90,7 +90,7 @@ export function CustomAgentsModal({
               <input
                 value={newCustomAgentLabel}
                 onChange={(e) => onNewCustomAgentLabelChange(e.target.value)}
-                className="h-9 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-muted)]"
+                className="dh-field-control h-9 rounded-[var(--radius-large)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-[var(--text-13)] text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)]"
                 placeholder="e.g. My Agent CLI"
               />
             </label>
@@ -99,7 +99,7 @@ export function CustomAgentsModal({
               <input
                 value={newCustomAgentCommand}
                 onChange={(e) => onNewCustomAgentCommandChange(e.target.value)}
-                className="h-9 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-muted)] font-mono"
+                className="dh-field-control h-9 rounded-[var(--radius-large)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 text-[var(--text-13)] text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)] font-mono"
                 placeholder="e.g. agent --approve-mcps  (or: codex)"
               />
             </label>

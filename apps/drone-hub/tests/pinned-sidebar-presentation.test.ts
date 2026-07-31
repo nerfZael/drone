@@ -34,7 +34,7 @@ describe('desktop pinned drone presentation', () => {
       '<IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />',
     );
     expect(sidebarSource).toContain(
-      '<span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-medium text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">',
+      '<span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-normal text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">',
     );
     expect(sidebarSource).toContain('<div className="flex flex-col gap-0.5 pb-1">');
     expect(sidebarSource).not.toContain('>{pinnedDrones.length}</span>');

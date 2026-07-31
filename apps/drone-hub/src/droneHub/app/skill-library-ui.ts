@@ -1,22 +1,22 @@
 export function inputClassName() {
-  return 'h-[var(--control-height)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors';
+  return 'dh-field-control h-[var(--control-height)] rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 dh-type-control text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)] transition-colors';
 }
 
 export function textareaClassName() {
-  return 'w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-12)] leading-relaxed text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono';
+  return 'dh-field-control w-full rounded-[var(--radius-medium)] border border-[var(--field-border)] bg-[var(--field-bg)] px-3 py-2 dh-type-control-compact leading-relaxed text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)] transition-colors font-mono';
 }
 
 export function buttonClassName(kind: 'primary' | 'secondary' | 'danger' = 'secondary', disabled = false): string {
   if (disabled) {
-    return 'h-[var(--control-height-compact)] px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]';
+    return 'h-8 px-2.5 rounded-[var(--radius-medium)] dh-type-control-compact border border-transparent transition-colors opacity-40 cursor-not-allowed bg-transparent text-[var(--muted-dim)]';
   }
   if (kind === 'primary') {
-    return 'h-[var(--control-height-compact)] px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110';
+    return 'h-8 px-3 rounded-[var(--radius-medium)] dh-type-control border transition-colors bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110';
   }
   if (kind === 'danger') {
-    return 'h-[var(--control-height-compact)] px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]';
+    return 'h-8 px-2.5 rounded-[var(--radius-medium)] dh-type-control-compact border border-transparent transition-colors bg-transparent text-[var(--red)] hover:bg-[var(--red-subtle)]';
   }
-  return 'h-[var(--control-height-compact)] px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]';
+  return 'h-8 px-2.5 rounded-[var(--radius-medium)] dh-type-control-compact border border-transparent transition-colors bg-transparent text-[var(--fg-secondary)] hover:bg-[var(--hover)] hover:text-[var(--fg)]';
 }
 
 export function importStatusClassName(status: 'importable' | 'importable_with_loss' | 'not_importable'): string {

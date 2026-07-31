@@ -4,6 +4,7 @@ import {
   mergeVisibleSidebarNodeOrderByParent,
   moveSidebarDroneToTopInNodeOrder,
   placeCreatedSidebarFolderAtTop,
+  placeCreatedSidebarFolderBeforeNode,
   removeSidebarRepoScopedNodeOrderByGroupPrefix,
   renameSidebarNodeOrderByParentGroupPrefix,
   sidebarDroneIdFromNodeId,
@@ -149,6 +150,33 @@ describe('sidebar-node-order', () => {
         sidebarFolderNodeId('Untitled 1'),
         firstDroneId,
         existingFolderId,
+      ],
+    });
+  });
+
+  test('keeps a committed folder immediately above its draft anchor', () => {
+    const firstDroneId = sidebarDroneNodeId('first');
+    const selectedDroneId = sidebarDroneNodeId('selected');
+    const lastFolderId = sidebarFolderNodeId('Existing');
+
+    expect(
+      placeCreatedSidebarFolderBeforeNode(
+        {},
+        {
+          childIdsByParent: {
+            [SIDEBAR_ROOT_PARENT_ID]: [firstDroneId, selectedDroneId, lastFolderId],
+          },
+        },
+        'Untitled 1',
+        null,
+        selectedDroneId,
+      ),
+    ).toEqual({
+      [SIDEBAR_ROOT_PARENT_ID]: [
+        firstDroneId,
+        sidebarFolderNodeId('Untitled 1'),
+        selectedDroneId,
+        lastFolderId,
       ],
     });
   });

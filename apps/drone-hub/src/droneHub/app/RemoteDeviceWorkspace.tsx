@@ -72,7 +72,7 @@ function RemoteSidebar({
       } border-[var(--border)]`}
       style={{ width: `min(${REMOTE_SIDEBAR_WIDTH_PX}px, 100vw)` }}
     >
-      <div className="flex h-[3.25rem] flex-shrink-0 select-none items-center border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] pl-3.5 pr-2">
+      <div className="flex h-11 flex-shrink-0 select-none items-center border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] pl-3 pr-2">
         <div className="flex w-full items-center justify-between gap-2">
           <span className="flex-shrink-0 text-left dh-type-sidebar-brand">DRONE HUB</span>
           <DesktopDevicePicker />
@@ -84,7 +84,7 @@ function RemoteSidebar({
           <div className="flex items-start gap-2.5 px-2 py-3">
             <DeviceConnectionIndicator online={false} className="mt-1" />
             <div className="min-w-0">
-              <div className="text-[var(--text-10)] font-semibold text-[var(--sidebar-fg)]">
+              <div className="dh-type-control-compact text-[var(--sidebar-fg)]">
                 Device offline
               </div>
               <div className="mt-1 text-[var(--text-9)] leading-relaxed text-[var(--sidebar-meta-fg)]">
@@ -103,7 +103,7 @@ function RemoteSidebar({
             <div className="text-[var(--text-10)] text-[var(--red)]">{model.listError}</div>
             <button
               type="button"
-              className="mt-2 text-[var(--text-10)] font-semibold text-[var(--accent)] hover:underline"
+              className="mt-2 dh-type-control-compact text-[var(--accent)] hover:underline"
               onClick={() => void model.loadDrones()}
             >
               Try again
@@ -122,7 +122,7 @@ function RemoteSidebar({
         <div className="flex flex-col gap-2">
           {groups.map((group) => (
             <section key={group.key}>
-              <div className="flex h-7 items-center gap-1.5 px-1.5 text-[var(--text-10)] font-semibold text-[var(--muted)]">
+              <div className="flex h-7 items-center gap-1.5 px-1.5 dh-type-control-compact text-[var(--muted)]">
                 <IconFolder className="h-3.5 w-3.5 opacity-70" />
                 <span className="truncate">{group.label}</span>
               </div>
@@ -236,7 +236,7 @@ function RemoteMain({
 
   return (
     <main className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--chat-background)]">
-      <header className="flex h-[3.25rem] flex-shrink-0 items-center gap-3 border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] px-3">
+      <header className="flex h-11 flex-shrink-0 items-center gap-3 border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] px-3">
         {sidebarCollapsed ? (
           <button
             type="button"
@@ -249,7 +249,7 @@ function RemoteMain({
           </button>
         ) : null}
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[var(--text-12)] font-semibold text-[var(--fg)]">
+          <div className="truncate dh-type-heading text-[var(--fg)]">
             {model.selectedDrone?.name ?? selectedDevice?.name ?? 'Remote Drone Hub'}
           </div>
           <div className="truncate text-[var(--text-9)] text-[var(--muted)]">
@@ -267,7 +267,7 @@ function RemoteMain({
         {model.selectedDrone ? (
           <button
             type="button"
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-medium)] px-2.5 text-[var(--text-10)] font-semibold text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-45"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-medium)] px-2.5 dh-type-control-compact text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-45"
             disabled={!routeAvailable || model.creatingChat}
             onClick={() => void model.createChat()}
           >
@@ -281,7 +281,7 @@ function RemoteMain({
         ) : null}
         <button
           type="button"
-          className="inline-flex h-8 items-center rounded-[var(--radius-medium)] px-2.5 text-[var(--text-10)] font-semibold text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-45"
+          className="inline-flex h-8 items-center rounded-[var(--radius-medium)] px-2.5 dh-type-control-compact text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-45"
           disabled={routeAvailable ? model.loadingDrones : deviceStatusLoading}
           onClick={() =>
             void (routeAvailable ? model.loadDrones() : refreshDeviceStatus())
@@ -315,7 +315,7 @@ function RemoteMain({
               <div className="flex flex-col items-center gap-3">
                 <button
                   type="button"
-                  className="inline-flex h-9 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-softest)] px-4 text-[var(--text-11)] font-semibold text-[var(--fg-secondary)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-45"
+                  className="inline-flex h-9 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-softest)] px-4 dh-type-control text-[var(--fg-secondary)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)] disabled:opacity-45"
                   disabled={deviceStatusLoading}
                   onClick={() => void refreshDeviceStatus()}
                 >
@@ -346,7 +346,7 @@ function RemoteMain({
             actions={
               <button
                 type="button"
-                className="rounded-[var(--radius-medium)] border border-[var(--border)] px-4 py-2 text-[var(--text-11)] font-semibold text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                className="rounded-[var(--radius-medium)] border border-[var(--border)] px-4 py-2 dh-type-control text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                 onClick={() => void model.loadDrones()}
               >
                 Try again
@@ -379,7 +379,7 @@ function RemoteMain({
             actions={
               <button
                 type="button"
-                className="rounded-[var(--radius-medium)] bg-[var(--accent)] px-3 py-2 text-[var(--text-11)] font-semibold text-[var(--accent-contrast)] disabled:opacity-45"
+                className="rounded-[var(--radius-medium)] bg-[var(--accent)] px-3 py-2 dh-type-control text-[var(--accent-contrast)] disabled:opacity-45"
                 disabled={!routeAvailable || model.creatingChat}
                 onClick={() => void model.createChat()}
               >

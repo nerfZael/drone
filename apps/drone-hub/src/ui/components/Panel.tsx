@@ -57,7 +57,7 @@ export function UiPanelHeader({
   return (
     <div
       className={cn(
-        'flex shrink-0 items-start gap-2 border-b border-[var(--border-subtle)] bg-[linear-gradient(180deg,var(--surface-soft),var(--surface-softest))]',
+        'flex shrink-0 items-start gap-2 border-b border-[var(--border-subtle)] bg-transparent',
         density === 'compact' ? 'min-h-8 px-2.5 py-1.5' : 'min-h-11 px-3 py-2.5',
         className,
       )}
@@ -68,19 +68,15 @@ export function UiPanelHeader({
         <div className="flex min-w-0 items-center gap-2">
           <div className="min-w-0">
             {eyebrow ? (
-              <div
-                className="truncate text-[length:var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]"
-                style={{ fontFamily: 'var(--display)' }}
-              >
+              <div className="truncate dh-type-eyebrow">
                 {eyebrow}
               </div>
             ) : null}
             <div
               className={cn(
-                'truncate font-[var(--weight-semibold)] text-[var(--fg-strong)]',
-                density === 'compact' ? 'text-[length:var(--text-10)] uppercase tracking-[0.1em]' : 'text-[length:var(--text-13)]',
+                'truncate text-[var(--fg-strong)]',
+                density === 'compact' ? 'dh-type-control-compact' : 'dh-type-heading',
               )}
-              style={{ fontFamily: 'var(--display)' }}
             >
               {title}
             </div>
@@ -88,7 +84,7 @@ export function UiPanelHeader({
           {meta ? <div className="shrink-0">{meta}</div> : null}
         </div>
         {description ? (
-          <div className="mt-0.5 truncate text-[length:var(--text-10)] text-[var(--muted)]">
+          <div className="mt-0.5 truncate dh-type-supporting !text-[var(--muted)]">
             {description}
           </div>
         ) : null}
@@ -106,7 +102,7 @@ export function UiPanelToolbar({
     <div
       role={props.role ?? 'toolbar'}
       className={cn(
-        'flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-[var(--border-subtle)] bg-[var(--panel-alt)] px-2.5 py-1.5',
+        'flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-[var(--border-subtle)] bg-transparent px-2.5 py-1.5',
         className,
       )}
       {...props}

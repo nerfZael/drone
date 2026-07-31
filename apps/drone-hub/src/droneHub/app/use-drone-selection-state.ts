@@ -166,7 +166,7 @@ export function useDroneSelectionState({
       setSelectedDrone(next.activeDroneId);
       selectionAnchorRef.current = next.selectionAnchor;
       manualEmptySelectionRef.current = Boolean(opts?.toggle && next.selectedDroneIds.length === 0);
-      if (next.activeDroneId) {
+      if (next.activeDroneId && next.activeDroneId !== selectedDrone) {
         setSelectedChat(resolveChatForDrone(next.activeDroneId));
         scrollChatToBottom();
       }
@@ -207,22 +207,26 @@ export function useDroneSelectionState({
   );
 
   const setDroneSelectionFromSidebarFolder = React.useCallback(
-    (droneIdsRaw: readonly string[]) => {
+    (droneIdsRaw: readonly string[], opts?: { preserveActive?: boolean }) => {
       const droneIds = Array.from(
         new Set(droneIdsRaw.map((droneId) => String(droneId ?? '').trim()).filter(Boolean)),
       );
-      const activeDroneId = droneIds[0] ?? null;
+      const activeDroneId =
+        opts?.preserveActive && selectedDrone && droneIds.includes(selectedDrone)
+          ? selectedDrone
+          : droneIds[0] ?? null;
       preferredSelectedDroneRef.current = null;
       preferredSelectedDroneHoldUntilRef.current = 0;
       selectionAnchorRef.current = activeDroneId;
       manualEmptySelectionRef.current = droneIds.length === 0;
       setSelectedDroneIds((prev) => (sameStringArray(prev, droneIds) ? prev : droneIds));
       setSelectedDrone(activeDroneId);
-      if (activeDroneId) setSelectedChat('default');
+      if (activeDroneId && activeDroneId !== selectedDrone) setSelectedChat('default');
     },
     [
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
+      selectedDrone,
       selectionAnchorRef,
       setSelectedChat,
       setSelectedDrone,

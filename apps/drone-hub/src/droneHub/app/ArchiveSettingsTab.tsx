@@ -30,7 +30,7 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
   const archivedChatRows = archivedChats?.archived ?? [];
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+    <div className="dh-settings-section">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
@@ -75,7 +75,7 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
           {archivedDronesLoading && !archivedDrones ? (
             <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading archived drones…</div>
           ) : archivedRows.length === 0 ? (
-            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-11)] text-[var(--muted-dim)]">No archived drones.</div>
+            <div className="py-4 text-[var(--text-11)] text-[var(--muted-dim)]">No archived drones.</div>
           ) : (
             <div className="overflow-x-auto rounded border border-[var(--border-subtle)]">
               <table className="w-full min-w-[620px] text-left">
@@ -150,7 +150,7 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
           {archivedChatsLoading && !archivedChats ? (
             <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading archived chats…</div>
           ) : archivedChatRows.length === 0 ? (
-            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-11)] text-[var(--muted-dim)]">No archived chats.</div>
+            <div className="py-4 text-[var(--text-11)] text-[var(--muted-dim)]">No archived chats.</div>
           ) : (
             <div className="overflow-x-auto rounded border border-[var(--border-subtle)]">
               <table className="w-full min-w-[720px] text-left">

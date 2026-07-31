@@ -48,7 +48,7 @@ export function UiSegmentedControl<T extends string>({
       role="radiogroup"
       aria-label={label}
       className={cn(
-        'relative inline-grid min-w-0 grid-flow-col auto-cols-fr gap-1 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-1 shadow-[inset_0_1px_3px_color-mix(in_srgb,var(--shadow-color)_45%,transparent)]',
+        'relative inline-grid min-w-0 grid-flow-col auto-cols-fr gap-1 rounded-[var(--radius-large)] border border-[var(--field-border)] bg-[var(--field-bg)] p-1 shadow-[inset_0_1px_3px_color-mix(in_srgb,var(--shadow-color)_42%,transparent)]',
         className,
       )}
     >
@@ -81,12 +81,11 @@ export function UiSegmentedControl<T extends string>({
               else optionRefs.current.delete(option.value);
             }}
             className={cn(
-              'relative z-[1] h-7 min-w-[4.5rem] rounded-[var(--radius-medium)] px-2.5 text-[length:var(--text-10)] font-[var(--weight-semibold)] transition-colors duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
+              'relative z-[1] h-7 min-w-[4.5rem] rounded-[var(--radius-medium)] px-2.5 dh-type-control-compact transition-colors duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
               selected
                 ? 'text-[var(--fg)]'
-                : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]',
+                : 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] hover:text-[var(--fg)]',
             )}
-            style={{ fontFamily: 'var(--display)' }}
           >
             {option.label}
           </button>

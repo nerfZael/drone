@@ -32,6 +32,11 @@
   --border-subtle: #293241;
   --chrome-muted: var(--muted-dim);
   --header-control-fg: #949daf;
+  --field-bg: rgba(0, 0, 0, .18);
+  --field-border: #3b4557;
+  --field-focus-border: color-mix(in srgb, var(--accent-muted) 62%, var(--field-border));
+  --field-fg: var(--fg);
+  --field-placeholder: var(--muted);
   --sidebar-fg: var(--fg-secondary);
   --sidebar-fg-active: var(--fg);
   --sidebar-subitem-fg: var(--muted);
@@ -63,12 +68,12 @@
   --sidebar-row-radius: var(--radius-medium);
   --sidebar-meta-fg: var(--muted-dim);
   --sidebar-blocked-indicator: #ff5964;
-  --sidebar-drone-compact-size: var(--text-10-5);
-  --sidebar-drone-size: var(--text-11-5);
-  --sidebar-drone-comfortable-size: var(--text-12);
-  --sidebar-item-compact-size: var(--text-11);
-  --sidebar-item-size: var(--text-12);
-  --sidebar-item-comfortable-size: var(--text-12-5);
+  --sidebar-drone-compact-size: var(--type-compact);
+  --sidebar-drone-size: var(--type-ui);
+  --sidebar-drone-comfortable-size: var(--type-prose);
+  --sidebar-item-compact-size: var(--type-compact);
+  --sidebar-item-size: var(--type-ui);
+  --sidebar-item-comfortable-size: var(--type-prose);
 
   /* ── Accent: soft violet ── */
   --accent: #b19cff;
@@ -111,7 +116,6 @@
   --surface-inset-faint: rgba(0, 0, 0, .09);
   --surface-inset: rgba(0, 0, 0, .14);
   --surface-inset-strong: rgba(0, 0, 0, .24);
-  --settings-section-bg: var(--surface-inset);
   --scrim: rgba(3, 6, 12, .74);
   --scrim-soft: rgba(3, 6, 12, .55);
   --panel-overlay: rgba(17, 22, 30, .96);
@@ -159,25 +163,38 @@
   --chat-composer-input-focus-border: var(--user-muted);
 
   /* ── Typography ── */
-  --display: 'Chakra Petch', system-ui, sans-serif;
-  --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --prose: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --brand-display: 'Chakra Petch', system-ui, sans-serif;
+  /* Compatibility aliases for component styles written before the UI/prose split. */
+  --display: var(--ui);
+  --sans: var(--ui);
   --code: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
   --body-size: 13px;
   --body-line-height: 1.55;
-  --text-8: 8px;
-  --text-9: 9px;
-  --text-10: 10px;
-  --text-10-5: 10.5px;
-  --text-11: 11px;
-  --text-11-5: 11.5px;
-  --text-12: 12px;
-  --text-12-5: 12.5px;
-  --text-13: 13px;
-  --text-14: 14px;
+  --type-micro: 10px;
+  --type-caption: 11px;
+  --type-compact: 12px;
+  --type-ui: 13px;
+  --type-prose: 14px;
+  /* Legacy aliases collapse the old fractional scale onto crisp UI sizes. */
+  --text-8: var(--type-micro);
+  --text-9: var(--type-micro);
+  --text-10: var(--type-caption);
+  --text-10-5: var(--type-caption);
+  --text-11: var(--type-compact);
+  --text-11-5: var(--type-compact);
+  --text-12: var(--type-ui);
+  --text-12-5: var(--type-ui);
+  --text-13: var(--type-ui);
+  --text-14: var(--type-prose);
   --chat-text-size: .875rem;
   --chat-prose-max: 72ch;
-  --weight-semibold: 500;
-  --weight-bold: 600;
+  --weight-ui: 400;
+  --weight-emphasis: 500;
+  /* Legacy aliases keep older feature styles light until they adopt type roles. */
+  --weight-semibold: var(--weight-ui);
+  --weight-bold: var(--weight-emphasis);
   --weight-strong: 600;
   --control-height: 36px;
   --control-height-compact: 32px;
@@ -235,7 +252,7 @@
   --fg-strong: #cdd6f4;
   --fg-secondary: #bac2de;
   --muted: #a6adc8;
-  --muted-dim: #7f849c;
+  --muted-dim: #9399b2;
   --panel: #181825;
   --panel-alt: #181825;
   --panel-raised: #313244;
@@ -247,6 +264,11 @@
   --border-subtle: rgba(49, 50, 68, .78);
   --chrome-muted: #7f849c;
   --header-control-fg: #9298b2;
+  --field-bg: rgba(49, 50, 68, .46);
+  --field-border: rgba(69, 71, 90, .72);
+  --field-focus-border: rgba(180, 190, 254, .62);
+  --field-fg: #cdd6f4;
+  --field-placeholder: #9399b2;
   --sidebar-fg: #a6adc8;
   --sidebar-fg-active: #bac2de;
   --sidebar-subitem-fg: #7f849c;
@@ -268,10 +290,10 @@
   --sidebar-brand-letter-spacing: .025rem;
   --sidebar-brand-transform: uppercase;
   --sidebar-font: system-ui, -apple-system, sans-serif;
-  --sidebar-heading-weight: 600;
-  --sidebar-drone-fg: #a6adc8;
+  --sidebar-heading-weight: 400;
+  --sidebar-drone-fg: #bac2de;
   --sidebar-drone-active-fg: #cdd6f4;
-  --sidebar-drone-weight: 500;
+  --sidebar-drone-weight: 400;
   --sidebar-row-selected-bg: rgba(203, 166, 247, .075);
   --sidebar-row-selected-border: transparent;
   --sidebar-row-selected-edge: rgba(203, 166, 247, .78);
@@ -279,8 +301,8 @@
   --sidebar-meta-fg: #7f849c;
   --sidebar-blocked-indicator: #ff596b;
   --sidebar-drone-compact-size: .75rem;
-  --sidebar-drone-size: .75rem;
-  --sidebar-drone-comfortable-size: .75rem;
+  --sidebar-drone-size: .8125rem;
+  --sidebar-drone-comfortable-size: .875rem;
   --accent: #cba6f7;
   --accent-muted: #b4befe;
   --accent-subtle: rgba(203, 166, 247, .075);
@@ -315,7 +337,6 @@
   --surface-inset-faint: rgba(17, 17, 27, .10);
   --surface-inset: rgba(205, 214, 244, .022);
   --surface-inset-strong: #313244;
-  --settings-section-bg: transparent;
   --scrim: rgba(17, 17, 27, .78);
   --scrim-soft: rgba(17, 17, 27, .54);
   --panel-overlay: rgba(24, 24, 37, .96);
@@ -498,6 +519,59 @@ code, pre {
   outline-offset: 2px;
 }
 
+/* Fields use one quiet 1px border instead of stacking the general keyboard
+   outline with component-specific rings and shadows. Buttons and navigation
+   retain the more visible keyboard halo above. */
+:where(
+  .dh-field-control,
+  input:not([type]),
+  input:is(
+    [type='text'],
+    [type='password'],
+    [type='number'],
+    [type='search'],
+    [type='url'],
+    [type='email'],
+    [type='tel'],
+    [type='date'],
+    [type='datetime-local'],
+    [type='time'],
+    [type='month'],
+    [type='week'],
+    [type='file']
+  ),
+  textarea,
+  select
+):is(:focus, :focus-visible) {
+  border-color: var(--field-focus-border);
+  outline: none;
+  box-shadow: none;
+}
+
+:where(
+  .dh-field-control,
+  input:not([type]),
+  input:is(
+    [type='text'],
+    [type='password'],
+    [type='number'],
+    [type='search'],
+    [type='url'],
+    [type='email'],
+    [type='tel'],
+    [type='date'],
+    [type='datetime-local'],
+    [type='time'],
+    [type='month'],
+    [type='week'],
+    [type='file']
+  ),
+  textarea,
+  select
+)[aria-invalid='true']:is(:focus, :focus-visible) {
+  border-color: var(--red);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
@@ -649,9 +723,9 @@ code, pre {
 
   [data-drone-selected-header="true"] > div:first-child {
     height: auto;
-    min-height: calc(3.25rem - 1px);
+    min-height: calc(2.75rem - 1px);
     align-items: flex-start;
-    padding: 8px 10px 4px;
+    padding: 6px 10px 4px;
   }
 
   [data-drone-selected-header="true"] > div:first-child > div {
@@ -787,6 +861,20 @@ code, pre {
 .dh-sidebar-row-selected {
   isolation: isolate;
   background: transparent;
+}
+
+.dh-sidebar-folder-body {
+  border-left-color: transparent;
+  transition: border-color 120ms ease;
+}
+
+[data-sidebar-folder-node]:hover > .dh-sidebar-folder-body,
+.dh-sidebar-folder-body[data-sidebar-guide-selected='true'] {
+  border-left-color: var(--border-subtle);
+}
+
+.dh-sidebar-folder-body[data-sidebar-guide-drop-active='true'] {
+  border-left-color: var(--accent-muted);
 }
 
 .dh-sidebar-row-interactive:not([aria-disabled='true']):not(.dh-sidebar-row-selected):not(.dh-sidebar-row-highlighted):is(:hover, :focus-visible)::after {
@@ -931,32 +1019,36 @@ code, pre {
 }
 
 /* ──────────────────────────────────────────────────────────
-   Typography: Display headings (Chakra Petch)
+   Typography
+
+   Application chrome uses the native UI face. Long-form prose keeps IBM Plex
+   Sans, and Chakra Petch is reserved for the small number of branded moments
+   that opt into .dh-display explicitly.
    ────────────────────────────────────────────────────────── */
 
 .dh-display {
-  font-family: var(--display);
-  font-weight: var(--weight-semibold);
+  font-family: var(--brand-display);
+  font-weight: var(--weight-emphasis);
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
 .dh-label {
-  font-family: var(--sans);
-  font-size: var(--text-10);
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted-dim);
+  font-family: var(--ui);
+  font-size: var(--type-compact);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
 }
 
 /* Semantic type roles. Palette themes may change their colors, but never their
    scale, weight, casing, or spacing. */
 .dh-type-title {
-  font-family: var(--display);
+  font-family: var(--ui);
   font-size: var(--text-13);
-  font-weight: var(--weight-semibold);
-  letter-spacing: -0.01em;
+  font-weight: 500;
+  letter-spacing: 0;
   color: var(--fg-strong);
 }
 
@@ -966,19 +1058,87 @@ code, pre {
 
 .dh-type-meta,
 .dh-type-status {
-  font-family: var(--sans);
-  font-size: var(--text-10);
+  font-family: var(--ui);
+  font-size: var(--type-caption);
   font-weight: 400;
   letter-spacing: 0;
   color: var(--chrome-muted);
 }
 
 .dh-type-section-label {
-  font-family: var(--sans);
-  font-size: var(--text-10);
-  font-weight: 500;
+  font-family: var(--ui);
+  font-size: var(--type-compact);
+  font-weight: 400;
   letter-spacing: 0;
-  color: var(--muted-dim);
+  color: var(--muted);
+}
+
+.dh-type-control,
+.dh-type-control-compact,
+.dh-type-label,
+.dh-type-supporting,
+.dh-type-heading,
+.dh-type-eyebrow,
+.dh-type-badge,
+.dh-type-menu-item,
+.dh-type-menu-meta {
+  font-family: var(--ui);
+  letter-spacing: 0;
+}
+
+.dh-type-control {
+  font-size: var(--type-ui);
+  font-weight: 400;
+}
+
+.dh-type-control-compact {
+  font-size: var(--type-compact);
+  font-weight: 400;
+}
+
+.dh-type-label {
+  font-size: var(--type-compact);
+  font-weight: 500;
+  color: var(--fg-secondary);
+}
+
+.dh-type-supporting {
+  font-size: var(--type-compact);
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.dh-type-heading {
+  font-size: var(--type-prose);
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--fg-strong);
+}
+
+/* Eyebrows and badges remain compact, but no longer rely on 8–9px display text. */
+.dh-type-eyebrow {
+  font-size: var(--type-caption);
+  font-weight: 500;
+  letter-spacing: .03em;
+  color: var(--muted);
+}
+
+.dh-type-badge {
+  font-size: var(--type-caption);
+  font-weight: 500;
+  letter-spacing: .01em;
+}
+
+.dh-type-menu-item {
+  font-size: var(--type-ui);
+  font-weight: 400;
+}
+
+.dh-type-menu-meta {
+  font-size: var(--type-compact);
+  font-weight: 400;
+  color: var(--muted);
 }
 
 .dh-type-sidebar-brand,
@@ -1025,24 +1185,92 @@ code, pre {
 .dh-type-sidebar-action--quiet:hover { color: var(--muted); }
 
 .dh-type-header-action {
-  font-family: var(--sans);
-  font-size: var(--text-11);
-  font-weight: 600;
+  font-family: var(--ui);
+  font-size: var(--text-12);
+  font-weight: 400;
   letter-spacing: 0;
   color: var(--chrome-muted);
 }
 
 .dh-type-header-action:hover { color: var(--fg-secondary); }
 .dh-type-header-action[data-unavailable='true'] { color: var(--muted-dim); }
-.dh-type-header-action--emphasis:not([data-unavailable='true']) { color: var(--header-control-fg); }
-.dh-type-header-action--emphasis:hover { color: var(--fg-secondary); }
+.dh-type-header-action--emphasis:not([data-unavailable='true']) { color: var(--fg-secondary); }
+.dh-type-header-action--emphasis:hover { color: var(--fg); }
+.dh-type-header-action[aria-expanded='true']:not([data-unavailable='true']) {
+  color: var(--accent);
+}
 
 .dh-type-count {
-  font-family: var(--sans);
-  font-size: var(--text-9);
+  font-family: var(--ui);
+  font-size: var(--text-11);
   font-weight: 400;
   font-variant-numeric: tabular-nums;
   color: var(--chrome-muted);
+}
+
+/* Settings use document-like sections. Visual containment belongs to controls,
+   tables, and overlays; ordinary groups are separated by spacing and one rule. */
+.dh-settings-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0 0 1.5rem;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.dh-settings-section:last-child {
+  border-bottom: 0;
+}
+
+.dh-settings-section--compact {
+  gap: .75rem;
+  padding-bottom: 1rem;
+}
+
+.dh-settings-subsection {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: .75rem;
+  padding-top: 1rem;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.dh-settings-row {
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.dh-settings-row:last-child {
+  border-bottom: 0;
+}
+
+/* Legacy settings controls are progressively moving onto shared primitives.
+   Keep their visual contract aligned in the meantime. */
+.dh-settings-content input:not([type]),
+.dh-settings-content input:is([type='text'], [type='password'], [type='number'], [type='search'], [type='url']),
+.dh-settings-content select,
+.dh-settings-content textarea {
+  border-color: var(--field-border);
+  background-color: var(--field-bg);
+  color: var(--field-fg);
+}
+
+.dh-settings-content input::placeholder,
+.dh-settings-content textarea::placeholder {
+  color: var(--field-placeholder);
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -1084,7 +1312,7 @@ code, pre {
    ────────────────────────────────────────────────────────── */
 
 .dh-markdown {
-  font: var(--chat-text-size)/1.65 var(--sans);
+  font: var(--chat-text-size)/1.65 var(--prose);
   color: var(--fg);
   word-break: break-word;
 }
@@ -1143,7 +1371,7 @@ code, pre {
 .dh-markdown h5,
 .dh-markdown h6 {
   margin: .95rem 0 .45rem;
-  font-family: var(--display);
+  font-family: var(--prose);
   font-weight: var(--weight-semibold);
   color: var(--fg);
   letter-spacing: 0.01em;

@@ -33,7 +33,7 @@ export function UiSpinner({
         )}
         aria-hidden="true"
       />
-      {label ? <span className="text-[length:var(--text-11)]">{label}</span> : null}
+      {label ? <span className="dh-type-control-compact">{label}</span> : null}
     </span>
   );
 }
@@ -92,11 +92,11 @@ export function UiAlert({ tone = 'info', title, action, className, children, ...
       </span>
       <div className="min-w-0 flex-1">
         {title ? (
-          <div className="text-[length:var(--text-11)] font-[var(--weight-semibold)] text-current" style={{ fontFamily: 'var(--display)' }}>
+          <div className="dh-type-control text-current">
             {title}
           </div>
         ) : null}
-        <div className={cn('text-[length:var(--text-11)] leading-relaxed text-[var(--fg-secondary)]', title && 'mt-0.5')}>{children}</div>
+        <div className={cn('dh-type-supporting !text-[var(--fg-secondary)]', title && 'mt-0.5')}>{children}</div>
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>
@@ -152,7 +152,7 @@ export function UiProgress({
   return (
     <div className={cn('min-w-0', className)}>
       {(showValue || label) ? (
-        <div className="mb-1.5 flex items-center justify-between gap-3 text-[length:var(--text-10)] text-[var(--muted)]">
+        <div className="mb-1.5 flex items-center justify-between gap-3 dh-type-supporting !text-[var(--muted)]">
           <span className="truncate">{label}</span>
           {showValue && determinate ? <span className="shrink-0 font-mono">{Math.round(percent)}%</span> : null}
         </div>
@@ -225,8 +225,8 @@ export function UiToast({
         <AlertIcon tone={tone} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-[length:var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>{title}</div>
-        {description ? <div className="mt-0.5 text-[length:var(--text-10)] leading-relaxed text-[var(--muted)]">{description}</div> : null}
+        <div className="dh-type-control text-[var(--fg-strong)]">{title}</div>
+        {description ? <div className="mt-0.5 dh-type-supporting !text-[var(--muted)]">{description}</div> : null}
         {action ? <div className="mt-2">{action}</div> : null}
       </div>
       {onDismiss ? (
@@ -258,10 +258,10 @@ export function UiEmptyState({ icon, title, description, action, className, ...p
           {icon}
         </div>
       ) : null}
-      <div className="text-[length:var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>
+      <div className="dh-type-heading">
         {title}
       </div>
-      {description ? <div className="mt-1 max-w-[44ch] text-[length:var(--text-11)] leading-relaxed text-[var(--muted)]">{description}</div> : null}
+      {description ? <div className="mt-1 max-w-[44ch] dh-type-supporting !text-[var(--muted)]">{description}</div> : null}
       {action ? <div className="mt-4">{action}</div> : null}
     </div>
   );

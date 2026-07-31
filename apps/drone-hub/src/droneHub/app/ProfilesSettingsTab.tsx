@@ -46,7 +46,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
         </div>
       )}
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)] gap-4">
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-4 py-4 flex flex-col gap-4">
+        <div className="dh-settings-section">
           <div className="flex flex-col gap-2">
             <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Active profile
@@ -59,7 +59,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
             </div>
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 flex flex-col gap-2">
+          <div className="dh-settings-subsection">
             <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Resolved paths</div>
             <div className="text-[var(--text-11)] text-[var(--muted-dim)] break-all">Drone: {profileSettings?.droneDataDir ?? 'Loading…'}</div>
             <div className="text-[var(--text-11)] text-[var(--muted-dim)] break-all">DVM: {profileSettings?.dvmDataDir ?? 'Loading…'}</div>
@@ -90,7 +90,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
           </div>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-4 py-4 flex flex-col gap-3">
+        <div className="dh-settings-section">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -117,10 +117,10 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                 return (
                   <div
                     key={item.name}
-                    className={`rounded border px-4 py-4 transition-colors ${
+                    className={`dh-settings-row px-1 py-4 transition-colors ${
                       item.active
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)]'
+                        ? 'bg-[var(--selected)]'
+                        : ''
                     }`}
                   >
                     <div className="flex flex-col gap-3">

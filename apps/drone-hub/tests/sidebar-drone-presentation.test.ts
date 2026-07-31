@@ -66,7 +66,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(sidebarItemStateToneClass('starting', false)).toContain('--yellow');
   });
 
-  test('puts the state indicator before a visible title-and-state cluster', () => {
+  test('puts the state indicator before a compact single-line title', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
         drone: drone({ runtime: 'container', busyChats: ['default'] }),
@@ -77,21 +77,21 @@ describe('desktop sidebar drone presentation', () => {
 
     expect(html).toContain('text-[var(--yellow)]');
     expect(html.indexOf('animate-[spin_1.6s_linear_infinite]')).toBeLessThan(html.indexOf('>worker</span>'));
-    expect(html).toContain('data-sidebar-drone-metadata="true"');
-    expect(html).toContain('>Working</span>');
+    expect(html).not.toContain('data-sidebar-drone-metadata="true"');
+    expect(html).toContain('· Working · created');
     expect(html).not.toContain('data-sidebar-runtime');
     expect(html).not.toContain('aria-label="container runtime"');
     expect(html).not.toContain('>container</span>');
   });
 
-  test('shows a persistent to do label at the bottom right of tagged drone rows', () => {
+  test('shows a persistent to do label at the right of tagged drone rows', () => {
     const source = readFileSync(
       new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
       'utf8',
     );
 
     expect(source).toContain('data-sidebar-drone-label="to-do"');
-    expect(source).toContain('absolute bottom-1 right-1');
+    expect(source).toContain('absolute right-1 top-1/2');
     expect(source).toContain('border-[var(--yellow-border)]');
     expect(source).toContain('bg-[var(--yellow-subtle)]');
     expect(source).toContain('text-[var(--yellow)] opacity-70');
@@ -120,17 +120,24 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).not.toContain('animate-[spin_1.6s_linear_infinite]');
   });
 
-  test('uses a dedicated saturated red warning triangle for blocked drones', () => {
-    const html = renderToStaticMarkup(
+  test('keeps persistent blocked triangles quiet and reserves red for emphasis', () => {
+    const quietHtml = renderToStaticMarkup(
       createElement(SidebarItemStateIndicator, { state: 'blocked' }),
     );
+    const emphasizedHtml = renderToStaticMarkup(
+      createElement(SidebarItemStateIndicator, { state: 'blocked', emphasized: true }),
+    );
 
-    expect(html).toContain('text-[var(--sidebar-blocked-indicator)]');
-    expect(html).toContain('M6 1.25 11 10.25H1L6 1.25Z');
-    expect(html).toContain('M6 4.15v2.75');
-    expect(html).toContain('cx="6" cy="8.5"');
-    expect(html).not.toContain('rounded-full');
-    expect(html).not.toContain('bg-[var(--green)]');
+    expect(quietHtml).toContain('data-sidebar-blocked-indicator="quiet"');
+    expect(quietHtml).toContain('text-[var(--muted-dim)] opacity-60');
+    expect(quietHtml).toContain('group-hover/drone:text-[var(--sidebar-blocked-indicator)]');
+    expect(emphasizedHtml).toContain('data-sidebar-blocked-indicator="emphasized"');
+    expect(emphasizedHtml).toContain('text-[var(--sidebar-blocked-indicator)] opacity-100');
+    expect(emphasizedHtml).toContain('M6 1.25 11 10.25H1L6 1.25Z');
+    expect(emphasizedHtml).toContain('M6 4.15v2.75');
+    expect(emphasizedHtml).toContain('cx="6" cy="8.5"');
+    expect(quietHtml).not.toContain('rounded-full');
+    expect(quietHtml).not.toContain('bg-[var(--green)]');
   });
 
   test('leaves ready drones visually quiet while preserving unread emphasis', () => {
@@ -165,7 +172,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).toContain('text-[var(--yellow)]');
   });
 
-  test('reserves hover actions for delete and the context menu', () => {
+  test('keeps delete as the only drone hover action', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
         drone: drone(),
@@ -180,18 +187,42 @@ describe('desktop sidebar drone presentation', () => {
     );
 
     expect(html).toContain('aria-label="Delete &quot;worker&quot;"');
-    expect(html).toContain('aria-label="More actions for &quot;worker&quot;"');
+    expect(html).not.toContain('aria-label="More actions for &quot;worker&quot;"');
     expect(html).not.toContain('aria-label="Create chat on');
     expect(html).not.toContain('aria-label="Clone &quot;worker&quot;"');
   });
 
-  test('raises an open action menu above the isolated drone rows', () => {
-    const source = readFileSync(
+  test('opens secondary drone actions from a right-click menu', () => {
+    const cardSource = readFileSync(
       new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
       'utf8',
     );
+    const menuSource = readFileSync(
+      new URL('../src/droneHub/app/SidebarContextMenu.tsx', import.meta.url),
+      'utf8',
+    );
+    const dropdownSource = readFileSync(
+      new URL('../src/ui/dropdown.ts', import.meta.url),
+      'utf8',
+    );
 
-    expect(source).toContain("actionMenuOpen ? 'z-50' : ''");
+    expect(cardSource).toContain('onContextMenu={(event) => {');
+    expect(cardSource).toContain(
+      'setActionMenuPosition({ x: event.clientX, y: event.clientY });',
+    );
+    expect(cardSource).toContain("label: 'Delete drone'");
+    expect(cardSource).toContain("tone: 'danger'");
+    expect(cardSource).not.toContain('<IconMore');
+    expect(menuSource).toContain('createPortal(menu, document.body)');
+    expect(menuSource).toContain('fixed z-[200]');
+    expect(menuSource).toContain('role="separator"');
+    expect(menuSource).toContain('contextMenuItemBaseClass');
+    expect(menuSource).toContain('contextMenuPanelBaseClass');
+    expect(dropdownSource).toContain('dh-type-menu-item');
+    expect(menuSource).toContain('{item.shortcut}');
+    expect(menuSource).toContain('text-[var(--muted-dim)] opacity-75');
+    expect(cardSource).toContain("shortcut: 'F2'");
+    expect(cardSource).toContain("shortcut: 'Delete'");
   });
 
   test('renames drones through a borderless inline editor that cancels on blur', () => {
@@ -210,7 +241,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(source).toContain("style={{ border: 0, outline: 'none', boxShadow: 'none' }}");
   });
 
-  test('uses the existing row height for a title-and-metadata cluster', () => {
+  test('uses one compact explorer row without secondary metadata', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
         drone: drone({ lastMessageAt: '2026-07-20T11:00:00.000Z' }),
@@ -221,17 +252,32 @@ describe('desktop sidebar drone presentation', () => {
       }),
     );
 
-    expect(html).toContain('min-h-[48px] py-1.5 pl-1.5 pr-1.5');
+    expect(html).toContain('h-7 px-1.5');
     expect(html).not.toContain('grid-rows-[1fr_1fr]');
-    expect(html).toContain('flex min-w-0 flex-1 flex-col justify-center gap-[3px]');
-    expect(html).toContain('group-hover/drone:pr-12 group-focus-within/drone:pr-12');
-    expect(html).toContain('data-sidebar-drone-metadata="true"');
-    expect(html).toContain('>Ready</span>');
-    expect(html).toContain('aria-hidden="true">·</span>');
+    expect(html).not.toContain('flex min-w-0 flex-1 flex-col');
+    expect(html).toContain('group-hover/drone:pr-7 group-focus-within/drone:pr-7');
+    expect(html).not.toContain('data-sidebar-drone-metadata="true"');
+    expect(html).toContain('· Ready · created');
     expect(html).not.toContain('min-w-[2.75rem]');
     expect(html).not.toContain('data-sidebar-runtime');
     expect(html).toContain('absolute right-1 top-1/2');
-    expect(html).toContain('Last message');
+    expect(html).not.toContain('Last message');
+  });
+
+  test('uses a rem-based 24/28/32px drone density scale', () => {
+    const renderDensity = (density: 'compact' | 'default' | 'comfortable') =>
+      renderToStaticMarkup(
+        createElement(DroneCard, {
+          drone: drone(),
+          selected: false,
+          density,
+          onClick: () => {},
+        }),
+      );
+
+    expect(renderDensity('compact')).toContain('h-6 px-1');
+    expect(renderDensity('default')).toContain('h-7 px-1.5');
+    expect(renderDensity('comfortable')).toContain('h-8 px-2');
   });
 
   test('replaces the message timestamp with a clean draft pill for draft drones', () => {

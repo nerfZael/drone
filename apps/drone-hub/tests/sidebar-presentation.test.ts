@@ -22,7 +22,7 @@ describe('sidebar presentation', () => {
     const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 
     expect(sidebarSource).toContain('<DesktopDevicePicker />');
-    expect(pickerSource).toContain('h-8 min-w-0 items-center');
+    expect(pickerSource).toContain('h-7 min-w-0 items-center');
     expect(pickerSource).toContain('<span className="min-w-0 truncate">{name}</span>');
     expect(pickerSource).toContain('aria-haspopup="menu"');
     expect(pickerSource).toContain('selectDevice(device.id)');
@@ -40,7 +40,8 @@ describe('sidebar presentation', () => {
     expect(sidebarSource).toContain('flex-shrink-0 text-left dh-type-sidebar-brand');
     expect(pickerSource).toContain('rounded-[var(--radius-medium)] pl-1.5 pr-0.5');
     expect(pickerSource).toContain('ml-2 h-3.5 w-3.5');
-    expect(sidebarSource).toContain('bg-[var(--app-header-bg)] pl-3.5 pr-2');
+    expect(sidebarSource).toContain('h-11 flex-shrink-0 select-none items-center');
+    expect(sidebarSource).toContain('bg-[var(--app-header-bg)] pl-3 pr-2');
     expect(stylesSource).toContain('--sidebar-brand-size: .875rem;');
   });
 
@@ -63,6 +64,12 @@ describe('sidebar presentation', () => {
     expect(compact.chatRow).toContain('h-6');
     expect(normal.chatRow).toContain('h-[25px]');
     expect(comfortable.chatRow).toContain('h-7');
+    expect(compact.chatRow).toContain('text-[var(--sidebar-item-compact-size)]');
+    expect(normal.chatRow).toContain('text-[var(--sidebar-item-size)]');
+    expect(comfortable.chatRow).toContain('text-[var(--sidebar-item-comfortable-size)]');
+    expect(normal.folderLabel).toContain('text-[var(--sidebar-item-size)]');
+    expect(normal.folderBody).toContain('ml-2.5');
+    expect(normal.folderBody).toContain('pl-0');
     expect(compact.folderDepthPaddingPx).toBeLessThan(normal.folderDepthPaddingPx);
     expect(normal.folderDepthPaddingPx).toBeLessThan(comfortable.folderDepthPaddingPx);
     expect(sidebarFolderLabelClass).toContain('dh-type-sidebar-heading');
@@ -144,7 +151,7 @@ describe('sidebar presentation', () => {
     expect(stylesSource).toContain('left: var(--sidebar-selection-edge-offset, 0px);');
   });
 
-  test('separates complete drone units with whitespace instead of divider lines', () => {
+  test('keeps complete drone units in a compact explorer rhythm', () => {
     const groupedTreeSource = readFileSync(
       new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
       'utf8',
@@ -152,8 +159,27 @@ describe('sidebar presentation', () => {
 
     expect(groupedTreeSource).toContain('data-sidebar-drone-unit="true"');
     expect(groupedTreeSource).toContain(
-      'className={`mb-1 flex flex-col gap-0.5 transition-[margin] duration-150',
+      'className={`flex flex-col gap-0 transition-[margin] duration-150',
     );
+  });
+
+  test('uses explorer chevrons and immediate select-and-toggle folder clicks', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(groupedTreeSource).toContain('down={!collapsed}');
+    expect(groupedTreeSource).toContain('strokeWidth={1.25}');
+    expect(groupedTreeSource).toContain('densityClasses.folderChevron');
+    expect(groupedTreeSource).toContain('onSelectFolder(folderPath, opts);');
+    expect(groupedTreeSource).toContain('onToggleGroupCollapsed(folderPath);');
+    expect(groupedTreeSource).not.toContain('GROUPED_FOLDER_SINGLE_CLICK_DELAY_MS');
+    expect(groupedTreeSource).not.toContain('scheduleFolderSingleClick');
+    expect(groupedTreeSource).not.toContain('Empty folder.');
+    expect(groupedTreeSource).not.toContain('No drones in this folder.');
+    expect(groupedTreeSource).not.toContain('No drones in this repo yet.');
+    expect(groupedTreeSource).not.toContain('Create a top-level folder');
   });
 
   test('connects multi-chat subtrees to their parent with a subtle rail', () => {
@@ -164,8 +190,24 @@ describe('sidebar presentation', () => {
 
     expect(groupedTreeSource).toContain('data-sidebar-chat-rail="true"');
     expect(groupedTreeSource).toContain(
-      'className={`${densityClasses.chatBlockIndent} flex flex-col gap-0.5 border-l border-[var(--border-subtle)]`}',
+      'className={`${densityClasses.chatBlockIndent} flex flex-col gap-0 border-l border-[var(--border-subtle)]`}',
     );
+  });
+
+  test('shows folder guides only for hovered ancestry or a direct selected child', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+    const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+
+    expect(groupedTreeSource).toContain('data-sidebar-folder-node={node.id}');
+    expect(groupedTreeSource).toContain('data-sidebar-guide-selected={selectedDirectChild');
+    expect(groupedTreeSource).toContain('selectedDirectChild={hasSelectedDirectChild}');
+    expect(groupedTreeSource).toContain('selectedSidebarNodeId === childId');
+    expect(stylesSource).toContain('[data-sidebar-folder-node]:hover > .dh-sidebar-folder-body');
+    expect(stylesSource).toContain(".dh-sidebar-folder-body[data-sidebar-guide-selected='true']");
+    expect(stylesSource).toContain('border-left-color: transparent;');
   });
 
   test('distinguishes the selected chat from an open chat without an extra marker', () => {
@@ -194,6 +236,10 @@ describe('sidebar presentation', () => {
     );
 
     expect(sidebarSource).toContain('dh-sidebar-row-interactive group/repository-row relative');
+    expect(sidebarSource).toContain('flex h-9 w-full items-center rounded-[var(--sidebar-row-radius)]');
+    expect(sidebarSource).not.toContain(
+      'group/repository-row relative flex min-h-14',
+    );
     expect(sidebarSource).toContain("containsSelectedDrone ? 'dh-sidebar-row-selected' : ''");
     expect(sidebarSource).toContain(
       '{containsSelectedDrone ? <span className={sidebarSelectionEdgeClass} /> : null}',
@@ -208,10 +254,10 @@ describe('sidebar presentation', () => {
     );
 
     expect(sidebarSource).toContain(
-      'group/active-repository flex min-h-14 w-full flex-shrink-0 items-center border-b border-[var(--border)] pr-2 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)]',
+      'group/active-repository flex h-10 w-full flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--surface-inset)] pr-1.5 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)]',
     );
     expect(sidebarSource).toContain(
-      'className="flex min-h-14 min-w-0 flex-1 items-center gap-2 px-2.5 text-left"',
+      'className="flex h-10 min-w-0 flex-1 items-center gap-1.5 px-2 text-left"',
     );
   });
 
@@ -231,6 +277,21 @@ describe('sidebar presentation', () => {
     );
     expect(headerStates.indexOf('stateSummary.unread')).toBeLessThan(
       headerStates.indexOf('stateSummary.working'),
+    );
+  });
+
+  test('optically aligns repository status counts with their indicators', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(sidebarSource).toContain('function SidebarRepositoryStateCount({');
+    expect(sidebarSource).toContain(
+      'className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center leading-none"',
+    );
+    expect(sidebarSource).toContain(
+      'className="relative top-px inline-flex h-3 items-center leading-none"',
     );
   });
 });

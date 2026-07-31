@@ -4,7 +4,7 @@ import type { DroneSummary } from '../types';
 import { joinSidebarGroupPath, isSameOrDescendantSidebarGroupPath, sidebarGroupBaseName, sidebarGroupParentPath } from './sidebar-group-paths';
 import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
 import {
-  placeCreatedSidebarFolderAtTop,
+  placeCreatedSidebarFolderBeforeNode,
   sidebarChatSidebarNodeId,
   sidebarDroneNodeId,
   sidebarFolderNodeId,
@@ -17,6 +17,7 @@ export type FolderEditorState = {
   mode: 'create' | 'rename';
   parentPath: string | null;
   anchorPath: string | null;
+  beforeNodeId: string | null;
   targetPath: string | null;
   repoGroupPath: string | null;
   value: string;
@@ -124,7 +125,7 @@ export function useSidebarInteractions({
   const folderEditorFocusKey = React.useMemo(
     () =>
       folderEditor
-        ? `${folderEditor.mode}:${folderEditor.parentPath ?? ''}:${folderEditor.anchorPath ?? ''}:${folderEditor.targetPath ?? ''}:${folderEditor.repoGroupPath ?? ''}`
+        ? `${folderEditor.mode}:${folderEditor.parentPath ?? ''}:${folderEditor.anchorPath ?? ''}:${folderEditor.beforeNodeId ?? ''}:${folderEditor.targetPath ?? ''}:${folderEditor.repoGroupPath ?? ''}`
         : null,
     [folderEditor],
   );
@@ -220,6 +221,7 @@ export function useSidebarInteractions({
       parentPathRaw: string | null,
       opts?: {
         anchorPath?: string | null;
+        beforeNodeId?: string | null;
         repoGroupPath?: string | null;
         initialValue?: string;
         dismissOnBlur?: boolean;
@@ -227,14 +229,16 @@ export function useSidebarInteractions({
     ) => {
       const parentPath = String(parentPathRaw ?? '').trim() || null;
       const anchorPath = String(opts?.anchorPath ?? '').trim() || parentPath;
+      const beforeNodeId = String(opts?.beforeNodeId ?? '').trim() || null;
       const repoGroupPath = String(opts?.repoGroupPath ?? '').trim() || null;
       if (parentPath && collapsedGroups[parentPath]) onToggleGroupCollapsed(parentPath);
-      setSelectedFolderPath(anchorPath);
+      if (!beforeNodeId) setSelectedFolderPath(anchorPath);
       setChatEditor(null);
       setFolderEditor({
         mode: 'create',
         parentPath,
         anchorPath,
+        beforeNodeId,
         targetPath: null,
         repoGroupPath,
         value: String(opts?.initialValue ?? ''),
@@ -255,6 +259,7 @@ export function useSidebarInteractions({
       mode: 'rename',
       parentPath: sidebarGroupParentPath(group),
       anchorPath: group,
+      beforeNodeId: null,
       targetPath: group,
       repoGroupPath: null,
       value: sidebarGroupBaseName(group),
@@ -333,11 +338,12 @@ export function useSidebarInteractions({
         });
       }
       setSidebarNodeOrderByParent((prev) =>
-        placeCreatedSidebarFolderAtTop(
+        placeCreatedSidebarFolderBeforeNode(
           prev,
           getRenderedSidebarNodeTree(),
           nextPath,
           repoGroupPath,
+          draft.beforeNodeId,
         ),
       );
       setSelectedFolderPath(nextPath);

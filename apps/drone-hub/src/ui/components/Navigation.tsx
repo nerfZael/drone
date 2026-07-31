@@ -85,17 +85,16 @@ export function UiTabs<T extends string>({
               else tabRefs.current.delete(option.value);
             }}
             className={cn(
-              'relative inline-flex min-w-0 items-center justify-center gap-1.5 rounded-t-[var(--radius-medium)] font-[var(--weight-semibold)] transition-[background-color,color,box-shadow] duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
-              size === 'small' ? 'h-7 px-2 text-[length:var(--text-9)]' : 'h-9 px-3 text-[length:var(--text-12)]',
+              'relative inline-flex min-w-0 items-center justify-center gap-1.5 rounded-t-[var(--radius-medium)] transition-[background-color,color,box-shadow] duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40',
+              size === 'small' ? 'h-7 px-2 dh-type-control-compact' : 'h-9 px-3 dh-type-control',
               selected
                 ? 'text-[var(--accent)]'
-                : 'text-[var(--muted)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg-secondary)]',
+                : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg)]',
             )}
-            style={{ fontFamily: 'var(--display)' }}
           >
             {option.icon ? <span className="shrink-0" aria-hidden="true">{option.icon}</span> : null}
             <span className="truncate">{option.label}</span>
-            {option.badge != null ? <UiBadge tone={option.badgeTone ?? 'neutral'} className="h-4 px-1.5 text-[length:var(--text-8)]">{option.badge}</UiBadge> : null}
+            {option.badge != null ? <UiBadge tone={option.badgeTone ?? 'neutral'} className="h-4 px-1.5 !text-[length:var(--text-10)]">{option.badge}</UiBadge> : null}
           </button>
         );
       })}
@@ -134,24 +133,24 @@ export function UiDisclosure({
         onOpenChange?.(event.currentTarget.open);
       }}
       className={cn(
-        'group/disclosure overflow-hidden rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)]',
+        'group/disclosure border-b border-[var(--border-subtle)]',
         className,
       )}
       {...props}
     >
-      <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-2.5 text-left marker:hidden hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]">
+      <summary className="flex cursor-pointer list-none items-center gap-3 rounded-[var(--radius-medium)] px-1 py-2.5 text-left marker:hidden hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]">
         <span className="flex h-5 w-5 shrink-0 items-center justify-center text-[var(--muted-dim)] transition-transform group-open/disclosure:rotate-90" aria-hidden="true">
           <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3">
             <path d="m6 4 4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[length:var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">{title}</span>
-          {description ? <span className="mt-0.5 block text-[length:var(--text-10)] text-[var(--muted-dim)]">{description}</span> : null}
+          <span className="block dh-type-control text-[var(--fg-secondary)]">{title}</span>
+          {description ? <span className="mt-0.5 block dh-type-supporting">{description}</span> : null}
         </span>
         {badge ? <span className="shrink-0">{badge}</span> : null}
       </summary>
-      <div className="border-t border-[var(--border-subtle)] px-3 py-3 text-[length:var(--text-11)] text-[var(--muted)]">
+      <div className="px-1 pb-3 pt-1 dh-type-control-compact text-[var(--muted)]">
         {children}
       </div>
     </details>

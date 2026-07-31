@@ -28,6 +28,16 @@ export function DroneDeleteConfirmModal({
   const archive = deleteMode === 'archive';
   const verb = archive ? 'Archive' : 'Delete';
   const actionText = busy ? `${archive ? 'Archiving' : 'Deleting'}...` : `${verb} ${count} drone${count === 1 ? '' : 's'}`;
+  const confirmButtonRef = React.useRef<HTMLButtonElement | null>(null);
+
+  React.useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => confirmButtonRef.current?.focus());
+    return () => {
+      window.cancelAnimationFrame(frame);
+      previousFocus?.focus();
+    };
+  }, []);
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -48,20 +58,26 @@ export function DroneDeleteConfirmModal({
         if (event.target === event.currentTarget && !busy) onCancel();
       }}
     >
-      <div className="w-full max-w-[560px] overflow-hidden rounded-[var(--radius-large)] border border-[var(--red-border)] bg-[var(--panel-overlay)] shadow-[0_28px_90px_var(--shadow-color)]">
-        <div className="border-b border-[var(--border-subtle)] px-6 py-5">
-          <div className="flex items-start gap-4">
-            <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]">
+      <form
+        className="w-full max-w-[560px] overflow-hidden rounded-[var(--radius-large)] border border-[var(--red-border)] bg-[var(--panel-overlay)] shadow-[0_28px_90px_var(--shadow-color)]"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!busy && count > 0) onConfirm();
+        }}
+      >
+        <div className="border-b border-[var(--border-subtle)] px-6 py-4">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]">
               <IconTrash className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <div className="text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.16em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                Confirm {archive ? 'Archive' : 'Delete'}
-              </div>
-              <h2 id="delete-drone-confirm-title" className="mt-2 text-[20px] font-[var(--weight-semibold)] leading-tight text-[var(--fg-strong)]">
-                {verb} {count} selected drone{count === 1 ? '' : 's'}?
+              <h2 id="delete-drone-confirm-title" className="flex flex-wrap items-baseline gap-x-2 text-[20px] font-[var(--weight-semibold)] leading-tight text-[var(--fg-strong)]">
+                <span>{verb}</span>
+                <span className="text-[var(--text-12)] font-[var(--weight-medium)] text-[var(--muted)]">
+                  {count} drone{count === 1 ? '' : 's'}
+                </span>
               </h2>
-              <p id="delete-drone-confirm-description" className="mt-2 text-[var(--text-13)] leading-6 text-[var(--muted)]">
+              <p id="delete-drone-confirm-description" className="mt-1.5 text-[var(--text-12)] leading-5 text-[var(--muted)]">
                 {archive
                   ? 'This removes the selected drones from the active list now. You can restore them from Settings > Archive before they auto-delete.'
                   : 'This removes the selected drone containers and removes them from your registry.'}
@@ -70,22 +86,22 @@ export function DroneDeleteConfirmModal({
           </div>
         </div>
 
-        <div className="px-6 py-5">
-          <div className="max-h-[240px] overflow-auto rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-soft)]">
+        <div className="px-6 py-3">
+          <div className="max-h-[240px] overflow-auto" role="list">
             {drones.map((drone, index) => (
               <div
                 key={drone.id}
-                className={`flex items-center justify-between gap-3 px-4 py-3 ${
+                role="listitem"
+                className={`flex min-h-9 items-center justify-between gap-3 px-1 py-2 ${
                   index === 0 ? '' : 'border-t border-[var(--border-subtle)]'
                 }`}
               >
-                <div className="min-w-0">
-                  <div className="truncate text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]">{drone.label}</div>
-                  <div className="mt-0.5 truncate text-[var(--text-11)] text-[var(--muted-dim)]">{drone.id}</div>
-                </div>
-                <div className="flex-shrink-0 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--red)]">
+                <span className="min-w-0 flex-1 truncate text-[var(--text-13)] font-[var(--weight-medium)] text-[var(--fg)]">
+                  {drone.label}
+                </span>
+                <span className={`flex-shrink-0 text-[var(--text-11)] ${archive ? 'text-[var(--muted-dim)]' : 'text-[var(--red)]'}`}>
                   {archive ? 'Archive' : 'Delete'}
-                </div>
+                </span>
               </div>
             ))}
           </div>
@@ -111,9 +127,10 @@ export function DroneDeleteConfirmModal({
             Cancel
           </button>
           <button
-            type="button"
-            onClick={onConfirm}
+            ref={confirmButtonRef}
+            type="submit"
             disabled={busy || count === 0}
+            aria-keyshortcuts="Enter"
             className={`inline-flex h-9 items-center justify-center gap-2 rounded px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] transition-all ${
               busy || count === 0
                 ? 'cursor-not-allowed border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] opacity-45'
@@ -125,7 +142,7 @@ export function DroneDeleteConfirmModal({
             {actionText}
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

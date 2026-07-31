@@ -3,12 +3,23 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const { detachedHubStartArgs, parseDetachedHubStartOutput } = require('./hub-electron-launch.cjs');
+const {
+  DEFAULT_ZOOM_FACTOR,
+  readZoomFactor,
+  stepZoomFactor,
+  writeZoomFactor,
+  zoomActionForInput,
+  zoomPreferencesPath,
+} = require('./hub-electron-zoom.cjs');
 
 const APP_NAME = 'Drone Hub';
+const ZOOM_CHANGED_CHANNEL = 'drone-hub:zoom-changed';
 
 let mainWindow = null;
 let hubLauncherProcess = null;
 let isQuitting = false;
+let currentZoomFactor = DEFAULT_ZOOM_FACTOR;
+let zoomPreferencesFile = null;
 
 app.setName(APP_NAME);
 if (process.platform === 'linux') {
@@ -92,6 +103,7 @@ function createWindow() {
     title: APP_NAME,
     backgroundColor: '#111827',
     webPreferences: {
+      preload: path.join(__dirname, 'hub-electron-preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -99,6 +111,31 @@ function createWindow() {
   });
 
   mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHtml())}`);
+  mainWindow.webContents.setZoomFactor(currentZoomFactor);
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.setZoomFactor(currentZoomFactor);
+    }
+  });
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    const action = zoomActionForInput(input);
+    if (!action || !mainWindow || mainWindow.isDestroyed()) return;
+    event.preventDefault();
+
+    currentZoomFactor =
+      action === 'reset' ? DEFAULT_ZOOM_FACTOR : stepZoomFactor(currentZoomFactor, action);
+    mainWindow.webContents.setZoomFactor(currentZoomFactor);
+    mainWindow.webContents.send(ZOOM_CHANGED_CHANNEL, {
+      percent: Math.round(currentZoomFactor * 100),
+    });
+    if (zoomPreferencesFile) {
+      try {
+        writeZoomFactor(zoomPreferencesFile, currentZoomFactor);
+      } catch (error) {
+        console.warn(`Unable to save Drone Hub zoom: ${error?.message || String(error)}`);
+      }
+    }
+  });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url).catch(() => {});
     return { action: 'deny' };
@@ -166,6 +203,8 @@ function startHub() {
 Menu.setApplicationMenu(null);
 
 app.whenReady().then(() => {
+  zoomPreferencesFile = zoomPreferencesPath(app.getPath('userData'));
+  currentZoomFactor = readZoomFactor(zoomPreferencesFile);
   createWindow();
   startHub();
 });

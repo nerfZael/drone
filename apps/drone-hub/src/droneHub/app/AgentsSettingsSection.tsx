@@ -101,7 +101,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
         </div>
       ) : null}
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-4 py-4 flex flex-col gap-4">
+      <div className="dh-settings-section">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Default AGENTS.md</div>
@@ -128,7 +128,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
         </div>
 
         {agentsSettingsLoading && !agentsSettings ? (
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-3 text-[var(--text-11)] text-[var(--muted-dim)]">
+          <div className="py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
             Loading AGENTS.md settings…
           </div>
         ) : null}
@@ -142,12 +142,12 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
           placeholder={'# Repo agent instructions\n\nDescribe project-specific expectations, commands, and guardrails.'}
         />
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-11)] text-[var(--muted-dim)]">
+        <div className="border-l-2 border-[var(--border-subtle)] py-1 pl-3 text-[var(--text-11)] text-[var(--muted-dim)]">
           Per-repo overrides live in the Repository modal, where each repo can inherit this default, replace it, or disable injection.
         </div>
       </div>
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-4 py-4 flex flex-col gap-4">
+      <div className="dh-settings-section">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
@@ -221,7 +221,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
         </div>
 
         <div className="grid min-h-[360px] grid-cols-1 gap-3 lg:grid-cols-[220px_minmax(0,1fr)]">
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-2">
+          <div className="border-b border-[var(--border-subtle)] pb-3 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-3">
             {files.length > 0 ? (
               <div className="flex flex-col gap-1">
                 {files.map((file) => {
@@ -257,7 +257,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
             )}
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] p-3">
+          <div className="pt-3 lg:pl-3 lg:pt-0">
             {agentsFileLoading ? (
               <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
                 Loading AGENTS.md file…
