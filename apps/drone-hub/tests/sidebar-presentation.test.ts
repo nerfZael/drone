@@ -254,8 +254,12 @@ describe('sidebar presentation', () => {
     );
 
     expect(sidebarSource).toContain(
-      'group/active-repository flex h-10 w-full flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--surface-inset)] pr-1.5 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)]',
+      'group/active-repository -mx-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--surface-inset)] pr-1.5 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)]',
     );
+    expect(sidebarSource).toContain(
+      "pinnedSidebarPlacement === 'top' && globalPinnedDrones.length > 0",
+    );
+    expect(sidebarSource).toContain("? 'border-t'");
     expect(sidebarSource).toContain(
       'className="flex h-10 min-w-0 flex-1 items-center gap-1.5 px-2 text-left"',
     );

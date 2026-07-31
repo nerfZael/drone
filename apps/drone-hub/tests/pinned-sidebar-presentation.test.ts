@@ -35,14 +35,31 @@ describe('desktop pinned drone presentation', () => {
       "(drone) => String(drone.repoPath ?? '').trim() === repoPath",
     );
     expect(sidebarSource).toContain('aria-label="Pinned drones"');
-    expect(sidebarSource).toContain(
-      'className="border-b border-[var(--border-subtle)]" aria-label="Pinned drones"',
+    expect(sidebarSource).toContain('data-sidebar-pinned-section="true"');
+    expect(sidebarSource).toContain('function PinnedSidebarPlacementSlot({');
+    expect(sidebarSource).toContain('bottomTarget ? createPortal(children, bottomTarget) : null');
+    expect(sidebarSource).toContain('data-sidebar-pinned-bottom-slot="true"');
+    expect(sidebarSource).toContain('className="flex-shrink-0 px-2"');
+    expect(sidebarSource.indexOf('data-sidebar-pinned-section="true"')).toBeLessThan(
+      sidebarSource.indexOf('data-sidebar-active-repository-header="true"'),
     );
+    expect(sidebarSource).toContain('data-sidebar-pinned-placement-toggle="true"');
+    expect(sidebarSource).toContain("current === 'top' ? 'bottom' : 'top'");
+    expect(sidebarSource).toContain("? 'Move pinned drones to bottom'");
+    expect(sidebarSource).toContain(": 'Move pinned drones to top'");
+    expect(sidebarSource).toContain("pinnedSidebarPlacement === 'bottom' ? 'rotate-180' : ''");
+    expect(sidebarSource).toContain("? 'border-t border-[var(--border-subtle)]'");
+    expect(sidebarSource).not.toContain(": 'border-b border-[var(--border-subtle)]'");
     expect(sidebarSource).toContain('key={`pinned:${droneId}`}');
     expect(sidebarSource).toContain('<PinnedDroneReorderItem');
     expect(sidebarSource).toContain('draggable={dragProps.draggable}');
     expect(sidebarSource).toContain('dragging={dragProps.dragging}');
     expect(sidebarSource).toContain('orderedDroneIds: globalPinnedDroneIds');
+    const pinnedSelectionStart = sidebarSource.indexOf('const selectPinnedDroneCard');
+    const pinnedSelectionEnd = sidebarSource.indexOf('const createDroneInRepository', pinnedSelectionStart);
+    const pinnedSelectionSource = sidebarSource.slice(pinnedSelectionStart, pinnedSelectionEnd);
+    expect(pinnedSelectionSource).not.toContain('openRepositoryNavigationItem');
+    expect(pinnedSelectionSource).not.toContain('setActiveRepoPath');
     expect(sidebarSource).not.toContain('leadingIcon={<IconPin');
     expect(sidebarSource).toContain(
       'className="flex min-h-8 items-center gap-1.5 px-1"',
@@ -65,6 +82,10 @@ describe('desktop pinned drone presentation', () => {
       'onDelete={sidebarCapabilities.actions ? () => onDeleteDrone(droneId) : undefined}',
     );
     expect(cardSource).toContain("pinned ? 'Unpin from top' : 'Pin to top'");
+    expect(cardSource).toContain("data-sidebar-status-hint={pinned ? 'pinned-repository' : 'status'}");
+    expect(cardSource).toContain(
+      "'max-w-[4.75rem] rounded-[2px] border-[var(--border)] bg-[var(--surface-inset)] px-0.5 py-px text-[.4375rem] font-[var(--weight-medium)] tracking-[0.01em] text-[var(--fg-secondary)]'",
+    );
   });
 
   test('does not render drone totals on group and folder rows', () => {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import {
   buildRepoSidebarModel,
@@ -143,6 +144,19 @@ const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
 const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
 const SIDEBAR_DND_IDLE_DISABLE_DELAY_MS = 1500;
 const SIDEBAR_DENSITY_MODE_ORDER: SidebarDensityMode[] = ['compact', 'default', 'comfortable'];
+
+function PinnedSidebarPlacementSlot({
+  placement,
+  bottomTarget,
+  children,
+}: {
+  placement: 'top' | 'bottom';
+  bottomTarget: HTMLDivElement | null;
+  children: React.ReactNode;
+}) {
+  if (placement === 'top') return children;
+  return bottomTarget ? createPortal(children, bottomTarget) : null;
+}
 
 function pinnedDroneRepoLabel(repoPathRaw: string, navigationLabel?: string): string {
   const navigationName = String(navigationLabel ?? '').trim();
@@ -1484,6 +1498,8 @@ export function DroneSidebar({
   readOnlyDisabledDroneReasonById = {},
   readOnlyDroneStatusHintById = {},
 }: DroneSidebarProps) {
+  const [pinnedSidebarBottomTarget, setPinnedSidebarBottomTarget] =
+    React.useState<HTMLDivElement | null>(null);
   const approvalRequiredByChatNodeId = useDroneHubRuntimeStore(
     (state) => state.approvalRequiredByChatNodeId,
   );
@@ -1498,6 +1514,7 @@ export function DroneSidebar({
     sidebarGroupingMode,
     sidebarDensityMode,
     activeRepoPath,
+    pinnedSidebarPlacement,
     selectedDrone,
     selectedChat,
     selectedGroupMultiChat,
@@ -1517,6 +1534,7 @@ export function DroneSidebar({
     setSidebarGroupingMode,
     setSidebarDensityMode,
     setSidebarDockSide,
+    setPinnedSidebarPlacement,
     setCollapsedGroups,
     setSidebarGroupOrder,
     setSidebarRepoScopedGroupByPath,
@@ -2196,19 +2214,9 @@ export function DroneSidebar({
   );
   const selectPinnedDroneCard = React.useCallback(
     (drone: DroneSummary, opts?: DroneSelectionClickOptions) => {
-      if (!opts?.toggle && !opts?.range) {
-        const repoPath = String(drone.repoPath ?? '').trim();
-        const repoItem = repositoryNavigationItems.find((item) => item.repoPath === repoPath);
-        if (repoItem) openRepositoryNavigationItem(repoItem);
-      }
       onSelectDroneCard(drone.id, { ...opts, orderedDroneIds: globalPinnedDroneIds });
     },
-    [
-      globalPinnedDroneIds,
-      onSelectDroneCard,
-      openRepositoryNavigationItem,
-      repositoryNavigationItems,
-    ],
+    [globalPinnedDroneIds, onSelectDroneCard],
   );
   const createDroneInRepository = React.useCallback(
     (item: (typeof repositoryNavigationItems)[number]) => {
@@ -2750,84 +2758,6 @@ export function DroneSidebar({
           </div>
         </div>
 
-        {sidebarCapabilities.headerActions ? (
-          <>
-            {!repositoryOverviewOpen && activeRepositoryNavigationItem ? (
-              <div className="group/active-repository flex h-10 w-full flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--surface-inset)] pr-1.5 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)]">
-                <button
-                  type="button"
-                  onClick={openRepositoryOverview}
-                  className="flex h-10 min-w-0 flex-1 items-center gap-1.5 px-2 text-left"
-                  title="Back to repositories"
-                  aria-label="Back to repositories"
-                >
-                  <span className="relative inline-flex h-4 w-4 flex-shrink-0 items-center justify-end text-[var(--sidebar-action-fg)]">
-                    <IconFolderGit className="h-3.5 w-3.5" />
-                    <span className="absolute -left-1 top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-[var(--surface-inset)] transition-colors group-hover/active-repository:bg-[var(--hover)] group-focus-within/active-repository:bg-[var(--hover)]">
-                      <IconChevronLeft className="h-2.5 w-2.5" />
-                    </span>
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[var(--text-12)] font-semibold text-[var(--fg)]">
-                      {activeRepositoryNavigationItem.label}
-                    </span>
-                  </span>
-                  <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem] leading-none">
-                    {activeRepositoryNavigationItem.stateSummary.approval > 0 ? (
-                      <SidebarRepositoryStateCount
-                        count={activeRepositoryNavigationItem.stateSummary.approval}
-                        indicator={<SidebarApprovalStatusIndicator />}
-                        label="awaiting approval"
-                        toneClassName="text-[var(--yellow)]"
-                      />
-                    ) : null}
-                    {activeRepositoryNavigationItem.stateSummary.unread > 0 ? (
-                      <SidebarRepositoryStateCount
-                        count={activeRepositoryNavigationItem.stateSummary.unread}
-                        indicator={<SidebarItemStateIndicator state="idle" unread />}
-                        label="unread"
-                        toneClassName="text-[var(--green)]"
-                      />
-                    ) : null}
-                    {activeRepositoryNavigationItem.stateSummary.working > 0 ? (
-                      <SidebarRepositoryStateCount
-                        count={activeRepositoryNavigationItem.stateSummary.working}
-                        indicator={<SidebarWorkingStatusIndicator />}
-                        label="working"
-                        toneClassName="text-[var(--yellow)]"
-                      />
-                    ) : null}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={openGroupDraft}
-                  disabled={!sidebarCapabilities.actions}
-                  data-sidebar-create-group="true"
-                  className="group/create-group inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-40"
-                  title="Create group (E)"
-                  aria-label="Create group"
-                >
-                  <span className="relative inline-flex h-4 w-4 items-center justify-center opacity-70 transition-opacity group-hover/create-group:opacity-100 group-focus-visible/create-group:opacity-100">
-                    <IconFolderOutline className="h-4 w-4" />
-                    <IconPlus className="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full bg-[var(--sidebar-bg)]" />
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={openDraftDroneFromSidebarSelection}
-                  disabled={!sidebarCapabilities.createDrones}
-                  className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-40"
-                  title={`Create drone in ${activeRepositoryNavigationItem.label}`}
-                  aria-label={`Create drone in ${activeRepositoryNavigationItem.label}`}
-                >
-                  <IconPlus className="h-4 w-4" />
-                </button>
-              </div>
-            ) : null}
-          </>
-        ) : null}
-
         <div
           className="dh-sidebar-scrollbar flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-2 pt-0 pb-1.5 [--sidebar-selection-edge-offset:-0.5rem]"
           style={{
@@ -2991,13 +2921,53 @@ export function DroneSidebar({
               </div>
             )}
           <div className={`flex flex-col gap-0 ${sidebarListSelectClass}`}>
-            {globalPinnedDrones.length > 0 ? (
-              <section className="border-b border-[var(--border-subtle)]" aria-label="Pinned drones">
+            <PinnedSidebarPlacementSlot
+              placement={pinnedSidebarPlacement}
+              bottomTarget={pinnedSidebarBottomTarget}
+            >
+              {globalPinnedDrones.length > 0 ? (
+                <section
+                  data-sidebar-pinned-section="true"
+                  data-sidebar-pinned-placement={pinnedSidebarPlacement}
+                  className={
+                    pinnedSidebarPlacement === 'bottom'
+                      ? 'border-t border-[var(--border-subtle)]'
+                      : undefined
+                  }
+                  aria-label="Pinned drones"
+                >
                 <div className="flex min-h-8 items-center gap-1.5 px-1">
                   <IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
                   <span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-normal text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">
                     Pinned
                   </span>
+                  <button
+                    type="button"
+                    data-sidebar-pinned-placement-toggle="true"
+                    onClick={() =>
+                      setPinnedSidebarPlacement((current) =>
+                        current === 'top' ? 'bottom' : 'top',
+                      )
+                    }
+                    className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted-dim)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
+                    title={
+                      pinnedSidebarPlacement === 'top'
+                        ? 'Move pinned drones to bottom'
+                        : 'Move pinned drones to top'
+                    }
+                    aria-label={
+                      pinnedSidebarPlacement === 'top'
+                        ? 'Move pinned drones to bottom'
+                        : 'Move pinned drones to top'
+                    }
+                    aria-pressed={pinnedSidebarPlacement === 'bottom'}
+                  >
+                    <IconChevronDown
+                      className={`h-3.5 w-3.5 transition-transform ${
+                        pinnedSidebarPlacement === 'bottom' ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
                 </div>
                 <div className="flex flex-col gap-0.5 pb-1">
                   {globalPinnedDrones.map((drone) => {
@@ -3105,7 +3075,90 @@ export function DroneSidebar({
                     );
                   })}
                 </div>
-              </section>
+                </section>
+              ) : null}
+            </PinnedSidebarPlacementSlot>
+            {sidebarCapabilities.headerActions &&
+            !repositoryOverviewOpen &&
+            activeRepositoryNavigationItem ? (
+              <div
+                data-sidebar-active-repository-header="true"
+                className={`group/active-repository -mx-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--surface-inset)] pr-1.5 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)] ${
+                  pinnedSidebarPlacement === 'top' && globalPinnedDrones.length > 0
+                    ? 'border-t'
+                    : ''
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={openRepositoryOverview}
+                  className="flex h-10 min-w-0 flex-1 items-center gap-1.5 px-2 text-left"
+                  title="Back to repositories"
+                  aria-label="Back to repositories"
+                >
+                  <span className="relative inline-flex h-4 w-4 flex-shrink-0 items-center justify-end text-[var(--sidebar-action-fg)]">
+                    <IconFolderGit className="h-3.5 w-3.5" />
+                    <span className="absolute -left-1 top-0.5 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-[var(--surface-inset)] transition-colors group-hover/active-repository:bg-[var(--hover)] group-focus-within/active-repository:bg-[var(--hover)]">
+                      <IconChevronLeft className="h-2.5 w-2.5" />
+                    </span>
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[var(--text-12)] font-semibold text-[var(--fg)]">
+                      {activeRepositoryNavigationItem.label}
+                    </span>
+                  </span>
+                  <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem] leading-none">
+                    {activeRepositoryNavigationItem.stateSummary.approval > 0 ? (
+                      <SidebarRepositoryStateCount
+                        count={activeRepositoryNavigationItem.stateSummary.approval}
+                        indicator={<SidebarApprovalStatusIndicator />}
+                        label="awaiting approval"
+                        toneClassName="text-[var(--yellow)]"
+                      />
+                    ) : null}
+                    {activeRepositoryNavigationItem.stateSummary.unread > 0 ? (
+                      <SidebarRepositoryStateCount
+                        count={activeRepositoryNavigationItem.stateSummary.unread}
+                        indicator={<SidebarItemStateIndicator state="idle" unread />}
+                        label="unread"
+                        toneClassName="text-[var(--green)]"
+                      />
+                    ) : null}
+                    {activeRepositoryNavigationItem.stateSummary.working > 0 ? (
+                      <SidebarRepositoryStateCount
+                        count={activeRepositoryNavigationItem.stateSummary.working}
+                        indicator={<SidebarWorkingStatusIndicator />}
+                        label="working"
+                        toneClassName="text-[var(--yellow)]"
+                      />
+                    ) : null}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openGroupDraft}
+                  disabled={!sidebarCapabilities.actions}
+                  data-sidebar-create-group="true"
+                  className="group/create-group inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Create group (E)"
+                  aria-label="Create group"
+                >
+                  <span className="relative inline-flex h-4 w-4 items-center justify-center opacity-70 transition-opacity group-hover/create-group:opacity-100 group-focus-visible/create-group:opacity-100">
+                    <IconFolderOutline className="h-4 w-4" />
+                    <IconPlus className="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full bg-[var(--sidebar-bg)]" />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openDraftDroneFromSidebarSelection}
+                  disabled={!sidebarCapabilities.createDrones}
+                  className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-40"
+                  title={`Create drone in ${activeRepositoryNavigationItem.label}`}
+                  aria-label={`Create drone in ${activeRepositoryNavigationItem.label}`}
+                >
+                  <IconPlus className="h-4 w-4" />
+                </button>
+              </div>
             ) : null}
             {sidebarCapabilities.headerActions && repositoryOverviewOpen ? (
               <div className="flex flex-col py-1 pb-6">
@@ -3336,6 +3389,14 @@ export function DroneSidebar({
             )}
           </div>
         </div>
+
+        {pinnedSidebarPlacement === 'bottom' ? (
+          <div
+            ref={setPinnedSidebarBottomTarget}
+            data-sidebar-pinned-bottom-slot="true"
+            className="flex-shrink-0 px-2"
+          />
+        ) : null}
 
         {sidebarCapabilities.repoFooter ||
         sidebarCapabilities.sidebarOptions ||

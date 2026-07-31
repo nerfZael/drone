@@ -1,5 +1,6 @@
 import React from 'react';
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Animated,
@@ -22,6 +23,7 @@ import Settings from 'lucide-react-native/icons/settings';
 import LoaderCircle from 'lucide-react-native/icons/loader-circle';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
+import ChevronUp from 'lucide-react-native/icons/chevron-up';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import FolderGit2 from 'lucide-react-native/icons/folder-git-2';
 import Folder from 'lucide-react-native/icons/folder';
@@ -113,6 +115,8 @@ const DRAWER_TREE_ROW_PADDING_LEFT = 7;
 const DRAWER_TREE_DEPTH_INDENT = 14;
 const DRAWER_TREE_LEADING_SLOT_WIDTH = 12;
 const DRAWER_TREE_LEADING_GAP = 6;
+const PINNED_SIDEBAR_PLACEMENT_KEY = 'droneHubMobile.pinnedSidebarPlacement';
+type PinnedSidebarPlacement = 'top' | 'bottom';
 
 function drawerTreeRowPaddingLeft(depth: number): number {
   return DRAWER_TREE_ROW_PADDING_LEFT + Math.max(0, depth) * DRAWER_TREE_DEPTH_INDENT;
@@ -808,25 +812,50 @@ function DrawerDroneEntry({
 
 function DrawerPinnedDrones({
   drones,
+  placement,
   repoLabelByPath,
   activeDroneId,
   activeChatName,
   droneOperationById,
   onSelect,
+  onTogglePlacement,
 }: {
   drones: MobileDroneSummary[];
+  placement: PinnedSidebarPlacement;
   repoLabelByPath: ReadonlyMap<string, string>;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
   onSelect(droneId: string, chatName: string): void;
+  onTogglePlacement(): void;
 }) {
   if (drones.length === 0) return null;
   return (
-    <View style={styles.pinnedSection} accessibilityLabel="Pinned drones">
+    <View
+      style={[styles.pinnedSection, placement === 'bottom' && styles.pinnedSectionBottom]}
+      accessibilityLabel="Pinned drones"
+    >
       <View style={styles.pinnedHeader}>
         <Pin color={colors.mutedDim} size={13} strokeWidth={1.7} />
         <Text style={styles.pinnedHeaderText}>Pinned</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            placement === 'top' ? 'Move pinned drones to bottom' : 'Move pinned drones to top'
+          }
+          accessibilityState={{ selected: placement === 'bottom' }}
+          onPress={onTogglePlacement}
+          style={({ pressed }) => [
+            styles.pinnedPlacementToggle,
+            pressed && styles.sidebarRowPressed,
+          ]}
+        >
+          {placement === 'top' ? (
+            <ChevronDown color={colors.mutedDim} size={15} strokeWidth={2} />
+          ) : (
+            <ChevronUp color={colors.mutedDim} size={15} strokeWidth={2} />
+          )}
+        </Pressable>
       </View>
       {drones.map((drone) => (
         <DrawerDroneNode
@@ -1020,6 +1049,28 @@ function AppDrawerView({
   onSelectDevice,
 }: AppDrawerProps) {
   const insets = useSafeAreaInsets();
+  const [pinnedSidebarPlacement, setPinnedSidebarPlacement] =
+    React.useState<PinnedSidebarPlacement>('bottom');
+  React.useEffect(() => {
+    let active = true;
+    void AsyncStorage.getItem(PINNED_SIDEBAR_PLACEMENT_KEY)
+      .then((stored) => {
+        if (active && (stored === 'top' || stored === 'bottom')) {
+          setPinnedSidebarPlacement(stored);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+  const togglePinnedSidebarPlacement = React.useCallback(() => {
+    setPinnedSidebarPlacement((current) => {
+      const next = current === 'top' ? 'bottom' : 'top';
+      void AsyncStorage.setItem(PINNED_SIDEBAR_PLACEMENT_KEY, next).catch(() => undefined);
+      return next;
+    });
+  }, []);
   const workingPhase = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
     if (!open) return;
@@ -1069,12 +1120,21 @@ function AppDrawerView({
   );
   const selectPinnedDroneChat = React.useCallback(
     (droneId: string, chatName: string) => {
-      const drone = drones.find((candidate) => candidate.id === droneId);
-      const repo = droneGroups.find((group) => group.repoPath === drone?.repoPath);
-      if (repo) setActiveRepoId(repo.id);
       onSelectDroneChat?.(droneId, chatName);
     },
-    [droneGroups, drones, onSelectDroneChat],
+    [onSelectDroneChat],
+  );
+  const pinnedDronesSection = (
+    <DrawerPinnedDrones
+      drones={globalPinnedDrones}
+      placement={pinnedSidebarPlacement}
+      repoLabelByPath={repoLabelByPath}
+      activeDroneId={activeDroneId}
+      activeChatName={activeChatName}
+      droneOperationById={droneOperationById}
+      onSelect={selectPinnedDroneChat}
+      onTogglePlacement={togglePinnedSidebarPlacement}
+    />
   );
   React.useEffect(() => {
     if (activeRepoId && !droneGroups.some((group) => group.id === activeRepoId)) {
@@ -1175,48 +1235,6 @@ function AppDrawerView({
         {showDrones ? (
           <>
             {activeRepo ? (
-              <View style={styles.repoNavigationHead}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Back to repositories"
-                  onPress={() => setActiveRepoId(null)}
-                  style={({ pressed }) => [styles.repoNavigationBack, pressed && styles.pressed]}
-                >
-                  <View style={styles.groupIcon}>
-                    <FolderGit2 color={colors.mutedDim} size={16} strokeWidth={1.9} />
-                    <View style={styles.groupChevron}>
-                      <ChevronLeft color={colors.mutedDim} size={10} strokeWidth={2.3} />
-                    </View>
-                  </View>
-                  <View style={styles.repoCopy}>
-                    <Text numberOfLines={1} style={styles.repoNavigationTitle}>
-                      {activeRepo.label}
-                    </Text>
-                  </View>
-                  <DroneStateCounts
-                    summary={
-                      repoStateSummaries.get(activeRepo.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY
-                    }
-                    compact
-                  />
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Create drone in ${activeRepo.label}`}
-                  accessibilityState={{ disabled: !onCreateDrone }}
-                  disabled={!onCreateDrone}
-                  onPress={() => onCreateDrone?.(activeRepo.repoPath)}
-                  style={({ pressed }) => [
-                    styles.repoCreate,
-                    !onCreateDrone && styles.repoCreateDisabled,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Plus color={colors.accent} size={18} strokeWidth={2.2} />
-                </Pressable>
-              </View>
-            ) : null}
-            {activeRepo ? (
               <FlatList<MobileDroneSidebarEntry>
                 key={`repo:${activeRepo.id}`}
                 style={styles.scroll}
@@ -1240,14 +1258,56 @@ function AppDrawerView({
                   />
                 )}
                 ListHeaderComponent={
-                  <DrawerPinnedDrones
-                    drones={globalPinnedDrones}
-                    repoLabelByPath={repoLabelByPath}
-                    activeDroneId={activeDroneId}
-                    activeChatName={activeChatName}
-                    droneOperationById={droneOperationById}
-                    onSelect={selectPinnedDroneChat}
-                  />
+                  <>
+                    {pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null}
+                    <View
+                      style={[
+                        styles.repoNavigationHead,
+                        pinnedSidebarPlacement === 'top' &&
+                          globalPinnedDrones.length > 0 &&
+                          styles.repoNavigationHeadBelowPinned,
+                      ]}
+                    >
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Back to repositories"
+                        onPress={() => setActiveRepoId(null)}
+                        style={({ pressed }) => [styles.repoNavigationBack, pressed && styles.pressed]}
+                      >
+                        <View style={styles.groupIcon}>
+                          <FolderGit2 color={colors.mutedDim} size={16} strokeWidth={1.9} />
+                          <View style={styles.groupChevron}>
+                            <ChevronLeft color={colors.mutedDim} size={10} strokeWidth={2.3} />
+                          </View>
+                        </View>
+                        <View style={styles.repoCopy}>
+                          <Text numberOfLines={1} style={styles.repoNavigationTitle}>
+                            {activeRepo.label}
+                          </Text>
+                        </View>
+                        <DroneStateCounts
+                          summary={
+                            repoStateSummaries.get(activeRepo.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY
+                          }
+                          compact
+                        />
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Create drone in ${activeRepo.label}`}
+                        accessibilityState={{ disabled: !onCreateDrone }}
+                        disabled={!onCreateDrone}
+                        onPress={() => onCreateDrone?.(activeRepo.repoPath)}
+                        style={({ pressed }) => [
+                          styles.repoCreate,
+                          !onCreateDrone && styles.repoCreateDisabled,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Plus color={colors.accent} size={18} strokeWidth={2.2} />
+                      </Pressable>
+                    </View>
+                  </>
                 }
                 ListFooterComponent={listStatus}
                 initialNumToRender={10}
@@ -1298,14 +1358,7 @@ function AppDrawerView({
                   );
                 }}
                 ListHeaderComponent={
-                  <DrawerPinnedDrones
-                    drones={globalPinnedDrones}
-                    repoLabelByPath={repoLabelByPath}
-                    activeDroneId={activeDroneId}
-                    activeChatName={activeChatName}
-                    droneOperationById={droneOperationById}
-                    onSelect={selectPinnedDroneChat}
-                  />
+                  pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null
                 }
                 ListFooterComponent={listStatus}
                 initialNumToRender={10}
@@ -1316,6 +1369,7 @@ function AppDrawerView({
                 keyboardShouldPersistTaps="handled"
               />
             )}
+            {pinnedSidebarPlacement === 'bottom' ? pinnedDronesSection : null}
           </>
         ) : (
           <View style={styles.drawerFill} />
@@ -1530,6 +1584,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
   },
+  repoNavigationHeadBelowPinned: {
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+  },
   repoNavigationBack: {
     minHeight: 56,
     flex: 1,
@@ -1565,8 +1623,11 @@ const styles = StyleSheet.create({
   droneList: { paddingBottom: 24 },
   pinnedSection: {
     paddingBottom: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
+  },
+  pinnedSectionBottom: {
+    flexShrink: 0,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
   },
   pinnedHeader: {
     minHeight: 32,
@@ -1577,10 +1638,19 @@ const styles = StyleSheet.create({
     paddingRight: 9,
   },
   pinnedHeaderText: {
+    flex: 1,
     color: colors.mutedDim,
     fontSize: 10,
     fontWeight: '600',
     letterSpacing: 0.2,
+  },
+  pinnedPlacementToggle: {
+    width: 28,
+    height: 28,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 5,
   },
   repoGroup: {
     borderBottomWidth: 1,

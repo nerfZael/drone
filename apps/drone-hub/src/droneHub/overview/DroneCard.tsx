@@ -761,7 +761,12 @@ export const DroneCard = React.memo(function DroneCard({
         ) : null}
         {statusHint ? (
           <span
-            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] leading-none tracking-wide uppercase text-[var(--muted-dim)]"
+            data-sidebar-status-hint={pinned ? 'pinned-repository' : 'status'}
+            className={`flex-shrink-0 truncate border leading-none uppercase ${
+              pinned
+                ? 'max-w-[4.75rem] rounded-[2px] border-[var(--border)] bg-[var(--surface-inset)] px-0.5 py-px text-[.4375rem] font-[var(--weight-medium)] tracking-[0.01em] text-[var(--fg-secondary)]'
+                : 'rounded border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] tracking-wide text-[var(--muted-dim)]'
+            }`}
             title={statusHint}
           >
             {statusHint}

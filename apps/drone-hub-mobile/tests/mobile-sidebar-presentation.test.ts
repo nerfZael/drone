@@ -236,7 +236,43 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).not.toContain('styles.pinnedCount');
     expect(drawerSource).not.toContain('<Text style={styles.pinnedCount}>{drones.length}</Text>');
     expect(drawerSource).not.toContain('accessibilityLabel={pinned ? `Unpin ${drone.name}`');
-    expect(drawerSource.match(/<DrawerPinnedDrones/g)).toHaveLength(2);
+    expect(drawerSource.match(/<DrawerPinnedDrones/g)).toHaveLength(1);
+    const activeRepoListStart = drawerSource.indexOf('key={`repo:${activeRepo.id}`}');
+    const activeRepoHeaderStart = drawerSource.indexOf('ListHeaderComponent={', activeRepoListStart);
+    const activeRepoHeaderEnd = drawerSource.indexOf('ListFooterComponent=', activeRepoHeaderStart);
+    const activeRepoHeader = drawerSource.slice(activeRepoHeaderStart, activeRepoHeaderEnd);
+    expect(activeRepoHeader.indexOf("pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null")).toBeLessThan(
+      activeRepoHeader.indexOf('styles.repoNavigationHead,'),
+    );
+    expect(drawerSource).toContain(
+      "pinnedSidebarPlacement === 'bottom' ? pinnedDronesSection : null",
+    );
+    expect(drawerSource).toContain("current === 'top' ? 'bottom' : 'top'");
+    expect(drawerSource).toContain('AsyncStorage.setItem(PINNED_SIDEBAR_PLACEMENT_KEY, next)');
+    expect(drawerSource).toContain("React.useState<PinnedSidebarPlacement>('bottom')");
+    expect(drawerSource).toContain("stored === 'top' || stored === 'bottom'");
+    expect(drawerSource).toContain("placement === 'top' ? 'Move pinned drones to bottom' : 'Move pinned drones to top'");
+    expect(drawerSource).toContain('style={styles.pinnedHeaderText}>Pinned</Text>');
+    expect(drawerSource).toContain('pinnedHeaderText: {\n    flex: 1,');
+    expect(drawerSource).toContain('pinnedPlacementToggle: {');
+    expect(drawerSource).toContain("placement === 'bottom' && styles.pinnedSectionBottom");
+    expect(drawerSource).toContain('pinnedSectionBottom: {\n    flexShrink: 0,');
+    expect(drawerSource).toContain("pinnedSidebarPlacement === 'top' &&");
+    expect(drawerSource).toContain('globalPinnedDrones.length > 0 &&');
+    expect(drawerSource).toContain('styles.repoNavigationHeadBelowPinned');
+    expect(drawerSource).toContain(
+      'repoNavigationHeadBelowPinned: {\n    borderTopWidth: 1,\n    borderTopColor: colors.borderSubtle,',
+    );
+    expect(drawerSource).toContain('borderTopWidth: 1,\n    borderTopColor: colors.borderSubtle,');
+    expect(drawerSource).not.toContain('pinnedSection: {\n    paddingBottom: 0,\n    borderBottomWidth: 1,');
+    expect(drawerSource.lastIndexOf("pinnedSidebarPlacement === 'bottom' ? pinnedDronesSection : null")).toBeGreaterThan(
+      drawerSource.lastIndexOf('keyboardShouldPersistTaps="handled"'),
+    );
+    const pinnedSelectionStart = drawerSource.indexOf('const selectPinnedDroneChat');
+    const pinnedSelectionEnd = drawerSource.indexOf('const pinnedDronesSection', pinnedSelectionStart);
+    const pinnedSelectionSource = drawerSource.slice(pinnedSelectionStart, pinnedSelectionEnd);
+    expect(pinnedSelectionSource).not.toContain('setActiveRepoId');
+    expect(pinnedSelectionSource).toContain('onSelectDroneChat?.(droneId, chatName)');
     expect(dronesSource).toContain('onTogglePinned: () =>');
     expect(dronesSource).toContain('void setDronePinned(');
     expect(shellSource).toContain("id: 'toggle-pin'");

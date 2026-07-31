@@ -53,6 +53,15 @@ describe('drone hub ui store migration', () => {
     });
   });
 
+  test('normalizes the persisted pinned sidebar placement', () => {
+    expect(migrateDroneHubUiPersistedState({ pinnedSidebarPlacement: 'bottom' }, 15)).toMatchObject({
+      pinnedSidebarPlacement: 'bottom',
+    });
+    expect(migrateDroneHubUiPersistedState({ pinnedSidebarPlacement: 'floating' }, 15)).toMatchObject({
+      pinnedSidebarPlacement: 'bottom',
+    });
+  });
+
   test('normalizes persisted desktop themes', () => {
     expect(migrateDroneHubUiPersistedState({ themeId: 'catppuccin-mocha' }, 14)).toMatchObject({
       themeId: 'catppuccin-mocha',

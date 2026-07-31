@@ -37,6 +37,7 @@ type NameSuggestToast = null | {
 };
 type SidebarGroupingMode = 'groups' | 'repos';
 export type SidebarDockSide = 'left' | 'right';
+export type PinnedSidebarPlacement = 'top' | 'bottom';
 type OutputView = 'screen' | 'log';
 type SpawnContextPreferences = {
   spawnAgentKey: string;
@@ -71,6 +72,7 @@ type DroneHubUiState = {
   sidebarGroupingMode: SidebarGroupingMode;
   sidebarDensityMode: SidebarDensityMode;
   sidebarDockSide: SidebarDockSide;
+  pinnedSidebarPlacement: PinnedSidebarPlacement;
   appView: AppView;
   collapsedGroups: Record<string, boolean>;
   sidebarGroupOrder: string[];
@@ -130,6 +132,7 @@ type DroneHubUiState = {
   setSidebarGroupingMode: (next: Updater<SidebarGroupingMode>) => void;
   setSidebarDensityMode: (next: Updater<SidebarDensityMode>) => void;
   setSidebarDockSide: (next: Updater<SidebarDockSide>) => void;
+  setPinnedSidebarPlacement: (next: Updater<PinnedSidebarPlacement>) => void;
   setAppView: (next: Updater<AppView>) => void;
   setCollapsedGroups: (next: Updater<Record<string, boolean>>) => void;
   setSidebarGroupOrder: (next: Updater<string[]>) => void;
@@ -283,6 +286,7 @@ type DroneHubUiPersistedState = Pick<
   | 'sidebarGroupingMode'
   | 'sidebarDensityMode'
   | 'sidebarDockSide'
+  | 'pinnedSidebarPlacement'
   | 'appView'
   | 'collapsedGroups'
   | 'sidebarGroupOrder'
@@ -339,6 +343,11 @@ export function migrateDroneHubUiPersistedState(
   delete (migrated as any).playbookRunsSelectedRepoPath;
   if (Object.prototype.hasOwnProperty.call(migrated, 'sidebarDockSide')) {
     migrated.sidebarDockSide = normalizeSidebarDockSide(migrated.sidebarDockSide);
+  }
+  if (Object.prototype.hasOwnProperty.call(migrated, 'pinnedSidebarPlacement')) {
+    migrated.pinnedSidebarPlacement = normalizePinnedSidebarPlacement(
+      migrated.pinnedSidebarPlacement,
+    );
   }
   delete (migrated as any).assistantThreadSidebarDockSide;
   const migratedShortcutBindings = migrateLegacyShortcutBindings(migrated.shortcutBindings);
@@ -419,6 +428,10 @@ function normalizeSidebarDensityMode(value: unknown): SidebarDensityMode {
 
 function normalizeSidebarDockSide(value: unknown): SidebarDockSide {
   return value === 'right' ? 'right' : 'left';
+}
+
+function normalizePinnedSidebarPlacement(value: unknown): PinnedSidebarPlacement {
+  return String(value ?? '').trim().toLowerCase() === 'top' ? 'top' : 'bottom';
 }
 
 function normalizeOutputView(value: unknown): OutputView {
@@ -621,6 +634,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       sidebarGroupingMode: 'repos',
       sidebarDensityMode: 'default',
       sidebarDockSide: 'left',
+      pinnedSidebarPlacement: 'bottom',
       appView: 'workspace',
       collapsedGroups: {},
       sidebarGroupOrder: [],
@@ -686,6 +700,12 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({ sidebarDensityMode: normalizeSidebarDensityMode(resolveNext(s.sidebarDensityMode, next)) })),
       setSidebarDockSide: (next) =>
         set((s) => ({ sidebarDockSide: normalizeSidebarDockSide(resolveNext(s.sidebarDockSide, next)) })),
+      setPinnedSidebarPlacement: (next) =>
+        set((s) => ({
+          pinnedSidebarPlacement: normalizePinnedSidebarPlacement(
+            resolveNext(s.pinnedSidebarPlacement, next),
+          ),
+        })),
       setAppView: (next) => set((s) => ({ appView: resolveNext(s.appView, next) })),
       setCollapsedGroups: (next) => set((s) => ({ collapsedGroups: resolveNext(s.collapsedGroups, next) })),
       setSidebarGroupOrder: (next) =>
@@ -929,6 +949,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         sidebarGroupingMode: state.sidebarGroupingMode,
         sidebarDensityMode: state.sidebarDensityMode,
         sidebarDockSide: state.sidebarDockSide,
+        pinnedSidebarPlacement: state.pinnedSidebarPlacement,
         appView: state.appView,
         collapsedGroups: state.collapsedGroups,
         sidebarGroupOrder: state.sidebarGroupOrder,
@@ -995,6 +1016,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             persisted.sidebarDensityMode ?? currentState.sidebarDensityMode,
           ),
           sidebarDockSide: normalizeSidebarDockSide(persisted.sidebarDockSide ?? currentState.sidebarDockSide),
+          pinnedSidebarPlacement: normalizePinnedSidebarPlacement(
+            persisted.pinnedSidebarPlacement ?? currentState.pinnedSidebarPlacement,
+          ),
           collapsedGroups: normalizeCollapsedGroups(persisted.collapsedGroups ?? currentState.collapsedGroups),
           sidebarGroupOrder: normalizeSidebarGroupOrder(
             persisted.sidebarGroupOrder ?? currentState.sidebarGroupOrder,
@@ -1178,6 +1202,7 @@ export function useDroneSidebarUiState() {
       sidebarGroupingMode: s.sidebarGroupingMode,
       sidebarDensityMode: s.sidebarDensityMode,
       sidebarDockSide: s.sidebarDockSide,
+      pinnedSidebarPlacement: s.pinnedSidebarPlacement,
       sidebarGroupOrder: s.sidebarGroupOrder,
       sidebarRepoScopedGroupByPath: s.sidebarRepoScopedGroupByPath,
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
@@ -1195,6 +1220,7 @@ export function useDroneSidebarUiState() {
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
       setSidebarDockSide: s.setSidebarDockSide,
+      setPinnedSidebarPlacement: s.setPinnedSidebarPlacement,
       setCollapsedGroups: s.setCollapsedGroups,
       setSidebarGroupOrder: s.setSidebarGroupOrder,
       setSidebarRepoScopedGroupByPath: s.setSidebarRepoScopedGroupByPath,
