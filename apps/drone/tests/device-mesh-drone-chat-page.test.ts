@@ -40,6 +40,9 @@ describe('device mesh drone chat pages', () => {
     const [turn] = boundedDroneChatPage([
       {
         id: 'turn-activity',
+        promptAt: '2026-07-24T00:00:00.000Z',
+        startedAt: '2026-07-24T00:05:00.000Z',
+        completedAt: '2026-07-24T00:06:00.000Z',
         prompt: 'Inspect it',
         output: 'Done',
         agentPlan: {
@@ -84,6 +87,7 @@ describe('device mesh drone chat pages', () => {
     ]).turns;
 
     expect(turn?.agentPlan).toMatchObject({ items: [{ text: 'Inspect' }] });
+    expect(turn?.startedAt).toBe('2026-07-24T00:05:00.000Z');
     expect(turn?.fileChanges).toMatchObject({ counts: { changed: 1 } });
     expect(turn?.activity).toMatchObject({
       version: 1,

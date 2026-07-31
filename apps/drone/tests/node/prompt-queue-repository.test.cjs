@@ -153,17 +153,19 @@ test('pending prompt updates preserve live agent plans and activity', async () =
       },
     ],
   };
+  const startedAt = '2026-07-10T09:00:02.000Z';
 
   await queue.update({
     droneId: 'alpha',
     chatName: 'default',
     promptId: 'p-plan',
-    patch: { state: 'sent', agentPlan, activity, updatedAt: agentPlan.updatedAt },
+    patch: { state: 'sent', agentPlan, activity, startedAt, updatedAt: agentPlan.updatedAt },
   });
 
   const stored = queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'p-plan' });
   assert.deepEqual(stored.agentPlan, agentPlan);
   assert.deepEqual(stored.activity, activity);
+  assert.equal(stored.startedAt, startedAt);
 });
 
 test('claims preserve FIFO within a chat while allowing another chat to proceed', async () => {

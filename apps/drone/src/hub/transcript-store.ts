@@ -23,6 +23,7 @@ export type StoredTranscriptTurn = {
   output: string;
   error?: string;
   promptAt?: string;
+  startedAt?: string;
   completedAt?: string;
   model?: string;
   reasoning?: string;
@@ -50,6 +51,7 @@ export type StoredPendingPrompt = {
   agentPlan?: AgentPlan;
   fileChangesBaseline?: AgentRunFileChangesBaseline;
   fileChanges?: AgentRunFileChanges;
+  startedAt?: string;
   updatedAt?: string;
 };
 
@@ -550,6 +552,9 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
     output: raw?.ok ? String(raw?.output ?? '') : '',
     ...(!raw?.ok ? { error: String(raw?.error ?? 'failed') } : {}),
     ...(typeof raw?.promptAt === 'string' && raw.promptAt.trim() ? { promptAt: raw.promptAt.trim() } : {}),
+    ...(typeof raw?.startedAt === 'string' && raw.startedAt.trim()
+      ? { startedAt: raw.startedAt.trim() }
+      : {}),
     ...(typeof raw?.completedAt === 'string' && raw.completedAt.trim() ? { completedAt: raw.completedAt.trim() } : {}),
     ...(typeof raw?.model === 'string' && raw.model.trim() ? { model: raw.model.trim() } : {}),
     ...(typeof raw?.reasoning === 'string' && raw.reasoning.trim() ? { reasoning: raw.reasoning.trim() } : {}),

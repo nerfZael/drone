@@ -176,6 +176,11 @@ export function mobileDronePendingPrompts(
         transcriptMessageIds.has(id) ||
         Boolean(messageId && transcriptMessageIds.has(messageId)));
     const agentPlan = normalizeAgentPlan(item?.agentPlan);
+    const startedAt = String(
+      state === 'sending' || state === 'sent'
+        ? item?.startedAt ?? ''
+        : item?.startedAt ?? item?.at ?? '',
+    ).trim();
     const attachmentCount = positiveCount(
       item?.attachmentCount ??
         item?.imageCount ??
@@ -196,7 +201,7 @@ export function mobileDronePendingPrompts(
         ...(attachmentCount > 0 ? { attachmentCount } : {}),
         imageCount: positiveCount(item?.imageCount),
         cancelable: state === 'queued',
-        ...(String(item?.at ?? '').trim() ? { startedAt: String(item.at).trim() } : {}),
+        ...(startedAt ? { startedAt } : {}),
         ...(agentPlan ? { agentPlan } : {}),
         ...(delivered ? { delivered: true } : {}),
       } satisfies MobileDronePendingPrompt,

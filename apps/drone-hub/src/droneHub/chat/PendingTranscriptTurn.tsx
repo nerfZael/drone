@@ -58,6 +58,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       : null;
   const isStopped = isFailed && isStoppedRunError(item.error);
   const activity = normalizeAgentRunActivity(item.activity);
+  const runStartedAt = item.startedAt ?? null;
   const badgeLabel = isFailed && !isStopped ? 'Failed' : null;
   const canCancelQueued = item.state === 'queued' && Boolean(onCancelQueued);
   const showAgentPendingBubble = !(item.state === 'queued' && !isFailed);
@@ -139,14 +140,14 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         <AgentRunActivityView
           activity={activity}
           active
-          startedAt={item.at}
+          startedAt={runStartedAt}
           plan={item.agentPlan}
         />
       ) : null}
       {activity && isFailed ? (
         <AgentRunActivityView
           activity={activity}
-          startedAt={item.at}
+          startedAt={runStartedAt}
           endedAt={item.updatedAt ?? item.at}
           at={item.updatedAt ?? item.at}
           plan={item.agentPlan}
@@ -177,7 +178,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             </div>
           ) : (
             <>
-              {!activity ? <WorkingElapsedStatus startedAt={item.at} /> : null}
+              {!activity ? <WorkingElapsedStatus startedAt={runStartedAt} /> : null}
               {observability ? (
                 <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-[var(--text-10-5)] leading-[1.45] text-[var(--yellow)]">
                   <div>{observability.message}</div>

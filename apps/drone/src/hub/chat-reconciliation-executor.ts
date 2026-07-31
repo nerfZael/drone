@@ -129,6 +129,11 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     return JSON.stringify(left.messages) === JSON.stringify(right.messages);
   }
 
+  function validRunStartedAt(raw: unknown): string | undefined {
+    const value = typeof raw === 'string' ? raw.trim() : '';
+    return value && Number.isFinite(Date.parse(value)) ? value : undefined;
+  }
+
   async function reconcileChatFromDaemon(opts: {
     droneId: string;
     chatName: string;
@@ -303,13 +308,26 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         const agentPlanChanged = !sameAgentPlan((p as any).agentPlan, nextAgentPlan);
         const activityChanged = !sameLiveAgentActivity((p as any).activity, nextActivity);
         const observabilityChanged = Boolean((p as any).observability);
-        if (state !== 'sent' || agentPlanChanged || activityChanged || observabilityChanged) {
+        const priorStartedAt = validRunStartedAt((p as any).startedAt);
+        const nextStartedAt =
+          jobState === 'running'
+            ? (validRunStartedAt(job?.startedAt) ?? priorStartedAt)
+            : priorStartedAt;
+        const startedAtChanged = nextStartedAt !== priorStartedAt;
+        if (
+          state !== 'sent' ||
+          agentPlanChanged ||
+          activityChanged ||
+          observabilityChanged ||
+          startedAtChanged
+        ) {
           pendingList[i] = {
             ...p,
             state: 'sent',
             observability: undefined,
             agentPlan: nextAgentPlan,
             activity: nextActivity,
+            ...(nextStartedAt ? { startedAt: nextStartedAt } : {}),
             updatedAt: nowIso(),
           };
           changed = true;
@@ -354,6 +372,14 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         continue;
       }
 
+      const terminalStartedAt =
+        validRunStartedAt(job?.startedAt) ?? validRunStartedAt((p as any).startedAt);
+      if (terminalStartedAt && (p as any).startedAt !== terminalStartedAt) {
+        (p as any).startedAt = terminalStartedAt;
+        pendingList[i] = p;
+        changed = true;
+      }
+
       if ((p as any).fileChangesBaseline && !(p as any).fileChanges) {
         try {
           const fileChanges = await finalizeDroneRunFileChanges({
@@ -386,6 +412,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           jobStartedAt: job?.startedAt,
           finishedAt,
         });
+        const startedAt = terminalStartedAt ?? promptAt;
         if (jobKind === 'codex') {
           const parsed = parseCodexJobTranscript(job);
           const turnRuntime = await resolveCodexTurnRuntime({
@@ -425,6 +452,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           turns.push({
             at: promptAt,
             promptAt,
+            startedAt,
             completedAt: finishedAt,
             id,
             prompt: String(p?.prompt ?? ''),
@@ -485,6 +513,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           turns.push({
             at: promptAt,
             promptAt,
+            startedAt,
             completedAt: finishedAt,
             id,
             prompt: String(p?.prompt ?? ''),
@@ -532,6 +561,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           turns.push({
             at: promptAt,
             promptAt,
+            startedAt,
             completedAt: finishedAt,
             id,
             prompt: String(p?.prompt ?? ''),
@@ -578,6 +608,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           turns.push({
             at: promptAt,
             promptAt,
+            startedAt,
             completedAt: finishedAt,
             id,
             prompt: String(p?.prompt ?? ''),
@@ -619,6 +650,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         turns.push({
           at: promptAt,
           promptAt,
+          startedAt,
           completedAt: finishedAt,
           id,
           prompt: String(p?.prompt ?? ''),
@@ -656,6 +688,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             jobStartedAt: job?.startedAt,
             finishedAt,
           });
+          const startedAt = terminalStartedAt ?? promptAt;
           // Self-heal false failed states only when Codex emitted a terminal
           // completion event. An in-flight status update is not a final answer.
           const terminalEvent = String(parsed.terminalEvent ?? '').trim();
@@ -669,6 +702,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             turns.push({
               at: promptAt,
               promptAt,
+              startedAt,
               completedAt: finishedAt,
               id,
               prompt: String(p?.prompt ?? ''),
@@ -704,12 +738,14 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             jobStartedAt: job?.startedAt,
             finishedAt,
           });
+          const startedAt = terminalStartedAt ?? promptAt;
           if (output && parsed.terminalStatus === 'completed') {
             const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
             const turnReasoning = normalizeChatReasoning(parsed.reasoning);
             turns.push({
               at: promptAt,
               promptAt,
+              startedAt,
               completedAt: finishedAt,
               id,
               prompt: String(p?.prompt ?? ''),
@@ -769,6 +805,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             jobStartedAt: job?.startedAt,
             finishedAt,
           });
+          const startedAt = terminalStartedAt ?? promptAt;
           if (
             parsed.sessionId &&
             String(parsed.sessionId).trim() &&
@@ -783,6 +820,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             turns.push({
               at: promptAt,
               promptAt,
+              startedAt,
               completedAt: finishedAt,
               id,
               prompt: String(p?.prompt ?? ''),
@@ -819,6 +857,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             jobStartedAt: job?.startedAt,
             finishedAt,
           });
+          const startedAt = terminalStartedAt ?? promptAt;
           if (
             parsed.sessionId &&
             String(parsed.sessionId).trim() &&
@@ -831,6 +870,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             turns.push({
               at: promptAt,
               promptAt,
+              startedAt,
               completedAt: finishedAt,
               id,
               prompt: String(p?.prompt ?? ''),
@@ -943,6 +983,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             fileChangesBaseline: pending.fileChangesBaseline,
             fileChanges: pending.fileChanges,
             activity: pending.activity,
+            startedAt: pending.startedAt,
             updatedAt: pending.updatedAt,
           },
         });

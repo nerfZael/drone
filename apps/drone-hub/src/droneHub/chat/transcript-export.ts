@@ -15,6 +15,7 @@ type TranscriptExportTurn = {
   id?: string;
   at: string;
   promptAt?: string;
+  startedAt?: string;
   completedAt?: string;
   session?: string;
   logPath?: string;
@@ -84,6 +85,7 @@ function normalizeTurn(item: TranscriptItem): TranscriptExportTurn {
   const status = item.ok ? 'ok' : 'error';
   const attachments = Array.isArray(item.attachments) ? item.attachments.map(normalizeAttachment) : [];
   const promptAt = String(item.promptAt ?? '').trim();
+  const startedAt = String(item.startedAt ?? '').trim();
   const completedAt = String(item.completedAt ?? '').trim();
   const id = String(item.id ?? '').trim();
   const session = String((item as any)?.session ?? '').trim();
@@ -92,6 +94,7 @@ function normalizeTurn(item: TranscriptItem): TranscriptExportTurn {
     turn: Number(item.turn ?? 0) || 0,
     at: String(item.at ?? ''),
     ...(promptAt ? { promptAt } : {}),
+    ...(startedAt ? { startedAt } : {}),
     ...(completedAt ? { completedAt } : {}),
     ...(id ? { id } : {}),
     ...(session ? { session } : {}),
@@ -188,6 +191,7 @@ export function formatTranscriptMarkdown(args: {
   for (const turn of payload.turns) {
     lines.push('', `## Turn ${turn.turn}`, '');
     lines.push(`- Prompted: ${turn.promptAt || turn.at}`);
+    if (turn.startedAt) lines.push(`- Started: ${turn.startedAt}`);
     if (turn.completedAt) lines.push(`- Completed: ${turn.completedAt}`);
     lines.push(`- Agent status: ${turn.agent.status}`);
     lines.push('', '### User', '', markdownSectionBody(turn.user.text, 'No user text.'));

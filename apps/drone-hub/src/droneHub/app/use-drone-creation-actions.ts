@@ -48,6 +48,7 @@ export type CloneDroneResult = {
 
 export type StartDraftPromptOptions = {
   keepComposerOpen?: boolean;
+  deliveryMode?: 'queue' | 'asap';
 };
 
 type UseDroneCreationActionsArgs = {
@@ -358,6 +359,7 @@ export function useDroneCreationActions({
       autoRenamePrompt?: string;
       keepDraftComposerOpen?: boolean;
       submittedAt?: string;
+      deliveryMode?: 'queue' | 'asap';
     }): Promise<boolean> => {
       const latestDraftChat = draftChatRef.current;
       const pending = latestDraftChat?.prompt ?? null;
@@ -559,7 +561,7 @@ export function useDroneCreationActions({
               reasoning: seedReasoning,
               agentPermissionMode: seedAgentPermissionMode,
               approvalPolicy: seedApprovalPolicy,
-              prompt,
+            prompt,
               chatName: 'default',
               group,
               repoPath,
@@ -782,7 +784,8 @@ export function useDroneCreationActions({
         prompt,
         attachments,
         autoRename: !draftCreateName.trim(),
-        submittedAt: nextDraftChat.prompt?.at,
+          submittedAt: nextDraftChat.prompt?.at,
+          deliveryMode: opts?.deliveryMode,
       });
     },
     [

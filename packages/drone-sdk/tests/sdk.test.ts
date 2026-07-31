@@ -256,6 +256,58 @@ describe('drone-sdk core', () => {
     ]);
   });
 
+  test('reports daemon execution time separately from prompt submission time', async () => {
+    let completed = false;
+    const transport = hubTransport({
+      baseUrl: 'http://127.0.0.1:8787',
+      token: 'test-token',
+      fetch: (async (): Promise<Response> =>
+        new Response(
+          JSON.stringify(
+            completed
+              ? {
+                  id: 'drone-1',
+                  transcripts: [
+                    {
+                      id: 'run-1',
+                      at: '2026-07-20T09:00:00.000Z',
+                      promptAt: '2026-07-20T09:00:00.000Z',
+                      startedAt: '2026-07-20T10:00:00.000Z',
+                      completedAt: '2026-07-20T10:01:00.000Z',
+                      ok: true,
+                    },
+                  ],
+                  pending: [],
+                }
+              : {
+                  id: 'drone-1',
+                  transcripts: [],
+                  pending: [
+                    {
+                      id: 'run-1',
+                      at: '2026-07-20T09:00:00.000Z',
+                      startedAt: '2026-07-20T10:00:00.000Z',
+                      state: 'sent',
+                    },
+                  ],
+                },
+          ),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )) as typeof fetch,
+    });
+
+    expect(await transport.getRun('drone-1', 'default', 'run-1')).toMatchObject({
+      status: 'running',
+      startedAt: '2026-07-20T10:00:00.000Z',
+    });
+    completed = true;
+    expect(await transport.getRun('drone-1', 'default', 'run-1')).toMatchObject({
+      status: 'done',
+      startedAt: '2026-07-20T10:00:00.000Z',
+      finishedAt: '2026-07-20T10:01:00.000Z',
+    });
+  });
+
   test('sends agent permission mode through hub transport create requests', async () => {
     const requests: Array<{ pathname: string; body: any }> = [];
     const transport = hubTransport({

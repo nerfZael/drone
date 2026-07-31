@@ -579,7 +579,12 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
           droneId: String(state?.id ?? droneIdOrName),
           chatName,
           status: transcriptMatch?.ok === false ? 'failed' : 'done',
-          startedAt: typeof transcriptMatch?.promptAt === 'string' ? transcriptMatch.promptAt : transcriptMatch?.at,
+          startedAt:
+            typeof transcriptMatch?.startedAt === 'string'
+              ? transcriptMatch.startedAt
+              : typeof transcriptMatch?.promptAt === 'string'
+                ? transcriptMatch.promptAt
+                : transcriptMatch?.at,
           finishedAt:
             typeof transcriptMatch?.completedAt === 'string'
               ? transcriptMatch.completedAt
@@ -596,7 +601,8 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
           droneId: String(state?.id ?? droneIdOrName),
           chatName,
           status: normalizeRunStatus(pendingMatch?.state),
-          startedAt: typeof pendingMatch?.at === 'string' ? pendingMatch.at : undefined,
+          startedAt:
+            typeof pendingMatch?.startedAt === 'string' ? pendingMatch.startedAt : undefined,
           error: typeof pendingMatch?.error === 'string' ? pendingMatch.error : undefined,
         };
       }

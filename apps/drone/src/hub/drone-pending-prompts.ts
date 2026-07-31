@@ -48,6 +48,7 @@ export type PendingPrompt = {
   agentPlan?: AgentPlan;
   fileChangesBaseline?: AgentRunFileChangesBaseline;
   fileChanges?: AgentRunFileChanges;
+  startedAt?: string;
   updatedAt?: string;
 };
 
@@ -159,6 +160,10 @@ export function createDronePendingPromptStore(deps: {
           ...((p as any)?.fileChanges && typeof (p as any).fileChanges === 'object'
             ? { fileChanges: (p as any).fileChanges as AgentRunFileChanges }
             : {}),
+          startedAt:
+            typeof p?.startedAt === 'string' && Number.isFinite(Date.parse(p.startedAt))
+              ? p.startedAt
+              : undefined,
           updatedAt: typeof p?.updatedAt === 'string' ? p.updatedAt : undefined,
         }))
         .filter((p: PendingPrompt) => p.id && p.prompt.trim())
@@ -393,6 +398,7 @@ export function createDronePendingPromptStore(deps: {
         | 'agentPlan'
         | 'fileChangesBaseline'
         | 'fileChanges'
+        | 'startedAt'
         | 'updatedAt'
       >
     >;

@@ -745,8 +745,9 @@ describe('device mesh drone summaries', () => {
               {
                 id: 'prompt-2',
                 at: '2026-07-15T12:00:00.000Z',
+                startedAt: '2026-07-15T12:05:00.000Z',
                 prompt: 'Make a PR',
-                state: 'queued',
+                state: 'sent',
               },
             ],
           }
@@ -787,7 +788,14 @@ describe('device mesh drone summaries', () => {
       );
       await expect(readResult).resolves.toMatchObject({
         turns: [{ turn: 1, prompt: 'Review the code' }],
-        pending: [{ id: 'prompt-2', prompt: 'Make a PR', state: 'queued' }],
+        pending: [
+          {
+            id: 'prompt-2',
+            prompt: 'Make a PR',
+            state: 'sent',
+            startedAt: '2026-07-15T12:05:00.000Z',
+          },
+        ],
         readState: {
           unread: false,
           latestAgentTurnId: 'turn-1',

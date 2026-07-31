@@ -21,6 +21,7 @@ export type PromptQueueItem = {
   agentPlan?: unknown;
   fileChangesBaseline?: unknown;
   fileChanges?: unknown;
+  startedAt?: string;
   updatedAt?: string;
 };
 
@@ -616,6 +617,7 @@ export class PromptQueueRepository {
         | 'agentPlan'
         | 'fileChangesBaseline'
         | 'fileChanges'
+        | 'startedAt'
         | 'updatedAt'
       >
     >;

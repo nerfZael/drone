@@ -93,6 +93,16 @@ describe('chat api transcript equality', () => {
 
     expect(sameTranscriptItem(before, after)).toBe(false);
   });
+
+  test('detects an execution start correction', () => {
+    const before = transcriptItem({ promptAt: '2026-06-16T18:30:00.000Z' });
+    const after = transcriptItem({
+      promptAt: '2026-06-16T18:30:00.000Z',
+      startedAt: '2026-06-16T18:34:00.000Z',
+    });
+
+    expect(sameTranscriptItem(before, after)).toBe(false);
+  });
 });
 
 describe('chat api request scopes', () => {

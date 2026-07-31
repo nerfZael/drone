@@ -77,7 +77,10 @@ type DraftChatWorkspaceProps = {
   draftCreateError: string | null;
   queuedPromptsByDroneChat: Record<string, QueuedPrompt[]>;
   onCancel: () => void;
-  onStartDraftPrompt: (payload: ChatSendPayload, opts?: { keepComposerOpen?: boolean }) => Promise<boolean>;
+  onStartDraftPrompt: (
+    payload: ChatSendPayload,
+    opts?: { keepComposerOpen?: boolean; deliveryMode?: ChatSendContext['deliveryMode'] },
+  ) => Promise<boolean>;
   onQueueDraftPromptDuringCreate: (payload: ChatSendPayload) => boolean;
   onEnqueueQueuedPrompt: (
     droneId: string,
@@ -424,6 +427,7 @@ export function DraftChatWorkspace({
             return await onStartDraftPrompt(payload, {
               keepComposerOpen:
                 context.trigger === 'keyboard' && context.deliveryMode === 'queue',
+              deliveryMode: context.deliveryMode,
             });
           }
           const droneId = String(draftChat.droneId ?? '').trim();

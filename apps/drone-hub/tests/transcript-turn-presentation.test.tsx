@@ -44,6 +44,30 @@ describe('completed external transcript presentation', () => {
     expect(html).not.toContain('bottom-full left-0');
   });
 
+  test('excludes queue delay from completed run duration', () => {
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 2,
+          at: '2026-07-20T09:00:00.000Z',
+          promptAt: '2026-07-20T09:00:00.000Z',
+          startedAt: '2026-07-20T10:00:00.000Z',
+          completedAt: '2026-07-20T10:01:05.000Z',
+          prompt: 'Run after the queue clears.',
+          session: 'external-session',
+          logPath: '/tmp/external-session.log',
+          ok: true,
+          output: 'Done.',
+        }}
+        onSpawnDroneHubTask={async () => ({ ok: true })}
+        messageId="external-turn-queued"
+      />,
+    );
+
+    expect(html).toContain('Worked for 1m 5s');
+    expect(html).not.toContain('Worked for 1h');
+  });
+
   test('collapses completed reasoning and tool activity while keeping the final answer visible', () => {
     const html = renderToStaticMarkup(
       <TranscriptTurn

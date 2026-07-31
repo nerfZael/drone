@@ -122,7 +122,7 @@ function finishRun(
   >,
   active: boolean,
 ): MobileTranscriptRun {
-  let metadata: MobileTranscriptRunMetadata | undefined;
+  let metadata = metadataFromMessage(run.user.message);
   let durationMs = 0;
   let hasDuration = false;
   let projectedDurationMs: number | undefined;
@@ -152,7 +152,7 @@ function finishRun(
       : hasDuration
         ? { durationMs }
         : {}),
-    startedAt: metadata?.startedAt ?? itemTimestamp(run.user),
+    startedAt: metadata ? metadata.startedAt : itemTimestamp(run.user),
     completedAt:
       metadata?.completedAt ??
       (active

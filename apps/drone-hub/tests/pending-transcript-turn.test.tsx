@@ -6,9 +6,11 @@ import { PendingTranscriptTurn } from '../src/droneHub/chat/PendingTranscriptTur
 import type { PendingPrompt } from '../src/droneHub/types';
 
 function pendingPrompt(patch: Partial<PendingPrompt> = {}): PendingPrompt {
+  const at = new Date(Date.now() - 65_000).toISOString();
   return {
     id: 'pending-1',
-    at: new Date(Date.now() - 65_000).toISOString(),
+    at,
+    startedAt: at,
     prompt: 'Inspect the repository',
     state: 'sent',
     ...patch,
@@ -63,6 +65,34 @@ describe('external pending transcript turn', () => {
     expect(html).not.toContain('group-hover/pending-turn');
     expect(html).not.toContain('Working for');
     expect(html).not.toContain('animate-pulse-dot');
+  });
+
+  test('counts working time from daemon execution rather than the queued timestamp', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          at: new Date(Date.now() - 3_600_000).toISOString(),
+          startedAt: new Date(Date.now() - 65_000).toISOString(),
+        })}
+      />,
+    );
+
+    expect(html).toMatch(/Working for 1m \d+s/);
+    expect(html).not.toContain('Working for 1h');
+  });
+
+  test('does not count submission age before the daemon reports an execution start', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          at: new Date(Date.now() - 3_600_000).toISOString(),
+          startedAt: undefined,
+        })}
+      />,
+    );
+
+    expect(html).toContain('Working for 0s');
+    expect(html).not.toContain('Working for 1h');
   });
 
   test('shows live external reasoning and an in-progress tool call', () => {

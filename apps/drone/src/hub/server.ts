@@ -2436,6 +2436,7 @@ type TranscriptTurn = {
   output: string;
   error?: string;
   promptAt?: string;
+  startedAt?: string;
   completedAt?: string;
   attachments?: ChatImageAttachmentRef[];
   inheritedFromClone?: boolean;

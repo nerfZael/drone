@@ -807,5 +807,7 @@ setTimeout(() => {}, 30000);
     expect(terminal.state).toBe('failed');
     expect(terminal.exitStatusSource).toBe('missing-exit-file');
     expect(terminal.failureReason).toContain('without writing an exit code');
+    const heartbeatAt = String(fs.readFileSync(terminal.heartbeatPath, 'utf8')).trim();
+    expect(Math.abs(Date.parse(terminal.finishedAt) - Date.parse(heartbeatAt))).toBeLessThan(1_000);
   }, 25_000);
 });

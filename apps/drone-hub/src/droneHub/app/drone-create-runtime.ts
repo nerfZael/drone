@@ -128,6 +128,7 @@ type BuildDraftDroneCreatePayloadArgs = {
   agentsMd?: string;
   seedApprovalPolicy?: AgentApprovalPolicy;
   prompt?: string | null;
+  deliveryMode?: 'queue' | 'asap';
 };
 
 export function buildDraftDroneCreatePayload({
@@ -146,6 +147,7 @@ export function buildDraftDroneCreatePayload({
   agentsMd,
   seedApprovalPolicy,
   prompt,
+  deliveryMode,
 }: BuildDraftDroneCreatePayloadArgs) {
   const trimmedName = String(name ?? '').trim();
   const trimmedGroup = String(group ?? '').trim();
@@ -178,6 +180,7 @@ export function buildDraftDroneCreatePayload({
       ? { seedAgentPermissionMode }
       : {}),
     ...(seedApprovalPolicy && seedApprovalPolicy !== 'ask' ? { seedApprovalPolicy } : {}),
+    ...(trimmedPrompt && deliveryMode ? { deliveryMode } : {}),
     ...(trimmedPrompt ? { seedPrompt: trimmedPrompt } : {}),
     ...(trimmedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),
   };

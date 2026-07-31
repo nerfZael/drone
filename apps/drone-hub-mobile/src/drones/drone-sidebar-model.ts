@@ -57,6 +57,7 @@ export type MobileDroneTurn = {
   turn: number | null;
   at: string;
   promptAt: string;
+  startedAt: string;
   completedAt: string;
   prompt: string;
   output: string;
@@ -679,7 +680,7 @@ export function mobileDroneTurnsToAssistantMessages(
     if (activity) {
       const runDetails = mobileRunDetails({
         id: turn.id,
-        startedAt: turn.promptAt || turn.at,
+        startedAt: turn.startedAt,
         completedAt: turn.completedAt || turn.at,
         plan: turn.agentPlan,
       });
@@ -748,6 +749,7 @@ export function mobileDroneTurnsToAssistantMessages(
         return [];
       }
       const at = String(item?.at ?? '').trim();
+      const startedAt = String(item?.startedAt ?? '').trim();
       const updatedAt = String(item?.updatedAt ?? at);
       const stopped = state === 'failed' && isStoppedRunError(item?.error);
       const displayedActivity =
@@ -755,7 +757,7 @@ export function mobileDroneTurnsToAssistantMessages(
       const plan = normalizeAgentPlan(item?.agentPlan);
       const runDetails = mobileRunDetails({
         id,
-        startedAt: at,
+        ...(startedAt ? { startedAt } : {}),
         ...(state === 'failed' ? { completedAt: updatedAt } : {}),
         plan,
       });
@@ -860,6 +862,7 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
     const turn = item as Record<string, unknown>;
     const turnNumber = Number(turn.turn);
     const at = text(turn.at);
+    const promptAt = text(turn.promptAt) || at;
     const agentPlan = normalizeAgentPlan(turn.agentPlan);
     const activity = settleAgentRunActivity(turn.activity);
     const fileChanges =
@@ -879,7 +882,8 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
         id: text(turn.id) || `turn-${Number.isFinite(turnNumber) ? turnNumber : index}`,
         turn: Number.isFinite(turnNumber) ? turnNumber : null,
         at,
-        promptAt: text(turn.promptAt) || at,
+        promptAt,
+        startedAt: text(turn.startedAt) || promptAt,
         completedAt: text(turn.completedAt) || at,
         prompt: text(turn.prompt),
         output: text(turn.output),

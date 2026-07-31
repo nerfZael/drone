@@ -12,6 +12,7 @@ const sampleTurns: TranscriptItem[] = [
     turn: 1,
     at: '2026-04-12T09:00:00.000Z',
     promptAt: '2026-04-12T09:00:00.000Z',
+    startedAt: '2026-04-12T09:00:02.000Z',
     completedAt: '2026-04-12T09:00:05.000Z',
     id: 'turn-1',
     prompt: 'Review the current repo state.',
@@ -56,6 +57,7 @@ describe('transcript export', () => {
     expect(payload.turns).toHaveLength(2);
     expect(payload.turns[0]?.user.role).toBe('user');
     expect(payload.turns[0]?.agent.role).toBe('agent');
+    expect(payload.turns[0]?.startedAt).toBe('2026-04-12T09:00:02.000Z');
     expect(payload.turns[0]?.user.attachments[0]?.relativePath).toBe('.drone-hub/attachments/screenshot.png');
     expect(payload.turns[1]?.agent.status).toBe('error');
     expect(payload.turns[1]?.agent.text).toBe('failed to connect');
@@ -74,6 +76,7 @@ describe('transcript export', () => {
     expect(markdown).toContain('# Drone Transcript');
     expect(markdown).toContain('- Drone: Alpha Drone');
     expect(markdown).toContain('## Turn 1');
+    expect(markdown).toContain('- Started: 2026-04-12T09:00:02.000Z');
     expect(markdown).toContain('### User');
     expect(markdown).toContain('#### Attachments');
     expect(markdown).toContain('- screenshot.png (image/png, 1.50 KB, .drone-hub/attachments/screenshot.png)');

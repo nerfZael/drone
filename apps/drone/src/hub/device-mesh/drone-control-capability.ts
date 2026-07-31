@@ -69,12 +69,14 @@ function compactPendingPrompts(value: unknown): any[] {
   const errorLimit = Math.max(80, Math.floor(4_000 / Math.max(1, prompts.length)));
   return prompts.map((prompt: any) => {
     const attachments = Array.isArray(prompt?.attachments) ? prompt.attachments : [];
+    const startedAt = optionalText(prompt?.startedAt);
     const compactedActivity = compactAgentRunActivityForMesh(prompt?.activity);
     const agentPlan = compactAgentPlanForMesh(prompt?.agentPlan);
     const fileChanges = compactAgentRunFileChangesForMesh(prompt?.fileChanges);
     return {
       id: String(prompt?.id ?? '').slice(0, 160),
       at: String(prompt?.at ?? ''),
+      ...(startedAt ? { startedAt } : {}),
       prompt: truncateUtf8(prompt?.prompt, promptLimit),
       state: normalizePendingPromptState(prompt?.state, 'queued'),
       ...(prompt?.error ? { error: truncateUtf8(prompt.error, errorLimit) } : {}),

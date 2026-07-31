@@ -769,6 +769,7 @@ describe('mobile drone sidebar model', () => {
         {
           id: 'pending-activity',
           at: '2026-07-24T00:00:00.000Z',
+          startedAt: '2026-07-24T00:00:30.000Z',
           prompt: 'Implement it',
           state: 'sent',
           agentPlan: {
@@ -797,6 +798,7 @@ describe('mobile drone sidebar model', () => {
       role: 'user',
       details: {
         mobileRun: {
+          startedAt: '2026-07-24T00:00:30.000Z',
           plan: { items: [{ text: 'Implement', status: 'in_progress' }] },
         },
       },
@@ -819,6 +821,7 @@ describe('mobile drone sidebar model', () => {
         {
           id: 'failed-activity',
           at: '2026-07-24T00:00:00.000Z',
+          startedAt: '2026-07-24T00:00:30.000Z',
           updatedAt: '2026-07-24T00:00:02.000Z',
           prompt: 'Implement it',
           state: 'failed',
@@ -843,7 +846,7 @@ describe('mobile drone sidebar model', () => {
       role: 'user',
       details: {
         mobileRun: {
-          startedAt: '2026-07-24T00:00:00.000Z',
+          startedAt: '2026-07-24T00:00:30.000Z',
           completedAt: '2026-07-24T00:00:02.000Z',
         },
       },

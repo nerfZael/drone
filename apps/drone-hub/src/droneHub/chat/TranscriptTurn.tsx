@@ -106,8 +106,9 @@ export const TranscriptTurn = React.memo(
       [cleanedAgentMessage, droneHomePath, droneId],
     );
     const promptIso = item.promptAt || item.at;
+    const runStartedIso = item.startedAt || promptIso;
     const agentIso = item.completedAt || item.at;
-    const promptStartedAtMs = Date.parse(String(promptIso ?? ''));
+    const promptStartedAtMs = Date.parse(String(runStartedIso ?? ''));
     const agentCompletedAtMs = Date.parse(String(item.completedAt ?? ''));
     const completedRunDurationMs =
       Number.isFinite(promptStartedAtMs) &&
@@ -158,7 +159,7 @@ export const TranscriptTurn = React.memo(
         {activity ? (
           <AgentRunActivityView
             activity={activity}
-            startedAt={promptIso}
+            startedAt={runStartedIso}
             endedAt={agentIso}
             at={agentIso}
             autoExpandFinalMessage={autoExpandAgentMessage}

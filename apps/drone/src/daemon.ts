@@ -525,6 +525,40 @@ async function promptHeartbeatAgeMs(job: PromptJob, nowMs = Date.now()): Promise
   }
 }
 
+async function promptHeartbeatAt(job: PromptJob, nowMs = Date.now()): Promise<string | undefined> {
+  const heartbeatPath =
+    job.heartbeatPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.heartbeat`);
+  try {
+    const raw = String(await fs.readFile(heartbeatPath, 'utf8')).trim();
+    const heartbeatMs = parseIsoLikeMs(raw);
+    const startedMs = parseIsoLikeMs(job.startedAt);
+    if (
+      heartbeatMs != null &&
+      heartbeatMs <= nowMs &&
+      (startedMs == null || heartbeatMs >= startedMs)
+    ) {
+      return raw;
+    }
+  } catch {
+    // Fall through to the file timestamp for older wrappers without content.
+  }
+  try {
+    const stat = await fs.stat(heartbeatPath);
+    const heartbeatMs = Number(stat.mtimeMs);
+    const startedMs = parseIsoLikeMs(job.startedAt);
+    if (
+      Number.isFinite(heartbeatMs) &&
+      heartbeatMs <= nowMs &&
+      (startedMs == null || heartbeatMs >= startedMs)
+    ) {
+      return new Date(heartbeatMs).toISOString();
+    }
+  } catch {
+    // A missing heartbeat leaves finalization on its existing detection-time fallback.
+  }
+  return undefined;
+}
+
 function transcriptTerminalStatusFromJsonl(
   kind: string,
   raw: string,
@@ -567,7 +601,7 @@ async function promptTranscriptTerminalStatus(
 
 async function finalizePromptJob(
   job: PromptJob,
-  opts?: { allowTerminalSuccess?: boolean; settleMs?: number },
+  opts?: { allowTerminalSuccess?: boolean; settleMs?: number; finishedAt?: string },
 ): Promise<PromptJob> {
   // Some CLIs (notably Codex JSON mode) may continue appending output briefly
   // after the tmux session has exited. Wait for output/exit artifacts to settle.
@@ -652,7 +686,17 @@ async function finalizePromptJob(
       ? ((await promptTranscriptTerminalStatus(job)) ?? job.terminalObservedStatus ?? null)
       : null;
   const ok = exitCode === 0 || (exitCode == null && terminalStatus === 'success');
-  const finishedAt = nowIso();
+  const detectedFinishedAt = nowIso();
+  const detectedFinishedMs = Date.parse(detectedFinishedAt);
+  const requestedFinishedAt = String(opts?.finishedAt ?? '').trim();
+  const requestedFinishedMs = parseIsoLikeMs(requestedFinishedAt);
+  const startedMs = parseIsoLikeMs(job.startedAt);
+  const finishedAt =
+    requestedFinishedMs != null &&
+    requestedFinishedMs <= detectedFinishedMs &&
+    (startedMs == null || requestedFinishedMs >= startedMs)
+      ? requestedFinishedAt
+      : detectedFinishedAt;
   const transcript = await parsePromptJobTranscriptFromFile(job, stdoutRead, finishedAt);
   const diagnostics = buildPromptJobDiagnostics({ ...job, finishedAt }, transcript, wrapperLog);
   const exitStatusSource =
@@ -1011,9 +1055,17 @@ async function advanceRunningPromptJob(job: PromptJob): Promise<PromptJob> {
       `prompt session confirmed missing for ${job.id} after ${consecutiveMissing} probes` +
         (probe.error ? `: ${probe.error}` : ''),
     );
+    // The heartbeat is written while the wrapper is actually alive. If the machine was off
+    // between its last heartbeat and this recovery probe, using detection time would count that
+    // downtime as agent runtime.
+    const lastHeartbeatAt = await promptHeartbeatAt(job, nowMs);
     const next = await finalizePromptJob(
       { ...job, sessionProbe: nextProbe, terminalObservedAt, terminalObservedStatus },
-      { allowTerminalSuccess: true, settleMs: 2_000 },
+      {
+        allowTerminalSuccess: true,
+        settleMs: 2_000,
+        ...(lastHeartbeatAt ? { finishedAt: lastHeartbeatAt } : {}),
+      },
     );
     await cleanupPromptSession(job);
     return next;

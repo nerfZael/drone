@@ -554,6 +554,7 @@ export type TranscriptItem = {
   turn: number;
   at: string;
   promptAt?: string;
+  startedAt?: string;
   completedAt?: string;
   id?: string;
   prompt: string;
@@ -614,6 +615,7 @@ export type PendingPrompt = {
   activity?: AgentRunActivity;
   agentPlan?: AgentPlan;
   fileChanges?: AgentRunFileChanges;
+  startedAt?: string;
   updatedAt?: string;
 };
 

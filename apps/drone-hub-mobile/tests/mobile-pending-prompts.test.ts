@@ -54,6 +54,7 @@ describe('mobile drone pending prompts', () => {
           {
             id: 'pending-1',
             at: '2026-07-20T10:00:00.000Z',
+            startedAt: '2026-07-20T10:05:00.000Z',
             state: 'sent',
             prompt: 'Implement it',
             agentPlan: {
@@ -65,7 +66,7 @@ describe('mobile drone pending prompts', () => {
         [],
       )[0],
     ).toMatchObject({
-      startedAt: '2026-07-20T10:00:00.000Z',
+      startedAt: '2026-07-20T10:05:00.000Z',
       agentPlan: { items: [{ text: 'Edit mobile UI', status: 'in_progress' }] },
     });
   });
@@ -110,9 +111,9 @@ describe('mobile drone pending prompts', () => {
     const messages = mobileDroneTurnsToAssistantMessages([], pending);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toMatchObject({ role: 'user', content: 'Implement it' });
-    expect(
-      groupMobileTranscriptRuns(renderItemsFromMessages(messages), { running: true }),
-    ).toMatchObject([{ type: 'run', active: true }]);
+    const groups = groupMobileTranscriptRuns(renderItemsFromMessages(messages), { running: true });
+    expect(groups).toMatchObject([{ type: 'run', active: true }]);
+    expect(groups[0]?.type === 'run' ? groups[0].startedAt : null).toBeUndefined();
   });
 
   test('uses the confirmed queued state instead of displaying a follow-up as active', () => {
