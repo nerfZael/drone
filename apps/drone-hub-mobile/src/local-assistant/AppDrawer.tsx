@@ -1700,7 +1700,7 @@ const styles = StyleSheet.create({
   switchItemContextBadge: {
     maxWidth: 96,
     flexShrink: 1,
-    color: colors.mutedDim,
+    color: colors.textSecondary,
     fontSize: 8,
     fontWeight: '600',
     lineHeight: 10,
@@ -1709,9 +1709,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 2,
     borderWidth: 1,
-    borderColor: colors.borderSubtle,
+    borderColor: colors.border,
     borderRadius: 3,
-    backgroundColor: colors.whiteWashSoft,
+    backgroundColor: colors.panelRaised,
   },
   switchItemStatus: {
     width: DRAWER_TREE_LEADING_SLOT_WIDTH,

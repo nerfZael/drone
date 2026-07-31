@@ -262,6 +262,10 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('<Pin color={colors.mutedDim} size={14} strokeWidth={1.7} />');
     expect(drawerSource).toContain("fontSize: 10.5,\n    fontWeight: '400',");
     expect(drawerSource).toContain('<Text numberOfLines={1} style={styles.switchItemContextBadge}>');
+    expect(drawerSource).toContain('switchItemContextBadge: {\n    maxWidth: 96,');
+    expect(drawerSource).toContain('color: colors.textSecondary,');
+    expect(drawerSource).toContain('borderColor: colors.border,');
+    expect(drawerSource).toContain('backgroundColor: colors.panelRaised,');
     expect(drawerSource).not.toContain('styles.pinnedCount');
     expect(drawerSource).not.toContain('<Text style={styles.pinnedCount}>{drones.length}</Text>');
     expect(drawerSource).not.toContain('accessibilityLabel={pinned ? `Unpin ${drone.name}`');
