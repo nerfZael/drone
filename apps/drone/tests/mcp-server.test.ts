@@ -190,6 +190,179 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('keeps same-named repository groups isolated across MCP list, create, move, and reorder tools', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-groups-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const repoA = '/repo/a';
+      const repoB = '/repo/b';
+      const groups = [
+        { id: 'grp_repo_a', repoPath: repoA, name: 'review', label: 'review', parentId: null, totalCount: 1 },
+        { id: 'grp_repo_b', repoPath: repoB, name: 'review', label: 'review', parentId: null, totalCount: 2 },
+      ];
+      const drones = [
+        { id: 'a-1', name: 'A 1', repoPath: repoA, group: 'review', groupId: 'grp_repo_a' },
+        { id: 'b-1', name: 'B 1', repoPath: repoB, group: 'review', groupId: 'grp_repo_b' },
+        { id: 'b-2', name: 'B 2', repoPath: repoB, group: 'review', groupId: 'grp_repo_b' },
+        { id: 'b-3', name: 'B 3', repoPath: repoB, group: null, groupId: null },
+      ];
+      let uiPreferences: any = {
+        sidebarGroupingMode: 'groups',
+        sidebarGroupOrder: ['group-id:grp_repo_a', 'group-id:grp_repo_b'],
+        sidebarDroneOrderByGroup: {
+          'group-id:grp_repo_a': ['a-1'],
+          'group-id:grp_repo_b': ['b-1', 'b-2'],
+        },
+        sidebarNodeOrderByParent: {
+          'folder:review': ['drone:a-1', 'drone:b-1', 'drone:b-2'],
+        },
+      };
+      const requests: Array<{ pathname: string; search: string; method: string; body?: any }> = [];
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+        const method = String(init?.method ?? 'GET').toUpperCase();
+        const body = method !== 'GET' && typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+        requests.push({ pathname: url.pathname, search: url.search, method, ...(body === undefined ? {} : { body }) });
+        if (url.pathname === '/api/drones/summary' && method === 'GET') {
+          return Response.json({ ok: true, drones });
+        }
+        if (url.pathname === '/api/groups' && method === 'GET') {
+          const repoPath = url.searchParams.has('repoPath') ? url.searchParams.get('repoPath') : null;
+          const visible = repoPath == null ? groups : groups.filter((group) => group.repoPath === repoPath);
+          return Response.json({ ok: true, groups: visible, total: visible.length });
+        }
+        if (url.pathname === '/api/groups' && method === 'POST') {
+          const created = {
+            id: 'grp_new_a',
+            repoPath: body.repoPath,
+            name: body.name,
+            label: body.name,
+            parentId: null,
+            createdAt: '2026-07-31T12:00:00.000Z',
+            totalCount: 0,
+          };
+          groups.push(created);
+          return Response.json({ ok: true, ...created }, { status: 201 });
+        }
+        if (url.pathname === '/api/drones/group-set' && method === 'POST') {
+          const target = drones.find((drone) => drone.id === body.droneIds?.[0]);
+          if (target) {
+            target.group = 'review';
+            target.groupId = body.groupId;
+          }
+          return Response.json({
+            ok: true,
+            group: 'review',
+            moved: target ? [{ id: target.id, name: target.name, previousGroup: null, group: 'review' }] : [],
+            rejected: [],
+            total: 1,
+          });
+        }
+        if (url.pathname === '/api/settings/ui-preferences' && method === 'GET') {
+          return Response.json({ ok: true, uiPreferences });
+        }
+        if (url.pathname === '/api/settings/ui-preferences' && method === 'POST') {
+          uiPreferences = body.uiPreferences;
+          return Response.json({ ok: true, uiPreferences });
+        }
+        return Response.json({ ok: false, error: `unexpected request: ${method} ${url.pathname}${url.search}` }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'assistant-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'thread-repo-groups',
+          allowedDroneRefs: drones.flatMap((drone) => [drone.id, drone.name]),
+          allowedWriteDroneRefs: drones.flatMap((drone) => [drone.id, drone.name]),
+          allowedDroneIds: drones.map((drone) => drone.id),
+        });
+
+        const listed = await client.callTool({ name: 'list_groups', arguments: { repoPath: repoA } });
+        expect(listed.structuredContent).toMatchObject({
+          ok: true,
+          total: 1,
+          groups: [{ id: 'grp_repo_a', repoPath: repoA, name: 'review' }],
+        });
+        expect(requests.some((request) => request.method === 'GET' && request.search === '?repoPath=%2Frepo%2Fa')).toBe(true);
+
+        const listedDrones = await client.callTool({
+          name: 'list_drones',
+          arguments: { repoPath: repoA, group: 'review' },
+        });
+        expect(listedDrones.structuredContent).toMatchObject({
+          count: 1,
+          drones: [{ id: 'a-1', repoPath: repoA, group: 'review', groupId: 'grp_repo_a' }],
+        });
+
+        const created = await client.callTool({
+          name: 'create_group',
+          arguments: { repoPath: repoA, name: 'ready' },
+        });
+        expect(created.structuredContent).toMatchObject({
+          ok: true,
+          id: 'grp_new_a',
+          repoPath: repoA,
+          name: 'ready',
+          groupOrder: { updated: true },
+        });
+        expect(uiPreferences.sidebarGroupOrder).toEqual([
+          'group-id:grp_new_a',
+          'group-id:grp_repo_a',
+          'group-id:grp_repo_b',
+        ]);
+        const createRequest = requests.find((request) => request.pathname === '/api/groups' && request.method === 'POST');
+        expect(createRequest?.body).toEqual({ name: 'ready', repoPath: repoA });
+
+        const moved = await client.callTool({
+          name: 'set_drone_group',
+          arguments: { drone: 'b-3', groupId: 'grp_repo_b' },
+        });
+        expect(moved.isError).not.toBe(true);
+        const moveRequest = requests.find((request) => request.pathname === '/api/drones/group-set');
+        expect(moveRequest?.body).toEqual({ droneIds: ['b-3'], groupId: 'grp_repo_b' });
+
+        const groupSetRequestCount = requests.filter((request) => request.pathname === '/api/drones/group-set').length;
+        const crossRepoMove = await client.callTool({
+          name: 'set_drone_group',
+          arguments: { drone: 'a-1', groupId: 'grp_repo_b' },
+        });
+        expect(crossRepoMove.isError).toBe(true);
+        expect(JSON.stringify(crossRepoMove.content)).toContain('different repository');
+        expect(requests.filter((request) => request.pathname === '/api/drones/group-set')).toHaveLength(groupSetRequestCount);
+
+        const reordered = await client.callTool({
+          name: 'reorder_drones',
+          arguments: { drones: ['b-2'], groupId: 'grp_repo_b', beforeDrone: 'b-1' },
+        });
+        expect(reordered.structuredContent).toMatchObject({
+          ok: true,
+          repoPath: repoB,
+          group: 'review',
+          groupId: 'grp_repo_b',
+          sidebarDroneOrder: ['b-2', 'b-1', 'b-3'],
+        });
+        expect(uiPreferences.sidebarDroneOrderByGroup['group-id:grp_repo_b']).toEqual(['b-2', 'b-1', 'b-3']);
+        expect(uiPreferences.sidebarDroneOrderByGroup['group-id:grp_repo_a']).toEqual(['a-1']);
+        expect(uiPreferences.sidebarDroneOrderByGroup['group:review']).toBeUndefined();
+        expect(uiPreferences.sidebarNodeOrderByParent['folder:review']).toEqual([
+          'drone:b-2',
+          'drone:b-1',
+          'drone:b-3',
+          'drone:a-1',
+        ]);
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
   test('returns draft drone creation immediately without polling for readiness', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-draft-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;

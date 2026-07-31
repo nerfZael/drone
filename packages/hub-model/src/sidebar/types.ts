@@ -4,12 +4,14 @@ export type SidebarTreeDrone = {
   id: string;
   name: string;
   group?: string | null;
+  groupId?: string | null;
   repoPath?: string | null;
   fleetParentId?: string | null;
   createdAt?: string | null;
 };
 
 export type SidebarTreeGroup<TDrone extends SidebarTreeDrone = SidebarTreeDrone> = {
+  groupId?: string | null;
   group: string;
   label: string;
   kind: SidebarTreeGroupKind;
@@ -17,6 +19,7 @@ export type SidebarTreeGroup<TDrone extends SidebarTreeDrone = SidebarTreeDrone>
 };
 
 export type SidebarFolderNode<TDrone extends SidebarTreeDrone = SidebarTreeDrone> = {
+  groupId?: string | null;
   path: string;
   label: string;
   name: string;
@@ -40,6 +43,7 @@ export type SidebarTreeFolderNode = {
   kind: 'folder';
   path: string;
   groupPath: string | null;
+  groupId?: string | null;
   repoGroupPath: string | null;
   label: string;
   groupKind: SidebarTreeGroupKind;
@@ -76,6 +80,7 @@ export type BuildSidebarNodeTreeArgs<TDrone extends SidebarTreeDrone> = {
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarGroupCreatedAtByName?: Record<string, string | null>;
+  sidebarGroupIdByName?: Record<string, string>;
 };
 
 export type BuildRepoSidebarGroupsArgs<TDrone extends SidebarTreeDrone> = {
@@ -91,6 +96,7 @@ export type BuildRepoSidebarModelArgs<TDrone extends SidebarTreeDrone> =
   BuildRepoSidebarGroupsArgs<TDrone> & {
     sidebarNodeOrderByParent: Record<string, string[]>;
     sidebarGroupCreatedAtByName?: Record<string, string | null>;
+    sidebarGroupIdByName?: Record<string, string>;
     repoScopedGroupPathsByRepoGroup?: Record<string, string[]>;
   };
 

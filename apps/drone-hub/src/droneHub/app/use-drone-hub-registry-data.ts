@@ -102,6 +102,7 @@ function sameDroneSummary(left: DroneSummary, right: DroneSummary): boolean {
     left.id === right.id &&
     left.name === right.name &&
     sameOptionalText(left.group, right.group) &&
+    sameOptionalText(left.groupId, right.groupId) &&
     left.createdAt === right.createdAt &&
     sameOptionalText(left.lastActivityAt, right.lastActivityAt) &&
     sameOptionalText(left.lastMessageAt, right.lastMessageAt) &&
@@ -343,7 +344,10 @@ function sameGroupsResponse(
   const rightGroups = Array.isArray(right?.groups) ? right.groups : [];
   if (leftGroups.length !== rightGroups.length) return false;
   for (let i = 0; i < leftGroups.length; i++) {
+    if (String(leftGroups[i]?.id ?? '') !== String(rightGroups[i]?.id ?? '')) return false;
+    if (String(leftGroups[i]?.repoPath ?? '') !== String(rightGroups[i]?.repoPath ?? '')) return false;
     if (String(leftGroups[i]?.name ?? '') !== String(rightGroups[i]?.name ?? '')) return false;
+    if (String(leftGroups[i]?.parentId ?? '') !== String(rightGroups[i]?.parentId ?? '')) return false;
     if (!sameOptionalText(leftGroups[i]?.createdAt, rightGroups[i]?.createdAt)) return false;
   }
   return true;
@@ -432,23 +436,35 @@ export function useDroneHubRegistryData({
   const registryGroupNames = React.useMemo(() => {
     const out = new Set<string>();
     for (const g of groupsResp?.groups ?? []) {
+      if (String(g?.repoPath ?? '').trim() !== String(activeRepoPath ?? '').trim()) continue;
       const name = String((g as any)?.name ?? '').trim();
       if (!name) continue;
       if (isUngroupedGroupName(name)) continue;
       out.add(name);
     }
     return Array.from(out.values()).sort((a, b) => a.localeCompare(b));
-  }, [groupsResp]);
+  }, [activeRepoPath, groupsResp]);
   const registryGroupCreatedAtByName = React.useMemo(() => {
     const out: Record<string, string | null> = {};
     for (const group of groupsResp?.groups ?? []) {
+      if (String(group?.repoPath ?? '').trim() !== String(activeRepoPath ?? '').trim()) continue;
       const name = String(group?.name ?? '').trim();
       if (!name || isUngroupedGroupName(name)) continue;
       const createdAt = String(group?.createdAt ?? '').trim();
       out[name] = createdAt || null;
     }
     return out;
-  }, [groupsResp]);
+  }, [activeRepoPath, groupsResp]);
+  const registryGroupIdByName = React.useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const group of groupsResp?.groups ?? []) {
+      if (String(group?.repoPath ?? '').trim() !== String(activeRepoPath ?? '').trim()) continue;
+      const id = String(group?.id ?? '').trim();
+      const name = String(group?.name ?? '').trim();
+      if (id && name && !isUngroupedGroupName(name)) out[name] = id;
+    }
+    return out;
+  }, [activeRepoPath, groupsResp]);
 
   React.useEffect(() => {
     if (!activeRepoPath) return;
@@ -532,6 +548,7 @@ export function useDroneHubRegistryData({
     registeredRepoPathSet,
     registryGroupNames,
     registryGroupCreatedAtByName,
+    registryGroupIdByName,
     dronesFilteredByRepo,
     dronesFilteredByRepoIdSet,
     sidebarDronesFilteredByRepoBase,

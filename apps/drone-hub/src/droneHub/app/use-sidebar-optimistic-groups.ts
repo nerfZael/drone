@@ -5,6 +5,8 @@ import type { MoveDronesToGroupResult } from './use-group-management';
 import {
   insertSidebarGroupOrderToken,
   mergeVisibleSidebarGroupOrder,
+  migrateSidebarGroupEntryOrderMapToIds,
+  migrateSidebarGroupOrderToIds,
   removeSidebarGroupOrderToken,
   renameSidebarEntryOrderMapKeysByPrefix,
   renameSidebarGroupTokenListByPrefix,
@@ -127,15 +129,25 @@ export function useSidebarOptimisticGroups({
       const hiddenSnapshot = hiddenSidebarGroups;
       const droneOrderSnapshot = sidebarDroneOrderByGroup;
       const nodeOrderSnapshot = sidebarNodeOrderByParent;
-      const stabilizedGroupOrder = mergeVisibleSidebarGroupOrder(sidebarGroupOrder, sidebarGroups);
+      const renamedGroup = sidebarGroups.find(
+        (entry) => entry.kind === 'group' && String(entry.group ?? '').trim() === group,
+      );
+      const groupId = String(renamedGroup?.groupId ?? '').trim() || null;
+      const groupIdByName = groupId ? { [group]: groupId } : {};
+      const currentRef = { groupId, group, kind: 'group' as const };
+      const nextRef = { groupId, group: nextName, kind: 'group' as const };
+      const stabilizedGroupOrder = migrateSidebarGroupOrderToIds(
+        mergeVisibleSidebarGroupOrder(sidebarGroupOrder, sidebarGroups),
+        groupIdByName,
+      );
       const stabilizedNodeOrder = mergeVisibleSidebarNodeOrderByParent(sidebarNodeOrderByParent, visibleNodeOrderByParent);
 
       setCollapsedGroups((prev) => renameCollapsedGroupKeysByPrefix(prev, group, nextName));
       setSidebarGroupOrder(() =>
         renameSidebarGroupTokenListByPrefix(
           stabilizedGroupOrder,
-          { group, kind: 'group' },
-          { group: nextName, kind: 'group' },
+          currentRef,
+          nextRef,
         ),
       );
       setHiddenSidebarGroups((prev) =>
@@ -147,9 +159,9 @@ export function useSidebarOptimisticGroups({
       );
       setSidebarDroneOrderByGroup((prev) =>
         renameSidebarEntryOrderMapKeysByPrefix(
-          prev,
-          { group, kind: 'group' },
-          { group: nextName, kind: 'group' },
+          migrateSidebarGroupEntryOrderMapToIds(prev, groupIdByName),
+          currentRef,
+          nextRef,
         ),
       );
       if (!opts?.skipNodeOrderUpdate) {

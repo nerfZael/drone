@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   insertSidebarGroupOrderToken,
+  migrateSidebarGroupEntryOrderMapToIds,
+  migrateSidebarGroupOrderToIds,
   mergeVisibleSidebarGroupOrder,
   orderSidebarEntries,
   orderSidebarGroups,
@@ -13,6 +15,34 @@ import {
 } from '../src/droneHub/app/sidebar-group-order';
 
 describe('sidebar-group-order', () => {
+  test('migrates persisted name keys to immutable group ids without changing order', () => {
+    const ids = { Alpha: 'grp_alpha', Beta: 'grp_beta' };
+    expect(migrateSidebarGroupOrderToIds(
+      ['group:Beta', 'repo:repo:/work/a', 'group:Alpha'],
+      ids,
+    )).toEqual(['group-id:grp_beta', 'repo:repo:/work/a', 'group-id:grp_alpha']);
+    expect(migrateSidebarGroupEntryOrderMapToIds({
+      'group:Alpha': ['drone-b', 'drone-a'],
+      'group-id:grp_beta': ['drone-c'],
+    }, ids)).toEqual({
+      'group-id:grp_alpha': ['drone-b', 'drone-a'],
+      'group-id:grp_beta': ['drone-c'],
+    });
+  });
+
+  test('keeps a stable group order token unchanged when its display name changes', () => {
+    expect(sidebarGroupOrderToken({ groupId: 'grp_alpha', group: 'Alpha', kind: 'group' }))
+      .toBe(sidebarGroupOrderToken({ groupId: 'grp_alpha', group: 'Renamed', kind: 'group' }));
+  });
+
+  test('keeps same-name repository groups independent through their ids', () => {
+    const repoA = { groupId: 'grp_repo_a', group: 'Review', kind: 'group' as const };
+    const repoB = { groupId: 'grp_repo_b', group: 'Review', kind: 'group' as const };
+    expect(sidebarGroupOrderToken(repoA)).not.toBe(sidebarGroupOrderToken(repoB));
+    expect(orderSidebarGroups([repoA, repoB], [sidebarGroupOrderToken(repoB)]))
+      .toEqual([repoB, repoA]);
+  });
+
   test('applies persisted order before fallback input order', () => {
     const groups = [
       { group: 'Ungrouped', kind: 'group' as const },

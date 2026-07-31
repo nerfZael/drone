@@ -24,6 +24,7 @@ export function buildRepoSidebarModel<TDrone extends SidebarTreeDrone>(
     sidebarDroneOrderByGroup: args.sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent: args.sidebarNodeOrderByParent,
     sidebarGroupCreatedAtByName: args.sidebarGroupCreatedAtByName,
+    sidebarGroupIdByName: args.sidebarGroupIdByName,
   });
   return { groups, nodeTree };
 }

@@ -64,4 +64,34 @@ describe('assistant approval card', () => {
     expect(html).toContain('Review the complete request on its home device.');
     expect(html.match(/disabled=""/g)?.length).toBe(1);
   });
+
+  test('shows canonical repository group identity for group moves', () => {
+    const html = renderToStaticMarkup(
+      <ApprovalCard
+        approval={{
+          ...bashApproval,
+          id: 'approval-group',
+          toolName: 'set_drone_group',
+          label: 'Set drone group',
+          args: {
+            resolved: {
+              drones: [{ id: 'drone-a', name: 'Reviewer' }],
+              group: 'review',
+              groupId: 'grp_repo_a',
+              repoPath: '/repo/a',
+            },
+          },
+        }}
+        busy={false}
+        onApprove={() => {}}
+        onDeny={() => {}}
+      />,
+    );
+
+    expect(html).toContain('Reviewer');
+    expect(html).toContain('review');
+    expect(html).toContain('Group ID');
+    expect(html).toContain('grp_repo_a');
+    expect(html).toContain('/repo/a');
+  });
 });

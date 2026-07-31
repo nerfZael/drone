@@ -18,6 +18,7 @@ type DroneProvisioningDependencyName =
   | 'droneRegistrySseClients'
   | 'enqueueProvisioning'
   | 'ensureCanonicalGroup'
+  | 'resolveCanonicalGroupReference'
   | 'fileExists'
   | 'findDroneEntryByIdentity'
   | 'findDroneIdByRef'

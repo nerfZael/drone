@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 import {
   applyHubDatabaseMigrations,
   requireHubDatabase,
@@ -110,6 +112,184 @@ const CATALOG_MIGRATIONS: readonly HubDatabaseMigration[] = [
       connection.prepare("DELETE FROM catalog_backfills WHERE domain = 'playbooks'").run();
     },
   },
+  {
+    version: 4,
+    name: 'stable group identities',
+    migrate(connection) {
+      const activeRows = connection.prepare(
+        'SELECT name,created_at,updated_at,version,deleted_at FROM catalog_groups WHERE deleted_at IS NULL',
+      ).all() as Array<{ name: string; created_at: string; updated_at: string; version: number; deleted_at: string | null }>;
+      const knownNames = new Set(
+        (connection.prepare('SELECT name FROM catalog_groups').all() as Array<{ name: string }>).map((row) => row.name),
+      );
+      const insertAncestor = connection.prepare(
+        'INSERT INTO catalog_groups (name,created_at,updated_at,version,deleted_at) VALUES (?,?,?,1,NULL)',
+      );
+      for (const row of activeRows) {
+        const parts = String(row.name ?? '').split('/').filter(Boolean);
+        for (let index = 1; index < parts.length; index += 1) {
+          const ancestor = parts.slice(0, index).join('/');
+          if (knownNames.has(ancestor)) continue;
+          insertAncestor.run(ancestor, row.created_at, row.updated_at);
+          knownNames.add(ancestor);
+        }
+      }
+
+      const rows = connection.prepare(
+        'SELECT name,created_at,updated_at,version,deleted_at FROM catalog_groups ORDER BY length(name), name',
+      ).all() as Array<{ name: string; created_at: string; updated_at: string; version: number; deleted_at: string | null }>;
+      const idByName = new Map<string, string>();
+      connection.exec(`
+        CREATE TABLE catalog_groups_v4 (
+          id TEXT NOT NULL PRIMARY KEY,
+          name TEXT NOT NULL,
+          parent_id TEXT,
+          label TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+          deleted_at TEXT,
+          FOREIGN KEY (parent_id) REFERENCES catalog_groups_v4(id)
+        );
+      `);
+      const insert = connection.prepare(`INSERT INTO catalog_groups_v4
+        (id,name,parent_id,label,created_at,updated_at,version,deleted_at) VALUES (?,?,?,?,?,?,?,?)`);
+      for (const row of rows) {
+        const name = String(row.name ?? '').trim();
+        const parentName = name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : '';
+        const id = `grp_${crypto.randomUUID()}`;
+        idByName.set(name, id);
+        insert.run(id, name, idByName.get(parentName) ?? null, name.slice(name.lastIndexOf('/') + 1), row.created_at,
+          row.updated_at, Number(row.version ?? 1), row.deleted_at);
+      }
+      connection.exec(`
+        DROP TABLE catalog_groups;
+        ALTER TABLE catalog_groups_v4 RENAME TO catalog_groups;
+        CREATE UNIQUE INDEX catalog_groups_active_name_unique ON catalog_groups (name) WHERE deleted_at IS NULL;
+        CREATE INDEX catalog_groups_parent_id ON catalog_groups (parent_id);
+      `);
+    },
+  },
+  {
+    version: 5,
+    name: 'repository scoped group identities',
+    migrate(connection) {
+      const groupRows = connection.prepare(
+        'SELECT * FROM catalog_groups ORDER BY deleted_at IS NOT NULL, length(name), name, created_at',
+      ).all() as any[];
+      const activeById = new Map(groupRows.filter((row) => row.deleted_at == null).map((row) => [String(row.id), row]));
+      const activeByName = new Map(groupRows.filter((row) => row.deleted_at == null).map((row) => [String(row.name), row]));
+      const scopesById = new Map<string, Set<string>>();
+      const lifecycleRows: Array<{
+        table: string;
+        jsonColumn: string;
+        droneId: string;
+        groupName: string;
+        lifecycle: Record<string, any>;
+      }> = [];
+      const tableExists = connection.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?");
+      const lifecycleSources = [
+        { table: 'hub_canonical_drones', jsonColumn: 'lifecycle_json' },
+        { table: 'hub_canonical_pending_drones', jsonColumn: 'lifecycle_json' },
+        { table: 'hub_canonical_archived_drones', jsonColumn: 'lifecycle_json' },
+        { table: 'hub_drones', jsonColumn: 'drone_json' },
+        { table: 'hub_pending_drones', jsonColumn: 'pending_json' },
+        { table: 'hub_archived_drones', jsonColumn: 'archived_json' },
+      ];
+      for (const { table, jsonColumn } of lifecycleSources) {
+        if (!tableExists.get(table)) continue;
+        const rows = connection.prepare(`SELECT drone_id,${jsonColumn} AS lifecycle_json FROM ${table}`).all() as Array<{
+          drone_id: string;
+          lifecycle_json: string;
+        }>;
+        for (const row of rows) {
+          let lifecycle: Record<string, any>;
+          try {
+            lifecycle = JSON.parse(row.lifecycle_json);
+          } catch {
+            continue;
+          }
+          const groupId = String(lifecycle.groupId ?? '').trim();
+          const groupName = String(lifecycle.group ?? '').trim();
+          const group = activeById.get(groupId) ?? activeByName.get(groupName);
+          lifecycleRows.push({
+            table,
+            jsonColumn,
+            droneId: row.drone_id,
+            groupName: String(group?.name ?? groupName),
+            lifecycle,
+          });
+          if (!group) continue;
+          const repoPath = String(lifecycle.repoPath ?? '').trim();
+          const scopes = scopesById.get(String(group.id)) ?? new Set<string>();
+          scopes.add(repoPath);
+          scopesById.set(String(group.id), scopes);
+        }
+      }
+      for (const row of groupRows.filter((group) => group.deleted_at == null)) {
+        const scopes = scopesById.get(String(row.id));
+        if (!scopes || scopes.size === 0) continue;
+        let parentName = String(row.name);
+        while (parentName.includes('/')) {
+          parentName = parentName.slice(0, parentName.lastIndexOf('/'));
+          const parent = activeByName.get(parentName);
+          if (!parent) continue;
+          const parentScopes = scopesById.get(String(parent.id)) ?? new Set<string>();
+          for (const scope of scopes) parentScopes.add(scope);
+          scopesById.set(String(parent.id), parentScopes);
+        }
+      }
+
+      connection.exec(`
+        CREATE TABLE catalog_groups_v5 (
+          id TEXT NOT NULL PRIMARY KEY,
+          repo_path TEXT NOT NULL DEFAULT '',
+          name TEXT NOT NULL,
+          parent_id TEXT,
+          label TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+          deleted_at TEXT,
+          FOREIGN KEY (parent_id) REFERENCES catalog_groups_v5(id)
+        );
+      `);
+      const insert = connection.prepare(`INSERT INTO catalog_groups_v5
+        (id,repo_path,name,parent_id,label,created_at,updated_at,version,deleted_at)
+        VALUES (?,?,?,?,?,?,?,?,?)`);
+      const idByScopeAndName = new Map<string, string>();
+      for (const row of groupRows) {
+        const scopes = row.deleted_at == null
+          ? [...(scopesById.get(String(row.id)) ?? new Set<string>(['']))].sort()
+          : [''];
+        const effectiveScopes = scopes.length > 0 ? scopes : [''];
+        for (const [index, repoPath] of effectiveScopes.entries()) {
+          const name = String(row.name);
+          const parentName = name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : '';
+          const id = index === 0 ? String(row.id) : `grp_${crypto.randomUUID()}`;
+          const parentId = parentName ? idByScopeAndName.get(`${repoPath}\0${parentName}`) ?? null : null;
+          insert.run(id, repoPath, name, parentId, row.label, row.created_at, row.updated_at,
+            Number(row.version ?? 1), row.deleted_at ?? null);
+          if (row.deleted_at == null) idByScopeAndName.set(`${repoPath}\0${name}`, id);
+        }
+      }
+      connection.exec(`
+        DROP TABLE catalog_groups;
+        ALTER TABLE catalog_groups_v5 RENAME TO catalog_groups;
+        CREATE UNIQUE INDEX catalog_groups_active_scope_name_unique
+          ON catalog_groups (repo_path, name) WHERE deleted_at IS NULL;
+        CREATE INDEX catalog_groups_scope_parent_id ON catalog_groups (repo_path, parent_id);
+      `);
+      for (const row of lifecycleRows) {
+        const repoPath = String(row.lifecycle.repoPath ?? '').trim();
+        const groupId = idByScopeAndName.get(`${repoPath}\0${row.groupName}`);
+        if (!groupId || row.lifecycle.groupId === groupId) continue;
+        row.lifecycle.groupId = groupId;
+        connection.prepare(`UPDATE ${row.table} SET ${row.jsonColumn}=? WHERE drone_id=?`)
+          .run(JSON.stringify(row.lifecycle), row.droneId);
+      }
+    },
+  },
 ];
 
 export type CatalogSkillRecord = {
@@ -145,7 +325,16 @@ export type CatalogMcpTokenRecord = {
   revokedAt?: string;
 };
 
-export type CatalogGroupRecord = { name: string; createdAt: string; updatedAt: string; version?: number };
+export type CatalogGroupRecord = {
+  id: string;
+  repoPath: string;
+  name: string;
+  label: string;
+  parentId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version?: number;
+};
 
 export type CatalogRepositoryRecord = {
   path: string;
@@ -367,90 +556,162 @@ export class CatalogStore {
     });
   }
 
-  listGroups(): CatalogGroupRecord[] {
-    return this.database.read((connection) => (connection.prepare(
-      'SELECT * FROM catalog_groups WHERE deleted_at IS NULL ORDER BY name').all() as any[]).map(this.groupFromRow));
+  listGroups(repoPath?: string): CatalogGroupRecord[] {
+    return this.database.read((connection) => {
+      const rows = repoPath === undefined
+        ? connection.prepare('SELECT * FROM catalog_groups WHERE deleted_at IS NULL ORDER BY repo_path,name').all()
+        : connection.prepare(
+          'SELECT * FROM catalog_groups WHERE repo_path=? AND deleted_at IS NULL ORDER BY name',
+        ).all(repoPath);
+      return (rows as any[]).map(this.groupFromRow);
+    });
   }
 
   backfillGroups(records: CatalogGroupRecord[]): Promise<boolean> {
     return this.database.writeTransaction('backfill group catalog', (connection) => {
-      const insert = connection.prepare('INSERT OR IGNORE INTO catalog_groups (name,created_at,updated_at) VALUES (?,?,?)');
+      const insert = connection.prepare(
+        'INSERT INTO catalog_groups (id,repo_path,name,parent_id,label,created_at,updated_at) VALUES (?,?,?,?,?,?,?)',
+      );
+      const exists = connection.prepare('SELECT 1 FROM catalog_groups WHERE repo_path=? AND name=? LIMIT 1');
+      const existsInAnyScope = connection.prepare('SELECT 1 FROM catalog_groups WHERE name=? LIMIT 1');
+      const alignHierarchy = connection.prepare(
+        'UPDATE catalog_groups SET parent_id=?,label=? WHERE repo_path=? AND name=? AND deleted_at IS NULL',
+      );
+      const activeIdByName = connection.prepare(
+        'SELECT id FROM catalog_groups WHERE repo_path=? AND name=? AND deleted_at IS NULL',
+      );
       let inserted = 0;
-      for (const record of records) inserted += Number(insert.run(record.name, record.createdAt, record.updatedAt).changes ?? 0);
+      for (const record of records) {
+        const parentName = record.name.includes('/') ? record.name.slice(0, record.name.lastIndexOf('/')) : '';
+        const parent = parentName
+          ? activeIdByName.get(record.repoPath, parentName) as { id?: string } | undefined
+          : undefined;
+        const parentId = parent?.id ?? null;
+        const shouldPreserveMigratedScope = record.repoPath === '' && existsInAnyScope.get(record.name);
+        if (!exists.get(record.repoPath, record.name) && !shouldPreserveMigratedScope) {
+          inserted += Number(
+            insert.run(record.id, record.repoPath, record.name, parentId, record.label,
+              record.createdAt, record.updatedAt).changes ?? 0,
+          );
+        } else {
+          alignHierarchy.run(parentId, record.label, record.repoPath, record.name);
+        }
+      }
       return inserted > 0;
     });
   }
 
   putGroup(record: CatalogGroupRecord, insertOnly = false): Promise<CatalogGroupRecord> {
     return this.database.writeTransaction('write group catalog', (connection) => {
+      const current = connection.prepare(
+        'SELECT * FROM catalog_groups WHERE repo_path=? AND name=? AND deleted_at IS NULL',
+      ).get(record.repoPath, record.name) as any;
       if (insertOnly) {
-        connection.prepare('INSERT OR IGNORE INTO catalog_groups (name,created_at,updated_at) VALUES (?,?,?)')
-          .run(record.name, record.createdAt, record.updatedAt);
+        const historical = connection.prepare(
+          'SELECT 1 FROM catalog_groups WHERE repo_path=? AND name=? LIMIT 1',
+        ).get(record.repoPath, record.name);
+        if (!historical) {
+          connection.prepare(
+            'INSERT INTO catalog_groups (id,repo_path,name,parent_id,label,created_at,updated_at) VALUES (?,?,?,?,?,?,?)',
+          ).run(record.id, record.repoPath, record.name, record.parentId, record.label,
+            record.createdAt, record.updatedAt);
+        }
+      } else if (current) {
+        connection.prepare(`UPDATE catalog_groups SET parent_id=?,label=?,updated_at=?,version=version+1
+          WHERE id=? AND deleted_at IS NULL`).run(record.parentId, record.label, record.updatedAt, current.id);
       } else {
-        const current = connection.prepare('SELECT * FROM catalog_groups WHERE name=?').get(record.name) as any;
-        connection.prepare(`INSERT INTO catalog_groups (name,created_at,updated_at,version,deleted_at) VALUES (?,?,?,1,NULL)
-          ON CONFLICT(name) DO UPDATE SET updated_at=excluded.updated_at, version=catalog_groups.version+1, deleted_at=NULL`)
-          .run(record.name, record.createdAt, record.updatedAt);
-        appendHubOutboxEvent(connection, {
-          topic: 'catalog.groups', eventType: current?.deleted_at == null && current ? 'group.updated' : 'group.created',
-          aggregateType: 'group', aggregateId: record.name,
-          payload: { name: record.name, updatedAt: record.updatedAt },
-        });
+        connection.prepare(`INSERT INTO catalog_groups
+          (id,repo_path,name,parent_id,label,created_at,updated_at,version,deleted_at) VALUES (?,?,?,?,?,?,?,1,NULL)`)
+          .run(record.id, record.repoPath, record.name, record.parentId, record.label,
+            record.createdAt, record.updatedAt);
       }
-      const row = connection.prepare('SELECT * FROM catalog_groups WHERE name=?').get(record.name) as any;
+      if (!insertOnly) appendHubOutboxEvent(connection, {
+        topic: 'catalog.groups', eventType: current ? 'group.updated' : 'group.created',
+        aggregateType: 'group', aggregateId: current?.id ?? record.id,
+        payload: { id: current?.id ?? record.id, repoPath: record.repoPath,
+          name: record.name, updatedAt: record.updatedAt },
+      });
+      const row = connection.prepare(
+        'SELECT * FROM catalog_groups WHERE repo_path=? AND name=? AND deleted_at IS NULL',
+      ).get(record.repoPath, record.name) as any ?? connection.prepare(
+        'SELECT * FROM catalog_groups WHERE repo_path=? AND name=? ORDER BY updated_at DESC LIMIT 1',
+      ).get(record.repoPath, record.name) as any;
       return this.groupFromRow(row);
     });
   }
 
-  deleteGroup(name: string, at = new Date().toISOString()): Promise<boolean> {
+  deleteGroup(repoPath: string, name: string, at = new Date().toISOString()): Promise<boolean> {
     return this.database.writeTransaction('delete group', (connection) => {
+      const group = connection.prepare(
+        'SELECT id FROM catalog_groups WHERE repo_path=? AND name=? AND deleted_at IS NULL',
+      ).get(repoPath, name) as { id?: string } | undefined;
       const info = connection.prepare(`UPDATE catalog_groups SET deleted_at=?,updated_at=?,version=version+1
-        WHERE name=? AND deleted_at IS NULL`).run(at, at, name);
+        WHERE repo_path=? AND name=? AND deleted_at IS NULL`).run(at, at, repoPath, name);
       if (Number(info.changes ?? 0) !== 1) return false;
       appendHubOutboxEvent(connection, { topic: 'catalog.groups', eventType: 'group.deleted',
-        aggregateType: 'group', aggregateId: name, payload: { name, deletedAt: at } });
+        aggregateType: 'group', aggregateId: group?.id ?? name,
+        payload: { id: group?.id ?? null, repoPath, name, deletedAt: at } });
       return true;
     });
   }
 
-  deleteGroups(names: string[], at = new Date().toISOString()): Promise<string[]> {
+  deleteGroups(repoPath: string, names: string[], at = new Date().toISOString()): Promise<string[]> {
     return this.database.writeTransaction('delete group hierarchy', (connection) => {
       const deleted: string[] = [];
       for (const name of [...new Set(names)]) {
+        const group = connection.prepare(
+          'SELECT id FROM catalog_groups WHERE repo_path=? AND name=? AND deleted_at IS NULL',
+        ).get(repoPath, name) as { id?: string } | undefined;
         const info = connection.prepare(`UPDATE catalog_groups SET deleted_at=?,updated_at=?,version=version+1
-          WHERE name=? AND deleted_at IS NULL`).run(at, at, name);
+          WHERE repo_path=? AND name=? AND deleted_at IS NULL`).run(at, at, repoPath, name);
         if (Number(info.changes ?? 0) !== 1) continue;
         appendHubOutboxEvent(connection, { topic: 'catalog.groups', eventType: 'group.deleted',
-          aggregateType: 'group', aggregateId: name, payload: { name, deletedAt: at } });
+          aggregateType: 'group', aggregateId: group?.id ?? name,
+          payload: { id: group?.id ?? null, repoPath, name, deletedAt: at } });
         deleted.push(name);
       }
       return deleted;
     });
   }
 
-  renameGroups(rewrites: Array<{ from: string; to: string }>, at = new Date().toISOString()): Promise<number> {
+  renameGroups(
+    repoPath: string,
+    rewrites: Array<{ id?: string; from: string; to: string }>,
+    at = new Date().toISOString(),
+  ): Promise<number> {
     return this.database.writeTransaction('rename group hierarchy', (connection) => {
       const sources = new Set(rewrites.map((item) => item.from));
       const sourceRows = new Map<string, any>();
       for (const item of rewrites) {
-        const row = connection.prepare('SELECT * FROM catalog_groups WHERE name=? AND deleted_at IS NULL').get(item.from) as any;
+        const row = item.id
+          ? connection.prepare('SELECT * FROM catalog_groups WHERE id=? AND deleted_at IS NULL').get(item.id) as any
+          : connection.prepare(
+            'SELECT * FROM catalog_groups WHERE repo_path=? AND name=? AND deleted_at IS NULL',
+          ).get(repoPath, item.from) as any;
         if (row) sourceRows.set(item.from, row);
       }
       for (const item of rewrites) {
-        const collision = connection.prepare('SELECT 1 FROM catalog_groups WHERE name=? AND deleted_at IS NULL').get(item.to);
+        const collision = connection.prepare(
+          'SELECT 1 FROM catalog_groups WHERE repo_path=? AND name=? AND deleted_at IS NULL',
+        ).get(repoPath, item.to);
         if (collision && !sources.has(item.to)) throw new Error(`group already exists: ${item.to}`);
       }
       let renamed = 0;
       for (const item of rewrites) {
         const source = sourceRows.get(item.from);
         if (!source) continue;
-        connection.prepare(`INSERT INTO catalog_groups (name,created_at,updated_at,version,deleted_at) VALUES (?,?,?,?,NULL)
-          ON CONFLICT(name) DO UPDATE SET updated_at=excluded.updated_at,version=catalog_groups.version+1,deleted_at=NULL`)
-          .run(item.to, source.created_at, at, Number(source.version ?? 1) + 1);
-        connection.prepare('UPDATE catalog_groups SET deleted_at=?,updated_at=?,version=version+1 WHERE name=?')
-          .run(at, at, item.from);
+        const label = item.to.slice(item.to.lastIndexOf('/') + 1);
+        const parentName = item.to.includes('/') ? item.to.slice(0, item.to.lastIndexOf('/')) : '';
+        const parent = parentName
+          ? connection.prepare(
+            'SELECT id FROM catalog_groups WHERE repo_path=? AND name=? AND deleted_at IS NULL',
+          ).get(repoPath, parentName) as { id?: string } | undefined
+          : undefined;
+        connection.prepare(`UPDATE catalog_groups SET name=?,parent_id=?,label=?,updated_at=?,version=version+1
+          WHERE id=? AND deleted_at IS NULL`).run(item.to, parent?.id ?? null, label, at, source.id);
         appendHubOutboxEvent(connection, { topic: 'catalog.groups', eventType: 'group.renamed', aggregateType: 'group',
-          aggregateId: item.to, payload: { oldName: item.from, newName: item.to, updatedAt: at } });
+          aggregateId: source.id, payload: { id: source.id, repoPath,
+            oldName: item.from, newName: item.to, updatedAt: at } });
         renamed += 1;
       }
       return renamed;
@@ -560,7 +821,11 @@ export class CatalogStore {
   });
 
   private groupFromRow = (row: any): CatalogGroupRecord => ({
+    id: row.id,
+    repoPath: row.repo_path ?? '',
     name: row.name,
+    label: row.label ?? String(row.name ?? '').slice(String(row.name ?? '').lastIndexOf('/') + 1),
+    parentId: row.parent_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     version: Number(row.version ?? 1),

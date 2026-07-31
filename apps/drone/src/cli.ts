@@ -1579,7 +1579,7 @@ createCommand
       }
 
       try {
-        if (group) await ensureCanonicalGroup(group);
+        const canonicalGroup = group ? await ensureCanonicalGroup(group, repoPath) : null;
         const registry = await loadRegistry();
         if (registryHasDisplayName(registry, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
         const at = new Date().toISOString();
@@ -1589,6 +1589,7 @@ createCommand
             name: displayName,
             containerName: stableContainerNameFromDroneId(stableId),
             group,
+            groupId: canonicalGroup?.id,
             cwd: effectiveCwd,
             hostPort,
             containerPort: hostPort,
@@ -1731,7 +1732,7 @@ createCommand
 
     await waitForHealth(hostPort, token);
 
-    if (group) await ensureCanonicalGroup(group);
+    const canonicalGroup = group ? await ensureCanonicalGroup(group, repoPath) : null;
     const registry = await loadRegistry();
     if (registryHasDisplayName(registry, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
     const at = new Date().toISOString();
@@ -1741,6 +1742,7 @@ createCommand
         name: displayName,
         containerName,
         group,
+        groupId: canonicalGroup?.id,
         cwd,
         hostPort,
         containerPort,
@@ -1797,7 +1799,7 @@ importCommand
       }
     }
 
-    if (group) await ensureCanonicalGroup(group);
+    const canonicalGroup = group ? await ensureCanonicalGroup(group, repoPath) : null;
     const registry = await loadRegistry();
     // Enforce unique display names (unless this is updating the same id).
     for (const [k, v] of Object.entries((registry as any)?.drones ?? {})) {
@@ -1812,6 +1814,7 @@ importCommand
         name: displayName,
         containerName,
         group,
+        groupId: canonicalGroup?.id,
         cwd,
         hostPort,
         containerPort,
@@ -2090,7 +2093,6 @@ program
     const group = String(groupRaw ?? '').trim();
     if (!group) throw new Error('invalid group (must be non-empty)');
 
-    await ensureCanonicalGroup(group);
     const reg = await loadRegistry();
     const { key, drone } = resolveDroneFromRegistry(reg as any, String(name));
     const prev = String(drone.group ?? '').trim() || null;

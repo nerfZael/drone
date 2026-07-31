@@ -75,6 +75,8 @@ function approvalSummary(approval: AssistantApproval): {
             .filter(Boolean)
         : [];
     const group = String(resolved.group ?? args.group ?? '').trim();
+    const groupId = String(resolved.groupId ?? args.groupId ?? '').trim();
+    const repoPath = String(resolved.repoPath ?? '').trim();
     return {
       title: 'Set drone group',
       rows: [
@@ -82,6 +84,8 @@ function approvalSummary(approval: AssistantApproval): {
           ? [{ label: droneNames.length === 1 ? 'Drone' : 'Drones', value: droneNames.join(', ') }]
           : []),
         { label: 'Group', value: group || 'Ungrouped' },
+        ...(groupId ? [{ label: 'Group ID', value: groupId }] : []),
+        ...(repoPath ? [{ label: 'Repo', value: repoPath }] : []),
       ],
     };
   }

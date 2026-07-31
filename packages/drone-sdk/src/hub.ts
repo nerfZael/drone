@@ -228,6 +228,7 @@ function toDroneRecord(drone: any): DroneRecord {
     id: String(drone?.id ?? ''),
     name: String(drone?.name ?? ''),
     group: typeof drone?.group === 'string' && drone.group.trim() ? String(drone.group).trim() : undefined,
+    groupId: typeof drone?.groupId === 'string' && drone.groupId.trim() ? String(drone.groupId).trim() : undefined,
     runtime: 'container',
     persistVolume: typeof drone?.persistVolume === 'boolean' ? drone.persistVolume : undefined,
     createdAt: typeof drone?.createdAt === 'string' ? drone.createdAt : undefined,
@@ -317,7 +318,8 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
       if (seedModel) body.seedModel = seedModel;
       if (seedAgentPermissionMode) body.seedAgentPermissionMode = seedAgentPermissionMode;
       if (seedApprovalPolicy) body.seedApprovalPolicy = seedApprovalPolicy;
-      if (input.group) body.group = input.group;
+      if (input.groupId) body.groupId = input.groupId;
+      else if (input.group) body.group = input.group;
       if (input.cwd) body.cwd = input.cwd;
       if (input.repoPath) body.repoPath = input.repoPath;
       if (typeof input.persistVolume === 'boolean') body.persistVolume = input.persistVolume;
@@ -332,7 +334,8 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
       return {
         id: String(response?.id ?? ''),
         name: String(response?.name ?? input.name),
-        group: input.group,
+        group: typeof response?.group === 'string' ? response.group : input.group,
+        groupId: typeof response?.groupId === 'string' ? response.groupId : input.groupId,
         runtime: input.runtime ?? 'container',
         persistVolume: input.persistVolume,
       };
@@ -349,7 +352,7 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
               ...resolveCreateSeedFields(item),
               name: item.name,
               runtime: item.runtime ?? 'container',
-              ...(item.group ? { group: item.group } : {}),
+              ...(item.groupId ? { groupId: item.groupId } : item.group ? { group: item.group } : {}),
               ...(item.cwd ? { cwd: item.cwd } : {}),
               ...(item.repoPath ? { repoPath: item.repoPath } : {}),
               ...(typeof item.persistVolume === 'boolean' ? { persistVolume: item.persistVolume } : {}),
@@ -368,6 +371,9 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
               group: typeof item?.group === 'string' && item.group.trim()
                 ? String(item.group).trim()
                 : inputs.find((input) => input.name === String(item?.name ?? ''))?.group,
+              groupId: typeof item?.groupId === 'string' && item.groupId.trim()
+                ? String(item.groupId).trim()
+                : inputs.find((input) => input.name === String(item?.name ?? ''))?.groupId,
               runtime: 'container',
               persistVolume: typeof item?.persistVolume === 'boolean' ? item.persistVolume : undefined,
             }))
@@ -401,7 +407,11 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
       const response = await requestJson<any>(options, '/api/groups', { method: 'GET' }, requestOptions);
       return Array.isArray(response?.groups)
         ? response.groups.map((group: any) => ({
+            id: String(group?.id ?? ''),
+            repoPath: String(group?.repoPath ?? ''),
             name: String(group?.name ?? ''),
+            label: String(group?.label ?? group?.name ?? ''),
+            parentId: typeof group?.parentId === 'string' && group.parentId ? group.parentId : null,
             count: Number(group?.totalCount ?? 0),
           }))
         : [];

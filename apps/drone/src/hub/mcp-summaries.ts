@@ -29,6 +29,7 @@ export function droneSummary(drone: any) {
     id: cleanString(drone?.id),
     name: cleanString(drone?.name),
     group: cleanString(drone?.group) || null,
+    groupId: cleanString(drone?.groupId) || null,
     runtime: cleanString(drone?.runtime, 'container'),
     repoPath: cleanString(drone?.repoPath) || null,
     cwd: cleanString(drone?.cwd) || null,

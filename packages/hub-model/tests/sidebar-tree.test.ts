@@ -109,6 +109,27 @@ describe('canonical sidebar tree', () => {
     ]);
   });
 
+  test('keeps same-named repo group folders on their independent canonical ids', () => {
+    const { nodeTree } = buildRepoSidebarModel({
+      drones: [
+        { id: 'repo-a-drone', name: 'A', repoPath: '/repo/a', group: 'review', groupId: 'grp_repo_a' },
+        { id: 'repo-b-drone', name: 'B', repoPath: '/repo/b', group: 'review', groupId: 'grp_repo_b' },
+      ],
+      registeredRepoPaths: ['/repo/a', '/repo/b'],
+      sidebarDroneOrderByGroup: {},
+      sidebarGroupOrder: ['group-id:grp_repo_b', 'group-id:grp_repo_a'],
+      sidebarNodeOrderByParent: {},
+    });
+
+    const repoAFolder = nodeTree.nodesById[sidebarFolderNodeId('repo-scope:repo:/repo/a:review')];
+    const repoBFolder = nodeTree.nodesById[sidebarFolderNodeId('repo-scope:repo:/repo/b:review')];
+
+    expect(repoAFolder?.kind).toBe('folder');
+    expect(repoBFolder?.kind).toBe('folder');
+    expect(repoAFolder?.kind === 'folder' ? repoAFolder.groupId : null).toBe('grp_repo_a');
+    expect(repoBFolder?.kind === 'folder' ? repoBFolder.groupId : null).toBe('grp_repo_b');
+  });
+
   test('normalizes repeated and Windows-style group separators before placing drones', () => {
     const tree = buildRepoTree([
       { id: 'repeated', name: 'Repeated', repoPath: '/repo', group: 'Delivery//Review' },

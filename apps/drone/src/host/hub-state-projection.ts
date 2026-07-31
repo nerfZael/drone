@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 import { getCatalogStore } from './catalog-store';
 import {
   getDroneLifecycleRepository,
@@ -200,11 +202,28 @@ export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Pro
     catalog.backfillSkills(listSkillsFromRegistry(base)),
     catalog.backfillMcpServers(listMcpServersFromRegistry(base)),
     catalog.backfillMcpTokens(listStoredTokensFromRegistry(base)),
-    catalog.backfillGroups(Object.entries(base.groups ?? {}).map(([key, raw]: [string, any]) => {
-      const name = String(raw?.name ?? key).trim();
-      const createdAt = String(raw?.createdAt ?? '').trim() || new Date(0).toISOString();
-      return { name, createdAt, updatedAt: String(raw?.updatedAt ?? '').trim() || createdAt };
-    }).filter((record: any) => record.name)),
+    catalog.backfillGroups((() => {
+      const rows = Object.entries(base.groups ?? {}).flatMap(([key, raw]: [string, any]) => {
+        const name = String(raw?.name ?? key).trim();
+        if (!name) return [];
+        const repoPath = String(raw?.repoPath ?? '').trim();
+        const createdAt = String(raw?.createdAt ?? '').trim() || new Date(0).toISOString();
+        return [{
+          id: String(raw?.id ?? '').trim() || `grp_${crypto.createHash('sha256').update(`drone-group:${repoPath}\0${name}`).digest('hex').slice(0, 32)}`,
+          repoPath,
+          name,
+          label: String(raw?.label ?? '').trim() || name.slice(name.lastIndexOf('/') + 1),
+          createdAt,
+          updatedAt: String(raw?.updatedAt ?? '').trim() || createdAt,
+        }];
+      }).sort((left, right) => left.repoPath.localeCompare(right.repoPath) ||
+        left.name.length - right.name.length || left.name.localeCompare(right.name));
+      const idByScopeAndName = new Map(rows.map((row) => [`${row.repoPath}\0${row.name}`, row.id]));
+      return rows.map((row) => {
+        const parentName = row.name.includes('/') ? row.name.slice(0, row.name.lastIndexOf('/')) : '';
+        return { ...row, parentId: idByScopeAndName.get(`${row.repoPath}\0${parentName}`) ?? null };
+      });
+    })()),
     catalog.backfillRepositories(Object.entries(base.repos ?? {}).flatMap(([key, raw]: [string, any]) => {
       if (!raw || typeof raw !== 'object') return [];
       const repoPath = String(raw.path ?? key).trim();
@@ -215,7 +234,7 @@ export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Pro
   base.skills = mapBy(catalog.listSkills(), (record: any) => record.id);
   base.mcpServers = mapBy(catalog.listMcpServers(), (record: any) => record.id);
   base.mcpTokens = mapBy(catalog.listMcpTokens(), (record: any) => record.id);
-  base.groups = mapBy(catalog.listGroups(), (record: any) => record.name);
+  base.groups = mapBy(catalog.listGroups(), (record: any) => record.id);
   base.repos = mapBy(catalog.listRepositories(), (record: any) => record.path);
 
   const workflows = await getFleetWorkflowStore();

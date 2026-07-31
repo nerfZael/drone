@@ -4,7 +4,7 @@ import type { DroneSummary } from '../types';
 import { compareDronesByNewestFirst, parseIsoTimestampMs } from './helpers';
 import { isStartupSeedFresh } from './app-config';
 import type { StartupSeedState } from './app-types';
-import { orderSidebarEntries, orderSidebarGroups, sidebarGroupOrderToken } from './sidebar-group-order';
+import { orderSidebarEntries, orderSidebarGroups, sidebarGroupLegacyOrderToken, sidebarGroupOrderToken } from './sidebar-group-order';
 import { isSidebarGroupDeleting as matchesDeletingSidebarGroup } from './sidebar-group-delete-visibility';
 import { isSameOrDescendantSidebarGroupPath } from './sidebar-group-paths';
 import { buildRepoSidebarGroups } from './sidebar-repo-groups';
@@ -13,6 +13,7 @@ import { isDroneRecentForSidebar } from './sidebar-recent-filter';
 const RECENT_FILTER_REFRESH_MS = 60 * 1000;
 
 export type SidebarGroup = {
+  groupId?: string | null;
   group: string;
   label: string;
   kind: 'group' | 'repo';
@@ -49,6 +50,7 @@ type UseSidebarViewModelArgs = {
   showRecentDronesOnly: boolean;
   registryGroupNames: string[];
   registryGroupCreatedAtByName: Record<string, string | null>;
+  registryGroupIdByName: Record<string, string>;
   registeredRepoPaths: string[];
 };
 
@@ -83,6 +85,7 @@ export function useSidebarViewModel({
   showRecentDronesOnly,
   registryGroupNames,
   registryGroupCreatedAtByName,
+  registryGroupIdByName,
   registeredRepoPaths,
 }: UseSidebarViewModelArgs) {
   const selectedDroneSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
@@ -160,17 +163,25 @@ export function useSidebarViewModel({
   }, [activeRepoPath, sidebarDrones]);
 
   const hiddenSidebarGroupTokenSet = React.useMemo(() => new Set(hiddenSidebarGroups), [hiddenSidebarGroups]);
+  const registryGroupNameById = React.useMemo(
+    () => Object.fromEntries(Object.entries(registryGroupIdByName).map(([name, id]) => [id, name])),
+    [registryGroupIdByName],
+  );
   const isSidebarGroupHidden = React.useCallback(
     (group: SidebarGroup) => {
       const token = sidebarGroupOrderToken(group);
       if (hiddenSidebarGroupTokenSet.has(token)) return true;
       if (group.kind !== 'group') return false;
       return hiddenSidebarGroups.some((hiddenToken) => {
+        if (hiddenToken.startsWith('group-id:')) {
+          const hiddenName = registryGroupNameById[hiddenToken.slice('group-id:'.length)];
+          return Boolean(hiddenName && isSameOrDescendantSidebarGroupPath(group.group, hiddenName));
+        }
         if (!hiddenToken.startsWith('group:')) return false;
         return isSameOrDescendantSidebarGroupPath(group.group, hiddenToken.slice('group:'.length));
       });
     },
-    [hiddenSidebarGroupTokenSet, hiddenSidebarGroups],
+    [hiddenSidebarGroupTokenSet, hiddenSidebarGroups, registryGroupNameById],
   );
   const isSidebarGroupDeleting = React.useCallback(
     (group: SidebarGroup) => matchesDeletingSidebarGroup(group, deletingGroups),
@@ -190,13 +201,10 @@ export function useSidebarViewModel({
     }
 
     const m = new Map<string, DroneSummary[]>();
-    const hasRepoFilter = Boolean(String(activeRepoPath ?? '').trim());
-    if (!hasRepoFilter) {
-      for (const rawName of registryGroupNames) {
-        const g = String(rawName ?? '').trim();
-        if (!g || isUngroupedGroupName(g)) continue;
-        if (!m.has(g)) m.set(g, []);
-      }
+    for (const rawName of registryGroupNames) {
+      const g = String(rawName ?? '').trim();
+      if (!g || isUngroupedGroupName(g)) continue;
+      if (!m.has(g)) m.set(g, []);
     }
     for (const d of sidebarDronesFilteredByRepoBase) {
       const raw = (d.group ?? '').trim();
@@ -207,12 +215,14 @@ export function useSidebarViewModel({
     }
     const out = Array.from(m.entries()).map(([group, items]): SidebarGroup => {
       items.sort(compareDronesByNewestFirst);
-      const groupOrderKey = sidebarGroupOrderToken({ group, kind: 'group' });
+      const groupId = registryGroupIdByName[group] ?? null;
+      const groupOrderKey = sidebarGroupOrderToken({ groupId, group, kind: 'group' });
       return {
+        groupId,
         group,
         label: group,
         kind: 'group',
-        items: orderSidebarEntries(items, sidebarDroneOrderByGroup[groupOrderKey] ?? [], (item) => item.id, {
+        items: orderSidebarEntries(items, sidebarDroneOrderByGroup[groupOrderKey] ?? sidebarDroneOrderByGroup[sidebarGroupLegacyOrderToken({ group, kind: 'group' })] ?? [], (item) => item.id, {
           unorderedPlacement: 'start',
         }),
       };
@@ -225,6 +235,7 @@ export function useSidebarViewModel({
     registeredRepoPaths,
     registryGroupNames,
     registryGroupCreatedAtByName,
+    registryGroupIdByName,
     sidebarDroneOrderByGroup,
     sidebarDronesFilteredByRepoBase,
     sidebarGroupOrder,

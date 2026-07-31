@@ -102,6 +102,7 @@ import {
   canonicalRepositoriesMap,
   ensureCanonicalGroup,
   listCanonicalGroups,
+  resolveCanonicalGroupReference,
   listCanonicalRepositories,
   registerCanonicalRepository,
   removeCanonicalRepository,
@@ -2253,23 +2254,6 @@ function reorderAssistantVisibleEntries(
     (entry) => !visibleSet.has(entry),
   );
   return normalizeAssistantUiOrderList([...nextVisible, ...hidden]);
-}
-
-function listAllKnownGroups(regAny: any): string[] {
-  const out = new Set<string>();
-  for (const k of Object.keys(regAny?.groups ?? {})) {
-    const g = normalizeGroupName(k);
-    if (g && !isUngroupedGroupName(g)) out.add(g);
-  }
-  for (const d of Object.values(regAny?.drones ?? {}) as any[]) {
-    const g = normalizeGroupName(d?.group);
-    if (g && !isUngroupedGroupName(g)) out.add(g);
-  }
-  for (const d of Object.values(regAny?.pending ?? {}) as any[]) {
-    const g = normalizeGroupName(d?.group);
-    if (g && !isUngroupedGroupName(g)) out.add(g);
-  }
-  return Array.from(out.values()).sort((a, b) => a.localeCompare(b));
 }
 
 function buildDockerExecTmuxAttachCommand(containerName: string, sessionName: string): string {
@@ -4942,7 +4926,14 @@ export async function startDroneHubApiServer(opts: {
   }
 
   async function buildDroneRegistrySnapshot(source: string): Promise<DroneRegistrySnapshot> {
-    const regAny = await loadPreparedDroneRegistryForSummary(source);
+    const [regAny, canonicalGroups] = await Promise.all([
+      loadPreparedDroneRegistryForSummary(source),
+      listCanonicalGroups(),
+    ]);
+    const groupIdByScopeAndName = new Map(
+      canonicalGroups.map((group) => [`${group.repoPath}\0${group.name}`, group.id]),
+    );
+    const groupById = new Map(canonicalGroups.map((group) => [group.id, group]));
     const pendingSummaries = Object.values(regAny?.pending ?? {}).map((p) =>
       buildPendingDroneSummary(regAny, p),
     );
@@ -4982,7 +4973,17 @@ export async function startDroneHubApiServer(opts: {
       const id = String(d?.id ?? '').trim();
       if (id) byId.set(id, d);
     }
-    const drones = Array.from(byId.values()).filter((x) => x?.id && x?.name);
+    const drones = Array.from(byId.values())
+      .filter((x) => x?.id && x?.name)
+      .map((drone) => {
+        const group = String(drone?.group ?? '').trim();
+        const repoPath = String(drone?.repoPath ?? '').trim();
+        const existingGroupId = String(drone?.groupId ?? '').trim();
+        const existingGroup = groupById.get(existingGroupId);
+        return group ? { ...drone, groupId: existingGroup?.repoPath === repoPath
+          ? existingGroupId
+          : groupIdByScopeAndName.get(`${repoPath}\0${group}`) || null } : drone;
+      });
     return { ok: true, drones };
   }
 
@@ -5268,7 +5269,6 @@ export async function startDroneHubApiServer(opts: {
   registerGroupRoutes(apiRouter, {
     loadRegistry,
     listCanonicalGroups,
-    listAllKnownGroups,
     normalizeGroupName,
     isUngroupedGroupName,
     validateGroupNameOrThrow,
@@ -5317,7 +5317,7 @@ export async function startDroneHubApiServer(opts: {
     dvmBaseSet,
     dvmStop,
     enqueueProvisioning,
-    ensureCanonicalGroup,
+    resolveCanonicalGroupReference,
     fileExists,
     findDroneIdByRef,
     hubLog,
@@ -5625,6 +5625,7 @@ export async function startDroneHubApiServer(opts: {
     droneRegistrySseClients,
     enqueueProvisioning,
     ensureCanonicalGroup,
+    resolveCanonicalGroupReference,
     fileExists,
     findDroneEntryByIdentity,
     findDroneIdByRef,

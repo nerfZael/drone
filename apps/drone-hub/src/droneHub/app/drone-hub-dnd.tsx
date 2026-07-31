@@ -17,6 +17,7 @@ import { IconFolder } from './icons';
 
 export type SidebarFolderDragData = {
   type: 'sidebar-folder';
+  groupId?: string | null;
   folderNodeId: string;
   folderPath: string;
   groupKind: SidebarGroupOrderKind;
@@ -24,6 +25,7 @@ export type SidebarFolderDragData = {
 };
 
 export type SidebarDragGroupRef = {
+  groupId?: string | null;
   group: string;
   kind: SidebarGroupOrderKind;
 };

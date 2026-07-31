@@ -41,6 +41,7 @@ export type CreateDroneInput = {
   cloneFrom?: string;
   cloneChats?: boolean;
   group?: string;
+  groupId?: string;
   runtime?: DroneRuntime;
   persistVolume?: boolean;
   cwd?: string;
@@ -114,6 +115,7 @@ export type DroneSummary = {
   id: string;
   name: string;
   group?: string;
+  groupId?: string;
   runtime: DroneRuntime;
   persistVolume?: boolean;
   createdAt?: string;
@@ -122,7 +124,11 @@ export type DroneSummary = {
 };
 
 export type DroneGroupSummary = {
+  id: string;
+  repoPath: string;
   name: string;
+  label: string;
+  parentId: string | null;
   count: number;
 };
 

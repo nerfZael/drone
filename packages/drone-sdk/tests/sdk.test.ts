@@ -169,7 +169,14 @@ describe('drone-sdk core', () => {
     ]);
 
     const groups = await sdk.groups.list();
-    expect(groups).toEqual([{ name: 'experimental', count: 2 }]);
+    expect(groups).toEqual([{
+      id: 'test-group:experimental',
+      repoPath: '',
+      name: 'experimental',
+      label: 'experimental',
+      parentId: null,
+      count: 2,
+    }]);
   });
 
   test('supports object create and createManyDrones on groups', async () => {

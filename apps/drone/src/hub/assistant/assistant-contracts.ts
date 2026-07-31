@@ -10,6 +10,7 @@ export type AssistantDroneSummary = {
   id: string;
   name: string;
   group: string | null;
+  groupId?: string | null;
   runtime: string;
   repoPath: string;
   status: string;
@@ -40,7 +41,14 @@ export type AssistantCreateChatResult = {
 
 export type AssistantSetDroneGroupResult = {
   group: string | null;
-  moved: Array<{ id: string; name: string; previousGroup: string | null; group: string | null }>;
+  moved: Array<{
+    id: string;
+    name: string;
+    previousGroup: string | null;
+    group: string | null;
+    groupId?: string | null;
+    repoPath?: string;
+  }>;
   rejected: Array<{ id: string; error: string }>;
   total: number;
 };
@@ -53,6 +61,9 @@ export type AssistantRenameDronesResult = {
 
 export type AssistantCreateGroupResult = {
   ok: true;
+  id?: string;
+  repoPath?: string;
+  name?: string;
   group: string;
   created: boolean;
   createdAt?: string | null;
@@ -73,6 +84,8 @@ export type AssistantSetDroneGroupsResult = {
 export type AssistantReorderDronesResult = {
   ok: true;
   group: string;
+  groupId?: string | null;
+  repoPath?: string;
   drones: Array<{ id: string; name: string }>;
   sidebarDroneOrder?: string[];
   sidebarNodeOrder?: string[];

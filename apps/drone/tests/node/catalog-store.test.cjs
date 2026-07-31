@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const Database = require('better-sqlite3');
 const { afterEach, test } = require('node:test');
 
 const { getCatalogStore } = require('../../dist/host/catalog-store.js');
@@ -62,8 +63,8 @@ test('opens with the production binding and applies a scoped normalized schema',
   );
   assert.deepEqual(migration, {
     scope: 'catalog',
-    version: 3,
-    name: 'remove retired playbook catalog',
+    version: 5,
+    name: 'repository scoped group identities',
   });
   const tables = database.read((connection) =>
     connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'catalog_%' ORDER BY name").all(),
@@ -76,6 +77,103 @@ test('opens with the production binding and applies a scoped normalized schema',
     'catalog_repositories',
     'catalog_skills',
   ]);
+});
+
+test('upgrades name-keyed groups with stable ids and explicit parent links', async () => {
+  const dataDir = useDataDir('group-id-migration');
+  const db = new Database(path.join(dataDir, 'hub.sqlite'));
+  db.exec(`
+    CREATE TABLE hub_schema_migrations (
+      scope TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL,
+      PRIMARY KEY (scope, version),
+      UNIQUE (scope, name)
+    );
+    INSERT INTO hub_schema_migrations (scope,version,name,applied_at) VALUES
+      ('catalog',1,'canonical configuration catalogs','2026-01-01T00:00:00.000Z'),
+      ('catalog',2,'versioned group and repository commands','2026-01-01T00:00:00.000Z'),
+      ('catalog',3,'remove retired playbook catalog','2026-01-01T00:00:00.000Z');
+    CREATE TABLE catalog_groups (
+      name TEXT NOT NULL PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      deleted_at TEXT
+    );
+    INSERT INTO catalog_groups (name,created_at,updated_at,version,deleted_at) VALUES
+      ('team','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',1,NULL),
+      ('team/api','2026-01-02T00:00:00.000Z','2026-01-02T00:00:00.000Z',1,NULL);
+  `);
+  db.close();
+
+  const store = await getCatalogStore();
+  const groups = store.listGroups();
+  const team = groups.find((group) => group.name === 'team');
+  const api = groups.find((group) => group.name === 'team/api');
+  assert.match(team.id, /^grp_/);
+  assert.match(api.id, /^grp_/);
+  assert.notEqual(team.id, api.id);
+  assert.equal(team.parentId, null);
+  assert.equal(api.parentId, team.id);
+  assert.equal(api.label, 'api');
+  const foreignKeyViolations = requireHubDatabase().read((connection) =>
+    connection.prepare('PRAGMA foreign_key_check(catalog_groups)').all(),
+  );
+  assert.deepEqual(foreignKeyViolations, []);
+});
+
+test('splits a formerly global group into independent repository identities', async () => {
+  const dataDir = useDataDir('group-repo-scope-migration');
+  const db = new Database(path.join(dataDir, 'hub.sqlite'));
+  db.exec(`
+    CREATE TABLE hub_schema_migrations (
+      scope TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL,
+      PRIMARY KEY (scope, version),
+      UNIQUE (scope, name)
+    );
+    INSERT INTO hub_schema_migrations (scope,version,name,applied_at) VALUES
+      ('catalog',1,'canonical configuration catalogs','2026-01-01T00:00:00.000Z'),
+      ('catalog',2,'versioned group and repository commands','2026-01-01T00:00:00.000Z'),
+      ('catalog',3,'remove retired playbook catalog','2026-01-01T00:00:00.000Z'),
+      ('catalog',4,'stable group identities','2026-01-01T00:00:00.000Z');
+    CREATE TABLE catalog_groups (
+      id TEXT NOT NULL PRIMARY KEY,
+      name TEXT NOT NULL,
+      parent_id TEXT,
+      label TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      deleted_at TEXT
+    );
+    INSERT INTO catalog_groups VALUES
+      ('grp_shared','shared',NULL,'shared','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z',1,NULL);
+    CREATE TABLE hub_canonical_drones (
+      drone_id TEXT PRIMARY KEY,
+      lifecycle_json TEXT NOT NULL
+    );
+    INSERT INTO hub_canonical_drones VALUES
+      ('drone-a','{"id":"drone-a","group":"shared","groupId":"grp_shared","repoPath":"/repo/a"}'),
+      ('drone-b','{"id":"drone-b","group":"shared","groupId":"grp_shared","repoPath":"/repo/b"}');
+  `);
+  db.close();
+
+  const store = await getCatalogStore();
+  const groups = store.listGroups();
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map((group) => group.repoPath), ['/repo/a', '/repo/b']);
+  assert.notEqual(groups[0].id, groups[1].id);
+  const lifecycleRows = requireHubDatabase().read((connection) =>
+    connection.prepare('SELECT lifecycle_json FROM hub_canonical_drones ORDER BY drone_id').all(),
+  );
+  const lifecycles = lifecycleRows.map((row) => JSON.parse(row.lifecycle_json));
+  assert.equal(lifecycles[0].groupId, groups.find((group) => group.repoPath === '/repo/a').id);
+  assert.equal(lifecycles[1].groupId, groups.find((group) => group.repoPath === '/repo/b').id);
 });
 
 test('insert-only backfill is idempotent and canonical rows retain precedence', async () => {
@@ -114,7 +212,7 @@ test('unique conflicts roll back cleanly and concurrent writers cannot create du
 test('cached store follows DRONE_DATA_DIR switching instead of leaking rows', async () => {
   useDataDir('switch-a');
   const first = await getCatalogStore();
-  await first.putGroup({ name: 'first', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' });
+  await first.putGroup({ id: 'grp_first', repoPath: '', name: 'first', label: 'first', parentId: null, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' });
   await resetHubDatabaseForTests();
 
   useDataDir('switch-b');
@@ -139,9 +237,10 @@ test('group tombstones prevent resurrection while repository backfill remains in
   useDataDir('secondary-domains');
   const store = await getCatalogStore();
   const at = '2026-01-01T00:00:00.000Z';
-  assert.equal(await store.backfillGroups([{ name: 'legacy', createdAt: at, updatedAt: at }]), true);
-  assert.equal(await store.deleteGroup('legacy'), true);
-  assert.equal(await store.backfillGroups([{ name: 'legacy', createdAt: at, updatedAt: at }]), false);
+  const legacyGroup = { id: 'grp_legacy', repoPath: '', name: 'legacy', label: 'legacy', parentId: null, createdAt: at, updatedAt: at };
+  assert.equal(await store.backfillGroups([legacyGroup]), true);
+  assert.equal(await store.deleteGroup('', 'legacy'), true);
+  assert.equal(await store.backfillGroups([legacyGroup]), false);
   assert.deepEqual(store.listGroups(), []);
 
   await store.putRepository({ path: '/repo', addedAt: at, remoteUrl: 'canonical' });

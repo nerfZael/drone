@@ -79,6 +79,7 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     expect(created.r.status).toBe(201);
     expect(created.data?.ok).toBe(true);
     expect(created.data?.name).toBe('alpha');
+    expect(String(created.data?.id ?? '').startsWith('grp_')).toBe(true);
 
     const listed = await apiFetch('/api/groups');
     expect(listed.data?.groups?.some((g: any) => g?.name === 'alpha' && g?.totalCount === 0)).toBe(true);
@@ -90,13 +91,13 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
   });
 
   test('renaming a group works even when empty', async () => {
-    await apiFetch('/api/groups', {
+    const created = await apiFetch('/api/groups', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'old' }),
     });
 
-    const renamed = await apiFetch('/api/groups/old/rename', {
+    const renamed = await apiFetch(`/api/groups/${encodeURIComponent(created.data?.id)}/rename`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ newName: 'new' }),
@@ -110,6 +111,7 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     const names = (listed.data?.groups ?? []).map((g: any) => String(g?.name ?? ''));
     expect(names.includes('old')).toBe(false);
     expect(names.includes('new')).toBe(true);
+    expect((listed.data?.groups ?? []).find((g: any) => g?.name === 'new')?.id).toBe(renamed.data?.id);
   });
 
 
@@ -144,14 +146,28 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
   });
 
   test('delete group can be scoped to one repo path', async () => {
+    const repoAGroup = await apiFetch('/api/groups', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'latest', repoPath: '/tmp/repo-a' }),
+    });
+    const repoBGroup = await apiFetch('/api/groups', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'latest', repoPath: '/tmp/repo-b' }),
+    });
+    expect(repoAGroup.r.status).toBe(201);
+    expect(repoBGroup.r.status).toBe(201);
+    expect(repoAGroup.data?.id).not.toBe(repoBGroup.data?.id);
+    const repoAList = await apiFetch(`/api/groups?repoPath=${encodeURIComponent('/tmp/repo-a')}`);
+    expect(repoAList.data?.groups?.map((group: any) => group.id)).toEqual([repoAGroup.data.id]);
     await updateRegistry((reg: any) => {
-      reg.groups = reg.groups ?? {};
-      reg.groups['latest'] = { name: 'latest', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       reg.pending = reg.pending ?? {};
       reg.pending['repo-a-drone'] = {
         id: 'repo-a-drone',
         name: 'repo-a-drone',
         group: 'latest',
+        groupId: repoAGroup.data.id,
         repoPath: '/tmp/repo-a',
         createdAt: new Date().toISOString(),
       };
@@ -159,37 +175,41 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
         id: 'repo-b-drone',
         name: 'repo-b-drone',
         group: 'latest',
+        groupId: repoBGroup.data.id,
         repoPath: '/tmp/repo-b',
         createdAt: new Date().toISOString(),
       };
     });
 
-    const deleted = await apiFetch(`/api/groups/latest?repoPath=${encodeURIComponent('/tmp/repo-a')}`, { method: 'DELETE' });
+    const deleted = await apiFetch(`/api/groups/${encodeURIComponent(repoAGroup.data.id)}`, { method: 'DELETE' });
     expect(deleted.r.status).toBe(200);
     expect(deleted.data?.ok).toBe(true);
     expect(deleted.data?.repoPath).toBe('/tmp/repo-a');
-    expect(deleted.data?.deletedGroup).toBe(false);
+    expect(deleted.data?.deletedGroup).toBe(true);
     expect(deleted.data?.removed?.map((item: any) => item?.id)).toEqual(['repo-a-drone']);
 
     const listed = await apiFetch('/api/groups');
-    const latest = (listed.data?.groups ?? []).find((g: any) => g?.name === 'latest');
+    const latest = (listed.data?.groups ?? []).find((g: any) =>
+      g?.name === 'latest' && g?.repoPath === '/tmp/repo-b');
     expect(latest?.totalCount).toBe(1);
+    expect((listed.data?.groups ?? []).some((g: any) =>
+      g?.name === 'latest' && g?.repoPath === '/tmp/repo-a')).toBe(false);
 
     const registry: any = await loadRegistry();
     expect(registry?.pending?.['repo-a-drone']).toBeUndefined();
     expect(registry?.pending?.['repo-b-drone']?.group).toBe('latest');
-    expect(registry?.groups?.latest?.name).toBe('latest');
+    expect(latest?.id).toBe(repoBGroup.data.id);
   });
 
-  test('scoped deletion of an existing empty group succeeds without deleting the canonical group', async () => {
-    await apiFetch('/api/groups', {
+  test('deleting an empty repository group removes only that scoped group', async () => {
+    const created = await apiFetch('/api/groups', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'scoped-empty' }),
+      body: JSON.stringify({ name: 'scoped-empty', repoPath: '/tmp/repo-a' }),
     });
 
     const deleted = await apiFetch(
-      `/api/groups/scoped-empty?repoPath=${encodeURIComponent('/tmp/repo-a')}`,
+      `/api/groups/${encodeURIComponent(created.data.id)}`,
       { method: 'DELETE' },
     );
     expect(deleted.r.status).toBe(200);
@@ -199,15 +219,15 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
       repoPath: '/tmp/repo-a',
       removed: [],
       total: 0,
-      deletedGroup: false,
+      deletedGroup: true,
     });
 
     const listed = await apiFetch('/api/groups');
     expect(
       listed.data?.groups?.some(
-        (group: any) => group?.name === 'scoped-empty' && group?.totalCount === 0,
+        (group: any) => group?.name === 'scoped-empty' && group?.repoPath === '/tmp/repo-a',
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test('can assign drones to groups and validates group names', async () => {

@@ -12,6 +12,7 @@ const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const { saveRegistry } = require('../../dist/host/registry.js');
 const {
   ensureCanonicalGroup,
+  deleteCanonicalGroup,
   listCanonicalGroups,
   listCanonicalRepositories,
   registerCanonicalRepository,
@@ -54,7 +55,7 @@ test('canonical tombstones beat repeated legacy imports for groups and repositor
   assert.equal((await listCanonicalGroups()).length, 1);
   assert.equal((await listCanonicalRepositories()).length, 1);
   const store = await getCatalogStore();
-  assert.equal(await store.deleteGroup('legacy', at), true);
+  assert.equal(await store.deleteGroup('', 'legacy', at), true);
   assert.equal(await removeCanonicalRepository('/repo'), true);
   assert.deepEqual(await listCanonicalGroups(), []);
   assert.deepEqual(await listCanonicalRepositories(), []);
@@ -95,13 +96,44 @@ test('failed serialization rolls back both repository state and its outbox event
 
 test('group hierarchy commands rename atomically and emit one event per aggregate', async () => {
   useDataDir('rename');
-  await ensureCanonicalGroup('team');
-  await ensureCanonicalGroup('team/api');
-  await assert.rejects(renameCanonicalGroupTree('team', 'team/api'), /own subtree/);
-  assert.equal(await renameCanonicalGroupTree('team', 'platform'), 2);
-  assert.deepEqual((await listCanonicalGroups()).map((group) => group.name), ['platform', 'platform/api']);
+  const team = await ensureCanonicalGroup('team');
+  const api = await ensureCanonicalGroup('team/api');
+  assert.equal(api.parentId, team.id);
+  await assert.rejects(renameCanonicalGroupTree('', 'team', 'team/api'), /own subtree/);
+  assert.equal(await renameCanonicalGroupTree('', 'team', 'platform'), 2);
+  const renamedGroups = await listCanonicalGroups();
+  assert.deepEqual(renamedGroups.map((group) => group.name), ['platform', 'platform/api']);
+  assert.equal(renamedGroups.find((group) => group.name === 'platform').id, team.id);
+  assert.equal(renamedGroups.find((group) => group.name === 'platform/api').id, api.id);
+  assert.equal(renamedGroups.find((group) => group.name === 'platform/api').parentId, team.id);
   const events = new HubOutboxRepository().list({ limit: 20 });
   assert.equal(events.filter((event) => event.eventType === 'group.renamed').length, 2);
+});
+
+test('recreating a deleted group gets a new immutable identity', async () => {
+  useDataDir('recreate-group');
+  const first = await ensureCanonicalGroup('recyclable');
+  assert.equal(await deleteCanonicalGroup('', 'recyclable'), true);
+  const second = await ensureCanonicalGroup('recyclable');
+  assert.notEqual(second.id, first.id);
+  assert.equal(second.name, first.name);
+});
+
+test('same-name groups in different repositories have isolated identities and commands', async () => {
+  useDataDir('repo-isolation');
+  const repoA = await ensureCanonicalGroup('review', '/repo/a');
+  const repoB = await ensureCanonicalGroup('review', '/repo/b');
+  assert.notEqual(repoA.id, repoB.id);
+  assert.equal(repoA.repoPath, '/repo/a');
+  assert.equal(repoB.repoPath, '/repo/b');
+
+  assert.equal(await renameCanonicalGroupTree('/repo/a', 'review', 'ready'), 1);
+  assert.deepEqual((await listCanonicalGroups('/repo/a')).map((group) => group.name), ['ready']);
+  assert.deepEqual((await listCanonicalGroups('/repo/b')).map((group) => group.name), ['review']);
+
+  assert.equal(await deleteCanonicalGroup('/repo/a', 'ready'), true);
+  assert.deepEqual(await listCanonicalGroups('/repo/a'), []);
+  assert.equal((await listCanonicalGroups('/repo/b'))[0].id, repoB.id);
 });
 
 test('CLI repo command registers through the canonical application command', async () => {

@@ -12,6 +12,7 @@ export type DroneSummary = {
   id: string;
   name: string;
   group: string | null;
+  groupId?: string | null;
   createdAt: string;
   lastActivityAt?: string | null;
   lastMessageAt?: string | null;
@@ -73,7 +74,11 @@ export type RepoSummary = {
 };
 
 export type GroupSummary = {
+  id: string;
+  repoPath: string;
   name: string;
+  label: string;
+  parentId: string | null;
   createdAt: string | null;
 };
 

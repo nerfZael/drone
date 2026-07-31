@@ -1,11 +1,12 @@
+import crypto from 'node:crypto';
 import path from 'node:path';
 
 import { getCatalogStore, type CatalogGroupRecord, type CatalogRepositoryRecord, type CatalogStore } from '../host/catalog-store';
 import { getHubDatabase } from '../host/hub-database';
 import { loadRegistry, loadRegistryRawSnapshot, updateRegistry } from '../host/registry';
 
-const groupsBackfilled = new WeakSet<CatalogStore>();
 const repositoriesBackfilled = new WeakSet<CatalogStore>();
+const groupBackfillSignatureByStore = new WeakMap<CatalogStore, string>();
 
 async function catalogStoreOrCompatibility(): Promise<CatalogStore | null> {
   try {
@@ -16,15 +17,51 @@ async function catalogStoreOrCompatibility(): Promise<CatalogStore | null> {
   }
 }
 
+function deterministicLegacyGroupId(repoPath: string, name: string): string {
+  return `grp_${crypto.createHash('sha256').update(`drone-group:${repoPath}\0${name}`).digest('hex').slice(0, 32)}`;
+}
+
+function groupLabel(name: string): string {
+  return name.slice(name.lastIndexOf('/') + 1);
+}
+
 function legacyGroups(registry: any): CatalogGroupRecord[] {
-  const out: CatalogGroupRecord[] = [];
+  const rawByScopeAndName = new Map<string, { raw: any; repoPath: string; name: string }>();
   for (const [key, raw] of Object.entries(registry?.groups ?? {})) {
     const name = String((raw as any)?.name ?? key).trim();
-    if (!name) continue;
-    const createdAt = String((raw as any)?.createdAt ?? '').trim() || new Date().toISOString();
-    out.push({ name, createdAt, updatedAt: String((raw as any)?.updatedAt ?? '').trim() || createdAt });
+    const repoPath = String((raw as any)?.repoPath ?? '').trim();
+    if (name) rawByScopeAndName.set(`${repoPath}\0${name}`, { raw, repoPath, name });
   }
-  return out;
+  for (const entry of [...rawByScopeAndName.values()]) {
+    const { repoPath, name } = entry;
+    const parts = name.split('/').filter(Boolean);
+    for (let index = 1; index < parts.length; index += 1) {
+      const ancestor = parts.slice(0, index).join('/');
+      const key = `${repoPath}\0${ancestor}`;
+      if (!rawByScopeAndName.has(key)) rawByScopeAndName.set(key, { raw: null, repoPath, name: ancestor });
+    }
+  }
+
+  const now = new Date().toISOString();
+  const entries = [...rawByScopeAndName.values()].sort((left, right) =>
+    left.repoPath.localeCompare(right.repoPath) || left.name.length - right.name.length || left.name.localeCompare(right.name));
+  const idByScopeAndName = new Map(entries.map(({ raw, repoPath, name }) => [
+    `${repoPath}\0${name}`,
+    String(raw?.id ?? '').trim() || deterministicLegacyGroupId(repoPath, name),
+  ]));
+  return entries.map(({ raw, repoPath, name }) => {
+    const createdAt = String(raw?.createdAt ?? '').trim() || now;
+    const parentName = name.includes('/') ? name.slice(0, name.lastIndexOf('/')) : '';
+    return {
+      id: idByScopeAndName.get(`${repoPath}\0${name}`)!,
+      repoPath,
+      name,
+      label: String(raw?.label ?? '').trim() || groupLabel(name),
+      parentId: idByScopeAndName.get(`${repoPath}\0${parentName}`) ?? null,
+      createdAt,
+      updatedAt: String(raw?.updatedAt ?? '').trim() || createdAt,
+    };
+  });
 }
 
 function legacyRepositories(registry: any): CatalogRepositoryRecord[] {
@@ -47,73 +84,163 @@ function legacyRepositories(registry: any): CatalogRepositoryRecord[] {
   return out;
 }
 
-export async function listCanonicalGroups(): Promise<CatalogGroupRecord[]> {
+export async function listCanonicalGroups(repoPath?: string): Promise<CatalogGroupRecord[]> {
   const store = await catalogStoreOrCompatibility();
-  if (!store) return legacyGroups(await loadRegistry());
-  if (!groupsBackfilled.has(store)) {
-    await store.backfillGroups(legacyGroups(await loadRegistryRawSnapshot()));
-    groupsBackfilled.add(store);
+  if (!store) {
+    const groups = legacyGroups(await loadRegistry());
+    return repoPath === undefined ? groups : groups.filter((group) => group.repoPath === repoPath);
   }
-  return store.listGroups();
+  const legacy = legacyGroups(await loadRegistryRawSnapshot());
+  const signature = JSON.stringify(legacy.map((group) => [
+    group.id, group.repoPath, group.name, group.parentId, group.label,
+  ]));
+  if (groupBackfillSignatureByStore.get(store) !== signature) {
+    await store.backfillGroups(legacy);
+    groupBackfillSignatureByStore.set(store, signature);
+  }
+  return store.listGroups(repoPath);
 }
 
-export async function ensureCanonicalGroup(nameRaw: string, at = new Date().toISOString()): Promise<CatalogGroupRecord> {
+export async function resolveCanonicalGroupReference(
+  refRaw: string,
+  repoPathRaw?: string,
+): Promise<CatalogGroupRecord | null> {
+  const ref = String(refRaw ?? '').trim();
+  if (!ref) return null;
+  const groups = await listCanonicalGroups();
+  const byId = groups.find((group) => group.id === ref);
+  if (byId) return byId;
+  const repoPath = repoPathRaw === undefined ? undefined : String(repoPathRaw ?? '').trim();
+  const matches = groups.filter((group) => group.name === ref && (repoPath === undefined || group.repoPath === repoPath));
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+export async function ensureCanonicalGroup(
+  nameRaw: string,
+  repoPathRaw = '',
+  at = new Date().toISOString(),
+): Promise<CatalogGroupRecord> {
   const name = String(nameRaw ?? '').trim();
+  const repoPath = String(repoPathRaw ?? '').trim();
   if (!name) throw new Error('group name cannot be empty');
-  const existing = (await listCanonicalGroups()).find((group) => group.name === name);
+  const existingGroups = await listCanonicalGroups(repoPath);
+  const existing = existingGroups.find((group) => group.name === name);
   if (existing) return existing;
+  const paths = name.split('/').filter(Boolean).map((_, index, parts) => parts.slice(0, index + 1).join('/'));
   const store = await catalogStoreOrCompatibility();
-  if (store) return await store.putGroup({ name, createdAt: at, updatedAt: at });
+  const byName = new Map(existingGroups.map((group) => [group.name, group]));
+  if (store) {
+    for (const groupPath of paths) {
+      if (byName.has(groupPath)) continue;
+      const parentName = groupPath.includes('/') ? groupPath.slice(0, groupPath.lastIndexOf('/')) : '';
+      const record = await store.putGroup({
+        id: `grp_${crypto.randomUUID()}`,
+        repoPath,
+        name: groupPath,
+        label: groupLabel(groupPath),
+        parentId: byName.get(parentName)?.id ?? null,
+        createdAt: at,
+        updatedAt: at,
+      });
+      byName.set(groupPath, record);
+    }
+    return byName.get(name)!;
+  }
   await updateRegistry((registry: any) => {
     registry.groups ??= {};
-    registry.groups[name] = { name, createdAt: at, updatedAt: at };
+    for (const groupPath of paths) {
+      const existing = byName.get(groupPath);
+      if (existing) continue;
+      const parentName = groupPath.includes('/') ? groupPath.slice(0, groupPath.lastIndexOf('/')) : '';
+      const parentId = byName.get(parentName)?.id ?? null;
+      const id = `grp_${crypto.randomUUID()}`;
+      registry.groups[id] = {
+        id,
+        repoPath,
+        name: groupPath,
+        label: groupLabel(groupPath),
+        parentId,
+        createdAt: at,
+        updatedAt: at,
+      };
+      byName.set(groupPath, registry.groups[id]);
+    }
   });
-  return { name, createdAt: at, updatedAt: at };
+  return legacyGroups(await loadRegistry()).find((group) => group.repoPath === repoPath && group.name === name)!;
 }
 
-export async function deleteCanonicalGroup(name: string, at?: string): Promise<boolean> {
+export async function deleteCanonicalGroup(repoPath: string, name: string, at?: string): Promise<boolean> {
   await listCanonicalGroups();
   const store = await catalogStoreOrCompatibility();
-  if (store) return await store.deleteGroup(name, at);
-  return await updateRegistry((registry: any) => Boolean(registry?.groups?.[name]) && delete registry.groups[name]);
+  if (store) return await store.deleteGroup(repoPath, name, at);
+  return await updateRegistry((registry: any) => {
+    const entry = Object.entries(registry?.groups ?? {}).find(([, raw]: [string, any]) =>
+      String(raw?.repoPath ?? '').trim() === repoPath && String(raw?.name ?? '').trim() === name);
+    return Boolean(entry) && delete registry.groups[entry![0]];
+  });
 }
 
-export async function deleteCanonicalGroupTree(name: string, at = new Date().toISOString()): Promise<string[]> {
-  const names = (await listCanonicalGroups())
+export async function deleteCanonicalGroupTree(
+  repoPath: string,
+  name: string,
+  at = new Date().toISOString(),
+): Promise<string[]> {
+  const groups = (await listCanonicalGroups(repoPath))
+    .filter((group) => group.name === name || group.name.startsWith(`${name}/`));
+  const names = groups
     .map((group) => group.name)
-    .filter((candidate) => candidate === name || candidate.startsWith(`${name}/`));
   if (names.length === 0) return [];
   const store = await catalogStoreOrCompatibility();
-  if (store) return await store.deleteGroups(names, at);
+  if (store) return await store.deleteGroups(repoPath, names, at);
   return await updateRegistry((registry: any) => {
     const deleted: string[] = [];
-    for (const candidate of names) {
-      if (!registry?.groups?.[candidate]) continue;
-      delete registry.groups[candidate];
-      deleted.push(candidate);
+    const deletedIds = new Set(groups.map((group) => group.id));
+    for (const [key, raw] of Object.entries(registry?.groups ?? {}) as Array<[string, any]>) {
+      if (!deletedIds.has(String(raw?.id ?? key))) continue;
+      deleted.push(String(raw?.name ?? ''));
+      delete registry.groups[key];
     }
     return deleted;
   });
 }
 
-export async function renameCanonicalGroupTree(oldName: string, newName: string, at = new Date().toISOString()): Promise<number> {
+export async function renameCanonicalGroupTree(
+  repoPath: string,
+  oldName: string,
+  newName: string,
+  at = new Date().toISOString(),
+): Promise<number> {
   if (newName === oldName || newName.startsWith(`${oldName}/`)) {
     throw new Error('cannot move a group into itself or its own subtree');
   }
-  const groups = await listCanonicalGroups();
+  const groups = await listCanonicalGroups(repoPath);
   const rewrites = groups
     .filter((group) => group.name === oldName || group.name.startsWith(`${oldName}/`))
-    .map((group) => ({ from: group.name, to: `${newName}${group.name.slice(oldName.length)}` }));
+    .map((group) => ({ id: group.id, from: group.name, to: `${newName}${group.name.slice(oldName.length)}` }));
   if (rewrites.length === 0) throw new Error(`unknown group: ${oldName}`);
   const store = await catalogStoreOrCompatibility();
-  if (store) return await store.renameGroups(rewrites, at);
+  if (store) return await store.renameGroups(repoPath, rewrites, at);
   await updateRegistry((registry: any) => {
     registry.groups ??= {};
     for (const item of rewrites) {
-      const current = registry.groups[item.from];
+      const currentEntry = Object.entries(registry.groups).find(([, raw]: [string, any]) =>
+        String(raw?.id ?? '') === item.id);
+      const current = currentEntry?.[1] as any;
       if (!current) continue;
-      delete registry.groups[item.from];
-      registry.groups[item.to] = { ...current, name: item.to, updatedAt: at };
+      registry.groups[currentEntry![0]] = {
+        ...current, id: item.id, repoPath, name: item.to, label: groupLabel(item.to), updatedAt: at,
+      };
+    }
+    const idByName = new Map(
+      Object.entries(registry.groups)
+        .filter(([, raw]: [string, any]) => String(raw?.repoPath ?? '').trim() === repoPath)
+        .map(([key, raw]: [string, any]) => [String(raw?.name ?? key), String(raw?.id ?? '')]),
+    );
+    for (const [key, raw] of Object.entries(registry.groups) as Array<[string, any]>) {
+      if (String(raw?.repoPath ?? '').trim() !== repoPath) continue;
+      const groupName = String(raw?.name ?? key).trim();
+      const parentName = groupName.includes('/') ? groupName.slice(0, groupName.lastIndexOf('/')) : '';
+      raw.parentId = idByName.get(parentName) || null;
     }
   });
   return rewrites.length;

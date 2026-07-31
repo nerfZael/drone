@@ -34,6 +34,7 @@ import {
   reorderSidebarEntryOrder,
   reorderSidebarGroupOrder,
   sidebarGroupOrderToken,
+  sidebarGroupLegacyOrderToken,
   type SidebarGroupDropPlacement,
 } from './sidebar-group-order';
 import {
@@ -212,12 +213,14 @@ function useGroupedSidebarTreeContext(): GroupedSidebarTreeContextValue {
 }
 
 function groupedFolderDragData(args: {
+  groupId?: string | null;
   nodeId: string;
   folderPath: string;
   groupKind: 'group' | 'repo';
   label: string;
 }): {
   type: 'sidebar-folder';
+  groupId?: string | null;
   folderNodeId: string;
   folderPath: string;
   groupKind: 'group' | 'repo';
@@ -229,6 +232,7 @@ function groupedFolderDragData(args: {
   const groupKind = args.groupKind === 'repo' ? 'repo' : 'group';
   return {
     type: 'sidebar-folder',
+    groupId: args.groupId ?? null,
     folderNodeId,
     folderPath,
     groupKind,
@@ -1080,8 +1084,8 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   const allowVirtualRepoReorderDrop =
     isVirtualGroup && activeDrag?.type === 'sidebar-folder' && activeDrag.groupKind === 'repo';
   const groupRef = React.useMemo(
-    () => ({ group: folderPath, kind: node.groupKind }),
-    [folderPath, node.groupKind],
+    () => ({ groupId: node.groupId, group: folderPath, kind: node.groupKind }),
+    [folderPath, node.groupId, node.groupKind],
   );
   const groupToken = React.useMemo(() => sidebarGroupOrderToken(groupRef), [groupRef]);
   const collapsed = Boolean(collapsedGroups[folderPath]);
@@ -1111,7 +1115,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
             groupOrderKey: null,
             label: node.label,
           }
-        : groupedFolderDragData({ nodeId: node.id, folderPath, groupKind: node.groupKind, label: node.label }),
+        : groupedFolderDragData({ groupId: node.groupId, nodeId: node.id, folderPath, groupKind: node.groupKind, label: node.label }),
     disabled: !sidebarDndEnabled,
   });
   const folderDndDisabled = !sidebarDndEnabled;
@@ -1422,7 +1426,8 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       const groupPath = String(group.group ?? '').trim() || 'Ungrouped';
       out[groupPath] = orderSidebarEntries(
         group.items,
-        sidebarDroneOrderByGroup[sidebarGroupOrderToken({ group: groupPath, kind: 'group' })] ?? [],
+        sidebarDroneOrderByGroup[sidebarGroupOrderToken({ groupId: group.groupId, group: groupPath, kind: 'group' })] ??
+          sidebarDroneOrderByGroup[sidebarGroupLegacyOrderToken({ group: groupPath, kind: 'group' })] ?? [],
         (item) => item.id,
         { unorderedPlacement: 'start' },
       );

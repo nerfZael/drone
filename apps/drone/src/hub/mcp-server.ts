@@ -481,6 +481,9 @@ async function resolveDroneRefs(refs: string[]) {
       ref,
       id: cleanString(match?.id, ref),
       name: cleanString(match?.name),
+      group: cleanString(match?.group) || null,
+      groupId: cleanString(match?.groupId) || null,
+      repoPath: cleanString(match?.repoPath),
       found: Boolean(match),
     };
   });
@@ -591,14 +594,43 @@ function normalizeUiPreferences(value: unknown) {
   };
 }
 
-function sidebarGroupOrderToken(group: string): string {
-  return `group:${cleanString(group)}`;
+type McpGroupSummary = {
+  id: string;
+  repoPath: string;
+  name: string;
+  label: string;
+  parentId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  droneCount: number;
+  pendingCount: number;
+  totalCount: number;
+};
+
+function normalizeGroupSummary(group: any): McpGroupSummary | null {
+  const name = cleanString(group?.name ?? group);
+  if (!name) return null;
+  return {
+    id: cleanString(group?.id),
+    repoPath: cleanString(group?.repoPath),
+    name,
+    label: cleanString(group?.label, name.slice(name.lastIndexOf('/') + 1)),
+    parentId: cleanString(group?.parentId) || null,
+    createdAt: cleanIsoTimestamp(group?.createdAt),
+    updatedAt: cleanIsoTimestamp(group?.updatedAt),
+    droneCount: Number.isFinite(Number(group?.droneCount)) ? Number(group.droneCount) : 0,
+    pendingCount: Number.isFinite(Number(group?.pendingCount)) ? Number(group.pendingCount) : 0,
+    totalCount: Number.isFinite(Number(group?.totalCount)) ? Number(group.totalCount) : 0,
+  };
 }
 
-function sidebarGroupParentPath(value: unknown): string | null {
-  const group = cleanString(value).replace(/^\/+|\/+$/g, '');
-  if (!group || !group.includes('/')) return null;
-  return group.split('/').slice(0, -1).join('/') || null;
+function sidebarGroupOrderToken(group: Pick<McpGroupSummary, 'id' | 'name'> | string): string {
+  if (typeof group !== 'string') {
+    const id = cleanString(group?.id);
+    if (id) return `group-id:${id}`;
+    return `group:${cleanString(group?.name)}`;
+  }
+  return `group:${cleanString(group)}`;
 }
 
 function sidebarDroneNodeId(droneId: string): string {
@@ -644,31 +676,44 @@ function reorderVisibleEntries(
   return normalizeOrderedStringList([...nextVisible, ...hidden]);
 }
 
-function insertGroupTokenAtParentTop(order: unknown, visibleGroups: string[], group: string): string[] {
-  const targetGroup = cleanString(group);
+function migrateScopedGroupOrderToIds(order: unknown, groups: McpGroupSummary[]): string[] {
+  const idByLegacyToken = new Map(
+    groups.filter((group) => group.id).map((group) => [`group:${group.name}`, sidebarGroupOrderToken(group)]),
+  );
+  return normalizeOrderedStringList(normalizeOrderedStringList(order).map((token) => idByLegacyToken.get(token) ?? token));
+}
+
+function insertGroupTokenAtParentTop(
+  order: unknown,
+  visibleGroups: McpGroupSummary[],
+  group: McpGroupSummary,
+): string[] {
+  const targetGroup = cleanString(group.name);
   if (!targetGroup || targetGroup.toLowerCase() === 'ungrouped') return normalizeOrderedStringList(order);
-  const nextToken = sidebarGroupOrderToken(targetGroup);
-  const normalizedOrder = normalizeOrderedStringList(order);
+  const scopedGroups = visibleGroups.filter((candidate) => candidate.repoPath === group.repoPath);
+  const nextToken = sidebarGroupOrderToken(group);
+  const normalizedOrder = migrateScopedGroupOrderToIds(order, scopedGroups);
   if (normalizedOrder.includes(nextToken)) return normalizedOrder;
 
   const missingAncestorTokens = targetGroup
     .split('/')
     .map((_, index, parts) => parts.slice(0, index + 1).join('/'))
     .slice(0, -1)
+    .map((name) => scopedGroups.find((candidate) => candidate.name === name))
+    .filter((candidate): candidate is McpGroupSummary => Boolean(candidate))
     .map(sidebarGroupOrderToken)
     .filter((token) => token && !normalizedOrder.includes(token));
   const tokensToInsert = normalizeOrderedStringList([...missingAncestorTokens, nextToken]);
-  const visibleTokens = normalizeOrderedStringList(visibleGroups.map(sidebarGroupOrderToken));
+  const visibleTokens = normalizeOrderedStringList(scopedGroups.map(sidebarGroupOrderToken));
   const visibleTokenSet = new Set(visibleTokens);
   const hiddenTokens = normalizedOrder.filter((token) => !visibleTokenSet.has(token));
   const visibleOrder = normalizeOrderedStringList([
     ...normalizedOrder.filter((token) => visibleTokenSet.has(token)),
     ...visibleTokens.filter((token) => !normalizedOrder.includes(token)),
   ]);
-  const parentPath = sidebarGroupParentPath(targetGroup);
   const siblingTokenSet = new Set(
-    visibleGroups
-      .filter((entry) => sidebarGroupParentPath(entry) === parentPath)
+    scopedGroups
+      .filter((entry) => entry.parentId === group.parentId)
       .map(sidebarGroupOrderToken),
   );
   const siblingIndex = visibleOrder.findIndex((token) => siblingTokenSet.has(token));
@@ -677,8 +722,9 @@ function insertGroupTokenAtParentTop(order: unknown, visibleGroups: string[], gr
     nextVisibleOrder.splice(siblingIndex, 0, ...tokensToInsert);
     return normalizeOrderedStringList([...nextVisibleOrder, ...hiddenTokens]);
   }
-  if (parentPath) {
-    const parentIndex = visibleOrder.indexOf(sidebarGroupOrderToken(parentPath));
+  if (group.parentId) {
+    const parent = scopedGroups.find((candidate) => candidate.id === group.parentId);
+    const parentIndex = parent ? visibleOrder.indexOf(sidebarGroupOrderToken(parent)) : -1;
     if (parentIndex >= 0) {
       const nextVisibleOrder = visibleOrder.slice();
       nextVisibleOrder.splice(parentIndex + 1, 0, ...tokensToInsert);
@@ -701,30 +747,44 @@ async function writeUiPreferences(uiPreferences: unknown) {
   return normalizeUiPreferences(response?.uiPreferences);
 }
 
-async function listGroupNames() {
-  const response = await requestJson('/api/groups', { method: 'GET' });
+async function listGroups(repoPath?: string): Promise<McpGroupSummary[]> {
+  const query = repoPath === undefined ? '' : `?${new URLSearchParams({ repoPath }).toString()}`;
+  const response = await requestJson(`/api/groups${query}`, { method: 'GET' });
   return Array.isArray(response?.groups)
-    ? response.groups.map((group: any) => cleanString(group?.name ?? group)).filter(Boolean)
+    ? response.groups
+        .map((group: any) => normalizeGroupSummary(group))
+        .filter((group: McpGroupSummary | null): group is McpGroupSummary => Boolean(group))
     : [];
 }
 
-async function insertNewGroupAtParentTop(group: string, existingGroups: string[]) {
-  const targetGroup = cleanString(group);
-  if (!targetGroup || targetGroup.toLowerCase() === 'ungrouped') return { updated: false, group: null };
-  const beforeGroups = normalizeOrderedStringList(existingGroups);
-  if (beforeGroups.includes(targetGroup)) return { updated: false, group: targetGroup };
+async function insertNewGroupsAtParentTop(
+  targetGroups: McpGroupSummary[],
+  beforeGroups: McpGroupSummary[],
+  afterGroups: McpGroupSummary[],
+) {
+  const beforeIds = new Set(beforeGroups.map((group) => group.id).filter(Boolean));
+  const beforeScopesAndNames = new Set(beforeGroups.map((group) => `${group.repoPath}\0${group.name}`));
+  const newGroups = targetGroups.filter((group) => group.id
+    ? !beforeIds.has(group.id)
+    : !beforeScopesAndNames.has(`${group.repoPath}\0${group.name}`));
+  if (newGroups.length === 0) return { updated: false, groups: targetGroups };
   const uiPreferences = await readUiPreferences();
+  let sidebarGroupOrder = uiPreferences.sidebarGroupOrder;
+  for (const group of newGroups) {
+    sidebarGroupOrder = insertGroupTokenAtParentTop(sidebarGroupOrder, afterGroups, group);
+  }
   const saved = await writeUiPreferences({
     ...uiPreferences,
-    sidebarGroupOrder: insertGroupTokenAtParentTop(uiPreferences.sidebarGroupOrder, beforeGroups, targetGroup),
+    sidebarGroupOrder,
   });
-  return { updated: true, group: targetGroup, sidebarGroupOrder: saved.sidebarGroupOrder };
+  return { updated: true, groups: targetGroups, sidebarGroupOrder: saved.sidebarGroupOrder };
 }
 
 async function reorderDronesInUiPreferences(args: any) {
   const refs = normalizeOrderedStringList(args?.drones);
   if (refs.length === 0) throw new Error('drones is required');
   if (cleanString(args?.beforeDrone) && cleanString(args?.afterDrone)) throw new Error('use either beforeDrone or afterDrone, not both');
+  if (cleanString(args?.group) && cleanString(args?.groupId)) throw new Error('use either group or groupId, not both');
 
   const response = await requestDroneSummaries();
   const allDrones = Array.isArray(response?.drones) ? response.drones.map(droneSummary) : [];
@@ -739,24 +799,57 @@ async function reorderDronesInUiPreferences(args: any) {
     return drone;
   });
 
+  const repoPaths = [...new Set(movingDrones.map((drone: any) => cleanString(drone.repoPath)))];
+  if (repoPaths.length !== 1) throw new Error('all reordered drones must belong to the same repository');
+  const inferredRepoPath = repoPaths[0] ?? '';
+  const requestedRepoPath = args?.repoPath === undefined ? inferredRepoPath : cleanString(args.repoPath);
+  if (requestedRepoPath !== inferredRepoPath) throw new Error('repoPath does not match the reordered drones');
   const targetGroup = normalizeGroupForOrder(args?.group);
-  const scopeDrones = allDrones.filter((drone: any) => normalizeGroupForOrder(drone.group) === targetGroup);
+  const requestedGroupId = cleanString(args?.groupId);
+  const groups = requestedGroupId || targetGroup !== 'Ungrouped' ? await listGroups() : [];
+  const groupRecord = requestedGroupId
+    ? groups.find((group) => group.id === requestedGroupId)
+    : groups.find((group) => group.repoPath === requestedRepoPath && group.name === targetGroup);
+  if (requestedGroupId && !groupRecord) throw new Error(`unknown group: ${requestedGroupId}`);
+  if (groupRecord && groupRecord.repoPath !== requestedRepoPath) throw new Error('group belongs to a different repository');
+  if (targetGroup !== 'Ungrouped' && !groupRecord) {
+    throw new Error(`unknown group in repository ${requestedRepoPath || '(none)'}: ${targetGroup}`);
+  }
+  const effectiveGroupName = groupRecord?.name ?? targetGroup;
+  const effectiveGroupId = groupRecord?.id ?? '';
+  const scopeDrones = allDrones.filter((drone: any) =>
+    cleanString(drone.repoPath) === requestedRepoPath &&
+    (effectiveGroupId
+      ? cleanString(drone.groupId) === effectiveGroupId
+      : normalizeGroupForOrder(drone.group) === effectiveGroupName));
   const scopeIds = scopeDrones.map((drone: any) => drone.id).filter(Boolean);
   for (const drone of movingDrones) {
-    if (normalizeGroupForOrder(drone.group) !== targetGroup) throw new Error(`drone is not in group ${targetGroup}: ${drone.name || drone.id}`);
+    const belongsToGroup = effectiveGroupId
+      ? cleanString(drone.groupId) === effectiveGroupId
+      : normalizeGroupForOrder(drone.group) === effectiveGroupName;
+    if (!belongsToGroup) throw new Error(`drone is not in group ${effectiveGroupName}: ${drone.name || drone.id}`);
   }
 
   const beforeDrone = cleanString(args?.beforeDrone) ? refToDrone.get(cleanString(args.beforeDrone)) : null;
   const afterDrone = cleanString(args?.afterDrone) ? refToDrone.get(cleanString(args.afterDrone)) : null;
   if (cleanString(args?.beforeDrone) && !beforeDrone) throw new Error(`unknown beforeDrone: ${args.beforeDrone}`);
   if (cleanString(args?.afterDrone) && !afterDrone) throw new Error(`unknown afterDrone: ${args.afterDrone}`);
+  if (beforeDrone && !scopeIds.includes(beforeDrone.id)) throw new Error(`beforeDrone is not in the selected repository group: ${args.beforeDrone}`);
+  if (afterDrone && !scopeIds.includes(afterDrone.id)) throw new Error(`afterDrone is not in the selected repository group: ${args.afterDrone}`);
 
   const movingIds = movingDrones.map((drone: any) => drone.id).filter(Boolean);
   const beforeId = beforeDrone?.id || '';
   const afterId = afterDrone?.id || '';
-  const groupOrderKey = sidebarGroupOrderToken(targetGroup);
-  const parentId = targetGroup === 'Ungrouped' ? 'root' : sidebarFolderNodeId(targetGroup);
+  const groupOrderKey = groupRecord ? sidebarGroupOrderToken(groupRecord) : sidebarGroupOrderToken(effectiveGroupName);
   const uiPreferences = await readUiPreferences();
+  const repoGroupPath = `repo:${requestedRepoPath}`;
+  const parentId = uiPreferences.sidebarGroupingMode === 'repos'
+    ? effectiveGroupName === 'Ungrouped'
+      ? sidebarFolderNodeId(repoGroupPath)
+      : sidebarFolderNodeId(`repo-scope:${repoGroupPath}:${effectiveGroupName}`)
+    : effectiveGroupName === 'Ungrouped'
+      ? 'root'
+      : sidebarFolderNodeId(effectiveGroupName);
   const nextUiPreferences = {
     ...uiPreferences,
     sidebarDroneOrderByGroup: {
@@ -777,7 +870,9 @@ async function reorderDronesInUiPreferences(args: any) {
   const saved = await writeUiPreferences(nextUiPreferences);
   return {
     ok: true,
-    group: targetGroup,
+    group: effectiveGroupName,
+    groupId: effectiveGroupId || null,
+    repoPath: requestedRepoPath,
     drones: movingDrones.map((drone: any) => ({ id: drone.id, name: drone.name })),
     sidebarDroneOrder: saved.sidebarDroneOrderByGroup[groupOrderKey] ?? [],
     sidebarNodeOrder: saved.sidebarNodeOrderByParent[parentId] ?? [],
@@ -1183,11 +1278,19 @@ async function grantCreatedDroneAccessBestEffort(
 function registerTools(server: McpServer, context: McpToolRegistrationContext) {
   server.registerTool('list_drones', {
     title: 'List drones',
-    description: 'List local Drone Hub drones, optionally filtered by group or names.',
-    inputSchema: { group: z.string().optional(), names: z.array(z.string()).optional(), limit: z.number().optional() },
+    description: 'List local Drone Hub drones, optionally filtered by repository, canonical group id, group name, or drone names.',
+    inputSchema: {
+      repoPath: z.string().optional(),
+      groupId: z.string().optional(),
+      group: z.string().optional(),
+      names: z.array(z.string()).optional(),
+      limit: z.number().optional(),
+    },
   }, async (args) => {
     const response = await requestDroneSummaries();
     const wantedNames = new Set((args.names ?? []).map((item) => cleanString(item)).filter(Boolean));
+    const repoPath = args.repoPath === undefined ? null : cleanString(args.repoPath);
+    const groupId = cleanString(args.groupId);
     const group = cleanString(args.group);
     const limit = cleanPositiveInt(args.limit, 50, 200);
     let drones = Array.isArray(response?.drones)
@@ -1195,6 +1298,8 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           .filter((drone: any) => !isWorkflowChildDroneEntry(drone))
           .map(droneSummary)
       : [];
+    if (repoPath !== null) drones = drones.filter((drone: any) => cleanString(drone.repoPath) === repoPath);
+    if (groupId) drones = drones.filter((drone: any) => drone.groupId === groupId);
     if (group) drones = drones.filter((drone: any) => drone.group === group);
     if (wantedNames.size > 0) drones = drones.filter((drone: any) => wantedNames.has(drone.id) || wantedNames.has(drone.name));
     drones.sort(compareDronesByRecentActivity);
@@ -1212,44 +1317,76 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
 
   server.registerTool('list_groups', {
     title: 'List drone groups',
-    description: 'List Drone Hub groups and their drone counts.',
-    inputSchema: {},
-  }, async () => toolResult(await requestJson('/api/groups', { method: 'GET' })));
+    description: 'List repository-scoped Drone Hub groups, their immutable ids, and drone counts.',
+    inputSchema: { repoPath: z.string().optional() },
+  }, async (args) => {
+    const repoPath = args.repoPath === undefined ? undefined : cleanString(args.repoPath);
+    const groups = await listGroups(repoPath);
+    return toolResult({ ok: true, groups, total: groups.length });
+  });
 
   server.registerTool('create_group', {
     title: 'Create drone group',
-    description: 'Create an empty Drone Hub group.',
-    inputSchema: { group: z.string().optional(), name: z.string().optional() },
+    description: 'Create an empty group scoped to one repository. Omit repoPath only for drones without a repository.',
+    inputSchema: { group: z.string().optional(), name: z.string().optional(), repoPath: z.string().optional() },
   }, async (args) => {
     const group = cleanString(args.group || args.name);
     if (!group) throw new Error('group is required');
-    const beforeGroups = await listGroupNames();
-    const response = await requestJson('/api/groups', { method: 'POST', body: JSON.stringify({ name: group }) });
-    const groupOrder = await insertNewGroupAtParentTop(group, beforeGroups);
-    return toolResult({ ok: true, group: cleanString(response?.name, group), createdAt: cleanIsoTimestamp(response?.createdAt), groupOrder });
+    const repoPath = cleanString(args.repoPath);
+    const beforeGroups = await listGroups(repoPath);
+    const response = await requestJson('/api/groups', {
+      method: 'POST',
+      body: JSON.stringify({ name: group, repoPath }),
+    });
+    const created = normalizeGroupSummary(response);
+    if (!created) throw new Error('Drone Hub returned an invalid group after creation');
+    const afterGroups = await listGroups(repoPath);
+    const canonical = afterGroups.find((candidate) => candidate.id === created.id) ?? created;
+    const groupOrder = await insertNewGroupsAtParentTop([canonical], beforeGroups, afterGroups);
+    return toolResult({ ok: true, ...canonical, group: canonical.name, groupOrder });
   });
 
   server.registerTool('set_drone_group', {
     title: 'Set drone group',
-    description: 'Move one or more Drone Hub drones into a group, or clear their group.',
+    description: 'Move one or more Drone Hub drones into repository-scoped groups, or clear their group. A name creates or selects an independent group in each drone repository; groupId selects one exact group.',
     inputSchema: {
       drones: z.array(z.string()).optional(),
       drone: z.string().optional(),
       group: z.string().optional(),
+      groupId: z.string().optional(),
       clearGroup: z.boolean().optional(),
     },
   }, async (args) => {
     const drones = [...new Set([...(args.drones ?? []).map((item) => cleanString(item)).filter(Boolean), ...(cleanString(args.drone) ? [cleanString(args.drone)] : [])])];
     if (drones.length === 0) throw new Error('at least one drone is required');
+    const groupId = cleanString(args.groupId);
     const group = args.clearGroup === true ? null : cleanString(args.group) || null;
-    if (group == null && args.clearGroup !== true) throw new Error('group is required unless clearGroup is true');
-    const beforeGroups = group ? await listGroupNames() : [];
+    if (args.clearGroup === true && (groupId || cleanString(args.group))) throw new Error('clearGroup cannot be combined with group or groupId');
+    if (groupId && group) throw new Error('use either group or groupId, not both');
+    if (!groupId && group == null && args.clearGroup !== true) throw new Error('group or groupId is required unless clearGroup is true');
+    const beforeGroups = groupId || group ? await listGroups() : [];
     const resolved = await resolveDroneRefs(drones);
+    const unknown = resolved.filter((item) => !item.found).map((item) => item.ref);
+    if (unknown.length > 0) throw new Error(`unknown drone${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}`);
+    const selectedGroup = groupId ? beforeGroups.find((candidate) => candidate.id === groupId) : null;
+    if (groupId && !selectedGroup) throw new Error(`unknown group: ${groupId}`);
+    if (selectedGroup && resolved.some((item) => item.repoPath !== selectedGroup.repoPath)) {
+      throw new Error('group belongs to a different repository than one or more selected drones');
+    }
     const droneIds = resolved.map((item) => item.id);
-    const response = await requestJson('/api/drones/group-set', { method: 'POST', body: JSON.stringify({ droneIds, group }) });
-    const groupOrder = group && Array.isArray(response?.moved) && response.moved.length > 0
-      ? await insertNewGroupAtParentTop(group, beforeGroups)
-      : { updated: false, group };
+    const response = await requestJson('/api/drones/group-set', {
+      method: 'POST',
+      body: JSON.stringify(groupId ? { droneIds, groupId } : { droneIds, group }),
+    });
+    let groupOrder: any = { updated: false, groups: [] };
+    if ((groupId || group) && Array.isArray(response?.moved) && response.moved.length > 0) {
+      const afterGroups = await listGroups();
+      const targetRepoPaths = new Set(resolved.filter((item) => item.found).map((item) => item.repoPath));
+      const targetGroups = groupId
+        ? afterGroups.filter((candidate) => candidate.id === groupId)
+        : afterGroups.filter((candidate) => targetRepoPaths.has(candidate.repoPath) && candidate.name === group);
+      groupOrder = await insertNewGroupsAtParentTop(targetGroups, beforeGroups, afterGroups);
+    }
     return toolResult({ ok: true, ...response, groupOrder });
   });
 
@@ -1296,10 +1433,12 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
 
   server.registerTool('reorder_drones', {
     title: 'Reorder drones',
-    description: 'Reorder Drone Hub drones in the sidebar preferences.',
+    description: 'Reorder drones within one repository-scoped sidebar group. Prefer groupId when group names are duplicated across repositories.',
     inputSchema: {
       drones: z.array(z.string()),
       group: z.string().optional(),
+      groupId: z.string().optional(),
+      repoPath: z.string().optional(),
       beforeDrone: z.string().optional(),
       afterDrone: z.string().optional(),
     },
@@ -1489,6 +1628,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     inputSchema: {
       name: z.string(),
       group: z.string().optional(),
+      groupId: z.string().optional(),
       agent: z.enum(['cursor', 'codex', 'claude', 'opencode', 'pi', 'blip']).optional(),
       model: z.string().optional(),
       cwd: z.string().optional(),
@@ -1509,6 +1649,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       completion: z.enum(['ready', 'accepted']).optional(),
     },
   }, async (args) => {
+    if (cleanString(args.group) && cleanString(args.groupId)) throw new Error('use either group or groupId, not both');
     const fleetParentId = await requireContainerDroneForManagedChat(
       context,
       chatPrincipal(context)?.droneId,
@@ -1528,7 +1669,11 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       name: cleanString(args.name),
       runtime: 'container',
       ...(args.draft === true ? { draft: true } : {}),
-      ...(cleanString(args.group) ? { group: cleanString(args.group) } : {}),
+      ...(cleanString(args.groupId)
+        ? { groupId: cleanString(args.groupId) }
+        : cleanString(args.group)
+          ? { group: cleanString(args.group) }
+          : {}),
       ...(seedAgent ? { seedAgent } : {}),
       ...(seedModel ? { seedModel } : {}),
       ...(cleanString(args.cwd) ? { cwd: cleanString(args.cwd) } : {}),
@@ -1575,10 +1720,12 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       source: z.string(),
       name: z.string(),
       group: z.string().optional(),
+      groupId: z.string().optional(),
       cloneChats: z.boolean().optional(),
       completion: z.enum(['ready', 'accepted']).optional(),
     },
   }, async (args) => {
+    if (cleanString(args.group) && cleanString(args.groupId)) throw new Error('use either group or groupId, not both');
     const fleetParentId = await requireContainerDroneForManagedChat(
       context,
       chatPrincipal(context)?.droneId,
@@ -1589,7 +1736,11 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       runtime: 'container',
       cloneFrom: cleanString(args.source),
       cloneChats: args.cloneChats !== false,
-      ...(cleanString(args.group) ? { group: cleanString(args.group) } : {}),
+      ...(cleanString(args.groupId)
+        ? { groupId: cleanString(args.groupId) }
+        : cleanString(args.group)
+          ? { group: cleanString(args.group) }
+          : {}),
       ...(fleetParentId ? { fleetParentId } : {}),
     };
     const response = await requestJson('/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);

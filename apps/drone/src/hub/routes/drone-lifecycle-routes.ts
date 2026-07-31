@@ -16,7 +16,7 @@ type DroneLifecycleDependencyName =
   | 'dvmBaseSet'
   | 'dvmStop'
   | 'enqueueProvisioning'
-  | 'ensureCanonicalGroup'
+  | 'resolveCanonicalGroupReference'
   | 'fileExists'
   | 'findDroneIdByRef'
   | 'hubLog'

@@ -1,7 +1,7 @@
 import { getDroneLifecycleRepository, type CanonicalDroneLifecycleRecord, type CanonicalDroneLifecycleState } from '../host/drone-lifecycle-repository';
 import { loadRegistry, updateRegistry } from '../host/registry';
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
-import { ensureCanonicalGroup } from './groups-repositories';
+import { ensureCanonicalGroup, listCanonicalGroups } from './groups-repositories';
 import { patchCanonicalDroneLifecycleBatch } from './drone-lifecycle-service';
 
 export type DroneMetadataCommandDependencies = {
@@ -138,42 +138,88 @@ export async function setDroneGroupMetadata(opts: {
   droneId: string;
   state?: 'real' | 'pending';
   group: string | null;
+  repoPath?: string;
   dependencies?: DroneMetadataCommandDependencies;
 }): Promise<CanonicalDroneLifecycleRecord> {
-  if (opts.group) await ensureCanonicalGroup(opts.group);
+  let repoPath = opts.repoPath === undefined ? '' : String(opts.repoPath).trim();
+  if (opts.repoPath === undefined) {
+    const repository = await repositoryWithBackfill();
+    const current = repository?.get(opts.droneId);
+    if (current) repoPath = String(current.lifecycle.repoPath ?? '').trim();
+    else {
+      const registry: any = await loadRegistry();
+      for (const bucketName of ['drones', 'pending']) {
+        const found = findDroneEntryByIdentity({ drones: registry?.[bucketName] }, opts.droneId);
+        if (found) repoPath = String(found.entry?.repoPath ?? '').trim();
+      }
+    }
+  }
+  const groupRecord = opts.group ? await ensureCanonicalGroup(opts.group, repoPath) : null;
   return await commitDroneMetadataPatch({
     droneId: opts.droneId,
     state: opts.state,
     eventType: opts.group ? 'drone.group.set' : 'drone.group.cleared',
-    payload: { group: opts.group },
+    payload: { group: opts.group, groupId: groupRecord?.id ?? null, repoPath },
     dependencies: opts.dependencies,
     transform: (lifecycle) => {
       const next = { ...lifecycle };
-      if (opts.group) next.group = opts.group;
-      else delete next.group;
+      if (opts.group) {
+        next.group = opts.group;
+        next.groupId = groupRecord!.id;
+      } else {
+        delete next.group;
+        delete next.groupId;
+      }
       return next;
     },
   });
 }
 
 export async function setDroneGroupMetadataBatch(
-  updates: Array<{ droneId: string; state: 'real' | 'pending'; group: string | null }>,
+  updates: Array<{
+    droneId: string;
+    state: 'real' | 'pending';
+    group: string | null;
+    repoPath?: string;
+  }>,
   options: { ensureGroups?: boolean } = {},
 ): Promise<CanonicalDroneLifecycleRecord[]> {
   if (options.ensureGroups !== false) {
-    for (const group of new Set(updates.map((update) => update.group).filter((group): group is string => Boolean(group)))) {
-      await ensureCanonicalGroup(group);
+    const groupScopes = new Map<string, { group: string; repoPath: string }>();
+    for (const update of updates) {
+      if (!update.group) continue;
+      const repoPath = String(update.repoPath ?? '').trim();
+      groupScopes.set(`${repoPath}\0${update.group}`, { group: update.group, repoPath });
+    }
+    for (const { group, repoPath } of groupScopes.values()) {
+      await ensureCanonicalGroup(group, repoPath);
     }
   }
+  const groupIdByScopeAndName = new Map(
+    (await listCanonicalGroups()).map((group) => [`${group.repoPath}\0${group.name}`, group.id]),
+  );
   return await patchCanonicalDroneLifecycleBatch(updates.map((update) => ({
     state: update.state,
     droneId: update.droneId,
     eventType: update.group ? 'drone.group.set' : 'drone.group.cleared',
-    payload: { group: update.group },
+    payload: {
+      group: update.group,
+      groupId: update.group
+        ? groupIdByScopeAndName.get(`${String(update.repoPath ?? '').trim()}\0${update.group}`) ?? null
+        : null,
+      repoPath: String(update.repoPath ?? '').trim(),
+    },
     transform: (lifecycle) => {
       const next = { ...lifecycle };
-      if (update.group) next.group = update.group;
-      else delete next.group;
+      if (update.group) {
+        next.group = update.group;
+        next.groupId = groupIdByScopeAndName.get(
+          `${String(update.repoPath ?? lifecycle.repoPath ?? '').trim()}\0${update.group}`,
+        ) ?? next.groupId;
+      } else {
+        delete next.group;
+        delete next.groupId;
+      }
       return next;
     },
   })));

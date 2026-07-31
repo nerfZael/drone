@@ -23,6 +23,7 @@ import {
 type UseGroupManagementArgs = {
   autoDelete: boolean;
   activeRepoPath: string;
+  groupIdByName: Record<string, string>;
   drones: DroneSummary[];
   polledDrones: DroneSummary[];
   optimisticallyDeletedDrones: Record<string, boolean>;
@@ -51,6 +52,7 @@ type DeleteGroupOptions = {
 export function useGroupManagement({
   autoDelete,
   activeRepoPath,
+  groupIdByName,
   drones,
   polledDrones,
   optimisticallyDeletedDrones,
@@ -88,12 +90,12 @@ export function useGroupManagement({
 
       setRenamingGroups((prev) => ({ ...prev, [group]: true }));
       try {
-        await requestJson<{ ok: true; oldName: string; newName: string; renamed: boolean }>(
-          `/api/groups/${encodeURIComponent(group)}/rename`,
+        await requestJson<{ ok: true; id: string; oldName: string; newName: string; renamed: boolean }>(
+          `/api/groups/${encodeURIComponent(groupIdByName[group] ?? group)}/rename`,
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ newName }),
+            body: JSON.stringify({ newName, repoPath: activeRepoPath }),
           },
         );
 
@@ -148,6 +150,8 @@ export function useGroupManagement({
       }
     },
     [
+      groupIdByName,
+      activeRepoPath,
       renamingGroups,
       selectedGroupMultiChat,
       setCollapsedGroups,
@@ -191,7 +195,7 @@ export function useGroupManagement({
                 if (targetRepoPath) return droneRepoPath === targetRepoPath;
                 return !droneRepoPath;
               }
-              if (scopedRepoPath && String(d?.repoPath ?? '').trim() !== scopedRepoPath) return false;
+              if (String(d?.repoPath ?? '').trim() !== scopedRepoPath) return false;
               const droneGroup = String(d?.group ?? '').trim();
               if (wantsUngroupedGroup) return !droneGroup || isUngroupedGroupName(droneGroup);
               return isSameOrDescendantSidebarGroupPath(droneGroup, group);
@@ -252,22 +256,29 @@ export function useGroupManagement({
             );
           }
         } else {
-          const query = scopedRepoPath ? `?repoPath=${encodeURIComponent(scopedRepoPath)}` : '';
-          await requestJson(`/api/groups/${encodeURIComponent(group)}${query}`, { method: 'DELETE' });
+          const query = `?repoPath=${encodeURIComponent(scopedRepoPath)}`;
+          await requestJson(`/api/groups/${encodeURIComponent(groupIdByName[group] ?? group)}${query}`, { method: 'DELETE' });
         }
         if (!scopedRepoPath) {
+          const deletedStableTokens = new Set(
+            Object.entries(groupIdByName)
+              .filter(([name]) => isSameOrDescendantSidebarGroupPath(name, group))
+              .map(([, id]) => `group-id:${id}`),
+          );
           setCollapsedGroups((prev) => removeCollapsedGroupKeysByPrefix(prev, group));
-          setSidebarGroupOrder((prev) =>
-            prev.filter((token) => !token.startsWith('group:') || !isSameOrDescendantSidebarGroupPath(token.slice('group:'.length), group)),
-          );
-          setHiddenSidebarGroups((prev) =>
-            prev.filter((token) => !token.startsWith('group:') || !isSameOrDescendantSidebarGroupPath(token.slice('group:'.length), group)),
-          );
+          setSidebarGroupOrder((prev) => prev.filter((token) =>
+            !deletedStableTokens.has(token) &&
+            (!token.startsWith('group:') || !isSameOrDescendantSidebarGroupPath(token.slice('group:'.length), group)),
+          ));
+          setHiddenSidebarGroups((prev) => prev.filter((token) =>
+            !deletedStableTokens.has(token) &&
+            (!token.startsWith('group:') || !isSameOrDescendantSidebarGroupPath(token.slice('group:'.length), group)),
+          ));
           setSidebarDroneOrderByGroup((prev) => {
             let changed = false;
             const nextMap: Record<string, string[]> = {};
             for (const [key, value] of Object.entries(prev)) {
-              if (key.startsWith('group:') && isSameOrDescendantSidebarGroupPath(key.slice('group:'.length), group)) {
+              if (deletedStableTokens.has(key) || (key.startsWith('group:') && isSameOrDescendantSidebarGroupPath(key.slice('group:'.length), group))) {
                 changed = true;
                 continue;
               }
@@ -308,6 +319,7 @@ export function useGroupManagement({
     [
       deletingGroups,
       activeRepoPath,
+      groupIdByName,
       optimisticallyDeletedDrones,
       polledDrones,
       selectedGroupMultiChat,
@@ -343,6 +355,10 @@ export function useGroupManagement({
       setGroupMoveError(null);
       setMovingDroneGroups(true);
       try {
+        const scopedGroupId = targetGroup && groupIdByName[targetGroup] &&
+          movable.every((id) => String(byId.get(id)?.repoPath ?? '').trim() === String(activeRepoPath ?? '').trim())
+          ? groupIdByName[targetGroup]
+          : null;
         const resp = await requestJson<{
           ok: true;
           moved: Array<{ id: string; name: string; previousGroup: string | null; group: string | null }>;
@@ -350,7 +366,11 @@ export function useGroupManagement({
         }>(`/api/drones/group-set`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ droneIds: movable, group: targetGroup }),
+          body: JSON.stringify(
+            targetGroup && scopedGroupId
+              ? { droneIds: movable, groupId: scopedGroupId }
+              : { droneIds: movable, group: targetGroup },
+          ),
         });
         const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
         if (rejected.length > 0) {
@@ -384,7 +404,7 @@ export function useGroupManagement({
         setMovingDroneGroups(false);
       }
     },
-    [drones],
+    [activeRepoPath, drones, groupIdByName],
   );
 
   const createGroupAndMove = React.useCallback(
@@ -413,7 +433,7 @@ export function useGroupManagement({
         await requestJson<{ ok: true; name: string; createdAt: string }>(`/api/groups`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: target }),
+          body: JSON.stringify({ name: target, repoPath: activeRepoPath }),
         });
         groupCreated = true;
       } catch (e: any) {
@@ -427,7 +447,7 @@ export function useGroupManagement({
       const result = await moveDronesToGroup(target, requested);
       return { ...result, groupCreated };
     },
-    [moveDronesToGroup],
+    [activeRepoPath, moveDronesToGroup],
   );
 
   const createGroup = React.useCallback(
@@ -449,7 +469,7 @@ export function useGroupManagement({
         await requestJson<{ ok: true; name: string; createdAt: string }>(`/api/groups`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: target }),
+          body: JSON.stringify({ name: target, repoPath: activeRepoPath }),
         });
         return { ok: true, error: null };
       } catch (e: any) {
@@ -459,7 +479,7 @@ export function useGroupManagement({
         return { ok: false, error: msg || 'Create group failed.' };
       }
     },
-    [],
+    [activeRepoPath],
   );
 
   return {

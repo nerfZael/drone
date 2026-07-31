@@ -11,6 +11,8 @@ import {
   SIDEBAR_ROOT_PARENT_ID,
   sidebarDroneNodeId,
   sidebarFolderNodeId,
+  sidebarGroupLegacyOrderToken,
+  sidebarGroupOrderToken,
 } from './ordering';
 import { buildSidebarDroneTree } from './drone-tree';
 import { buildSidebarFolderTree } from './folder-tree';
@@ -64,6 +66,7 @@ function collectFolderNodes<TDrone extends SidebarTreeDrone>(
     kind: 'folder',
     path: folder.path,
     groupPath: folder.kind === 'group' ? folder.path : null,
+    groupId: folder.groupId ?? null,
     repoGroupPath: folder.kind === 'repo' ? folder.path : null,
     label: sidebarFolderDisplayLabel(folder),
     groupKind: folder.kind,
@@ -89,13 +92,27 @@ function ensureRepoScopedGroupFolders<TDrone extends SidebarTreeDrone>(args: {
   groupedItems: Map<string, TDrone[]>;
   groupOrderIndex: Map<string, number>;
   groupCreatedAtByName: Record<string, string | null>;
+  groupIdByName: Record<string, string>;
   nodesById: Record<string, SidebarTreeNode>;
   childIdsByParentDraft: Record<string, string[]>;
 }): Map<string, SidebarTreeFolderNode> {
   const byGroupPath = new Map<string, SidebarTreeFolderNode>();
+  const resolvedGroupIdByPath = new Map<string, string>();
+  for (const [groupPath, items] of args.groupedItems) {
+    const configuredId = String(args.groupIdByName[groupPath] ?? '').trim();
+    const itemId = items
+      .map((item) => String(item.groupId ?? '').trim())
+      .find(Boolean);
+    const groupId = configuredId || itemId;
+    if (groupId) resolvedGroupIdByPath.set(groupPath, groupId);
+  }
+  const groupIdForPath = (groupPath: string): string | undefined =>
+    resolvedGroupIdByPath.get(groupPath) || undefined;
   const groupPaths = [...args.groupedItems.keys()].filter(Boolean).sort((a, b) => {
-    const aOrder = args.groupOrderIndex.get(`group:${a}`) ?? Number.POSITIVE_INFINITY;
-    const bOrder = args.groupOrderIndex.get(`group:${b}`) ?? Number.POSITIVE_INFINITY;
+    const aOrder = args.groupOrderIndex.get(sidebarGroupOrderToken({ groupId: groupIdForPath(a), group: a, kind: 'group' })) ??
+      args.groupOrderIndex.get(sidebarGroupLegacyOrderToken({ group: a, kind: 'group' })) ?? Number.POSITIVE_INFINITY;
+    const bOrder = args.groupOrderIndex.get(sidebarGroupOrderToken({ groupId: groupIdForPath(b), group: b, kind: 'group' })) ??
+      args.groupOrderIndex.get(sidebarGroupLegacyOrderToken({ group: b, kind: 'group' })) ?? Number.POSITIVE_INFINITY;
     if (aOrder !== bOrder) return aOrder - bOrder;
     const aMs = parseIsoTimestampMs(args.groupCreatedAtByName[a]);
     const bMs = parseIsoTimestampMs(args.groupCreatedAtByName[b]);
@@ -123,6 +140,7 @@ function ensureRepoScopedGroupFolders<TDrone extends SidebarTreeDrone>(args: {
         kind: 'folder',
         path,
         groupPath: currentPath,
+        groupId: groupIdForPath(currentPath) ?? null,
         repoGroupPath: args.repoGroup.group,
         label: part,
         groupKind: 'group',
@@ -156,8 +174,12 @@ function ensureRepoScopedGroupFolders<TDrone extends SidebarTreeDrone>(args: {
     const left = args.nodesById[leftId];
     const right = args.nodesById[rightId];
     if (!left || left.kind !== 'folder' || !right || right.kind !== 'folder') return 0;
-    const leftOrder = args.groupOrderIndex.get(`group:${left.groupPath ?? ''}`) ?? Number.POSITIVE_INFINITY;
-    const rightOrder = args.groupOrderIndex.get(`group:${right.groupPath ?? ''}`) ?? Number.POSITIVE_INFINITY;
+    const leftGroupPath = left.groupPath ?? '';
+    const rightGroupPath = right.groupPath ?? '';
+    const leftOrder = args.groupOrderIndex.get(sidebarGroupOrderToken({ groupId: groupIdForPath(leftGroupPath), group: leftGroupPath, kind: 'group' })) ??
+      args.groupOrderIndex.get(sidebarGroupLegacyOrderToken({ group: leftGroupPath, kind: 'group' })) ?? Number.POSITIVE_INFINITY;
+    const rightOrder = args.groupOrderIndex.get(sidebarGroupOrderToken({ groupId: groupIdForPath(rightGroupPath), group: rightGroupPath, kind: 'group' })) ??
+      args.groupOrderIndex.get(sidebarGroupLegacyOrderToken({ group: rightGroupPath, kind: 'group' })) ?? Number.POSITIVE_INFINITY;
     if (leftOrder !== rightOrder) return leftOrder - rightOrder;
     const leftMs = parseIsoTimestampMs(args.groupCreatedAtByName[left.groupPath ?? '']);
     const rightMs = parseIsoTimestampMs(args.groupCreatedAtByName[right.groupPath ?? '']);
@@ -191,6 +213,7 @@ export function buildSidebarNodeTree<TDrone extends SidebarTreeDrone>({
   sidebarDroneOrderByGroup,
   sidebarNodeOrderByParent,
   sidebarGroupCreatedAtByName = {},
+  sidebarGroupIdByName = {},
 }: BuildSidebarNodeTreeArgs<TDrone>): SidebarNodeTreeModel {
   const nodesById: Record<string, SidebarTreeNode> = {};
   const folderNodeByPath: Record<string, SidebarTreeFolderNode> = {};
@@ -277,13 +300,20 @@ export function buildSidebarNodeTree<TDrone extends SidebarTreeDrone>({
         groupedItems,
         groupOrderIndex,
         groupCreatedAtByName: sidebarGroupCreatedAtByName,
+        groupIdByName: sidebarGroupIdByName,
         nodesById,
         childIdsByParentDraft,
       });
       for (const [actualGroupPath, rawItems] of groupedItems) {
+        const repoScopedGroupId = String(rawItems.find((item) => String(item.groupId ?? '').trim())?.groupId ?? '').trim()
+          || sidebarGroupIdByName[actualGroupPath];
         const orderedItems = orderSidebarEntries(
           rawItems,
-          sidebarDroneOrderByGroup[`group:${actualGroupPath}`] ?? [],
+          sidebarDroneOrderByGroup[sidebarGroupOrderToken({
+            groupId: repoScopedGroupId,
+            group: actualGroupPath,
+            kind: 'group',
+          })] ?? sidebarDroneOrderByGroup[sidebarGroupLegacyOrderToken({ group: actualGroupPath, kind: 'group' })] ?? [],
           (drone) => drone.id,
           { unorderedPlacement: 'start' },
         );
@@ -307,7 +337,8 @@ export function buildSidebarNodeTree<TDrone extends SidebarTreeDrone>({
     if (!folder) continue;
     const orderedItems = orderSidebarEntries(
       group.items,
-      sidebarDroneOrderByGroup[`group:${groupPath}`] ?? [],
+      sidebarDroneOrderByGroup[sidebarGroupOrderToken(group)] ??
+        sidebarDroneOrderByGroup[sidebarGroupLegacyOrderToken(group)] ?? [],
       (drone) => drone.id,
       { unorderedPlacement: 'start' },
     );

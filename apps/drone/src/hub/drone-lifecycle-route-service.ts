@@ -31,7 +31,7 @@ function createDroneLifecycleServiceHandler(
     dvmBaseSet,
     dvmStop,
     enqueueProvisioning,
-    ensureCanonicalGroup,
+    resolveCanonicalGroupReference,
     fileExists,
     findDroneIdByRef,
     hubLog,
@@ -111,13 +111,19 @@ function createDroneLifecycleServiceHandler(
           dronesToMove.push(id);
         }
 
-        const groupRaw = body?.group;
+        const groupRaw = body?.groupId ?? body?.group;
         if (!(groupRaw == null || typeof groupRaw === 'string')) {
           json(res, 400, { ok: false, error: 'invalid group (expected string or null)' });
           return;
         }
         const groupValue = String(groupRaw ?? '').trim();
-        const nextGroup = !groupValue || isUngroupedGroupName(groupValue) ? null : groupValue;
+        const referencedGroup = body?.groupId ? await resolveCanonicalGroupReference(groupValue) : null;
+        if (body?.groupId && !referencedGroup) {
+          json(res, 404, { ok: false, error: `unknown group: ${groupValue}` });
+          return;
+        }
+        const resolvedGroupValue = referencedGroup?.name ?? groupValue;
+        const nextGroup = !resolvedGroupValue || isUngroupedGroupName(resolvedGroupValue) ? null : resolvedGroupValue;
         if (nextGroup) {
           try {
             validateGroupNameOrThrow(nextGroup);
@@ -127,12 +133,13 @@ function createDroneLifecycleServiceHandler(
           }
         }
 
-        if (nextGroup) await ensureCanonicalGroup(nextGroup);
         const moved: Array<{
           id: string;
           name: string;
           previousGroup: string | null;
           group: string | null;
+          groupId: string | null;
+          repoPath: string;
         }> = [];
         const rejected: Array<{ id: string; error: string }> = [];
         for (const id of dronesToMove) {
@@ -141,6 +148,10 @@ function createDroneLifecycleServiceHandler(
             const resolved = await resolveDroneOrPendingForReadRef(id);
             if (!resolved) throw new Error(`unknown drone: ${id}`);
             const source = resolved.kind === 'real' ? resolved.drone : resolved.pending;
+            const repoPath = String(source?.repoPath ?? '').trim();
+            if (referencedGroup && referencedGroup.repoPath !== repoPath) {
+              throw new Error('group belongs to a different repository');
+            }
             const prevRaw = String(source?.group ?? '').trim();
             const previousGroup = !prevRaw || isUngroupedGroupName(prevRaw) ? null : prevRaw;
             if (previousGroup === nextGroup) continue;
@@ -149,8 +160,16 @@ function createDroneLifecycleServiceHandler(
               droneId: id,
               state: resolved.kind,
               group: nextGroup,
+              repoPath,
             });
-            moved.push({ id, name: record.name, previousGroup, group: nextGroup });
+            moved.push({
+              id,
+              name: record.name,
+              previousGroup,
+              group: nextGroup,
+              groupId: String(record.groupId ?? '').trim() || null,
+              repoPath,
+            });
           } catch (error: any) {
             rejected.push({ id, error: String(error?.message ?? error) });
           }

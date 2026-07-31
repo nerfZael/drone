@@ -82,6 +82,7 @@ function createDroneProvisioningServiceHandler(
     droneRegistrySseClients,
     enqueueProvisioning,
     ensureCanonicalGroup,
+    resolveCanonicalGroupReference,
     fileExists,
     findDroneEntryByIdentity,
     findDroneIdByRef,
@@ -144,8 +145,17 @@ function createDroneProvisioningServiceHandler(
         const nameRaw = body?.name;
         const createAsDraft = parseDraftFlag(body?.draft ?? body?.isDraft);
 
-        const groupRaw = typeof body?.group === 'string' ? body.group.trim() : '';
-        const group = groupRaw ? groupRaw : null;
+        const groupRefRaw = typeof body?.groupId === 'string'
+          ? body.groupId.trim()
+          : typeof body?.group === 'string'
+            ? body.group.trim()
+            : '';
+        const referencedGroup = body?.groupId ? await resolveCanonicalGroupReference(groupRefRaw) : null;
+        if (body?.groupId && !referencedGroup) {
+          json(res, 404, { ok: false, error: `unknown group: ${groupRefRaw}` });
+          return;
+        }
+        const group = referencedGroup?.name ?? (groupRefRaw || null);
         const repoRaw = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
         let repoPath = repoRaw ? repoRaw : '';
         let repoBranchSource: RepoBranchSourceMode = 'host';
@@ -465,7 +475,13 @@ function createDroneProvisioningServiceHandler(
           runtime,
         });
         const droneId = makeDroneIdentity();
-        if (group) await ensureCanonicalGroup(group);
+        if (referencedGroup && referencedGroup.repoPath !== repoPath) {
+          json(res, 409, { ok: false, error: 'group belongs to a different repository' });
+          return;
+        }
+        const canonicalGroup = group
+          ? referencedGroup ?? await ensureCanonicalGroup(group, repoPath)
+          : null;
         if (droneDisplayNameExists(preRegAny, name)) {
           json(res, 409, { ok: false, error: `drone already exists: ${name}` });
           return;
@@ -491,6 +507,7 @@ function createDroneProvisioningServiceHandler(
             name,
             ...(createAsDraft ? { draft: true } : {}),
             group: group ?? undefined,
+            groupId: canonicalGroup?.id,
             repoPath,
             runtime,
             ...(hasAgentsMdOverride ? { agentsMdOverride } : {}),
@@ -576,6 +593,8 @@ function createDroneProvisioningServiceHandler(
           ok: true,
           id: droneId,
           name,
+          group,
+          groupId: canonicalGroup?.id ?? null,
           runtime,
           phase: createAsDraft ? 'draft' : 'starting',
           draft: createAsDraft,
@@ -767,6 +786,8 @@ function createDroneProvisioningServiceHandler(
         let accepted: Array<{
           id: string;
           name: string;
+          group?: string;
+          groupId?: string;
           phase: 'draft' | 'starting';
           draft?: boolean;
           initialMessage?: {
@@ -785,12 +806,21 @@ function createDroneProvisioningServiceHandler(
           ).trim();
           const pendingEntries: Array<{ state: 'pending'; droneId: string; entry: any }> = [];
           const initialPromptReservations: InitialPromptQueueReservation[] = [];
-          const groupsToEnsure = new Set<string>();
+          const groupsToEnsure = new Map<string, { group: string; repoPath: string }>();
+          const groupById = new Map<string, Awaited<ReturnType<typeof resolveCanonicalGroupReference>>>();
+          for (const raw of list) {
+            const groupId = typeof raw?.groupId === 'string' ? raw.groupId.trim() : '';
+            if (groupId && !groupById.has(groupId)) {
+              groupById.set(groupId, await resolveCanonicalGroupReference(groupId));
+            }
+          }
           const result = (() => {
             regAny.pending = regAny.pending ?? {};
             const accepted: Array<{
               id: string;
               name: string;
+              group?: string;
+              groupId?: string;
               phase: 'draft' | 'starting';
               draft?: boolean;
               initialMessage?: {
@@ -842,9 +872,22 @@ function createDroneProvisioningServiceHandler(
                 continue;
               }
 
-              const groupRaw = typeof raw?.group === 'string' ? raw.group.trim() : '';
-              const group = groupRaw ? groupRaw : null;
+              const groupRefRaw = typeof raw?.groupId === 'string'
+                ? raw.groupId.trim()
+                : typeof raw?.group === 'string'
+                  ? raw.group.trim()
+                  : '';
+              const referencedGroup = raw?.groupId ? groupById.get(groupRefRaw) ?? null : null;
+              if (raw?.groupId && !referencedGroup) {
+                rejected.push({ name, error: `unknown group: ${groupRefRaw}`, status: 404 });
+                continue;
+              }
+              const group = referencedGroup?.name ?? (groupRefRaw || null);
               const repoPath = preflight.repoPath;
+              if (referencedGroup && referencedGroup.repoPath !== repoPath) {
+                rejected.push({ name, error: 'group belongs to a different repository', status: 409 });
+                continue;
+              }
               const repoBranchSource = preflight.repoBranchSource;
               const remoteBranch = preflight.remoteBranch;
               let runtime: DroneRuntime = 'container';
@@ -1107,7 +1150,9 @@ function createDroneProvisioningServiceHandler(
               const seedPromptId = seedPrompt
                 ? crypto.randomBytes(9).toString('hex')
                 : '';
-              if (group) groupsToEnsure.add(group);
+              if (group && !referencedGroup) {
+                groupsToEnsure.set(`${repoPath}\0${group}`, { group, repoPath });
+              }
               const startupQueuedPrompts =
                 createAsDraft && seedPrompt
                   ? [
@@ -1203,6 +1248,7 @@ function createDroneProvisioningServiceHandler(
               accepted.push({
                 id,
                 name,
+                ...(group ? { group, ...(referencedGroup ? { groupId: referencedGroup.id } : {}) } : {}),
                 phase: createAsDraft ? 'draft' : 'starting',
                 ...(createAsDraft ? { draft: true } : {}),
                 ...(seedPromptId
@@ -1220,7 +1266,24 @@ function createDroneProvisioningServiceHandler(
 
             return { accepted, rejected };
           })();
-          for (const groupName of groupsToEnsure) await ensureCanonicalGroup(groupName);
+          const groupIdByScopeAndName = new Map<string, string>();
+          for (const { group, repoPath } of groupsToEnsure.values()) {
+            const canonicalGroup = await ensureCanonicalGroup(group, repoPath);
+            groupIdByScopeAndName.set(`${canonicalGroup.repoPath}\0${canonicalGroup.name}`, canonicalGroup.id);
+          }
+          for (const entry of pendingEntries) {
+            const groupName = String(entry.entry?.group ?? '').trim();
+            const repoPath = String(entry.entry?.repoPath ?? '').trim();
+            const groupId = groupIdByScopeAndName.get(`${repoPath}\0${groupName}`);
+            if (!groupId) continue;
+            entry.entry.groupId = groupId;
+          }
+          for (const item of result.accepted) {
+            if (!item.group || item.groupId) continue;
+            const pending = pendingEntries.find((entry) => entry.droneId === item.id);
+            const repoPath = String(pending?.entry?.repoPath ?? '').trim();
+            item.groupId = groupIdByScopeAndName.get(`${repoPath}\0${item.group}`);
+          }
           await upsertCanonicalDroneLifecycleBatch(pendingEntries);
           for (const reservation of initialPromptReservations) {
             await reserveInitialPromptQueuePosition(reservation);

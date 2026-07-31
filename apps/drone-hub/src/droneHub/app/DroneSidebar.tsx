@@ -55,6 +55,8 @@ import { SidebarReorderDropIndicator } from './sidebar-reorder-ui';
 import { buildSidebarDroneTree } from './sidebar-drone-tree';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import {
+  migrateSidebarGroupEntryOrderMapToIds,
+  migrateSidebarGroupOrderToIds,
   orderSidebarEntries,
   orderSidebarGroups,
   sidebarGroupOrderToken,
@@ -1079,8 +1081,8 @@ function SidebarFolderTreeNode({
   onDeleteGroup,
 }: SidebarFolderTreeNodeProps) {
   const groupRef = React.useMemo<SidebarDragGroupRef>(
-    () => ({ group: node.path, kind: 'group' }),
-    [node.path],
+    () => ({ groupId: node.groupId, group: node.path, kind: 'group' }),
+    [node.groupId, node.path],
   );
   const groupToken = React.useMemo(() => sidebarGroupOrderToken(groupRef), [groupRef]);
   const groupLabel = sidebarFolderDisplayLabel(node);
@@ -1408,6 +1410,7 @@ export type DroneSidebarProps = {
   movingDroneGroups: boolean;
   sidebarGroups: SidebarGroup[];
   sidebarGroupCreatedAtByName: Record<string, string | null>;
+  sidebarGroupIdByName: Record<string, string>;
   sidebarHiddenGroupCount: number;
   collapsedGroups: Record<string, boolean>;
   deletingGroups: Record<string, boolean>;
@@ -1502,6 +1505,7 @@ export function DroneSidebar({
   movingDroneGroups,
   sidebarGroups,
   sidebarGroupCreatedAtByName,
+  sidebarGroupIdByName,
   sidebarHiddenGroupCount,
   collapsedGroups,
   deletingGroups,
@@ -1595,6 +1599,19 @@ export function DroneSidebar({
     setAutoDelete,
     setSidebarCollapsed,
   } = useDroneSidebarUiState();
+  React.useEffect(() => {
+    if (Object.keys(sidebarGroupIdByName).length === 0) return;
+    setSidebarGroupOrder((current) => migrateSidebarGroupOrderToIds(current, sidebarGroupIdByName));
+    setHiddenSidebarGroups((current) => migrateSidebarGroupOrderToIds(current, sidebarGroupIdByName));
+    setSidebarDroneOrderByGroup((current) =>
+      migrateSidebarGroupEntryOrderMapToIds(current, sidebarGroupIdByName),
+    );
+  }, [
+    setSidebarDroneOrderByGroup,
+    setSidebarGroupOrder,
+    setHiddenSidebarGroups,
+    sidebarGroupIdByName,
+  ]);
   const activeDrag = useDroneHubActiveDrag();
   const collapseTimerRef = React.useRef<number | null>(null);
   const expandTimerRef = React.useRef<number | null>(null);
@@ -1674,6 +1691,7 @@ export function DroneSidebar({
       sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent,
       sidebarGroupCreatedAtByName,
+      sidebarGroupIdByName,
     });
     return Object.fromEntries(
       Object.entries(nodeTree.childIdsByParent).map(([parentId, childIds]) => [
@@ -1687,6 +1705,7 @@ export function DroneSidebar({
     sidebarGroupOrder,
     sidebarGroups,
     sidebarGroupCreatedAtByName,
+    sidebarGroupIdByName,
     sidebarNodeOrderByParent,
   ]);
   const handleRenameGroup = React.useCallback(
@@ -1849,6 +1868,7 @@ export function DroneSidebar({
         sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent,
         sidebarGroupCreatedAtByName,
+        sidebarGroupIdByName,
       }),
     [
       renderSidebarGroups,
@@ -1858,6 +1878,7 @@ export function DroneSidebar({
       sidebarGroupOrder,
       sidebarNodeOrderByParent,
       sidebarGroupCreatedAtByName,
+      sidebarGroupIdByName,
     ],
   );
   const renderedSidebarNodeTreeRef = React.useRef<SidebarNodeTreeModel | null>(null);
@@ -2205,6 +2226,7 @@ export function DroneSidebar({
       sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent,
       sidebarGroupCreatedAtByName,
+      sidebarGroupIdByName,
       repoScopedGroupPathsByRepoGroup,
     });
   }, [
@@ -2213,6 +2235,7 @@ export function DroneSidebar({
     sidebarDroneOrderByGroup,
     sidebarDrones,
     sidebarGroupCreatedAtByName,
+    sidebarGroupIdByName,
     sidebarGroupOrder,
     sidebarNodeOrderByParent,
     summarizeSidebarFleet,
@@ -2375,6 +2398,7 @@ export function DroneSidebar({
       sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent,
       sidebarGroupCreatedAtByName,
+      sidebarGroupIdByName,
       repoScopedGroupPathsByRepoGroup,
     });
   }, [
@@ -2384,6 +2408,7 @@ export function DroneSidebar({
     sidebarDroneById,
     sidebarDroneOrderByGroup,
     sidebarGroupCreatedAtByName,
+    sidebarGroupIdByName,
     sidebarGroupOrder,
     sidebarNodeOrderByParent,
   ]);

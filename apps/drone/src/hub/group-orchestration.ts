@@ -12,6 +12,7 @@ type ActiveLifecycleMembership = {
   state: 'real' | 'pending';
   droneId: string;
   group: string;
+  repoPath: string;
 };
 
 export type RenameGroupOrchestrationResult =
@@ -41,8 +42,10 @@ async function activeLifecycleMemberships(): Promise<ActiveLifecycleMembership[]
   ]);
   if (real && pending) {
     return [
-      ...real.map((record) => ({ state: 'real' as const, droneId: record.id, group: normalizeGroupName(record.lifecycle.group) })),
-      ...pending.map((record) => ({ state: 'pending' as const, droneId: record.id, group: normalizeGroupName(record.lifecycle.group) })),
+      ...real.map((record) => ({ state: 'real' as const, droneId: record.id,
+        group: normalizeGroupName(record.lifecycle.group), repoPath: normalizeGroupName(record.lifecycle.repoPath) })),
+      ...pending.map((record) => ({ state: 'pending' as const, droneId: record.id,
+        group: normalizeGroupName(record.lifecycle.group), repoPath: normalizeGroupName(record.lifecycle.repoPath) })),
     ];
   }
   const registry: any = await loadRegistry();
@@ -51,23 +54,31 @@ async function activeLifecycleMemberships(): Promise<ActiveLifecycleMembership[]
       state: 'real' as const,
       droneId: String(entry?.id ?? key),
       group: normalizeGroupName(entry?.group),
+      repoPath: normalizeGroupName(entry?.repoPath),
     })),
     ...Object.entries(registry?.pending ?? {}).map(([key, entry]: [string, any]) => ({
       state: 'pending' as const,
       droneId: String(entry?.id ?? key),
       group: normalizeGroupName(entry?.group),
+      repoPath: normalizeGroupName(entry?.repoPath),
     })),
   ];
 }
 
 export async function renameCanonicalGroupOrchestration(
+  repoPathRaw: string,
   oldNameRaw: string,
   newNameRaw: string,
   at = new Date().toISOString(),
 ): Promise<RenameGroupOrchestrationResult> {
+  const repoPath = normalizeGroupName(repoPathRaw);
   const oldName = normalizeGroupName(oldNameRaw);
   const newName = normalizeGroupName(newNameRaw);
-  const [groups, memberships] = await Promise.all([listCanonicalGroups(), activeLifecycleMemberships()]);
+  const [groups, allMemberships] = await Promise.all([
+    listCanonicalGroups(repoPath),
+    activeLifecycleMemberships(),
+  ]);
+  const memberships = allMemberships.filter((membership) => membership.repoPath === repoPath);
   const groupNames = groups.map((group) => group.name);
   const usedOld = memberships.some((membership) => isSameOrDescendantGroupPath(membership.group, oldName));
   const usedNew = memberships.some((membership) => isSameOrDescendantGroupPath(membership.group, newName));
@@ -79,8 +90,8 @@ export async function renameCanonicalGroupOrchestration(
     return { ok: false, status: 409, error: `group already exists: ${newName}` };
   }
 
-  if (!hasOldEntry) await ensureCanonicalGroup(oldName, at);
-  await renameCanonicalGroupTree(oldName, newName, at);
+  if (!hasOldEntry) await ensureCanonicalGroup(oldName, repoPath, at);
+  await renameCanonicalGroupTree(repoPath, oldName, newName, at);
 
   const updates = memberships
     .filter((membership) => isSameOrDescendantGroupPath(membership.group, oldName))
@@ -88,6 +99,7 @@ export async function renameCanonicalGroupOrchestration(
       state: membership.state,
       droneId: membership.droneId,
       group: rewriteGroupPathPrefix(membership.group, oldName, newName),
+      repoPath,
     }));
   await setDroneGroupMetadataBatch(updates, { ensureGroups: false });
   return {
@@ -97,9 +109,13 @@ export async function renameCanonicalGroupOrchestration(
   };
 }
 
-export async function deleteCanonicalGroupArtifacts(groupNameRaw: string): Promise<string[]> {
+export async function deleteCanonicalGroupArtifacts(
+  repoPathRaw: string,
+  groupNameRaw: string,
+): Promise<string[]> {
+  const repoPath = normalizeGroupName(repoPathRaw);
   const groupName = normalizeGroupName(groupNameRaw);
-  const removedGroupNames = await deleteCanonicalGroupTree(groupName);
+  const removedGroupNames = await deleteCanonicalGroupTree(repoPath, groupName);
   if (removedGroupNames.length === 0) return [];
   return removedGroupNames;
 }

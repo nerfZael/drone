@@ -124,7 +124,14 @@ export function createMockTransport(options: MockTransportOptions = {}): DroneTr
         if (!drone.group) continue;
         counts.set(drone.group, (counts.get(drone.group) ?? 0) + 1);
       }
-      return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
+      return Array.from(counts.entries()).map(([name, count]) => ({
+        id: `test-group:${name}`,
+        repoPath: '',
+        name,
+        label: name.slice(name.lastIndexOf('/') + 1),
+        parentId: null,
+        count,
+      }));
     },
 
     async setDroneGroup(droneIds: string[], group: string | null): Promise<SetDroneGroupResult> {

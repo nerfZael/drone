@@ -3022,7 +3022,11 @@ export class HubAssistantService {
       try {
         if (toolName === 'set_drone_group') {
           const regAny: any = await loadRegistry();
-          const rawList = Array.isArray(ctx?.args?.droneIds) ? ctx.args.droneIds : [];
+          const rawList = [
+            ...(Array.isArray(ctx?.args?.droneIds) ? ctx.args.droneIds : []),
+            ...(Array.isArray(ctx?.args?.drones) ? ctx.args.drones : []),
+            ...(cleanOptionalString(ctx?.args?.drone) ? [ctx.args.drone] : []),
+          ];
           const drones = await this.tools.listDrones();
           const droneNameById = new Map(drones.map((drone) => [drone.id, drone.name]));
           const droneIds: string[] = Array.from(
@@ -3034,11 +3038,22 @@ export class HubAssistantService {
             if (denied.length > 0)
               throw new Error(`assistant scope does not include drone: ${denied.join(', ')}`);
           }
+          const groupId = cleanOptionalString(ctx?.args?.groupId);
+          const canonicalGroup = groupId
+            ? Object.values(regAny?.groups ?? {}).find((group: any) =>
+                cleanOptionalString(group?.id) === groupId)
+            : null;
           approvalArgs = {
             requested: ctx?.args ?? {},
             resolved: {
               drones: droneIds.map((id) => ({ id, name: droneNameById.get(id) ?? id })),
-              group: normalizeAssistantGroupValue(ctx?.args?.group),
+              group: canonicalGroup
+                ? normalizeAssistantGroupValue((canonicalGroup as any).name)
+                : normalizeAssistantGroupValue(ctx?.args?.group),
+              ...(groupId ? { groupId } : {}),
+              ...(canonicalGroup
+                ? { repoPath: cleanOptionalString((canonicalGroup as any).repoPath) }
+                : {}),
             },
           };
         } else if (toolName === 'set_drone_groups') {
@@ -3255,7 +3270,7 @@ export class HubAssistantService {
       thread?.agentPermissionMode === 'full-access'
         ? describeAssistantAccessMode(accessScope.executeMode, accessScope.droneIds)
         : 'none (command execution is disabled)';
-    const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}; execute=${executeScope}. Do not claim access to existing drones outside those scopes. create_drone creates a container child of this chat's owner and automatically grants this chat access; clone_drone also requires read access to its source. Neither operation is available when this chat's owner runs directly on the host. create_group remains a global creation tool.`;
+    const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}; execute=${executeScope}. Do not claim access to existing drones outside those scopes. create_drone creates a container child of this chat's owner and automatically grants this chat access; clone_drone also requires read access to its source. Neither operation is available when this chat's owner runs directly on the host. create_group creates an independent group in the supplied repository scope; omit repoPath only for drones without a repository.`;
     const basePrompt =
       normalizeAssistantSystemPrompt(thread?.systemPrompt) ||
       (thread ? this.defaultSystemPromptForThread(thread) : this.defaultSystemPrompt);

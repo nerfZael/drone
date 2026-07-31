@@ -215,7 +215,7 @@ type DroneRegistryV1 = {
   /**
    * Host-side group registry.
    *
-   * Groups are UI organization metadata and should exist independently from drones.
+   * Groups are repository-scoped UI organization metadata and should exist independently from drones.
    * This allows:
    * - creating empty groups (even when there are 0 drones)
    * - keeping groups around after the last drone is deleted
@@ -224,7 +224,11 @@ type DroneRegistryV1 = {
   groups?: Record<
     string,
     {
+      id?: string;
+      repoPath?: string;
       name: string;
+      label?: string;
+      parentId?: string | null;
       createdAt: string;
       updatedAt?: string;
     }

@@ -105,7 +105,7 @@ test('projection backfills once, then canonical columns and tombstones win', asy
 
   const first = await buildHubStateProjection();
   assert.equal(first.skills.skill.description, 'legacy skill');
-  assert.equal(first.groups.stale.name, 'stale');
+  assert.equal(Object.values(first.groups).find((group) => group.name === 'stale')?.name, 'stale');
   assert.ok(first.drones.alpha.chats.default);
   assert.equal(first.drones.alpha.chats.review.pendingPrompts[0].id, 'review-prompt');
   assert.equal(first.drones.alpha.archivedChats.review.turns[0].id, 'archived-turn');
@@ -126,7 +126,7 @@ test('projection backfills once, then canonical columns and tombstones win', asy
     phase: 'ready',
   });
   const catalog = await getCatalogStore();
-  await catalog.deleteGroup('stale');
+  await catalog.deleteGroup('', 'stale');
   const settings = await getHubSettingsRepository();
   await settings.put('filesystem', null);
   await settings.put('api-key.openai', null);
@@ -136,7 +136,7 @@ test('projection backfills once, then canonical columns and tombstones win', asy
   assert.equal(projected.drones.alpha.containerName, 'canonical-alpha');
   assert.equal(projected.drones.alpha.runtime, 'host');
   assert.equal(projected.drones.alpha.phase, 'ready');
-  assert.equal(projected.groups.stale, undefined);
+  assert.equal(Object.values(projected.groups).some((group) => group.name === 'stale'), false);
   assert.equal(projected.settings.filesystem, undefined);
   assert.equal(projected.settings.openai, undefined);
   assert.equal(projected.settings.canonical, undefined);
@@ -155,7 +155,11 @@ test('canonical writes and residual concurrency do not rewrite registry_json', a
 
   const catalog = await getCatalogStore();
   await catalog.putGroup({
+    id: 'grp_canonical',
+    repoPath: '',
     name: 'canonical',
+    label: 'canonical',
+    parentId: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   });

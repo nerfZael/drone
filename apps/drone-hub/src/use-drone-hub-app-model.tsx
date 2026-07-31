@@ -302,6 +302,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     registeredRepoPathSet,
     registryGroupNames,
     registryGroupCreatedAtByName,
+    registryGroupIdByName,
     dronesFilteredByRepo,
     dronesFilteredByRepoIdSet,
     droneCountByRepoPath,
@@ -409,6 +410,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   } = useGroupManagement({
     autoDelete,
     activeRepoPath,
+    groupIdByName: registryGroupIdByName,
     drones,
     polledDrones,
     optimisticallyDeletedDrones,
@@ -459,6 +461,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     showRecentDronesOnly,
     registryGroupNames,
     registryGroupCreatedAtByName,
+    registryGroupIdByName,
     registeredRepoPaths,
   });
   const draftSidebarPlaceholder = React.useMemo(() => {
@@ -3886,6 +3889,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     movingDroneGroups,
     sidebarGroups,
     sidebarGroupCreatedAtByName: registryGroupCreatedAtByName,
+    sidebarGroupIdByName: registryGroupIdByName,
     sidebarHiddenGroupCount,
     collapsedGroups,
     deletingGroups,

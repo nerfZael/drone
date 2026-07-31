@@ -3,7 +3,7 @@ import {
   sidebarGroupBaseName,
   splitSidebarGroupPath,
 } from './paths';
-import { parseIsoTimestampMs } from './ordering';
+import { parseIsoTimestampMs, sidebarGroupLegacyOrderToken, sidebarGroupOrderToken } from './ordering';
 import type {
   SidebarFolderNode,
   SidebarTreeDrone,
@@ -16,6 +16,7 @@ type SidebarFolderNodeDraft<TDrone extends SidebarTreeDrone> = SidebarFolderNode
 };
 
 function createFolderNode<TDrone extends SidebarTreeDrone>(args: {
+  groupId?: string | null;
   path: string;
   label: string;
   name: string;
@@ -43,6 +44,7 @@ function finalizeFolderNode<TDrone extends SidebarTreeDrone>(
 ): SidebarFolderNode<TDrone> {
   const children = [...node.childrenMap.values()].map(finalizeFolderNode);
   return {
+    groupId: node.groupId ?? null,
     path: node.path,
     label: node.label,
     name: node.name,
@@ -66,12 +68,14 @@ function ensureGroupPathNode<TDrone extends SidebarTreeDrone>(
   if (group.kind === 'repo' || isUngroupedGroupName(group.group)) {
     const existing = rootsByPath.get(group.group);
     if (existing) {
+      existing.groupId = group.groupId ?? null;
       existing.ownItems = group.items;
       existing.directDroneCount = group.items.length;
       existing.hasExplicitGroup = true;
       return;
     }
     const next = createFolderNode({
+      groupId: group.groupId ?? null,
       path: group.group,
       label: group.label,
       name: group.label,
@@ -96,6 +100,7 @@ function ensureGroupPathNode<TDrone extends SidebarTreeDrone>(
     let next = current.childrenMap.get(currentPath);
     if (!next) {
       next = createFolderNode({
+        groupId: isLeaf ? group.groupId ?? null : null,
         path: currentPath,
         label: isLeaf ? group.label : part,
         name: part,
@@ -109,6 +114,7 @@ function ensureGroupPathNode<TDrone extends SidebarTreeDrone>(
     current = next;
     if (isLeaf) {
       current.label = group.label;
+      current.groupId = group.groupId ?? null;
       current.name = sidebarGroupBaseName(group.group) || group.label;
       current.kind = group.kind;
       current.ownItems = group.items;
@@ -127,7 +133,11 @@ function sortFolderNodes<TDrone extends SidebarTreeDrone>(
     .map((node, index) => ({
       node,
       index,
-      order: orderIndex.get(`${node.kind}:${node.path}`) ?? Number.POSITIVE_INFINITY,
+      order: orderIndex.get(sidebarGroupOrderToken({
+        group: node.path,
+        kind: node.kind,
+        groupId: node.groupId,
+      })) ?? orderIndex.get(sidebarGroupLegacyOrderToken({ group: node.path, kind: node.kind })) ?? Number.POSITIVE_INFINITY,
     }))
     .sort((left, right) => {
       if (left.order !== right.order) return left.order - right.order;

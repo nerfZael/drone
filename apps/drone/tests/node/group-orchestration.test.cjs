@@ -38,8 +38,8 @@ afterEach(async () => {
 test('group rename uses canonical precedence across catalog and lifecycle memberships', async () => {
   useTempDataDir('precedence');
   const at = '2026-07-01T00:00:00.000Z';
-  await ensureCanonicalGroup('team', at);
-  await ensureCanonicalGroup('team/api', at);
+  const team = await ensureCanonicalGroup('team', '', at);
+  const api = await ensureCanonicalGroup('team/api', '', at);
   await upsertCanonicalDroneLifecycle('real', 'drone-1', {
     id: 'drone-1', name: 'worker-one', runtime: 'container', group: 'team', createdAt: at,
   });
@@ -52,15 +52,20 @@ test('group rename uses canonical precedence across catalog and lifecycle member
     pending: {}, archived: {}, groups: {}, settings: {},
   });
 
-  assert.deepEqual(await renameCanonicalGroupOrchestration('team', 'platform', at), {
+  assert.deepEqual(await renameCanonicalGroupOrchestration('', 'team', 'platform', at), {
     ok: true,
     movedDrones: 1,
     movedPending: 1,
   });
-  assert.deepEqual((await listCanonicalGroups()).map((group) => group.name), ['platform', 'platform/api']);
+  const renamedGroups = await listCanonicalGroups();
+  assert.deepEqual(renamedGroups.map((group) => group.name), ['platform', 'platform/api']);
+  assert.equal(renamedGroups.find((group) => group.name === 'platform').id, team.id);
+  assert.equal(renamedGroups.find((group) => group.name === 'platform/api').id, api.id);
   const lifecycle = await getDroneLifecycleRepository();
   assert.equal(lifecycle.get('drone-1').lifecycle.group, 'platform');
+  assert.equal(lifecycle.get('drone-1').lifecycle.groupId, team.id);
   assert.equal(lifecycle.get('drone-2').lifecycle.group, 'platform/api');
+  assert.equal(lifecycle.get('drone-2').lifecycle.groupId, api.id);
 });
 
 test('group collision validation and lifecycle membership batches leave prior canonical state intact', async () => {
@@ -71,7 +76,7 @@ test('group collision validation and lifecycle membership batches leave prior ca
     id: 'drone-1', name: 'worker-one', runtime: 'container', group: 'source',
   });
 
-  assert.deepEqual(await renameCanonicalGroupOrchestration('source', 'target'), {
+  assert.deepEqual(await renameCanonicalGroupOrchestration('', 'source', 'target'), {
     ok: false,
     status: 409,
     error: 'group already exists: target',
@@ -90,8 +95,36 @@ test('group collision validation and lifecycle membership batches leave prior ca
 test('group artifact deletion tombstones the complete subtree', async () => {
   useTempDataDir('delete');
   const at = '2026-07-01T00:00:00.000Z';
-  await ensureCanonicalGroup('team', at);
-  await ensureCanonicalGroup('team/api', at);
-  assert.deepEqual(await deleteCanonicalGroupArtifacts('team'), ['team', 'team/api']);
+  await ensureCanonicalGroup('team', '', at);
+  await ensureCanonicalGroup('team/api', '', at);
+  assert.deepEqual(await deleteCanonicalGroupArtifacts('', 'team'), ['team', 'team/api']);
   assert.deepEqual(await listCanonicalGroups(), []);
+});
+
+test('rename and membership updates are isolated to one repository scope', async () => {
+  useTempDataDir('repo-isolation');
+  const at = '2026-07-01T00:00:00.000Z';
+  const repoAGroup = await ensureCanonicalGroup('shared', '/repo/a', at);
+  const repoBGroup = await ensureCanonicalGroup('shared', '/repo/b', at);
+  await upsertCanonicalDroneLifecycle('real', 'drone-a', {
+    id: 'drone-a', name: 'worker-a', runtime: 'container', repoPath: '/repo/a',
+    group: 'shared', groupId: repoAGroup.id, createdAt: at,
+  });
+  await upsertCanonicalDroneLifecycle('real', 'drone-b', {
+    id: 'drone-b', name: 'worker-b', runtime: 'container', repoPath: '/repo/b',
+    group: 'shared', groupId: repoBGroup.id, createdAt: at,
+  });
+
+  assert.deepEqual(await renameCanonicalGroupOrchestration('/repo/a', 'shared', 'renamed', at), {
+    ok: true,
+    movedDrones: 1,
+    movedPending: 0,
+  });
+  const lifecycle = await getDroneLifecycleRepository();
+  assert.equal(lifecycle.get('drone-a').lifecycle.group, 'renamed');
+  assert.equal(lifecycle.get('drone-a').lifecycle.groupId, repoAGroup.id);
+  assert.equal(lifecycle.get('drone-b').lifecycle.group, 'shared');
+  assert.equal(lifecycle.get('drone-b').lifecycle.groupId, repoBGroup.id);
+  assert.deepEqual((await listCanonicalGroups('/repo/a')).map((group) => group.name), ['renamed']);
+  assert.deepEqual((await listCanonicalGroups('/repo/b')).map((group) => group.name), ['shared']);
 });

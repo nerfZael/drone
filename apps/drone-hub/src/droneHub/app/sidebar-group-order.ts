@@ -5,14 +5,16 @@ import {
 } from './sidebar-group-paths';
 import {
   orderSidebarEntries,
+  sidebarGroupLegacyOrderToken,
   sidebarGroupOrderToken,
 } from '@drone/hub-model/sidebar';
 
-export { orderSidebarEntries, sidebarGroupOrderToken };
+export { orderSidebarEntries, sidebarGroupLegacyOrderToken, sidebarGroupOrderToken };
 
 export type SidebarGroupOrderKind = 'group' | 'repo';
 
 export type SidebarGroupOrderRef = {
+  groupId?: string | null;
   group: string;
   kind: SidebarGroupOrderKind;
 };
@@ -31,8 +33,46 @@ export function normalizeSidebarGroupOrder(value: unknown): string[] {
   return out;
 }
 
+function migrateSidebarGroupIdentityToken(token: string, groupIdByName: Readonly<Record<string, string>>): string {
+  if (!token.startsWith('group:')) return token;
+  const name = token.slice('group:'.length);
+  const id = String(groupIdByName[name] ?? '').trim();
+  return id ? `group-id:${id}` : token;
+}
+
+export function migrateSidebarGroupOrderToIds(
+  order: string[],
+  groupIdByName: Readonly<Record<string, string>>,
+): string[] {
+  const normalized = normalizeSidebarGroupOrder(order);
+  const migrated = normalizeSidebarGroupOrder(
+    normalized.map((token) => migrateSidebarGroupIdentityToken(token, groupIdByName)),
+  );
+  return migrated.length === normalized.length && migrated.every((token, index) => token === normalized[index])
+    ? order
+    : migrated;
+}
+
+export function migrateSidebarGroupEntryOrderMapToIds(
+  entriesByKey: Record<string, string[]>,
+  groupIdByName: Readonly<Record<string, string>>,
+): Record<string, string[]> {
+  let changed = false;
+  const out: Record<string, string[]> = {};
+  for (const [key, entries] of Object.entries(entriesByKey)) {
+    const nextKey = migrateSidebarGroupIdentityToken(key, groupIdByName);
+    if (nextKey !== key) changed = true;
+    out[nextKey] = normalizeSidebarGroupOrder([...(out[nextKey] ?? []), ...entries]);
+  }
+  return changed ? out : entriesByKey;
+}
+
 export function orderSidebarGroups<T extends SidebarGroupOrderRef>(groups: T[], order: string[]): T[] {
-  return orderSidebarEntries(groups, order, sidebarGroupOrderToken);
+  const orderedTokens = new Set(order);
+  return orderSidebarEntries(groups, order, (group) => {
+    const stableToken = sidebarGroupOrderToken(group);
+    return orderedTokens.has(stableToken) ? stableToken : sidebarGroupLegacyOrderToken(group);
+  });
 }
 
 export function mergeVisibleSidebarGroupOrder<T extends SidebarGroupOrderRef>(order: string[], groups: T[]): string[] {
@@ -61,7 +101,12 @@ export function insertSidebarGroupOrderToken<T extends SidebarGroupOrderRef>(
           .split('/')
           .map((_, index, parts) => parts.slice(0, index + 1).join('/'))
           .slice(0, -1)
-          .map((ancestor) => sidebarGroupOrderToken({ group: ancestor, kind: group.kind }))
+          .map((ancestor) => {
+            const visibleAncestor = groups.find(
+              (entry) => entry.kind === group.kind && String(entry.group ?? '').trim() === ancestor,
+            );
+            return sidebarGroupOrderToken(visibleAncestor ?? { group: ancestor, kind: group.kind });
+          })
           .filter((token) => token && !stabilizedOrder.includes(token))
       : [];
   const tokensToInsert = normalizeSidebarGroupOrder([...missingAncestorTokens, nextToken]);
@@ -95,7 +140,10 @@ export function insertSidebarGroupOrderToken<T extends SidebarGroupOrderRef>(
     if (group.kind === 'group') {
       const parentPath = sidebarGroupParentPath(group.group);
       if (parentPath) {
-        const parentToken = sidebarGroupOrderToken({ group: parentPath, kind: group.kind });
+        const visibleParent = groups.find(
+          (entry) => entry.kind === group.kind && String(entry.group ?? '').trim() === parentPath,
+        );
+        const parentToken = sidebarGroupOrderToken(visibleParent ?? { group: parentPath, kind: group.kind });
         const parentIndex = visibleOrder.indexOf(parentToken);
         if (parentIndex >= 0) {
           const nextVisibleOrder = visibleOrder.slice();
@@ -191,11 +239,14 @@ export function renameSidebarGroupTokenListByPrefix(
   next: SidebarGroupOrderRef,
 ): string[] {
   if (current.kind !== next.kind) return normalizeSidebarGroupOrder(tokens);
+  const currentStableToken = sidebarGroupOrderToken(current);
+  const nextStableToken = sidebarGroupOrderToken(next);
   const kindPrefix = `${current.kind}:`;
   const currentGroup = String(current.group ?? '').trim();
   const nextGroup = String(next.group ?? '').trim();
   if (!currentGroup || !nextGroup || currentGroup === nextGroup) return normalizeSidebarGroupOrder(tokens);
   return normalizeSidebarGroupOrder(tokens).map((token) => {
+    if (token === currentStableToken) return nextStableToken;
     if (!token.startsWith(kindPrefix)) return token;
     const groupPath = token.slice(kindPrefix.length);
     if (!isSameOrDescendantSidebarGroupPath(groupPath, currentGroup)) return token;

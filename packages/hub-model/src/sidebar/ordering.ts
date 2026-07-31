@@ -10,7 +10,17 @@ export function sidebarDroneNodeId(droneIdRaw: string): string {
   return `drone:${String(droneIdRaw ?? '').trim()}`;
 }
 
-export function sidebarGroupOrderToken(group: { group: string; kind: SidebarTreeGroupKind }): string {
+export function sidebarGroupOrderToken(group: {
+  group: string;
+  kind: SidebarTreeGroupKind;
+  groupId?: string | null;
+}): string {
+  const groupId = String(group.groupId ?? '').trim();
+  if (group.kind === 'group' && groupId) return `group-id:${groupId}`;
+  return `${group.kind}:${String(group.group ?? '').trim()}`;
+}
+
+export function sidebarGroupLegacyOrderToken(group: { group: string; kind: SidebarTreeGroupKind }): string {
   return `${group.kind}:${String(group.group ?? '').trim()}`;
 }
 
