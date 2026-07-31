@@ -94,6 +94,7 @@ export type ChatInputProps = {
   alwaysExpanded?: boolean;
   allowSendWhileWaiting?: boolean;
   onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
+  onSendInNewChat?: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onPublish?: () => Promise<boolean> | boolean;
   publishing?: boolean;
   onStop?: () => Promise<void> | void;
@@ -121,6 +122,7 @@ export function ChatInput({
   alwaysExpanded = false,
   allowSendWhileWaiting = false,
   onSend,
+  onSendInNewChat,
   onPublish,
   publishing = false,
   onStop,
@@ -428,7 +430,12 @@ export function ChatInput({
     });
   }
 
-  async function submitPromptSnapshot(prompt: string, snapshotAttachments: DraftChatAttachment[], context: ChatSendContext) {
+  async function submitPromptSnapshot(
+    prompt: string,
+    snapshotAttachments: DraftChatAttachment[],
+    context: ChatSendContext,
+    submit: ChatInputProps['onSend'] = onSend,
+  ) {
     if (!prompt && snapshotAttachments.length === 0) return;
     setDraft('');
     setAttachments([]);
@@ -471,7 +478,7 @@ export function ChatInput({
       return;
     }
 
-    const ok = await onSend({ prompt, attachments: encoded }, context);
+    const ok = await submit({ prompt, attachments: encoded }, context);
     if (!ok) {
       // Don't clobber any new text the user started typing.
       setDraft((cur) => (cur.trim().length === 0 ? prompt : cur));
@@ -523,7 +530,10 @@ export function ChatInput({
     }
   }
 
-  const sendNow = (context: ChatSendContext) => {
+  const sendNow = (
+    context: ChatSendContext,
+    submit: ChatInputProps['onSend'] = onSend,
+  ) => {
     if (sending || composerLocked) return;
     const actionToken = beginVoiceAction();
     if (actionToken == null) return;
@@ -537,7 +547,7 @@ export function ChatInput({
           setAttachmentError((current) => current || 'No speech detected.');
           return;
         }
-        await submitPromptSnapshot(prompt, snapshotAttachments, context);
+        await submitPromptSnapshot(prompt, snapshotAttachments, context, submit);
       } finally {
         endVoiceAction(actionToken);
       }
@@ -814,7 +824,7 @@ export function ChatInput({
                   event.currentTarget.blur();
                   return;
                 }
-                const deliveryMode = chatSendShortcut({
+                const shortcutAction = chatSendShortcut({
                   key: event.key,
                   shiftKey: event.shiftKey,
                   ctrlKey: event.ctrlKey,
@@ -825,9 +835,17 @@ export function ChatInput({
                     attachmentsRef.current.length > 0 ||
                     voiceRecordingActive,
                 });
-                if (!deliveryMode) return;
+                if (!shortcutAction) return;
+                if (shortcutAction === 'new-chat' && !onSendInNewChat) return;
                 event.preventDefault();
-                sendNow({ trigger: 'keyboard', deliveryMode });
+                if (shortcutAction === 'new-chat') {
+                  sendNow(
+                    { trigger: 'keyboard', deliveryMode: 'asap' },
+                    onSendInNewChat!,
+                  );
+                  return;
+                }
+                sendNow({ trigger: 'keyboard', deliveryMode: shortcutAction });
               }}
               rows={1}
               placeholder="Ask the agent"
@@ -837,7 +855,9 @@ export function ChatInput({
               disabled={composerLocked || voiceRecordingActive}
               autoFocus={Boolean(autoFocus)}
               aria-label={`Message ${droneName}`}
-              aria-keyshortcuts="Enter Tab Control+Enter Meta+Enter"
+              aria-keyshortcuts={
+                onSendInNewChat ? 'Enter Tab Control+Enter Meta+Enter' : 'Enter Tab'
+              }
             />
             {!composerExpanded ? (
               <>
@@ -1055,7 +1075,9 @@ export function ChatInput({
               title={
                 showStopAction && !showSeparateStopAction
                   ? 'Stop response'
-                  : 'Send ASAP (Enter). Queue with Tab or Ctrl/Command+Enter.'
+                  : onSendInNewChat
+                    ? 'Send ASAP (Enter). Queue with Tab. Send in a new chat with Ctrl/Command+Enter.'
+                    : 'Send ASAP (Enter). Queue with Tab.'
               }
               aria-label={sendButtonLabel}
             >

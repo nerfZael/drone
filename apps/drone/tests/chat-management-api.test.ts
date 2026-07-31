@@ -256,6 +256,26 @@ describeSocketSuite('chat management api', () => {
     expect(secondPrompt.r.status).toBe(202);
     expect(secondPrompt.data?.autoRenameChat).toBe(false);
 
+    const untitled = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Untitled 1' }),
+    });
+    expect(untitled.r.status).toBe(201);
+    const untitledPrompt = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent('Untitled 1')}/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Document the release workflow',
+          autoRenameHandledByClient: true,
+        }),
+      },
+    );
+    expect(untitledPrompt.r.status).toBe(202);
+    expect(untitledPrompt.data?.autoRenameChat).toBe(true);
+
     const customNamed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -276,6 +296,10 @@ describeSocketSuite('chat management api', () => {
     const regAfterPrompts: any = await loadRegistry();
     expect(
       typeof regAfterPrompts?.drones?.[droneId]?.chats?.['chat-2']
+        ?.firstMessageNameSuggestionAttemptedAt,
+    ).toBe('string');
+    expect(
+      typeof regAfterPrompts?.drones?.[droneId]?.chats?.['Untitled 1']
         ?.firstMessageNameSuggestionAttemptedAt,
     ).toBe('string');
 

@@ -7,8 +7,10 @@ import {
 } from '../src/droneHub/app/chat-name-suggestions';
 
 describe('chat name suggestions', () => {
-  test('recognizes only generated chat-number names', () => {
+  test('recognizes current and legacy generated chat names', () => {
     expect(isGeneratedChatName('chat-2')).toBe(true);
+    expect(isGeneratedChatName('Untitled 2')).toBe(true);
+    expect(isGeneratedChatName('untitled 2')).toBe(false);
     expect(isGeneratedChatName('default')).toBe(false);
     expect(isGeneratedChatName('login-chat-2')).toBe(false);
   });

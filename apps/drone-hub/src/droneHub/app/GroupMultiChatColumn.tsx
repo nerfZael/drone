@@ -72,6 +72,10 @@ export type GroupMultiChatColumnProps = {
     task: DroneHubTask;
     mode: DroneHubTaskSpawnMode;
   }) => Promise<{ ok: boolean; error?: string | null }>;
+  onSendPromptInNewChat: (
+    payload: ChatSendPayload,
+    context: ChatSendContext,
+  ) => Promise<boolean>;
   onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
   columnWidthPx: number;
   onRuntimeStateChange?: (next: GroupMultiChatColumnRuntimeState) => void;
@@ -85,6 +89,7 @@ export function GroupMultiChatColumn({
   onDeleteDrone,
   deleteBusy = false,
   onSpawnDroneHubTask,
+  onSendPromptInNewChat,
   onAutoRenameChatFromFirstPrompt,
   columnWidthPx,
   onRuntimeStateChange,
@@ -947,6 +952,7 @@ export function GroupMultiChatColumn({
         onStop={canStopResponse ? stopResponse : undefined}
         stopping={stoppingResponse}
         onSend={sendPrompt}
+        onSendInNewChat={onSendPromptInNewChat}
       />
       {dirtyDroneApplyModal ? (
         <React.Suspense fallback={null}>
