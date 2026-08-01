@@ -24,6 +24,7 @@ import type { UseLlmSettingsResult } from './use-llm-settings';
 import { useMcpServers } from './use-mcp-servers';
 import { useProfileSettings } from './use-profile-settings';
 import { useRegistryBackupSettings } from './use-registry-backup-settings';
+import { useResourceSubscriptionSettings } from './use-resource-subscription-settings';
 import { useSkillLibrary } from './use-skill-library';
 import { useSpeechSettings } from './use-speech-settings';
 import { useSyncSets } from './use-sync-sets';
@@ -83,6 +84,7 @@ export function SettingsView({
   const syncSets = useSyncSets(requestJson);
   const profile = useProfileSettings(requestJson);
   const backups = useRegistryBackupSettings(requestJson);
+  const subscriptions = useResourceSubscriptionSettings(requestJson);
 
   const settingsBusy =
     hubLogsState.hubLogsLoading ||
@@ -94,6 +96,7 @@ export function SettingsView({
     syncSets.syncSetsLoading ||
     profile.profileSettingsLoading ||
     backups.backupSettingsLoading ||
+    subscriptions.loading ||
     deleteAction.archivedDronesLoading ||
     deleteAction.archivedChatsLoading ||
     llm.savingOpenAiSettings ||
@@ -126,6 +129,7 @@ export function SettingsView({
     syncSets.creatingSyncSet ||
     backups.savingBackupSettings ||
     backups.runningBackup ||
+    subscriptions.saving ||
     Boolean(syncSets.savingSyncSetId) ||
     Boolean(syncSets.deletingSyncSetId) ||
     Boolean(syncSets.applyingSyncSetId) ||
@@ -176,11 +180,12 @@ export function SettingsView({
     void deleteAction.loadArchivedChats();
     void profile.loadProfileSettings();
     void backups.loadBackupSettings();
+    void subscriptions.load();
     void hubLogsState.loadHubLogs();
     void skillLibrary.loadSkills();
     void skillLibrary.loadSkillSources();
     void mcpServers.loadMcpServers();
-  }, [agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, filesystem, github, hubLogsState, llm, mcpServers, profile, skillLibrary, speech, syncSets]);
+  }, [agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, filesystem, github, hubLogsState, llm, mcpServers, profile, skillLibrary, speech, subscriptions.load, syncSets]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
@@ -190,6 +195,7 @@ export function SettingsView({
           llm={llm}
           filesystem={filesystem}
           speech={speech}
+          subscriptions={subscriptions}
           onReplayOnboarding={onReplayOnboarding}
           onResetOnboarding={onResetOnboarding}
         />

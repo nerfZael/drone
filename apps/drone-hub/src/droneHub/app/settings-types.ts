@@ -177,6 +177,23 @@ export type GithubSettingsResponse = {
   };
 };
 
+export type ResourceSubscriptionSettings = {
+  enabled: boolean;
+  githubPollingIntervalMs: number;
+  batchWindowMs: number;
+  maxEventsPerPrompt: number;
+  maxActiveSubscriptionsPerConversation: number;
+  maxAutomatedRunsPerConversationPerHour: number;
+  deliveryRetryLimit: number;
+  terminalEventRetentionDays: number;
+  deliveryRetentionDays: number;
+};
+
+export type ResourceSubscriptionSettingsResponse = {
+  ok: true;
+  settings: ResourceSubscriptionSettings;
+};
+
 export type UiPreferencesSettingsResponse = {
   ok: true;
   uiPreferences: {
