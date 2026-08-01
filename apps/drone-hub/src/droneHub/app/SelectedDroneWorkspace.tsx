@@ -1369,12 +1369,6 @@ export function SelectedDroneWorkspace({
             <div data-drone-header-status="true" className="flex items-center gap-2 flex-shrink-0">
               {chatUiMode === 'cli' ? (
                 <>
-                  {loadingSession && (
-                    <span className="text-[var(--text-11)] text-[var(--muted)] flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--yellow)] animate-pulse-dot" />
-                      Loading...
-                    </span>
-                  )}
                   {sessionError && !loadingSession && (
                     <span className="text-[var(--text-11)] text-[var(--red)] flex items-center gap-1" title={sessionError}>
                       <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />
@@ -1384,12 +1378,6 @@ export function SelectedDroneWorkspace({
                 </>
               ) : (
                 <>
-                  {loadingTranscript && (
-                    <span className="text-[var(--text-11)] text-[var(--muted)] flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--yellow)] animate-pulse-dot" />
-                      Loading...
-                    </span>
-                  )}
                   {transcriptError && !loadingTranscript && (
                     <span className="text-[var(--text-11)] text-[var(--red)] flex items-center gap-1" title={transcriptError}>
                       <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />

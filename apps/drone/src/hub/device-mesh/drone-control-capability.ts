@@ -148,8 +148,8 @@ export function deviceMeshDroneSummary(drone: any) {
     id: String(drone?.id ?? drone?.name ?? ''),
     name: String(drone?.name ?? drone?.id ?? ''),
     runtime: String(drone?.runtime ?? 'container'),
-    phase: String(drone?.phase ?? drone?.hub?.phase ?? ''),
-    status: String(drone?.status ?? ''),
+    phase: String(drone?.phase ?? drone?.hubPhase ?? drone?.hub?.phase ?? ''),
+    status: String(drone?.status ?? drone?.hubMessage ?? ''),
     group: drone?.group ?? null,
     repoPath: firstText(
       drone?.repoPath,
@@ -171,6 +171,14 @@ export function deviceMeshDroneSummary(drone: any) {
     ),
     fleetParentId: String(drone?.fleetParentId ?? '').trim() || null,
     chats: chats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean),
+    draftChats:
+      drone?.draftChats && typeof drone.draftChats === 'object' && !Array.isArray(drone.draftChats)
+        ? Object.fromEntries(
+            Object.entries(drone.draftChats).filter(
+              ([chatName, draft]) => Boolean(String(chatName).trim()) && draft === true,
+            ),
+          )
+        : {},
     busyChats: Array.isArray(drone?.busyChats)
       ? drone.busyChats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean)
       : [],
@@ -190,6 +198,11 @@ export function deviceMeshDroneSummary(drone: any) {
     lastMessageAt: String(drone?.lastMessageAt ?? ''),
     statusOk: drone?.statusOk !== false,
     statusError: String(drone?.statusError ?? '').trim() || null,
+    draft:
+      drone?.draft === true ||
+      String(drone?.phase ?? drone?.hubPhase ?? drone?.hub?.phase ?? '')
+        .trim()
+        .toLowerCase() === 'draft',
   };
 }
 
@@ -510,6 +523,7 @@ export function createDroneControlCapability(
             sidebarGroupOrder: textList(preferences.sidebarGroupOrder),
             sidebarDroneOrderByGroup: textListMap(preferences.sidebarDroneOrderByGroup),
             sidebarNodeOrderByParent: textListMap(preferences.sidebarNodeOrderByParent),
+            sidebarChatOrderByDrone: textListMap(preferences.sidebarChatOrderByDrone),
             pinnedDroneIds: textList(preferences.pinnedDroneIds),
           },
           ...(payload.includeCreateOptions === true

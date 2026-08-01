@@ -95,7 +95,7 @@ const styles = StyleSheet.create({
     minHeight: 29,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
     paddingRight: 12,
     paddingVertical: 5,
   },

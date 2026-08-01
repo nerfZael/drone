@@ -12,6 +12,7 @@ import {
 import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import File from 'lucide-react-native/icons/file';
 import Pause from 'lucide-react-native/icons/pause';
 import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
 import X from 'lucide-react-native/icons/x';
@@ -294,6 +295,11 @@ function ChangedFilesSummary({
                       >
                         {agentRunFileStatusLabel(entry)}
                       </Text>
+                      <File
+                        color={pressed ? colors.text : colors.muted}
+                        size={13}
+                        strokeWidth={1.8}
+                      />
                       <Text
                         numberOfLines={1}
                         style={[styles.changedFilesPath, pressed && styles.changedFilesPathPressed]}
@@ -301,21 +307,24 @@ function ChangedFilesSummary({
                         {name}
                       </Text>
                       {!entry.binary && (entry.additions > 0 || entry.deletions > 0) ? (
-                        <Text
+                        <View
                           style={[
                             styles.changedFilesLineCounts,
                             pressed && styles.changedFilesLineCountsPressed,
                           ]}
                         >
-                          {[
-                            entry.additions > 0 ? `+${entry.additions}` : '',
-                            entry.deletions > 0 ? `-${entry.deletions}` : '',
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
-                        </Text>
+                          {entry.additions > 0 ? (
+                            <Text style={styles.changedFilesFileAdditions}>
+                              +{entry.additions}
+                            </Text>
+                          ) : null}
+                          {entry.deletions > 0 ? (
+                            <Text style={styles.changedFilesFileDeletions}>
+                              -{entry.deletions}
+                            </Text>
+                          ) : null}
+                        </View>
                       ) : null}
-                      <ChevronRight color={pressed ? colors.accent : colors.muted} size={12} />
                     </View>
                   );
                   return (
@@ -1840,7 +1849,9 @@ const styles = StyleSheet.create({
     marginVertical: 5,
     overflow: 'hidden',
     borderRadius: 8,
-    backgroundColor: colors.whiteWashSoft,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+    backgroundColor: colors.whiteWash,
   },
   changedFilesHeader: {
     minHeight: 34,
@@ -1885,7 +1896,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
     borderRadius: 6,
   },
-  changedFilesList: { paddingVertical: 5 },
+  changedFilesList: { paddingBottom: 5 },
   changedFilesWorkspace: {
     color: colors.muted,
     fontSize: 9,
@@ -1900,7 +1911,7 @@ const styles = StyleSheet.create({
     minHeight: 29,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 5,
     paddingHorizontal: 12,
     paddingVertical: 5,
   },
@@ -1916,12 +1927,14 @@ const styles = StyleSheet.create({
   changedFilesPath: { flex: 1, color: colors.text, fontSize: 10, fontFamily: 'monospace' },
   changedFilesPathPressed: { color: colors.accent },
   changedFilesLineCounts: {
-    color: colors.muted,
-    fontSize: 9,
-    fontFamily: 'monospace',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
     opacity: 0.75,
   },
-  changedFilesLineCountsPressed: { color: colors.text, opacity: 1 },
+  changedFilesLineCountsPressed: { opacity: 1 },
+  changedFilesFileAdditions: { color: colors.online, fontSize: 9, fontFamily: 'monospace' },
+  changedFilesFileDeletions: { color: colors.danger, fontSize: 9, fontFamily: 'monospace' },
   changedFilesDiffLoading: {
     minHeight: 42,
     flexDirection: 'row',

@@ -147,14 +147,16 @@ const SIDEBAR_DENSITY_MODE_ORDER: SidebarDensityMode[] = ['compact', 'default', 
 
 function PinnedSidebarPlacementSlot({
   placement,
+  topTarget,
   bottomTarget,
   children,
 }: {
   placement: 'top' | 'bottom';
+  topTarget: HTMLDivElement | null;
   bottomTarget: HTMLDivElement | null;
   children: React.ReactNode;
 }) {
-  if (placement === 'top') return children;
+  if (placement === 'top') return topTarget ? createPortal(children, topTarget) : null;
   return bottomTarget ? createPortal(children, bottomTarget) : null;
 }
 
@@ -1498,6 +1500,8 @@ export function DroneSidebar({
   readOnlyDisabledDroneReasonById = {},
   readOnlyDroneStatusHintById = {},
 }: DroneSidebarProps) {
+  const [pinnedSidebarTopTarget, setPinnedSidebarTopTarget] =
+    React.useState<HTMLDivElement | null>(null);
   const [pinnedSidebarBottomTarget, setPinnedSidebarBottomTarget] =
     React.useState<HTMLDivElement | null>(null);
   const approvalRequiredByChatNodeId = useDroneHubRuntimeStore(
@@ -1552,6 +1556,7 @@ export function DroneSidebar({
     setActiveRepoPath,
     setAutoDelete,
     setSidebarCollapsed,
+    setSettingsActiveTab,
   } = useDroneSidebarUiState();
   React.useEffect(() => {
     if (Object.keys(sidebarGroupIdByName).length === 0) return;
@@ -2751,12 +2756,31 @@ export function DroneSidebar({
             >
               DRONE HUB
             </button>
-            {sidebarCapabilities.headerActions ? <DesktopDevicePicker /> : null}
+            {sidebarCapabilities.headerActions ? (
+              <DesktopDevicePicker
+                onOpenDeviceSettings={() => {
+                  setSettingsActiveTab('devices');
+                  setAppView('settings');
+                }}
+              />
+            ) : null}
             {headerAccessory ? (
               <div className="flex items-center gap-1 flex-shrink-0">{headerAccessory}</div>
             ) : null}
           </div>
         </div>
+
+        {pinnedSidebarPlacement === 'top' && globalPinnedDrones.length > 0 ? (
+          <div
+            ref={setPinnedSidebarTopTarget}
+            data-sidebar-pinned-top-slot="true"
+            className={`flex-shrink-0 px-2 [--sidebar-selection-edge-offset:-0.5rem] ${
+              repositoryOverviewOpen || !activeRepositoryNavigationItem
+                ? 'border-b border-[var(--border-subtle)]'
+                : ''
+            }`}
+          />
+        ) : null}
 
         <div
           className="dh-sidebar-scrollbar flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-2 pt-0 pb-1.5 [--sidebar-selection-edge-offset:-0.5rem]"
@@ -2923,6 +2947,7 @@ export function DroneSidebar({
           <div className={`flex flex-col gap-0 ${sidebarListSelectClass}`}>
             <PinnedSidebarPlacementSlot
               placement={pinnedSidebarPlacement}
+              topTarget={pinnedSidebarTopTarget}
               bottomTarget={pinnedSidebarBottomTarget}
             >
               {globalPinnedDrones.length > 0 ? (
@@ -3083,7 +3108,7 @@ export function DroneSidebar({
             activeRepositoryNavigationItem ? (
               <div
                 data-sidebar-active-repository-header="true"
-                className={`group/active-repository -mx-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--surface-inset)] pr-1.5 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)] ${
+                className={`group/active-repository sticky top-0 z-20 -mx-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--sidebar-bg)] pr-1.5 transition-colors ${
                   pinnedSidebarPlacement === 'top' && globalPinnedDrones.length > 0
                     ? 'border-t'
                     : ''
@@ -3331,6 +3356,7 @@ export function DroneSidebar({
                       onOpenGroupMultiChat={onOpenGroupMultiChat}
                       onDeleteGroup={handleDeleteGroup}
                       busyChatNodeIdSet={busyChatNodeIdSet}
+                      approvalRequiredByChatNodeId={approvalRequiredByChatNodeId}
                       unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
                       deletingDrones={deletingDrones}
                       deleteOperationModeById={deleteOperationModeById}
@@ -3394,7 +3420,7 @@ export function DroneSidebar({
           <div
             ref={setPinnedSidebarBottomTarget}
             data-sidebar-pinned-bottom-slot="true"
-            className="flex-shrink-0 px-2"
+            className="flex-shrink-0 px-2 [--sidebar-selection-edge-offset:-0.5rem]"
           />
         ) : null}
 

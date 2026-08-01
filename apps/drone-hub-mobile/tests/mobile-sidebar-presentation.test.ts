@@ -1,7 +1,88 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
+import { colors } from '../src/theme';
+
+function normalizedColor(value: string): string {
+  return value
+    .replaceAll(/\s+/g, '')
+    .replaceAll(/([,(])0\./g, '$1.')
+    .toLowerCase();
+}
 
 describe('mobile sidebar presentation', () => {
+  test('shares the desktop Catppuccin sidebar palette', () => {
+    const desktopStyles = readFileSync(
+      new URL('../../drone-hub/src/styles.css', import.meta.url),
+      'utf8',
+    );
+    const themeStart = desktopStyles.indexOf(":root[data-theme='catppuccin-mocha']");
+    const themeEnd = desktopStyles.indexOf('\n}', themeStart);
+    const desktopTheme = desktopStyles.slice(themeStart, themeEnd);
+    const desktopColor = (name: string) =>
+      new RegExp(`--${name}:\\s*([^;]+);`).exec(desktopTheme)?.[1] ?? '';
+
+    expect(normalizedColor(colors.sidebarFg)).toBe(normalizedColor(desktopColor('sidebar-fg')));
+    expect(normalizedColor(colors.sidebarFgActive)).toBe(
+      normalizedColor(desktopColor('sidebar-fg-active')),
+    );
+    expect(normalizedColor(colors.sidebarHeadingFg)).toBe(
+      normalizedColor(desktopColor('sidebar-heading-fg')),
+    );
+    expect(normalizedColor(colors.sidebarActionFg)).toBe(
+      normalizedColor(desktopColor('sidebar-action-fg')),
+    );
+    expect(normalizedColor(colors.sidebarSubitemFg)).toBe(
+      normalizedColor(desktopColor('sidebar-subitem-fg')),
+    );
+    expect(normalizedColor(colors.sidebarDroneFg)).toBe(
+      normalizedColor(desktopColor('sidebar-drone-fg')),
+    );
+    expect(normalizedColor(colors.sidebarDroneActiveFg)).toBe(
+      normalizedColor(desktopColor('sidebar-drone-active-fg')),
+    );
+    expect(normalizedColor(colors.sidebarSelectionWash)).toBe(
+      normalizedColor(desktopColor('sidebar-row-selected-bg')),
+    );
+    expect(normalizedColor(colors.sidebarSelectionEdge)).toBe(
+      normalizedColor(desktopColor('sidebar-row-selected-edge')),
+    );
+    expect(normalizedColor(colors.sidebarBlockedIndicator)).toBe(
+      normalizedColor(desktopColor('sidebar-blocked-indicator')),
+    );
+    expect(normalizedColor(colors.sidebarHeaderBorder)).toBe(
+      normalizedColor(desktopColor('app-header-border')),
+    );
+  });
+
+  test('uses the exact desktop SVG paths for shared sidebar icons', () => {
+    const mobileIcons = readFileSync(
+      new URL('../src/local-assistant/SidebarIcons.tsx', import.meta.url),
+      'utf8',
+    );
+    const desktopIcons = [
+      '../../drone-hub/src/droneHub/icons.tsx',
+      '../../drone-hub/src/droneHub/app/icons.tsx',
+      '../../drone-hub/src/droneHub/overview/icons.tsx',
+      '../../drone-hub/src/droneHub/overview/DroneCard.tsx',
+    ]
+      .map((path) => readFileSync(new URL(path, import.meta.url), 'utf8'))
+      .join('\n');
+    const paths = (source: string) =>
+      [...source.matchAll(/<(?:path|Path)\s+d="([^"]+)"/g)].map((match) => match[1]);
+    const desktopPathSet = new Set(paths(desktopIcons));
+
+    for (const mobilePath of paths(mobileIcons)) {
+      expect(desktopPathSet.has(mobilePath)).toBe(true);
+    }
+    expect(mobileIcons).toContain('<Rect x="5" y="5" width="6" height="6" rx="1" />');
+    expect(mobileIcons).toContain(
+      '<Path d="M6.8 1.03a1.2 1.2 0 012.4 0l.1.81',
+    );
+    expect(mobileIcons).toContain("? 'm15 18-6-6 6-6'");
+    expect(mobileIcons).toContain("? 'm4 6 4 4 4-4' : 'm6 4 4 4-4 4'");
+    expect(mobileIcons).toContain('strokeWidth="1.2"');
+  });
+
   test('uses a flat device picker with quiet local and trailing platform metadata', () => {
     const drawerSource = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
@@ -10,7 +91,7 @@ describe('mobile sidebar presentation', () => {
     const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
 
     expect(drawerSource).toContain('deviceOptionActiveEdge');
-    expect(drawerSource).toContain('borderColor: colors.mutedDim');
+    expect(drawerSource).toContain('borderColor: colors.sidebarMutedDim');
     expect(drawerSource).toContain('shadowColor: colors.online');
     expect(drawerSource).toContain('<Text numberOfLines={1} style={styles.devicePlatform}>');
     expect(drawerSource).toContain('{devicePlatformLabel(device.platform)}');
@@ -20,6 +101,23 @@ describe('mobile sidebar presentation', () => {
     expect(shellSource).toContain("detail: 'This device'");
     expect(shellSource).toContain("platform: current?.platform ?? 'android'");
     expect(shellSource).toContain('platform: device.platform');
+    expect(drawerSource).toContain('width: 232,');
+    expect(drawerSource).toContain(
+      "deviceOptionName: { color: colors.sidebarFg, fontSize: 12, fontWeight: '400' }",
+    );
+    expect(drawerSource).toContain('deviceOptionNameActive: { color: colors.sidebarFgActive }');
+    expect(drawerSource).toContain('backgroundColor: colors.sidebarSelectionEdge');
+    expect(drawerSource).toContain('accessibilityLabel="Manage devices"');
+    expect(drawerSource).toContain('deviceSettingsActionLabel');
+    expect(drawerSource).toContain('borderTopColor: colors.borderSubtle');
+    expect(drawerSource).toContain('{devicesNavigationItem ? (');
+    expect(drawerSource).toContain('accessibilityLabel="Open settings"');
+    expect(drawerSource).toContain('<SidebarSettingsIcon');
+    expect(drawerSource).not.toContain('<View style={styles.navigation}>');
+    expect(drawerSource).not.toContain('function navigationIcon');
+    expect(drawerSource).toContain(
+      "devicePickerName: { color: colors.text, fontSize: 12, fontWeight: '400' }",
+    );
   });
 
   test('uses explicit offline states without exposing transport terminology', () => {
@@ -90,12 +188,14 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('repoListSpacer: { height: 4 }');
     expect(source).toContain('<View style={styles.repoListSpacer} />');
     expect(source).not.toContain('styles.repoGroup');
-    expect(source).toContain("repoRow: {\n    height: 36,");
+    expect(source).toContain('repoRow: {\n    height: 36,');
     expect(source).toContain('paddingHorizontal: 14,');
     expect(source).toContain(
-      "repoName: { color: colors.secondary, fontSize: 12, fontWeight: '500' }",
+      "repoName: { color: colors.sidebarHeadingFg, fontSize: 12, fontWeight: '500' }",
     );
-    expect(source).toContain("repoNameActive: { color: colors.text, fontWeight: '600' }");
+    expect(source).toContain(
+      "repoNameActive: { color: colors.sidebarDroneActiveFg, fontWeight: '600' }",
+    );
     expect(source).not.toContain('<ChevronRight color={colors.muted} size={15}');
   });
 
@@ -160,9 +260,9 @@ describe('mobile sidebar presentation', () => {
     );
     expect(source).toContain('repoRowActive: { backgroundColor: colors.sidebarSelectionWash }');
     expect(source).toContain("droneNode: { position: 'relative' }");
-    expect(source).toContain("switchItemRow: {\n    height: 36,");
-    expect(source).toContain('fontSize: 13,\n    fontWeight: \'400\',');
-    expect(source).toContain("switchItemTitleActive: { color: colors.text }");
+    expect(source).toContain('switchItemRow: {\n    height: 36,');
+    expect(source).toContain("fontSize: 13,\n    fontWeight: '400',");
+    expect(source).toContain('switchItemTitleActive: { color: colors.sidebarDroneActiveFg }');
     expect(source).toContain('const DRAWER_TREE_ROW_PADDING_LEFT = 12;');
     expect(source).toContain('const DRAWER_TREE_DEPTH_INDENT = 10;');
     expect(source).toContain('sidebarRowPressed: { backgroundColor: colors.whiteWash }');
@@ -182,18 +282,18 @@ describe('mobile sidebar presentation', () => {
     expect(source).not.toContain('<Text style={styles.switchItemState}>{stateLabel}</Text>');
   });
 
-  test('keeps a fixed leading status gutter with a faint ready anchor', () => {
+  test('keeps a fixed leading status gutter with the desktop ready anchor', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
       'utf8',
     );
 
-    expect(source).toContain("const ready = state === 'idle' && !unread;");
+    expect(source).toContain("const ready = showReadyAnchor && state === 'idle' && !unread;");
     expect(source).toContain('<View style={styles.readyStateAnchor} />');
     expect(source).toContain('width: DRAWER_TREE_LEADING_SLOT_WIDTH');
     expect(source).toContain('height: DRAWER_TREE_LEADING_SLOT_WIDTH');
-    expect(source).toContain('borderColor: colors.mutedDim');
-    expect(source).toContain('opacity: 0.35');
+    expect(source).toContain('borderColor: colors.sidebarItemIcon');
+    expect(source).toContain('opacity: 0.7');
   });
 
   test('matches the desktop blocked warning and unread glow indicators', () => {
@@ -203,13 +303,71 @@ describe('mobile sidebar presentation', () => {
     );
 
     expect(source).toContain("state === 'blocked' ? (");
-    expect(source).toContain('<BlockedStatusIndicator />');
+    expect(source).toContain('<BlockedStatusIndicator emphasized={emphasized} />');
     expect(source).toContain('d="M6 1.25 11 10.25H1L6 1.25Z"');
     expect(source).toContain('d="M6 4.15v2.75"');
     expect(source).toContain('cx="6" cy="8.5"');
-    expect(source).toContain('stroke={colors.sidebarBlockedIndicator}');
+    expect(source).toContain(
+      'const color = emphasized ? colors.sidebarBlockedIndicator : colors.sidebarItemIcon;',
+    );
+    expect(source).toContain('quietBlockedStatusIndicator: { opacity: 0.7 }');
     expect(source).toContain('shadowColor: colors.onlineBorder');
     expect(source).toContain('shadowOffset: { width: 0, height: 0 }');
+    expect(source).toContain('const RECENT_BLOCKED_EMPHASIS_MS = 30_000;');
+    expect(source).toContain('emphasized={recentlyBlocked || selected}');
+  });
+
+  test('renders desktop-equivalent multi-chat rows and keeps pinned rows as shortcuts', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const modelSource = readFileSync(
+      new URL('../src/drones/drone-sidebar-model.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('const chats = orderedMobileDroneChats(');
+    expect(source).toContain('sidebarChatOrderByDrone[drone.id]');
+    expect(source).toContain('showChats && chats.length > 1 ? (');
+    expect(source).toContain(
+      'chats.length > 1 && drone.approvalRequired ? { ...drone, approvalRequired: false } : drone',
+    );
+    expect(source).toContain('{ marginLeft: drawerTreeRowPaddingLeft(depth) + 8 }');
+    expect(source).toContain('selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}');
+    expect(source).toContain('styles.droneChatSelectionWash, { left: -selectionWashInset }');
+    expect(source).toContain('<DrawerDroneChatRow');
+    expect(source).toContain('drone.draftChats?.[chatName] === true');
+    expect(source).toContain('styles.droneChatDraftBadge');
+    expect(source).toContain('borderColor: colors.accentAlt,');
+    expect(source).toContain('showReadyAnchor={false}');
+    expect(source).toContain('selected && !hasActiveChildChat && styles.switchItemRowActive');
+    expect(source).toContain(
+      'selected && !hasActiveChildChat ? <View style={styles.sidebarSelectionEdge} /> : null',
+    );
+    expect(source).toContain('showChats={false}');
+    expect(source).toContain('color: colors.sidebarSubitemFg,');
+    expect(source).toContain('droneChildren: {\n    marginLeft: 4,');
+    expect(source).toContain('paddingLeft: 6,\n    borderLeftWidth: StyleSheet.hairlineWidth,');
+    expect(modelSource).toContain('sidebarChatOrderByDrone: Record<string, string[]>;');
+    expect(modelSource).toContain(
+      'sidebarChatOrderByDrone: stringListMap(sidebar.sidebarChatOrderByDrone)',
+    );
+  });
+
+  test('distinguishes draft and loading rows instead of showing misleading ready content', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain("drone.phase.trim().toLowerCase() === 'draft'");
+    expect(source).toContain('<View accessible={false} style={styles.switchItemStatus} />');
+    expect(source).toContain('accessibilityLabel="Draft drone"');
+    expect(source).toContain('style={styles.switchItemDraftBadge}');
+    expect(source).toContain('dronesLoading && drones.length === 0 ? (');
+    expect(source).toContain('accessibilityLabel="Loading drones"');
+    expect(source).toContain('<Text style={styles.drawerLoadingText}>Loading drones…</Text>');
   });
 
   test('uses the desktop chevron-only group treatment and selected-child guide', () => {
@@ -222,9 +380,8 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('gap: DRAWER_TREE_LEADING_GAP');
     expect(source).toContain('width: DRAWER_TREE_LEADING_SLOT_WIDTH');
     expect(source).toContain('<View style={styles.folderChevronSlot}>');
-    expect(source).toContain(
-      '<Chevron color={colors.mutedDim} size={16} strokeWidth={1.25} />',
-    );
+    expect(source).toContain('color={colors.sidebarMutedDim}');
+    expect(source).toContain('style={styles.folderChevron}');
     expect(source).not.toContain('<Folder color={colors.muted}');
     expect(source).toContain(
       'const hasSelectedDirectDrone = folder.roots.some((node) => node.drone.id === activeDroneId);',
@@ -232,9 +389,9 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('{hasSelectedDirectDrone ? (');
     expect(source).toContain('styles.groupChildrenGuide');
     expect(source).toContain(
-      "groupName: { color: colors.secondary, fontSize: 13, fontWeight: '400', flex: 1 }",
+      "groupName: { color: colors.sidebarHeadingFg, fontSize: 13, fontWeight: '400', flex: 1 }",
     );
-    expect(source).toContain("groupRow: {\n    minHeight: 36,");
+    expect(source).toContain('groupRow: {\n    minHeight: 36,');
   });
 
   test('shows pinned drones first and keeps pinning in the chat header menu', () => {
@@ -256,26 +413,39 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('data={activeRepo.entries}');
     expect(drawerSource).toContain('drones={globalPinnedDrones}');
     expect(drawerSource).toContain('<Text style={styles.pinnedHeaderText}>Pinned</Text>');
-    expect(drawerSource).toContain('pinnedSection: {\n    paddingBottom: 4,');
+    expect(drawerSource).toContain(
+      'pinnedSection: {\n    flexShrink: 0,\n    paddingBottom: 4,',
+    );
     expect(drawerSource).toContain('pinnedHeader: {\n    minHeight: 32,');
     expect(drawerSource).toContain('paddingLeft: 12,\n    paddingRight: 8,');
-    expect(drawerSource).toContain('<Pin color={colors.mutedDim} size={14} strokeWidth={1.7} />');
+    expect(drawerSource).toContain('color={colors.sidebarMutedDim}');
+    expect(drawerSource).toContain('style={styles.pinnedHeaderIcon}');
     expect(drawerSource).toContain("fontSize: 10.5,\n    fontWeight: '400',");
-    expect(drawerSource).toContain('<Text numberOfLines={1} style={styles.switchItemContextBadge}>');
-    expect(drawerSource).toContain('switchItemContextBadge: {\n    maxWidth: 96,');
-    expect(drawerSource).toContain('color: colors.textSecondary,');
+    expect(drawerSource).toContain(
+      '<Text numberOfLines={1} style={styles.switchItemContextBadge}>',
+    );
+    expect(drawerSource).toContain('switchItemContextBadge: {\n    maxWidth: 76,');
+    expect(drawerSource).toContain('color: colors.sidebarFgActive,');
     expect(drawerSource).toContain('borderColor: colors.border,');
-    expect(drawerSource).toContain('backgroundColor: colors.panelRaised,');
+    expect(drawerSource).toContain('backgroundColor: colors.sidebarSurfaceInset,');
     expect(drawerSource).not.toContain('styles.pinnedCount');
     expect(drawerSource).not.toContain('<Text style={styles.pinnedCount}>{drones.length}</Text>');
     expect(drawerSource).not.toContain('accessibilityLabel={pinned ? `Unpin ${drone.name}`');
     expect(drawerSource.match(/<DrawerPinnedDrones/g)).toHaveLength(1);
     const activeRepoListStart = drawerSource.indexOf('key={`repo:${activeRepo.id}`}');
-    const activeRepoHeaderStart = drawerSource.indexOf('ListHeaderComponent={', activeRepoListStart);
+    const activeRepoHeaderStart = drawerSource.indexOf(
+      'ListHeaderComponent={',
+      activeRepoListStart,
+    );
     const activeRepoHeaderEnd = drawerSource.indexOf('ListFooterComponent=', activeRepoHeaderStart);
     const activeRepoHeader = drawerSource.slice(activeRepoHeaderStart, activeRepoHeaderEnd);
-    expect(activeRepoHeader.indexOf("pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null")).toBeLessThan(
-      activeRepoHeader.indexOf('styles.repoNavigationHead,'),
+    const topPinnedIndex = drawerSource.indexOf(
+      "{pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null}",
+    );
+    expect(topPinnedIndex).toBeGreaterThan(-1);
+    expect(topPinnedIndex).toBeLessThan(activeRepoListStart);
+    expect(activeRepoHeader).not.toContain(
+      "pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null",
     );
     expect(drawerSource).toContain(
       "pinnedSidebarPlacement === 'bottom' ? pinnedDronesSection : null",
@@ -284,25 +454,38 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('AsyncStorage.setItem(PINNED_SIDEBAR_PLACEMENT_KEY, next)');
     expect(drawerSource).toContain("React.useState<PinnedSidebarPlacement>('bottom')");
     expect(drawerSource).toContain("stored === 'top' || stored === 'bottom'");
-    expect(drawerSource).toContain("placement === 'top' ? 'Move pinned drones to bottom' : 'Move pinned drones to top'");
+    expect(drawerSource).toContain(
+      "placement === 'top' ? 'Move pinned drones to bottom' : 'Move pinned drones to top'",
+    );
     expect(drawerSource).toContain('style={styles.pinnedHeaderText}>Pinned</Text>');
     expect(drawerSource).toContain('pinnedHeaderText: {\n    flex: 1,');
     expect(drawerSource).toContain('pinnedPlacementToggle: {');
+    expect(drawerSource).toContain(
+      "placement === 'top' && separateFromRepositoryList && styles.pinnedSectionTop",
+    );
+    expect(drawerSource).toContain('separateFromRepositoryList={!activeRepo}');
     expect(drawerSource).toContain("placement === 'bottom' && styles.pinnedSectionBottom");
     expect(drawerSource).toContain('pinnedSectionBottom: {\n    flexShrink: 0,');
+    expect(drawerSource).toContain(
+      'pinnedSectionTop: {\n    borderBottomWidth: 1,\n    borderBottomColor: colors.borderSubtle,',
+    );
+    expect(drawerSource).toContain('stickyHeaderIndices={[0]}');
     expect(drawerSource).toContain("pinnedSidebarPlacement === 'top' &&");
     expect(drawerSource).toContain('globalPinnedDrones.length > 0 &&');
     expect(drawerSource).toContain('styles.repoNavigationHeadBelowPinned');
     expect(drawerSource).toContain(
       'repoNavigationHeadBelowPinned: {\n    borderTopWidth: 1,\n    borderTopColor: colors.borderSubtle,',
     );
-    expect(drawerSource).toContain('borderTopWidth: 1,\n    borderTopColor: colors.borderSubtle,');
-    expect(drawerSource).not.toContain('pinnedSection: {\n    paddingBottom: 0,\n    borderBottomWidth: 1,');
-    expect(drawerSource.lastIndexOf("pinnedSidebarPlacement === 'bottom' ? pinnedDronesSection : null")).toBeGreaterThan(
-      drawerSource.lastIndexOf('keyboardShouldPersistTaps="handled"'),
-    );
+    expect(drawerSource).toContain('backgroundColor: colors.panel,');
+    expect(drawerSource).not.toContain('pinnedSection: {\n    borderBottomWidth: 1,');
+    expect(
+      drawerSource.lastIndexOf("pinnedSidebarPlacement === 'bottom' ? pinnedDronesSection : null"),
+    ).toBeGreaterThan(drawerSource.lastIndexOf('keyboardShouldPersistTaps="handled"'));
     const pinnedSelectionStart = drawerSource.indexOf('const selectPinnedDroneChat');
-    const pinnedSelectionEnd = drawerSource.indexOf('const pinnedDronesSection', pinnedSelectionStart);
+    const pinnedSelectionEnd = drawerSource.indexOf(
+      'const pinnedDronesSection',
+      pinnedSelectionStart,
+    );
     const pinnedSelectionSource = drawerSource.slice(pinnedSelectionStart, pinnedSelectionEnd);
     expect(pinnedSelectionSource).not.toContain('setActiveRepoId');
     expect(pinnedSelectionSource).toContain('onSelectDroneChat?.(droneId, chatName)');
@@ -313,7 +496,7 @@ describe('mobile sidebar presentation', () => {
     expect(shellSource).toContain('disabled: dronesHeader.pinDisabled');
   });
 
-  test('does not render status counts on group rows', () => {
+  test('shows descendant state counts on group rows', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
       'utf8',
@@ -322,7 +505,8 @@ describe('mobile sidebar presentation', () => {
     const folderEnd = source.indexOf('function DrawerDroneEntry', folderStart);
     const folderSource = source.slice(folderStart, folderEnd);
 
-    expect(folderSource).not.toContain('<DroneStateCounts');
+    expect(folderSource).toContain('summarizeDroneScope(folder.roots, folder.children)');
+    expect(folderSource).toContain('<DroneStateCounts summary={stateSummary} compact />');
   });
 
   test('omits the selected-drone subtitle while preserving contextual create copy', () => {

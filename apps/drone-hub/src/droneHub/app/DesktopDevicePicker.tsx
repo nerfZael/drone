@@ -1,6 +1,6 @@
 import React from 'react';
 import { dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
-import { IconChevronDown } from './icons';
+import { IconChevronDown, IconNetwork } from './icons';
 import { desktopDeviceRouteAvailable, useDesktopDevice } from './DesktopDeviceProvider';
 import { DeviceConnectionIndicator } from './DeviceConnectionIndicator';
 
@@ -10,7 +10,11 @@ function platformLabel(platform: string): string {
   return 'Device';
 }
 
-export function DesktopDevicePicker() {
+export function DesktopDevicePicker({
+  onOpenDeviceSettings,
+}: {
+  onOpenDeviceSettings?: () => void;
+}) {
   const {
     devices,
     status,
@@ -107,6 +111,22 @@ export function DesktopDevicePicker() {
           {error ? (
             <div className="border-t border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-9)] text-[var(--red)]">
               Device status could not be refreshed.
+            </div>
+          ) : null}
+          {onOpenDeviceSettings ? (
+            <div className="border-t border-[var(--border-subtle)] p-1">
+              <button
+                type="button"
+                role="menuitem"
+                className="flex min-h-9 w-full items-center gap-2 rounded-[var(--radius-medium)] px-2 text-left dh-type-control-compact text-[var(--sidebar-fg)] transition-colors hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
+                onClick={() => {
+                  setOpen(false);
+                  onOpenDeviceSettings();
+                }}
+              >
+                <IconNetwork className="h-3.5 w-3.5 flex-shrink-0 text-[var(--sidebar-action-fg)]" />
+                <span>Manage devices</span>
+              </button>
             </div>
           ) : null}
         </div>

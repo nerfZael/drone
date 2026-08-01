@@ -29,6 +29,12 @@ describe('mobile changed files tree', () => {
     expect(treeSource).toContain('node.children.map');
     expect(treeSource).toMatch(/\{collapsed \? \(\s*<View style=\{\[styles\.stats/);
     expect(transcriptSource).toContain('<MobileChangedFilesTree');
+    expect(transcriptSource).toContain("import File from 'lucide-react-native/icons/file';");
+    expect(transcriptSource).toContain('styles.changedFilesFileAdditions');
+    expect(transcriptSource).toContain('styles.changedFilesFileDeletions');
+    expect(transcriptSource).not.toContain(
+      '<ChevronRight color={pressed ? colors.accent : colors.muted} size={12} />',
+    );
     expect(transcriptSource).toContain('{name}');
     expect(transcriptSource).toContain('<MobileChangedFilesReviewModal');
     expect(transcriptSource).not.toContain('diff.patch.slice');

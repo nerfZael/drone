@@ -15,6 +15,7 @@ import type { AgentRunFileChanges } from '@blip/protocol';
 import {
   buildRepoSidebarModel,
   compareSidebarDronesByNewestFirst,
+  orderSidebarEntries,
   sidebarFolderNodeId,
   type SidebarNodeTreeModel,
   type SidebarTreeFolderNode,
@@ -33,6 +34,7 @@ export type MobileDroneSummary = {
   repoAttached?: boolean;
   fleetParentId: string | null;
   chats: string[];
+  draftChats?: Record<string, boolean>;
   busyChats: string[];
   approvalChats?: string[];
   approvalRequired?: boolean;
@@ -50,6 +52,7 @@ export type MobileDroneSummary = {
   lastMessageAt?: string;
   statusOk?: boolean;
   statusError?: string | null;
+  draft?: boolean;
 };
 
 export type MobileDroneTurn = {
@@ -117,6 +120,7 @@ export type MobileDroneSidebarOrder = {
   sidebarGroupOrder: string[];
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
+  sidebarChatOrderByDrone: Record<string, string[]>;
   pinnedDroneIds: string[];
 };
 
@@ -210,6 +214,7 @@ export const EMPTY_MOBILE_DRONE_SIDEBAR_ORDER: MobileDroneSidebarOrder = {
   sidebarGroupOrder: [],
   sidebarDroneOrderByGroup: {},
   sidebarNodeOrderByParent: {},
+  sidebarChatOrderByDrone: {},
   pinnedDroneIds: [],
 };
 
@@ -266,6 +271,15 @@ function nullableStringMap(value: unknown): Record<string, string | null> {
   );
 }
 
+function trueBooleanMap(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, item]) => [text(key), item === true] as const)
+      .filter(([key, item]) => Boolean(key && item)),
+  );
+}
+
 function chatReadStateMap(value: unknown): NonNullable<MobileDroneSummary['chatReadStates']> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(
@@ -311,6 +325,11 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
   const approvalChats = stringList(value.approvalChats).filter((chatName) =>
     chats.includes(chatName),
   );
+  const draftChats = Object.fromEntries(
+    Object.entries(trueBooleanMap(value.draftChats)).filter(([chatName]) =>
+      chats.includes(chatName),
+    ),
+  );
   return {
     id,
     name: text(value.name || value.id) || id,
@@ -337,6 +356,7 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
           ),
     fleetParentId: text(value.fleetParentId) || null,
     chats,
+    draftChats,
     busyChats: stringList(value.busyChats),
     approvalChats,
     approvalRequired:
@@ -351,6 +371,7 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
     lastMessageAt: text(value.lastMessageAt) || undefined,
     statusOk: value.statusOk !== false,
     statusError: text(value.statusError) || null,
+    draft: value.draft === true || text(value.phase).toLowerCase() === 'draft',
   };
 }
 
@@ -434,6 +455,7 @@ export function normalizeMobileDroneListPayload(raw: unknown): NormalizedMobileD
       sidebarGroupOrder: stringList(sidebar.sidebarGroupOrder),
       sidebarDroneOrderByGroup: stringListMap(sidebar.sidebarDroneOrderByGroup),
       sidebarNodeOrderByParent: stringListMap(sidebar.sidebarNodeOrderByParent),
+      sidebarChatOrderByDrone: stringListMap(sidebar.sidebarChatOrderByDrone),
       pinnedDroneIds: stringList(sidebar.pinnedDroneIds),
     },
     sidebarSnapshotStatus,
@@ -508,6 +530,14 @@ export function compareMobileDronesByNewestFirst(
   right: MobileDroneSummary,
 ): number {
   return compareSidebarDronesByNewestFirst(left, right);
+}
+
+export function orderedMobileDroneChats(
+  drone: Pick<MobileDroneSummary, 'id' | 'chats'>,
+  preferredOrder: readonly string[] = [],
+): string[] {
+  const chats = drone.chats.length > 0 ? drone.chats : ['default'];
+  return orderSidebarEntries(chats, [...preferredOrder], (chatName) => chatName);
 }
 
 function mobileDroneTreeNode(

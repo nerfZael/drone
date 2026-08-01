@@ -40,10 +40,9 @@ export function withMobileApprovalRequired(
   return { ...drone, approvalRequired: true };
 }
 
-export function mobileDroneDisplayState(drone: MobileDroneSummary): MobileDroneDisplayState {
-  const rawState = `${drone.phase ?? ''} ${drone.status ?? ''}`.toLowerCase();
-  if (drone.approvalRequired || rawState.includes('approval')) return 'approval';
-  if (drone.busyChats.length > 0) return 'working';
+function mobileDroneInactiveDisplayState(drone: MobileDroneSummary): MobileDroneDisplayState {
+  const rawState =
+    `${drone.phase ?? ''} ${drone.status ?? ''} ${drone.statusError ?? ''}`.toLowerCase();
   if (
     rawState.includes('block') ||
     rawState.includes('error') ||
@@ -56,6 +55,25 @@ export function mobileDroneDisplayState(drone: MobileDroneSummary): MobileDroneD
   if (rawState.includes('start') || rawState.includes('creat') || rawState.includes('seed'))
     return 'starting';
   return 'idle';
+}
+
+export function mobileDroneDisplayState(drone: MobileDroneSummary): MobileDroneDisplayState {
+  if (drone.approvalRequired) return 'approval';
+  if (drone.busyChats.length > 0) return 'working';
+  return mobileDroneInactiveDisplayState(drone);
+}
+
+export function mobileDroneChatDisplayState(
+  drone: MobileDroneSummary,
+  chatNameRaw: string,
+  locallyApprovalRequired = false,
+): MobileDroneDisplayState {
+  const chatName = chatNameRaw.trim() || 'default';
+  if (locallyApprovalRequired || drone.approvalChats?.includes(chatName)) {
+    return 'approval';
+  }
+  if (drone.busyChats.includes(chatName)) return 'working';
+  return mobileDroneInactiveDisplayState(drone);
 }
 
 export function addMobileDroneToStateSummary(

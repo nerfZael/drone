@@ -3,7 +3,9 @@ import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type Drag
 import { isUngroupedGroupName } from '../../domain';
 import {
   DroneCard,
+  SidebarApprovalStatusIndicator,
   SidebarItemStateIndicator,
+  SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
   sidebarDroneStateLabel,
   type DroneInlineRenameResult,
@@ -135,6 +137,7 @@ type GroupedSidebarTreeProps = {
     opts?: { kind?: 'group' | 'repo'; label?: string; repoPath?: string | null },
   ) => Promise<boolean> | boolean;
   busyChatNodeIdSet: Set<string>;
+  approvalRequiredByChatNodeId: Record<string, boolean>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
   deletingDrones: Record<string, boolean>;
   deleteOperationModeById: Record<string, DroneDeleteMode>;
@@ -258,6 +261,70 @@ function collectSidebarTreeDroneIds(nodeTree: SidebarNodeTreeModel, rootNodeId: 
   };
   visit(rootNodeId);
   return out;
+}
+
+type SidebarGroupStateSummary = {
+  approval: number;
+  unread: number;
+  working: number;
+};
+
+function SidebarGroupStateCount({
+  count,
+  indicator,
+  label,
+  toneClassName,
+}: {
+  count: number;
+  indicator: React.ReactNode;
+  label: string;
+  toneClassName: string;
+}) {
+  return (
+    <span
+      className={`inline-flex h-3 items-center gap-1 ${toneClassName}`}
+      title={`${count} ${label}`}
+      aria-label={`${count} ${label}`}
+    >
+      <span className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center leading-none">
+        {indicator}
+      </span>
+      <span className="relative top-px inline-flex h-3 min-w-[2ch] items-center leading-none tabular-nums">
+        {count}
+      </span>
+    </span>
+  );
+}
+
+function SidebarGroupStateCounts({ summary }: { summary: SidebarGroupStateSummary }) {
+  return (
+    <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem] leading-none">
+      {summary.approval > 0 ? (
+        <SidebarGroupStateCount
+          count={summary.approval}
+          indicator={<SidebarApprovalStatusIndicator />}
+          label="awaiting approval"
+          toneClassName="text-[var(--yellow)]"
+        />
+      ) : null}
+      {summary.unread > 0 ? (
+        <SidebarGroupStateCount
+          count={summary.unread}
+          indicator={<SidebarItemStateIndicator state="idle" unread />}
+          label="unread"
+          toneClassName="text-[var(--green)]"
+        />
+      ) : null}
+      {summary.working > 0 ? (
+        <SidebarGroupStateCount
+          count={summary.working}
+          indicator={<SidebarWorkingStatusIndicator />}
+          label="working"
+          toneClassName="text-[var(--yellow)]"
+        />
+      ) : null}
+    </span>
+  );
 }
 
 function groupedDroneDragData(args: {
@@ -1075,6 +1142,11 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     toggleSidebarGroupHidden,
     onOpenGroupMultiChat,
     onDeleteGroup,
+    droneById,
+    busyChatNodeIdSet,
+    approvalRequiredByChatNodeId,
+    unreadAgentMessageByChatNodeId,
+    deletingDrones,
     shouldSuppressClick,
     actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
@@ -1090,6 +1162,50 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   const groupToken = React.useMemo(() => sidebarGroupOrderToken(groupRef), [groupRef]);
   const collapsed = Boolean(collapsedGroups[folderPath]);
   const folderDroneIds = React.useMemo(() => collectSidebarTreeDroneIds(nodeTree, node.id), [node.id, nodeTree]);
+  const stateSummary = React.useMemo<SidebarGroupStateSummary>(() => {
+    const summary: SidebarGroupStateSummary = { approval: 0, unread: 0, working: 0 };
+    for (const droneId of folderDroneIds) {
+      const drone = droneById[droneId];
+      if (!drone) continue;
+      const chats = normalizedDroneChats(drone, { includeDefaultWhenEmpty: true });
+      const approval = chats.some((chatName) => {
+        const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
+        return (
+          droneChatRequiresApproval(drone, chatName) ||
+          Boolean(approvalRequiredByChatNodeId[chatNodeId])
+        );
+      });
+      const working =
+        !approval &&
+        (Boolean(drone.busy) ||
+          (drone.busyChats?.length ?? 0) > 0 ||
+          chats.some((chatName) =>
+            busyChatNodeIdSet.has(createCanvasChatNodeId(drone.id, chatName)),
+          ) ||
+          drone.hubPhase === 'creating' ||
+          drone.hubPhase === 'starting' ||
+          drone.hubPhase === 'seeding' ||
+          Boolean(deletingDrones[drone.id]));
+      const unread =
+        (drone.unreadChats?.length ?? 0) > 0 ||
+        chats.some((chatName) =>
+          Boolean(
+            unreadAgentMessageByChatNodeId[createCanvasChatNodeId(drone.id, chatName)],
+          ),
+        );
+      if (approval) summary.approval += 1;
+      if (unread) summary.unread += 1;
+      if (working) summary.working += 1;
+    }
+    return summary;
+  }, [
+    approvalRequiredByChatNodeId,
+    busyChatNodeIdSet,
+    deletingDrones,
+    droneById,
+    folderDroneIds,
+    unreadAgentMessageByChatNodeId,
+  ]);
   const folderDroneSelected = folderDroneIds.length > 0 && folderDroneIds.every((droneId) => selectedDroneSet.has(droneId));
   const isSelected = selectedSidebarNodeId === node.id || selectedFolderPath === folderPath || folderDroneSelected;
   const isHiddenGroup = hiddenSidebarGroupTokenSet.has(groupToken);
@@ -1322,6 +1438,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`} title={folderPath}>
                   {node.label}
                 </span>
+                <SidebarGroupStateCounts summary={stateSummary} />
               </div>
             </button>
           )}
@@ -2127,6 +2244,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     }),
     [
       props.activeChatName,
+      props.approvalRequiredByChatNodeId,
       props.busyChatNodeIdSet,
       props.chatEditor,
       props.chatEditorInputRef,

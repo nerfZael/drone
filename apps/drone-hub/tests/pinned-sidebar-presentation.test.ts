@@ -37,12 +37,28 @@ describe('desktop pinned drone presentation', () => {
     expect(sidebarSource).toContain('aria-label="Pinned drones"');
     expect(sidebarSource).toContain('data-sidebar-pinned-section="true"');
     expect(sidebarSource).toContain('function PinnedSidebarPlacementSlot({');
+    expect(sidebarSource).toContain(
+      "placement === 'top') return topTarget ? createPortal(children, topTarget) : null",
+    );
     expect(sidebarSource).toContain('bottomTarget ? createPortal(children, bottomTarget) : null');
+    expect(sidebarSource).toContain('data-sidebar-pinned-top-slot="true"');
     expect(sidebarSource).toContain('data-sidebar-pinned-bottom-slot="true"');
-    expect(sidebarSource).toContain('className="flex-shrink-0 px-2"');
+    expect(sidebarSource).toContain(
+      'repositoryOverviewOpen || !activeRepositoryNavigationItem',
+    );
+    expect(sidebarSource).toContain(
+      "? 'border-b border-[var(--border-subtle)]'",
+    );
+    expect(sidebarSource).toContain(
+      "pinnedSidebarPlacement === 'top' && globalPinnedDrones.length > 0",
+    );
+    expect(sidebarSource.indexOf('data-sidebar-pinned-top-slot="true"')).toBeLessThan(
+      sidebarSource.indexOf('dh-sidebar-scrollbar flex-1 min-h-0 overflow-x-hidden'),
+    );
     expect(sidebarSource.indexOf('data-sidebar-pinned-section="true"')).toBeLessThan(
       sidebarSource.indexOf('data-sidebar-active-repository-header="true"'),
     );
+    expect(sidebarSource).toContain('group/active-repository sticky top-0 z-20');
     expect(sidebarSource).toContain('data-sidebar-pinned-placement-toggle="true"');
     expect(sidebarSource).toContain("current === 'top' ? 'bottom' : 'top'");
     expect(sidebarSource).toContain("? 'Move pinned drones to bottom'");

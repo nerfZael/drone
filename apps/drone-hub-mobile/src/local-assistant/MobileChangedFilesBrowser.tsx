@@ -1,5 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import File from 'lucide-react-native/icons/file';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import type {
   AgentRunFileChangeEntry,
@@ -119,6 +120,11 @@ function WorkspaceBrowser({
               ]}
             >
               <MobileChangedFileStatusBadge tone={presentation.tone} code={presentation.code} />
+              <File
+                color={selected ? colors.accent : colors.muted}
+                size={13}
+                strokeWidth={1.8}
+              />
               <Text
                 numberOfLines={1}
                 style={[styles.fileName, selected && styles.fileNameSelected]}
@@ -126,13 +132,16 @@ function WorkspaceBrowser({
                 {name}
               </Text>
               {!entry.binary && (entry.additions > 0 || entry.deletions > 0) ? (
-                <Text style={styles.fileStats}>
-                  {entry.additions > 0 ? `+${entry.additions}` : ''}
-                  {entry.additions > 0 && entry.deletions > 0 ? ' ' : ''}
-                  {entry.deletions > 0 ? `-${entry.deletions}` : ''}
-                </Text>
+                <View style={styles.fileStats}>
+                  {entry.additions > 0 ? (
+                    <Text style={styles.fileAdditions}>+{entry.additions}</Text>
+                  ) : null}
+                  {entry.deletions > 0 ? (
+                    <Text style={styles.fileDeletions}>-{entry.deletions}</Text>
+                  ) : null}
+                </View>
               ) : entry.binary ? (
-                <Text style={styles.fileStats}>binary</Text>
+                <Text style={styles.binaryFileStats}>binary</Text>
               ) : null}
             </Pressable>
           );
@@ -215,7 +224,10 @@ const styles = StyleSheet.create({
   fileRowSelected: { backgroundColor: colors.selectionWash },
   fileName: { minWidth: 0, flex: 1, color: colors.text, fontSize: 10, fontFamily: 'monospace' },
   fileNameSelected: { color: colors.accent },
-  fileStats: { color: colors.muted, fontSize: 9, fontFamily: 'monospace' },
+  fileStats: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  fileAdditions: { color: colors.online, fontSize: 9, fontFamily: 'monospace' },
+  fileDeletions: { color: colors.danger, fontSize: 9, fontFamily: 'monospace' },
+  binaryFileStats: { color: colors.muted, fontSize: 9, fontFamily: 'monospace' },
   inlineState: {
     minHeight: 40,
     flexDirection: 'row',

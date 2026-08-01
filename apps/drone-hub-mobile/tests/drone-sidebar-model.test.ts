@@ -10,6 +10,7 @@ import {
   normalizeMobileNativeChatHistory,
   normalizeMobileDroneTurns,
   normalizeMobileDrones,
+  orderedMobileDroneChats,
   resolveMobileDroneListSnapshot,
   suggestNextMobileDroneChatName,
 } from '../src/drones/drone-sidebar-model';
@@ -158,6 +159,7 @@ describe('mobile drone sidebar model', () => {
           id: 'mapped',
           lastMessageAt: '2026-07-14T10:00:00.000Z',
           chats: ['default', 'review'],
+          draftChats: { review: true, default: false, missing: true },
           unreadChats: ['default'],
           chatReadStates: {
             default: {
@@ -179,12 +181,14 @@ describe('mobile drone sidebar model', () => {
         sidebarGroupOrder: ['repo:repo:/work/mapped'],
         sidebarDroneOrderByGroup: { 'group:Review': ['mapped'] },
         sidebarNodeOrderByParent: { root: ['drone:mapped'] },
+        sidebarChatOrderByDrone: { mapped: ['review', 'default'] },
         pinnedDroneIds: ['mapped'],
       },
     });
 
     expect(payload.drones[0]?.lastMessageAt).toBe('2026-07-14T10:00:00.000Z');
     expect(payload.drones[0]?.unreadChats).toEqual(['review']);
+    expect(payload.drones[0]?.draftChats).toEqual({ review: true });
     expect(payload.drones[0]?.chatReadStates?.review).toEqual({
       unread: true,
       latestAgentTurnId: 'turn-2',
@@ -196,8 +200,12 @@ describe('mobile drone sidebar model', () => {
       sidebarGroupOrder: ['repo:repo:/work/mapped'],
       sidebarDroneOrderByGroup: { 'group:Review': ['mapped'] },
       sidebarNodeOrderByParent: { root: ['drone:mapped'] },
+      sidebarChatOrderByDrone: { mapped: ['review', 'default'] },
       pinnedDroneIds: ['mapped'],
     });
+    expect(
+      orderedMobileDroneChats(payload.drones[0]!, payload.sidebar.sidebarChatOrderByDrone.mapped),
+    ).toEqual(['review', 'default']);
     expect(payload.sidebarSnapshotStatus).toBe('legacy');
   });
 

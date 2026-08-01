@@ -17,11 +17,13 @@ describe('device mesh drone summaries', () => {
         cwd: '/work/repo/subdir',
         fleetParentId: 'drone_parent',
         chats: ['default', 'review'],
+        draftChats: { review: true, default: false },
         busyChats: ['review'],
         approvalChats: ['default'],
         lastMessageAt: '2026-07-14T10:00:00.000Z',
         statusOk: false,
         statusError: 'offline',
+        draft: true,
       }),
     ).toMatchObject({
       id: 'drone_child',
@@ -31,12 +33,14 @@ describe('device mesh drone summaries', () => {
       fleetParentId: 'drone_parent',
       group: 'Review',
       chats: ['default', 'review'],
+      draftChats: { review: true },
       busyChats: ['review'],
       approvalChats: ['default'],
       approvalRequired: true,
       lastMessageAt: '2026-07-14T10:00:00.000Z',
       statusOk: false,
       statusError: 'offline',
+      draft: true,
     });
   });
 
@@ -52,6 +56,23 @@ describe('device mesh drone summaries', () => {
       repoPath: '/nested/repo',
       chats: ['default', 'planning'],
       fleetParentId: null,
+    });
+  });
+
+  test('forwards the desktop Hub phase and message used by sidebar state glyphs', () => {
+    expect(
+      deviceMeshDroneSummary({
+        id: 'blocked',
+        hubPhase: 'error',
+        hubMessage: 'Provisioning failed',
+      }),
+    ).toMatchObject({
+      phase: 'error',
+      status: 'Provisioning failed',
+    });
+    expect(deviceMeshDroneSummary({ id: 'draft', hubPhase: 'draft' })).toMatchObject({
+      phase: 'draft',
+      draft: true,
     });
   });
 
@@ -101,6 +122,7 @@ describe('device mesh drone summaries', () => {
                         sidebarGroupOrder: ['repo:repo:/work/one'],
                         sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
                         sidebarNodeOrderByParent: { root: ['drone:one'] },
+                        sidebarChatOrderByDrone: { one: ['review', 'default'] },
                         pinnedDroneIds: ['one'],
                       },
                     }
@@ -133,6 +155,7 @@ describe('device mesh drone summaries', () => {
           sidebarGroupOrder: ['repo:repo:/work/one'],
           sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
           sidebarNodeOrderByParent: { root: ['drone:one'] },
+          sidebarChatOrderByDrone: { one: ['review', 'default'] },
           pinnedDroneIds: ['one'],
         },
         createOptions: {

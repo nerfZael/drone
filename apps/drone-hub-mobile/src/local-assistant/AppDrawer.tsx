@@ -16,20 +16,9 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import MessageCircle from 'lucide-react-native/icons/message-circle';
-import Network from 'lucide-react-native/icons/network';
-import Plus from 'lucide-react-native/icons/plus';
-import Settings from 'lucide-react-native/icons/settings';
-import LoaderCircle from 'lucide-react-native/icons/loader-circle';
-import ChevronLeft from 'lucide-react-native/icons/chevron-left';
-import ChevronDown from 'lucide-react-native/icons/chevron-down';
-import ChevronUp from 'lucide-react-native/icons/chevron-up';
-import ChevronRight from 'lucide-react-native/icons/chevron-right';
-import FolderGit2 from 'lucide-react-native/icons/folder-git-2';
 import Square from 'lucide-react-native/icons/square';
 import X from 'lucide-react-native/icons/x';
-import Pin from 'lucide-react-native/icons/pin';
-import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Line, Path } from 'react-native-svg';
 import { Drawer } from 'react-native-drawer-layout';
 import { colors } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,6 +30,7 @@ import {
 import {
   buildMobileDroneRepoGroups,
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+  orderedMobileDroneChats,
   type MobileDroneGroupFolder,
   type MobileDroneRepoGroup,
   type MobileDroneSidebarEntry,
@@ -52,10 +42,21 @@ import { resolvePinnedSidebarDrones } from '@drone/hub-model/sidebar';
 import {
   addMobileDroneToStateSummary,
   EMPTY_MOBILE_DRONE_STATE_SUMMARY,
+  mobileDroneChatDisplayState,
   mobileDroneDisplayState,
   type MobileDroneDisplayState,
   type MobileDroneStateSummary,
 } from '../drones/drone-state-summary';
+import {
+  SidebarChevronIcon,
+  SidebarFolderGitIcon,
+  SidebarNetworkIcon,
+  SidebarPinIcon,
+  SidebarPlusIcon,
+  SidebarSettingsIcon,
+  SidebarTreeChevronIcon,
+  SidebarWorkingIcon,
+} from './SidebarIcons';
 
 export function appDrawerWidth(windowWidth: number): number {
   return Math.max(0, windowWidth);
@@ -109,6 +110,7 @@ type RegisterDrawer = (props: AppDrawerProps | null) => void;
 const AppDrawerHostContext = React.createContext<RegisterDrawer | null>(null);
 const DrawerWorkingPhaseContext = React.createContext<Animated.Value | null>(null);
 const DRAWER_WORKING_SPIN_DURATION_MS = 1_600;
+const RECENT_BLOCKED_EMPHASIS_MS = 30_000;
 const DRAWER_TREE_ROW_PADDING_LEFT = 12;
 const DRAWER_TREE_DEPTH_INDENT = 10;
 const DRAWER_TREE_LEADING_SLOT_WIDTH = 12;
@@ -248,10 +250,12 @@ function DrawerDevicePicker({
   devices,
   activeDeviceId,
   onSelect,
+  onOpenDeviceSettings,
 }: {
   devices: DrawerDevicePickerItem[];
   activeDeviceId: string;
   onSelect?(deviceId: string): void;
+  onOpenDeviceSettings?(): void;
 }) {
   const [open, setOpen] = React.useState(false);
   const activeDevice = devices.find((device) => device.id === activeDeviceId) ?? devices[0];
@@ -275,97 +279,86 @@ function DrawerDevicePicker({
             {activeDevice?.name ?? 'Choose a device'}
           </Text>
         </View>
-        <ChevronDown
-          color={open ? colors.accent : colors.subtle}
+        <SidebarChevronIcon
+          color={colors.sidebarActionFg}
           size={14}
           strokeWidth={2}
-          style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
+          direction={open ? 'up' : 'down'}
         />
       </Pressable>
       {open ? (
-        <ScrollView
-          style={styles.deviceOptions}
-          contentContainerStyle={styles.deviceOptionsContent}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-        >
-          {devices.map((device) => {
-            const active = device.id === activeDeviceId;
-            return (
-              <Pressable
-                key={device.id}
-                accessibilityRole="button"
-                accessibilityLabel={`${device.name}, ${device.connected ? 'online' : 'offline'}, ${devicePlatformLabel(device.platform)}`}
-                accessibilityState={{ selected: active }}
-                onPress={() => {
-                  setOpen(false);
-                  if (!active) onSelect?.(device.id);
-                }}
-                style={({ pressed }) => [
-                  styles.deviceOption,
-                  active && styles.deviceOptionActive,
-                  pressed && styles.pressed,
-                ]}
-              >
-                {active ? <View style={styles.deviceOptionActiveEdge} /> : null}
-                <View style={[styles.deviceDot, device.connected && styles.deviceDotOnline]} />
-                <View style={styles.devicePickerCopy}>
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.deviceOptionName, active && styles.activeText]}
-                  >
-                    {device.name}
-                  </Text>
-                  {device.detail ? (
-                    <Text numberOfLines={1} style={styles.devicePickerDetail}>
-                      {device.detail}
+        <View style={styles.deviceOptions}>
+          <ScrollView
+            style={styles.deviceOptionsList}
+            contentContainerStyle={styles.deviceOptionsContent}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+          >
+            {devices.map((device, index) => {
+              const active = device.id === activeDeviceId;
+              return (
+                <Pressable
+                  key={device.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${device.name}, ${device.connected ? 'online' : 'offline'}, ${devicePlatformLabel(device.platform)}`}
+                  accessibilityState={{ selected: active }}
+                  onPress={() => {
+                    setOpen(false);
+                    if (!active) onSelect?.(device.id);
+                  }}
+                  style={({ pressed }) => [
+                    styles.deviceOption,
+                    index === devices.length - 1 && styles.deviceOptionLast,
+                    active && styles.deviceOptionActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  {active ? <View style={styles.deviceOptionActiveEdge} /> : null}
+                  <View style={[styles.deviceDot, device.connected && styles.deviceDotOnline]} />
+                  <View style={styles.devicePickerCopy}>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.deviceOptionName, active && styles.deviceOptionNameActive]}
+                    >
+                      {device.name}
                     </Text>
-                  ) : null}
-                </View>
-                <Text numberOfLines={1} style={styles.devicePlatform}>
-                  {devicePlatformLabel(device.platform)}
-                </Text>
-              </Pressable>
-            );
-          })}
-          {devices.length === 0 ? (
-            <Text style={styles.empty}>No compatible devices are available.</Text>
+                    {device.detail ? (
+                      <Text numberOfLines={1} style={styles.devicePickerDetail}>
+                        {device.detail}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <Text numberOfLines={1} style={styles.devicePlatform}>
+                    {devicePlatformLabel(device.platform)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+            {devices.length === 0 ? (
+              <Text style={styles.empty}>No compatible devices are available.</Text>
+            ) : null}
+          </ScrollView>
+          {onOpenDeviceSettings ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Manage devices"
+              onPress={() => {
+                setOpen(false);
+                onOpenDeviceSettings();
+              }}
+              style={({ pressed }) => [
+                styles.deviceSettingsAction,
+                pressed && styles.pressed,
+              ]}
+            >
+              <SidebarNetworkIcon color={colors.sidebarActionFg} size={16} strokeWidth={1.9} />
+              <Text style={styles.deviceSettingsActionLabel}>Manage devices</Text>
+            </Pressable>
           ) : null}
-        </ScrollView>
+        </View>
       ) : null}
     </View>
   );
-}
-
-function QuadDroneIcon({
-  color = colors.text,
-  size = 18,
-  strokeWidth = 1.9,
-}: {
-  color?: string;
-  size?: number;
-  strokeWidth?: number;
-}) {
-  return (
-    <Svg height={size} width={size} viewBox="0 0 16 16" fill="none">
-      <Rect x="5" y="5" width="6" height="6" rx="1" stroke={color} strokeWidth={strokeWidth} />
-      <Line x1="2" y1="2" x2="5" y2="5" stroke={color} strokeWidth={strokeWidth} />
-      <Line x1="14" y1="2" x2="11" y2="5" stroke={color} strokeWidth={strokeWidth} />
-      <Line x1="2" y1="14" x2="5" y2="11" stroke={color} strokeWidth={strokeWidth} />
-      <Line x1="14" y1="14" x2="11" y2="11" stroke={color} strokeWidth={strokeWidth} />
-      <Circle cx="2" cy="2" r="1" fill={color} />
-      <Circle cx="14" cy="2" r="1" fill={color} />
-      <Circle cx="2" cy="14" r="1" fill={color} />
-      <Circle cx="14" cy="14" r="1" fill={color} />
-    </Svg>
-  );
-}
-
-function navigationIcon(id: string) {
-  if (id === 'drones') return QuadDroneIcon;
-  if (id === 'devices') return Network;
-  if (id === 'settings') return Settings;
-  return MessageCircle;
 }
 
 function droneTreeContains(nodes: MobileDroneTreeNode[], droneId: string): boolean {
@@ -471,11 +464,15 @@ function switchStateColor(state: SwitchDisplayState): string {
 function SwitchItemStatusIndicator({
   state,
   unread = false,
+  emphasized = false,
+  showReadyAnchor = true,
 }: {
   state: SwitchDisplayState;
   unread?: boolean;
+  emphasized?: boolean;
+  showReadyAnchor?: boolean;
 }) {
-  const ready = state === 'idle' && !unread;
+  const ready = showReadyAnchor && state === 'idle' && !unread;
   const working =
     state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting';
   const stateColor = switchStateColor(state);
@@ -488,7 +485,7 @@ function SwitchItemStatusIndicator({
       ) : state === 'approval' ? (
         <ApprovalStatusIndicator />
       ) : state === 'blocked' ? (
-        <BlockedStatusIndicator />
+        <BlockedStatusIndicator emphasized={emphasized} />
       ) : unread && state === 'idle' ? (
         <UnreadStatusIndicator />
       ) : (
@@ -531,7 +528,7 @@ function WorkingStatusIndicator() {
           ],
         }}
       >
-        <LoaderCircle color={colors.warning} size={12} strokeWidth={2.4} />
+        <SidebarWorkingIcon color={colors.warning} size={12} strokeWidth={2.4} />
       </Animated.View>
     </View>
   );
@@ -564,26 +561,23 @@ function ApprovalStatusIndicator() {
   );
 }
 
-function BlockedStatusIndicator() {
-  // Desktop can reveal its quiet blocked icon on hover. Mobile has no equivalent hover state,
-  // so keep the error color visible instead of leaving a persistent failure muted.
+function BlockedStatusIndicator({ emphasized = false }: { emphasized?: boolean }) {
+  const color = emphasized ? colors.sidebarBlockedIndicator : colors.sidebarItemIcon;
   return (
-    <View accessible={false} style={styles.stateStatusIndicator}>
+    <View
+      accessible={false}
+      style={[styles.stateStatusIndicator, !emphasized && styles.quietBlockedStatusIndicator]}
+    >
       <Svg height={12} width={12} viewBox="0 0 12 12" fill="none">
         <Path
           d="M6 1.25 11 10.25H1L6 1.25Z"
-          stroke={colors.sidebarBlockedIndicator}
+          stroke={color}
           strokeWidth="1.25"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-        <Path
-          d="M6 4.15v2.75"
-          stroke={colors.sidebarBlockedIndicator}
-          strokeWidth="1.25"
-          strokeLinecap="round"
-        />
-        <Circle cx="6" cy="8.5" r=".55" fill={colors.sidebarBlockedIndicator} />
+        <Path d="M6 4.15v2.75" stroke={color} strokeWidth="1.25" strokeLinecap="round" />
+        <Circle cx="6" cy="8.5" r=".55" fill={color} />
       </Svg>
     </View>
   );
@@ -597,10 +591,63 @@ function UnreadStatusIndicator() {
   );
 }
 
+function DrawerDroneChatRow({
+  drone,
+  chatName,
+  activeDroneId,
+  activeChatName,
+  selectionWashInset,
+  onSelect,
+}: {
+  drone: MobileDroneSummary;
+  chatName: string;
+  activeDroneId: string;
+  activeChatName: string;
+  selectionWashInset: number;
+  onSelect(droneId: string, chatName: string): void;
+}) {
+  const selected = drone.id === activeDroneId && chatName === activeChatName;
+  const draft = drone.draftChats?.[chatName] === true;
+  const unread = !selected && (drone.unreadChats?.includes(chatName) ?? false);
+  const displayState = mobileDroneChatDisplayState(
+    drone,
+    chatName,
+    selected && Boolean(drone.approvalRequired),
+  );
+  const stateLabel = unread && displayState === 'idle' ? 'Unread' : switchStateLabel(displayState);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${drone.name} / ${chatName}, ${stateLabel}`}
+      accessibilityState={{ selected }}
+      onPress={() => onSelect(drone.id, chatName)}
+      style={({ pressed }) => [
+        styles.droneChatRow,
+        pressed && !selected && styles.sidebarRowPressed,
+      ]}
+    >
+      {selected ? (
+        <View style={[styles.droneChatSelectionWash, { left: -selectionWashInset }]} />
+      ) : null}
+      {selected ? <View style={styles.sidebarSelectionEdge} /> : null}
+      <SwitchItemStatusIndicator state={displayState} unread={unread} showReadyAnchor={false} />
+      <Text
+        numberOfLines={1}
+        style={[styles.droneChatLabel, selected && styles.droneChatLabelActive]}
+      >
+        {chatName}
+      </Text>
+      {draft ? <Text style={styles.droneChatDraftBadge}>Draft</Text> : null}
+    </Pressable>
+  );
+}
+
 function DrawerDroneNode({
   node,
   depth,
   contextLabel,
+  sidebarChatOrderByDrone,
+  showChats = true,
   activeDroneId,
   activeChatName,
   droneOperationById,
@@ -609,19 +656,43 @@ function DrawerDroneNode({
   node: MobileDroneTreeNode;
   depth: number;
   contextLabel?: string;
+  sidebarChatOrderByDrone: Record<string, string[]>;
+  showChats?: boolean;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
   onSelect(droneId: string, chatName: string): void;
 }) {
   const { drone } = node;
-  const chats = drone.chats.length > 0 ? drone.chats : ['default'];
+  const chats = orderedMobileDroneChats(drone, sidebarChatOrderByDrone[drone.id]);
   const selected = drone.id === activeDroneId;
+  const hasActiveChildChat = selected && showChats && chats.length > 1;
   const selectedChat = selected && chats.includes(activeChatName) ? activeChatName : chats[0]!;
   const operation = droneOperationById[drone.id] as 'archiving' | 'deleting' | undefined;
-  const displayState = operation ?? mobileDroneDisplayState(drone);
-  const unread = (drone.unreadChats?.length ?? 0) > 0;
-  const stateLabel = unread && displayState === 'idle' ? 'Unread' : switchStateLabel(displayState);
+  const displayStateDrone =
+    chats.length > 1 && drone.approvalRequired ? { ...drone, approvalRequired: false } : drone;
+  const displayState = operation ?? mobileDroneDisplayState(displayStateDrone);
+  const isDraft = drone.draft === true || drone.phase.trim().toLowerCase() === 'draft';
+  const unread = !isDraft && (drone.unreadChats?.length ?? 0) > 0;
+  const stateLabel = isDraft
+    ? 'Draft'
+    : unread && displayState === 'idle'
+      ? 'Unread'
+      : switchStateLabel(displayState);
+  const previousDisplayStateRef = React.useRef<SwitchDisplayState>(displayState);
+  const [recentlyBlocked, setRecentlyBlocked] = React.useState(false);
+  React.useEffect(() => {
+    const previousDisplayState = previousDisplayStateRef.current;
+    previousDisplayStateRef.current = displayState;
+    if (displayState !== 'blocked') {
+      setRecentlyBlocked(false);
+      return;
+    }
+    if (previousDisplayState === 'blocked') return;
+    setRecentlyBlocked(true);
+    const timeoutId = setTimeout(() => setRecentlyBlocked(false), RECENT_BLOCKED_EMPHASIS_MS);
+    return () => clearTimeout(timeoutId);
+  }, [displayState]);
   const runtimeLabel = drone.runtime.trim().toLowerCase() === 'host' ? 'host' : 'container';
   const accessibilityLabel = [
     `Open ${drone.name} chat`,
@@ -644,19 +715,32 @@ function DrawerDroneNode({
         style={({ pressed }) => [
           styles.switchItemRow,
           { paddingLeft: drawerTreeRowPaddingLeft(depth), paddingRight: 6 },
-          selected && styles.switchItemRowActive,
-          pressed && !selected && styles.sidebarRowPressed,
+          selected && !hasActiveChildChat && styles.switchItemRowActive,
+          pressed && (!selected || hasActiveChildChat) && styles.sidebarRowPressed,
         ]}
       >
-        {selected ? <View style={styles.sidebarSelectionEdge} /> : null}
+        {selected && !hasActiveChildChat ? <View style={styles.sidebarSelectionEdge} /> : null}
         <View style={styles.switchItemMain}>
-          <SwitchItemStatusIndicator state={displayState} unread={unread} />
+          {isDraft ? (
+            <View accessible={false} style={styles.switchItemStatus} />
+          ) : (
+            <SwitchItemStatusIndicator
+              state={displayState}
+              unread={unread}
+              emphasized={recentlyBlocked || selected}
+            />
+          )}
           <Text
             numberOfLines={1}
             style={[styles.switchItemTitle, selected && styles.switchItemTitleActive]}
           >
             {drone.name}
           </Text>
+          {isDraft ? (
+            <Text accessibilityLabel="Draft drone" style={styles.switchItemDraftBadge}>
+              Draft
+            </Text>
+          ) : null}
           {contextLabel ? (
             <Text numberOfLines={1} style={styles.switchItemContextBadge}>
               {contextLabel}
@@ -664,13 +748,34 @@ function DrawerDroneNode({
           ) : null}
         </View>
       </Pressable>
+      {showChats && chats.length > 1 ? (
+        <View
+          style={[
+            styles.droneChatRail,
+            { marginLeft: drawerTreeRowPaddingLeft(depth) + 8 },
+          ]}
+        >
+          {chats.map((chatName) => (
+            <DrawerDroneChatRow
+              key={`${drone.id}:${chatName}`}
+              drone={drone}
+              chatName={chatName}
+              activeDroneId={activeDroneId}
+              activeChatName={activeChatName}
+              selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}
+              onSelect={onSelect}
+            />
+          ))}
+        </View>
+      ) : null}
       {node.children.length > 0 ? (
         <View style={styles.droneChildren}>
           {node.children.map((child) => (
             <DrawerDroneNode
               key={child.drone.id}
               node={child}
-              depth={depth + 1}
+              depth={depth}
+              sidebarChatOrderByDrone={sidebarChatOrderByDrone}
               activeDroneId={activeDroneId}
               activeChatName={activeChatName}
               droneOperationById={droneOperationById}
@@ -687,6 +792,7 @@ function DrawerDroneFolder({
   folder,
   depth,
   collapsedFolderIds,
+  sidebarChatOrderByDrone,
   activeDroneId,
   activeChatName,
   droneOperationById,
@@ -696,6 +802,7 @@ function DrawerDroneFolder({
   folder: MobileDroneGroupFolder;
   depth: number;
   collapsedFolderIds: ReadonlySet<string>;
+  sidebarChatOrderByDrone: Record<string, string[]>;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
@@ -703,8 +810,11 @@ function DrawerDroneFolder({
   onSelect(droneId: string, chatName: string): void;
 }) {
   const collapsed = collapsedFolderIds.has(folder.id);
-  const Chevron = collapsed ? ChevronRight : ChevronDown;
   const hasSelectedDirectDrone = folder.roots.some((node) => node.drone.id === activeDroneId);
+  const stateSummary = React.useMemo(
+    () => summarizeDroneScope(folder.roots, folder.children),
+    [folder.children, folder.roots],
+  );
   return (
     <View>
       <Pressable
@@ -718,21 +828,25 @@ function DrawerDroneFolder({
         ]}
       >
         <View style={styles.folderChevronSlot}>
-          <Chevron color={colors.mutedDim} size={16} strokeWidth={1.25} />
+          <SidebarTreeChevronIcon
+            color={colors.sidebarMutedDim}
+            size={16}
+            strokeWidth={1.25}
+            expanded={!collapsed}
+            style={styles.folderChevron}
+          />
         </View>
         <Text numberOfLines={1} style={styles.groupName}>
           {folder.label}
         </Text>
+        <DroneStateCounts summary={stateSummary} compact />
       </Pressable>
       {!collapsed ? (
         <View style={styles.groupChildren}>
           {hasSelectedDirectDrone ? (
             <View
               pointerEvents="none"
-              style={[
-                styles.groupChildrenGuide,
-                { left: drawerTreeRowPaddingLeft(depth) + 8 },
-              ]}
+              style={[styles.groupChildrenGuide, { left: drawerTreeRowPaddingLeft(depth) + 8 }]}
             />
           ) : null}
           {folder.entries.map((entry) => (
@@ -745,6 +859,7 @@ function DrawerDroneFolder({
               entry={entry}
               depth={depth + 1}
               collapsedFolderIds={collapsedFolderIds}
+              sidebarChatOrderByDrone={sidebarChatOrderByDrone}
               activeDroneId={activeDroneId}
               activeChatName={activeChatName}
               droneOperationById={droneOperationById}
@@ -762,6 +877,7 @@ function DrawerDroneEntry({
   entry,
   depth,
   collapsedFolderIds,
+  sidebarChatOrderByDrone,
   activeDroneId,
   activeChatName,
   droneOperationById,
@@ -771,6 +887,7 @@ function DrawerDroneEntry({
   entry: MobileDroneSidebarEntry;
   depth: number;
   collapsedFolderIds: ReadonlySet<string>;
+  sidebarChatOrderByDrone: Record<string, string[]>;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
@@ -781,6 +898,7 @@ function DrawerDroneEntry({
     <DrawerDroneNode
       node={entry.node}
       depth={depth}
+      sidebarChatOrderByDrone={sidebarChatOrderByDrone}
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
       droneOperationById={droneOperationById}
@@ -791,6 +909,7 @@ function DrawerDroneEntry({
       folder={entry.folder}
       depth={depth}
       collapsedFolderIds={collapsedFolderIds}
+      sidebarChatOrderByDrone={sidebarChatOrderByDrone}
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
       droneOperationById={droneOperationById}
@@ -803,7 +922,9 @@ function DrawerDroneEntry({
 function DrawerPinnedDrones({
   drones,
   placement,
+  separateFromRepositoryList,
   repoLabelByPath,
+  sidebarChatOrderByDrone,
   activeDroneId,
   activeChatName,
   droneOperationById,
@@ -812,7 +933,9 @@ function DrawerPinnedDrones({
 }: {
   drones: MobileDroneSummary[];
   placement: PinnedSidebarPlacement;
+  separateFromRepositoryList: boolean;
   repoLabelByPath: ReadonlyMap<string, string>;
+  sidebarChatOrderByDrone: Record<string, string[]>;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
@@ -822,11 +945,20 @@ function DrawerPinnedDrones({
   if (drones.length === 0) return null;
   return (
     <View
-      style={[styles.pinnedSection, placement === 'bottom' && styles.pinnedSectionBottom]}
+      style={[
+        styles.pinnedSection,
+        placement === 'top' && separateFromRepositoryList && styles.pinnedSectionTop,
+        placement === 'bottom' && styles.pinnedSectionBottom,
+      ]}
       accessibilityLabel="Pinned drones"
     >
       <View style={styles.pinnedHeader}>
-        <Pin color={colors.mutedDim} size={14} strokeWidth={1.7} />
+        <SidebarPinIcon
+          color={colors.sidebarMutedDim}
+          size={14}
+          strokeWidth={1.7}
+          style={styles.pinnedHeaderIcon}
+        />
         <Text style={styles.pinnedHeaderText}>Pinned</Text>
         <Pressable
           accessibilityRole="button"
@@ -841,9 +973,19 @@ function DrawerPinnedDrones({
           ]}
         >
           {placement === 'top' ? (
-            <ChevronDown color={colors.mutedDim} size={15} strokeWidth={2} />
+            <SidebarChevronIcon
+              color={colors.sidebarMutedDim}
+              size={14}
+              strokeWidth={2}
+              direction="down"
+            />
           ) : (
-            <ChevronUp color={colors.mutedDim} size={15} strokeWidth={2} />
+            <SidebarChevronIcon
+              color={colors.sidebarMutedDim}
+              size={14}
+              strokeWidth={2}
+              direction="up"
+            />
           )}
         </Pressable>
       </View>
@@ -853,6 +995,8 @@ function DrawerPinnedDrones({
           node={{ drone, children: [] }}
           depth={0}
           contextLabel={repoLabelByPath.get(drone.repoPath) ?? 'Ungrouped'}
+          sidebarChatOrderByDrone={sidebarChatOrderByDrone}
+          showChats={false}
           activeDroneId={activeDroneId}
           activeChatName={activeChatName}
           droneOperationById={droneOperationById}
@@ -1037,6 +1181,7 @@ function AppDrawerView({
   onRetryDrones,
   onSelectDroneChat,
   onSelectDevice,
+  onClose,
 }: AppDrawerProps) {
   const insets = useSafeAreaInsets();
   const [pinnedSidebarPlacement, setPinnedSidebarPlacement] =
@@ -1118,7 +1263,9 @@ function AppDrawerView({
     <DrawerPinnedDrones
       drones={globalPinnedDrones}
       placement={pinnedSidebarPlacement}
+      separateFromRepositoryList={!activeRepo}
       repoLabelByPath={repoLabelByPath}
+      sidebarChatOrderByDrone={droneSidebarOrder.sidebarChatOrderByDrone}
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
       droneOperationById={droneOperationById}
@@ -1136,7 +1283,16 @@ function AppDrawerView({
     setCollapsedFolderIds(new Set());
   }, [activeDeviceId]);
   const listStatus =
-    !dronesLoading && !dronesReachable ? (
+    dronesLoading && drones.length === 0 ? (
+      <View
+        accessibilityLabel="Loading drones"
+        accessibilityRole="progressbar"
+        style={styles.drawerLoading}
+      >
+        <ActivityIndicator color={colors.sidebarActionFg} size="small" />
+        <Text style={styles.drawerLoadingText}>Loading drones…</Text>
+      </View>
+    ) : !dronesLoading && !dronesReachable ? (
       <View style={styles.drawerOffline}>
         <View style={styles.deviceDot} />
         <View style={styles.drawerOfflineCopy}>
@@ -1169,6 +1325,9 @@ function AppDrawerView({
     ) : !dronesLoading && drones.length === 0 ? (
       <Text style={styles.empty}>No drones are available on this device.</Text>
     ) : null;
+  const dronesNavigationItem = navigationItems.find((item) => item.id === 'drones');
+  const devicesNavigationItem = navigationItems.find((item) => item.id === 'devices');
+  const settingsNavigationItem = navigationItems.find((item) => item.id === 'settings');
 
   return (
     <DrawerWorkingPhaseContext.Provider value={workingPhase}>
@@ -1183,47 +1342,51 @@ function AppDrawerView({
         ]}
       >
         <View style={styles.header}>
-          <View style={styles.headerCopy}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open drones"
+            disabled={!dronesNavigationItem}
+            onPress={() => {
+              dronesNavigationItem?.onPress();
+              onClose();
+            }}
+            style={({ pressed }) => [styles.headerCopy, pressed && styles.pressed]}
+          >
             <Text style={styles.title}>Drone Hub</Text>
-          </View>
-          {devicePickerItems.length > 0 ? (
+          </Pressable>
+          {devicesNavigationItem ? (
             <DrawerDevicePicker
               devices={devicePickerItems}
               activeDeviceId={activeDeviceId}
               onSelect={onSelectDevice}
+              onOpenDeviceSettings={devicesNavigationItem?.onPress}
             />
           ) : null}
-        </View>
-        <View style={styles.navigation}>
-          {navigationItems.map((item) => {
-            const Icon = navigationIcon(item.id);
-            return (
-              <Pressable
-                key={item.id}
-                accessibilityRole="button"
-                accessibilityState={{ selected: item.active }}
-                onPress={item.onPress}
-                style={({ pressed }) => [
-                  styles.navigationItem,
-                  item.active && styles.navigationItemActive,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Icon
-                  color={item.active ? colors.accent : colors.secondary}
-                  size={18}
-                  strokeWidth={item.active ? 2.3 : 1.9}
-                />
-                <Text style={[styles.navigationLabel, item.active && styles.navigationLabelActive]}>
-                  {item.label}
-                </Text>
-                {item.active ? <View style={styles.navigationIndicator} /> : null}
-              </Pressable>
-            );
-          })}
+          {settingsNavigationItem ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Open settings"
+              accessibilityState={{ selected: settingsNavigationItem.active }}
+              onPress={settingsNavigationItem.onPress}
+              style={({ pressed }) => [
+                styles.headerSettings,
+                settingsNavigationItem.active && styles.headerSettingsActive,
+                pressed && styles.pressed,
+              ]}
+            >
+              <SidebarSettingsIcon
+                color={
+                  settingsNavigationItem.active ? colors.accent : colors.sidebarActionFg
+                }
+                size={16}
+                strokeWidth={settingsNavigationItem.active ? 2.2 : 1.9}
+              />
+            </Pressable>
+          ) : null}
         </View>
         {showDrones ? (
           <>
+            {pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null}
             {activeRepo ? (
               <FlatList<MobileDroneSidebarEntry>
                 key={`repo:${activeRepo.id}`}
@@ -1240,6 +1403,7 @@ function AppDrawerView({
                     entry={entry}
                     depth={0}
                     collapsedFolderIds={collapsedFolderIds}
+                    sidebarChatOrderByDrone={droneSidebarOrder.sidebarChatOrderByDrone}
                     activeDroneId={activeDroneId}
                     activeChatName={activeChatName}
                     droneOperationById={droneOperationById}
@@ -1249,7 +1413,6 @@ function AppDrawerView({
                 )}
                 ListHeaderComponent={
                   <>
-                    {pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null}
                     <View
                       style={[
                         styles.repoNavigationHead,
@@ -1262,12 +1425,24 @@ function AppDrawerView({
                         accessibilityRole="button"
                         accessibilityLabel="Back to repositories"
                         onPress={() => setActiveRepoId(null)}
-                        style={({ pressed }) => [styles.repoNavigationBack, pressed && styles.pressed]}
+                        style={({ pressed }) => [
+                          styles.repoNavigationBack,
+                          pressed && styles.pressed,
+                        ]}
                       >
                         <View style={styles.groupIcon}>
-                          <FolderGit2 color={colors.mutedDim} size={14} strokeWidth={1.9} />
+                          <SidebarFolderGitIcon
+                            color={colors.sidebarActionFg}
+                            size={14}
+                            strokeWidth={1.9}
+                          />
                           <View style={styles.groupChevron}>
-                            <ChevronLeft color={colors.mutedDim} size={10} strokeWidth={2.3} />
+                            <SidebarChevronIcon
+                              color={colors.sidebarActionFg}
+                              size={10}
+                              strokeWidth={2.3}
+                              direction="left"
+                            />
                           </View>
                         </View>
                         <View style={styles.repoCopy}>
@@ -1277,7 +1452,8 @@ function AppDrawerView({
                         </View>
                         <DroneStateCounts
                           summary={
-                            repoStateSummaries.get(activeRepo.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY
+                            repoStateSummaries.get(activeRepo.id) ??
+                            EMPTY_MOBILE_DRONE_STATE_SUMMARY
                           }
                           compact
                         />
@@ -1294,12 +1470,13 @@ function AppDrawerView({
                           pressed && styles.pressed,
                         ]}
                       >
-                        <Plus color={colors.accent} size={16} strokeWidth={2.2} />
+                        <SidebarPlusIcon color={colors.accent} size={16} />
                       </Pressable>
                     </View>
                   </>
                 }
                 ListFooterComponent={listStatus}
+                stickyHeaderIndices={[0]}
                 initialNumToRender={10}
                 maxToRenderPerBatch={8}
                 updateCellsBatchingPeriod={24}
@@ -1325,6 +1502,7 @@ function AppDrawerView({
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={`Open ${group.label} repository`}
+                        accessibilityState={{ selected: containsSelectedDrone }}
                         onPress={() => setActiveRepoId(group.id)}
                         style={({ pressed }) => [
                           styles.repoRow,
@@ -1335,8 +1513,8 @@ function AppDrawerView({
                         {containsSelectedDrone ? (
                           <View style={styles.sidebarSelectionEdge} />
                         ) : null}
-                        <FolderGit2
-                          color={colors.mutedDim}
+                        <SidebarFolderGitIcon
+                          color={colors.sidebarActionFg}
                           size={14}
                           strokeWidth={1.9}
                           style={styles.repoIcon}
@@ -1359,7 +1537,6 @@ function AppDrawerView({
                 }}
                 ListHeaderComponent={
                   <>
-                    {pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null}
                     <View style={styles.repoListSpacer} />
                   </>
                 }
@@ -1402,17 +1579,26 @@ const styles = StyleSheet.create({
   },
   drawerContent: { flex: 1, backgroundColor: colors.panel },
   header: {
-    minHeight: 48,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 12,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.sidebarHeaderBorder,
     borderBottomWidth: 1,
     backgroundColor: colors.panel,
     zIndex: 30,
   },
   headerCopy: { flex: 1, minWidth: 0 },
+  headerSettings: {
+    width: 32,
+    height: 32,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 6,
+  },
+  headerSettingsActive: { backgroundColor: colors.whiteWashSoft },
   title: {
     color: colors.textStrong,
     fontSize: 14,
@@ -1420,44 +1606,16 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     textTransform: 'uppercase',
   },
-  navigation: {
-    flexDirection: 'row',
-    backgroundColor: colors.panel,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
-  },
-  navigationItem: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 56,
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 3,
-    paddingHorizontal: 2,
-    position: 'relative',
-  },
-  navigationItemActive: { backgroundColor: 'transparent' },
-  navigationLabel: {
-    color: colors.secondary,
-    fontSize: 10,
-    fontWeight: '500',
-    letterSpacing: 0.1,
-  },
-  navigationLabelActive: { color: colors.accentAlt },
-  navigationIndicator: {
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-    left: 0,
-    height: 2,
-    borderTopLeftRadius: 2,
-    borderTopRightRadius: 2,
-    backgroundColor: colors.accent,
-  },
   scroll: { flex: 1 },
-  activeText: { color: colors.text, fontWeight: '600' },
   empty: { color: colors.muted, fontSize: 12, lineHeight: 18, padding: 12 },
+  drawerLoading: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+  },
+  drawerLoadingText: { color: colors.sidebarSubitemFg, fontSize: 12 },
   drawerError: { gap: 10, padding: 12 },
   drawerErrorText: { color: colors.danger, fontSize: 11, lineHeight: 17 },
   retry: {
@@ -1502,21 +1660,19 @@ const styles = StyleSheet.create({
   devicePickerPressed: { backgroundColor: colors.whiteWashSoft },
   devicePickerTriggerCopy: { flexShrink: 1, minWidth: 0 },
   devicePickerCopy: { flex: 1, minWidth: 0, justifyContent: 'center' },
-  devicePickerName: { color: colors.text, fontSize: 12, fontWeight: '600' },
+  devicePickerName: { color: colors.text, fontSize: 12, fontWeight: '400' },
   devicePickerDetail: {
-    color: colors.muted,
-    fontSize: 8,
-    fontWeight: '500',
-    marginTop: 2,
-    textTransform: 'uppercase',
-    letterSpacing: 0.45,
+    color: colors.sidebarMetaFg,
+    fontSize: 10,
+    fontWeight: '400',
+    marginTop: 1,
   },
   deviceDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     borderWidth: 1,
-    borderColor: colors.mutedDim,
+    borderColor: colors.sidebarMutedDim,
     backgroundColor: 'transparent',
   },
   deviceDotOnline: {
@@ -1532,11 +1688,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 46,
     right: 0,
-    width: 208,
+    width: 232,
     maxHeight: 208,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderSubtle,
     backgroundColor: colors.panel,
     elevation: 8,
     shadowColor: colors.shadow,
@@ -1547,6 +1703,7 @@ const styles = StyleSheet.create({
   deviceOptionsContent: {
     padding: 0,
   },
+  deviceOptionsList: { maxHeight: 162 },
   deviceOption: {
     position: 'relative',
     minHeight: 42,
@@ -1556,9 +1713,10 @@ const styles = StyleSheet.create({
     paddingLeft: 10,
     paddingRight: 9,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.borderSubtle,
   },
   deviceOptionActive: { backgroundColor: colors.sidebarSelectionWash },
+  deviceOptionLast: { borderBottomWidth: 0 },
   deviceOptionActiveEdge: {
     position: 'absolute',
     top: 7,
@@ -1567,16 +1725,31 @@ const styles = StyleSheet.create({
     width: 2,
     borderTopRightRadius: 2,
     borderBottomRightRadius: 2,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.sidebarSelectionEdge,
   },
-  deviceOptionName: { color: colors.textSecondary, fontSize: 11, fontWeight: '600' },
+  deviceOptionName: { color: colors.sidebarFg, fontSize: 12, fontWeight: '400' },
+  deviceOptionNameActive: { color: colors.sidebarFgActive },
   devicePlatform: {
     width: 52,
     flexShrink: 0,
-    color: colors.mutedDim,
-    fontSize: 8,
-    fontWeight: '500',
+    color: colors.sidebarMetaFg,
+    fontSize: 12,
+    fontWeight: '400',
     textAlign: 'right',
+  },
+  deviceSettingsAction: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderSubtle,
+  },
+  deviceSettingsActionLabel: {
+    color: colors.sidebarFg,
+    fontSize: 12,
+    fontWeight: '500',
   },
   repoNavigationHead: {
     height: 40,
@@ -1586,7 +1759,7 @@ const styles = StyleSheet.create({
     paddingRight: 6,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
-    backgroundColor: colors.whiteWashSoft,
+    backgroundColor: colors.panel,
   },
   repoNavigationHeadBelowPinned: {
     borderTopWidth: 1,
@@ -1627,7 +1800,10 @@ const styles = StyleSheet.create({
   droneList: { paddingBottom: 24 },
   repoListSpacer: { height: 4 },
   pinnedSection: {
+    flexShrink: 0,
     paddingBottom: 4,
+  },
+  pinnedSectionTop: {
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
   },
@@ -1647,10 +1823,11 @@ const styles = StyleSheet.create({
   },
   pinnedHeaderText: {
     flex: 1,
-    color: colors.mutedDim,
+    color: colors.sidebarMutedDim,
     fontSize: 10.5,
     fontWeight: '400',
   },
+  pinnedHeaderIcon: { opacity: 0.72 },
   pinnedPlacementToggle: {
     width: 28,
     height: 28,
@@ -1670,8 +1847,8 @@ const styles = StyleSheet.create({
   repoRowActive: { backgroundColor: colors.sidebarSelectionWash },
   repoCopy: { flex: 1, minWidth: 0, justifyContent: 'center' },
   repoIcon: { opacity: 0.85 },
-  repoName: { color: colors.secondary, fontSize: 12, fontWeight: '500' },
-  repoNameActive: { color: colors.text, fontWeight: '600' },
+  repoName: { color: colors.sidebarHeadingFg, fontSize: 12, fontWeight: '500' },
+  repoNameActive: { color: colors.sidebarDroneActiveFg, fontWeight: '600' },
   droneNode: { position: 'relative' },
   switchItemRow: {
     height: 36,
@@ -1692,26 +1869,38 @@ const styles = StyleSheet.create({
   switchItemTitle: {
     flex: 1,
     minWidth: 0,
-    color: colors.textSecondary,
+    color: colors.sidebarDroneFg,
     fontSize: 13,
     fontWeight: '400',
   },
-  switchItemTitleActive: { color: colors.text },
-  switchItemContextBadge: {
-    maxWidth: 96,
-    flexShrink: 1,
-    color: colors.textSecondary,
-    fontSize: 8,
+  switchItemTitleActive: { color: colors.sidebarDroneActiveFg },
+  switchItemDraftBadge: {
+    flexShrink: 0,
+    color: colors.accent,
+    fontSize: 10,
     fontWeight: '600',
     lineHeight: 10,
-    letterSpacing: 0.35,
-    textTransform: 'uppercase',
+    letterSpacing: 0.2,
     paddingHorizontal: 4,
     paddingVertical: 2,
+    borderRadius: 3,
+    backgroundColor: colors.accentDark,
+  },
+  switchItemContextBadge: {
+    maxWidth: 76,
+    flexShrink: 1,
+    color: colors.sidebarFgActive,
+    fontSize: 7,
+    fontWeight: '500',
+    lineHeight: 8,
+    letterSpacing: 0.1,
+    textTransform: 'uppercase',
+    paddingHorizontal: 2,
+    paddingVertical: 1,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 3,
-    backgroundColor: colors.panelRaised,
+    borderRadius: 2,
+    backgroundColor: colors.sidebarSurfaceInset,
   },
   switchItemStatus: {
     width: DRAWER_TREE_LEADING_SLOT_WIDTH,
@@ -1730,12 +1919,13 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     borderWidth: 1,
-    borderColor: colors.mutedDim,
-    opacity: 0.35,
+    borderColor: colors.sidebarItemIcon,
+    opacity: 0.7,
   },
   switchStateDot: { width: 6, height: 6, borderRadius: 3 },
   workingStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   stateStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
+  quietBlockedStatusIndicator: { opacity: 0.7 },
   unreadStatusDot: {
     width: 6,
     height: 6,
@@ -1758,7 +1948,55 @@ const styles = StyleSheet.create({
     backgroundColor: colors.sidebarSelectionEdge,
   },
   sidebarRowPressed: { backgroundColor: colors.whiteWash },
-  droneChildren: {},
+  droneChatRail: {
+    marginRight: 4,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: colors.borderSubtle,
+  },
+  droneChatRow: {
+    height: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: DRAWER_TREE_LEADING_GAP,
+    paddingHorizontal: 6,
+    position: 'relative',
+  },
+  droneChatSelectionWash: {
+    position: 'absolute',
+    top: 0,
+    right: -4,
+    bottom: 0,
+    backgroundColor: colors.sidebarSelectionWash,
+  },
+  droneChatLabel: {
+    flex: 1,
+    minWidth: 0,
+    color: colors.sidebarSubitemFg,
+    fontSize: 13,
+    fontWeight: '400',
+  },
+  droneChatLabelActive: { color: colors.sidebarDroneFg },
+  droneChatDraftBadge: {
+    flexShrink: 0,
+    color: colors.accent,
+    fontSize: 10,
+    fontWeight: '600',
+    lineHeight: 10,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: colors.accentAlt,
+    borderRadius: 3,
+  },
+  droneChildren: {
+    marginLeft: 4,
+    marginRight: 4,
+    paddingLeft: 6,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: colors.borderSubtle,
+  },
   groupRow: {
     minHeight: 36,
     flexDirection: 'row',
@@ -1779,6 +2017,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  folderChevron: { opacity: 0.72 },
   groupChevron: {
     position: 'absolute',
     left: -4,
@@ -1790,7 +2029,7 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: colors.panel,
   },
-  groupName: { color: colors.secondary, fontSize: 13, fontWeight: '400', flex: 1 },
+  groupName: { color: colors.sidebarHeadingFg, fontSize: 13, fontWeight: '400', flex: 1 },
   groupChildren: { position: 'relative' },
   groupChildrenGuide: {
     position: 'absolute',

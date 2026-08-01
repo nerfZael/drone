@@ -240,6 +240,7 @@ function useLocalDroneControlValue() {
             sidebarGroupOrder: [],
             sidebarDroneOrderByGroup: {},
             sidebarNodeOrderByParent: {},
+            sidebarChatOrderByDrone: {},
             pinnedDroneIds: pinnedDroneIdsRef.current,
           },
           createOptions: { repos: [] },

@@ -21,7 +21,10 @@ describe('sidebar presentation', () => {
     );
     const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
 
-    expect(sidebarSource).toContain('<DesktopDevicePicker />');
+    expect(sidebarSource).toContain('<DesktopDevicePicker');
+    expect(sidebarSource).toContain("setSettingsActiveTab('devices')");
+    expect(pickerSource).toContain('<span>Manage devices</span>');
+    expect(pickerSource).toContain('border-t border-[var(--border-subtle)] p-1');
     expect(pickerSource).toContain('h-7 min-w-0 items-center');
     expect(pickerSource).toContain('<span className="min-w-0 truncate">{name}</span>');
     expect(pickerSource).toContain('aria-haspopup="menu"');
@@ -254,7 +257,7 @@ describe('sidebar presentation', () => {
     );
 
     expect(sidebarSource).toContain(
-      'group/active-repository -mx-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--surface-inset)] pr-1.5 transition-colors hover:bg-[var(--hover)] focus-within:bg-[var(--hover)]',
+      'group/active-repository sticky top-0 z-20 -mx-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--sidebar-bg)]',
     );
     expect(sidebarSource).toContain(
       "pinnedSidebarPlacement === 'top' && globalPinnedDrones.length > 0",
@@ -281,6 +284,29 @@ describe('sidebar presentation', () => {
     );
     expect(headerStates.indexOf('stateSummary.unread')).toBeLessThan(
       headerStates.indexOf('stateSummary.working'),
+    );
+  });
+
+  test('shows descendant state counts on group headers in repository order', () => {
+    const groupedTreeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
+    const countsStart = groupedTreeSource.indexOf('function SidebarGroupStateCounts');
+    const countsEnd = groupedTreeSource.indexOf('function groupedDroneDragData', countsStart);
+    const countsSource = groupedTreeSource.slice(countsStart, countsEnd);
+
+    expect(groupedTreeSource).toContain(
+      '<SidebarGroupStateCounts summary={stateSummary} />',
+    );
+    expect(groupedTreeSource).toContain(
+      'collectSidebarTreeDroneIds(nodeTree, node.id)',
+    );
+    expect(countsSource.indexOf('summary.approval')).toBeLessThan(
+      countsSource.indexOf('summary.unread'),
+    );
+    expect(countsSource.indexOf('summary.unread')).toBeLessThan(
+      countsSource.indexOf('summary.working'),
     );
   });
 
