@@ -1450,7 +1450,12 @@ export function DronesScreen({
       promptId,
     })
       .then(async () => {
-        if (targetIdRef.current !== destinationId) return;
+        if (
+          targetIdRef.current !== destinationId ||
+          selectedRef.current?.id !== droneId ||
+          chatNameRef.current !== activeChat
+        )
+          return;
         setPendingPrompts((current) =>
           current.filter((item) => String(item?.id ?? '') !== promptId),
         );
@@ -1458,7 +1463,11 @@ export function DronesScreen({
         await loadDrones(true);
       })
       .catch((nextError: any) => {
-        if (targetIdRef.current === destinationId)
+        if (
+          targetIdRef.current === destinationId &&
+          selectedRef.current?.id === droneId &&
+          chatNameRef.current === activeChat
+        )
           setError(nextError?.message ?? String(nextError));
       })
       .finally(() => setCancellingPromptId((current) => (current === promptId ? '' : current)));
@@ -1573,7 +1582,12 @@ export function DronesScreen({
         name: nextChat,
         ...(sourceChat && chats.includes(sourceChat) ? { copyFrom: sourceChat } : {}),
       });
-      if (targetIdRef.current !== destinationId) return;
+      if (
+        targetIdRef.current !== destinationId ||
+        selectedRef.current?.id !== drone.id ||
+        chatNameRef.current !== sourceChat
+      )
+        return;
       const createdChat = String(result?.chatName ?? nextChat).trim() || nextChat;
       const nextChats: string[] = Array.isArray(result?.chats)
         ? [
@@ -2096,11 +2110,23 @@ export function DronesScreen({
       approved,
     })
       .then(async () => {
-        if (targetIdRef.current !== destinationId) return;
+        if (
+          targetIdRef.current !== destinationId ||
+          selectedRef.current?.id !== droneId ||
+          chatNameRef.current !== activeChat
+        )
+          return;
         setPendingApprovals((current) => current.filter((item) => item.id !== approval.id));
         await readChat(droneId, activeChat);
       })
-      .catch((nextError: any) => setError(nextError?.message ?? String(nextError)))
+      .catch((nextError: any) => {
+        if (
+          targetIdRef.current === destinationId &&
+          selectedRef.current?.id === droneId &&
+          chatNameRef.current === activeChat
+        )
+          setError(nextError?.message ?? String(nextError));
+      })
       .finally(() => setApprovalBusyId(''));
   };
 
