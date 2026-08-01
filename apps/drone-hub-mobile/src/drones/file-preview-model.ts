@@ -17,6 +17,24 @@ export type MobileFilePreview = {
 
 export const MOBILE_MEDIA_PREVIEW_MAX_BYTES = 32 * 1024 * 1024;
 export const MOBILE_TEXT_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
+export const MOBILE_SVG_PREVIEW_MAX_BYTES = 512 * 1024;
+export const MOBILE_FORMATTED_TEXT_PREVIEW_MAX_CHARS = 120_000;
+export const MOBILE_RENDERED_TEXT_PREVIEW_MAX_CHARS = 400_000;
+export const MOBILE_RENDERED_HTML_PREVIEW_MAX_CHARS = 400_000;
+
+export function mobileTextPreviewContent(raw: unknown): {
+  content: string;
+  formatted: boolean;
+  truncated: boolean;
+} {
+  const source = String(raw ?? '');
+  const truncated = source.length > MOBILE_RENDERED_TEXT_PREVIEW_MAX_CHARS;
+  return {
+    content: truncated ? source.slice(0, MOBILE_RENDERED_TEXT_PREVIEW_MAX_CHARS) : source,
+    formatted: !truncated && source.length <= MOBILE_FORMATTED_TEXT_PREVIEW_MAX_CHARS,
+    truncated,
+  };
+}
 
 function normalizedPath(raw: unknown): string {
   const value = String(raw ?? '')

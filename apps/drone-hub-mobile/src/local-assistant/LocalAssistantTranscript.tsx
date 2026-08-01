@@ -60,7 +60,7 @@ import {
   mobileTranscriptGroupStartedAt,
   mobileRunIsThinking,
   partitionMobileRunItems,
-  sortMobileTranscriptTimeline,
+  mergeMobileTranscriptTimeline,
   workingDurationLabel,
   type MobileTranscriptRun,
 } from './mobile-transcript-runs';
@@ -1690,20 +1690,20 @@ export function MobileAssistantTranscript({
   const activePromptHasPlan = Boolean(activePrompt?.agentPlan?.items.length);
   const showStandaloneReasoning =
     running && Boolean(currentReasoning.trim()) && !groupedActiveRun && !activePrompt;
-  const historicalTimeline = sortMobileTranscriptTimeline([
-    ...groups.map((group, order) => ({
+  const historicalTimeline = mergeMobileTranscriptTimeline(
+    groups.map((group, order) => ({
       kind: 'group' as const,
       group,
       order,
       atMs: timestampMs(mobileTranscriptGroupStartedAt(group)),
     })),
-    ...historicalPrompts.map((prompt, index) => ({
+    historicalPrompts.map((prompt, index) => ({
       kind: 'prompt' as const,
       prompt,
       order: groups.length + index,
       atMs: timestampMs(prompt.startedAt),
     })),
-  ]);
+  );
   return (
     <View style={styles.messages}>
       {historicalTimeline.map((entry) =>

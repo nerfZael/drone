@@ -1,5 +1,5 @@
 import { DRONE_CONTROL_CAPABILITY, MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
-import { normalizePendingPromptState } from '@drone/assistant-chat';
+import { filterCompletedPendingPrompts, normalizePendingPromptState } from '@drone/assistant-chat';
 import type { CapabilityHandler } from './device-mesh-types';
 import { scheduleCreatedDroneAutoRename } from './auto-rename-created-drone';
 import {
@@ -956,7 +956,10 @@ export function createDroneControlCapability(
           agent: result.agent ?? null,
           model: result.model ?? null,
           reasoning: result.reasoning ?? null,
-          pending: compactPendingPrompts(pendingResult?.pending),
+          pending: filterCompletedPendingPrompts(
+            compactPendingPrompts(pendingResult?.pending),
+            result.turns,
+          ),
           readState: marked?.readState ?? result?.readState ?? null,
           agentPermissionMode:
             result.agentPermissionMode === 'read-only' ||

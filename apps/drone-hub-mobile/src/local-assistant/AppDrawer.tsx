@@ -668,7 +668,8 @@ function DrawerDroneNode({
   const chats = orderedMobileDroneChats(drone, sidebarChatOrderByDrone[drone.id]);
   const selected = drone.id === activeDroneId;
   const hasActiveChildChat = selected && showChats && chats.length > 1;
-  const selectedChat = selected && chats.includes(activeChatName) ? activeChatName : chats[0]!;
+  const selectedChat =
+    selected && chats.includes(activeChatName) ? activeChatName : (chats[0] ?? '');
   const operation = droneOperationById[drone.id] as 'archiving' | 'deleting' | undefined;
   const displayStateDrone =
     chats.length > 1 && drone.approvalRequired ? { ...drone, approvalRequired: false } : drone;

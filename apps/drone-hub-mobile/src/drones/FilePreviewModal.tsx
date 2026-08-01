@@ -22,6 +22,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { SvgXml } from 'react-native-svg';
 import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
+import { RenderErrorBoundary } from '../components/RenderErrorBoundary';
 import { colors } from '../theme';
 import {
   NativeMarkdown,
@@ -33,6 +34,8 @@ import {
   isMarkdownPreview,
   isRenderedHtmlPreviewAvailable,
   mobileHtmlPreviewMode,
+  mobileTextPreviewContent,
+  MOBILE_RENDERED_HTML_PREVIEW_MAX_CHARS,
   type MobileFilePreview,
   type MobileHtmlPreviewMode,
 } from './file-preview-model';
@@ -113,21 +116,22 @@ function TextPreview({
   markdownExpansionCommand: NativeMarkdownExpansionCommand | null;
 }) {
   const scrollRef = React.useRef<ScrollView | null>(null);
-  const markdown = isMarkdownPreview(preview.path, preview.mime);
-  const code = isCodePreview(preview.path, preview.mime);
+  const safePreview = mobileTextPreviewContent(preview.content);
+  const markdown = safePreview.formatted && isMarkdownPreview(preview.path, preview.mime);
+  const code = safePreview.formatted && isCodePreview(preview.path, preview.mime);
   React.useEffect(() => {
     if (!line || markdown) return;
     const frame = requestAnimationFrame(() =>
       scrollRef.current?.scrollTo({ y: Math.max(0, (line - 1) * 19 - 24), animated: false }),
     );
     return () => cancelAnimationFrame(frame);
-  }, [line, markdown, preview.content]);
+  }, [line, markdown, safePreview.content]);
 
   if (markdown) {
     return (
       <ScrollView style={styles.bodyScroll} contentContainerStyle={styles.markdownContent}>
         <NativeMarkdown
-          text={preview.content ?? ''}
+          text={safePreview.content}
           documentMode
           collapsibleHeadings
           expansionCommand={markdownExpansionCommand}
@@ -141,17 +145,24 @@ function TextPreview({
       style={styles.bodyScroll}
       contentContainerStyle={styles.textVerticalContent}
     >
+      {!safePreview.formatted || safePreview.truncated ? (
+        <Text style={styles.previewNotice}>
+          {safePreview.truncated
+            ? 'This file is large. Showing a shortened plain-text preview.'
+            : 'This file is large. Showing plain text to keep the preview responsive.'}
+        </Text>
+      ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.textRow}>
         {code ? (
           <MobileHighlightedCode
-            content={preview.content ?? ''}
+            content={safePreview.content}
             path={preview.path}
             mime={preview.mime}
             style={[styles.textContent, styles.codeContent]}
           />
         ) : (
           <Text selectable style={styles.textContent}>
-            {preview.content ?? ''}
+            {safePreview.content}
           </Text>
         )}
       </ScrollView>
@@ -184,13 +195,19 @@ export function FilePreviewModal({
     path: string;
     mode: MobileHtmlPreviewMode;
   } | null>(null);
+  const safeTextPreview = mobileTextPreviewContent(preview?.content);
   const markdownPreview = Boolean(
-    preview?.kind === 'text' && isMarkdownPreview(preview.path, preview.mime),
+    preview?.kind === 'text' &&
+    safeTextPreview.formatted &&
+    isMarkdownPreview(preview.path, preview.mime),
   );
   const htmlPreview = Boolean(
     preview?.kind === 'text' && isHtmlPreview(preview.path, preview.mime),
   );
-  const htmlRenderingAvailable = isRenderedHtmlPreviewAvailable(Platform.OS);
+  const htmlRenderingAvailable =
+    isRenderedHtmlPreviewAvailable(Platform.OS) &&
+    safeTextPreview.content.length <= MOBILE_RENDERED_HTML_PREVIEW_MAX_CHARS &&
+    !safeTextPreview.truncated;
   const htmlMode = preview
     ? mobileHtmlPreviewMode({
         path: preview.path,
@@ -310,73 +327,80 @@ export function FilePreviewModal({
                 </View>
                 {!htmlRenderingAvailable ? (
                   <Text style={styles.htmlFallback}>
-                    Rendered HTML is unavailable on this platform. Showing source.
+                    Rendered HTML is unavailable for this file on this device. Showing source.
                   </Text>
                 ) : null}
               </View>
             ) : null}
             <View style={styles.previewBody}>
-              {loading ? (
-                <View style={styles.centerState}>
-                  <ActivityIndicator color={colors.accent} size="large" />
-                  <Text style={styles.stateTitle}>Opening preview</Text>
-                  <Text style={styles.stateBody}>Reading the file from the selected drone…</Text>
-                </View>
-              ) : error ? (
-                <View style={styles.centerState}>
-                  <FileQuestion color={colors.danger} size={34} strokeWidth={1.7} />
-                  <Text style={styles.stateTitle}>Preview unavailable</Text>
-                  <Text style={styles.stateBody}>{error}</Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={onRetry}
-                    style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
-                  >
-                    <RotateCcw color={colors.onAccent} size={15} strokeWidth={2.2} />
-                    <Text style={styles.retryText}>Try again</Text>
-                  </Pressable>
-                </View>
-              ) : preview?.kind === 'text' && htmlPreview && htmlMode === 'rendered' ? (
-                preview.content ? (
-                  <RenderedHtmlPreview source={preview.content} />
-                ) : (
+              <RenderErrorBoundary
+                key={`${preview?.path ?? displayPath}:${preview?.revision ?? preview?.mtimeMs ?? preview?.content?.length ?? 0}`}
+                fallback={
+                  <MediaUnavailable message="This file could not be rendered safely. Try opening it as plain text on the desktop." />
+                }
+              >
+                {loading ? (
                   <View style={styles.centerState}>
-                    <Text style={styles.stateTitle}>Empty HTML file</Text>
-                    <Text style={styles.stateBody}>There is no markup to render.</Text>
+                    <ActivityIndicator color={colors.accent} size="large" />
+                    <Text style={styles.stateTitle}>Opening preview</Text>
+                    <Text style={styles.stateBody}>Reading the file from the selected drone…</Text>
                   </View>
-                )
-              ) : preview?.kind === 'text' ? (
-                <TextPreview
-                  preview={preview}
-                  line={line}
-                  markdownExpansionCommand={markdownExpansionCommand}
-                />
-              ) : preview?.kind === 'image' &&
-                preview.mime === 'image/svg+xml' &&
-                preview.content ? (
-                <ZoomableImageStage resetKey={`${preview.path}:${preview.content.length}`}>
-                  <SvgXml
-                    xml={preview.content}
-                    width="100%"
-                    height="100%"
-                    fallback={
-                      <MediaUnavailable message="This SVG file could not be displayed on this phone." />
-                    }
+                ) : error ? (
+                  <View style={styles.centerState}>
+                    <FileQuestion color={colors.danger} size={34} strokeWidth={1.7} />
+                    <Text style={styles.stateTitle}>Preview unavailable</Text>
+                    <Text style={styles.stateBody}>{error}</Text>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={onRetry}
+                      style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
+                    >
+                      <RotateCcw color={colors.onAccent} size={15} strokeWidth={2.2} />
+                      <Text style={styles.retryText}>Try again</Text>
+                    </Pressable>
+                  </View>
+                ) : preview?.kind === 'text' && htmlPreview && htmlMode === 'rendered' ? (
+                  preview.content ? (
+                    <RenderedHtmlPreview source={preview.content} />
+                  ) : (
+                    <View style={styles.centerState}>
+                      <Text style={styles.stateTitle}>Empty HTML file</Text>
+                      <Text style={styles.stateBody}>There is no markup to render.</Text>
+                    </View>
+                  )
+                ) : preview?.kind === 'text' ? (
+                  <TextPreview
+                    preview={preview}
+                    line={line}
+                    markdownExpansionCommand={markdownExpansionCommand}
                   />
-                </ZoomableImageStage>
-              ) : preview?.kind === 'image' && preview.uri ? (
-                <PreviewImage uri={preview.uri} />
-              ) : preview?.kind === 'video' && preview.uri ? (
-                <PreviewVideo uri={preview.uri} />
-              ) : preview ? (
-                <View style={styles.centerState}>
-                  <FileQuestion color={colors.muted} size={34} strokeWidth={1.7} />
-                  <Text style={styles.stateTitle}>No visual preview</Text>
-                  <Text style={styles.stateBody}>
-                    This file is available, but its binary format cannot be displayed yet.
-                  </Text>
-                </View>
-              ) : null}
+                ) : preview?.kind === 'image' &&
+                  preview.mime === 'image/svg+xml' &&
+                  preview.content ? (
+                  <ZoomableImageStage resetKey={`${preview.path}:${preview.content.length}`}>
+                    <SvgXml
+                      xml={preview.content}
+                      width="100%"
+                      height="100%"
+                      fallback={
+                        <MediaUnavailable message="This SVG file could not be displayed on this phone." />
+                      }
+                    />
+                  </ZoomableImageStage>
+                ) : preview?.kind === 'image' && preview.uri ? (
+                  <PreviewImage uri={preview.uri} />
+                ) : preview?.kind === 'video' && preview.uri ? (
+                  <PreviewVideo uri={preview.uri} />
+                ) : preview ? (
+                  <View style={styles.centerState}>
+                    <FileQuestion color={colors.muted} size={34} strokeWidth={1.7} />
+                    <Text style={styles.stateTitle}>No visual preview</Text>
+                    <Text style={styles.stateBody}>
+                      This file is available, but its binary format cannot be displayed yet.
+                    </Text>
+                  </View>
+                ) : null}
+              </RenderErrorBoundary>
             </View>
           </View>
         </SafeAreaView>
@@ -430,6 +454,13 @@ const styles = StyleSheet.create({
   },
   path: { color: colors.muted, fontFamily: 'monospace', fontSize: 9, marginTop: 3 },
   content: { flex: 1, minHeight: 0 },
+  previewNotice: {
+    color: colors.muted,
+    fontSize: 11,
+    lineHeight: 16,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
   previewBody: { flex: 1, minHeight: 0 },
   htmlModeBar: {
     paddingHorizontal: 12,
