@@ -879,7 +879,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const { output, silentCompletion } = normalizeSilentCompletion(
       ok,
       turn?.output,
-      (turn as any)?.silentCompletion === true,
+      { explicitlySilent: (turn as any)?.silentCompletion === true, prompt, promptId: id },
     );
     const error = ok ? undefined : String(turn?.error ?? 'failed');
     return {

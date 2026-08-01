@@ -212,6 +212,102 @@ describe('GitHub subscription polling', () => {
     );
     expect(result.events.map((event) => event.resourceId)).toEqual(['getsentry/junior#2']);
   });
+
+  test('reads every comment page before advancing the poll cursor', async () => {
+    process.env.DRONE_HUB_GITHUB_TOKEN = 'test-token';
+    const issueCommentPages: number[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/pulls')) {
+        return Response.json([
+          {
+            number: 1,
+            state: 'open',
+            created_at: '2026-07-01T00:00:00.000Z',
+            updated_at: '2026-08-01T00:00:01.000Z',
+          },
+        ]);
+      }
+      if (url.pathname.endsWith('/issues/comments')) {
+        const page = Number(url.searchParams.get('page'));
+        issueCommentPages.push(page);
+        const firstId = page === 1 ? 1 : 101;
+        const count = page === 1 ? 100 : 1;
+        return Response.json(
+          Array.from({ length: count }, (_, index) => ({
+            id: firstId + index,
+            body: `Comment ${firstId + index}`,
+            created_at: '2026-08-01T00:00:02.000Z',
+            issue_url: 'https://api.github.com/repos/getsentry/junior/issues/1',
+          })),
+        );
+      }
+      return Response.json([]);
+    }) as typeof fetch;
+
+    const result = await pollGithubRepository(
+      'getsentry/junior',
+      {
+        initialized: true,
+        lastPollAt: '2026-08-01T00:00:00.000Z',
+        pulls: {},
+        seenCommentIds: [],
+      },
+      new Date('2026-08-01T00:00:05.000Z'),
+    );
+
+    expect(issueCommentPages).toEqual([1, 2]);
+    expect(result.events).toHaveLength(101);
+    expect(result.events.at(-1)?.providerEventId).toBe('github:comment:conversation:101');
+    expect(result.cursor.lastPollAt).toBe('2026-08-01T00:00:05.000Z');
+  });
+
+  test('reads every changed pull-request page and preserves older cursor state', async () => {
+    process.env.DRONE_HUB_GITHUB_TOKEN = 'test-token';
+    const pullPages: number[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (!url.pathname.endsWith('/pulls')) return Response.json([]);
+      const page = Number(url.searchParams.get('page'));
+      pullPages.push(page);
+      if (page === 1) {
+        return Response.json(
+          Array.from({ length: 100 }, (_, index) => ({
+            number: index + 1,
+            state: 'open',
+            created_at: '2026-07-01T00:00:00.000Z',
+            updated_at: '2026-08-01T00:00:01.000Z',
+          })),
+        );
+      }
+      return Response.json([
+        {
+          number: 101,
+          state: 'closed',
+          created_at: '2026-07-01T00:00:00.000Z',
+          updated_at: '2026-08-01T00:00:02.000Z',
+          merged_at: '2026-08-01T00:00:02.000Z',
+        },
+      ]);
+    }) as typeof fetch;
+
+    const result = await pollGithubRepository(
+      'getsentry/junior',
+      {
+        initialized: true,
+        lastPollAt: '2026-08-01T00:00:00.000Z',
+        pulls: {
+          '999': { state: 'open', updatedAt: '2026-07-01T00:00:00.000Z' },
+        },
+        seenCommentIds: [],
+      },
+      new Date('2026-08-01T00:00:05.000Z'),
+    );
+
+    expect(pullPages).toEqual([1, 2]);
+    expect(result.events.map((event) => event.resourceId)).toEqual(['getsentry/junior#101']);
+    expect(result.cursor.pulls['999']?.state).toBe('open');
+  });
 });
 
 describe('chat subscription transitions', () => {
@@ -446,13 +542,36 @@ describe('resource subscription MCP surface', () => {
 });
 
 describe('silent subscription completions', () => {
-  test('suppresses only an exact trimmed NO_REPLY marker', () => {
-    expect(normalizeSilentCompletion(true, '  [[NO_REPLY]]\n')).toEqual({
+  test('suppresses only an exact trimmed NO_REPLY marker for automated events', () => {
+    expect(
+      normalizeSilentCompletion(true, '  [[NO_REPLY]]\n', {
+        prompt: '[event notification]\nSubscribed resources changed.',
+        promptId: 'subscription-batch-1',
+      }),
+    ).toEqual({
       output: '',
       silentCompletion: true,
     });
-    expect(normalizeSilentCompletion(true, 'Result: [[NO_REPLY]]')).toEqual({
+    expect(
+      normalizeSilentCompletion(true, 'Result: [[NO_REPLY]]', {
+        prompt: '[event notification]',
+        promptId: 'subscription-batch-1',
+      }),
+    ).toEqual({
       output: 'Result: [[NO_REPLY]]',
+      silentCompletion: false,
+    });
+    expect(normalizeSilentCompletion(true, '[[NO_REPLY]]', { prompt: 'Print the marker.' })).toEqual({
+      output: '[[NO_REPLY]]',
+      silentCompletion: false,
+    });
+    expect(
+      normalizeSilentCompletion(true, '[[NO_REPLY]]', {
+        prompt: '[event notification]',
+        promptId: 'user-prompt-1',
+      }),
+    ).toEqual({
+      output: '[[NO_REPLY]]',
       silentCompletion: false,
     });
     expect(normalizeSilentCompletion(false, '[[NO_REPLY]]')).toEqual({

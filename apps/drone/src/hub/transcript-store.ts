@@ -549,7 +549,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
   const { output, silentCompletion } = normalizeSilentCompletion(
     Boolean(raw?.ok),
     raw?.output,
-    raw?.silentCompletion === true,
+    { explicitlySilent: raw?.silentCompletion === true, prompt: raw?.prompt, promptId: id },
   );
   return {
     at,

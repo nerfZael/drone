@@ -624,17 +624,19 @@ export function createChatManagementRouteHandler(
           const storeChats = listChatsFromStore({ droneId });
           timer.mark('store');
           const allChats = storeChats.available ? storeChats.chats : importedChats;
+          const storedChats = new Map<string, ReturnType<typeof readChatFromStore>>();
           const chats = allChats.filter((chatName: string) => {
             const stored = readChatFromStore({ droneId, chatName });
+            storedChats.set(chatName, stored);
             return !isWorkflowChatEntry(stored?.chat);
           });
           const registryChats = (resolved.drone as any)?.chats ?? {};
           const readStates = listChatReadStatesFromStore({ droneId });
           const chatDetails = chats.map((chatName: string) => {
-            const stored = readChatFromStore({ droneId, chatName });
+            const stored = storedChats.get(chatName);
             return {
               chat: chatName,
-              chatId: String((stored.chat as any)?.id ?? '').trim() || null,
+              chatId: String((stored?.chat as any)?.id ?? '').trim() || null,
               draft: isDraftChatEntry(registryChats?.[chatName]),
               unread: readStates[chatName]?.unread === true,
               latestAgentTurnId: readStates[chatName]?.latestAgentTurnId ?? null,

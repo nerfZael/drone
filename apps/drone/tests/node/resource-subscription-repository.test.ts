@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import test from 'node:test';
+import BetterSqlite3 from 'better-sqlite3';
 
 import type { HubDatabase, HubDatabaseConnection } from '../../src/host/hub-database';
 import { PromptQueueRepository } from '../../src/host/prompt-queue-repository';
 import { ResourceSubscriptionRepository } from '../../src/hub/subscriptions/resource-subscription-repository';
 import { DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS } from '../../src/hub/subscriptions/resource-subscription-types';
-
-const require = createRequire(import.meta.url);
 
 test('deduplicates and batches repository events for the owning conversation', async () => {
   const { database, close } = memoryHubDatabase();
@@ -291,6 +289,61 @@ test('failed enqueue attempts do not consume the automated-run budget', async ()
   }
 });
 
+test('rate-limited subscribers do not prevent later subscribers from claiming events', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    const settings = {
+      ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS,
+      batchWindowMs: 0,
+      maxAutomatedRunsPerConversationPerHour: 1,
+    };
+    const now = Date.now();
+
+    for (let index = 1; index <= 20; index += 1) {
+      await repository.upsert({
+        subscriber: {
+          chatId: `subscriber-${index}`,
+          droneId: 'drone-a',
+          chatName: `chat-${index}`,
+        },
+        provider: 'github',
+        resourceType: 'repository',
+        resourceId: `example/repository-${index}`,
+        events: ['pull_request.opened'],
+        intent: '',
+        maxActive: 50,
+      });
+      await appendOpenedEvent(repository, index, 'initial');
+    }
+
+    for (let index = 0; index < 20; index += 1) {
+      const batch = await repository.claimBatch(settings, new Date(now + 1_000));
+      assert.ok(batch);
+      await repository.completeBatch(batch.id);
+    }
+
+    for (let index = 1; index <= 20; index += 1) {
+      await appendOpenedEvent(repository, index, 'pending');
+    }
+    await repository.upsert({
+      subscriber: { chatId: 'subscriber-21', droneId: 'drone-a', chatName: 'chat-21' },
+      provider: 'github',
+      resourceType: 'repository',
+      resourceId: 'example/repository-21',
+      events: ['pull_request.opened'],
+      intent: '',
+      maxActive: 50,
+    });
+    await appendOpenedEvent(repository, 21, 'initial');
+
+    const batch = await repository.claimBatch(settings, new Date(now + 2_000));
+    assert.equal(batch?.subscriber.chatId, 'subscriber-21');
+  } finally {
+    close();
+  }
+});
+
 test('GitHub polling resumes from a fresh cursor after the last watcher is cancelled', async () => {
   const { database, close } = memoryHubDatabase();
   try {
@@ -347,7 +400,6 @@ test('GitHub polling resumes from a fresh cursor after the last watcher is cance
 });
 
 function memoryHubDatabase(): { database: HubDatabase; close: () => void } {
-  const BetterSqlite3 = require('better-sqlite3');
   const connection = new BetterSqlite3(':memory:') as HubDatabaseConnection;
   connection.pragma('foreign_keys = ON');
   const database: HubDatabase = {
@@ -378,4 +430,23 @@ function memoryHubDatabase(): { database: HubDatabase; close: () => void } {
     },
   };
   return { database, close: () => connection.close() };
+}
+
+async function appendOpenedEvent(
+  repository: ResourceSubscriptionRepository,
+  repositoryNumber: number,
+  eventName: string,
+): Promise<void> {
+  await repository.appendEvent({
+    id: `event-${repositoryNumber}-${eventName}`,
+    providerEventId: `github:example/repository-${repositoryNumber}:${eventName}`,
+    provider: 'github',
+    resourceType: 'pull_request',
+    resourceId: `example/repository-${repositoryNumber}#1`,
+    parentResourceId: `example/repository-${repositoryNumber}`,
+    eventType: 'pull_request.opened',
+    occurredAt: '2026-08-01T00:00:00.000Z',
+    summary: 'Pull request opened.',
+    providerContent: {},
+  });
 }

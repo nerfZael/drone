@@ -772,30 +772,33 @@ export class ResourceSubscriptionRepository {
       const subscribers = connection
         .prepare(
           `
-          SELECT DISTINCT s.subscriber_chat_id, s.subscriber_drone_id, s.subscriber_chat_name
+          SELECT s.subscriber_chat_id, s.subscriber_drone_id, s.subscriber_chat_name,
+            MIN(d.created_at) AS oldest_delivery_at
           FROM subscription_deliveries d
           JOIN resource_subscriptions s ON s.id = d.subscription_id
           WHERE d.state = 'pending' AND d.available_at <= ? AND d.next_attempt_at <= ?
             AND s.status IN ('active', 'completed')
-          ORDER BY d.created_at
+            AND (
+              SELECT COUNT(*) FROM subscription_batches b
+              WHERE b.subscriber_chat_id = s.subscriber_chat_id
+                AND b.state = 'delivered' AND b.created_at >= ?
+            ) < ?
+          GROUP BY s.subscriber_chat_id, s.subscriber_drone_id, s.subscriber_chat_name
+          ORDER BY oldest_delivery_at
           LIMIT 20
         `,
         )
-        .all(cutoff, nowIso) as Array<{
+        .all(
+          cutoff,
+          nowIso,
+          hourAgo,
+          settings.maxAutomatedRunsPerConversationPerHour,
+        ) as Array<{
         subscriber_chat_id: string;
         subscriber_drone_id: string;
         subscriber_chat_name: string;
       }>;
       for (const subscriber of subscribers) {
-        const recent = connection
-          .prepare(
-            `
-            SELECT COUNT(*) AS count FROM subscription_batches
-            WHERE subscriber_chat_id = ? AND state = 'delivered' AND created_at >= ?
-          `,
-          )
-          .get(subscriber.subscriber_chat_id, hourAgo) as { count: number };
-        if (Number(recent.count) >= settings.maxAutomatedRunsPerConversationPerHour) continue;
         const rows = connection
           .prepare(
             `

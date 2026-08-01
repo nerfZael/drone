@@ -49,28 +49,36 @@ export async function pollGithubRepository(
   const token = options ? options.token : await resolveGithubToken();
   const cursor = normalizeCursor(cursorRaw, now);
   const since = encodeURIComponent(cursor.lastPollAt);
-  const [pullsRaw, issueCommentsRaw, reviewCommentsRaw] = await Promise.all([
-    githubApiRequest<GithubPull[]>({
-      path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls?state=all&sort=updated&direction=desc&per_page=100`,
+  const repositoryPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const [pulls, issueComments, reviewComments] = await Promise.all([
+    githubApiPages<GithubPull>({
+      path: (page) =>
+        `${repositoryPath}/pulls?state=all&sort=updated&direction=desc&per_page=100&page=${page}`,
+      token,
+      pageComplete: (page) =>
+        page.some(
+          (pull) =>
+            Date.parse(validIso(pull.updated_at, '')) <= Date.parse(cursor.lastPollAt),
+        ),
+    }),
+    githubApiPages<GithubComment>({
+      path: (page) =>
+        `${repositoryPath}/issues/comments?sort=updated&direction=asc&since=${since}&per_page=100&page=${page}`,
       token,
     }),
-    githubApiRequest<GithubComment[]>({
-      path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/comments?sort=updated&direction=asc&since=${since}&per_page=100`,
-      token,
-    }),
-    githubApiRequest<GithubComment[]>({
-      path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/comments?sort=updated&direction=asc&since=${since}&per_page=100`,
+    githubApiPages<GithubComment>({
+      path: (page) =>
+        `${repositoryPath}/pulls/comments?sort=updated&direction=asc&since=${since}&per_page=100&page=${page}`,
       token,
     }),
   ]);
 
-  const pulls = Array.isArray(pullsRaw) ? pullsRaw : [];
   const pullNumbers = new Set(
-    pulls
-      .map((pull) => normalizePullNumber(pull.number))
+    [...Object.keys(cursor.pulls), ...pulls.map((pull) => pull.number)]
+      .map(normalizePullNumber)
       .filter((value): value is number => value != null),
   );
-  const nextPulls: GithubRepositoryPollCursor['pulls'] = {};
+  const nextPulls: GithubRepositoryPollCursor['pulls'] = { ...cursor.pulls };
   const events: ResourceEvent[] = [];
   for (const pull of pulls) {
     const number = normalizePullNumber(pull.number);
@@ -121,11 +129,11 @@ export async function pollGithubRepository(
   const seen = new Set(cursor.seenCommentIds);
   const nextCommentIds = [...cursor.seenCommentIds];
   if (cursor.initialized) {
-    for (const [kind, rawComments] of [
-      ['conversation', issueCommentsRaw],
-      ['inline', reviewCommentsRaw],
+    for (const [kind, comments] of [
+      ['conversation', issueComments],
+      ['inline', reviewComments],
     ] as const) {
-      for (const comment of Array.isArray(rawComments) ? rawComments : []) {
+      for (const comment of comments) {
         const id = normalizeCommentId(comment.id);
         const number = pullNumberFromComment(comment);
         if (!id || number == null || !pullNumbers.has(number)) continue;
@@ -141,11 +149,11 @@ export async function pollGithubRepository(
       }
     }
   } else {
-    for (const [kind, rawComments] of [
-      ['conversation', issueCommentsRaw],
-      ['inline', reviewCommentsRaw],
+    for (const [kind, comments] of [
+      ['conversation', issueComments],
+      ['inline', reviewComments],
     ] as const) {
-      for (const comment of Array.isArray(rawComments) ? rawComments : []) {
+      for (const comment of comments) {
         const id = normalizeCommentId(comment.id);
         if (id) nextCommentIds.push(`${kind}:${id}`);
       }
@@ -161,6 +169,20 @@ export async function pollGithubRepository(
       seenCommentIds: [...new Set(nextCommentIds)].slice(-1_000),
     },
   };
+}
+
+async function githubApiPages<T>(input: {
+  path: (page: number) => string;
+  token: string | null;
+  pageComplete?: (items: T[]) => boolean;
+}): Promise<T[]> {
+  const items: T[] = [];
+  for (let page = 1; ; page += 1) {
+    const result = await githubApiRequest<T[]>({ path: input.path(page), token: input.token });
+    const pageItems = Array.isArray(result) ? result : [];
+    items.push(...pageItems);
+    if (pageItems.length < 100 || input.pageComplete?.(pageItems)) return items;
+  }
 }
 
 export function normalizeGithubRepositoryId(raw: string): string {
