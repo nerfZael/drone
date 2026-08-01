@@ -23,41 +23,46 @@ function isClosingFence(line: string, fence: { markerChar: '`' | '~'; markerLeng
   return marker[0] === fence.markerChar && marker.length >= fence.markerLength;
 }
 
-function findLeadParagraphBreak(rawText: string): number {
-  const text = String(rawText ?? '');
-  if (!text.includes('\n\n')) return -1;
+function previewCollapsedMarkdown(rawText: string, collapseAfterLines: number): string {
+  const text = String(rawText ?? '').replace(/\r\n/g, '\n');
   const lines = text.split('\n');
-  let offset = 0;
+  const previewLineLimit = Math.max(1, Math.min(12, collapseAfterLines));
+  const blockEnds: number[] = [];
   let fence: { markerChar: '`' | '~'; markerLength: number } | null = null;
 
-  for (let i = 0; i < lines.length - 1; i++) {
-    const line = lines[i] ?? '';
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
     if (fence) {
       if (isClosingFence(line, fence)) fence = null;
     } else {
       fence = parseFenceMarker(line);
     }
 
-    if (!fence && lines[i + 1] === '' && offset + line.length > 0) {
-      return offset + line.length;
+    if (!fence && (lines[index + 1] === '' || index === lines.length - 1)) {
+      blockEnds.push(index + 1);
     }
-    offset += line.length + 1;
   }
 
-  return -1;
-}
-
-function previewCollapsedMarkdown(rawText: string, collapseAfterLines: number): string {
-  const text = String(rawText ?? '').replace(/\r\n/g, '\n');
-  const leadBreak = findLeadParagraphBreak(text);
-  if (leadBreak > 0) return text.slice(0, leadBreak).trimEnd();
-
-  const lines = text.split('\n');
-  if (lines.length > collapseAfterLines) {
-    return lines.slice(0, Math.max(1, Math.min(12, collapseAfterLines))).join('\n').trimEnd();
+  // Keep leading tables and code fences intact, then fill the preview with as many
+  // complete blocks as fit. This gives short opening paragraphs useful context
+  // without mounting the full Markdown body.
+  const firstBlockEnd = blockEnds[0] ?? lines.length;
+  const firstBlockIsFence = blockEnds.length > 0 && Boolean(parseFenceMarker(lines[0] ?? ''));
+  const firstBlockIsTable =
+    firstBlockEnd > 1 &&
+    /\|/.test(lines[0] ?? '') &&
+    /^\s*\|?\s*:?-+/.test(lines[1] ?? '');
+  let previewEnd =
+    firstBlockIsFence || firstBlockIsTable
+      ? firstBlockEnd
+      : Math.min(firstBlockEnd, previewLineLimit);
+  for (const blockEnd of blockEnds.slice(1)) {
+    if (blockEnd > previewLineLimit) break;
+    previewEnd = blockEnd;
   }
 
-  return text.slice(0, 1200).trimEnd();
+  const preview = lines.slice(0, previewEnd).join('\n').trimEnd();
+  return firstBlockIsFence || firstBlockIsTable ? preview : preview.slice(0, 1200).trimEnd();
 }
 
 const POINTER_TOGGLE_MAX_MOVEMENT_PX = 6;
@@ -105,7 +110,6 @@ export function CollapsibleMarkdown({
   renderBlockCopyAction,
   maxHeightPx = 240,
   collapseAfterLines = 40,
-  preserveLeadParagraph = false,
   toggleOnMessageClick = false,
   autoExpand = false,
 }: {
@@ -119,6 +123,7 @@ export function CollapsibleMarkdown({
   renderBlockCopyAction?: MarkdownBlockCopyActionRenderer;
   maxHeightPx?: number;
   collapseAfterLines?: number;
+  /** @deprecated Collapsed previews now preserve Markdown blocks by default. */
   preserveLeadParagraph?: boolean;
   toggleOnMessageClick?: boolean;
   autoExpand?: boolean;
@@ -129,18 +134,9 @@ export function CollapsibleMarkdown({
   const [collapsed, setCollapsed] = React.useState(isLong && !autoExpand);
   const pointerDownRef = React.useRef<{ clientX: number; clientY: number; ignored: boolean; pointerId: number } | null>(null);
   const pointerToggleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const leadSplit = React.useMemo(() => {
-    if (!preserveLeadParagraph) return null;
-    const firstBreak = findLeadParagraphBreak(normalizedText);
-    if (firstBreak <= 0) return null;
-    const lead = normalizedText.slice(0, firstBreak).trimEnd();
-    const rest = normalizedText.slice(firstBreak + 2).trimStart();
-    if (!lead || !rest) return null;
-    return { lead, rest };
-  }, [normalizedText, preserveLeadParagraph]);
   const collapsedPreviewText = React.useMemo(
-    () => (leadSplit ? leadSplit.lead : previewCollapsedMarkdown(normalizedText, collapseAfterLines)),
-    [collapseAfterLines, leadSplit, normalizedText],
+    () => previewCollapsedMarkdown(normalizedText, collapseAfterLines),
+    [collapseAfterLines, normalizedText],
   );
   const shouldDeferHiddenMarkdown = isLong && collapsed;
 
@@ -217,32 +213,7 @@ export function CollapsibleMarkdown({
       onPointerCancel={handlePointerCancel}
       onDoubleClick={clearPendingPointerToggle}
     >
-      {isLong && leadSplit ? (
-        <>
-          <MarkdownMessage
-            text={leadSplit.lead}
-            className={className}
-            onOpenFileReference={onOpenFileReference}
-            onOpenLink={onOpenLink}
-            textMentionLinks={textMentionLinks}
-            onOpenTextMention={onOpenTextMention}
-            renderBlockCopyAction={renderBlockCopyAction}
-          />
-          {!collapsed ? (
-            <div className={`output-collapse ${collapsed ? 'collapsed' : ''}`} style={style}>
-              <MarkdownMessage
-                text={leadSplit.rest}
-                className={className}
-                onOpenFileReference={onOpenFileReference}
-                onOpenLink={onOpenLink}
-                textMentionLinks={textMentionLinks}
-                onOpenTextMention={onOpenTextMention}
-                renderBlockCopyAction={renderBlockCopyAction}
-              />
-            </div>
-          ) : null}
-        </>
-      ) : shouldDeferHiddenMarkdown ? (
+      {shouldDeferHiddenMarkdown ? (
         <div className="output-collapse collapsed" style={style}>
           <MarkdownMessage
             text={collapsedPreviewText}
@@ -272,7 +243,7 @@ export function CollapsibleMarkdown({
           type="button"
           onClick={() => setCollapsed((v) => !v)}
           aria-expanded={!collapsed}
-          className="mt-2 flex items-center gap-1 text-[var(--text-11)] font-medium text-[var(--accent)] hover:text-[var(--fg)] transition-colors"
+          className="mt-2 inline-flex min-h-7 items-center gap-1 rounded-[var(--radius-small)] border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 text-[var(--text-11)] font-medium text-[var(--muted)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
         >
           <IconChevron down={!collapsed} />
           {collapsed ? 'Show more' : 'Collapse'}

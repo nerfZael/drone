@@ -34,6 +34,10 @@ describe('mobile changed files tree', () => {
     expect(transcriptSource).toContain('path={entry.path}');
     expect(transcriptSource).toContain('styles.changedFilesFileAdditions');
     expect(transcriptSource).toContain('styles.changedFilesFileDeletions');
+    expect(transcriptSource).toContain('userMessageFollowsLatestRunSummary');
+    expect(transcriptSource).toContain(
+      "item.type === 'message' && item.message.role === 'user'",
+    );
     expect(transcriptSource).not.toContain(
       '<ChevronRight color={pressed ? colors.accent : colors.muted} size={12} />',
     );

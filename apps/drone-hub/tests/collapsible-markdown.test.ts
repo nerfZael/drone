@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { CollapsibleMarkdown } from '../src/droneHub/chat/CollapsibleMarkdown';
 
 describe('CollapsibleMarkdown', () => {
-  test('does not render a partial table when lead-preserving content is initially collapsed', () => {
+  test('does not render a partial table when content is initially collapsed', () => {
     const text = [
       'Summary paragraph.',
       '',
@@ -19,7 +19,6 @@ describe('CollapsibleMarkdown', () => {
       React.createElement(CollapsibleMarkdown, {
         text,
         fadeTo: 'var(--accent-subtle)',
-        preserveLeadParagraph: true,
         collapseAfterLines: 3,
       }),
     );
@@ -30,7 +29,30 @@ describe('CollapsibleMarkdown', () => {
     expect(html).not.toContain('alpha');
   });
 
-  test('does not split fenced code blocks at internal blank lines when preserving the lead block', () => {
+  test('keeps a leading table intact even when it exceeds the preview line limit', () => {
+    const text = [
+      '| Name | Status |',
+      '| - | - |',
+      '| alpha | ok |',
+      '| beta | ok |',
+      '',
+      'Follow-up explanation.',
+    ].join('\n');
+    const html = renderToStaticMarkup(
+      React.createElement(CollapsibleMarkdown, {
+        text,
+        fadeTo: 'var(--accent-subtle)',
+        collapseAfterLines: 3,
+      }),
+    );
+
+    expect(html).toContain('<table class=');
+    expect(html).toContain('alpha');
+    expect(html).toContain('beta');
+    expect(html).not.toContain('Follow-up explanation.');
+  });
+
+  test('does not split fenced code blocks at internal blank lines', () => {
     const text = [
       '```ts',
       'import { createDroneSDK, hubTransport } from "drone-sdk";',
@@ -49,7 +71,6 @@ describe('CollapsibleMarkdown', () => {
       React.createElement(CollapsibleMarkdown, {
         text,
         fadeTo: 'var(--accent-subtle)',
-        preserveLeadParagraph: true,
         collapseAfterLines: 3,
       }),
     );
@@ -80,6 +101,34 @@ describe('CollapsibleMarkdown', () => {
     expect(html).toContain('line 1');
     expect(html).toContain('Show more');
     expect(html).not.toContain(hiddenTail);
+  });
+
+  test('shows several complete opening blocks in a collapsed message preview', () => {
+    const text = [
+      'Opening summary.',
+      '',
+      'Second paragraph.',
+      '',
+      'Third paragraph.',
+      '',
+      'Fourth paragraph.',
+      '',
+      'Hidden fifth paragraph.',
+      '',
+      'Hidden sixth paragraph.',
+    ].join('\n');
+    const html = renderToStaticMarkup(
+      React.createElement(CollapsibleMarkdown, {
+        text,
+        fadeTo: 'var(--accent-subtle)',
+        collapseAfterLines: 8,
+      }),
+    );
+
+    expect(html).toContain('Opening summary.');
+    expect(html).toContain('Fourth paragraph.');
+    expect(html).not.toContain('Hidden fifth paragraph.');
+    expect(html).toContain('bg-[var(--surface-soft)]');
   });
 
   test('marks click-toggle markdown as collapsed and expandable when opted in', () => {
