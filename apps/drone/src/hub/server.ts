@@ -297,6 +297,7 @@ import { registerFleetRoutes } from './routes/fleet-routes';
 import { registerGroupRoutes } from './routes/group-routes';
 import { registerMessageRoutes } from './routes/message-routes';
 import { registerOperationalRoutes } from './routes/operational-routes';
+import { registerResourceSubscriptionRoutes } from './routes/resource-subscription-routes';
 import { createRepositoryRouteHandler } from './routes/repository-operation-routes';
 import { registerRepositoryRoutes } from './routes/repository-routes';
 import { registerSettingsRoutes } from './routes/settings-routes';
@@ -304,6 +305,9 @@ import { registerSystemRoutes } from './routes/system-routes';
 import { createTerminalRouteHandler } from './routes/terminal-routes';
 import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
 import { LocalCheckoutService } from './local-checkout-service';
+import { createResourceSubscriptionDeliveryAuthorizer } from './subscriptions/create-resource-subscription-delivery-authorizer';
+import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
+import { ResourceSubscriptionService } from './subscriptions/resource-subscription-service';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
 import {
   isWorkflowChildDroneEntry,
@@ -5135,6 +5139,34 @@ export async function startDroneHubApiServer(opts: {
       : await createMcpServer(payload);
   };
 
+  const resourceSubscriptionDatabase = getHubDatabase();
+  const resourceSubscriptionRepository = resourceSubscriptionDatabase
+    ? new ResourceSubscriptionRepository(resourceSubscriptionDatabase)
+    : null;
+  const resourceSubscriptionService = resourceSubscriptionRepository
+    ? new ResourceSubscriptionService({
+        repository: resourceSubscriptionRepository,
+        readChatStatus: async (location) => {
+          const registry = await loadCanonicalActiveModel();
+          return summarizeAssistantChatIdle(
+            registry,
+            { droneId: location.droneId, chatName: location.chatName },
+            { requireChat: true },
+          );
+        },
+        wakePromptQueue: (droneId, chatName) => {
+          enqueuePendingPromptPump(droneId, chatName);
+          notifyCanonicalPromptQueueChatWrite(droneId, chatName);
+        },
+        authorizeDelivery: createResourceSubscriptionDeliveryAuthorizer({
+          resolveChatResource: (resourceId) =>
+            resourceSubscriptionRepository.resolveChatResource(resourceId),
+          loadRegistry: loadCanonicalActiveModel,
+        }),
+        log: hubLog,
+      })
+    : null;
+
   const apiRouter = new HubRouter(json, readJsonBody);
 
   registerSystemRoutes(apiRouter, {
@@ -5365,6 +5397,8 @@ export async function startDroneHubApiServer(opts: {
       assistantService.emitExternalUiAction(uiAction, threadId),
     hubLog,
   });
+
+  registerResourceSubscriptionRoutes(apiRouter, resourceSubscriptionService);
 
   registerFleetRoutes(apiRouter, {
     resolveDroneOrRespond,
@@ -5896,6 +5930,7 @@ export async function startDroneHubApiServer(opts: {
       )
     : null;
   hubOutboxDispatchLoop?.start();
+  await resourceSubscriptionService?.start();
   void auditStartupRegistryPresence();
   startDroneStatusRefresher();
   scheduleDroneSummaryMaintenance('startup', 0);
@@ -5968,6 +6003,7 @@ export async function startDroneHubApiServer(opts: {
         : null,
     close: async () => {
       cancelCodexLogin();
+      resourceSubscriptionService?.stop();
       unsubscribeDeviceMeshAssistantChanges();
       await deviceMesh.close();
       await hubOutboxDispatchLoop?.stop();

@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { droneRootPath } from './paths';
+import { normalizeSilentCompletion } from './silent-completion';
 
 type DatabaseConstructor = typeof import('better-sqlite3');
 type DatabaseInstance = import('better-sqlite3').Database;
@@ -63,12 +64,18 @@ function normalizeTurn(raw: any): any {
   const promptAt = typeof raw?.promptAt === 'string' && raw.promptAt.trim() ? String(raw.promptAt).trim() : undefined;
   const completedAt = typeof raw?.completedAt === 'string' && raw.completedAt.trim() ? String(raw.completedAt).trim() : undefined;
   const error = raw?.ok ? undefined : String(raw?.error ?? 'failed');
+  const { output, silentCompletion } = normalizeSilentCompletion(
+    Boolean(raw?.ok),
+    raw?.output,
+    { explicitlySilent: raw?.silentCompletion === true, prompt: raw?.prompt, promptId: id },
+  );
   return {
     at,
     ...(id ? { id } : {}),
     prompt: String(raw?.prompt ?? ''),
     ok: Boolean(raw?.ok),
-    output: raw?.ok ? String(raw?.output ?? '') : '',
+    output,
+    ...(silentCompletion ? { silentCompletion: true } : {}),
     ...(error ? { error } : {}),
     ...(promptAt ? { promptAt } : {}),
     ...(completedAt ? { completedAt } : {}),

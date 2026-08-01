@@ -21,6 +21,10 @@ import { UserChatMessage } from './UserChatMessage';
 import { ChangedFilesCard } from './ChangedFilesCard';
 import { StoppedRunNotice } from './StoppedRunNotice';
 import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
+import {
+  isSubscriptionEventPrompt,
+  SubscriptionEventBadge,
+} from './SubscriptionEventBadge';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
@@ -57,6 +61,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
 }) {
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
+  const isSubscriptionEvent = isSubscriptionEventPrompt(item.prompt);
   const isFailed = item.state === 'failed';
   const observability =
     item.observability?.state === 'status-unavailable'
@@ -146,7 +151,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         </div>
       </div>
     ) : null;
-  const pendingHeader = actionPresentation ? (
+  const statusBadge = actionPresentation ? (
     <span
       className={`rounded border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${actionPresentation.state === 'failed' ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]' : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'}`}
       style={{ fontFamily: 'var(--display)' }}
@@ -159,6 +164,12 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       style={{ fontFamily: 'var(--display)' }}
     >
       {badgeLabel}
+    </span>
+  ) : null;
+  const pendingHeader = statusBadge || isSubscriptionEvent ? (
+    <span className="inline-flex items-center gap-1.5">
+      {isSubscriptionEvent ? <SubscriptionEventBadge /> : null}
+      {statusBadge}
     </span>
   ) : null;
 

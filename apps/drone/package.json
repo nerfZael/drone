@@ -24,7 +24,7 @@
     "dev": "ts-node src/cli.ts",
     "app": "node dist/cli.js hub app",
     "test": "bun test --timeout 20000 --max-concurrency 1 tests/*.test.ts && bun run test:node",
-    "test:node": "bun run build && node --test tests/node/*.test.cjs",
+    "test:node": "bun run build && node --test tests/node/*.test.cjs && node --require ts-node/register --test tests/node/*.test.ts",
     "test:coverage": "bun test --timeout 20000 --max-concurrency 1 --coverage tests/*.test.ts",
     "smoke": "node scripts/smoke-cli.cjs",
     "lint": "eslint \"src/**/*.ts\"",

@@ -5,10 +5,12 @@ import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
 import type { UseGithubSettingsResult } from './use-github-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
 import type { UseSpeechSettingsResult } from './use-speech-settings';
+import type { UseResourceSubscriptionSettingsResult } from './use-resource-subscription-settings';
 import type { LlmProviderId } from './settings-types';
 import { CodexConnectControl } from './CodexConnectControl';
 import { DESKTOP_THEMES } from '../../theme';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { ResourceSubscriptionSettingsSection } from './ResourceSubscriptionSettingsSection';
 
 function llmProviderLabel(provider: LlmProviderId | null | undefined): string {
   if (provider === 'codex') return 'Codex';
@@ -27,6 +29,7 @@ type GeneralSettingsTabProps = {
   llm: UseLlmSettingsResult;
   filesystem: UseFilesystemSettingsResult;
   speech: UseSpeechSettingsResult;
+  subscriptions: UseResourceSubscriptionSettingsResult;
   onReplayOnboarding: () => void;
   onResetOnboarding: () => void;
 };
@@ -114,6 +117,7 @@ export function GeneralSettingsTab({
   llm,
   filesystem,
   speech,
+  subscriptions,
   onReplayOnboarding,
   onResetOnboarding,
 }: GeneralSettingsTabProps) {
@@ -275,6 +279,8 @@ export function GeneralSettingsTab({
           </div>
         )}
       </div>
+
+      <ResourceSubscriptionSettingsSection subscriptions={subscriptions} />
 
       <div className="dh-settings-section">
         {llmSettingsLoading && !llmSettings ? (
