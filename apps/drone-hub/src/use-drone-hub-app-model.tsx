@@ -102,6 +102,7 @@ import {
   type ManualUnreadMarker,
 } from './droneHub/app/chat-node-helpers';
 import { orderSidebarEntries } from './droneHub/app/sidebar-group-order';
+import { isSidebarGroupCollapsed } from './droneHub/app/is-sidebar-group-collapsed';
 import {
   buildFleetAssignedIdsByDroneId,
   buildFleetParentIdByDroneId,
@@ -1587,7 +1588,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         let changed = false;
         const next = { ...prev };
         for (const group of groups) {
-          if (!next[group]) continue;
+          if (!isSidebarGroupCollapsed(next, group)) continue;
           next[group] = false;
           changed = true;
         }

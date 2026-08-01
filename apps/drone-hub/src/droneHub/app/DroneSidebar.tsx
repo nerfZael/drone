@@ -99,6 +99,7 @@ import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { useSidebarOptimisticGroups } from './use-sidebar-optimistic-groups';
 import type { MoveDronesToGroupResult } from './use-group-management';
 import type { DroneDeleteMode, SidebarDensityMode, SidebarGroupingMode } from './settings-types';
+import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import {
   sidebarChatLabelClass,
   sidebarChatRowTone,
@@ -296,7 +297,7 @@ function ReadOnlySidebarGroups({
     () =>
       sidebarGroups.flatMap((group) => {
         const groupKey = String(group.group ?? '').trim();
-        if (groupKey && collapsedGroups[groupKey]) return [];
+        if (isSidebarGroupCollapsed(collapsedGroups, groupKey)) return [];
         return group.items.map((drone) => String(drone?.id ?? '').trim()).filter(Boolean);
       }),
     [collapsedGroups, sidebarGroups],
@@ -316,7 +317,7 @@ function ReadOnlySidebarGroups({
     <div className="flex flex-col gap-1.5">
       {sidebarGroups.map((group) => {
         const groupKey = String(group.group ?? '').trim();
-        const collapsed = Boolean(groupKey && collapsedGroups[groupKey]);
+        const collapsed = isSidebarGroupCollapsed(collapsedGroups, groupKey);
         return (
           <section key={`${group.kind}:${group.group}`} className="flex flex-col gap-0.5">
             <UiNavigationRow
@@ -459,7 +460,7 @@ function flattenReadOnlyTreeDroneOrder(
       return;
     }
     const folderPath = staticTreeFolderPath(node);
-    if (folderPath && collapsedGroups[folderPath]) return;
+    if (isSidebarGroupCollapsed(collapsedGroups, folderPath)) return;
     for (const childId of nodeTree.childIdsByParent[node.id] ?? []) visit(childId);
   };
   for (const nodeId of nodeTree.rootChildIds) visit(nodeId);
@@ -645,7 +646,7 @@ function StaticReadOnlySidebarTree({
     ancestorNodeIds: Set<string>,
   ): React.ReactNode => {
     const folderPath = staticTreeFolderPath(node);
-    const collapsed = Boolean(folderPath && collapsedGroups[folderPath]);
+    const collapsed = isSidebarGroupCollapsed(collapsedGroups, folderPath);
     const childIds = nodeTree.childIdsByParent[node.id] ?? [];
     return (
       <div key={node.id} className="flex flex-col gap-0.5">
@@ -1063,7 +1064,7 @@ function SidebarFolderTreeNode({
   );
   const groupToken = React.useMemo(() => sidebarGroupOrderToken(groupRef), [groupRef]);
   const groupLabel = sidebarFolderDisplayLabel(node);
-  const collapsed = Boolean(collapsedGroups[node.path]);
+  const collapsed = isSidebarGroupCollapsed(collapsedGroups, node.path);
   const isDeletingGroup = Boolean(deletingGroups[node.path]);
   const isRenamingGroup = Boolean(renamingGroups[node.path]);
   const isDropTarget = dragOverGroup === node.path;
@@ -2587,13 +2588,19 @@ export function DroneSidebar({
 
       if (!selectedFolderPath || !visibleSidebarFolderPathSet.has(selectedFolderPath)) return;
 
-      if (event.key === 'ArrowLeft' && !collapsedGroups[selectedFolderPath]) {
+      if (
+        event.key === 'ArrowLeft' &&
+        !isSidebarGroupCollapsed(collapsedGroups, selectedFolderPath)
+      ) {
         event.preventDefault();
         onToggleGroupCollapsed(selectedFolderPath);
         return;
       }
 
-      if (event.key === 'ArrowRight' && collapsedGroups[selectedFolderPath]) {
+      if (
+        event.key === 'ArrowRight' &&
+        isSidebarGroupCollapsed(collapsedGroups, selectedFolderPath)
+      ) {
         event.preventDefault();
         onToggleGroupCollapsed(selectedFolderPath);
       }

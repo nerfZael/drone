@@ -11,6 +11,7 @@ import {
 } from './sidebar-node-order';
 import type { SidebarNodeTreeModel } from './sidebar-node-tree';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
+import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 
 export type FolderEditorState = {
   mode: 'create' | 'rename';
@@ -204,7 +205,9 @@ export function useSidebarInteractions({
       const anchorPath = String(opts?.anchorPath ?? '').trim() || parentPath;
       const beforeNodeId = String(opts?.beforeNodeId ?? '').trim() || null;
       const repoGroupPath = String(opts?.repoGroupPath ?? '').trim() || null;
-      if (parentPath && collapsedGroups[parentPath]) onToggleGroupCollapsed(parentPath);
+      if (parentPath && isSidebarGroupCollapsed(collapsedGroups, parentPath)) {
+        onToggleGroupCollapsed(parentPath);
+      }
       if (!beforeNodeId) setSelectedFolderPath(anchorPath);
       setChatEditor(null);
       setFolderEditor({
