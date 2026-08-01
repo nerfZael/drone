@@ -57,6 +57,7 @@ import {
   SidebarTreeChevronIcon,
   SidebarWorkingIcon,
 } from './SidebarIcons';
+import { useMobileSidebarExpandedFolderIds } from './use-mobile-sidebar-expanded-folder-ids';
 
 export function appDrawerWidth(windowWidth: number): number {
   return Math.max(0, windowWidth);
@@ -791,7 +792,7 @@ function DrawerDroneNode({
 function DrawerDroneFolder({
   folder,
   depth,
-  collapsedFolderIds,
+  expandedFolderIds,
   sidebarChatOrderByDrone,
   activeDroneId,
   activeChatName,
@@ -801,7 +802,7 @@ function DrawerDroneFolder({
 }: {
   folder: MobileDroneGroupFolder;
   depth: number;
-  collapsedFolderIds: ReadonlySet<string>;
+  expandedFolderIds: ReadonlySet<string>;
   sidebarChatOrderByDrone: Record<string, string[]>;
   activeDroneId: string;
   activeChatName: string;
@@ -809,7 +810,7 @@ function DrawerDroneFolder({
   onToggleFolder(folderId: string): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
-  const collapsed = collapsedFolderIds.has(folder.id);
+  const collapsed = !expandedFolderIds.has(folder.id);
   const hasSelectedDirectDrone = folder.roots.some((node) => node.drone.id === activeDroneId);
   const stateSummary = React.useMemo(
     () => summarizeDroneScope(folder.roots, folder.children),
@@ -858,7 +859,7 @@ function DrawerDroneFolder({
               }
               entry={entry}
               depth={depth + 1}
-              collapsedFolderIds={collapsedFolderIds}
+              expandedFolderIds={expandedFolderIds}
               sidebarChatOrderByDrone={sidebarChatOrderByDrone}
               activeDroneId={activeDroneId}
               activeChatName={activeChatName}
@@ -876,7 +877,7 @@ function DrawerDroneFolder({
 function DrawerDroneEntry({
   entry,
   depth,
-  collapsedFolderIds,
+  expandedFolderIds,
   sidebarChatOrderByDrone,
   activeDroneId,
   activeChatName,
@@ -886,7 +887,7 @@ function DrawerDroneEntry({
 }: {
   entry: MobileDroneSidebarEntry;
   depth: number;
-  collapsedFolderIds: ReadonlySet<string>;
+  expandedFolderIds: ReadonlySet<string>;
   sidebarChatOrderByDrone: Record<string, string[]>;
   activeDroneId: string;
   activeChatName: string;
@@ -908,7 +909,7 @@ function DrawerDroneEntry({
     <DrawerDroneFolder
       folder={entry.folder}
       depth={depth}
-      collapsedFolderIds={collapsedFolderIds}
+      expandedFolderIds={expandedFolderIds}
       sidebarChatOrderByDrone={sidebarChatOrderByDrone}
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
@@ -1233,17 +1234,7 @@ function AppDrawerView({
     [droneGroups],
   );
   const [activeRepoId, setActiveRepoId] = React.useState<string | null>(null);
-  const [collapsedFolderIds, setCollapsedFolderIds] = React.useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-  const toggleFolder = React.useCallback((folderId: string) => {
-    setCollapsedFolderIds((current) => {
-      const next = new Set(current);
-      if (next.has(folderId)) next.delete(folderId);
-      else next.add(folderId);
-      return next;
-    });
-  }, []);
+  const { expandedFolderIds, toggleFolder } = useMobileSidebarExpandedFolderIds();
   const activeRepo = droneGroups.find((group) => group.id === activeRepoId) ?? null;
   const globalPinnedDrones = React.useMemo(
     () => resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds),
@@ -1280,7 +1271,6 @@ function AppDrawerView({
   }, [activeRepoId, droneGroups]);
   React.useEffect(() => {
     setActiveRepoId(null);
-    setCollapsedFolderIds(new Set());
   }, [activeDeviceId]);
   const listStatus =
     dronesLoading && drones.length === 0 ? (
@@ -1402,7 +1392,7 @@ function AppDrawerView({
                   <DrawerDroneEntry
                     entry={entry}
                     depth={0}
-                    collapsedFolderIds={collapsedFolderIds}
+                    expandedFolderIds={expandedFolderIds}
                     sidebarChatOrderByDrone={droneSidebarOrder.sidebarChatOrderByDrone}
                     activeDroneId={activeDroneId}
                     activeChatName={activeChatName}

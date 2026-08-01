@@ -17,6 +17,7 @@ import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag
 import { isDroneStartingOrSeeding } from './helpers';
 import { IconChevron, IconColumns, IconEye, IconEyeOff, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
 import { canReorderSidebarDroneSelectionAtParent } from './sidebar-drone-drop';
+import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import type { SidebarFolderSelectionOptions } from './sidebar-folder-selection';
 import { buildSidebarDroneTree, type SidebarDroneTree } from './sidebar-drone-tree';
@@ -393,7 +394,7 @@ function flattenVisibleDroneOrderFromNodeTree(
     }
     if (node.kind === 'folder') {
       const folderPath = groupedFolderPathFromNode(node);
-      if (folderPath && collapsedGroups[folderPath]) return;
+      if (isSidebarGroupCollapsed(collapsedGroups, folderPath ?? '')) return;
     }
     for (const childId of nodeTree.childIdsByParent[node.id] ?? []) visit(childId);
   };
@@ -1160,7 +1161,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     [folderPath, node.groupId, node.groupKind],
   );
   const groupToken = React.useMemo(() => sidebarGroupOrderToken(groupRef), [groupRef]);
-  const collapsed = Boolean(collapsedGroups[folderPath]);
+  const collapsed = isSidebarGroupCollapsed(collapsedGroups, folderPath);
   const folderDroneIds = React.useMemo(() => collectSidebarTreeDroneIds(nodeTree, node.id), [node.id, nodeTree]);
   const stateSummary = React.useMemo<SidebarGroupStateSummary>(() => {
     const summary: SidebarGroupStateSummary = { approval: 0, unread: 0, working: 0 };

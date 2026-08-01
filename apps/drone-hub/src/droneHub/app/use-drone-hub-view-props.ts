@@ -1,6 +1,7 @@
 import type { DroneSidebarProps } from './DroneSidebar';
 import type { DroneHubOverlaysProps } from './DroneHubOverlays';
 import type { DroneHubWorkspaceContentProps } from './DroneHubWorkspaceContent';
+import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 
 export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
   const {
@@ -122,7 +123,7 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     onToggleGroupCollapsed: (group) =>
       setCollapsedGroups((prev: Record<string, boolean>) => ({
         ...prev,
-        [group]: !prev[group],
+        [group]: !isSidebarGroupCollapsed(prev, group),
       })),
     onRenameGroup: (group, nextName) => renameGroup(group, nextName),
     onOpenGroupMultiChat: (group) => {
