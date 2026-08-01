@@ -3,6 +3,7 @@ import { normalizeMobileDrones } from '../src/drones/drone-sidebar-model';
 import {
   mobileDroneChatDisplayState,
   mobileDroneDisplayState,
+  summarizeMobileDroneChats,
   summarizeMobileDrones,
   withMobileApprovalRequired,
   withOptimisticMobileBusyChat,
@@ -76,6 +77,33 @@ describe('mobile drone state summary', () => {
     expect(mobileDroneChatDisplayState(drone, 'approval')).toBe('approval');
     expect(mobileDroneChatDisplayState(drone, 'review')).toBe('working');
     expect(mobileDroneChatDisplayState(drone, 'default')).toBe('blocked');
+  });
+
+  test('keeps chat activity off the multi-chat drone parent state', () => {
+    const [drone] = normalizeMobileDrones([
+      {
+        id: 'multi-chat',
+        chats: ['default', 'review'],
+        busyChats: ['review'],
+        approvalChats: ['default'],
+        unreadChats: ['review'],
+      },
+    ]);
+    expect(drone).toBeDefined();
+    if (!drone) return;
+
+    expect(mobileDroneDisplayState(drone)).toBe('approval');
+    expect(mobileDroneDisplayState(drone, false)).toBe('idle');
+    expect(summarizeMobileDroneChats(drone)).toEqual({
+      approval: 1,
+      working: 1,
+      unread: 1,
+    });
+    expect(summarizeMobileDroneChats(drone, 'review')).toEqual({
+      approval: 1,
+      working: 1,
+      unread: 0,
+    });
   });
 
   test('summarizes approval, working, and unread drones with desktop precedence', () => {

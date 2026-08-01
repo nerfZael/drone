@@ -44,6 +44,7 @@ import {
   EMPTY_MOBILE_DRONE_STATE_SUMMARY,
   mobileDroneChatDisplayState,
   mobileDroneDisplayState,
+  summarizeMobileDroneChats,
   type MobileDroneDisplayState,
   type MobileDroneStateSummary,
 } from '../drones/drone-state-summary';
@@ -410,15 +411,21 @@ function summarizeDroneScope(
 function DroneStateCounts({
   summary,
   compact = false,
+  entity = 'drone',
 }: {
   summary: MobileDroneStateSummary;
   compact?: boolean;
+  entity?: 'drone' | 'chat';
 }) {
   return (
     <View style={[styles.fleetStates, compact && styles.fleetStatesCompact]}>
       {summary.approval > 0 ? (
         <View
-          accessibilityLabel={`${summary.approval} awaiting approval`}
+          accessibilityLabel={
+            entity === 'chat'
+              ? `${summary.approval} chats awaiting approval`
+              : `${summary.approval} awaiting approval`
+          }
           style={styles.fleetState}
         >
           <ApprovalStatusIndicator />
@@ -428,13 +435,27 @@ function DroneStateCounts({
         </View>
       ) : null}
       {summary.unread > 0 ? (
-        <View accessibilityLabel={`${summary.unread} with unread chats`} style={styles.fleetState}>
+        <View
+          accessibilityLabel={
+            entity === 'chat'
+              ? `${summary.unread} unread chats`
+              : `${summary.unread} with unread chats`
+          }
+          style={styles.fleetState}
+        >
           <UnreadStatusIndicator />
           <Text style={[styles.fleetStateText, styles.fleetStateTextUnread]}>{summary.unread}</Text>
         </View>
       ) : null}
       {summary.working > 0 ? (
-        <View accessibilityLabel={`${summary.working} working`} style={styles.fleetState}>
+        <View
+          accessibilityLabel={
+            entity === 'chat'
+              ? `${summary.working} working chats`
+              : `${summary.working} working`
+          }
+          style={styles.fleetState}
+        >
           <WorkingStatusIndicator />
           <Text style={[styles.fleetStateText, styles.fleetStateTextWorking]}>
             {summary.working}
@@ -454,8 +475,9 @@ function switchStateLabel(state: SwitchDisplayState): string {
 
 function switchStateColor(state: SwitchDisplayState): string {
   if (state === 'approval') return colors.warning;
-  if (state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting')
-    return colors.warning;
+  if (state === 'archiving') return colors.info;
+  if (state === 'deleting') return colors.danger;
+  if (state === 'working' || state === 'starting') return colors.warning;
   if (state === 'waiting') return colors.info;
   if (state === 'blocked' || state === 'offline') return colors.danger;
   if (state === 'done') return colors.online;
@@ -474,13 +496,16 @@ function SwitchItemStatusIndicator({
   showReadyAnchor?: boolean;
 }) {
   const ready = showReadyAnchor && state === 'idle' && !unread;
-  const working =
-    state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting';
+  const working = state === 'working' || state === 'starting';
   const stateColor = switchStateColor(state);
   return (
     <View accessible={false} style={styles.switchItemStatus}>
       {ready ? (
         <View style={styles.readyStateAnchor} />
+      ) : state === 'archiving' ? (
+        <OperationStatusIndicator operation="archiving" />
+      ) : state === 'deleting' ? (
+        <OperationStatusIndicator operation="deleting" />
       ) : working ? (
         <WorkingStatusIndicator />
       ) : state === 'approval' ? (
@@ -494,6 +519,46 @@ function SwitchItemStatusIndicator({
           <View style={[styles.switchStateDot, { backgroundColor: stateColor }]} />
         </View>
       )}
+    </View>
+  );
+}
+
+function OperationStatusIndicator({
+  operation,
+}: {
+  operation: 'archiving' | 'deleting';
+}) {
+  const sharedPhase = React.useContext(DrawerWorkingPhaseContext);
+  const rotate = sharedPhase?.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+  const operationColor = operation === 'archiving' ? colors.info : colors.danger;
+  return (
+    <View accessible={false} style={styles.operationStatusIndicator}>
+      <Animated.View style={rotate ? { transform: [{ rotate }] } : undefined}>
+        <SidebarWorkingIcon color={colors.info} size={12} strokeWidth={2.4} />
+      </Animated.View>
+      <Svg
+        height={6}
+        width={6}
+        viewBox="0 0 12 12"
+        fill="none"
+        stroke={operationColor}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={styles.operationStatusGlyph}
+      >
+        {operation === 'archiving' ? (
+          <>
+            <Path d="M1.5 4.5h9v6h-9z" />
+            <Path d="M6 1.25v5M3.9 4.25 6 6.35l2.1-2.1" />
+          </>
+        ) : (
+          <Path d="M2.25 3.25h7.5M4.25 3.25V1.75h3.5v1.5M3.15 3.25l.5 7h4.7l.5-7M5 5.25v3M7 5.25v3" />
+        )}
+      </Svg>
     </View>
   );
 }
@@ -667,15 +732,19 @@ function DrawerDroneNode({
   const { drone } = node;
   const chats = orderedMobileDroneChats(drone, sidebarChatOrderByDrone[drone.id]);
   const selected = drone.id === activeDroneId;
-  const hasActiveChildChat = selected && showChats && chats.length > 1;
+  const hasMultipleChats = chats.length > 1;
+  const hasActiveChildChat = selected && showChats && hasMultipleChats;
   const selectedChat =
     selected && chats.includes(activeChatName) ? activeChatName : (chats[0] ?? '');
   const operation = droneOperationById[drone.id] as 'archiving' | 'deleting' | undefined;
-  const displayStateDrone =
-    chats.length > 1 && drone.approvalRequired ? { ...drone, approvalRequired: false } : drone;
-  const displayState = operation ?? mobileDroneDisplayState(displayStateDrone);
+  const displayState = operation ?? mobileDroneDisplayState(drone, !hasMultipleChats);
   const isDraft = drone.draft === true || drone.phase.trim().toLowerCase() === 'draft';
-  const unread = !isDraft && (drone.unreadChats?.length ?? 0) > 0;
+  const unread =
+    !isDraft && !hasMultipleChats && (drone.unreadChats?.length ?? 0) > 0;
+  const chatStateSummary = React.useMemo(
+    () => summarizeMobileDroneChats(drone, selected ? activeChatName : ''),
+    [activeChatName, drone, selected],
+  );
   const stateLabel = isDraft
     ? 'Draft'
     : unread && displayState === 'idle'
@@ -747,6 +816,9 @@ function DrawerDroneNode({
             <Text numberOfLines={1} style={styles.switchItemContextBadge}>
               {contextLabel}
             </Text>
+          ) : null}
+          {hasMultipleChats ? (
+            <DroneStateCounts summary={chatStateSummary} compact entity="chat" />
           ) : null}
         </View>
       </Pressable>
@@ -1915,6 +1987,8 @@ const styles = StyleSheet.create({
   },
   switchStateDot: { width: 6, height: 6, borderRadius: 3 },
   workingStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
+  operationStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
+  operationStatusGlyph: { position: 'absolute' },
   stateStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   quietBlockedStatusIndicator: { opacity: 0.7 },
   unreadStatusDot: {

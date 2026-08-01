@@ -63,6 +63,7 @@ type DroneCardProps = {
   deleteBusy?: boolean;
   operationLabel?: string;
   statusHint?: string;
+  chatStateSummary?: SidebarChatStateSummary;
   unreadAgentMessage?: boolean;
   highlighted?: boolean;
   active?: boolean;
@@ -72,6 +73,12 @@ type DroneCardProps = {
   showSelectionEdge?: boolean;
   showGroup?: boolean;
   density?: SidebarDensityMode;
+};
+
+export type SidebarChatStateSummary = {
+  approval: number;
+  unread: number;
+  working: number;
 };
 
 export type SidebarDroneDisplayState =
@@ -108,12 +115,15 @@ export function sidebarDroneDisplayState(
   busy = false,
   operationLabel = '',
   approvalRequired = false,
+  includeChatActivity = true,
 ): SidebarDroneDisplayState {
   const operation = operationLabel.trim().toLowerCase();
   if (operation.includes('archiv')) return 'archiving';
   if (operation.includes('delet')) return 'deleting';
-  if (approvalRequired) return 'approval';
-  if (busy || drone.busy || (drone.busyChats?.length ?? 0) > 0) return 'working';
+  if (includeChatActivity && approvalRequired) return 'approval';
+  if (includeChatActivity && (busy || drone.busy || (drone.busyChats?.length ?? 0) > 0)) {
+    return 'working';
+  }
 
   return sidebarDroneInactiveDisplayState(drone);
 }
@@ -140,7 +150,9 @@ export function sidebarItemStateToneClass(
   state: SidebarDroneDisplayState,
   unread = false,
 ): string {
-  if (state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting') {
+  if (state === 'archiving') return 'text-[var(--info)]';
+  if (state === 'deleting') return 'text-[var(--red)]';
+  if (state === 'working' || state === 'starting') {
     return 'text-[var(--yellow)]';
   }
   if (state === 'approval') return 'text-[var(--yellow)]';
@@ -162,7 +174,7 @@ export function SidebarItemStateIndicator({
   emphasized?: boolean;
 }) {
   const ready = state === 'idle' && !unread;
-  const working = state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting';
+  const working = state === 'working' || state === 'starting';
   const approvalRequired = state === 'approval';
   const indicatorToneClass =
     unread && state === 'idle'
@@ -181,6 +193,10 @@ export function SidebarItemStateIndicator({
             className="h-1.5 w-1.5 rounded-full border border-[var(--sidebar-item-icon)] opacity-70"
           />
         ) : null
+      ) : state === 'archiving' ? (
+        <SidebarArchiveStatusIndicator />
+      ) : state === 'deleting' ? (
+        <SidebarDeletingStatusIndicator />
       ) : working ? (
         <SidebarWorkingStatusIndicator />
       ) : approvalRequired ? (
@@ -191,6 +207,71 @@ export function SidebarItemStateIndicator({
         <span className={`h-1.5 w-1.5 rounded-full ${indicatorToneClass}`} />
       )}
     </span>
+  );
+}
+
+export function SidebarArchiveStatusIndicator() {
+  return (
+    <span
+      data-sidebar-operation-indicator="archiving"
+      className="relative block h-3 w-3 text-[var(--info)]"
+      aria-hidden="true"
+    >
+      <SidebarOperationSpinnerRing />
+      <svg
+        className="absolute left-1/2 top-1/2 h-[6px] w-[6px] -translate-x-1/2 -translate-y-1/2"
+        viewBox="0 0 12 12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M1.5 4.5h9v6h-9z" />
+        <path d="M6 1.25v5M3.9 4.25 6 6.35l2.1-2.1" />
+      </svg>
+    </span>
+  );
+}
+
+export function SidebarDeletingStatusIndicator() {
+  return (
+    <span
+      data-sidebar-operation-indicator="deleting"
+      className="relative block h-3 w-3 text-[var(--info)]"
+      aria-hidden="true"
+    >
+      <SidebarOperationSpinnerRing />
+      <svg
+        className="absolute left-1/2 top-1/2 h-[6px] w-[6px] -translate-x-1/2 -translate-y-1/2 text-[var(--red)]"
+        viewBox="0 0 12 12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M2.25 3.25h7.5M4.25 3.25V1.75h3.5v1.5M3.15 3.25l.5 7h4.7l.5-7M5 5.25v3M7 5.25v3" />
+      </svg>
+    </span>
+  );
+}
+
+function SidebarOperationSpinnerRing() {
+  return (
+    <svg
+      data-sidebar-operation-spinner="true"
+      className="block h-3 w-3 animate-[spin_1.6s_linear_infinite]"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
   );
 }
 
@@ -225,6 +306,83 @@ export function SidebarApprovalStatusIndicator() {
       <path d="M4 2.5v7M8 2.5v7" />
     </svg>
   );
+}
+
+function SidebarChatStateCount({
+  count,
+  indicator,
+  label,
+  toneClassName,
+}: {
+  count: number;
+  indicator: React.ReactNode;
+  label: string;
+  toneClassName: string;
+}) {
+  return (
+    <span
+      className={`inline-flex h-3 items-center gap-1 ${toneClassName}`}
+      title={`${count} ${label}`}
+      aria-label={`${count} ${label}`}
+    >
+      <span className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center leading-none">
+        {indicator}
+      </span>
+      <span className="relative top-px inline-flex h-3 min-w-[2ch] items-center leading-none tabular-nums">
+        {count}
+      </span>
+    </span>
+  );
+}
+
+function SidebarChatStateCounts({ summary }: { summary: SidebarChatStateSummary }) {
+  return (
+    <span
+      data-sidebar-chat-state-counts="true"
+      className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem] leading-none"
+    >
+      {summary.approval > 0 ? (
+        <SidebarChatStateCount
+          count={summary.approval}
+          indicator={<SidebarApprovalStatusIndicator />}
+          label="awaiting approval"
+          toneClassName="text-[var(--yellow)]"
+        />
+      ) : null}
+      {summary.unread > 0 ? (
+        <SidebarChatStateCount
+          count={summary.unread}
+          indicator={<SidebarItemStateIndicator state="idle" unread />}
+          label="unread"
+          toneClassName="text-[var(--green)]"
+        />
+      ) : null}
+      {summary.working > 0 ? (
+        <SidebarChatStateCount
+          count={summary.working}
+          indicator={<SidebarWorkingStatusIndicator />}
+          label="working"
+          toneClassName="text-[var(--yellow)]"
+        />
+      ) : null}
+    </span>
+  );
+}
+
+function summarizeDroneChats(drone: DroneSummary): SidebarChatStateSummary {
+  const chats = new Set(drone.chats ?? []);
+  const approvalChats = new Set((drone.approvalChats ?? []).filter((chatName) => chats.has(chatName)));
+  const unreadChats = new Set((drone.unreadChats ?? []).filter((chatName) => chats.has(chatName)));
+  const busyChats = new Set((drone.busyChats ?? []).filter((chatName) => chats.has(chatName)));
+  let working = 0;
+  for (const chatName of busyChats) {
+    if (!approvalChats.has(chatName)) working += 1;
+  }
+  return {
+    approval: approvalChats.size || (drone.approvalRequired ? 1 : 0),
+    unread: unreadChats.size,
+    working,
+  };
 }
 
 export function SidebarBlockedStatusIndicator({ emphasized = false }: { emphasized?: boolean }) {
@@ -273,6 +431,8 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     (a.drone.chats ?? []).join('\u0000') === (b.drone.chats ?? []).join('\u0000') &&
     (a.drone.unreadChats ?? []).join('\u0000') === (b.drone.unreadChats ?? []).join('\u0000') &&
     (a.drone.busyChats ?? []).join('\u0000') === (b.drone.busyChats ?? []).join('\u0000') &&
+    (a.drone.approvalChats ?? []).join('\u0000') === (b.drone.approvalChats ?? []).join('\u0000') &&
+    Boolean(a.drone.approvalRequired) === Boolean(b.drone.approvalRequired) &&
     Boolean(a.drone.busy) === Boolean(b.drone.busy) &&
     a.selected === b.selected &&
     Boolean(a.busy) === Boolean(b.busy) &&
@@ -307,6 +467,9 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.deleteBusy) === Boolean(b.deleteBusy) &&
     (a.operationLabel ?? '') === (b.operationLabel ?? '') &&
     (a.statusHint ?? '') === (b.statusHint ?? '') &&
+    (a.chatStateSummary?.approval ?? -1) === (b.chatStateSummary?.approval ?? -1) &&
+    (a.chatStateSummary?.unread ?? -1) === (b.chatStateSummary?.unread ?? -1) &&
+    (a.chatStateSummary?.working ?? -1) === (b.chatStateSummary?.working ?? -1) &&
     Boolean(a.unreadAgentMessage) === Boolean(b.unreadAgentMessage) &&
     Boolean(a.highlighted) === Boolean(b.highlighted) &&
     Boolean(a.active) === Boolean(b.active) &&
@@ -354,6 +517,7 @@ export const DroneCard = React.memo(function DroneCard({
   deleteBusy,
   operationLabel,
   statusHint,
+  chatStateSummary,
   unreadAgentMessage,
   highlighted,
   active,
@@ -406,12 +570,20 @@ export const DroneCard = React.memo(function DroneCard({
     setInlineRenameOpen(true);
   }, [inlineRenameRequestKey]);
   const isDraftDrone = drone.draft === true || drone.hubPhase === 'draft';
-  const unread = !isDraftDrone && (Boolean(unreadAgentMessage) || (drone.unreadChats?.length ?? 0) > 0);
+  const hasMultipleChats = (drone.chats?.length ?? 0) > 1;
+  const effectiveChatStateSummary = hasMultipleChats
+    ? (chatStateSummary ?? summarizeDroneChats(drone))
+    : null;
+  const unread =
+    !isDraftDrone &&
+    !hasMultipleChats &&
+    (Boolean(unreadAgentMessage) || (drone.unreadChats?.length ?? 0) > 0);
   const displayState = sidebarDroneDisplayState(
     drone,
     Boolean(busy),
     activeOperationLabel,
     Boolean(approvalRequired),
+    !hasMultipleChats,
   );
   const previousDisplayStateRef = React.useRef<SidebarDroneDisplayState>(displayState);
   const [recentlyBlocked, setRecentlyBlocked] = React.useState(false);
@@ -771,6 +943,9 @@ export const DroneCard = React.memo(function DroneCard({
           >
             {statusHint}
           </span>
+        ) : null}
+        {effectiveChatStateSummary ? (
+          <SidebarChatStateCounts summary={effectiveChatStateSummary} />
         ) : null}
       </div>
 

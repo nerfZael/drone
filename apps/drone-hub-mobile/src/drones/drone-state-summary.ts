@@ -57,9 +57,12 @@ function mobileDroneInactiveDisplayState(drone: MobileDroneSummary): MobileDrone
   return 'idle';
 }
 
-export function mobileDroneDisplayState(drone: MobileDroneSummary): MobileDroneDisplayState {
-  if (drone.approvalRequired) return 'approval';
-  if (drone.busyChats.length > 0) return 'working';
+export function mobileDroneDisplayState(
+  drone: MobileDroneSummary,
+  includeChatActivity = true,
+): MobileDroneDisplayState {
+  if (includeChatActivity && drone.approvalRequired) return 'approval';
+  if (includeChatActivity && drone.busyChats.length > 0) return 'working';
   return mobileDroneInactiveDisplayState(drone);
 }
 
@@ -91,5 +94,24 @@ export function summarizeMobileDrones(
 ): MobileDroneStateSummary {
   const summary = { ...EMPTY_MOBILE_DRONE_STATE_SUMMARY };
   for (const drone of drones) addMobileDroneToStateSummary(summary, drone);
+  return summary;
+}
+
+export function summarizeMobileDroneChats(
+  drone: MobileDroneSummary,
+  activeChatNameRaw = '',
+): MobileDroneStateSummary {
+  const summary = { ...EMPTY_MOBILE_DRONE_STATE_SUMMARY };
+  const activeChatName = activeChatNameRaw.trim();
+  const approvalChats = new Set(drone.approvalChats ?? []);
+  for (const chatName of drone.chats) {
+    const approval = approvalChats.has(chatName);
+    const working = !approval && drone.busyChats.includes(chatName);
+    const unread = chatName !== activeChatName && (drone.unreadChats ?? []).includes(chatName);
+    if (approval) summary.approval += 1;
+    if (working) summary.working += 1;
+    if (unread) summary.unread += 1;
+  }
+  if (summary.approval === 0 && drone.approvalRequired) summary.approval = 1;
   return summary;
 }

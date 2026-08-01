@@ -2,8 +2,10 @@ export { GroupBadge } from './GroupBadge';
 export { StatusBadge } from './StatusBadge';
 export {
   DroneCard,
+  SidebarArchiveStatusIndicator,
   SidebarApprovalStatusIndicator,
   SidebarBlockedStatusIndicator,
+  SidebarDeletingStatusIndicator,
   SidebarItemStateIndicator,
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,

@@ -700,6 +700,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     visibleDroneOrder,
     sidebarChatOrderByDrone,
     busyChatNodeIdSet,
+    approvalRequiredByChatNodeId,
     unreadAgentMessageByChatNodeId,
     deletingDrones,
     deleteOperationModeById,
@@ -792,6 +793,37 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const showBusy =
     !isDroneStartingOrSeeding(drone.hubPhase) && hasOnlyDefaultChat && busyChatNodeIdSet.has(defaultChatNodeId);
   const showUnread = hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true;
+  const chatStateSummary = React.useMemo<SidebarGroupStateSummary>(() => {
+    const summary: SidebarGroupStateSummary = { approval: 0, unread: 0, working: 0 };
+    if (hasOnlyDefaultChat) return summary;
+    for (const chatName of chats) {
+      const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
+      const approval =
+        droneChatRequiresApproval(drone, chatName) ||
+        Boolean(approvalRequiredByChatNodeId[chatNodeId]);
+      const working =
+        !approval &&
+        ((drone.busyChats ?? []).includes(chatName) || busyChatNodeIdSet.has(chatNodeId));
+      const active = selectedDrone === drone.id && activeChatName === chatName;
+      const unread =
+        !active &&
+        ((drone.unreadChats ?? []).includes(chatName) ||
+          unreadAgentMessageByChatNodeId[chatNodeId] === true);
+      if (approval) summary.approval += 1;
+      if (unread) summary.unread += 1;
+      if (working) summary.working += 1;
+    }
+    return summary;
+  }, [
+    activeChatName,
+    approvalRequiredByChatNodeId,
+    busyChatNodeIdSet,
+    chats,
+    drone,
+    hasOnlyDefaultChat,
+    selectedDrone,
+    unreadAgentMessageByChatNodeId,
+  ]);
   const childDroneIds = (nodeTree.childIdsByParent[node.id] ?? [])
     .map((childNodeId) => nodeTree.nodesById[childNodeId])
     .filter((child): child is SidebarTreeDroneNode => Boolean(child && child.kind === 'drone'));
@@ -849,6 +881,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                 ? ((deleteOperationModeById[drone.id] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
                 : undefined
             }
+            chatStateSummary={hasOnlyDefaultChat ? undefined : chatStateSummary}
             unreadAgentMessage={showUnread}
             onClick={(rowOpts) => {
               if (shouldSuppressClick()) return;

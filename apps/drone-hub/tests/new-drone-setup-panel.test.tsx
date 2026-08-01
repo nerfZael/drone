@@ -48,7 +48,49 @@ const baseProps: React.ComponentProps<typeof NewDroneSetupPanel> = {
   controlsLocked: false,
 };
 
-describe('new drone setup AGENTS.md override', () => {
+describe('new drone setup panel', () => {
+  test('uses one branch picker with the current host branch selected', () => {
+    const html = renderToStaticMarkup(
+      <NewDroneSetupPanel
+        {...baseProps}
+        draftRepoRemoteBranches={[
+          {
+            name: 'origin/main',
+            remote: 'origin',
+            branch: 'main',
+            headSha: 'abc123',
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain('main');
+    expect(html).toContain('Host branch');
+    expect(html).not.toContain('role="group" aria-label="Branch target"');
+  });
+
+  test('shows the selected remote branch in the same picker', () => {
+    const html = renderToStaticMarkup(
+      <NewDroneSetupPanel
+        {...baseProps}
+        repoBranchSource="remote"
+        repoCreateRemoteBranch="origin/feature/picker"
+        draftRepoRemoteBranches={[
+          {
+            name: 'origin/feature/picker',
+            remote: 'origin',
+            branch: 'feature/picker',
+            headSha: null,
+          },
+        ]}
+      />,
+    );
+
+    expect(html).toContain('origin/feature/picker');
+    expect(html).toContain('Remote');
+    expect(html).not.toContain('Pull first');
+  });
+
   test('renders the override editor for repo-attached container drones', () => {
     const html = renderToStaticMarkup(<NewDroneSetupPanel {...baseProps} />);
 

@@ -64,6 +64,8 @@ describe('desktop sidebar drone presentation', () => {
     expect(sidebarItemStateToneClass('blocked', true)).toContain('--red');
     expect(sidebarItemStateToneClass('approval', false)).toContain('--yellow');
     expect(sidebarItemStateToneClass('starting', false)).toContain('--yellow');
+    expect(sidebarItemStateToneClass('archiving', false)).toContain('--info');
+    expect(sidebarItemStateToneClass('deleting', false)).toContain('--red');
   });
 
   test('puts the state indicator before a compact single-line title', () => {
@@ -82,6 +84,70 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).not.toContain('data-sidebar-runtime');
     expect(html).not.toContain('aria-label="container runtime"');
     expect(html).not.toContain('>container</span>');
+  });
+
+  test('keeps chat activity off a multi-chat drone parent row', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({
+          chats: ['default', 'research'],
+          busy: true,
+          busyChats: ['research'],
+          unreadChats: ['research'],
+        }),
+        selected: false,
+        busy: true,
+        approvalRequired: true,
+        unreadAgentMessage: true,
+        onClick: () => {},
+      }),
+    );
+
+    expect(html).toContain('· Ready · created');
+    expect(html).toContain('title="Ready" aria-label="Ready"');
+    expect(html).not.toContain('title="Working" aria-label="Working"');
+    expect(html).not.toContain('title="Unread" aria-label="Unread"');
+    expect(html).not.toContain('title="Approval required" aria-label="Approval required"');
+    expect(html).toContain('data-sidebar-chat-state-counts="true"');
+  });
+
+  test('renders aggregate chat status counts at the right of a drone row', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({ chats: ['default', 'research'] }),
+        selected: false,
+        chatStateSummary: { approval: 1, unread: 2, working: 1 },
+        onClick: () => {},
+      }),
+    );
+
+    expect(html).toContain('data-sidebar-chat-state-counts="true"');
+    expect(html).toContain('aria-label="1 awaiting approval"');
+    expect(html).toContain('aria-label="2 unread"');
+    expect(html).toContain('aria-label="1 working"');
+    expect(html.indexOf('>worker</span>')).toBeLessThan(
+      html.indexOf('data-sidebar-chat-state-counts="true"'),
+    );
+  });
+
+  test('derives multi-chat aggregate counts from the drone summary by default', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({
+          chats: ['default', 'research', 'review'],
+          approvalRequired: true,
+          approvalChats: ['review'],
+          unreadChats: ['default', 'research'],
+          busyChats: ['research', 'review'],
+        }),
+        selected: false,
+        onClick: () => {},
+      }),
+    );
+
+    expect(html).toContain('aria-label="1 awaiting approval"');
+    expect(html).toContain('aria-label="2 unread"');
+    expect(html).toContain('aria-label="1 working"');
   });
 
   test('shows a persistent to do label at the right of tagged drone rows', () => {
@@ -170,6 +236,28 @@ describe('desktop sidebar drone presentation', () => {
 
     expect(html).toContain('animate-[spin_1.6s_linear_infinite]');
     expect(html).toContain('text-[var(--yellow)]');
+  });
+
+  test('uses operation-specific progress indicators for archive and delete', () => {
+    const archiveHtml = renderToStaticMarkup(
+      createElement(SidebarItemStateIndicator, { state: 'archiving' }),
+    );
+    const deleteHtml = renderToStaticMarkup(
+      createElement(SidebarItemStateIndicator, { state: 'deleting' }),
+    );
+
+    expect(archiveHtml).toContain('data-sidebar-operation-indicator="archiving"');
+    expect(archiveHtml).toContain('text-[var(--info)]');
+    expect(archiveHtml).toContain('data-sidebar-operation-spinner="true"');
+    expect(archiveHtml).toContain('h-[6px] w-[6px]');
+    expect(archiveHtml).toContain('M6 1.25v5');
+    expect(deleteHtml).toContain('data-sidebar-operation-indicator="deleting"');
+    expect(deleteHtml).toContain('text-[var(--red)]');
+    expect(deleteHtml).toContain('data-sidebar-operation-spinner="true"');
+    expect(deleteHtml).toContain('h-[6px] w-[6px]');
+    expect(deleteHtml).toContain('M2.25 3.25h7.5');
+    expect(archiveHtml).toContain('M21 12a9 9 0 1 1-6.219-8.56');
+    expect(deleteHtml).toContain('M21 12a9 9 0 1 1-6.219-8.56');
   });
 
   test('keeps destructive drone actions out of the hover rail', () => {

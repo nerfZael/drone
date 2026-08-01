@@ -269,15 +269,22 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('droneList: { paddingBottom: 24 }');
   });
 
-  test('uses the working spinner for starting and operation states in the compact row', () => {
+  test('uses distinct progress indicators for archive and delete in the compact row', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
       'utf8',
     );
 
-    expect(source).toContain("state === 'starting' ||");
-    expect(source).toContain("state === 'archiving' ||");
-    expect(source).toContain("state === 'deleting';");
+    expect(source).toContain("const working = state === 'working' || state === 'starting';");
+    expect(source).toContain("state === 'archiving' ? (");
+    expect(source).toContain('<OperationStatusIndicator operation="archiving" />');
+    expect(source).toContain("state === 'deleting' ? (");
+    expect(source).toContain('<OperationStatusIndicator operation="deleting" />');
+    expect(source).toContain("operation === 'archiving' ? colors.info : colors.danger");
+    expect(source).toContain('<SidebarWorkingIcon color={colors.info} size={12} strokeWidth={2.4} />');
+    expect(source).toContain('height={6}');
+    expect(source).toContain('width={6}');
+    expect(source).toContain("operationStatusGlyph: { position: 'absolute' }");
     expect(source).toContain(') : working ? (');
     expect(source).not.toContain('<Text style={styles.switchItemState}>{stateLabel}</Text>');
   });
@@ -330,8 +337,11 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('const chats = orderedMobileDroneChats(');
     expect(source).toContain('sidebarChatOrderByDrone[drone.id]');
     expect(source).toContain('showChats && chats.length > 1 ? (');
+    expect(source).toContain('mobileDroneDisplayState(drone, !hasMultipleChats)');
+    expect(source).toContain('!isDraft && !hasMultipleChats');
+    expect(source).toContain('summarizeMobileDroneChats(drone, selected ? activeChatName : \'\')');
     expect(source).toContain(
-      'chats.length > 1 && drone.approvalRequired ? { ...drone, approvalRequired: false } : drone',
+      '<DroneStateCounts summary={chatStateSummary} compact entity="chat" />',
     );
     expect(source).toContain('{ marginLeft: drawerTreeRowPaddingLeft(depth) + 8 }');
     expect(source).toContain('selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}');
