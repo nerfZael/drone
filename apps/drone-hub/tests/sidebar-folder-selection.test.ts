@@ -38,4 +38,26 @@ describe('sidebar folder drone selection', () => {
       }),
     ).toEqual(['outside']);
   });
+
+  test('control click combines any number of folders with individually selected drones', () => {
+    const withFirstFolder = resolveSidebarFolderDroneSelection({
+      selectedDroneIds: ['outside'],
+      folderDroneIds: ['one', 'two'],
+      options: { selectDrones: true, toggle: true },
+    });
+    const withBothFolders = resolveSidebarFolderDroneSelection({
+      selectedDroneIds: withFirstFolder,
+      folderDroneIds: ['three', 'four'],
+      options: { selectDrones: true, toggle: true },
+    });
+
+    expect(withBothFolders).toEqual(['outside', 'one', 'two', 'three', 'four']);
+    expect(
+      resolveSidebarFolderDroneSelection({
+        selectedDroneIds: withBothFolders,
+        folderDroneIds: ['one', 'two'],
+        options: { selectDrones: true, toggle: true },
+      }),
+    ).toEqual(['outside', 'three', 'four']);
+  });
 });

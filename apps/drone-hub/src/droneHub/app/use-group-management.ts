@@ -68,7 +68,8 @@ export function useGroupManagement({
   setSelectedGroupMultiChat,
 }: UseGroupManagementArgs) {
   const [groupMoveError, setGroupMoveError] = React.useState<string | null>(null);
-  const [movingDroneGroups, setMovingDroneGroups] = React.useState(false);
+  const [pendingGroupMoveCount, setPendingGroupMoveCount] = React.useState(0);
+  const movingDroneGroups = pendingGroupMoveCount > 0;
   const [deletingGroups, setDeletingGroups] = React.useState<Record<string, boolean>>({});
   const [renamingGroups, setRenamingGroups] = React.useState<Record<string, boolean>>({});
   const confirmDelete = useAppConfirmDialog();
@@ -345,65 +346,70 @@ export function useGroupManagement({
       const requested = Array.from(new Set(rawDroneNames.map((n) => String(n ?? '').trim()).filter(Boolean)));
       if (requested.length === 0) return { ok: true, error: null } as MoveDronesToGroupResult;
 
-      const movable = requested.filter((name) => {
-        const d = byId.get(name);
-        if (!d) return false;
-        const currentRaw = String(d.group ?? '').trim();
-        const currentGroup = !currentRaw || isUngroupedGroupName(currentRaw) ? 'Ungrouped' : currentRaw;
-        return currentGroup !== target;
-      });
+      // The rendered drones may still reflect an earlier server snapshot while
+      // optimistic moves are pending. Always submit every known requested drone;
+      // filtering against that stale snapshot can incorrectly discard a quick
+      // follow-up move back to the original group.
+      const movable = requested.filter((id) => byId.has(id));
       if (movable.length === 0) return { ok: true, error: null } as MoveDronesToGroupResult;
 
       setGroupMoveError(null);
-      setMovingDroneGroups(true);
+      setPendingGroupMoveCount((count) => count + 1);
+      const runMove = async (): Promise<MoveDronesToGroupResult> => {
+        setGroupMoveError(null);
+        try {
+          const scopedGroupId = targetGroup && groupIdByName[targetGroup] &&
+            movable.every((id) => String(byId.get(id)?.repoPath ?? '').trim() === String(activeRepoPath ?? '').trim())
+            ? groupIdByName[targetGroup]
+            : null;
+          const resp = await requestJson<{
+            ok: true;
+            moved: Array<{ id: string; name: string; previousGroup: string | null; group: string | null }>;
+            rejected: Array<{ id: string; name: string; error: string }>;
+          }>(`/api/drones/group-set`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(
+              targetGroup && scopedGroupId
+                ? { droneIds: movable, groupId: scopedGroupId }
+                : { droneIds: movable, group: targetGroup },
+            ),
+          });
+          const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
+          if (rejected.length > 0) {
+            const msg = rejected
+              .slice(0, 3)
+              .map((r) => `${String(r?.name ?? r?.id ?? 'unknown')}: ${String(r?.error ?? 'failed')}`)
+              .join(', ');
+            const errorMessage =
+              rejected.length > 3
+                ? `Some drones could not be moved (${msg}, +${rejected.length - 3} more).`
+                : `Some drones could not be moved (${msg}).`;
+            setGroupMoveError(errorMessage);
+            return { ok: false, error: errorMessage } as MoveDronesToGroupResult;
+          }
+          return { ok: true, error: null } as MoveDronesToGroupResult;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          let errorMessage = String(msg ?? 'move failed');
+          if (isNotFoundError(e)) {
+            errorMessage = 'Hub API is missing group-move support. Restart the hub after rebuilding/updating `drone`.';
+            setGroupMoveError(errorMessage);
+          } else {
+            setGroupMoveError(errorMessage);
+          }
+          console.error('[DroneHub] move drones between groups failed', {
+            targetGroup: targetGroup ?? null,
+            drones: movable,
+            error: e,
+          });
+          return { ok: false, error: errorMessage } as MoveDronesToGroupResult;
+        }
+      };
       try {
-        const scopedGroupId = targetGroup && groupIdByName[targetGroup] &&
-          movable.every((id) => String(byId.get(id)?.repoPath ?? '').trim() === String(activeRepoPath ?? '').trim())
-          ? groupIdByName[targetGroup]
-          : null;
-        const resp = await requestJson<{
-          ok: true;
-          moved: Array<{ id: string; name: string; previousGroup: string | null; group: string | null }>;
-          rejected: Array<{ id: string; name: string; error: string }>;
-        }>(`/api/drones/group-set`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(
-            targetGroup && scopedGroupId
-              ? { droneIds: movable, groupId: scopedGroupId }
-              : { droneIds: movable, group: targetGroup },
-          ),
-        });
-        const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
-        if (rejected.length > 0) {
-          const msg = rejected
-            .slice(0, 3)
-            .map((r) => `${String(r?.name ?? r?.id ?? 'unknown')}: ${String(r?.error ?? 'failed')}`)
-            .join(', ');
-          setGroupMoveError(
-            rejected.length > 3
-              ? `Some drones could not be moved (${msg}, +${rejected.length - 3} more).`
-              : `Some drones could not be moved (${msg}).`,
-          );
-        }
-        return { ok: true, error: null } as MoveDronesToGroupResult;
-      } catch (e: any) {
-        const msg = e?.message ?? String(e);
-        let errorMessage = String(msg ?? 'move failed');
-        if (isNotFoundError(e)) {
-          errorMessage = 'Hub API is missing group-move support. Restart the hub after rebuilding/updating `drone`.';
-          setGroupMoveError(errorMessage);
-        } else {
-          setGroupMoveError(errorMessage);
-        }
-        console.error('[DroneHub] move drones between groups failed', {
-          targetGroup: targetGroup ?? null,
-          drones: movable,
-          error: e,
-        });
-        return { ok: false, error: errorMessage } as MoveDronesToGroupResult;
+        return await runMove();
       } finally {
-        setMovingDroneGroups(false);
+        setPendingGroupMoveCount((count) => Math.max(0, count - 1));
       }
     },
     [activeRepoPath, drones, groupIdByName],

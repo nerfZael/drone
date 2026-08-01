@@ -1,5 +1,5 @@
 import React from 'react';
-import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
+import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent, type DragStartEvent } from '@dnd-kit/core';
 import { isUngroupedGroupName } from '../../domain';
 import {
   DroneCard,
@@ -185,7 +185,7 @@ type GroupedSidebarTreeProps = {
   onSetDronePinned: (droneId: string, pinned: boolean) => Promise<void>;
   onDeleteDrone: (droneId: string) => void;
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
-  onPrepareDroneDragStart: (droneId: string) => void;
+  onPrepareDroneDragStart: (droneId: string, draggedDroneIds?: readonly string[]) => void;
   onReparentDronesToParent: (
     parentDroneId: string | null,
     droneIds: string[],
@@ -460,7 +460,6 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
   const {
     sidebarDensityMode,
     uiDroneName,
-    movingDroneGroups,
     sidebarDndEnabled,
     busyChatNodeIdSet,
     unreadAgentMessageByChatNodeId,
@@ -492,7 +491,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     () => createSidebarChatDragData(drone.id, chatName, `${uiDroneName(drone.name)} / ${chatName}`),
     [chatName, drone.id, drone.name, uiDroneName],
   );
-  const chatDndDisabled = !sidebarDndEnabled || !chatDragData || movingDroneGroups || isOptimistic;
+  const chatDndDisabled = !sidebarDndEnabled || !chatDragData || isOptimistic;
   const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
     id: `sidebar-grouped-chat:${drone.id}:${chatName}`,
     data: chatDragData ?? undefined,
@@ -567,7 +566,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
             setSelectedSidebarNodeId(sidebarChatId);
             onSelectDroneChat(drone.id, chatName);
           }}
-          className={`relative flex flex-1 items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })} ${isDragging ? 'opacity-35' : ''} ${!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${actionsEnabled && chatName !== 'default' ? 'group-hover/chat-row:pr-14 group-focus-within/chat-row:pr-14' : ''}`}
+          className={`relative flex flex-1 items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })} ${isDragging ? 'opacity-35' : ''} ${!sidebarDndEnabled || !chatDragData || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${actionsEnabled && chatName !== 'default' ? 'group-hover/chat-row:pr-14 group-focus-within/chat-row:pr-14' : ''}`}
           aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
           aria-current={active ? 'page' : undefined}
         >
@@ -741,7 +740,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const drone = droneById[node.droneId];
   if (!drone) return null;
   const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
-  const dragDisabled = !sidebarDndEnabled || movingDroneGroups || isOptimistic;
+  const dragDisabled = !sidebarDndEnabled || isOptimistic;
   const dragData = React.useMemo(
     () =>
       groupedDroneDragData({
@@ -796,7 +795,10 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const childDroneIds = (nodeTree.childIdsByParent[node.id] ?? [])
     .map((childNodeId) => nodeTree.nodesById[childNodeId])
     .filter((child): child is SidebarTreeDroneNode => Boolean(child && child.kind === 'drone'));
-  const selected = selectedDroneSet.has(drone.id) || selectedSidebarNodeId === node.id;
+  // The focused tree node is tracked separately for keyboard actions. Selection
+  // styling must follow the actual multi-selection so Ctrl/Cmd-click can visibly
+  // deselect a drone without the focus marker making it look selected.
+  const selected = selectedDroneSet.has(drone.id);
   const showOpenDefaultChatIndicator =
     hasOnlyDefaultChat && selectedDrone === drone.id && activeChatName === 'default';
   const hasActiveChildChat = selectedDrone === drone.id && !hasOnlyDefaultChat;
@@ -1843,9 +1845,9 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     () =>
       props.sidebarDndEnabled
         ? {
-            onDragStart: (event: DragEndEvent) => {
+            onDragStart: (event: DragStartEvent) => {
               const active = parseDroneHubDragData(event.active.data.current);
-              if (active?.type === 'sidebar-drone') onPrepareDroneDragStart(active.droneId);
+              if (active?.type === 'sidebar-drone') onPrepareDroneDragStart(active.droneId, active.droneIds);
             },
             onDragMove: updateTreeDragState,
             onDragOver: updateTreeDragState,

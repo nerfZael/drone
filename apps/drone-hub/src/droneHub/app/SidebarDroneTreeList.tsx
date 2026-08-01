@@ -96,7 +96,7 @@ export type SidebarDroneTreeListProps = {
   onSetDroneBaseImage: (droneId: string) => void;
   onDeleteDrone: (droneId: string) => void;
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
-  onPrepareDroneDragStart: (droneId: string) => void;
+  onPrepareDroneDragStart: (droneId: string, draggedDroneIds?: readonly string[]) => void;
   onReparentDronesToParent: (
     parentDroneId: string | null,
     droneIds: string[],
@@ -282,7 +282,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
 }: SidebarDroneRowProps) {
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
-  const dragDisabled = !sidebarDndEnabled || movingDroneGroups || isOptimistic;
+  const dragDisabled = !sidebarDndEnabled || isOptimistic;
   const selectedDragDroneIds = React.useMemo(
     () => {
       if (!selectedDroneSet.has(drone.id) || selectedDroneIds.length === 0) return [drone.id];
@@ -429,7 +429,6 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
   busy,
   deleting,
   canDelete,
-  movingDroneGroups,
   sidebarDndEnabled,
   isOptimistic,
   dragOverPlacement,
@@ -462,7 +461,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
     () => createSidebarChatDragData(drone.id, chatName, `${uiDroneName(drone.name)} / ${chatName}`),
     [chatName, drone.id, drone.name, uiDroneName],
   );
-  const chatDndDisabled = editing || !sidebarDndEnabled || !chatDragData || movingDroneGroups || isOptimistic;
+  const chatDndDisabled = editing || !sidebarDndEnabled || !chatDragData || isOptimistic;
   const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
     id: `sidebar-chat:${chatKey}`,
     data: chatDragData ?? undefined,
@@ -518,7 +517,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
           event.stopPropagation();
           onSelectDroneChat(drone.id, chatName);
         }}
-        className={`relative flex-1 rounded border text-left transition-colors flex items-center gap-1.5 min-w-0 ${densityClasses.chatRow} ${sidebarChatRowTone({ selected })} ${!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${actionsEnabled && (canRename || canDelete) ? 'group-hover/chat-row:pr-14 group-focus-within/chat-row:pr-14' : ''} ${
+        className={`relative flex-1 rounded border text-left transition-colors flex items-center gap-1.5 min-w-0 ${densityClasses.chatRow} ${sidebarChatRowTone({ selected })} ${!sidebarDndEnabled || !chatDragData || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${actionsEnabled && (canRename || canDelete) ? 'group-hover/chat-row:pr-14 group-focus-within/chat-row:pr-14' : ''} ${
           isDragging ? 'opacity-35' : ''
         }`}
         aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
@@ -1161,7 +1160,7 @@ export function SidebarDroneTreeList({
     onDragStart: (event) => {
       const active = parseDroneHubDragData(event.active.data.current);
       if (active?.type === 'sidebar-drone' && visibleDroneOrder.includes(active.droneId)) {
-        onPrepareDroneDragStart(active.droneId);
+        onPrepareDroneDragStart(active.droneId, active.droneIds);
       }
     },
     onDragMove: updateDragOverState,

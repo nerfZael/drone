@@ -352,10 +352,12 @@ export function useDroneMutationActions({
       if (parentDroneId && !parentDrone) {
         return { ok: false, error: `unknown drone: ${parentDroneId}`, reparentedIds: [] };
       }
-      const requestedDroneIds = dedupedDroneIds.filter((droneId) => {
-        const drone = currentDrones.find((item) => item.id === droneId) ?? null;
-        return (String(drone?.fleetParentId ?? '').trim() || null) !== parentDroneId;
-      });
+      // Polling can still expose the pre-move parent while a queued follow-up
+      // drag is starting. Submit every known drone so a quick move back to its
+      // apparent original parent is not incorrectly treated as a no-op.
+      const requestedDroneIds = dedupedDroneIds.filter((droneId) =>
+        currentDrones.some((drone) => drone.id === droneId),
+      );
       if (requestedDroneIds.length === 0) {
         return { ok: true, error: null, reparentedIds: [] };
       }
@@ -385,12 +387,9 @@ export function useDroneMutationActions({
 
       const targetGroupRaw = String(parentDrone?.group ?? '').trim();
       const targetGroup = targetGroupRaw || null;
-      const droneIdsNeedingGroupMove = parentDrone
-        ? reparentedIds.filter((droneId) => {
-            const drone = currentDrones.find((item) => item.id === droneId) ?? null;
-            return String(drone?.group ?? '').trim() !== String(targetGroup ?? '').trim();
-          })
-        : [];
+      // The same stale-snapshot rule applies to inherited group membership.
+      // Reassert the target parent's group after every successful reparent.
+      const droneIdsNeedingGroupMove = parentDrone ? reparentedIds : [];
       if (droneIdsNeedingGroupMove.length > 0) {
         try {
           const response = await requestJson<{

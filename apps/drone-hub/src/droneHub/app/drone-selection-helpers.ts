@@ -11,6 +11,13 @@ function uniqueOrderedDroneIds(ids: string[]): string[] {
   return Array.from(new Set(ids.map((item) => String(item ?? '').trim()).filter(Boolean)));
 }
 
+export function retainValidSelectedDroneIds(
+  selectedDroneIds: readonly string[],
+  validDroneIds: ReadonlySet<string>,
+): string[] {
+  return uniqueOrderedDroneIds([...selectedDroneIds]).filter((id) => validDroneIds.has(id));
+}
+
 export function resolveSelectedChatForDrone(args: {
   droneId: string;
   droneById?: Record<string, DroneSummary>;

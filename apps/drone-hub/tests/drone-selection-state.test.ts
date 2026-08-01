@@ -3,6 +3,7 @@ import {
   resolveDroneDeleteTargetIds,
   resolveDroneCardSelection,
   resolveSelectedChatForDrone,
+  retainValidSelectedDroneIds,
   shouldKeepPendingSelectedChat,
 } from '../src/droneHub/app/drone-selection-helpers';
 import type { DroneSummary } from '../src/droneHub/types';
@@ -222,6 +223,20 @@ describe('resolveDroneCardSelection', () => {
       activeDroneId: 'alpha',
       selectionAnchor: 'delta',
     });
+  });
+});
+
+describe('retainValidSelectedDroneIds', () => {
+  test('keeps a modifier-deselected drone absent from a still-valid selection', () => {
+    expect(
+      retainValidSelectedDroneIds(['alpha', 'charlie'], new Set(['alpha', 'bravo', 'charlie'])),
+    ).toEqual(['alpha', 'charlie']);
+  });
+
+  test('removes unavailable ids and duplicate selection entries', () => {
+    expect(
+      retainValidSelectedDroneIds(['alpha', 'missing', 'alpha'], new Set(['alpha', 'bravo'])),
+    ).toEqual(['alpha']);
   });
 });
 

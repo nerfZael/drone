@@ -24,6 +24,7 @@ import {
   type SidebarOptimisticOp,
 } from './sidebar-optimistic-ops';
 import { isUngroupedGroupName } from '../../domain';
+import { createSidebarDroneMutationQueue } from './sidebar-drone-mutation-queue';
 
 type CreateGroupResult = {
   ok: boolean;
@@ -88,6 +89,10 @@ export function useSidebarOptimisticGroups({
 }: UseSidebarOptimisticGroupsArgs) {
   const [pendingSidebarOps, setPendingSidebarOps] = React.useState<SidebarOptimisticOp[]>([]);
   const optimisticSidebarOpIdRef = React.useRef(0);
+  const droneMutationQueueRef = React.useRef<ReturnType<typeof createSidebarDroneMutationQueue> | null>(null);
+  if (!droneMutationQueueRef.current) {
+    droneMutationQueueRef.current = createSidebarDroneMutationQueue();
+  }
 
   const createOptimisticSidebarOpId = React.useCallback(() => {
     optimisticSidebarOpIdRef.current += 1;
@@ -216,7 +221,10 @@ export function useSidebarOptimisticGroups({
           targetGroup: isUngroupedGroupName(targetGroup) ? null : targetGroup,
         },
       ]);
-      const result = await onMoveDronesToGroup(groupRaw, droneIds);
+      const result = await droneMutationQueueRef.current!.enqueue(
+        droneIds,
+        () => onMoveDronesToGroup(groupRaw, droneIds),
+      );
       if (!result.ok) {
         setPendingSidebarOps((prev) => prev.filter((op) => op.id !== opId));
       }
@@ -259,7 +267,10 @@ export function useSidebarOptimisticGroups({
         },
       ]);
 
-      const result = await onReparentDronesToParent(targetParentDroneId, droneIds);
+      const result = await droneMutationQueueRef.current!.enqueue(
+        droneIds,
+        () => onReparentDronesToParent(targetParentDroneId, droneIds),
+      );
       if (!result.ok) {
         rollbackOptimistic();
       }
@@ -285,7 +296,10 @@ export function useSidebarOptimisticGroups({
         { id: createOpId, kind: 'create_group', group },
         { id: moveOpId, kind: 'move_drones', droneIds, targetGroup: isUngroupedGroupName(group) ? null : group },
       ]);
-      const result = await onCreateGroupAndMove(group, droneIds);
+      const result = await droneMutationQueueRef.current!.enqueue(
+        droneIds,
+        () => onCreateGroupAndMove(group, droneIds),
+      );
       if (!result.ok) {
         setPendingSidebarOps((prev) => prev.filter((op) => op.id !== createOpId && op.id !== moveOpId));
         if (!result.groupCreated) {

@@ -3,6 +3,7 @@ import {
   assignedDroneIdsFromData,
   resolveAssignedDroneIdsFromTransfer,
 } from '../src/droneHub/app/drone-hub-dnd-utils';
+import { resolveSidebarDroneDragIds } from '../src/droneHub/app/drone-hub-dnd';
 import { DRONE_CHAT_DND_MIME, DRONE_DND_MIME, createCanvasChatNodeId } from '../src/droneHub/app/app-config';
 
 describe('drone hub assignment drag helpers', () => {
@@ -43,5 +44,37 @@ describe('drone hub assignment drag helpers', () => {
     };
 
     expect(resolveAssignedDroneIdsFromTransfer(transfer)).toEqual(['alpha', 'bravo', 'charlie', 'delta']);
+  });
+});
+
+describe('sidebar drone drag selection', () => {
+  test('plain dragging an unselected drone replaces the existing selection', () => {
+    expect(
+      resolveSidebarDroneDragIds({
+        draggedDroneId: 'charlie',
+        selectedDroneIds: ['alpha', 'bravo'],
+        additive: false,
+      }),
+    ).toEqual(['charlie']);
+  });
+
+  test('dragging an already-selected drone keeps the selected set together', () => {
+    expect(
+      resolveSidebarDroneDragIds({
+        draggedDroneId: 'bravo',
+        selectedDroneIds: ['alpha', 'bravo'],
+        additive: false,
+      }),
+    ).toEqual(['alpha', 'bravo']);
+  });
+
+  test('modifier-dragging an unselected drone adds it to the dragged set', () => {
+    expect(
+      resolveSidebarDroneDragIds({
+        draggedDroneId: 'charlie',
+        selectedDroneIds: ['alpha', 'bravo'],
+        additive: true,
+      }),
+    ).toEqual(['alpha', 'bravo', 'charlie']);
   });
 });

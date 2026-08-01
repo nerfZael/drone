@@ -14,6 +14,7 @@ import type { SidebarGroupOrderKind } from './sidebar-group-order';
 import { expandDroneIdsToChatNodeIds, orderChatNodeIdsBySidebar } from '../canvas/chat-node-utils';
 import { DroneCard } from '../overview';
 import { IconFolder } from './icons';
+import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 export type SidebarFolderDragData = {
   type: 'sidebar-folder';
@@ -65,6 +66,25 @@ export type DroneHubDragData =
   | SidebarDroneDragData
   | SidebarPinnedDroneDragData
   | SidebarChatDragData;
+
+export function resolveSidebarDroneDragIds(args: {
+  draggedDroneId: string;
+  selectedDroneIds: readonly string[];
+  additive: boolean;
+}): string[] {
+  const draggedDroneId = String(args.draggedDroneId ?? '').trim();
+  if (!draggedDroneId) return [];
+  const selectedDroneIds = Array.from(
+    new Set(args.selectedDroneIds.map((id) => String(id ?? '').trim()).filter(Boolean)),
+  );
+  if (selectedDroneIds.includes(draggedDroneId)) return selectedDroneIds;
+  return args.additive ? [...selectedDroneIds, draggedDroneId] : [draggedDroneId];
+}
+
+function dragActivatorUsesAdditiveSelection(event: Event): boolean {
+  const modifiers = event as Event & { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean };
+  return Boolean(modifiers.ctrlKey || modifiers.metaKey || modifiers.shiftKey);
+}
 
 const DroneHubActiveDragContext = React.createContext<DroneHubDragData | null>(null);
 
@@ -250,19 +270,61 @@ export function DroneHubDndProvider({ children, enabled = true }: { children: Re
   );
   const sensors = enabled ? pointerSensors : [];
   const [activeDrag, setActiveDrag] = React.useState<DroneHubDragData | null>(null);
+  const suppressClicksUntilRef = React.useRef(0);
 
   const clearActiveDrag = React.useCallback(() => {
     setActiveDrag(null);
   }, []);
 
   const onDragStart = React.useCallback((event: DragStartEvent) => {
-    if (enabled) setActiveDrag(parseDroneHubDragData(event.active.data.current));
+    if (!enabled) return;
+    let dragData = parseDroneHubDragData(event.active.data.current);
+    if (dragData?.type === 'sidebar-drone') {
+      const selectedDroneIds = useDroneHubUiStore.getState().selectedDroneIds;
+      const draggedWasSelected = selectedDroneIds.includes(dragData.droneId);
+      const resolvedDroneIds = resolveSidebarDroneDragIds({
+        draggedDroneId: dragData.droneId,
+        selectedDroneIds,
+        additive: dragActivatorUsesAdditiveSelection(event.activatorEvent),
+      });
+      const resolvedDroneIdSet = new Set(resolvedDroneIds);
+      const initialDroneIds = dragData.droneIds;
+      const orderedResolvedDroneIds = draggedWasSelected
+        ? [
+            ...initialDroneIds.filter((id) => resolvedDroneIdSet.has(id)),
+            ...resolvedDroneIds.filter((id) => !initialDroneIds.includes(id)),
+          ]
+        : resolvedDroneIds;
+      dragData = {
+        ...dragData,
+        droneIds: orderedResolvedDroneIds,
+      };
+      // DndContext invokes this callback before useDndMonitor subscribers, so
+      // update the shared data ref to give every drop handler the resolved set.
+      event.active.data.current = dragData;
+    }
+    setActiveDrag(dragData);
   }, [enabled]);
+
+  const finishDrag = React.useCallback(() => {
+    suppressClicksUntilRef.current = Date.now() + 180;
+    clearActiveDrag();
+  }, [clearActiveDrag]);
 
   const onDragEnd = React.useCallback((event: DragEndEvent) => {
     void event;
-    clearActiveDrag();
-  }, [clearActiveDrag]);
+    finishDrag();
+  }, [finishDrag]);
+
+  React.useEffect(() => {
+    const suppressPostDragClick = (event: MouseEvent) => {
+      if (Date.now() >= suppressClicksUntilRef.current) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener('click', suppressPostDragClick, true);
+    return () => window.removeEventListener('click', suppressPostDragClick, true);
+  }, []);
 
   React.useEffect(() => {
     if (!activeDrag) return;
@@ -283,7 +345,7 @@ export function DroneHubDndProvider({ children, enabled = true }: { children: Re
       sensors={sensors}
       collisionDetection={pointerWithin}
       onDragStart={enabled ? onDragStart : undefined}
-      onDragCancel={clearActiveDrag}
+      onDragCancel={finishDrag}
       onDragEnd={onDragEnd}
     >
       <DroneHubActiveDragContext.Provider value={activeDrag}>

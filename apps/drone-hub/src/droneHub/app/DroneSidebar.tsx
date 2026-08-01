@@ -1421,7 +1421,7 @@ export type DroneSidebarProps = {
     count: number,
     opts?: { kind?: 'group' | 'repo'; label?: string; repoPath?: string | null },
   ) => Promise<boolean> | boolean;
-  onPrepareDroneDragStart: (droneId: string) => void;
+  onPrepareDroneDragStart: (droneId: string, draggedDroneIds?: readonly string[]) => void;
   onOpenReposModal: () => void;
   onSetDroneSelectionFromFolder: (
     droneIds: readonly string[],
@@ -1947,6 +1947,14 @@ export function DroneSidebar({
       staticReadOnlyNodeTree,
     ],
   );
+  const handleGroupedPrepareDroneDragStart = React.useCallback(
+    (droneId: string, draggedDroneIds?: readonly string[]) => {
+      clearGroupedFolderSelection();
+      setSelectedSidebarNodeId(sidebarDroneNodeId(droneId));
+      onPrepareDroneDragStart(droneId, draggedDroneIds);
+    },
+    [clearGroupedFolderSelection, onPrepareDroneDragStart, setSelectedSidebarNodeId],
+  );
   const {
     activeDraggedDroneIds,
     dragOverGroup,
@@ -2197,8 +2205,7 @@ export function DroneSidebar({
   const pinnedDroneReorderEnabled =
     sidebarDndEnabled &&
     globalPinnedDroneIds.length > 1 &&
-    pinningDroneIds.size === 0 &&
-    !movingDroneGroups;
+    pinningDroneIds.size === 0;
   const pinnedDroneDropTarget = usePinnedDroneReorder({
     enabled: pinnedDroneReorderEnabled,
     visibleDroneIds: globalPinnedDroneIds,
@@ -2515,6 +2522,7 @@ export function DroneSidebar({
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (isEditableTarget(event.target)) return;
 
       if (
@@ -3396,7 +3404,7 @@ export function DroneSidebar({
                       onSetDronePinned={setPinned}
                       onDeleteDrone={onDeleteDrone}
                       onOpenDroneErrorModal={onOpenDroneErrorModal}
-                      onPrepareDroneDragStart={onPrepareDroneDragStart}
+                      onPrepareDroneDragStart={handleGroupedPrepareDroneDragStart}
                       onReparentDronesToParent={runOptimisticReparentDronesToParent}
                       actionsEnabled={sidebarCapabilities.actions}
                     />

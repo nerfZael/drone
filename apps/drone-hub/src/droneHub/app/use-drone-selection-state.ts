@@ -6,6 +6,7 @@ import { normalizedDroneChats } from './chat-node-helpers';
 import {
   resolveDroneCardSelection,
   resolveSelectedChatForDrone,
+  retainValidSelectedDroneIds,
   shouldKeepPendingSelectedChat,
   type DroneSelectionClickOptions,
 } from './drone-selection-helpers';
@@ -252,10 +253,10 @@ export function useDroneSelectionState({
       if (isWorkflowChildDrone(drone)) valid.add(drone.id);
     }
     setSelectedDroneIds((prev) => {
-      const next = prev.filter((id) => valid.has(id));
-      if (selectedDrone && valid.has(selectedDrone) && !next.includes(selectedDrone)) {
-        next.push(selectedDrone);
-      }
+      // Selection actions update the active drone and the selected-id list through
+      // separate store setters. Do not re-add the (possibly stale) active drone
+      // here: doing so can undo a modifier-click deselection.
+      const next = retainValidSelectedDroneIds(prev, valid);
       if (next.length === prev.length && next.every((id, idx) => id === prev[idx])) return prev;
       return next;
     });

@@ -1495,18 +1495,31 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   const resetGroupDndState = React.useCallback(() => {}, []);
   const prepareSidebarDroneDragStart = React.useCallback(
-    (droneIdRaw: string) => {
-      if (movingDroneGroups) return;
+    (droneIdRaw: string, draggedDroneIdsRaw?: readonly string[]) => {
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return;
       setGroupMoveError(null);
-      if (!selectedDroneSet.has(droneId)) {
-        setSelectedDroneIds([droneId]);
+      if (!draggedDroneIdsRaw) {
+        if (!selectedDroneSet.has(droneId)) {
+          setSelectedDroneIds([droneId]);
+          selectionAnchorRef.current = droneId;
+        }
+        return;
+      }
+      const draggedDroneIds = Array.from(
+        new Set(draggedDroneIdsRaw.map((id) => String(id ?? '').trim()).filter(Boolean)),
+      );
+      setSelectedDroneIds((current) =>
+        current.length === draggedDroneIds.length &&
+        current.every((id, index) => id === draggedDroneIds[index])
+          ? current
+          : draggedDroneIds,
+      );
+      if (!selectedDroneSet.has(droneId) || draggedDroneIds.length === 1) {
         selectionAnchorRef.current = droneId;
       }
     },
     [
-      movingDroneGroups,
       selectedDroneSet,
       selectionAnchorRef,
       setGroupMoveError,

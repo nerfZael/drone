@@ -62,7 +62,7 @@ export function usePinnedDroneReorder({
   enabled: boolean;
   visibleDroneIds: string[];
   setPinnedDroneIds: React.Dispatch<React.SetStateAction<string[]>>;
-  onPrepareDroneDragStart: (droneId: string) => void;
+  onPrepareDroneDragStart: (droneId: string, draggedDroneIds?: readonly string[]) => void;
 }): PinnedDroneDropTarget | null {
   const [dropTarget, setDropTarget] = React.useState<PinnedDroneDropTarget | null>(null);
 
