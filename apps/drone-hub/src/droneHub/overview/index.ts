@@ -9,6 +9,7 @@ export {
   SidebarItemStateIndicator,
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
+  sidebarDroneDisplayState,
   sidebarDroneStateLabel,
   sidebarItemStateToneClass,
 } from './DroneCard';

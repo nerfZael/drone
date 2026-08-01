@@ -7,6 +7,7 @@ import {
   SidebarItemStateIndicator,
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
+  sidebarDroneDisplayState,
   sidebarDroneStateLabel,
   type DroneInlineRenameResult,
 } from '../overview';
@@ -298,6 +299,7 @@ function SidebarGroupStateCount({
 }
 
 function SidebarGroupStateCounts({ summary }: { summary: SidebarGroupStateSummary }) {
+  if (summary.approval <= 0 && summary.unread <= 0 && summary.working <= 0) return null;
   return (
     <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem] leading-none">
       {summary.approval > 0 ? (
@@ -1222,13 +1224,16 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           drone.hubPhase === 'starting' ||
           drone.hubPhase === 'seeding' ||
           Boolean(deletingDrones[drone.id]));
+      const inactiveDisplayState = sidebarDroneDisplayState(drone, false, '', false, false);
       const unread =
-        (drone.unreadChats?.length ?? 0) > 0 ||
-        chats.some((chatName) =>
-          Boolean(
-            unreadAgentMessageByChatNodeId[createCanvasChatNodeId(drone.id, chatName)],
-          ),
-        );
+        inactiveDisplayState !== 'blocked' &&
+        inactiveDisplayState !== 'offline' &&
+        ((drone.unreadChats?.length ?? 0) > 0 ||
+          chats.some((chatName) =>
+            Boolean(
+              unreadAgentMessageByChatNodeId[createCanvasChatNodeId(drone.id, chatName)],
+            ),
+          ));
       if (approval) summary.approval += 1;
       if (unread) summary.unread += 1;
       if (working) summary.working += 1;
@@ -1398,7 +1403,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           <TreeDropGuide placement={dragOverTreeTarget.placement} />
         ) : null}
         <div
-          className={`dh-sidebar-row-interactive group/folder-row relative flex items-center gap-1 rounded-[var(--sidebar-row-radius)] pr-1 transition-colors ${densityClasses.folderRow} ${
+          className={`dh-sidebar-row-interactive group/folder-row relative flex items-center gap-1 rounded-[var(--sidebar-row-radius)] pr-0.5 transition-colors ${densityClasses.folderRow} ${
             showEditorInline
               ? 'border border-transparent'
               : intoState
@@ -1474,7 +1479,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`} title={folderPath}>
                   {node.label}
                 </span>
-                <SidebarGroupStateCounts summary={stateSummary} />
+                {collapsed ? <SidebarGroupStateCounts summary={stateSummary} /> : null}
               </div>
             </button>
           )}

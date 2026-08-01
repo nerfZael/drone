@@ -103,6 +103,29 @@ export function SidebarFolderGitIcon({ color, size, strokeWidth = 1.9, style }: 
   );
 }
 
+export function SidebarFolderOutlineIcon({
+  color,
+  size,
+  strokeWidth = 1.35,
+  style,
+}: SidebarIconProps) {
+  return (
+    <Svg
+      height={size}
+      width={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <Path d="M2.25 2.5h2.6c.44 0 .84.21 1.08.58l.78 1.17h7.04c.69 0 1.25.56 1.25 1.25v6.75c0 .69-.56 1.25-1.25 1.25H2.25c-.69 0-1.25-.56-1.25-1.25v-8.5c0-.69.56-1.25 1.25-1.25Z" />
+    </Svg>
+  );
+}
+
 export function SidebarPinIcon({ color, size, style }: SidebarIconProps) {
   return (
     <Svg height={size} width={size} viewBox="0 0 16 16" fill="none" style={style}>

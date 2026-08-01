@@ -84,9 +84,16 @@ export function addMobileDroneToStateSummary(
   drone: MobileDroneSummary,
 ): void {
   const state = mobileDroneDisplayState(drone);
+  const inactiveState = mobileDroneDisplayState(drone, false);
   if (state === 'approval') summary.approval += 1;
   if (state === 'working' || state === 'starting') summary.working += 1;
-  if ((drone.unreadChats?.length ?? 0) > 0) summary.unread += 1;
+  if (
+    inactiveState !== 'blocked' &&
+    inactiveState !== 'offline' &&
+    (drone.unreadChats?.length ?? 0) > 0
+  ) {
+    summary.unread += 1;
+  }
 }
 
 export function summarizeMobileDrones(

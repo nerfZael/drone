@@ -1,6 +1,6 @@
 import React from 'react';
 import { dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
-import { IconChevronDown, IconNetwork } from './icons';
+import { IconChevronDown } from './icons';
 import { desktopDeviceRouteAvailable, useDesktopDevice } from './DesktopDeviceProvider';
 import { DeviceConnectionIndicator } from './DeviceConnectionIndicator';
 
@@ -118,13 +118,12 @@ export function DesktopDevicePicker({
               <button
                 type="button"
                 role="menuitem"
-                className="flex min-h-9 w-full items-center gap-2 rounded-[var(--radius-medium)] px-2 text-left dh-type-control-compact text-[var(--sidebar-fg)] transition-colors hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
+                className="flex min-h-9 w-full items-center rounded-[var(--radius-medium)] px-2.5 text-left dh-type-control-compact text-[var(--sidebar-fg)] transition-colors hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
                 onClick={() => {
                   setOpen(false);
                   onOpenDeviceSettings();
                 }}
               >
-                <IconNetwork className="h-3.5 w-3.5 flex-shrink-0 text-[var(--sidebar-action-fg)]" />
                 <span>Manage devices</span>
               </button>
             </div>

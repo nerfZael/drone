@@ -26,7 +26,6 @@ import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext
 import { MobileChatVoiceRecorderProvider } from '../local-assistant/MobileChatVoiceRecorderContext';
 import {
   AppDrawerProvider,
-  AppDrawer,
   type AppDrawerNavigationItem,
   type DrawerDevicePickerItem,
 } from '../local-assistant/AppDrawer';
@@ -266,6 +265,7 @@ function Shell() {
         } as const
       )[tab];
   const hasContextHeader = Boolean(!pairingVisible && tab === 'drones' && dronesHeader);
+  const hasBackNavigation = Boolean(hasContextHeader && dronesHeader?.backNavigation);
   const headerMenuActions: HeaderMenuAction[] = !pairingVisible
     ? tab === 'drones' && dronesHeader
       ? [
@@ -361,7 +361,7 @@ function Shell() {
         ]
       : []
     : [];
-  const content = pairingVisible ? (
+  const pairingContent = pairingVisible ? (
     <ScrollView keyboardShouldPersistTaps="handled">
       {mesh.profile ? (
         <View style={styles.pairBack}>
@@ -378,50 +378,67 @@ function Shell() {
         }}
       />
     </ScrollView>
-  ) : tab === 'settings' ? (
-    <SettingsScreen tab={settingsTab} onTabChange={setSettingsTab} onPair={openPairing} />
-  ) : tab === 'drones' ? (
-    <DronesScreen
-      drawerOpen={appDrawerOpen}
-      navigationItems={navigationItems}
-      onDrawerOpenChange={setAppDrawerOpen}
-      onHeaderChange={handleDronesHeaderChange}
-      selectedDeviceId={activeDeviceId}
-      devicePickerItems={devicePickerItems}
-      onDeviceChange={selectDevice}
-    />
-  ) : (
-    <DevicesScreen />
+  ) : null;
+  const content = (
+    <>
+      {mesh.profile ? (
+        <View
+          pointerEvents={!pairingVisible && tab === 'drones' ? 'auto' : 'none'}
+          style={[
+            styles.tabContent,
+            (pairingVisible || tab !== 'drones') && styles.tabContentHidden,
+          ]}
+        >
+          <DronesScreen
+            drawerOpen={appDrawerOpen}
+            navigationItems={navigationItems}
+            onDrawerOpenChange={setAppDrawerOpen}
+            onHeaderChange={handleDronesHeaderChange}
+            selectedDeviceId={activeDeviceId}
+            devicePickerItems={devicePickerItems}
+            onDeviceChange={selectDevice}
+          />
+        </View>
+      ) : null}
+      {pairingContent}
+      {!pairingVisible && tab === 'settings' ? (
+        <SettingsScreen tab={settingsTab} onTabChange={setSettingsTab} onPair={openPairing} />
+      ) : null}
+      {!pairingVisible && tab === 'devices' ? <DevicesScreen /> : null}
+    </>
   );
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'right', 'bottom', 'left']}>
-      {mesh.profile && (tab !== 'drones' || pairingVisible) ? (
-        <AppDrawer
-          open={appDrawerOpen}
-          navigationItems={navigationItems}
-          devicePickerItems={devicePickerItems}
-          activeDeviceId={activeDeviceId}
-          onSelectDevice={selectDevice}
-          onOpen={() => setAppDrawerOpen(true)}
-          onClose={() => setAppDrawerOpen(false)}
-        />
-      ) : null}
       <View style={styles.header}>
         <View pointerEvents="none" style={styles.headerAccent} />
         {mesh.profile ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Toggle app menu"
+            accessibilityLabel={hasBackNavigation ? 'Open drone navigation' : 'Toggle app menu'}
             onPress={toggleAppDrawer}
             style={styles.titleButton}
           >
-            <View style={[styles.menuButton, appDrawerOpen && styles.menuButtonActive]}>
-              <Menu
-                color={appDrawerOpen ? colors.accent : colors.text}
-                size={19}
-                strokeWidth={2.2}
-              />
+            <View
+              style={[
+                styles.menuButton,
+                hasBackNavigation && styles.contextBackButton,
+                appDrawerOpen && styles.menuButtonActive,
+              ]}
+            >
+              {hasBackNavigation ? (
+                <ChevronLeft
+                  color={appDrawerOpen ? colors.accent : colors.text}
+                  size={22}
+                  strokeWidth={2.1}
+                />
+              ) : (
+                <Menu
+                  color={appDrawerOpen ? colors.accent : colors.text}
+                  size={19}
+                  strokeWidth={2.2}
+                />
+              )}
             </View>
             {hasContextHeader ? (
               <View style={styles.contextTitle}>
@@ -482,7 +499,7 @@ function Shell() {
               onPress={() => setHeaderMenuOpen(true)}
               style={styles.contextMenuAction}
             >
-              <MoreVertical color={colors.text} size={19} strokeWidth={2.2} />
+              <MoreVertical color={colors.muted} size={19} strokeWidth={2} />
             </Pressable>
           ) : null}
         </View>
@@ -566,6 +583,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.panelRaised,
   },
   menuButtonActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
+  contextBackButton: {
+    width: 28,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+  },
   contextTitle: { flex: 1, minWidth: 0, justifyContent: 'center' },
   contextTitleRow: { flexDirection: 'row', alignItems: 'center' },
   contextTitleText: {
@@ -610,12 +632,9 @@ const styles = StyleSheet.create({
   contextMenuAction: {
     width: 36,
     height: 36,
-    borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.panelRaised,
+    backgroundColor: 'transparent',
   },
   actionMenuLayer: { flex: 1 },
   actionMenu: {
@@ -656,6 +675,8 @@ const styles = StyleSheet.create({
   actionMenuItemTextSelected: { color: colors.accent },
   actionMenuItemTextDanger: { color: colors.danger },
   content: { flex: 1 },
+  tabContent: { flex: 1 },
+  tabContentHidden: { display: 'none' },
   pairBack: { paddingHorizontal: 20, paddingTop: 14 },
   backButton: {
     alignSelf: 'flex-start',

@@ -171,6 +171,7 @@ function nativeUserMessageMatchesOptimisticPrompt(
 export type DronesAppHeaderState = {
   title: string;
   subtitle?: string;
+  backNavigation?: boolean;
   draft?: boolean;
   draftDisabled?: boolean;
   onToggleDraft?(): void;
@@ -1901,6 +1902,7 @@ export function DronesScreen({
       selected
         ? {
             title: selected.name,
+            backNavigation: true,
             onNewDrone: openNewDroneFromCurrent,
             onNewChat: () => void createNewChat(),
             onRename: () => openDroneRename(selected),
@@ -2202,6 +2204,9 @@ export function DronesScreen({
   const renameValidationError = renameCandidate
     ? validateMobileDroneRename(renameName, renameCandidate.name)
     : null;
+  const navigateToDrones = () => {
+    navigationItems.find((item) => item.id === 'drones')?.onPress();
+  };
 
   return (
     <View style={styles.screen}>
@@ -2224,6 +2229,7 @@ export function DronesScreen({
         onCreateDrone={
           targetSupportsDrones && targetReachable
             ? (repoPath) => {
+                navigateToDrones();
                 onDrawerOpenChange(false);
                 void openNewDroneScreen({ repoPath });
               }
@@ -2246,6 +2252,7 @@ export function DronesScreen({
         onSelectDroneChat={(droneId, nextChat) => {
           const drone = drones.find((item) => item.id === droneId);
           if (!drone) return;
+          navigateToDrones();
           onDrawerOpenChange(false);
           void openDrone(drone, nextChat);
         }}

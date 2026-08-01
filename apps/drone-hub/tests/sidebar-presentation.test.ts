@@ -24,6 +24,7 @@ describe('sidebar presentation', () => {
     expect(sidebarSource).toContain('<DesktopDevicePicker');
     expect(sidebarSource).toContain("setSettingsActiveTab('devices')");
     expect(pickerSource).toContain('<span>Manage devices</span>');
+    expect(pickerSource).not.toContain('<IconNetwork');
     expect(pickerSource).toContain('border-t border-[var(--border-subtle)] p-1');
     expect(pickerSource).toContain('h-7 min-w-0 items-center');
     expect(pickerSource).toContain('<span className="min-w-0 truncate">{name}</span>');
@@ -46,6 +47,18 @@ describe('sidebar presentation', () => {
     expect(sidebarSource).toContain('h-11 flex-shrink-0 select-none items-center');
     expect(sidebarSource).toContain('bg-[var(--app-header-bg)] pl-3 pr-2');
     expect(stylesSource).toContain('--sidebar-brand-size: .875rem;');
+  });
+
+  test('uses the Drone Hub brand as a project-list home control', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(sidebarSource).toContain('aria-label="Open project list"');
+    expect(sidebarSource).toContain(
+      "setAppView('workspace');\n                openRepositoryOverview();",
+    );
   });
 
   test('uses the wider desktop sidebar for both the shell and dock preview', () => {
@@ -242,10 +255,16 @@ describe('sidebar presentation', () => {
     );
 
     expect(sidebarSource).toContain('dh-sidebar-row-interactive group/repository-row relative');
-    expect(sidebarSource).toContain('flex h-9 w-full items-center rounded-[var(--sidebar-row-radius)]');
-    expect(sidebarSource).not.toContain(
-      'group/repository-row relative flex min-h-14',
-    );
+    expect(sidebarSource).toContain('flex min-h-12 w-full items-center rounded-[var(--sidebar-row-radius)]');
+    expect(sidebarSource).not.toContain('const repositoryProjectCount =');
+    expect(sidebarSource).toContain('const isUngrouped = !item.repoPath;');
+    expect(sidebarSource).toContain('{item.repoPath || \'Drones without a repository\'}');
+    expect(sidebarSource).toContain('items-start gap-2');
+    expect(sidebarSource).toContain('inline-flex h-5 w-5 flex-shrink-0 items-center justify-center');
+    expect(sidebarSource).not.toContain('inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[5px] border');
+    expect(sidebarSource).toContain('mx-1.5 h-px bg-[var(--border-subtle)]');
+    expect(sidebarSource).toContain('font-mono text-[.5625rem]');
+    expect(sidebarSource).toContain('text-[var(--sidebar-meta-fg)] opacity-55');
     expect(sidebarSource).toContain("containsSelectedDrone ? 'dh-sidebar-row-selected' : ''");
     expect(sidebarSource).toContain(
       '{containsSelectedDrone ? <span className={sidebarSelectionEdgeClass} /> : null}',
@@ -290,7 +309,7 @@ describe('sidebar presentation', () => {
     );
   });
 
-  test('shows descendant state counts on group headers in repository order', () => {
+  test('shows descendant state counts only on collapsed group headers in repository order', () => {
     const groupedTreeSource = readFileSync(
       new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
       'utf8',
@@ -300,16 +319,21 @@ describe('sidebar presentation', () => {
     const countsSource = groupedTreeSource.slice(countsStart, countsEnd);
 
     expect(groupedTreeSource).toContain(
-      '<SidebarGroupStateCounts summary={stateSummary} />',
+      '{collapsed ? <SidebarGroupStateCounts summary={stateSummary} /> : null}',
     );
     expect(groupedTreeSource).toContain(
       'collectSidebarTreeDroneIds(nodeTree, node.id)',
     );
+    expect(groupedTreeSource).toContain("inactiveDisplayState !== 'blocked'");
+    expect(groupedTreeSource).toContain("inactiveDisplayState !== 'offline'");
     expect(countsSource.indexOf('summary.approval')).toBeLessThan(
       countsSource.indexOf('summary.unread'),
     );
     expect(countsSource.indexOf('summary.unread')).toBeLessThan(
       countsSource.indexOf('summary.working'),
+    );
+    expect(groupedTreeSource).toContain(
+      'group/folder-row relative flex items-center gap-1 rounded-[var(--sidebar-row-radius)] pr-0.5',
     );
   });
 

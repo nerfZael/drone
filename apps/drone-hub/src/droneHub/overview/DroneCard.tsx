@@ -336,6 +336,7 @@ function SidebarChatStateCount({
 }
 
 function SidebarChatStateCounts({ summary }: { summary: SidebarChatStateSummary }) {
+  if (summary.approval <= 0 && summary.unread <= 0 && summary.working <= 0) return null;
   return (
     <span
       data-sidebar-chat-state-counts="true"
@@ -931,6 +932,9 @@ export const DroneCard = React.memo(function DroneCard({
             Draft
           </span>
         ) : null}
+        {pinned && effectiveChatStateSummary ? (
+          <SidebarChatStateCounts summary={effectiveChatStateSummary} />
+        ) : null}
         {statusHint ? (
           <span
             data-sidebar-status-hint={pinned ? 'pinned-repository' : 'status'}
@@ -944,7 +948,7 @@ export const DroneCard = React.memo(function DroneCard({
             {statusHint}
           </span>
         ) : null}
-        {effectiveChatStateSummary ? (
+        {!pinned && effectiveChatStateSummary ? (
           <SidebarChatStateCounts summary={effectiveChatStateSummary} />
         ) : null}
       </div>

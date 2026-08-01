@@ -106,7 +106,7 @@ describe('mobile drone state summary', () => {
     });
   });
 
-  test('summarizes approval, working, and unread drones with desktop precedence', () => {
+  test('summarizes activity without presenting blocked drones as unread', () => {
     const drones = normalizeMobileDrones([
       {
         id: 'working-unread',
@@ -127,7 +127,7 @@ describe('mobile drone state summary', () => {
     expect(summarizeMobileDrones(drones)).toEqual({
       approval: 1,
       working: 1,
-      unread: 3,
+      unread: 2,
     });
   });
 });

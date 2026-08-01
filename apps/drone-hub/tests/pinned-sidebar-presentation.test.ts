@@ -78,7 +78,7 @@ describe('desktop pinned drone presentation', () => {
     expect(pinnedSelectionSource).not.toContain('setActiveRepoPath');
     expect(sidebarSource).not.toContain('leadingIcon={<IconPin');
     expect(sidebarSource).toContain(
-      'className="flex min-h-8 items-center gap-1.5 px-1"',
+      'className="flex min-h-8 items-center gap-1.5 border-b border-[var(--border-subtle)] px-1"',
     );
     expect(sidebarSource).toContain(
       '<IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />',
@@ -102,6 +102,17 @@ describe('desktop pinned drone presentation', () => {
     expect(cardSource).toContain(
       "'max-w-[4.75rem] rounded-[2px] border-[var(--border)] bg-[var(--surface-inset)] px-0.5 py-px text-[.4375rem] font-[var(--weight-medium)] tracking-[0.01em] text-[var(--fg-secondary)]'",
     );
+    expect(cardSource).toContain(
+      'if (summary.approval <= 0 && summary.unread <= 0 && summary.working <= 0) return null;',
+    );
+    const pinnedCountsIndex = cardSource.indexOf('pinned && effectiveChatStateSummary ? (');
+    const pinnedRepositoryHintIndex = cardSource.indexOf(
+      "data-sidebar-status-hint={pinned ? 'pinned-repository' : 'status'}",
+    );
+    const regularCountsIndex = cardSource.indexOf('!pinned && effectiveChatStateSummary ? (');
+    expect(pinnedCountsIndex).toBeGreaterThan(-1);
+    expect(pinnedCountsIndex).toBeLessThan(pinnedRepositoryHintIndex);
+    expect(regularCountsIndex).toBeGreaterThan(pinnedRepositoryHintIndex);
   });
 
   test('does not render drone totals on group and folder rows', () => {

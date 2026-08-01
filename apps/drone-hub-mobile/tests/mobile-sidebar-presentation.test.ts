@@ -80,6 +80,9 @@ describe('mobile sidebar presentation', () => {
     );
     expect(mobileIcons).toContain("? 'm15 18-6-6 6-6'");
     expect(mobileIcons).toContain("? 'm4 6 4 4 4-4' : 'm6 4 4 4-4 4'");
+    expect(mobileIcons).toContain(
+      '<Path d="M2.25 2.5h2.6c.44 0 .84.21 1.08.58l.78 1.17',
+    );
     expect(mobileIcons).toContain('strokeWidth="1.2"');
   });
 
@@ -109,6 +112,7 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('backgroundColor: colors.sidebarSelectionEdge');
     expect(drawerSource).toContain('accessibilityLabel="Manage devices"');
     expect(drawerSource).toContain('deviceSettingsActionLabel');
+    expect(drawerSource).not.toContain('<SidebarNetworkIcon');
     expect(drawerSource).toContain('borderTopColor: colors.borderSubtle');
     expect(drawerSource).toContain('{devicesNavigationItem ? (');
     expect(drawerSource).toContain('accessibilityLabel="Open settings"');
@@ -174,25 +178,35 @@ describe('mobile sidebar presentation', () => {
     expect(mobileSource.match(/duration: DRAWER_WORKING_SPIN_DURATION_MS/g)).toHaveLength(2);
   });
 
-  test('keeps repository rows compact, path-free, and aligned with desktop state glyphs', () => {
+  test('uses spacious repository rows with muted paths and desktop-aligned state glyphs', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
       'utf8',
     );
 
-    expect(source).not.toContain('styles.repoPath');
+    expect(source).toContain('style={styles.repoPath}');
+    expect(source).toContain("{group.repoPath || 'Drones without a repository'}");
     expect(source).toContain('<ApprovalStatusIndicator />');
     expect(source).toContain('<WorkingStatusIndicator />');
     expect(source).toContain('<UnreadStatusIndicator />');
     expect(source).toContain("repoCopy: { flex: 1, minWidth: 0, justifyContent: 'center' }");
-    expect(source).toContain('repoListSpacer: { height: 4 }');
-    expect(source).toContain('<View style={styles.repoListSpacer} />');
+    expect(source).not.toContain('const projectCount =');
+    expect(source).not.toContain('repoListHeader: {');
+    expect(source).toContain('style={styles.repoIconSlot}');
+    expect(source).toContain('repoIconSlot: {');
+    expect(source).toContain('{isUngrouped ? (\n                            <SidebarFolderOutlineIcon');
+    expect(source).not.toContain('repoIconFrame: {');
+    expect(source).toContain('repoUngroupedDivider: {');
     expect(source).not.toContain('styles.repoGroup');
-    expect(source).toContain('repoRow: {\n    height: 36,');
+    expect(source).toContain('repoRow: {\n    minHeight: 50,');
     expect(source).toContain('paddingHorizontal: 14,');
+    expect(source).toContain('paddingVertical: 7,');
     expect(source).toContain(
-      "repoName: { color: colors.sidebarHeadingFg, fontSize: 12, fontWeight: '500' }",
+      "repoName: { color: colors.sidebarHeadingFg, fontSize: 13, fontWeight: '600' }",
     );
+    expect(source).toContain('repoPath: {\n    marginTop: 2,');
+    expect(source).toContain('fontSize: 8.5,');
+    expect(source).toContain('opacity: 0.55,');
     expect(source).toContain(
       "repoNameActive: { color: colors.sidebarDroneActiveFg, fontWeight: '600' }",
     );
@@ -376,8 +390,8 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('accessibilityLabel="Draft drone"');
     expect(source).toContain('style={styles.switchItemDraftBadge}');
     expect(source).toContain('dronesLoading && drones.length === 0 ? (');
-    expect(source).toContain('accessibilityLabel="Loading drones"');
-    expect(source).toContain('<Text style={styles.drawerLoadingText}>Loading drones…</Text>');
+    expect(source).toContain('accessibilityLabel="Loading projects and drones"');
+    expect(source).toContain('Loading projects and drones…');
   });
 
   test('uses the desktop chevron-only group treatment and selected-child guide', () => {
@@ -428,12 +442,24 @@ describe('mobile sidebar presentation', () => {
     );
     expect(drawerSource).toContain('pinnedHeader: {\n    minHeight: 32,');
     expect(drawerSource).toContain('paddingLeft: 12,\n    paddingRight: 8,');
+    expect(drawerSource).toContain('borderBottomWidth: StyleSheet.hairlineWidth,');
     expect(drawerSource).toContain('color={colors.sidebarMutedDim}');
     expect(drawerSource).toContain('style={styles.pinnedHeaderIcon}');
     expect(drawerSource).toContain("fontSize: 10.5,\n    fontWeight: '400',");
     expect(drawerSource).toContain(
       '<Text numberOfLines={1} style={styles.switchItemContextBadge}>',
     );
+    expect(drawerSource).toContain(
+      'if (summary.approval <= 0 && summary.unread <= 0 && summary.working <= 0) return null;',
+    );
+    const pinnedCountsIndex = drawerSource.indexOf('hasMultipleChats && contextLabel ? (');
+    const contextBadgeIndex = drawerSource.indexOf(
+      '<Text numberOfLines={1} style={styles.switchItemContextBadge}>',
+    );
+    const regularCountsIndex = drawerSource.indexOf('hasMultipleChats && !contextLabel ? (');
+    expect(pinnedCountsIndex).toBeGreaterThan(-1);
+    expect(pinnedCountsIndex).toBeLessThan(contextBadgeIndex);
+    expect(regularCountsIndex).toBeGreaterThan(contextBadgeIndex);
     expect(drawerSource).toContain('switchItemContextBadge: {\n    maxWidth: 76,');
     expect(drawerSource).toContain('color: colors.sidebarFgActive,');
     expect(drawerSource).toContain('borderColor: colors.border,');
@@ -506,7 +532,7 @@ describe('mobile sidebar presentation', () => {
     expect(shellSource).toContain('disabled: dronesHeader.pinDisabled');
   });
 
-  test('shows descendant state counts on group rows', () => {
+  test('shows descendant state counts only on collapsed group rows', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
       'utf8',
@@ -516,7 +542,12 @@ describe('mobile sidebar presentation', () => {
     const folderSource = source.slice(folderStart, folderEnd);
 
     expect(folderSource).toContain('summarizeDroneScope(folder.roots, folder.children)');
-    expect(folderSource).toContain('<DroneStateCounts summary={stateSummary} compact />');
+    expect(folderSource).toContain(
+      '{collapsed ? <DroneStateCounts summary={stateSummary} compact /> : null}',
+    );
+    expect(source).toContain(
+      "groupRow: {\n    minHeight: 36,\n    flexDirection: 'row',\n    alignItems: 'center',\n    gap: DRAWER_TREE_LEADING_GAP,\n    paddingRight: 10,",
+    );
   });
 
   test('omits the selected-drone subtitle while preserving contextual create copy', () => {
@@ -529,6 +560,49 @@ describe('mobile sidebar presentation', () => {
     expect(dronesSource).not.toContain('mobileRepoLabel(selected.repoPath)');
     expect(dronesSource).toContain("subtitle: `Create on ${activeTarget?.name ?? 'this device'}`");
     expect(shellSource).toContain('dronesHeader?.subtitle ?');
+  });
+
+  test('keeps the fleet drawer mounted across tabs and quiets the chat header controls', () => {
+    const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
+
+    expect(shellSource).toContain("(pairingVisible || tab !== 'drones') && styles.tabContentHidden");
+    expect(shellSource).toContain('tabContentHidden: { display: \'none\' }');
+    expect(shellSource).not.toContain('  AppDrawer,\n');
+    expect(shellSource).toContain(
+      "accessibilityLabel={hasBackNavigation ? 'Open drone navigation'",
+    );
+    expect(shellSource).toContain('hasBackNavigation && styles.contextBackButton');
+    expect(shellSource).toContain('<ChevronLeft\n                  color={appDrawerOpen');
+    expect(shellSource).toContain('<MoreVertical color={colors.muted} size={19} strokeWidth={2} />');
+    expect(shellSource).toContain("contextBackButton: {\n    width: 28,\n    borderWidth: 0,");
+    expect(shellSource).toContain(
+      "contextMenuAction: {\n    width: 36,\n    height: 36,\n    alignItems: 'center',",
+    );
+
+    const dronesSource = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+    expect(dronesSource).toContain(
+      "navigationItems.find((item) => item.id === 'drones')?.onPress();",
+    );
+    expect(dronesSource).toContain('backNavigation: true,');
+    expect(dronesSource.match(/navigateToDrones\(\);/g)).toHaveLength(2);
+  });
+
+  test('uses the Drone Hub brand as a project-list home control', () => {
+    const drawerSource = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(drawerSource).toContain('accessibilityLabel="Open project list"');
+    expect(drawerSource).toContain(
+      'setActiveRepoId(null);\n              dronesNavigationItem?.onPress();',
+    );
+    expect(drawerSource).not.toContain(
+      'dronesNavigationItem?.onPress();\n              onClose();',
+    );
   });
 
   test('keeps Android drawer gestures on the UI thread and long lists virtualized', () => {

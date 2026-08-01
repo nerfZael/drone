@@ -13,6 +13,7 @@ import {
   SidebarItemStateIndicator,
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
+  sidebarDroneDisplayState,
   sidebarDroneStateLabel,
   type DroneInlineRenameResult,
 } from '../overview';
@@ -2146,11 +2147,14 @@ export function DroneSidebar({
           drone.hubPhase === 'starting' ||
           drone.hubPhase === 'seeding' ||
           Boolean(deletingDrones[drone.id]));
+      const inactiveDisplayState = sidebarDroneDisplayState(drone, false, '', false, false);
       const droneUnread =
-        (drone.unreadChats?.length ?? 0) > 0 ||
-        chats.some((chatName) =>
-          Boolean(unreadAgentMessageByChatNodeId[sidebarChatSidebarNodeId(drone.id, chatName)]),
-        );
+        inactiveDisplayState !== 'blocked' &&
+        inactiveDisplayState !== 'offline' &&
+        ((drone.unreadChats?.length ?? 0) > 0 ||
+          chats.some((chatName) =>
+            Boolean(unreadAgentMessageByChatNodeId[sidebarChatSidebarNodeId(drone.id, chatName)]),
+          ));
       if (droneWorking) working += 1;
       if (droneApprovalRequired) approval += 1;
       if (droneUnread) unread += 1;
@@ -2765,9 +2769,13 @@ export function DroneSidebar({
           <div className="flex w-full items-center justify-between gap-2">
             <button
               type="button"
-              onClick={() => setAppView('workspace')}
+              onClick={() => {
+                setAppView('workspace');
+                openRepositoryOverview();
+              }}
               className="flex-shrink-0 text-left dh-type-sidebar-brand"
-              title="Open drones workspace"
+              title="Open project list"
+              aria-label="Open project list"
             >
               DRONE HUB
             </button>
@@ -2821,7 +2829,15 @@ export function DroneSidebar({
             </UiPanelStatusStrip>
           )}
           {dronesLoading && sidebarDronesFilteredByRepo.length === 0 && !dronesError && (
-            <div className="px-3 py-3 flex flex-col gap-4">
+            <div
+              role="status"
+              aria-live="polite"
+              aria-label="Loading projects and drones"
+              className="px-3 py-3 flex flex-col gap-3"
+            >
+              <span className="text-[var(--text-10)] text-[var(--sidebar-meta-fg)]">
+                Loading projects and drones…
+              </span>
               {[1, 2, 3].map((i) => (
                 <div key={i} className="flex flex-col gap-2 opacity-30">
                   <SkeletonLine w="65%" />
@@ -2976,7 +2992,7 @@ export function DroneSidebar({
                   }
                   aria-label="Pinned drones"
                 >
-                <div className="flex min-h-8 items-center gap-1.5 px-1">
+                <div className="flex min-h-8 items-center gap-1.5 border-b border-[var(--border-subtle)] px-1">
                   <IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
                   <span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-normal text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">
                     Pinned
@@ -3204,71 +3220,98 @@ export function DroneSidebar({
               <div className="flex flex-col py-1 pb-6">
                 {repositoryNavigationItems.map((item) => {
                   const containsSelectedDrone = Boolean(selectedDrone) && item.repoPath === selectedDroneRepoPath;
+                  const isUngrouped = !item.repoPath;
                   return (
-                    <div
-                      key={item.id}
-                      className={`dh-sidebar-row-interactive group/repository-row relative flex h-9 w-full items-center rounded-[var(--sidebar-row-radius)] transition-colors ${
-                        containsSelectedDrone ? 'dh-sidebar-row-selected' : ''
-                      }`}
-                    >
-                      {containsSelectedDrone ? <span className={sidebarSelectionEdgeClass} /> : null}
-                      <button
-                        type="button"
-                        onClick={() => openRepositoryNavigationItem(item)}
-                        className="flex h-9 min-w-0 flex-1 items-center gap-1.5 px-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
-                        title={item.repoPath || item.label}
-                        aria-label={`Open ${item.label} repository`}
+                    <React.Fragment key={item.id}>
+                      <div
+                        className={`dh-sidebar-row-interactive group/repository-row relative flex min-h-12 w-full items-center rounded-[var(--sidebar-row-radius)] transition-colors ${
+                          containsSelectedDrone ? 'dh-sidebar-row-selected' : ''
+                        }`}
                       >
-                        <IconFolderGit className="h-3.5 w-3.5 flex-shrink-0 text-[var(--sidebar-action-fg)] opacity-85" />
-                        <span className="min-w-0 flex-1">
-                          <span className={`block truncate text-[var(--text-12)] group-hover/repository-row:text-[var(--fg)] ${
-                            containsSelectedDrone
-                              ? 'font-semibold text-[var(--fg)]'
-                              : 'font-medium text-[var(--fg-secondary)]'
-                          }`}>
-                            {item.label}
-                          </span>
-                        </span>
-                      </button>
-                      <div className="relative mr-0.5 h-7 w-7 flex-shrink-0">
-                        <span className="pointer-events-none absolute inset-0 inline-flex items-center justify-end gap-1.5 whitespace-nowrap pr-2 font-mono text-[.5625rem] leading-none transition-opacity duration-150 group-hover/repository-row:opacity-0 group-focus-within/repository-row:opacity-0">
-                          {item.stateSummary.approval > 0 ? (
-                            <SidebarRepositoryStateCount
-                              count={item.stateSummary.approval}
-                              indicator={<SidebarApprovalStatusIndicator />}
-                              label="awaiting approval"
-                              toneClassName="text-[var(--yellow)]"
-                            />
-                          ) : null}
-                          {item.stateSummary.unread > 0 ? (
-                            <SidebarRepositoryStateCount
-                              count={item.stateSummary.unread}
-                              indicator={<SidebarItemStateIndicator state="idle" unread />}
-                              label="unread"
-                              toneClassName="text-[var(--green)]"
-                            />
-                          ) : null}
-                          {item.stateSummary.working > 0 ? (
-                            <SidebarRepositoryStateCount
-                              count={item.stateSummary.working}
-                              indicator={<SidebarWorkingStatusIndicator />}
-                              label="working"
-                              toneClassName="text-[var(--yellow)]"
-                            />
-                          ) : null}
-                        </span>
+                        {containsSelectedDrone ? <span className={sidebarSelectionEdgeClass} /> : null}
                         <button
                           type="button"
-                          onClick={() => createDroneInRepository(item)}
-                          disabled={!sidebarCapabilities.createDrones}
-                          className="absolute inset-0 inline-flex items-center justify-center rounded-[.25rem] text-[var(--muted)] opacity-0 transition-[color,background-color,opacity] duration-150 hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] group-hover/repository-row:opacity-100 group-focus-within/repository-row:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
-                          title={`Create drone in ${item.label}`}
-                          aria-label={`Create drone in ${item.label}`}
+                          onClick={() => openRepositoryNavigationItem(item)}
+                          className="flex min-h-12 min-w-0 flex-1 items-start gap-2 px-1.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
+                          title={item.repoPath || item.label}
+                          aria-label={`Open ${item.label} repository`}
                         >
-                          <IconPlus className="h-4 w-4" />
+                          <span
+                            className={`inline-flex h-5 w-5 flex-shrink-0 items-center justify-center ${
+                              containsSelectedDrone
+                                ? 'text-[var(--accent)]'
+                                : isUngrouped
+                                  ? 'text-[var(--sidebar-meta-fg)]'
+                                  : 'text-[var(--sidebar-action-fg)]'
+                            }`}
+                          >
+                            {isUngrouped ? (
+                              <IconFolderOutline className="h-3.5 w-3.5" />
+                            ) : (
+                              <IconFolderGit className="h-3.5 w-3.5" />
+                            )}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className={`block truncate text-[var(--text-13)] group-hover/repository-row:text-[var(--fg)] ${
+                              containsSelectedDrone
+                                ? 'font-semibold text-[var(--fg)]'
+                                : isUngrouped
+                                  ? 'font-medium text-[var(--fg-secondary)]'
+                                  : 'font-semibold text-[var(--sidebar-heading-fg)]'
+                            }`}>
+                              {item.label}
+                            </span>
+                            <span
+                              className="mt-0.5 block truncate font-mono text-[.5625rem] font-normal text-[var(--sidebar-meta-fg)] opacity-55"
+                              title={item.repoPath || 'Drones without a repository'}
+                            >
+                              {item.repoPath || 'Drones without a repository'}
+                            </span>
+                          </span>
                         </button>
+                        <div className="relative mr-0.5 h-7 w-7 flex-shrink-0">
+                          <span className="pointer-events-none absolute inset-0 inline-flex items-center justify-end gap-1.5 whitespace-nowrap pr-2 font-mono text-[.5625rem] leading-none transition-opacity duration-150 group-hover/repository-row:opacity-0 group-focus-within/repository-row:opacity-0">
+                            {item.stateSummary.approval > 0 ? (
+                              <SidebarRepositoryStateCount
+                                count={item.stateSummary.approval}
+                                indicator={<SidebarApprovalStatusIndicator />}
+                                label="awaiting approval"
+                                toneClassName="text-[var(--yellow)]"
+                              />
+                            ) : null}
+                            {item.stateSummary.unread > 0 ? (
+                              <SidebarRepositoryStateCount
+                                count={item.stateSummary.unread}
+                                indicator={<SidebarItemStateIndicator state="idle" unread />}
+                                label="unread"
+                                toneClassName="text-[var(--green)]"
+                              />
+                            ) : null}
+                            {item.stateSummary.working > 0 ? (
+                              <SidebarRepositoryStateCount
+                                count={item.stateSummary.working}
+                                indicator={<SidebarWorkingStatusIndicator />}
+                                label="working"
+                                toneClassName="text-[var(--yellow)]"
+                              />
+                            ) : null}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => createDroneInRepository(item)}
+                            disabled={!sidebarCapabilities.createDrones}
+                            className="absolute inset-0 inline-flex items-center justify-center rounded-[.25rem] text-[var(--muted)] opacity-0 transition-[color,background-color,opacity] duration-150 hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] group-hover/repository-row:opacity-100 group-focus-within/repository-row:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
+                            title={`Create drone in ${item.label}`}
+                            aria-label={`Create drone in ${item.label}`}
+                          >
+                            <IconPlus className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                      {isUngrouped ? (
+                        <div aria-hidden="true" className="mx-1.5 h-px bg-[var(--border-subtle)]" />
+                      ) : null}
+                    </React.Fragment>
                   );
                 })}
               </div>
