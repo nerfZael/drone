@@ -1067,7 +1067,11 @@ export function GroupMultiChatColumn({
                   autoExpandAgentMessage={
                     index === items.length - 1 && visiblePendingPrompts.length === 0
                   }
-                  initiallyExpandFileChanges={index === latestTranscriptFileChangesIndex}
+                  initiallyExpandFileChanges={
+                    index === latestTranscriptFileChangesIndex &&
+                    index === items.length - 1 &&
+                    visiblePendingPrompts.length === 0
+                  }
                   onSpawnDroneHubTask={spawnDroneHubTaskForColumn}
                   messageId={messageId}
                   droneId={drone.id}
@@ -1081,7 +1085,10 @@ export function GroupMultiChatColumn({
                 key={`${drone.id}:pending:${item.id}`}
                 item={item}
                 autoExpandPrompt={index === visiblePendingPrompts.length - 1}
-                initiallyExpandFileChanges={index === latestPendingFileChangesIndex}
+                initiallyExpandFileChanges={
+                  index === latestPendingFileChangesIndex &&
+                  index === visiblePendingPrompts.length - 1
+                }
                 droneId={drone.id}
                 droneHomePath={droneHome}
                 showRoleIcons={false}

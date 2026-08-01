@@ -1460,11 +1460,16 @@ export function MobileAssistantTranscript({
     );
   }
   let latestRunSummaryKey = '';
+  let latestRunSummaryIndex = -1;
   for (let index = items.length - 1; index >= 0; index -= 1) {
     if (items[index]?.type !== 'runSummary') continue;
     latestRunSummaryKey = items[index]!.key;
+    latestRunSummaryIndex = index;
     break;
   }
+  const userMessageFollowsLatestRunSummary = items
+    .slice(latestRunSummaryIndex + 1)
+    .some((item) => item.type === 'message' && item.message.role === 'user');
   const renderItem = (item: AssistantRenderItem, blocked = false): any => {
     if (item.type === 'tool')
       return <ToolRow key={item.key} item={item} blocked={blocked && !item.result} />;
@@ -1478,7 +1483,9 @@ export function MobileAssistantTranscript({
           item={item}
           onLoadDiff={onLoadRunFileDiff}
           onLoadFiles={onLoadRunFiles}
-          initiallyExpanded={item.key === latestRunSummaryKey}
+          initiallyExpanded={
+            item.key === latestRunSummaryKey && !userMessageFollowsLatestRunSummary
+          }
         />
       );
     }
