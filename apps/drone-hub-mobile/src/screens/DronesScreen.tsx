@@ -19,6 +19,7 @@ import MessageCircle from 'lucide-react-native/icons/message-circle';
 import WifiOff from 'lucide-react-native/icons/wifi-off';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ConfirmDialog, ErrorBanner, TextInputDialog } from '../components/Ui';
+import { RenderErrorBoundary } from '../components/RenderErrorBoundary';
 import {
   AppDrawer,
   type AppDrawerNavigationItem,
@@ -449,11 +450,13 @@ export function DronesScreen({
         const nextSelected = currentSelected
           ? (nextDrones.find((drone) => drone.id === currentSelected.id) ?? null)
           : null;
+        selectedRef.current = nextSelected;
         setSelected(nextSelected);
         if (nextSelected) {
           const nextChats = nextSelected.chats;
           setChats(nextChats);
           if (nextChats.length === 0) {
+            chatNameRef.current = '';
             setChatName('');
             setChatModel('');
             setChatReasoning('');
@@ -468,6 +471,7 @@ export function DronesScreen({
           if (!nextChats.includes(chatNameRef.current)) {
             const fallbackChat = nextChats[0];
             if (fallbackChat) {
+              chatNameRef.current = fallbackChat;
               setChatName(fallbackChat);
               setChatModel('');
               setChatReasoning('');
@@ -551,6 +555,7 @@ export function DronesScreen({
   React.useEffect(() => {
     const createDefaultsVersion = ++createDefaultsRequestVersion.current;
     selectedRef.current = null;
+    chatNameRef.current = 'default';
     commitDroneListSnapshot({
       ...EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
       targetId,
@@ -637,9 +642,12 @@ export function DronesScreen({
       createDefaultsRequestVersion.current += 1;
       const destinationId = targetId;
       const requestVersion = ++openDroneVersion.current;
+      chatReadVersion.current += 1;
       const knownChats = drone.chats;
       const knownChat =
         requestedChat && knownChats.includes(requestedChat) ? requestedChat : (knownChats[0] ?? '');
+      selectedRef.current = drone;
+      chatNameRef.current = knownChat;
       setSelected(drone);
       setChats(knownChats);
       setChatName(knownChat);
@@ -671,6 +679,7 @@ export function DronesScreen({
       const nextChat =
         requestedChat && nextChats.includes(requestedChat) ? requestedChat : (nextChats[0] ?? '');
       setChats(nextChats);
+      chatNameRef.current = nextChat;
       setChatName(nextChat);
       if (nextChat) await readChat(drone.id, nextChat);
     });
@@ -682,7 +691,13 @@ export function DronesScreen({
       droneId,
       chatName: nextChat,
     });
-    if (targetIdRef.current !== destinationId || chatReadVersion.current !== requestVersion) return;
+    if (
+      targetIdRef.current !== destinationId ||
+      selectedRef.current?.id !== droneId ||
+      chatNameRef.current !== nextChat ||
+      chatReadVersion.current !== requestVersion
+    )
+      return;
     setChatModel(String(result?.model ?? '').trim());
     setChatReasoning(String(result?.reasoning ?? '').trim());
     setChatAgentId(
@@ -952,6 +967,7 @@ export function DronesScreen({
   const selectChat = (nextChat: string) =>
     selected &&
     run('chat', async () => {
+      chatNameRef.current = nextChat;
       setChatName(nextChat);
       setChatModel('');
       setChatReasoning('');
@@ -1501,6 +1517,10 @@ export function DronesScreen({
     setNewDroneDefaults(defaults);
     setNewDroneDraft(defaults.draft === true);
     setNewDroneScreenVersion((value) => value + 1);
+    selectedRef.current = null;
+    chatNameRef.current = 'default';
+    chatReadVersion.current += 1;
+    openDroneVersion.current += 1;
     setSelected(null);
     setChats([]);
     setChatName('default');
@@ -1568,6 +1588,8 @@ export function DronesScreen({
       setDrones((current) =>
         current.map((item) => (item.id === updatedDrone.id ? updatedDrone : item)),
       );
+      selectedRef.current = updatedDrone;
+      chatNameRef.current = createdChat;
       setSelected(updatedDrone);
       setChats(nextChats);
       setChatName(createdChat);
@@ -2145,6 +2167,9 @@ export function DronesScreen({
         }
         onRetryDrones={() => void (targetReachable ? loadDrones() : mesh.refreshDevices())}
         onSelectDevice={(deviceId) => {
+          selectedRef.current = null;
+          chatReadVersion.current += 1;
+          openDroneVersion.current += 1;
           setDronesLoaded(false);
           setDroneListError(null);
           onDeviceChange(deviceId);
@@ -2338,45 +2363,52 @@ export function DronesScreen({
                           ) : null}
                         </View>
                       ) : null}
-                      <MobileAssistantTranscript
-                        messages={transcriptMessages}
-                        loading={chatLoading}
-                        running={running}
-                        awaitingApproval={awaitingApproval}
-                        approvalStartedAt={approvalStartedAt}
-                        emptyTitle="This drone chat is ready."
-                        emptyBody="Send a prompt to start the conversation."
-                        assistantLabel="Agent"
-                        queuedPrompts={visiblePendingPrompts}
-                        cancellingPromptId={cancellingPromptId}
-                        onCancelQueuedPrompt={cancelPendingPrompt}
-                        linkedPullRequests={linkedPullRequests}
-                        onLoadFullMessage={(message) => void loadFullChatMessage(message)}
-                        fullMessageLoadingId={fullMessageBusyId}
-                        onOpenFileReference={filePreview.open}
-                        onLoadRunFileDiff={loadRunFileDiff}
-                        onLoadRunFiles={loadRunFiles}
-                        onDeleteMessageRequest={
-                          nativeMessages !== null
-                            ? ({ message, deleteFollowing }) => {
-                                const messageId = String((message as any)?.id ?? '').trim();
-                                if (!selected || !messageId) return;
-                                const destinationId = targetId;
-                                void requestDroneControl(destinationId, 'chat.message.delete', {
-                                  droneId: selected.id,
-                                  chatName,
-                                  nativeChatId,
-                                  messageId,
-                                  deleteFollowing,
-                                })
-                                  .then(() => readChat(selected.id, chatName))
-                                  .catch((nextError: any) =>
-                                    setError(nextError?.message ?? String(nextError)),
-                                  );
-                              }
-                            : undefined
+                      <RenderErrorBoundary
+                        key={`${targetId}:${selected.id}:${chatName}`}
+                        fallback={
+                          <ErrorBanner message="This transcript could not be rendered safely. Switch chats and return to retry." />
                         }
-                      />
+                      >
+                        <MobileAssistantTranscript
+                          messages={transcriptMessages}
+                          loading={chatLoading}
+                          running={running}
+                          awaitingApproval={awaitingApproval}
+                          approvalStartedAt={approvalStartedAt}
+                          emptyTitle="This drone chat is ready."
+                          emptyBody="Send a prompt to start the conversation."
+                          assistantLabel="Agent"
+                          queuedPrompts={visiblePendingPrompts}
+                          cancellingPromptId={cancellingPromptId}
+                          onCancelQueuedPrompt={cancelPendingPrompt}
+                          linkedPullRequests={linkedPullRequests}
+                          onLoadFullMessage={(message) => void loadFullChatMessage(message)}
+                          fullMessageLoadingId={fullMessageBusyId}
+                          onOpenFileReference={filePreview.open}
+                          onLoadRunFileDiff={loadRunFileDiff}
+                          onLoadRunFiles={loadRunFiles}
+                          onDeleteMessageRequest={
+                            nativeMessages !== null
+                              ? ({ message, deleteFollowing }) => {
+                                  const messageId = String((message as any)?.id ?? '').trim();
+                                  if (!selected || !messageId) return;
+                                  const destinationId = targetId;
+                                  void requestDroneControl(destinationId, 'chat.message.delete', {
+                                    droneId: selected.id,
+                                    chatName,
+                                    nativeChatId,
+                                    messageId,
+                                    deleteFollowing,
+                                  })
+                                    .then(() => readChat(selected.id, chatName))
+                                    .catch((nextError: any) =>
+                                      setError(nextError?.message ?? String(nextError)),
+                                    );
+                                }
+                              : undefined
+                          }
+                        />
+                      </RenderErrorBoundary>
                       {pendingApprovals.map((approval) => (
                         <AssistantApprovalCard
                           key={approval.id}
@@ -2544,6 +2576,8 @@ export function DronesScreen({
               setDrones((current) => current.filter((drone) => drone.id !== droneId));
               if (selectedRef.current?.id === droneId) {
                 selectedRef.current = null;
+                chatReadVersion.current += 1;
+                openDroneVersion.current += 1;
                 setSelected(null);
                 setChats([]);
                 setTurns([]);
