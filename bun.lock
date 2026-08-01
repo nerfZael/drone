@@ -65,6 +65,7 @@
         "@dnd-kit/utilities": "^3.2.2",
         "@drone/assistant-chat": "workspace:*",
         "@drone/assistant-markdown": "workspace:*",
+        "@drone/file-icons": "workspace:*",
         "@drone/hub-model": "workspace:*",
         "@excalidraw/excalidraw": "^0.18.1",
         "@monaco-editor/react": "^4.7.0",
@@ -104,6 +105,7 @@
         "@blip/workspace": "workspace:*",
         "@drone/assistant-chat": "workspace:*",
         "@drone/device-protocol": "workspace:*",
+        "@drone/file-icons": "workspace:*",
         "@drone/hub-model": "workspace:*",
         "@mariozechner/pi-agent-core": "workspace:*",
         "@mariozechner/pi-ai": "workspace:*",
@@ -387,6 +389,14 @@
         "eslint-config-prettier": "^9.1.0",
         "prettier": "^3.3.3",
         "rimraf": "^6.0.1",
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/file-icons": {
+      "name": "@drone/file-icons",
+      "version": "0.1.0",
+      "devDependencies": {
+        "material-icon-theme": "5.37.0",
         "typescript": "^5.6.3",
       },
     },
@@ -714,6 +724,8 @@
     "@drone/assistant-markdown": ["@drone/assistant-markdown@workspace:packages/assistant-markdown"],
 
     "@drone/device-protocol": ["@drone/device-protocol@workspace:packages/device-protocol"],
+
+    "@drone/file-icons": ["@drone/file-icons@workspace:packages/file-icons"],
 
     "@drone/hub-model": ["@drone/hub-model@workspace:packages/hub-model"],
 
@@ -1715,6 +1727,8 @@
 
     "chownr": ["chownr@3.0.0", "", {}, "sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g=="],
 
+    "chroma-js": ["chroma-js@3.2.0", "", {}, "sha512-os/OippSlX1RlWWr+QDPcGUZs0uoqr32urfxESG9U93lhUfbnlyckte84Q8P1UQY/qth983AS1JONKmLS4T0nw=="],
+
     "chrome-launcher": ["chrome-launcher@0.15.2", "", { "dependencies": { "@types/node": "*", "escape-string-regexp": "^4.0.0", "is-wsl": "^2.2.0", "lighthouse-logger": "^1.0.0" }, "bin": { "print-chrome-path": "bin/print-chrome-path.js" } }, "sha512-zdLEwNo3aUVzIhKhTtXfxhdvZhUghrnmkvcAq2NoDd+LeOHKf03H5jwZ8T/STsAlzyALkBVK552iaG1fGf1xVQ=="],
 
     "chromium-edge-launcher": ["chromium-edge-launcher@0.3.0", "", { "dependencies": { "@types/node": "*", "escape-string-regexp": "^4.0.0", "is-wsl": "^2.2.0", "lighthouse-logger": "^1.0.0", "mkdirp": "^1.0.4" } }, "sha512-p03azHlGjtyRvFEee3cyvtsRYdniSkwjkzmM/KmVnqT5d7QkkwpJBhis/zCLMYdQMVJ5tt140TBNqqrZPaWeFA=="],
@@ -2638,6 +2652,8 @@
     "marky": ["marky@1.3.0", "", {}, "sha512-ocnPZQLNpvbedwTy9kNrQEsknEfgvcLMvOtz3sFeWApDq1MXH1TqkCIx58xlpESsfwQOnuBO9beyQuNGzVvuhQ=="],
 
     "matcher": ["matcher@3.0.0", "", { "dependencies": { "escape-string-regexp": "^4.0.0" } }, "sha512-OkeDaAZ/bQCxeFAozM55PKcKU0yJMPGifLwV4Qgjitu+5MoAfSQN4lsLJeXZ1b8w0x+/Emda6MZgXS1jvsapng=="],
+
+    "material-icon-theme": ["material-icon-theme@5.37.0", "", { "dependencies": { "chroma-js": "^3.2.0", "fast-deep-equal": "^3.1.3" } }, "sha512-/F5llOVU0DZ88V+wmPlEbBqi8FochPg5XaJ7zqVzGCTTygeFnpIpdVQQTRElEnHyxSWRMfF0wBbOqwFKnujFLA=="],
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 

@@ -1,5 +1,6 @@
 import React from 'react';
-import { IconChevron, iconForFilePath } from '../icons';
+import { IconChevron } from '../icons';
+import { FileTypeIcon } from './FileTypeIcon';
 import { formatBytes, formatEditorMtime } from '../app/selected-drone-workspace-utils';
 import {
   buildQuickOpenItems,
@@ -123,7 +124,6 @@ export function QuickOpenModal({
         <div className="min-h-0 overflow-y-auto py-1">
           {items.map((item, index) => {
             const active = index === activeIndex;
-            const Icon = iconForFilePath(item.path);
             return (
               <button
                 key={`${item.source}:${item.path}`}
@@ -134,7 +134,7 @@ export function QuickOpenModal({
                   active ? 'bg-[var(--accent-subtle)] text-[var(--fg)]' : 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
                 }`}
               >
-                <Icon className="h-4 w-4 flex-shrink-0 text-[var(--muted)]" />
+                <FileTypeIcon path={item.path} className="h-4 w-4 flex-shrink-0" size={16} />
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="truncate text-[var(--text-12)] font-medium">{item.name}</span>

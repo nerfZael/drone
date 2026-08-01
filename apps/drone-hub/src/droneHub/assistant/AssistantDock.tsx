@@ -38,7 +38,7 @@ import {
   IconSpinner,
   IconWrench,
 } from '../app/icons';
-import { IconChevron, IconDrone, IconFile, IconFolder, iconForFilePath } from '../icons';
+import { IconChevron, IconDrone, IconFile, IconFolder } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import { useBlipThreadSession } from './useBlipThreadSession';
 import { latestActivityHasVisibleAssistantText } from './assistant-streaming-state';

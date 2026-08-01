@@ -12,7 +12,6 @@ import {
 import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
-import File from 'lucide-react-native/icons/file';
 import Pause from 'lucide-react-native/icons/pause';
 import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
 import X from 'lucide-react-native/icons/x';
@@ -37,6 +36,7 @@ import {
   type AssistantToolRenderItem,
 } from '@drone/assistant-chat';
 import { colors } from '../theme';
+import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import { QueuedPromptRows, type MobileQueuedPrompt } from '../components/QueuedPromptRows';
 import { ContextMenu } from '../components/Ui';
 import { NativeMarkdown } from './NativeMarkdown';
@@ -295,10 +295,10 @@ function ChangedFilesSummary({
                       >
                         {agentRunFileStatusLabel(entry)}
                       </Text>
-                      <File
-                        color={pressed ? colors.text : colors.muted}
-                        size={13}
-                        strokeWidth={1.8}
+                      <NativeFileTypeIcon
+                        path={entry.path}
+                        size={16}
+                        opacity={pressed ? 1 : 0.86}
                       />
                       <Text
                         numberOfLines={1}

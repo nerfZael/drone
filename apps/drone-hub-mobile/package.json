@@ -17,6 +17,7 @@
     "@blip/protocol": "workspace:*",
     "@drone/assistant-chat": "workspace:*",
     "@drone/device-protocol": "workspace:*",
+    "@drone/file-icons": "workspace:*",
     "@drone/hub-model": "workspace:*",
     "@blip/workspace": "workspace:*",
     "@mariozechner/pi-agent-core": "workspace:*",

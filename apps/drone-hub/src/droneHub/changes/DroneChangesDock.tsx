@@ -18,8 +18,9 @@ import {
   UiToolbarIconButton,
   UiToolbarSegmentedControl,
 } from '../../ui/components';
-import { IconChevron, IconFolder, iconForFilePath } from '../icons';
+import { IconChevron } from '../icons';
 import { IconEye, IconEyeOff } from '../app/icons';
+import { FileTypeIcon, FolderTypeIcon } from '../files/FileTypeIcon';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import { readPullRequestMergeMethod } from '../pullRequests/pull-request-preferences';
 import type {
@@ -2913,7 +2914,7 @@ function LiveDroneChangesDock({
                   className="inline-flex items-center justify-center flex-shrink-0 text-[var(--muted)]"
                   style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
                 >
-                  <IconFolder size={explorerIconSizePx} />
+                  <FolderTypeIcon path={node.path} size={explorerIconSizePx} />
                 </span>
                 <span
                   className={`truncate flex-1 ${dirAllViewed ? 'text-[var(--muted)]' : 'text-[var(--fg-secondary)]'}`}
@@ -2963,7 +2964,6 @@ function LiveDroneChangesDock({
         entry.path === selectedPath &&
         (!workingKind || splitShownKind === workingKind);
       const viewedState = entryViewedStatus(entry);
-      const FileIcon = iconForFilePath(entry.path);
       return (
         <div
           key={`file:${entry.path}`}
@@ -3012,7 +3012,7 @@ function LiveDroneChangesDock({
                 }`}
                 style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
               >
-                <FileIcon size={explorerIconSizePx} />
+                <FileTypeIcon path={entry.path} size={explorerIconSizePx} />
               </span>
               <span
                 className={`truncate flex-1 ${active ? 'text-[var(--accent)]' : 'text-[var(--fg-secondary)]'}`}
@@ -3080,7 +3080,7 @@ function LiveDroneChangesDock({
                   className="inline-flex items-center justify-center flex-shrink-0 text-[var(--muted)]"
                   style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
                 >
-                  <IconFolder size={explorerIconSizePx} />
+                  <FolderTypeIcon path={node.path} size={explorerIconSizePx} />
                 </span>
                 <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
                   {node.name}
@@ -3098,7 +3098,6 @@ function LiveDroneChangesDock({
       const entry = node.entry ?? null;
       if (!entry) return null;
       const active = entry.path === commitFileSelectedPath;
-      const FileIcon = iconForFilePath(entry.path);
       return (
         <div key={`commit-file:${entry.path}`} className="w-full group/file" style={{ paddingLeft: `${indentPx}px` }}>
           <div className="relative">
@@ -3130,7 +3129,7 @@ function LiveDroneChangesDock({
                 }`}
                 style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
               >
-                <FileIcon size={explorerIconSizePx} />
+                <FileTypeIcon path={entry.path} size={explorerIconSizePx} />
               </span>
               <span
                 className={`truncate flex-1 ${active ? 'text-[var(--accent)]' : 'text-[var(--fg-secondary)]'}`}

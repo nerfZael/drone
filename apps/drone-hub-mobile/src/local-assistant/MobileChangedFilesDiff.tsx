@@ -4,6 +4,7 @@ import FileQuestion from 'lucide-react-native/icons/file-question-mark';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
 import type { AgentRunFileChangeEntry, AgentRunFileChangeWorkspace } from '@blip/protocol';
+import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import { colors } from '../theme';
 import { MobileChangedFileStatusBadge } from './MobileChangedFileStatusBadge';
 import type { MobileChangedFilesReviewDiffState } from './mobile-changed-files-review-model';
@@ -54,6 +55,7 @@ function SelectedFileHeader({
         code={presentation.code}
         label={presentation.label}
       />
+      <NativeFileTypeIcon path={entry.path} size={17} />
       <View style={styles.fileHeaderCopy}>
         <Text numberOfLines={1} style={styles.filePath}>
           {entry.path}

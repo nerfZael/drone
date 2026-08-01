@@ -7,10 +7,11 @@ import {
 import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 import { invalidateFsListCachesForDrone } from '../app/use-files-and-ports-pane-state';
 import { requestJson, requestJsonWithTimeout } from '../http';
-import { IconChevron, IconFolder, iconForFilePath } from '../icons';
+import { IconChevron } from '../icons';
 import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../types';
 import { runDroneFsAction } from './file-actions-api';
 import type { DroneOpenedFileState } from './opened-file-types';
+import { FileTypeIcon, FolderTypeIcon } from './FileTypeIcon';
 import {
   isPathInsideOrEqual,
   movedPathForEntry,
@@ -842,7 +843,7 @@ export function DroneFilesDock({
                   <IconChevron down={open} size={12} />
                 </span>
                 <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--yellow)]">
-                  <IconFolder size={13} />
+                  <FolderTypeIcon path={node.path} size={15} />
                 </span>
                 <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
                 {childError ? <span className="px-1 text-[var(--text-9)] uppercase text-[var(--red)]">Error</span> : null}
@@ -881,7 +882,6 @@ export function DroneFilesDock({
       const entry = node.entry;
       const active = activeOpenedFilePath === entry.path;
       const selected = selectedPaths.has(entry.path);
-      const FileIcon = iconForFilePath(entry.path);
       const modified = formatLocalDateTime(entry.mtimeMs);
       const openable = entry.kind === 'file';
       return (
@@ -906,7 +906,7 @@ export function DroneFilesDock({
           >
             <span className="inline-flex h-4 w-4 flex-shrink-0" aria-hidden="true" />
             <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)] ${openable ? '' : 'opacity-70'}`}>
-              <FileIcon size={13} />
+              <FileTypeIcon path={entry.path} size={15} />
             </span>
             <span className={`min-w-0 flex-1 truncate leading-none ${openable ? '' : 'opacity-70'}`}>{node.name}</span>
           </button>

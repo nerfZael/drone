@@ -1,5 +1,5 @@
 import React from 'react';
-import { iconForFilePath } from '../icons';
+import { FileTypeIcon } from './FileTypeIcon';
 import type { DroneOpenedFileTabState } from './opened-file-types';
 
 type OpenedDroneFileTabsProps = {
@@ -37,7 +37,7 @@ export function OpenedDroneFileTabs({
       <div className="min-h-[34px] min-w-0 flex flex-1 items-end gap-1 overflow-x-auto px-2 pt-1.5" role="tablist" aria-label="Open files">
         {normalizedTabs.map((tab) => {
           const active = tab.tabId === activeTabId;
-          const FileIcon = iconForFilePath(tab.path ?? tab.name ?? '');
+          const iconPath = tab.path ?? tab.name ?? '';
           const displayName =
             tab.name ||
             String(tab.path ?? '')
@@ -92,7 +92,7 @@ export function OpenedDroneFileTabs({
                 className="min-w-0 flex-1 flex items-center gap-1.5 text-left"
                 title={title}
               >
-                <FileIcon className="h-3.5 w-3.5 shrink-0" />
+                <FileTypeIcon path={iconPath} className="h-3.5 w-3.5 shrink-0" size={14} />
                 <span className="truncate">
                   {displayName}
                   {tab.dirty ? <span aria-hidden="true">*</span> : null}

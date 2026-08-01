@@ -20,6 +20,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { SvgXml } from 'react-native-svg';
+import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
 import { colors } from '../theme';
 import {
@@ -229,6 +230,7 @@ export function FilePreviewModal({
             </Pressable>
             <View style={styles.headerCopy}>
               <View style={styles.titleRow}>
+                <NativeFileTypeIcon path={preview?.name || displayPath} size={18} />
                 <Text numberOfLines={1} style={styles.title}>
                   {preview?.name || displayPath.split('/').at(-1) || 'File preview'}
                 </Text>

@@ -6,7 +6,8 @@ import {
   type AgentRunChangeTreeNode,
 } from '@drone/assistant-chat';
 
-import { IconChevron, IconFolder, iconForFilePath } from '../icons';
+import { IconChevron } from '../icons';
+import { FileTypeIcon, FolderTypeIcon } from '../files/FileTypeIcon';
 
 function statusTextClass(entry: AgentRunFileChangeEntry): string {
   switch (entry.status) {
@@ -137,7 +138,8 @@ export function AgentRunChangedFilesTree({
               className="shrink-0 text-[var(--muted-dim)] transition-colors group-hover/change-row:text-[var(--accent)] group-focus-visible/change-row:text-[var(--accent)]"
               size={panelAppearance ? 12 : 11}
             />
-            <IconFolder
+            <FolderTypeIcon
+              path={node.path}
               className={
                 panelAppearance
                   ? 'shrink-0 text-[var(--yellow)] opacity-80 transition-opacity group-hover/change-row:opacity-100 group-focus-visible/change-row:opacity-100'
@@ -161,7 +163,6 @@ export function AgentRunChangedFilesTree({
       );
     }
 
-    const FileIcon = iconForFilePath(node.path);
     const selected = selectedPath === node.path;
     return (
       <button
@@ -193,7 +194,8 @@ export function AgentRunChangedFilesTree({
             {agentRunFileStatusLabel(node.entry)}
           </span>
         ) : null}
-        <FileIcon
+        <FileTypeIcon
+          path={node.path}
           className={`shrink-0 transition-colors ${
             selected
               ? 'text-[var(--accent)]'

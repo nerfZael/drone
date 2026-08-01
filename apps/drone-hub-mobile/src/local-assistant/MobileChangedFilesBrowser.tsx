@@ -1,6 +1,5 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import File from 'lucide-react-native/icons/file';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
 import type {
   AgentRunFileChangeEntry,
@@ -8,6 +7,7 @@ import type {
   AgentRunFileChangeWorkspace,
 } from '@blip/protocol';
 import { colors } from '../theme';
+import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import { MobileChangedFileStatusBadge } from './MobileChangedFileStatusBadge';
 import { MobileChangedFilesTree } from './MobileChangedFilesTree';
 import {
@@ -120,10 +120,10 @@ function WorkspaceBrowser({
               ]}
             >
               <MobileChangedFileStatusBadge tone={presentation.tone} code={presentation.code} />
-              <File
-                color={selected ? colors.accent : colors.muted}
-                size={13}
-                strokeWidth={1.8}
+              <NativeFileTypeIcon
+                path={entry.path}
+                size={16}
+                opacity={selected ? 1 : 0.86}
               />
               <Text
                 numberOfLines={1}

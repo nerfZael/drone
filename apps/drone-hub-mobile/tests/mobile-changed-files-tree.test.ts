@@ -27,9 +27,11 @@ describe('mobile changed files tree', () => {
     expect(treeSource).toContain('buildAgentRunChangeTree(entries)');
     expect(treeSource).toContain("node.kind === 'file'");
     expect(treeSource).toContain('node.children.map');
+    expect(treeSource).toContain('<NativeFolderTypeIcon');
     expect(treeSource).toMatch(/\{collapsed \? \(\s*<View style=\{\[styles\.stats/);
     expect(transcriptSource).toContain('<MobileChangedFilesTree');
-    expect(transcriptSource).toContain("import File from 'lucide-react-native/icons/file';");
+    expect(transcriptSource).toContain('<NativeFileTypeIcon');
+    expect(transcriptSource).toContain('path={entry.path}');
     expect(transcriptSource).toContain('styles.changedFilesFileAdditions');
     expect(transcriptSource).toContain('styles.changedFilesFileDeletions');
     expect(transcriptSource).not.toContain(
@@ -43,6 +45,9 @@ describe('mobile changed files tree', () => {
     expect(reviewSource).toContain('Previous');
     expect(reviewSource).toContain('Next');
     expect(browserSource).toContain('<MobileChangedFilesTree');
+    expect(browserSource).toContain('<NativeFileTypeIcon');
+    expect(browserSource).toContain('path={entry.path}');
+    expect(diffSource).toContain('<NativeFileTypeIcon path={entry.path}');
     expect(diffSource).toContain('<DiffLine');
   });
 });

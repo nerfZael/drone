@@ -1,7 +1,8 @@
 import React from 'react';
 
 import { MarkdownMessage } from '../chat/MarkdownMessage';
-import { IconChevron, IconFile, IconFolder, iconForFilePath } from '../icons';
+import { IconChevron, IconFile } from '../icons';
+import { FileTypeIcon, FolderTypeIcon } from '../files/FileTypeIcon';
 import { formatArtifactSize, formatUpdatedAt } from './assistant-formatters';
 import type { AssistantArtifactFile, AssistantArtifactSummary } from './assistant-types';
 
@@ -174,7 +175,7 @@ export function AssistantThreadFilesView({
                   <IconChevron down={open} size={12} />
                 </span>
                 <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--yellow)]">
-                  <IconFolder size={13} />
+                  <FolderTypeIcon path={node.path} size={15} />
                 </span>
                 <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
               </button>
@@ -184,7 +185,6 @@ export function AssistantThreadFilesView({
         );
       }
 
-      const Icon = iconForFilePath(node.path) ?? IconFile;
       const selected = node.path === selectedPath;
       return (
         <button
@@ -205,7 +205,7 @@ export function AssistantThreadFilesView({
             aria-hidden="true"
           />
           <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
-            <Icon size={13} />
+            <FileTypeIcon path={node.path} size={15} />
           </span>
           <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
         </button>

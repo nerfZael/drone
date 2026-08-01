@@ -2,7 +2,7 @@ import React from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { chatAttachmentTypeLabel } from '@drone/assistant-chat';
 import X from 'lucide-react-native/icons/x';
-import FileText from 'lucide-react-native/icons/file-text';
+import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import { colors } from '../theme';
 import type { MobileChatAttachment } from './pick-chat-images';
 
@@ -38,7 +38,7 @@ export function ChatAttachmentStrip({
               <Image source={{ uri: attachment.uri }} resizeMode="cover" style={styles.thumbnail} />
             ) : (
               <View style={[styles.thumbnail, styles.fileThumbnail]}>
-                <FileText color={colors.accent} size={20} strokeWidth={1.9} />
+                <NativeFileTypeIcon path={attachment.name} size={22} />
               </View>
             )}
             <View style={styles.copy}>
