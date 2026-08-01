@@ -11,7 +11,9 @@ export function pendingPromptKeepsChatBusy(opts: {
   state: string;
   hasTurn: boolean;
   native: boolean;
+  countsAsAgentRun?: boolean;
 }): boolean {
+  if (opts.countsAsAgentRun === false) return false;
   const state = String(opts.state ?? '').trim();
   if (state === 'failed' || state === 'cancelled') return false;
   // A queued prompt is waiting for delivery; the agent is not working on it

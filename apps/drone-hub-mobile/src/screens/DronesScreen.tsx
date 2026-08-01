@@ -1,9 +1,6 @@
 import React from 'react';
 import { fromByteArray } from 'base64-js';
-import {
-  buildModelCatalogChoices,
-  type AssistantMessage,
-} from '@drone/assistant-chat';
+import { buildModelCatalogChoices, type AssistantMessage } from '@drone/assistant-chat';
 import {
   ActivityIndicator,
   Alert,
@@ -80,6 +77,7 @@ import {
   confirmOptimisticMobilePendingPrompt,
   confirmedMobilePendingPromptState,
   hasActiveMobileDronePendingPrompt,
+  latestActiveMobileAgentPrompt,
   mergeOptimisticMobilePendingPrompts,
   mobileChatRespondingStatus,
   mobileDronePendingPrompts,
@@ -293,9 +291,7 @@ export function DronesScreen({
       commitDroneListSnapshot({
         ...current,
         sidebar,
-        ...(preferenceVersion !== undefined
-          ? { sidebarPreferenceVersion: preferenceVersion }
-          : {}),
+        ...(preferenceVersion !== undefined ? { sidebarPreferenceVersion: preferenceVersion } : {}),
       });
     },
     [commitDroneListSnapshot, targetId],
@@ -331,6 +327,7 @@ export function DronesScreen({
   const [approvalBusyId, setApprovalBusyId] = React.useState('');
   const [pendingPrompts, setPendingPrompts] = React.useState<any[]>([]);
   const [cancellingPromptId, setCancellingPromptId] = React.useState('');
+  const [creatingQueuedChatId, setCreatingQueuedChatId] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
   const [promptAttachments, setPromptAttachments] = React.useState<MobileChatAttachment[]>([]);
   const promptRef = React.useRef(prompt);
@@ -1473,6 +1470,52 @@ export function DronesScreen({
       .finally(() => setCancellingPromptId((current) => (current === promptId ? '' : current)));
   };
 
+  const createQueuedChatNow = (actionId: string) => {
+    if (!selected || !actionId || creatingQueuedChatId) return;
+    const destinationId = targetId;
+    const droneId = selected.id;
+    const sourceChatName = chatName;
+    setCreatingQueuedChatId(actionId);
+    setError(null);
+    void requestDroneControl(destinationId, 'chat.create', {
+      droneId,
+      queuedActionId: actionId,
+      sourceChatName,
+    })
+      .then(async (result: any) => {
+        if (
+          targetIdRef.current !== destinationId ||
+          selectedRef.current?.id !== droneId ||
+          chatNameRef.current !== sourceChatName
+        )
+          return;
+        const targetChatName = String(result?.targetChatName ?? '').trim();
+        if (!targetChatName) {
+          await readChat(droneId, sourceChatName);
+          return;
+        }
+        const currentDrone = selectedRef.current!;
+        const nextChats = [...new Set([...currentDrone.chats, targetChatName])];
+        const updatedDrone = { ...currentDrone, chats: nextChats };
+        selectedRef.current = updatedDrone;
+        chatNameRef.current = targetChatName;
+        setSelected(updatedDrone);
+        setDrones((current) => current.map((item) => (item.id === droneId ? updatedDrone : item)));
+        setChats(nextChats);
+        setChatName(targetChatName);
+        setTurns([]);
+        setNativeMessages(null);
+        setNativeChatId('');
+        setNativeThread(null);
+        setPendingApprovals([]);
+        setPendingPrompts([]);
+        await readChat(droneId, targetChatName);
+        await loadDrones(true);
+      })
+      .catch((nextError: any) => setError(nextError?.message ?? String(nextError)))
+      .finally(() => setCreatingQueuedChatId((current) => (current === actionId ? '' : current)));
+  };
+
   const openNewDroneScreen = async (
     overrides: MobileDroneCreateDefaults | null = null,
   ): Promise<void> => {
@@ -1723,7 +1766,7 @@ export function DronesScreen({
       busy === 'prompt' ||
       busy === 'stop' ||
       hasActivePendingPrompt ||
-      visiblePendingPrompts.some((item) => item.status === 'pending'),
+      Boolean(latestActiveMobileAgentPrompt(visiblePendingPrompts)),
     nativeRuntimeActive:
       nativeThread?.status === 'running' ||
       nativeThread?.status === 'waiting_for_approval' ||
@@ -1883,9 +1926,7 @@ export function DronesScreen({
                     : {}),
                 }
               : {}),
-            ...((nativeMessages !== null ||
-              chatAgentId === 'codex' ||
-              chatAgentId === 'blip')
+            ...(nativeMessages !== null || chatAgentId === 'codex' || chatAgentId === 'blip'
               ? {
                   agentAccessOptions: (
                     [
@@ -1920,10 +1961,7 @@ export function DronesScreen({
                     [
                       {
                         policy: 'ask',
-                        label:
-                          chatAgentId === 'codex'
-                            ? 'Ask · unavailable'
-                            : 'Ask',
+                        label: chatAgentId === 'codex' ? 'Ask · unavailable' : 'Ask',
                         disabled: chatAgentId === 'codex',
                       },
                       ...(chatAgentId === 'codex'
@@ -2407,6 +2445,8 @@ export function DronesScreen({
                           queuedPrompts={visiblePendingPrompts}
                           cancellingPromptId={cancellingPromptId}
                           onCancelQueuedPrompt={cancelPendingPrompt}
+                          creatingQueuedChatId={creatingQueuedChatId}
+                          onCreateQueuedChatNow={createQueuedChatNow}
                           linkedPullRequests={linkedPullRequests}
                           onLoadFullMessage={(message) => void loadFullChatMessage(message)}
                           fullMessageLoadingId={fullMessageBusyId}

@@ -107,7 +107,10 @@ test('reserves a seed queue position before an immediate follow-up', async () =>
     queued.map((item) => item.id),
     ['initial-task', 'review-follow-up'],
   );
-  assert.equal(queue.nextQueued({ droneId: 'seeded-drone', chatName: 'default' }).id, 'initial-task');
+  assert.equal(
+    queue.nextQueued({ droneId: 'seeded-drone', chatName: 'default' }).id,
+    'initial-task',
+  );
 });
 
 test('drops retired automation metadata from prompt payloads', async () => {
@@ -249,6 +252,180 @@ test('steering can claim a follow-up while the current built-in prompt is sendin
   );
 });
 
+test('new-chat actions are durable FIFO barriers and Create now claims them exactly once', async () => {
+  const queue = repository('new-chat-action');
+  const at = '2026-07-10T09:00:00.000Z';
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('before', at), deliveryMode: 'queue' },
+  });
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: {
+      ...prompt('new-chat', at, 'Review the completed work'),
+      deliveryMode: 'queue',
+      action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+    },
+  });
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('after-asap', at), deliveryMode: 'asap' },
+  });
+
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' }).id, 'before');
+  assert.equal(
+    await queue.claim({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'after-asap',
+      leaseOwner: 'worker',
+      now: at,
+    }),
+    null,
+  );
+
+  const [firstPromotion, secondPromotion] = await Promise.all([
+    queue.claimForSteering({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'new-chat',
+      leaseOwner: 'promoter-one',
+      now: at,
+    }),
+    queue.claimForSteering({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'new-chat',
+      leaseOwner: 'promoter-two',
+      now: at,
+    }),
+  ]);
+  assert.equal([firstPromotion, secondPromotion].filter(Boolean).length, 1);
+  assert.deepEqual(
+    queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'new-chat' }).action,
+    { type: 'send-in-new-chat', sourceChatName: 'default' },
+  );
+});
+
+test('normal claims advance through a new-chat barrier before later ASAP prompts', async () => {
+  const queue = repository('new-chat-claim-order');
+  const at = '2026-07-10T09:00:00.000Z';
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('before', at), deliveryMode: 'queue' },
+  });
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: {
+      ...prompt('new-chat', at, 'Review the completed work'),
+      deliveryMode: 'queue',
+      action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+    },
+  });
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('after-asap', at), deliveryMode: 'asap' },
+  });
+
+  assert.ok(
+    await queue.claim({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'before',
+      leaseOwner: 'worker',
+      now: at,
+    }),
+  );
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'before',
+    patch: { state: 'sent', updatedAt: at },
+  });
+
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' }).id, 'new-chat');
+  assert.ok(
+    await queue.claim({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'new-chat',
+      leaseOwner: 'worker',
+      now: at,
+    }),
+  );
+  assert.equal(
+    await queue.claim({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'after-asap',
+      leaseOwner: 'worker',
+      now: at,
+    }),
+    null,
+  );
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'new-chat',
+    patch: { state: 'sent', updatedAt: at },
+  });
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' }).id, 'after-asap');
+});
+
+test('dispatch windows retain an older new-chat barrier beyond the UI history limit', async () => {
+  const queue = repository('new-chat-window');
+  const at = '2026-07-10T09:00:00.000Z';
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('active', at), state: 'sent' },
+  });
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: {
+      ...prompt('new-chat', at, 'Review the completed work'),
+      deliveryMode: 'queue',
+      action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+    },
+  });
+  for (let index = 0; index < 80; index += 1) {
+    await queue.enqueue({
+      droneId: 'alpha',
+      chatName: 'default',
+      prompt: {
+        ...prompt(`later-${index}`, at),
+        deliveryMode: 'asap',
+      },
+    });
+  }
+
+  assert.equal(
+    queue
+      .list({ droneId: 'alpha', chatName: 'default', limit: 60 })
+      .some((item) => item.id === 'new-chat'),
+    false,
+  );
+  const candidate = queue.nextQueued({ droneId: 'alpha', chatName: 'default' });
+  assert.equal(candidate?.id, 'new-chat');
+  assert.deepEqual(
+    queue
+      .listThrough({
+        droneId: 'alpha',
+        chatName: 'default',
+        promptId: candidate.id,
+      })
+      .map((item) => item.id),
+    ['active', 'new-chat'],
+  );
+});
+
 test('ASAP prompts are selected before older queued prompts', async () => {
   const queue = repository('asap-priority');
   const at = '2026-07-10T09:00:00.000Z';
@@ -268,30 +445,21 @@ test('ASAP prompts are selected before older queued prompts', async () => {
     prompt: { ...prompt('asap-second', at), deliveryMode: 'asap' },
   });
 
-  assert.equal(
-    queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id,
-    'asap-first',
-  );
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id, 'asap-first');
   await queue.update({
     droneId: 'alpha',
     chatName: 'default',
     promptId: 'asap-first',
     patch: { state: 'sent', updatedAt: at },
   });
-  assert.equal(
-    queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id,
-    'asap-second',
-  );
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id, 'asap-second');
   await queue.update({
     droneId: 'alpha',
     chatName: 'default',
     promptId: 'asap-second',
     patch: { state: 'sent', updatedAt: at },
   });
-  assert.equal(
-    queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id,
-    'queue-first',
-  );
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id, 'queue-first');
 });
 
 test('a conditional update permits only one competing claimant', async () => {

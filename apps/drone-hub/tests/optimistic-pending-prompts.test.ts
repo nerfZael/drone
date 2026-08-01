@@ -5,6 +5,7 @@ import {
   mergeDesktopOptimisticPendingPrompts,
   normalizePendingPromptState,
   optimisticPendingPromptState,
+  pendingPromptCanStopResponse,
   pendingPromptShowsWorkingState,
   reconcileOptimisticPendingPrompt,
   selectedChatRespondingStatus,
@@ -21,6 +22,10 @@ describe('optimistic pending prompt helpers', () => {
     expect(pendingPromptShowsWorkingState({ state: 'sending' })).toBe(true);
     expect(pendingPromptShowsWorkingState({ state: 'sent' })).toBe(true);
     expect(pendingPromptShowsWorkingState({ state: 'failed' })).toBe(false);
+    const action = { type: 'send-in-new-chat' as const, sourceChatName: 'default' };
+    expect(pendingPromptShowsWorkingState({ state: 'sending', action })).toBe(false);
+    expect(pendingPromptCanStopResponse({ state: 'queued', action })).toBe(true);
+    expect(pendingPromptCanStopResponse({ state: 'sending', action })).toBe(false);
   });
 
   test('keeps the desktop sending fallback for unknown server states', () => {

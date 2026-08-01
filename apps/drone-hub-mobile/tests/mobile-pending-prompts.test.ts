@@ -5,6 +5,7 @@ import {
   confirmOptimisticMobilePendingPrompt,
   confirmedMobilePendingPromptState,
   hasActiveMobileDronePendingPrompt,
+  latestActiveMobileAgentPrompt,
   mergeOptimisticMobilePendingPrompts,
   mobileChatRespondingStatus,
   mobileDronePendingPrompts,
@@ -69,6 +70,66 @@ describe('mobile drone pending prompts', () => {
       startedAt: '2026-07-20T10:05:00.000Z',
       agentPlan: { items: [{ text: 'Edit mobile UI', status: 'in_progress' }] },
     });
+  });
+
+  test('preserves queued new-chat actions for the mobile Create now UI', () => {
+    expect(
+      mobileDronePendingPrompts(
+        [
+          {
+            id: 'review-action',
+            at: '2026-07-20T10:00:00.000Z',
+            state: 'queued',
+            prompt: 'Review the finished implementation',
+            action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+          },
+        ],
+        [],
+      )[0],
+    ).toMatchObject({
+      id: 'review-action',
+      status: 'queued',
+      cancelable: true,
+      action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+    });
+  });
+
+  test('does not treat an executing new-chat action as an agent run', () => {
+    const action = {
+      id: 'review-action',
+      prompt: 'Review it',
+      status: 'pending' as const,
+      error: null,
+      imageCount: 0,
+      cancelable: false,
+      action: { type: 'send-in-new-chat' as const, sourceChatName: 'default' },
+    };
+    expect(
+      hasActiveMobileDronePendingPrompt(
+        [
+          {
+            id: action.id,
+            state: 'sending',
+            action: action.action,
+          },
+        ],
+        [],
+      ),
+    ).toBe(false);
+    expect(latestActiveMobileAgentPrompt([action])).toBeUndefined();
+    expect(
+      latestActiveMobileAgentPrompt([
+        action,
+        {
+          id: 'agent-prompt',
+          prompt: 'Implement it',
+          status: 'pending',
+          error: null,
+          imageCount: 0,
+          cancelable: false,
+        },
+      ])?.id,
+    ).toBe('agent-prompt');
   });
 
   test('does not duplicate an active prompt once its activity is in the transcript', () => {

@@ -19,6 +19,7 @@ type ChatManagementRouteDependencyName =
   | 'cloneNativeChatSession'
   | 'collectDockerSnapshotImageRefsFromChatEntry'
   | 'createChatInStore'
+  | 'createDroneChat'
   | 'createRequestTimer'
   | 'deleteActiveChatFromStore'
   | 'deleteNativeChatSession'
@@ -102,6 +103,7 @@ export function createChatManagementRouteHandler(
     cloneNativeChatSession,
     collectDockerSnapshotImageRefsFromChatEntry,
     createChatInStore,
+    createDroneChat,
     createRequestTimer,
     deleteActiveChatFromStore,
     deleteNativeChatSession,
@@ -240,50 +242,14 @@ export function createChatManagementRouteHandler(
         const copyFrom = copyFromRaw ? normalizeChatName(copyFromRaw) : '';
         const createAsDraft = parseDraftFlag(body?.draft ?? body?.isDraft);
         try {
-          const droneEntry = resolved.drone;
-          await importDroneChatsFromRegistry({ droneId, chats: droneEntry?.chats });
-          const createdAt = nowIso();
-          const defaultEntry = buildNewChatEntry({
-            droneEntry,
-            createdAt,
-          });
-          const created = await createChatInStore({
+          const created = await createDroneChat({
             droneId,
             chatName,
-            ...(copyFrom ? { copyFromChatName: copyFrom, implicitDefaultEntry: defaultEntry } : {}),
-            createEntry: (source: any) => {
-              const entry: any = buildNewChatEntry({
-                droneEntry,
-                createdAt,
-                ...(source ? { sourceChatEntry: source } : {}),
-              });
-              if (createAsDraft) entry.draft = true;
-              return entry;
-            },
+            droneEntry: resolved.drone,
+            creationMode: copyFrom ? 'clone-history' : 'empty',
+            ...(copyFrom ? { sourceChatName: copyFrom } : {}),
+            draft: createAsDraft,
           });
-          await projectCanonicalChatsToRegistry(droneId);
-          if (copyFrom) {
-            const [{ chat: sourceChat }, { chat: targetChat }] = await Promise.all([
-              getChatEntry({ droneId, chatName: copyFrom }),
-              getChatEntry({ droneId, chatName }),
-            ]);
-            if (inferChatAgent(sourceChat, droneEntry).kind === 'native') {
-              const sourceId = String(sourceChat?.id ?? '').trim();
-              const targetId = String(targetChat?.id ?? '').trim();
-              if (sourceId && targetId) {
-                await cloneNativeChatSession({
-                  sourceId,
-                  sourceChatName: copyFrom,
-                  sourceProvider: String(sourceChat?.nativeProvider ?? '').trim(),
-                  sourceModel: String(sourceChat?.model ?? '').trim(),
-                  sourceThinkingLevel: String(sourceChat?.reasoning ?? '').trim(),
-                  targetId,
-                  droneId,
-                  chatName,
-                });
-              }
-            }
-          }
 
           json(res, 201, {
             ok: true,
@@ -763,10 +729,7 @@ export function createChatManagementRouteHandler(
           json(res, 200, {
             ok: true,
             available,
-            accessScope: normalizeMcpChatAccessScope(
-              chat?.droneHubMcpAccessScope,
-              droneId,
-            ),
+            accessScope: normalizeMcpChatAccessScope(chat?.droneHubMcpAccessScope, droneId),
           });
           return;
         } catch (error: any) {

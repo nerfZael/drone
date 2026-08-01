@@ -24,6 +24,14 @@ describe('pending prompt ownership', () => {
       pendingPromptKeepsChatBusy({ state: 'sending', hasTurn: false, native: true }),
     ).toBe(true);
     expect(
+      pendingPromptKeepsChatBusy({
+        state: 'sending',
+        hasTurn: false,
+        native: true,
+        countsAsAgentRun: false,
+      }),
+    ).toBe(false);
+    expect(
       pendingPromptKeepsChatBusy({ state: 'sent', hasTurn: false, native: true }),
     ).toBe(false);
     expect(

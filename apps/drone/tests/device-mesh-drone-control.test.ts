@@ -838,9 +838,7 @@ describe('device mesh drone summaries', () => {
         },
       });
       expect(readResult.turns).toHaveLength(100);
-      expect(
-        readResult.turns.some((turn: any) => turn.id === 'prompt-completed'),
-      ).toBe(false);
+      expect(readResult.turns.some((turn: any) => turn.id === 'prompt-completed')).toBe(false);
       expect(markReadBody).toBe(
         '{"latestAgentTurnId":"turn-1","latestAgentRevision":2,"updatedByDeviceId":"phone-1"}',
       );
@@ -855,6 +853,46 @@ describe('device mesh drone summaries', () => {
         url: 'http://127.0.0.1:7777/api/drones/Untitled%206/chats/default/pending/prompt-2',
         method: 'DELETE',
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('promotes a queued new-chat action through the existing mobile chat-create grant', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      requests.push({
+        url: String(input),
+        method: String(init?.method ?? 'GET'),
+        body: String(init?.body ?? ''),
+      });
+      return Response.json({
+        ok: true,
+        status: 'created',
+        actionId: 'review-action',
+        targetChatName: 'Untitled 2',
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('chat.create', {
+          droneId: 'drone one',
+          sourceChatName: 'default',
+          queuedActionId: 'review-action',
+        }),
+      ).resolves.toMatchObject({ targetChatName: 'Untitled 2' });
+      expect(requests).toEqual([
+        {
+          url: 'http://127.0.0.1:7777/api/drones/drone%20one/chats/default/pending/review-action/create-now',
+          method: 'POST',
+          body: '{}',
+        },
+      ]);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -904,7 +942,10 @@ describe('device mesh drone summaries', () => {
     const requests: Array<{ path: string; method: string }> = [];
     globalThis.fetch = (async (input, init) => {
       const url = new URL(String(input));
-      requests.push({ path: `${url.pathname}${url.search}`, method: String(init?.method ?? 'GET') });
+      requests.push({
+        path: `${url.pathname}${url.search}`,
+        method: String(init?.method ?? 'GET'),
+      });
       if (url.pathname.endsWith('/native')) {
         return Response.json({ ok: true, nativeChatId: 'native-chat-1' });
       }
@@ -1067,8 +1108,7 @@ describe('device mesh drone summaries', () => {
               content: '# Preview',
               size: 9,
               mtimeMs: 100,
-              revision:
-                url.searchParams.get('revision') === '0' ? null : 'sha256:text',
+              revision: url.searchParams.get('revision') === '0' ? null : 'sha256:text',
             }
           : {
               ok: true,
@@ -1077,8 +1117,7 @@ describe('device mesh drone summaries', () => {
               mime: 'video/mp4',
               size: 6,
               mtimeMs: 200,
-              revision:
-                url.searchParams.get('revision') === '0' ? null : 'sha256:video',
+              revision: url.searchParams.get('revision') === '0' ? null : 'sha256:video',
             };
         return Response.json(body);
       }

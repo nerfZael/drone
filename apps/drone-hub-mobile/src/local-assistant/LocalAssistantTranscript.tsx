@@ -43,6 +43,7 @@ import { NativeMarkdown } from './NativeMarkdown';
 import { MobileLoadingState } from './MobileLoadingState';
 import { MobileReasoningBlock } from './MobileReasoningBlock';
 import { MobileChangedFilesTree } from './MobileChangedFilesTree';
+import { latestActiveMobileAgentPrompt } from '../drones/mobile-pending-prompts';
 import { MobileChangedFilesReviewModal } from './MobileChangedFilesReviewModal';
 import { nativeMarkdownHasCodeBlock } from './native-markdown-model';
 import {
@@ -314,14 +315,10 @@ function ChangedFilesSummary({
                           ]}
                         >
                           {entry.additions > 0 ? (
-                            <Text style={styles.changedFilesFileAdditions}>
-                              +{entry.additions}
-                            </Text>
+                            <Text style={styles.changedFilesFileAdditions}>+{entry.additions}</Text>
                           ) : null}
                           {entry.deletions > 0 ? (
-                            <Text style={styles.changedFilesFileDeletions}>
-                              -{entry.deletions}
-                            </Text>
+                            <Text style={styles.changedFilesFileDeletions}>-{entry.deletions}</Text>
                           ) : null}
                         </View>
                       ) : null}
@@ -1146,10 +1143,7 @@ function AgentRunSummary({
     !awaitingApproval && pauseClock.startedAt !== null
       ? Math.max(0, rawEnd - pauseClock.startedAt)
       : 0;
-  const measuredDurationMs = Math.max(
-    0,
-    end - start - pauseClock.accumulatedMs - resumingPauseMs,
-  );
+  const measuredDurationMs = Math.max(0, end - start - pauseClock.accumulatedMs - resumingPauseMs);
   const durationMs =
     (!active || awaitingApproval) && Number.isFinite(completedDurationMs)
       ? Math.max(0, Number(completedDurationMs))
@@ -1194,13 +1188,7 @@ function AgentRunSummary({
   );
 }
 
-function MobileAgentPlanList({
-  plan,
-  running = false,
-}: {
-  plan?: AgentPlan;
-  running?: boolean;
-}) {
+function MobileAgentPlanList({ plan, running = false }: { plan?: AgentPlan; running?: boolean }) {
   const [stepsExpanded, setStepsExpanded] = React.useState(false);
   if (!plan?.items.length) return null;
   const complete = plan.items.filter((item) => item.status === 'completed').length;
@@ -1386,6 +1374,8 @@ export function MobileAssistantTranscript({
   queuedPrompts = [],
   cancellingPromptId = '',
   onCancelQueuedPrompt,
+  creatingQueuedChatId = '',
+  onCreateQueuedChatNow,
   loading = false,
   emptyTitle = 'The assistant lives here.',
   emptyBody = 'Ask a question, or attach a remote workspace and let this phone inspect and edit it.',
@@ -1407,6 +1397,8 @@ export function MobileAssistantTranscript({
   queuedPrompts?: MobileQueuedPrompt[];
   cancellingPromptId?: string;
   onCancelQueuedPrompt?: (promptId: string) => void;
+  creatingQueuedChatId?: string;
+  onCreateQueuedChatNow?: (promptId: string) => void;
   loading?: boolean;
   emptyTitle?: string;
   emptyBody?: string;
@@ -1451,6 +1443,7 @@ export function MobileAssistantTranscript({
     return <ConversationLoadingState />;
   }
   const activePrompts = queuedPrompts.filter((prompt) => prompt.status === 'pending');
+  const activeAgentPrompt = latestActiveMobileAgentPrompt(activePrompts);
   const historicalPrompts = queuedPrompts.filter(
     (prompt) => prompt.status === 'failed' || prompt.status === 'stopped',
   );
@@ -1680,9 +1673,9 @@ export function MobileAssistantTranscript({
   };
   const groups = groupMobileTranscriptRuns(items, {
     running,
-    hasSeparateActivePrompt: activePrompts.length > 0,
+    hasSeparateActivePrompt: Boolean(activeAgentPrompt),
   });
-  const activePrompt = activePrompts.at(-1);
+  const activePrompt = activeAgentPrompt;
   const lastGroup = groups.at(-1);
   const latestRunGroup = [...groups].reverse().find((group) => group.type === 'run');
   const groupedActiveRun = lastGroup?.type === 'run' && lastGroup.active;
@@ -1727,6 +1720,8 @@ export function MobileAssistantTranscript({
           prompts={activePrompts}
           cancellingId={cancellingPromptId}
           onCancel={onCancelQueuedPrompt}
+          creatingId={creatingQueuedChatId}
+          onCreateNow={onCreateQueuedChatNow}
         />
       ) : null}
       {running && activePrompt ? (
@@ -1786,6 +1781,8 @@ export function MobileAssistantTranscript({
           prompts={queuedOnlyPrompts}
           cancellingId={cancellingPromptId}
           onCancel={onCancelQueuedPrompt}
+          creatingId={creatingQueuedChatId}
+          onCreateNow={onCreateQueuedChatNow}
         />
       ) : null}
       <ContextMenu

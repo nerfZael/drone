@@ -30,10 +30,7 @@ import {
   renameProfile as renameManagedProfile,
   useProfile as useManagedProfile,
 } from '../host/profile-manager';
-import {
-  loadRegistry,
-  updateRegistry as updateHostRegistry,
-} from '../host/registry';
+import { loadRegistry, updateRegistry as updateHostRegistry } from '../host/registry';
 import { getCatalogStore } from '../host/catalog-store';
 import {
   createRegistryBackup,
@@ -261,6 +258,7 @@ import { createAssistantRuntime } from './assistant-runtime';
 import { createArchiveRuntime } from './archive-runtime';
 import { createChatPromptRuntime } from './chat-prompt-runtime';
 import { createChatSessionRuntime } from './chat-session-runtime';
+import { createDroneChatCreator } from './chat-creation-service';
 import {
   FS_EDITOR_MAX_BYTES,
   FS_LIST_TIMEOUT_MS,
@@ -326,6 +324,7 @@ import {
   copyChatAttachmentsToContainer,
   normalizeChatImageAttachments,
   promptWithImageAttachments,
+  readChatAttachmentsFromRefs,
   type ChatImageAttachment,
   type ChatImageAttachmentRef,
 } from './chat-attachments';
@@ -1358,8 +1357,15 @@ let nativeChatStopHandler: (nativeChatId: string) => Promise<void> = async () =>
 };
 let nativeChatIsBusyHandler: (nativeChatId: string) => Promise<boolean> = async () => false;
 let nativeChatErrorHandler: (nativeChatId: string) => Promise<string> = async () => '';
-let nativeChatLatestAssistantTextHandler: (nativeChatId: string) => Promise<string> = async () => '';
+let nativeChatLatestAssistantTextHandler: (nativeChatId: string) => Promise<string> = async () =>
+  '';
 let deleteNativeChatSessionsHandler: (droneEntry: any) => Promise<void> = async () => {};
+let cloneNativeChatSessionHandler: (input: any) => Promise<void> = async () => {
+  throw new Error('native chat runtime is not ready');
+};
+let copyNativeChatConfigurationHandler: (input: any) => Promise<void> = async () => {
+  throw new Error('native chat runtime is not ready');
+};
 
 function fleetError(message: string, status: number = 400): Error & { status?: number } {
   const error = new Error(message) as Error & { status?: number };
@@ -1885,11 +1891,13 @@ async function mcpServersForProjection(opts: {
       out.push(server);
       continue;
     }
-    out.push(projectMcpServerForManagedChats({
-      server,
-      runtime: opts.runtime,
-      hostBridgePath: path.resolve(__dirname, '..', 'mcp-http-stdio-bridge.js'),
-    }));
+    out.push(
+      projectMcpServerForManagedChats({
+        server,
+        runtime: opts.runtime,
+        hostBridgePath: path.resolve(__dirname, '..', 'mcp-http-stdio-bridge.js'),
+      }),
+    );
   }
   return out;
 }
@@ -1905,8 +1913,7 @@ async function resolveManagedChatMcpEnv(input: {
   const chatId = String(input.chat?.id ?? '').trim();
   if (!chatId) return {};
   return {
-    DRONE_HUB_MCP_URL:
-      input.runtime === 'container' ? config.containerUrl : config.hostUrl,
+    DRONE_HUB_MCP_URL: input.runtime === 'container' ? config.containerUrl : config.hostUrl,
     DRONE_HUB_MCP_TOKEN: createChatMcpAccessToken({
       droneId: input.droneId,
       chatName: input.chatName,
@@ -3039,6 +3046,20 @@ const {
   updateTranscriptTurnById,
 } = chatSessionRuntime;
 
+const createDroneChat = createDroneChatCreator({
+  buildNewChatEntry,
+  cloneNativeChatSession: (input) => cloneNativeChatSessionHandler(input),
+  copyNativeChatConfiguration: (input) => copyNativeChatConfigurationHandler(input),
+  createChatInStore,
+  getChatEntry,
+  importDroneChatsFromRegistry,
+  inferChatAgent,
+  listChatsFromStore,
+  nowIso,
+  projectCanonicalChatsToRegistry,
+  readChatFromStore,
+});
+
 dockerSnapshotRuntime = createDockerSnapshotRuntime({
   chatHasActivePendingPromptsForSummary: (...args: any[]) =>
     promptRuntime.chatHasActivePendingPromptsForSummary(...args),
@@ -3087,6 +3108,7 @@ promptRuntime = createChatPromptRuntime({
   UPGRADE_DAEMON_READY_TIMEOUT_MS,
   applyChatReconciliationInStore,
   applyPendingDisplayNameToProvisionedDrone,
+  autoRenameGeneratedChatFromFirstPrompt,
   assertReadOnlySupportedForAgent,
   bashQuote,
   buildChatAttachmentsDirectory,
@@ -3105,6 +3127,7 @@ promptRuntime = createChatPromptRuntime({
   copyChatAttachmentsToContainer,
   copyChatAttachmentsToHost,
   createDronePendingPromptStore,
+  createDroneChat,
   createDroneProvisioningController,
   defaultDaemonReadyTimeoutMs,
   defaultPendingPromptEnqueueRetryDelayMs,
@@ -3136,6 +3159,7 @@ promptRuntime = createChatPromptRuntime({
   inferChatAgent,
   isDraftChatEntry,
   isNotFoundErrorMessage,
+  listChatsFromStore,
   loadRegistry,
   looksLikeTransientPromptEnqueueError,
   launchHostDroneDaemon,
@@ -3173,6 +3197,7 @@ promptRuntime = createChatPromptRuntime({
   projectCanonicalChatToRegistry,
   promptWithImageAttachments,
   readBuiltinTranscriptSessionId,
+  readChatAttachmentsFromRefs,
   readChatFromStore,
   resetTranscriptStoreForTests,
   resolveBlipPromptCommand,
@@ -3217,6 +3242,7 @@ const {
   chatHasActivePendingPromptsForSummary,
   chatHasReconcilablePendingPrompts,
   chatReconciliationQueue,
+  createOrEnqueueNewChatAction,
   createOrEnqueuePromptUnified,
   daemonPromptEventMonitor,
   dequeueProvisioning,
@@ -3233,6 +3259,7 @@ const {
   migrateInMemoryChatStateForRename,
   normalizeChatImageAttachmentRefs,
   pendingPromptsFromChatEntry,
+  promoteQueuedNewChatAction,
   pruneCompletedPendingPrompts,
   pushPendingPrompt,
   pushPendingStartupPrompt,
@@ -4090,11 +4117,31 @@ export async function startDroneHubApiServer(opts: {
     deviceMesh,
     normalizeDroneIdentity,
     nowIso,
-    onNativePromptQueueChanged: ({ droneId, chatName }) =>
-      notifyDroneChatWrite?.(droneId, chatName),
+    onNativePromptQueueChanged: ({ droneId, chatName }) => {
+      notifyDroneChatWrite?.(droneId, chatName);
+      promptRuntime.enqueuePendingPromptPump(droneId, chatName);
+    },
     summarizeDroneActivity,
   });
   const nativeChatLifecycle = new NativeChatLifecycle(assistantService, blipAssistantHost);
+  cloneNativeChatSessionHandler = (input: any) =>
+    nativeChatLifecycle.clone({ ...input, id: input.targetId });
+  copyNativeChatConfigurationHandler = async (input: any) => {
+    await nativeChatLifecycle.ensure({
+      id: input.sourceId,
+      droneId: input.droneId,
+      chatName: input.sourceChatName,
+      provider: input.sourceProvider,
+      model: input.sourceModel,
+      thinkingLevel: input.sourceThinkingLevel,
+    });
+    await assistantService.cloneNativeThread({
+      sourceId: input.sourceId,
+      id: input.targetId,
+      droneId: input.droneId,
+      chatName: input.chatName,
+    });
+  };
   nativeChatIsBusyHandler = async (nativeChatId: string) =>
     assistantPromptDrains.has(nativeChatId) ||
     blipAssistantHost.isThreadRunning(nativeChatId) ||
@@ -4983,9 +5030,15 @@ export async function startDroneHubApiServer(opts: {
         const repoPath = String(drone?.repoPath ?? '').trim();
         const existingGroupId = String(drone?.groupId ?? '').trim();
         const existingGroup = groupById.get(existingGroupId);
-        return group ? { ...drone, groupId: existingGroup?.repoPath === repoPath
-          ? existingGroupId
-          : groupIdByScopeAndName.get(`${repoPath}\0${group}`) || null } : drone;
+        return group
+          ? {
+              ...drone,
+              groupId:
+                existingGroup?.repoPath === repoPath
+                  ? existingGroupId
+                  : groupIdByScopeAndName.get(`${repoPath}\0${group}`) || null,
+            }
+          : drone;
       });
     return { ok: true, drones };
   }
@@ -5542,6 +5595,8 @@ export async function startDroneHubApiServer(opts: {
     }) => nativeChatLifecycle.clone({ ...input, id: input.targetId }),
     collectDockerSnapshotImageRefsFromChatEntry,
     createChatInStore,
+    createDroneChat,
+    createOrEnqueueNewChatAction,
     createOrEnqueuePromptUnified,
     createRequestTimer,
     defaultDaemonReadyTimeoutMs,
@@ -5603,17 +5658,15 @@ export async function startDroneHubApiServer(opts: {
     parseDraftFlag,
     projectCanonicalChatToRegistry,
     projectCanonicalChatsToRegistry,
+    promoteQueuedNewChatAction,
     pushPendingPrompt,
     pushPendingStartupPrompt,
     readChatFromStore,
     readChatReadStateFromStore,
     readChatSnapshot,
     removeDockerSnapshotImagesBestEffort,
-    renameNativeChatSession: (input: {
-      id: string;
-      droneId: string;
-      chatName: string;
-    }) => nativeChatLifecycle.rename(input),
+    renameNativeChatSession: (input: { id: string; droneId: string; chatName: string }) =>
+      nativeChatLifecycle.rename(input),
     renameChatInStore,
     resolveChatTmuxCommand,
     resolveDroneDaemonClientForEntry,

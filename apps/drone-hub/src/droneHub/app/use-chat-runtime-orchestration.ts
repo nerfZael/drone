@@ -12,6 +12,7 @@ import {
   mergeDesktopOptimisticPendingPrompts,
   normalizePendingPromptState,
   optimisticPendingPromptState,
+  pendingPromptCanStopResponse,
   pendingPromptShowsWorkingState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
@@ -118,8 +119,7 @@ function chatUiModeForAgent(agent: ChatAgentConfig | null | undefined): 'transcr
 }
 
 function isStoppableTranscriptPendingPrompt(item: PendingPrompt | null | undefined): boolean {
-  if (!item) return false;
-  return item.state === 'queued' || item.state === 'sending' || item.state === 'sent';
+  return pendingPromptCanStopResponse(item);
 }
 
 export function shouldFlushLocalQueuedPrompts(

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import {
   completedTurnIds as createCompletedTurnIds,
+  isSendInNewChatQueueAction,
   normalizePendingPromptState,
 } from '@drone/assistant-chat';
 import type {
@@ -1043,6 +1044,7 @@ function sanitizeQueuedPrompt(
     status:
       prompt.status === 'failed' ? 'failed' : prompt.status === 'running' ? 'running' : 'queued',
     error: cleanOptionalString(prompt.error) || null,
+    ...(isSendInNewChatQueueAction(prompt.action) ? { action: prompt.action } : {}),
   };
 }
 
@@ -1991,9 +1993,7 @@ export class HubAssistantService {
       if (thread.autoApprove) this.resolvePendingApprovalsForThread(thread.id, true);
     }
     if (patch.agentPermissionMode != null) {
-      thread.agentPermissionMode = normalizeAssistantAgentPermissionMode(
-        patch.agentPermissionMode,
-      );
+      thread.agentPermissionMode = normalizeAssistantAgentPermissionMode(patch.agentPermissionMode);
     }
     if (patch.approvalPolicy != null) {
       if (String(patch.approvalPolicy).trim() === 'agent-decides')
@@ -2289,6 +2289,7 @@ export class HubAssistantService {
         status:
           record.state === 'failed' ? 'failed' : record.state === 'sending' ? 'running' : 'queued',
         error: cleanOptionalString(record.error ?? record.lastError) || null,
+        ...(isSendInNewChatQueueAction(record.action) ? { action: record.action } : {}),
       },
       includeImageData,
     );
@@ -2673,7 +2674,7 @@ export class HubAssistantService {
     const thread = this.getThread(threadId);
     const identity = this.promptQueueIdentity(thread);
     const queued = this.requirePromptQueue().nextQueued(identity);
-    if (!queued) return null;
+    if (!queued || isSendInNewChatQueueAction(queued.action)) return null;
     return await this.claimQueuedPrompt(threadId, queued.id);
   }
 
@@ -2686,6 +2687,8 @@ export class HubAssistantService {
     const thread = this.getThread(threadId);
     const identity = this.promptQueueIdentity(thread);
     const queue = this.requirePromptQueue();
+    const queued = queue.get({ ...identity, promptId });
+    if (!queued || isSendInNewChatQueueAction(queued.action)) return null;
     const claim = options?.allowConcurrent
       ? queue.claimForSteering.bind(queue)
       : queue.claim.bind(queue);
@@ -2953,10 +2956,7 @@ export class HubAssistantService {
       .trim()
       .replace(/^drone_hub__/, '');
     const permissionMode = this.getThread(threadId).agentPermissionMode;
-    if (
-      permissionMode === 'read-only' &&
-      ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES.has(toolName)
-    ) {
+    if (permissionMode === 'read-only' && ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES.has(toolName)) {
       return {
         status: 'deny',
         reason: `${toolName} is unavailable while this chat is read only.`,
@@ -3048,8 +3048,9 @@ export class HubAssistantService {
           }
           const groupId = cleanOptionalString(ctx?.args?.groupId);
           const canonicalGroup = groupId
-            ? Object.values(regAny?.groups ?? {}).find((group: any) =>
-                cleanOptionalString(group?.id) === groupId)
+            ? Object.values(regAny?.groups ?? {}).find(
+                (group: any) => cleanOptionalString(group?.id) === groupId,
+              )
             : null;
           approvalArgs = {
             requested: ctx?.args ?? {},

@@ -1,17 +1,17 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { chatAttachmentPreviewLabel } from '@drone/assistant-chat';
+import {
+  chatAttachmentPreviewLabel,
+  isSendInNewChatQueueAction,
+} from '@drone/assistant-chat';
 
 import type { AgentPlan } from '@drone/assistant-chat';
 import { DroneApiRequestError } from '../host/api';
 import type { ChatImageAttachment, ChatImageAttachmentRef } from './chat-attachments';
-import type {
-  AgentPermissionMode,
-  BuiltinAgentId,
-  ChatAgentConfig,
-} from './chat-types';
+import type { AgentPermissionMode, BuiltinAgentId, ChatAgentConfig } from './chat-types';
 import { ChatReconciliationQueue } from './chat-reconciliation-queue';
 import { createChatReconciliationExecutor } from './chat-reconciliation-executor';
+import { createSendInNewChatActionRuntime } from './chat-queue-action-runtime';
 import { DaemonPromptEventMonitor } from './daemon-prompt-event-monitor';
 import { DroneDaemonRecovery } from './drone-daemon-recovery';
 import type { PendingPromptState } from './drone-pending-state';
@@ -30,6 +30,7 @@ type ChatPromptRuntimeDependencyName =
   | 'UPGRADE_DAEMON_READY_TIMEOUT_MS'
   | 'applyChatReconciliationInStore'
   | 'applyPendingDisplayNameToProvisionedDrone'
+  | 'autoRenameGeneratedChatFromFirstPrompt'
   | 'assertReadOnlySupportedForAgent'
   | 'bashQuote'
   | 'buildChatAttachmentsDirectory'
@@ -47,6 +48,7 @@ type ChatPromptRuntimeDependencyName =
   | 'commitDroneMetadataPatch'
   | 'copyChatAttachmentsToContainer'
   | 'copyChatAttachmentsToHost'
+  | 'createDroneChat'
   | 'createDronePendingPromptStore'
   | 'createDroneProvisioningController'
   | 'defaultDaemonReadyTimeoutMs'
@@ -80,6 +82,7 @@ type ChatPromptRuntimeDependencyName =
   | 'isDraftChatEntry'
   | 'isNotFoundErrorMessage'
   | 'loadRegistry'
+  | 'listChatsFromStore'
   | 'looksLikeTransientPromptEnqueueError'
   | 'launchHostDroneDaemon'
   | 'makeClient'
@@ -112,6 +115,7 @@ type ChatPromptRuntimeDependencyName =
   | 'promptWithImageAttachments'
   | 'readBuiltinTranscriptSessionId'
   | 'readChatFromStore'
+  | 'readChatAttachmentsFromRefs'
   | 'resetTranscriptStoreForTests'
   | 'resolveBlipPromptCommand'
   | 'resolveCanonicalDroneOrPendingForReadRef'
@@ -161,6 +165,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     UPGRADE_DAEMON_READY_TIMEOUT_MS,
     applyChatReconciliationInStore,
     applyPendingDisplayNameToProvisionedDrone,
+    autoRenameGeneratedChatFromFirstPrompt,
     assertReadOnlySupportedForAgent,
     bashQuote,
     buildChatAttachmentsDirectory,
@@ -178,6 +183,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     commitDroneMetadataPatch,
     copyChatAttachmentsToContainer,
     copyChatAttachmentsToHost,
+    createDroneChat,
     createDronePendingPromptStore,
     createDroneProvisioningController,
     defaultDaemonReadyTimeoutMs,
@@ -211,6 +217,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     isDraftChatEntry,
     isNotFoundErrorMessage,
     loadRegistry,
+    listChatsFromStore,
     looksLikeTransientPromptEnqueueError,
     launchHostDroneDaemon,
     makeClient,
@@ -246,6 +253,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     promptWithImageAttachments,
     readBuiltinTranscriptSessionId,
     readChatFromStore,
+    readChatAttachmentsFromRefs,
     resetTranscriptStoreForTests,
     resolveBlipPromptCommand,
     resolveCanonicalDroneOrPendingForReadRef,
@@ -495,6 +503,14 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             });
       const effectivePrompt = promptWithImageAttachments(opts.prompt, attachmentsForPrompt);
       if (agent.kind === 'native') {
+        const nativeAttachments =
+          attachments.length > 0 || attachmentsForPrompt.length === 0
+            ? attachments
+            : await readChatAttachmentsFromRefs({
+                runtime,
+                containerName,
+                attachments: attachmentsForPrompt,
+              });
         await promptNativeChat({
           droneId,
           chatName: normalizedChat,
@@ -504,7 +520,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           model: String((chat as any)?.model ?? '').trim(),
           thinkingLevel: String((chat as any)?.reasoning ?? '').trim(),
           prompt: String(opts.prompt ?? '').trim(),
-          attachments,
+          attachments: nativeAttachments,
           deliveryMode: opts.deliveryMode,
           agentPermissionMode,
           approvalPolicy,
@@ -979,10 +995,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
   const {
     cancelQueuedPendingPrompt,
+    claimQueuedPendingPromptForPromotion,
     claimQueuedPendingPromptForSending,
     isSafePromptId,
     pendingPromptsFromChatEntry,
     pruneCompletedPendingPrompts,
+    readPendingPrompt,
+    readPendingPromptDispatchWindow,
     readPendingPrompts,
     readPendingStartupPrompts,
     resumePendingPromptChats,
@@ -1641,9 +1660,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     return await stopCliChatResponse(opts);
   }
 
-  function chatHasActivePendingPrompts(
-    entry: any,
-  ): boolean {
+  function chatHasActivePendingPrompts(entry: any): boolean {
     const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
     if (pending.length === 0) return false;
     const turns = Array.isArray(entry?.turns) ? entry.turns : [];
@@ -1723,7 +1740,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       const entry: any = chat;
       // Prompt rows are canonical in SQLite; the registry-backed chat projection
       // is compatibility metadata and can lag queue transitions.
-      const pendingList: any[] = await readPendingPrompts({ droneId, chatName });
+      const dispatchWindow = readPendingPromptDispatchWindow({ droneId, chatName });
+      const pendingList: any[] = (
+        dispatchWindow?.prompts ?? (await readPendingPrompts({ droneId, chatName }))
+      ).filter(
+        (pending: any) =>
+          !(String(pending?.state ?? '') === 'sent' && isSendInNewChatQueueAction(pending?.action)),
+      );
       if (pendingList.length === 0) return;
 
       const turns: any[] = Array.isArray(entry?.turns) ? entry.turns : [];
@@ -1731,19 +1754,36 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean),
       );
 
-      const idx = pendingList.findIndex(
-        (p: any) =>
-          String(p?.state ?? '') === 'queued' &&
-          p?.deliveryMode === 'asap' &&
-          String(p?.id ?? '').trim(),
-      );
-      const queuedIndex =
-        idx >= 0
-          ? idx
-          : pendingList.findIndex(
-              (p: any) =>
-                String(p?.state ?? '') === 'queued' && String(p?.id ?? '').trim(),
-            );
+      let queuedIndex = dispatchWindow?.candidateId
+        ? pendingList.findIndex(
+            (p: any) => String(p?.id ?? '').trim() === dispatchWindow.candidateId,
+          )
+        : -1;
+      if (!dispatchWindow) {
+        const queuedActionIndex = pendingList.findIndex(
+          (p: any) =>
+            String(p?.state ?? '') === 'queued' &&
+            isSendInNewChatQueueAction(p?.action) &&
+            String(p?.id ?? '').trim(),
+        );
+        const actionBarrierIndex = queuedActionIndex >= 0 ? queuedActionIndex : pendingList.length;
+        const asapIndex = pendingList.findIndex(
+          (p: any, index: number) =>
+            index <= actionBarrierIndex &&
+            String(p?.state ?? '') === 'queued' &&
+            p?.deliveryMode === 'asap' &&
+            String(p?.id ?? '').trim(),
+        );
+        queuedIndex =
+          asapIndex >= 0
+            ? asapIndex
+            : pendingList.findIndex(
+                (p: any, index: number) =>
+                  index <= actionBarrierIndex &&
+                  String(p?.state ?? '') === 'queued' &&
+                  String(p?.id ?? '').trim(),
+              );
+      }
       if (queuedIndex === -1) return;
 
       const p = pendingList[queuedIndex] ?? {};
@@ -1760,7 +1800,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         }).catch(() => {});
         continue;
       }
-
 
       const sessionKnown = hasKnownBuiltinTranscriptSession(entry, agent.id);
       const prior = pendingList
@@ -1782,6 +1821,29 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
               transcriptDoneIds,
             });
       if (defer) return;
+
+      if (isSendInNewChatQueueAction(p?.action)) {
+        const claimed = await claimQueuedPendingPromptForSending({ droneId, chatName, id });
+        if (!claimed) continue;
+        const claimedPending = readPendingPrompt({ droneId, chatName, id });
+        if (!claimedPending) continue;
+        try {
+          await sendInNewChatActionRuntime.executeClaimed({
+            droneId,
+            sourceChatName: chatName,
+            pending: claimedPending,
+          });
+        } catch (error) {
+          await sendInNewChatActionRuntime.failOrRetry({
+            droneId,
+            sourceChatName: chatName,
+            actionId: id,
+            error,
+          });
+          return;
+        }
+        continue;
+      }
 
       if (nativeAssistantOwnsPromptDelivery(agent.kind)) {
         try {
@@ -1861,10 +1923,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           if (agent.kind === 'native') {
             const nativeChatId = String((chat as any)?.id ?? '').trim();
             if (!nativeChatId) throw new Error('native chat has no stable identity');
-            await waitForNativePromptCompletion(
-              nativeChatId,
-              30 * 60_000,
-            );
+            await waitForNativePromptCompletion(nativeChatId, 30 * 60_000);
           }
           await updatePendingPrompt({ droneId, chatName, id, patch: { state: 'sent' } });
           if (agent.kind === 'builtin') {
@@ -1953,7 +2012,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const key = droneChatMapKey(opts.droneId, opts.chatName);
     if (!key) return;
 
-
     chatReconciliationQueue.delete(opts.droneId, opts.chatName);
 
     pendingPromptPump.delete(opts.droneId, opts.chatName);
@@ -1967,7 +2025,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const fromKey = droneChatMapKey(opts.droneId, opts.fromChatName);
     const toKey = droneChatMapKey(opts.droneId, opts.toChatName);
     if (!fromKey || !toKey || fromKey === toKey) return;
-
 
     chatReconciliationQueue.migrate(opts.droneId, opts.fromChatName, opts.toChatName);
 
@@ -1988,6 +2045,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           state: st,
           hasTurn: Boolean(id && doneIds.has(id)),
           native,
+          countsAsAgentRun: !isSendInNewChatQueueAction(p?.action),
         })
       )
         return true;
@@ -2143,7 +2201,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   });
   const { reconcileChatFromDaemon } = chatReconciliationExecutor;
 
-  async function waitForNativePromptCompletion(nativeChatId: string, timeoutMs: number): Promise<void> {
+  async function waitForNativePromptCompletion(
+    nativeChatId: string,
+    timeoutMs: number,
+  ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     do {
       if (!(await nativeChatIsBusy(nativeChatId))) {
@@ -2162,6 +2223,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatName: string;
     prompt: string;
     attachments?: ChatImageAttachment[];
+    attachmentRefs?: ChatImageAttachmentRef[];
     cwd?: string | null;
     submittedAt?: string | null;
     waitForDaemonMs?: number;
@@ -2190,20 +2252,23 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       chatEntry: { ...chat, pendingPrompts: canonicalPendingPrompts },
     });
     const defer =
-      disposition.hasPriorInFlight ||
-      (opts.priority !== 'asap' && disposition.hasPriorQueued);
+      disposition.hasPriorInFlight || (opts.priority !== 'asap' && disposition.hasPriorQueued);
     opts.mark?.('disposition');
 
     const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
     const rawAttachments = Array.isArray(opts.attachments) ? opts.attachments : [];
+    const providedAttachmentRefs = normalizeChatImageAttachmentRefs(opts.attachmentRefs);
     const attachmentsStorageRoot = chatAttachmentsStorageRootForDrone(d);
-    const attachmentsForPending = buildChatImageAttachmentRefs({
-      attachments: rawAttachments,
-      cwd,
-      chatName,
-      promptId: id,
-      storageRoot: attachmentsStorageRoot,
-    });
+    const attachmentsForPending =
+      providedAttachmentRefs.length > 0
+        ? providedAttachmentRefs
+        : buildChatImageAttachmentRefs({
+            attachments: rawAttachments,
+            cwd,
+            chatName,
+            promptId: id,
+            storageRoot: attachmentsStorageRoot,
+          });
 
     await pushPendingPrompt({
       droneId,
@@ -2223,7 +2288,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     opts.mark?.('persistPending');
 
     if (defer || opts.deliveryMode === 'background') {
-      if (rawAttachments.length > 0 && attachmentsForPending.length > 0) {
+      if (
+        providedAttachmentRefs.length === 0 &&
+        rawAttachments.length > 0 &&
+        attachmentsForPending.length > 0
+      ) {
         const attachmentsDir = buildChatAttachmentsDirectory({
           cwd,
           chatName,
@@ -2289,6 +2358,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           chatName,
           prompt: opts.prompt,
           attachments: rawAttachments,
+          attachmentRefs: attachmentsForPending,
           cwd: opts.cwd ?? null,
           waitForDaemonMs: opts.waitForDaemonMs,
           mark: opts.mark,
@@ -2368,9 +2438,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     hasPriorQueued: boolean;
   };
 
-  function getPromptEnqueueDisposition(opts: {
-    chatEntry: any;
-  }): PromptEnqueueDisposition {
+  function getPromptEnqueueDisposition(opts: { chatEntry: any }): PromptEnqueueDisposition {
     const turns: any[] = Array.isArray((opts.chatEntry as any)?.turns)
       ? (opts.chatEntry as any).turns
       : [];
@@ -2386,14 +2454,53 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         .filter((p: any) => p.id),
       transcriptDoneIds,
     });
-    const hasPriorQueued = priorPending.some(
-      (p: any) => String(p?.state ?? '') === 'queued',
-    );
+    const hasPriorQueued = priorPending.some((p: any) => String(p?.state ?? '') === 'queued');
     return {
       hasPriorInFlight,
       hasPriorQueued,
     };
   }
+
+  const sendInNewChatActionRuntime = createSendInNewChatActionRuntime({
+    attachmentOnlyPromptLabel,
+    autoRenameGeneratedChatFromFirstPrompt,
+    buildChatAttachmentsDirectory,
+    buildChatImageAttachmentRefs,
+    chatAttachmentsStorageRootForDrone,
+    claimQueuedPendingPromptForPromotion,
+    claimQueuedPendingPromptForSending,
+    copyChatAttachmentsToContainer,
+    copyChatAttachmentsToHost,
+    createDroneChat,
+    createOrEnqueuePrompt: createOrEnqueuePromptUnified,
+    droneRuntime,
+    enqueuePendingPromptPump,
+    getChatEntry,
+    hasPendingWork: (chat, pending) => {
+      const disposition = getPromptEnqueueDisposition({
+        chatEntry: { ...chat, pendingPrompts: pending },
+      });
+      return disposition.hasPriorInFlight || disposition.hasPriorQueued;
+    },
+    isSafePromptId,
+    listChatsFromStore,
+    loadRegistry,
+    normalizeChatImageAttachmentRefs,
+    normalizeChatName,
+    normalizeDroneCwdForRuntime,
+    normalizeDroneIdentity,
+    normalizeSubmittedAtIso,
+    notifyDroneChatWrite,
+    pushPendingPrompt,
+    readChatFromStore,
+    readPendingPrompt,
+    readPendingPrompts,
+    retryPendingPrompt,
+    schedulePendingPromptPumpRetry,
+    updatePendingPrompt,
+  });
+  const createOrEnqueueNewChatAction = sendInNewChatActionRuntime.createOrEnqueue;
+  const promoteQueuedNewChatAction = sendInNewChatActionRuntime.promote;
 
   type UnifiedPromptCreateOpts = {
     group?: string | null;
@@ -2415,6 +2522,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatName: string;
     prompt: string;
     attachments?: ChatImageAttachment[];
+    attachmentRefs?: ChatImageAttachmentRef[];
     cwd?: string | null;
     submittedAt?: string | null;
     deliveryMode?: 'queue' | 'asap';
@@ -2431,6 +2539,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const chatName = normalizeChatName(String(opts.chatName ?? '').trim() || 'default');
     const prompt = String(opts.prompt ?? '').trim();
     const attachments = Array.isArray(opts.attachments) ? opts.attachments : [];
+    const attachmentRefs = normalizeChatImageAttachmentRefs(opts.attachmentRefs);
     const preferredIdRaw = typeof opts.id === 'string' ? opts.id.trim() : '';
     if (preferredIdRaw && !isSafePromptId(preferredIdRaw)) {
       return { kind: 'error', status: 400, error: 'invalid promptId' };
@@ -2497,6 +2606,18 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         };
       }
       if (chatEntry && inferChatAgent(chatEntry, liveDroneEntry).kind === 'native') {
+        const runtime = droneRuntime(liveDroneEntry);
+        const containerName =
+          String(liveDroneEntry?.containerName ?? liveDroneEntry?.name ?? droneId).trim() ||
+          droneId;
+        const nativeAttachments =
+          attachments.length > 0 || attachmentRefs.length === 0
+            ? attachments
+            : await readChatAttachmentsFromRefs({
+                runtime,
+                containerName,
+                attachments: attachmentRefs,
+              });
         await promptNativeChat({
           droneId,
           chatName,
@@ -2506,7 +2627,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           model: String(chatEntry?.model ?? '').trim(),
           thinkingLevel: String(chatEntry?.reasoning ?? '').trim(),
           prompt,
-          attachments,
+          attachments: nativeAttachments,
           deliveryMode: opts.deliveryMode,
         });
         return {
@@ -2521,6 +2642,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         chatName,
         prompt,
         attachments,
+        attachmentRefs,
         cwd: opts.cwd ?? null,
         submittedAt: opts.submittedAt ?? null,
         deliveryMode: opts.deliveryMode === 'asap' ? 'immediate' : 'background',
@@ -2628,6 +2750,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatHasReconcilablePendingPrompts,
     chatReconciliationQueue,
     createOrEnqueuePromptUnified,
+    createOrEnqueueNewChatAction,
     daemonPromptEventMonitor,
     dequeueProvisioning,
     enqueuePendingPromptPump,
@@ -2644,6 +2767,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     migrateInMemoryChatStateForRename,
     normalizeChatImageAttachmentRefs,
     pendingPromptsFromChatEntry,
+    promoteQueuedNewChatAction,
     pruneCompletedPendingPrompts,
     pushPendingPrompt,
     pushPendingStartupPrompt,

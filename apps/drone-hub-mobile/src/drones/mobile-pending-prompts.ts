@@ -3,12 +3,15 @@ import {
   filterCompletedPendingPrompts,
   hasActivePendingPrompt,
   isStoppedRunError,
+  isSendInNewChatQueueAction,
   mergeOptimisticPendingPrompts,
   normalizeAgentPlan,
   normalizeAgentRunActivity,
   replaceOptimisticPendingPromptId,
+  resolveChatQueueActionPresentation,
   type AgentPlan,
   type PendingPromptState,
+  type SendInNewChatQueueAction,
 } from '@drone/assistant-chat';
 
 export type MobileDronePendingPrompt = {
@@ -22,6 +25,7 @@ export type MobileDronePendingPrompt = {
   startedAt?: string;
   agentPlan?: AgentPlan;
   delivered?: boolean;
+  action?: SendInNewChatQueueAction;
 };
 
 export type MobileOptimisticPendingPrompt = {
@@ -80,10 +84,7 @@ export function mergeOptimisticMobilePendingPrompts(input: {
     mergeMatched: ({ optimisticPrompt, serverPrompt, state }) => ({
       ...optimisticPrompt,
       ...serverPrompt,
-      state:
-        String(serverPrompt?.state ?? '').trim() === 'running'
-          ? 'sending'
-          : state,
+      state: String(serverPrompt?.state ?? '').trim() === 'running' ? 'sending' : state,
       optimisticSent: true,
     }),
   });
@@ -99,11 +100,7 @@ export function confirmOptimisticMobilePendingPrompt(
   },
 ): any[] {
   const optimisticId = String(input.optimisticId ?? '').trim();
-  const replaced = replaceOptimisticPendingPromptId(
-    prompts,
-    optimisticId,
-    input.confirmedId,
-  );
+  const replaced = replaceOptimisticPendingPromptId(prompts, optimisticId, input.confirmedId);
   return replaced.map((prompt, index) =>
     String(prompts[index]?.id ?? '').trim() === optimisticId
       ? {
@@ -129,7 +126,25 @@ export function confirmedMobilePendingPromptState(input: {
 }
 
 export function hasActiveMobileDronePendingPrompt(raw: unknown, turnsRaw: unknown): boolean {
-  return hasActivePendingPrompt(raw, turnsRaw);
+  const agentPrompts = (Array.isArray(raw) ? raw : []).filter(
+    (prompt: any) =>
+      resolveChatQueueActionPresentation(prompt?.action, String(prompt?.state ?? ''))
+        ?.countsAsAgentRun ?? true,
+  );
+  return hasActivePendingPrompt(agentPrompts, turnsRaw);
+}
+
+export function latestActiveMobileAgentPrompt<
+  T extends { status: string; action?: SendInNewChatQueueAction },
+>(prompts: T[]): T | undefined {
+  return [...prompts]
+    .reverse()
+    .find(
+      (prompt) =>
+        prompt.status === 'pending' &&
+        (resolveChatQueueActionPresentation(prompt.action, prompt.status)?.countsAsAgentRun ??
+          true),
+    );
 }
 
 export function mobileChatRespondingStatus(input: {
@@ -178,8 +193,8 @@ export function mobileDronePendingPrompts(
     const agentPlan = normalizeAgentPlan(item?.agentPlan);
     const startedAt = String(
       state === 'sending' || state === 'sent'
-        ? item?.startedAt ?? ''
-        : item?.startedAt ?? item?.at ?? '',
+        ? (item?.startedAt ?? '')
+        : (item?.startedAt ?? item?.at ?? ''),
     ).trim();
     const attachmentCount = positiveCount(
       item?.attachmentCount ??
@@ -201,6 +216,7 @@ export function mobileDronePendingPrompts(
         ...(attachmentCount > 0 ? { attachmentCount } : {}),
         imageCount: positiveCount(item?.imageCount),
         cancelable: state === 'queued',
+        ...(isSendInNewChatQueueAction(item?.action) ? { action: item.action } : {}),
         ...(startedAt ? { startedAt } : {}),
         ...(agentPlan ? { agentPlan } : {}),
         ...(delivered ? { delivered: true } : {}),

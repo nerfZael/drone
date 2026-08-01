@@ -1,5 +1,9 @@
 import React from 'react';
-import { isStoppedRunError, normalizeAgentRunActivity } from '@drone/assistant-chat';
+import {
+  isStoppedRunError,
+  normalizeAgentRunActivity,
+  resolveChatQueueActionPresentation,
+} from '@drone/assistant-chat';
 import { stripAnsi } from '../../domain';
 import type { PendingPrompt } from '../types';
 import { ChatMessageCopyAction } from './ChatMessageCopyAction';
@@ -30,6 +34,10 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   cancelError = null,
   autoExpandPrompt = false,
   initiallyExpandFileChanges = false,
+  onCreateNewChatNow,
+  createNewChatBusy = false,
+  createNewChatError = null,
+  autoFocusCreateNewChat = false,
 }: {
   item: PendingPrompt;
   showRoleIcons?: boolean;
@@ -42,6 +50,10 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   cancelError?: string | null;
   autoExpandPrompt?: boolean;
   initiallyExpandFileChanges?: boolean;
+  onCreateNewChatNow?: (promptId: string) => Promise<void> | void;
+  createNewChatBusy?: boolean;
+  createNewChatError?: string | null;
+  autoFocusCreateNewChat?: boolean;
 }) {
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
@@ -60,21 +72,34 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   const activity = normalizeAgentRunActivity(item.activity);
   const runStartedAt = item.startedAt ?? null;
   const badgeLabel = isFailed && !isStopped ? 'Failed' : null;
-  const canCancelQueued = item.state === 'queued' && Boolean(onCancelQueued);
-  const showAgentPendingBubble = !(item.state === 'queued' && !isFailed);
+  const actionPresentation = resolveChatQueueActionPresentation(item.action, item.state);
+  const canCancelQueued =
+    Boolean(onCancelQueued) && (actionPresentation?.canCancel ?? item.state === 'queued');
+  const createNowRef = React.useRef<HTMLButtonElement | null>(null);
+  React.useEffect(() => {
+    if (!autoFocusCreateNewChat || !actionPresentation?.canExecuteNow) return;
+    createNowRef.current?.focus();
+  }, [actionPresentation?.canExecuteNow, autoFocusCreateNewChat]);
+  const showAgentPendingBubble = !actionPresentation && !(item.state === 'queued' && !isFailed);
   const agentCopyText = isFailed ? stripAnsi(item.error || 'failed to send') : 'Working…';
   const queuedFooter =
     item.state === 'queued' ? (
-      <div className="mt-2 flex items-center justify-between gap-3">
+      <div className="mt-2 flex items-center justify-between gap-3 border-t border-[var(--border-subtle)] pt-2">
         <span
           role="status"
           aria-label={
-            item.deliveryMode === 'asap'
-              ? 'ASAP, waiting for the next safe delivery point'
-              : 'Queued, waiting to send'
+            actionPresentation
+              ? 'Queued, waiting to create a fresh chat'
+              : item.deliveryMode === 'asap'
+                ? 'ASAP, waiting for the next safe delivery point'
+                : 'Queued, waiting to send'
           }
           title={
-            item.deliveryMode === 'asap' ? 'Will run before queued follow-ups' : 'Waiting to send'
+            actionPresentation
+              ? 'Creates a fresh chat after earlier messages finish'
+              : item.deliveryMode === 'asap'
+                ? 'Will run before queued follow-ups'
+                : 'Waiting to send'
           }
           className="inline-flex items-center gap-1.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--user-muted)]"
         >
@@ -88,23 +113,47 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               strokeLinejoin="round"
             />
           </svg>
-          {item.deliveryMode === 'asap' ? 'ASAP' : 'Queued'}
+          {actionPresentation
+            ? 'Waiting to create a fresh chat'
+            : item.deliveryMode === 'asap'
+              ? 'ASAP'
+              : 'Queued'}
         </span>
-        {canCancelQueued ? (
-          <button
-            type="button"
-            onClick={() => void onCancelQueued?.(item.id)}
-            disabled={cancelBusy}
-            className="inline-flex min-h-5 items-center rounded px-1 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--red-subtle)] hover:text-[var(--red)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:text-[var(--muted-dim)]"
-            aria-label="Cancel queued prompt"
-            title="Cancel queued prompt"
-          >
-            {cancelBusy ? 'Canceling…' : 'Cancel'}
-          </button>
-        ) : null}
+        <div className="flex items-center gap-1.5">
+          {actionPresentation?.canExecuteNow && onCreateNewChatNow ? (
+            <button
+              ref={createNowRef}
+              type="button"
+              onClick={() => void onCreateNewChatNow(item.id)}
+              disabled={createNewChatBusy || cancelBusy}
+              className="inline-flex min-h-7 items-center rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] transition-colors hover:bg-[var(--accent-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {createNewChatBusy ? 'Creating…' : 'Create now'}
+            </button>
+          ) : null}
+          {canCancelQueued ? (
+            <button
+              type="button"
+              onClick={() => void onCancelQueued?.(item.id)}
+              disabled={cancelBusy || createNewChatBusy}
+              className="inline-flex min-h-5 items-center rounded px-1 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--red-subtle)] hover:text-[var(--red)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:text-[var(--muted-dim)]"
+              aria-label={actionPresentation ? 'Cancel queued new chat' : 'Cancel queued prompt'}
+              title={actionPresentation ? 'Cancel queued new chat' : 'Cancel queued prompt'}
+            >
+              {cancelBusy ? 'Canceling…' : 'Cancel'}
+            </button>
+          ) : null}
+        </div>
       </div>
     ) : null;
-  const pendingHeader = badgeLabel ? (
+  const pendingHeader = actionPresentation ? (
+    <span
+      className={`rounded border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${actionPresentation.state === 'failed' ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]' : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'}`}
+      style={{ fontFamily: 'var(--display)' }}
+    >
+      {actionPresentation.label}
+    </span>
+  ) : badgeLabel ? (
     <span
       className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)]"
       style={{ fontFamily: 'var(--display)' }}
@@ -132,6 +181,16 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               onOpenFileReference={onOpenFileReference}
             />
             {queuedFooter}
+            {actionPresentation?.state === 'failed' && item.error ? (
+              <div className="mt-2 whitespace-pre-wrap text-[var(--text-10)] text-[var(--red)]">
+                {stripAnsi(item.error)}
+              </div>
+            ) : null}
+            {createNewChatError ? (
+              <div className="mt-2 text-[var(--text-10)] text-[var(--red)]">
+                {stripAnsi(createNewChatError)}
+              </div>
+            ) : null}
           </>
         }
       />

@@ -243,22 +243,12 @@ describe('agent chat surface adapters', () => {
     ];
     const nativeHtml = renderToStaticMarkup(
       <ChatSurface adapter={adaptNativeAgentChatSurface()}>
-        <AgentChatTranscript
-          loading={false}
-          hasContent
-          emptyState={null}
-          items={renderItems()}
-        />
+        <AgentChatTranscript loading={false} hasContent emptyState={null} items={renderItems()} />
       </ChatSurface>,
     );
     const externalHtml = renderToStaticMarkup(
       <ChatSurface adapter={adaptExternalAgentChatSurface()}>
-        <AgentChatTranscript
-          loading={false}
-          hasContent
-          emptyState={null}
-          items={renderItems()}
-        />
+        <AgentChatTranscript loading={false} hasContent emptyState={null} items={renderItems()} />
       </ChatSurface>,
     );
 
@@ -455,7 +445,9 @@ describe('agent chat surface adapters', () => {
     expect(config.controls.some((control) => control.id === 'native-delivery')).toBe(false);
     expect(modelControl?.kind).toBe('model-picker');
     if (modelControl?.kind !== 'model-picker') throw new Error('Expected native model picker');
-    expect(modelControl.options.map((option) => `${option.provider}:${option.id}`)).toContain('openai:o3');
+    expect(modelControl.options.map((option) => `${option.provider}:${option.id}`)).toContain(
+      'openai:o3',
+    );
     modelControl.onSelect(
       { provider: 'openai', id: 'o3', name: 'o3', thinkingLevel: 'high' },
       'model',
@@ -488,6 +480,31 @@ describe('agent chat surface adapters', () => {
 
     expect(html).toContain('ASAP');
     expect(html).not.toContain('>Queued<');
+  });
+
+  test('native queued new-chat actions expose the same Create now control', () => {
+    const html = renderToStaticMarkup(
+      <AssistantQueuedPromptRow
+        prompt={{
+          id: 'review-action',
+          prompt: 'Review this work',
+          promptImages: [],
+          imageCount: 0,
+          createdAt: '2026-07-23T00:00:00.000Z',
+          deliveryMode: 'queue',
+          status: 'queued',
+          error: null,
+          action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+        }}
+        cancelling={false}
+        onCancel={() => {}}
+        onCreateNewChatNow={() => {}}
+      />,
+    );
+
+    expect(html).toContain('New chat queued');
+    expect(html).toContain('>Create now</button>');
+    expect(html).toContain('Runs after earlier work finishes');
   });
 
   test('the shared message body renders the same markdown and images for either controller', () => {
@@ -644,7 +661,9 @@ describe('agent chat surface adapters', () => {
     const userHtml = renderToStaticMarkup(
       <AssistantMessageRow message={{ id: 'plain-user', role: 'user', content: 'A prompt.' }} />,
     );
-    const workingHtml = renderToStaticMarkup(<AssistantWorkingRow startedAt={Date.now() - 4_000} />);
+    const workingHtml = renderToStaticMarkup(
+      <AssistantWorkingRow startedAt={Date.now() - 4_000} />,
+    );
 
     expect(assistantHtml).toContain('A plain response.');
     expect(assistantHtml).not.toContain('>Agent<');
@@ -784,11 +803,7 @@ describe('agent chat surface adapters', () => {
     expect(assistantTranscriptHasErrorMessage([message], 'fetch failed')).toBe(true);
     expect(assistantTranscriptHasErrorMessage([message], 'different failure')).toBe(false);
     const historicalHtml = renderToStaticMarkup(
-      <NativeAgentFailureCard
-        message={message}
-        hasSavedToolResults
-        retrying={false}
-      />,
+      <NativeAgentFailureCard message={message} hasSavedToolResults retrying={false} />,
     );
     expect(historicalHtml).toContain('Completed tool results were saved.');
     expect(historicalHtml).not.toContain('Continue response');
@@ -841,9 +856,7 @@ describe('agent chat surface adapters', () => {
     expect(singleHtml).toContain(
       '<span class="min-w-0 truncate font-medium">Command Execution</span>',
     );
-    expect(singleHtml.indexOf('Command Execution')).toBeLessThan(
-      singleHtml.indexOf(chevronPath),
-    );
+    expect(singleHtml.indexOf('Command Execution')).toBeLessThan(singleHtml.indexOf(chevronPath));
     expect(groupedHtml.indexOf('×2')).toBeLessThan(groupedHtml.indexOf(chevronPath));
     expect(groupedHtml.indexOf(chevronPath)).toBeLessThan(groupedHtml.indexOf('1 failed'));
     expect(groupedHtml).not.toContain('ml-auto text-[var(--muted-dim)]');
@@ -1246,11 +1259,7 @@ describe('agent chat surface adapters', () => {
 
   test('completed runs without tool calls still show their duration', () => {
     const html = renderToStaticMarkup(
-      <AssistantRunActivity
-        active={false}
-        startedAt={1_000}
-        endedAt={66_000}
-      />,
+      <AssistantRunActivity active={false} startedAt={1_000} endedAt={66_000} />,
     );
 
     expect(html).toContain('Worked for 1m 5s');
@@ -1275,9 +1284,7 @@ describe('agent chat surface adapters', () => {
         call: { id: `list-call-${index}`, name: 'list_files', args: {} },
       })),
     ];
-    const html = renderToStaticMarkup(
-      <ToolRunActivity items={items} active initiallyExpanded />,
-    );
+    const html = renderToStaticMarkup(<ToolRunActivity items={items} active initiallyExpanded />);
 
     expect(html).toContain('8 tool calls');
     expect(html).toContain('Read file');

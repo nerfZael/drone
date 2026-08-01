@@ -3,6 +3,7 @@ import type { AgentRunFileChanges } from '@blip/protocol';
 import type {
   AgentPlan,
   AgentRunActivity,
+  ChatQueueAction,
   PendingPromptState,
 } from '@drone/assistant-chat';
 
@@ -608,6 +609,7 @@ export type PendingPrompt = {
     dataBase64: string;
   }>;
   deliveryMode?: 'queue' | 'asap';
+  action?: ChatQueueAction;
   // `queued` is waiting for earlier work or for a provisioning drone to become ready.
   state: PendingPromptState;
   error?: string;

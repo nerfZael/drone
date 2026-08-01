@@ -12,6 +12,21 @@ export type SendDroneChatPromptResponse = {
   autoRenameChat?: boolean;
 };
 
+export type SendInNewChatActionResponse = {
+  ok: true;
+  accepted: true;
+  actionId: string;
+  pendingState: PendingPrompt['state'];
+  targetChatName?: string;
+};
+
+export type PromoteNewChatActionResponse = {
+  ok: true;
+  status: 'created' | 'executing';
+  actionId: string;
+  targetChatName?: string;
+};
+
 export type FetchDroneChatTranscriptResult = {
   transcripts: TranscriptItem[];
   etag: string | null;
@@ -38,12 +53,23 @@ function normalizeEventText(raw: unknown): string {
   return String(raw ?? '').trim();
 }
 
-export function droneChatEventMatches(data: DroneChatDeltaEvent, droneIdRaw: string | null | undefined, chatNameRaw: string | null | undefined): boolean {
+export function droneChatEventMatches(
+  data: DroneChatDeltaEvent,
+  droneIdRaw: string | null | undefined,
+  chatNameRaw: string | null | undefined,
+): boolean {
   const droneId = normalizeEventText(droneIdRaw);
   const chatName = normalizeEventText(chatNameRaw) || 'default';
   if (!droneId || !chatName) return false;
-  const refs = [...(Array.isArray(data?.chats) ? data.chats : []), ...(Array.isArray(data?.removed) ? data.removed : [])];
-  return refs.some((ref) => normalizeEventText(ref?.droneId) === droneId && (normalizeEventText(ref?.chatName) || 'default') === chatName);
+  const refs = [
+    ...(Array.isArray(data?.chats) ? data.chats : []),
+    ...(Array.isArray(data?.removed) ? data.removed : []),
+  ];
+  return refs.some(
+    (ref) =>
+      normalizeEventText(ref?.droneId) === droneId &&
+      (normalizeEventText(ref?.chatName) || 'default') === chatName,
+  );
 }
 
 function buildUnexpectedHtmlError(url: string): string {
@@ -58,7 +84,10 @@ function sameOptionalText(left: unknown, right: unknown): boolean {
   return String(left ?? '') === String(right ?? '');
 }
 
-function sameAttachments(leftRaw: TranscriptItem['attachments'], rightRaw: TranscriptItem['attachments']): boolean {
+function sameAttachments(
+  leftRaw: TranscriptItem['attachments'],
+  rightRaw: TranscriptItem['attachments'],
+): boolean {
   const left = Array.isArray(leftRaw) ? leftRaw : [];
   const right = Array.isArray(rightRaw) ? rightRaw : [];
   if (left.length !== right.length) return false;
@@ -94,13 +123,19 @@ function sameDockerSnapshot(
   );
 }
 
-function sameFileChanges(left: TranscriptItem['fileChanges'], right: TranscriptItem['fileChanges']): boolean {
+function sameFileChanges(
+  left: TranscriptItem['fileChanges'],
+  right: TranscriptItem['fileChanges'],
+): boolean {
   if (left === right) return true;
   if (!left || !right) return false;
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function sameActivity(left: TranscriptItem['activity'], right: TranscriptItem['activity']): boolean {
+function sameActivity(
+  left: TranscriptItem['activity'],
+  right: TranscriptItem['activity'],
+): boolean {
   if (left === right) return true;
   if (!left || !right) return false;
   if (
@@ -140,7 +175,10 @@ export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem):
   );
 }
 
-export function sameTranscriptItems(left: TranscriptItem[] | null | undefined, right: TranscriptItem[] | null | undefined): boolean {
+export function sameTranscriptItems(
+  left: TranscriptItem[] | null | undefined,
+  right: TranscriptItem[] | null | undefined,
+): boolean {
   if (left === right) return true;
   if (!Array.isArray(left) || !Array.isArray(right)) return false;
   if (left.length !== right.length) return false;
@@ -209,6 +247,47 @@ export async function sendDroneChatPrompt(
   );
 }
 
+export async function sendInNewDroneChatAction(
+  requestJson: RequestJson,
+  opts: {
+    droneId: string;
+    chatName: string;
+    prompt: string;
+    actionId?: string;
+    attachments?: ChatSendPayload['attachments'];
+    submittedAt?: string;
+  },
+): Promise<SendInNewChatActionResponse> {
+  const droneId = String(opts.droneId ?? '').trim();
+  const chatName = String(opts.chatName ?? '').trim() || 'default';
+  return await requestJson<SendInNewChatActionResponse>(
+    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/new-chat-action`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        prompt: String(opts.prompt ?? ''),
+        attachments: Array.isArray(opts.attachments) ? opts.attachments : [],
+        ...(opts.actionId ? { promptId: opts.actionId } : {}),
+        submittedAt: opts.submittedAt ?? new Date().toISOString(),
+      }),
+    },
+  );
+}
+
+export async function promoteNewDroneChatAction(
+  requestJson: RequestJson,
+  opts: { droneId: string; chatName: string; actionId: string },
+): Promise<PromoteNewChatActionResponse> {
+  const droneId = String(opts.droneId ?? '').trim();
+  const chatName = String(opts.chatName ?? '').trim() || 'default';
+  const actionId = String(opts.actionId ?? '').trim();
+  return await requestJson<PromoteNewChatActionResponse>(
+    `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/pending/${encodeURIComponent(actionId)}/create-now`,
+    { method: 'POST' },
+  );
+}
+
 export async function fetchDroneChatTranscript(
   requestJson: RequestJson,
   opts: {
@@ -250,7 +329,11 @@ export async function fetchDroneChatState(
     qs.set('tail', String(Math.floor(opts.tail)));
     qs.set('transcript', 'tail');
   }
-  const data = await requestJson<{ ok: true; transcripts: TranscriptItem[]; pending: PendingPrompt[] }>(
+  const data = await requestJson<{
+    ok: true;
+    transcripts: TranscriptItem[];
+    pending: PendingPrompt[];
+  }>(
     `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`,
   );
   return {
@@ -291,7 +374,11 @@ export async function fetchDroneChatTranscriptCached(opts: {
     try {
       data = JSON.parse(text);
     } catch {
-      const error = new Error(looksHtml ? buildUnexpectedHtmlError(url) : `Expected JSON from ${url}, but response was not valid JSON.`) as Error & {
+      const error = new Error(
+        looksHtml
+          ? buildUnexpectedHtmlError(url)
+          : `Expected JSON from ${url}, but response was not valid JSON.`,
+      ) as Error & {
         status?: number;
         data?: any;
       };
@@ -300,7 +387,9 @@ export async function fetchDroneChatTranscriptCached(opts: {
     }
   }
   if (!response.ok) {
-    const error = new Error(data?.error ? String(data.error) : `${response.status} ${response.statusText}`) as Error & {
+    const error = new Error(
+      data?.error ? String(data.error) : `${response.status} ${response.statusText}`,
+    ) as Error & {
       status?: number;
       data?: any;
     };

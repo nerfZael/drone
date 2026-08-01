@@ -4,6 +4,7 @@ import {
   mergeOptimisticPendingPrompts,
   normalizePendingPromptState as normalizeSharedPendingPromptState,
   replaceOptimisticPendingPromptId,
+  resolveChatQueueActionPresentation,
 } from '@drone/assistant-chat';
 import type { ChatSendPayload } from '../chat';
 import type { ChatImageAttachmentRef, PendingPrompt } from '../types';
@@ -75,9 +76,19 @@ export function optimisticPendingPromptState(
 }
 
 export function pendingPromptShowsWorkingState(
-  item: Pick<PendingPrompt, 'state'> | null | undefined,
+  item: Pick<PendingPrompt, 'state' | 'action'> | null | undefined,
 ): boolean {
+  const actionPresentation = resolveChatQueueActionPresentation(item?.action, item?.state ?? '');
+  if (actionPresentation && !actionPresentation.countsAsAgentRun) return false;
   return isActivePendingPrompt(item);
+}
+
+export function pendingPromptCanStopResponse(
+  item: Pick<PendingPrompt, 'state' | 'action'> | null | undefined,
+): boolean {
+  const actionPresentation = resolveChatQueueActionPresentation(item?.action, item?.state ?? '');
+  if (actionPresentation) return actionPresentation.canCancel;
+  return item?.state === 'queued' || item?.state === 'sending' || item?.state === 'sent';
 }
 
 export function selectedChatRespondingStatus(args: {

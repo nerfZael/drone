@@ -68,10 +68,7 @@ import {
   resolveAssistantStartupPromptPresentation,
   type AssistantStartupPrompt,
 } from './assistant-startup-prompt';
-import {
-  formatArtifactSize,
-  formatUpdatedAt,
-} from './assistant-formatters';
+import { formatArtifactSize, formatUpdatedAt } from './assistant-formatters';
 import {
   assistantHasEnabledMcpGroup,
   assistantMessageTimestampMs,
@@ -138,7 +135,12 @@ function readInitialFilesOpen(): boolean {
   return window.localStorage.getItem(ASSISTANT_FILES_OPEN_STORAGE_KEY) === '1';
 }
 
-function assistantScopeSyncKey(readMode: AssistantScopeMode, writeMode: AssistantScopeMode, executeMode: AssistantScopeMode, droneIds: string[]): string {
+function assistantScopeSyncKey(
+  readMode: AssistantScopeMode,
+  writeMode: AssistantScopeMode,
+  executeMode: AssistantScopeMode,
+  droneIds: string[],
+): string {
   return `${readMode}\u0000${writeMode}\u0000${executeMode}\u0000${droneIds.join('\u0000')}`;
 }
 
@@ -156,7 +158,9 @@ function cleanAssistantScopeDrones(drones: AssistantScopeDrone[]): AssistantScop
   return Array.from(byId.values());
 }
 
-function cleanAssistantDroneReferences(drones: AssistantDroneReference[]): AssistantDroneReference[] {
+function cleanAssistantDroneReferences(
+  drones: AssistantDroneReference[],
+): AssistantDroneReference[] {
   return cleanAssistantScopeDrones(drones).map((drone) => ({ id: drone.id, name: drone.name }));
 }
 
@@ -169,19 +173,29 @@ function assistantDroneReferenceBlock(drones: AssistantDroneReference[]): string
   ].join('\n');
 }
 
-function appendAssistantDroneReferences(promptRaw: string, drones: AssistantDroneReference[]): string {
+function appendAssistantDroneReferences(
+  promptRaw: string,
+  drones: AssistantDroneReference[],
+): string {
   const prompt = String(promptRaw ?? '').trim();
   const referenceBlock = assistantDroneReferenceBlock(drones);
   if (!referenceBlock) return prompt;
   return prompt ? `${prompt}\n\n${referenceBlock}` : referenceBlock;
 }
 
-function assistantScopeDroneIds(readMode: AssistantScopeMode, writeMode: AssistantScopeMode, executeMode: AssistantScopeMode, drones: AssistantScopeDrone[]): string[] {
+function assistantScopeDroneIds(
+  readMode: AssistantScopeMode,
+  writeMode: AssistantScopeMode,
+  executeMode: AssistantScopeMode,
+  drones: AssistantScopeDrone[],
+): string[] {
   if (readMode !== 'selected' && writeMode !== 'selected' && executeMode !== 'selected') return [];
   return cleanAssistantScopeDrones(drones).map((drone) => drone.id);
 }
 
-function assistantDroneDropTargetFromDragData(data: ReturnType<typeof parseDroneHubDragData>): { ids: string[]; fallbackLabel: string } | null {
+function assistantDroneDropTargetFromDragData(
+  data: ReturnType<typeof parseDroneHubDragData>,
+): { ids: string[]; fallbackLabel: string } | null {
   if (!data) return null;
   if (data.type === 'sidebar-drone') {
     return {
@@ -205,7 +219,10 @@ function assistantScopeKeyFromScope(scope: AssistantAccessScope): string {
   const readMode: AssistantScopeMode = scope.readMode === 'selected' ? 'selected' : 'all';
   const writeMode: AssistantScopeMode = scope.writeMode === 'selected' ? 'selected' : 'all';
   const executeMode: AssistantScopeMode = scope.executeMode === 'selected' ? 'selected' : 'all';
-  const ids = readMode === 'selected' || writeMode === 'selected' || executeMode === 'selected' ? cleanAssistantScopeIds(scope.droneIds) : [];
+  const ids =
+    readMode === 'selected' || writeMode === 'selected' || executeMode === 'selected'
+      ? cleanAssistantScopeIds(scope.droneIds)
+      : [];
   return assistantScopeSyncKey(readMode, writeMode, executeMode, ids);
 }
 
@@ -267,16 +284,21 @@ export function AssistantDock({
   startupPrompt,
   onStartupPromptReconciled,
   onSendPromptInNewChat,
+  onCreateQueuedNewChatNow,
+  focusedNewChatActionId = '',
+  promotingNewChatActionById = {},
+  promoteNewChatActionErrorById = {},
 }: {
   nativeChat: NativeChatBinding;
   messageFeatures: AssistantMessageFeatures;
   onHistoryChange?: (hasHistory: boolean) => void;
   startupPrompt?: AssistantStartupPrompt | null;
   onStartupPromptReconciled?: () => void;
-  onSendPromptInNewChat?: (
-    payload: ChatSendPayload,
-    context: ChatSendContext,
-  ) => Promise<boolean>;
+  onSendPromptInNewChat?: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
+  onCreateQueuedNewChatNow?: (promptId: string) => Promise<void>;
+  focusedNewChatActionId?: string;
+  promotingNewChatActionById?: Record<string, true>;
+  promoteNewChatActionErrorById?: Record<string, string>;
 }) {
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
   const nativeDroneId = nativeChat.droneId;
@@ -297,7 +319,8 @@ export function AssistantDock({
   const [filesOpen, setFilesOpen] = React.useState(readInitialFilesOpen);
   const [artifactFiles, setArtifactFiles] = React.useState<AssistantArtifactSummary[]>([]);
   const [selectedArtifactPath, setSelectedArtifactPath] = React.useState<string | null>(null);
-  const [selectedArtifactFile, setSelectedArtifactFile] = React.useState<AssistantArtifactFile | null>(null);
+  const [selectedArtifactFile, setSelectedArtifactFile] =
+    React.useState<AssistantArtifactFile | null>(null);
   const [artifactsLoading, setArtifactsLoading] = React.useState(false);
   const [artifactsError, setArtifactsError] = React.useState<string | null>(null);
   const [scopeReadMode, setScopeReadMode] = React.useState<AssistantScopeMode>('all');
@@ -319,13 +342,17 @@ export function AssistantDock({
   const [droneHubPermissionsOpen, setDroneHubPermissionsOpen] = React.useState(false);
   const [enabledToolDraftNames, setEnabledToolDraftNames] = React.useState<string[]>([]);
   const [enabledWorkspaceDraftIds, setEnabledWorkspaceDraftIds] = React.useState<string[]>([]);
-  const [defaultEnabledToolDraftNames, setDefaultEnabledToolDraftNames] = React.useState<string[]>([]);
+  const [defaultEnabledToolDraftNames, setDefaultEnabledToolDraftNames] = React.useState<string[]>(
+    [],
+  );
   const [defaultToolsBusy, setDefaultToolsBusy] = React.useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = React.useState(false);
   const [systemPromptMode, setSystemPromptMode] = React.useState<'thread' | 'global'>('thread');
-  const [systemPromptSettings, setSystemPromptSettings] = React.useState<AssistantSystemPromptSettings | null>(null);
+  const [systemPromptSettings, setSystemPromptSettings] =
+    React.useState<AssistantSystemPromptSettings | null>(null);
   const [systemPromptDraft, setSystemPromptDraft] = React.useState('');
-  const [threadSystemPromptSettings, setThreadSystemPromptSettings] = React.useState<AssistantThreadSystemPromptSettings | null>(null);
+  const [threadSystemPromptSettings, setThreadSystemPromptSettings] =
+    React.useState<AssistantThreadSystemPromptSettings | null>(null);
   const [threadSystemPromptDraft, setThreadSystemPromptDraft] = React.useState('');
   const [systemPromptLoading, setSystemPromptLoading] = React.useState(false);
   const [systemPromptSaving, setSystemPromptSaving] = React.useState(false);
@@ -371,7 +398,8 @@ export function AssistantDock({
     id: 'assistant-drone-scope-drop',
     data: { type: 'assistant-drone-scope-drop' },
   });
-  const scopeDropActive = scopeDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
+  const scopeDropActive =
+    scopeDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
 
   const activeThread = snapshot?.threads[0] ?? null;
   const activeThreadId = activeThread?.id ?? '';
@@ -432,10 +460,14 @@ export function AssistantDock({
   React.useEffect(() => {
     if (activeThreadId) void blipSession.refreshHistory({ quiet: true });
   }, [activeThread?.updatedAt, activeThreadId, blipSession.refreshHistory]);
-  const activeAccessScope: AssistantAccessScope | null = activeThread?.accessScope ?? snapshot?.accessScope ?? null;
+  const activeAccessScope: AssistantAccessScope | null =
+    activeThread?.accessScope ?? snapshot?.accessScope ?? null;
   const activeAccessScopeDroneIdsKey = activeAccessScope?.droneIds?.join('\u0000') ?? '';
   const activePendingApprovals = React.useMemo(
-    () => (snapshot?.pendingApprovals ?? []).filter((approval) => approval.threadId === activeThread?.id && approval.status === 'pending'),
+    () =>
+      (snapshot?.pendingApprovals ?? []).filter(
+        (approval) => approval.threadId === activeThread?.id && approval.status === 'pending',
+      ),
     [activeThread?.id, snapshot?.pendingApprovals],
   );
   const activeApprovalStartedAt = React.useMemo(() => {
@@ -519,11 +551,7 @@ export function AssistantDock({
         olderHistoryTriggerArmedRef.current = true;
         return;
       }
-      if (
-        node.scrollTop > 40 ||
-        !olderHistoryTriggerArmedRef.current ||
-        blipSession.olderLoading
-      ) {
+      if (node.scrollTop > 40 || !olderHistoryTriggerArmedRef.current || blipSession.olderLoading) {
         return;
       }
       olderHistoryTriggerArmedRef.current = false;
@@ -531,12 +559,7 @@ export function AssistantDock({
     };
     node.addEventListener('scroll', loadAtTop, { passive: true });
     return () => node.removeEventListener('scroll', loadAtTop);
-  }, [
-    blipSession.hasOlder,
-    blipSession.olderLoading,
-    loadOlderMessages,
-    scrollRef,
-  ]);
+  }, [blipSession.hasOlder, blipSession.olderLoading, loadOlderMessages, scrollRef]);
   const droneMentionLinks = React.useMemo<MarkdownTextMentionLink[]>(() => {
     const nameCounts = new Map<string, number>();
     for (const name of Object.values(droneNameById)) {
@@ -546,8 +569,13 @@ export function AssistantDock({
       nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
     }
     return Object.entries(droneNameById)
-      .map(([droneId, name]) => ({ droneId: String(droneId ?? '').trim(), name: String(name ?? '').trim() }))
-      .filter(({ droneId, name }) => Boolean(droneId && name && nameCounts.get(name.toLowerCase()) === 1))
+      .map(([droneId, name]) => ({
+        droneId: String(droneId ?? '').trim(),
+        name: String(name ?? '').trim(),
+      }))
+      .filter(({ droneId, name }) =>
+        Boolean(droneId && name && nameCounts.get(name.toLowerCase()) === 1),
+      )
       .map(({ droneId, name }) => ({
         key: droneId,
         label: name,
@@ -563,12 +591,14 @@ export function AssistantDock({
     [droneNameById],
   );
   const droneReferenceControlsLocked = !activeThread;
-  const { isOver: droneReferenceDropIsOver, setNodeRef: setDroneReferenceDropNodeRef } = useDroppable({
-    id: 'assistant-message-drone-reference-drop',
-    data: { type: 'assistant-message-drone-reference-drop' },
-    disabled: droneReferenceControlsLocked,
-  });
-  const droneReferenceDropActive = droneReferenceDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
+  const { isOver: droneReferenceDropIsOver, setNodeRef: setDroneReferenceDropNodeRef } =
+    useDroppable({
+      id: 'assistant-message-drone-reference-drop',
+      data: { type: 'assistant-message-drone-reference-drop' },
+      disabled: droneReferenceControlsLocked,
+    });
+  const droneReferenceDropActive =
+    droneReferenceDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
   const visibleMessages = blipSession.messages as AssistantMessage[];
   const visibleItems = React.useMemo(() => {
     return renderItemsFromMessages(visibleMessages);
@@ -620,36 +650,42 @@ export function AssistantDock({
     return snapshotRequestSeqRef.current;
   }, []);
 
-  const snapshotMutationCurrent = React.useCallback((requestSeq: number) => snapshotRequestSeqRef.current === requestSeq, []);
+  const snapshotMutationCurrent = React.useCallback(
+    (requestSeq: number) => snapshotRequestSeqRef.current === requestSeq,
+    [],
+  );
 
-  const refresh = React.useCallback(async (options: { silent?: boolean; includeHistory?: boolean } = {}) => {
-    if (!options.silent) {
-      setLoading(true);
-      setError(null);
-    }
-    const requestSeq = snapshotRequestSeqRef.current;
-    try {
-      const next = await requestJson<AssistantBootstrapSnapshot>(
-        `/api/drones/${encodeURIComponent(nativeDroneId)}/chats/${encodeURIComponent(nativeChatName)}/native${
-          options.includeHistory ? '?includeHistory=1' : ''
-        }`,
-        { method: 'POST' },
-      );
-      if (snapshotRequestSeqRef.current !== requestSeq) return;
-      const nativeChatId = String(next.nativeChatId ?? next.chatId ?? '').trim();
-      activeThreadIdRef.current = nativeChatId;
-      if (options.includeHistory) {
-        setBootstrapHistory(
-          next.initialHistory?.threadId === nativeChatId ? next.initialHistory : null,
-        );
+  const refresh = React.useCallback(
+    async (options: { silent?: boolean; includeHistory?: boolean } = {}) => {
+      if (!options.silent) {
+        setLoading(true);
+        setError(null);
       }
-      applySnapshot(next);
-    } catch (err: any) {
-      if (!options.silent) setError(err?.message ?? String(err));
-    } finally {
-      if (!options.silent) setLoading(false);
-    }
-  }, [applySnapshot, nativeChatName, nativeDroneId]);
+      const requestSeq = snapshotRequestSeqRef.current;
+      try {
+        const next = await requestJson<AssistantBootstrapSnapshot>(
+          `/api/drones/${encodeURIComponent(nativeDroneId)}/chats/${encodeURIComponent(nativeChatName)}/native${
+            options.includeHistory ? '?includeHistory=1' : ''
+          }`,
+          { method: 'POST' },
+        );
+        if (snapshotRequestSeqRef.current !== requestSeq) return;
+        const nativeChatId = String(next.nativeChatId ?? next.chatId ?? '').trim();
+        activeThreadIdRef.current = nativeChatId;
+        if (options.includeHistory) {
+          setBootstrapHistory(
+            next.initialHistory?.threadId === nativeChatId ? next.initialHistory : null,
+          );
+        }
+        applySnapshot(next);
+      } catch (err: any) {
+        if (!options.silent) setError(err?.message ?? String(err));
+      } finally {
+        if (!options.silent) setLoading(false);
+      }
+    },
+    [applySnapshot, nativeChatName, nativeDroneId],
+  );
   nativeChangeRefreshRef.current = () => {
     void refresh({ silent: true });
   };
@@ -672,7 +708,9 @@ export function AssistantDock({
       const [data, threadData] = await Promise.all([
         requestJson<AssistantSystemPromptSettings>('/api/assistant/system-prompt'),
         threadId
-          ? requestJson<AssistantThreadSystemPromptSettings>(`/api/assistant/threads/${encodeURIComponent(threadId)}/system-prompt`)
+          ? requestJson<AssistantThreadSystemPromptSettings>(
+              `/api/assistant/threads/${encodeURIComponent(threadId)}/system-prompt`,
+            )
           : Promise.resolve(null),
       ]);
       setSystemPromptSettings(data);
@@ -698,11 +736,14 @@ export function AssistantDock({
     setSystemPromptError(null);
     setSystemPromptNotice(null);
     try {
-      const data = await requestJson<AssistantSystemPromptSettings>('/api/assistant/system-prompt', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: systemPromptDraft }),
-      });
+      const data = await requestJson<AssistantSystemPromptSettings>(
+        '/api/assistant/system-prompt',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ prompt: systemPromptDraft }),
+        },
+      );
       setSystemPromptSettings(data);
       setSystemPromptDraft(data.assistantSystemPrompt.prompt);
       setThreadSystemPromptSettings((prev) => {
@@ -740,11 +781,14 @@ export function AssistantDock({
     setSystemPromptError(null);
     setSystemPromptNotice(null);
     try {
-      const data = await requestJson<AssistantThreadSystemPromptSettings>(`/api/assistant/threads/${encodeURIComponent(threadId)}/system-prompt`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: threadSystemPromptDraft }),
-      });
+      const data = await requestJson<AssistantThreadSystemPromptSettings>(
+        `/api/assistant/threads/${encodeURIComponent(threadId)}/system-prompt`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ prompt: threadSystemPromptDraft }),
+        },
+      );
       setThreadSystemPromptSettings(data);
       setThreadSystemPromptDraft(data.threadSystemPrompt.prompt);
       setSystemPromptNotice('Saved. Only this Built-in chat will use this prompt.');
@@ -759,17 +803,22 @@ export function AssistantDock({
   const promoteThreadSystemPrompt = React.useCallback(async () => {
     const threadId = activeThreadIdRef.current;
     if (!threadId) return;
-    const confirmed = window.confirm('Promote this chat system prompt to the matching global prompt for new Built-in chats? Existing chats keep their own prompts.');
+    const confirmed = window.confirm(
+      'Promote this chat system prompt to the matching global prompt for new Built-in chats? Existing chats keep their own prompts.',
+    );
     if (!confirmed) return;
     setPromoteSystemPromptSaving(true);
     setSystemPromptError(null);
     setSystemPromptNotice(null);
     try {
-      const data = await requestJson<AssistantSystemPromptSettings>(`/api/assistant/threads/${encodeURIComponent(threadId)}/promote-system-prompt`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: threadSystemPromptDraft }),
-      });
+      const data = await requestJson<AssistantSystemPromptSettings>(
+        `/api/assistant/threads/${encodeURIComponent(threadId)}/promote-system-prompt`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ prompt: threadSystemPromptDraft }),
+        },
+      );
       setSystemPromptSettings(data);
       setSystemPromptDraft(data.assistantSystemPrompt.prompt);
       await loadSystemPromptSettings();
@@ -815,20 +864,39 @@ export function AssistantDock({
     void loadSystemPromptSettings();
   }, [activeThreadId, loadSystemPromptSettings, systemPromptOpen]);
 
-  const resolveScopeDroneNames = React.useCallback(async (ids: string[], fallbackLabel?: string): Promise<AssistantScopeDrone[]> => {
-    const cleanIds = Array.from(new Set(ids.map((id) => String(id ?? '').trim()).filter(Boolean)));
-    if (cleanIds.length === 0) return [];
-    try {
-      const data = await requestJson<{ ok: true; drones?: Array<{ id?: string; name?: string }> }>('/api/drones');
-      const nameEntries: Array<[string, string]> = (Array.isArray(data?.drones) ? data.drones : [])
-        .map((drone): [string, string] => [String(drone?.id ?? '').trim(), String(drone?.name ?? '').trim()])
-        .filter(([id]) => Boolean(id));
-      const nameById = new Map<string, string>(nameEntries);
-      return cleanIds.map((id) => ({ id, name: nameById.get(id) || (cleanIds.length === 1 ? fallbackLabel || id : id) }));
-    } catch {
-      return cleanIds.map((id) => ({ id, name: cleanIds.length === 1 ? fallbackLabel || id : id }));
-    }
-  }, []);
+  const resolveScopeDroneNames = React.useCallback(
+    async (ids: string[], fallbackLabel?: string): Promise<AssistantScopeDrone[]> => {
+      const cleanIds = Array.from(
+        new Set(ids.map((id) => String(id ?? '').trim()).filter(Boolean)),
+      );
+      if (cleanIds.length === 0) return [];
+      try {
+        const data = await requestJson<{
+          ok: true;
+          drones?: Array<{ id?: string; name?: string }>;
+        }>('/api/drones');
+        const nameEntries: Array<[string, string]> = (
+          Array.isArray(data?.drones) ? data.drones : []
+        )
+          .map((drone): [string, string] => [
+            String(drone?.id ?? '').trim(),
+            String(drone?.name ?? '').trim(),
+          ])
+          .filter(([id]) => Boolean(id));
+        const nameById = new Map<string, string>(nameEntries);
+        return cleanIds.map((id) => ({
+          id,
+          name: nameById.get(id) || (cleanIds.length === 1 ? fallbackLabel || id : id),
+        }));
+      } catch {
+        return cleanIds.map((id) => ({
+          id,
+          name: cleanIds.length === 1 ? fallbackLabel || id : id,
+        }));
+      }
+    },
+    [],
+  );
 
   React.useEffect(() => {
     const scope = activeAccessScope;
@@ -844,7 +912,12 @@ export function AssistantDock({
     if (pending && pending.threadId === activeThreadId && incomingKey !== pending.key) {
       return;
     }
-    if (!pending && incomingUpdatedAtMs > 0 && lastSyncedScopeUpdatedAtMsRef.current > 0 && incomingUpdatedAtMs < lastSyncedScopeUpdatedAtMsRef.current) {
+    if (
+      !pending &&
+      incomingUpdatedAtMs > 0 &&
+      lastSyncedScopeUpdatedAtMsRef.current > 0 &&
+      incomingUpdatedAtMs < lastSyncedScopeUpdatedAtMsRef.current
+    ) {
       return;
     }
     lastSyncedScopeKeyRef.current = incomingKey;
@@ -892,146 +965,163 @@ export function AssistantDock({
     snapshot?.chatId,
   ]);
 
-  const saveScopeDraft = React.useCallback(async (draft: AssistantScopeDraft): Promise<boolean> => {
-    const readMode = draft.readMode === 'selected' ? 'selected' : 'all';
-    const writeMode = draft.writeMode === 'selected' ? 'selected' : 'all';
-    const executeMode = draft.executeMode === 'selected' ? 'selected' : 'all';
-    const cleanDrones = cleanAssistantScopeDrones(draft.drones);
-    const visibleDrones = readMode === 'selected' || writeMode === 'selected' || executeMode === 'selected' ? cleanDrones : [];
-    const scopedDroneIds = assistantScopeDroneIds(readMode, writeMode, executeMode, visibleDrones);
-    const syncKey = assistantScopeSyncKey(readMode, writeMode, executeMode, scopedDroneIds);
-    currentScopeKeyRef.current = syncKey;
-    currentScopeDraftRef.current = {
-      readMode,
-      writeMode,
-      executeMode,
-      drones: visibleDrones,
-    };
-    setScopeReadMode(readMode);
-    setScopeWriteMode(writeMode);
-    setScopeExecuteMode(executeMode);
-    setScopeDrones(visibleDrones);
-    setScopeSyncError(null);
-    if (!activeThread) return true;
-    queuedScopeSaveRef.current = {
-      readMode,
-      writeMode,
-      executeMode,
-      droneIds: scopedDroneIds,
-      key: syncKey,
-    };
-    if (lastSyncedScopeKeyRef.current === syncKey && !scopeSyncPromiseRef.current) {
-      queuedScopeSaveRef.current = null;
-      return true;
-    }
-    if (
-      scopeSyncPromiseRef.current &&
-      scopeSyncPromiseRef.current.threadId !== activeThread.id
-    ) {
-      scopeSaveRequestIdRef.current += 1;
-      scopeSyncPromiseRef.current = null;
-    }
-    if (scopeSyncPromiseRef.current) {
-      scopeSyncPromiseRef.current.key = syncKey;
-      return await scopeSyncPromiseRef.current.promise;
-    }
-    const requestId = scopeSaveRequestIdRef.current + 1;
-    scopeSaveRequestIdRef.current = requestId;
-    const threadId = activeThread.id;
-    setScopeSyncBusy(true);
-    const promise = (async () => {
-      while (queuedScopeSaveRef.current) {
-        const next = queuedScopeSaveRef.current;
+  const saveScopeDraft = React.useCallback(
+    async (draft: AssistantScopeDraft): Promise<boolean> => {
+      const readMode = draft.readMode === 'selected' ? 'selected' : 'all';
+      const writeMode = draft.writeMode === 'selected' ? 'selected' : 'all';
+      const executeMode = draft.executeMode === 'selected' ? 'selected' : 'all';
+      const cleanDrones = cleanAssistantScopeDrones(draft.drones);
+      const visibleDrones =
+        readMode === 'selected' || writeMode === 'selected' || executeMode === 'selected'
+          ? cleanDrones
+          : [];
+      const scopedDroneIds = assistantScopeDroneIds(
+        readMode,
+        writeMode,
+        executeMode,
+        visibleDrones,
+      );
+      const syncKey = assistantScopeSyncKey(readMode, writeMode, executeMode, scopedDroneIds);
+      currentScopeKeyRef.current = syncKey;
+      currentScopeDraftRef.current = {
+        readMode,
+        writeMode,
+        executeMode,
+        drones: visibleDrones,
+      };
+      setScopeReadMode(readMode);
+      setScopeWriteMode(writeMode);
+      setScopeExecuteMode(executeMode);
+      setScopeDrones(visibleDrones);
+      setScopeSyncError(null);
+      if (!activeThread) return true;
+      queuedScopeSaveRef.current = {
+        readMode,
+        writeMode,
+        executeMode,
+        droneIds: scopedDroneIds,
+        key: syncKey,
+      };
+      if (lastSyncedScopeKeyRef.current === syncKey && !scopeSyncPromiseRef.current) {
         queuedScopeSaveRef.current = null;
-        if (lastSyncedScopeKeyRef.current === next.key) continue;
-        try {
-          const data = await requestJson<AssistantScopeUpdateResult>('/api/assistant/scope', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              threadId,
+        return true;
+      }
+      if (scopeSyncPromiseRef.current && scopeSyncPromiseRef.current.threadId !== activeThread.id) {
+        scopeSaveRequestIdRef.current += 1;
+        scopeSyncPromiseRef.current = null;
+      }
+      if (scopeSyncPromiseRef.current) {
+        scopeSyncPromiseRef.current.key = syncKey;
+        return await scopeSyncPromiseRef.current.promise;
+      }
+      const requestId = scopeSaveRequestIdRef.current + 1;
+      scopeSaveRequestIdRef.current = requestId;
+      const threadId = activeThread.id;
+      setScopeSyncBusy(true);
+      const promise = (async () => {
+        while (queuedScopeSaveRef.current) {
+          const next = queuedScopeSaveRef.current;
+          queuedScopeSaveRef.current = null;
+          if (lastSyncedScopeKeyRef.current === next.key) continue;
+          try {
+            const data = await requestJson<AssistantScopeUpdateResult>('/api/assistant/scope', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                threadId,
+                readMode: next.readMode,
+                writeMode: next.writeMode,
+                executeMode: next.executeMode,
+                droneIds: next.droneIds,
+              }),
+            });
+            if (scopeSaveRequestIdRef.current !== requestId) return true;
+            const savedScope = data.accessScope ?? {
               readMode: next.readMode,
               writeMode: next.writeMode,
               executeMode: next.executeMode,
               droneIds: next.droneIds,
-            }),
-          });
-          if (scopeSaveRequestIdRef.current !== requestId) return true;
-          const savedScope = data.accessScope ?? {
-            readMode: next.readMode,
-            writeMode: next.writeMode,
-            executeMode: next.executeMode,
-            droneIds: next.droneIds,
-            updatedAt: new Date().toISOString(),
-          };
-          lastSyncedScopeKeyRef.current = assistantScopeKeyFromScope(savedScope);
-          lastSyncedScopeUpdatedAtMsRef.current = assistantScopeUpdatedAtMs(savedScope);
-          const nameById = new Map(
-            currentScopeDraftRef.current.drones.map((drone) => [drone.id, drone.name]),
-          );
-          persistedScopeDraftRef.current = {
-            readMode: savedScope.readMode === 'selected' ? 'selected' : 'all',
-            writeMode: savedScope.writeMode === 'selected' ? 'selected' : 'all',
-            executeMode: savedScope.executeMode === 'selected' ? 'selected' : 'all',
-            drones: cleanAssistantScopeIds(savedScope.droneIds).map((id) => ({
-              id,
-              name: nameById.get(id) || id,
-            })),
-          };
-        } catch (err: any) {
-          if (scopeSaveRequestIdRef.current === requestId) {
-            queuedScopeSaveRef.current = null;
-            const persisted = persistedScopeDraftRef.current;
-            currentScopeDraftRef.current = persisted;
-            currentScopeKeyRef.current = assistantScopeSyncKey(
-              persisted.readMode,
-              persisted.writeMode,
-              persisted.executeMode,
-              assistantScopeDroneIds(
+              updatedAt: new Date().toISOString(),
+            };
+            lastSyncedScopeKeyRef.current = assistantScopeKeyFromScope(savedScope);
+            lastSyncedScopeUpdatedAtMsRef.current = assistantScopeUpdatedAtMs(savedScope);
+            const nameById = new Map(
+              currentScopeDraftRef.current.drones.map((drone) => [drone.id, drone.name]),
+            );
+            persistedScopeDraftRef.current = {
+              readMode: savedScope.readMode === 'selected' ? 'selected' : 'all',
+              writeMode: savedScope.writeMode === 'selected' ? 'selected' : 'all',
+              executeMode: savedScope.executeMode === 'selected' ? 'selected' : 'all',
+              drones: cleanAssistantScopeIds(savedScope.droneIds).map((id) => ({
+                id,
+                name: nameById.get(id) || id,
+              })),
+            };
+          } catch (err: any) {
+            if (scopeSaveRequestIdRef.current === requestId) {
+              queuedScopeSaveRef.current = null;
+              const persisted = persistedScopeDraftRef.current;
+              currentScopeDraftRef.current = persisted;
+              currentScopeKeyRef.current = assistantScopeSyncKey(
                 persisted.readMode,
                 persisted.writeMode,
                 persisted.executeMode,
-                persisted.drones,
-              ),
-            );
-            setScopeReadMode(persisted.readMode);
-            setScopeWriteMode(persisted.writeMode);
-            setScopeExecuteMode(persisted.executeMode);
-            setScopeDrones(persisted.drones);
-            setScopeSyncError(err?.message ?? String(err));
+                assistantScopeDroneIds(
+                  persisted.readMode,
+                  persisted.writeMode,
+                  persisted.executeMode,
+                  persisted.drones,
+                ),
+              );
+              setScopeReadMode(persisted.readMode);
+              setScopeWriteMode(persisted.writeMode);
+              setScopeExecuteMode(persisted.executeMode);
+              setScopeDrones(persisted.drones);
+              setScopeSyncError(err?.message ?? String(err));
+            }
+            return false;
           }
-          return false;
         }
-      }
-      return true;
-    })().finally(() => {
+        return true;
+      })().finally(() => {
         if (scopeSyncPromiseRef.current?.requestId === requestId) {
           scopeSyncPromiseRef.current = null;
           setScopeSyncBusy(false);
         }
       });
-    scopeSyncPromiseRef.current = { requestId, threadId, key: syncKey, promise };
-    return await promise;
-  }, [activeThread]);
+      scopeSyncPromiseRef.current = { requestId, threadId, key: syncKey, promise };
+      return await promise;
+    },
+    [activeThread],
+  );
 
   const waitForScopeSave = React.useCallback(async (): Promise<boolean> => {
     if (scopeSyncPromiseRef.current && !(await scopeSyncPromiseRef.current.promise)) return false;
-    if (currentScopeKeyRef.current && lastSyncedScopeKeyRef.current !== currentScopeKeyRef.current) {
+    if (
+      currentScopeKeyRef.current &&
+      lastSyncedScopeKeyRef.current !== currentScopeKeyRef.current
+    ) {
       setError('Built-in agent access changes are not saved yet.');
       return false;
     }
     return true;
   }, []);
 
-  const addScopeDrones = React.useCallback((drones: AssistantScopeDrone[]) => {
-    const clean = cleanAssistantScopeDrones(drones);
-    if (clean.length === 0) return;
-    const byId = new Map(
-      currentScopeDraftRef.current.drones.map((drone) => [drone.id, drone]),
-    );
-    for (const drone of clean) byId.set(drone.id, drone);
-    void saveScopeDraft({ readMode: 'selected', writeMode: 'selected', executeMode: 'selected', drones: Array.from(byId.values()) });
-  }, [saveScopeDraft]);
+  const addScopeDrones = React.useCallback(
+    (drones: AssistantScopeDrone[]) => {
+      const clean = cleanAssistantScopeDrones(drones);
+      if (clean.length === 0) return;
+      const byId = new Map(currentScopeDraftRef.current.drones.map((drone) => [drone.id, drone]));
+      for (const drone of clean) byId.set(drone.id, drone);
+      void saveScopeDraft({
+        readMode: 'selected',
+        writeMode: 'selected',
+        executeMode: 'selected',
+        drones: Array.from(byId.values()),
+      });
+    },
+    [saveScopeDraft],
+  );
 
   const addReferencedDrones = React.useCallback((drones: AssistantDroneReference[]) => {
     const clean = cleanAssistantDroneReferences(drones);
@@ -1043,7 +1133,9 @@ export function AssistantDock({
       return Array.from(byId.values());
     });
     window.requestAnimationFrame(() =>
-      document.querySelector<HTMLTextAreaElement>('[data-chat-input-focus-id="assistant-chat"]')?.focus(),
+      document
+        .querySelector<HTMLTextAreaElement>('[data-chat-input-focus-id="assistant-chat"]')
+        ?.focus(),
     );
   }, []);
 
@@ -1053,30 +1145,46 @@ export function AssistantDock({
     setReferencedDrones((prev) => prev.filter((drone) => drone.id !== droneId));
   }, []);
 
-  const removeScopeDrone = React.useCallback((droneId: string) => {
-    const current = currentScopeDraftRef.current;
-    void saveScopeDraft({
-      ...current,
-      drones: current.drones.filter((drone) => drone.id !== droneId),
-    });
-  }, [saveScopeDraft]);
+  const removeScopeDrone = React.useCallback(
+    (droneId: string) => {
+      const current = currentScopeDraftRef.current;
+      void saveScopeDraft({
+        ...current,
+        drones: current.drones.filter((drone) => drone.id !== droneId),
+      });
+    },
+    [saveScopeDraft],
+  );
 
-  const updateScopeReadMode = React.useCallback((mode: AssistantScopeMode) => {
-    void saveScopeDraft({ ...currentScopeDraftRef.current, readMode: mode });
-  }, [saveScopeDraft]);
+  const updateScopeReadMode = React.useCallback(
+    (mode: AssistantScopeMode) => {
+      void saveScopeDraft({ ...currentScopeDraftRef.current, readMode: mode });
+    },
+    [saveScopeDraft],
+  );
 
-  const updateScopeWriteMode = React.useCallback((mode: AssistantScopeMode) => {
-    void saveScopeDraft({ ...currentScopeDraftRef.current, writeMode: mode });
-  }, [saveScopeDraft]);
+  const updateScopeWriteMode = React.useCallback(
+    (mode: AssistantScopeMode) => {
+      void saveScopeDraft({ ...currentScopeDraftRef.current, writeMode: mode });
+    },
+    [saveScopeDraft],
+  );
 
-  const updateScopeExecuteMode = React.useCallback((mode: AssistantScopeMode) => {
-    void saveScopeDraft({ ...currentScopeDraftRef.current, executeMode: mode });
-  }, [saveScopeDraft]);
+  const updateScopeExecuteMode = React.useCallback(
+    (mode: AssistantScopeMode) => {
+      void saveScopeDraft({ ...currentScopeDraftRef.current, executeMode: mode });
+    },
+    [saveScopeDraft],
+  );
 
   useDndMonitor({
     onDragEnd: (event) => {
       const overId = String(event.over?.id ?? '');
-      if (overId !== 'assistant-drone-scope-drop' && overId !== 'assistant-message-drone-reference-drop') return;
+      if (
+        overId !== 'assistant-drone-scope-drop' &&
+        overId !== 'assistant-message-drone-reference-drop'
+      )
+        return;
       const data = parseDroneHubDragData(event.active.data.current);
       const target = assistantDroneDropTargetFromDragData(data);
       if (!target || target.ids.length === 0) return;
@@ -1095,118 +1203,151 @@ export function AssistantDock({
   React.useEffect(() => {
     if (running || !refocusInputWhenIdleRef.current) return;
     refocusInputWhenIdleRef.current = false;
-    document.querySelector<HTMLTextAreaElement>('[data-chat-input-focus-id="assistant-chat"]')?.focus();
+    document
+      .querySelector<HTMLTextAreaElement>('[data-chat-input-focus-id="assistant-chat"]')
+      ?.focus();
   }, [running]);
 
-  const updateThread = React.useCallback(async (patch: Partial<Pick<AssistantThread, 'title' | 'model' | 'provider' | 'thinkingLevel' | 'autoApprove' | 'promptDeliveryMode' | 'enabledTools' | 'enabledWorkspaceIds'>>) => {
-    if (!activeThread) return false;
-    const requestId = updateThreadRequestRef.current + 1;
-    updateThreadRequestRef.current = requestId;
-    const requestSeq = beginSnapshotMutation();
-    try {
-      const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq)) applySnapshot(next);
-      return true;
-    } catch (err: any) {
-      if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
-      return false;
-    }
-  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
-
-  const sendPrompt = React.useCallback(async (
-    sharedPayload: ChatSendPayload,
-    deliveryMode: 'asap' | 'queue',
-  ): Promise<boolean> => {
-    if (!activeThread) return false;
-    const referencedDroneSnapshot = referencedDronesRef.current.slice();
-    const prompt = appendAssistantDroneReferences(sharedPayload.prompt, referencedDroneSnapshot);
-    const encodedAttachments: AssistantAttachmentPayload[] = sharedPayload.attachments.map((attachment) => ({
-      ...attachment,
-      disposition: attachment.disposition,
-    }));
-    if (!prompt && encodedAttachments.length === 0) return false;
-    const endLocalBusy = beginLocalChatBusy(nativeChatNodeId);
-    try {
+  const updateThread = React.useCallback(
+    async (
+      patch: Partial<
+        Pick<
+          AssistantThread,
+          | 'title'
+          | 'model'
+          | 'provider'
+          | 'thinkingLevel'
+          | 'autoApprove'
+          | 'promptDeliveryMode'
+          | 'enabledTools'
+          | 'enabledWorkspaceIds'
+        >
+      >,
+    ) => {
+      if (!activeThread) return false;
+      const requestId = updateThreadRequestRef.current + 1;
+      updateThreadRequestRef.current = requestId;
       const requestSeq = beginSnapshotMutation();
-      setError(null);
-      setAttachmentError(null);
-      if (!(await waitForScopeSave())) return false;
-      if (!snapshotMutationCurrent(requestSeq)) return false;
-      setReferencedDrones([]);
-      scrollAssistantToBottom({ force: true });
-      refocusInputWhenIdleRef.current = true;
-      let sentOk = true;
       try {
-        const response = await fetch(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/prompt`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            prompt,
-            attachments: encodedAttachments,
-            provider: activeThread.provider,
-            model: activeThread.model,
-            thinkingLevel: activeThread.thinkingLevel,
-            deliveryMode,
-          }),
-        });
-        await readNdjson(response, (event) => {
-          if (!snapshotMutationCurrent(requestSeq)) return;
-          blipSession.handleStreamEvent(event);
-          if (event?.type === 'error') {
-            sentOk = false;
-            setError(String(event.error ?? 'Built-in agent failed.'));
-          }
-        });
-        if (!sentOk && snapshotMutationCurrent(requestSeq)) {
-          setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
-        }
+        const next = await requestJson<AssistantSnapshot>(
+          `/api/assistant/threads/${encodeURIComponent(activeThread.id)}`,
+          {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(patch),
+          },
+        );
+        if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq))
+          applySnapshot(next);
+        return true;
       } catch (err: any) {
-        sentOk = false;
-        if (snapshotMutationCurrent(requestSeq)) {
+        if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq))
           setError(err?.message ?? String(err));
-          setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
-        }
-      } finally {
-        if (snapshotMutationCurrent(requestSeq)) {
-          void blipSession.refreshHistory({ quiet: true });
-          void refresh({ silent: true });
-        }
-        if (snapshotMutationCurrent(requestSeq) && sentOk && encodedAttachments.length > 0) {
-          requestJson<{ ok: true; threadId: string; files: AssistantArtifactSummary[] }>(
-            `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/artifacts`,
-          )
-            .then((data) => {
-              if (activeThreadIdRef.current === activeThread.id) setArtifactFiles(Array.isArray(data.files) ? data.files : []);
-            })
-            .catch(() => {});
-        }
+        return false;
       }
-      return sentOk;
-    } finally {
-      endLocalBusy();
-    }
-  }, [activeThread, beginSnapshotMutation, blipSession, nativeChatNodeId, refresh, scrollAssistantToBottom, snapshotMutationCurrent, waitForScopeSave]);
+    },
+    [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent],
+  );
+
+  const sendPrompt = React.useCallback(
+    async (sharedPayload: ChatSendPayload, deliveryMode: 'asap' | 'queue'): Promise<boolean> => {
+      if (!activeThread) return false;
+      const referencedDroneSnapshot = referencedDronesRef.current.slice();
+      const prompt = appendAssistantDroneReferences(sharedPayload.prompt, referencedDroneSnapshot);
+      const encodedAttachments: AssistantAttachmentPayload[] = sharedPayload.attachments.map(
+        (attachment) => ({
+          ...attachment,
+          disposition: attachment.disposition,
+        }),
+      );
+      if (!prompt && encodedAttachments.length === 0) return false;
+      const endLocalBusy = beginLocalChatBusy(nativeChatNodeId);
+      try {
+        const requestSeq = beginSnapshotMutation();
+        setError(null);
+        setAttachmentError(null);
+        if (!(await waitForScopeSave())) return false;
+        if (!snapshotMutationCurrent(requestSeq)) return false;
+        setReferencedDrones([]);
+        scrollAssistantToBottom({ force: true });
+        refocusInputWhenIdleRef.current = true;
+        let sentOk = true;
+        try {
+          const response = await fetch(
+            `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/prompt`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                prompt,
+                attachments: encodedAttachments,
+                provider: activeThread.provider,
+                model: activeThread.model,
+                thinkingLevel: activeThread.thinkingLevel,
+                deliveryMode,
+              }),
+            },
+          );
+          await readNdjson(response, (event) => {
+            if (!snapshotMutationCurrent(requestSeq)) return;
+            blipSession.handleStreamEvent(event);
+            if (event?.type === 'error') {
+              sentOk = false;
+              setError(String(event.error ?? 'Built-in agent failed.'));
+            }
+          });
+          if (!sentOk && snapshotMutationCurrent(requestSeq)) {
+            setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
+          }
+        } catch (err: any) {
+          sentOk = false;
+          if (snapshotMutationCurrent(requestSeq)) {
+            setError(err?.message ?? String(err));
+            setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
+          }
+        } finally {
+          if (snapshotMutationCurrent(requestSeq)) {
+            void blipSession.refreshHistory({ quiet: true });
+            void refresh({ silent: true });
+          }
+          if (snapshotMutationCurrent(requestSeq) && sentOk && encodedAttachments.length > 0) {
+            requestJson<{ ok: true; threadId: string; files: AssistantArtifactSummary[] }>(
+              `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/artifacts`,
+            )
+              .then((data) => {
+                if (activeThreadIdRef.current === activeThread.id)
+                  setArtifactFiles(Array.isArray(data.files) ? data.files : []);
+              })
+              .catch(() => {});
+          }
+        }
+        return sentOk;
+      } finally {
+        endLocalBusy();
+      }
+    },
+    [
+      activeThread,
+      beginSnapshotMutation,
+      blipSession,
+      nativeChatNodeId,
+      refresh,
+      scrollAssistantToBottom,
+      snapshotMutationCurrent,
+      waitForScopeSave,
+    ],
+  );
 
   const sendPromptInNewChat = React.useCallback(
     async (sharedPayload: ChatSendPayload, context: ChatSendContext): Promise<boolean> => {
       if (!onSendPromptInNewChat) return false;
       const referencedDroneSnapshot = referencedDronesRef.current.slice();
-      const prompt = appendAssistantDroneReferences(
-        sharedPayload.prompt,
-        referencedDroneSnapshot,
-      );
+      const prompt = appendAssistantDroneReferences(sharedPayload.prompt, referencedDroneSnapshot);
       if (!prompt && sharedPayload.attachments.length === 0) return false;
       setError(null);
       setAttachmentError(null);
       if (!(await waitForScopeSave())) return false;
-      const sent = await onSendPromptInNewChat(
-        { ...sharedPayload, prompt },
-        context,
-      );
+      const sent = await onSendPromptInNewChat({ ...sharedPayload, prompt }, context);
       if (sent) setReferencedDrones([]);
       return sent;
     },
@@ -1218,7 +1359,10 @@ export function AssistantDock({
     const requestSeq = beginSnapshotMutation();
     setAssistantStopBusy(true);
     try {
-      const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/stop`, { method: 'POST' });
+      const next = await requestJson<AssistantSnapshot>(
+        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/stop`,
+        { method: 'POST' },
+      );
       if (!snapshotMutationCurrent(requestSeq)) return;
       applySnapshot(next);
     } catch (err: any) {
@@ -1258,41 +1402,47 @@ export function AssistantDock({
     snapshotMutationCurrent,
   ]);
 
-  const cancelQueuedPrompt = React.useCallback(async (promptId: string) => {
-    if (!activeThread) return;
-    const requestSeq = beginSnapshotMutation();
-    setQueuedPromptBusyId(promptId);
-    try {
-      const next = await requestJson<AssistantSnapshot>(
-        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/queued/${encodeURIComponent(promptId)}`,
-        { method: 'DELETE' },
-      );
-      if (snapshotMutationCurrent(requestSeq)) applySnapshot(next);
-    } catch (err: any) {
-      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
-    } finally {
-      setQueuedPromptBusyId(null);
-    }
-  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
+  const cancelQueuedPrompt = React.useCallback(
+    async (promptId: string) => {
+      if (!activeThread) return;
+      const requestSeq = beginSnapshotMutation();
+      setQueuedPromptBusyId(promptId);
+      try {
+        const next = await requestJson<AssistantSnapshot>(
+          `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/queued/${encodeURIComponent(promptId)}`,
+          { method: 'DELETE' },
+        );
+        if (snapshotMutationCurrent(requestSeq)) applySnapshot(next);
+      } catch (err: any) {
+        if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
+      } finally {
+        setQueuedPromptBusyId(null);
+      }
+    },
+    [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent],
+  );
 
-  const resolveApproval = React.useCallback(async (approval: AssistantApproval, approved: boolean) => {
-    if (!activeThread) return;
-    const requestSeq = beginSnapshotMutation();
-    setApprovalBusyId(approval.id);
-    try {
-      const next = await requestJson<AssistantSnapshot>(
-        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/approvals/${encodeURIComponent(approval.id)}/${approved ? 'approve' : 'deny'}`,
-        { method: 'POST' },
-      );
-      if (!snapshotMutationCurrent(requestSeq)) return;
-      if (!approved) refocusInputWhenIdleRef.current = true;
-      applySnapshot(next);
-    } catch (err: any) {
-      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
-    } finally {
-      setApprovalBusyId(null);
-    }
-  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
+  const resolveApproval = React.useCallback(
+    async (approval: AssistantApproval, approved: boolean) => {
+      if (!activeThread) return;
+      const requestSeq = beginSnapshotMutation();
+      setApprovalBusyId(approval.id);
+      try {
+        const next = await requestJson<AssistantSnapshot>(
+          `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/approvals/${encodeURIComponent(approval.id)}/${approved ? 'approve' : 'deny'}`,
+          { method: 'POST' },
+        );
+        if (!snapshotMutationCurrent(requestSeq)) return;
+        if (!approved) refocusInputWhenIdleRef.current = true;
+        applySnapshot(next);
+      } catch (err: any) {
+        if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
+      } finally {
+        setApprovalBusyId(null);
+      }
+    },
+    [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent],
+  );
 
   const setActiveModelAsDefault = React.useCallback(async () => {
     if (!activeThread) return;
@@ -1300,14 +1450,19 @@ export function AssistantDock({
       snapshot?.defaultModel.provider === activeThread.provider &&
       snapshot.defaultModel.model === activeThread.model &&
       snapshot.defaultModel.thinkingLevel === activeThread.thinkingLevel
-    ) return;
+    )
+      return;
     const requestSeq = beginSnapshotMutation();
     setDefaultModelBusy(true);
     try {
       const next = await requestJson<AssistantDefaultSettings>('/api/assistant/default-model', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ provider: activeThread.provider, model: activeThread.model, thinkingLevel: activeThread.thinkingLevel }),
+        body: JSON.stringify({
+          provider: activeThread.provider,
+          model: activeThread.model,
+          thinkingLevel: activeThread.thinkingLevel,
+        }),
       });
       if (snapshotMutationCurrent(requestSeq)) {
         setSnapshot((current) => (current ? { ...current, ...next } : current));
@@ -1346,10 +1501,18 @@ export function AssistantDock({
     if (!activeThread) return [];
     const configured = Array.isArray(activeThread.enabledTools)
       ? activeThread.enabledTools
-      : toolNames.filter((name) => name !== 'get_system_prompt' && name !== 'update_system_prompt' && name !== 'set_thinking_level');
+      : toolNames.filter(
+          (name) =>
+            name !== 'get_system_prompt' &&
+            name !== 'update_system_prompt' &&
+            name !== 'set_thinking_level',
+        );
     return configured.filter((name) => toolNames.includes(name));
   }, [activeThread, availableTools]);
-  const availableToolNamesKey = React.useMemo(() => availableTools.map((tool) => tool.name).join('\u0000'), [availableTools]);
+  const availableToolNamesKey = React.useMemo(
+    () => availableTools.map((tool) => tool.name).join('\u0000'),
+    [availableTools],
+  );
 
   React.useEffect(() => {
     const currentKey = enabledToolDraftNamesRef.current.join('\u0000');
@@ -1383,7 +1546,9 @@ export function AssistantDock({
       enabledToolDraftNamesRef.current = nextTools;
       setEnabledToolDraftNames(nextTools);
       const available = new Set(availableTools.map((tool) => tool.name));
-      const unavailableConfigured = (activeThread?.enabledTools ?? []).filter((name) => !available.has(name));
+      const unavailableConfigured = (activeThread?.enabledTools ?? []).filter(
+        (name) => !available.has(name),
+      );
       void updateThread({ enabledTools: [...nextTools, ...unavailableConfigured] });
     },
     [activeThread?.enabledTools, availableTools, updateThread],
@@ -1455,7 +1620,9 @@ export function AssistantDock({
       defaultEnabledToolDraftNamesRef.current = nextTools;
       setDefaultEnabledToolDraftNames(nextTools);
       const available = new Set(availableTools.map((tool) => tool.name));
-      const unavailableConfigured = (snapshot?.defaultEnabledTools ?? []).filter((name) => !available.has(name));
+      const unavailableConfigured = (snapshot?.defaultEnabledTools ?? []).filter(
+        (name) => !available.has(name),
+      );
       const persistedTools = [...nextTools, ...unavailableConfigured];
       const requestSeq = beginSnapshotMutation();
       setDefaultToolsBusy(true);
@@ -1482,7 +1649,9 @@ export function AssistantDock({
       const current = new Set(defaultEnabledToolDraftNamesRef.current);
       if (enabled) current.add(toolName);
       else current.delete(toolName);
-      void updateDefaultEnabledTools(availableTools.map((tool) => tool.name).filter((name) => current.has(name)));
+      void updateDefaultEnabledTools(
+        availableTools.map((tool) => tool.name).filter((name) => current.has(name)),
+      );
     },
     [availableTools, updateDefaultEnabledTools],
   );
@@ -1494,57 +1663,67 @@ export function AssistantDock({
         if (enabled) current.add(toolName);
         else current.delete(toolName);
       }
-      void updateDefaultEnabledTools(availableTools.map((tool) => tool.name).filter((name) => current.has(name)));
+      void updateDefaultEnabledTools(
+        availableTools.map((tool) => tool.name).filter((name) => current.has(name)),
+      );
     },
     [availableTools, updateDefaultEnabledTools],
   );
 
-  const loadArtifactFiles = React.useCallback(async (options: { silent?: boolean } = {}) => {
-    const threadId = activeThreadId;
-    if (!threadId) {
-      setArtifactFiles([]);
-      setSelectedArtifactPath(null);
-      setSelectedArtifactFile(null);
-      return;
-    }
-    if (!options.silent) setArtifactsLoading(true);
-    setArtifactsError(null);
-    try {
-      const data = await requestJson<{ ok: true; threadId: string; files: AssistantArtifactSummary[] }>(
-        `/api/assistant/threads/${encodeURIComponent(threadId)}/artifacts`,
-      );
-      if (activeThreadIdRef.current !== threadId) return;
-      setArtifactFiles(Array.isArray(data.files) ? data.files : []);
-    } catch (err: any) {
-      if (activeThreadIdRef.current !== threadId) return;
-      setArtifactsError(err?.message ?? String(err));
-    } finally {
-      if (!options.silent && activeThreadIdRef.current === threadId) setArtifactsLoading(false);
-    }
-  }, [activeThreadId]);
+  const loadArtifactFiles = React.useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      const threadId = activeThreadId;
+      if (!threadId) {
+        setArtifactFiles([]);
+        setSelectedArtifactPath(null);
+        setSelectedArtifactFile(null);
+        return;
+      }
+      if (!options.silent) setArtifactsLoading(true);
+      setArtifactsError(null);
+      try {
+        const data = await requestJson<{
+          ok: true;
+          threadId: string;
+          files: AssistantArtifactSummary[];
+        }>(`/api/assistant/threads/${encodeURIComponent(threadId)}/artifacts`);
+        if (activeThreadIdRef.current !== threadId) return;
+        setArtifactFiles(Array.isArray(data.files) ? data.files : []);
+      } catch (err: any) {
+        if (activeThreadIdRef.current !== threadId) return;
+        setArtifactsError(err?.message ?? String(err));
+      } finally {
+        if (!options.silent && activeThreadIdRef.current === threadId) setArtifactsLoading(false);
+      }
+    },
+    [activeThreadId],
+  );
 
-  const loadSelectedArtifactFile = React.useCallback(async (options: { silent?: boolean } = {}) => {
-    const threadId = activeThreadId;
-    if (!threadId || !selectedArtifactPath) {
-      setSelectedArtifactFile(null);
-      return;
-    }
-    if (!options.silent) setArtifactsLoading(true);
-    setArtifactsError(null);
-    try {
-      const data = await requestJson<{ ok: true; threadId: string; file: AssistantArtifactFile }>(
-        `/api/assistant/threads/${encodeURIComponent(threadId)}/artifacts/file?path=${encodeURIComponent(selectedArtifactPath)}`,
-      );
-      if (activeThreadIdRef.current !== threadId) return;
-      setSelectedArtifactFile(data.file ?? null);
-    } catch (err: any) {
-      if (activeThreadIdRef.current !== threadId) return;
-      setSelectedArtifactFile(null);
-      setArtifactsError(err?.message ?? String(err));
-    } finally {
-      if (!options.silent && activeThreadIdRef.current === threadId) setArtifactsLoading(false);
-    }
-  }, [activeThreadId, selectedArtifactPath]);
+  const loadSelectedArtifactFile = React.useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      const threadId = activeThreadId;
+      if (!threadId || !selectedArtifactPath) {
+        setSelectedArtifactFile(null);
+        return;
+      }
+      if (!options.silent) setArtifactsLoading(true);
+      setArtifactsError(null);
+      try {
+        const data = await requestJson<{ ok: true; threadId: string; file: AssistantArtifactFile }>(
+          `/api/assistant/threads/${encodeURIComponent(threadId)}/artifacts/file?path=${encodeURIComponent(selectedArtifactPath)}`,
+        );
+        if (activeThreadIdRef.current !== threadId) return;
+        setSelectedArtifactFile(data.file ?? null);
+      } catch (err: any) {
+        if (activeThreadIdRef.current !== threadId) return;
+        setSelectedArtifactFile(null);
+        setArtifactsError(err?.message ?? String(err));
+      } finally {
+        if (!options.silent && activeThreadIdRef.current === threadId) setArtifactsLoading(false);
+      }
+    },
+    [activeThreadId, selectedArtifactPath],
+  );
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1571,7 +1750,11 @@ export function AssistantDock({
       setSelectedArtifactFile(null);
       return;
     }
-    setSelectedArtifactPath((prev) => (prev && artifactFiles.some((file) => file.path === prev) ? prev : selectDefaultArtifactPath(artifactFiles)));
+    setSelectedArtifactPath((prev) =>
+      prev && artifactFiles.some((file) => file.path === prev)
+        ? prev
+        : selectDefaultArtifactPath(artifactFiles),
+    );
   }, [artifactFiles, filesOpen]);
 
   React.useEffect(() => {
@@ -1584,7 +1767,12 @@ export function AssistantDock({
       id: 'files',
       label: filesOpen ? 'Hide thread files' : 'Thread files',
       icon: <IconFile className="h-3.5 w-3.5" />,
-      badge: artifactFiles.length > 0 ? (artifactFiles.length > 99 ? '99+' : artifactFiles.length) : undefined,
+      badge:
+        artifactFiles.length > 0
+          ? artifactFiles.length > 99
+            ? '99+'
+            : artifactFiles.length
+          : undefined,
       active: filesOpen,
       onSelect: () => {
         setDroneHubPermissionsOpen(false);
@@ -1709,7 +1897,9 @@ export function AssistantDock({
           enabledWorkspaceIds={enabledWorkspaceDraftIds}
           disabled={!activeThread}
           onToggleWorkspace={toggleAssistantWorkspace}
-          onEnableAll={() => updateEnabledWorkspaces(availableWorkspaces.map((workspace) => workspace.id))}
+          onEnableAll={() =>
+            updateEnabledWorkspaces(availableWorkspaces.map((workspace) => workspace.id))
+          }
           onDisableAll={() => updateEnabledWorkspaces([])}
           onOpenRemoteAccess={() => {
             setWorkspacesPanelOpen(false);
@@ -1795,11 +1985,7 @@ export function AssistantDock({
   let lastRunSummaryItemIndex = -1;
   for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
     const candidate = visibleItems[index];
-    if (
-      lastRunSummaryItemIndex < 0 &&
-      candidate?.type === 'runSummary' &&
-      candidate.fileChanges
-    ) {
+    if (lastRunSummaryItemIndex < 0 && candidate?.type === 'runSummary' && candidate.fileChanges) {
       lastRunSummaryItemIndex = index;
     }
     if (lastRunSummaryItemIndex >= 0) break;
@@ -1820,9 +2006,7 @@ export function AssistantDock({
     }),
   );
   const visibleRunSummaryItemIndexes = new Set(
-    requestRuns
-      .map((run) => run.fileSummaryItemIndex)
-      .filter((index) => index >= 0),
+    requestRuns.map((run) => run.fileSummaryItemIndex).filter((index) => index >= 0),
   );
 
   for (let itemIndex = 0; itemIndex < visibleItems.length; itemIndex += 1) {
@@ -1955,9 +2139,7 @@ export function AssistantDock({
     const runStartIndex = requestRun.firstToolItemIndex;
     const userItem = visibleItems[requestRun.userItemIndex];
     const precedingUserAt =
-      userItem?.type === 'message'
-        ? assistantMessageTimestampMs(userItem.message)
-        : undefined;
+      userItem?.type === 'message' ? assistantMessageTimestampMs(userItem.message) : undefined;
     const callStartedAt = runItems
       .map((runItem) => toolCallStartedAt.get(String(runItem.call?.id ?? '')))
       .filter((timestamp): timestamp is number => timestamp !== undefined);
@@ -1971,8 +2153,7 @@ export function AssistantDock({
       finalAssistantAt = assistantMessageTimestampMs(candidate.message) ?? finalAssistantAt;
     }
     const startedAt =
-      precedingUserAt ??
-      (callStartedAt.length > 0 ? Math.min(...callStartedAt) : undefined);
+      precedingUserAt ?? (callStartedAt.length > 0 ? Math.min(...callStartedAt) : undefined);
     const endedAt =
       finalAssistantAt ??
       (resultEndedAt.length > 0
@@ -1980,12 +2161,9 @@ export function AssistantDock({
         : callStartedAt.length > 0
           ? Math.max(...callStartedAt)
           : undefined);
-    const runActive =
-      running &&
-      requestRun.userItemIndex === latestUserItemIndex;
+    const runActive = running && requestRun.userItemIndex === latestUserItemIndex;
     const runAwaitingApproval =
-      requestRun.userItemIndex === latestUserItemIndex &&
-      activePendingApprovals.length > 0;
+      requestRun.userItemIndex === latestUserItemIndex && activePendingApprovals.length > 0;
     const runKey = `tool-run:${userItem?.key ?? runStartIndex}`;
     nativeTranscriptItems.push({
       key: runKey,
@@ -2042,6 +2220,12 @@ export function AssistantDock({
           prompt={prompt}
           cancelling={queuedPromptBusyId === prompt.id}
           onCancel={() => void cancelQueuedPrompt(prompt.id)}
+          onCreateNewChatNow={
+            onCreateQueuedNewChatNow ? () => void onCreateQueuedNewChatNow(prompt.id) : undefined
+          }
+          creatingNewChat={Boolean(promotingNewChatActionById[prompt.id])}
+          autoFocusCreateNewChat={focusedNewChatActionId === prompt.id}
+          createNewChatError={promoteNewChatActionErrorById[prompt.id] ?? null}
         />
       ),
     });
@@ -2178,7 +2362,8 @@ export function AssistantDock({
               contentRef={bindScrollContentRef}
               loading={Boolean(
                 !startupPromptPresentation.showOptimistic &&
-                ((loading && !snapshot) || (blipSession.historyLoading && visibleItems.length === 0)),
+                ((loading && !snapshot) ||
+                  (blipSession.historyLoading && visibleItems.length === 0)),
               )}
               loadingMessage="Loading conversation…"
               hasContent={Boolean(
@@ -2222,9 +2407,7 @@ export function AssistantDock({
               }
               onStop={() => stop()}
               stopping={assistantStopBusy}
-              onSend={async (payload, context) =>
-                await sendPrompt(payload, context.deliveryMode)
-              }
+              onSend={async (payload, context) => await sendPrompt(payload, context.deliveryMode)}
               onSendInNewChat={onSendPromptInNewChat ? sendPromptInNewChat : undefined}
             />
           </div>

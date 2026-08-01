@@ -15,6 +15,7 @@ type ChatPromptRouteDependencyName =
   | 'chatSnapshotResponseBody'
   | 'claimChatAutoRenameFromFirstPrompt'
   | 'createOrEnqueuePromptUnified'
+  | 'createOrEnqueueNewChatAction'
   | 'createRequestTimer'
   | 'defaultDaemonReadyTimeoutMs'
   | 'discoverAndRememberModelsForBuiltinAgent'
@@ -43,6 +44,7 @@ type ChatPromptRouteDependencyName =
   | 'nowIso'
   | 'pushPendingPrompt'
   | 'pushPendingStartupPrompt'
+  | 'promoteQueuedNewChatAction'
   | 'readChatSnapshot'
   | 'resolveChatTmuxCommand'
   | 'resolveDroneDaemonClientForEntry'
@@ -66,6 +68,7 @@ export function createChatPromptRouteHandler(
     chatSnapshotResponseBody,
     claimChatAutoRenameFromFirstPrompt,
     createOrEnqueuePromptUnified,
+    createOrEnqueueNewChatAction,
     createRequestTimer,
     defaultDaemonReadyTimeoutMs,
     discoverAndRememberModelsForBuiltinAgent,
@@ -94,6 +97,7 @@ export function createChatPromptRouteHandler(
     nowIso,
     pushPendingPrompt,
     pushPendingStartupPrompt,
+    promoteQueuedNewChatAction,
     readChatSnapshot,
     resolveChatTmuxCommand,
     resolveDroneDaemonClientForEntry,
@@ -168,7 +172,11 @@ export function createChatPromptRouteHandler(
           prompt = attachmentOnlyPromptLabel(attachments);
         }
         const deliveryMode =
-          body?.deliveryMode === 'asap' ? 'asap' : body?.deliveryMode === 'queue' ? 'queue' : undefined;
+          body?.deliveryMode === 'asap'
+            ? 'asap'
+            : body?.deliveryMode === 'queue'
+              ? 'queue'
+              : undefined;
 
         try {
           const resolved = await resolveDroneOrPendingForReadRef(droneRef);
@@ -359,6 +367,108 @@ export function createChatPromptRouteHandler(
           timer.setHeader(res);
           logSlowHubRequest('chat prompt', timer, { droneRef, chatName, status: code, error: msg });
           json(res, code, { ok: false, error: msg });
+          return;
+        }
+      }
+
+      // POST /api/drones/:id/chats/:chat/new-chat-action
+      if (
+        method === 'POST' &&
+        parts.length === 6 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'new-chat-action'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        try {
+          const body: any = parseRequestSchema(
+            chatPromptBodySchema,
+            await readJsonBody(req),
+            'new chat action',
+          );
+          let prompt = String(body?.prompt ?? '').trim();
+          const attachments = normalizeChatImageAttachments(body?.attachments);
+          if (!prompt && attachments.length === 0) {
+            json(res, 400, { ok: false, error: 'missing prompt' });
+            return;
+          }
+          if (!prompt) prompt = attachmentOnlyPromptLabel(attachments);
+          const promptId = String(body?.promptId ?? body?.id ?? '').trim();
+          if (promptId && !isSafePromptId(promptId)) {
+            json(res, 400, { ok: false, error: 'invalid promptId' });
+            return;
+          }
+          const resolved = await resolveDroneOrRespond(res, droneRef);
+          if (!resolved) return;
+          const result = await createOrEnqueueNewChatAction({
+            id: promptId || undefined,
+            droneId: resolved.id,
+            chatName,
+            prompt,
+            attachments,
+            cwd: typeof body?.cwd === 'string' ? body.cwd : null,
+            submittedAt: body?.submittedAt ?? body?.clientSubmittedAt ?? body?.at,
+          });
+          if (result.kind === 'error') {
+            json(res, result.status, { ok: false, error: result.error });
+            return;
+          }
+          json(res, 202, {
+            ok: true,
+            accepted: true,
+            id: resolved.id,
+            chat: chatName,
+            actionId: result.id,
+            pendingState: result.pendingState,
+            ...(result.targetChatName ? { targetChatName: result.targetChatName } : {}),
+          });
+          return;
+        } catch (error: any) {
+          const message = error?.message ?? String(error);
+          json(res, /unknown drone|unknown chat/i.test(message) ? 404 : 500, {
+            ok: false,
+            error: message,
+          });
+          return;
+        }
+      }
+
+      // POST /api/drones/:id/chats/:chat/pending/:actionId/create-now
+      if (
+        method === 'POST' &&
+        parts.length === 8 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'pending' &&
+        parts[7] === 'create-now'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        const actionId = decodeURIComponent(parts[6]);
+        try {
+          const resolved = await resolveDroneOrRespond(res, droneRef);
+          if (!resolved) return;
+          const result = await promoteQueuedNewChatAction({
+            droneId: resolved.id,
+            chatName,
+            actionId,
+          });
+          if (result.kind === 'error') {
+            json(res, result.status, { ok: false, error: result.error });
+            return;
+          }
+          json(res, result.kind === 'created' ? 200 : 202, {
+            ok: true,
+            status: result.kind,
+            actionId,
+            ...(result.targetChatName ? { targetChatName: result.targetChatName } : {}),
+          });
+          return;
+        } catch (error: any) {
+          json(res, 500, { ok: false, error: error?.message ?? String(error) });
           return;
         }
       }

@@ -67,6 +67,42 @@ describe('external pending transcript turn', () => {
     expect(html).not.toContain('animate-pulse-dot');
   });
 
+  test('renders queued new-chat actions with Create now and cancel controls', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          state: 'queued',
+          action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+        })}
+        onCreateNewChatNow={() => {}}
+        onCancelQueued={() => {}}
+      />,
+    );
+
+    expect(html).toContain('New chat queued');
+    expect(html).toContain('Waiting to create a fresh chat');
+    expect(html).toContain('>Create now</button>');
+    expect(html).toContain('aria-label="Cancel queued new chat"');
+    expect(html).not.toContain('Working for');
+  });
+
+  test('shows the failure reason when a queued new-chat action terminates', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          state: 'failed',
+          error: '\u001b[31mCould not initialize the target agent\u001b[0m',
+          action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+        })}
+      />,
+    );
+
+    expect(html).toContain('New chat failed');
+    expect(html).toContain('Could not initialize the target agent');
+    expect(html).not.toContain('\u001b[31m');
+    expect(html).not.toContain('Working for');
+  });
+
   test('counts working time from daemon execution rather than the queued timestamp', () => {
     const html = renderToStaticMarkup(
       <PendingTranscriptTurn

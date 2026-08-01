@@ -9,7 +9,7 @@ import {
   validateChatAttachments,
 } from '@drone/assistant-chat';
 
-import { dvmCopyToContainer, dvmExec } from '../host/dvm';
+import { dvmCopyFromContainer, dvmCopyToContainer, dvmExec } from '../host/dvm';
 import { bashQuote, normalizeContainerPath } from './hub-format';
 
 type ChatImageAttachmentInput = {
@@ -134,7 +134,8 @@ function uniqueAttachmentFileName(fileNameRaw: string, usedNames: Set<string>): 
     const ext = parsed.ext || '';
     const suffix = `-${n}`;
     const maxBaseLength = Math.max(1, 96 - ext.length - suffix.length);
-    const base = (parsed.name || 'attachment').slice(0, maxBaseLength).replace(/[-.]+$/g, '') || 'attachment';
+    const base =
+      (parsed.name || 'attachment').slice(0, maxBaseLength).replace(/[-.]+$/g, '') || 'attachment';
     candidate = `${base}${suffix}${ext}`;
     n += 1;
   }
@@ -154,7 +155,8 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
     if (!item || typeof item !== 'object') continue;
 
     const mime = normalizeChatAttachmentMime(item.mime, item.name);
-    if (!isSupportedAttachmentMime(mime)) throw new Error('only image and text attachments are supported');
+    if (!isSupportedAttachmentMime(mime))
+      throw new Error('only image and text attachments are supported');
 
     const dataBase64 = String(item.dataBase64 ?? '').replace(/\s+/g, '');
     if (!dataBase64) throw new Error('attachment is missing dataBase64');
@@ -198,9 +200,14 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
     }
 
     const ext = extForAttachmentMime(mime);
-    const fallbackBase = isImageAttachmentMime(mime) ? `image-${out.length + 1}` : `text-${out.length + 1}`;
+    const fallbackBase = isImageAttachmentMime(mime)
+      ? `image-${out.length + 1}`
+      : `text-${out.length + 1}`;
     const name = String(item.name ?? '').trim() || `${fallbackBase}.${ext}`;
-    const fileName = uniqueAttachmentFileName(sanitizeAttachmentFileName(name, fallbackBase, ext), usedFileNames);
+    const fileName = uniqueAttachmentFileName(
+      sanitizeAttachmentFileName(name, fallbackBase, ext),
+      usedFileNames,
+    );
 
     out.push({ name, mime, size: effectiveSize, dataBase64, fileName });
   }
@@ -210,7 +217,7 @@ export function normalizeChatImageAttachments(raw: unknown): ChatImageAttachment
 
 export function promptWithImageAttachments(
   promptRaw: string,
-  files: Array<{ name: string; mime: string; size: number; path: string; relativePath?: string }>
+  files: Array<{ name: string; mime: string; size: number; path: string; relativePath?: string }>,
 ): string {
   return promptWithChatAttachmentContext(promptRaw, files);
 }
@@ -258,7 +265,8 @@ export function buildChatImageAttachmentRefs(opts: {
   return list.map((a) => {
     const absPath = normalizeContainerPath(path.posix.join(dir, a.fileName));
     const relPathRaw = path.posix.relative(cwd, absPath);
-    const relPath = relPathRaw && relPathRaw !== '.' && !relPathRaw.startsWith('../') ? relPathRaw : absPath;
+    const relPath =
+      relPathRaw && relPathRaw !== '.' && !relPathRaw.startsWith('../') ? relPathRaw : absPath;
     return {
       name: a.name,
       mime: a.mime,
@@ -310,5 +318,43 @@ export async function copyChatAttachmentsToContainer(opts: {
     } catch {
       // ignore
     }
+  }
+}
+
+export async function readChatAttachmentsFromRefs(opts: {
+  runtime: 'host' | 'container';
+  containerName?: string;
+  attachments: ChatImageAttachmentRef[];
+}): Promise<ChatImageAttachment[]> {
+  const attachments = Array.isArray(opts.attachments) ? opts.attachments : [];
+  if (attachments.length === 0) return [];
+  const tmpRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), `drone-hub-read-attachments-${process.pid}-`),
+  );
+  try {
+    const out: ChatImageAttachment[] = [];
+    for (let index = 0; index < attachments.length; index += 1) {
+      const attachment = attachments[index]!;
+      let bytes: Buffer;
+      if (opts.runtime === 'host') {
+        bytes = await fs.readFile(attachment.path);
+      } else {
+        const containerName = String(opts.containerName ?? '').trim();
+        if (!containerName) throw new Error('missing attachment container');
+        const localPath = path.join(tmpRoot, `${index}-${path.basename(attachment.fileName)}`);
+        await dvmCopyFromContainer(containerName, attachment.path, localPath);
+        bytes = await fs.readFile(localPath);
+      }
+      out.push({
+        name: attachment.name,
+        mime: attachment.mime,
+        size: bytes.length,
+        dataBase64: bytes.toString('base64'),
+        fileName: attachment.fileName,
+      });
+    }
+    return normalizeChatImageAttachments(out);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => undefined);
   }
 }

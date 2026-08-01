@@ -1,5 +1,9 @@
 import { DRONE_CONTROL_CAPABILITY, MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
-import { filterCompletedPendingPrompts, normalizePendingPromptState } from '@drone/assistant-chat';
+import {
+  filterCompletedPendingPrompts,
+  isSendInNewChatQueueAction,
+  normalizePendingPromptState,
+} from '@drone/assistant-chat';
 import type { CapabilityHandler } from './device-mesh-types';
 import { scheduleCreatedDroneAutoRename } from './auto-rename-created-drone';
 import {
@@ -79,6 +83,7 @@ function compactPendingPrompts(value: unknown): any[] {
       ...(startedAt ? { startedAt } : {}),
       prompt: truncateUtf8(prompt?.prompt, promptLimit),
       state: normalizePendingPromptState(prompt?.state, 'queued'),
+      ...(isSendInNewChatQueueAction(prompt?.action) ? { action: prompt.action } : {}),
       ...(prompt?.error ? { error: truncateUtf8(prompt.error, errorLimit) } : {}),
       attachmentCount: attachments.length,
       imageCount: attachments.filter((attachment: any) =>
@@ -631,6 +636,16 @@ export function createDroneControlCapability(
         };
       }
       if (operation === 'chat.create') {
+        const queuedActionId = optionalText(payload.queuedActionId);
+        if (queuedActionId) {
+          const sourceChatName =
+            optionalText(payload.sourceChatName ?? payload.chatName) ?? 'default';
+          return await localHubRequest(
+            access,
+            `/api/drones/${encodedDrone}/chats/${encodeURIComponent(sourceChatName)}/pending/${encodeURIComponent(queuedActionId)}/create-now`,
+            { method: 'POST', body: '{}' },
+          );
+        }
         const chatName = requiredText(payload.name ?? payload.chatName, 'chatName');
         const copyFrom = optionalText(payload.copyFrom ?? payload.copyFromChat);
         const result = await localHubRequest(access, `/api/drones/${encodedDrone}/chats`, {
@@ -919,8 +934,7 @@ export function createDroneControlCapability(
               nativeResponse.thread?.agentPermissionMode ??
               result.agentPermissionMode ??
               'full-access',
-            approvalPolicy:
-              nativeResponse.thread?.approvalPolicy ?? result.approvalPolicy ?? 'ask',
+            approvalPolicy: nativeResponse.thread?.approvalPolicy ?? result.approvalPolicy ?? 'ask',
           };
         }
         const turnId = optionalText(payload.turnId);
@@ -1021,10 +1035,7 @@ export function createDroneControlCapability(
         const requestedNativeChatId = optionalText(payload.nativeChatId);
         if (requestedNativeChatId) {
           const { nativeChatId } = await resolveNativeChat(requestedNativeChatId);
-          if (
-            payload.agentPermissionMode !== undefined ||
-            payload.approvalPolicy !== undefined
-          ) {
+          if (payload.agentPermissionMode !== undefined || payload.approvalPolicy !== undefined) {
             await localHubRequest(access, `${chatPath}/config`, {
               method: 'POST',
               body: JSON.stringify({

@@ -1,6 +1,6 @@
 import { applyHubDatabaseMigrations, getHubDatabase } from './hub-database';
 import type { HubDatabase, HubDatabaseConnection, HubDatabaseMigration } from './hub-database';
-import type { AgentRunActivity } from '@drone/assistant-chat';
+import type { AgentRunActivity, ChatQueueAction } from '@drone/assistant-chat';
 
 export type PromptQueueState = 'queued' | 'sending' | 'sent' | 'failed' | 'cancelled';
 
@@ -13,6 +13,7 @@ export type PromptQueueItem = {
   cwd?: string | null;
   attachments?: unknown;
   deliveryMode?: 'queue' | 'asap';
+  action?: ChatQueueAction;
   state: PromptQueueState;
   error?: string;
   observability?: unknown;
@@ -417,6 +418,17 @@ export class PromptQueueRepository {
           .prepare(
             `SELECT * FROM prompts
              WHERE drone_id = ? AND chat_name = ? AND state = 'queued'
+               AND sequence <= COALESCE(
+                 (
+                   SELECT MIN(barrier.sequence)
+                   FROM prompts AS barrier
+                   WHERE barrier.drone_id = prompts.drone_id
+                     AND barrier.chat_name = prompts.chat_name
+                     AND barrier.state = 'queued'
+                     AND json_extract(barrier.payload_json, '$.action.type') = 'send-in-new-chat'
+                 ),
+                 sequence
+               )
              ORDER BY
                CASE WHEN json_extract(payload_json, '$.deliveryMode') = 'asap' THEN 0 ELSE 1 END,
                sequence
@@ -425,6 +437,44 @@ export class PromptQueueRepository {
           .get(opts.droneId, opts.chatName) as PromptRow | undefined,
       ),
     );
+  }
+
+  listThrough(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    limit?: number;
+  }): PromptQueueRecord[] {
+    const limit = Math.max(1, Math.min(500, Math.floor(opts.limit ?? 100)));
+    return this.database.read((connection) => {
+      const rows = connection
+        .prepare(
+          `SELECT * FROM (
+             SELECT * FROM prompts
+             WHERE drone_id = ? AND chat_name = ? AND state != 'cancelled'
+               AND sequence <= COALESCE(
+                 (
+                   SELECT sequence FROM prompts
+                   WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?
+                 ),
+                 -1
+               )
+             ORDER BY sequence DESC
+             LIMIT ?
+           ) ORDER BY sequence ASC`,
+        )
+        .all(
+          opts.droneId,
+          opts.chatName,
+          opts.droneId,
+          opts.chatName,
+          opts.promptId,
+          limit,
+        ) as PromptRow[];
+      return rows
+        .map((row) => recordFromRow(row))
+        .filter((row): row is PromptQueueRecord => Boolean(row));
+    });
   }
 
   async renameChat(opts: {
@@ -540,6 +590,22 @@ export class PromptQueueRepository {
                     blocker.state = 'sending'
                     OR (
                       blocker.state = 'queued'
+                      AND blocker.sequence < prompts.sequence
+                      AND json_extract(blocker.payload_json, '$.action.type') = 'send-in-new-chat'
+                    )
+                    OR (
+                      blocker.state = 'queued'
+                      AND blocker.sequence <= COALESCE(
+                        (
+                          SELECT MIN(barrier.sequence)
+                          FROM prompts AS barrier
+                          WHERE barrier.drone_id = prompts.drone_id
+                            AND barrier.chat_name = prompts.chat_name
+                            AND barrier.state = 'queued'
+                            AND json_extract(barrier.payload_json, '$.action.type') = 'send-in-new-chat'
+                        ),
+                        blocker.sequence
+                      )
                       AND (
                         CASE WHEN json_extract(blocker.payload_json, '$.deliveryMode') = 'asap'
                           THEN 0 ELSE 1 END
@@ -617,6 +683,7 @@ export class PromptQueueRepository {
         | 'agentPlan'
         | 'fileChangesBaseline'
         | 'fileChanges'
+        | 'action'
         | 'startedAt'
         | 'updatedAt'
       >

@@ -2,7 +2,13 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import X from 'lucide-react-native/icons/x';
 import Square from 'lucide-react-native/icons/square';
-import { stoppedRunDetail, type AgentPlan } from '@drone/assistant-chat';
+import MessageSquarePlus from 'lucide-react-native/icons/message-square-plus';
+import {
+  resolveChatQueueActionPresentation,
+  stoppedRunDetail,
+  type AgentPlan,
+  type SendInNewChatQueueAction,
+} from '@drone/assistant-chat';
 import { colors } from '../theme';
 
 export type MobileQueuedPrompt = {
@@ -16,16 +22,21 @@ export type MobileQueuedPrompt = {
   startedAt?: string;
   agentPlan?: AgentPlan;
   delivered?: boolean;
+  action?: SendInNewChatQueueAction;
 };
 
 export function QueuedPromptRows({
   prompts,
   cancellingId = '',
   onCancel,
+  creatingId = '',
+  onCreateNow,
 }: {
   prompts: MobileQueuedPrompt[];
   cancellingId?: string;
   onCancel?: (promptId: string) => void;
+  creatingId?: string;
+  onCreateNow?: (promptId: string) => void;
 }) {
   if (prompts.length === 0) return null;
   return (
@@ -39,7 +50,70 @@ export function QueuedPromptRows({
         const stopped = prompt.status === 'stopped';
         const pending = prompt.status === 'pending';
         const cancelling = cancellingId === prompt.id;
+        const creating = creatingId === prompt.id;
+        const actionPresentation = resolveChatQueueActionPresentation(prompt.action, prompt.status);
         const label = failed ? 'Failed' : prompt.status === 'queued' ? 'Queued' : 'Pending';
+        if (actionPresentation) {
+          return (
+            <View
+              key={prompt.id}
+              style={[styles.row, styles.actionRow, failed && styles.rowFailed]}
+            >
+              <View style={styles.actionIcon}>
+                <MessageSquarePlus color={failed ? colors.danger : colors.accent} size={17} />
+              </View>
+              <View style={styles.body}>
+                <Text style={[styles.badge, failed && styles.badgeFailed]}>
+                  {actionPresentation.label}
+                </Text>
+                {prompt.prompt ? (
+                  <Text selectable style={styles.prompt}>
+                    {prompt.prompt}
+                  </Text>
+                ) : null}
+                {failed && prompt.error ? <Text style={styles.error}>{prompt.error}</Text> : null}
+                {actionPresentation.canExecuteNow || actionPresentation.canCancel ? (
+                  <View style={styles.actionButtons}>
+                    {actionPresentation.canExecuteNow && onCreateNow ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Create new chat now"
+                        accessibilityState={{ disabled: creating || cancelling }}
+                        disabled={creating || cancelling}
+                        onPress={() => onCreateNow(prompt.id)}
+                        style={({ pressed }) => [
+                          styles.createNow,
+                          (creating || cancelling) && styles.disabled,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text style={styles.createNowText}>
+                          {creating ? 'Creating…' : 'Create now'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                    {actionPresentation.canCancel && onCancel ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Cancel queued new chat"
+                        disabled={creating || cancelling}
+                        onPress={() => onCancel(prompt.id)}
+                        style={({ pressed }) => [
+                          styles.cancelTextButton,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text style={styles.cancelText}>
+                          {cancelling ? 'Canceling…' : 'Cancel'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          );
+        }
         if (pending) {
           return (
             <View key={prompt.id} style={styles.pendingMessageGroup}>
@@ -151,6 +225,25 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   rowFailed: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
+  actionRow: { borderColor: colors.accentBorder, backgroundColor: colors.surface1 },
+  actionIcon: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 7,
+    backgroundColor: colors.accentWash,
+  },
+  actionButtons: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  createNow: {
+    borderRadius: 6,
+    backgroundColor: colors.accent,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  createNowText: { color: colors.surface0, fontSize: 11, fontWeight: '800' },
+  cancelTextButton: { paddingHorizontal: 8, paddingVertical: 7 },
+  cancelText: { color: colors.muted, fontSize: 11, fontWeight: '700' },
   body: { flex: 1, gap: 5 },
   stoppedGroup: { width: '100%' },
   pendingMessageGroup: {

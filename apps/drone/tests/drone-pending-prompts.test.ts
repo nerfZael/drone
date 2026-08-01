@@ -95,6 +95,13 @@ describe('drone pending prompt store', () => {
       expect(claimed).toBe(true);
       const afterClaim = await pendingPromptStore.readPendingPrompts({ droneId: 'drone-1', chatName: 'default' });
       expect(afterClaim[0]).toMatchObject({ id: 'prompt-1', state: 'sending' });
+      expect(
+        pendingPromptStore.readPendingPrompt({
+          droneId: 'drone-1',
+          chatName: 'default',
+          id: 'prompt-1',
+        }),
+      ).toMatchObject({ id: 'prompt-1', state: 'sending' });
     });
   });
 

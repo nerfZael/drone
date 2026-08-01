@@ -1,4 +1,5 @@
 import { MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
+import { isSendInNewChatQueueAction } from '@drone/assistant-chat';
 import { boundedAssistantHistory } from './features/cross-device-assistant/bounded-assistant-history';
 
 function truncateUtf8(value: unknown, maxBytes: number): string {
@@ -27,6 +28,7 @@ function compactQueuedPrompt(prompt: any) {
     status: prompt?.status === 'running' || prompt?.status === 'failed' ? prompt.status : 'queued',
     error: prompt?.error ? truncateUtf8(prompt.error, 512) : null,
     imageCount: Math.max(0, Number(prompt?.imageCount ?? 0) || 0),
+    ...(isSendInNewChatQueueAction(prompt?.action) ? { action: prompt.action } : {}),
   };
 }
 
@@ -46,12 +48,10 @@ function compactThread(thread: any) {
     model: String(thread.model ?? ''),
     thinkingLevel: String(thread.thinkingLevel ?? ''),
     agentPermissionMode:
-      thread.agentPermissionMode === 'read-only' ||
-      thread.agentPermissionMode === 'workspace-write'
+      thread.agentPermissionMode === 'read-only' || thread.agentPermissionMode === 'workspace-write'
         ? thread.agentPermissionMode
         : 'full-access',
-    approvalPolicy:
-      thread.approvalPolicy === 'never' ? 'never' : 'ask',
+    approvalPolicy: thread.approvalPolicy === 'never' ? 'never' : 'ask',
     autoApprove: thread.autoApprove === true,
     promptDeliveryMode: thread.promptDeliveryMode === 'asap' ? 'asap' : 'queue',
     queuedPrompts,

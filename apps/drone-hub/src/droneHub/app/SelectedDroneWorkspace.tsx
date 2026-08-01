@@ -26,11 +26,7 @@ import { StatusBadge } from '../overview';
 import { TypingDots } from '../overview/icons';
 import { requestJson } from '../http';
 import type { AgentApprovalPolicy, AgentPermissionMode } from '../../domain';
-import type {
-  DroneSummary,
-  PendingPrompt,
-  TranscriptItem,
-} from '../types';
+import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import {
   IconBoard,
   IconChat,
@@ -88,9 +84,7 @@ import type { UiMenuSelectEntry } from '../../ui/components';
 import { fetchDroneChatTranscript } from './chat-api';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { CliPendingPromptStrip } from './CliPendingPromptStrip';
-import {
-  formatBytes,
-} from './selected-drone-workspace-utils';
+import { formatBytes } from './selected-drone-workspace-utils';
 import { buildExternalAgentComposerControls } from './external-agent-composer-controls';
 import { parseGithubPullRequestHref } from '../chat/github-pull-request-links';
 import { useHeaderRepoPullRequestSummary } from './HeaderPullRequestShortcuts';
@@ -109,14 +103,12 @@ import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 import type { LocalAutoUpdates, LocalCheckoutView } from './use-local-checkout';
 
-type LaunchHint =
-  | {
-      context: 'terminal' | 'code' | 'cursor';
-      command?: string;
-      launcher?: string;
-      kind: 'copied';
-    }
-  | null;
+type LaunchHint = {
+  context: 'terminal' | 'code' | 'cursor';
+  command?: string;
+  launcher?: string;
+  kind: 'copied';
+} | null;
 
 type DockerSizeSummary = NonNullable<DroneSummary['dockerSize']>;
 
@@ -141,7 +133,10 @@ function HeaderDropdownPortal({
   width: number;
   children: React.ReactNode;
 }) {
-  const [position, setPosition] = React.useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const [position, setPosition] = React.useState<{ top: number; left: number }>({
+    top: 0,
+    left: 0,
+  });
 
   React.useLayoutEffect(() => {
     if (!open) return;
@@ -209,8 +204,12 @@ function HeaderMenuToggleRow({
       <span>{label}</span>
       <span className="inline-flex flex-shrink-0 items-center gap-2">
         <span className={checked ? 'text-[var(--accent)]' : 'text-[var(--muted)]'}>{value}</span>
-        <span className={`relative inline-flex h-3.5 w-6 rounded-full ${checked ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'}`}>
-          <span className={`absolute top-px h-3 w-3 rounded-full bg-white transition-transform ${checked ? 'translate-x-[11px]' : 'translate-x-px'}`} />
+        <span
+          className={`relative inline-flex h-3.5 w-6 rounded-full ${checked ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'}`}
+        >
+          <span
+            className={`absolute top-px h-3 w-3 rounded-full bg-white transition-transform ${checked ? 'translate-x-[11px]' : 'translate-x-px'}`}
+          />
         </span>
       </span>
     </button>
@@ -254,10 +253,7 @@ function HeaderMenuRadioRow({
       <span>{label}</span>
       <span
         aria-hidden="true"
-        className={cn(
-          'h-2 w-2 rounded-full',
-          checked ? 'bg-[var(--accent)]' : 'bg-transparent',
-        )}
+        className={cn('h-2 w-2 rounded-full', checked ? 'bg-[var(--accent)]' : 'bg-transparent')}
       />
     </button>
   );
@@ -297,9 +293,7 @@ function LocalAutoUpdatesControl({
     : activeForAnotherDroneName
       ? `${activeForAnotherDroneName} is currently being used locally`
       : 'This drone is not being used locally';
-  const optionRefs = React.useRef(
-    new Map<LocalAutoUpdates, HTMLButtonElement>(),
-  );
+  const optionRefs = React.useRef(new Map<LocalAutoUpdates, HTMLButtonElement>());
   const moveSelection = (currentMode: LocalAutoUpdates, key: string) => {
     const currentIndex = LOCAL_AUTO_UPDATE_OPTIONS.findIndex(
       (option) => option.mode === currentMode,
@@ -309,8 +303,7 @@ function LocalAutoUpdatesControl({
       nextIndex = (currentIndex + 1) % LOCAL_AUTO_UPDATE_OPTIONS.length;
     } else if (key === 'ArrowLeft' || key === 'ArrowUp') {
       nextIndex =
-        (currentIndex - 1 + LOCAL_AUTO_UPDATE_OPTIONS.length) %
-        LOCAL_AUTO_UPDATE_OPTIONS.length;
+        (currentIndex - 1 + LOCAL_AUTO_UPDATE_OPTIONS.length) % LOCAL_AUTO_UPDATE_OPTIONS.length;
     } else if (key === 'Home') {
       nextIndex = 0;
     } else if (key === 'End') {
@@ -332,16 +325,15 @@ function LocalAutoUpdatesControl({
         title={localStatusTitle}
       >
         <IconMonitor
-          className={cn(
-            'h-4 w-4',
-            active
-              ? 'text-[var(--accent)]'
-              : 'text-[var(--muted-dim)]',
-          )}
+          className={cn('h-4 w-4', active ? 'text-[var(--accent)]' : 'text-[var(--muted-dim)]')}
         />
         <span className={active ? 'text-[var(--fg-secondary)]' : 'text-[var(--muted)]'}>Local</span>
       </span>
-      <div className="inline-flex items-center gap-0.5" role="radiogroup" aria-label="Local auto-updates">
+      <div
+        className="inline-flex items-center gap-0.5"
+        role="radiogroup"
+        aria-label="Local auto-updates"
+      >
         {LOCAL_AUTO_UPDATE_OPTIONS.map((option) => {
           const selected = option.mode === mode;
           const action = active
@@ -360,14 +352,9 @@ function LocalAutoUpdatesControl({
               onClick={() => onSelect(option.mode)}
               onKeyDown={(event) => {
                 if (
-                  ![
-                    'ArrowLeft',
-                    'ArrowRight',
-                    'ArrowUp',
-                    'ArrowDown',
-                    'Home',
-                    'End',
-                  ].includes(event.key)
+                  !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(
+                    event.key,
+                  )
                 ) {
                   return;
                 }
@@ -531,7 +518,10 @@ type SelectedDroneWorkspaceProps = {
   setLocalAutoUpdates: (mode: LocalAutoUpdates) => Promise<void>;
   returnRepoLocalCheckout: () => Promise<void>;
   applyRepoLocalCheckout: () => Promise<void>;
-  onRequestDropActions: (targetDroneId: string, sourceDroneIds: string[]) => { ok: boolean; error?: string | null };
+  onRequestDropActions: (
+    targetDroneId: string,
+    sourceDroneIds: string[],
+  ) => { ok: boolean; error?: string | null };
   repoOp: { kind: 'pull' | 'push' | 'reseed' | 'pull-from-drone' | 'push-to-drone' } | null;
   headerOverflowRef: React.RefObject<HTMLDivElement | null>;
   reseedRepo: () => Promise<void>;
@@ -572,12 +562,20 @@ type SelectedDroneWorkspaceProps = {
   requestCancelPendingPrompt: (promptId: string) => Promise<void>;
   cancellingPendingPromptById: Record<string, true>;
   cancelPendingPromptErrorById: Record<string, string>;
+  onCreateQueuedNewChatNow: (promptId: string) => Promise<void>;
+  focusedNewChatActionId: string;
+  promotingNewChatActionById: Record<string, true>;
+  promoteNewChatActionErrorById: Record<string, string>;
   openedEditorFileOpenFailureMessage: string | null;
   openedEditorFileOpenFailureAt: number | null;
   onOpenMarkdownFileReference: (ref: MarkdownFileReference) => void;
   rightPanelBottomTab: RightPanelTab;
   rightPanelOpenRequestSeq: number;
-  renderRightPanelTabContent: (drone: DroneSummary, tab: RightPanelTab, pane: 'single' | 'top' | 'bottom') => React.ReactNode;
+  renderRightPanelTabContent: (
+    drone: DroneSummary,
+    tab: RightPanelTab,
+    pane: 'single' | 'top' | 'bottom',
+  ) => React.ReactNode;
   onPersistentPreviewHostChange?: (state: {
     style: React.CSSProperties;
     activeDroneId: string | null;
@@ -678,6 +676,10 @@ export function SelectedDroneWorkspace({
   requestCancelPendingPrompt,
   cancellingPendingPromptById,
   cancelPendingPromptErrorById,
+  onCreateQueuedNewChatNow,
+  focusedNewChatActionId,
+  promotingNewChatActionById,
+  promoteNewChatActionErrorById,
   openedEditorFileOpenFailureMessage,
   openedEditorFileOpenFailureAt,
   onOpenMarkdownFileReference,
@@ -737,7 +739,8 @@ export function SelectedDroneWorkspace({
     const snapshot = workspaceChatScrollSnapshotRef.current;
     if (!snapshot) return;
     requestAnimationFrame(() => {
-      const node = snapshot.mode === 'transcript' ? transcriptScrollRef.current : outputScrollRef.current;
+      const node =
+        snapshot.mode === 'transcript' ? transcriptScrollRef.current : outputScrollRef.current;
       workspaceChatScrollSnapshotRef.current = null;
       if (!node) return;
       const heightDelta = node.scrollHeight - snapshot.scrollHeight;
@@ -759,7 +762,9 @@ export function SelectedDroneWorkspace({
     [activeChatName, currentDrone.id, spawnDroneHubTaskFromAgentMessage],
   );
   const hasChats = React.useMemo(
-    () => Array.isArray(currentDrone.chats) && currentDrone.chats.some((chat) => String(chat ?? '').trim().length > 0),
+    () =>
+      Array.isArray(currentDrone.chats) &&
+      currentDrone.chats.some((chat) => String(chat ?? '').trim().length > 0),
     [currentDrone.chats],
   );
   const syncMenuRef = React.useRef<HTMLDivElement | null>(null);
@@ -821,9 +826,13 @@ export function SelectedDroneWorkspace({
 
     return () => controller.abort();
   }, [currentDrone.id, hostRuntime]);
-  const dockerSize = dockerSizeState.droneId === currentDrone.id ? dockerSizeState.dockerSize : (currentDrone.dockerSize ?? null);
+  const dockerSize =
+    dockerSizeState.droneId === currentDrone.id
+      ? dockerSizeState.dockerSize
+      : (currentDrone.dockerSize ?? null);
   const dockerSizeLoading = dockerSizeState.droneId === currentDrone.id && dockerSizeState.loading;
-  const dockerSizeError = dockerSizeState.droneId === currentDrone.id ? dockerSizeState.error : null;
+  const dockerSizeError =
+    dockerSizeState.droneId === currentDrone.id ? dockerSizeState.error : null;
   const dockerSizeTitle = (() => {
     if (dockerSize) {
       return `Docker tracked size: ${formatBytes(dockerSize.totalBytes)} current writable + unique snapshot layers. Current container writable layer: ${formatBytes(
@@ -862,9 +871,7 @@ export function SelectedDroneWorkspace({
   const localActiveForCurrentDrone = localSession?.droneId === currentDrone.id;
   const localActiveForAnotherDrone = Boolean(localSession && !localActiveForCurrentDrone);
   const localActionDisabled = localCheckoutLoading || localCheckoutBusy || Boolean(repoOp);
-  const syncButtonLabel = localCheckoutBusy
-    ? 'Working…'
-    : repoSyncBusyLabel;
+  const syncButtonLabel = localCheckoutBusy ? 'Working…' : repoSyncBusyLabel;
   const syncDisabled =
     isDroneStartingOrSeeding(currentDrone.hubPhase) ||
     Boolean(openingEditor) ||
@@ -914,7 +921,8 @@ export function SelectedDroneWorkspace({
     !isDroneProvisioningPhase(currentDrone.hubPhase) &&
     (fleetBadgeAssigning ||
       fleetBadgeDropActive ||
-      (!currentDroneIsDraft && (Boolean(fleetBadgeError) || /\b[1-9]\d*\b/.test(fleetBadgeSummaryText))));
+      (!currentDroneIsDraft &&
+        (Boolean(fleetBadgeError) || /\b[1-9]\d*\b/.test(fleetBadgeSummaryText))));
   const selectedChatDockerSnapshotBusy = React.useMemo(
     () =>
       (transcripts ?? []).some((item) => {
@@ -926,8 +934,9 @@ export function SelectedDroneWorkspace({
   const chatInputWaiting = currentChatIsDraft
     ? false
     : chatUiMode === 'transcript'
-      ? selectedChatDockerSnapshotBusy || visiblePendingPromptsWithStartup.some(pendingPromptShowsWorkingState)
-      : (showRespondingAsStatusInHeader || canStopResponse);
+      ? selectedChatDockerSnapshotBusy ||
+        visiblePendingPromptsWithStartup.some(pendingPromptShowsWorkingState)
+      : showRespondingAsStatusInHeader || canStopResponse;
   const openChatErrorDetails = React.useCallback(() => {
     const message = String(chatInfoError ?? '').trim();
     if (!message) return;
@@ -981,7 +990,11 @@ export function SelectedDroneWorkspace({
   }, [chatUiMode, visiblePendingPromptsWithStartup]);
   const shouldAutoFocusInput = React.useMemo(() => {
     if (chatUiMode === 'transcript') {
-      return !loadingTranscript && (transcripts?.length ?? 0) === 0 && visiblePendingPromptsWithStartup.length === 0;
+      return (
+        !loadingTranscript &&
+        (transcripts?.length ?? 0) === 0 &&
+        visiblePendingPromptsWithStartup.length === 0
+      );
     }
     return !loadingSession && !sessionText.trim();
   }, [
@@ -992,7 +1005,8 @@ export function SelectedDroneWorkspace({
     transcripts,
     visiblePendingPromptsWithStartup.length,
   ]);
-  const [workspacePaneHeaderMode, setWorkspacePaneHeaderModeState] = React.useState<WorkspacePaneHeaderMode>(() => readWorkspacePaneHeaderMode());
+  const [workspacePaneHeaderMode, setWorkspacePaneHeaderModeState] =
+    React.useState<WorkspacePaneHeaderMode>(() => readWorkspacePaneHeaderMode());
   const [droneControlsMenuOpen, setDroneControlsMenuOpen] = React.useState(false);
   const [droneHubPermissionsOpen, setDroneHubPermissionsOpen] = React.useState(false);
   const chatMcpAccess = useChatMcpAccess(
@@ -1001,16 +1015,12 @@ export function SelectedDroneWorkspace({
     !nativeChatActive && hasChats && chatUiMode === 'transcript',
   );
   const chatMcpAccessDropId = `chat-mcp-access:${currentDrone.id}:${activeChatName}`;
-  const {
-    isOver: chatMcpAccessDropActive,
-    setNodeRef: setChatMcpAccessDropNodeRef,
-  } = useDroppable({ id: chatMcpAccessDropId });
+  const { isOver: chatMcpAccessDropActive, setNodeRef: setChatMcpAccessDropNodeRef } = useDroppable(
+    { id: chatMcpAccessDropId },
+  );
   useDndMonitor({
     onDragEnd(event) {
-      if (
-        chatMcpAccess.loading ||
-        !chatMcpAccess.available
-      ) {
+      if (chatMcpAccess.loading || !chatMcpAccess.available) {
         return;
       }
       if (String(event.over?.id ?? '') !== chatMcpAccessDropId) return;
@@ -1028,7 +1038,9 @@ export function SelectedDroneWorkspace({
   }, [requestRightPanelTab]);
   const quickOpenTabUrl = resolveDroneOpenTabUrl(currentDrone);
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
-  const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(null);
+  const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(
+    null,
+  );
   const [transcriptExportToast, setTranscriptExportToast] = React.useState<string | null>(null);
   const [exportingTranscript, setExportingTranscript] = React.useState(false);
   const transcriptExportToastTimerRef = React.useRef<number | null>(null);
@@ -1063,9 +1075,15 @@ export function SelectedDroneWorkspace({
     const count = Number(pullRequestSummary.pullRequestsData?.count ?? 0);
     return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
   }, [pullRequestSummary.pullRequestsData]);
-  const availableTranscriptItems = React.useMemo(() => (Array.isArray(transcripts) ? transcripts : []), [transcripts]);
+  const availableTranscriptItems = React.useMemo(
+    () => (Array.isArray(transcripts) ? transcripts : []),
+    [transcripts],
+  );
   const transcriptExportDisabled =
-    chatUiMode !== 'transcript' || loadingTranscript || exportingTranscript || availableTranscriptItems.length === 0;
+    chatUiMode !== 'transcript' ||
+    loadingTranscript ||
+    exportingTranscript ||
+    availableTranscriptItems.length === 0;
 
   const showTranscriptExportToast = React.useCallback((message: string) => {
     setTranscriptExportToast(message);
@@ -1087,7 +1105,13 @@ export function SelectedDroneWorkspace({
       exportedAt,
       transcripts: exportTranscripts,
     }),
-    [activeChatName, availableTranscriptItems, currentDrone.id, currentDrone.name, currentDroneLabel],
+    [
+      activeChatName,
+      availableTranscriptItems,
+      currentDrone.id,
+      currentDrone.name,
+      currentDroneLabel,
+    ],
   );
 
   const loadTranscriptForExport = React.useCallback(async (): Promise<TranscriptItem[]> => {
@@ -1108,13 +1132,20 @@ export function SelectedDroneWorkspace({
     try {
       const fullTranscript = await loadTranscriptForExport();
       const exportedAt = new Date().toISOString();
-      const markdown = formatTranscriptMarkdown(buildTranscriptExportArgs(exportedAt, fullTranscript));
+      const markdown = formatTranscriptMarkdown(
+        buildTranscriptExportArgs(exportedAt, fullTranscript),
+      );
       await copyText(markdown);
       showTranscriptExportToast('Transcript copied as Markdown.');
     } catch (error: any) {
       showTranscriptExportToast(error?.message ?? 'Unable to load the full transcript.');
     }
-  }, [buildTranscriptExportArgs, loadTranscriptForExport, showTranscriptExportToast, transcriptExportDisabled]);
+  }, [
+    buildTranscriptExportArgs,
+    loadTranscriptForExport,
+    showTranscriptExportToast,
+    transcriptExportDisabled,
+  ]);
 
   const downloadTranscriptJson = React.useCallback(async () => {
     if (transcriptExportDisabled) return;
@@ -1158,7 +1189,11 @@ export function SelectedDroneWorkspace({
   }, [openedEditorFileOpenFailureAt, openedEditorFileOpenFailureMessage]);
 
   React.useEffect(() => {
-    if (!currentDroneRepoAttached || isDroneStartingOrSeeding(currentDrone.hubPhase) || !currentDroneRepoPath.trim()) {
+    if (
+      !currentDroneRepoAttached ||
+      isDroneStartingOrSeeding(currentDrone.hubPhase) ||
+      !currentDroneRepoPath.trim()
+    ) {
       repoIdentityRef.current = null;
       return;
     }
@@ -1167,10 +1202,19 @@ export function SelectedDroneWorkspace({
       repoIdentityRef.current = null;
       return;
     }
-    const owner = String(data?.github?.owner ?? '').trim().toLowerCase();
-    const repo = String(data?.github?.repo ?? '').trim().toLowerCase();
+    const owner = String(data?.github?.owner ?? '')
+      .trim()
+      .toLowerCase();
+    const repo = String(data?.github?.repo ?? '')
+      .trim()
+      .toLowerCase();
     repoIdentityRef.current = owner && repo ? { owner, repo } : null;
-  }, [currentDrone.hubPhase, currentDroneRepoAttached, currentDroneRepoPath, pullRequestSummary.pullRequestsData]);
+  }, [
+    currentDrone.hubPhase,
+    currentDroneRepoAttached,
+    currentDroneRepoPath,
+    pullRequestSummary.pullRequestsData,
+  ]);
 
   React.useEffect(
     () => () => {
@@ -1189,7 +1233,8 @@ export function SelectedDroneWorkspace({
       if (!currentDroneRepoAttached) return false;
       if (isDroneStartingOrSeeding(currentDrone.hubPhase)) return false;
       const knownRepo = repoIdentityRef.current;
-      if (knownRepo && (knownRepo.owner !== parsed.owner || knownRepo.repo !== parsed.repo)) return false;
+      if (knownRepo && (knownRepo.owner !== parsed.owner || knownRepo.repo !== parsed.repo))
+        return false;
       requestRightPanelTab('prs');
       requestChangesPullRequest({ droneId: currentDrone.id, pullNumber: parsed.pullNumber });
       return true;
@@ -1275,6 +1320,10 @@ export function SelectedDroneWorkspace({
             droneHomePath={currentDroneHomePath}
             cancelBusy={Boolean(cancellingPendingPromptById[prompt.id])}
             cancelError={cancelPendingPromptErrorById[prompt.id] ?? null}
+            onCreateNewChatNow={onCreateQueuedNewChatNow}
+            createNewChatBusy={Boolean(promotingNewChatActionById[prompt.id])}
+            createNewChatError={promoteNewChatActionErrorById[prompt.id] ?? null}
+            autoFocusCreateNewChat={focusedNewChatActionId === prompt.id}
             autoExpandPrompt={isLatestActivity}
             initiallyExpandFileChanges={timelineIndex === latestFileChangesTimelineIndex}
           />
@@ -1351,10 +1400,15 @@ export function SelectedDroneWorkspace({
                             ? 'border-[var(--red-border)] bg-[var(--danger-panel)] text-[var(--red)] hover:border-[var(--red-border)]'
                             : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]',
                       )}
-                      title={fleetBadgeError ? `${fleetBadgeTitle} ${fleetBadgeError}` : fleetBadgeTitle}
+                      title={
+                        fleetBadgeError ? `${fleetBadgeTitle} ${fleetBadgeError}` : fleetBadgeTitle
+                      }
                       aria-label={`${fleetBadgeSummaryText}. Drop drones here to assign them.`}
                     >
-                      <span className="uppercase tracking-[0.12em]" style={{ fontFamily: 'var(--display)' }}>
+                      <span
+                        className="uppercase tracking-[0.12em]"
+                        style={{ fontFamily: 'var(--display)' }}
+                      >
                         Relationships
                       </span>
                       <span className="font-mono text-[var(--text-10)] text-inherit">
@@ -1370,7 +1424,10 @@ export function SelectedDroneWorkspace({
               {chatUiMode === 'cli' ? (
                 <>
                   {sessionError && !loadingSession && (
-                    <span className="text-[var(--text-11)] text-[var(--red)] flex items-center gap-1" title={sessionError}>
+                    <span
+                      className="text-[var(--text-11)] text-[var(--red)] flex items-center gap-1"
+                      title={sessionError}
+                    >
                       <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />
                       Error
                     </span>
@@ -1379,7 +1436,10 @@ export function SelectedDroneWorkspace({
               ) : (
                 <>
                   {transcriptError && !loadingTranscript && (
-                    <span className="text-[var(--text-11)] text-[var(--red)] flex items-center gap-1" title={transcriptError}>
+                    <span
+                      className="text-[var(--text-11)] text-[var(--red)] flex items-center gap-1"
+                      title={transcriptError}
+                    >
                       <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)]" />
                       Error
                     </span>
@@ -1419,15 +1479,20 @@ export function SelectedDroneWorkspace({
               {launchHint?.kind === 'copied' && (
                 <span
                   className="hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded text-[var(--text-10)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] font-mono"
-                  title={launchHint.launcher ? `Launched: ${launchHint.launcher}` : 'Paste the copied command into a terminal.'}
+                  title={
+                    launchHint.launcher
+                      ? `Launched: ${launchHint.launcher}`
+                      : 'Paste the copied command into a terminal.'
+                  }
                 >
-                  Command copied{launchHint.launcher ? ` • ${launchHint.launcher.split(' ')[0]}` : ''}
+                  Command copied
+                  {launchHint.launcher ? ` • ${launchHint.launcher.split(' ')[0]}` : ''}
                 </span>
               )}
             </div>
           </div>
         </div>
-      {/* Tier 2: Toolbar */}
+        {/* Tier 2: Toolbar */}
         <div
           data-drone-header-toolbar="true"
           className="absolute right-3 top-1/2 flex max-w-[calc(100%-22rem)] -translate-y-1/2 flex-wrap items-center justify-end gap-1.5"
@@ -1437,15 +1502,9 @@ export function SelectedDroneWorkspace({
               <LocalAutoUpdatesControl
                 active={localActiveForCurrentDrone}
                 activeForAnotherDroneName={
-                  localActiveForAnotherDrone
-                    ? localSession?.droneName || 'Another drone'
-                    : null
+                  localActiveForAnotherDrone ? localSession?.droneName || 'Another drone' : null
                 }
-                mode={
-                  localActiveForCurrentDrone
-                    ? localCheckout?.autoUpdates ?? 'off'
-                    : 'off'
-                }
+                mode={localActiveForCurrentDrone ? (localCheckout?.autoUpdates ?? 'off') : 'off'}
                 disabled={syncDisabled || localActionDisabled}
                 onSelect={selectLocalAutoUpdates}
               />
@@ -1469,150 +1528,163 @@ export function SelectedDroneWorkspace({
                   <HeaderDropdownPortal open={syncMenuOpen} anchorRef={syncMenuRef} width={260}>
                     <div>
                       {localActiveForCurrentDrone ? (
-                      <>
-                        <div className="px-3 py-2 text-[var(--text-10)] text-[var(--muted)]">
-                          <div className="text-[var(--fg-secondary)]">Using this drone locally</div>
-                          <div className="mt-0.5">
-                            {localSession?.snapshotKind === 'working-tree'
-                              ? `${localSession.sourceDirtyFileCount} uncommitted ${
-                                  localSession.sourceDirtyFileCount === 1 ? 'file' : 'files'
-                                } included`
-                              : 'Committed changes'}
-                          </div>
-                        </div>
-                        <div className={contextMenuSeparatorClass} />
-                        <button
-                          type="button"
-                          disabled={localActionDisabled}
-                          onClick={() => {
-                            setSyncMenuOpen(false);
-                            void updateRepoLocally();
-                          }}
-                          className={cn(
-                            dropdownMenuItemBaseClass,
-                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
-                          )}
-                          role="menuitem"
-                          title="Refresh the host working tree from this drone"
-                        >
-                          <HeaderMenuItemIcon><IconRefresh className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
-                          <span>Update</span>
-                        </button>
-                        <button
-                          type="button"
-                          disabled={localActionDisabled}
-                          onClick={() => {
-                            setSyncMenuOpen(false);
-                            void applyRepoLocalCheckout();
-                          }}
-                          className={cn(
-                            dropdownMenuItemBaseClass,
-                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
-                          )}
-                          role="menuitem"
-                          title="Apply this exact version through the normal host merge flow"
-                        >
-                          <HeaderMenuItemIcon><IconFileDiff className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
-                          <span>Apply</span>
-                        </button>
-                        <button
-                          type="button"
-                          disabled={localActionDisabled}
-                          onClick={() => {
-                            setSyncMenuOpen(false);
-                            void returnRepoLocalCheckout();
-                          }}
-                          className={cn(
-                            dropdownMenuItemBaseClass,
-                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
-                          )}
-                          role="menuitem"
-                          title="Return to the branch that was checked out before using this drone locally"
-                        >
-                          <HeaderMenuItemIcon><IconChevronLeft className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
-                          <span>Return</span>
-                        </button>
-                        <div className={contextMenuSeparatorClass} />
-                        <div className="px-3 pb-1 pt-2 text-[var(--text-10)] uppercase tracking-wide text-[var(--muted)]">
-                          Auto-updates
-                        </div>
-                        {LOCAL_AUTO_UPDATE_OPTIONS.map(({ mode, label }) => (
-                          <HeaderMenuRadioRow
-                            key={mode}
-                            label={label}
-                            checked={(localCheckout?.autoUpdates ?? 'off') === mode}
-                            disabled={localActionDisabled}
-                            onSelect={() => {
-                              setSyncMenuOpen(false);
-                              selectLocalAutoUpdates(mode);
-                            }}
-                          />
-                        ))}
-                      </>
-                    ) : (
-                      <>
-                        {localActiveForAnotherDrone ? (
+                        <>
                           <div className="px-3 py-2 text-[var(--text-10)] text-[var(--muted)]">
-                            Switches local use from {localSession?.droneName || 'the other drone'}.
+                            <div className="text-[var(--fg-secondary)]">
+                              Using this drone locally
+                            </div>
+                            <div className="mt-0.5">
+                              {localSession?.snapshotKind === 'working-tree'
+                                ? `${localSession.sourceDirtyFileCount} uncommitted ${
+                                    localSession.sourceDirtyFileCount === 1 ? 'file' : 'files'
+                                  } included`
+                                : 'Committed changes'}
+                            </div>
                           </div>
-                        ) : null}
-                        <button
-                          type="button"
-                          disabled={localActionDisabled}
-                          onClick={() => {
-                            setSyncMenuOpen(false);
-                            void useRepoLocally();
-                          }}
-                          className={cn(
-                            dropdownMenuItemBaseClass,
-                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
-                          )}
-                          role="menuitem"
-                          title={
-                            localCheckout?.autoUpdates === 'all'
-                              ? "Use this drone's committed and uncommitted code in the current host working tree"
-                              : "Use this drone's committed code in the current host working tree"
-                          }
-                        >
-                          <HeaderMenuItemIcon><IconMonitor className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
-                          <span>Use locally</span>
-                        </button>
-                        <div className={contextMenuSeparatorClass} />
-                        <button
-                          type="button"
-                          disabled={localCheckoutBusy}
-                          onClick={() => {
-                            setSyncMenuOpen(false);
-                            void pullRepoChanges();
-                          }}
-                          className={cn(
-                            dropdownMenuItemBaseClass,
-                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
-                          )}
-                          role="menuitem"
-                          title="Apply this drone repo into the host repo"
-                        >
-                          <HeaderMenuItemIcon><IconFileDiff className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
-                          <span>Apply to host</span>
-                        </button>
-                        <button
-                          type="button"
-                          disabled={localCheckoutBusy}
-                          onClick={() => {
-                            setSyncMenuOpen(false);
-                            void pushRepoChanges();
-                          }}
-                          className={cn(
-                            dropdownMenuItemBaseClass,
-                            'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
-                          )}
-                          role="menuitem"
-                          title="Pull the current host branch into this drone repo"
-                        >
-                          <HeaderMenuItemIcon><IconGitPullRequest className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
-                          <span>Pull from host</span>
-                        </button>
-                      </>
+                          <div className={contextMenuSeparatorClass} />
+                          <button
+                            type="button"
+                            disabled={localActionDisabled}
+                            onClick={() => {
+                              setSyncMenuOpen(false);
+                              void updateRepoLocally();
+                            }}
+                            className={cn(
+                              dropdownMenuItemBaseClass,
+                              'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                            )}
+                            role="menuitem"
+                            title="Refresh the host working tree from this drone"
+                          >
+                            <HeaderMenuItemIcon><IconRefresh className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                            <span>Update</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={localActionDisabled}
+                            onClick={() => {
+                              setSyncMenuOpen(false);
+                              void applyRepoLocalCheckout();
+                            }}
+                            className={cn(
+                              dropdownMenuItemBaseClass,
+                              'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                            )}
+                            role="menuitem"
+                            title="Apply this exact version through the normal host merge flow"
+                          >
+                            <HeaderMenuItemIcon>
+                              <IconFileDiff className="h-3.5 w-3.5" />
+                            </HeaderMenuItemIcon>
+                            <span>Apply</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={localActionDisabled}
+                            onClick={() => {
+                              setSyncMenuOpen(false);
+                              void returnRepoLocalCheckout();
+                            }}
+                            className={cn(
+                              dropdownMenuItemBaseClass,
+                              'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                            )}
+                            role="menuitem"
+                            title="Return to the branch that was checked out before using this drone locally"
+                          >
+                            <HeaderMenuItemIcon>
+                              <IconChevronLeft className="h-3.5 w-3.5" />
+                            </HeaderMenuItemIcon>
+                            <span>Return</span>
+                          </button>
+                          <div className={contextMenuSeparatorClass} />
+                          <div className="px-3 pb-1 pt-2 text-[var(--text-10)] uppercase tracking-wide text-[var(--muted)]">
+                            Auto-updates
+                          </div>
+                          {LOCAL_AUTO_UPDATE_OPTIONS.map(({ mode, label }) => (
+                            <HeaderMenuRadioRow
+                              key={mode}
+                              label={label}
+                              checked={(localCheckout?.autoUpdates ?? 'off') === mode}
+                              disabled={localActionDisabled}
+                              onSelect={() => {
+                                setSyncMenuOpen(false);
+                                selectLocalAutoUpdates(mode);
+                              }}
+                            />
+                          ))}
+                        </>
+                      ) : (
+                        <>
+                          {localActiveForAnotherDrone ? (
+                            <div className="px-3 py-2 text-[var(--text-10)] text-[var(--muted)]">
+                              Switches local use from {localSession?.droneName || 'the other drone'}
+                              .
+                            </div>
+                          ) : null}
+                          <button
+                            type="button"
+                            disabled={localActionDisabled}
+                            onClick={() => {
+                              setSyncMenuOpen(false);
+                              void useRepoLocally();
+                            }}
+                            className={cn(
+                              dropdownMenuItemBaseClass,
+                              'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                            )}
+                            role="menuitem"
+                            title={
+                              localCheckout?.autoUpdates === 'all'
+                                ? "Use this drone's committed and uncommitted code in the current host working tree"
+                                : "Use this drone's committed code in the current host working tree"
+                            }
+                          >
+                            <HeaderMenuItemIcon>
+                              <IconMonitor className="h-3.5 w-3.5" />
+                            </HeaderMenuItemIcon>
+                            <span>Use locally</span>
+                          </button>
+                          <div className={contextMenuSeparatorClass} />
+                          <button
+                            type="button"
+                            disabled={localCheckoutBusy}
+                            onClick={() => {
+                              setSyncMenuOpen(false);
+                              void pullRepoChanges();
+                            }}
+                            className={cn(
+                              dropdownMenuItemBaseClass,
+                              'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                            )}
+                            role="menuitem"
+                            title="Apply this drone repo into the host repo"
+                          >
+                            <HeaderMenuItemIcon>
+                              <IconFileDiff className="h-3.5 w-3.5" />
+                            </HeaderMenuItemIcon>
+                            <span>Apply to host</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={localCheckoutBusy}
+                            onClick={() => {
+                              setSyncMenuOpen(false);
+                              void pushRepoChanges();
+                            }}
+                            className={cn(
+                              dropdownMenuItemBaseClass,
+                              'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+                            )}
+                            role="menuitem"
+                            title="Pull the current host branch into this drone repo"
+                          >
+                            <HeaderMenuItemIcon>
+                              <IconGitPullRequest className="h-3.5 w-3.5" />
+                            </HeaderMenuItemIcon>
+                            <span>Pull from host</span>
+                          </button>
+                        </>
                       )}
                     </div>
                   </HeaderDropdownPortal>
@@ -1639,7 +1711,11 @@ export function SelectedDroneWorkspace({
               <IconChevron down={!headerOverflowOpen} className="opacity-75" />
             </HeaderActionButton>
             {headerOverflowOpen && (
-              <HeaderDropdownPortal open={headerOverflowOpen} anchorRef={headerOverflowRef} width={280}>
+              <HeaderDropdownPortal
+                open={headerOverflowOpen}
+                anchorRef={headerOverflowRef}
+                width={280}
+              >
                 <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto">
                   <button
                     type="button"
@@ -1647,8 +1723,13 @@ export function SelectedDroneWorkspace({
                       setHeaderOverflowOpen(false);
                       openDroneTerminal('ssh');
                     }}
-                    disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingTerminal)}
-                    className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
+                    disabled={
+                      isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingTerminal)
+                    }
+                    className={cn(
+                      dropdownMenuItemBaseClass,
+                      'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed',
+                    )}
                     role="menuitem"
                     title={`SSH into "${currentDroneLabel}"`}
                   >
@@ -1662,11 +1743,20 @@ export function SelectedDroneWorkspace({
                       openDroneTabFromLastPreview(currentDrone);
                     }}
                     disabled={quickOpenTabDisabled}
-                    className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
+                    className={cn(
+                      dropdownMenuItemBaseClass,
+                      'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed',
+                    )}
                     role="menuitem"
-                    title={quickOpenTabUrl ? `Open ${quickOpenTabUrl} in a new browser tab` : 'No preview port selected yet'}
+                    title={
+                      quickOpenTabUrl
+                        ? `Open ${quickOpenTabUrl} in a new browser tab`
+                        : 'No preview port selected yet'
+                    }
                   >
-                    <HeaderMenuItemIcon><IconMonitor className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <HeaderMenuItemIcon>
+                      <IconMonitor className="h-3.5 w-3.5" />
+                    </HeaderMenuItemIcon>
                     <span>Open default tab</span>
                   </button>
                   <div className={contextMenuSeparatorClass} />
@@ -1677,9 +1767,16 @@ export function SelectedDroneWorkspace({
                       copyTranscriptMarkdown();
                     }}
                     disabled={transcriptExportDisabled}
-                    className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
+                    className={cn(
+                      dropdownMenuItemBaseClass,
+                      'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed',
+                    )}
                     role="menuitem"
-                    title={transcriptExportDisabled ? 'No completed transcript turns are available yet.' : 'Copy the current chat transcript as Markdown'}
+                    title={
+                      transcriptExportDisabled
+                        ? 'No completed transcript turns are available yet.'
+                        : 'Copy the current chat transcript as Markdown'
+                    }
                   >
                     <HeaderMenuItemIcon><IconCopy className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
                     <span>Copy transcript</span>
@@ -1691,11 +1788,20 @@ export function SelectedDroneWorkspace({
                       downloadTranscriptJson();
                     }}
                     disabled={transcriptExportDisabled}
-                    className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
+                    className={cn(
+                      dropdownMenuItemBaseClass,
+                      'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed',
+                    )}
                     role="menuitem"
-                    title={transcriptExportDisabled ? 'No completed transcript turns are available yet.' : 'Download the current chat transcript as JSON'}
+                    title={
+                      transcriptExportDisabled
+                        ? 'No completed transcript turns are available yet.'
+                        : 'Download the current chat transcript as JSON'
+                    }
                   >
-                    <HeaderMenuItemIcon><IconDownload className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <HeaderMenuItemIcon>
+                      <IconDownload className="h-3.5 w-3.5" />
+                    </HeaderMenuItemIcon>
                     <span>Download transcript</span>
                   </button>
                   <div className={contextMenuSeparatorClass} />
@@ -1705,11 +1811,18 @@ export function SelectedDroneWorkspace({
                       setHeaderOverflowOpen(false);
                       openDroneTerminal('agent');
                     }}
-                    disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingTerminal)}
-                    className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
+                    disabled={
+                      isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingTerminal)
+                    }
+                    className={cn(
+                      dropdownMenuItemBaseClass,
+                      'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed',
+                    )}
                     role="menuitem"
                   >
-                    <HeaderMenuItemIcon><IconChat className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <HeaderMenuItemIcon>
+                      <IconChat className="h-3.5 w-3.5" />
+                    </HeaderMenuItemIcon>
                     <span>SSH + Agent session</span>
                   </button>
                   <button
@@ -1718,8 +1831,15 @@ export function SelectedDroneWorkspace({
                       setHeaderOverflowOpen(false);
                       openDroneEditor('code');
                     }}
-                    disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal)}
-                    className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
+                    disabled={
+                      isDroneStartingOrSeeding(currentDrone.hubPhase) ||
+                      Boolean(openingEditor) ||
+                      Boolean(openingTerminal)
+                    }
+                    className={cn(
+                      dropdownMenuItemBaseClass,
+                      'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed',
+                    )}
                     role="menuitem"
                   >
                     <HeaderMenuItemIcon><IconVsCode className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
@@ -1731,11 +1851,20 @@ export function SelectedDroneWorkspace({
                       setHeaderOverflowOpen(false);
                       openDroneEditor('cursor');
                     }}
-                    disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal)}
-                    className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
+                    disabled={
+                      isDroneStartingOrSeeding(currentDrone.hubPhase) ||
+                      Boolean(openingEditor) ||
+                      Boolean(openingTerminal)
+                    }
+                    className={cn(
+                      dropdownMenuItemBaseClass,
+                      'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed',
+                    )}
                     role="menuitem"
                   >
-                    <HeaderMenuItemIcon><IconCursorApp className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                    <HeaderMenuItemIcon>
+                      <IconCursorApp className="h-3.5 w-3.5" />
+                    </HeaderMenuItemIcon>
                     <span>Open Cursor</span>
                   </button>
                   {currentDroneRepoAttached && (
@@ -1747,32 +1876,57 @@ export function SelectedDroneWorkspace({
                           setHeaderOverflowOpen(false);
                           void reseedRepo();
                         }}
-                        disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp)}
-                        className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
+                        disabled={
+                          isDroneStartingOrSeeding(currentDrone.hubPhase) ||
+                          Boolean(openingEditor) ||
+                          Boolean(openingTerminal) ||
+                          Boolean(repoOp)
+                        }
+                        className={cn(
+                          dropdownMenuItemBaseClass,
+                          'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed',
+                        )}
                         role="menuitem"
-                        title={hostRuntime ? 'Host runtime uses the host repository directly; this action is a no-op.' : undefined}
+                        title={
+                          hostRuntime
+                            ? 'Host runtime uses the host repository directly; this action is a no-op.'
+                            : undefined
+                        }
                       >
-                        <HeaderMenuItemIcon><IconRefresh className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                        <HeaderMenuItemIcon>
+                          <IconRefresh className="h-3.5 w-3.5" />
+                        </HeaderMenuItemIcon>
                         <span>{hostRuntime ? 'Reseed repo (noop)' : 'Reseed repo'}</span>
                       </button>
                     </>
                   )}
                   <div className={contextMenuSeparatorClass} />
-                  <div ref={terminalMenuRef as React.RefObject<HTMLDivElement>} className="relative">
+                  <div
+                    ref={terminalMenuRef as React.RefObject<HTMLDivElement>}
+                    className="relative"
+                  >
                     <button
                       type="button"
                       onClick={() => {
                         setDroneControlsMenuOpen(false);
                         setTerminalMenuOpen((v) => !v);
                       }}
-                      className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] flex items-center justify-between')}
+                      className={cn(
+                        dropdownMenuItemBaseClass,
+                        'text-[var(--fg-secondary)] hover:bg-[var(--hover)] flex items-center justify-between',
+                      )}
                       role="menuitem"
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        <HeaderMenuItemIcon><IconTerminal className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                        <HeaderMenuItemIcon>
+                          <IconTerminal className="h-3.5 w-3.5" />
+                        </HeaderMenuItemIcon>
                         <span className="truncate">Terminal: {terminalLabel}</span>
                       </span>
-                      <IconChevron down={!terminalMenuOpen} className="text-[var(--muted-dim)] opacity-60" />
+                      <IconChevron
+                        down={!terminalMenuOpen}
+                        className="text-[var(--muted-dim)] opacity-60"
+                      />
                     </button>
                     {terminalMenuOpen && (
                       <div className="border-t border-[var(--border-subtle)]">
@@ -1788,7 +1942,9 @@ export function SelectedDroneWorkspace({
                                 setHeaderOverflowOpen(false);
                               }}
                               className={`w-full text-left pl-6 pr-3 py-1.5 text-[var(--text-11)] transition-colors ${
-                                active ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-[var(--weight-semibold)]' : 'text-[var(--muted)] hover:bg-[var(--hover)]'
+                                active
+                                  ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-[var(--weight-semibold)]'
+                                  : 'text-[var(--muted)] hover:bg-[var(--hover)]'
                               }`}
                               role="menuitem"
                             >
@@ -1807,19 +1963,31 @@ export function SelectedDroneWorkspace({
                         setTerminalMenuOpen(false);
                         setDroneControlsMenuOpen((open) => !open);
                       }}
-                      className={cn(dropdownMenuItemBaseClass, 'flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]')}
+                      className={cn(
+                        dropdownMenuItemBaseClass,
+                        'flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]',
+                      )}
                       role="menuitem"
                       aria-haspopup="menu"
                       aria-expanded={droneControlsMenuOpen}
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        <HeaderMenuItemIcon><IconTune className="h-3.5 w-3.5" /></HeaderMenuItemIcon>
+                        <HeaderMenuItemIcon>
+                          <IconTune className="h-3.5 w-3.5" />
+                        </HeaderMenuItemIcon>
                         <span>Drone controls</span>
                       </span>
-                      <IconChevron down={!droneControlsMenuOpen} className="text-[var(--muted-dim)] opacity-60" />
+                      <IconChevron
+                        down={!droneControlsMenuOpen}
+                        className="text-[var(--muted-dim)] opacity-60"
+                      />
                     </button>
                     {droneControlsMenuOpen ? (
-                      <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-inset-faint)]" role="group" aria-label="Drone controls">
+                      <div
+                        className="border-t border-[var(--border-subtle)] bg-[var(--surface-inset-faint)]"
+                        role="group"
+                        aria-label="Drone controls"
+                      >
                         {hasChats && chatUiMode === 'transcript' ? (
                           <>
                             {readOnlySupported ? (
@@ -1877,9 +2045,14 @@ export function SelectedDroneWorkspace({
                           </>
                         ) : null}
                         {!hostRuntime ? (
-                          <div className="flex items-center justify-between gap-4 px-3 py-1.5 text-[var(--text-11)] text-[var(--muted)]" title={dockerSizeTitle}>
+                          <div
+                            className="flex items-center justify-between gap-4 px-3 py-1.5 text-[var(--text-11)] text-[var(--muted)]"
+                            title={dockerSizeTitle}
+                          >
                             <span>Docker usage</span>
-                            <span className="truncate text-right font-mono text-[var(--muted-dim)]">{dockerSizeLabel.replace(/^Docker used\s*/i, '')}</span>
+                            <span className="truncate text-right font-mono text-[var(--muted-dim)]">
+                              {dockerSizeLabel.replace(/^Docker used\s*/i, '')}
+                            </span>
                           </div>
                         ) : null}
                         {hasChats && chatUiMode === 'transcript' ? (
@@ -1896,7 +2069,9 @@ export function SelectedDroneWorkspace({
                               }
                               onToggle={() => {
                                 if (!dockerSnapshotSupported) return;
-                                void setDockerSnapshotAfterAgentMessageEnabled(!dockerSnapshotAfterAgentMessageEnabled).catch((err: any) =>
+                                void setDockerSnapshotAfterAgentMessageEnabled(
+                                  !dockerSnapshotAfterAgentMessageEnabled,
+                                ).catch((err: any) =>
                                   setChatInfoError(err?.message ?? String(err)),
                                 );
                               }}
@@ -1908,22 +2083,37 @@ export function SelectedDroneWorkspace({
                             label="Output view"
                             value={outputView === 'screen' ? 'Screen' : 'Log'}
                             checked={outputView === 'screen'}
-                            title={outputView === 'screen' ? 'Switch to raw log view.' : 'Switch to screen capture view.'}
-                            onToggle={() => setOutputView(outputView === 'screen' ? 'log' : 'screen')}
+                            title={
+                              outputView === 'screen'
+                                ? 'Switch to raw log view.'
+                                : 'Switch to screen capture view.'
+                            }
+                            onToggle={() =>
+                              setOutputView(outputView === 'screen' ? 'log' : 'screen')
+                            }
                           />
                         ) : null}
                         <div className="flex items-center justify-between gap-4 px-3 py-1.5 text-[var(--text-11)]">
                           <span className="text-[var(--muted)]">Chat</span>
                           <span className="min-w-0 truncate font-mono text-[var(--fg-secondary)]">
-                            {activeChatName}{selectedChatIsDraft ? ' · Draft' : ''}
+                            {activeChatName}
+                            {selectedChatIsDraft ? ' · Draft' : ''}
                           </span>
                         </div>
                         <HeaderMenuToggleRow
                           label="Pane headers"
                           value={workspacePaneHeaderMode === 'compact' ? 'Compact' : 'Normal'}
                           checked={workspacePaneHeaderMode === 'compact'}
-                          title={workspacePaneHeaderMode === 'compact' ? 'Use normal pane headers.' : 'Use compact pane headers.'}
-                          onToggle={() => setWorkspacePaneHeaderMode(workspacePaneHeaderMode === 'compact' ? 'normal' : 'compact')}
+                          title={
+                            workspacePaneHeaderMode === 'compact'
+                              ? 'Use normal pane headers.'
+                              : 'Use compact pane headers.'
+                          }
+                          onToggle={() =>
+                            setWorkspacePaneHeaderMode(
+                              workspacePaneHeaderMode === 'compact' ? 'normal' : 'compact',
+                            )
+                          }
                         />
                       </div>
                     ) : null}
@@ -1952,7 +2142,11 @@ export function SelectedDroneWorkspace({
               <IconChevron down={!workspaceToolsMenuOpen} className="opacity-75" />
             </HeaderActionButton>
             {workspaceToolsMenuOpen ? (
-              <HeaderDropdownPortal open={workspaceToolsMenuOpen} anchorRef={workspaceToolsMenuRef} width={220}>
+              <HeaderDropdownPortal
+                open={workspaceToolsMenuOpen}
+                anchorRef={workspaceToolsMenuRef}
+                width={220}
+              >
                 <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto">
                   {rightPanelHeaderTabs(rightPanelTabs).map((tab) => {
                     const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
@@ -1966,7 +2160,9 @@ export function SelectedDroneWorkspace({
                         className={cn(
                           dropdownMenuItemBaseClass,
                           'flex items-center justify-between gap-3 hover:bg-[var(--hover)]',
-                          active ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--fg-secondary)]',
+                          active
+                            ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+                            : 'text-[var(--fg-secondary)]',
                         )}
                         role="menuitem"
                         aria-current={active ? 'true' : undefined}
@@ -2017,249 +2213,268 @@ export function SelectedDroneWorkspace({
         onBeforeWorkspaceMouseDown={captureWorkspaceChatScroll}
         onAfterToolPanelRemove={restoreWorkspaceChatScroll}
         chatContent={
-        <div
-          ref={setFleetDropNodeRef}
-          data-fleet-assignment-drop-zone="1"
-          data-fleet-assignment-drone-id={currentDrone.id}
-          data-fleet-assignment-owner-id={currentDrone.id}
-          onDragOver={onFleetDropDragOver}
-          onDragLeave={onFleetDropDragLeave}
-          onDrop={onFleetDropDrop}
-          className={cn(
-            'flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden relative',
-            fleetBadgeDropActive && 'ring-1 ring-inset ring-[var(--accent-muted)]',
-          )}
-        >
-          {fleetDropHintVisible && (
-            <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center px-6 py-6">
-              <div
-                className={cn(
-                  'flex w-full max-w-[560px] items-center justify-center rounded-[var(--radius-xlarge)] border border-dashed px-6 py-8 text-center shadow-[0_24px_60px_var(--shadow-color)] backdrop-blur-sm transition-all',
-                  fleetBadgeDropActive
-                    ? 'border-[var(--accent)] bg-[var(--panel-overlay)] text-[var(--fg-secondary)] shadow-[inset_0_0_0_1px_var(--canvas-related-subtle),0_24px_60px_var(--shadow-color)]'
-                    : 'border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--info-subtle),0_24px_60px_var(--shadow-color)]',
-                )}
-              >
-                <div className="max-w-[420px]">
-                  <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.14em]" style={{ fontFamily: 'var(--display)' }}>
-                    Drone Drop Actions
-                  </div>
-                  <div className="mt-2 text-[var(--text-13)] leading-5">
-                    {fleetDropHintText}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          <ChatSurface
-            adapter={nativeChatActive ? NATIVE_AGENT_CHAT_SURFACE : EXTERNAL_AGENT_CHAT_SURFACE}
-            ariaHidden={fleetDropHintVisible}
+          <div
+            ref={setFleetDropNodeRef}
+            data-fleet-assignment-drop-zone="1"
+            data-fleet-assignment-drone-id={currentDrone.id}
+            data-fleet-assignment-owner-id={currentDrone.id}
+            onDragOver={onFleetDropDragOver}
+            onDragLeave={onFleetDropDragLeave}
+            onDrop={onFleetDropDrop}
             className={cn(
-              'flex-1 flex min-h-0 flex-col transition-opacity duration-150',
-              fleetDropHintVisible && 'pointer-events-none select-none opacity-0',
+              'flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden relative',
+              fleetBadgeDropActive && 'ring-1 ring-inset ring-[var(--accent-muted)]',
             )}
           >
-          {droneHubPermissionsOpen && !nativeChatActive ? (
-            <div className="absolute inset-0 z-30 overflow-y-auto">
-              <DroneHubPermissionsView
-                chatLabel={`${currentDroneLabel} · ${activeChatName}`}
-                available={chatMcpAccess.available}
-                loading={chatMcpAccess.loading}
-                saving={chatMcpAccess.saving}
-                error={chatMcpAccess.error}
-                unavailableMessage={
-                  chatUiMode === 'cli'
-                    ? 'Terminal chats do not receive a DroneHub MCP credential. Use a managed agent chat to configure DroneHub access.'
-                    : 'The DroneHub MCP server is not enabled for this chat.'
-                }
-                readMode={chatMcpAccess.accessScope.readMode}
-                writeMode={chatMcpAccess.accessScope.writeMode}
-                executeMode={chatMcpAccess.accessScope.executeMode}
-                selectedDrones={chatMcpAccess.accessScope.droneIds.map((droneId) => ({
-                  id: droneId,
-                  label: droneId === currentDrone.id ? currentDroneLabel : droneId,
-                  removable: droneId !== currentDrone.id,
-                }))}
-                dropActive={chatMcpAccessDropActive}
-                dropTargetRef={setChatMcpAccessDropNodeRef}
-                onModeChange={(kind, mode) => void chatMcpAccess.setMode(kind, mode)}
-                onRemoveDrone={(droneId) =>
-                  void chatMcpAccess.removeSelectedDrone(droneId)
-                }
-                onBack={() => setDroneHubPermissionsOpen(false)}
-              />
-            </div>
-          ) : null}
-          <div className="relative flex min-h-0 flex-1 flex-col">
-            {chatConfigPending ? (
-              <ChatSurfaceLoadingView
-                resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}:loading`}
-                droneName={currentDrone.name}
-                draftValue={chatDraftValue}
-                onDraftValueChange={(next) => {
-                  setChatInputDraft(chatDraftKey, next);
-                }}
-                focusTargetId="primary-chat"
-              />
-            ) : chatConfigFailed ? (
-              <EmptyState
-                icon={<IconChat className="h-8 w-8 text-[var(--muted)]" />}
-                title="Chat unavailable"
-                description={chatInfoError || 'Unable to load this chat.'}
-              />
-            ) : nativeChatActive ? (
-              <AssistantDock
-                key={`${currentDrone.id}:${activeChatName}`}
-                nativeChat={{ droneId: currentDrone.id, chatName: activeChatName }}
-                startupPrompt={
-                  startupSeedForCurrentDrone?.agent?.kind === 'native' &&
-                  String(startupSeedForCurrentDrone.prompt ?? '').trim()
-                    ? {
-                        prompt: String(startupSeedForCurrentDrone.prompt).trim(),
-                        at: startupSeedForCurrentDrone.at,
-                      }
-                    : null
-                }
-                onStartupPromptReconciled={() => clearStartupSeedForDrone(currentDrone.id)}
-                onSendPromptInNewChat={onSendPromptInNewChat}
-                messageFeatures={{
-                  onSpawnTask: spawnCurrentDroneHubTask,
-                  linkedPullRequestContext,
-                  droneId: currentDrone.id,
-                  droneHomePath: currentDroneHomePath,
-                  onOpenFileReference: onOpenMarkdownFileReference,
-                  onOpenLink: tryOpenMarkdownPullRequest,
-                }}
-              />
-            ) : chatUiMode === 'transcript' ? (
-              <AgentChatTranscript
-                scrollRef={bindTranscriptScrollRef}
-                contentRef={bindTranscriptContentRef}
-                loading={loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0}
-                hasContent={Boolean((transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0)}
-                emptyState={
+            {fleetDropHintVisible && (
+              <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center px-6 py-6">
+                <div
+                  className={cn(
+                    'flex w-full max-w-[560px] items-center justify-center rounded-[var(--radius-xlarge)] border border-dashed px-6 py-8 text-center shadow-[0_24px_60px_var(--shadow-color)] backdrop-blur-sm transition-all',
+                    fleetBadgeDropActive
+                      ? 'border-[var(--accent)] bg-[var(--panel-overlay)] text-[var(--fg-secondary)] shadow-[inset_0_0_0_1px_var(--canvas-related-subtle),0_24px_60px_var(--shadow-color)]'
+                      : 'border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--info-subtle),0_24px_60px_var(--shadow-color)]',
+                  )}
+                >
+                  <div className="max-w-[420px]">
+                    <div
+                      className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.14em]"
+                      style={{ fontFamily: 'var(--display)' }}
+                    >
+                      Drone Drop Actions
+                    </div>
+                    <div className="mt-2 text-[var(--text-13)] leading-5">{fleetDropHintText}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <ChatSurface
+              adapter={nativeChatActive ? NATIVE_AGENT_CHAT_SURFACE : EXTERNAL_AGENT_CHAT_SURFACE}
+              ariaHidden={fleetDropHintVisible}
+              className={cn(
+                'flex-1 flex min-h-0 flex-col transition-opacity duration-150',
+                fleetDropHintVisible && 'pointer-events-none select-none opacity-0',
+              )}
+            >
+              {droneHubPermissionsOpen && !nativeChatActive ? (
+                <div className="absolute inset-0 z-30 overflow-y-auto">
+                  <DroneHubPermissionsView
+                    chatLabel={`${currentDroneLabel} · ${activeChatName}`}
+                    available={chatMcpAccess.available}
+                    loading={chatMcpAccess.loading}
+                    saving={chatMcpAccess.saving}
+                    error={chatMcpAccess.error}
+                    unavailableMessage={
+                      chatUiMode === 'cli'
+                        ? 'Terminal chats do not receive a DroneHub MCP credential. Use a managed agent chat to configure DroneHub access.'
+                        : 'The DroneHub MCP server is not enabled for this chat.'
+                    }
+                    readMode={chatMcpAccess.accessScope.readMode}
+                    writeMode={chatMcpAccess.accessScope.writeMode}
+                    executeMode={chatMcpAccess.accessScope.executeMode}
+                    selectedDrones={chatMcpAccess.accessScope.droneIds.map((droneId) => ({
+                      id: droneId,
+                      label: droneId === currentDrone.id ? currentDroneLabel : droneId,
+                      removable: droneId !== currentDrone.id,
+                    }))}
+                    dropActive={chatMcpAccessDropActive}
+                    dropTargetRef={setChatMcpAccessDropNodeRef}
+                    onModeChange={(kind, mode) => void chatMcpAccess.setMode(kind, mode)}
+                    onRemoveDrone={(droneId) => void chatMcpAccess.removeSelectedDrone(droneId)}
+                    onBack={() => setDroneHubPermissionsOpen(false)}
+                  />
+                </div>
+              ) : null}
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                {chatConfigPending ? (
+                  <ChatSurfaceLoadingView
+                    resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}:loading`}
+                    droneName={currentDrone.name}
+                    draftValue={chatDraftValue}
+                    onDraftValueChange={(next) => {
+                      setChatInputDraft(chatDraftKey, next);
+                    }}
+                    focusTargetId="primary-chat"
+                  />
+                ) : chatConfigFailed ? (
                   <EmptyState
                     icon={<IconChat className="h-8 w-8 text-[var(--muted)]" />}
-                    title="No messages yet"
-                    description={
-                      transcriptError
-                        ? `Error: ${transcriptError}`
-                        : hasChats
-                          ? `Send a prompt to ${currentDroneLabel} to see the conversation here.`
-                          : `${currentDroneLabel} has no chats yet. Send the first prompt or click New to create one.`
-                    }
+                    title="Chat unavailable"
+                    description={chatInfoError || 'Unable to load this chat.'}
                   />
-                }
-                items={externalTranscriptItems}
-              />
-            ) : (
-              <div
-                ref={outputScrollRef as React.RefObject<HTMLDivElement>}
-                onScroll={(e) => updatePinned(e.currentTarget)}
-                className="h-full min-w-0 min-h-0 overflow-auto relative"
-              >
-                {isDroneStartingOrSeeding(currentDrone.hubPhase) && String(startupSeedForCurrentDrone?.prompt ?? '').trim() && (
-                  <div className="max-w-[1170px] mx-auto px-6 pt-2">
-                    <div className="rounded-[var(--radius-medium)] border border-[var(--user-bubble-border)] bg-[var(--user-bubble)] px-3 py-2 text-[var(--text-12)] text-[var(--user-bubble-fg)] whitespace-pre-wrap">
-                      {String(startupSeedForCurrentDrone?.prompt ?? '').trim()}
-                    </div>
-                  </div>
-                )}
-                {loadingSession && !sessionText ? (
-                  <ChatLoadingState message="Loading session output…" />
-                ) : sessionText ? (
-                  <div className="max-w-[1170px] mx-auto px-6 py-6">
-                    <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] px-4 py-3">
-                      <CollapsibleOutput text={sessionText} ok={!sessionError} />
-                    </div>
-                  </div>
+                ) : nativeChatActive ? (
+                  <AssistantDock
+                    key={`${currentDrone.id}:${activeChatName}`}
+                    nativeChat={{ droneId: currentDrone.id, chatName: activeChatName }}
+                    startupPrompt={
+                      startupSeedForCurrentDrone?.agent?.kind === 'native' &&
+                      String(startupSeedForCurrentDrone.prompt ?? '').trim()
+                        ? {
+                            prompt: String(startupSeedForCurrentDrone.prompt).trim(),
+                            at: startupSeedForCurrentDrone.at,
+                          }
+                        : null
+                    }
+                    onStartupPromptReconciled={() => clearStartupSeedForDrone(currentDrone.id)}
+                    onSendPromptInNewChat={onSendPromptInNewChat}
+                    onCreateQueuedNewChatNow={onCreateQueuedNewChatNow}
+                    focusedNewChatActionId={focusedNewChatActionId}
+                    promotingNewChatActionById={promotingNewChatActionById}
+                    promoteNewChatActionErrorById={promoteNewChatActionErrorById}
+                    messageFeatures={{
+                      onSpawnTask: spawnCurrentDroneHubTask,
+                      linkedPullRequestContext,
+                      droneId: currentDrone.id,
+                      droneHomePath: currentDroneHomePath,
+                      onOpenFileReference: onOpenMarkdownFileReference,
+                      onOpenLink: tryOpenMarkdownPullRequest,
+                    }}
+                  />
+                ) : chatUiMode === 'transcript' ? (
+                  <AgentChatTranscript
+                    scrollRef={bindTranscriptScrollRef}
+                    contentRef={bindTranscriptContentRef}
+                    loading={
+                      loadingTranscript &&
+                      !transcripts &&
+                      visiblePendingPromptsWithStartup.length === 0
+                    }
+                    hasContent={Boolean(
+                      (transcripts && transcripts.length > 0) ||
+                      visiblePendingPromptsWithStartup.length > 0,
+                    )}
+                    emptyState={
+                      <EmptyState
+                        icon={<IconChat className="h-8 w-8 text-[var(--muted)]" />}
+                        title="No messages yet"
+                        description={
+                          transcriptError
+                            ? `Error: ${transcriptError}`
+                            : hasChats
+                              ? `Send a prompt to ${currentDroneLabel} to see the conversation here.`
+                              : `${currentDroneLabel} has no chats yet. Send the first prompt or click New to create one.`
+                        }
+                      />
+                    }
+                    items={externalTranscriptItems}
+                  />
                 ) : (
-                  <EmptyState
-                    icon={<IconChat className="w-8 h-8 text-[var(--muted)]" />}
-                    title="No output yet"
-                    description={
-                      sessionError
-                        ? `Error: ${sessionError}`
-                        : hasChats
-                          ? `Send a prompt to ${currentDroneLabel} to see the session output here.`
-                          : `${currentDroneLabel} has no chats yet. Send the first prompt or click New to create one.`
-                    }
-                  />
-                )}
+                  <div
+                    ref={outputScrollRef as React.RefObject<HTMLDivElement>}
+                    onScroll={(e) => updatePinned(e.currentTarget)}
+                    className="h-full min-w-0 min-h-0 overflow-auto relative"
+                  >
+                    {isDroneStartingOrSeeding(currentDrone.hubPhase) &&
+                      String(startupSeedForCurrentDrone?.prompt ?? '').trim() && (
+                        <div className="max-w-[1170px] mx-auto px-6 pt-2">
+                          <div className="rounded-[var(--radius-medium)] border border-[var(--user-bubble-border)] bg-[var(--user-bubble)] px-3 py-2 text-[var(--text-12)] text-[var(--user-bubble-fg)] whitespace-pre-wrap">
+                            {String(startupSeedForCurrentDrone?.prompt ?? '').trim()}
+                          </div>
+                        </div>
+                      )}
+                    {loadingSession && !sessionText ? (
+                      <ChatLoadingState message="Loading session output…" />
+                    ) : sessionText ? (
+                      <div className="max-w-[1170px] mx-auto px-6 py-6">
+                        <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] px-4 py-3">
+                          <CollapsibleOutput text={sessionText} ok={!sessionError} />
+                        </div>
+                      </div>
+                    ) : (
+                      <EmptyState
+                        icon={<IconChat className="w-8 h-8 text-[var(--muted)]" />}
+                        title="No output yet"
+                        description={
+                          sessionError
+                            ? `Error: ${sessionError}`
+                            : hasChats
+                              ? `Send a prompt to ${currentDroneLabel} to see the session output here.`
+                              : `${currentDroneLabel} has no chats yet. Send the first prompt or click New to create one.`
+                        }
+                      />
+                    )}
 
-                {!pinnedToBottom && sessionText && (
-                  <div className="pointer-events-none sticky bottom-4 flex justify-center px-6">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const el = outputScrollRef.current;
-                        if (!el) return;
-                        el.scrollTop = el.scrollHeight;
-                        updatePinned(el);
-                      }}
-                      className="pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--accent-muted)] bg-[var(--panel-raised)] text-[var(--accent)] hover:shadow-[var(--glow-accent)] shadow-[0_8px_24px_var(--shadow-color)] transition-all"
-                      style={{ fontFamily: 'var(--display)' }}
-                      title="Scroll to bottom"
-                    >
-                      New output ↓
-                    </button>
+                    {!pinnedToBottom && sessionText && (
+                      <div className="pointer-events-none sticky bottom-4 flex justify-center px-6">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const el = outputScrollRef.current;
+                            if (!el) return;
+                            el.scrollTop = el.scrollHeight;
+                            updatePinned(el);
+                          }}
+                          className="pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--accent-muted)] bg-[var(--panel-raised)] text-[var(--accent)] hover:shadow-[var(--glow-accent)] shadow-[0_8px_24px_var(--shadow-color)] transition-all"
+                          style={{ fontFamily: 'var(--display)' }}
+                          title="Scroll to bottom"
+                        >
+                          New output ↓
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-          </div>
 
-          {genericChatActive && chatUiMode === 'cli' ? <CliPendingPromptStrip items={visibleCliPendingPrompts} /> : null}
+              {genericChatActive && chatUiMode === 'cli' ? (
+                <CliPendingPromptStrip items={visibleCliPendingPrompts} />
+              ) : null}
 
-          {genericChatActive ? (
-            <ChatSurfaceComposer
-              resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
-              droneName={currentDrone.name}
-              focusTargetId="primary-chat"
-              draftValue={chatDraftValue}
-              onDraftValueChange={(next) => {
-                setChatInputDraft(chatDraftKey, next);
-              }}
-              promptError={stopResponseError || promptError}
-              // A prompt may remain active for a long time. Queue/ASAP follow-ups
-              // must remain available while that response is running; `sendingPrompt`
-              // is also used for the initial request-flight state.
-              sending={sendingPrompt && !chatInputWaiting}
-              publishing={publishingDraft}
-              waiting={chatInputWaiting}
-              composerControls={externalComposerControls}
-              autoFocus={shouldAutoFocusInput}
-              onStop={
-                !currentChatIsDraft && canStopResponse ? () => requestStopResponse() : undefined
-              }
-              stopping={stoppingResponse}
-              onPublish={currentChatIsDraft ? publishSelectedDraft : undefined}
-              onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
-                if (chatUiMode === 'transcript') scrollTranscriptToBottom({ force: true });
-                const sent = await sendPromptText(payload, context);
-                if (sent && chatUiMode === 'transcript') scrollTranscriptToBottom({ force: true });
-                return sent;
-              }}
-              onSendInNewChat={onSendPromptInNewChat}
-            />
-          ) : null}
-          {fileOpenToast ? (
-            <div className="absolute right-4 bottom-4 z-20">
-              <button
-                type="button"
-                onClick={() => setFileOpenToast(null)}
-                title="Click to dismiss"
-                className="block max-w-[360px] text-left rounded border border-[var(--red-border)] bg-[var(--danger-panel)] px-3 py-2 shadow-[0_10px_26px_var(--shadow-color)] cursor-pointer"
-              >
-                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--red)]" style={{ fontFamily: 'var(--display)' }}>
-                  Open file failed
+              {genericChatActive ? (
+                <ChatSurfaceComposer
+                  resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
+                  droneName={currentDrone.name}
+                  focusTargetId="primary-chat"
+                  draftValue={chatDraftValue}
+                  onDraftValueChange={(next) => {
+                    setChatInputDraft(chatDraftKey, next);
+                  }}
+                  promptError={stopResponseError || promptError}
+                  // A prompt may remain active for a long time. Queue/ASAP follow-ups
+                  // must remain available while that response is running; `sendingPrompt`
+                  // is also used for the initial request-flight state.
+                  sending={sendingPrompt && !chatInputWaiting}
+                  publishing={publishingDraft}
+                  waiting={chatInputWaiting}
+                  composerControls={externalComposerControls}
+                  autoFocus={shouldAutoFocusInput}
+                  onStop={
+                    !currentChatIsDraft && canStopResponse ? () => requestStopResponse() : undefined
+                  }
+                  stopping={stoppingResponse}
+                  onPublish={currentChatIsDraft ? publishSelectedDraft : undefined}
+                  onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
+                    if (chatUiMode === 'transcript') scrollTranscriptToBottom({ force: true });
+                    const sent = await sendPromptText(payload, context);
+                    if (sent && chatUiMode === 'transcript')
+                      scrollTranscriptToBottom({ force: true });
+                    return sent;
+                  }}
+                  onSendInNewChat={onSendPromptInNewChat}
+                />
+              ) : null}
+              {fileOpenToast ? (
+                <div className="absolute right-4 bottom-4 z-20">
+                  <button
+                    type="button"
+                    onClick={() => setFileOpenToast(null)}
+                    title="Click to dismiss"
+                    className="block max-w-[360px] text-left rounded border border-[var(--red-border)] bg-[var(--danger-panel)] px-3 py-2 shadow-[0_10px_26px_var(--shadow-color)] cursor-pointer"
+                  >
+                    <div
+                      className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--red)]"
+                      style={{ fontFamily: 'var(--display)' }}
+                    >
+                      Open file failed
+                    </div>
+                    <div className="mt-1 text-[var(--text-11)] text-[var(--fg-secondary)] break-words">
+                      {fileOpenToast.message}
+                    </div>
+                  </button>
                 </div>
-                <div className="mt-1 text-[var(--text-11)] text-[var(--fg-secondary)] break-words">{fileOpenToast.message}</div>
-              </button>
-            </div>
-          ) : null}
-        </ChatSurface>
-        </div>
+              ) : null}
+            </ChatSurface>
+          </div>
         }
       />
     </>

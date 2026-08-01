@@ -32,6 +32,7 @@ import {
   mergeDesktopOptimisticPendingPrompts,
   normalizePendingPromptState,
   optimisticPendingPromptState,
+  pendingPromptCanStopResponse,
   pendingPromptShowsWorkingState,
   reconcileOptimisticPendingPrompt,
 } from './optimistic-pending-prompts';
@@ -45,7 +46,13 @@ import { createCanvasChatNodeId } from './app-config';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { beginRepoApplyProgress, useLocalChatBusy } from './use-drone-hub-runtime-store';
-import { droneChatEventMatches, fetchDroneChatState, fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
+import {
+  droneChatEventMatches,
+  fetchDroneChatState,
+  fetchDroneChatTranscriptCached,
+  sameTranscriptItems,
+  sendDroneChatPrompt,
+} from './chat-api';
 import { subscribeDroneChatEvents } from './chat-events';
 import { useChatMcpAccess } from './use-chat-mcp-access';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from './drone-hub-dnd';
@@ -72,10 +79,11 @@ export type GroupMultiChatColumnProps = {
     task: DroneHubTask;
     mode: DroneHubTaskSpawnMode;
   }) => Promise<{ ok: boolean; error?: string | null }>;
-  onSendPromptInNewChat: (
-    payload: ChatSendPayload,
-    context: ChatSendContext,
-  ) => Promise<boolean>;
+  onSendPromptInNewChat: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
+  onCreateQueuedNewChatNow: (actionId: string, sourceChatName: string) => Promise<void>;
+  focusedNewChatActionId: string;
+  promotingNewChatActionById: Record<string, true>;
+  promoteNewChatActionErrorById: Record<string, string>;
   onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
   columnWidthPx: number;
   onRuntimeStateChange?: (next: GroupMultiChatColumnRuntimeState) => void;
@@ -90,12 +98,19 @@ export function GroupMultiChatColumn({
   deleteBusy = false,
   onSpawnDroneHubTask,
   onSendPromptInNewChat,
+  onCreateQueuedNewChatNow,
+  focusedNewChatActionId,
+  promotingNewChatActionById,
+  promoteNewChatActionErrorById,
   onAutoRenameChatFromFirstPrompt,
   columnWidthPx,
   onRuntimeStateChange,
 }: GroupMultiChatColumnProps) {
   const shownName = String(droneLabel ?? drone.name).trim() || drone.name;
-  const chatName = React.useMemo(() => resolveChatNameForDrone(drone, preferredChat), [drone, preferredChat]);
+  const chatName = React.useMemo(
+    () => resolveChatNameForDrone(drone, preferredChat),
+    [drone, preferredChat],
+  );
   const chatCacheKey = React.useMemo(() => `${drone.id}\u0000${chatName}`, [chatName, drone.id]);
   const droneHome = React.useMemo(() => droneHomePath(drone), [drone]);
   const [transcripts, setTranscripts] = React.useState<TranscriptItem[] | null>(null);
@@ -105,18 +120,35 @@ export function GroupMultiChatColumn({
   const [sendingPromptCount, setSendingPromptCount] = React.useState(0);
   const sendingPrompt = sendingPromptCount > 0;
   const [stoppingResponse, setStoppingResponse] = React.useState(false);
+  const [cancellingPendingPromptById, setCancellingPendingPromptById] = React.useState<
+    Record<string, true>
+  >({});
+  const [cancelPendingPromptErrorById, setCancelPendingPromptErrorById] = React.useState<
+    Record<string, string>
+  >({});
   const [localWaitingStartedAtMs, setLocalWaitingStartedAtMs] = React.useState<number | null>(null);
-  const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>([]);
-  const [initialPendingResp, setInitialPendingResp] = React.useState<{ key: string; pending: PendingPrompt[] } | null>(null);
+  const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>(
+    [],
+  );
+  const [initialPendingResp, setInitialPendingResp] = React.useState<{
+    key: string;
+    pending: PendingPrompt[];
+  } | null>(null);
   const [chatEventsConnected, setChatEventsConnected] = React.useState(false);
   const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
-  const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull' | 'push'>(null);
+  const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull' | 'push'>(
+    null,
+  );
   const [quickActionError, setQuickActionError] = React.useState<string | null>(null);
-  const [dirtyDroneApplyModal, setDirtyDroneApplyModal] = React.useState<DirtyDroneApplyModalState | null>(null);
+  const [dirtyDroneApplyModal, setDirtyDroneApplyModal] =
+    React.useState<DirtyDroneApplyModalState | null>(null);
   const [droneHubPermissionsOpen, setDroneHubPermissionsOpen] = React.useState(false);
   const columnScrollRef = React.useRef<HTMLDivElement | null>(null);
   const transcriptEtagRef = React.useRef<string | null>(null);
-  const draftKey = React.useMemo(() => chatInputDraftKeyForDroneChat(drone.id, chatName), [drone.id, chatName]);
+  const draftKey = React.useMemo(
+    () => chatInputDraftKeyForDroneChat(drone.id, chatName),
+    [drone.id, chatName],
+  );
   const draftValue = useDroneHubUiStore((s) => s.chatInputDrafts[draftKey] ?? '');
   const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
   const terminalEmulator = useDroneHubUiStore((s) => s.terminalEmulator);
@@ -128,11 +160,11 @@ export function GroupMultiChatColumn({
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const chatMcpAccess = useChatMcpAccess(drone.id, chatName, true);
   const chatMcpAccessDropId = `group-chat-mcp-access:${drone.id}:${chatName}`;
-  const { isOver: chatMcpAccessDropIsOver, setNodeRef: setChatMcpAccessDropNodeRef } =
-    useDroppable({ id: chatMcpAccessDropId });
+  const { isOver: chatMcpAccessDropIsOver, setNodeRef: setChatMcpAccessDropNodeRef } = useDroppable(
+    { id: chatMcpAccessDropId },
+  );
   const chatMcpAccessDropActive =
-    chatMcpAccessDropIsOver &&
-    assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
+    chatMcpAccessDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
 
   useDndMonitor({
     onDragEnd(event) {
@@ -209,7 +241,9 @@ export function GroupMultiChatColumn({
       }
       transcriptEtagRef.current = data.etag;
       fullTranscriptLoadedRef.current = true;
-      setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
+      setTranscripts((prev) =>
+        sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts,
+      );
       setError(null);
     };
 
@@ -265,7 +299,9 @@ export function GroupMultiChatColumn({
           if (!mounted) return false;
           loadedInitialTail = true;
           setInitialPendingResp({ key: chatCacheKey, pending: data.pending });
-          setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
+          setTranscripts((prev) =>
+            sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts,
+          );
           setError(null);
           setLoading(false);
           startBackgroundFullLoad();
@@ -301,9 +337,14 @@ export function GroupMultiChatColumn({
       const scheduleNext = await load();
       if (!mounted || !scheduleNext) return;
       clearTimer();
-      timer = setTimeout(() => {
-        void loop();
-      }, eventsConnected ? resolvePollIntervalMs(60_000, 60_000) : resolvePollIntervalMs(4000, 15_000));
+      timer = setTimeout(
+        () => {
+          void loop();
+        },
+        eventsConnected
+          ? resolvePollIntervalMs(60_000, 60_000)
+          : resolvePollIntervalMs(4000, 15_000),
+      );
     };
 
     const onVisibilityChange = () => {
@@ -337,7 +378,8 @@ export function GroupMultiChatColumn({
     };
   }, [chatCacheKey, chatName, drone.hubPhase, drone.id]);
 
-  const pendingPollEnabled = initialPendingResp?.key === chatCacheKey || transcripts !== null || Boolean(error);
+  const pendingPollEnabled =
+    initialPendingResp?.key === chatCacheKey || transcripts !== null || Boolean(error);
 
   const { value: pendingResp } = usePoll<{ key: string; pending: PendingPrompt[] }>(
     async () => {
@@ -354,7 +396,10 @@ export function GroupMultiChatColumn({
 
   const pendingPrompts = React.useMemo(() => {
     const initial = initialPendingResp?.key === chatCacheKey ? initialPendingResp.pending : [];
-    const server = pendingResp?.key === chatCacheKey && Array.isArray(pendingResp.pending) ? pendingResp.pending : initial;
+    const server =
+      pendingResp?.key === chatCacheKey && Array.isArray(pendingResp.pending)
+        ? pendingResp.pending
+        : initial;
     return mergeDesktopOptimisticPendingPrompts({
       serverPrompts: server,
       optimisticPrompts: optimisticPendingPrompts,
@@ -366,6 +411,53 @@ export function GroupMultiChatColumn({
     return filterCompletedPendingPrompts(pendingPrompts, transcripts);
   }, [pendingPrompts, transcripts]);
 
+  const cancelPendingPrompt = React.useCallback(
+    async (promptIdRaw: string): Promise<void> => {
+      const promptId = String(promptIdRaw ?? '').trim();
+      if (!promptId || cancellingPendingPromptById[promptId]) return;
+      setCancellingPendingPromptById((current) => ({ ...current, [promptId]: true }));
+      setCancelPendingPromptErrorById((current) => {
+        const next = { ...current };
+        delete next[promptId];
+        return next;
+      });
+      try {
+        const result = await requestJson<{
+          ok: true;
+          cancelled: boolean;
+          alreadySubmitted: boolean;
+        }>(
+          `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/pending/${encodeURIComponent(promptId)}`,
+          { method: 'DELETE' },
+        );
+        if (!result.cancelled) {
+          throw new Error(
+            result.alreadySubmitted
+              ? 'Already submitted to agent.'
+              : 'Unable to cancel pending prompt.',
+          );
+        }
+        setChatEventsNonce((value) => value + 1);
+      } catch (cancelError: any) {
+        if (Number(cancelError?.status ?? 0) === 404) {
+          setChatEventsNonce((value) => value + 1);
+        } else {
+          setCancelPendingPromptErrorById((current) => ({
+            ...current,
+            [promptId]: cancelError?.message ?? String(cancelError),
+          }));
+        }
+      } finally {
+        setCancellingPendingPromptById((current) => {
+          const next = { ...current };
+          delete next[promptId];
+          return next;
+        });
+      }
+    },
+    [cancellingPendingPromptById, chatName, drone.id],
+  );
+
   const waitingForAgent = React.useMemo(() => {
     if (sendingPrompt) return true;
     return visiblePendingPrompts.some(pendingPromptShowsWorkingState);
@@ -373,7 +465,7 @@ export function GroupMultiChatColumn({
   useLocalChatBusy(createCanvasChatNodeId(drone.id, chatName), waitingForAgent);
 
   const canStopResponse = React.useMemo(
-    () => visiblePendingPrompts.some((item) => item.state === 'queued' || item.state === 'sending' || item.state === 'sent'),
+    () => visiblePendingPrompts.some(pendingPromptCanStopResponse),
     [visiblePendingPrompts],
   );
 
@@ -427,7 +519,14 @@ export function GroupMultiChatColumn({
     if (loading) return;
     const id = requestAnimationFrame(() => scrollColumnToBottom());
     return () => cancelAnimationFrame(id);
-  }, [chatName, columnWidthPx, loading, scrollColumnToBottom, transcripts?.length, visiblePendingPrompts.length]);
+  }, [
+    chatName,
+    columnWidthPx,
+    loading,
+    scrollColumnToBottom,
+    transcripts?.length,
+    visiblePendingPrompts.length,
+  ]);
 
   const sendPrompt = React.useCallback(
     async (payload: ChatSendPayload, context: ChatSendContext): Promise<boolean> => {
@@ -436,7 +535,9 @@ export function GroupMultiChatColumn({
       if (!prompt && attachments.length === 0) return false;
       if (isDroneStartingOrSeeding(drone.hubPhase)) {
         if (attachments.length > 0) {
-          setPromptError(`\"${shownName}\" is still starting. Attachments can be sent once it is ready.`);
+          setPromptError(
+            `\"${shownName}\" is still starting. Attachments can be sent once it is ready.`,
+          );
           return false;
         }
         setPromptError(`\"${shownName}\" is still starting.`);
@@ -523,12 +624,23 @@ export function GroupMultiChatColumn({
     setStoppingResponse(true);
     setPromptError(null);
     try {
-      const data = await requestJson<{ ok: true; stoppedPromptIds?: string[]; clearedPromptIds?: string[] }>(
-        `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/stop`,
-        { method: 'POST' },
+      const data = await requestJson<{
+        ok: true;
+        stoppedPromptIds?: string[];
+        clearedPromptIds?: string[];
+      }>(`/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(chatName)}/stop`, {
+        method: 'POST',
+      });
+      const stoppedSet = new Set(
+        (Array.isArray(data.stoppedPromptIds) ? data.stoppedPromptIds : [])
+          .map((id) => String(id).trim())
+          .filter(Boolean),
       );
-      const stoppedSet = new Set((Array.isArray(data.stoppedPromptIds) ? data.stoppedPromptIds : []).map((id) => String(id).trim()).filter(Boolean));
-      const clearedSet = new Set((Array.isArray(data.clearedPromptIds) ? data.clearedPromptIds : []).map((id) => String(id).trim()).filter(Boolean));
+      const clearedSet = new Set(
+        (Array.isArray(data.clearedPromptIds) ? data.clearedPromptIds : [])
+          .map((id) => String(id).trim())
+          .filter(Boolean),
+      );
       if (stoppedSet.size > 0 || clearedSet.size > 0) {
         setOptimisticPendingPrompts((prev) =>
           prev.flatMap((item) => {
@@ -564,7 +676,10 @@ export function GroupMultiChatColumn({
       const cwd = droneHomePath(drone);
       if (cwd && !(hostRuntime && cwd === '/')) qs.set('cwd', cwd);
       if (terminalEmulator && terminalEmulator !== 'auto') qs.set('terminal', terminalEmulator);
-      const r = await fetch(`/api/drones/${encodeURIComponent(drone.id)}/open-terminal?${qs.toString()}`, { method: 'POST' });
+      const r = await fetch(
+        `/api/drones/${encodeURIComponent(drone.id)}/open-terminal?${qs.toString()}`,
+        { method: 'POST' },
+      );
       if (!r.ok) {
         const text = await r.text();
         let parsed: any = null;
@@ -582,81 +697,99 @@ export function GroupMultiChatColumn({
     }
   }, [chatName, disabledByProvisioning, drone, quickActionBusy, terminalEmulator]);
 
-  const executePullRepoChanges = React.useCallback(async (body: Record<string, unknown> = {}) => {
-    if (disabledByProvisioning || quickActionBusy || !repoAttached) return;
-    setQuickActionBusy('pull');
-    setQuickActionError(null);
-    const endApplyProgress = beginRepoApplyProgress({
-      droneId: drone.id,
-      droneLabel: shownName,
-    });
-    try {
-      const postPull = async (
-        body: any,
-      ): Promise<{ ok: boolean; status: number; statusText: string; data: any }> => {
-        const response = await fetch(`/api/drones/${encodeURIComponent(drone.id)}/repo/pull`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body ?? {}),
-        });
-        const text = await response.text();
-        let parsed: any = null;
-        try {
-          parsed = text ? JSON.parse(text) : null;
-        } catch {
-          parsed = null;
-        }
-        return { ok: response.ok, status: response.status, statusText: response.statusText, data: parsed };
-      };
+  const executePullRepoChanges = React.useCallback(
+    async (body: Record<string, unknown> = {}) => {
+      if (disabledByProvisioning || quickActionBusy || !repoAttached) return;
+      setQuickActionBusy('pull');
+      setQuickActionError(null);
+      const endApplyProgress = beginRepoApplyProgress({
+        droneId: drone.id,
+        droneLabel: shownName,
+      });
+      try {
+        const postPull = async (
+          body: any,
+        ): Promise<{ ok: boolean; status: number; statusText: string; data: any }> => {
+          const response = await fetch(`/api/drones/${encodeURIComponent(drone.id)}/repo/pull`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body ?? {}),
+          });
+          const text = await response.text();
+          let parsed: any = null;
+          try {
+            parsed = text ? JSON.parse(text) : null;
+          } catch {
+            parsed = null;
+          }
+          return {
+            ok: response.ok,
+            status: response.status,
+            statusText: response.statusText,
+            data: parsed,
+          };
+        };
 
-      let result = await postPull(body);
-      const initialCode = String(result.data?.code ?? '').trim().toLowerCase();
-      if (!result.ok && initialCode === 'drone_dirty') {
-        setDirtyDroneApplyModal({
-          droneId: String(drone.id ?? '').trim(),
-          droneLabel: shownName,
-          dirtyFileCount: Number(result.data?.dirtyFileCount) || 0,
-          autoCommitMessage:
-            String(result.data?.autoCommitMessage ?? '').trim() || 'chore(drone): snapshot working tree before apply changes',
-        });
-        return;
-      }
-      const canOfferConflictApply =
-        !result.ok &&
-        initialCode === 'patch_apply_conflict' &&
-        result.data?.hostConflictState !== true &&
-        result.data?.canApplyConflictsToHost === true &&
-        (body as any)?.applyConflictsToHost !== true;
-      if (canOfferConflictApply) {
-        const conflictFiles = Array.isArray(result.data?.conflictFiles)
-          ? result.data.conflictFiles.map((f: any) => String(f ?? '').trim()).filter(Boolean)
-          : [];
-        const preview: string[] = conflictFiles.slice(0, 8);
-        const suffix = conflictFiles.length > preview.length ? `\n- and ${conflictFiles.length - preview.length} more` : '';
-        const confirmed = window.confirm(
-          [
-            'Applying these drone changes would conflict with your host repo.',
-            '',
-            preview.length > 0 ? preview.map((file) => `- ${file}`).join('\n') + suffix : 'No individual files were reported.',
-            '',
-            'Apply the conflict set onto the host repo so you can resolve it there?',
-          ].join('\n'),
-        );
-        if (confirmed) {
-          result = await postPull({ ...body, applyConflictsToHost: true });
+        let result = await postPull(body);
+        const initialCode = String(result.data?.code ?? '')
+          .trim()
+          .toLowerCase();
+        if (!result.ok && initialCode === 'drone_dirty') {
+          setDirtyDroneApplyModal({
+            droneId: String(drone.id ?? '').trim(),
+            droneLabel: shownName,
+            dirtyFileCount: Number(result.data?.dirtyFileCount) || 0,
+            autoCommitMessage:
+              String(result.data?.autoCommitMessage ?? '').trim() ||
+              'chore(drone): snapshot working tree before apply changes',
+          });
+          return;
         }
-      }
+        const canOfferConflictApply =
+          !result.ok &&
+          initialCode === 'patch_apply_conflict' &&
+          result.data?.hostConflictState !== true &&
+          result.data?.canApplyConflictsToHost === true &&
+          (body as any)?.applyConflictsToHost !== true;
+        if (canOfferConflictApply) {
+          const conflictFiles = Array.isArray(result.data?.conflictFiles)
+            ? result.data.conflictFiles.map((f: any) => String(f ?? '').trim()).filter(Boolean)
+            : [];
+          const preview: string[] = conflictFiles.slice(0, 8);
+          const suffix =
+            conflictFiles.length > preview.length
+              ? `\n- and ${conflictFiles.length - preview.length} more`
+              : '';
+          const confirmed = window.confirm(
+            [
+              'Applying these drone changes would conflict with your host repo.',
+              '',
+              preview.length > 0
+                ? preview.map((file) => `- ${file}`).join('\n') + suffix
+                : 'No individual files were reported.',
+              '',
+              'Apply the conflict set onto the host repo so you can resolve it there?',
+            ].join('\n'),
+          );
+          if (confirmed) {
+            result = await postPull({ ...body, applyConflictsToHost: true });
+          }
+        }
 
-      if (!result.ok) {
-        setQuickActionError(String(result.data?.error ?? `${result.status} ${result.statusText}`));
+        if (!result.ok) {
+          setQuickActionError(
+            String(result.data?.error ?? `${result.status} ${result.statusText}`),
+          );
+        }
+      } catch (err: any) {
+        setQuickActionError(err?.message ?? String(err));
+      } finally {
+        endApplyProgress();
+        setQuickActionBusy(null);
       }
-    } catch (err: any) {
-      setQuickActionError(err?.message ?? String(err));
-    } finally {
-      endApplyProgress();
-      setQuickActionBusy(null);
-    }
-  }, [disabledByProvisioning, drone.id, quickActionBusy, repoAttached, shownName]);
+    },
+    [disabledByProvisioning, drone.id, quickActionBusy, repoAttached, shownName],
+  );
 
   const pullRepoChanges = React.useCallback(async () => {
     await executePullRepoChanges();
@@ -665,7 +798,10 @@ export function GroupMultiChatColumn({
   const continueDirtyDroneApply = React.useCallback(
     async (choice: 'commit' | 'keep') => {
       if (!dirtyDroneApplyModal) return;
-      const requestBody = dirtyDroneApplyRequestBody(choice, dirtyDroneApplyModal.autoCommitMessage);
+      const requestBody = dirtyDroneApplyRequestBody(
+        choice,
+        dirtyDroneApplyModal.autoCommitMessage,
+      );
       setDirtyDroneApplyModal(null);
       await executePullRepoChanges(requestBody);
     },
@@ -802,11 +938,17 @@ export function GroupMultiChatColumn({
                 title={deleteBusy ? `Deleting "${shownName}"…` : `Delete "${shownName}"`}
                 aria-label={deleteBusy ? `Deleting "${shownName}"` : `Delete "${shownName}"`}
               >
-                {deleteBusy ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
+                {deleteBusy ? (
+                  <IconSpinner className="opacity-90" />
+                ) : (
+                  <IconTrash className="opacity-90" />
+                )}
               </button>
             </div>
           </div>
-          <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono mt-0.5">chat: {chatName}</div>
+          <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono mt-0.5">
+            chat: {chatName}
+          </div>
           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
             <button
               type="button"
@@ -836,7 +978,11 @@ export function GroupMultiChatColumn({
                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
-              title={quickOpenTabUrl ? `Open ${quickOpenTabUrl} in a new browser tab` : 'No preview URL available yet'}
+              title={
+                quickOpenTabUrl
+                  ? `Open ${quickOpenTabUrl} in a new browser tab`
+                  : 'No preview URL available yet'
+              }
             >
               Open tab
             </button>
@@ -860,7 +1006,11 @@ export function GroupMultiChatColumn({
                       : 'Apply repo changes from this drone into the local repo'
                   }
                 >
-                  {quickActionBusy === 'pull' ? 'Applying...' : hostRuntime ? 'Apply (noop)' : 'Apply'}
+                  {quickActionBusy === 'pull'
+                    ? 'Applying...'
+                    : hostRuntime
+                      ? 'Apply (noop)'
+                      : 'Apply'}
                 </button>
                 <button
                   type="button"
@@ -880,19 +1030,32 @@ export function GroupMultiChatColumn({
                       : 'Merge current host branch commits into this drone branch'
                   }
                 >
-                  {quickActionBusy === 'push' ? 'Pulling...' : hostRuntime ? 'Pull host (noop)' : 'Pull host'}
+                  {quickActionBusy === 'push'
+                    ? 'Pulling...'
+                    : hostRuntime
+                      ? 'Pull host (noop)'
+                      : 'Pull host'}
                 </button>
               </>
             ) : null}
           </div>
-          {quickActionError ? <div className="mt-1 text-[var(--text-10)] text-[var(--red)] truncate" title={quickActionError}>{quickActionError}</div> : null}
+          {quickActionError ? (
+            <div
+              className="mt-1 text-[var(--text-10)] text-[var(--red)] truncate"
+              title={quickActionError}
+            >
+              {quickActionError}
+            </div>
+          ) : null}
         </div>
       </div>
       <div ref={columnScrollRef} className="flex-1 min-h-0 overflow-auto px-3 py-3">
         {loading && !transcripts ? (
           <ChatLoadingState />
         ) : error ? (
-          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">{error}</div>
+          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
+            {error}
+          </div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
           <div className="space-y-5">
             {(transcripts ?? []).map((item, index, items) => {
@@ -922,13 +1085,22 @@ export function GroupMultiChatColumn({
                 droneId={drone.id}
                 droneHomePath={droneHome}
                 showRoleIcons={false}
+                onCancelQueued={cancelPendingPrompt}
+                cancelBusy={Boolean(cancellingPendingPromptById[item.id])}
+                cancelError={cancelPendingPromptErrorById[item.id] ?? null}
+                onCreateNewChatNow={(actionId) => onCreateQueuedNewChatNow(actionId, chatName)}
+                createNewChatBusy={Boolean(promotingNewChatActionById[item.id])}
+                createNewChatError={promoteNewChatActionErrorById[item.id] ?? null}
+                autoFocusCreateNewChat={focusedNewChatActionId === item.id}
               />
             ))}
           </div>
         ) : (
           <EmptyState
             icon={<IconChat className="w-7 h-7 text-[var(--muted)]" />}
-            title={isDroneStartingOrSeeding(drone.hubPhase) ? 'Drone is starting' : 'No messages yet'}
+            title={
+              isDroneStartingOrSeeding(drone.hubPhase) ? 'Drone is starting' : 'No messages yet'
+            }
             description={
               isDroneStartingOrSeeding(drone.hubPhase)
                 ? `Waiting for ${shownName} to become ready.`

@@ -1,4 +1,5 @@
 import React from 'react';
+import { resolveChatQueueActionPresentation } from '@drone/assistant-chat';
 import type { AssistantMessageDiagnosticError } from '@drone/assistant-chat';
 
 import {
@@ -225,20 +226,32 @@ export function AssistantQueuedPromptRow({
   prompt,
   cancelling,
   onCancel,
+  creatingNewChat = false,
+  onCreateNewChatNow,
+  autoFocusCreateNewChat = false,
+  createNewChatError = null,
 }: {
   prompt: AssistantQueuedPrompt;
   cancelling: boolean;
   onCancel: () => void;
+  creatingNewChat?: boolean;
+  onCreateNewChatNow?: () => void;
+  autoFocusCreateNewChat?: boolean;
+  createNewChatError?: string | null;
 }) {
+  const createNowRef = React.useRef<HTMLButtonElement | null>(null);
+  const actionPresentation = resolveChatQueueActionPresentation(prompt.action, prompt.status);
+  React.useEffect(() => {
+    if (actionPresentation?.canExecuteNow && autoFocusCreateNewChat) {
+      createNowRef.current?.focus();
+    }
+  }, [actionPresentation?.canExecuteNow, autoFocusCreateNewChat]);
   const failed = prompt.status === 'failed';
   const running = prompt.status === 'running';
-  const statusLabel = failed
-    ? 'Failed'
-    : running
-      ? 'Working'
-      : prompt.deliveryMode === 'asap'
-        ? 'ASAP'
-        : 'Queued';
+  const canRemovePrompt = actionPresentation ? actionPresentation.canCancel || failed : !running;
+  const statusLabel =
+    actionPresentation?.label ??
+    (failed ? 'Failed' : running ? 'Working' : prompt.deliveryMode === 'asap' ? 'ASAP' : 'Queued');
   return (
     <div className="mx-3 flex justify-end">
       <div
@@ -256,7 +269,7 @@ export function AssistantQueuedPromptRow({
               {prompt.imageCount} image{prompt.imageCount === 1 ? '' : 's'}
             </span>
           ) : null}
-          {!running ? (
+          {canRemovePrompt ? (
             <button
               type="button"
               onClick={onCancel}
@@ -276,6 +289,27 @@ export function AssistantQueuedPromptRow({
         ) : null}
         {failed && prompt.error ? (
           <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">{prompt.error}</div>
+        ) : null}
+        {actionPresentation?.canExecuteNow ? (
+          <div className="mt-2 flex items-center gap-2 border-t border-[var(--border-subtle)] pt-2">
+            {onCreateNewChatNow ? (
+              <button
+                ref={createNowRef}
+                type="button"
+                onClick={onCreateNewChatNow}
+                disabled={creatingNewChat || cancelling}
+                className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)] disabled:opacity-50"
+              >
+                {creatingNewChat ? 'Creating…' : 'Create now'}
+              </button>
+            ) : null}
+            <span className="text-[var(--text-10)] text-[var(--muted-dim)]">
+              {actionPresentation.queuedDescription}
+            </span>
+          </div>
+        ) : null}
+        {createNewChatError ? (
+          <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">{createNewChatError}</div>
         ) : null}
       </div>
     </div>
@@ -554,9 +588,9 @@ function toolActivityFailed(item: AssistantToolRenderItem): boolean {
   const details = item.result?.details;
   return Boolean(
     details &&
-      typeof details === 'object' &&
-      (details as Record<string, unknown>).type === 'workspace_transfer' &&
-      (details as Record<string, unknown>).phase === 'failed',
+    typeof details === 'object' &&
+    (details as Record<string, unknown>).type === 'workspace_transfer' &&
+    (details as Record<string, unknown>).phase === 'failed',
   );
 }
 
@@ -568,13 +602,7 @@ function toolActivityStatusResult(item: AssistantToolRenderItem): AssistantMessa
   return item.result;
 }
 
-function ToolPartialFailureIndicator({
-  failed,
-  total,
-}: {
-  failed: number;
-  total: number;
-}) {
+function ToolPartialFailureIndicator({ failed, total }: { failed: number; total: number }) {
   const label = `${failed} of ${total} tool calls failed`;
   return (
     <span
@@ -693,18 +721,11 @@ function ToolStructuredValue({
     return (
       <div className="grid gap-1.5">
         {visibleItems.map((item, index) => (
-          <div
-            key={index}
-            className="grid min-w-0 grid-cols-[1.5rem_minmax(0,1fr)] gap-2"
-          >
+          <div key={index} className="grid min-w-0 grid-cols-[1.5rem_minmax(0,1fr)] gap-2">
             <span className="pt-0.5 text-right font-mono text-[var(--text-9)] text-[var(--muted-dim)]">
               {index + 1}
             </span>
-            <ToolStructuredValue
-              value={item}
-              depth={depth + 1}
-              ancestors={nextAncestors}
-            />
+            <ToolStructuredValue value={item} depth={depth + 1} ancestors={nextAncestors} />
           </div>
         ))}
         {hiddenCount > 0 ? (
@@ -720,19 +741,12 @@ function ToolStructuredValue({
   return (
     <dl className="grid gap-1.5">
       {visibleEntries.map(([key, item]) => (
-        <div
-          key={key}
-          className="grid min-w-0 grid-cols-[minmax(5.5rem,28%)_minmax(0,1fr)] gap-3"
-        >
+        <div key={key} className="grid min-w-0 grid-cols-[minmax(5.5rem,28%)_minmax(0,1fr)] gap-3">
           <dt className="pt-0.5 text-[var(--text-10)] text-[var(--muted-dim)]">
             {humanizeToolField(key)}
           </dt>
           <dd className="min-w-0">
-            <ToolStructuredValue
-              value={item}
-              depth={depth + 1}
-              ancestors={nextAncestors}
-            />
+            <ToolStructuredValue value={item} depth={depth + 1} ancestors={nextAncestors} />
           </dd>
         </div>
       ))}
@@ -969,8 +983,7 @@ export function RepeatedToolActivityRow({
   const label = toolLabel(name);
   const errorCount = items.filter(toolActivityFailed).length;
   const pendingCount = items.filter((item) => !toolActivityIsSettled(item)).length;
-  const hasPartialFailure =
-    pendingCount === 0 && errorCount > 0 && errorCount < items.length;
+  const hasPartialFailure = pendingCount === 0 && errorCount > 0 && errorCount < items.length;
   const statusText = [
     pendingCount > 0 && !blocked ? `${pendingCount} pending` : '',
     errorCount > 0 ? `${errorCount} failed` : '',
@@ -1360,10 +1373,7 @@ export function ToolRunActivity({
     !awaitingApproval && pauseClock.startedAt !== null
       ? Math.max(0, rawEnd - pauseClock.startedAt)
       : 0;
-  const measuredDurationMs = Math.max(
-    0,
-    end - start - pauseClock.accumulatedMs - resumingPauseMs,
-  );
+  const measuredDurationMs = Math.max(0, end - start - pauseClock.accumulatedMs - resumingPauseMs);
   const durationMs =
     (!active || awaitingApproval) && Number.isFinite(completedDurationMs)
       ? Math.max(0, Number(completedDurationMs))

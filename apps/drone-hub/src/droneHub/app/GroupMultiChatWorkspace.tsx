@@ -1,6 +1,13 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ChatInput, type ChatSendContext, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode, EmptyState } from '../chat';
+import {
+  ChatInput,
+  type ChatSendContext,
+  type ChatSendPayload,
+  type DroneHubTask,
+  type DroneHubTaskSpawnMode,
+  EmptyState,
+} from '../chat';
 import { GroupMultiChatColumn } from './GroupMultiChatColumn';
 import {
   GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
@@ -8,7 +15,10 @@ import {
   GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX,
   clampGroupMultiChatColumnWidthPx,
 } from './app-config';
-import { sortGroupMultiChatDrones, type GroupMultiChatColumnRuntimeState } from './group-multi-chat-sort';
+import {
+  sortGroupMultiChatDrones,
+  type GroupMultiChatColumnRuntimeState,
+} from './group-multi-chat-sort';
 import { IconChat, IconChevron, IconDrone } from './icons';
 import type { DroneSummary } from '../types';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
@@ -33,6 +43,13 @@ type GroupMultiChatWorkspaceProps = {
     context: ChatSendContext,
     sourceChatName: string,
   ) => Promise<boolean>;
+  onCreateQueuedNewChatNow: (
+    actionId: string,
+    source: { droneId: string; chatName: string },
+  ) => Promise<void>;
+  focusedNewChatActionId: string;
+  promotingNewChatActionById: Record<string, true>;
+  promoteNewChatActionErrorById: Record<string, string>;
   onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
   uiDroneName: (nameRaw: string) => string;
   onSelectDroneCard: (droneId: string) => void;
@@ -52,6 +69,10 @@ export function GroupMultiChatWorkspace({
   groupBroadcastSending,
   onSendGroupBroadcastPrompt,
   onSendPromptInNewChat,
+  onCreateQueuedNewChatNow,
+  focusedNewChatActionId,
+  promotingNewChatActionById,
+  promoteNewChatActionErrorById,
   onAutoRenameChatFromFirstPrompt,
   uiDroneName,
   onSelectDroneCard,
@@ -82,8 +103,12 @@ export function GroupMultiChatWorkspace({
       setChatInputDraft: s.setChatInputDraft,
     })),
   );
-  const [runtimeByDroneId, setRuntimeByDroneId] = React.useState<Record<string, GroupMultiChatColumnRuntimeState>>({});
-  const groupLabel = String(selectedGroupMultiChatData.label ?? selectedGroupMultiChatData.group).trim() || selectedGroupMultiChatData.group;
+  const [runtimeByDroneId, setRuntimeByDroneId] = React.useState<
+    Record<string, GroupMultiChatColumnRuntimeState>
+  >({});
+  const groupLabel =
+    String(selectedGroupMultiChatData.label ?? selectedGroupMultiChatData.group).trim() ||
+    selectedGroupMultiChatData.group;
   const broadcastDraftKey = React.useMemo(
     () => `group-broadcast:${selectedGroupMultiChatData.group}:${selectedChat || 'default'}`,
     [selectedGroupMultiChatData.group, selectedChat],
@@ -115,30 +140,39 @@ export function GroupMultiChatWorkspace({
     });
   }, [selectedGroupMultiChatData.items]);
 
-  const onColumnRuntimeStateChange = React.useCallback((droneId: string, next: GroupMultiChatColumnRuntimeState) => {
-    setRuntimeByDroneId((prev) => {
-      const current = prev[droneId];
-      if (
-        current &&
-        current.waitingForAgent === next.waitingForAgent &&
-        current.waitingSinceMs === next.waitingSinceMs &&
-        current.lastResponseAtMs === next.lastResponseAtMs
-      ) {
-        return prev;
-      }
-      return { ...prev, [droneId]: next };
-    });
-  }, []);
+  const onColumnRuntimeStateChange = React.useCallback(
+    (droneId: string, next: GroupMultiChatColumnRuntimeState) => {
+      setRuntimeByDroneId((prev) => {
+        const current = prev[droneId];
+        if (
+          current &&
+          current.waitingForAgent === next.waitingForAgent &&
+          current.waitingSinceMs === next.waitingSinceMs &&
+          current.lastResponseAtMs === next.lastResponseAtMs
+        ) {
+          return prev;
+        }
+        return { ...prev, [droneId]: next };
+      });
+    },
+    [],
+  );
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] px-5 py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[var(--text-10)] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-[var(--weight-semibold)]" style={{ fontFamily: 'var(--display)' }}>
+            <div
+              className="text-[var(--text-10)] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-[var(--weight-semibold)]"
+              style={{ fontFamily: 'var(--display)' }}
+            >
               Group Multi-Chat
             </div>
-            <div className="mt-1 text-[15px] font-[var(--weight-semibold)] text-[var(--fg-strong)] truncate" style={{ fontFamily: 'var(--display)' }}>
+            <div
+              className="mt-1 text-[15px] font-[var(--weight-semibold)] text-[var(--fg-strong)] truncate"
+              style={{ fontFamily: 'var(--display)' }}
+            >
               {groupLabel}
             </div>
             <div className="text-[var(--text-11)] text-[var(--muted)] mt-1">
@@ -147,7 +181,10 @@ export function GroupMultiChatWorkspace({
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <div className="inline-flex items-center gap-2 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
-              <span className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              <span
+                className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
+                style={{ fontFamily: 'var(--display)' }}
+              >
                 Width
               </span>
               <input
@@ -156,14 +193,20 @@ export function GroupMultiChatWorkspace({
                 max={GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX}
                 step={10}
                 value={groupMultiChatColumnWidth}
-                onChange={(e) => setGroupMultiChatColumnWidth(clampGroupMultiChatColumnWidthPx(Number(e.target.value)))}
+                onChange={(e) =>
+                  setGroupMultiChatColumnWidth(
+                    clampGroupMultiChatColumnWidthPx(Number(e.target.value)),
+                  )
+                }
                 className="w-[92px] accent-[var(--accent)]"
                 title="Adjust width for all columns"
                 aria-label="Adjust width for all group multi-chat columns"
               />
               <button
                 type="button"
-                onClick={() => setGroupMultiChatColumnWidth(GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX)}
+                onClick={() =>
+                  setGroupMultiChatColumnWidth(GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX)
+                }
                 disabled={groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX}
                 className={`inline-flex items-center h-5 px-1.5 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                   groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX
@@ -177,7 +220,8 @@ export function GroupMultiChatWorkspace({
               </button>
             </div>
             <span className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] font-mono text-[var(--muted-dim)]">
-              {selectedGroupMultiChatData.items.length} drone{selectedGroupMultiChatData.items.length !== 1 ? 's' : ''}
+              {selectedGroupMultiChatData.items.length} drone
+              {selectedGroupMultiChatData.items.length !== 1 ? 's' : ''}
             </span>
             <button
               type="button"
@@ -206,7 +250,11 @@ export function GroupMultiChatWorkspace({
                   : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:shadow-[var(--glow-accent)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
-              title={groupBroadcastExpanded ? 'Hide broadcast composer' : 'Broadcast a message to all drones'}
+              title={
+                groupBroadcastExpanded
+                  ? 'Hide broadcast composer'
+                  : 'Broadcast a message to all drones'
+              }
               aria-expanded={groupBroadcastExpanded}
             >
               <IconChat className={groupBroadcastExpanded ? 'opacity-90' : 'opacity-80'} />
@@ -227,7 +275,9 @@ export function GroupMultiChatWorkspace({
       </div>
       <div
         className={`flex-shrink-0 overflow-hidden border-b border-[var(--border)] bg-[var(--surface-faint)] transition-[max-height,opacity,padding] duration-200 ease-out ${
-          groupBroadcastExpanded ? 'max-h-[220px] opacity-100 px-3' : 'max-h-0 opacity-0 px-3 pointer-events-none'
+          groupBroadcastExpanded
+            ? 'max-h-[220px] opacity-100 px-3'
+            : 'max-h-0 opacity-0 px-3 pointer-events-none'
         }`}
         aria-hidden={!groupBroadcastExpanded}
       >
@@ -270,6 +320,15 @@ export function GroupMultiChatWorkspace({
                   onSendPromptInNewChat={(payload, context) =>
                     onSendPromptInNewChat(d, payload, context, selectedChat || 'default')
                   }
+                  onCreateQueuedNewChatNow={(actionId, sourceChatName) =>
+                    onCreateQueuedNewChatNow(actionId, {
+                      droneId: d.id,
+                      chatName: sourceChatName,
+                    })
+                  }
+                  focusedNewChatActionId={focusedNewChatActionId}
+                  promotingNewChatActionById={promotingNewChatActionById}
+                  promoteNewChatActionErrorById={promoteNewChatActionErrorById}
                   onAutoRenameChatFromFirstPrompt={onAutoRenameChatFromFirstPrompt}
                   columnWidthPx={groupMultiChatColumnWidth}
                   onRuntimeStateChange={(next) => onColumnRuntimeStateChange(d.id, next)}

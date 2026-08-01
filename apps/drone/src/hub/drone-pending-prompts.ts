@@ -5,6 +5,7 @@ import {
   normalizePendingPromptState as normalizeSharedPendingPromptState,
   type AgentPlan,
   type AgentRunActivity,
+  type ChatQueueAction,
 } from '@drone/assistant-chat';
 import { loadRegistry, updateRegistry } from '../host/registry';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
@@ -35,6 +36,7 @@ export type PendingPrompt = {
   cwd?: string | null;
   attachments?: ChatImageAttachmentRef[];
   deliveryMode?: 'queue' | 'asap';
+  action?: ChatQueueAction;
   state: PendingPromptState;
   error?: string;
   observability?: {
@@ -102,6 +104,9 @@ export function createDronePendingPromptStore(deps: {
     turnsRaw: unknown,
     opts?: { keepRecentlyCompleted?: boolean; nowMs?: number },
   ): PendingPrompt[] {
+    const visible = list.filter(
+      (item) => !(item.state === 'sent' && item.action?.type === 'send-in-new-chat'),
+    );
     const turns = Array.isArray(turnsRaw) ? turnsRaw : [];
     const turnById = new Map<string, any>();
     for (const turn of turns) {
@@ -109,12 +114,13 @@ export function createDronePendingPromptStore(deps: {
       if (!id) continue;
       turnById.set(id, turn);
     }
-    if (turnById.size === 0) return list;
+    if (turnById.size === 0) return visible;
 
     const keepRecentlyCompleted = opts?.keepRecentlyCompleted === true;
-    const nowMs = typeof opts?.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+    const nowMs =
+      typeof opts?.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
 
-    return list.filter((item) => {
+    return visible.filter((item) => {
       if (isTerminalPendingPrompt(item)) return true;
       const turn = turnById.get(item.id);
       if (!turn) return true;
@@ -136,7 +142,10 @@ export function createDronePendingPromptStore(deps: {
     return completedTurnIds(entry?.turns);
   }
 
-  function pendingPromptsFromChatEntry(entry: any, opts?: { keepRecentlyCompleted?: boolean }): PendingPrompt[] {
+  function pendingPromptsFromChatEntry(
+    entry: any,
+    opts?: { keepRecentlyCompleted?: boolean },
+  ): PendingPrompt[] {
     const list = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
     const pending = pruneCompletedPendingPrompts(
       list
@@ -144,11 +153,18 @@ export function createDronePendingPromptStore(deps: {
           id: String(p?.id ?? '').trim(),
           at: String(p?.at ?? '').trim(),
           prompt: deps.normalizePendingPromptText(p?.prompt),
-          ...(typeof p?.model === 'string' && String(p.model).trim() ? { model: String(p.model).trim() } : {}),
-          ...(typeof p?.messageId === 'string' && String(p.messageId).trim() ? { messageId: String(p.messageId).trim() } : {}),
+          ...(typeof p?.model === 'string' && String(p.model).trim()
+            ? { model: String(p.model).trim() }
+            : {}),
+          ...(typeof p?.messageId === 'string' && String(p.messageId).trim()
+            ? { messageId: String(p.messageId).trim() }
+            : {}),
           cwd: typeof p?.cwd === 'string' ? String(p.cwd) : p?.cwd === null ? null : undefined,
           attachments: deps.normalizeChatImageAttachmentRefs(p?.attachments),
           deliveryMode: p?.deliveryMode === 'asap' ? 'asap' : 'queue',
+          ...(p?.action && typeof p.action === 'object'
+            ? { action: p.action as ChatQueueAction }
+            : {}),
           state: normalizeSharedPendingPromptState(p?.state),
           error: typeof p?.error === 'string' ? p.error : undefined,
           observability: normalizeObservability((p as any)?.observability),
@@ -178,7 +194,8 @@ export function createDronePendingPromptStore(deps: {
     if (!raw || typeof raw !== 'object') return undefined;
     if (String((raw as any).state ?? '').trim() !== 'status-unavailable') return undefined;
     const lastCheckedAt = String((raw as any).lastCheckedAt ?? '').trim();
-    const message = String((raw as any).message ?? '').trim() || 'Prompt status is temporarily unavailable.';
+    const message =
+      String((raw as any).message ?? '').trim() || 'Prompt status is temporarily unavailable.';
     return {
       state: 'status-unavailable',
       message,
@@ -192,7 +209,8 @@ export function createDronePendingPromptStore(deps: {
   function normalizePendingAgentPlan(raw: unknown): PendingPrompt['agentPlan'] | undefined {
     if (!raw || typeof raw !== 'object') return undefined;
     const source = String((raw as any).source ?? '').trim();
-    if (source !== 'cursor' && source !== 'codex' && source !== 'claude' && source !== 'opencode') return undefined;
+    if (source !== 'cursor' && source !== 'codex' && source !== 'claude' && source !== 'opencode')
+      return undefined;
     return normalizeAgentPlan(raw, source, String((raw as any).updatedAt ?? ''));
   }
 
@@ -203,7 +221,10 @@ export function createDronePendingPromptStore(deps: {
     return /^[A-Za-z0-9._-]+$/.test(text);
   }
 
-  async function readPendingPrompts(opts: { droneId: string; chatName: string }): Promise<PendingPrompt[]> {
+  async function readPendingPrompts(opts: {
+    droneId: string;
+    chatName: string;
+  }): Promise<PendingPrompt[]> {
     if (!(globalThis as any).Bun) {
       const ref = normalizeDroneIdentity(opts.droneId);
       const resolved = ref ? await resolveCanonicalDroneOrPendingForReadRef(ref) : null;
@@ -228,7 +249,8 @@ export function createDronePendingPromptStore(deps: {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const drone = droneId ? regAny?.drones?.[droneId] : null;
     if (!drone) {
-      if (droneId && regAny?.pending?.[droneId] && !regAny?.drones?.[droneId]) throw new Error(`drone "${droneId}" is still starting`);
+      if (droneId && regAny?.pending?.[droneId] && !regAny?.drones?.[droneId])
+        throw new Error(`drone "${droneId}" is still starting`);
       throw new Error(`unknown drone: ${opts.droneId}`);
     }
     const chatName = opts.chatName || 'default';
@@ -247,7 +269,9 @@ export function createDronePendingPromptStore(deps: {
       const stored = queue.list({ droneId, chatName, limit: 60 }) as PendingPrompt[];
       const projected = readChatFromStore({ droneId, chatName });
       const turns = projected.available && projected.chat ? projected.chat.turns : entry?.turns;
-      return pruneCompletedPendingPrompts(stored, turns, { keepRecentlyCompleted: true }).slice(-50);
+      return pruneCompletedPendingPrompts(stored, turns, { keepRecentlyCompleted: true }).slice(
+        -50,
+      );
     }
     if (entry) {
       await importChatFromRegistry({ droneId, chatName, chatEntry: entry });
@@ -259,25 +283,81 @@ export function createDronePendingPromptStore(deps: {
     return pendingPromptsFromChatEntry(entry, { keepRecentlyCompleted: true }).slice(-50);
   }
 
-  async function readPendingStartupPrompts(opts: { droneId: string; chatName: string }): Promise<PendingPrompt[]> {
+  function readPendingPrompt(opts: {
+    droneId: string;
+    chatName: string;
+    id: string;
+  }): PendingPrompt | null {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const queue = promptQueueForActiveDrone();
+    if (!droneId) return null;
+    if (!queue) {
+      const stored = readChatFromStore({ droneId, chatName: opts.chatName || 'default' });
+      const pending = Array.isArray(stored.chat?.pendingPrompts)
+        ? stored.chat.pendingPrompts.find(
+            (item: any) => String(item?.id ?? '').trim() === opts.id,
+          )
+        : null;
+      return (pending as PendingPrompt | null) ?? null;
+    }
+    return queue.get({
+      droneId,
+      chatName: opts.chatName || 'default',
+      promptId: opts.id,
+    }) as PendingPrompt | null;
+  }
+
+  function readPendingPromptDispatchWindow(opts: {
+    droneId: string;
+    chatName: string;
+  }): { candidateId: string; prompts: PendingPrompt[] } | null {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const chatName = opts.chatName || 'default';
+    const queue = promptQueueForActiveDrone();
+    if (!queue || !droneId) return null;
+    const candidate = queue.nextQueued({ droneId, chatName });
+    if (!candidate) return { candidateId: '', prompts: [] };
+    return {
+      candidateId: candidate.id,
+      prompts: queue.listThrough({
+        droneId,
+        chatName,
+        promptId: candidate.id,
+        limit: 100,
+      }) as PendingPrompt[],
+    };
+  }
+
+  async function readPendingStartupPrompts(opts: {
+    droneId: string;
+    chatName: string;
+  }): Promise<PendingPrompt[]> {
     if (!(globalThis as any).Bun) {
       const ref = normalizeDroneIdentity(opts.droneId);
       const resolved = ref ? await resolveCanonicalDroneOrPendingForReadRef(ref) : null;
       if (!resolved || resolved.kind !== 'pending') return [];
-      return deps.normalizePendingStartupPrompts(
-        (resolved.pending as any)?.startupQueuedPrompts,
-        opts.chatName,
-      ).map(deps.startupPromptToPendingPrompt);
+      return deps
+        .normalizePendingStartupPrompts(
+          (resolved.pending as any)?.startupQueuedPrompts,
+          opts.chatName,
+        )
+        .map(deps.startupPromptToPendingPrompt);
     }
 
     const regAny: any = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);
     const pending = droneId ? regAny?.pending?.[droneId] : null;
     if (!pending) return [];
-    return deps.normalizePendingStartupPrompts((pending as any)?.startupQueuedPrompts, opts.chatName).map(deps.startupPromptToPendingPrompt);
+    return deps
+      .normalizePendingStartupPrompts((pending as any)?.startupQueuedPrompts, opts.chatName)
+      .map(deps.startupPromptToPendingPrompt);
   }
 
-  async function pushPendingPrompt(opts: { droneId: string; chatName: string; pending: PendingPrompt }): Promise<void> {
+  async function pushPendingPrompt(opts: {
+    droneId: string;
+    chatName: string;
+    pending: PendingPrompt;
+  }): Promise<void> {
     const droneIdForStore = normalizeDroneIdentity(opts.droneId);
     const chatNameForStore = opts.chatName || 'default';
     const queue = promptQueueForActiveDrone();
@@ -293,7 +373,11 @@ export function createDronePendingPromptStore(deps: {
       return;
     }
     if (droneIdForStore) {
-      upsertPendingPromptInStore({ droneId: droneIdForStore, chatName: chatNameForStore, pending: opts.pending });
+      upsertPendingPromptInStore({
+        droneId: droneIdForStore,
+        chatName: chatNameForStore,
+        pending: opts.pending,
+      });
     }
     await updateRegistry((regAny: any) => {
       const droneId = normalizeDroneIdentity(opts.droneId);
@@ -305,12 +389,18 @@ export function createDronePendingPromptStore(deps: {
       entry.pendingPrompts = Array.isArray(entry.pendingPrompts) ? entry.pendingPrompts : [];
       const id = String(opts.pending?.id ?? '').trim();
       if (!id) return;
-      const existingIdx = entry.pendingPrompts.findIndex((item: any) => String(item?.id ?? '').trim() === id);
+      const existingIdx = entry.pendingPrompts.findIndex(
+        (item: any) => String(item?.id ?? '').trim() === id,
+      );
       if (existingIdx === -1) {
         entry.pendingPrompts.push(opts.pending);
       } else {
         const current = entry.pendingPrompts[existingIdx] ?? {};
-        entry.pendingPrompts[existingIdx] = { ...current, ...opts.pending, updatedAt: opts.pending.updatedAt ?? deps.nowIso() };
+        entry.pendingPrompts[existingIdx] = {
+          ...current,
+          ...opts.pending,
+          updatedAt: opts.pending.updatedAt ?? deps.nowIso(),
+        };
       }
       entry.pendingPrompts = entry.pendingPrompts.slice(-60);
       drone.chats[chatName] = entry;
@@ -319,9 +409,11 @@ export function createDronePendingPromptStore(deps: {
     });
   }
 
-  async function pushPendingStartupPrompt(
-    opts: { droneId: string; chatName: string; pending: PendingPrompt },
-  ): Promise<'queued' | 'active' | 'missing'> {
+  async function pushPendingStartupPrompt(opts: {
+    droneId: string;
+    chatName: string;
+    pending: PendingPrompt;
+  }): Promise<'queued' | 'active' | 'missing'> {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const id = String(opts.pending?.id ?? '').trim();
     const prompt = String(opts.pending?.prompt ?? '');
@@ -337,8 +429,12 @@ export function createDronePendingPromptStore(deps: {
       chatName,
       at: String(opts.pending?.at ?? deps.nowIso()),
       prompt,
-      ...(typeof opts.pending?.messageId === 'string' && opts.pending.messageId.trim() ? { messageId: opts.pending.messageId.trim() } : {}),
-      ...(typeof opts.pending?.cwd === 'string' || opts.pending?.cwd === null ? { cwd: opts.pending.cwd } : {}),
+      ...(typeof opts.pending?.messageId === 'string' && opts.pending.messageId.trim()
+        ? { messageId: opts.pending.messageId.trim() }
+        : {}),
+      ...(typeof opts.pending?.cwd === 'string' || opts.pending?.cwd === null
+        ? { cwd: opts.pending.cwd }
+        : {}),
       ...(opts.pending?.deliveryMode === 'asap' || opts.pending?.deliveryMode === 'queue'
         ? { deliveryMode: opts.pending.deliveryMode }
         : {}),
@@ -398,6 +494,7 @@ export function createDronePendingPromptStore(deps: {
         | 'agentPlan'
         | 'fileChangesBaseline'
         | 'fileChanges'
+        | 'action'
         | 'startedAt'
         | 'updatedAt'
       >
@@ -483,7 +580,11 @@ export function createDronePendingPromptStore(deps: {
     return queue.listQueuedChatWakeups();
   }
 
-  async function claimQueuedPendingPromptForSending(opts: { droneId: string; chatName: string; id: string }): Promise<boolean> {
+  async function claimQueuedPendingPromptForSending(opts: {
+    droneId: string;
+    chatName: string;
+    id: string;
+  }): Promise<boolean> {
     const droneIdForStore = normalizeDroneIdentity(opts.droneId);
     const chatNameForStore = opts.chatName || 'default';
     const queue = promptQueueForActiveDrone();
@@ -499,7 +600,11 @@ export function createDronePendingPromptStore(deps: {
     }
     let storeClaimed = false;
     if (droneIdForStore) {
-      const storeClaim = claimQueuedPendingPromptInStore({ droneId: droneIdForStore, chatName: chatNameForStore, id: opts.id });
+      const storeClaim = claimQueuedPendingPromptInStore({
+        droneId: droneIdForStore,
+        chatName: chatNameForStore,
+        id: opts.id,
+      });
       if (storeClaim.available && !storeClaim.claimed && storeClaim.state) return false;
       storeClaimed = storeClaim.available && storeClaim.claimed;
     }
@@ -525,9 +630,32 @@ export function createDronePendingPromptStore(deps: {
       return true;
     });
     if (!storeClaimed && claimed && droneIdForStore && claimedPending) {
-      upsertPendingPromptInStore({ droneId: droneIdForStore, chatName: chatNameForStore, pending: claimedPending });
+      upsertPendingPromptInStore({
+        droneId: droneIdForStore,
+        chatName: chatNameForStore,
+        pending: claimedPending,
+      });
     }
     return storeClaimed || Boolean(claimed);
+  }
+
+  async function claimQueuedPendingPromptForPromotion(opts: {
+    droneId: string;
+    chatName: string;
+    id: string;
+  }): Promise<PendingPrompt | null> {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const chatName = opts.chatName || 'default';
+    const queue = promptQueueForActiveDrone();
+    if (!queue || !droneId) return null;
+    const claimed = await queue.claimForSteering({
+      droneId,
+      chatName,
+      promptId: opts.id,
+      leaseOwner: `hub-promote:${process.pid}`,
+    });
+    if (claimed) notifyPendingPromptChanged(droneId, chatName);
+    return claimed as PendingPrompt | null;
   }
 
   async function cancelQueuedPendingPrompt(opts: {
@@ -583,16 +711,22 @@ export function createDronePendingPromptStore(deps: {
         cancelQueuedPendingPromptInStore({ droneId, chatName, id: promptId });
         return { status: 'cancelled', pendingState: 'queued' };
       }
-      if (storeCancel.state) return { status: 'already-submitted', pendingState: storeCancel.state as PendingPromptState };
+      if (storeCancel.state)
+        return {
+          status: 'already-submitted',
+          pendingState: storeCancel.state as PendingPromptState,
+        };
     }
 
     const result = await updateRegistry((regAny: any) => {
       const drone = regAny?.drones?.[droneId] ?? null;
-      if (!drone) return { status: 'not-found' as const, pendingState: null as PendingPromptState | null };
+      if (!drone)
+        return { status: 'not-found' as const, pendingState: null as PendingPromptState | null };
       const entry = drone?.chats?.[chatName] ?? null;
       const list = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
       const idx = list.findIndex((item: any) => String(item?.id ?? '').trim() === promptId);
-      if (idx < 0) return { status: 'not-found' as const, pendingState: null as PendingPromptState | null };
+      if (idx < 0)
+        return { status: 'not-found' as const, pendingState: null as PendingPromptState | null };
       const item = list[idx] ?? {};
       const state = String(item?.state ?? '').trim() as PendingPromptState;
       if (state === 'queued') {
@@ -623,11 +757,14 @@ export function createDronePendingPromptStore(deps: {
 
   return {
     cancelQueuedPendingPrompt,
+    claimQueuedPendingPromptForPromotion,
     claimQueuedPendingPromptForSending,
     isSafePromptId,
     pendingPromptsFromChatEntry,
     pruneCompletedPendingPrompts,
     readPendingPrompts,
+    readPendingPrompt,
+    readPendingPromptDispatchWindow,
     readPendingStartupPrompts,
     resumePendingPromptChats,
     retryPendingPrompt,
