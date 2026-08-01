@@ -15,6 +15,7 @@ export function UserChatMessage({
   showRoleIcons = false,
   showRoleLabel = showRoleIcons,
   headerEnd,
+  headerAttached = false,
   onOpenFileReference,
   onOpenLink,
   textMentionLinks,
@@ -29,6 +30,7 @@ export function UserChatMessage({
   showRoleIcons?: boolean;
   showRoleLabel?: boolean;
   headerEnd?: React.ReactNode;
+  headerAttached?: boolean;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
   textMentionLinks?: MarkdownTextMentionLink[];
@@ -41,6 +43,7 @@ export function UserChatMessage({
       showRoleIcon={showRoleIcons}
       showRoleLabel={showRoleLabel}
       headerEnd={headerEnd}
+      headerAttached={headerAttached}
       hoverActions={
         copyText ? <ChatMessageCopyAction text={copyText} position="hover-rail" /> : undefined
       }

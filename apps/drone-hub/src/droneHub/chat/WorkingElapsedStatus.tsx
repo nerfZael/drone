@@ -60,7 +60,7 @@ export function AgentRunSummaryLine({
     </>
   );
   const className =
-    'flex min-h-9 w-full items-center gap-2 border-b border-[var(--border-subtle)] py-1.5 text-left text-[var(--muted)]';
+    'flex min-h-9 w-full items-center gap-2 border-b border-[var(--border-subtle)] py-1.5 text-left text-[var(--muted)] max-w-[var(--chat-prose-max)]';
 
   if (onToggle) {
     return (
@@ -92,4 +92,39 @@ export function WorkingElapsedStatus({ startedAt }: { startedAt?: string | numbe
   }, []);
 
   return <AgentRunSummaryLine active durationMs={now - start} />;
+}
+
+export function CreatingNewChatStatus() {
+  return (
+    <div role="status" aria-live="polite">
+      <AgentRunSummaryLine
+        active
+        durationMs={0}
+        label="Creating a new chat"
+        trailing={
+          <svg
+            className="h-3 w-3 animate-spin motion-reduce:animate-none"
+            viewBox="0 0 12 12"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle
+              cx="6"
+              cy="6"
+              r="4.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              opacity="0.25"
+            />
+            <path
+              d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+          </svg>
+        }
+      />
+    </div>
+  );
 }

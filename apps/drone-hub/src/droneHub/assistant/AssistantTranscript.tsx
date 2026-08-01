@@ -11,11 +11,13 @@ import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { ChatMessageCopyAction } from '../chat/ChatMessageCopyAction';
 import { ChatMessageFrame } from '../chat/ChatMessageFrame';
+import { CreateNewChatNowButton, QueuedNewChatLabel } from '../chat/QueuedNewChatAction';
 import { ImageAttachmentChips, normalizeImageAttachmentRefs } from '../chat/ImageAttachmentChips';
 import { collectInlineAgentMedia } from '../chat/inline-agent-media';
 import { UserChatMessage } from '../chat/UserChatMessage';
 import {
   AgentRunSummaryLine,
+  CreatingNewChatStatus,
   formatWorkingDuration,
   WorkingElapsedStatus,
 } from '../chat/WorkingElapsedStatus';
@@ -229,6 +231,7 @@ export function AssistantQueuedPromptRow({
   creatingNewChat = false,
   onCreateNewChatNow,
   autoFocusCreateNewChat = false,
+  onCreateNewChatAutoFocusHandled,
   createNewChatError = null,
 }: {
   prompt: AssistantQueuedPrompt;
@@ -237,82 +240,114 @@ export function AssistantQueuedPromptRow({
   creatingNewChat?: boolean;
   onCreateNewChatNow?: () => void;
   autoFocusCreateNewChat?: boolean;
+  onCreateNewChatAutoFocusHandled?: (promptId: string) => void;
   createNewChatError?: string | null;
 }) {
-  const createNowRef = React.useRef<HTMLButtonElement | null>(null);
   const actionPresentation = resolveChatQueueActionPresentation(prompt.action, prompt.status);
-  React.useEffect(() => {
-    if (actionPresentation?.canExecuteNow && autoFocusCreateNewChat) {
-      createNowRef.current?.focus();
-    }
-  }, [actionPresentation?.canExecuteNow, autoFocusCreateNewChat]);
   const failed = prompt.status === 'failed';
   const running = prompt.status === 'running';
+  const showCreatingNewChat =
+    Boolean(actionPresentation) &&
+    (creatingNewChat || actionPresentation?.state === 'running');
   const canRemovePrompt = actionPresentation ? actionPresentation.canCancel || failed : !running;
+  const showPromptHeader = !actionPresentation || prompt.imageCount > 0 || canRemovePrompt;
   const statusLabel =
-    actionPresentation?.label ??
-    (failed ? 'Failed' : running ? 'Working' : prompt.deliveryMode === 'asap' ? 'ASAP' : 'Queued');
+    failed ? 'Failed' : running ? 'Working' : prompt.deliveryMode === 'asap' ? 'ASAP' : 'Queued';
   return (
-    <div className="mx-3 flex justify-end">
-      <div
-        className={`max-w-[88%] rounded-[var(--radius-large)] border px-3 py-2 ${failed ? 'border-[var(--red-border)] bg-[var(--red-subtle)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)]'}`}
-      >
-        <div
-          className="mb-1 flex items-center gap-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide"
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          <span className={failed ? 'text-[var(--red)]' : 'text-[var(--muted)]'}>
-            {statusLabel}
-          </span>
-          {prompt.imageCount > 0 ? (
-            <span className="text-[var(--muted-dim)]">
-              {prompt.imageCount} image{prompt.imageCount === 1 ? '' : 's'}
-            </span>
+    <>
+      <div className="mx-3 flex justify-end">
+        <div className="max-w-[88%]">
+          {actionPresentation ? (
+            <div className="relative z-[1] -mb-px flex justify-end">
+              <QueuedNewChatLabel failed={failed} surface="neutral" />
+            </div>
           ) : null}
-          {canRemovePrompt ? (
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={cancelling}
-              className="ml-auto rounded px-1 py-0.5 text-[var(--text-9)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
-              aria-label={failed ? 'Dismiss failed prompt' : 'Cancel queued prompt'}
-              title={failed ? 'Dismiss failed prompt' : 'Cancel queued prompt'}
-            >
-              {cancelling ? '…' : '×'}
-            </button>
-          ) : null}
-        </div>
-        {prompt.prompt ? (
-          <div className="whitespace-pre-wrap break-words text-[var(--text-12)] leading-relaxed text-[var(--fg-secondary)]">
-            {prompt.prompt}
-          </div>
-        ) : null}
-        {failed && prompt.error ? (
-          <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">{prompt.error}</div>
-        ) : null}
-        {actionPresentation?.canExecuteNow ? (
-          <div className="mt-2 flex items-center gap-2 border-t border-[var(--border-subtle)] pt-2">
-            {onCreateNewChatNow ? (
-              <button
-                ref={createNowRef}
-                type="button"
-                onClick={onCreateNewChatNow}
-                disabled={creatingNewChat || cancelling}
-                className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)] disabled:opacity-50"
+          <div
+            className={`rounded-[var(--radius-large)] border px-3 py-2 ${actionPresentation ? 'rounded-tr-none' : ''} ${failed ? 'border-[var(--red-border)] bg-[var(--red-subtle)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)]'}`}
+          >
+            {showPromptHeader ? (
+              <div
+                className="mb-1 flex items-center gap-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide"
+                style={{ fontFamily: 'var(--display)' }}
               >
-                {creatingNewChat ? 'Creating…' : 'Create now'}
-              </button>
+                {!actionPresentation ? (
+                  <span className={failed ? 'text-[var(--red)]' : 'text-[var(--muted)]'}>
+                    {statusLabel}
+                  </span>
+                ) : null}
+                {prompt.imageCount > 0 ? (
+                  <span className="text-[var(--muted-dim)]">
+                    {prompt.imageCount} image{prompt.imageCount === 1 ? '' : 's'}
+                  </span>
+                ) : null}
+                {canRemovePrompt ? (
+                  <button
+                    type="button"
+                    onClick={onCancel}
+                    disabled={cancelling || creatingNewChat}
+                    className="ml-auto rounded px-1 py-0.5 text-[var(--text-9)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
+                    aria-label={
+                      failed
+                        ? 'Dismiss failed prompt'
+                        : actionPresentation
+                          ? 'Cancel queued new chat'
+                          : 'Cancel queued prompt'
+                    }
+                    title={
+                      failed
+                        ? 'Dismiss failed prompt'
+                        : actionPresentation
+                          ? 'Cancel queued new chat'
+                          : 'Cancel queued prompt'
+                    }
+                  >
+                    {cancelling ? '…' : '×'}
+                  </button>
+                ) : null}
+              </div>
             ) : null}
-            <span className="text-[var(--text-10)] text-[var(--muted-dim)]">
-              {actionPresentation.queuedDescription}
-            </span>
+            {prompt.prompt ? (
+              <div className="whitespace-pre-wrap break-words text-[var(--text-12)] leading-relaxed text-[var(--fg-secondary)]">
+                {prompt.prompt}
+              </div>
+            ) : null}
+            {failed && prompt.error ? (
+              <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">
+                {prompt.error}
+              </div>
+            ) : null}
+            {actionPresentation?.canExecuteNow && !creatingNewChat ? (
+              <div className="mt-2 flex items-center gap-2 border-t border-[var(--border-subtle)] pt-2">
+                {onCreateNewChatNow ? (
+                  <CreateNewChatNowButton
+                    autoFocus={autoFocusCreateNewChat}
+                    onAutoFocusComplete={() =>
+                      onCreateNewChatAutoFocusHandled?.(prompt.id)
+                    }
+                    onClick={onCreateNewChatNow}
+                    disabled={creatingNewChat || cancelling}
+                    busy={creatingNewChat}
+                  />
+                ) : null}
+                <span className="text-[var(--text-10)] text-[var(--muted-dim)]">
+                  {actionPresentation.queuedDescription}
+                </span>
+              </div>
+            ) : null}
+            {createNewChatError ? (
+              <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">
+                {createNewChatError}
+              </div>
+            ) : null}
           </div>
-        ) : null}
-        {createNewChatError ? (
-          <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">{createNewChatError}</div>
-        ) : null}
+        </div>
       </div>
-    </div>
+      {showCreatingNewChat ? (
+        <div className="px-3">
+          <CreatingNewChatStatus />
+        </div>
+      ) : null}
+    </>
   );
 }
 

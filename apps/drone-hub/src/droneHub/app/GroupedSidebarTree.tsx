@@ -932,7 +932,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
         <div
           ref={chatTailDropDisabled ? undefined : setChatTailDropNodeRef}
           data-sidebar-chat-rail="true"
-          className={`${densityClasses.chatBlockIndent} flex flex-col gap-0 border-l border-[var(--border-subtle)]`}
+          className={`${densityClasses.chatBlockIndent} flex flex-col gap-0 border-l border-[var(--border-subtle)] [--sidebar-selection-edge-offset:-1px]`}
         >
           {showCreateChatEditor ? (
             <div className="flex flex-col gap-0.5">

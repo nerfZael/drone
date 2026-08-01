@@ -48,6 +48,7 @@ type GroupMultiChatWorkspaceProps = {
     source: { droneId: string; chatName: string },
   ) => Promise<void>;
   focusedNewChatActionId: string;
+  onCreateNewChatAutoFocusHandled: (promptId: string) => void;
   promotingNewChatActionById: Record<string, true>;
   promoteNewChatActionErrorById: Record<string, string>;
   onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
@@ -71,6 +72,7 @@ export function GroupMultiChatWorkspace({
   onSendPromptInNewChat,
   onCreateQueuedNewChatNow,
   focusedNewChatActionId,
+  onCreateNewChatAutoFocusHandled,
   promotingNewChatActionById,
   promoteNewChatActionErrorById,
   onAutoRenameChatFromFirstPrompt,
@@ -327,6 +329,7 @@ export function GroupMultiChatWorkspace({
                     })
                   }
                   focusedNewChatActionId={focusedNewChatActionId}
+                  onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
                   promotingNewChatActionById={promotingNewChatActionById}
                   promoteNewChatActionErrorById={promoteNewChatActionErrorById}
                   onAutoRenameChatFromFirstPrompt={onAutoRenameChatFromFirstPrompt}

@@ -502,9 +502,68 @@ describe('agent chat surface adapters', () => {
       />,
     );
 
-    expect(html).toContain('New chat queued');
+    expect(html).toContain('>New chat</span>');
+    expect(html).toContain('border-b-0');
+    expect(html).toContain('bg-[color-mix(in_srgb,var(--accent)_11%,var(--surface-soft))]');
+    expect(html).toContain('-mb-px flex justify-end"><span');
+    expect(html).toContain('rounded-tr-none');
     expect(html).toContain('>Create now</button>');
+    expect(html).toContain('aria-keyshortcuts="Enter Escape"');
+    expect(html).toContain('aria-label="Cancel queued new chat"');
     expect(html).toContain('Runs after earlier work finishes');
+  });
+
+  test('native new-chat actions show creation activity without elapsed seconds', () => {
+    const html = renderToStaticMarkup(
+      <AssistantQueuedPromptRow
+        prompt={{
+          id: 'creating-chat',
+          prompt: 'Review this work',
+          promptImages: [],
+          imageCount: 0,
+          createdAt: '2026-07-23T00:00:00.000Z',
+          deliveryMode: 'queue',
+          status: 'queued',
+          error: null,
+          action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+        }}
+        cancelling={false}
+        creatingNewChat
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(html).toContain('Creating a new chat');
+    expect(html).toContain('animate-spin');
+    expect(html).toContain('role="status"');
+    expect(html).not.toContain('Working for');
+    expect(html).not.toContain('Runs after earlier work finishes');
+    expect(html).not.toContain('>Create now</button>');
+    expect(html).toContain('disabled=""');
+  });
+
+  test('native queue-runner activity shows the same new-chat creation status', () => {
+    const html = renderToStaticMarkup(
+      <AssistantQueuedPromptRow
+        prompt={{
+          id: 'claimed-chat',
+          prompt: 'Review this work',
+          promptImages: [],
+          imageCount: 0,
+          createdAt: '2026-07-23T00:00:00.000Z',
+          deliveryMode: 'queue',
+          status: 'running',
+          error: null,
+          action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+        }}
+        cancelling={false}
+        onCancel={() => {}}
+      />,
+    );
+
+    expect(html).toContain('Creating a new chat');
+    expect(html).toContain('animate-spin');
+    expect(html).not.toContain('Runs after earlier work finishes');
   });
 
   test('the shared message body renders the same markdown and images for either controller', () => {
@@ -673,6 +732,7 @@ describe('agent chat surface adapters', () => {
     expect(userHtml).toContain('text-[var(--user-bubble-fg)]');
     expect(userHtml).not.toContain('>You<');
     expect(workingHtml).toContain('Working for 4s');
+    expect(workingHtml).toContain('max-w-[var(--chat-prose-max)]');
     expect(workingHtml).not.toContain('animate-pulse');
     expect(workingHtml).not.toContain('>Agent<');
   });
@@ -979,6 +1039,7 @@ describe('agent chat surface adapters', () => {
     );
 
     expect(html).toContain('Worked for 10s');
+    expect(html).toContain('max-w-[var(--chat-prose-max)]');
     expect(html).not.toContain('aria-label="Expand activity"');
     expect(html).not.toContain('border-l border-[var(--border-subtle)]');
   });

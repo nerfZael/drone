@@ -564,6 +564,7 @@ type SelectedDroneWorkspaceProps = {
   cancelPendingPromptErrorById: Record<string, string>;
   onCreateQueuedNewChatNow: (promptId: string) => Promise<void>;
   focusedNewChatActionId: string;
+  onCreateNewChatAutoFocusHandled: (promptId: string) => void;
   promotingNewChatActionById: Record<string, true>;
   promoteNewChatActionErrorById: Record<string, string>;
   openedEditorFileOpenFailureMessage: string | null;
@@ -678,6 +679,7 @@ export function SelectedDroneWorkspace({
   cancelPendingPromptErrorById,
   onCreateQueuedNewChatNow,
   focusedNewChatActionId,
+  onCreateNewChatAutoFocusHandled,
   promotingNewChatActionById,
   promoteNewChatActionErrorById,
   openedEditorFileOpenFailureMessage,
@@ -1324,6 +1326,7 @@ export function SelectedDroneWorkspace({
             createNewChatBusy={Boolean(promotingNewChatActionById[prompt.id])}
             createNewChatError={promoteNewChatActionErrorById[prompt.id] ?? null}
             autoFocusCreateNewChat={focusedNewChatActionId === prompt.id}
+            onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
             autoExpandPrompt={isLatestActivity}
             initiallyExpandFileChanges={timelineIndex === latestFileChangesTimelineIndex}
           />
@@ -2319,6 +2322,7 @@ export function SelectedDroneWorkspace({
                     onSendPromptInNewChat={onSendPromptInNewChat}
                     onCreateQueuedNewChatNow={onCreateQueuedNewChatNow}
                     focusedNewChatActionId={focusedNewChatActionId}
+                    onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
                     promotingNewChatActionById={promotingNewChatActionById}
                     promoteNewChatActionErrorById={promoteNewChatActionErrorById}
                     messageFeatures={{

@@ -82,6 +82,7 @@ export type GroupMultiChatColumnProps = {
   onSendPromptInNewChat: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onCreateQueuedNewChatNow: (actionId: string, sourceChatName: string) => Promise<void>;
   focusedNewChatActionId: string;
+  onCreateNewChatAutoFocusHandled: (promptId: string) => void;
   promotingNewChatActionById: Record<string, true>;
   promoteNewChatActionErrorById: Record<string, string>;
   onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
@@ -100,6 +101,7 @@ export function GroupMultiChatColumn({
   onSendPromptInNewChat,
   onCreateQueuedNewChatNow,
   focusedNewChatActionId,
+  onCreateNewChatAutoFocusHandled,
   promotingNewChatActionById,
   promoteNewChatActionErrorById,
   onAutoRenameChatFromFirstPrompt,
@@ -1092,6 +1094,7 @@ export function GroupMultiChatColumn({
                 createNewChatBusy={Boolean(promotingNewChatActionById[item.id])}
                 createNewChatError={promoteNewChatActionErrorById[item.id] ?? null}
                 autoFocusCreateNewChat={focusedNewChatActionId === item.id}
+                onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
               />
             ))}
           </div>

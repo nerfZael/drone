@@ -286,6 +286,7 @@ export function AssistantDock({
   onSendPromptInNewChat,
   onCreateQueuedNewChatNow,
   focusedNewChatActionId = '',
+  onCreateNewChatAutoFocusHandled,
   promotingNewChatActionById = {},
   promoteNewChatActionErrorById = {},
 }: {
@@ -297,6 +298,7 @@ export function AssistantDock({
   onSendPromptInNewChat?: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onCreateQueuedNewChatNow?: (promptId: string) => Promise<void>;
   focusedNewChatActionId?: string;
+  onCreateNewChatAutoFocusHandled?: (promptId: string) => void;
   promotingNewChatActionById?: Record<string, true>;
   promoteNewChatActionErrorById?: Record<string, string>;
 }) {
@@ -2225,6 +2227,7 @@ export function AssistantDock({
           }
           creatingNewChat={Boolean(promotingNewChatActionById[prompt.id])}
           autoFocusCreateNewChat={focusedNewChatActionId === prompt.id}
+          onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
           createNewChatError={promoteNewChatActionErrorById[prompt.id] ?? null}
         />
       ),

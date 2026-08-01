@@ -16,11 +16,12 @@ import {
 import type { MarkdownFileReference } from './MarkdownMessage';
 import { RelativeTimeText } from './RelativeTimeText';
 import { AgentPlanList } from './AgentPlanList';
-import { WorkingElapsedStatus } from './WorkingElapsedStatus';
+import { CreatingNewChatStatus, WorkingElapsedStatus } from './WorkingElapsedStatus';
 import { UserChatMessage } from './UserChatMessage';
 import { ChangedFilesCard } from './ChangedFilesCard';
 import { StoppedRunNotice } from './StoppedRunNotice';
 import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
+import { CreateNewChatNowButton, QueuedNewChatLabel } from './QueuedNewChatAction';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
@@ -38,6 +39,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   createNewChatBusy = false,
   createNewChatError = null,
   autoFocusCreateNewChat = false,
+  onCreateNewChatAutoFocusHandled,
 }: {
   item: PendingPrompt;
   showRoleIcons?: boolean;
@@ -54,6 +56,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   createNewChatBusy?: boolean;
   createNewChatError?: string | null;
   autoFocusCreateNewChat?: boolean;
+  onCreateNewChatAutoFocusHandled?: (promptId: string) => void;
 }) {
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
@@ -73,17 +76,15 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   const runStartedAt = item.startedAt ?? null;
   const badgeLabel = isFailed && !isStopped ? 'Failed' : null;
   const actionPresentation = resolveChatQueueActionPresentation(item.action, item.state);
+  const creatingNewChat =
+    Boolean(actionPresentation) &&
+    (createNewChatBusy || actionPresentation?.state === 'running');
   const canCancelQueued =
     Boolean(onCancelQueued) && (actionPresentation?.canCancel ?? item.state === 'queued');
-  const createNowRef = React.useRef<HTMLButtonElement | null>(null);
-  React.useEffect(() => {
-    if (!autoFocusCreateNewChat || !actionPresentation?.canExecuteNow) return;
-    createNowRef.current?.focus();
-  }, [actionPresentation?.canExecuteNow, autoFocusCreateNewChat]);
   const showAgentPendingBubble = !actionPresentation && !(item.state === 'queued' && !isFailed);
   const agentCopyText = isFailed ? stripAnsi(item.error || 'failed to send') : 'Working…';
   const queuedFooter =
-    item.state === 'queued' ? (
+    item.state === 'queued' && !createNewChatBusy ? (
       <div className="mt-2 flex items-center justify-between gap-3 border-t border-[var(--border-subtle)] pt-2">
         <span
           role="status"
@@ -121,15 +122,13 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         </span>
         <div className="flex items-center gap-1.5">
           {actionPresentation?.canExecuteNow && onCreateNewChatNow ? (
-            <button
-              ref={createNowRef}
-              type="button"
+            <CreateNewChatNowButton
+              autoFocus={autoFocusCreateNewChat}
+              onAutoFocusComplete={() => onCreateNewChatAutoFocusHandled?.(item.id)}
               onClick={() => void onCreateNewChatNow(item.id)}
               disabled={createNewChatBusy || cancelBusy}
-              className="inline-flex min-h-7 items-center rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] transition-colors hover:bg-[var(--accent-muted)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {createNewChatBusy ? 'Creating…' : 'Create now'}
-            </button>
+              busy={createNewChatBusy}
+            />
           ) : null}
           {canCancelQueued ? (
             <button
@@ -147,12 +146,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       </div>
     ) : null;
   const pendingHeader = actionPresentation ? (
-    <span
-      className={`rounded border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${actionPresentation.state === 'failed' ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]' : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'}`}
-      style={{ fontFamily: 'var(--display)' }}
-    >
-      {actionPresentation.label}
-    </span>
+    <QueuedNewChatLabel failed={actionPresentation.state === 'failed'} />
   ) : badgeLabel ? (
     <span
       className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)]"
@@ -168,6 +162,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         at={item.at}
         showRoleIcons={showRoleIcons}
         headerEnd={pendingHeader}
+        headerAttached={Boolean(actionPresentation)}
         text={promptText}
         autoExpand={autoExpandPrompt}
         onOpenFileReference={onOpenFileReference}
@@ -221,6 +216,15 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             initiallyExpanded={initiallyExpandFileChanges}
           />
         </>
+      ) : creatingNewChat ? (
+        <ChatMessageFrame
+          role="assistant"
+          showRoleIcon={showRoleIcons}
+          showRoleLabel={showRoleIcons}
+          plainAssistant={!showRoleIcons}
+        >
+          <CreatingNewChatStatus />
+        </ChatMessageFrame>
       ) : showAgentPendingBubble ? (
         <ChatMessageFrame
           role="assistant"

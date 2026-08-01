@@ -79,11 +79,33 @@ describe('external pending transcript turn', () => {
       />,
     );
 
-    expect(html).toContain('New chat queued');
+    expect(html).toContain('>New chat</span>');
+    expect(html).toContain('border-b-0');
+    expect(html).toContain('bg-[color-mix(in_srgb,var(--accent)_11%,var(--user-bubble))]');
+    expect(html).toContain('-mb-px flex justify-end"><span');
+    expect(html).toContain('rounded-tr-none');
     expect(html).toContain('Waiting to create a fresh chat');
     expect(html).toContain('>Create now</button>');
+    expect(html).toContain('aria-keyshortcuts="Enter Escape"');
     expect(html).toContain('aria-label="Cancel queued new chat"');
     expect(html).not.toContain('Working for');
+  });
+
+  test('keeps an attached new-chat tab singular when role icons are visible', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          state: 'queued',
+          action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+        })}
+        showRoleIcons
+        onCreateNewChatNow={() => {}}
+      />,
+    );
+
+    expect(html.match(/>New chat<\/span>/g)).toHaveLength(1);
+    expect(html.match(/>You<\/span>/g)).toHaveLength(1);
+    expect(html).toContain('-mb-px flex items-end justify-between');
   });
 
   test('shows the failure reason when a queued new-chat action terminates', () => {
@@ -101,6 +123,41 @@ describe('external pending transcript turn', () => {
     expect(html).toContain('Could not initialize the target agent');
     expect(html).not.toContain('\u001b[31m');
     expect(html).not.toContain('Working for');
+  });
+
+  test('shows a spinner while a queued new chat is being created', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          state: 'queued',
+          action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+        })}
+        createNewChatBusy
+      />,
+    );
+
+    expect(html).toContain('Creating a new chat');
+    expect(html).toContain('animate-spin');
+    expect(html).toContain('role="status"');
+    expect(html).toContain('max-w-[var(--chat-prose-max)]');
+    expect(html).not.toContain('Working for');
+    expect(html).not.toContain('Waiting to create a fresh chat');
+    expect(html).not.toContain('>Create now</button>');
+  });
+
+  test('shows creation activity when the queue runner claims a new-chat action', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          state: 'sending',
+          action: { type: 'send-in-new-chat', sourceChatName: 'default' },
+        })}
+      />,
+    );
+
+    expect(html).toContain('Creating a new chat');
+    expect(html).toContain('animate-spin');
+    expect(html).not.toContain('Waiting to create a fresh chat');
   });
 
   test('counts working time from daemon execution rather than the queued timestamp', () => {

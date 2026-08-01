@@ -3589,6 +3589,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [createDroneChat],
   );
   const [focusedNewChatActionId, setFocusedNewChatActionId] = React.useState('');
+  const consumeNewChatActionAutoFocus = React.useCallback((actionIdRaw: string) => {
+    const actionId = String(actionIdRaw ?? '').trim();
+    if (!actionId) return;
+    setFocusedNewChatActionId((current) => (current === actionId ? '' : current));
+  }, []);
   const [promotingNewChatActionById, setPromotingNewChatActionById] = React.useState<
     Record<string, true>
   >({});
@@ -4518,6 +4523,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sendPromptInNewDroneChat,
     createQueuedNewChatNow,
     focusedNewChatActionId,
+    consumeNewChatActionAutoFocus,
     promotingNewChatActionById,
     promoteNewChatActionErrorById,
     handleAutoRenameChatFromFirstPrompt,

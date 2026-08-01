@@ -12,6 +12,7 @@ export function ChatMessageFrame({
   showRoleLabel = true,
   plainAssistant = false,
   headerEnd,
+  headerAttached = false,
   hoverActions,
   children,
   className = '',
@@ -24,6 +25,7 @@ export function ChatMessageFrame({
   showRoleLabel?: boolean;
   plainAssistant?: boolean;
   headerEnd?: React.ReactNode;
+  headerAttached?: boolean;
   hoverActions?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
@@ -31,7 +33,8 @@ export function ChatMessageFrame({
   const user = role === 'user';
   const label = user ? 'You' : 'Agent';
   const transparentAssistant = !user && plainAssistant && !error && !warning;
-  const showHeader = showRoleLabel || Boolean(headerEnd);
+  const showAttachedHeader = user && headerAttached && Boolean(headerEnd);
+  const showHeader = !showAttachedHeader && (showRoleLabel || Boolean(headerEnd));
   const surfaceClass = transparentAssistant
     ? 'py-1'
     : user
@@ -73,6 +76,21 @@ export function ChatMessageFrame({
           {hoverActions}
         </div>
       ) : null}
+      {showAttachedHeader ? (
+        <div
+          className={`relative z-[1] -mb-px flex ${showRoleLabel ? 'items-end justify-between' : 'justify-end'}`}
+        >
+          {showRoleLabel ? (
+            <span
+              className="pb-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--user-muted)]"
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              {label}
+            </span>
+          ) : null}
+          {headerEnd}
+        </div>
+      ) : null}
       {showHeader ? (
         <div
           className={`mb-1.5 flex items-center gap-2 ${user ? 'justify-end' : 'justify-between'}`}
@@ -99,7 +117,11 @@ export function ChatMessageFrame({
           </div>
         </div>
       ) : null}
-      <div className={`group relative ${surfaceClass} ${className}`}>{children}</div>
+      <div
+        className={`group relative ${surfaceClass} ${showAttachedHeader ? 'rounded-tr-none' : ''} ${className}`}
+      >
+        {children}
+      </div>
     </div>
   );
 

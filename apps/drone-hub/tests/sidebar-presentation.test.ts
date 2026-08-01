@@ -73,6 +73,9 @@ describe('sidebar presentation', () => {
     expect(normal.folderLabel).toContain('text-[var(--sidebar-item-size)]');
     expect(normal.folderBody).toContain('ml-2.5');
     expect(normal.folderBody).toContain('pl-0');
+    expect(compact.chatBlockIndent).toBe('ml-[9px] mr-1');
+    expect(normal.chatBlockIndent).toBe('ml-2.5 mr-1');
+    expect(comfortable.chatBlockIndent).toBe('ml-3 mr-1');
     expect(compact.folderDepthPaddingPx).toBeLessThan(normal.folderDepthPaddingPx);
     expect(normal.folderDepthPaddingPx).toBeLessThan(comfortable.folderDepthPaddingPx);
     expect(sidebarFolderLabelClass).toContain('dh-type-sidebar-heading');
@@ -193,7 +196,7 @@ describe('sidebar presentation', () => {
 
     expect(groupedTreeSource).toContain('data-sidebar-chat-rail="true"');
     expect(groupedTreeSource).toContain(
-      'className={`${densityClasses.chatBlockIndent} flex flex-col gap-0 border-l border-[var(--border-subtle)]`}',
+      'className={`${densityClasses.chatBlockIndent} flex flex-col gap-0 border-l border-[var(--border-subtle)] [--sidebar-selection-edge-offset:-1px]`}',
     );
   });
 
