@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  AUTO_RENAME_NAME_SUGGESTION_RETRY_DELAYS_MS,
   DEFAULT_DRONE_NAME_MODEL_ID,
+  retryTemporaryNameSuggestion,
   suggestDroneNameFromMessage,
 } from '../src/hub/drone-name-from-message';
 import { codexObjectCompletionOptions } from '../src/hub/llm-runtime';
@@ -28,6 +30,35 @@ describe('name suggestion model', () => {
       reasoningEffort: 'none',
       maxRetries: 1,
     });
+  });
+
+  test('retries temporary naming failures after 5 and 10 seconds, then stops', async () => {
+    const delays: number[] = [];
+    let attempts = 0;
+    const recovered = await retryTemporaryNameSuggestion(
+      async () => {
+        attempts += 1;
+        if (attempts < 3) throw new Error('fetch failed');
+        return 'Recovered name';
+      },
+      { wait: async (delayMs) => void delays.push(delayMs) },
+    );
+
+    expect(recovered).toBe('Recovered name');
+    expect(attempts).toBe(3);
+    expect(delays).toEqual([...AUTO_RENAME_NAME_SUGGESTION_RETRY_DELAYS_MS]);
+
+    let permanentAttempts = 0;
+    await expect(
+      retryTemporaryNameSuggestion(
+        async () => {
+          permanentAttempts += 1;
+          throw new Error('This model is no longer available.');
+        },
+        { wait: async () => {} },
+      ),
+    ).rejects.toThrow('no longer available');
+    expect(permanentAttempts).toBe(1);
   });
 
   test('sends GPT-5.6 Luna with no reasoning through the OpenAI fallback', async () => {

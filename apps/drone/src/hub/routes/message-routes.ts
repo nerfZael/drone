@@ -1,5 +1,6 @@
 import {
   DEFAULT_DRONE_NAME_MODEL_ID,
+  retryTemporaryNameSuggestion,
   suggestDroneNameFromMessage,
 } from '../drone-name-from-message';
 import type { LlmProviderId } from '../hub-settings';
@@ -57,11 +58,26 @@ export function registerMessageRoutes(apiRouter: HubRouter, deps: MessageRouteDe
         });
         return;
       }
-      const name = await suggestDroneNameFromMessage(message, {
-        provider,
-        apiKey: resolved.apiKey,
-        style: source === 'draft-create' ? 'identifier' : 'display',
-      });
+      const suggest = () =>
+        suggestDroneNameFromMessage(message, {
+          provider,
+          apiKey: resolved.apiKey,
+          style: source === 'draft-create' ? 'identifier' : 'display',
+        });
+      const name = source?.endsWith('auto-rename')
+        ? await retryTemporaryNameSuggestion(suggest, {
+            onRetry: ({ attempt, delayMs, error }) => {
+              hubLog('warn', 'name-from-message temporary failure; retrying', {
+                provider,
+                source,
+                requestedDroneId,
+                attempt,
+                delayMs,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            },
+          })
+        : await suggest();
       if (source || requestedDroneId) {
         hubLog('info', 'name-from-message suggested', {
           provider,
