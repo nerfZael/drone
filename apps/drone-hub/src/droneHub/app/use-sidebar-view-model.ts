@@ -6,6 +6,7 @@ import { isStartupSeedFresh } from './app-config';
 import type { StartupSeedState } from './app-types';
 import { orderSidebarEntries, orderSidebarGroups, sidebarGroupLegacyOrderToken, sidebarGroupOrderToken } from './sidebar-group-order';
 import { isSidebarGroupDeleting as matchesDeletingSidebarGroup } from './sidebar-group-delete-visibility';
+import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import { isSameOrDescendantSidebarGroupPath } from './sidebar-group-paths';
 import { buildRepoSidebarGroups } from './sidebar-repo-groups';
 import { isDroneRecentForSidebar } from './sidebar-recent-filter';
@@ -283,7 +284,7 @@ export function useSidebarViewModel({
   const sidebarVisibleDrones = React.useMemo(() => {
     const visible: DroneSummary[] = [];
     for (const group of sidebarGroups) {
-      if (collapsedGroups[group.group]) continue;
+      if (isSidebarGroupCollapsed(collapsedGroups, group.group)) continue;
       visible.push(...group.items);
     }
     return visible;
