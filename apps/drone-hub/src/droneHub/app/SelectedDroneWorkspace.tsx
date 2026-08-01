@@ -1328,7 +1328,9 @@ export function SelectedDroneWorkspace({
             autoFocusCreateNewChat={focusedNewChatActionId === prompt.id}
             onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
             autoExpandPrompt={isLatestActivity}
-            initiallyExpandFileChanges={timelineIndex === latestFileChangesTimelineIndex}
+            initiallyExpandFileChanges={
+              isLatestActivity && timelineIndex === latestFileChangesTimelineIndex
+            }
           />
         ),
       });
@@ -1343,7 +1345,9 @@ export function SelectedDroneWorkspace({
         <TranscriptTurn
           item={turn}
           autoExpandAgentMessage={isLatestActivity}
-          initiallyExpandFileChanges={timelineIndex === latestFileChangesTimelineIndex}
+          initiallyExpandFileChanges={
+            isLatestActivity && timelineIndex === latestFileChangesTimelineIndex
+          }
           onSpawnDroneHubTask={spawnCurrentDroneHubTask}
           messageId={messageId}
           onRollbackDockerSnapshot={rollbackDockerSnapshot}

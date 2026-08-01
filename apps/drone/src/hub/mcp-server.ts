@@ -1167,6 +1167,48 @@ function chatPrincipal(
   return context.principal.kind === 'chat' ? context.principal : null;
 }
 
+function subscriptionSubscriber(context: McpToolRegistrationContext) {
+  const principal = chatPrincipal(context);
+  if (!principal) {
+    throw new Error('resource subscriptions require a DroneHub conversation identity');
+  }
+  return {
+    chatId: principal.chatId,
+    droneId: principal.droneId,
+    chatName: principal.chatName,
+  };
+}
+
+function mcpSubscription(value: any): any {
+  if (!value || typeof value !== 'object') return value;
+  const { cursor: _cursor, subscriber: _subscriber, ...subscription } = value;
+  return subscription;
+}
+
+async function authorizeChatSubscriptionResource(
+  context: McpToolRegistrationContext,
+  resourceId: string,
+): Promise<void> {
+  const principal = chatPrincipal(context);
+  if (!principal) return;
+  const response = await requestJson(
+    `/api/resource-subscriptions/chat-resource/${encodeURIComponent(resourceId)}`,
+    { method: 'GET' },
+  );
+  const droneId = cleanString(response?.resource?.droneId);
+  if (
+    !droneId ||
+    !mcpChatAccessAllowsDrone(
+      principal.accessScope,
+      'read',
+      droneId,
+      principal.selectedDroneRefs,
+    )
+  ) {
+    throw new Error('MCP principal is not authorized for the requested chat resource');
+  }
+}
+
 async function requireContainerDroneForManagedChat(
   context: McpToolRegistrationContext,
   droneRefRaw: unknown,
@@ -1808,6 +1850,14 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
               .filter(([name, draft]) => Boolean(name) && draft),
           )
         : {};
+    const chatIdByName = Object.fromEntries(
+      (Array.isArray(response?.chatDetails) ? response.chatDetails : [])
+        .map(
+          (item: any) =>
+            [cleanString(item?.chat ?? item?.name), cleanString(item?.chatId)] as const,
+        )
+        .filter(([name, id]: readonly [string, string]) => Boolean(name && id)),
+    );
     for (const item of Array.isArray(response?.chatDetails) ? response.chatDetails : []) {
       const name = cleanString(item?.chat ?? item?.name);
       if (name && item?.draft === true) draftByChat[name] = true;
@@ -1819,7 +1869,18 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         ? response.chats
             .map((item: any) => {
               const name = typeof item === 'string' ? cleanString(item) : cleanString(item?.chat ?? item?.name);
-              return name ? { name, ...((typeof item === 'object' && item?.draft === true) || draftByChat[name] ? { draft: true } : {}) } : null;
+              const resourceId =
+                (typeof item === 'object' ? cleanString(item?.chatId ?? item?.id) : '') ||
+                chatIdByName[name];
+              return name
+                ? {
+                    name,
+                    ...(resourceId ? { resourceId } : {}),
+                    ...((typeof item === 'object' && item?.draft === true) || draftByChat[name]
+                      ? { draft: true }
+                      : {}),
+                  }
+                : null;
             })
             .filter(Boolean)
         : [],
@@ -1833,14 +1894,28 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
   }, async (args) => {
     await requireContainerDroneForManagedChat(context, args.drone, 'create chats');
     let created = true;
-    await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
+    let result: any = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
       method: 'POST',
       body: JSON.stringify({ name: args.chat, ...(args.draft === true ? { draft: true } : {}) }),
     }).catch((error: any) => {
       if (error?.status !== 409) throw error;
       created = false;
     });
-    return toolResult({ ok: true, drone: args.drone, chat: args.chat, created });
+    if (!result?.chatId) {
+      const listed = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
+        method: 'GET',
+      });
+      result = (Array.isArray(listed?.chatDetails) ? listed.chatDetails : []).find(
+        (item: any) => cleanString(item?.chat ?? item?.name) === cleanString(args.chat),
+      );
+    }
+    return toolResult({
+      ok: true,
+      drone: args.drone,
+      chat: args.chat,
+      created,
+      resourceId: cleanString(result?.chatId) || undefined,
+    });
   });
 
   server.registerTool('send_message', {
@@ -1870,6 +1945,109 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       body: JSON.stringify(body),
     }, 30_000);
     return toolResult({ ok: true, drone: cleanString(response?.id, args.drone), chat, runId: cleanString(response?.promptId || body.promptId), status: cleanString(response?.pendingState, 'queued'), raw: response });
+  });
+
+  const resourceEventSchema = z.enum([
+    'chat.idle',
+    'chat.failed',
+    'pull_request.opened',
+    'pull_request.comment.created',
+    'pull_request.merged',
+    'pull_request.closed',
+  ]);
+  server.registerTool('subscribe_to_resource_events', {
+    title: 'Subscribe to resource events',
+    description:
+      'Subscribe this conversation to events. Chat IDs support chat.idle and chat.failed and require read access. GitHub owner/repository supports pull_request.opened, pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub owner/repository#number supports pull_request.comment.created, pull_request.merged, and pull_request.closed. GitHub resources are validated directly with the Hub GitHub identity and do not need to be registered in DroneHub. Delivery settings and cursors are managed by DroneHub.',
+    inputSchema: {
+      provider: z.enum(['drone-hub', 'github']),
+      resourceType: z.enum(['chat', 'repository', 'pull_request']),
+      resourceId: z.string(),
+      events: z.array(resourceEventSchema).min(1),
+      intent: z.string().optional(),
+    },
+  }, async (args) => {
+    const subscriber = subscriptionSubscriber(context);
+    if (args.provider === 'drone-hub' && args.resourceType === 'chat') {
+      await authorizeChatSubscriptionResource(context, args.resourceId);
+    }
+    const response = await requestJson('/api/resource-subscriptions', {
+      method: 'POST',
+      body: JSON.stringify({ ...args, subscriber }),
+    });
+    return toolResult({
+      ok: true,
+      created: response?.created === true,
+      subscription: mcpSubscription(response?.subscription),
+    });
+  });
+
+  server.registerTool('list_resource_subscriptions', {
+    title: 'List resource subscriptions',
+    description: 'List resource subscriptions owned by this conversation.',
+    inputSchema: { includeInactive: z.boolean().optional() },
+  }, async (args) => {
+    const subscriber = subscriptionSubscriber(context);
+    const response = await requestJson(
+      `/api/resource-subscriptions?subscriberChatId=${encodeURIComponent(subscriber.chatId)}&includeInactive=${args.includeInactive === true}`,
+      { method: 'GET' },
+    );
+    return toolResult({
+      ok: true,
+      subscriptions: (Array.isArray(response?.subscriptions) ? response.subscriptions : []).map(
+        mcpSubscription,
+      ),
+    });
+  });
+
+  server.registerTool('get_resource_subscription', {
+    title: 'Get resource subscription',
+    description: 'Read one resource subscription owned by this conversation.',
+    inputSchema: { subscriptionId: z.string() },
+  }, async (args) => {
+    const subscriber = subscriptionSubscriber(context);
+    const response = await requestJson(
+      `/api/resource-subscriptions/${encodeURIComponent(args.subscriptionId)}?subscriberChatId=${encodeURIComponent(subscriber.chatId)}`,
+      { method: 'GET' },
+    );
+    return toolResult({ ok: true, subscription: mcpSubscription(response?.subscription) });
+  });
+
+  server.registerTool('update_resource_subscription', {
+    title: 'Update resource subscription',
+    description: 'Change the events or intent for a resource subscription owned by this conversation.',
+    inputSchema: {
+      subscriptionId: z.string(),
+      events: z.array(resourceEventSchema).min(1).optional(),
+      intent: z.string().optional(),
+    },
+  }, async (args) => {
+    const subscriber = subscriptionSubscriber(context);
+    const response = await requestJson(
+      `/api/resource-subscriptions/${encodeURIComponent(args.subscriptionId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          subscriberChatId: subscriber.chatId,
+          ...(args.events ? { events: args.events } : {}),
+          ...(args.intent !== undefined ? { intent: args.intent } : {}),
+        }),
+      },
+    );
+    return toolResult({ ok: true, subscription: mcpSubscription(response?.subscription) });
+  });
+
+  server.registerTool('cancel_resource_subscription', {
+    title: 'Cancel resource subscription',
+    description: 'Cancel a resource subscription owned by this conversation.',
+    inputSchema: { subscriptionId: z.string() },
+  }, async (args) => {
+    const subscriber = subscriptionSubscriber(context);
+    const response = await requestJson(
+      `/api/resource-subscriptions/${encodeURIComponent(args.subscriptionId)}?subscriberChatId=${encodeURIComponent(subscriber.chatId)}`,
+      { method: 'DELETE' },
+    );
+    return toolResult({ ok: true, subscription: mcpSubscription(response?.subscription) });
   });
 
   const idleTargetSchema = z.object({

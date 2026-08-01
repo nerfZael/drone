@@ -10,6 +10,7 @@ import {
 } from '../host/hub-database';
 import { appendHubOutboxEvent, initializeHubOutbox } from '../host/hub-outbox';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
+import { normalizeSilentCompletion } from '../host/silent-completion';
 import type { AgentRunFileChanges } from '@blip/protocol';
 import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
 import { normalizeAgentRunActivity } from './builtin-agent-activity';
@@ -21,6 +22,7 @@ export type StoredTranscriptTurn = {
   prompt: string;
   ok: boolean;
   output: string;
+  silentCompletion?: boolean;
   error?: string;
   promptAt?: string;
   startedAt?: string;
@@ -544,12 +546,18 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
   const at = String(raw?.at ?? new Date().toISOString());
   const id = typeof raw?.id === 'string' && raw.id.trim() ? raw.id.trim() : undefined;
   const activity = normalizeAgentRunActivity(raw?.activity);
+  const { output, silentCompletion } = normalizeSilentCompletion(
+    Boolean(raw?.ok),
+    raw?.output,
+    { explicitlySilent: raw?.silentCompletion === true, prompt: raw?.prompt, promptId: id },
+  );
   return {
     at,
     ...(id ? { id } : {}),
     prompt: String(raw?.prompt ?? ''),
     ok: Boolean(raw?.ok),
-    output: raw?.ok ? String(raw?.output ?? '') : '',
+    output,
+    ...(silentCompletion ? { silentCompletion: true } : {}),
     ...(!raw?.ok ? { error: String(raw?.error ?? 'failed') } : {}),
     ...(typeof raw?.promptAt === 'string' && raw.promptAt.trim() ? { promptAt: raw.promptAt.trim() } : {}),
     ...(typeof raw?.startedAt === 'string' && raw.startedAt.trim()

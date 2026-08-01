@@ -22,6 +22,10 @@ import { ChangedFilesCard } from './ChangedFilesCard';
 import { StoppedRunNotice } from './StoppedRunNotice';
 import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
 import { CreateNewChatNowButton, QueuedNewChatLabel } from './QueuedNewChatAction';
+import {
+  isSubscriptionEventPrompt,
+  SubscriptionEventBadge,
+} from './SubscriptionEventBadge';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
@@ -60,6 +64,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
 }) {
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
+  const isSubscriptionEvent = isSubscriptionEventPrompt(item.prompt);
   const isFailed = item.state === 'failed';
   const observability =
     item.observability?.state === 'status-unavailable'
@@ -145,7 +150,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         </div>
       </div>
     ) : null;
-  const pendingHeader = actionPresentation ? (
+  const statusBadge = actionPresentation ? (
     <QueuedNewChatLabel failed={actionPresentation.state === 'failed'} />
   ) : badgeLabel ? (
     <span
@@ -153,6 +158,12 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       style={{ fontFamily: 'var(--display)' }}
     >
       {badgeLabel}
+    </span>
+  ) : null;
+  const pendingHeader = statusBadge || isSubscriptionEvent ? (
+    <span className="inline-flex items-center gap-1.5">
+      {isSubscriptionEvent ? <SubscriptionEventBadge /> : null}
+      {statusBadge}
     </span>
   ) : null;
 

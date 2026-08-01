@@ -13,6 +13,7 @@ import type { AgentApprovalPolicy, AgentPermissionMode, ChatAgentConfig } from '
 import type { PendingPrompt } from './drone-pending-prompts';
 import type { DroneRuntime } from '../host/runtime';
 import type { ResolvedOrPendingDrone } from './drone-lifecycle-service';
+import { normalizeSilentCompletion } from '../host/silent-completion';
 
 type TranscriptTurn = any;
 
@@ -875,7 +876,11 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         ? normalizeAgentPlan(agentPlanRaw, agentPlanSource, String(agentPlanRaw?.updatedAt ?? ''))
         : undefined;
     const ok = Boolean(turn?.ok);
-    const output = ok ? String(turn?.output ?? '') : '';
+    const { output, silentCompletion } = normalizeSilentCompletion(
+      ok,
+      turn?.output,
+      { explicitlySilent: (turn as any)?.silentCompletion === true, prompt, promptId: id },
+    );
     const error = ok ? undefined : String(turn?.error ?? 'failed');
     return {
       turn: turnIndex + 1,
@@ -907,6 +912,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         : {}),
       ...((turn as any)?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
       ok,
+      ...(silentCompletion ? { silentCompletion: true } : {}),
       ...(ok ? { output } : { output: '', error }),
     };
   }

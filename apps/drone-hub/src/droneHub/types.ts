@@ -572,6 +572,7 @@ export type TranscriptItem = {
   session: string;
   logPath: string;
   ok: boolean;
+  silentCompletion?: boolean;
   error?: string;
   output: string;
   agentPlan?: AgentPlan;

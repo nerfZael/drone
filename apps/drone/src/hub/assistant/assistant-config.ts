@@ -33,7 +33,7 @@ export const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY =
   'When you send a drone chat message and need the result later, call subscribe_to_chats_idle on the target chat. This returns immediately so you can continue other work. If there is nothing else to do, end your turn; the system will resume this thread when the subscribed chats become idle.';
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
-  'When you send drone chat messages and need results later, call subscribe_to_any_chat_idle to resume as soon as one target chat is idle, or subscribe_to_all_chats_idle to resume only after every target chat is idle. These tools return immediately so you can continue other work. If there is nothing else to do, end your turn; the system will resume this thread when the subscription fires.';
+  'When you start asynchronous work and need the result later, use subscribe_to_resource_events for chat idle or failure events and GitHub pull-request events. It returns immediately; end your turn when there is nothing else to do, and the system will resume this conversation when subscribed events arrive.';
 export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
   'Use list_targets to discover the workspaces enabled for this chat, including its optional private Artifacts workspace. Use set_target to choose the default workspace before a sequence of file operations, or pass target explicitly on an individual workspace tool. When two or more workspaces are available, use transfer_files to copy a file or folder directly between them.';
 export const ASSISTANT_SINGLE_TARGET_PROMPT_LINE =
@@ -281,6 +281,36 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     category: 'chats',
     description: 'Cancel a durable chat-idle subscription.',
   },
+  {
+    name: 'subscribe_to_resource_events',
+    label: 'Subscribe to resource events',
+    category: 'chats',
+    description: 'Resume this conversation when selected DroneHub chat or GitHub events occur.',
+  },
+  {
+    name: 'list_resource_subscriptions',
+    label: 'List resource subscriptions',
+    category: 'chats',
+    description: 'List resource subscriptions owned by this conversation.',
+  },
+  {
+    name: 'get_resource_subscription',
+    label: 'Get resource subscription',
+    category: 'chats',
+    description: 'Read a resource subscription owned by this conversation.',
+  },
+  {
+    name: 'update_resource_subscription',
+    label: 'Update resource subscription',
+    category: 'chats',
+    description: 'Change events or intent for a resource subscription.',
+  },
+  {
+    name: 'cancel_resource_subscription',
+    label: 'Cancel resource subscription',
+    category: 'chats',
+    description: 'Cancel a resource subscription owned by this conversation.',
+  },
   ...WORKFLOW_ASSISTANT_TOOL_SUMMARIES,
   {
     name: 'create_drone',
@@ -383,6 +413,11 @@ const DRONE_HUB_MCP_TOOL_NAMES = new Set([
   'subscribe_to_all_chats_idle',
   'list_chat_idle_subscriptions',
   'cancel_chat_idle_subscription',
+  'subscribe_to_resource_events',
+  'list_resource_subscriptions',
+  'get_resource_subscription',
+  'update_resource_subscription',
+  'cancel_resource_subscription',
   'read_chat',
   ...WORKFLOW_MCP_TOOL_NAMES,
 ]);

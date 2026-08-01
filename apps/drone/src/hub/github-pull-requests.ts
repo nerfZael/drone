@@ -290,7 +290,7 @@ export async function inspectGithubAuthStatus(): Promise<GithubAuthStatus> {
   };
 }
 
-async function resolveGithubToken(): Promise<string | null> {
+export async function resolveGithubToken(): Promise<string | null> {
   for (const key of GITHUB_TOKEN_ENV_KEYS) {
     const raw = String(process.env[key] ?? '').trim();
     if (raw) return raw;
@@ -326,7 +326,7 @@ function parseGithubApiErrorMessage(status: number, statusText: string, parsedBo
   return message;
 }
 
-async function githubApiRequest<T>(opts: {
+export async function githubApiRequest<T>(opts: {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH';
   path: string;
   token?: string | null;
