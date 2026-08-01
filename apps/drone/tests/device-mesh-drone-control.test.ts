@@ -751,7 +751,7 @@ describe('device mesh drone summaries', () => {
     }
   });
 
-  test('returns durable pending prompts and forwards per-prompt cancellation', async () => {
+  test('filters completed pending prompts outside the mobile page and forwards cancellation', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; method: string }> = [];
     let markReadBody = '';
@@ -765,6 +765,12 @@ describe('device mesh drone summaries', () => {
         ? {
             ok: true,
             pending: [
+              {
+                id: 'prompt-completed',
+                at: '2026-07-15T11:00:00.000Z',
+                prompt: 'Review the code',
+                state: 'sent',
+              },
               {
                 id: 'prompt-2',
                 at: '2026-07-15T12:00:00.000Z',
@@ -787,7 +793,14 @@ describe('device mesh drone summaries', () => {
               }
             : {
                 ok: true,
-                turns: [{ turn: 1, prompt: 'Review the code' }],
+                turns: [
+                  { id: 'prompt-completed', turn: 1, prompt: 'Review the code' },
+                  ...Array.from({ length: 100 }, (_, index) => ({
+                    id: `later-${index + 1}`,
+                    turn: index + 2,
+                    prompt: `Later prompt ${index + 1}`,
+                  })),
+                ],
                 readState: {
                   unread: true,
                   latestAgentTurnId: 'turn-1',
@@ -804,13 +817,12 @@ describe('device mesh drone summaries', () => {
         baseUrl: () => 'http://127.0.0.1:7777',
         apiToken: 'test',
       });
-      const readResult = capability.invoke(
+      const readResult: any = await capability.invoke(
         'chat.read',
         { droneId: 'Untitled 6', chatName: 'default' },
         { sourceDevice: { id: 'phone-1' } } as never,
       );
-      await expect(readResult).resolves.toMatchObject({
-        turns: [{ turn: 1, prompt: 'Review the code' }],
+      expect(readResult).toMatchObject({
         pending: [
           {
             id: 'prompt-2',
@@ -825,6 +837,10 @@ describe('device mesh drone summaries', () => {
           latestAgentRevision: 2,
         },
       });
+      expect(readResult.turns).toHaveLength(100);
+      expect(
+        readResult.turns.some((turn: any) => turn.id === 'prompt-completed'),
+      ).toBe(false);
       expect(markReadBody).toBe(
         '{"latestAgentTurnId":"turn-1","latestAgentRevision":2,"updatedByDeviceId":"phone-1"}',
       );

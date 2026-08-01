@@ -79,16 +79,40 @@ export function mobileTranscriptGroupStartedAt(
   return group.type === 'run' ? group.startedAt : itemTimestamp(group.item);
 }
 
-export function sortMobileTranscriptTimeline<T extends { atMs: number; order: number }>(
-  entries: readonly T[],
-): T[] {
-  return [...entries].sort((left, right) => {
-    const leftHasTime = Number.isFinite(left.atMs);
-    const rightHasTime = Number.isFinite(right.atMs);
-    if (leftHasTime && rightHasTime && left.atMs !== right.atMs) return left.atMs - right.atMs;
-    if (leftHasTime !== rightHasTime) return leftHasTime ? -1 : 1;
-    return left.order - right.order;
-  });
+export function mergeMobileTranscriptTimeline<
+  TOrdered extends { atMs: number; order: number },
+  TInserted extends { atMs: number; order: number },
+>(
+  orderedEntries: readonly TOrdered[],
+  insertedEntries: readonly TInserted[],
+): Array<TOrdered | TInserted> {
+  const buckets = Array.from(
+    { length: orderedEntries.length + 1 },
+    () => [] as Array<TOrdered | TInserted>,
+  );
+  const inserts = [...insertedEntries].sort(compareTimelineEntries);
+  for (const entry of inserts) {
+    const insertionIndex = Number.isFinite(entry.atMs)
+      ? orderedEntries.findIndex(
+          (candidate) => !Number.isFinite(candidate.atMs) || candidate.atMs > entry.atMs,
+        )
+      : -1;
+    buckets[insertionIndex < 0 ? orderedEntries.length : insertionIndex]!.push(entry);
+  }
+  return orderedEntries
+    .flatMap((entry, index): Array<TOrdered | TInserted> => [...buckets[index]!, entry])
+    .concat(buckets.at(-1)!);
+}
+
+function compareTimelineEntries<T extends { atMs: number; order: number }>(
+  left: T,
+  right: T,
+): number {
+  const leftHasTime = Number.isFinite(left.atMs);
+  const rightHasTime = Number.isFinite(right.atMs);
+  if (leftHasTime && rightHasTime && left.atMs !== right.atMs) return left.atMs - right.atMs;
+  if (leftHasTime !== rightHasTime) return leftHasTime ? -1 : 1;
+  return left.order - right.order;
 }
 
 function toolCount(item: AssistantRenderItem): number {

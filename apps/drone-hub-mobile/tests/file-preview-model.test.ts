@@ -6,6 +6,9 @@ import {
   isMarkdownPreview,
   isRenderedHtmlPreviewAvailable,
   mobileHtmlPreviewMode,
+  mobileTextPreviewContent,
+  MOBILE_FORMATTED_TEXT_PREVIEW_MAX_CHARS,
+  MOBILE_RENDERED_TEXT_PREVIEW_MAX_CHARS,
   mobileWorkspaceRelativeFilePath,
   resolveMobileDroneFilePath,
 } from '../src/drones/file-preview-model';
@@ -87,6 +90,22 @@ describe('mobile file preview model', () => {
     expect(isMarkdownPreview('/work/repo/README.txt', 'text/plain')).toBe(false);
     expect(isCodePreview('/work/repo/src/index.ts', 'text/plain')).toBe(true);
     expect(isCodePreview('/work/repo/notes.txt', 'text/plain')).toBe(false);
+  });
+
+  test('falls back to bounded plain text for large files', () => {
+    expect(mobileTextPreviewContent('short')).toEqual({
+      content: 'short',
+      formatted: true,
+      truncated: false,
+    });
+    expect(
+      mobileTextPreviewContent('x'.repeat(MOBILE_FORMATTED_TEXT_PREVIEW_MAX_CHARS + 1)),
+    ).toMatchObject({ formatted: false, truncated: false });
+    const oversized = mobileTextPreviewContent(
+      'x'.repeat(MOBILE_RENDERED_TEXT_PREVIEW_MAX_CHARS + 1),
+    );
+    expect(oversized).toMatchObject({ formatted: false, truncated: true });
+    expect(oversized.content).toHaveLength(MOBILE_RENDERED_TEXT_PREVIEW_MAX_CHARS);
   });
 
   test('detects HTML by supported path or MIME type', () => {

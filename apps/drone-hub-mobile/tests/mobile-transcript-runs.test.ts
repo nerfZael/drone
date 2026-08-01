@@ -10,7 +10,7 @@ import {
   mobileRunIsThinking,
   mobileRunDetails,
   partitionMobileRunItems,
-  sortMobileTranscriptTimeline,
+  mergeMobileTranscriptTimeline,
   workingDurationLabel,
 } from '../src/local-assistant/mobile-transcript-runs';
 
@@ -322,12 +322,29 @@ describe('mobile transcript runs', () => {
   });
 
   test('places a historical stopped run at its original transcript time', () => {
-    const timeline = sortMobileTranscriptTimeline([
-      { label: 'newer run', atMs: Date.parse('2026-07-20T10:02:00.000Z'), order: 1 },
-      { label: 'stopped run', atMs: Date.parse('2026-07-20T10:01:00.000Z'), order: 2 },
-      { label: 'older run', atMs: Date.parse('2026-07-20T10:00:00.000Z'), order: 0 },
-    ]);
+    const timeline = mergeMobileTranscriptTimeline(
+      [
+        { label: 'older run', atMs: Date.parse('2026-07-20T10:00:00.000Z'), order: 0 },
+        { label: 'newer run', atMs: Date.parse('2026-07-20T10:02:00.000Z'), order: 1 },
+      ],
+      [{ label: 'stopped run', atMs: Date.parse('2026-07-20T10:01:00.000Z'), order: 2 }],
+    );
 
     expect(timeline.map((entry) => entry.label)).toEqual(['older run', 'stopped run', 'newer run']);
+  });
+
+  test('never reorders transcript groups when their timestamps disagree', () => {
+    const timeline = mergeMobileTranscriptTimeline(
+      [
+        { label: 'first server group', atMs: Date.parse('2026-07-20T10:02:00.000Z'), order: 0 },
+        { label: 'second server group', atMs: Date.parse('2026-07-20T10:00:00.000Z'), order: 1 },
+      ],
+      [],
+    );
+
+    expect(timeline.map((entry) => entry.label)).toEqual([
+      'first server group',
+      'second server group',
+    ]);
   });
 });

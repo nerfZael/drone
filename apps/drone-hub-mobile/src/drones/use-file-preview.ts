@@ -8,6 +8,7 @@ import type { MobileFileReference } from '../local-assistant/file-reference';
 import {
   mobileFileName,
   MOBILE_MEDIA_PREVIEW_MAX_BYTES,
+  MOBILE_SVG_PREVIEW_MAX_BYTES,
   mobileWorkspaceRelativeFilePath,
   resolveMobileDroneFilePath,
   type MobileFilePreview,
@@ -18,6 +19,7 @@ type PreviewRequest = {
   targetId: string;
   droneId: string;
   chatName: string;
+  phoneTarget: boolean;
   path: string;
   line: number | null;
 };
@@ -138,6 +140,9 @@ export function useFilePreview({
         const path = String(metadata.path ?? nextRequest.path).trim() || nextRequest.path;
         const mime = String(metadata.mime ?? '');
         const svg = metadata.kind === 'image' && mime === 'image/svg+xml';
+        if (svg && totalBytes > MOBILE_SVG_PREVIEW_MAX_BYTES) {
+          throw new Error('This SVG is too large to render safely on this phone');
+        }
         const chunks: Uint8Array[] = [];
         const extension = mobileFileName(path)
           .split('.')
@@ -291,6 +296,7 @@ export function useFilePreview({
         targetId,
         droneId: selectedDrone.id,
         chatName,
+        phoneTarget,
         path: phoneTarget
           ? reference.path
           : resolveMobileDroneFilePath(selectedDrone, reference.path),
@@ -311,8 +317,20 @@ export function useFilePreview({
     discardCachedPreview();
   }, [discardCachedPreview]);
 
+  const requestIsCurrent = Boolean(
+    request &&
+    selectedDrone &&
+    request.targetId === targetId &&
+    request.droneId === selectedDrone.id &&
+    request.chatName === chatName &&
+    request.phoneTarget === phoneTarget,
+  );
   React.useEffect(() => {
-    if (!request || !preview) return;
+    if (request && !requestIsCurrent) close();
+  }, [close, request, requestIsCurrent]);
+
+  React.useEffect(() => {
+    if (!request || !preview || !requestIsCurrent) return;
     let active = true;
     let checking = false;
     let checkCount = 0;
@@ -412,23 +430,25 @@ export function useFilePreview({
     phoneTarget,
     preview?.path,
     request,
+    requestIsCurrent,
     requestDroneControl,
     subscribeFileChanges,
   ]);
 
   return {
-    visible: Boolean(request),
-    preview,
-    displayPath: selectedDrone
-      ? mobileWorkspaceRelativeFilePath(selectedDrone, preview?.path ?? request?.path ?? '')
-      : (preview?.path ?? request?.path ?? ''),
-    line: request?.line ?? null,
-    loading,
-    error,
+    visible: requestIsCurrent,
+    preview: requestIsCurrent ? preview : null,
+    displayPath:
+      requestIsCurrent && selectedDrone
+        ? mobileWorkspaceRelativeFilePath(selectedDrone, preview?.path ?? request?.path ?? '')
+        : '',
+    line: requestIsCurrent ? (request?.line ?? null) : null,
+    loading: requestIsCurrent && loading,
+    error: requestIsCurrent ? error : null,
     open,
     close,
     retry: () => {
-      if (request) void load(request);
+      if (request && requestIsCurrent) void load(request);
     },
   };
 }
