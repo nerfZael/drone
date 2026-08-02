@@ -11,15 +11,12 @@ import type { CreateRuntime, RepoBranchSourceMode } from './drone-create-runtime
 import { NewDroneTargetControls } from './NewDroneTargetControls';
 import { AgentsMdCreateSelector } from './AgentsMdCreateSelector';
 import { repoPathLabel } from './repo-path-label';
-import { SegmentedToolbarToggle } from './SegmentedToolbarToggle';
 import type { AgentsMdFileSummary } from './settings-types';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type NewDroneSetupPanelProps = {
   createRuntime: CreateRuntime;
   onCreateRuntimeChange: (value: CreateRuntime) => void;
-  createAsDraft: boolean;
-  onCreateAsDraftChange: (value: boolean) => void;
   createPersistVolume: boolean;
   onCreatePersistVolumeChange: (value: boolean) => void;
   spawnAgentPermissionMode: AgentPermissionMode;
@@ -91,8 +88,6 @@ function CheckIcon() {
 export function NewDroneSetupPanel({
   createRuntime,
   onCreateRuntimeChange,
-  createAsDraft,
-  onCreateAsDraftChange,
   createPersistVolume,
   onCreatePersistVolumeChange,
   spawnAgentPermissionMode,
@@ -136,8 +131,6 @@ export function NewDroneSetupPanel({
   const repositoryLabel = chatHeaderRepoPath ? repoPathLabel(chatHeaderRepoPath) : '';
   const spawnAgentIsCodex =
     spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex';
-  const spawnAgentSupportsApprovals =
-    spawnAgentConfig.kind === 'native' || spawnAgentIsCodex;
 
   return (
     <div className="px-1 pb-1">
@@ -153,6 +146,13 @@ export function NewDroneSetupPanel({
         remoteBranches={draftRepoRemoteBranches}
         branchesLoading={draftRepoBranchesLoading}
         branchesError={draftRepoBranchesError}
+        permissionMode={spawnAgentPermissionMode}
+        onPermissionModeChange={onSpawnAgentPermissionModeChange}
+        approvalPolicy={spawnApprovalPolicy}
+        onApprovalPolicyChange={onSpawnApprovalPolicyChange}
+        readOnlySupported={spawnAgentReadOnlySupported}
+        approvalsSupported={spawnAgentApprovalSupported}
+        agentIsCodex={spawnAgentIsCodex}
         disabled={controlsLocked}
         actions={
           <>
@@ -162,7 +162,7 @@ export function NewDroneSetupPanel({
               aria-controls={advancedPanelId}
               onClick={() => setAdvancedOpen((open) => !open)}
               disabled={controlsLocked}
-              className={`inline-flex h-7 items-center gap-1.5 rounded-[var(--chat-composer-control-radius)] px-2 text-[var(--text-10)] font-medium transition-colors hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--chat-composer-control-radius)] px-2 text-[var(--text-10)] font-medium transition-colors hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40 ${
                 advancedOpen
                   ? 'bg-[var(--surface-soft)] text-[var(--fg-secondary)]'
                   : 'text-[var(--chat-composer-placeholder)] hover:text-[var(--chat-composer-control-fg)]'
@@ -171,101 +171,9 @@ export function NewDroneSetupPanel({
               <ChevronIcon open={advancedOpen} />
               Advanced
             </button>
-            <button
-              type="button"
-              aria-pressed={createAsDraft}
-              onClick={() => onCreateAsDraftChange(!createAsDraft)}
-              disabled={controlsLocked}
-              title={createAsDraft ? 'This drone will be saved as a draft' : 'Save this drone as a draft'}
-              className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[.625rem] font-[var(--weight-semibold)] uppercase tracking-[0.08em] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                createAsDraft
-                  ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--chat-composer-control-border)] bg-transparent text-[var(--chat-composer-placeholder)] hover:border-[var(--border)] hover:text-[var(--chat-composer-control-fg)]'
-              }`}
-            >
-              {createAsDraft ? <CheckIcon /> : null}
-              {createAsDraft ? 'Draft' : 'Save as draft'}
-            </button>
           </>
         }
       />
-
-      <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-[var(--border-subtle)] pb-2">
-        <SegmentedToolbarToggle<AgentPermissionMode>
-          label="Chat access"
-          value={spawnAgentPermissionMode}
-          options={[
-            {
-              value: 'read-only',
-              label: 'Read',
-              title: spawnAgentReadOnlySupported
-                ? 'The default chat can inspect files in a read-only sandbox.'
-                : 'Access controls are available for native, Codex, and Blip.',
-              disabled: !spawnAgentReadOnlySupported,
-            },
-            {
-              value: 'workspace-write',
-              label: 'Write',
-              title: spawnAgentReadOnlySupported
-                ? 'The default chat can write inside the workspace sandbox.'
-                : 'Access controls are available for native, Codex, and Blip.',
-              disabled: !spawnAgentReadOnlySupported,
-            },
-            {
-              value: 'full-access',
-              label: 'Execute',
-              title: 'The default chat can run with full command access.',
-            },
-          ]}
-          onChange={onSpawnAgentPermissionModeChange}
-          disabled={controlsLocked}
-          tone="accent"
-          density="compact"
-        />
-
-        <SegmentedToolbarToggle<AgentApprovalPolicy>
-          label="Approvals"
-          value={spawnApprovalPolicy}
-          options={[
-            {
-              value: 'ask',
-              label: 'Ask',
-              title: spawnAgentIsCodex
-                ? 'Ask requires an interactive Codex integration.'
-                : 'Ask before approval-gated commands.',
-              disabled: spawnAgentIsCodex,
-            },
-            ...(spawnAgentIsCodex
-              ? [
-                  {
-                    value: 'agent-decides' as const,
-                    label: 'Decide for me',
-                    title: 'Codex decides when a command needs confirmation.',
-                  },
-                ]
-              : []),
-            {
-              value: 'never',
-              label: 'Always Allow',
-              title: 'Run commands without waiting for confirmation.',
-            },
-          ]}
-          onChange={onSpawnApprovalPolicyChange}
-          disabled={controlsLocked || !spawnAgentApprovalSupported}
-          tone="accent"
-          density="compact"
-        />
-
-        {!spawnAgentReadOnlySupported ? (
-          <span className="basis-full text-left text-[var(--text-10)] text-[var(--muted-dim)]">
-            Access controls are available for native, Codex, and Blip.
-          </span>
-        ) : !spawnAgentSupportsApprovals ? (
-          <span className="basis-full text-left text-[var(--text-10)] text-[var(--muted-dim)]">
-            Approval policies are available for native and Codex.
-          </span>
-        ) : null}
-      </div>
 
       {advancedOpen ? (
         <div

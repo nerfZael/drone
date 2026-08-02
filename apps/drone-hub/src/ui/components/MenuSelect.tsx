@@ -46,6 +46,7 @@ export type UiMenuSelectProps = {
   headerStyle?: React.CSSProperties;
   searchable?: boolean;
   searchPlaceholder?: string;
+  searchInputClassName?: string;
   emptySearchLabel?: React.ReactNode;
   triggerLabel?: React.ReactNode;
   triggerLabelClassName?: string;
@@ -160,6 +161,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
     headerStyle,
     searchable = false,
     searchPlaceholder = 'Search…',
+    searchInputClassName,
     emptySearchLabel = 'No matches',
     triggerLabel,
     triggerLabelClassName,
@@ -326,7 +328,10 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
                   target.focus();
                 }}
                 placeholder={searchPlaceholder}
-                className="dh-field-control w-full h-[var(--control-height-compact)] rounded border border-[var(--field-border)] bg-[var(--field-bg)] px-2 text-[length:var(--text-11)] text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)]"
+                className={cn(
+                  'dh-field-control w-full h-[var(--control-height-compact)] rounded border border-[var(--field-border)] bg-[var(--field-bg)] px-2 text-[length:var(--text-11)] text-[var(--field-fg)] placeholder:text-[var(--field-placeholder)]',
+                  searchInputClassName,
+                )}
               />
             </div>
           ) : null}
@@ -380,11 +385,13 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
                 <button
                   key={entry.value}
                   type="button"
-                  onClick={() => {
+                  onClick={(event) => {
                     if (entry.disabled) return;
                     setOpen(false);
                     onValueChange(entry.value);
-                    triggerRef.current?.focus();
+                    // Pointer selection should not leave a focus ring on the trigger.
+                    // Keyboard and assistive-tech activation still return focus there.
+                    if (event.detail === 0) triggerRef.current?.focus();
                   }}
                   className={cn(
                     dropdownMenuItemBaseClass,

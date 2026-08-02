@@ -7,8 +7,6 @@ import { NewDroneSetupPanel } from '../src/droneHub/app/NewDroneSetupPanel';
 const baseProps: React.ComponentProps<typeof NewDroneSetupPanel> = {
   createRuntime: 'container',
   onCreateRuntimeChange: () => {},
-  createAsDraft: false,
-  onCreateAsDraftChange: () => {},
   createPersistVolume: false,
   onCreatePersistVolumeChange: () => {},
   spawnAgentPermissionMode: 'full-access',
@@ -49,27 +47,20 @@ const baseProps: React.ComponentProps<typeof NewDroneSetupPanel> = {
 };
 
 describe('new drone setup panel', () => {
-  test('uses one branch picker with the current host branch selected', () => {
-    const html = renderToStaticMarkup(
-      <NewDroneSetupPanel
-        {...baseProps}
-        draftRepoRemoteBranches={[
-          {
-            name: 'origin/main',
-            remote: 'origin',
-            branch: 'main',
-            headSha: 'abc123',
-          },
-        ]}
-      />,
-    );
+  test('renders runtime, branch, and combined access choices in one setup row', () => {
+    const html = renderToStaticMarkup(<NewDroneSetupPanel {...baseProps} />);
 
-    expect(html).toContain('main');
-    expect(html).toContain('Host branch');
-    expect(html).not.toContain('role="group" aria-label="Branch target"');
+    expect(html).toContain('Execution target: Container');
+    expect(html).toContain('Branch: main');
+    expect(html).toContain('Choose chat access and approvals');
+    expect(html).toContain('Execute · Ask');
+    expect(html).toContain('Pull first');
+    expect(html).not.toContain('Save as draft');
+    expect(html).not.toContain('role="group" aria-label="Chat access"');
+    expect(html).not.toContain('role="group" aria-label="Approvals"');
   });
 
-  test('shows the selected remote branch in the same picker', () => {
+  test('hides host pull behavior when a remote branch is selected', () => {
     const html = renderToStaticMarkup(
       <NewDroneSetupPanel
         {...baseProps}
@@ -86,8 +77,7 @@ describe('new drone setup panel', () => {
       />,
     );
 
-    expect(html).toContain('origin/feature/picker');
-    expect(html).toContain('Remote');
+    expect(html).toContain('Branch: origin/feature/picker');
     expect(html).not.toContain('Pull first');
   });
 

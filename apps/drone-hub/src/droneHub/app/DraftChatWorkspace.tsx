@@ -294,8 +294,6 @@ export function DraftChatWorkspace({
     <NewDroneSetupPanel
       createRuntime={createRuntime}
       onCreateRuntimeChange={onCreateRuntimeChange}
-      createAsDraft={createAsDraft}
-      onCreateAsDraftChange={onCreateAsDraftChange}
       createPersistVolume={createPersistVolume}
       onCreatePersistVolumeChange={onCreatePersistVolumeChange}
       spawnAgentPermissionMode={spawnAgentPermissionMode}
@@ -421,6 +419,27 @@ export function DraftChatWorkspace({
         attachmentsEnabled
         alwaysExpanded
         composerControls={newDroneComposerControls}
+        composerTopAction={!draftChat.prompt ? (
+          <button
+            type="button"
+            aria-pressed={createAsDraft}
+            onClick={() => onCreateAsDraftChange(!createAsDraft)}
+            disabled={controlsLocked}
+            title={createAsDraft ? 'This drone will be saved as a draft' : 'Save this drone as a draft'}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[.625rem] font-[var(--weight-semibold)] uppercase tracking-[0.08em] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              createAsDraft
+                ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] text-[var(--chat-composer-placeholder)] hover:border-[var(--border)] hover:text-[var(--chat-composer-control-fg)]'
+            }`}
+          >
+            {createAsDraft ? (
+              <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m4.5 10.5 3.4 3.4 7.6-8" />
+              </svg>
+            ) : null}
+            {createAsDraft ? 'Draft' : 'Save as draft'}
+          </button>
+        ) : null}
         composerFooter={!draftChat.prompt ? idleSetupPanel : null}
         onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
           if (!draftChat.prompt) {

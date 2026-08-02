@@ -89,6 +89,7 @@ export type ChatInputProps = {
   attachmentMode?: 'images' | 'files';
   composerContext?: ChatComposerContextConfig;
   composerControls?: ChatComposerControlsConfig;
+  composerTopAction?: React.ReactNode;
   composerStatus?: React.ReactNode;
   composerFooter?: React.ReactNode;
   alwaysExpanded?: boolean;
@@ -117,6 +118,7 @@ export function ChatInput({
   attachmentMode = 'images',
   composerContext,
   composerControls,
+  composerTopAction,
   composerStatus,
   composerFooter,
   alwaysExpanded = false,
@@ -601,6 +603,11 @@ export function ChatInput({
             {promptError || attachmentError}
           </div>
         )}
+        {composerTopAction ? (
+          <div className="mb-1 flex min-h-7 items-center justify-end px-1">
+            {composerTopAction}
+          </div>
+        ) : null}
         <div
           data-chat-composer-expanded={composerExpanded ? 'true' : 'false'}
           onFocusCapture={(event) => {
