@@ -32,20 +32,24 @@ import {
   type MobileDroneCreatePreferences,
 } from './create-preferences-model';
 import { pickChatImages, type MobileChatImage } from './pick-chat-images';
-import {
-  ExternalAgentPicker,
-  type ExternalAgentPickerOption,
-} from './ExternalAgentPicker';
+import { ExternalAgentPicker, type ExternalAgentPickerOption } from './ExternalAgentPicker';
+import { NewDroneAccessPicker } from './NewDroneAccessPicker';
+import { NewDroneBranchPicker, mobileHostBranchLabel } from './NewDroneBranchPicker';
+import { NewDroneRuntimePicker } from './NewDroneRuntimePicker';
 
 export type MobileDroneCreateMode = 'with-chat' | 'without-chat';
 export type MobileDroneCreateRuntime = 'container' | 'host';
 export type MobileDroneCreateBranchSource = 'host' | 'remote';
-export type MobileDroneAgentPermissionMode =
-  | 'read-only'
-  | 'workspace-write'
-  | 'full-access';
+export type MobileDroneAgentPermissionMode = 'read-only' | 'workspace-write' | 'full-access';
 export type MobileDroneApprovalPolicy = 'ask' | 'agent-decides' | 'never';
-export type MobileDroneAgentId = 'native' | 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
+export type MobileDroneAgentId =
+  | 'native'
+  | 'cursor'
+  | 'codex'
+  | 'claude'
+  | 'opencode'
+  | 'pi'
+  | 'blip';
 
 type ExternalAgentId = Exclude<MobileDroneAgentId, 'native'>;
 type MobileDroneAgentMode = 'builtin' | 'external';
@@ -292,15 +296,11 @@ export function NewDroneScreen({
     initialImages?: readonly MobileChatImage[],
   ): Promise<boolean>;
 }) {
-  const [mode, setMode] = React.useState<MobileDroneCreateMode>(
-    initialValues?.mode ?? 'with-chat',
-  );
+  const [mode, setMode] = React.useState<MobileDroneCreateMode>(initialValues?.mode ?? 'with-chat');
   const [runtime, setRuntime] = React.useState<MobileDroneCreateRuntime>(
     localDevice ? 'host' : (initialValues?.runtime ?? 'container'),
   );
-  const [persistVolume, setPersistVolume] = React.useState(
-    initialValues?.persistVolume ?? false,
-  );
+  const [persistVolume, setPersistVolume] = React.useState(initialValues?.persistVolume ?? false);
   const [name, setName] = React.useState('');
   const [group, setGroup] = React.useState(initialValues?.group ?? '');
   const [detailsOpen, setDetailsOpen] = React.useState(false);
@@ -312,6 +312,7 @@ export function NewDroneScreen({
     return initialAgent && initialAgent !== 'native' ? initialAgent : 'codex';
   });
   const [agentPickerOpen, setAgentPickerOpen] = React.useState(false);
+  const [accessPickerOpen, setAccessPickerOpen] = React.useState(false);
   const [agentPermissionMode, setAgentPermissionMode] =
     React.useState<MobileDroneAgentPermissionMode>(
       initialValues?.agentPermissionMode ?? 'full-access',
@@ -340,6 +341,7 @@ export function NewDroneScreen({
   const [initialImages, setInitialImages] = React.useState<MobileChatImage[]>([]);
   const [repoPickerOpen, setRepoPickerOpen] = React.useState(false);
   const [branchPickerOpen, setBranchPickerOpen] = React.useState(false);
+  const [runtimePickerOpen, setRuntimePickerOpen] = React.useState(false);
   const [branchesLoading, setBranchesLoading] = React.useState(false);
   const [branchesLoadError, setBranchesLoadError] = React.useState<string | null>(null);
   const [formError, setFormError] = React.useState<string | null>(null);
@@ -352,8 +354,7 @@ export function NewDroneScreen({
   const agentMode: MobileDroneAgentMode = agent === 'native' ? 'builtin' : 'external';
   const readOnlySupported = agent === 'native' || agent === 'codex' || agent === 'blip';
   const approvalAgentSupported = agent === 'native' || agent === 'codex';
-  const approvalSupported =
-    agentPermissionMode === 'full-access' && approvalAgentSupported;
+  const approvalSupported = agentPermissionMode === 'full-access' && approvalAgentSupported;
   const selectedModel =
     models.find(
       (option) => option.id === model && (!modelProvider || option.provider === modelProvider),
@@ -362,6 +363,8 @@ export function NewDroneScreen({
     () => buildModelCatalogChoices(models, agent),
     [agent, models],
   );
+  const effectiveBranchSource: MobileDroneCreateBranchSource =
+    runtime === 'host' ? 'host' : branchSource;
 
   const scrollMessageIntoView = React.useCallback(() => {
     requestAnimationFrame(() => pageRef.current?.scrollToEnd({ animated: true }));
@@ -372,6 +375,7 @@ export function NewDroneScreen({
     setRuntime('host');
     setAgent('native');
     setAgentPickerOpen(false);
+    setRuntimePickerOpen(false);
     setRepoPath('');
     setPersistVolume(false);
   }, [localDevice]);
@@ -488,10 +492,8 @@ export function NewDroneScreen({
   }, [agentPermissionMode, readOnlySupported]);
   React.useEffect(() => {
     if (!approvalSupported) setApprovalPolicy('ask');
-    else if (agent === 'codex' && approvalPolicy === 'ask')
-      setApprovalPolicy('agent-decides');
-    else if (agent !== 'codex' && approvalPolicy === 'agent-decides')
-      setApprovalPolicy('ask');
+    else if (agent === 'codex' && approvalPolicy === 'ask') setApprovalPolicy('agent-decides');
+    else if (agent !== 'codex' && approvalPolicy === 'agent-decides') setApprovalPolicy('ask');
   }, [agent, approvalPolicy, approvalSupported]);
 
   React.useEffect(() => {
@@ -511,6 +513,8 @@ export function NewDroneScreen({
     setPersistVolume(false);
     setAgent('native');
     setAgentPickerOpen(false);
+    setAccessPickerOpen(false);
+    setRuntimePickerOpen(false);
     setAgentPermissionMode('full-access');
     setApprovalPolicy('ask');
     setModels([]);
@@ -565,6 +569,18 @@ export function NewDroneScreen({
     requestAnimationFrame(() => setAgentPickerOpen(true));
   };
 
+  const chooseRuntime = (value: MobileDroneCreateRuntime) => {
+    if (value !== runtime) {
+      modelRequestId.current += 1;
+      setModels([]);
+      setModel('');
+      setModelProvider('');
+      setReasoning('');
+    }
+    setRuntime(value);
+    if (value === 'host') setBranchSource('host');
+  };
+
   const addInitialImages = async () => {
     try {
       setFormError(null);
@@ -588,9 +604,7 @@ export function NewDroneScreen({
     setFormError(null);
     const effectiveBranchSource = runtime === 'host' ? 'host' : branchSource;
     const effectiveApprovalPolicy: MobileDroneApprovalPolicy =
-      agent === 'codex' &&
-      agentPermissionMode === 'full-access' &&
-      approvalPolicy === 'ask'
+      agent === 'codex' && agentPermissionMode === 'full-access' && approvalPolicy === 'ask'
         ? 'agent-decides'
         : approvalPolicy;
     const payload: MobileDroneCreatePayload = {
@@ -605,9 +619,10 @@ export function NewDroneScreen({
       ...(effectiveBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
       ...(mode === 'with-chat'
         ? {
-            seedAgent: agent === 'native'
-              ? { kind: 'native' as const }
-              : { kind: 'builtin' as const, id: agent },
+            seedAgent:
+              agent === 'native'
+                ? { kind: 'native' as const }
+                : { kind: 'builtin' as const, id: agent },
             ...(agent === 'native' && modelProvider.trim()
               ? { seedProvider: modelProvider.trim() }
               : {}),
@@ -640,8 +655,7 @@ export function NewDroneScreen({
         reasoning,
         repoBranchSource: effectiveBranchSource,
         repoCreateRemoteBranch: effectiveBranchSource === 'remote' ? remoteBranch : '',
-        pullHostBranchBeforeCreate:
-          effectiveBranchSource === 'host' && pullHostBranch,
+        pullHostBranchBeforeCreate: effectiveBranchSource === 'host' && pullHostBranch,
       }),
       mode === 'with-chat' ? initialImages : [],
     );
@@ -675,6 +689,7 @@ export function NewDroneScreen({
           setMode(value);
           if (value === 'without-chat') {
             setAgentPickerOpen(false);
+            setAccessPickerOpen(false);
             setModelPickerOpen(false);
             setInitialImages([]);
           }
@@ -687,26 +702,16 @@ export function NewDroneScreen({
         <View style={styles.runtimeRow}>
           <View style={styles.runtimeControl}>
             <Label>Runtime</Label>
-            <Segmented<MobileDroneCreateRuntime>
+            <NewDroneRuntimePicker
+              open={runtimePickerOpen}
               value={runtime}
-              onChange={(value) => {
-                if (value !== runtime) {
-                  modelRequestId.current += 1;
-                  setModels([]);
-                  setModel('');
-                  setModelProvider('');
-                  setReasoning('');
-                }
-                setRuntime(value);
-                if (value === 'host') setBranchSource('host');
-              }}
               disabled={busy}
-              options={localDevice
-                ? [{ value: 'host', label: 'Host' }]
-                : [
-                    { value: 'container', label: 'Container' },
-                    { value: 'host', label: 'Host' },
-                  ]}
+              localDevice={localDevice}
+              onOpen={() => {
+                if (!localDevice) setRuntimePickerOpen(true);
+              }}
+              onClose={() => setRuntimePickerOpen(false)}
+              onSelect={chooseRuntime}
             />
           </View>
           {runtime === 'container' ? (
@@ -718,11 +723,6 @@ export function NewDroneScreen({
             />
           ) : null}
         </View>
-        <Text style={styles.helper}>
-          {runtime === 'host'
-            ? 'Runs directly on the selected Drone Hub device.'
-            : 'Runs inside a managed container.'}
-        </Text>
       </View>
 
       <View style={styles.section}>
@@ -750,12 +750,10 @@ export function NewDroneScreen({
           </View>
           {loadingOptions ? (
             <ActivityIndicator color={colors.accent} size="small" />
+          ) : repoPickerOpen ? (
+            <ChevronUp color={colors.muted} size={17} strokeWidth={2} />
           ) : (
-            repoPickerOpen ? (
-              <ChevronUp color={colors.muted} size={17} strokeWidth={2} />
-            ) : (
-              <ChevronDown color={colors.muted} size={17} strokeWidth={2} />
-            )
+            <ChevronDown color={colors.muted} size={17} strokeWidth={2} />
           )}
         </Pressable>
         {repoPickerOpen ? (
@@ -775,85 +773,41 @@ export function NewDroneScreen({
 
         {selectedRepo ? (
           <View style={styles.branchBlock}>
-            <Text style={styles.fieldTitle}>Repo branch source</Text>
-            <Segmented<MobileDroneCreateBranchSource>
-              value={runtime === 'host' ? 'host' : branchSource}
-              onChange={setBranchSource}
-              disabled={busy || runtime === 'host'}
-              options={[
-                { value: 'host', label: 'Host branch' },
-                { value: 'remote', label: 'Remote branch' },
-              ]}
+            <Text style={styles.fieldTitle}>Branch</Text>
+            <NewDroneBranchPicker
+              open={branchPickerOpen}
+              branchSource={effectiveBranchSource}
+              remoteBranch={remoteBranch}
+              hostBranch={selectedRepo.hostBranch}
+              remoteBranches={selectedRepo.remoteBranches}
+              remoteEnabled={runtime === 'container'}
+              loading={branchesLoading}
+              disabled={busy}
+              onOpen={() => setBranchPickerOpen(true)}
+              onClose={() => setBranchPickerOpen(false)}
+              onSelect={(selection) => {
+                if (selection.branchSource === 'remote' && selection.remoteBranch) {
+                  setRemoteBranch(selection.remoteBranch);
+                }
+                setBranchSource(selection.branchSource);
+              }}
             />
-            {runtime === 'host' ? (
-              <Text style={styles.helper}>Host runtime uses the host repository directly.</Text>
-            ) : branchSource === 'host' ? (
-              <>
-                <Text style={styles.helper}>
-                  {branchesLoading
-                    ? 'Loading current host branch…'
-                    : `Current host branch: ${selectedRepo.hostBranch ?? 'Unavailable'}`}
-                </Text>
-                <Toggle
-                  label="Pull before create"
-                  detail="Run a fast-forward-only pull on the host branch first."
-                  value={pullHostBranch}
-                  disabled={busy}
-                  onChange={setPullHostBranch}
-                />
-              </>
-            ) : (
-              <>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: branchPickerOpen }}
-                  disabled={busy || branchesLoading || selectedRepo.remoteBranches.length === 0}
-                  onPress={() => setBranchPickerOpen((open) => !open)}
-                  style={({ pressed }) => [
-                    styles.pickerTrigger,
-                    (branchesLoading || selectedRepo.remoteBranches.length === 0) &&
-                      styles.disabled,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text numberOfLines={1} style={styles.pickerValue}>
-                    {branchesLoading
-                      ? 'Loading remote branches…'
-                      : remoteBranch || 'Choose remote branch'}
-                  </Text>
-                  {branchesLoading ? (
-                    <ActivityIndicator color={colors.accent} size="small" />
-                  ) : (
-                    <ChevronDown color={colors.muted} size={17} strokeWidth={2} />
-                  )}
-                </Pressable>
-                {branchPickerOpen ? (
-                  <View style={styles.pickerOptions}>
-                    {selectedRepo.remoteBranches.map((branch) => (
-                      <SelectionRow
-                        key={branch.name}
-                        label={branch.name}
-                        detail={
-                          branch.remote ? `${branch.remote} · ${branch.branch}` : branch.branch
-                        }
-                        selected={branch.name === remoteBranch}
-                        onPress={() => {
-                          setRemoteBranch(branch.name);
-                          setBranchPickerOpen(false);
-                        }}
-                      />
-                    ))}
-                  </View>
-                ) : null}
-                {branchesLoadError || selectedRepo.branchesError ? (
-                  <Text style={styles.errorText}>
-                    {branchesLoadError ?? selectedRepo.branchesError}
-                  </Text>
-                ) : selectedRepo.branchesLoaded && selectedRepo.remoteBranches.length === 0 ? (
-                  <Text style={styles.helper}>No remote branches are available for this repo.</Text>
-                ) : null}
-              </>
-            )}
+            {effectiveBranchSource === 'host' ? (
+              <Toggle
+                label="Pull before create"
+                detail={`Fast-forward ${mobileHostBranchLabel(selectedRepo.hostBranch)} before creating.`}
+                value={pullHostBranch}
+                disabled={busy}
+                onChange={setPullHostBranch}
+              />
+            ) : null}
+            {branchesLoadError || selectedRepo.branchesError ? (
+              <Text style={styles.errorText}>
+                {branchesLoadError ?? selectedRepo.branchesError}
+              </Text>
+            ) : selectedRepo.branchesLoaded && selectedRepo.remoteBranches.length === 0 ? (
+              <Text style={styles.helper}>No remote branches are available for this repo.</Text>
+            ) : null}
           </View>
         ) : null}
       </View>
@@ -932,9 +886,7 @@ export function NewDroneScreen({
                     attachments={initialImages}
                     disabled={busy}
                     onRemove={(id) =>
-                      setInitialImages((current) =>
-                        current.filter((image) => image.id !== id),
-                      )
+                      setInitialImages((current) => current.filter((image) => image.id !== id))
                     }
                   />
                   <View style={styles.composerConfigRow}>
@@ -970,46 +922,18 @@ export function NewDroneScreen({
                         <ChevronDown color={colors.accent} size={16} strokeWidth={2.2} />
                       </Pressable>
                     ) : null}
-                    <Segmented<MobileDroneAgentPermissionMode>
-                      label="Access"
-                      value={agentPermissionMode}
-                      onChange={setAgentPermissionMode}
+                    <NewDroneAccessPicker
+                      open={accessPickerOpen}
+                      permissionMode={agentPermissionMode}
+                      approvalPolicy={approvalPolicy}
+                      readOnlySupported={readOnlySupported}
+                      approvalsSupported={approvalSupported}
+                      agentIsCodex={agent === 'codex'}
                       disabled={busy}
-                      options={
-                        [
-                          { value: 'read-only', label: 'Read' },
-                          { value: 'workspace-write', label: 'Write' },
-                          { value: 'full-access', label: 'Execute' },
-                        ].filter(
-                          (option) => option.value === 'full-access' || readOnlySupported,
-                        ) as Array<{
-                          value: MobileDroneAgentPermissionMode;
-                          label: string;
-                        }>
-                      }
-                    />
-                    <Segmented<MobileDroneApprovalPolicy>
-                      label="Approvals"
-                      value={approvalPolicy}
-                      onChange={setApprovalPolicy}
-                      disabled={busy || !approvalSupported}
-                      options={
-                        [
-                          {
-                            value: 'ask',
-                            label: 'Ask',
-                            disabled: agent === 'codex',
-                          },
-                          ...(agent === 'codex'
-                            ? [{ value: 'agent-decides' as const, label: 'Decide for me' }]
-                            : []),
-                          { value: 'never', label: 'Always Allow' },
-                        ] as Array<{
-                          value: MobileDroneApprovalPolicy;
-                          label: string;
-                          disabled?: boolean;
-                        }>
-                      }
+                      onOpen={() => setAccessPickerOpen(true)}
+                      onClose={() => setAccessPickerOpen(false)}
+                      onPermissionModeChange={setAgentPermissionMode}
+                      onApprovalPolicyChange={setApprovalPolicy}
                     />
                   </View>
                   <ExternalAgentPicker
@@ -1020,21 +944,6 @@ export function NewDroneScreen({
                     onClose={() => setAgentPickerOpen(false)}
                     onSelect={(value) => chooseAgent(value as ExternalAgentId)}
                   />
-                  {!readOnlySupported ? (
-                    <Text style={styles.helper}>
-                      Access controls are available for native, Codex, and Blip.
-                    </Text>
-                  ) : null}
-                  {!approvalAgentSupported ? (
-                    <Text style={styles.helper}>
-                      Approval policies are available for native and Codex.
-                    </Text>
-                  ) : approvalSupported && agent === 'codex' ? (
-                    <Text style={styles.helper}>
-                      Ask requires interactive Codex approvals. Decide for me uses Codex
-                      Auto-review.
-                    </Text>
-                  ) : null}
                   {modelsError ? (
                     <View style={styles.inlineNotice}>
                       <Text style={[styles.errorText, styles.inlineNoticeText]}>{modelsError}</Text>
@@ -1069,6 +978,7 @@ export function NewDroneScreen({
               onInputFocus={() => {
                 composerFocusedRef.current = true;
                 setAgentPickerOpen(false);
+                setAccessPickerOpen(false);
                 scrollMessageIntoView();
               }}
               onInputBlur={() => {
@@ -1141,9 +1051,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
     gap: 14,
   },
-  runtimeControl: { gap: 10 },
+  runtimeControl: { flex: 1, minWidth: 170, gap: 6 },
   compactCheckbox: {
     minHeight: 34,
     flexDirection: 'row',
