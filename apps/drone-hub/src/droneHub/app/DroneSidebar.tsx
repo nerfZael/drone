@@ -51,7 +51,7 @@ import { DesktopDevicePicker } from './DesktopDevicePicker';
 import { SidebarDroneTreeList, type SidebarDroneTreeListSharedProps } from './SidebarDroneTreeList';
 import { GroupedSidebarTree } from './GroupedSidebarTree';
 import { createCanvasChatNodeId } from './app-config';
-import { droneChatRequiresApproval } from './chat-node-helpers';
+import { droneChatRequiresApproval, normalizedDroneChats } from './chat-node-helpers';
 import { SidebarReorderDropIndicator } from './sidebar-reorder-ui';
 import { buildSidebarDroneTree } from './sidebar-drone-tree';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
@@ -86,6 +86,7 @@ import {
   removeSidebarRepoScopedNodeOrderByGroupPrefix,
   SIDEBAR_ROOT_PARENT_ID,
   sidebarChatSidebarNodeId,
+  sidebarChatRefFromNodeId,
   sidebarDroneIdFromNodeId,
   sidebarDroneNodeId,
   sidebarFolderNodeId,
@@ -97,6 +98,7 @@ import {
 } from './drone-hub-dnd';
 import type { SidebarGroup } from './use-sidebar-view-model';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
+import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
 import { useSidebarOptimisticGroups } from './use-sidebar-optimistic-groups';
 import type { MoveDronesToGroupResult } from './use-group-management';
 import type { DroneDeleteMode, SidebarDensityMode, SidebarGroupingMode } from './settings-types';
@@ -256,10 +258,7 @@ type DraftSidebarPlaceholder = {
 const DRAFT_SIDEBAR_PLACEHOLDER_ID = '__draft-sidebar-placeholder__';
 
 function readOnlyDroneChats(drone: DroneSummary): string[] {
-  const chats = Array.isArray(drone?.chats)
-    ? drone.chats.map((item) => String(item ?? '').trim()).filter(Boolean)
-    : [];
-  return chats.length > 0 ? chats : ['default'];
+  return normalizedDroneChats(drone, { includeDefaultWhenEmpty: true });
 }
 
 function ReadOnlySidebarGroups({
@@ -269,11 +268,14 @@ function ReadOnlySidebarGroups({
   selectedDroneSet,
   highlightedDroneIds,
   activeChatName,
-  showAllChats,
+  selectedSidebarNodeId,
+  collapsedDroneSections,
   collapsedGroups,
   uiDroneName,
   onSelectDroneCard,
+  onSelectDroneContainer,
   onSelectDroneChat,
+  onToggleDroneSection,
   onToggleGroupCollapsed,
 }: {
   sidebarGroups: SidebarGroup[];
@@ -282,11 +284,14 @@ function ReadOnlySidebarGroups({
   selectedDroneSet: Set<string>;
   highlightedDroneIds: Set<string>;
   activeChatName: string;
-  showAllChats: boolean;
+  selectedSidebarNodeId: string | null;
+  collapsedDroneSections: Record<string, boolean>;
   collapsedGroups: Record<string, boolean>;
   uiDroneName: (nameRaw: string) => string;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
+  onSelectDroneContainer: (droneId: string) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
+  onToggleDroneSection: (droneId: string, kind: SidebarInlineSectionKind) => void;
   onToggleGroupCollapsed: (group: string) => void;
 }) {
   const lastToggleRef = React.useRef<{ groupKey: string; timestamp: number } | null>(null);
@@ -341,17 +346,21 @@ function ReadOnlySidebarGroups({
                 {group.items.map((drone) => {
                   const droneId = String(drone?.id ?? '').trim();
                   const chats = readOnlyDroneChats(drone);
-                  const selected = selectedDroneSet.has(droneId);
                   const busy =
                     Boolean(drone?.busy) ||
                     (Array.isArray(drone?.busyChats) && drone.busyChats.length > 0);
                   const displayName = uiDroneName(drone.name) || drone.name || droneId;
                   const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
+                  const hasChatSection = chats.length > 1;
+                  const selected = hasChatSection
+                    ? selectedSidebarNodeId === sidebarDroneNodeId(droneId)
+                    : selectedDroneSet.has(droneId);
+                  const chatSectionExpanded = collapsedDroneSections[sidebarInlineSectionKey(droneId, 'chats')] !== true;
                   const hasActiveChildChat = selectedDrone === droneId && !hasOnlyDefaultChat;
                   const defaultChatNodeId = createCanvasChatNodeId(droneId, 'default');
-                  const showChatRows = chats.length > 1 && (showAllChats || selected);
+                  const showChatRows = hasChatSection && chatSectionExpanded;
                   return (
-                    <div key={droneId || displayName} className="flex flex-col gap-0.5">
+                    <div key={droneId || displayName} data-sidebar-drone-unit="true" className="flex flex-col gap-0.5">
                       <DroneCard
                         drone={drone}
                         density={sidebarDensityMode}
@@ -360,12 +369,16 @@ function ReadOnlySidebarGroups({
                         highlighted={highlightedDroneIds.has(droneId)}
                         active={
                           selectedDrone === droneId &&
-                          hasOnlyDefaultChat &&
-                          activeChatName === 'default'
+                          ((hasOnlyDefaultChat && activeChatName === 'default') ||
+                            (hasActiveChildChat && !chatSectionExpanded))
                         }
                         activeIndicatorStyle="edge"
-                        selectionTone={hasActiveChildChat ? 'muted' : 'accent'}
-                        showSelectionEdge={!hasActiveChildChat}
+                        disclosureExpanded={hasChatSection ? chatSectionExpanded : undefined}
+                        disclosureLabel={
+                          hasChatSection
+                            ? `${chatSectionExpanded ? 'Collapse' : 'Expand'} chats for ${displayName}`
+                            : undefined
+                        }
                         busy={busy && hasOnlyDefaultChat}
                         approvalRequired={
                           hasOnlyDefaultChat &&
@@ -374,6 +387,11 @@ function ReadOnlySidebarGroups({
                         }
                         unreadAgentMessage={false}
                         onClick={(rowOpts) => {
+                          if (hasChatSection) {
+                            onSelectDroneContainer(droneId);
+                            onToggleDroneSection(droneId, 'chats');
+                            return;
+                          }
                           if (droneId)
                             onSelectDroneCard(droneId, {
                               ...rowOpts,
@@ -384,19 +402,25 @@ function ReadOnlySidebarGroups({
                         dragging={false}
                       />
                       {showChatRows ? (
-                        <div className={`${densityClasses.chatIndent} flex flex-col gap-0.5`}>
+                        <div
+                          data-sidebar-guide-selected={hasActiveChildChat ? 'true' : undefined}
+                          className={`${densityClasses.chatIndent} dh-sidebar-drone-chat-body flex flex-col gap-0.5 border-l`}
+                        >
                           {chats.map((chatName) => {
                             const active = selectedDrone === droneId && activeChatName === chatName;
                             const chatNodeId = createCanvasChatNodeId(droneId, chatName);
                             const chatBusy =
                               Array.isArray(drone?.busyChats) && drone.busyChats.includes(chatName);
+                            const chatUnread =
+                              !active &&
+                              (drone?.unreadChats ?? []).includes(chatName);
                             const chatState = sidebarChatDisplayState(
                               drone,
                               chatBusy,
                               droneChatRequiresApproval(drone, chatName) ||
                                 Boolean(approvalRequiredByChatNodeId[chatNodeId]),
                             );
-                            const chatStateLabel = sidebarDroneStateLabel(chatState, false);
+                            const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
                             return (
                               <UiNavigationRow
                                 key={chatName}
@@ -406,6 +430,7 @@ function ReadOnlySidebarGroups({
                                     ? 'text-[var(--sidebar-drone-fg)]'
                                     : 'text-[var(--sidebar-subitem-fg)]'
                                 }`}
+                                style={{ paddingLeft: 4 }}
                                 label={<span className={sidebarChatLabelClass}>{chatName}</span>}
                                 status={
                                   <span
@@ -414,7 +439,12 @@ function ReadOnlySidebarGroups({
                                     role="img"
                                     aria-label={chatStateLabel}
                                   >
-                                    <SidebarItemStateIndicator state={chatState} />
+                                    <SidebarItemStateIndicator
+                                      state={chatState}
+                                      unread={chatUnread}
+                                      showReadyAnchor
+                                      emphasized={active}
+                                    />
                                   </span>
                                 }
                                 current={active}
@@ -502,14 +532,18 @@ function StaticReadOnlySidebarTree({
   selectedDroneSet,
   highlightedDroneIds,
   activeChatName,
+  selectedSidebarNodeId,
   busyChatNodeIdSet,
   unreadAgentMessageByChatNodeId,
   disabledDroneReasonById,
   droneStatusHintById,
+  collapsedDroneSections,
   collapsedGroups,
   uiDroneName,
   onSelectDroneCard,
+  onSelectDroneContainer,
   onSelectDroneChat,
+  onToggleDroneSection,
   onToggleGroupCollapsed,
 }: {
   nodeTree: SidebarNodeTreeModel;
@@ -520,14 +554,18 @@ function StaticReadOnlySidebarTree({
   selectedDroneSet: Set<string>;
   highlightedDroneIds: Set<string>;
   activeChatName: string;
+  selectedSidebarNodeId: string | null;
   busyChatNodeIdSet: Set<string>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
   disabledDroneReasonById: Record<string, string>;
   droneStatusHintById: Record<string, string>;
+  collapsedDroneSections: Record<string, boolean>;
   collapsedGroups: Record<string, boolean>;
   uiDroneName: (nameRaw: string) => string;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
+  onSelectDroneContainer: (droneId: string) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
+  onToggleDroneSection: (droneId: string, kind: SidebarInlineSectionKind) => void;
   onToggleGroupCollapsed: (group: string) => void;
 }) {
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
@@ -551,8 +589,12 @@ function StaticReadOnlySidebarTree({
       (chat) => chat,
     );
     const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
+    const hasChatSection = chats.length > 1;
+    const chatSectionExpanded = collapsedDroneSections[sidebarInlineSectionKey(drone.id, 'chats')] !== true;
     const hasActiveChildChat = selectedDrone === drone.id && !hasOnlyDefaultChat;
-    const selected = selectedDroneSet.has(drone.id);
+    const selected = hasChatSection
+      ? selectedSidebarNodeId === node.id
+      : selectedDroneSet.has(drone.id);
     const disabledReason = String(disabledDroneReasonById[drone.id] ?? '').trim();
     const defaultChatNodeId = createCanvasChatNodeId(drone.id, 'default');
     const defaultChatBusy =
@@ -561,19 +603,27 @@ function StaticReadOnlySidebarTree({
     const busy = Boolean(drone.busy) || defaultChatBusy;
     const childIds = nodeTree.childIdsByParent[node.id] ?? [];
     return (
-      <div key={node.id} className="flex flex-col gap-0.5">
+      <div key={node.id} data-sidebar-drone-unit="true" className="flex flex-col gap-0.5">
         <DroneCard
           drone={drone}
           density={sidebarDensityMode}
           displayName={uiDroneName(drone.name)}
           selected={selected}
-          disabled={Boolean(disabledReason)}
+          disabled={Boolean(disabledReason) && !hasChatSection}
           disabledReason={disabledReason || undefined}
           highlighted={highlightedDroneIds.has(drone.id)}
-          active={selectedDrone === drone.id && hasOnlyDefaultChat && activeChatName === 'default'}
+          active={
+            selectedDrone === drone.id &&
+            ((hasOnlyDefaultChat && activeChatName === 'default') ||
+              (hasActiveChildChat && !chatSectionExpanded))
+          }
           activeIndicatorStyle="edge"
-          selectionTone={hasActiveChildChat ? 'muted' : 'accent'}
-          showSelectionEdge={!hasActiveChildChat}
+          disclosureExpanded={hasChatSection ? chatSectionExpanded : undefined}
+          disclosureLabel={
+            hasChatSection
+              ? `${chatSectionExpanded ? 'Collapse' : 'Expand'} chats for ${uiDroneName(drone.name)}`
+              : undefined
+          }
           busy={busy && hasOnlyDefaultChat}
           approvalRequired={
             hasOnlyDefaultChat &&
@@ -584,21 +634,32 @@ function StaticReadOnlySidebarTree({
           unreadAgentMessage={
             hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true
           }
-          onClick={(rowOpts) =>
-            onSelectDroneCard(drone.id, { ...rowOpts, orderedDroneIds: visibleDroneOrder })
-          }
+          onClick={(rowOpts) => {
+            if (hasChatSection) {
+              onSelectDroneContainer(drone.id);
+              onToggleDroneSection(drone.id, 'chats');
+              return;
+            }
+            onSelectDroneCard(drone.id, { ...rowOpts, orderedDroneIds: visibleDroneOrder });
+          }}
           draggable={false}
           dragging={false}
         />
-        {chats.length > 1 ? (
-          <div className={`${densityClasses.chatIndent} flex flex-col gap-0.5`}>
+        {hasChatSection && chatSectionExpanded ? (
+          <div
+            data-sidebar-guide-selected={hasActiveChildChat ? 'true' : undefined}
+            className={`${densityClasses.chatIndent} dh-sidebar-drone-chat-body flex flex-col gap-0.5 border-l`}
+          >
             {chats.map((chatName) => {
               const active = selectedDrone === drone.id && activeChatName === chatName;
               const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
               const chatBusy =
                 (Array.isArray(drone.busyChats) && drone.busyChats.includes(chatName)) ||
                 busyChatNodeIdSet.has(chatNodeId);
-              const chatUnread = !active && unreadAgentMessageByChatNodeId[chatNodeId] === true;
+              const chatUnread =
+                !active &&
+                ((drone.unreadChats ?? []).includes(chatName) ||
+                  unreadAgentMessageByChatNodeId[chatNodeId] === true);
               const chatState = sidebarChatDisplayState(
                 drone,
                 chatBusy,
@@ -611,7 +672,7 @@ function StaticReadOnlySidebarTree({
                   key={chatName}
                   type="button"
                   disabled={Boolean(disabledReason)}
-                  className={`relative flex items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ active, disabled: Boolean(disabledReason) })}`}
+                  className={`relative flex items-center gap-1 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ active, disabled: Boolean(disabledReason) })}`}
                   onClick={() => {
                     if (!disabledReason) onSelectDroneChat(drone.id, chatName);
                   }}
@@ -625,7 +686,12 @@ function StaticReadOnlySidebarTree({
                     role="img"
                     aria-label={chatStateLabel}
                   >
-                    <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
+                    <SidebarItemStateIndicator
+                      state={chatState}
+                      unread={chatUnread}
+                      showReadyAnchor
+                      emphasized={active}
+                    />
                   </span>
                   <span className={sidebarChatLabelClass}>{chatName}</span>
                 </button>
@@ -1883,7 +1949,9 @@ export function DroneSidebar({
     folderEditorInputRef,
     clearGroupedFolderSelection,
     handleGroupedSelectDroneCard,
+    handleGroupedSelectDroneContainer,
     handleGroupedSelectDroneChat,
+    handleGroupedFocusDroneChat,
     handleGroupedSelectFolder,
     moveFolderIntoGroup,
     openDroneChatCreate,
@@ -1947,6 +2015,20 @@ export function DroneSidebar({
       onSetDroneSelectionFromFolder,
       staticReadOnlyNodeTree,
     ],
+  );
+  const selectGroupedDroneContainer = React.useCallback(
+    (droneId: string) => {
+      handleGroupedSelectDroneContainer(droneId);
+      onSetDroneSelectionFromFolder([]);
+    },
+    [handleGroupedSelectDroneContainer, onSetDroneSelectionFromFolder],
+  );
+  const focusGroupedDroneChat = React.useCallback(
+    (droneId: string, chatName: string) => {
+      handleGroupedFocusDroneChat(droneId, chatName);
+      onSetDroneSelectionFromFolder([]);
+    },
+    [handleGroupedFocusDroneChat, onSetDroneSelectionFromFolder],
   );
   const handleGroupedPrepareDroneDragStart = React.useCallback(
     (droneId: string, draggedDroneIds?: readonly string[]) => {
@@ -2580,6 +2662,14 @@ export function DroneSidebar({
       if (folderEditor) return;
 
       if (sidebarCapabilities.actions && event.key === 'F2') {
+        const selectedChatRef = sidebarChatRefFromNodeId(selectedSidebarNodeId ?? '');
+        if (selectedChatRef) {
+          event.preventDefault();
+          if (selectedChatRef.chatName !== 'default') {
+            startRenameDroneChat(selectedChatRef.droneId, selectedChatRef.chatName);
+          }
+          return;
+        }
         if (
           !isRepoGroupingMode &&
           selectedFolderPath &&
@@ -2639,6 +2729,7 @@ export function DroneSidebar({
     selectedFolderPath,
     staticReadOnlyNodeTree,
     startRenameFolder,
+    startRenameDroneChat,
     visibleSidebarFolderPathSet,
   ]);
   const sidebarBorderClass = sidebarDockSide === 'right' ? 'border-l' : 'border-r';
@@ -3139,7 +3230,7 @@ export function DroneSidebar({
             activeRepositoryNavigationItem ? (
               <div
                 data-sidebar-active-repository-header="true"
-                className={`group/active-repository sticky top-0 z-20 -mx-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--sidebar-bg)] pr-1.5 transition-colors ${
+                className={`group/active-repository sticky top-0 z-20 -mx-2 mb-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--sidebar-bg)] pr-1.5 transition-colors ${
                   pinnedSidebarPlacement === 'top' && globalPinnedDrones.length > 0
                     ? 'border-t'
                     : ''
@@ -3325,14 +3416,18 @@ export function DroneSidebar({
                 selectedDroneSet={selectedDroneSet}
                 highlightedDroneIds={highlightedDroneIds}
                 activeChatName={activeChatName}
+                selectedSidebarNodeId={selectedSidebarNodeId}
                 busyChatNodeIdSet={busyChatNodeIdSet}
                 unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
                 disabledDroneReasonById={readOnlyDisabledDroneReasonById}
                 droneStatusHintById={readOnlyDroneStatusHintById}
+                collapsedDroneSections={collapsedDroneSections}
                 collapsedGroups={collapsedGroups}
                 uiDroneName={uiDroneName}
                 onSelectDroneCard={onSelectDroneCard}
+                onSelectDroneContainer={selectGroupedDroneContainer}
                 onSelectDroneChat={onSelectDroneChat}
+                onToggleDroneSection={toggleDroneSection}
                 onToggleGroupCollapsed={onToggleGroupCollapsed}
               />
             ) : useReadOnlySidebarBranch ? (
@@ -3343,11 +3438,14 @@ export function DroneSidebar({
                 selectedDroneSet={selectedDroneSet}
                 highlightedDroneIds={highlightedDroneIds}
                 activeChatName={activeChatName}
-                showAllChats={readOnlyMode === 'read-only-chats'}
+                selectedSidebarNodeId={selectedSidebarNodeId}
+                collapsedDroneSections={collapsedDroneSections}
                 collapsedGroups={collapsedGroups}
                 uiDroneName={uiDroneName}
                 onSelectDroneCard={onSelectDroneCard}
+                onSelectDroneContainer={selectGroupedDroneContainer}
                 onSelectDroneChat={onSelectDroneChat}
+                onToggleDroneSection={toggleDroneSection}
                 onToggleGroupCollapsed={onToggleGroupCollapsed}
               />
             ) : (
@@ -3393,10 +3491,15 @@ export function DroneSidebar({
                       setSelectedSidebarNodeId={setSelectedSidebarNodeId}
                       onSelectFolder={handleGroupedSelectFolderWithDrones}
                       onSelectDroneCard={handleGroupedSelectDroneCard}
+                      onSelectDroneContainer={selectGroupedDroneContainer}
+                      onFocusDroneChat={focusGroupedDroneChat}
                       onSelectDroneChat={handleGroupedSelectDroneChat}
                       onMoveDronesToGroup={runOptimisticMoveDronesToGroup}
                       onRenameGroup={runOptimisticRenameGroup}
                       onToggleGroupCollapsed={onToggleGroupCollapsed}
+                      collapsedDroneSections={collapsedDroneSections}
+                      setCollapsedDroneSections={setCollapsedDroneSections}
+                      onToggleDroneSection={toggleDroneSection}
                       collapsedGroups={collapsedGroups}
                       deletingGroups={deletingGroups}
                       renamingGroups={renamingGroups}

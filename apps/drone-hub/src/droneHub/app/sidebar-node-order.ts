@@ -25,6 +25,19 @@ export function sidebarChatSidebarNodeId(droneIdRaw: string, chatNameRaw: string
   return `chat:${droneId}:${chatName}`;
 }
 
+export function sidebarChatRefFromNodeId(
+  nodeIdRaw: string,
+): { droneId: string; chatName: string } | null {
+  const nodeId = String(nodeIdRaw ?? '').trim();
+  if (!nodeId.startsWith('chat:')) return null;
+  const ref = nodeId.slice('chat:'.length);
+  const separatorIndex = ref.indexOf(':');
+  if (separatorIndex <= 0) return null;
+  const droneId = ref.slice(0, separatorIndex).trim();
+  const chatName = ref.slice(separatorIndex + 1).trim() || 'default';
+  return droneId ? { droneId, chatName } : null;
+}
+
 export function sidebarFolderPathFromNodeId(nodeIdRaw: string): string | null {
   const nodeId = String(nodeIdRaw ?? '').trim();
   return nodeId.startsWith('folder:') ? nodeId.slice('folder:'.length) || null : null;

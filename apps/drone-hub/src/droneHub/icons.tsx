@@ -34,6 +34,26 @@ export function IconDrone({ className, size = 16 }: IconProps) {
   );
 }
 
+export function IconContainer({ className, size = 14 }: IconProps) {
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m8 1.5 5.5 3v7L8 14.5l-5.5-3v-7L8 1.5Z" />
+      <path d="m2.5 4.5 5.5 3 5.5-3M8 7.5v7" />
+    </svg>
+  );
+}
+
 export function IconChat({ className, size = 14 }: IconProps) {
   return (
     <svg className={className} width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">

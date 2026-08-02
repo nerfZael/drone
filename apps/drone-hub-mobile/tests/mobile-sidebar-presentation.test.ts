@@ -338,7 +338,7 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('emphasized={recentlyBlocked || selected}');
   });
 
-  test('renders desktop-equivalent multi-chat rows and keeps pinned rows as shortcuts', () => {
+  test('renders desktop-equivalent multi-chat disclosures, including pinned drones', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
       'utf8',
@@ -347,10 +347,34 @@ describe('mobile sidebar presentation', () => {
       new URL('../src/drones/drone-sidebar-model.ts', import.meta.url),
       'utf8',
     );
+    const screenSource = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+    const localControlSource = readFileSync(
+      new URL('../src/drones/local-drone-control.ts', import.meta.url),
+      'utf8',
+    );
 
     expect(source).toContain('const chats = orderedMobileDroneChats(');
+    expect(source).toContain(
+      'const hasVisibleActiveChildChat = hasActiveChildChat && chatSectionExpanded;',
+    );
     expect(source).toContain('sidebarChatOrderByDrone[drone.id]');
     expect(source).toContain('showChats && chats.length > 1 ? (');
+    expect(source).toContain('const isChatDisclosure = showChats && hasMultipleChats;');
+    expect(source).toContain('const chatSectionExpanded = !collapsedDroneIds.has(drone.id);');
+    expect(source).toContain(
+      'if (isChatDisclosure) {\n            onSelectContainer(drone.id);\n            onToggleDrone(drone.id);',
+    );
+    expect(source).toContain('expanded: isChatDisclosure ? chatSectionExpanded : undefined');
+    expect(source).toContain('<View accessible={false} style={styles.droneChevronSlot}>');
+    expect(source).toContain('expanded={chatSectionExpanded}');
+    expect(source).toContain('chatSectionExpanded ? (');
+    expect(source).toContain('<SidebarContainerIcon');
+    expect(source).toContain('color={colors.sidebarMutedDim}');
+    expect(source).not.toContain('styles.droneSpineExpanded');
+    expect(source).toContain('isChatDisclosure ? null : isDraft ? (');
     expect(source).toContain('mobileDroneDisplayState(drone, !hasMultipleChats)');
     expect(source).toContain('!isDraft && !hasMultipleChats');
     expect(source).toContain('summarizeMobileDroneChats(drone, selected ? activeChatName : \'\')');
@@ -359,17 +383,40 @@ describe('mobile sidebar presentation', () => {
     );
     expect(source).toContain('{ marginLeft: drawerTreeRowPaddingLeft(depth) + 8 }');
     expect(source).toContain('selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}');
+    expect(source).toContain('hasActiveChildChat && styles.droneChatRailVisible');
+    expect(source).toContain("borderLeftColor: 'transparent'");
+    expect(source).toContain('gap: 4,\n    paddingLeft: 4,\n    paddingRight: 6,');
     expect(source).toContain('styles.droneChatSelectionWash, { left: -selectionWashInset }');
     expect(source).toContain('<DrawerDroneChatRow');
     expect(source).toContain('drone.draftChats?.[chatName] === true');
     expect(source).toContain('styles.droneChatDraftBadge');
     expect(source).toContain('borderColor: colors.accentAlt,');
-    expect(source).toContain('showReadyAnchor={false}');
-    expect(source).toContain('selected && !hasActiveChildChat && styles.switchItemRowActive');
     expect(source).toContain(
-      'selected && !hasActiveChildChat ? <View style={styles.sidebarSelectionEdge} /> : null',
+      '<SwitchItemStatusIndicator state={displayState} unread={unread} showReadyAnchor />',
     );
-    expect(source).toContain('showChats={false}');
+    expect(source).toContain(
+      'const containerSelected = isChatDisclosure && selectedContainerDroneId === drone.id;',
+    );
+    expect(source).toContain(
+      'const parentSelected = containerSelected || (selected && !hasVisibleActiveChildChat);',
+    );
+    expect(source).toContain('parentSelected && styles.switchItemRowActive');
+    expect(source).toContain(
+      'parentSelected ? <View style={styles.sidebarSelectionEdge} /> : null',
+    );
+    expect(source).toContain('delayLongPress={400}');
+    expect(source).toContain('suppressPressAfterLongPressRef.current = true;');
+    expect(source).toContain('onOpenActions({ drone, chatName });');
+    expect(source).toContain('if (suppressPressAfterLongPressRef.current) {');
+    expect(source).toContain("if (!applied) return;");
+    expect(source).toContain('onSelectDroneChat?.(');
+    expect(source).toContain("label: 'Create chat'");
+    expect(source).toContain("label: 'Rename chat'");
+    expect(source).toContain("label: 'Delete chat'");
+    expect(source).toContain('<TextInputDialog');
+    expect(source).toContain('<ConfirmDialog');
+    expect(source).toContain('repoNavigationHead: {\n    minHeight: 48,\n    marginBottom: 8,');
+    expect(source).not.toContain('showChats={false}');
     expect(source).toContain('color: colors.sidebarSubitemFg,');
     expect(source).toContain('droneChildren: {\n    marginLeft: 4,');
     expect(source).toContain('paddingLeft: 6,\n    borderLeftWidth: StyleSheet.hairlineWidth,');
@@ -377,6 +424,15 @@ describe('mobile sidebar presentation', () => {
     expect(modelSource).toContain(
       'sidebarChatOrderByDrone: stringListMap(sidebar.sidebarChatOrderByDrone)',
     );
+    expect(screenSource).toContain("requestDroneControl(destinationId, 'chat.rename'");
+    expect(screenSource).toContain("requestDroneControl(destinationId, 'chat.delete'");
+    expect(screenSource).toContain('commitDrawerChatMutation(');
+    expect(screenSource).toContain('return targetIdRef.current === destinationId;');
+    expect(screenSource).toContain('onCreateDroneChat={createDrawerChat}');
+    expect(screenSource).toContain('onRenameDroneChat={renameDrawerChat}');
+    expect(screenSource).toContain('onDeleteDroneChat={deleteDrawerChat}');
+    expect(localControlSource).toContain("if (operation === 'chat.rename')");
+    expect(localControlSource).toContain("if (operation === 'chat.delete')");
   });
 
   test('distinguishes draft and loading rows instead of showing misleading ready content', () => {

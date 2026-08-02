@@ -80,6 +80,12 @@ describe('device protocol', () => {
     expect(DRONE_CONTROL_CAPABILITY.operations).toContain('drone.rename');
   });
 
+  test('advertises chat rename and delete as explicit permissions', () => {
+    expect(DRONE_CONTROL_CAPABILITY.operations).toEqual(
+      expect.arrayContaining(['chat.rename', 'chat.delete']),
+    );
+  });
+
   test('public pairing endpoints require a safe HTTPS origin', () => {
     expect(() =>
       parsePairingPayload({

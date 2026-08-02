@@ -294,7 +294,7 @@ export function ContextMenu({
       <View style={[styles.contextMenuLayer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Close message actions"
+          accessibilityLabel={`Close ${title}`}
           onPress={onClose}
           style={StyleSheet.absoluteFill}
         />

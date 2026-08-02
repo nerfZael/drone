@@ -27,9 +27,11 @@ export function migrateDeviceMeshGrants(
   const droneControl = next.find(
     (grant) => grant.capability === 'drone-control' && grant.version === 1,
   );
-  // Existing phones trusted to delete drones should not lose access to the
-  // less-destructive rename action merely because it arrived in a later release.
-  if (droneControl?.operations.includes('drone.delete')) operations.push('drone.rename');
+  // Existing phones trusted to delete drones should not lose access to newer,
+  // narrower rename and per-chat management actions after an upgrade.
+  if (droneControl?.operations.includes('drone.delete')) {
+    operations.push('drone.rename', 'chat.rename', 'chat.delete');
+  }
   if (operations.length === 0) return next;
   if (!droneControl) {
     next.push({ capability: 'drone-control', version: 1, operations });

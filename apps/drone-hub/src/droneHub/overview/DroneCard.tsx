@@ -3,7 +3,9 @@ import { timeAgo } from '../../domain';
 import type { DroneSummary } from '../types';
 import {
   IconBaseImage,
+  IconChevron,
   IconClone,
+  IconContainer,
   IconFolder,
   IconPin,
   IconPlus,
@@ -12,10 +14,11 @@ import {
   IconTrash,
 } from './icons';
 import type { SidebarDensityMode } from '../app/settings-types';
-import { sidebarItemTypeClass, sidebarSelectionEdgeClass } from '../sidebar/presentation';
+import { sidebarDensityClasses, sidebarItemTypeClass, sidebarSelectionEdgeClass } from '../sidebar/presentation';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { SidebarContextMenu, type SidebarContextMenuItem } from '../app/SidebarContextMenu';
 import { formatShortcutBinding } from '../app/shortcuts';
+import { normalizedDroneChats } from '../app/chat-node-helpers';
 
 export type DroneInlineRenameResult =
   | boolean
@@ -69,6 +72,8 @@ type DroneCardProps = {
   active?: boolean;
   activeIndicatorStyle?: 'dot' | 'edge';
   leadingIcon?: React.ReactNode;
+  disclosureExpanded?: boolean;
+  disclosureLabel?: string;
   selectionTone?: 'accent' | 'muted';
   showSelectionEdge?: boolean;
   showGroup?: boolean;
@@ -370,8 +375,11 @@ function SidebarChatStateCounts({ summary }: { summary: SidebarChatStateSummary 
   );
 }
 
-function summarizeDroneChats(drone: DroneSummary): SidebarChatStateSummary {
-  const chats = new Set(drone.chats ?? []);
+function summarizeDroneChats(
+  drone: DroneSummary,
+  chatNames: readonly string[],
+): SidebarChatStateSummary {
+  const chats = new Set(chatNames);
   const approvalChats = new Set((drone.approvalChats ?? []).filter((chatName) => chats.has(chatName)));
   const unreadChats = new Set((drone.unreadChats ?? []).filter((chatName) => chats.has(chatName)));
   const busyChats = new Set((drone.busyChats ?? []).filter((chatName) => chats.has(chatName)));
@@ -475,6 +483,8 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.highlighted) === Boolean(b.highlighted) &&
     Boolean(a.active) === Boolean(b.active) &&
     (a.activeIndicatorStyle ?? 'dot') === (b.activeIndicatorStyle ?? 'dot') &&
+    a.disclosureExpanded === b.disclosureExpanded &&
+    (a.disclosureLabel ?? '') === (b.disclosureLabel ?? '') &&
     (a.selectionTone ?? 'accent') === (b.selectionTone ?? 'accent') &&
     (a.showSelectionEdge ?? true) === (b.showSelectionEdge ?? true) &&
     (a.density ?? 'default') === (b.density ?? 'default')
@@ -524,6 +534,8 @@ export const DroneCard = React.memo(function DroneCard({
   active,
   activeIndicatorStyle,
   leadingIcon,
+  disclosureExpanded,
+  disclosureLabel,
   selectionTone,
   showSelectionEdge,
   density = 'default',
@@ -571,9 +583,10 @@ export const DroneCard = React.memo(function DroneCard({
     setInlineRenameOpen(true);
   }, [inlineRenameRequestKey]);
   const isDraftDrone = drone.draft === true || drone.hubPhase === 'draft';
-  const hasMultipleChats = (drone.chats?.length ?? 0) > 1;
+  const chatNames = normalizedDroneChats(drone);
+  const hasMultipleChats = chatNames.length > 1;
   const effectiveChatStateSummary = hasMultipleChats
-    ? (chatStateSummary ?? summarizeDroneChats(drone))
+    ? (chatStateSummary ?? summarizeDroneChats(drone, chatNames))
     : null;
   const unread =
     !isDraftDrone &&
@@ -616,6 +629,7 @@ export const DroneCard = React.memo(function DroneCard({
       : density === 'comfortable'
         ? 'h-8 px-2'
         : 'h-7 px-1.5';
+  const densityClasses = sidebarDensityClasses(density);
   const titleDensityClass =
     density === 'compact'
       ? 'text-[var(--sidebar-drone-compact-size)]'
@@ -782,7 +796,9 @@ export const DroneCard = React.memo(function DroneCard({
       role="button"
       tabIndex={disabled ? -1 : 0}
       aria-disabled={disabled || undefined}
-      title={disabled ? disabledReason : undefined}
+      aria-expanded={disclosureExpanded}
+      aria-label={disclosureLabel}
+      title={disabled ? disabledReason : disclosureLabel}
       {...dragAttributes}
       {...dragListeners}
       onClick={(e) => {
@@ -828,8 +844,20 @@ export const DroneCard = React.memo(function DroneCard({
         className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch"
         style={taggedToDo ? { paddingRight: '3rem' } : undefined}
       >
+        {typeof disclosureExpanded === 'boolean' ? (
+          <>
+            <IconChevron
+              down={disclosureExpanded}
+              strokeWidth={1.25}
+              className={`flex-shrink-0 ${densityClasses.folderChevron}`}
+            />
+            <IconContainer
+              className={`flex-shrink-0 ${densityClasses.icon}`}
+            />
+          </>
+        ) : null}
         {leadingIcon ? <span className="inline-flex flex-shrink-0 items-center">{leadingIcon}</span> : null}
-        {isDraftDrone ? (
+        {typeof disclosureExpanded === 'boolean' ? null : isDraftDrone ? (
           <span
             className="inline-flex h-3 w-3 flex-shrink-0"
             data-sidebar-state-spacer="draft"

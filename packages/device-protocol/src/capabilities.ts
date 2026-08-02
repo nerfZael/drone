@@ -16,6 +16,8 @@ export const DRONE_CONTROL_OPERATIONS = [
   'drones.list',
   'chats.list',
   'chat.create',
+  'chat.rename',
+  'chat.delete',
   'chat.read',
   'chat.models',
   'chat.update',

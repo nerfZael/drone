@@ -87,6 +87,15 @@ function uniqueDroneName(drones: LocalDroneRecord[], requested: unknown): string
   return `${base} ${index}`;
 }
 
+function parseLocalChatName(raw: unknown, label = 'Chat name'): string {
+  const chatName = String(raw ?? '').trim();
+  if (!chatName) throw new Error(`${label} is required.`);
+  if (/[\r\n\t]/.test(chatName)) throw new Error(`${label} cannot contain invalid whitespace.`);
+  if (/[\\/]/.test(chatName)) throw new Error(`${label} cannot include / or \\.`);
+  if (chatName.length > 64) throw new Error(`${label} must be 64 characters or fewer.`);
+  return chatName;
+}
+
 function useLocalDroneControlValue() {
   const assistant = useLocalAssistant();
   const [drones, setDrones] = React.useState<LocalDroneRecord[]>([]);
@@ -339,8 +348,7 @@ function useLocalDroneControlValue() {
       }
       if (operation === 'chat.create') {
         const drone = getDrone();
-        const chatName = String(payload.name ?? '').trim();
-        if (!chatName) throw new Error('Chat name is required');
+        const chatName = parseLocalChatName(payload.name);
         if (drone.chats[chatName]) throw new Error(`Chat already exists: ${chatName}`);
         const sourceId = drone.chats[String(payload.copyFrom ?? '')];
         const thread = sourceId
@@ -352,6 +360,42 @@ function useLocalDroneControlValue() {
           dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
         );
         return { ok: true, chatName, chats: Object.keys(nextDrone.chats) };
+      }
+      if (operation === 'chat.rename') {
+        const drone = getDrone();
+        const chatName = String(payload.chatName ?? '').trim();
+        if (!chatName || chatName === 'default') throw new Error('The default chat cannot be renamed.');
+        const newName = parseLocalChatName(payload.newName, 'New chat name');
+        if (!drone.chats[chatName]) throw new Error(`Unknown chat: ${chatName}`);
+        if (newName !== chatName && drone.chats[newName]) {
+          throw new Error(`Chat already exists: ${newName}`);
+        }
+        const threadId = drone.chats[chatName]!;
+        await assistant.updateThread(threadId, { title: newName, artifactWorkspace: true });
+        const nextChats = Object.fromEntries(
+          Object.entries(drone.chats).map(([name, id]) => [name === chatName ? newName : name, id]),
+        );
+        const nextDrone = { ...drone, chats: nextChats };
+        await replaceDrones(
+          dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
+        );
+        return { ok: true, oldChat: chatName, chat: newName, chats: Object.keys(nextChats) };
+      }
+      if (operation === 'chat.delete') {
+        const drone = getDrone();
+        const chatName = String(payload.chatName ?? '').trim();
+        if (!chatName || chatName === 'default') throw new Error('The default chat cannot be deleted.');
+        const threadId = drone.chats[chatName];
+        if (!threadId) throw new Error(`Unknown chat: ${chatName}`);
+        await assistant.deleteThread(threadId);
+        const nextChats = Object.fromEntries(
+          Object.entries(drone.chats).filter(([name]) => name !== chatName),
+        );
+        const nextDrone = { ...drone, chats: nextChats };
+        await replaceDrones(
+          dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
+        );
+        return { ok: true, deletedChat: chatName, chats: Object.keys(nextChats) };
       }
       if (operation === 'file.preview') {
         const { thread } = getThread();

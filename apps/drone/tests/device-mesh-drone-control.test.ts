@@ -898,6 +898,48 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('routes mobile chat rename and delete through the desktop Hub APIs', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      requests.push({
+        url: String(input),
+        method: String(init?.method ?? 'GET'),
+        body: String(init?.body ?? ''),
+      });
+      return Response.json({ ok: true, chats: ['default'] });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await capability.invoke('chat.rename', {
+        droneId: 'drone one',
+        chatName: 'review notes',
+        newName: 'final review',
+      });
+      await capability.invoke('chat.delete', {
+        droneId: 'drone one',
+        chatName: 'final review',
+      });
+      expect(requests).toEqual([
+        {
+          url: 'http://127.0.0.1:7777/api/drones/drone%20one/chats/review%20notes/rename',
+          method: 'POST',
+          body: '{"newName":"final review"}',
+        },
+        {
+          url: 'http://127.0.0.1:7777/api/drones/drone%20one/chats/final%20review',
+          method: 'DELETE',
+          body: '',
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('loads a historical file diff through the existing chat read permission', async () => {
     const originalFetch = globalThis.fetch;
     const requestedPaths: string[] = [];

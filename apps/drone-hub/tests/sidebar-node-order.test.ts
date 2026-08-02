@@ -7,6 +7,8 @@ import {
   placeCreatedSidebarFolderBeforeNode,
   removeSidebarRepoScopedNodeOrderByGroupPrefix,
   renameSidebarNodeOrderByParentGroupPrefix,
+  sidebarChatRefFromNodeId,
+  sidebarChatSidebarNodeId,
   sidebarDroneIdFromNodeId,
   sidebarDroneNodeId,
   sidebarFolderNodeId,
@@ -17,6 +19,12 @@ describe('sidebar-node-order', () => {
     expect(sidebarDroneIdFromNodeId(sidebarDroneNodeId('drone-1'))).toBe('drone-1');
     expect(sidebarDroneIdFromNodeId(sidebarFolderNodeId('Group'))).toBeNull();
     expect(sidebarDroneIdFromNodeId('chat:drone-1:default')).toBeNull();
+  });
+
+  test('resolves a selected chat row as an inline rename target', () => {
+    expect(sidebarChatRefFromNodeId(sidebarChatSidebarNodeId('drone-1', 'review:api')))
+      .toEqual({ droneId: 'drone-1', chatName: 'review:api' });
+    expect(sidebarChatRefFromNodeId(sidebarDroneNodeId('drone-1'))).toBeNull();
   });
 
   test('can persist the current visible folder order before a rename', () => {

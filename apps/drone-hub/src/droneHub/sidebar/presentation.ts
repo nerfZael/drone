@@ -5,9 +5,7 @@ export type SidebarDensityClasses = {
   icon: string;
   folderChevron: string;
   chatRow: string;
-  chatDeleteWidth: string;
   chatIndent: string;
-  chatBlockIndent: string;
   childIndent: string;
   nestedDroneIndent: string;
   nestedDroneRail: string;
@@ -25,10 +23,8 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
   compact: {
     icon: 'h-3 w-3 text-[var(--muted-dim)] opacity-72',
     folderChevron: 'h-3.5 w-3.5 translate-x-px text-[var(--muted-dim)] opacity-72',
-    chatRow: 'h-6 px-1.5 text-[var(--sidebar-item-compact-size)]',
-    chatDeleteWidth: 'w-6',
+    chatRow: 'h-6 pl-1 pr-1.5 text-[var(--sidebar-item-compact-size)]',
     chatIndent: 'ml-3 mr-1',
-    chatBlockIndent: 'ml-[9px] mr-1',
     childIndent: 'ml-4',
     nestedDroneIndent: 'ml-2',
     nestedDroneRail: 'ml-1 mr-1 pl-1',
@@ -38,16 +34,14 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
     folderPaddingX: 'px-1 py-0.5',
     folderLabel: 'text-[var(--sidebar-item-compact-size)]',
     folderInput: 'px-1.5 py-0.5 text-[var(--sidebar-item-compact-size)]',
-    folderBody: 'ml-[9px] flex flex-col gap-0 border-l pl-0',
+    folderBody: 'ml-[11px] flex flex-col gap-0 border-l pl-0',
     folderDepthPaddingPx: 4,
   },
   default: {
     icon: 'h-3.5 w-3.5 text-[var(--muted-dim)] opacity-72',
     folderChevron: 'h-4 w-4 translate-x-px text-[var(--muted-dim)] opacity-72',
-    chatRow: 'h-[25px] px-1.5 text-[var(--sidebar-item-size)]',
-    chatDeleteWidth: 'w-6',
+    chatRow: 'h-[25px] pl-1 pr-1.5 text-[var(--sidebar-item-size)]',
     chatIndent: 'ml-[14px] mr-1',
-    chatBlockIndent: 'ml-2.5 mr-1',
     childIndent: 'ml-5',
     nestedDroneIndent: 'ml-2.5',
     nestedDroneRail: 'ml-1 mr-1 pl-1',
@@ -57,16 +51,14 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
     folderPaddingX: 'px-1 py-0.5',
     folderLabel: 'text-[var(--sidebar-item-size)]',
     folderInput: 'px-2 py-1 text-[var(--sidebar-item-size)]',
-    folderBody: 'ml-2.5 flex flex-col gap-0 border-l pl-0',
+    folderBody: 'ml-3 flex flex-col gap-0 border-l pl-0',
     folderDepthPaddingPx: 5,
   },
   comfortable: {
     icon: 'h-[15px] w-[15px] text-[var(--muted-dim)] opacity-72',
     folderChevron: 'h-[17px] w-[17px] translate-x-px text-[var(--muted-dim)] opacity-72',
-    chatRow: 'h-7 px-2 text-[var(--sidebar-item-comfortable-size)]',
-    chatDeleteWidth: 'w-7',
+    chatRow: 'h-7 pl-1 pr-2 text-[var(--sidebar-item-comfortable-size)]',
     chatIndent: 'ml-[18px] mr-1',
-    chatBlockIndent: 'ml-3 mr-1',
     childIndent: 'ml-6',
     nestedDroneIndent: 'ml-3.5',
     nestedDroneRail: 'ml-1.5 mr-1 pl-1.5',
@@ -76,7 +68,7 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
     folderPaddingX: 'px-1.5 py-1',
     folderLabel: 'text-[var(--sidebar-item-comfortable-size)]',
     folderInput: 'px-2 py-1 text-[var(--sidebar-item-comfortable-size)]',
-    folderBody: 'ml-3 flex flex-col gap-0 border-l pl-0',
+    folderBody: 'ml-[15px] flex flex-col gap-0 border-l pl-0',
     folderDepthPaddingPx: 6,
   },
 };

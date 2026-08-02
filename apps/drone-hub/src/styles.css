@@ -878,6 +878,20 @@ code, pre {
   border-left-color: var(--accent-muted);
 }
 
+.dh-sidebar-drone-chat-body {
+  border-left-color: transparent;
+  transition: border-color 120ms ease;
+}
+
+[data-sidebar-drone-unit]:hover > .dh-sidebar-drone-chat-body,
+.dh-sidebar-drone-chat-body[data-sidebar-guide-selected='true'] {
+  border-left-color: var(--border-subtle);
+}
+
+.dh-sidebar-drone-chat-body[data-sidebar-guide-drop-active='true'] {
+  border-left-color: var(--accent-muted);
+}
+
 .dh-sidebar-row-interactive:not([aria-disabled='true']):not(.dh-sidebar-row-selected):not(.dh-sidebar-row-highlighted):is(:hover, :focus-visible)::after {
   content: '';
   position: absolute;

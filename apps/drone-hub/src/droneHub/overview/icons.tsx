@@ -1,6 +1,6 @@
 import React from 'react';
 
-export { IconChat, IconChevron, IconDrone, IconFolder, IconMessageCircle, IconSpinner, IconTrash } from '../icons';
+export { IconChat, IconChevron, IconContainer, IconDrone, IconFolder, IconMessageCircle, IconSpinner, IconTrash } from '../icons';
 
 export function IconPlus({ className }: { className?: string }) {
   return (

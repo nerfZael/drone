@@ -84,11 +84,13 @@ describe('sidebar presentation', () => {
     expect(normal.chatRow).toContain('text-[var(--sidebar-item-size)]');
     expect(comfortable.chatRow).toContain('text-[var(--sidebar-item-comfortable-size)]');
     expect(normal.folderLabel).toContain('text-[var(--sidebar-item-size)]');
-    expect(normal.folderBody).toContain('ml-2.5');
+    expect(compact.chatRow).toContain('pl-1 pr-1.5');
+    expect(normal.chatRow).toContain('pl-1 pr-1.5');
+    expect(comfortable.chatRow).toContain('pl-1 pr-2');
+    expect(compact.folderBody).toContain('ml-[11px]');
+    expect(normal.folderBody).toContain('ml-3');
+    expect(comfortable.folderBody).toContain('ml-[15px]');
     expect(normal.folderBody).toContain('pl-0');
-    expect(compact.chatBlockIndent).toBe('ml-[9px] mr-1');
-    expect(normal.chatBlockIndent).toBe('ml-2.5 mr-1');
-    expect(comfortable.chatBlockIndent).toBe('ml-3 mr-1');
     expect(compact.folderDepthPaddingPx).toBeLessThan(normal.folderDepthPaddingPx);
     expect(normal.folderDepthPaddingPx).toBeLessThan(comfortable.folderDepthPaddingPx);
     expect(sidebarFolderLabelClass).toContain('dh-type-sidebar-heading');
@@ -209,7 +211,21 @@ describe('sidebar presentation', () => {
 
     expect(groupedTreeSource).toContain('data-sidebar-chat-rail="true"');
     expect(groupedTreeSource).toContain(
-      'className={`${densityClasses.chatBlockIndent} flex flex-col gap-0 border-l border-[var(--border-subtle)] [--sidebar-selection-edge-offset:-1px]`}',
+      'className={`${densityClasses.chatIndent} dh-sidebar-drone-chat-body flex flex-col gap-0 border-l [--sidebar-selection-edge-offset:-1px]`}',
+    );
+    expect(groupedTreeSource).toContain(
+      "data-sidebar-guide-selected={hasActiveChildChat ? 'true' : undefined}",
+    );
+  });
+
+  test('balances root tree spacing below the active project header', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(sidebarSource).toContain(
+      'group/active-repository sticky top-0 z-20 -mx-2 mb-2',
     );
   });
 
@@ -226,6 +242,8 @@ describe('sidebar presentation', () => {
     expect(groupedTreeSource).toContain('selectedSidebarNodeId === childId');
     expect(stylesSource).toContain('[data-sidebar-folder-node]:hover > .dh-sidebar-folder-body');
     expect(stylesSource).toContain(".dh-sidebar-folder-body[data-sidebar-guide-selected='true']");
+    expect(stylesSource).toContain('[data-sidebar-drone-unit]:hover > .dh-sidebar-drone-chat-body');
+    expect(stylesSource).toContain(".dh-sidebar-drone-chat-body[data-sidebar-guide-selected='true']");
     expect(stylesSource).toContain('border-left-color: transparent;');
   });
 
@@ -279,7 +297,7 @@ describe('sidebar presentation', () => {
     );
 
     expect(sidebarSource).toContain(
-      'group/active-repository sticky top-0 z-20 -mx-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--sidebar-bg)]',
+      'group/active-repository sticky top-0 z-20 -mx-2 mb-2 flex h-10 w-[calc(100%+1rem)] flex-shrink-0 items-center border-b border-[var(--border-subtle)] bg-[var(--sidebar-bg)]',
     );
     expect(sidebarSource).toContain(
       "pinnedSidebarPlacement === 'top' && globalPinnedDrones.length > 0",

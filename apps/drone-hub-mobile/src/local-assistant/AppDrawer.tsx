@@ -31,6 +31,7 @@ import {
   buildMobileDroneRepoGroups,
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   orderedMobileDroneChats,
+  suggestNextMobileDroneChatName,
   type MobileDroneGroupFolder,
   type MobileDroneRepoGroup,
   type MobileDroneSidebarEntry,
@@ -50,6 +51,7 @@ import {
 } from '../drones/drone-state-summary';
 import {
   SidebarChevronIcon,
+  SidebarContainerIcon,
   SidebarFolderGitIcon,
   SidebarFolderOutlineIcon,
   SidebarPinIcon,
@@ -59,6 +61,13 @@ import {
   SidebarWorkingIcon,
 } from './SidebarIcons';
 import { useMobileSidebarExpandedFolderIds } from './use-mobile-sidebar-expanded-folder-ids';
+import { useMobileSidebarCollapsedDroneIds } from './use-mobile-sidebar-collapsed-drone-ids';
+import {
+  ConfirmDialog,
+  ContextMenu,
+  TextInputDialog,
+  type ContextMenuAction,
+} from '../components/Ui';
 
 export function appDrawerWidth(windowWidth: number): number {
   return Math.max(0, windowWidth);
@@ -104,7 +113,15 @@ export type AppDrawerProps = {
   onCreateDrone?(repoPath: string): void;
   onRetryDrones?(): void;
   onSelectDroneChat?(droneId: string, chatName: string): void;
+  onCreateDroneChat?(droneId: string, chatName: string, copyFrom: string): Promise<boolean>;
+  onRenameDroneChat?(droneId: string, chatName: string, newName: string): Promise<boolean>;
+  onDeleteDroneChat?(droneId: string, chatName: string): Promise<boolean>;
   onSelectDevice?(deviceId: string): void;
+};
+
+type DrawerChatActionTarget = {
+  drone: MobileDroneSummary;
+  chatName: string;
 };
 
 type RegisterDrawer = (props: AppDrawerProps | null) => void;
@@ -663,6 +680,7 @@ function DrawerDroneChatRow({
   activeDroneId,
   activeChatName,
   selectionWashInset,
+  onOpenActions,
   onSelect,
 }: {
   drone: MobileDroneSummary;
@@ -670,9 +688,11 @@ function DrawerDroneChatRow({
   activeDroneId: string;
   activeChatName: string;
   selectionWashInset: number;
+  onOpenActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
   const selected = drone.id === activeDroneId && chatName === activeChatName;
+  const suppressPressAfterLongPressRef = React.useRef(false);
   const draft = drone.draftChats?.[chatName] === true;
   const unread = !selected && (drone.unreadChats?.includes(chatName) ?? false);
   const displayState = mobileDroneChatDisplayState(
@@ -686,7 +706,25 @@ function DrawerDroneChatRow({
       accessibilityRole="button"
       accessibilityLabel={`${drone.name} / ${chatName}, ${stateLabel}`}
       accessibilityState={{ selected }}
-      onPress={() => onSelect(drone.id, chatName)}
+      delayLongPress={400}
+      onLongPress={() => {
+        if (!onOpenActions) return;
+        suppressPressAfterLongPressRef.current = true;
+        onOpenActions({ drone, chatName });
+      }}
+      onPressOut={() => {
+        if (!suppressPressAfterLongPressRef.current) return;
+        setTimeout(() => {
+          suppressPressAfterLongPressRef.current = false;
+        }, 0);
+      }}
+      onPress={() => {
+        if (suppressPressAfterLongPressRef.current) {
+          suppressPressAfterLongPressRef.current = false;
+          return;
+        }
+        onSelect(drone.id, chatName);
+      }}
       style={({ pressed }) => [
         styles.droneChatRow,
         pressed && !selected && styles.sidebarRowPressed,
@@ -696,7 +734,7 @@ function DrawerDroneChatRow({
         <View style={[styles.droneChatSelectionWash, { left: -selectionWashInset }]} />
       ) : null}
       {selected ? <View style={styles.sidebarSelectionEdge} /> : null}
-      <SwitchItemStatusIndicator state={displayState} unread={unread} showReadyAnchor={false} />
+      <SwitchItemStatusIndicator state={displayState} unread={unread} showReadyAnchor />
       <Text
         numberOfLines={1}
         style={[styles.droneChatLabel, selected && styles.droneChatLabelActive]}
@@ -713,27 +751,42 @@ function DrawerDroneNode({
   depth,
   contextLabel,
   sidebarChatOrderByDrone,
+  collapsedDroneIds,
+  selectedContainerDroneId,
   showChats = true,
   activeDroneId,
   activeChatName,
   droneOperationById,
+  onToggleDrone,
+  onSelectContainer,
+  onOpenChatActions,
   onSelect,
 }: {
   node: MobileDroneTreeNode;
   depth: number;
   contextLabel?: string;
   sidebarChatOrderByDrone: Record<string, string[]>;
+  collapsedDroneIds: ReadonlySet<string>;
+  selectedContainerDroneId: string;
   showChats?: boolean;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
+  onToggleDrone(droneId: string): void;
+  onSelectContainer(droneId: string): void;
+  onOpenChatActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
   const { drone } = node;
   const chats = orderedMobileDroneChats(drone, sidebarChatOrderByDrone[drone.id]);
   const selected = drone.id === activeDroneId;
   const hasMultipleChats = chats.length > 1;
+  const chatSectionExpanded = !collapsedDroneIds.has(drone.id);
+  const isChatDisclosure = showChats && hasMultipleChats;
   const hasActiveChildChat = selected && showChats && hasMultipleChats;
+  const hasVisibleActiveChildChat = hasActiveChildChat && chatSectionExpanded;
+  const containerSelected = isChatDisclosure && selectedContainerDroneId === drone.id;
+  const parentSelected = containerSelected || (selected && !hasVisibleActiveChildChat);
   const selectedChat =
     selected && chats.includes(activeChatName) ? activeChatName : (chats[0] ?? '');
   const operation = droneOperationById[drone.id] as 'archiving' | 'deleting' | undefined;
@@ -766,7 +819,9 @@ function DrawerDroneNode({
   }, [displayState]);
   const runtimeLabel = drone.runtime.trim().toLowerCase() === 'host' ? 'host' : 'container';
   const accessibilityLabel = [
-    `Open ${drone.name} chat`,
+    isChatDisclosure
+      ? `${chatSectionExpanded ? 'Collapse' : 'Expand'} ${drone.name} chats`
+      : `Open ${drone.name} chat`,
     stateLabel,
     unread && stateLabel !== 'Unread' ? 'unread chat' : '',
     `${runtimeLabel} runtime`,
@@ -779,20 +834,51 @@ function DrawerDroneNode({
     <View style={styles.droneNode}>
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ selected, disabled: Boolean(operation) }}
+        accessibilityState={{
+          selected: parentSelected,
+          disabled: Boolean(operation),
+          expanded: isChatDisclosure ? chatSectionExpanded : undefined,
+        }}
         accessibilityLabel={accessibilityLabel}
         disabled={Boolean(operation)}
-        onPress={() => onSelect(drone.id, selectedChat)}
+        onPress={() => {
+          if (isChatDisclosure) {
+            onSelectContainer(drone.id);
+            onToggleDrone(drone.id);
+            return;
+          }
+          onSelect(drone.id, selectedChat);
+        }}
         style={({ pressed }) => [
           styles.switchItemRow,
           { paddingLeft: drawerTreeRowPaddingLeft(depth), paddingRight: 6 },
-          selected && !hasActiveChildChat && styles.switchItemRowActive,
-          pressed && (!selected || hasActiveChildChat) && styles.sidebarRowPressed,
+          parentSelected && styles.switchItemRowActive,
+          pressed && !parentSelected && styles.sidebarRowPressed,
         ]}
       >
-        {selected && !hasActiveChildChat ? <View style={styles.sidebarSelectionEdge} /> : null}
+        {parentSelected ? <View style={styles.sidebarSelectionEdge} /> : null}
         <View style={styles.switchItemMain}>
-          {isDraft ? (
+          {isChatDisclosure ? (
+            <View accessible={false} style={styles.droneChevronSlot}>
+              <SidebarTreeChevronIcon
+                color={colors.sidebarMutedDim}
+                size={16}
+                strokeWidth={1.25}
+                expanded={chatSectionExpanded}
+                style={styles.droneChevron}
+              />
+            </View>
+          ) : null}
+          {isChatDisclosure ? (
+            <View accessible={false} style={styles.droneContainerIconSlot}>
+              <SidebarContainerIcon
+                color={colors.sidebarMutedDim}
+                size={14}
+                strokeWidth={1.35}
+              />
+            </View>
+          ) : null}
+          {isChatDisclosure ? null : isDraft ? (
             <View accessible={false} style={styles.switchItemStatus} />
           ) : (
             <SwitchItemStatusIndicator
@@ -803,7 +889,7 @@ function DrawerDroneNode({
           )}
           <Text
             numberOfLines={1}
-            style={[styles.switchItemTitle, selected && styles.switchItemTitleActive]}
+            style={[styles.switchItemTitle, parentSelected && styles.switchItemTitleActive]}
           >
             {drone.name}
           </Text>
@@ -826,24 +912,28 @@ function DrawerDroneNode({
         </View>
       </Pressable>
       {showChats && chats.length > 1 ? (
-        <View
-          style={[
-            styles.droneChatRail,
-            { marginLeft: drawerTreeRowPaddingLeft(depth) + 8 },
-          ]}
-        >
-          {chats.map((chatName) => (
-            <DrawerDroneChatRow
-              key={`${drone.id}:${chatName}`}
-              drone={drone}
-              chatName={chatName}
-              activeDroneId={activeDroneId}
-              activeChatName={activeChatName}
-              selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}
-              onSelect={onSelect}
-            />
-          ))}
-        </View>
+        chatSectionExpanded ? (
+          <View
+            style={[
+              styles.droneChatRail,
+              { marginLeft: drawerTreeRowPaddingLeft(depth) + 8 },
+              hasActiveChildChat && styles.droneChatRailVisible,
+            ]}
+          >
+            {chats.map((chatName) => (
+              <DrawerDroneChatRow
+                key={`${drone.id}:${chatName}`}
+                drone={drone}
+                chatName={chatName}
+                activeDroneId={activeDroneId}
+                activeChatName={activeChatName}
+                selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}
+                onOpenActions={operation ? undefined : onOpenChatActions}
+                onSelect={onSelect}
+              />
+            ))}
+          </View>
+        ) : null
       ) : null}
       {node.children.length > 0 ? (
         <View style={styles.droneChildren}>
@@ -853,9 +943,14 @@ function DrawerDroneNode({
               node={child}
               depth={depth}
               sidebarChatOrderByDrone={sidebarChatOrderByDrone}
+              collapsedDroneIds={collapsedDroneIds}
+              selectedContainerDroneId={selectedContainerDroneId}
               activeDroneId={activeDroneId}
               activeChatName={activeChatName}
               droneOperationById={droneOperationById}
+              onToggleDrone={onToggleDrone}
+              onSelectContainer={onSelectContainer}
+              onOpenChatActions={onOpenChatActions}
               onSelect={onSelect}
             />
           ))}
@@ -869,21 +964,31 @@ function DrawerDroneFolder({
   folder,
   depth,
   expandedFolderIds,
+  collapsedDroneIds,
+  selectedContainerDroneId,
   sidebarChatOrderByDrone,
   activeDroneId,
   activeChatName,
   droneOperationById,
   onToggleFolder,
+  onToggleDrone,
+  onSelectContainer,
+  onOpenChatActions,
   onSelect,
 }: {
   folder: MobileDroneGroupFolder;
   depth: number;
   expandedFolderIds: ReadonlySet<string>;
+  collapsedDroneIds: ReadonlySet<string>;
+  selectedContainerDroneId: string;
   sidebarChatOrderByDrone: Record<string, string[]>;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
   onToggleFolder(folderId: string): void;
+  onToggleDrone(droneId: string): void;
+  onSelectContainer(droneId: string): void;
+  onOpenChatActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
   const collapsed = !expandedFolderIds.has(folder.id);
@@ -936,11 +1041,16 @@ function DrawerDroneFolder({
               entry={entry}
               depth={depth + 1}
               expandedFolderIds={expandedFolderIds}
+              collapsedDroneIds={collapsedDroneIds}
+              selectedContainerDroneId={selectedContainerDroneId}
               sidebarChatOrderByDrone={sidebarChatOrderByDrone}
               activeDroneId={activeDroneId}
               activeChatName={activeChatName}
               droneOperationById={droneOperationById}
               onToggleFolder={onToggleFolder}
+              onToggleDrone={onToggleDrone}
+              onSelectContainer={onSelectContainer}
+              onOpenChatActions={onOpenChatActions}
               onSelect={onSelect}
             />
           ))}
@@ -954,21 +1064,31 @@ function DrawerDroneEntry({
   entry,
   depth,
   expandedFolderIds,
+  collapsedDroneIds,
+  selectedContainerDroneId,
   sidebarChatOrderByDrone,
   activeDroneId,
   activeChatName,
   droneOperationById,
   onToggleFolder,
+  onToggleDrone,
+  onSelectContainer,
+  onOpenChatActions,
   onSelect,
 }: {
   entry: MobileDroneSidebarEntry;
   depth: number;
   expandedFolderIds: ReadonlySet<string>;
+  collapsedDroneIds: ReadonlySet<string>;
+  selectedContainerDroneId: string;
   sidebarChatOrderByDrone: Record<string, string[]>;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
   onToggleFolder(folderId: string): void;
+  onToggleDrone(droneId: string): void;
+  onSelectContainer(droneId: string): void;
+  onOpenChatActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
   return entry.kind === 'drone' ? (
@@ -976,9 +1096,14 @@ function DrawerDroneEntry({
       node={entry.node}
       depth={depth}
       sidebarChatOrderByDrone={sidebarChatOrderByDrone}
+      collapsedDroneIds={collapsedDroneIds}
+      selectedContainerDroneId={selectedContainerDroneId}
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
       droneOperationById={droneOperationById}
+      onToggleDrone={onToggleDrone}
+      onSelectContainer={onSelectContainer}
+      onOpenChatActions={onOpenChatActions}
       onSelect={onSelect}
     />
   ) : (
@@ -986,11 +1111,16 @@ function DrawerDroneEntry({
       folder={entry.folder}
       depth={depth}
       expandedFolderIds={expandedFolderIds}
+      collapsedDroneIds={collapsedDroneIds}
+      selectedContainerDroneId={selectedContainerDroneId}
       sidebarChatOrderByDrone={sidebarChatOrderByDrone}
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
       droneOperationById={droneOperationById}
       onToggleFolder={onToggleFolder}
+      onToggleDrone={onToggleDrone}
+      onSelectContainer={onSelectContainer}
+      onOpenChatActions={onOpenChatActions}
       onSelect={onSelect}
     />
   );
@@ -1002,9 +1132,14 @@ function DrawerPinnedDrones({
   separateFromRepositoryList,
   repoLabelByPath,
   sidebarChatOrderByDrone,
+  collapsedDroneIds,
+  selectedContainerDroneId,
   activeDroneId,
   activeChatName,
   droneOperationById,
+  onToggleDrone,
+  onSelectContainer,
+  onOpenChatActions,
   onSelect,
   onTogglePlacement,
 }: {
@@ -1013,9 +1148,14 @@ function DrawerPinnedDrones({
   separateFromRepositoryList: boolean;
   repoLabelByPath: ReadonlyMap<string, string>;
   sidebarChatOrderByDrone: Record<string, string[]>;
+  collapsedDroneIds: ReadonlySet<string>;
+  selectedContainerDroneId: string;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
+  onToggleDrone(droneId: string): void;
+  onSelectContainer(droneId: string): void;
+  onOpenChatActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
   onTogglePlacement(): void;
 }) {
@@ -1073,10 +1213,14 @@ function DrawerPinnedDrones({
           depth={0}
           contextLabel={repoLabelByPath.get(drone.repoPath) ?? 'Ungrouped'}
           sidebarChatOrderByDrone={sidebarChatOrderByDrone}
-          showChats={false}
+          collapsedDroneIds={collapsedDroneIds}
+          selectedContainerDroneId={selectedContainerDroneId}
           activeDroneId={activeDroneId}
           activeChatName={activeChatName}
           droneOperationById={droneOperationById}
+          onToggleDrone={onToggleDrone}
+          onSelectContainer={onSelectContainer}
+          onOpenChatActions={onOpenChatActions}
           onSelect={onSelect}
         />
       ))}
@@ -1257,6 +1401,9 @@ function AppDrawerView({
   onCreateDrone,
   onRetryDrones,
   onSelectDroneChat,
+  onCreateDroneChat,
+  onRenameDroneChat,
+  onDeleteDroneChat,
   onSelectDevice,
   onClose,
 }: AppDrawerProps) {
@@ -1311,6 +1458,33 @@ function AppDrawerView({
   );
   const [activeRepoId, setActiveRepoId] = React.useState<string | null>(null);
   const { expandedFolderIds, toggleFolder } = useMobileSidebarExpandedFolderIds();
+  const { collapsedDroneIds, toggleDrone } = useMobileSidebarCollapsedDroneIds();
+  const [selectedContainerDroneId, setSelectedContainerDroneId] = React.useState('');
+  const [chatActionTarget, setChatActionTarget] = React.useState<DrawerChatActionTarget | null>(null);
+  const [chatEditor, setChatEditor] = React.useState<{
+    mode: 'create' | 'rename';
+    target: DrawerChatActionTarget;
+    value: string;
+  } | null>(null);
+  const [deleteChatTarget, setDeleteChatTarget] = React.useState<DrawerChatActionTarget | null>(null);
+  const [chatMutationBusy, setChatMutationBusy] = React.useState(false);
+  const [chatMutationError, setChatMutationError] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setSelectedContainerDroneId('');
+  }, [activeChatName, activeDeviceId, activeDroneId]);
+  React.useEffect(() => {
+    setChatActionTarget(null);
+    setChatEditor(null);
+    setDeleteChatTarget(null);
+    setChatMutationError(null);
+  }, [activeDeviceId]);
+  React.useEffect(() => {
+    if (open || chatMutationBusy) return;
+    setChatActionTarget(null);
+    setChatEditor(null);
+    setDeleteChatTarget(null);
+    setChatMutationError(null);
+  }, [chatMutationBusy, open]);
   const activeRepo = droneGroups.find((group) => group.id === activeRepoId) ?? null;
   const globalPinnedDrones = React.useMemo(
     () => resolvePinnedSidebarDrones(drones, droneSidebarOrder.pinnedDroneIds),
@@ -1322,10 +1496,127 @@ function AppDrawerView({
   );
   const selectPinnedDroneChat = React.useCallback(
     (droneId: string, chatName: string) => {
+      setSelectedContainerDroneId('');
       onSelectDroneChat?.(droneId, chatName);
     },
     [onSelectDroneChat],
   );
+  const openChatActions = React.useCallback(
+    (target: DrawerChatActionTarget) => {
+      if (
+        !dronesReachable ||
+        (!onCreateDroneChat && !onRenameDroneChat && !onDeleteDroneChat)
+      ) return;
+      setChatMutationError(null);
+      setChatActionTarget(target);
+    },
+    [dronesReachable, onCreateDroneChat, onDeleteDroneChat, onRenameDroneChat],
+  );
+  const submitChatEditor = React.useCallback(async () => {
+    if (!chatEditor || chatMutationBusy) return;
+    const nextName = chatEditor.value.trim();
+    if (!nextName) {
+      setChatMutationError('Enter a chat name.');
+      return;
+    }
+    const duplicate = chatEditor.target.drone.chats.some(
+      (chatName) =>
+        chatName === nextName &&
+        (chatEditor.mode === 'create' || chatName !== chatEditor.target.chatName),
+    );
+    if (duplicate) {
+      setChatMutationError(`A chat named “${nextName}” already exists.`);
+      return;
+    }
+    setChatMutationBusy(true);
+    setChatMutationError(null);
+    try {
+      let applied = false;
+      if (chatEditor.mode === 'create') {
+        applied =
+          (await onCreateDroneChat?.(
+            chatEditor.target.drone.id,
+            nextName,
+            chatEditor.target.chatName,
+          )) === true;
+      } else {
+        applied =
+          (await onRenameDroneChat?.(
+            chatEditor.target.drone.id,
+            chatEditor.target.chatName,
+            nextName,
+          )) === true;
+      }
+      if (!applied) return;
+      setSelectedContainerDroneId('');
+      onSelectDroneChat?.(chatEditor.target.drone.id, nextName);
+      setChatEditor(null);
+    } catch (error: any) {
+      setChatMutationError(String(error?.message ?? error ?? 'Chat action failed.'));
+    } finally {
+      setChatMutationBusy(false);
+    }
+  }, [
+    chatEditor,
+    chatMutationBusy,
+    onCreateDroneChat,
+    onRenameDroneChat,
+    onSelectDroneChat,
+  ]);
+  const confirmDeleteChat = React.useCallback(async () => {
+    if (!deleteChatTarget || chatMutationBusy || !onDeleteDroneChat) return;
+    setChatMutationBusy(true);
+    setChatMutationError(null);
+    try {
+      await onDeleteDroneChat(deleteChatTarget.drone.id, deleteChatTarget.chatName);
+      setDeleteChatTarget(null);
+    } catch (error: any) {
+      setChatMutationError(String(error?.message ?? error ?? 'Could not delete chat.'));
+    } finally {
+      setChatMutationBusy(false);
+    }
+  }, [chatMutationBusy, deleteChatTarget, onDeleteDroneChat]);
+  const chatContextActions = React.useMemo<ContextMenuAction[]>(() => {
+    if (!chatActionTarget) return [];
+    const actions: ContextMenuAction[] = [];
+    if (onCreateDroneChat) {
+      actions.push({
+        label: 'Create chat',
+        onPress: () => {
+          setChatMutationError(null);
+          setChatEditor({
+            mode: 'create',
+            target: chatActionTarget,
+            value: suggestNextMobileDroneChatName(chatActionTarget.drone.chats),
+          });
+        },
+      });
+    }
+    if (chatActionTarget.chatName !== 'default' && onRenameDroneChat) {
+      actions.push({
+        label: 'Rename chat',
+        onPress: () => {
+          setChatMutationError(null);
+          setChatEditor({
+            mode: 'rename',
+            target: chatActionTarget,
+            value: chatActionTarget.chatName,
+          });
+        },
+      });
+    }
+    if (chatActionTarget.chatName !== 'default' && onDeleteDroneChat) {
+      actions.push({
+        label: 'Delete chat',
+        destructive: true,
+        onPress: () => {
+          setChatMutationError(null);
+          setDeleteChatTarget(chatActionTarget);
+        },
+      });
+    }
+    return actions;
+  }, [chatActionTarget, onCreateDroneChat, onDeleteDroneChat, onRenameDroneChat]);
   const pinnedDronesSection = (
     <DrawerPinnedDrones
       drones={globalPinnedDrones}
@@ -1333,9 +1624,14 @@ function AppDrawerView({
       separateFromRepositoryList={!activeRepo}
       repoLabelByPath={repoLabelByPath}
       sidebarChatOrderByDrone={droneSidebarOrder.sidebarChatOrderByDrone}
+      collapsedDroneIds={collapsedDroneIds}
+      selectedContainerDroneId={selectedContainerDroneId}
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
       droneOperationById={droneOperationById}
+      onToggleDrone={toggleDrone}
+      onSelectContainer={setSelectedContainerDroneId}
+      onOpenChatActions={openChatActions}
       onSelect={selectPinnedDroneChat}
       onTogglePlacement={togglePinnedSidebarPlacement}
     />
@@ -1471,12 +1767,20 @@ function AppDrawerView({
                     entry={entry}
                     depth={0}
                     expandedFolderIds={expandedFolderIds}
+                    collapsedDroneIds={collapsedDroneIds}
+                    selectedContainerDroneId={selectedContainerDroneId}
                     sidebarChatOrderByDrone={droneSidebarOrder.sidebarChatOrderByDrone}
                     activeDroneId={activeDroneId}
                     activeChatName={activeChatName}
                     droneOperationById={droneOperationById}
                     onToggleFolder={toggleFolder}
-                    onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
+                    onToggleDrone={toggleDrone}
+                    onSelectContainer={setSelectedContainerDroneId}
+                    onOpenChatActions={openChatActions}
+                    onSelect={(droneId, chatName) => {
+                      setSelectedContainerDroneId('');
+                      onSelectDroneChat?.(droneId, chatName);
+                    }}
                   />
                 )}
                 ListHeaderComponent={
@@ -1635,6 +1939,63 @@ function AppDrawerView({
         )}
         <DrawerVoiceRecordingIndicator />
       </View>
+      <ContextMenu
+        visible={Boolean(chatActionTarget)}
+        title={
+          chatActionTarget
+            ? `${chatActionTarget.drone.name} / ${chatActionTarget.chatName}`
+            : 'Chat actions'
+        }
+        actions={chatContextActions}
+        onClose={() => setChatActionTarget(null)}
+      />
+      <TextInputDialog
+        visible={Boolean(chatEditor)}
+        title={chatEditor?.mode === 'rename' ? 'Rename chat' : 'Create chat'}
+        message={
+          chatEditor?.mode === 'rename'
+            ? `Choose a new name for “${chatEditor.target.chatName}”.`
+            : `Create a chat in ${chatEditor?.target.drone.name ?? 'this drone'}.`
+        }
+        value={chatEditor?.value ?? ''}
+        error={chatMutationError}
+        confirmLabel={chatEditor?.mode === 'rename' ? 'Rename' : 'Create'}
+        confirmDisabled={
+          chatEditor?.mode === 'rename' &&
+          chatEditor.value.trim() === chatEditor.target.chatName
+        }
+        busy={chatMutationBusy}
+        maxLength={64}
+        onChangeText={(value) => {
+          setChatMutationError(null);
+          setChatEditor((current) => (current ? { ...current, value } : current));
+        }}
+        onCancel={() => {
+          if (!chatMutationBusy) {
+            setChatEditor(null);
+            setChatMutationError(null);
+          }
+        }}
+        onConfirm={() => void submitChatEditor()}
+      />
+      <ConfirmDialog
+        visible={Boolean(deleteChatTarget)}
+        title="Delete chat?"
+        message={
+          chatMutationError ||
+          `Delete “${deleteChatTarget?.chatName ?? ''}” from ${deleteChatTarget?.drone.name ?? 'this drone'}?`
+        }
+        confirmLabel="Delete"
+        destructive
+        busy={chatMutationBusy}
+        onCancel={() => {
+          if (!chatMutationBusy) {
+            setDeleteChatTarget(null);
+            setChatMutationError(null);
+          }
+        }}
+        onConfirm={() => void confirmDeleteChat()}
+      />
     </DrawerWorkingPhaseContext.Provider>
   );
 }
@@ -1830,6 +2191,7 @@ const styles = StyleSheet.create({
   },
   repoNavigationHead: {
     minHeight: 48,
+    marginBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -1970,6 +2332,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: DRAWER_TREE_LEADING_GAP,
   },
+  droneChevronSlot: {
+    width: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  droneChevron: { opacity: 0.75 },
+  droneContainerIconSlot: {
+    width: 14,
+    height: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.72,
+  },
   switchItemTitle: {
     flex: 1,
     minWidth: 0,
@@ -2057,14 +2433,16 @@ const styles = StyleSheet.create({
   droneChatRail: {
     marginRight: 4,
     borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: colors.borderSubtle,
+    borderLeftColor: 'transparent',
   },
+  droneChatRailVisible: { borderLeftColor: colors.borderSubtle },
   droneChatRow: {
     height: 32,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: DRAWER_TREE_LEADING_GAP,
-    paddingHorizontal: 6,
+    gap: 4,
+    paddingLeft: 4,
+    paddingRight: 6,
     position: 'relative',
   },
   droneChatSelectionWash: {

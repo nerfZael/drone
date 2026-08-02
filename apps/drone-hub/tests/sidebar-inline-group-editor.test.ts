@@ -39,7 +39,7 @@ describe('sidebar inline group editor', () => {
     expect(interactionsSource).toContain('setFolderEditor(null)');
   });
 
-  test('routes F2 to the selected group or drone inline editor', () => {
+  test('routes F2 to the selected group, drone, or chat inline editor', () => {
     const sidebarSource = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
       'utf8',
@@ -51,6 +51,14 @@ describe('sidebar inline group editor', () => {
 
     expect(sidebarSource).toContain("event.key === 'F2'");
     expect(sidebarSource).toContain('startRenameFolder(selectedFolderPath)');
+    expect(sidebarSource).toContain(
+      "sidebarChatRefFromNodeId(selectedSidebarNodeId ?? '')",
+    );
+    expect(sidebarSource).toContain('if (selectedChatRef) {');
+    expect(sidebarSource).toContain("if (selectedChatRef.chatName !== 'default') {");
+    expect(sidebarSource).toContain(
+      'startRenameDroneChat(selectedChatRef.droneId, selectedChatRef.chatName)',
+    );
     expect(sidebarSource).toContain(
       "sidebarDroneIdFromNodeId(selectedSidebarNodeId ?? '')",
     );

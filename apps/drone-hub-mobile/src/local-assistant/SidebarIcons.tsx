@@ -33,6 +33,24 @@ export function SidebarDroneIcon({ color, size, strokeWidth = 1.5 }: SidebarIcon
   );
 }
 
+export function SidebarContainerIcon({ color, size, strokeWidth = 1.35 }: SidebarIconProps) {
+  return (
+    <Svg
+      height={size}
+      width={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <Path d="m8 1.5 5.5 3v7L8 14.5l-5.5-3v-7L8 1.5Z" />
+      <Path d="m2.5 4.5 5.5 3 5.5-3M8 7.5v7" />
+    </Svg>
+  );
+}
+
 export function SidebarNetworkIcon({ color, size, strokeWidth = 1.9 }: SidebarIconProps) {
   return (
     <Svg

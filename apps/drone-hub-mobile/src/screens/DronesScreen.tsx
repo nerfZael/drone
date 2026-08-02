@@ -129,6 +129,41 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function normalizedChatMutationList(raw: unknown, fallback: readonly string[]): string[] {
+  if (!Array.isArray(raw)) return [...fallback];
+  const chats = [...new Set(raw.map((value) => String(value ?? '').trim()).filter(Boolean))];
+  return chats.length > 0 ? chats : [...fallback];
+}
+
+function applyChatMutationToDrone(
+  drone: MobileDroneSummary,
+  nextChats: readonly string[],
+  rename?: { from: string; to: string },
+): MobileDroneSummary {
+  const projectName = (chatName: string) =>
+    rename && chatName === rename.from ? rename.to : chatName;
+  const allowed = new Set(nextChats);
+  const projectList = (chatNames: readonly string[] | undefined) =>
+    [...new Set((chatNames ?? []).map(projectName).filter((chatName) => allowed.has(chatName)))];
+  const projectMap = <T,>(source: Record<string, T> | undefined): Record<string, T> | undefined => {
+    if (!source) return undefined;
+    return Object.fromEntries(
+      Object.entries(source)
+        .map(([chatName, value]) => [projectName(chatName), value] as const)
+        .filter(([chatName]) => allowed.has(chatName)),
+    );
+  };
+  return {
+    ...drone,
+    chats: [...nextChats],
+    busyChats: projectList(drone.busyChats),
+    approvalChats: projectList(drone.approvalChats),
+    unreadChats: projectList(drone.unreadChats),
+    draftChats: projectMap(drone.draftChats),
+    chatReadStates: projectMap(drone.chatReadStates),
+  };
+}
+
 function nativeUserMessageMatchesOptimisticPrompt(
   messages: readonly AssistantMessage[],
   pending: any,
@@ -1614,6 +1649,104 @@ export function DronesScreen({
     });
   };
 
+  const commitDrawerChatMutation = (
+    droneId: string,
+    nextChats: readonly string[],
+    rename?: { from: string; to: string },
+  ) => {
+    setDrones((current) =>
+      current.map((drone) =>
+        drone.id === droneId
+          ? applyChatMutationToDrone(drone, nextChats, rename)
+          : drone,
+      ),
+    );
+    const currentSelected = selectedRef.current;
+    if (currentSelected?.id !== droneId) return;
+    const nextSelected = applyChatMutationToDrone(currentSelected, nextChats, rename);
+    selectedRef.current = nextSelected;
+    setSelected(nextSelected);
+    setChats([...nextChats]);
+  };
+
+  const createDrawerChat = async (
+    droneId: string,
+    nextChatName: string,
+    copyFrom: string,
+  ) => {
+    const destinationId = targetId;
+    const result = await requestDroneControl(destinationId, 'chat.create', {
+      droneId,
+      name: nextChatName,
+      ...(copyFrom ? { copyFrom } : {}),
+    });
+    if (targetIdRef.current !== destinationId) return false;
+    const currentDrone = droneListSnapshotRef.current.drones.find((drone) => drone.id === droneId);
+    const fallbackChats = currentDrone
+      ? [...new Set([...currentDrone.chats, nextChatName])]
+      : [nextChatName];
+    commitDrawerChatMutation(
+      droneId,
+      normalizedChatMutationList(result?.chats, fallbackChats),
+    );
+    await loadDrones(true);
+    return targetIdRef.current === destinationId;
+  };
+
+  const renameDrawerChat = async (
+    droneId: string,
+    currentChatName: string,
+    newName: string,
+  ) => {
+    const destinationId = targetId;
+    const result = await requestDroneControl(destinationId, 'chat.rename', {
+      droneId,
+      chatName: currentChatName,
+      newName,
+    });
+    if (targetIdRef.current !== destinationId) return false;
+    if (selectedRef.current?.id === droneId && chatNameRef.current === currentChatName) {
+      chatNameRef.current = newName;
+      setChatName(newName);
+    }
+    const currentDrone = droneListSnapshotRef.current.drones.find((drone) => drone.id === droneId);
+    const fallbackChats = (currentDrone?.chats ?? []).map((chatName) =>
+      chatName === currentChatName ? newName : chatName,
+    );
+    commitDrawerChatMutation(
+      droneId,
+      normalizedChatMutationList(result?.chats, fallbackChats),
+      { from: currentChatName, to: newName },
+    );
+    await loadDrones(true);
+    return targetIdRef.current === destinationId;
+  };
+
+  const deleteDrawerChat = async (droneId: string, chatToDelete: string) => {
+    const destinationId = targetId;
+    const result = await requestDroneControl(destinationId, 'chat.delete', {
+      droneId,
+      chatName: chatToDelete,
+    });
+    if (targetIdRef.current !== destinationId) return false;
+    const currentDrone = droneListSnapshotRef.current.drones.find((drone) => drone.id === droneId);
+    const fallbackChats = (currentDrone?.chats ?? []).filter(
+      (chatName) => chatName !== chatToDelete,
+    );
+    const nextChats = normalizedChatMutationList(result?.chats, fallbackChats);
+    commitDrawerChatMutation(droneId, nextChats);
+    await loadDrones(true);
+    if (selectedRef.current?.id === droneId && chatNameRef.current === chatToDelete) {
+      const fallbackChat = nextChats[0] ?? '';
+      chatNameRef.current = fallbackChat;
+      setChatName(fallbackChat);
+      setTurns([]);
+      setNativeMessages(null);
+      if (fallbackChat) await readChat(droneId, fallbackChat);
+    }
+    return targetIdRef.current === destinationId;
+  };
+
   const createNewChat = () =>
     selected &&
     run('create-chat', async () => {
@@ -2256,6 +2389,9 @@ export function DronesScreen({
           onDrawerOpenChange(false);
           void openDrone(drone, nextChat);
         }}
+        onCreateDroneChat={createDrawerChat}
+        onRenameDroneChat={renameDrawerChat}
+        onDeleteDroneChat={deleteDrawerChat}
       />
       <KeyboardAvoidingView
         style={styles.content}

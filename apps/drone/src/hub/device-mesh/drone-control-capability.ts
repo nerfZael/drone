@@ -658,6 +658,23 @@ export function createDroneControlCapability(
           chats: Array.isArray(result.chats) ? result.chats : [],
         };
       }
+      if (operation === 'chat.rename') {
+        const chatName = requiredText(payload.chatName, 'chatName');
+        const newName = requiredText(payload.newName, 'newName');
+        return await localHubRequest(
+          access,
+          `/api/drones/${encodedDrone}/chats/${encodeURIComponent(chatName)}/rename`,
+          { method: 'POST', body: JSON.stringify({ newName }) },
+        );
+      }
+      if (operation === 'chat.delete') {
+        const chatName = requiredText(payload.chatName, 'chatName');
+        return await localHubRequest(
+          access,
+          `/api/drones/${encodedDrone}/chats/${encodeURIComponent(chatName)}`,
+          { method: 'DELETE' },
+        );
+      }
       if (operation === 'repo.pull-requests.read') {
         const state =
           payload.state === 'open' || payload.state === 'closed' ? payload.state : 'all';

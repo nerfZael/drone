@@ -38,7 +38,7 @@ describe('device mesh grant migrations', () => {
     expect(migrateDeviceMeshGrants(grants)).toEqual(grants);
   });
 
-  test('keeps existing drone-management access compatible with rename', () => {
+  test('keeps existing drone-management access compatible with narrower mutations', () => {
     expect(
       migrateDeviceMeshGrants([
         {
@@ -51,7 +51,13 @@ describe('device mesh grant migrations', () => {
       {
         capability: 'drone-control',
         version: 1,
-        operations: ['drones.list', 'drone.delete', 'drone.rename'],
+        operations: [
+          'drones.list',
+          'drone.delete',
+          'drone.rename',
+          'chat.rename',
+          'chat.delete',
+        ],
       },
     ]);
   });
