@@ -747,105 +747,49 @@ function WorkflowAgentsInspector({
   selectedAgentId,
   onSelectAgent,
   onSelectNode,
-  onClose,
 }: {
   workflow: DroneWorkflow;
   layout: WorkflowGraphLayout;
   selectedAgentId: string;
   onSelectAgent: (agentId: string) => void;
   onSelectNode: (nodeKey: string) => void;
-  onClose: () => void;
 }) {
   const agentIds = Object.keys(workflow.definition.agents);
-  const [query, setQuery] = React.useState('');
   const agent = workflow.definition.agents[selectedAgentId];
   if (!selectedAgentId || !agent) {
-    const normalizedQuery = query.trim().toLowerCase();
-    const visibleAgentIds = agentIds.filter((agentId) => {
-      if (!normalizedQuery) return true;
-      const candidate = workflow.definition.agents[agentId]!;
-      return `${agentId} ${candidate.runner.agent.id} ${candidate.model ?? ''} ${candidate.instructions}`
-        .toLowerCase()
-        .includes(normalizedQuery);
-    });
     return (
       <aside className="flex w-[310px] flex-none flex-col border-l border-[var(--border)] bg-[var(--panel-alt)] shadow-[-18px_0_42px_var(--shadow-color)]">
-        <div className="flex flex-none items-start gap-2 border-b border-[var(--border)] px-3 py-3">
-          <span className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-lg border border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]">
-            ◎
+        <div className="flex h-11 flex-none items-center border-b border-[var(--border)] px-3">
+          <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
+            Agents
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[var(--text-8)] uppercase tracking-[0.14em] text-[var(--muted-dim)]">
-              Agent definitions
-            </span>
-            <span className="mt-0.5 block text-[var(--text-12)] font-[var(--weight-semibold)] leading-tight text-[var(--fg-strong)]">
-              {agentIds.length} configured
-            </span>
-            <span className="mt-1 block text-[var(--text-8)] text-[var(--muted)]">
-              Select an agent to inspect its role
-            </span>
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close agent definitions"
-            className="flex h-7 w-7 flex-none items-center justify-center rounded text-[var(--text-14)] text-[var(--muted)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg)]"
-          >
-            ×
-          </button>
         </div>
-        <div className="flex-none border-b border-[var(--border-subtle)] p-2.5">
-          <label className="relative flex h-8 items-center">
-            <span className="pointer-events-none absolute left-2.5 text-[var(--text-10)] text-[var(--muted-dim)]">
-              ⌕
-            </span>
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Find an agent"
-              aria-label="Find an agent definition"
-              className="h-8 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-inset)] pl-7 pr-2 text-[var(--text-9)] text-[var(--fg)] outline-none placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)]"
-            />
-          </label>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          {visibleAgentIds.length > 0 ? (
-            <div className="space-y-1">
-              {visibleAgentIds.map((agentId) => {
-                const candidate = workflow.definition.agents[agentId]!;
-                const callCount = workflowCallsForAgent(layout, agentId).length;
-                return (
-                  <button
-                    key={agentId}
-                    type="button"
-                    onClick={() => onSelectAgent(agentId)}
-                    className="group flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-2.5 text-left hover:border-[var(--border-subtle)] hover:bg-[var(--surface-softest)]"
-                  >
-                    <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-inset)] font-mono text-[var(--text-9)] text-[var(--accent)]">
-                      {agentId.slice(0, 2).toUpperCase()}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="divide-y divide-[var(--border-subtle)]">
+            {agentIds.map((agentId) => {
+              const candidate = workflow.definition.agents[agentId]!;
+              const callCount = workflowCallsForAgent(layout, agentId).length;
+              return (
+                <button
+                  key={agentId}
+                  type="button"
+                  onClick={() => onSelectAgent(agentId)}
+                  className="flex w-full items-center px-3 py-3 text-left hover:bg-[var(--surface-softest)] focus-visible:bg-[var(--surface-softest)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                      {agentId}
                     </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-mono text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg)]">
-                        {agentId}
-                      </span>
-                      <span className="mt-0.5 block truncate text-[var(--text-8)] text-[var(--muted-dim)]">
-                        {candidate.runner.agent.id} ·{' '}
-                        {candidate.runner.kind === 'drone' ? 'child drone' : 'chat'} ·{' '}
-                        {callCount} call{callCount === 1 ? '' : 's'}
-                      </span>
+                    <span className="mt-0.5 block truncate text-[var(--text-8)] text-[var(--muted-dim)]">
+                      {candidate.runner.agent.id} ·{' '}
+                      {candidate.runner.kind === 'drone' ? 'child drone' : 'chat'} ·{' '}
+                      {callCount} call{callCount === 1 ? '' : 's'}
                     </span>
-                    <span className="text-[var(--muted-dim)] transition-transform group-hover:translate-x-0.5 group-hover:text-[var(--fg)]">
-                      →
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="px-3 py-8 text-center text-[var(--text-9)] text-[var(--muted-dim)]">
-              No matching agents.
-            </div>
-          )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </aside>
     );
@@ -857,34 +801,20 @@ function WorkflowAgentsInspector({
 
   return (
     <aside className="flex w-[310px] flex-none flex-col border-l border-[var(--border)] bg-[var(--panel-alt)] shadow-[-18px_0_42px_var(--shadow-color)]">
-      <div className="flex flex-none items-start gap-2 border-b border-[var(--border)] px-3 py-3">
+      <div className="flex min-h-11 flex-none items-center gap-2 border-b border-[var(--border)] px-3 py-2">
         <button
           type="button"
           onClick={() => onSelectAgent('')}
-          aria-label="Back to agent definitions"
-          className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg)]"
+          aria-label="Back to agents"
+          className="flex h-7 w-7 flex-none items-center justify-center rounded text-[22px] leading-none text-[var(--muted)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg)]"
         >
-          ←
+          ‹
         </button>
         <span className="min-w-0 flex-1">
-          <span className="block text-[var(--text-8)] uppercase tracking-[0.14em] text-[var(--muted-dim)]">
-            Agents / <span className="text-[var(--accent)]">{selectedAgentId}</span>
-          </span>
-          <span className="mt-0.5 block text-[var(--text-12)] font-[var(--weight-semibold)] leading-tight text-[var(--fg-strong)]">
-            Agent definition
-          </span>
-          <span className="mt-1 block text-[var(--text-8)] text-[var(--muted)]">
-            Role, instructions, and call prompts
+          <span className="block truncate font-mono text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
+            {selectedAgentId}
           </span>
         </span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close agent definitions"
-          className="flex h-7 w-7 flex-none items-center justify-center rounded text-[var(--text-14)] text-[var(--muted)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg)]"
-        >
-          ×
-        </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <InspectorSection label="Agent">
@@ -1690,9 +1620,7 @@ export function WorkflowDefinitionView({
             }`}
             title="Inspect workflow agent definitions"
           >
-            <span aria-hidden="true">◎</span>
             Agents
-            <span className="font-mono opacity-60">{agentIds.length}</span>
           </button>
         ) : null}
         {mode === 'run' && run ? (
@@ -1755,16 +1683,22 @@ export function WorkflowDefinitionView({
           >
             −
           </button>
+          <span
+            aria-label={`Workflow zoom ${Math.round(scale * 100)} percent`}
+            className="flex h-7 min-w-[46px] items-center justify-center px-1.5 font-mono text-[var(--text-8)] text-[var(--muted)]"
+          >
+            {Math.round(scale * 100)}%
+          </span>
           <button
             type="button"
             onClick={() => {
               viewportInteractedRef.current = true;
               fitGraph();
             }}
-            className="h-7 min-w-[46px] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 font-mono text-[var(--text-8)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)]"
-            title="Fit workflow graph"
+            className="h-7 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-8)] font-[var(--weight-semibold)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)]"
+            title="Reset the workflow graph position and zoom"
           >
-            {Math.round(scale * 100)}%
+            Reset view
           </button>
           <button
             type="button"
@@ -1851,7 +1785,6 @@ export function WorkflowDefinitionView({
               setSelectedNodeKey(nodeKey);
               setInspectorTab('overview');
             }}
-            onClose={() => setSelectedAgentId(null)}
           />
         ) : selectedNode ? (
           <WorkflowNodeInspector

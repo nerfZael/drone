@@ -41,7 +41,7 @@ const productionSurfaces = [
   {
     name: 'Workflows',
     path: '../src/droneHub/workflows/DroneWorkflowsDock.tsx',
-    components: ['UiNavigationRow', 'UiPanelHeader', 'UiPanelStatusStrip', 'UiStatusDot', 'UiTextarea'],
+    components: ['UiDialog', 'UiPanelHeader', 'UiPanelStatusStrip', 'UiStatusDot', 'UiTextarea'],
   },
   {
     name: 'Environment',

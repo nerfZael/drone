@@ -2,8 +2,9 @@ import React from 'react';
 
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import {
+  UiButton,
   UiCountBadge,
-  UiNavigationRow,
+  UiDialog,
   UiPaneState,
   UiPanel,
   UiPanelBody,
@@ -120,6 +121,8 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
   const [selectedWorkflowId, setSelectedWorkflowId] = React.useState('');
   const [selectedRunId, setSelectedRunId] = React.useState('');
   const [inputText, setInputText] = React.useState('{}');
+  const [runDialogOpen, setRunDialogOpen] = React.useState(false);
+  const [runInputError, setRunInputError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [working, setWorking] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -217,14 +220,16 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
     try {
       input = JSON.parse(inputText);
     } catch {
-      setError('Workflow input must be valid JSON.');
+      setRunInputError('Enter valid JSON before running this workflow.');
       return;
     }
+    setRunInputError(null);
     setWorking(true);
     setError(null);
     try {
       const pending = await requestWorkflowRun(droneId, selectedWorkflow.id, input);
       setSelectedRunId(pending.id);
+      setRunDialogOpen(false);
       const permissionSummary = pending.plan.permissions.join(', ') || 'no permissions';
       const estimate =
         pending.plan.invocationCountEstimate == null
@@ -278,7 +283,8 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
   };
 
   return (
-    <UiPanel flush className="dh-workflows-dock h-full">
+    <>
+      <UiPanel flush className="dh-workflows-dock h-full">
       {error ? (
         <UiPanelStatusStrip tone="danger">
           {error}
@@ -324,23 +330,22 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
       ) : selectedWorkflow ? (
         <UiPanelBody role="main" className="flex flex-col">
           <UiPanelHeader
-            eyebrow="Workflow"
             title={selectedWorkflow.name}
-            description={`${selectedWorkflow.description ? `${selectedWorkflow.description} · ` : ''}${
-              Object.keys(selectedWorkflow.definition.agents).length
-            } agents · ${selectedWorkflow.definition.phases.length} phases`}
+            description={selectedWorkflow.description || undefined}
             leading={
-              <UiToolbarButton
-                size="xsmall"
+              <button
+                type="button"
                 onClick={() => {
                   setSelectedWorkflowId('');
                   setSelectedRunId('');
                   setInputText('{}');
                 }}
                 aria-label="Back to workflows"
+                title="Back to workflows"
+                className="flex h-7 w-7 items-center justify-center rounded text-[22px] leading-none text-[var(--muted)] hover:bg-[var(--surface-softest)] hover:text-[var(--fg)]"
               >
-                ← Workflows
-              </UiToolbarButton>
+                ‹
+              </button>
             }
             meta={<UiStatusChip>v{selectedWorkflow.version}</UiStatusChip>}
             actions={
@@ -357,31 +362,16 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
                   active
                   loading={working}
                   disabled={disabled}
-                  onClick={() => void runSelectedWorkflow()}
+                  onClick={() => {
+                    setRunInputError(null);
+                    setRunDialogOpen(true);
+                  }}
                 >
                   Run workflow
                 </UiToolbarButton>
               </>
             }
           />
-          <div className="flex-none border-b border-[var(--border-subtle)] bg-[var(--panel-alt)] px-3 py-2">
-                <details className="mt-1.5 text-[var(--text-9)] text-[var(--muted)]">
-                  <summary className="w-fit cursor-pointer select-none hover:text-[var(--fg)]">
-                    Input{' '}
-                    <span className="font-mono text-[var(--muted-dim)]">
-                      {inputText.trim() === '{}' ? '{}' : 'modified'}
-                    </span>
-                  </summary>
-                  <UiTextarea
-                    value={inputText}
-                    onChange={(event) => setInputText(event.target.value)}
-                    rows={3}
-                    spellCheck={false}
-                    aria-label="Workflow input JSON"
-                    className="mt-2 font-mono text-[var(--text-10)]"
-                  />
-                </details>
-          </div>
           <UiPanelToolbar aria-label="Workflow runs" className="min-h-11 px-3 py-1.5">
             <span
               className="flex-none text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted)]"
@@ -474,52 +464,119 @@ export function DroneWorkflowsDock({ droneId, disabled, onOpenChat }: Props) {
             description="Reusable multi-agent processes and their latest execution state."
             meta={<UiCountBadge>{workflows.length}</UiCountBadge>}
           />
-          <div className="mx-auto w-full max-w-5xl px-5 py-5">
-            <div className="overflow-hidden rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)]">
-              {workflows.map((workflow, index) => {
+          <div className="mx-auto w-full max-w-6xl px-5 py-4">
+            <div className="grid grid-cols-[minmax(0,1fr)_72px_150px] gap-4 border-b border-[var(--border)] px-3 pb-2 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)] max-[680px]:grid-cols-[minmax(0,1fr)_80px]">
+              <span>Workflow</span>
+              <span>Version</span>
+              <span className="max-[680px]:hidden">Latest run</span>
+            </div>
+            <div className="divide-y divide-[var(--border-subtle)] border-b border-[var(--border-subtle)]">
+              {workflows.map((workflow) => {
                 const workflowRuns = runs.filter((run) => run.workflowId === workflow.id);
                 const latest = workflowRuns[0];
                 return (
-                  <UiNavigationRow
+                  <button
                     key={workflow.id}
+                    type="button"
                     onClick={() => {
                       setSelectedWorkflowId(workflow.id);
                       setSelectedRunId(latest?.id ?? '');
                       setInputText('{}');
                     }}
-                    label={workflow.name}
-                    description={`${workflow.description ? `${workflow.description} · ` : ''}${
-                      Object.keys(workflow.definition.agents).length
-                    } agents · ${workflow.definition.phases.length} phases · ${
-                      workflowRuns.length
-                    } run${workflowRuns.length === 1 ? '' : 's'}`}
-                    leading={<WorkflowGlyph compact />}
-                    status={<UiStatusChip>v{workflow.version}</UiStatusChip>}
-                    meta={
-                      <span className="inline-flex items-center gap-1.5">
-                        <UiStatusDot
-                          tone={workflowRunTone(latest?.status)}
-                        />
-                        <span
-                          className={`rounded px-1.5 py-0.5 ${
-                            latest ? workflowStatusClass(latest.status) : ''
-                          }`}
-                        >
-                          {latest ? workflowStatusLabel(latest.status) : 'Not run'}
-                        </span>
-                        <span aria-hidden="true">→</span>
+                    className="grid w-full grid-cols-[minmax(0,1fr)_72px_150px] items-center gap-4 px-3 py-3 text-left hover:bg-[var(--surface-softest)] focus-visible:bg-[var(--surface-softest)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)] max-[680px]:grid-cols-[minmax(0,1fr)_80px]"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">
+                        {workflow.name}
                       </span>
-                    }
-                    className={`rounded-none px-1 py-1 ${
-                      index > 0 ? 'border-t border-[var(--border-subtle)]' : ''
-                    }`}
-                  />
+                      {workflow.description ? (
+                        <span className="mt-0.5 block truncate text-[var(--text-9)] text-[var(--muted)]">
+                          {workflow.description}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="font-mono text-[var(--text-9)] text-[var(--muted)]">
+                      v{workflow.version}
+                    </span>
+                    <span className="flex min-w-0 items-center gap-2 max-[680px]:hidden">
+                      {latest ? (
+                        <>
+                          <UiStatusDot tone={workflowRunTone(latest.status)} />
+                          <span
+                            className={`truncate rounded px-1.5 py-0.5 capitalize ${workflowStatusClass(latest.status)}`}
+                          >
+                            {workflowStatusLabel(latest.status)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-[var(--text-9)] text-[var(--muted-dim)]">Not run</span>
+                      )}
+                    </span>
+                  </button>
                 );
               })}
             </div>
           </div>
         </UiPanelBody>
       )}
-    </UiPanel>
+      </UiPanel>
+      <UiDialog
+        open={runDialogOpen && Boolean(selectedWorkflow)}
+        onClose={() => {
+          if (working) return;
+          setRunDialogOpen(false);
+          setRunInputError(null);
+        }}
+        title={selectedWorkflow ? `Run ${selectedWorkflow.name}` : 'Run workflow'}
+        description="Provide the input for this run. You’ll review its permissions before it starts."
+        size="small"
+        tone="accent"
+        dismissible={!working}
+        footer={
+          <>
+            <UiButton
+              onClick={() => {
+                setRunDialogOpen(false);
+                setRunInputError(null);
+              }}
+              disabled={working}
+            >
+              Cancel
+            </UiButton>
+            <UiButton
+              variant="primary"
+              loading={working}
+              disabled={Boolean(disabled)}
+              onClick={() => void runSelectedWorkflow()}
+            >
+              Review and run
+            </UiButton>
+          </>
+        }
+      >
+        <label className="block">
+          <span className="mb-2 block text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+            Input (JSON)
+          </span>
+          <UiTextarea
+            value={inputText}
+            onChange={(event) => {
+              setInputText(event.target.value);
+              setRunInputError(null);
+            }}
+            rows={8}
+            spellCheck={false}
+            aria-label="Workflow input JSON"
+            aria-invalid={Boolean(runInputError)}
+            className="font-mono text-[var(--text-10)]"
+          />
+        </label>
+        {runInputError ? (
+          <p role="alert" className="mt-2 text-[var(--text-9)] text-[var(--red)]">
+            {runInputError}
+          </p>
+        ) : null}
+      </UiDialog>
+    </>
   );
 }
