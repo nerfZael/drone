@@ -27,7 +27,9 @@ describe('mobile changed files tree', () => {
     expect(treeSource).toContain('buildAgentRunChangeTree(entries)');
     expect(treeSource).toContain("node.kind === 'file'");
     expect(treeSource).toContain('node.children.map');
-    expect(treeSource).toContain('<NativeFolderTypeIcon');
+    expect(treeSource).not.toContain('NativeFolderTypeIcon');
+    expect(treeSource).toContain('<ChevronRight');
+    expect(treeSource).toContain('<ChevronDown');
     expect(treeSource).toMatch(/\{collapsed \? \(\s*<View style=\{\[styles\.stats/);
     expect(transcriptSource).toContain('<MobileChangedFilesTree');
     expect(transcriptSource).toContain('<NativeFileTypeIcon');

@@ -5,7 +5,6 @@ import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import type { AgentRunFileChangeEntry } from '@blip/protocol';
 import { buildAgentRunChangeTree, type AgentRunChangeTreeNode } from '@drone/assistant-chat';
 import { colors } from '../theme';
-import { NativeFolderTypeIcon } from '../components/FileTypeIcon';
 
 export function MobileChangedFilesTree({
   entries,
@@ -62,12 +61,6 @@ export function MobileChangedFilesTree({
                   strokeWidth={2}
                 />
               )}
-              <NativeFolderTypeIcon
-                path={node.path}
-                open={!collapsed}
-                size={16}
-                opacity={pressed ? 1 : 0.86}
-              />
               <Text
                 numberOfLines={1}
                 style={[styles.directoryName, pressed && styles.directoryNamePressed]}

@@ -11,7 +11,7 @@ import { IconChevron } from '../icons';
 import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../types';
 import { runDroneFsAction } from './file-actions-api';
 import type { DroneOpenedFileState } from './opened-file-types';
-import { FileTypeIcon, FolderTypeIcon } from './FileTypeIcon';
+import { FileTypeIcon } from './FileTypeIcon';
 import {
   isPathInsideOrEqual,
   movedPathForEntry,
@@ -841,9 +841,6 @@ export function DroneFilesDock({
               >
                 <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
                   <IconChevron down={open} size={12} />
-                </span>
-                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--yellow)]">
-                  <FolderTypeIcon path={node.path} size={15} />
                 </span>
                 <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
                 {childError ? <span className="px-1 text-[var(--text-9)] uppercase text-[var(--red)]">Error</span> : null}

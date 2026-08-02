@@ -7,7 +7,7 @@ import {
 } from '@drone/assistant-chat';
 
 import { IconChevron } from '../icons';
-import { FileTypeIcon, FolderTypeIcon } from '../files/FileTypeIcon';
+import { FileTypeIcon } from '../files/FileTypeIcon';
 
 function statusTextClass(entry: AgentRunFileChangeEntry): string {
   switch (entry.status) {
@@ -137,15 +137,6 @@ export function AgentRunChangedFilesTree({
               down={open}
               className="shrink-0 text-[var(--muted-dim)] transition-colors group-hover/change-row:text-[var(--accent)] group-focus-visible/change-row:text-[var(--accent)]"
               size={panelAppearance ? 12 : 11}
-            />
-            <FolderTypeIcon
-              path={node.path}
-              className={
-                panelAppearance
-                  ? 'shrink-0 text-[var(--yellow)] opacity-80 transition-opacity group-hover/change-row:opacity-100 group-focus-visible/change-row:opacity-100'
-                  : 'shrink-0 text-[var(--muted)] transition-colors group-hover/change-row:text-[var(--fg)] group-focus-visible/change-row:text-[var(--fg)]'
-              }
-              size={13}
             />
             <span className={`min-w-0 truncate ${panelAppearance ? 'text-[var(--text-12)]' : 'font-mono text-[var(--text-10)]'}`}>
               {node.name}

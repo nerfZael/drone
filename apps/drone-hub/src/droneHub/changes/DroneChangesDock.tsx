@@ -20,7 +20,7 @@ import {
 } from '../../ui/components';
 import { IconChevron } from '../icons';
 import { IconEye, IconEyeOff } from '../app/icons';
-import { FileTypeIcon, FolderTypeIcon } from '../files/FileTypeIcon';
+import { FileTypeIcon } from '../files/FileTypeIcon';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import { readPullRequestMergeMethod } from '../pullRequests/pull-request-preferences';
 import type {
@@ -2911,12 +2911,6 @@ function LiveDroneChangesDock({
                 }
               >
                 <span
-                  className="inline-flex items-center justify-center flex-shrink-0 text-[var(--muted)]"
-                  style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
-                >
-                  <FolderTypeIcon path={node.path} size={explorerIconSizePx} />
-                </span>
-                <span
                   className={`truncate flex-1 ${dirAllViewed ? 'text-[var(--muted)]' : 'text-[var(--fg-secondary)]'}`}
                   style={{ fontSize: `${explorerTextSizePx}px` }}
                 >
@@ -3076,12 +3070,6 @@ function LiveDroneChangesDock({
                 }}
                 title={node.path}
               >
-                <span
-                  className="inline-flex items-center justify-center flex-shrink-0 text-[var(--muted)]"
-                  style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
-                >
-                  <FolderTypeIcon path={node.path} size={explorerIconSizePx} />
-                </span>
                 <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
                   {node.name}
                 </span>
