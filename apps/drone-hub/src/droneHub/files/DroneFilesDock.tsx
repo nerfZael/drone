@@ -988,7 +988,7 @@ export function DroneFilesDock({
           <div
             className="flex-1 min-h-0 overflow-auto py-1 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
             role="tree"
-            aria-label="Files"
+            aria-label="File Explorer"
             aria-multiselectable="true"
             tabIndex={0}
             onClick={(event) => {

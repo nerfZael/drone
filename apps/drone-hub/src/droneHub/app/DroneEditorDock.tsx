@@ -85,7 +85,7 @@ export function DroneEditorDock({
         />
       ) : (
         <div className="h-full flex items-center justify-center px-4 text-center text-[var(--text-12)] text-[var(--muted)]">
-          Open a file from Files, Changes, PRs, or a chat reference.
+          Select a file in the File Explorer, Changes, PRs, or a chat reference.
         </div>
       )}
     </div>

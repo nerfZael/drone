@@ -20,7 +20,7 @@ describe('right panel tab content', () => {
   test('tracks only non-critical right panel panes as lazy-loaded', () => {
     expect([...LAZY_RIGHT_PANEL_TABS].sort()).toEqual(
       RIGHT_PANEL_TABS.filter(
-        (tab) => tab !== 'files' && tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs',
+        (tab) => tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs',
       ).sort(),
     );
     expect(isRightPanelTabLazyLoaded('files')).toBe(false);
@@ -28,15 +28,15 @@ describe('right panel tab content', () => {
     expect(isRightPanelTabLazyLoaded('whiteboard')).toBe(false);
     expect(isRightPanelTabLazyLoaded('prs')).toBe(false);
     for (const tab of RIGHT_PANEL_TABS) {
-      if (tab !== 'files' && tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs') {
+      if (tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs') {
         expect(isRightPanelTabLazyLoaded(tab)).toBe(true);
       }
     }
   });
 
   test('renders a pane-shaped loading fallback', () => {
-    const html = renderToStaticMarkup(React.createElement(RightPanelPaneLoadingFallback, { tab: 'files' }));
-    expect(html).toContain('Loading files…');
+    const html = renderToStaticMarkup(React.createElement(RightPanelPaneLoadingFallback, { tab: 'editor' }));
+    expect(html).toContain('Loading editor…');
     expect(html).toContain('bg-[var(--panel-alt)]');
     expect(html).toContain('animate-spin');
     expect(html).toContain('role="status"');
@@ -60,14 +60,14 @@ describe('right panel tab content', () => {
     expect(source).not.toContain('loadWhiteboardDock');
     expect(source).not.toContain('loadDroneEditorDock');
     for (const tab of RIGHT_PANEL_TABS) {
-      if (tab === 'files' || tab === 'editor' || tab === 'whiteboard' || tab === 'prs') continue;
+      if (tab === 'editor' || tab === 'whiteboard' || tab === 'prs') continue;
       if (tab === 'assistant') {
         expect(source).toContain("if (tab === 'assistant')");
       } else {
         expect(source).toContain(`case '${tab}'`);
       }
     }
-    expect(source.match(/<PaneModule tab=\{tab\}/g)?.length).toBe(RIGHT_PANEL_TABS.length - 4);
+    expect(source.match(/<PaneModule tab=\{tab\}/g)?.length).toBe(RIGHT_PANEL_TABS.length - 3);
   });
 
   test('loads the changes dock only when inspecting a pull request', () => {

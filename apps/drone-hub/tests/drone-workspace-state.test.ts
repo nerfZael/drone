@@ -72,6 +72,17 @@ describe('per-drone workspace state', () => {
     expect(selectedWorkspace).toContain('key={currentDrone.id}');
   });
 
+  test('keeps one globally positioned File Explorer inside the Editor', () => {
+    const editorWorkspace = readAppSource('app/DroneEditorWorkspace.tsx');
+    const appConfig = readAppSource('app/app-config.ts');
+
+    expect(editorWorkspace).toContain("profileStorageKey('droneHub.editorExplorerLayout')");
+    expect(editorWorkspace).toContain('DEFAULT_EXPLORER_WIDTH = 240');
+    expect(editorWorkspace).toContain('draggable');
+    expect(editorWorkspace).toContain('File Explorer');
+    expect(appConfig).toContain("if (raw === 'files') return 'editor'");
+  });
+
   test('repairs an empty saved chat group and restores chat beside the editor', () => {
     const emptyGroup = { panels: [] };
     const editorPanel = {

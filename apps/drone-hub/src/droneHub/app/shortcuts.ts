@@ -130,8 +130,8 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: 'openFilesTab',
-    label: 'Open Files tab',
-    description: 'Opens the Files workspace pane.',
+    label: 'Open Editor',
+    description: 'Opens the Editor with its built-in File Explorer.',
   },
   {
     id: 'openTerminalTab',

@@ -40,7 +40,6 @@ export type RightPanelTab = RightPanelTabId;
 export const RIGHT_PANEL_TABS: RightPanelTab[] = [
   'terminal',
   'env',
-  'files',
   'editor',
   'preview',
   'links',
@@ -53,7 +52,7 @@ export const RIGHT_PANEL_TABS: RightPanelTab[] = [
 export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   terminal: 'Terminal',
   env: 'Env',
-  files: 'Files',
+  files: 'Editor',
   editor: 'Editor',
   preview: 'Browser',
   links: 'Links',
@@ -64,7 +63,7 @@ export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   workflows: 'Workflows',
 };
 export function rightPanelHeaderTabs(tabs: readonly RightPanelTab[]): RightPanelTab[] {
-  return tabs.filter((tab) => tab !== 'editor' && tab !== 'links');
+  return tabs.filter((tab) => tab !== 'files' && tab !== 'links');
 }
 export function rightPanelTabsForRuntime(runtimeRaw: unknown): RightPanelTab[] {
   void runtimeRaw;
@@ -88,6 +87,7 @@ export function clampGroupMultiChatColumnWidthPx(width: number): number {
 }
 
 export function parseRightPanelTab(raw: string | null | undefined, fallback: RightPanelTab): RightPanelTab {
+  if (raw === 'files') return 'editor';
   if (raw && RIGHT_PANEL_TABS.includes(raw as RightPanelTab)) return raw as RightPanelTab;
   return fallback;
 }

@@ -80,7 +80,7 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
       rightPanelOpen: true,
       rightPanelWidth: clampCustomRightPanelWidthPx(RIGHT_PANEL_DEFAULT_WIDTH_PX),
       rightPanelWidthMode: 'custom',
-      rightPanelTab: 'files',
+      rightPanelTab: 'editor',
       rightPanelSplit: true,
       rightPanelBottomTab: 'terminal',
       rightPanelOpenRequestSeq: 0,
