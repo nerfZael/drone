@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  UiCenteredLoadingState,
   UiPaneState,
   UiPanel,
   UiPanelStatusStrip,
@@ -1127,16 +1128,25 @@ export function DroneFilesDock({
               openContextMenu(event.clientX, event.clientY, null);
             }}
           >
-            {showStartupPlaceholder ? (
+            {showStartupPlaceholder && !startup?.timedOut ? (
+              <div className="min-h-full" role="treeitem">
+                <UiCenteredLoadingState
+                  message={startupLabel}
+                  description={[startupText, startupDetail].filter(Boolean).join(' ')}
+                />
+              </div>
+            ) : showStartupPlaceholder ? (
               <UiPaneState
-                kind={startup?.timedOut ? 'warning' : 'loading'}
+                kind="warning"
                 title={startupLabel}
                 description={[startupText, startupDetail].filter(Boolean).join(' ')}
                 compact
                 role="treeitem"
               />
             ) : !error && loading && entries.length === 0 ? (
-              <UiPaneState kind="loading" title="Loading files…" compact role="treeitem" />
+              <div className="min-h-full" role="treeitem">
+                <UiCenteredLoadingState message="Loading files…" />
+              </div>
             ) : !error && !loading && entries.length === 0 && !inlineNameMode ? (
               <UiPaneState
                 kind="empty"
