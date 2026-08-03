@@ -1,12 +1,12 @@
 import React from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { colors } from '../theme';
 import {
   buildMobileHtmlPreviewDocument,
+  mobileHtmlPreviewWebViewPolicy,
   MOBILE_HTML_PREVIEW_BASE_URL,
   MOBILE_HTML_PREVIEW_ORIGIN_WHITELIST,
-  MOBILE_HTML_PREVIEW_WEBVIEW_POLICY,
   shouldAllowMobileHtmlPreviewNavigation,
 } from './mobile-html-preview-security';
 
@@ -40,7 +40,7 @@ export function RenderedHtmlPreview({ source }: { source: string }) {
       </View>
       <WebView
         ref={webViewRef}
-        {...MOBILE_HTML_PREVIEW_WEBVIEW_POLICY}
+        {...mobileHtmlPreviewWebViewPolicy(Platform.OS)}
         originWhitelist={[...MOBILE_HTML_PREVIEW_ORIGIN_WHITELIST]}
         source={{ html: document, baseUrl: MOBILE_HTML_PREVIEW_BASE_URL }}
         onShouldStartLoadWithRequest={(request) =>
