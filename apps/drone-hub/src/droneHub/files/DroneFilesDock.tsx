@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  UiCenteredLoadingState,
   UiPaneState,
   UiPanel,
   UiPanelStatusStrip,
@@ -12,9 +13,12 @@ import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../
 import { runDroneFsAction } from './file-actions-api';
 import type { DroneOpenedFileState } from './opened-file-types';
 import { FileTypeIcon } from './FileTypeIcon';
+import { InlineExplorerNameInput } from './InlineExplorerNameInput';
 import {
+  fileExtensionLower,
   isPathInsideOrEqual,
   movedPathForEntry,
+  parentFsPath,
   pruneSelectedPaths,
   renamedPathForEntry,
   selectedEntriesFromPaths,
@@ -124,6 +128,7 @@ function sameFsEntries(a: DroneFsEntry[] | undefined, b: DroneFsEntry[] | undefi
       left.size !== right.size ||
       left.mtimeMs !== right.mtimeMs ||
       left.ext !== right.ext ||
+      left.isGitIgnored !== right.isGitIgnored ||
       left.isImage !== right.isImage ||
       left.isVideo !== right.isVideo
     ) {
@@ -139,21 +144,6 @@ function InlineSpinner() {
       aria-hidden="true"
       className="inline-block h-3 w-3 rounded-full border border-[var(--accent-muted)] border-t-[var(--accent)] animate-spin"
     />
-  );
-}
-
-function TreeIndentGuides({ depth }: { depth: number }) {
-  if (depth <= 0) return null;
-  return (
-    <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0">
-      {Array.from({ length: depth }).map((_, index) => (
-        <span
-          key={index}
-          className="absolute inset-y-0 w-px bg-[var(--border-subtle)]"
-          style={{ left: `${9 + index * 14}px` }}
-        />
-      ))}
-    </span>
   );
 }
 
@@ -230,7 +220,9 @@ export function DroneFilesDock({
   const [clipboard, setClipboard] = React.useState<FileClipboardState>(null);
   const [actionMode, setActionMode] = React.useState<DroneFilesActionMode | null>(null);
   const [actionInput, setActionInput] = React.useState('');
+  const [actionTargetDirectory, setActionTargetDirectory] = React.useState(normalizedPath);
   const [actionLoading, setActionLoading] = React.useState(false);
+  const actionRunRef = React.useRef(false);
   const [actionStatus, setActionStatus] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [contextMenu, setContextMenu] = React.useState<DroneFilesContextMenuState | null>(null);
@@ -251,7 +243,9 @@ export function DroneFilesDock({
     setUploadStatus(null);
     setActionMode(null);
     setActionInput('');
+    setActionTargetDirectory(normalizedPath);
     setActionLoading(false);
+    actionRunRef.current = false;
     setActionError(null);
     setActionStatus(null);
     setSelectedPaths(new Set());
@@ -460,7 +454,8 @@ export function DroneFilesDock({
 
   const runAction = React.useCallback(
     async (label: string, task: () => Promise<void>) => {
-      if (actionLoading) return;
+      if (actionRunRef.current) return;
+      actionRunRef.current = true;
       setActionLoading(true);
       setActionError(null);
       setActionStatus(`${label}...`);
@@ -470,15 +465,16 @@ export function DroneFilesDock({
         setActionError(String(e?.message ?? e ?? 'filesystem action failed'));
         setActionStatus(null);
       } finally {
+        actionRunRef.current = false;
         setActionLoading(false);
       }
     },
-    [actionLoading],
+    [],
   );
 
   const submitInlineAction = React.useCallback(() => {
     const value = actionInput.trim();
-    if (!actionMode || !value) return;
+    if (actionLoading || !actionMode || !value) return;
     if (actionMode === 'go-to-path') {
       setActionMode(null);
       setActionInput('');
@@ -490,7 +486,7 @@ export function DroneFilesDock({
       void runAction(actionMode === 'create-file' ? 'Creating file' : 'Creating folder', async () => {
         const result = await runDroneFsAction(droneId, {
           action: actionMode,
-          targetDir: normalizedPath,
+          targetDir: actionTargetDirectory,
           name: value,
         });
         setActionMode(null);
@@ -503,7 +499,7 @@ export function DroneFilesDock({
             kind: 'file',
             size: 0,
             mtimeMs: null,
-            ext: value.includes('.') ? value.slice(value.lastIndexOf('.')).toLowerCase() : null,
+            ext: fileExtensionLower(value),
             isImage: false,
             isVideo: false,
           });
@@ -514,6 +510,12 @@ export function DroneFilesDock({
     }
     if (actionMode === 'rename' && selectedOne) {
       const previous = selectedOne;
+      if (previous.name === value) {
+        setActionMode(null);
+        setActionInput('');
+        setContextMenu(null);
+        return;
+      }
       void runAction('Renaming', async () => {
         const result = await runDroneFsAction(droneId, {
           action: 'rename',
@@ -554,7 +556,9 @@ export function DroneFilesDock({
     }
   }, [
     actionInput,
+    actionLoading,
     actionMode,
+    actionTargetDirectory,
     droneId,
     clearClipboardForChangedEntries,
     normalizedPath,
@@ -568,25 +572,47 @@ export function DroneFilesDock({
     selectedOne,
   ]);
 
-  const beginCreate = React.useCallback((mode: 'create-file' | 'create-directory') => {
-    ensureContextMenu(null);
-    setActionMode(mode);
-    setActionInput('');
-    setActionError(null);
-    setActionStatus(null);
-  }, [ensureContextMenu]);
+  const beginCreate = React.useCallback(
+    (mode: 'create-file' | 'create-directory', entry?: DroneFsEntry | null) => {
+      const targetDirectory = entry
+        ? entry.kind === 'directory'
+          ? entry.path
+          : parentFsPath(entry.path)
+        : normalizedPath;
+      setContextMenu(null);
+      setActionMode(mode);
+      setActionInput('');
+      setActionTargetDirectory(targetDirectory);
+      setActionError(null);
+      setActionStatus(null);
+      if (entry?.kind === 'directory') {
+        setExpandedDirs((current) => ({ ...current, [entry.path]: true }));
+        void loadDirectory(entry.path);
+      }
+    },
+    [loadDirectory, normalizedPath, setExpandedDirs],
+  );
 
   const beginRename = React.useCallback((entry?: DroneFsEntry) => {
     const target = entry ?? selectedOne;
     if (!target) return;
     setSelectedPaths(new Set([target.path]));
     selectionAnchorRef.current = target.path;
-    ensureContextMenu(target);
+    setContextMenu(null);
     setActionMode('rename');
     setActionInput(target.name);
     setActionError(null);
     setActionStatus(null);
-  }, [ensureContextMenu, selectedOne]);
+  }, [selectedOne]);
+
+  const cancelInlineNameAction = React.useCallback(() => {
+    if (actionLoading) return;
+    setActionMode(null);
+    setActionInput('');
+    setActionTargetDirectory(normalizedPath);
+    setActionError(null);
+    setActionStatus(null);
+  }, [actionLoading, normalizedPath]);
 
   const beginMove = React.useCallback(() => {
     if (selectedCount === 0) return;
@@ -808,105 +834,205 @@ export function DroneFilesDock({
     [openContextMenu, selectedPaths],
   );
 
-  function renderExplorer(nodes: FileExplorerNode[], depth: number): React.ReactNode {
+  const inlineNameMode =
+    actionMode === 'create-file' || actionMode === 'create-directory' || actionMode === 'rename'
+      ? actionMode
+      : null;
+  const contextActionMode =
+    actionMode === 'move' || actionMode === 'go-to-path' ? actionMode : null;
+
+  function renderInlineCreateRow(): React.ReactNode {
+    if (inlineNameMode !== 'create-file' && inlineNameMode !== 'create-directory') return null;
+    const creatingDirectory = inlineNameMode === 'create-directory';
+    return (
+      <div
+        role="treeitem"
+        aria-selected="true"
+        className="relative flex h-[22px] w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--text-13)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
+        style={{ paddingLeft: '4px' }}
+      >
+        <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
+          {creatingDirectory ? (
+            <IconChevron down={false} size={12} />
+          ) : (
+            <FileTypeIcon path={actionInput || 'untitled'} size={15} />
+          )}
+        </span>
+        <InlineExplorerNameInput
+          value={actionInput}
+          mode={inlineNameMode}
+          loading={actionLoading}
+          onChange={setActionInput}
+          onSubmit={submitInlineAction}
+          onCancel={cancelInlineNameAction}
+        />
+      </div>
+    );
+  }
+
+  function renderExplorer(nodes: FileExplorerNode[]): React.ReactNode {
     return nodes.map((node) => {
-      const indentPx = 4 + depth * 14;
+      const indentPx = 4;
       if (node.kind === 'directory') {
         const open = expandedDirs[node.path] === true;
+        const ignored = node.entry.isGitIgnored === true;
         const childLoading = childLoadingByPath[node.path] === true;
         const childError = childErrorByPath[node.path];
         const childLoaded = Object.prototype.hasOwnProperty.call(childEntriesByPath, node.path);
         const title = `${node.path}${childLoaded && node.count != null ? ` • ${node.count} item${node.count === 1 ? '' : 's'}` : ''}`;
         const selected = selectedPaths.has(node.path);
+        const renaming = inlineNameMode === 'rename' && selectedOne?.path === node.path;
+        const creatingInside =
+          (inlineNameMode === 'create-file' || inlineNameMode === 'create-directory') &&
+          actionTargetDirectory === node.path;
+        const hasSelectedDescendant = Array.from(selectedPaths).some(
+          (selectedPath) => selectedPath !== node.path && isPathInsideOrEqual(node.path, selectedPath),
+        );
 
         return (
-          <React.Fragment key={`dir:${node.path}`}>
+          <div
+            key={`dir:${node.path}`}
+            role="none"
+            data-file-explorer-directory={node.path}
+            className="flex flex-col"
+          >
             <div className="relative w-full">
-              <TreeIndentGuides depth={depth} />
-              <button
-                type="button"
-                role="treeitem"
-                aria-expanded={open}
-                aria-selected={selected}
-                disabled={busy}
-                onClick={(event) => activateEntry(node.entry, event)}
-                onContextMenu={(event) => openEntryContextMenu(node.entry, event)}
-                className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[var(--text-13)] transition-colors disabled:opacity-60 ${
-                  selected
-                    ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
-                    : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
-                }`}
-                style={{ paddingLeft: `${indentPx}px` }}
-                title={`${title} • Click to ${open ? 'collapse' : 'expand'} • Right-click for actions`}
-              >
-                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
-                  <IconChevron down={open} size={12} />
-                </span>
-                <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
-                {childError ? <span className="px-1 text-[var(--text-9)] uppercase text-[var(--red)]">Error</span> : null}
-                {childLoading ? (
-                  <span className="inline-flex items-center gap-1 px-1 text-[var(--text-9)] uppercase text-[var(--accent)]">
-                    <InlineSpinner />
-                    Loading
+              {renaming ? (
+                <div
+                  role="treeitem"
+                  aria-expanded={open}
+                  aria-selected="true"
+                  className="relative flex h-[22px] w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--text-13)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
+                  style={{ paddingLeft: `${indentPx}px` }}
+                >
+                  <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
+                    <IconChevron down={open} size={12} />
                   </span>
-                ) : null}
-              </button>
+                  <InlineExplorerNameInput
+                    value={actionInput}
+                    mode="rename"
+                    loading={actionLoading}
+                    onChange={setActionInput}
+                    onSubmit={submitInlineAction}
+                    onCancel={cancelInlineNameAction}
+                  />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  role="treeitem"
+                  aria-expanded={open}
+                  aria-selected={selected}
+                  disabled={busy}
+                  onClick={(event) => activateEntry(node.entry, event)}
+                  onContextMenu={(event) => openEntryContextMenu(node.entry, event)}
+                  className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[var(--text-13)] transition-colors disabled:opacity-60 ${
+                    selected
+                      ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                      : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                  }`}
+                  style={{ paddingLeft: `${indentPx}px` }}
+                  title={`${title}${ignored ? ' • Ignored by Git' : ''} • Click to ${open ? 'collapse' : 'expand'} • Right-click for actions`}
+                >
+                  <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)] ${ignored ? 'opacity-50' : ''}`}>
+                    <IconChevron down={open} size={12} />
+                  </span>
+                  <span className={`min-w-0 flex-1 truncate leading-5 ${ignored ? 'text-[var(--muted-dim)] opacity-60' : ''}`}>
+                    {node.name}
+                  </span>
+                  {childError ? <span className="px-1 text-[var(--text-9)] uppercase text-[var(--red)]">Error</span> : null}
+                  {childLoading ? (
+                    <span className="inline-flex items-center gap-1 px-1 text-[var(--text-9)] uppercase text-[var(--accent)]">
+                      <InlineSpinner />
+                      Loading
+                    </span>
+                  ) : null}
+                </button>
+              )}
             </div>
             {open ? (
-              <>
+              <div
+                role="group"
+                className="dh-file-explorer-directory-body ml-[11px] flex flex-col border-l"
+                data-file-explorer-guide-selected={hasSelectedDescendant ? 'true' : undefined}
+              >
+                {creatingInside ? renderInlineCreateRow() : null}
                 {childError ? (
-                  <div className="ml-7 my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--red)]">
+                  <div className="my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--red)]">
                     {childError}
                   </div>
                 ) : null}
                 {childLoading && !childLoaded ? (
-                  <div className="ml-7 my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
+                  <div className="my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
                     Loading directory...
                   </div>
                 ) : null}
-                {childLoaded && node.children && node.children.length > 0 ? renderExplorer(node.children, depth + 1) : null}
-                {childLoaded && (!node.children || node.children.length === 0) ? (
-                  <div className="ml-7 my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
+                {childLoaded && node.children && node.children.length > 0 ? renderExplorer(node.children) : null}
+                {childLoaded && !creatingInside && (!node.children || node.children.length === 0) ? (
+                  <div className="my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
                     Directory is empty.
                   </div>
                 ) : null}
-              </>
+              </div>
             ) : null}
-          </React.Fragment>
+          </div>
         );
       }
 
       const entry = node.entry;
       const active = activeOpenedFilePath === entry.path;
+      const ignored = entry.isGitIgnored === true;
       const selected = selectedPaths.has(entry.path);
       const modified = formatLocalDateTime(entry.mtimeMs);
       const openable = entry.kind === 'file';
+      const renaming = inlineNameMode === 'rename' && selectedOne?.path === entry.path;
       return (
-        <div key={`file:${entry.path}`} className="relative w-full">
-          <TreeIndentGuides depth={depth} />
-          <button
-            type="button"
-            role="treeitem"
-            aria-selected={selected}
-            disabled={busy}
-            onClick={(event) => activateEntry(entry, event)}
-            onContextMenu={(event) => openEntryContextMenu(entry, event)}
-            className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[var(--text-13)] transition-colors disabled:opacity-60 ${
-              selected
-                ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
-                : active
-                  ? 'bg-[var(--surface-soft)] text-[var(--fg)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
-                  : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
-            }`}
-            style={{ paddingLeft: `${indentPx}px` }}
-            title={`${entry.path} • ${modified} • Right-click for actions`}
-          >
-            <span className="inline-flex h-4 w-4 flex-shrink-0" aria-hidden="true" />
-            <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)] ${openable ? '' : 'opacity-70'}`}>
-              <FileTypeIcon path={entry.path} size={15} />
-            </span>
-            <span className={`min-w-0 flex-1 truncate leading-none ${openable ? '' : 'opacity-70'}`}>{node.name}</span>
-          </button>
+        <div key={`file:${entry.path}`} role="none" className="relative w-full">
+          {renaming ? (
+            <div
+              role="treeitem"
+              aria-selected="true"
+              className="relative flex h-[22px] w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--text-13)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
+              style={{ paddingLeft: `${indentPx}px` }}
+            >
+              <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
+                <FileTypeIcon path={actionInput || entry.path} size={15} />
+              </span>
+              <InlineExplorerNameInput
+                value={actionInput}
+                mode="rename"
+                loading={actionLoading}
+                onChange={setActionInput}
+                onSubmit={submitInlineAction}
+                onCancel={cancelInlineNameAction}
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              role="treeitem"
+              aria-selected={selected}
+              disabled={busy}
+              onClick={(event) => activateEntry(entry, event)}
+              onContextMenu={(event) => openEntryContextMenu(entry, event)}
+              className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[var(--text-13)] transition-colors disabled:opacity-60 ${
+                selected
+                  ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                  : active
+                    ? 'bg-[var(--surface-soft)] text-[var(--fg)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                    : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+              }`}
+              style={{ paddingLeft: `${indentPx}px` }}
+              title={`${entry.path} • ${modified}${ignored ? ' • Ignored by Git' : ''} • Right-click for actions`}
+            >
+              <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)] ${ignored ? 'opacity-50' : openable ? '' : 'opacity-70'}`}>
+                <FileTypeIcon path={entry.path} size={15} />
+              </span>
+              <span className={`min-w-0 flex-1 truncate leading-5 ${ignored ? 'text-[var(--muted-dim)] opacity-60' : openable ? '' : 'opacity-70'}`}>
+                {node.name}
+              </span>
+            </button>
+          )}
         </div>
       );
     });
@@ -988,7 +1114,7 @@ export function DroneFilesDock({
           <div
             className="flex-1 min-h-0 overflow-auto py-1 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
             role="tree"
-            aria-label="Files"
+            aria-label="File Explorer"
             aria-multiselectable="true"
             tabIndex={0}
             onClick={(event) => {
@@ -1002,17 +1128,26 @@ export function DroneFilesDock({
               openContextMenu(event.clientX, event.clientY, null);
             }}
           >
-            {showStartupPlaceholder ? (
+            {showStartupPlaceholder && !startup?.timedOut ? (
+              <div className="min-h-full" role="treeitem">
+                <UiCenteredLoadingState
+                  message={startupLabel}
+                  description={[startupText, startupDetail].filter(Boolean).join(' ')}
+                />
+              </div>
+            ) : showStartupPlaceholder ? (
               <UiPaneState
-                kind={startup?.timedOut ? 'warning' : 'loading'}
+                kind="warning"
                 title={startupLabel}
                 description={[startupText, startupDetail].filter(Boolean).join(' ')}
                 compact
                 role="treeitem"
               />
             ) : !error && loading && entries.length === 0 ? (
-              <UiPaneState kind="loading" title="Loading files…" compact role="treeitem" />
-            ) : !error && !loading && entries.length === 0 ? (
+              <div className="min-h-full" role="treeitem">
+                <UiCenteredLoadingState message="Loading files…" />
+              </div>
+            ) : !error && !loading && entries.length === 0 && !inlineNameMode ? (
               <UiPaneState
                 kind="empty"
                 title="Directory is empty"
@@ -1021,7 +1156,10 @@ export function DroneFilesDock({
                 role="treeitem"
               />
             ) : (
-              renderExplorer(explorerTree, 0)
+              <>
+                {actionTargetDirectory === normalizedPath ? renderInlineCreateRow() : null}
+                {renderExplorer(explorerTree)}
+              </>
             )}
           </div>
         </div>
@@ -1033,7 +1171,7 @@ export function DroneFilesDock({
           busy={busy}
           selectedCount={selectedCount}
           clipboardCount={clipboard?.entries.length ?? 0}
-          actionMode={actionMode}
+          actionMode={contextActionMode}
           actionInput={actionInput}
           actionLoading={actionLoading}
           readOnly={readOnly}
@@ -1043,7 +1181,7 @@ export function DroneFilesDock({
             if (entry?.kind === 'file') openFileEntry(entry);
             setContextMenu(null);
           }}
-          onCreate={beginCreate}
+          onCreate={(mode) => beginCreate(mode, contextMenu.entry)}
           onRename={() => beginRename()}
           onDelete={() => {
             setContextMenu(null);

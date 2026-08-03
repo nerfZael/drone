@@ -1,4 +1,5 @@
 import React from 'react';
+import { UiCenteredLoadingState } from '../../ui/components';
 import {
   defaultTextFileViewModeForFile,
   editorLanguageForPath,
@@ -665,8 +666,8 @@ export function OpenedDroneFilePanel({
         <div className="flex-1 min-h-[360px] flex flex-col">
           <div className="flex-1 min-h-0">
             {fileLoading ? (
-              <div className="h-full w-full flex items-center justify-center text-[var(--text-12)] text-[var(--muted)]">
-                Loading file...
+              <div className="h-full w-full">
+                <UiCenteredLoadingState message="Loading file…" />
               </div>
             ) : fileKind === 'image' && openedFileMediaSrc ? (
               <div

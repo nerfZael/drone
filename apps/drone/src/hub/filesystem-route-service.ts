@@ -5,11 +5,12 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
+import { FS_GIT_IGNORED_PATHS_MARKER } from './filesystem-media';
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
-import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
-
+import { listGitIgnoredPaths } from './listGitIgnoredPaths';
 import type { FilesystemRouteDependencies } from './routes/filesystem-routes';
+import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
 
 export class FilesystemService {
   readonly handle: LegacyRouteHandler;
@@ -56,30 +57,53 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
     withLockedDroneContainer,
     withReadonlyDroneContainer,
   } = deps;
-  const inferPreviewType = (filePath: string, rawMime: string) => {
+  const isEmptyTextFile = (filePath: string, sizeRaw: number | null | undefined) =>
+    sizeRaw != null &&
+    Number(sizeRaw) === 0 &&
+    !isLikelyImagePath(filePath) &&
+    !isLikelyVideoPath(filePath);
+  const inferPreviewType = (filePath: string, rawMime: string, sizeRaw?: number | null) => {
     const mimeRaw = String(rawMime ?? '')
       .trim()
       .toLowerCase();
-    const mime = mimeRaw.startsWith('image/')
-      ? mimeRaw
-      : mimeRaw.startsWith('video/')
+    const emptyTextFile = isEmptyTextFile(filePath, sizeRaw);
+    const mime = emptyTextFile
+      ? 'text/plain'
+      : mimeRaw.startsWith('image/')
         ? mimeRaw
-        : isLikelyImagePath(filePath)
-          ? guessImageMimeType(filePath)
-          : isLikelyVideoPath(filePath)
-            ? guessVideoMimeType(filePath)
-            : mimeRaw || 'application/octet-stream';
+        : mimeRaw.startsWith('video/')
+          ? mimeRaw
+          : isLikelyImagePath(filePath)
+            ? guessImageMimeType(filePath)
+            : isLikelyVideoPath(filePath)
+              ? guessVideoMimeType(filePath)
+              : mimeRaw || 'application/octet-stream';
     const kind = mime.startsWith('image/')
       ? 'image'
       : mime.startsWith('video/')
         ? 'video'
-        : isLikelyTextMimeType(mimeRaw)
+        : isLikelyTextMimeType(mime)
           ? 'text'
           : 'binary';
     return { kind, mime };
   };
   const sha256 = (value: Buffer | string) =>
     `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+  const addHostGitIgnoreMetadata = async <T extends { path: string }>(
+    directoryPath: string,
+    entries: T[],
+  ): Promise<Array<T & { isGitIgnored: boolean }>> => {
+    const ignoredPaths = await listGitIgnoredPaths({
+      directoryPath,
+      entryPaths: entries.map((entry) => entry.path),
+      runCommand: runHostCommand,
+      timeoutMs: FS_LIST_TIMEOUT_MS,
+    });
+    return entries.map((entry) => ({
+      ...entry,
+      isGitIgnored: ignoredPaths.has(path.resolve(entry.path)),
+    }));
+  };
   const hashHostFile = async (filePath: string): Promise<string> =>
     await new Promise((resolve, reject) => {
       const hash = crypto.createHash('sha256');
@@ -233,12 +257,13 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         if (runtime === 'host') {
           try {
             const parsed = await listHostFsDirectory(targetPath);
+            const entries = await addHostGitIgnoreMetadata(parsed.resolvedPath, parsed.entries);
             json(res, 200, {
               ok: true,
               id: droneId,
               name: droneName,
               path: parsed.resolvedPath,
-              entries: parsed.entries,
+              entries,
             });
             return;
           } catch (e: any) {
@@ -278,6 +303,10 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           '  mtime=$(stat -c %Y -- "$p" 2>/dev/null || echo 0)',
           '  printf "%s\t%s\t%s\t%s\n" "$name" "$kind" "$size" "$mtime"',
           'done',
+          'if command -v git >/dev/null 2>&1 && git -C "$resolved" rev-parse --is-inside-work-tree >/dev/null 2>&1; then',
+          `  printf "${FS_GIT_IGNORED_PATHS_MARKER}\\n"`,
+          '  find "$resolved" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | git -C "$resolved" check-ignore -z --stdin 2>/dev/null || true',
+          'fi',
         ].join('\n');
 
         try {
@@ -877,6 +906,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               const { kind, mime } = inferPreviewType(
                 resolvedPath,
                 (await hostMimeType(resolvedPath)) ?? '',
+                stat.size,
               );
               json(res, 200, {
                 ok: true,
@@ -897,7 +927,10 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             const mimeRaw = String(read.mime ?? '')
               .trim()
               .toLowerCase();
-            const textLike = isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(read.buf);
+            const emptyTextFile = isEmptyTextFile(targetPath, read.buf.length);
+            const textLike =
+              emptyTextFile ||
+              (isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(read.buf));
             if (!textLike) {
               const inferredMime = mimeRaw.startsWith('image/')
                 ? mimeRaw
@@ -933,7 +966,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               name: droneName,
               path: path.resolve(targetPath),
               kind: 'text',
-              mime: mimeRaw || 'text/plain',
+              mime: emptyTextFile ? 'text/plain' : mimeRaw || 'text/plain',
               content: read.buf.toString('utf8'),
               size: read.size,
               mtimeMs: read.mtimeMs,
@@ -1128,7 +1161,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             ? `sha256:${String(meta[4]).toLowerCase()}`
             : null;
           if (metadataOnly) {
-            const { kind, mime } = inferPreviewType(effectivePath, mimeRaw);
+            const { kind, mime } = inferPreviewType(effectivePath, mimeRaw, sizeNum);
             json(res, 200, {
               ok: true,
               id: droneId,
@@ -1157,7 +1190,10 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             return;
           }
 
-          const textLike = isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(buf);
+          const emptyTextFile = isEmptyTextFile(effectivePath, buf.length);
+          const textLike =
+            emptyTextFile ||
+            (isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(buf));
           if (!textLike) {
             const inferredMime = mimeRaw.startsWith('image/')
               ? mimeRaw
@@ -1193,7 +1229,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             name: droneName,
             path: effectivePath,
             kind: 'text',
-            mime: mimeRaw || 'text/plain',
+            mime: emptyTextFile ? 'text/plain' : mimeRaw || 'text/plain',
             content: buf.toString('utf8'),
             size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
             mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,

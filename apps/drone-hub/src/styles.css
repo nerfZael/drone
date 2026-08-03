@@ -878,6 +878,16 @@ code, pre {
   border-left-color: var(--accent-muted);
 }
 
+.dh-file-explorer-directory-body {
+  border-left-color: transparent;
+  transition: border-color 120ms ease;
+}
+
+[data-file-explorer-directory]:hover > .dh-file-explorer-directory-body,
+.dh-file-explorer-directory-body[data-file-explorer-guide-selected='true'] {
+  border-left-color: var(--border-subtle);
+}
+
 .dh-sidebar-drone-chat-body {
   border-left-color: transparent;
   transition: border-color 120ms ease;

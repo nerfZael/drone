@@ -16,4 +16,5 @@ export * from './SegmentedControl';
 export * from './Status';
 export * from './Table';
 export * from './Toolbar';
+export * from './UiCenteredLoadingState';
 export * from './Utility';

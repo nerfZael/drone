@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   RIGHT_PANEL_TAB_LABELS,
   RIGHT_PANEL_TABS,
+  parseRightPanelTab,
   repoUnavailableReasonForRuntime,
   rightPanelHeaderTabs,
   rightPanelTabsForRuntime,
@@ -14,7 +15,8 @@ describe('host runtime repo UX safeguards', () => {
     expect(tabs).toContain('prs');
     expect(tabs).toContain('terminal');
     expect(tabs).toContain('env');
-    expect(tabs).toContain('files');
+    expect(tabs).toContain('editor');
+    expect(tabs).not.toContain('files');
     expect(tabs).toEqual(RIGHT_PANEL_TABS);
   });
 
@@ -26,11 +28,16 @@ describe('host runtime repo UX safeguards', () => {
   test('keeps deep-link panes internal while simplifying the workspace header', () => {
     const headerTabs = rightPanelHeaderTabs(RIGHT_PANEL_TABS);
 
-    expect(headerTabs).not.toContain('editor');
+    expect(headerTabs).toContain('editor');
+    expect(headerTabs).not.toContain('files');
     expect(headerTabs).not.toContain('links');
     expect(RIGHT_PANEL_TABS).toContain('editor');
     expect(RIGHT_PANEL_TABS).toContain('links');
     expect(RIGHT_PANEL_TAB_LABELS.env).toBe('Env');
+  });
+
+  test('migrates the legacy Files tab to Editor', () => {
+    expect(parseRightPanelTab('files', 'terminal')).toBe('editor');
   });
 
   test('does not return repo unavailable reason by runtime', () => {
