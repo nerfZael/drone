@@ -145,21 +145,6 @@ function InlineSpinner() {
   );
 }
 
-function TreeIndentGuides({ depth }: { depth: number }) {
-  if (depth <= 0) return null;
-  return (
-    <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0">
-      {Array.from({ length: depth }).map((_, index) => (
-        <span
-          key={index}
-          className="absolute inset-y-0 w-px bg-[var(--border-subtle)]"
-          style={{ left: `${9 + index * 14}px` }}
-        />
-      ))}
-    </span>
-  );
-}
-
 export function DroneFilesDock({
   droneId,
   path,
@@ -854,7 +839,7 @@ export function DroneFilesDock({
   const contextActionMode =
     actionMode === 'move' || actionMode === 'go-to-path' ? actionMode : null;
 
-  function renderInlineCreateRow(depth: number): React.ReactNode {
+  function renderInlineCreateRow(): React.ReactNode {
     if (inlineNameMode !== 'create-file' && inlineNameMode !== 'create-directory') return null;
     const creatingDirectory = inlineNameMode === 'create-directory';
     return (
@@ -862,16 +847,15 @@ export function DroneFilesDock({
         role="treeitem"
         aria-selected="true"
         className="relative flex h-[22px] w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--text-13)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
-        style={{ paddingLeft: `${4 + depth * 14}px` }}
+        style={{ paddingLeft: '4px' }}
       >
         <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
-          {creatingDirectory ? <IconChevron down={false} size={12} /> : null}
-        </span>
-        {!creatingDirectory ? (
-          <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
+          {creatingDirectory ? (
+            <IconChevron down={false} size={12} />
+          ) : (
             <FileTypeIcon path={actionInput || 'untitled'} size={15} />
-          </span>
-        ) : null}
+          )}
+        </span>
         <InlineExplorerNameInput
           value={actionInput}
           mode={inlineNameMode}
@@ -884,9 +868,9 @@ export function DroneFilesDock({
     );
   }
 
-  function renderExplorer(nodes: FileExplorerNode[], depth: number): React.ReactNode {
+  function renderExplorer(nodes: FileExplorerNode[]): React.ReactNode {
     return nodes.map((node) => {
-      const indentPx = 4 + depth * 14;
+      const indentPx = 4;
       if (node.kind === 'directory') {
         const open = expandedDirs[node.path] === true;
         const childLoading = childLoadingByPath[node.path] === true;
@@ -898,11 +882,17 @@ export function DroneFilesDock({
         const creatingInside =
           (inlineNameMode === 'create-file' || inlineNameMode === 'create-directory') &&
           actionTargetDirectory === node.path;
+        const hasSelectedDescendant = Array.from(selectedPaths).some(
+          (selectedPath) => selectedPath !== node.path && isPathInsideOrEqual(node.path, selectedPath),
+        );
 
         return (
-          <React.Fragment key={`dir:${node.path}`}>
+          <div
+            key={`dir:${node.path}`}
+            data-file-explorer-directory={node.path}
+            className="flex flex-col"
+          >
             <div className="relative w-full">
-              <TreeIndentGuides depth={depth} />
               {renaming ? (
                 <div
                   role="treeitem"
@@ -943,7 +933,7 @@ export function DroneFilesDock({
                   <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
                     <IconChevron down={open} size={12} />
                   </span>
-                  <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
+                  <span className="min-w-0 flex-1 truncate leading-5">{node.name}</span>
                   {childError ? <span className="px-1 text-[var(--text-9)] uppercase text-[var(--red)]">Error</span> : null}
                   {childLoading ? (
                     <span className="inline-flex items-center gap-1 px-1 text-[var(--text-9)] uppercase text-[var(--accent)]">
@@ -955,27 +945,30 @@ export function DroneFilesDock({
               )}
             </div>
             {open ? (
-              <>
-                {creatingInside ? renderInlineCreateRow(depth + 1) : null}
+              <div
+                className="dh-file-explorer-directory-body ml-[11px] flex flex-col border-l"
+                data-file-explorer-guide-selected={hasSelectedDescendant ? 'true' : undefined}
+              >
+                {creatingInside ? renderInlineCreateRow() : null}
                 {childError ? (
-                  <div className="ml-7 my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--red)]">
+                  <div className="my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--red)]">
                     {childError}
                   </div>
                 ) : null}
                 {childLoading && !childLoaded ? (
-                  <div className="ml-7 my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
+                  <div className="my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
                     Loading directory...
                   </div>
                 ) : null}
-                {childLoaded && node.children && node.children.length > 0 ? renderExplorer(node.children, depth + 1) : null}
+                {childLoaded && node.children && node.children.length > 0 ? renderExplorer(node.children) : null}
                 {childLoaded && !creatingInside && (!node.children || node.children.length === 0) ? (
-                  <div className="ml-7 my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
+                  <div className="my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
                     Directory is empty.
                   </div>
                 ) : null}
-              </>
+              </div>
             ) : null}
-          </React.Fragment>
+          </div>
         );
       }
 
@@ -987,7 +980,6 @@ export function DroneFilesDock({
       const renaming = inlineNameMode === 'rename' && selectedOne?.path === entry.path;
       return (
         <div key={`file:${entry.path}`} className="relative w-full">
-          <TreeIndentGuides depth={depth} />
           {renaming ? (
             <div
               role="treeitem"
@@ -995,7 +987,6 @@ export function DroneFilesDock({
               className="relative flex h-[22px] w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--text-13)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
               style={{ paddingLeft: `${indentPx}px` }}
             >
-              <span className="inline-flex h-4 w-4 flex-shrink-0" aria-hidden="true" />
               <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
                 <FileTypeIcon path={actionInput || entry.path} size={15} />
               </span>
@@ -1026,11 +1017,10 @@ export function DroneFilesDock({
               style={{ paddingLeft: `${indentPx}px` }}
               title={`${entry.path} • ${modified} • Right-click for actions`}
             >
-              <span className="inline-flex h-4 w-4 flex-shrink-0" aria-hidden="true" />
               <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)] ${openable ? '' : 'opacity-70'}`}>
                 <FileTypeIcon path={entry.path} size={15} />
               </span>
-              <span className={`min-w-0 flex-1 truncate leading-none ${openable ? '' : 'opacity-70'}`}>{node.name}</span>
+              <span className={`min-w-0 flex-1 truncate leading-5 ${openable ? '' : 'opacity-70'}`}>{node.name}</span>
             </button>
           )}
         </div>
@@ -1157,8 +1147,8 @@ export function DroneFilesDock({
               />
             ) : (
               <>
-                {actionTargetDirectory === normalizedPath ? renderInlineCreateRow(0) : null}
-                {renderExplorer(explorerTree, 0)}
+                {actionTargetDirectory === normalizedPath ? renderInlineCreateRow() : null}
+                {renderExplorer(explorerTree)}
               </>
             )}
           </div>

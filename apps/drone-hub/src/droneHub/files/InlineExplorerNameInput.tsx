@@ -59,7 +59,7 @@ export function InlineExplorerNameInput({
       }}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.stopPropagation()}
-      className="h-[19px] min-w-0 flex-1 rounded-sm border border-[var(--accent)] bg-[var(--panel-alt)] px-1 text-[var(--text-12)] leading-none text-[var(--fg)] outline-none disabled:opacity-60"
+      className="h-[19px] min-w-0 flex-1 rounded-sm border border-[var(--accent)] bg-[var(--panel-alt)] px-1 text-[var(--text-12)] leading-[17px] text-[var(--fg)] outline-none disabled:opacity-60"
       aria-label={
         mode === 'rename'
           ? 'Rename item'
