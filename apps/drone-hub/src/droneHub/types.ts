@@ -118,6 +118,7 @@ export type DronePortsPayload =
 export type DroneFsEntry = {
   name: string;
   path: string;
+  isGitIgnored?: boolean;
   kind: 'directory' | 'file' | 'other';
   size: number | null;
   mtimeMs: number | null;

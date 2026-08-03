@@ -324,7 +324,7 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       openFilesTab: () => {
-        openRightPanelTabFromShortcut('files');
+        openRightPanelTabFromShortcut('editor');
         return true;
       },
       openTerminalTab: () => {

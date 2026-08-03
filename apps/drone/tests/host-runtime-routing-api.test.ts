@@ -119,16 +119,47 @@ describeSocketSuite('host runtime routing api', () => {
     expect(resp.data?.ports).toEqual([{ hostPort: 4888, containerPort: 3000 }]);
   });
 
+  test('marks Git-ignored host filesystem entries', async () => {
+    const droneId = 'host-fs-git-ignore';
+    const repoRoot = path.join(tempRoot, 'host-fs-git-ignore-root');
+    fs.mkdirSync(path.join(repoRoot, 'ignored-build'), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, '.gitignore'), '*.tmp\n/ignored-build/\n', 'utf8');
+    fs.writeFileSync(path.join(repoRoot, 'ignored.tmp'), 'ignored\n', 'utf8');
+    fs.writeFileSync(path.join(repoRoot, 'tracked.tmp'), 'tracked\n', 'utf8');
+    fs.writeFileSync(path.join(repoRoot, 'visible.txt'), 'visible\n', 'utf8');
+    runGit(repoRoot, ['init']);
+    runGit(repoRoot, ['add', '.gitignore']);
+    runGit(repoRoot, ['add', '-f', 'tracked.tmp']);
+    await seedHostDrone(droneId, { cwd: repoRoot, repoPath: repoRoot });
+
+    const response = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/list`);
+
+    expect(response.r.status).toBe(200);
+    const entries = (response.data?.entries ?? []) as Array<{
+      name?: string;
+      isGitIgnored?: boolean;
+    }>;
+    const ignoredByName = new Map(
+      entries.map((entry) => [String(entry.name ?? ''), entry.isGitIgnored === true]),
+    );
+    expect(ignoredByName.get('ignored.tmp')).toBe(true);
+    expect(ignoredByName.get('ignored-build')).toBe(true);
+    expect(ignoredByName.get('tracked.tmp')).toBe(false);
+    expect(ignoredByName.get('visible.txt')).toBe(false);
+  });
+
   test('supports fs routes for host runtime drone', async () => {
     const droneId = 'host-fs';
     const droneRoot = path.join(tempRoot, 'host-fs-root');
     fs.mkdirSync(droneRoot, { recursive: true });
 
     const notePath = path.join(droneRoot, 'note.txt');
+    const emptyMarkdownPath = path.join(droneRoot, 'empty.md');
     const largeNotePath = path.join(droneRoot, 'large-note.txt');
     const imagePath = path.join(droneRoot, 'thumb.png');
     const videoPath = path.join(droneRoot, 'demo.mp4');
     fs.writeFileSync(notePath, 'hello\n', 'utf8');
+    fs.writeFileSync(emptyMarkdownPath, '', 'utf8');
     fs.writeFileSync(largeNotePath, `${'x'.repeat(700 * 1024)}\n`, 'utf8');
     fs.writeFileSync(
       imagePath,
@@ -161,6 +192,21 @@ describeSocketSuite('host runtime routing api', () => {
     expect(readResp.data?.kind).toBe('text');
     expect(String(readResp.data?.content ?? '')).toBe('hello\n');
     expect(String(readResp.data?.revision ?? '')).toMatch(/^sha256:[a-f0-9]{64}$/);
+
+    const emptyReadResp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(emptyMarkdownPath)}`,
+    );
+    expect(emptyReadResp.r.status).toBe(200);
+    expect(emptyReadResp.data?.kind).toBe('text');
+    expect(emptyReadResp.data?.mime).toBe('text/plain');
+    expect(emptyReadResp.data?.content).toBe('');
+
+    const emptyMetadataResp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(emptyMarkdownPath)}&metadata=1`,
+    );
+    expect(emptyMetadataResp.r.status).toBe(200);
+    expect(emptyMetadataResp.data?.kind).toBe('text');
+    expect(emptyMetadataResp.data?.mime).toBe('text/plain');
 
     const metadataResp = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(notePath)}&metadata=1`,

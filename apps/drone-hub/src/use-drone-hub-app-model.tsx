@@ -1786,7 +1786,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
       if (action.type === 'close_whiteboard') {
         if (rightPanelTab === 'whiteboard' || rightPanelBottomTab === 'whiteboard') {
-          requestRightPanelTab('files');
+          requestRightPanelTab('editor');
         }
         return;
       }
@@ -3064,10 +3064,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
       setCurrentFsPath(parentPath);
       if (pane === 'bottom') {
-        setRightPanelBottomTab('files');
+        setRightPanelBottomTab('editor');
         setRightPanelOpen(true);
       } else {
-        requestRightPanelTab('files');
+        requestRightPanelTab('editor');
       }
     },
     [
