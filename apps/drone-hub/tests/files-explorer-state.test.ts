@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import type { DroneFsEntry } from '../src/droneHub/types';
 import {
   allVisibleSelected,
+  fileNameStemSelectionEnd,
   isPathInsideOrEqual,
   movedPathForEntry,
+  parentFsPath,
   pruneSelectedPaths,
   renamedPathForEntry,
   selectedEntriesFromPaths,
@@ -51,6 +53,14 @@ describe('file explorer state helpers', () => {
     expect(isPathInsideOrEqual('/work/repo/src', '/work/repo/src/main.ts')).toBe(true);
     expect(renamedPathForEntry(dir, 'lib', '/work/repo/src/main.ts')).toBe('/work/repo/lib/main.ts');
     expect(movedPathForEntry(file, '/work/repo/tests', '/work/repo/src/main.ts')).toBe('/work/repo/tests/main.ts');
+    expect(parentFsPath('/work/repo/src/main.ts')).toBe('/work/repo/src');
+  });
+
+  test('selects the filename stem for inline rename', () => {
+    expect(fileNameStemSelectionEnd('README.md')).toBe(6);
+    expect(fileNameStemSelectionEnd('archive.tar.gz')).toBe(11);
+    expect(fileNameStemSelectionEnd('.env')).toBe(4);
+    expect(fileNameStemSelectionEnd('Makefile')).toBe(8);
   });
 
   test('collapses nested selections before filesystem actions', () => {

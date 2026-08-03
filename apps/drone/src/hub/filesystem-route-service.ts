@@ -56,24 +56,32 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
     withLockedDroneContainer,
     withReadonlyDroneContainer,
   } = deps;
-  const inferPreviewType = (filePath: string, rawMime: string) => {
+  const isEmptyTextFile = (filePath: string, sizeRaw: number | null | undefined) =>
+    sizeRaw != null &&
+    Number(sizeRaw) === 0 &&
+    !isLikelyImagePath(filePath) &&
+    !isLikelyVideoPath(filePath);
+  const inferPreviewType = (filePath: string, rawMime: string, sizeRaw?: number | null) => {
     const mimeRaw = String(rawMime ?? '')
       .trim()
       .toLowerCase();
-    const mime = mimeRaw.startsWith('image/')
-      ? mimeRaw
-      : mimeRaw.startsWith('video/')
+    const emptyTextFile = isEmptyTextFile(filePath, sizeRaw);
+    const mime = emptyTextFile
+      ? 'text/plain'
+      : mimeRaw.startsWith('image/')
         ? mimeRaw
-        : isLikelyImagePath(filePath)
-          ? guessImageMimeType(filePath)
-          : isLikelyVideoPath(filePath)
-            ? guessVideoMimeType(filePath)
-            : mimeRaw || 'application/octet-stream';
+        : mimeRaw.startsWith('video/')
+          ? mimeRaw
+          : isLikelyImagePath(filePath)
+            ? guessImageMimeType(filePath)
+            : isLikelyVideoPath(filePath)
+              ? guessVideoMimeType(filePath)
+              : mimeRaw || 'application/octet-stream';
     const kind = mime.startsWith('image/')
       ? 'image'
       : mime.startsWith('video/')
         ? 'video'
-        : isLikelyTextMimeType(mimeRaw)
+        : isLikelyTextMimeType(mime)
           ? 'text'
           : 'binary';
     return { kind, mime };
@@ -877,6 +885,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               const { kind, mime } = inferPreviewType(
                 resolvedPath,
                 (await hostMimeType(resolvedPath)) ?? '',
+                stat.size,
               );
               json(res, 200, {
                 ok: true,
@@ -897,7 +906,10 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             const mimeRaw = String(read.mime ?? '')
               .trim()
               .toLowerCase();
-            const textLike = isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(read.buf);
+            const emptyTextFile = isEmptyTextFile(targetPath, read.buf.length);
+            const textLike =
+              emptyTextFile ||
+              (isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(read.buf));
             if (!textLike) {
               const inferredMime = mimeRaw.startsWith('image/')
                 ? mimeRaw
@@ -933,7 +945,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               name: droneName,
               path: path.resolve(targetPath),
               kind: 'text',
-              mime: mimeRaw || 'text/plain',
+              mime: emptyTextFile ? 'text/plain' : mimeRaw || 'text/plain',
               content: read.buf.toString('utf8'),
               size: read.size,
               mtimeMs: read.mtimeMs,
@@ -1128,7 +1140,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             ? `sha256:${String(meta[4]).toLowerCase()}`
             : null;
           if (metadataOnly) {
-            const { kind, mime } = inferPreviewType(effectivePath, mimeRaw);
+            const { kind, mime } = inferPreviewType(effectivePath, mimeRaw, sizeNum);
             json(res, 200, {
               ok: true,
               id: droneId,
@@ -1157,7 +1169,10 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             return;
           }
 
-          const textLike = isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(buf);
+          const emptyTextFile = isEmptyTextFile(effectivePath, buf.length);
+          const textLike =
+            emptyTextFile ||
+            (isLikelyTextMimeType(mimeRaw) && !bufferLooksBinary(buf));
           if (!textLike) {
             const inferredMime = mimeRaw.startsWith('image/')
               ? mimeRaw
@@ -1193,7 +1208,7 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             name: droneName,
             path: effectivePath,
             kind: 'text',
-            mime: mimeRaw || 'text/plain',
+            mime: emptyTextFile ? 'text/plain' : mimeRaw || 'text/plain',
             content: buf.toString('utf8'),
             size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
             mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,

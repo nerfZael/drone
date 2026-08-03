@@ -125,10 +125,12 @@ describeSocketSuite('host runtime routing api', () => {
     fs.mkdirSync(droneRoot, { recursive: true });
 
     const notePath = path.join(droneRoot, 'note.txt');
+    const emptyMarkdownPath = path.join(droneRoot, 'empty.md');
     const largeNotePath = path.join(droneRoot, 'large-note.txt');
     const imagePath = path.join(droneRoot, 'thumb.png');
     const videoPath = path.join(droneRoot, 'demo.mp4');
     fs.writeFileSync(notePath, 'hello\n', 'utf8');
+    fs.writeFileSync(emptyMarkdownPath, '', 'utf8');
     fs.writeFileSync(largeNotePath, `${'x'.repeat(700 * 1024)}\n`, 'utf8');
     fs.writeFileSync(
       imagePath,
@@ -161,6 +163,21 @@ describeSocketSuite('host runtime routing api', () => {
     expect(readResp.data?.kind).toBe('text');
     expect(String(readResp.data?.content ?? '')).toBe('hello\n');
     expect(String(readResp.data?.revision ?? '')).toMatch(/^sha256:[a-f0-9]{64}$/);
+
+    const emptyReadResp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(emptyMarkdownPath)}`,
+    );
+    expect(emptyReadResp.r.status).toBe(200);
+    expect(emptyReadResp.data?.kind).toBe('text');
+    expect(emptyReadResp.data?.mime).toBe('text/plain');
+    expect(emptyReadResp.data?.content).toBe('');
+
+    const emptyMetadataResp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(emptyMarkdownPath)}&metadata=1`,
+    );
+    expect(emptyMetadataResp.r.status).toBe(200);
+    expect(emptyMetadataResp.data?.kind).toBe('text');
+    expect(emptyMetadataResp.data?.mime).toBe('text/plain');
 
     const metadataResp = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(notePath)}&metadata=1`,

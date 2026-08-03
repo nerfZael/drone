@@ -45,6 +45,12 @@ export function allVisibleSelected(entries: DroneFsEntry[], selectedPaths: Reado
   return entries.length > 0 && entries.every((entry) => selectedPaths.has(entry.path));
 }
 
+export function fileNameStemSelectionEnd(nameRaw: string): number {
+  const name = String(nameRaw ?? '');
+  const extensionIndex = name.lastIndexOf('.');
+  return extensionIndex > 0 ? extensionIndex : name.length;
+}
+
 export function setAllVisibleSelected(
   entries: DroneFsEntry[],
   selectedPaths: ReadonlySet<string>,
@@ -81,7 +87,7 @@ export function renamedPathForEntry(entry: DroneFsEntry, nextName: string, activ
   return movedPathForEntry({ ...entry, path: entry.path, name: nextName }, parent, activePath);
 }
 
-function parentFsPath(rawPath: string): string {
+export function parentFsPath(rawPath: string): string {
   const text = String(rawPath ?? '').trim().replace(/[\/\\]+$/g, '');
   const slash = Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\'));
   if (slash <= 0) return text.startsWith('/') ? '/' : '.';
