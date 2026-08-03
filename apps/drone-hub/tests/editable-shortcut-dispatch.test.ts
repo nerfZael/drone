@@ -56,6 +56,17 @@ describe('editable shortcut dispatch', () => {
     expect(out).toBe(false);
   });
 
+  test('allows Quick Open from any editable input', () => {
+    const out = shouldDispatchEditableShortcutAction({
+      matchedActionId: 'openQuickOpen',
+      matchedShortcutKey: 'p',
+      targetInPrimaryChatInput: false,
+      targetInCanvasMessageInput: false,
+      targetInAssistantChatInput: false,
+    });
+    expect(out).toBe(true);
+  });
+
   test('allows voice transcription shortcut from chat inputs', () => {
     expect(
       shouldDispatchEditableShortcutAction({

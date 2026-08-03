@@ -46,6 +46,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   toggleSelectedDronesToDoFromShortcut: () => boolean;
   openGroupMultiChat: (group: string) => void;
   openSidebarVisibleMultiChat: () => void;
+  openQuickOpenFromShortcut: () => boolean;
   toggleVoiceClipboardRecording: () => boolean;
   draftCreateOpen: boolean;
   draftCreateNameRef: React.RefObject<HTMLInputElement | null>;
@@ -109,6 +110,7 @@ export function useDroneHubLifecycleEffects({
   toggleSelectedDronesToDoFromShortcut,
   openGroupMultiChat,
   openSidebarVisibleMultiChat,
+  openQuickOpenFromShortcut,
   toggleVoiceClipboardRecording,
   draftCreateOpen,
   draftCreateNameRef,
@@ -327,6 +329,7 @@ export function useDroneHubLifecycleEffects({
         openRightPanelTabFromShortcut('editor');
         return true;
       },
+      openQuickOpen: () => openQuickOpenFromShortcut(),
       openTerminalTab: () => {
         openRightPanelTabFromShortcut('terminal');
         return true;
@@ -426,6 +429,7 @@ export function useDroneHubLifecycleEffects({
     toggleSelectedDronesToDoFromShortcut,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
+    openQuickOpenFromShortcut,
     rightPanelBottomTab,
     rightPanelOpen,
     rightPanelSplit,

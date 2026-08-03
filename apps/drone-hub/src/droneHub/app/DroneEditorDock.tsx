@@ -24,7 +24,7 @@ type DroneEditorDockProps = {
     canGoForward: boolean;
     onQueryChange: (value: string) => void;
     onClose: () => void;
-    onOpenFile: (file: { path: string; name: string }) => void;
+    onOpenFile: (file: OpenFileTarget) => void;
     onGoBack: () => void;
     onGoForward: () => void;
   };

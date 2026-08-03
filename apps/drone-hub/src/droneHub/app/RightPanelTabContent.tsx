@@ -234,7 +234,7 @@ type RightPanelTabContentProps = {
     canGoForward: boolean;
     onQueryChange: (next: string) => void;
     onClose: () => void;
-    onOpenFile: (next: { path: string; name: string }) => void;
+    onOpenFile: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
     onGoBack: () => void;
     onGoForward: () => void;
   };
