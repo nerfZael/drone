@@ -1,27 +1,39 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildMobileHtmlPreviewDocument,
+  mobileHtmlPreviewWebViewPolicy,
   MOBILE_HTML_PREVIEW_BASE_URL,
   MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY,
   MOBILE_HTML_PREVIEW_ORIGIN_WHITELIST,
-  MOBILE_HTML_PREVIEW_WEBVIEW_POLICY,
   shouldAllowMobileHtmlPreviewNavigation,
 } from '../src/drones/mobile-html-preview-security';
 
 describe('mobile rendered HTML preview security', () => {
   test('disables active WebView capabilities', () => {
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.javaScriptEnabled).toBe(false);
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.javaScriptCanOpenWindowsAutomatically).toBe(false);
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.domStorageEnabled).toBe(false);
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.cacheEnabled).toBe(false);
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.allowFileAccess).toBe(false);
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.allowFileAccessFromFileURLs).toBe(false);
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.allowUniversalAccessFromFileURLs).toBe(false);
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.thirdPartyCookiesEnabled).toBe(false);
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.sharedCookiesEnabled).toBe(false);
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.geolocationEnabled).toBe(false);
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.mediaCapturePermissionGrantType).toBe('deny');
-    expect(MOBILE_HTML_PREVIEW_WEBVIEW_POLICY.paymentRequestEnabled).toBe(false);
+    const androidPolicy = mobileHtmlPreviewWebViewPolicy('android');
+    const iosPolicy = mobileHtmlPreviewWebViewPolicy('ios');
+
+    expect(androidPolicy.javaScriptEnabled).toBe(false);
+    expect(androidPolicy.javaScriptCanOpenWindowsAutomatically).toBe(false);
+    expect(androidPolicy.domStorageEnabled).toBe(false);
+    expect(androidPolicy.cacheEnabled).toBe(false);
+    expect(androidPolicy.allowFileAccess).toBe(false);
+    expect(androidPolicy.allowFileAccessFromFileURLs).toBe(false);
+    expect(androidPolicy.allowUniversalAccessFromFileURLs).toBe(false);
+    expect(androidPolicy.thirdPartyCookiesEnabled).toBe(false);
+    expect(androidPolicy.geolocationEnabled).toBe(false);
+    expect(androidPolicy.paymentRequestEnabled).toBe(false);
+    expect(iosPolicy.sharedCookiesEnabled).toBe(false);
+    expect(iosPolicy.mediaCapturePermissionGrantType).toBe('deny');
+  });
+
+  test('does not send iOS-only native props to the Android Fabric component', () => {
+    const androidPolicy = mobileHtmlPreviewWebViewPolicy('android');
+    const iosPolicy = mobileHtmlPreviewWebViewPolicy('ios');
+
+    expect(androidPolicy).not.toHaveProperty('dataDetectorTypes');
+    expect(androidPolicy).not.toHaveProperty('mediaCapturePermissionGrantType');
+    expect(iosPolicy.dataDetectorTypes).toEqual(['none']);
   });
 
   test('blocks script, network, form, object, and top navigation capabilities', () => {

@@ -21,33 +21,51 @@ export const MOBILE_HTML_PREVIEW_CONTENT_SECURITY_POLICY = [
   "navigate-to 'none'",
 ].join('; ');
 
-export const MOBILE_HTML_PREVIEW_WEBVIEW_POLICY = {
+const MOBILE_HTML_PREVIEW_SHARED_WEBVIEW_POLICY = {
   javaScriptEnabled: false,
   javaScriptCanOpenWindowsAutomatically: false,
-  domStorageEnabled: false,
   cacheEnabled: false,
   incognito: true,
+  mediaPlaybackRequiresUserAction: true,
+  webviewDebuggingEnabled: false,
+};
+
+const MOBILE_HTML_PREVIEW_ANDROID_WEBVIEW_POLICY = {
+  domStorageEnabled: false,
   allowFileAccess: false,
   allowFileAccessFromFileURLs: false,
   allowUniversalAccessFromFileURLs: false,
   mixedContentMode: 'never' as const,
   thirdPartyCookiesEnabled: false,
-  sharedCookiesEnabled: false,
   geolocationEnabled: false,
-  mediaPlaybackRequiresUserAction: true,
-  allowsInlineMediaPlayback: false,
   allowsFullscreenVideo: false,
-  allowsAirPlayForMediaPlayback: false,
-  allowsBackForwardNavigationGestures: false,
-  dataDetectorTypes: 'none' as const,
-  keyboardDisplayRequiresUserAction: true,
   saveFormDataDisabled: true,
   setSupportMultipleWindows: true,
-  mediaCapturePermissionGrantType: 'deny' as const,
   paymentRequestEnabled: false,
   allowsProtectedMedia: false,
-  webviewDebuggingEnabled: false,
 };
+
+const MOBILE_HTML_PREVIEW_IOS_WEBVIEW_POLICY = {
+  sharedCookiesEnabled: false,
+  allowsInlineMediaPlayback: false,
+  allowsAirPlayForMediaPlayback: false,
+  allowsBackForwardNavigationGestures: false,
+  dataDetectorTypes: ['none'] as Array<'none'>,
+  keyboardDisplayRequiresUserAction: true,
+  mediaCapturePermissionGrantType: 'deny' as const,
+};
+
+export function mobileHtmlPreviewWebViewPolicy(platform: string) {
+  return platform === 'ios'
+    ? {
+        ...MOBILE_HTML_PREVIEW_SHARED_WEBVIEW_POLICY,
+        ...MOBILE_HTML_PREVIEW_IOS_WEBVIEW_POLICY,
+      }
+    : {
+        ...MOBILE_HTML_PREVIEW_SHARED_WEBVIEW_POLICY,
+        ...MOBILE_HTML_PREVIEW_ANDROID_WEBVIEW_POLICY,
+      };
+}
 
 /**
  * The CSP is emitted before untrusted markup. Keeping that markup in the top
