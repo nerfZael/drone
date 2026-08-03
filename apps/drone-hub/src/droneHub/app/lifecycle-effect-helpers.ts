@@ -20,6 +20,7 @@ export function shouldDispatchEditableShortcutAction(_args: EditableShortcutDisp
   } = _args;
   const inDraftShortcutChatInput = targetInPrimaryChatInput || targetInCanvasMessageInput;
   const inVoiceShortcutChatInput = inDraftShortcutChatInput || targetInAssistantChatInput;
+  if (matchedActionId === 'openQuickOpen') return true;
   if (matchedActionId === 'createDraftDrone') {
     return matchedShortcutKey === 'tab' && inDraftShortcutChatInput;
   }

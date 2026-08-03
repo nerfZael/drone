@@ -27,6 +27,7 @@ import {
 } from '../files/editor-location-history';
 import {
   quickOpenNameForPath,
+  parseQuickOpenQuery,
   QUICK_OPEN_SEARCH_MIN_QUERY_LENGTH,
   removeRecentQuickOpenFilesForPaths,
   remapRecentQuickOpenFilesForPathChange,
@@ -291,6 +292,8 @@ export function useFileEditorState({
   const openQuickOpen = React.useCallback(() => {
     if (!currentDrone?.id) return;
     setQuickOpenQuery('');
+    setQuickOpenFiles([]);
+    setQuickOpenLoading(false);
     setQuickOpenOpen(true);
     setQuickOpenError(null);
   }, [currentDrone?.id]);
@@ -385,7 +388,7 @@ export function useFileEditorState({
     if (!quickOpenOpen) return;
     const droneId = String(currentDrone?.id ?? '').trim();
     if (!droneId) return;
-    const query = String(quickOpenQuery ?? '').trim();
+    const query = parseQuickOpenQuery(quickOpenQuery).searchTerm.trim();
     if (!query) {
       setQuickOpenFiles([]);
       setQuickOpenLoading(false);
@@ -404,7 +407,7 @@ export function useFileEditorState({
       setQuickOpenLoading(true);
       setQuickOpenError(null);
       void requestJson<DroneFsSearchPayload>(
-        `/api/drones/${encodeURIComponent(droneId)}/fs/search?query=${encodeURIComponent(query)}&limit=50`,
+        `/api/drones/${encodeURIComponent(droneId)}/fs/search?query=${encodeURIComponent(query)}&limit=200`,
         controller ? { signal: controller.signal } : undefined,
       )
         .then((data) => {

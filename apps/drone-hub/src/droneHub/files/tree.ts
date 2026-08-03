@@ -23,27 +23,30 @@ export function buildFileExplorerTree(opts: {
   const childEntriesByPath = opts.childEntriesByPath ?? {};
 
   function visit(entries: DroneFsEntry[]): FileExplorerNode[] {
-    return entries.map((entry) => {
-      if (entry.kind !== 'directory') {
+    return entries
+      .filter((entry) => !(entry.kind === 'directory' && entry.name === '.git'))
+      .map((entry) => {
+        if (entry.kind !== 'directory') {
+          return {
+            kind: entry.kind,
+            name: entry.name,
+            path: entry.path,
+            entry,
+            count: entry.kind === 'file' ? 1 : null,
+          };
+        }
+
+        const childEntries = childEntriesByPath[entry.path];
+        const children = Array.isArray(childEntries) ? visit(childEntries) : undefined;
         return {
           kind: entry.kind,
           name: entry.name,
           path: entry.path,
           entry,
-          count: entry.kind === 'file' ? 1 : null,
+          count: children?.length ?? null,
+          children,
         };
-      }
-
-      const childEntries = childEntriesByPath[entry.path];
-      return {
-        kind: entry.kind,
-        name: entry.name,
-        path: entry.path,
-        entry,
-        count: Array.isArray(childEntries) ? childEntries.length : null,
-        children: Array.isArray(childEntries) ? visit(childEntries) : undefined,
-      };
-    });
+      });
   }
 
   return visit(opts.rootEntries ?? []);

@@ -78,8 +78,8 @@ describe('per-drone workspace state', () => {
 
     expect(editorWorkspace).toContain("profileStorageKey('droneHub.editorExplorerLayout')");
     expect(editorWorkspace).toContain('DEFAULT_EXPLORER_WIDTH = 240');
-    expect(editorWorkspace).toContain('draggable');
-    expect(editorWorkspace).toContain('File Explorer');
+    expect(editorWorkspace).not.toContain('>File Explorer<');
+    expect(editorWorkspace).toContain('aria-label="File Explorer"');
     expect(appConfig).toContain("if (raw === 'files') return 'editor'");
   });
 

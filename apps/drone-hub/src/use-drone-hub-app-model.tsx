@@ -2975,11 +2975,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, [goForwardLocation, revealEditorLocationParent]);
 
   React.useEffect(() => {
-    const isQuickOpenShortcut = (event: KeyboardEvent): boolean =>
-      event.key.toLowerCase() === 'p' &&
-      (event.ctrlKey || event.metaKey) &&
-      !event.altKey &&
-      !event.shiftKey;
     const isBackShortcut = (event: KeyboardEvent): boolean =>
       event.key === 'ArrowLeft' &&
       event.altKey &&
@@ -2995,11 +2990,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat) return;
-      if (isQuickOpenShortcut(event)) {
-        if (!openQuickOpenFromShortcut()) return;
-        event.preventDefault();
-        return;
-      }
       if (quickOpenOpen) return;
       if (isBackShortcut(event)) {
         if (!goBackEditorLocationFromShortcut()) return;
@@ -3016,7 +3006,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, [
     goBackEditorLocationFromShortcut,
     goForwardEditorLocationFromShortcut,
-    openQuickOpenFromShortcut,
     quickOpenOpen,
   ]);
 
@@ -3791,6 +3780,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     toggleSelectedDronesToDoFromShortcut,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
+    openQuickOpenFromShortcut,
     toggleVoiceClipboardRecording,
     draftCreateOpen,
     draftCreateNameRef,

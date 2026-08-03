@@ -32,6 +32,7 @@ import {
   type MarkdownOutlineExpansionCommand,
 } from './MarkdownOutlinePreview';
 import { IsolatedHtmlPreview } from './IsolatedHtmlPreview';
+import { configureMonacoTypeScriptDiagnostics } from './editor-monaco-configuration';
 
 type MonacoEditorComponent = (typeof import('@monaco-editor/react'))['default'];
 type MonacoEditorProps = React.ComponentProps<MonacoEditorComponent>;
@@ -791,6 +792,7 @@ export function OpenedDroneFilePanel({
                         const editorTheme = desktopMonacoTheme(theme.id);
                         monaco.editor.defineTheme(editorTheme.id, editorTheme.definition);
                       }
+                      configureMonacoTypeScriptDiagnostics(monaco.languages.typescript);
                     }}
                     onMount={(editor, monaco) => {
                       editorRef.current = editor;
@@ -816,7 +818,12 @@ export function OpenedDroneFilePanel({
                       padding: { top: 12, bottom: 12 },
                       'semanticHighlighting.enabled': true,
                       bracketPairColorization: { enabled: true },
-                      guides: { bracketPairs: true },
+                      guides: {
+                        indentation: true,
+                        highlightActiveIndentation: true,
+                        bracketPairs: false,
+                        bracketPairsHorizontal: false,
+                      },
                     }}
                   />
                 </React.Suspense>

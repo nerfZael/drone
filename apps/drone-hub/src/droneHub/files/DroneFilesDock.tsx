@@ -849,7 +849,7 @@ export function DroneFilesDock({
         role="treeitem"
         aria-selected="true"
         className="relative flex h-[22px] w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--text-13)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
-        style={{ paddingLeft: '4px' }}
+        style={{ paddingLeft: '8px' }}
       >
         <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
           {creatingDirectory ? (
@@ -872,7 +872,7 @@ export function DroneFilesDock({
 
   function renderExplorer(nodes: FileExplorerNode[]): React.ReactNode {
     return nodes.map((node) => {
-      const indentPx = 4;
+      const indentPx = 8;
       if (node.kind === 'directory') {
         const open = expandedDirs[node.path] === true;
         const ignored = node.entry.isGitIgnored === true;
@@ -1143,11 +1143,11 @@ export function DroneFilesDock({
                 compact
                 role="treeitem"
               />
-            ) : !error && loading && entries.length === 0 ? (
+            ) : !error && loading && explorerTree.length === 0 ? (
               <div className="min-h-full" role="treeitem">
                 <UiCenteredLoadingState message="Loading files…" />
               </div>
-            ) : !error && !loading && entries.length === 0 && !inlineNameMode ? (
+            ) : !error && !loading && explorerTree.length === 0 && !inlineNameMode ? (
               <UiPaneState
                 kind="empty"
                 title="Directory is empty"

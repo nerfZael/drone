@@ -71,7 +71,7 @@ describe('desktop themes', () => {
       'editor.foreground': '#CDD6F4',
       'editorCursor.foreground': '#F5E0DC',
       'editor.selectionBackground': '#9399B240',
-      'editor.lineHighlightBackground': '#CDD6F41A',
+      'editor.lineHighlightBackground': '#CDD6F40D',
       'editorLineNumber.foreground': '#7F849C',
       'editorLineNumber.activeForeground': '#B4BEFE',
       'editorWidget.background': '#181825',

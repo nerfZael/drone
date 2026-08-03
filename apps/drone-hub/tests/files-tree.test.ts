@@ -69,6 +69,18 @@ describe('file explorer tree', () => {
     ]);
   });
 
+  test('hides Git metadata directories', () => {
+    const tree = buildFileExplorerTree({
+      rootEntries: [
+        entry({ name: '.git', path: '/work/repo/.git', kind: 'directory' }),
+        entry({ name: '.github', path: '/work/repo/.github', kind: 'directory' }),
+        entry({ name: '.gitignore', path: '/work/repo/.gitignore', kind: 'file' }),
+      ],
+    });
+
+    expect(tree.map((node) => node.name)).toEqual(['.github', '.gitignore']);
+  });
+
   test('summarizes root entry kinds', () => {
     expect(
       summarizeRootEntries([
