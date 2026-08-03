@@ -253,7 +253,6 @@ describe('canonical UI preferences settings', () => {
     assert.equal(resolved.uiPreferences.spawnModel, '');
     assert.equal(resolved.uiPreferences.repoBranchSource, 'host');
     assert.equal(resolved.uiPreferences.repoCreateRemoteBranch, '');
-    assert.equal(resolved.uiPreferences.pullHostBranchBeforeCreate, true);
   });
 
   test('backfills legacy UI preferences once and gives canonical data precedence afterward', async () => {
@@ -312,7 +311,6 @@ describe('canonical UI preferences settings', () => {
       spawnModel: 'gpt-5.5',
       repoBranchSource: 'remote',
       repoCreateRemoteBranch: 'origin/feature/voice',
-      pullHostBranchBeforeCreate: false,
     });
 
     const resolved = await resolveUiPreferencesSettingsResponse();
@@ -332,7 +330,6 @@ describe('canonical UI preferences settings', () => {
     assert.equal(resolved.uiPreferences.spawnModel, 'gpt-5.5');
     assert.equal(resolved.uiPreferences.repoBranchSource, 'remote');
     assert.equal(resolved.uiPreferences.repoCreateRemoteBranch, 'origin/feature/voice');
-    assert.equal(resolved.uiPreferences.pullHostBranchBeforeCreate, false);
     assert.equal(readRegistryJsonFromSqlite(), registryBefore);
   });
 

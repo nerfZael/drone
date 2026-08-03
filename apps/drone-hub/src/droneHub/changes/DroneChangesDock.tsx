@@ -274,7 +274,7 @@ function ChangesViewMenu({
   return (
     <UiActionMenu
       label="Changes view options"
-      size="small"
+      size="xsmall"
       triggerContent={
         <>
           View
@@ -3213,13 +3213,17 @@ function LiveDroneChangesDock({
       surface="alternate"
       style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
     >
-      <UiPanelToolbar aria-label="Changes controls" className="px-3 py-2">
-        <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+      <UiPanelToolbar
+        aria-label="Changes controls"
+        className="!min-h-8 !gap-1.5 !px-1.5 !py-0.5"
+      >
+        <div className="flex min-w-0 flex-nowrap items-center gap-1">
           {repoAttached && !disabled && contextMode === 'branch' && primaryView === 'changes' ? (
             <UiToolbarSegmentedControl
               label="Branch change source"
               value={branchChangesMode}
               onValueChange={setBranchChangesMode}
+              size="xsmall"
               options={[
                 { value: 'working-tree', label: 'Working' },
                 { value: 'pull-preview', label: 'Apply' },
@@ -3229,7 +3233,7 @@ function LiveDroneChangesDock({
         </div>
         <div
           data-onboarding-id="changes.viewMode"
-          className="ml-auto flex shrink-0 items-center gap-2"
+          className="ml-auto flex shrink-0 items-center gap-1"
         >
           {repoAttached && !disabled ? (
             <>
@@ -3238,6 +3242,7 @@ function LiveDroneChangesDock({
                   label="Changes context"
                   value={contextMode}
                   onValueChange={setContextModeState}
+                  size="xsmall"
                   options={[
                     { value: 'branch', label: 'Branch' },
                     {
@@ -3252,6 +3257,7 @@ function LiveDroneChangesDock({
                 label="Changes view"
                 value={primaryView}
                 onValueChange={setPrimaryView}
+                size="xsmall"
                 options={[
                   { value: 'changes', label: 'Changes' },
                   { value: 'commits', label: 'Commits' },

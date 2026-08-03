@@ -19,7 +19,6 @@ describe('desktop new drone preferences', () => {
         spawnApprovalPolicy: 'agent-decides',
         repoBranchSource: 'remote',
         repoCreateRemoteBranch: ' origin/feature-a ',
-        pullHostBranchBeforeCreate: false,
         name: 'do-not-remember',
         group: 'do-not-remember',
         repoPath: '/do/not/remember',
@@ -36,7 +35,6 @@ describe('desktop new drone preferences', () => {
       spawnApprovalPolicy: 'agent-decides',
       repoBranchSource: 'remote',
       repoCreateRemoteBranch: 'origin/feature-a',
-      pullHostBranchBeforeCreate: false,
     });
   });
 
@@ -53,7 +51,6 @@ describe('desktop new drone preferences', () => {
       spawnApprovalPolicy: 'ask',
       repoBranchSource: 'host',
       repoCreateRemoteBranch: '',
-      pullHostBranchBeforeCreate: true,
     });
     expect(normalizeDesktopNewDronePreferences(null)).toBeNull();
   });

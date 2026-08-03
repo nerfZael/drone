@@ -216,7 +216,6 @@ import {
   gitRepoCommitDiffForPath,
   gitRepoCommitList,
   gitCurrentBranchOrSha,
-  gitPullHostBranchBeforeCreate,
   gitRepoDiffForPath,
   gitResolveCommitSha,
   gitIsClean,
@@ -227,7 +226,6 @@ import {
   gitRepoChangesSummary,
   gitResolveRemoteBranchForCreate,
   importBundleHeadToHostRef,
-  isHostRepoPullBeforeCreateError,
   resolveBundleImportSourceRefFromListHeads,
   gitStashPop,
   gitStashPush,
@@ -533,17 +531,6 @@ function normalizeApiKey(raw: unknown): string {
   return typeof raw === 'string' ? raw.trim() : '';
 }
 
-function parsePullHostBranchBeforeCreate(raw: unknown): boolean {
-  if (typeof raw === 'boolean') return raw;
-  if (raw == null) return true;
-  if (typeof raw === 'number') return raw !== 0;
-  const value = String(raw).trim().toLowerCase();
-  if (!value) return true;
-  if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
-  if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
-  return true;
-}
-
 type RepoBranchSourceMode = 'host' | 'remote';
 
 function parseRepoBranchSourceMode(raw: unknown): RepoBranchSourceMode {
@@ -612,35 +599,6 @@ function parsePersistVolume(raw: unknown): boolean | undefined {
   if (raw == null) return undefined;
   if (typeof raw === 'boolean') return raw;
   throw new Error('invalid persistVolume (expected boolean)');
-}
-
-function formatPullHostBranchBeforeCreateError(error: unknown): {
-  status: number;
-  message: string;
-  reason: string;
-} {
-  if (isHostRepoPullBeforeCreateError(error)) {
-    switch (error.code) {
-      case 'not_repo':
-      case 'detached_head':
-      case 'missing_upstream':
-      case 'pull_non_fast_forward':
-      case 'pull_failed':
-        return {
-          status: 409,
-          message: error.message,
-          reason: error.code,
-        };
-      default:
-        break;
-    }
-  }
-  const fallback = String((error as any)?.message ?? error ?? '').trim();
-  return {
-    status: 500,
-    message: fallback || 'failed to pull host branch before create',
-    reason: 'unknown',
-  };
 }
 
 async function readLogTail(
@@ -5739,9 +5697,7 @@ export async function startDroneHubApiServer(opts: {
     fileExists,
     findDroneEntryByIdentity,
     findDroneIdByRef,
-    formatPullHostBranchBeforeCreateError,
     getDroneRegistrySseLastSnapshot: () => droneRegistryBroadcaster.snapshot,
-    gitPullHostBranchBeforeCreate,
     gitResolveRemoteBranchForCreate,
     isSafePromptId,
     loadCanonicalActiveModel,
@@ -5761,7 +5717,6 @@ export async function startDroneHubApiServer(opts: {
     parseCreateRuntime,
     parseDraftFlag,
     parsePersistVolume,
-    parsePullHostBranchBeforeCreate,
     parseRemoteBranchName,
     parseRepoBranchSourceMode,
     parseSeedAgent,

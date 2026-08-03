@@ -10,7 +10,6 @@ export type RepoBranchSourceMode = 'host' | 'remote';
 
 export type RepoBranchSelectionState = {
   repoBranchSource: RepoBranchSourceMode;
-  pullHostBranchBeforeCreate: boolean;
   remoteBranch?: string | null;
 };
 
@@ -168,7 +167,6 @@ export function buildDraftDroneCreatePayload({
     ...(trimmedRepoSeedFromDroneId ? { repoSeedFromDroneId: trimmedRepoSeedFromDroneId } : {}),
     runtime,
     ...(runtime === 'container' && typeof persistVolume === 'boolean' ? { persistVolume } : {}),
-    pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
     repoBranchSource,
     ...(repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
     ...(agentsMd !== undefined ? { agentsMd } : {}),

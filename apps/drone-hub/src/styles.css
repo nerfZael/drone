@@ -2584,8 +2584,22 @@ select:disabled optgroup {
 
 .dh-dockable-workspace .dv-tab .dv-default-tab .dv-default-tab-action {
   margin-left: 2px;
-  padding: 3px;
+  padding: 2px;
   color: var(--muted-dim);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.dh-dockable-workspace .dv-tab:hover .dv-default-tab-action,
+.dh-dockable-workspace .dv-tab:focus-within .dv-default-tab-action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dh-dockable-workspace .dv-tab .dv-default-tab .dv-default-tab-action .dv-svg {
+  width: 9px;
+  height: 9px;
 }
 
 .dh-dockable-workspace .dv-sash-container .dv-sash:hover,
@@ -2621,8 +2635,8 @@ select:disabled optgroup {
 }
 
 .dh-dockable-workspace--compact-headers .dv-tab .dv-default-tab .dv-svg {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
 }
 
 .dh-changes-dock {
@@ -2693,7 +2707,7 @@ select:disabled optgroup {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  height: 32px;
+  height: 28px;
   padding: 2px;
   border: 0;
   border-radius: var(--radius-medium);
@@ -2703,7 +2717,7 @@ select:disabled optgroup {
 
 .dh-changes-segment-button {
   position: relative;
-  height: 28px;
+  height: 24px;
   padding: 0 8px;
   border: 0;
   border-radius: calc(var(--radius-medium) - 1px);
@@ -2713,7 +2727,7 @@ select:disabled optgroup {
   font-size: var(--text-11);
   font-weight: var(--weight-semibold);
   letter-spacing: 0.01em;
-  line-height: 28px;
+  line-height: 24px;
   transition:
     color 120ms ease,
     background-color 120ms ease;

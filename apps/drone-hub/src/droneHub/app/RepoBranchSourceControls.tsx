@@ -17,8 +17,6 @@ type RepoBranchSourceControlsProps = {
   error?: string | null;
   branchSource: RepoBranchSourceMode;
   onBranchSourceChange: (next: RepoBranchSourceMode) => void;
-  pullHostBranchBeforeCreate: boolean;
-  onPullHostBranchBeforeCreateChange: (next: boolean) => void;
   remoteBranch: string;
   onRemoteBranchChange: (next: string) => void;
   remoteBranchCheckoutEnabled?: boolean;
@@ -41,8 +39,6 @@ export function RepoBranchSourceControls({
   error = null,
   branchSource,
   onBranchSourceChange,
-  pullHostBranchBeforeCreate,
-  onPullHostBranchBeforeCreateChange,
   remoteBranch,
   onRemoteBranchChange,
   remoteBranchCheckoutEnabled = true,
@@ -166,23 +162,7 @@ export function RepoBranchSourceControls({
         <div className="mt-3 text-[var(--text-10)] text-[var(--muted-dim)]">{remoteBranchCheckoutDisabledReason}</div>
       ) : null}
 
-      {branchSource === 'host' ? (
-        <label
-          className={`mt-3 inline-flex items-center gap-2 ${flat ? 'py-2' : 'rounded-[var(--radius-large)] border border-[var(--border-subtle)] px-3 py-2'} text-[var(--text-11)] ${
-            disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
-          }`}
-          title="Run git pull --ff-only on the current host branch before creating the drone."
-        >
-          <input
-            type="checkbox"
-            checked={pullHostBranchBeforeCreate}
-            onChange={(event) => onPullHostBranchBeforeCreateChange(event.target.checked)}
-            disabled={disabled}
-            className="h-3.5 w-3.5 accent-[var(--accent)]"
-          />
-          <span className="text-[var(--muted)]">Pull host branch before create</span>
-        </label>
-      ) : (
+      {branchSource === 'remote' ? (
         <div className="mt-3 flex flex-col gap-2">
           <UiMenuSelect
             variant="form"
@@ -202,7 +182,7 @@ export function RepoBranchSourceControls({
             <div className="text-[var(--text-10)] text-[var(--yellow)]">Saved remote branch is not available for this repo. Choose another branch.</div>
           ) : null}
         </div>
-      )}
+      ) : null}
 
       {error ? <div className="mt-3 text-[var(--text-10)] text-[var(--red)] whitespace-pre-wrap">{error}</div> : null}
       {!error && !loading && branchSource === 'remote' && remoteBranches.length === 0 ? (

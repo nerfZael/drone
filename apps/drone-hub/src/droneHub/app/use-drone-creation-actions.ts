@@ -56,7 +56,6 @@ type UseDroneCreationActionsArgs = {
   creating: boolean;
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
-  pullHostBranchBeforeCreate: boolean;
   createRuntime: 'container' | 'host';
   createAsDraft: boolean;
   createPersistVolume: boolean;
@@ -138,7 +137,6 @@ export function useDroneCreationActions({
   creating,
   repoBranchSource,
   repoCreateRemoteBranch,
-  pullHostBranchBeforeCreate,
   createRuntime,
   createAsDraft,
   createPersistVolume,
@@ -275,7 +273,6 @@ export function useDroneCreationActions({
                 cloneChats: true,
               },
             ],
-            pullHostBranchBeforeCreate: false,
           }),
         });
         const acceptedList = Array.isArray(resp?.accepted) ? resp.accepted : [];
@@ -500,7 +497,6 @@ export function useDroneCreationActions({
             persistVolume,
             repoBranchSelection: {
               repoBranchSource: effectiveRepoBranchSource,
-              pullHostBranchBeforeCreate,
               remoteBranch,
             },
             seedAgent,
@@ -536,7 +532,6 @@ export function useDroneCreationActions({
             spawnApprovalPolicy: seedApprovalPolicy,
             repoBranchSource: effectiveRepoBranchSource,
             repoCreateRemoteBranch: remoteBranch,
-            pullHostBranchBeforeCreate,
           });
 
           if (optimisticSeeds.length > 0) {
@@ -685,7 +680,6 @@ export function useDroneCreationActions({
       addOptimisticStartupSeeds,
       clearOptimisticStartupSeeds,
       enqueueQueuedPrompt,
-      pullHostBranchBeforeCreate,
       repoBranchSource,
       repoCreateRemoteBranch,
       preferredSelectedDroneHoldUntilRef,

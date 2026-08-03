@@ -81,7 +81,6 @@ describe('drone hub ui store migration', () => {
         spawnModel: 'gpt-5.4',
         repoBranchSource: 'remote',
         repoCreateRemoteBranch: 'origin/feature-x',
-        pullHostBranchBeforeCreate: false,
       },
       11,
     );
@@ -93,7 +92,6 @@ describe('drone hub ui store migration', () => {
         spawnReasoning: '',
         repoBranchSource: 'remote',
         repoCreateRemoteBranch: 'origin/feature-x',
-        pullHostBranchBeforeCreate: false,
       },
     });
   });
@@ -105,14 +103,12 @@ describe('drone hub ui store migration', () => {
         spawnModel: '',
         repoBranchSource: 'host',
         repoCreateRemoteBranch: '',
-        pullHostBranchBeforeCreate: true,
       },
       '/tmp/repo-a': {
         spawnAgentKey: 'builtin:codex',
         spawnModel: 'gpt-5.4',
         repoBranchSource: 'remote',
         repoCreateRemoteBranch: 'origin/feature-a',
-        pullHostBranchBeforeCreate: false,
       },
     });
 
@@ -121,36 +117,18 @@ describe('drone hub ui store migration', () => {
       spawnModel: 'gpt-5.4',
       repoBranchSource: 'remote',
       repoCreateRemoteBranch: 'origin/feature-a',
-      pullHostBranchBeforeCreate: false,
     });
     expect(resolveSpawnContextPreferencesForRepo(byRepo, '/tmp/repo-b')).toMatchObject({
       spawnAgentKey: 'builtin:cursor',
       spawnModel: '',
       repoBranchSource: 'host',
       repoCreateRemoteBranch: '',
-      pullHostBranchBeforeCreate: true,
     });
     expect(resolveSpawnContextPreferencesForRepo(byRepo, '')).toMatchObject({
       spawnAgentKey: 'builtin:cursor',
       spawnModel: '',
       repoBranchSource: 'host',
       repoCreateRemoteBranch: '',
-      pullHostBranchBeforeCreate: true,
-    });
-  });
-
-  test('keeps pull-before-create enabled when old spawn defaults omit it', () => {
-    const byRepo = normalizeSpawnContextByRepoKey({
-      __no_repo__: {
-        spawnAgentKey: 'builtin:cursor',
-        spawnModel: '',
-        repoBranchSource: 'host',
-        repoCreateRemoteBranch: '',
-      },
-    });
-
-    expect(resolveSpawnContextPreferencesForRepo(byRepo, '')).toMatchObject({
-      pullHostBranchBeforeCreate: true,
     });
   });
 
@@ -168,7 +146,6 @@ describe('drone hub ui store migration', () => {
         spawnModel: '',
         repoBranchSource: 'host',
         repoCreateRemoteBranch: '',
-        pullHostBranchBeforeCreate: true,
       },
       JSON.stringify({
         state: {
@@ -177,7 +154,6 @@ describe('drone hub ui store migration', () => {
           spawnModel: 'gpt-5.5',
           repoBranchSource: 'remote',
           repoCreateRemoteBranch: 'origin/voice',
-          pullHostBranchBeforeCreate: false,
           pinnedDroneIds: ['drone-b', 'drone-a'],
         },
         version: 5,
@@ -190,7 +166,6 @@ describe('drone hub ui store migration', () => {
     expect(restored.snapshot.spawnModel).toBe('gpt-5.5');
     expect(restored.snapshot.repoBranchSource).toBe('remote');
     expect(restored.snapshot.repoCreateRemoteBranch).toBe('origin/voice');
-    expect(restored.snapshot.pullHostBranchBeforeCreate).toBe(false);
     expect(restored.snapshot.pinnedDroneIds).toEqual(['drone-b', 'drone-a']);
   });
 

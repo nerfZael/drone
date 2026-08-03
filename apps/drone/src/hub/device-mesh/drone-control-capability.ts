@@ -554,7 +554,6 @@ export function createDroneControlCapability(
           ...(typeof payload.persistVolume === 'boolean'
             ? { persistVolume: payload.persistVolume }
             : {}),
-          pullHostBranchBeforeCreate: payload.pullHostBranchBeforeCreate === true,
           repoBranchSource,
           ...(repoBranchSource === 'remote'
             ? { remoteBranch: optionalText(payload.remoteBranch) }

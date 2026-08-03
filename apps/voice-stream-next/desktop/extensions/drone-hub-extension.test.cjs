@@ -66,7 +66,7 @@ describe('drone hub desktop extension', () => {
     expect(createTool.inputSchema.properties.repoLabel.type).toBe('string');
     expect(createTool.inputSchema.properties.repoBranchSource.enum).toEqual(['host', 'remote']);
     expect(createTool.inputSchema.properties.remoteBranch.type).toBe('string');
-    expect(createTool.inputSchema.properties.pullHostBranchBeforeCreate.type).toBe('boolean');
+    expect(createTool.inputSchema.properties.pullHostBranchBeforeCreate).toBeUndefined();
   });
 
   test('uses repo-scoped remembered branch defaults when creating a drone', async () => {
@@ -90,14 +90,12 @@ describe('drone hub desktop extension', () => {
             spawnModel: 'gpt-5.5',
             repoBranchSource: 'remote',
             repoCreateRemoteBranch: 'origin/global-default',
-            pullHostBranchBeforeCreate: false,
             spawnContextByRepoKey: {
               [repoPath]: {
                 spawnAgentKey: 'builtin:codex',
                 spawnModel: 'gpt-5.5',
                 repoBranchSource: 'remote',
                 repoCreateRemoteBranch: 'origin/voice-default',
-                pullHostBranchBeforeCreate: false,
               },
             },
           },
@@ -144,7 +142,6 @@ describe('drone hub desktop extension', () => {
     expect(result.branch).toEqual({
       repoBranchSource: 'remote',
       remoteBranch: 'origin/voice-default',
-      pullHostBranchBeforeCreate: null,
     });
     fs.rmSync(repoPath, { recursive: true, force: true });
   });
@@ -170,7 +167,6 @@ describe('drone hub desktop extension', () => {
             spawnModel: 'gpt-5.5',
             repoBranchSource: 'remote',
             repoCreateRemoteBranch: 'origin/release/dev',
-            pullHostBranchBeforeCreate: false,
           },
         });
       }
@@ -199,13 +195,11 @@ describe('drone hub desktop extension', () => {
       runtime: 'container',
       repoPath,
       repoBranchSource: 'host',
-      pullHostBranchBeforeCreate: false,
     });
     expect(body.remoteBranch).toBeUndefined();
     expect(result.branch).toEqual({
       repoBranchSource: 'host',
       remoteBranch: null,
-      pullHostBranchBeforeCreate: false,
     });
     fs.rmSync(repoPath, { recursive: true, force: true });
   });

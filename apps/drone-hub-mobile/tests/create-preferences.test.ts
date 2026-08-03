@@ -17,7 +17,6 @@ describe('mobile new drone preferences', () => {
       persistVolume: true,
       repoBranchSource: 'remote',
       remoteBranch: 'origin/feature-a',
-      pullHostBranchBeforeCreate: false,
       seedAgent: { kind: 'builtin', id: 'codex' },
       seedModel: 'gpt-5.4',
       seedReasoning: 'high',
@@ -39,7 +38,6 @@ describe('mobile new drone preferences', () => {
       reasoning: 'high',
       repoBranchSource: 'remote',
       repoCreateRemoteBranch: 'origin/feature-a',
-      pullHostBranchBeforeCreate: false,
     });
     expect(preferences).not.toHaveProperty('name');
     expect(preferences).not.toHaveProperty('group');
@@ -59,7 +57,6 @@ describe('mobile new drone preferences', () => {
       reasoning: 'medium',
       repoBranchSource: 'remote',
       repoCreateRemoteBranch: 'origin/repo-a',
-      pullHostBranchBeforeCreate: false,
     });
 
     expect(
@@ -81,7 +78,6 @@ describe('mobile new drone preferences', () => {
       mobileDroneCreatePreferencesFromPayload({
         runtime: 'host',
         repoBranchSource: 'host',
-        pullHostBranchBeforeCreate: false,
       }).mode,
     ).toBe('without-chat');
   });
@@ -100,7 +96,6 @@ describe('mobile new drone preferences', () => {
         reasoning: 'high',
         repoBranchSource: 'host',
         repoCreateRemoteBranch: '',
-        pullHostBranchBeforeCreate: false,
       }),
     ).toMatchObject({
       mode: 'without-chat',

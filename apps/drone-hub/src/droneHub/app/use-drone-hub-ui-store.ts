@@ -45,7 +45,6 @@ type SpawnContextPreferences = {
   spawnReasoning: string;
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
-  pullHostBranchBeforeCreate: boolean;
 };
 const CHAT_INPUT_DRAFT_MAX_CHARS = 300_000;
 const CHAT_INPUT_DRAFT_MAX_KEYS = 80;
@@ -58,7 +57,6 @@ const DEFAULT_SPAWN_CONTEXT_PREFERENCES: SpawnContextPreferences = {
   spawnReasoning: '',
   repoBranchSource: 'host',
   repoCreateRemoteBranch: '',
-  pullHostBranchBeforeCreate: true,
 };
 
 type DroneHubUiState = {
@@ -112,7 +110,6 @@ type DroneHubUiState = {
   seenModelIds: string[];
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
-  pullHostBranchBeforeCreate: boolean;
   customAgents: CustomAgentProfile[];
   customAgentModalOpen: boolean;
   newCustomAgentLabel: string;
@@ -172,7 +169,6 @@ type DroneHubUiState = {
   rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
   setRepoBranchSource: (next: Updater<RepoBranchSourceMode>) => void;
   setRepoCreateRemoteBranch: (next: Updater<string>) => void;
-  setPullHostBranchBeforeCreate: (next: Updater<boolean>) => void;
   setCustomAgents: (next: Updater<CustomAgentProfile[]>) => void;
   setCustomAgentModalOpen: (next: Updater<boolean>) => void;
   setNewCustomAgentLabel: (next: Updater<string>) => void;
@@ -199,10 +195,6 @@ function normalizeRepoBranchSourceMode(value: unknown): RepoBranchSourceMode {
   return value === 'remote' ? 'remote' : 'host';
 }
 
-function normalizePullHostBranchBeforeCreate(value: unknown): boolean {
-  return typeof value === 'boolean' ? value : DEFAULT_SPAWN_CONTEXT_PREFERENCES.pullHostBranchBeforeCreate;
-}
-
 function normalizeSpawnContextRepoPath(value: unknown): string {
   return typeof value === 'string' ? value.trim() : String(value ?? '').trim();
 }
@@ -221,7 +213,6 @@ function normalizeSpawnContextPreferences(
     spawnReasoning: normalizeTrimmedString(value?.spawnReasoning),
     repoBranchSource: normalizeRepoBranchSourceMode(value?.repoBranchSource),
     repoCreateRemoteBranch: normalizeTrimmedString(value?.repoCreateRemoteBranch),
-    pullHostBranchBeforeCreate: normalizePullHostBranchBeforeCreate(value?.pullHostBranchBeforeCreate),
   };
 }
 
@@ -266,8 +257,7 @@ function buildUpdatedSpawnContextByRepoKey(
     current.spawnModel === merged.spawnModel &&
     current.spawnReasoning === merged.spawnReasoning &&
     current.repoBranchSource === merged.repoBranchSource &&
-    current.repoCreateRemoteBranch === merged.repoCreateRemoteBranch &&
-    current.pullHostBranchBeforeCreate === merged.pullHostBranchBeforeCreate
+    current.repoCreateRemoteBranch === merged.repoCreateRemoteBranch
   ) {
     return prev;
   }
@@ -313,7 +303,6 @@ type DroneHubUiPersistedState = Pick<
   | 'seenModelIds'
   | 'repoBranchSource'
   | 'repoCreateRemoteBranch'
-  | 'pullHostBranchBeforeCreate'
   | 'customAgents'
   | 'shortcutBindings'
 >;
@@ -338,6 +327,7 @@ export function migrateDroneHubUiPersistedState(
     migrated.themeId = normalizeDesktopThemeId(migrated.themeId);
   }
   delete (migrated as any).automations;
+  delete (migrated as any).pullHostBranchBeforeCreate;
   delete (migrated as any).playbookRunsSelectionInitialized;
   delete (migrated as any).playbookRunsSelectedPlaybookId;
   delete (migrated as any).playbookRunsSelectedRepoPath;
@@ -365,7 +355,6 @@ export function migrateDroneHubUiPersistedState(
     spawnReasoning: migrated.spawnReasoning,
     repoBranchSource: migrated.repoBranchSource,
     repoCreateRemoteBranch: migrated.repoCreateRemoteBranch,
-    pullHostBranchBeforeCreate: migrated.pullHostBranchBeforeCreate,
   });
   migrated.spawnContextByRepoKey = {
     [NO_REPO_SPAWN_CONTEXT_KEY]: legacySpawnDefaults,
@@ -676,7 +665,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       seenModelIds: [],
       repoBranchSource: DEFAULT_SPAWN_CONTEXT_PREFERENCES.repoBranchSource,
       repoCreateRemoteBranch: DEFAULT_SPAWN_CONTEXT_PREFERENCES.repoCreateRemoteBranch,
-      pullHostBranchBeforeCreate: DEFAULT_SPAWN_CONTEXT_PREFERENCES.pullHostBranchBeforeCreate,
       customAgents: [],
       customAgentModalOpen: false,
       newCustomAgentLabel: '',
@@ -819,7 +807,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             spawnReasoning: resolved.spawnReasoning,
             repoBranchSource: resolved.repoBranchSource,
             repoCreateRemoteBranch: resolved.repoCreateRemoteBranch,
-            pullHostBranchBeforeCreate: resolved.pullHostBranchBeforeCreate,
           };
         }),
       updateSpawnContextForRepo: (repoPathRaw, patch) =>
@@ -838,7 +825,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             spawnReasoning: resolved.spawnReasoning,
             repoBranchSource: resolved.repoBranchSource,
             repoCreateRemoteBranch: resolved.repoCreateRemoteBranch,
-            pullHostBranchBeforeCreate: resolved.pullHostBranchBeforeCreate,
           };
         }),
       setSpawnAgentKey: (next) =>
@@ -898,17 +884,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           });
           return {
             repoCreateRemoteBranch,
-            spawnContextByRepoKey: nextByRepoKey,
-          };
-        }),
-      setPullHostBranchBeforeCreate: (next) =>
-        set((s) => {
-          const pullHostBranchBeforeCreate = resolveNext(s.pullHostBranchBeforeCreate, next) === true;
-          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
-            pullHostBranchBeforeCreate,
-          });
-          return {
-            pullHostBranchBeforeCreate,
             spawnContextByRepoKey: nextByRepoKey,
           };
         }),
@@ -976,7 +951,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         seenModelIds: state.seenModelIds,
         repoBranchSource: state.repoBranchSource,
         repoCreateRemoteBranch: state.repoCreateRemoteBranch,
-        pullHostBranchBeforeCreate: state.pullHostBranchBeforeCreate,
         customAgents: state.customAgents,
         shortcutBindings: state.shortcutBindings,
       }),
@@ -1068,9 +1042,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           repoCreateRemoteBranch: normalizeTrimmedString(
             persisted.repoCreateRemoteBranch ?? currentState.repoCreateRemoteBranch,
           ),
-          pullHostBranchBeforeCreate: normalizeBoolean(
-            persisted.pullHostBranchBeforeCreate ?? currentState.pullHostBranchBeforeCreate,
-          ),
           customAgents: sanitizeCustomAgents(persisted.customAgents ?? currentState.customAgents),
           shortcutBindings: sanitizeShortcutBindings(migratedShortcutBindings ?? currentState.shortcutBindings),
         };
@@ -1121,7 +1092,6 @@ export function useDroneHubAppModelUiState() {
       seenModelIds: s.seenModelIds,
       repoBranchSource: s.repoBranchSource,
       repoCreateRemoteBranch: s.repoCreateRemoteBranch,
-      pullHostBranchBeforeCreate: s.pullHostBranchBeforeCreate,
       customAgents: s.customAgents,
       customAgentModalOpen: s.customAgentModalOpen,
       newCustomAgentLabel: s.newCustomAgentLabel,
@@ -1168,7 +1138,6 @@ export function useDroneHubAppModelUiState() {
       rememberSeenModels: s.rememberSeenModels,
       setRepoBranchSource: s.setRepoBranchSource,
       setRepoCreateRemoteBranch: s.setRepoCreateRemoteBranch,
-      setPullHostBranchBeforeCreate: s.setPullHostBranchBeforeCreate,
       setCustomAgents: s.setCustomAgents,
       setCustomAgentModalOpen: s.setCustomAgentModalOpen,
       setNewCustomAgentLabel: s.setNewCustomAgentLabel,

@@ -82,7 +82,6 @@ function normalizeUiPreferencesSnapshot(value: Partial<UiPreferencesSnapshot> | 
     spawnModel: normalizeTrimmedText(value?.spawnModel, 200),
     repoBranchSource: normalizeRepoBranchSource(value?.repoBranchSource),
     repoCreateRemoteBranch: normalizeTrimmedText(value?.repoCreateRemoteBranch, 400),
-    pullHostBranchBeforeCreate: value?.pullHostBranchBeforeCreate !== false,
   };
 }
 
@@ -104,8 +103,7 @@ function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boole
     value.spawnAgentKey !== 'builtin:cursor' ||
     value.spawnModel.length > 0 ||
     value.repoBranchSource !== 'host' ||
-    value.repoCreateRemoteBranch.length > 0 ||
-    value.pullHostBranchBeforeCreate !== true
+    value.repoCreateRemoteBranch.length > 0
   );
 }
 
@@ -127,8 +125,6 @@ function mergeUiPreferencesForRecovery(base: UiPreferencesSnapshot, rescue: UiPr
     spawnModel: base.spawnModel || rescue.spawnModel,
     repoBranchSource: base.repoBranchSource !== 'host' ? base.repoBranchSource : rescue.repoBranchSource,
     repoCreateRemoteBranch: base.repoCreateRemoteBranch || rescue.repoCreateRemoteBranch,
-    pullHostBranchBeforeCreate:
-      base.pullHostBranchBeforeCreate === false ? base.pullHostBranchBeforeCreate : rescue.pullHostBranchBeforeCreate,
   });
 }
 
@@ -171,7 +167,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     spawnModel,
     repoBranchSource,
     repoCreateRemoteBranch,
-    pullHostBranchBeforeCreate,
     setSidebarGroupingMode,
     setSidebarDensityMode,
     setSidebarGroupOrder,
@@ -198,7 +193,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       spawnModel: s.spawnModel,
       repoBranchSource: s.repoBranchSource,
       repoCreateRemoteBranch: s.repoCreateRemoteBranch,
-      pullHostBranchBeforeCreate: s.pullHostBranchBeforeCreate,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
       setSidebarGroupOrder: s.setSidebarGroupOrder,
@@ -274,12 +268,10 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
         spawnModel,
         repoBranchSource,
         repoCreateRemoteBranch,
-        pullHostBranchBeforeCreate,
       }),
     [
       autoDelete,
       hiddenSidebarGroups,
-      pullHostBranchBeforeCreate,
       repoBranchSource,
       repoCreateRemoteBranch,
       sidebarDensityMode,

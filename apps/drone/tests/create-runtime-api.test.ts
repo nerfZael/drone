@@ -186,6 +186,7 @@ describeSocketSuite('create runtime api', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        pullHostBranchBeforeCreate: true,
         drones: [
           {
             name: 'seeded-batch-draft-state',
@@ -281,7 +282,6 @@ describeSocketSuite('create runtime api', () => {
         name: 'agents-override-single',
         runtime: 'container',
         repoPath: '/tmp/agents-override-single',
-        pullHostBranchBeforeCreate: false,
         draft: true,
         agentsMd: '# Drone instructions\r\n\r\nUse the local workflow.',
       }),
@@ -296,17 +296,35 @@ describeSocketSuite('create runtime api', () => {
     );
   });
 
+  test('ignores the removed host pull flag from legacy clients', async () => {
+    const resp = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'legacy-pull-flag',
+        runtime: 'container',
+        repoPath: '/tmp/legacy-pull-flag',
+        repoBranchSource: 'host',
+        pullHostBranchBeforeCreate: true,
+        draft: true,
+      }),
+    });
+
+    expect(resp.r.status).toBe(201);
+    expect(resp.data?.ok).toBe(true);
+  });
+
   test('batch create accepts an empty AGENTS.md override and rejects it without a repo', async () => {
     const resp = await apiFetch('/api/drones/batch', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        pullHostBranchBeforeCreate: true,
         drones: [
           {
             name: 'agents-override-empty',
             runtime: 'container',
             repoPath: '/tmp/agents-override-empty',
-            pullHostBranchBeforeCreate: false,
             draft: true,
             agentsMd: '',
           },
@@ -572,7 +590,6 @@ describeSocketSuite('create runtime api', () => {
         name: 'seed-child',
         runtime: 'container',
         repoPath: '/work/repo',
-        pullHostBranchBeforeCreate: false,
         fleetParentId: 'seed-parent',
         repoSeedFromDroneId: 'seed-parent',
       }),

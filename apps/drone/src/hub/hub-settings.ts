@@ -133,7 +133,6 @@ export type UiPreferencesSettings = {
   spawnModel: string;
   repoBranchSource: 'host' | 'remote';
   repoCreateRemoteBranch: string;
-  pullHostBranchBeforeCreate: boolean;
 };
 
 const ARCHIVE_RETENTION_MS_MAP: Record<ArchiveRetentionId, number> = {
@@ -149,7 +148,6 @@ const DEFAULT_SIDEBAR_GROUPING_MODE: SidebarGroupingMode = 'groups';
 const DEFAULT_SIDEBAR_DENSITY_MODE: UiPreferencesSettings['sidebarDensityMode'] = 'default';
 const DEFAULT_SPAWN_AGENT_KEY = 'builtin:cursor';
 const DEFAULT_REPO_BRANCH_SOURCE: UiPreferencesSettings['repoBranchSource'] = 'host';
-const DEFAULT_PULL_HOST_BRANCH_BEFORE_CREATE = true;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_MIN = 1 * 1024 * 1024;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_MAX = 8 * 1024 * 1024 * 1024;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT = 2 * 1024 * 1024 * 1024;
@@ -309,10 +307,6 @@ function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
     spawnModel: normalizeUiPreferenceText(raw.spawnModel, 200),
     repoBranchSource: parseRepoBranchSource(raw.repoBranchSource) ?? DEFAULT_REPO_BRANCH_SOURCE,
     repoCreateRemoteBranch: normalizeUiPreferenceText(raw.repoCreateRemoteBranch, 400),
-    pullHostBranchBeforeCreate:
-      typeof raw.pullHostBranchBeforeCreate === 'boolean'
-        ? raw.pullHostBranchBeforeCreate
-        : DEFAULT_PULL_HOST_BRANCH_BEFORE_CREATE,
   };
 }
 

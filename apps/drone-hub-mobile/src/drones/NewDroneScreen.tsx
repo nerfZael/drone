@@ -1,32 +1,17 @@
 import React from 'react';
 import { buildModelCatalogChoices } from '@drone/assistant-chat';
-import {
-  ActivityIndicator,
-  Keyboard,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import Check from 'lucide-react-native/icons/check';
-import ChevronDown from 'lucide-react-native/icons/chevron-down';
-import ChevronUp from 'lucide-react-native/icons/chevron-up';
-import { ErrorBanner, Label } from '../components/Ui';
+import { Keyboard, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ErrorBanner } from '../components/Ui';
 import { ThemedTextInput } from '../components/ThemedTextInput';
-import { TopTabs } from '../components/TopTabs';
 import { AssistantComposer } from '../local-assistant/AssistantComposer';
 import {
   AssistantModelPicker,
   type AssistantModelChoice,
 } from '../local-assistant/AssistantModelPicker';
+import { SidebarDroneIcon } from '../local-assistant/SidebarIcons';
 import { colors } from '../theme';
 import { ChatAttachmentStrip } from './ChatAttachmentStrip';
-import {
-  mobileRepoLabel,
-  type MobileDroneCreateModel,
-  type MobileDroneCreateRepo,
-} from './drone-sidebar-model';
+import { type MobileDroneCreateModel, type MobileDroneCreateRepo } from './drone-sidebar-model';
 import {
   mobileDroneCreatePreferencesFromSelection,
   type MobileDroneCreatePreferences,
@@ -34,7 +19,8 @@ import {
 import { pickChatImages, type MobileChatImage } from './pick-chat-images';
 import { ExternalAgentPicker, type ExternalAgentPickerOption } from './ExternalAgentPicker';
 import { NewDroneAccessPicker } from './NewDroneAccessPicker';
-import { NewDroneBranchPicker, mobileHostBranchLabel } from './NewDroneBranchPicker';
+import { NewDroneBranchPicker } from './NewDroneBranchPicker';
+import { NewDroneRepoPicker } from './NewDroneRepoPicker';
 import { NewDroneRuntimePicker } from './NewDroneRuntimePicker';
 
 export type MobileDroneCreateMode = 'with-chat' | 'without-chat';
@@ -51,10 +37,8 @@ export type MobileDroneAgentId =
   | 'pi'
   | 'blip';
 
-type ExternalAgentId = Exclude<MobileDroneAgentId, 'native'>;
-type MobileDroneAgentMode = 'builtin' | 'external';
-
-const EXTERNAL_AGENTS: Array<ExternalAgentPickerOption & { id: ExternalAgentId }> = [
+const AGENTS: Array<ExternalAgentPickerOption & { id: MobileDroneAgentId }> = [
+  { id: 'native', label: 'Built-in', detail: 'Use DroneHub’s built-in assistant.' },
   { id: 'cursor', label: 'Cursor Agent', detail: 'Use Cursor’s external coding agent.' },
   { id: 'codex', label: 'Codex', detail: 'Use the OpenAI Codex CLI agent.' },
   { id: 'claude', label: 'Claude Code', detail: 'Use Anthropic’s Claude Code agent.' },
@@ -71,7 +55,6 @@ export type MobileDroneCreatePayload = {
   persistVolume?: boolean;
   repoPath?: string;
   repoBranchSource: MobileDroneCreateBranchSource;
-  pullHostBranchBeforeCreate: boolean;
   remoteBranch?: string;
   seedAgent?: { kind: 'native' } | { kind: 'builtin'; id: Exclude<MobileDroneAgentId, 'native'> };
   seedProvider?: string;
@@ -93,7 +76,6 @@ export type MobileDroneCreateDefaults = {
   repoPath?: string;
   repoBranchSource?: MobileDroneCreateBranchSource;
   repoCreateRemoteBranch?: string;
-  pullHostBranchBeforeCreate?: boolean;
   agent?: MobileDroneAgentId;
   agentPermissionMode?: MobileDroneAgentPermissionMode;
   approvalPolicy?: MobileDroneApprovalPolicy;
@@ -101,165 +83,6 @@ export type MobileDroneCreateDefaults = {
   provider?: string;
   reasoning?: string;
 };
-
-function Segmented<T extends string>({
-  value,
-  options,
-  label,
-  disabled,
-  onChange,
-}: {
-  value: T;
-  options: Array<{ value: T; label: string; disabled?: boolean }>;
-  label?: string;
-  disabled?: boolean;
-  onChange(value: T): void;
-}) {
-  const control = (
-    <View style={[styles.segmented, !label && disabled && styles.disabled]}>
-      {options.map((option) => {
-        const active = option.value === value;
-        const optionDisabled = disabled || option.disabled;
-        return (
-          <Pressable
-            key={option.value}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active, disabled: optionDisabled }}
-            disabled={optionDisabled}
-            onPress={() => onChange(option.value)}
-            style={({ pressed }) => [
-              styles.segment,
-              active && styles.segmentActive,
-              option.disabled && styles.segmentDisabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text
-              style={[
-                styles.segmentText,
-                active && styles.segmentTextActive,
-                option.disabled && styles.segmentTextDisabled,
-              ]}
-            >
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-  if (!label) return control;
-  return (
-    <View style={[styles.labeledSegmented, disabled && styles.disabled]}>
-      <Text style={styles.segmentedLabel}>{label}:</Text>
-      {control}
-    </View>
-  );
-}
-
-function Toggle({
-  label,
-  detail,
-  value,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  detail: string;
-  value: boolean;
-  disabled?: boolean;
-  onChange(value: boolean): void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="switch"
-      accessibilityState={{ checked: value, disabled }}
-      disabled={disabled}
-      onPress={() => onChange(!value)}
-      style={({ pressed }) => [
-        styles.toggleRow,
-        disabled && styles.disabled,
-        pressed && styles.pressed,
-      ]}
-    >
-      <View style={styles.toggleCopy}>
-        <Text style={styles.fieldTitle}>{label}</Text>
-        <Text style={styles.helper}>{detail}</Text>
-      </View>
-      <View style={[styles.switchTrack, value && styles.switchTrackActive]}>
-        <View style={[styles.switchThumb, value && styles.switchThumbActive]} />
-      </View>
-    </Pressable>
-  );
-}
-
-function CompactCheckbox({
-  label,
-  value,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: boolean;
-  disabled?: boolean;
-  onChange(value: boolean): void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: value, disabled }}
-      disabled={disabled}
-      onPress={() => onChange(!value)}
-      style={({ pressed }) => [
-        styles.compactCheckbox,
-        disabled && styles.disabled,
-        pressed && styles.pressed,
-      ]}
-    >
-      <View style={[styles.checkboxBox, value && styles.checkboxBoxActive]}>
-        {value ? <Check color={colors.onAccent} size={12} strokeWidth={3} /> : null}
-      </View>
-      <Text style={[styles.compactCheckboxText, value && styles.activeText]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function SelectionRow({
-  label,
-  detail,
-  selected,
-  onPress,
-}: {
-  label: string;
-  detail?: string;
-  selected: boolean;
-  onPress(): void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.selectionRow,
-        selected && styles.selectionRowActive,
-        pressed && styles.pressed,
-      ]}
-    >
-      <View style={styles.selectionCopy}>
-        <Text numberOfLines={1} style={[styles.selectionLabel, selected && styles.activeText]}>
-          {label}
-        </Text>
-        {detail ? (
-          <Text numberOfLines={1} style={styles.selectionDetail}>
-            {detail}
-          </Text>
-        ) : null}
-      </View>
-      {selected ? <Check color={colors.accent} size={16} strokeWidth={2.4} /> : null}
-    </Pressable>
-  );
-}
 
 export function NewDroneScreen({
   repos,
@@ -296,21 +119,16 @@ export function NewDroneScreen({
     initialImages?: readonly MobileChatImage[],
   ): Promise<boolean>;
 }) {
-  const [mode, setMode] = React.useState<MobileDroneCreateMode>(initialValues?.mode ?? 'with-chat');
+  const mode: MobileDroneCreateMode = 'with-chat';
   const [runtime, setRuntime] = React.useState<MobileDroneCreateRuntime>(
     localDevice ? 'host' : (initialValues?.runtime ?? 'container'),
   );
   const [persistVolume, setPersistVolume] = React.useState(initialValues?.persistVolume ?? false);
   const [name, setName] = React.useState('');
-  const [group, setGroup] = React.useState(initialValues?.group ?? '');
-  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const group = initialValues?.group ?? '';
   const [agent, setAgent] = React.useState<MobileDroneAgentId>(
     localDevice ? 'native' : (initialValues?.agent ?? 'native'),
   );
-  const [lastExternalAgent, setLastExternalAgent] = React.useState<ExternalAgentId>(() => {
-    const initialAgent = initialValues?.agent;
-    return initialAgent && initialAgent !== 'native' ? initialAgent : 'codex';
-  });
   const [agentPickerOpen, setAgentPickerOpen] = React.useState(false);
   const [accessPickerOpen, setAccessPickerOpen] = React.useState(false);
   const [agentPermissionMode, setAgentPermissionMode] =
@@ -334,9 +152,6 @@ export function NewDroneScreen({
   const [remoteBranch, setRemoteBranch] = React.useState(
     initialValues?.repoCreateRemoteBranch ?? '',
   );
-  const [pullHostBranch, setPullHostBranch] = React.useState(
-    initialValues?.pullHostBranchBeforeCreate ?? false,
-  );
   const [initialMessage, setInitialMessage] = React.useState('');
   const [initialImages, setInitialImages] = React.useState<MobileChatImage[]>([]);
   const [repoPickerOpen, setRepoPickerOpen] = React.useState(false);
@@ -351,7 +166,6 @@ export function NewDroneScreen({
   const pageRef = React.useRef<ScrollView>(null);
   const composerFocusedRef = React.useRef(false);
   const selectedRepo = repos.find((repo) => repo.path === repoPath) ?? null;
-  const agentMode: MobileDroneAgentMode = agent === 'native' ? 'builtin' : 'external';
   const readOnlySupported = agent === 'native' || agent === 'codex' || agent === 'blip';
   const approvalAgentSupported = agent === 'native' || agent === 'codex';
   const approvalSupported = agentPermissionMode === 'full-access' && approvalAgentSupported;
@@ -412,12 +226,11 @@ export function NewDroneScreen({
   );
 
   React.useEffect(() => {
-    if (mode !== 'with-chat') return;
     void detectModels(false);
-  }, [detectModels, mode]);
+  }, [detectModels]);
 
   React.useEffect(() => {
-    if (mode !== 'with-chat' || models.length === 0) return;
+    if (models.length === 0) return;
     const current = models.find(
       (option) => option.id === model && (!modelProvider || option.provider === modelProvider),
     );
@@ -428,7 +241,7 @@ export function NewDroneScreen({
     const fallback = models[0];
     setModel(fallback.id);
     setModelProvider(fallback.provider || agent);
-  }, [agent, mode, model, modelProvider, models]);
+  }, [agent, model, modelProvider, models]);
 
   React.useEffect(
     () => () => {
@@ -508,7 +321,6 @@ export function NewDroneScreen({
     modelRequestId.current += 1;
     setRepoPath(path);
     setRepoPickerOpen(false);
-    setMode('with-chat');
     setRuntime(localDevice ? 'host' : 'container');
     setPersistVolume(false);
     setAgent('native');
@@ -524,17 +336,12 @@ export function NewDroneScreen({
     onRememberedDraftChange(false);
     setBranchSource('host');
     setRemoteBranch('');
-    setPullHostBranch(false);
     setBranchPickerOpen(false);
     void onLoadRepoPreferences(path).then((remembered) => {
       if (preferenceRequestId.current !== requestId || !remembered) return;
-      setMode(remembered.mode);
       setRuntime(localDevice ? 'host' : remembered.runtime);
       setPersistVolume(remembered.persistVolume);
       setAgent(localDevice ? 'native' : remembered.agent);
-      if (!localDevice && remembered.agent !== 'native') {
-        setLastExternalAgent(remembered.agent);
-      }
       setAgentPermissionMode(remembered.agentPermissionMode);
       setApprovalPolicy(remembered.approvalPolicy);
       setModel(remembered.model);
@@ -543,7 +350,6 @@ export function NewDroneScreen({
       onRememberedDraftChange(remembered.draft);
       setBranchSource(localDevice ? 'host' : remembered.repoBranchSource);
       setRemoteBranch(localDevice ? '' : remembered.repoCreateRemoteBranch);
-      setPullHostBranch(remembered.pullHostBranchBeforeCreate);
     });
   };
 
@@ -556,17 +362,7 @@ export function NewDroneScreen({
       setReasoning('');
       setAgent(nextAgent);
     }
-    if (nextAgent !== 'native') setLastExternalAgent(nextAgent);
     setAgentPickerOpen(false);
-  };
-
-  const chooseAgentMode = (nextMode: MobileDroneAgentMode) => {
-    if (nextMode === 'builtin') {
-      chooseAgent('native');
-      return;
-    }
-    chooseAgent(lastExternalAgent);
-    requestAnimationFrame(() => setAgentPickerOpen(true));
   };
 
   const chooseRuntime = (value: MobileDroneCreateRuntime) => {
@@ -593,8 +389,8 @@ export function NewDroneScreen({
 
   const submit = async (promptOverride?: string) => {
     const prompt = String(promptOverride ?? initialMessage).trim();
-    if (mode === 'with-chat' && !prompt && initialImages.length === 0) {
-      setFormError('Add a first message, or choose Create empty drone.');
+    if (!prompt && initialImages.length === 0) {
+      setFormError('Add a first message to create this drone.');
       return;
     }
     if (repoPath && runtime === 'container' && branchSource === 'remote' && !remoteBranch) {
@@ -615,30 +411,19 @@ export function NewDroneScreen({
       ...(runtime === 'container' ? { persistVolume } : {}),
       ...(repoPath ? { repoPath } : {}),
       repoBranchSource: effectiveBranchSource,
-      pullHostBranchBeforeCreate: effectiveBranchSource === 'host' && pullHostBranch,
       ...(effectiveBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
-      ...(mode === 'with-chat'
-        ? {
-            seedAgent:
-              agent === 'native'
-                ? { kind: 'native' as const }
-                : { kind: 'builtin' as const, id: agent },
-            ...(agent === 'native' && modelProvider.trim()
-              ? { seedProvider: modelProvider.trim() }
-              : {}),
-            ...(model.trim() ? { seedModel: model.trim() } : {}),
-            ...(reasoning.trim() ? { seedReasoning: reasoning.trim() } : {}),
-            ...(agentPermissionMode !== 'full-access'
-              ? { seedAgentPermissionMode: agentPermissionMode }
-              : {}),
-            ...(effectiveApprovalPolicy !== 'ask'
-              ? { seedApprovalPolicy: effectiveApprovalPolicy }
-              : {}),
-            seedPrompt: prompt,
-            seedSubmittedAt: new Date().toISOString(),
-            ...(!name.trim() && prompt ? { autoRename: true } : {}),
-          }
+      seedAgent:
+        agent === 'native' ? { kind: 'native' as const } : { kind: 'builtin' as const, id: agent },
+      ...(agent === 'native' && modelProvider.trim() ? { seedProvider: modelProvider.trim() } : {}),
+      ...(model.trim() ? { seedModel: model.trim() } : {}),
+      ...(reasoning.trim() ? { seedReasoning: reasoning.trim() } : {}),
+      ...(agentPermissionMode !== 'full-access'
+        ? { seedAgentPermissionMode: agentPermissionMode }
         : {}),
+      ...(effectiveApprovalPolicy !== 'ask' ? { seedApprovalPolicy: effectiveApprovalPolicy } : {}),
+      seedPrompt: prompt,
+      seedSubmittedAt: new Date().toISOString(),
+      ...(!name.trim() && prompt ? { autoRename: true } : {}),
     };
     const created = await onCreate(
       payload,
@@ -655,9 +440,8 @@ export function NewDroneScreen({
         reasoning,
         repoBranchSource: effectiveBranchSource,
         repoCreateRemoteBranch: effectiveBranchSource === 'remote' ? remoteBranch : '',
-        pullHostBranchBeforeCreate: effectiveBranchSource === 'host' && pullHostBranch,
       }),
-      mode === 'with-chat' ? initialImages : [],
+      initialImages,
     );
     if (!created) return;
     setName('');
@@ -669,340 +453,225 @@ export function NewDroneScreen({
     <ScrollView
       ref={pageRef}
       style={styles.page}
-      contentContainerStyle={[
-        styles.pageContent,
-        mode === 'with-chat' && styles.pageContentWithChat,
-      ]}
+      contentContainerStyle={[styles.pageContent, styles.pageContentWithChat]}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="interactive"
       automaticallyAdjustKeyboardInsets
     >
-      <TopTabs<MobileDroneCreateMode>
-        value={mode}
-        disabled={busy}
-        style={styles.modeTabsFullBleed}
-        options={[
-          { value: 'with-chat', label: 'Start with chat' },
-          { value: 'without-chat', label: 'Empty drone' },
-        ]}
-        onChange={(value) => {
-          setMode(value);
-          if (value === 'without-chat') {
-            setAgentPickerOpen(false);
-            setAccessPickerOpen(false);
-            setModelPickerOpen(false);
-            setInitialImages([]);
-          }
-        }}
-      />
-
       <ErrorBanner message={formError ?? requestError} />
 
-      <View style={styles.section}>
-        <View style={styles.runtimeRow}>
-          <View style={styles.runtimeControl}>
-            <Label>Runtime</Label>
+      <View style={styles.nameSection}>
+        <Text style={styles.fieldTitle}>Name</Text>
+        <ThemedTextInput
+          accessibilityLabel="Drone name"
+          value={name}
+          onChangeText={setName}
+          editable={!busy}
+          placeholder="Automatic name"
+          placeholderTextColor={colors.subtle}
+          autoCapitalize="none"
+          onFocus={() => {
+            setAgentPickerOpen(false);
+            setAccessPickerOpen(false);
+            setRuntimePickerOpen(false);
+            setBranchPickerOpen(false);
+            setRepoPickerOpen(false);
+          }}
+          style={styles.nameInput}
+        />
+      </View>
+
+      <View style={styles.emptyState}>
+        <View style={styles.emptyStateIcon}>
+          <SidebarDroneIcon color={colors.accent} size={20} strokeWidth={1.7} />
+        </View>
+        <Text style={styles.emptyStateTitle}>Start a new drone</Text>
+      </View>
+
+      <View style={[styles.section, styles.messageSection]}>
+        <View style={styles.composerWrap}>
+          <View style={styles.topConfigRow}>
             <NewDroneRuntimePicker
               open={runtimePickerOpen}
               value={runtime}
               disabled={busy}
               localDevice={localDevice}
               onOpen={() => {
-                if (!localDevice) setRuntimePickerOpen(true);
+                if (localDevice) return;
+                setBranchPickerOpen(false);
+                setAccessPickerOpen(false);
+                setAgentPickerOpen(false);
+                setRepoPickerOpen(false);
+                setRuntimePickerOpen(true);
               }}
               onClose={() => setRuntimePickerOpen(false)}
               onSelect={chooseRuntime}
             />
-          </View>
-          {runtime === 'container' ? (
-            <CompactCheckbox
-              label="Persist volume"
-              value={persistVolume}
-              disabled={busy}
-              onChange={setPersistVolume}
-            />
-          ) : null}
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Label>Repo</Label>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ expanded: repoPickerOpen }}
-          disabled={busy || loadingOptions}
-          onPress={() => setRepoPickerOpen((open) => !open)}
-          style={({ pressed }) => [styles.pickerTrigger, pressed && styles.pressed]}
-        >
-          <View style={styles.selectionCopy}>
-            <Text style={styles.pickerValue}>
-              {loadingOptions
-                ? 'Loading repos…'
-                : selectedRepo
-                  ? mobileRepoLabel(selectedRepo.path)
-                  : 'No repo'}
-            </Text>
             {selectedRepo ? (
-              <Text numberOfLines={1} style={styles.selectionDetail}>
-                {selectedRepo.path}
-              </Text>
-            ) : null}
-          </View>
-          {loadingOptions ? (
-            <ActivityIndicator color={colors.accent} size="small" />
-          ) : repoPickerOpen ? (
-            <ChevronUp color={colors.muted} size={17} strokeWidth={2} />
-          ) : (
-            <ChevronDown color={colors.muted} size={17} strokeWidth={2} />
-          )}
-        </Pressable>
-        {repoPickerOpen ? (
-          <View style={styles.pickerOptions}>
-            <SelectionRow label="No repo" selected={!repoPath} onPress={() => chooseRepo('')} />
-            {repos.map((repo) => (
-              <SelectionRow
-                key={repo.path}
-                label={mobileRepoLabel(repo.path)}
-                detail={repo.path}
-                selected={repo.path === repoPath}
-                onPress={() => chooseRepo(repo.path)}
-              />
-            ))}
-          </View>
-        ) : null}
-
-        {selectedRepo ? (
-          <View style={styles.branchBlock}>
-            <Text style={styles.fieldTitle}>Branch</Text>
-            <NewDroneBranchPicker
-              open={branchPickerOpen}
-              branchSource={effectiveBranchSource}
-              remoteBranch={remoteBranch}
-              hostBranch={selectedRepo.hostBranch}
-              remoteBranches={selectedRepo.remoteBranches}
-              remoteEnabled={runtime === 'container'}
-              loading={branchesLoading}
-              disabled={busy}
-              onOpen={() => setBranchPickerOpen(true)}
-              onClose={() => setBranchPickerOpen(false)}
-              onSelect={(selection) => {
-                if (selection.branchSource === 'remote' && selection.remoteBranch) {
-                  setRemoteBranch(selection.remoteBranch);
-                }
-                setBranchSource(selection.branchSource);
-              }}
-            />
-            {effectiveBranchSource === 'host' ? (
-              <Toggle
-                label="Pull before create"
-                detail={`Fast-forward ${mobileHostBranchLabel(selectedRepo.hostBranch)} before creating.`}
-                value={pullHostBranch}
-                disabled={busy}
-                onChange={setPullHostBranch}
-              />
-            ) : null}
-            {branchesLoadError || selectedRepo.branchesError ? (
-              <Text style={styles.errorText}>
-                {branchesLoadError ?? selectedRepo.branchesError}
-              </Text>
-            ) : selectedRepo.branchesLoaded && selectedRepo.remoteBranches.length === 0 ? (
-              <Text style={styles.helper}>No remote branches are available for this repo.</Text>
-            ) : null}
-          </View>
-        ) : null}
-      </View>
-
-      <View style={styles.section}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ expanded: detailsOpen }}
-          onPress={() => setDetailsOpen((open) => !open)}
-          style={({ pressed }) => [styles.accordionHeader, pressed && styles.pressed]}
-        >
-          <View style={styles.accordionCopy}>
-            <Text style={styles.accordionTitle}>Name & group</Text>
-            <Text numberOfLines={1} style={styles.accordionSummary}>
-              {name.trim() || group.trim()
-                ? [name.trim() || 'Automatic name', group.trim()].filter(Boolean).join(' · ')
-                : 'Optional details'}
-            </Text>
-          </View>
-          {detailsOpen ? (
-            <ChevronUp color={colors.muted} size={17} strokeWidth={2} />
-          ) : (
-            <ChevronDown color={colors.muted} size={17} strokeWidth={2} />
-          )}
-        </Pressable>
-        {detailsOpen ? (
-          <View style={styles.accordionBody}>
-            <Text style={styles.fieldTitle}>Name</Text>
-            <ThemedTextInput
-              value={name}
-              onChangeText={setName}
-              editable={!busy}
-              placeholder="Automatic name"
-              placeholderTextColor={colors.subtle}
-              autoCapitalize="none"
-              style={[styles.input, styles.monoInput]}
-            />
-            <Text style={styles.fieldTitle}>Group</Text>
-            <ThemedTextInput
-              value={group}
-              onChangeText={setGroup}
-              editable={!busy}
-              placeholder="No group"
-              placeholderTextColor={colors.subtle}
-              autoCapitalize="none"
-              style={styles.input}
-            />
-          </View>
-        ) : null}
-      </View>
-
-      {mode === 'with-chat' ? (
-        <View style={[styles.section, styles.messageSection]}>
-          <View style={styles.composerWrap}>
-            <AssistantComposer
-              voiceResetKey={`new-drone:${mode}`}
-              value={initialMessage}
-              onChangeText={setInitialMessage}
-              onSend={(promptOverride) => void submit(promptOverride)}
-              onOpenModel={() => setModelPickerOpen(true)}
-              modelLabel={
-                selectedModel?.label ||
-                model ||
-                (modelsLoading ? 'Detecting models…' : 'Default model')
-              }
-              reasoningLabel={reasoning}
-              placeholder="Ask the agent"
-              sending={busy}
-              editable={!busy}
-              showAttachments={!draft}
-              hasAttachments={initialImages.length > 0}
-              onAddAttachment={draft ? undefined : () => void addInitialImages()}
-              footer={
-                <>
-                  <ChatAttachmentStrip
-                    attachments={initialImages}
-                    disabled={busy}
-                    onRemove={(id) =>
-                      setInitialImages((current) => current.filter((image) => image.id !== id))
+              <View style={styles.topBranchSlot}>
+                <NewDroneBranchPicker
+                  open={branchPickerOpen}
+                  branchSource={effectiveBranchSource}
+                  remoteBranch={remoteBranch}
+                  hostBranch={selectedRepo.hostBranch}
+                  remoteBranches={selectedRepo.remoteBranches}
+                  remoteEnabled={runtime === 'container'}
+                  loading={branchesLoading}
+                  disabled={busy}
+                  onOpen={() => {
+                    setRuntimePickerOpen(false);
+                    setAccessPickerOpen(false);
+                    setAgentPickerOpen(false);
+                    setRepoPickerOpen(false);
+                    setBranchPickerOpen(true);
+                  }}
+                  onClose={() => setBranchPickerOpen(false)}
+                  onSelect={(selection) => {
+                    if (selection.branchSource === 'remote' && selection.remoteBranch) {
+                      setRemoteBranch(selection.remoteBranch);
                     }
-                  />
-                  <View style={styles.composerConfigRow}>
-                    <Segmented<MobileDroneAgentMode>
-                      label="Agent"
-                      value={agentMode}
-                      onChange={chooseAgentMode}
-                      disabled={busy || localDevice}
-                      options={
-                        localDevice
-                          ? [{ value: 'builtin', label: 'Built-in' }]
-                          : [
-                              { value: 'builtin', label: 'Built-in' },
-                              { value: 'external', label: 'External' },
-                            ]
-                      }
-                    />
-                    {agentMode === 'external' ? (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Choose external agent"
-                        accessibilityState={{ expanded: agentPickerOpen, disabled: busy }}
-                        disabled={busy}
-                        onPress={() => setAgentPickerOpen(true)}
-                        style={({ pressed }) => [
-                          styles.externalAgentTrigger,
-                          pressed && styles.pressed,
-                        ]}
-                      >
-                        <Text numberOfLines={1} style={styles.externalAgentText}>
-                          {EXTERNAL_AGENTS.find((option) => option.id === agent)?.label ?? agent}
-                        </Text>
-                        <ChevronDown color={colors.accent} size={16} strokeWidth={2.2} />
-                      </Pressable>
-                    ) : null}
-                    <NewDroneAccessPicker
-                      open={accessPickerOpen}
-                      permissionMode={agentPermissionMode}
-                      approvalPolicy={approvalPolicy}
-                      readOnlySupported={readOnlySupported}
-                      approvalsSupported={approvalSupported}
-                      agentIsCodex={agent === 'codex'}
-                      disabled={busy}
-                      onOpen={() => setAccessPickerOpen(true)}
-                      onClose={() => setAccessPickerOpen(false)}
-                      onPermissionModeChange={setAgentPermissionMode}
-                      onApprovalPolicyChange={setApprovalPolicy}
-                    />
-                  </View>
-                  <ExternalAgentPicker
-                    open={agentMode === 'external' && agentPickerOpen}
-                    value={agent === 'native' ? lastExternalAgent : agent}
-                    options={EXTERNAL_AGENTS}
-                    disabled={busy}
-                    onClose={() => setAgentPickerOpen(false)}
-                    onSelect={(value) => chooseAgent(value as ExternalAgentId)}
-                  />
-                  {modelsError ? (
-                    <View style={styles.inlineNotice}>
-                      <Text style={[styles.errorText, styles.inlineNoticeText]}>{modelsError}</Text>
-                      <Pressable
-                        disabled={busy || modelsLoading}
-                        onPress={() => void detectModels(true)}
-                        style={({ pressed }) => pressed && styles.pressed}
-                      >
-                        <Text style={styles.inlineAction}>Retry models</Text>
-                      </Pressable>
-                    </View>
-                  ) : null}
-                  <AssistantModelPicker
-                    open={modelPickerOpen}
-                    currentProvider={modelProvider || agent}
-                    currentModel={model}
-                    currentThinkingLevel={reasoning}
-                    options={modelChoices}
-                    busy={modelsLoading}
-                    onClose={() => setModelPickerOpen(false)}
-                    onSelect={(choice, selection) => {
-                      if (selection === 'model') {
-                        setModel(choice.id);
-                        setModelProvider(choice.provider);
-                      }
-                      if (choice.thinkingLevel) setReasoning(choice.thinkingLevel);
-                      if (selection === 'reasoning') setModelPickerOpen(false);
-                    }}
-                  />
-                </>
-              }
-              onInputFocus={() => {
-                composerFocusedRef.current = true;
-                setAgentPickerOpen(false);
-                setAccessPickerOpen(false);
-                scrollMessageIntoView();
-              }}
-              onInputBlur={() => {
-                composerFocusedRef.current = false;
-              }}
-            />
+                    setBranchSource(selection.branchSource);
+                  }}
+                />
+              </View>
+            ) : null}
           </View>
+          <AssistantComposer
+            voiceResetKey="new-drone"
+            value={initialMessage}
+            onChangeText={setInitialMessage}
+            onSend={(promptOverride) => void submit(promptOverride)}
+            onOpenModel={() => {
+              setRepoPickerOpen(false);
+              setModelPickerOpen(true);
+            }}
+            modelLabel={
+              selectedModel?.label ||
+              model ||
+              (modelsLoading ? 'Detecting models…' : 'Default model')
+            }
+            reasoningLabel={reasoning}
+            placeholder="Ask the agent"
+            sending={busy}
+            editable={!busy}
+            alwaysExpanded
+            showAttachments={!draft}
+            hasAttachments={initialImages.length > 0}
+            onAddAttachment={draft ? undefined : () => void addInitialImages()}
+            footer={
+              <>
+                <ChatAttachmentStrip
+                  attachments={initialImages}
+                  disabled={busy}
+                  onRemove={(id) =>
+                    setInitialImages((current) => current.filter((image) => image.id !== id))
+                  }
+                />
+                <View style={styles.bottomConfigRow}>
+                  <ExternalAgentPicker
+                    open={agentPickerOpen}
+                    value={agent}
+                    options={
+                      localDevice ? AGENTS.filter((option) => option.id === 'native') : AGENTS
+                    }
+                    disabled={busy || localDevice}
+                    onOpen={() => {
+                      setRuntimePickerOpen(false);
+                      setBranchPickerOpen(false);
+                      setAccessPickerOpen(false);
+                      setRepoPickerOpen(false);
+                      setAgentPickerOpen(true);
+                    }}
+                    onClose={() => setAgentPickerOpen(false)}
+                    onSelect={(value) => chooseAgent(value as MobileDroneAgentId)}
+                  />
+                  <NewDroneAccessPicker
+                    open={accessPickerOpen}
+                    permissionMode={agentPermissionMode}
+                    approvalPolicy={approvalPolicy}
+                    readOnlySupported={readOnlySupported}
+                    approvalsSupported={approvalSupported}
+                    agentIsCodex={agent === 'codex'}
+                    disabled={busy}
+                    onOpen={() => {
+                      setRuntimePickerOpen(false);
+                      setBranchPickerOpen(false);
+                      setAgentPickerOpen(false);
+                      setRepoPickerOpen(false);
+                      setAccessPickerOpen(true);
+                    }}
+                    onClose={() => setAccessPickerOpen(false)}
+                    onPermissionModeChange={setAgentPermissionMode}
+                    onApprovalPolicyChange={setApprovalPolicy}
+                  />
+                  <NewDroneRepoPicker
+                    open={repoPickerOpen}
+                    value={repoPath}
+                    repos={repos}
+                    loading={loadingOptions}
+                    disabled={busy}
+                    onOpen={() => {
+                      setRuntimePickerOpen(false);
+                      setBranchPickerOpen(false);
+                      setAccessPickerOpen(false);
+                      setAgentPickerOpen(false);
+                      setRepoPickerOpen(true);
+                    }}
+                    onClose={() => setRepoPickerOpen(false)}
+                    onSelect={chooseRepo}
+                  />
+                </View>
+                {selectedRepo && (branchesLoadError || selectedRepo.branchesError) ? (
+                  <Text style={styles.errorText}>
+                    {branchesLoadError ?? selectedRepo.branchesError}
+                  </Text>
+                ) : null}
+                {modelsError ? (
+                  <View style={styles.inlineNotice}>
+                    <Text style={[styles.errorText, styles.inlineNoticeText]}>{modelsError}</Text>
+                    <Pressable
+                      disabled={busy || modelsLoading}
+                      onPress={() => void detectModels(true)}
+                      style={({ pressed }) => pressed && styles.pressed}
+                    >
+                      <Text style={styles.inlineAction}>Retry models</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+                <AssistantModelPicker
+                  open={modelPickerOpen}
+                  currentProvider={modelProvider || agent}
+                  currentModel={model}
+                  currentThinkingLevel={reasoning}
+                  options={modelChoices}
+                  busy={modelsLoading}
+                  onClose={() => setModelPickerOpen(false)}
+                  onSelect={(choice, selection) => {
+                    if (selection === 'model') {
+                      setModel(choice.id);
+                      setModelProvider(choice.provider);
+                    }
+                    if (choice.thinkingLevel) setReasoning(choice.thinkingLevel);
+                    if (selection === 'reasoning') setModelPickerOpen(false);
+                  }}
+                />
+              </>
+            }
+            onInputFocus={() => {
+              composerFocusedRef.current = true;
+              setAgentPickerOpen(false);
+              setAccessPickerOpen(false);
+              setRuntimePickerOpen(false);
+              setBranchPickerOpen(false);
+              setRepoPickerOpen(false);
+              scrollMessageIntoView();
+            }}
+            onInputBlur={() => {
+              composerFocusedRef.current = false;
+            }}
+          />
         </View>
-      ) : (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{ disabled: busy }}
-          disabled={busy}
-          onPress={() => void submit()}
-          style={({ pressed }) => [
-            styles.submit,
-            busy && styles.disabled,
-            pressed && styles.pressed,
-          ]}
-        >
-          {busy ? <ActivityIndicator color={colors.onAccent} size="small" /> : null}
-          <Text style={styles.submitText}>{busy ? 'Creating…' : 'Create drone'}</Text>
-        </Pressable>
-      )}
+      </View>
     </ScrollView>
   );
 }
@@ -1011,76 +680,11 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
   pageContent: { flexGrow: 1, paddingHorizontal: 18, paddingTop: 0, paddingBottom: 36 },
   pageContentWithChat: { paddingBottom: 12 },
-  modeTabsFullBleed: {
-    marginHorizontal: -18,
-    marginBottom: 4,
-  },
   section: {
     paddingVertical: 10,
     gap: 10,
   },
-  segmented: {
-    flexDirection: 'row',
-    alignSelf: 'flex-start',
-    borderRadius: 7,
-    backgroundColor: colors.panel,
-    overflow: 'hidden',
-  },
-  segment: {
-    minHeight: 34,
-    justifyContent: 'center',
-    paddingHorizontal: 13,
-  },
-  segmentActive: {
-    backgroundColor: colors.accent,
-  },
-  segmentDisabled: { opacity: 0.38 },
-  segmentText: { color: colors.text, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
-  segmentTextActive: { color: colors.onAccent },
-  segmentTextDisabled: { color: colors.muted },
-  labeledSegmented: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  segmentedLabel: {
-    color: colors.accent,
-    fontSize: 9,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.45,
-  },
-  helper: { color: colors.muted, fontSize: 11, lineHeight: 16 },
-  runtimeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 14,
-  },
-  runtimeControl: { flex: 1, minWidth: 170, gap: 6 },
-  compactCheckbox: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 2,
-  },
-  checkboxBox: {
-    width: 17,
-    height: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 4,
-    borderWidth: 1.5,
-    borderColor: colors.accent,
-  },
-  checkboxBoxActive: { backgroundColor: colors.accent },
-  compactCheckboxText: { color: colors.text, fontSize: 10, fontWeight: '800' },
-  toggleRow: {
-    minHeight: 49,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 7,
-  },
-  toggleCopy: { flex: 1, minWidth: 0 },
+  nameSection: { gap: 6, paddingTop: 10 },
   fieldTitle: {
     color: colors.muted,
     fontSize: 10,
@@ -1088,109 +692,64 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.55,
   },
-  switchTrack: {
-    width: 38,
-    height: 22,
-    padding: 3,
-    borderRadius: 11,
-    backgroundColor: colors.surface1,
-  },
-  switchTrackActive: { backgroundColor: colors.accent },
-  switchThumb: { width: 16, height: 16, borderRadius: 8, backgroundColor: colors.text },
-  switchThumbActive: { transform: [{ translateX: 16 }], backgroundColor: colors.onAccent },
-  input: {
-    minHeight: 44,
+  nameInput: {
+    minHeight: 42,
     color: colors.text,
     fontSize: 13,
+    fontFamily: 'monospace',
     backgroundColor: colors.panel,
     borderColor: colors.borderStrong,
     borderWidth: 1,
     borderRadius: 7,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 9,
   },
-  monoInput: { fontFamily: 'monospace' },
-  composerConfigRow: {
-    flexDirection: 'row',
+  emptyState: {
+    flexGrow: 1,
+    minHeight: 180,
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
+    justifyContent: 'center',
+    gap: 14,
+    paddingVertical: 32,
   },
-  externalAgentTrigger: {
-    minHeight: 34,
+  emptyStateIcon: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panel,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  emptyStateTitle: { color: colors.text, fontSize: 17, fontWeight: '700', letterSpacing: -0.25 },
+  topConfigRow: {
+    zIndex: 20,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
-    paddingHorizontal: 10,
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: colors.accentBorder,
-    backgroundColor: colors.accentDark,
+    paddingHorizontal: 9,
+    paddingBottom: 2,
   },
-  externalAgentText: { flexShrink: 1, color: colors.textStrong, fontSize: 12, fontWeight: '800' },
-  activeText: { color: colors.accent },
-  pickerTrigger: {
-    minHeight: 48,
+  topBranchSlot: { flex: 1, alignItems: 'flex-end' },
+  bottomConfigRow: {
+    zIndex: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    borderRadius: 7,
-    backgroundColor: colors.panel,
+    flexWrap: 'nowrap',
+    columnGap: 2,
   },
-  pickerValue: { color: colors.text, fontSize: 12, fontWeight: '800' },
   inlineAction: { color: colors.accent, fontSize: 11, fontWeight: '700' },
   inlineNotice: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   inlineNoticeText: { flex: 1 },
-  pickerOptions: { borderLeftWidth: 1, borderLeftColor: colors.accentBorder, paddingLeft: 9 },
-  selectionRow: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  selectionRowActive: { backgroundColor: colors.selectionWash },
-  selectionCopy: { flex: 1, minWidth: 0 },
-  selectionLabel: { color: colors.text, fontSize: 12, fontWeight: '700' },
-  selectionDetail: { color: colors.muted, fontSize: 9, fontFamily: 'monospace', marginTop: 3 },
-  branchBlock: { gap: 10, paddingTop: 7 },
   errorText: { color: colors.danger, fontSize: 11, lineHeight: 16 },
-  accordionHeader: {
-    minHeight: 54,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 6,
-  },
-  accordionCopy: { flex: 1, minWidth: 0 },
-  accordionTitle: { color: colors.text, fontSize: 12, fontWeight: '800' },
-  accordionSummary: { color: colors.muted, fontSize: 10, marginTop: 3 },
-  accordionBody: { gap: 9, paddingTop: 4 },
-  messageSection: { flexGrow: 1, justifyContent: 'flex-end', paddingBottom: 0 },
+  messageSection: { justifyContent: 'flex-end', paddingBottom: 0 },
   composerWrap: { marginHorizontal: -9, marginBottom: -8 },
-  submit: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 9,
-    marginTop: 18,
-    borderRadius: 8,
-    backgroundColor: colors.accent,
-  },
-  submitText: {
-    color: colors.onAccent,
-    fontSize: 12,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-    letterSpacing: 0.45,
-  },
   disabled: { opacity: 0.45 },
   pressed: { opacity: 0.72 },
 });

@@ -150,7 +150,6 @@ type RightPanelTabContentProps = {
       model: string;
       repoPath: string;
       group: string;
-      pullHostBranchBeforeCreate: boolean;
     };
   }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
   onRenameCanvasChat: (
@@ -177,8 +176,6 @@ type RightPanelTabContentProps = {
   onCanvasCreateRepoPathChange: (next: string) => void;
   canvasCreateGroup: string;
   onCanvasCreateGroupChange: (next: string) => void;
-  canvasPullHostBranchBeforeCreate: boolean;
-  onCanvasPullHostBranchBeforeCreateChange: (next: boolean) => void;
   currentDroneId: string | null;
   currentCanvasChatNodeId: string | null;
   defaultFsPathForCurrentDrone: string;
@@ -284,8 +281,6 @@ export function RightPanelTabContent({
   onCanvasCreateRepoPathChange,
   canvasCreateGroup,
   onCanvasCreateGroupChange,
-  canvasPullHostBranchBeforeCreate,
-  onCanvasPullHostBranchBeforeCreateChange,
   currentDroneId,
   currentCanvasChatNodeId,
   defaultFsPathForCurrentDrone,
@@ -392,8 +387,6 @@ export function RightPanelTabContent({
               onCreateRepoPathChange={onCanvasCreateRepoPathChange}
               createGroup={canvasCreateGroup}
               onCreateGroupChange={onCanvasCreateGroupChange}
-              pullHostBranchBeforeCreate={canvasPullHostBranchBeforeCreate}
-              onPullHostBranchBeforeCreateChange={onCanvasPullHostBranchBeforeCreateChange}
             />
           )}
         </PaneModule>

@@ -1,11 +1,11 @@
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Box from 'lucide-react-native/icons/box';
 import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import Monitor from 'lucide-react-native/icons/monitor';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
+import { AnchoredPickerPopover } from './AnchoredPickerPopover';
 import type { MobileDroneCreateRuntime } from './NewDroneScreen';
 
 const RUNTIME_OPTIONS: Array<{
@@ -13,11 +13,11 @@ const RUNTIME_OPTIONS: Array<{
   label: string;
   detail: string;
 }> = [
-  { value: 'container', label: 'Container', detail: 'Managed, isolated workspace' },
-  { value: 'host', label: 'Host', detail: 'Run directly on this hub' },
+  { value: 'container', label: 'Container', detail: 'Isolated workspace' },
+  { value: 'host', label: 'Host', detail: 'This hub' },
 ];
 
-function RuntimeIcon({ runtime, size = 16 }: { runtime: MobileDroneCreateRuntime; size?: number }) {
+function RuntimeIcon({ runtime, size = 15 }: { runtime: MobileDroneCreateRuntime; size?: number }) {
   const color = runtime === 'host' ? colors.online : colors.accent;
   return runtime === 'host' ? (
     <Monitor color={color} size={size} strokeWidth={2} />
@@ -43,133 +43,98 @@ export function NewDroneRuntimePicker({
   onClose(): void;
   onSelect(value: MobileDroneCreateRuntime): void;
 }) {
-  const insets = useSafeAreaInsets();
-  const window = useWindowDimensions();
   const current = RUNTIME_OPTIONS.find((option) => option.value === value)!;
   const options = localDevice
     ? RUNTIME_OPTIONS.filter((option) => option.value === 'host')
     : RUNTIME_OPTIONS;
 
   return (
-    <>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Execution target: ${current.label}`}
-        accessibilityState={{ expanded: open, disabled: disabled || localDevice }}
-        disabled={disabled || localDevice}
-        onPress={onOpen}
-        style={({ pressed }) => [
-          styles.trigger,
-          disabled && styles.disabled,
-          pressed && styles.pressed,
-        ]}
-      >
-        <View style={[styles.iconChip, value === 'host' && styles.hostIconChip]}>
+    <AnchoredPickerPopover
+      open={open && !localDevice}
+      onClose={onClose}
+      width={220}
+      align="left"
+      anchorStyle={[styles.root, open && styles.rootOpen]}
+      menuStyle={styles.menu}
+      trigger={
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Execution target: ${current.label}`}
+          accessibilityState={{ expanded: open, disabled: disabled || localDevice }}
+          disabled={disabled || localDevice}
+          hitSlop={4}
+          onPress={open ? onClose : onOpen}
+          style={({ pressed }) => [
+            styles.trigger,
+            (disabled || localDevice) && styles.disabled,
+            pressed && styles.pressed,
+          ]}
+        >
           <RuntimeIcon runtime={value} />
-        </View>
-        <View style={styles.triggerCopy}>
-          <Text style={styles.triggerLabel}>{current.label}</Text>
-          <Text numberOfLines={1} style={styles.triggerDetail}>
-            {current.detail}
+          <Text numberOfLines={1} style={styles.triggerLabel}>
+            {current.label}
           </Text>
-        </View>
-        {!localDevice ? <ChevronDown color={colors.accent} size={16} strokeWidth={2.1} /> : null}
-      </Pressable>
-
-      <Modal
-        visible={open && !localDevice}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        navigationBarTranslucent
-        onRequestClose={onClose}
-      >
-        <View style={styles.layer}>
-          <Pressable
-            accessibilityLabel="Close execution target picker"
-            onPress={onClose}
-            style={StyleSheet.absoluteFill}
-          />
-          <View
-            style={[
-              styles.sheet,
-              {
-                width: Math.min(window.width * 0.92, 330),
-                marginBottom: Math.max(insets.bottom + 6, 12),
-              },
-            ]}
-          >
-            <Text style={styles.title}>Execution target</Text>
-            <View style={styles.options} accessibilityRole="radiogroup">
-              {options.map((option) => {
-                const active = option.value === value;
-                return (
-                  <Pressable
-                    key={option.value}
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: active, disabled }}
-                    disabled={disabled}
-                    onPress={() => {
-                      onSelect(option.value);
-                      onClose();
-                    }}
-                    style={({ pressed }) => [
-                      styles.option,
-                      active && styles.optionActive,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <View style={[styles.iconChip, option.value === 'host' && styles.hostIconChip]}>
-                      <RuntimeIcon runtime={option.value} />
-                    </View>
-                    <View style={styles.optionCopy}>
-                      <Text style={[styles.optionLabel, active && styles.activeText]}>
-                        {option.label}
-                      </Text>
-                      <Text style={styles.optionDetail}>{option.detail}</Text>
-                    </View>
-                    {active ? <Check color={colors.accent} size={16} strokeWidth={2.7} /> : null}
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </>
+          {!localDevice ? (
+            <ChevronDown
+              color={colors.accent}
+              size={15}
+              strokeWidth={2.1}
+              style={open ? styles.chevronOpen : undefined}
+            />
+          ) : null}
+        </Pressable>
+      }
+    >
+      <View accessibilityRole="radiogroup">
+        {options.map((option) => {
+          const active = option.value === value;
+          return (
+            <Pressable
+              key={option.value}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: active, disabled }}
+              disabled={disabled}
+              onPress={() => {
+                onSelect(option.value);
+                onClose();
+              }}
+              style={({ pressed }) => [
+                styles.option,
+                active && styles.optionActive,
+                pressed && styles.pressed,
+              ]}
+            >
+              <RuntimeIcon runtime={option.value} />
+              <View style={styles.optionCopy}>
+                <Text style={[styles.optionLabel, active && styles.activeText]}>
+                  {option.label}
+                </Text>
+                <Text style={styles.optionDetail}>{option.detail}</Text>
+              </View>
+              {active ? <Check color={colors.accent} size={15} strokeWidth={2.7} /> : null}
+            </Pressable>
+          );
+        })}
+      </View>
+    </AnchoredPickerPopover>
   );
 }
 
 const styles = StyleSheet.create({
+  root: { position: 'relative', zIndex: 1 },
+  rootOpen: { zIndex: 30 },
   trigger: {
-    minWidth: 180,
-    minHeight: 44,
+    minHeight: 32,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.panel,
+    gap: 5,
+    paddingHorizontal: 7,
   },
-  triggerCopy: { flex: 1, minWidth: 0 },
-  triggerLabel: { color: colors.text, fontSize: 12, fontWeight: '700' },
-  triggerDetail: { color: colors.mutedDim, fontSize: 9, marginTop: 1 },
-  iconChip: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 7,
-    backgroundColor: colors.accentDark,
-  },
-  hostIconChip: { backgroundColor: colors.onlineDark },
-  layer: { flex: 1, alignItems: 'flex-end', justifyContent: 'flex-end', paddingHorizontal: 10 },
-  sheet: {
-    maxWidth: '92%',
-    overflow: 'hidden',
-    borderRadius: 16,
+  triggerLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '600' },
+  chevronOpen: { transform: [{ rotate: '180deg' }] },
+  menu: {
+    padding: 6,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panel,
@@ -179,30 +144,19 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     elevation: 14,
   },
-  title: {
-    color: colors.textStrong,
-    fontSize: 14,
-    fontWeight: '700',
-    paddingHorizontal: 13,
-    paddingTop: 11,
-    paddingBottom: 5,
-  },
-  options: { paddingHorizontal: 8, paddingBottom: 8 },
   option: {
-    minHeight: 50,
+    minHeight: 46,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 9,
-    paddingHorizontal: 8,
+    paddingHorizontal: 9,
     paddingVertical: 6,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: 'transparent',
+    borderRadius: 8,
   },
-  optionActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
+  optionActive: { backgroundColor: colors.accentDark },
   optionCopy: { flex: 1, minWidth: 0 },
   optionLabel: { color: colors.text, fontSize: 12, fontWeight: '700' },
-  optionDetail: { color: colors.mutedDim, fontSize: 9, marginTop: 2 },
+  optionDetail: { color: colors.mutedDim, fontSize: 9, marginTop: 1 },
   activeText: { color: colors.accentAlt },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.72 },

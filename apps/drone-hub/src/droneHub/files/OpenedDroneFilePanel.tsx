@@ -548,11 +548,11 @@ export function OpenedDroneFilePanel({
   }, [findReferences, goToDefinition]);
 
   const modeButtonClassName = (disabled: boolean) =>
-    `h-7 rounded-[var(--radius-medium)] bg-transparent px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
+    `h-6 rounded-[var(--radius-small)] bg-transparent px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
       disabled ? 'cursor-not-allowed opacity-50' : ''
     }`;
   const headingActionClassName = (disabled: boolean) =>
-    `flex h-7 w-7 items-center justify-center rounded-[var(--radius-medium)] bg-transparent text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
+    `flex h-5 w-5 items-center justify-center rounded-[var(--radius-small)] bg-transparent text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
       disabled ? 'cursor-not-allowed opacity-50' : ''
     }`;
   return (
@@ -569,7 +569,7 @@ export function OpenedDroneFilePanel({
               <div className="flex items-center gap-1.5">
                 {openedFileShowsMarkdownPreview ? (
                   <div
-                    className="flex items-center gap-0.5 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] p-0.5"
+                    className="flex h-6 items-center gap-0.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] p-0.5"
                     role="group"
                     aria-label="Heading expansion"
                   >

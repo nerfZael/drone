@@ -11,7 +11,6 @@ type DroneHubTaskSourceContext = {
 type DroneHubTaskRepoDefaults = {
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
-  pullHostBranchBeforeCreate: boolean;
 };
 
 export function buildDroneHubTaskQueueSpec(args: {
@@ -50,7 +49,6 @@ export function buildDroneHubTaskQueueSpec(args: {
 
   const repoBranchSelection: RepoBranchSelectionState = {
     repoBranchSource: repoPath ? args.repoDefaults.repoBranchSource : 'host',
-    pullHostBranchBeforeCreate: args.repoDefaults.pullHostBranchBeforeCreate === true,
     remoteBranch:
       repoPath && args.repoDefaults.repoBranchSource === 'remote'
         ? String(args.repoDefaults.repoCreateRemoteBranch ?? '').trim()

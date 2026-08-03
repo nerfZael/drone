@@ -262,7 +262,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     spawnReasoning,
     repoBranchSource,
     repoCreateRemoteBranch,
-    pullHostBranchBeforeCreate,
     customAgents,
     customAgentModalOpen,
     newCustomAgentLabel,
@@ -300,7 +299,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rememberSeenModels,
     setRepoBranchSource,
     setRepoCreateRemoteBranch,
-    setPullHostBranchBeforeCreate,
     setCustomAgents,
     setCustomAgentModalOpen,
     setNewCustomAgentLabel,
@@ -927,10 +925,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }>(`/api/drones/batch`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ drones, pullHostBranchBeforeCreate }),
+        body: JSON.stringify({ drones }),
       });
     },
-    [pullHostBranchBeforeCreate, requestJson],
+    [requestJson],
   );
 
   const terminalMenuRef = React.useRef<HTMLDivElement | null>(null);
@@ -1586,7 +1584,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     creating,
     repoBranchSource,
     repoCreateRemoteBranch,
-    pullHostBranchBeforeCreate,
     createRuntime,
     createAsDraft,
     createPersistVolume,
@@ -2506,7 +2503,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setSpawnApprovalPolicy(preferences.spawnApprovalPolicy);
       setRepoBranchSource(preferences.repoBranchSource);
       setRepoCreateRemoteBranch(preferences.repoCreateRemoteBranch);
-      setPullHostBranchBeforeCreate(preferences.pullHostBranchBeforeCreate);
     },
     [
       normalizeCreateRepoPath,
@@ -2517,7 +2513,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setSpawnContextRepoPath,
       setRepoBranchSource,
       setRepoCreateRemoteBranch,
-      setPullHostBranchBeforeCreate,
       updateSpawnContextForRepo,
     ],
   );
@@ -3246,7 +3241,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         model: string;
         repoPath: string;
         group: string;
-        pullHostBranchBeforeCreate: boolean;
       };
     }): Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }> => {
       const prompt = String(payload?.prompt ?? '').trim();
@@ -3257,7 +3251,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         model: '',
         repoPath: '',
         group: '',
-        pullHostBranchBeforeCreate: pullHostBranchBeforeCreate,
       };
       const seedAgentKey =
         String(overrides.agentKey ?? spawnAgentKey ?? '').trim() || 'builtin:cursor';
@@ -3287,9 +3280,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
       const repoPath = String(overrides.repoPath ?? chatHeaderRepoPath ?? '').trim();
       const group = String(overrides.group ?? draftCreateGroup ?? '').trim();
-      const shouldPullHostBranchBeforeCreate =
-        overrides.pullHostBranchBeforeCreate === true ||
-        (overrides.pullHostBranchBeforeCreate !== false && pullHostBranchBeforeCreate);
       const remoteBranch = String(repoCreateRemoteBranch ?? '').trim();
 
       try {
@@ -3297,7 +3287,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         const body: any = {
           ...(group ? { group } : {}),
           ...(repoPath ? { repoPath } : {}),
-          pullHostBranchBeforeCreate: shouldPullHostBranchBeforeCreate,
           repoBranchSource,
           ...(repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
           seedChat: 'default',
@@ -3343,7 +3332,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [
       chatHeaderRepoPath,
       draftCreateGroup,
-      pullHostBranchBeforeCreate,
       repoBranchSource,
       repoCreateRemoteBranch,
       resolveAgentKeyToConfig,
@@ -4026,8 +4014,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onCanvasCreateRepoPathChange={setChatHeaderRepoPath}
           canvasCreateGroup={draftCreateGroup}
           onCanvasCreateGroupChange={setDraftCreateGroup}
-          canvasPullHostBranchBeforeCreate={pullHostBranchBeforeCreate}
-          onCanvasPullHostBranchBeforeCreateChange={setPullHostBranchBeforeCreate}
           currentDroneId={previewCurrentDroneId}
           currentCanvasChatNodeId={selectedCanvasChatNodeId}
           defaultFsPathForCurrentDrone={defaultFsPathForCurrentDrone}
@@ -4194,7 +4180,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       createRepoMenuEntries,
       chatHeaderRepoPath,
       draftCreateGroup,
-      pullHostBranchBeforeCreate,
       setChatHeaderRepoPath,
       setCustomAgentModalOpen,
       setDraftCreateGroup,
@@ -4203,7 +4188,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setActiveTerminalPaneTab,
       setTerminalPaneTabSessionName,
       closeTerminalPaneTab,
-      setPullHostBranchBeforeCreate,
       setSpawnAgentKey,
       setSpawnModel,
       selectedChat,
@@ -4464,15 +4448,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     draftChat,
     createRuntime,
     createAsDraft,
-    createPersistVolume,
-    pullHostBranchBeforeCreate,
     repoBranchSource,
     setRepoBranchSource,
     repoCreateRemoteBranch,
     setRepoCreateRemoteBranch,
     setCreateRuntime,
     setCreateAsDraft,
-    setCreatePersistVolume,
     draftCreateMode,
     setDraftCreateMode,
     spawnAgentPermissionMode,

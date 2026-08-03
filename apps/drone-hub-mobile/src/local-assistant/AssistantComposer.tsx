@@ -140,8 +140,10 @@ export function AssistantComposer({
   showAttachments = true,
   hasAttachments = false,
   onAddAttachment,
+  leadingControl,
   attachmentActionsDisabled = false,
   sendBlocked = false,
+  alwaysExpanded = false,
   footer,
   onInputFocus,
   onInputBlur,
@@ -164,8 +166,10 @@ export function AssistantComposer({
   showAttachments?: boolean;
   hasAttachments?: boolean;
   onAddAttachment?(): void;
+  leadingControl?: React.ReactNode;
   attachmentActionsDisabled?: boolean;
   sendBlocked?: boolean;
+  alwaysExpanded?: boolean;
   footer?: any;
   onInputFocus?(target: number): void;
   onInputBlur?(): void;
@@ -205,13 +209,15 @@ export function AssistantComposer({
     running,
     queueWhileRunning,
   });
-  const expanded = mobileAssistantComposerExpanded({
-    focused,
-    value,
-    hasAttachments,
-    voiceActive,
-    voiceError,
-  });
+  const expanded =
+    alwaysExpanded ||
+    mobileAssistantComposerExpanded({
+      focused,
+      value,
+      hasAttachments,
+      voiceActive,
+      voiceError,
+    });
   const showAssistantStop =
     editable &&
     mobileAssistantStopVisible({
@@ -369,7 +375,13 @@ export function AssistantComposer({
 
   return (
     <View style={styles.frame}>
-      <View style={[styles.composer, expanded && styles.composerExpanded]}>
+      <View
+        style={[
+          styles.composer,
+          expanded && styles.composerExpanded,
+          Boolean(leadingControl) && styles.composerWithLeadingControl,
+        ]}
+      >
         <ThemedTextInput
           ref={inputRef}
           value={value}
@@ -493,6 +505,7 @@ export function AssistantComposer({
                     onPress={onAddAttachment!}
                   />
                 ) : null}
+                {leadingControl}
                 <View style={styles.controlSpacer} />
                 <Pressable
                   accessibilityRole="button"
@@ -587,6 +600,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   composerExpanded: { borderRadius: 7, borderColor: colors.accentBorder },
+  composerWithLeadingControl: { overflow: 'visible' },
   input: {
     minHeight: 50,
     maxHeight: 132,

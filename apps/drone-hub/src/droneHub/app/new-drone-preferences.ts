@@ -12,7 +12,6 @@ export type DesktopNewDronePreferences = {
   spawnApprovalPolicy: 'ask' | 'agent-decides' | 'never';
   repoBranchSource: 'host' | 'remote';
   repoCreateRemoteBranch: string;
-  pullHostBranchBeforeCreate: boolean;
 };
 
 type DesktopNewDronePreferencesByRepo = Record<string, DesktopNewDronePreferences>;
@@ -52,7 +51,6 @@ export function normalizeDesktopNewDronePreferences(
         : 'ask',
     repoBranchSource: candidate.repoBranchSource === 'remote' ? 'remote' : 'host',
     repoCreateRemoteBranch: trimmed(candidate.repoCreateRemoteBranch),
-    pullHostBranchBeforeCreate: candidate.pullHostBranchBeforeCreate !== false,
   };
 }
 

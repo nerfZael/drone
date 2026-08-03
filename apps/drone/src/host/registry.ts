@@ -146,7 +146,6 @@ type DroneRegistryV1 = {
       spawnModel?: string;
       repoBranchSource?: 'host' | 'remote';
       repoCreateRemoteBranch?: string;
-      pullHostBranchBeforeCreate?: boolean;
       updatedAt?: string;
     };
     nonRepoEnvironment?: {

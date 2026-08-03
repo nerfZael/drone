@@ -589,7 +589,6 @@ function normalizeUiPreferences(value: unknown) {
     spawnModel: cleanString(raw.spawnModel),
     repoBranchSource: normalizeRepoBranchSource(raw.repoBranchSource, 'host'),
     repoCreateRemoteBranch: cleanString(raw.repoCreateRemoteBranch),
-    pullHostBranchBeforeCreate: typeof raw.pullHostBranchBeforeCreate === 'boolean' ? raw.pullHostBranchBeforeCreate : true,
     spawnContextByRepoKey: raw.spawnContextByRepoKey && typeof raw.spawnContextByRepoKey === 'object' && !Array.isArray(raw.spawnContextByRepoKey)
       ? raw.spawnContextByRepoKey
       : {},
@@ -1123,7 +1122,6 @@ async function createDronePreferences(repoPath = '') {
       spawnModel: cleanString(merged.spawnModel),
       repoBranchSource: normalizeRepoBranchSource(merged.repoBranchSource, 'host'),
       repoCreateRemoteBranch: cleanString(merged.repoCreateRemoteBranch),
-      pullHostBranchBeforeCreate: typeof merged.pullHostBranchBeforeCreate === 'boolean' ? merged.pullHostBranchBeforeCreate : true,
       source: response?.updatedAt ? 'drone_hub_ui_preferences' : 'default',
       updatedAt: cleanIsoTimestamp(response?.updatedAt),
     };
@@ -1133,7 +1131,6 @@ async function createDronePreferences(repoPath = '') {
       spawnModel: '',
       repoBranchSource: 'host' as const,
       repoCreateRemoteBranch: '',
-      pullHostBranchBeforeCreate: true,
       source: 'default',
       updatedAt: null,
       warning: error?.message || String(error),
@@ -1705,7 +1702,6 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       repoPath: z.string().optional(),
       repoBranchSource: z.enum(['host', 'remote']).optional(),
       remoteBranch: z.string().optional(),
-      pullHostBranchBeforeCreate: z.boolean().optional(),
       agentsMd: z
         .string()
         .describe(
@@ -1746,7 +1742,6 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       ...(seedModel ? { seedModel } : {}),
       ...(cleanString(args.cwd) ? { cwd: cleanString(args.cwd) } : {}),
       ...(repoPath ? { repoPath, repoBranchSource } : {}),
-      ...(repoPath && repoBranchSource === 'host' ? { pullHostBranchBeforeCreate: args.pullHostBranchBeforeCreate ?? defaults.pullHostBranchBeforeCreate } : {}),
       ...(repoPath && repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
       ...(args.agentsMd !== undefined ? { agentsMd: args.agentsMd } : {}),
       ...(cleanString(args.initialMessage) ? { seedPrompt: cleanString(args.initialMessage), seedSubmittedAt: new Date().toISOString() } : {}),

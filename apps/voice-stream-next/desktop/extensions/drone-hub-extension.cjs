@@ -18,7 +18,6 @@ const DEFAULT_CREATE_DRONE_PREFERENCES = {
   spawnModel: '',
   repoBranchSource: 'host',
   repoCreateRemoteBranch: '',
-  pullHostBranchBeforeCreate: true,
 };
 
 const idleSubscriptions = new Map();
@@ -243,10 +242,6 @@ function normalizeCreateDronePreferences(value) {
     spawnModel: cleanString(raw.spawnModel),
     repoBranchSource,
     repoCreateRemoteBranch: cleanString(raw.repoCreateRemoteBranch),
-    pullHostBranchBeforeCreate:
-      typeof raw.pullHostBranchBeforeCreate === 'boolean'
-        ? raw.pullHostBranchBeforeCreate
-        : DEFAULT_CREATE_DRONE_PREFERENCES.pullHostBranchBeforeCreate,
   };
 }
 
@@ -528,10 +523,6 @@ function normalizeUiPreferences(value) {
     spawnModel: cleanString(raw.spawnModel),
     repoBranchSource: normalizeRepoBranchSource(raw.repoBranchSource, DEFAULT_CREATE_DRONE_PREFERENCES.repoBranchSource),
     repoCreateRemoteBranch: cleanString(raw.repoCreateRemoteBranch),
-    pullHostBranchBeforeCreate:
-      typeof raw.pullHostBranchBeforeCreate === 'boolean'
-        ? raw.pullHostBranchBeforeCreate
-        : DEFAULT_CREATE_DRONE_PREFERENCES.pullHostBranchBeforeCreate,
     spawnContextByRepoKey: normalizeSpawnContextByRepoKey(raw.spawnContextByRepoKey),
   };
 }
@@ -1372,7 +1363,7 @@ exports.activate = async function activate(api) {
     name: 'create_drone',
     label: 'Create drone',
     description:
-      'Create a new Drone Hub container drone, optionally starting its default chat with an initial message. Omitted agent, model, branch source, remote branch, and pull-before-create values use the same defaults Drone Hub remembers from manual drone creation. Use repoBranchSource=host for the local/current host branch, optionally with pullHostBranchBeforeCreate. Use repoBranchSource=remote with remoteBranch to seed from a specific remote branch.',
+      'Create a new Drone Hub container drone, optionally starting its default chat with an initial message. Omitted agent, model, branch source, and remote branch values use the same defaults Drone Hub remembers from manual drone creation. Use repoBranchSource=host for the local/current host branch. Use repoBranchSource=remote with remoteBranch to seed from a specific remote branch.',
     approval: 'never',
     inputSchema: {
       type: 'object',
@@ -1387,7 +1378,6 @@ exports.activate = async function activate(api) {
         repoPath: { type: 'string' },
         repoBranchSource: { type: 'string', enum: ['host', 'remote'] },
         remoteBranch: { type: 'string' },
-        pullHostBranchBeforeCreate: { type: 'boolean' },
         initialMessage: { type: 'string', description: 'Optional first message to send to the new drone default chat.' },
       },
       required: ['name'],
@@ -1413,10 +1403,6 @@ exports.activate = async function activate(api) {
               args.remoteBranch == null ? 'default' : 'explicit',
             )
           : remoteBranchRaw;
-      const pullHostBranchBeforeCreate =
-        typeof args.pullHostBranchBeforeCreate === 'boolean'
-          ? args.pullHostBranchBeforeCreate
-          : defaults.pullHostBranchBeforeCreate;
       const initialMessage = cleanString(args.initialMessage);
       const body = {
         name: cleanString(args.name),
@@ -1427,7 +1413,6 @@ exports.activate = async function activate(api) {
         ...(cleanString(args.cwd) ? { cwd: cleanString(args.cwd) } : {}),
         ...(repoPath ? { repoPath } : {}),
         ...(repoPath ? { repoBranchSource } : {}),
-        ...(repoPath && repoBranchSource === 'host' ? { pullHostBranchBeforeCreate } : {}),
         ...(repoPath && repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
         ...(initialMessage ? { seedPrompt: initialMessage, seedSubmittedAt: new Date().toISOString() } : {}),
       };
@@ -1460,7 +1445,6 @@ exports.activate = async function activate(api) {
           ? {
               repoBranchSource,
               remoteBranch: repoBranchSource === 'remote' ? remoteBranch : null,
-              pullHostBranchBeforeCreate: repoBranchSource === 'host' ? pullHostBranchBeforeCreate : null,
             }
           : null,
       };

@@ -58,7 +58,6 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
           launchedCount: 0,
           inFlightCount: 0,
           serializeFirstMessageGroup: false,
-          pullHostBranchBeforeCreate: false,
           createdAt: '2026-06-07T00:00:00.000Z',
           updatedAt: '2026-06-07T00:00:00.000Z',
         },
