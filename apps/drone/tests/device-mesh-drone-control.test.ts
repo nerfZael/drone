@@ -858,6 +858,101 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('bounds combined history and active-run details for a busy drone', async () => {
+    const originalFetch = globalThis.fetch;
+    const largePlan = {
+      source: 'codex',
+      items: Array.from({ length: 100 }, (_, index) => ({
+        id: `step-${index}`,
+        text: `Plan ${index} ${'p'.repeat(1_000)}`,
+        status: 'in_progress',
+      })),
+    };
+    const largeActivity = {
+      version: 1,
+      source: 'codex',
+      updatedAt: '2026-08-02T12:00:00.000Z',
+      messages: Array.from({ length: 30 }, (_, index) => ({
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: `Activity ${index} ${'a'.repeat(2_000)}` }],
+      })),
+    };
+    const largeFileChanges = {
+      version: 2,
+      capturedAt: '2026-08-02T12:00:00.000Z',
+      counts: { changed: 100, additions: 1_000, deletions: 500 },
+      workspaces: Array.from({ length: 8 }, (_, workspaceIndex) => ({
+        targetId: `target-${workspaceIndex}`,
+        droneId: 'busy-drone',
+        label: `Workspace ${workspaceIndex}`,
+        previewEntries: Array.from({ length: 48 }, (_, entryIndex) => ({
+          path: `src/${workspaceIndex}/${entryIndex}-${'f'.repeat(300)}.ts`,
+          status: 'modified',
+          additions: 20,
+          deletions: 10,
+        })),
+      })),
+    };
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      if (url.endsWith('/pending')) {
+        return Response.json({
+          ok: true,
+          pending: Array.from({ length: 6 }, (_, index) => ({
+            id: `pending-${index}`,
+            at: `2026-08-02T12:${String(index).padStart(2, '0')}:00.000Z`,
+            prompt: `Pending ${index} ${'q'.repeat(20_000)}`,
+            state: 'sent',
+            agentPlan: largePlan,
+            activity: largeActivity,
+            fileChanges: largeFileChanges,
+          })),
+        });
+      }
+      if (url.endsWith('/read')) {
+        return Response.json({
+          ok: true,
+          readState: { unread: false, latestAgentTurnId: 'turn-5', latestAgentRevision: 1 },
+        });
+      }
+      return Response.json({
+        ok: true,
+        turns: Array.from({ length: 6 }, (_, index) => ({
+          id: `turn-${index}`,
+          turn: index,
+          prompt: `Prompt ${index} ${'u'.repeat(30_000)}`,
+          output: `Output ${index} ${'o'.repeat(30_000)}`,
+          activity: largeActivity,
+          agentPlan: largePlan,
+          fileChanges: largeFileChanges,
+        })),
+        agent: { kind: 'builtin', id: 'codex' },
+        readState: { unread: true, latestAgentTurnId: 'turn-5', latestAgentRevision: 1 },
+      });
+    }) as typeof fetch;
+
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      const result: any = await capability.invoke(
+        'chat.read',
+        { droneId: 'busy-drone', chatName: 'default' },
+        { sourceDevice: { id: 'phone-1' } } as never,
+      );
+
+      expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(220 * 1024);
+      expect(result.pending).toHaveLength(6);
+      expect(result.pending[0].activityMeshTruncated).toBe(true);
+      expect(result.pending.at(-1).activity).toBeDefined();
+      expect(result.turns.length).toBeLessThan(6);
+      expect(result.page.hasOlder).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('promotes a queued new-chat action through the existing mobile chat-create grant', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; method: string; body: string }> = [];
