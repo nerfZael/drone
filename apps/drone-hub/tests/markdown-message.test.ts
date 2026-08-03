@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MarkdownMessage } from '../src/droneHub/chat/MarkdownMessage';
@@ -11,6 +12,29 @@ function renderMarkdown(
 }
 
 describe('MarkdownMessage', () => {
+  test('keeps text-renderer identities stable across parent refreshes', () => {
+    const markdownSource = readFileSync(
+      new URL('../../../packages/assistant-markdown/src/MarkdownMessage.tsx', import.meta.url),
+      'utf8',
+    );
+    const outlineSource = readFileSync(
+      new URL('../src/droneHub/files/MarkdownOutlinePreview.tsx', import.meta.url),
+      'utf8',
+    );
+    const editorSource = readFileSync(
+      new URL('../src/droneHub/files/OpenedDroneFilePanel.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(markdownSource).toContain('components={STABLE_MARKDOWN_COMPONENTS}');
+    expect(markdownSource).not.toContain('components={{');
+    expect(outlineSource).toContain('components={HEADING_MARKDOWN_COMPONENTS}');
+    expect(outlineSource).not.toContain('components={{');
+    expect(editorSource).toContain('const monacoOptions = React.useMemo');
+    expect(editorSource).toContain('options={monacoOptions}');
+    expect(editorSource).toContain('onChange={handleEditorChange}');
+  });
+
   test('renders GFM lists and tables', () => {
     const html = renderMarkdown(['- alpha', '- beta', '', '| A | B |', '| - | - |', '| 1 | 2 |'].join('\n'));
     expect(html).toContain('<ul>');

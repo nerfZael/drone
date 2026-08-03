@@ -10,6 +10,23 @@ type MarkdownOutlinePreviewProps = {
   expansionCommand?: MarkdownOutlineExpansionCommand | null;
 };
 
+const HEADING_REMARK_PLUGINS = [remarkGfm];
+
+function MarkdownHeadingParagraph({ children }: React.ComponentProps<'p'>) {
+  return <>{children}</>;
+}
+
+function MarkdownHeadingAnchor({ children }: React.ComponentProps<'a'>) {
+  return <span className="dh-markdown-outline__heading-link">{children}</span>;
+}
+
+const HEADING_MARKDOWN_COMPONENTS: NonNullable<
+  React.ComponentProps<typeof ReactMarkdown>['components']
+> = {
+  p: MarkdownHeadingParagraph,
+  a: MarkdownHeadingAnchor,
+};
+
 export type MarkdownOutlineExpansionCommand = {
   action: 'collapse' | 'expand';
   sequence: number;
@@ -38,12 +55,9 @@ function ExpandArrow() {
 function HeadingTitle({ text }: { text: string }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={HEADING_REMARK_PLUGINS}
       skipHtml
-      components={{
-        p: ({ children }) => <>{children}</>,
-        a: ({ children }) => <span className="dh-markdown-outline__heading-link">{children}</span>,
-      }}
+      components={HEADING_MARKDOWN_COMPONENTS}
     >
       {text}
     </ReactMarkdown>

@@ -484,6 +484,12 @@ type MarkdownCodeRenderContextValue = {
   handleAnchorClick: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
   onOpenFileReference: MarkdownMessageProps['onOpenFileReference'];
   renderCodeBlock: MarkdownMessageProps['renderCodeBlock'];
+  renderMentionChildren: (children: React.ReactNode) => React.ReactNode;
+  renderBlockCopyAction: MarkdownMessageProps['renderBlockCopyAction'];
+  normalizedText: string;
+  tableModes: Record<string, TableMode>;
+  setTableMode: (tableId: string, mode: TableMode) => void;
+  openExpandedTable: (table: ExpandedTableState) => void;
 };
 
 const MarkdownCodeRenderContext = React.createContext<MarkdownCodeRenderContextValue | null>(null);
@@ -571,6 +577,183 @@ function StableMarkdownPre({
   );
 }
 
+type MarkdownElementProps<Tag extends keyof React.JSX.IntrinsicElements> =
+  React.ComponentProps<Tag> & { node?: unknown };
+
+function StableMarkdownParagraph({ children, node: _node, ...props }: MarkdownElementProps<'p'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  return <p {...props}>{context?.renderMentionChildren(children) ?? children}</p>;
+}
+
+function StableMarkdownListItem({ children, node: _node, ...props }: MarkdownElementProps<'li'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  return <li {...props}>{context?.renderMentionChildren(children) ?? children}</li>;
+}
+
+function StableMarkdownTableCell({ children, node: _node, ...props }: MarkdownElementProps<'td'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  return <td {...props}>{context?.renderMentionChildren(children) ?? children}</td>;
+}
+
+function StableMarkdownTableHeader({ children, node: _node, ...props }: MarkdownElementProps<'th'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  return <th {...props}>{context?.renderMentionChildren(children) ?? children}</th>;
+}
+
+function StableMarkdownHeading1({ children, node: _node, ...props }: MarkdownElementProps<'h1'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  return <h1 {...props}>{context?.renderMentionChildren(children) ?? children}</h1>;
+}
+
+function StableMarkdownHeading2({ children, node: _node, ...props }: MarkdownElementProps<'h2'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  return <h2 {...props}>{context?.renderMentionChildren(children) ?? children}</h2>;
+}
+
+function StableMarkdownHeading3({ children, node: _node, ...props }: MarkdownElementProps<'h3'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  return <h3 {...props}>{context?.renderMentionChildren(children) ?? children}</h3>;
+}
+
+function StableMarkdownHeading4({ children, node: _node, ...props }: MarkdownElementProps<'h4'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  return <h4 {...props}>{context?.renderMentionChildren(children) ?? children}</h4>;
+}
+
+function StableMarkdownHeading5({ children, node: _node, ...props }: MarkdownElementProps<'h5'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  return <h5 {...props}>{context?.renderMentionChildren(children) ?? children}</h5>;
+}
+
+function StableMarkdownHeading6({ children, node: _node, ...props }: MarkdownElementProps<'h6'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  return <h6 {...props}>{context?.renderMentionChildren(children) ?? children}</h6>;
+}
+
+function StableMarkdownAnchor({
+  href,
+  children,
+  node: _node,
+  ...props
+}: MarkdownElementProps<'a'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  const hrefText = typeof href === 'string' ? href : '';
+  const hrefFileRef = context?.onOpenFileReference
+    ? parseInlineCodeFileReference(hrefText)
+    : null;
+  if (hrefFileRef && context?.onOpenFileReference) {
+    const targetDescription =
+      hrefFileRef.line == null
+        ? hrefFileRef.path
+        : `${hrefFileRef.path}:${hrefFileRef.line}${hrefFileRef.column == null ? '' : `:${hrefFileRef.column}`}`;
+    return (
+      <a
+        href={hrefText}
+        title={`Open ${targetDescription}`}
+        aria-label={`Open file ${targetDescription}`}
+        onClick={(event) => {
+          event.preventDefault();
+          context.onOpenFileReference?.(hrefFileRef);
+        }}
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  }
+  return (
+    <a
+      href={hrefText}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(event) => context?.handleAnchorClick(event, hrefText)}
+      {...props}
+    >
+      {children}
+    </a>
+  );
+}
+
+function StableMarkdownBlockquote({
+  children,
+  node,
+  ...props
+}: MarkdownElementProps<'blockquote'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  const kind = detectCalloutKind(children);
+  const cleanedChildren = kind ? stripLeadingCalloutMarker(children) : children;
+  const blockquote = (
+    <blockquote data-callout={kind ?? undefined} {...props}>
+      {kind ? (
+        <span className="dh-markdown-callout-label" aria-label={`${CALLOUT_LABEL[kind]} callout`}>
+          {CALLOUT_LABEL[kind]}
+        </span>
+      ) : null}
+      {cleanedChildren}
+    </blockquote>
+  );
+  const blockText = context?.renderBlockCopyAction
+    ? blockquoteCopyText(node, context.normalizedText, cleanedChildren)
+    : '';
+  return blockText ? (
+    <div className="dh-markdown-copyable-block group/markdown-block">
+      {blockquote}
+      {context?.renderBlockCopyAction?.(blockText)}
+    </div>
+  ) : blockquote;
+}
+
+function StableMarkdownTable({
+  children,
+  node,
+  ...props
+}: MarkdownElementProps<'table'>) {
+  const context = React.useContext(MarkdownCodeRenderContext);
+  const tableId = tableIdFromNode(node, children);
+  const mode = context?.tableModes[tableId] ?? 'fit';
+  return (
+    <MarkdownTable
+      {...props}
+      mode={mode}
+      onModeChange={(nextMode) => context?.setTableMode(tableId, nextMode)}
+      onOpenExpanded={() =>
+        context?.openExpandedTable({
+          id: tableId,
+          children,
+          props,
+        })
+      }
+    >
+      {children}
+    </MarkdownTable>
+  );
+}
+
+// React uses component identity during reconciliation. Keep this map and every
+// renderer in it module-stable so a timer or data poll cannot replace unchanged
+// Markdown DOM nodes and destroy the user's browser text selection.
+const STABLE_MARKDOWN_COMPONENTS: NonNullable<
+  React.ComponentProps<typeof ReactMarkdown>['components']
+> = {
+  p: StableMarkdownParagraph,
+  li: StableMarkdownListItem,
+  td: StableMarkdownTableCell,
+  th: StableMarkdownTableHeader,
+  h1: StableMarkdownHeading1,
+  h2: StableMarkdownHeading2,
+  h3: StableMarkdownHeading3,
+  h4: StableMarkdownHeading4,
+  h5: StableMarkdownHeading5,
+  h6: StableMarkdownHeading6,
+  a: StableMarkdownAnchor,
+  code: StableMarkdownCode,
+  blockquote: StableMarkdownBlockquote,
+  pre: StableMarkdownPre,
+  table: StableMarkdownTable,
+};
+
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+
 export function MarkdownMessage({
   text,
   className,
@@ -616,9 +799,36 @@ export function MarkdownMessage({
   const [tableModes, setTableModes] = React.useState<Record<string, TableMode>>({});
   const [expandedTable, setExpandedTable] = React.useState<ExpandedTableState | null>(null);
   const [expandedTableMode, setExpandedTableMode] = React.useState<TableMode>('fit');
+  const setTableMode = React.useCallback((tableId: string, mode: TableMode) => {
+    setTableModes((prev) => (prev[tableId] === mode ? prev : { ...prev, [tableId]: mode }));
+  }, []);
+  const openExpandedTable = React.useCallback((table: ExpandedTableState) => {
+    setExpandedTable(table);
+    setExpandedTableMode('fit');
+  }, []);
   const codeRenderContext = React.useMemo<MarkdownCodeRenderContextValue>(
-    () => ({ handleAnchorClick, onOpenFileReference, renderCodeBlock }),
-    [handleAnchorClick, onOpenFileReference, renderCodeBlock],
+    () => ({
+      handleAnchorClick,
+      onOpenFileReference,
+      renderCodeBlock,
+      renderMentionChildren,
+      renderBlockCopyAction,
+      normalizedText,
+      tableModes,
+      setTableMode,
+      openExpandedTable,
+    }),
+    [
+      handleAnchorClick,
+      normalizedText,
+      onOpenFileReference,
+      openExpandedTable,
+      renderBlockCopyAction,
+      renderCodeBlock,
+      renderMentionChildren,
+      setTableMode,
+      tableModes,
+    ],
   );
 
   React.useEffect(() => {
@@ -632,102 +842,8 @@ export function MarkdownMessage({
       <div className={`dh-markdown ${className ?? ''}`}>
         <MarkdownCodeRenderContext.Provider value={codeRenderContext}>
           <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkBreaks]}
-            components={{
-            p: ({ children, node: _node, ...props }) => <p {...props}>{renderMentionChildren(children)}</p>,
-            li: ({ children, node: _node, ...props }) => <li {...props}>{renderMentionChildren(children)}</li>,
-            td: ({ children, node: _node, ...props }) => <td {...props}>{renderMentionChildren(children)}</td>,
-            th: ({ children, node: _node, ...props }) => <th {...props}>{renderMentionChildren(children)}</th>,
-            h1: ({ children, node: _node, ...props }) => <h1 {...props}>{renderMentionChildren(children)}</h1>,
-            h2: ({ children, node: _node, ...props }) => <h2 {...props}>{renderMentionChildren(children)}</h2>,
-            h3: ({ children, node: _node, ...props }) => <h3 {...props}>{renderMentionChildren(children)}</h3>,
-            h4: ({ children, node: _node, ...props }) => <h4 {...props}>{renderMentionChildren(children)}</h4>,
-            h5: ({ children, node: _node, ...props }) => <h5 {...props}>{renderMentionChildren(children)}</h5>,
-            h6: ({ children, node: _node, ...props }) => <h6 {...props}>{renderMentionChildren(children)}</h6>,
-            a: ({ href, children, node: _node, ...props }) => {
-              const hrefText = typeof href === 'string' ? href : '';
-              const hrefFileRef = onOpenFileReference ? parseInlineCodeFileReference(hrefText) : null;
-              if (hrefFileRef && onOpenFileReference) {
-                const targetDescription =
-                  hrefFileRef.line == null
-                    ? hrefFileRef.path
-                    : `${hrefFileRef.path}:${hrefFileRef.line}${hrefFileRef.column == null ? '' : `:${hrefFileRef.column}`}`;
-                return (
-                  <a
-                    href={hrefText}
-                    title={`Open ${targetDescription}`}
-                    aria-label={`Open file ${targetDescription}`}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      onOpenFileReference(hrefFileRef);
-                    }}
-                    {...props}
-                  >
-                    {children}
-                  </a>
-                );
-              }
-              return (
-                <a
-                  href={hrefText}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(event) => handleAnchorClick(event, hrefText)}
-                  {...props}
-                >
-                  {children}
-                </a>
-              );
-            },
-            code: StableMarkdownCode,
-            blockquote: ({ children, node, ...props }) => {
-              const kind = detectCalloutKind(children);
-              const cleanedChildren = kind ? stripLeadingCalloutMarker(children) : children;
-              const blockquote = (
-                <blockquote data-callout={kind ?? undefined} {...props}>
-                  {kind ? (
-                    <span className="dh-markdown-callout-label" aria-label={`${CALLOUT_LABEL[kind]} callout`}>
-                      {CALLOUT_LABEL[kind]}
-                    </span>
-                  ) : null}
-                  {cleanedChildren}
-                </blockquote>
-              );
-              const blockText = renderBlockCopyAction
-                ? blockquoteCopyText(node, normalizedText, cleanedChildren)
-                : '';
-              return blockText ? (
-                <div className="dh-markdown-copyable-block group/markdown-block">
-                  {blockquote}
-                  {renderBlockCopyAction?.(blockText)}
-                </div>
-              ) : blockquote;
-            },
-            pre: StableMarkdownPre,
-            table: ({ children, node, ...props }) => {
-              const tableId = tableIdFromNode(node, children);
-              const mode = tableModes[tableId] ?? 'fit';
-              return (
-                <MarkdownTable
-                  {...props}
-                  mode={mode}
-                  onModeChange={(nextMode) =>
-                    setTableModes((prev) => (prev[tableId] === nextMode ? prev : { ...prev, [tableId]: nextMode }))
-                  }
-                  onOpenExpanded={() => {
-                    setExpandedTable({
-                      id: tableId,
-                      children,
-                      props,
-                    });
-                    setExpandedTableMode('fit');
-                  }}
-                >
-                  {children}
-                </MarkdownTable>
-              );
-            },
-            }}
+            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+            components={STABLE_MARKDOWN_COMPONENTS}
           >
             {normalizedText}
           </ReactMarkdown>
