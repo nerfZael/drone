@@ -127,6 +127,7 @@ function sameFsEntries(a: DroneFsEntry[] | undefined, b: DroneFsEntry[] | undefi
       left.size !== right.size ||
       left.mtimeMs !== right.mtimeMs ||
       left.ext !== right.ext ||
+      left.isGitIgnored !== right.isGitIgnored ||
       left.isImage !== right.isImage ||
       left.isVideo !== right.isVideo
     ) {
@@ -873,6 +874,7 @@ export function DroneFilesDock({
       const indentPx = 4;
       if (node.kind === 'directory') {
         const open = expandedDirs[node.path] === true;
+        const ignored = node.entry.isGitIgnored === true;
         const childLoading = childLoadingByPath[node.path] === true;
         const childError = childErrorByPath[node.path];
         const childLoaded = Object.prototype.hasOwnProperty.call(childEntriesByPath, node.path);
@@ -928,12 +930,14 @@ export function DroneFilesDock({
                       : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                   }`}
                   style={{ paddingLeft: `${indentPx}px` }}
-                  title={`${title} • Click to ${open ? 'collapse' : 'expand'} • Right-click for actions`}
+                  title={`${title}${ignored ? ' • Ignored by Git' : ''} • Click to ${open ? 'collapse' : 'expand'} • Right-click for actions`}
                 >
-                  <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
+                  <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)] ${ignored ? 'opacity-50' : ''}`}>
                     <IconChevron down={open} size={12} />
                   </span>
-                  <span className="min-w-0 flex-1 truncate leading-5">{node.name}</span>
+                  <span className={`min-w-0 flex-1 truncate leading-5 ${ignored ? 'text-[var(--muted-dim)] opacity-60' : ''}`}>
+                    {node.name}
+                  </span>
                   {childError ? <span className="px-1 text-[var(--text-9)] uppercase text-[var(--red)]">Error</span> : null}
                   {childLoading ? (
                     <span className="inline-flex items-center gap-1 px-1 text-[var(--text-9)] uppercase text-[var(--accent)]">
@@ -974,6 +978,7 @@ export function DroneFilesDock({
 
       const entry = node.entry;
       const active = activeOpenedFilePath === entry.path;
+      const ignored = entry.isGitIgnored === true;
       const selected = selectedPaths.has(entry.path);
       const modified = formatLocalDateTime(entry.mtimeMs);
       const openable = entry.kind === 'file';
@@ -1015,12 +1020,14 @@ export function DroneFilesDock({
                     : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
               }`}
               style={{ paddingLeft: `${indentPx}px` }}
-              title={`${entry.path} • ${modified} • Right-click for actions`}
+              title={`${entry.path} • ${modified}${ignored ? ' • Ignored by Git' : ''} • Right-click for actions`}
             >
-              <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)] ${openable ? '' : 'opacity-70'}`}>
+              <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)] ${ignored ? 'opacity-50' : openable ? '' : 'opacity-70'}`}>
                 <FileTypeIcon path={entry.path} size={15} />
               </span>
-              <span className={`min-w-0 flex-1 truncate leading-5 ${openable ? '' : 'opacity-70'}`}>{node.name}</span>
+              <span className={`min-w-0 flex-1 truncate leading-5 ${ignored ? 'text-[var(--muted-dim)] opacity-60' : openable ? '' : 'opacity-70'}`}>
+                {node.name}
+              </span>
             </button>
           )}
         </div>

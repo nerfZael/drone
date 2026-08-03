@@ -119,6 +119,35 @@ describeSocketSuite('host runtime routing api', () => {
     expect(resp.data?.ports).toEqual([{ hostPort: 4888, containerPort: 3000 }]);
   });
 
+  test('marks Git-ignored host filesystem entries', async () => {
+    const droneId = 'host-fs-git-ignore';
+    const repoRoot = path.join(tempRoot, 'host-fs-git-ignore-root');
+    fs.mkdirSync(path.join(repoRoot, 'ignored-build'), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, '.gitignore'), '*.tmp\n/ignored-build/\n', 'utf8');
+    fs.writeFileSync(path.join(repoRoot, 'ignored.tmp'), 'ignored\n', 'utf8');
+    fs.writeFileSync(path.join(repoRoot, 'tracked.tmp'), 'tracked\n', 'utf8');
+    fs.writeFileSync(path.join(repoRoot, 'visible.txt'), 'visible\n', 'utf8');
+    runGit(repoRoot, ['init']);
+    runGit(repoRoot, ['add', '.gitignore']);
+    runGit(repoRoot, ['add', '-f', 'tracked.tmp']);
+    await seedHostDrone(droneId, { cwd: repoRoot, repoPath: repoRoot });
+
+    const response = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/list`);
+
+    expect(response.r.status).toBe(200);
+    const entries = (response.data?.entries ?? []) as Array<{
+      name?: string;
+      isGitIgnored?: boolean;
+    }>;
+    const ignoredByName = new Map(
+      entries.map((entry) => [String(entry.name ?? ''), entry.isGitIgnored === true]),
+    );
+    expect(ignoredByName.get('ignored.tmp')).toBe(true);
+    expect(ignoredByName.get('ignored-build')).toBe(true);
+    expect(ignoredByName.get('tracked.tmp')).toBe(false);
+    expect(ignoredByName.get('visible.txt')).toBe(false);
+  });
+
   test('supports fs routes for host runtime drone', async () => {
     const droneId = 'host-fs';
     const droneRoot = path.join(tempRoot, 'host-fs-root');

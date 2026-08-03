@@ -5,11 +5,12 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
+import { FS_GIT_IGNORED_PATHS_MARKER } from './filesystem-media';
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
-import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
-
+import { listGitIgnoredPaths } from './listGitIgnoredPaths';
 import type { FilesystemRouteDependencies } from './routes/filesystem-routes';
+import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
 
 export class FilesystemService {
   readonly handle: LegacyRouteHandler;
@@ -88,6 +89,21 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
   };
   const sha256 = (value: Buffer | string) =>
     `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+  const addHostGitIgnoreMetadata = async <T extends { path: string }>(
+    directoryPath: string,
+    entries: T[],
+  ): Promise<Array<T & { isGitIgnored: boolean }>> => {
+    const ignoredPaths = await listGitIgnoredPaths({
+      directoryPath,
+      entryPaths: entries.map((entry) => entry.path),
+      runCommand: runHostCommand,
+      timeoutMs: FS_LIST_TIMEOUT_MS,
+    });
+    return entries.map((entry) => ({
+      ...entry,
+      isGitIgnored: ignoredPaths.has(path.resolve(entry.path)),
+    }));
+  };
   const hashHostFile = async (filePath: string): Promise<string> =>
     await new Promise((resolve, reject) => {
       const hash = crypto.createHash('sha256');
@@ -241,12 +257,13 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
         if (runtime === 'host') {
           try {
             const parsed = await listHostFsDirectory(targetPath);
+            const entries = await addHostGitIgnoreMetadata(parsed.resolvedPath, parsed.entries);
             json(res, 200, {
               ok: true,
               id: droneId,
               name: droneName,
               path: parsed.resolvedPath,
-              entries: parsed.entries,
+              entries,
             });
             return;
           } catch (e: any) {
@@ -286,6 +303,10 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           '  mtime=$(stat -c %Y -- "$p" 2>/dev/null || echo 0)',
           '  printf "%s\t%s\t%s\t%s\n" "$name" "$kind" "$size" "$mtime"',
           'done',
+          'if command -v git >/dev/null 2>&1 && git -C "$resolved" rev-parse --is-inside-work-tree >/dev/null 2>&1; then',
+          `  printf "${FS_GIT_IGNORED_PATHS_MARKER}\\n"`,
+          '  find "$resolved" -mindepth 1 -maxdepth 1 -print0 2>/dev/null | git -C "$resolved" check-ignore -z --stdin 2>/dev/null || true',
+          'fi',
         ].join('\n');
 
         try {

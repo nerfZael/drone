@@ -9,13 +9,13 @@ const dvm = createDvmApi();
 export async function run(
   cmd: string,
   args: string[],
-  opts?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }
+  opts?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; input?: string | Buffer }
 ): Promise<RunResult> {
   return await new Promise<RunResult>((resolve) => {
     const child = spawn(cmd, args, {
       cwd: opts?.cwd,
       env: opts?.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [opts?.input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
 
     let stdout = '';
@@ -30,8 +30,12 @@ export async function run(
       resolve(res);
     };
 
-    child.stdout.on('data', (d) => (stdout += d.toString('utf8')));
-    child.stderr.on('data', (d) => (stderr += d.toString('utf8')));
+    child.stdout!.on('data', (d) => (stdout += d.toString('utf8')));
+    child.stderr!.on('data', (d) => (stderr += d.toString('utf8')));
+    child.stdin?.on('error', () => {
+      // The process may exit before consuming all optional input.
+    });
+    if (opts?.input != null) child.stdin?.end(opts.input);
     child.on('error', (err: any) => {
       finish({ code: 127, stdout, stderr: `${stderr}${err?.message ?? String(err)}` });
     });
