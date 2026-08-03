@@ -52,6 +52,7 @@ const DEFAULT_NEW_TOOL_PANEL_WIDTH = 720;
 const DEFAULT_NEW_TOOL_PANEL_HEIGHT = 320;
 const NEW_TOOL_PANEL_MIN_WIDTH = 360;
 const NEW_TOOL_PANEL_MAX_WIDTH = 1200;
+const EDITOR_PANEL_MIN_WIDTH = 480;
 const PANE_HEADER_MODE_STORAGE_KEY = profileStorageKey('droneHub.workspacePaneHeaderMode');
 const LEGACY_LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.workspaceLayout.global');
 const PREVIEW_HOST_SELECTOR = '[data-dockview-preview-host="1"]';
@@ -185,6 +186,9 @@ function ensurePanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePan
     (canonicalTab === 'editor' ? api.getPanel(toolPanelId('files')) : undefined);
   if (existing) {
     existing.api.setTitle(RIGHT_PANEL_TAB_LABELS[canonicalTab]);
+    if (canonicalTab === 'editor') {
+      existing.api.setConstraints({ minimumWidth: EDITOR_PANEL_MIN_WIDTH });
+    }
     existing.api.setActive();
     return false;
   }
@@ -201,7 +205,7 @@ function ensurePanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePan
     },
     initialWidth,
     initialHeight: DEFAULT_NEW_TOOL_PANEL_HEIGHT,
-    minimumWidth: canonicalTab === 'editor' ? 480 : 260,
+    minimumWidth: canonicalTab === 'editor' ? EDITOR_PANEL_MIN_WIDTH : 260,
     minimumHeight: 180,
   });
   return true;
@@ -233,7 +237,9 @@ function migrateLegacyEditorPanel(api: DockviewApi): void {
   const editorPanel = api.getPanel(toolPanelId('editor'));
   const filesPanel = api.getPanel(toolPanelId('files'));
   if (editorPanel && filesPanel) filesPanel.api.close();
-  (editorPanel ?? filesPanel)?.api.setTitle(RIGHT_PANEL_TAB_LABELS.editor);
+  const unifiedEditorPanel = editorPanel ?? filesPanel;
+  unifiedEditorPanel?.api.setTitle(RIGHT_PANEL_TAB_LABELS.editor);
+  unifiedEditorPanel?.api.setConstraints({ minimumWidth: EDITOR_PANEL_MIN_WIDTH });
 }
 
 function createDefaultLayout(

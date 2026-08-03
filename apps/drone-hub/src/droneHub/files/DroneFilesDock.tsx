@@ -15,6 +15,7 @@ import type { DroneOpenedFileState } from './opened-file-types';
 import { FileTypeIcon } from './FileTypeIcon';
 import { InlineExplorerNameInput } from './InlineExplorerNameInput';
 import {
+  fileExtensionLower,
   isPathInsideOrEqual,
   movedPathForEntry,
   parentFsPath,
@@ -498,7 +499,7 @@ export function DroneFilesDock({
             kind: 'file',
             size: 0,
             mtimeMs: null,
-            ext: value.includes('.') ? value.slice(value.lastIndexOf('.')).toLowerCase() : null,
+            ext: fileExtensionLower(value),
             isImage: false,
             isVideo: false,
           });
@@ -891,6 +892,7 @@ export function DroneFilesDock({
         return (
           <div
             key={`dir:${node.path}`}
+            role="none"
             data-file-explorer-directory={node.path}
             className="flex flex-col"
           >
@@ -950,6 +952,7 @@ export function DroneFilesDock({
             </div>
             {open ? (
               <div
+                role="group"
                 className="dh-file-explorer-directory-body ml-[11px] flex flex-col border-l"
                 data-file-explorer-guide-selected={hasSelectedDescendant ? 'true' : undefined}
               >
@@ -984,7 +987,7 @@ export function DroneFilesDock({
       const openable = entry.kind === 'file';
       const renaming = inlineNameMode === 'rename' && selectedOne?.path === entry.path;
       return (
-        <div key={`file:${entry.path}`} className="relative w-full">
+        <div key={`file:${entry.path}`} role="none" className="relative w-full">
           {renaming ? (
             <div
               role="treeitem"

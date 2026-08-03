@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { DroneFsEntry } from '../src/droneHub/types';
 import {
   allVisibleSelected,
+  fileExtensionLower,
   fileNameStemSelectionEnd,
   isPathInsideOrEqual,
   movedPathForEntry,
@@ -61,6 +62,13 @@ describe('file explorer state helpers', () => {
     expect(fileNameStemSelectionEnd('archive.tar.gz')).toBe(11);
     expect(fileNameStemSelectionEnd('.env')).toBe(4);
     expect(fileNameStemSelectionEnd('Makefile')).toBe(8);
+  });
+
+  test('derives new file extensions in the same shape as filesystem entries', () => {
+    expect(fileExtensionLower('README.md')).toBe('md');
+    expect(fileExtensionLower('archive.tar.GZ')).toBe('gz');
+    expect(fileExtensionLower('.env')).toBeNull();
+    expect(fileExtensionLower('README.')).toBeNull();
   });
 
   test('collapses nested selections before filesystem actions', () => {

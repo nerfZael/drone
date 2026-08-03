@@ -32,14 +32,14 @@ export async function run(
 
     child.stdout!.on('data', (d) => (stdout += d.toString('utf8')));
     child.stderr!.on('data', (d) => (stderr += d.toString('utf8')));
-    child.stdin?.on('error', () => {
-      // The process may exit before consuming all optional input.
-    });
-    if (opts?.input != null) child.stdin?.end(opts.input);
     child.on('error', (err: any) => {
       finish({ code: 127, stdout, stderr: `${stderr}${err?.message ?? String(err)}` });
     });
     child.on('close', (code) => finish({ code: code ?? 1, stdout, stderr }));
+    child.stdin?.on('error', () => {
+      // The process may exit before consuming all optional input.
+    });
+    if (opts?.input != null) child.stdin?.end(opts.input);
 
     const timeoutMs =
       typeof opts?.timeoutMs === 'number' && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0

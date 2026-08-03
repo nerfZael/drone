@@ -81,8 +81,7 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
     if (!hasExplorerDragPayload(event)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
-    const rect = event.currentTarget.getBoundingClientRect();
-    setDropSide(event.clientX < rect.left + rect.width / 2 ? 'left' : 'right');
+    setDropSide(explorerSideForPointer(event.currentTarget, event.clientX));
   }, []);
 
   const finishExplorerDrag = React.useCallback(() => {
@@ -94,10 +93,11 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
     (event: React.DragEvent<HTMLDivElement>) => {
       if (!hasExplorerDragPayload(event)) return;
       event.preventDefault();
-      if (dropSide) updateLayout({ ...layout, side: dropSide });
+      const side = explorerSideForPointer(event.currentTarget, event.clientX);
+      updateLayout({ ...layout, side });
       finishExplorerDrag();
     },
-    [dropSide, finishExplorerDrag, layout, updateLayout],
+    [finishExplorerDrag, layout, updateLayout],
   );
 
   const moveExplorer = React.useCallback(() => {
@@ -110,7 +110,9 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
       event.preventDefault();
       const separatorDirection = event.key === 'ArrowRight' ? 1 : -1;
       const widthDirection = layout.side === 'left' ? separatorDirection : -separatorDirection;
-      updateLayout({ ...layout, width: layout.width + widthDirection * 12 });
+      const containerWidth = rootRef.current?.getBoundingClientRect().width;
+      const width = clampExplorerWidth(layout.width + widthDirection * 12, containerWidth);
+      updateLayout({ ...layout, width });
     },
     [layout, updateLayout],
   );
@@ -157,6 +159,7 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
       onPointerMove={handleResizeMove}
       onPointerUp={finishResize}
       onPointerCancel={finishResize}
+      onLostPointerCapture={finishResize}
       onKeyDown={handleResizeKeyDown}
       onDoubleClick={() => updateLayout({ ...layout, width: DEFAULT_EXPLORER_WIDTH })}
       title="Drag to resize; double-click to reset"
@@ -192,6 +195,11 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
 
 function hasExplorerDragPayload(event: React.DragEvent<HTMLElement>): boolean {
   return Array.from(event.dataTransfer.types ?? []).includes(EXPLORER_DRAG_TYPE);
+}
+
+function explorerSideForPointer(element: HTMLElement, clientX: number): ExplorerSide {
+  const rect = element.getBoundingClientRect();
+  return clientX < rect.left + rect.width / 2 ? 'left' : 'right';
 }
 
 function clampExplorerWidth(width: number, containerWidth = Number.POSITIVE_INFINITY): number {

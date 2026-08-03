@@ -51,6 +51,13 @@ export function fileNameStemSelectionEnd(nameRaw: string): number {
   return extensionIndex > 0 ? extensionIndex : name.length;
 }
 
+export function fileExtensionLower(nameRaw: string): string | null {
+  const name = String(nameRaw ?? '').trim().toLowerCase();
+  const extensionIndex = name.lastIndexOf('.');
+  if (extensionIndex <= 0 || extensionIndex === name.length - 1) return null;
+  return name.slice(extensionIndex + 1);
+}
+
 export function setAllVisibleSelected(
   entries: DroneFsEntry[],
   selectedPaths: ReadonlySet<string>,
