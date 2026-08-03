@@ -20,7 +20,7 @@ type QuickOpenModalProps = {
   error: string | null;
   onQueryChange: (next: string) => void;
   onClose: () => void;
-  onOpenFile: (next: { path: string; name: string }) => void;
+  onOpenFile: (next: { path: string; name: string; line: number | null; column: number | null }) => void;
 };
 
 function itemDetailText(item: QuickOpenItem): string {
@@ -44,6 +44,7 @@ export function QuickOpenModal({
   onOpenFile,
 }: QuickOpenModalProps) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const listRef = React.useRef<HTMLDivElement | null>(null);
   const [activeIndex, setActiveIndex] = React.useState(0);
   const items = React.useMemo(
     () => buildQuickOpenItems({ query, recentFiles, searchFiles: files, limit: 80 }),
@@ -63,11 +64,22 @@ export function QuickOpenModal({
     setActiveIndex((current) => Math.min(Math.max(0, current), Math.max(0, items.length - 1)));
   }, [items.length]);
 
+  React.useEffect(() => {
+    if (open) setActiveIndex(0);
+  }, [open, query]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-quick-open-index="${activeIndex}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, open]);
+
   if (!open) return null;
 
   const openItem = (item: QuickOpenItem | undefined) => {
     if (!item) return;
-    onOpenFile(quickOpenSelectionToOpenTarget(item));
+    onOpenFile(quickOpenSelectionToOpenTarget(item, query));
   };
   const trimmedQuery = query.trim();
   const searchingEnabled = trimmedQuery.length >= QUICK_OPEN_SEARCH_MIN_QUERY_LENGTH;
@@ -103,12 +115,18 @@ export function QuickOpenModal({
               }
               if (event.key === 'ArrowDown') {
                 event.preventDefault();
-                setActiveIndex((current) => (items.length > 0 ? Math.min(items.length - 1, current + 1) : 0));
+                setActiveIndex((current) => (items.length > 0 ? (current + 1) % items.length : 0));
                 return;
               }
               if (event.key === 'ArrowUp') {
                 event.preventDefault();
-                setActiveIndex((current) => Math.max(0, current - 1));
+                setActiveIndex((current) => (items.length > 0 ? (current - 1 + items.length) % items.length : 0));
+                return;
+              }
+              if (event.key === 'PageDown' || event.key === 'PageUp') {
+                event.preventDefault();
+                const direction = event.key === 'PageDown' ? 1 : -1;
+                setActiveIndex((current) => Math.min(Math.max(0, current + direction * 10), Math.max(0, items.length - 1)));
                 return;
               }
               if (event.key === 'Enter') {
@@ -116,17 +134,31 @@ export function QuickOpenModal({
                 openItem(items[activeIndex]);
               }
             }}
-            placeholder="Search files by path"
+            placeholder="Search files by name (append : to go to line)"
             className="h-9 w-full rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-3 font-mono text-[var(--text-13)] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
             spellCheck={false}
+            role="combobox"
+            aria-expanded="true"
+            aria-autocomplete="list"
+            aria-controls="quick-open-results"
+            aria-activedescendant={items[activeIndex] ? `quick-open-result-${activeIndex}` : undefined}
           />
         </div>
-        <div className="min-h-0 overflow-y-auto py-1">
+        <div ref={listRef} id="quick-open-results" role="listbox" aria-label="Matching files" className="min-h-0 overflow-y-auto py-1">
+          {!trimmedQuery && items.length > 0 ? (
+            <div className="px-3 pb-1 pt-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+              Recently opened
+            </div>
+          ) : null}
           {items.map((item, index) => {
             const active = index === activeIndex;
             return (
               <button
                 key={`${item.source}:${item.path}`}
+                id={`quick-open-result-${index}`}
+                data-quick-open-index={index}
+                role="option"
+                aria-selected={active}
                 type="button"
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => openItem(item)}

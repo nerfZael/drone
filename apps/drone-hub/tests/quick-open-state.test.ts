@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildQuickOpenItems,
+  parseQuickOpenQuery,
   quickOpenSelectionToOpenTarget,
   remapRecentQuickOpenFilesForPathChange,
   removeRecentQuickOpenFilesForPaths,
@@ -44,7 +45,43 @@ describe('quick open state', () => {
     expect(quickOpenSelectionToOpenTarget(item!)).toEqual({
       path: '/work/repo/src/main.ts',
       name: 'main.ts',
+      line: null,
+      column: null,
     });
+  });
+
+  test('fuzzy-matches filename characters and ranks filename matches ahead of path-only matches', () => {
+    const searchFiles: QuickOpenFile[] = [
+      { path: '/work/repo/sidebar/drone/tree/list.ts', name: 'list.ts', relativePath: 'sidebar/drone/tree/list.ts', size: null, mtimeMs: null },
+      { path: '/work/repo/src/SidebarDroneTreeList.tsx', name: 'SidebarDroneTreeList.tsx', relativePath: 'src/SidebarDroneTreeList.tsx', size: null, mtimeMs: null },
+      { path: '/work/repo/src/unrelated.ts', name: 'unrelated.ts', relativePath: 'src/unrelated.ts', size: null, mtimeMs: null },
+    ];
+
+    const items = buildQuickOpenItems({ query: 'sdtl', recentFiles: [], searchFiles });
+
+    expect(items.map((item) => item.relativePath)).toEqual([
+      'src/SidebarDroneTreeList.tsx',
+      'sidebar/drone/tree/list.ts',
+    ]);
+  });
+
+  test('parses VS Code-style line and column suffixes into the open target', () => {
+    expect(parseQuickOpenQuery('src/main.ts:42:7')).toEqual({
+      searchTerm: 'src/main.ts',
+      line: 42,
+      column: 7,
+    });
+    expect(parseQuickOpenQuery('src/main.ts:')).toEqual({
+      searchTerm: 'src/main.ts',
+      line: null,
+      column: null,
+    });
+    const [item] = buildQuickOpenItems({
+      query: 'main:42:7',
+      recentFiles: [],
+      searchFiles: [{ path: '/work/repo/src/main.ts', name: 'main.ts', relativePath: 'src/main.ts', size: null, mtimeMs: null }],
+    });
+    expect(quickOpenSelectionToOpenTarget(item!, 'main:42:7')).toMatchObject({ line: 42, column: 7 });
   });
 
   test('remaps recent files under renamed or moved paths', () => {
