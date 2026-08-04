@@ -287,6 +287,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSelectedGroupMultiChat,
     setGroupBroadcastExpanded,
     setSelectedChat,
+    rememberRepoChatSelection,
     setDraftChat,
     setSidebarCollapsed,
     setReposModalOpen,
@@ -1570,9 +1571,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedDrone,
     selectedDroneIds,
     selectedChat,
+    activeRepoPath,
     homeOpen,
     draftChat,
     droneById,
+    dronesReady: !dronesLoading && !dronesError,
     dronesFilteredByRepoIdSet,
     visibleDronesFilteredByRepo: sidebarDronesFilteredByRepo,
     retainedDroneIds: pinnedDroneIds,
@@ -1682,6 +1685,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
 
   const currentDrone = selectedDrone ? (droneById[selectedDrone] ?? null) : null;
+  React.useEffect(() => {
+    if (!currentDrone) return;
+    const repoPath = String(currentDrone.repoPath ?? '').trim();
+    const droneId = String(currentDrone.id ?? '').trim();
+    if (!repoPath || !droneId) return;
+    rememberRepoChatSelection(repoPath, droneId, selectedChat);
+  }, [currentDrone, rememberRepoChatSelection, selectedChat]);
   const currentDroneLabel = currentDrone ? uiDroneName(currentDrone.name) : '';
   const [droneDropActionModal, setDroneDropActionModal] =
     React.useState<DroneDropActionModalState | null>(null);

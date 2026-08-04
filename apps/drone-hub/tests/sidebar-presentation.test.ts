@@ -61,6 +61,19 @@ describe('sidebar presentation', () => {
     );
   });
 
+  test('opens a repository back into its remembered chat workspace', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(sidebarSource).toContain("setAppView('workspace');");
+    expect(sidebarSource).toContain('setHomeOpen(false);');
+    expect(sidebarSource).toContain('setDraftChat(null);');
+    expect(sidebarSource).toContain('setSelectedGroupMultiChat(null);');
+    expect(sidebarSource).toContain('setActiveRepoPath(item.repoPath);');
+  });
+
   test('uses the wider desktop sidebar for both the shell and dock preview', () => {
     const sidebarSource = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),

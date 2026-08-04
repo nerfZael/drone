@@ -27,9 +27,11 @@ type UseDroneSelectionStateArgs = {
   selectedDrone: string | null;
   selectedDroneIds: string[];
   selectedChat: string;
+  activeRepoPath: string;
   homeOpen: boolean;
   draftChat: { prompt: unknown | null } | null;
   droneById: Record<string, DroneSummary>;
+  dronesReady: boolean;
   dronesFilteredByRepoIdSet: Set<string>;
   visibleDronesFilteredByRepo: DroneSummary[];
   retainedDroneIds: readonly string[];
@@ -56,9 +58,11 @@ export function useDroneSelectionState({
   selectedDrone,
   selectedDroneIds,
   selectedChat,
+  activeRepoPath,
   homeOpen,
   draftChat,
   droneById,
+  dronesReady,
   dronesFilteredByRepoIdSet,
   visibleDronesFilteredByRepo,
   retainedDroneIds,
@@ -80,7 +84,15 @@ export function useDroneSelectionState({
   setSelectedChat,
 }: UseDroneSelectionStateArgs) {
   const lastSelectedChatByDroneRef = React.useRef<Record<string, string>>({});
-  const pendingSelectedChatUntilByDroneRef = React.useRef<Record<string, number>>({});
+  const pendingSelectedChatByDroneRef = React.useRef<
+    Record<string, { chatName: string; untilMs: number }>
+  >({});
+  const previousActiveRepoPathRef = React.useRef(String(activeRepoPath ?? '').trim());
+  const pendingActiveRepoPathRef = React.useRef<string | null>(null);
+  const normalizedActiveRepoPath = String(activeRepoPath ?? '').trim();
+  const activeRepoPathChanged = previousActiveRepoPathRef.current !== normalizedActiveRepoPath;
+  const activeRepoSelectionPending =
+    activeRepoPathChanged || pendingActiveRepoPathRef.current === normalizedActiveRepoPath;
   const manualEmptySelectionRef = React.useRef(false);
   const retainedDroneIdSet = React.useMemo(
     () =>
@@ -117,13 +129,22 @@ export function useDroneSelectionState({
   );
 
   React.useEffect(() => {
+    if (previousActiveRepoPathRef.current !== normalizedActiveRepoPath) {
+      pendingActiveRepoPathRef.current = normalizedActiveRepoPath;
+    }
+    previousActiveRepoPathRef.current = normalizedActiveRepoPath;
+  }, [normalizedActiveRepoPath]);
+
+  React.useEffect(() => {
+    if (!dronesReady) return;
     const droneId = String(selectedDrone ?? '').trim();
     const chatName = String(selectedChat ?? '').trim() || 'default';
     if (!droneId) return;
     lastSelectedChatByDroneRef.current[droneId] = chatName;
-  }, [selectedChat, selectedDrone]);
+  }, [dronesReady, selectedChat, selectedDrone]);
 
   React.useEffect(() => {
+    if (!dronesReady) return;
     const droneId = String(selectedDrone ?? '').trim();
     const chatName = String(selectedChat ?? '').trim() || 'default';
     if (!droneId) return;
@@ -133,11 +154,16 @@ export function useDroneSelectionState({
       ...(drone?.workflowChats ?? []),
     ];
     if (chatName !== 'default' && !chats.includes(chatName)) {
-      pendingSelectedChatUntilByDroneRef.current[droneId] = Date.now() + PENDING_SELECTED_CHAT_GRACE_MS;
+      if (pendingSelectedChatByDroneRef.current[droneId]?.chatName !== chatName) {
+        pendingSelectedChatByDroneRef.current[droneId] = {
+          chatName,
+          untilMs: Date.now() + PENDING_SELECTED_CHAT_GRACE_MS,
+        };
+      }
       return;
     }
-    delete pendingSelectedChatUntilByDroneRef.current[droneId];
-  }, [droneById, selectedChat, selectedDrone]);
+    delete pendingSelectedChatByDroneRef.current[droneId];
+  }, [droneById, dronesReady, selectedChat, selectedDrone]);
 
   const selectDroneCard = React.useCallback(
     (droneIdRaw: string, opts?: DroneSelectionClickOptions) => {
@@ -247,6 +273,7 @@ export function useDroneSelectionState({
   );
 
   React.useEffect(() => {
+    if (!dronesReady) return;
     const valid = new Set(visibleDronesFilteredByRepo.map((d) => d.id));
     for (const droneId of retainedDroneIdSet) valid.add(droneId);
     for (const drone of Object.values(droneById)) {
@@ -260,10 +287,11 @@ export function useDroneSelectionState({
       if (next.length === prev.length && next.every((id, idx) => id === prev[idx])) return prev;
       return next;
     });
-  }, [droneById, retainedDroneIdSet, selectedDrone, setSelectedDroneIds, visibleDronesFilteredByRepo]);
+  }, [droneById, dronesReady, retainedDroneIdSet, selectedDrone, setSelectedDroneIds, visibleDronesFilteredByRepo]);
 
   // Auto-select first drone (and recover from deletions).
   React.useEffect(() => {
+    if (!dronesReady) return;
     if (homeOpen) {
       clearSelectedDroneState();
       return;
@@ -274,17 +302,27 @@ export function useDroneSelectionState({
       }
       return;
     }
+    const selectedDroneRecord = selectedDrone ? droneById[selectedDrone] : null;
+    const selectedDroneMatchesActiveRepo = Boolean(
+      selectedDroneRecord &&
+        (!normalizedActiveRepoPath ||
+          String(selectedDroneRecord.repoPath ?? '').trim() === normalizedActiveRepoPath),
+    );
     const selectedExistsInRepo = Boolean(
       selectedDrone &&
         (dronesFilteredByRepoIdSet.has(selectedDrone) ||
-          retainedDroneIdSet.has(selectedDrone) ||
-          isWorkflowChildDrone(droneById[selectedDrone])),
+          (!activeRepoSelectionPending && retainedDroneIdSet.has(selectedDrone)) ||
+          (selectedDroneMatchesActiveRepo && isWorkflowChildDrone(selectedDroneRecord))),
     );
     if (visibleDronesFilteredByRepo.length === 0) {
-      if (selectedExistsInRepo) return;
+      if (selectedExistsInRepo) {
+        pendingActiveRepoPathRef.current = null;
+        return;
+      }
       clearSelectedDroneState();
       resetGroupDndState();
       setGroupMoveError(null);
+      pendingActiveRepoPathRef.current = null;
       return;
     }
     const preferred = preferredSelectedDroneRef.current;
@@ -297,6 +335,7 @@ export function useDroneSelectionState({
           setSelectedDroneIds((prev) => (prev.length === 1 && prev[0] === preferred ? prev : [preferred]));
           selectionAnchorRef.current = preferred;
           setSelectedChat(resolveChatForDrone(preferred));
+          pendingActiveRepoPathRef.current = null;
           return;
         }
         preferredSelectedDroneRef.current = null;
@@ -322,11 +361,15 @@ export function useDroneSelectionState({
       selectionAnchorRef.current = first;
       setSelectedChat(resolveChatForDrone(first));
     }
+    pendingActiveRepoPathRef.current = null;
   }, [
     clearSelectedDroneState,
+    activeRepoSelectionPending,
     draftChat,
     droneById,
+    dronesReady,
     homeOpen,
+    normalizedActiveRepoPath,
     dronesFilteredByRepoIdSet,
     visibleDronesFilteredByRepo,
     preferredSelectedDroneHoldUntilRef,
@@ -342,22 +385,31 @@ export function useDroneSelectionState({
 
   // Fall back if selected chat disappears.
   React.useEffect(() => {
+    if (!dronesReady) return;
     if (!selectedDrone) return;
     const d = droneById[selectedDrone] ?? null;
     const chats = [...(d?.chats ?? []), ...(d?.workflowChats ?? [])];
-    if (chats.length === 0) return;
     if (selectedChat && chats.includes(selectedChat)) return;
+    const fallbackChat = chats.includes('default') ? 'default' : chats[0] ?? 'default';
+    const pendingSelection = pendingSelectedChatByDroneRef.current[selectedDrone];
     if (
       shouldKeepPendingSelectedChat({
         selectedChat,
         availableChats: chats,
-        pendingUntilMs: pendingSelectedChatUntilByDroneRef.current[selectedDrone] ?? 0,
+        pendingUntilMs:
+          pendingSelection?.chatName === selectedChat ? pendingSelection.untilMs : 0,
       })
     ) {
-      return;
+      const pendingUntilMs = pendingSelection?.untilMs ?? 0;
+      const timer = setTimeout(() => {
+        setSelectedChat((current) =>
+          current === selectedChat ? fallbackChat : current,
+        );
+      }, Math.max(0, pendingUntilMs - Date.now()) + 1);
+      return () => clearTimeout(timer);
     }
-    setSelectedChat(chats.includes('default') ? 'default' : chats[0]);
-  }, [droneById, selectedDrone, selectedChat, setSelectedChat]);
+    if (selectedChat !== fallbackChat) setSelectedChat(fallbackChat);
+  }, [droneById, dronesReady, selectedDrone, selectedChat, setSelectedChat]);
 
   return { selectDroneCard, selectDroneChat, setDroneSelectionFromSidebarFolder };
 }

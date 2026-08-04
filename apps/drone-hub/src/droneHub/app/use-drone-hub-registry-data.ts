@@ -467,18 +467,20 @@ export function useDroneHubRegistryData({
   }, [activeRepoPath, groupsResp]);
 
   React.useEffect(() => {
+    if (reposLoading || reposError) return;
     if (!activeRepoPath) return;
     const exists = repos.some((r) => String(r?.path ?? '').trim() === activeRepoPath);
     if (!exists) setActiveRepoPath('');
-  }, [activeRepoPath, repos, setActiveRepoPath]);
+  }, [activeRepoPath, repos, reposError, reposLoading, setActiveRepoPath]);
 
   React.useEffect(() => {
+    if (reposLoading || reposError) return;
     setChatHeaderRepoPath((prev) => {
       const p = String(prev ?? '').trim();
       if (!p) return '';
       return registeredRepoPathSet.has(p) ? p : '';
     });
-  }, [registeredRepoPathSet, setChatHeaderRepoPath]);
+  }, [registeredRepoPathSet, reposError, reposLoading, setChatHeaderRepoPath]);
 
   const dronesFilteredByRepo = React.useMemo(() => {
     const targetRepo = String(activeRepoPath ?? '').trim();

@@ -46,6 +46,10 @@ type SpawnContextPreferences = {
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
 };
+export type RepoChatSelection = {
+  droneId: string;
+  chatName: string;
+};
 const CHAT_INPUT_DRAFT_MAX_CHARS = 300_000;
 const CHAT_INPUT_DRAFT_MAX_KEYS = 80;
 const CHAT_INPUT_DRAFTS_STORAGE_KEY = profileStorageKey('droneHub.chatInputDrafts');
@@ -92,6 +96,7 @@ type DroneHubUiState = {
   groupMultiChatColumnWidth: number;
   groupMultiChatStatusSort: boolean;
   selectedChat: string;
+  lastChatSelectionByRepoPath: Record<string, RepoChatSelection>;
   chatInputDrafts: Record<string, string>;
   draftChat: DraftChatState | null;
   sidebarCollapsed: boolean;
@@ -151,6 +156,7 @@ type DroneHubUiState = {
   setGroupMultiChatColumnWidth: (next: Updater<number>) => void;
   setGroupMultiChatStatusSort: (next: Updater<boolean>) => void;
   setSelectedChat: (next: Updater<string>) => void;
+  rememberRepoChatSelection: (repoPath: string, droneId: string, chatName: string) => void;
   setChatInputDraft: (draftKey: string, next: string) => void;
   setDraftChat: (next: Updater<DraftChatState | null>) => void;
   setSidebarCollapsed: (next: Updater<boolean>) => void;
@@ -292,6 +298,7 @@ type DroneHubUiPersistedState = Pick<
   | 'selectedDrone'
   | 'selectedDroneIds'
   | 'selectedChat'
+  | 'lastChatSelectionByRepoPath'
   | 'groupMultiChatColumnWidth'
   | 'groupMultiChatStatusSort'
   | 'outputView'
@@ -306,6 +313,81 @@ type DroneHubUiPersistedState = Pick<
   | 'customAgents'
   | 'shortcutBindings'
 >;
+
+export function normalizeLastChatSelectionByRepoPath(
+  value: unknown,
+): Record<string, RepoChatSelection> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, RepoChatSelection> = {};
+  for (const [repoPathRaw, selectionRaw] of Object.entries(value as Record<string, unknown>)) {
+    const repoPath = String(repoPathRaw ?? '').trim();
+    if (!repoPath || !selectionRaw || typeof selectionRaw !== 'object' || Array.isArray(selectionRaw)) {
+      continue;
+    }
+    const selection = selectionRaw as Partial<RepoChatSelection>;
+    const droneId = String(selection.droneId ?? '').trim();
+    if (!droneId) continue;
+    out[repoPath] = {
+      droneId,
+      chatName: String(selection.chatName ?? '').trim() || 'default',
+    };
+  }
+  return out;
+}
+
+function rememberRepoChatSelection(
+  current: Record<string, RepoChatSelection>,
+  repoPathRaw: unknown,
+  droneIdRaw: unknown,
+  chatNameRaw: unknown,
+): Record<string, RepoChatSelection> {
+  const repoPath = String(repoPathRaw ?? '').trim();
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!repoPath || !droneId) return current;
+  const chatName = String(chatNameRaw ?? '').trim() || 'default';
+  const previous = current[repoPath];
+  if (previous?.droneId === droneId && previous.chatName === chatName) return current;
+  return { ...current, [repoPath]: { droneId, chatName } };
+}
+
+export function resolveRepoChatSelectionTransition(
+  state: Pick<
+    DroneHubUiState,
+    | 'activeRepoPath'
+    | 'selectedDrone'
+    | 'selectedDroneIds'
+    | 'selectedChat'
+    | 'lastChatSelectionByRepoPath'
+  >,
+  nextRepoPathRaw: unknown,
+): Pick<
+  DroneHubUiState,
+  | 'activeRepoPath'
+  | 'selectedDrone'
+  | 'selectedDroneIds'
+  | 'selectedChat'
+  | 'lastChatSelectionByRepoPath'
+> {
+  const nextRepoPath = String(nextRepoPathRaw ?? '').trim();
+  const lastChatSelectionByRepoPath = state.lastChatSelectionByRepoPath;
+  if (!nextRepoPath) {
+    return {
+      activeRepoPath: '',
+      selectedDrone: state.selectedDrone,
+      selectedDroneIds: state.selectedDroneIds,
+      selectedChat: state.selectedChat,
+      lastChatSelectionByRepoPath,
+    };
+  }
+  const remembered = nextRepoPath ? lastChatSelectionByRepoPath[nextRepoPath] : null;
+  return {
+    activeRepoPath: nextRepoPath,
+    selectedDrone: remembered?.droneId ?? null,
+    selectedDroneIds: remembered ? [remembered.droneId] : [],
+    selectedChat: remembered?.chatName ?? 'default',
+    lastChatSelectionByRepoPath,
+  };
+}
 
 export function migrateDroneHubUiPersistedState(
   persistedState: unknown,
@@ -323,6 +405,22 @@ export function migrateDroneHubUiPersistedState(
     viewMode?: unknown;
   };
   const migrated = { ...persisted };
+  const normalizedLastChatSelections = normalizeLastChatSelectionByRepoPath(
+    (migrated as any).lastChatSelectionByRepoPath,
+  );
+  const legacyActiveRepoPath = String(migrated.activeRepoPath ?? '').trim();
+  const legacySelectedDrone = String(migrated.selectedDrone ?? '').trim();
+  if (
+    legacyActiveRepoPath &&
+    legacySelectedDrone &&
+    !normalizedLastChatSelections[legacyActiveRepoPath]
+  ) {
+    normalizedLastChatSelections[legacyActiveRepoPath] = {
+      droneId: legacySelectedDrone,
+      chatName: String(migrated.selectedChat ?? '').trim() || 'default',
+    };
+  }
+  migrated.lastChatSelectionByRepoPath = normalizedLastChatSelections;
   if (Object.prototype.hasOwnProperty.call(migrated, 'themeId')) {
     migrated.themeId = normalizeDesktopThemeId(migrated.themeId);
   }
@@ -347,18 +445,18 @@ export function migrateDroneHubUiPersistedState(
   const normalizedContexts = normalizeSpawnContextByRepoKey((migrated as any).spawnContextByRepoKey);
   if (Object.keys(normalizedContexts).length > 0) {
     migrated.spawnContextByRepoKey = normalizedContexts;
-    return migrated;
+  } else {
+    const legacySpawnDefaults = normalizeSpawnContextPreferences({
+      spawnAgentKey: migrated.spawnAgentKey,
+      spawnModel: migrated.spawnModel,
+      spawnReasoning: migrated.spawnReasoning,
+      repoBranchSource: migrated.repoBranchSource,
+      repoCreateRemoteBranch: migrated.repoCreateRemoteBranch,
+    });
+    migrated.spawnContextByRepoKey = {
+      [NO_REPO_SPAWN_CONTEXT_KEY]: legacySpawnDefaults,
+    };
   }
-  const legacySpawnDefaults = normalizeSpawnContextPreferences({
-    spawnAgentKey: migrated.spawnAgentKey,
-    spawnModel: migrated.spawnModel,
-    spawnReasoning: migrated.spawnReasoning,
-    repoBranchSource: migrated.repoBranchSource,
-    repoCreateRemoteBranch: migrated.repoCreateRemoteBranch,
-  });
-  migrated.spawnContextByRepoKey = {
-    [NO_REPO_SPAWN_CONTEXT_KEY]: legacySpawnDefaults,
-  };
   return migrated;
 }
 
@@ -645,6 +743,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       groupMultiChatColumnWidth: GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
       groupMultiChatStatusSort: false,
       selectedChat: 'default',
+      lastChatSelectionByRepoPath: {},
       chatInputDrafts: initialChatInputDrafts,
       draftChat: null,
       sidebarCollapsed: false,
@@ -676,7 +775,14 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       agentMenuOpen: false,
       setThemeId: (next) =>
         set((s) => ({ themeId: normalizeDesktopThemeId(resolveNext(s.themeId, next)) })),
-      setActiveRepoPath: (next) => set((s) => ({ activeRepoPath: resolveNext(s.activeRepoPath, next) })),
+      setActiveRepoPath: (next) =>
+        set((s) => {
+          const nextRepoPath = resolveNext(s.activeRepoPath, next);
+          if (String(nextRepoPath ?? '').trim() === String(s.activeRepoPath ?? '').trim()) {
+            return s;
+          }
+          return resolveRepoChatSelectionTransition(s, nextRepoPath);
+        }),
       setSettingsActiveTab: (next) => set((s) => ({ settingsActiveTab: resolveNext(s.settingsActiveTab, next) })),
       setChatHeaderRepoPath: (next) => set((s) => ({ chatHeaderRepoPath: resolveNext(s.chatHeaderRepoPath, next) })),
       setSidebarReposCollapsed: (next) => set((s) => ({ sidebarReposCollapsed: resolveNext(s.sidebarReposCollapsed, next) })),
@@ -739,7 +845,22 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({
           groupMultiChatStatusSort: resolveNext(s.groupMultiChatStatusSort, next),
         })),
-      setSelectedChat: (next) => set((s) => ({ selectedChat: resolveNext(s.selectedChat, next) })),
+      setSelectedChat: (next) =>
+        set((s) => ({
+          selectedChat: String(resolveNext(s.selectedChat, next) ?? '').trim() || 'default',
+        })),
+      rememberRepoChatSelection: (repoPath, droneId, chatName) =>
+        set((s) => {
+          const next = rememberRepoChatSelection(
+            s.lastChatSelectionByRepoPath,
+            repoPath,
+            droneId,
+            chatName,
+          );
+          return next === s.lastChatSelectionByRepoPath
+            ? s
+            : { lastChatSelectionByRepoPath: next };
+        }),
       setChatInputDraft: (draftKeyRaw, nextRaw) =>
         set((s) => {
           const draftKey = String(draftKeyRaw ?? '').trim();
@@ -910,7 +1031,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: profileStorageKey('droneHub.ui'),
-      version: 15,
+      version: 16,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState, version) => migrateDroneHubUiPersistedState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({
@@ -940,6 +1061,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         selectedDroneIds: state.selectedDroneIds,
         toDoDroneIds: state.toDoDroneIds,
         selectedChat: state.selectedChat,
+        lastChatSelectionByRepoPath: state.lastChatSelectionByRepoPath,
         groupMultiChatColumnWidth: state.groupMultiChatColumnWidth,
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
@@ -1019,6 +1141,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           selectedDroneIds: normalizeSidebarGroupOrder(persisted.selectedDroneIds),
           toDoDroneIds: normalizeSidebarGroupOrder(persisted.toDoDroneIds),
           selectedChat: normalizeTrimmedString(persisted.selectedChat) || currentState.selectedChat,
+          lastChatSelectionByRepoPath: normalizeLastChatSelectionByRepoPath(
+            persisted.lastChatSelectionByRepoPath ?? currentState.lastChatSelectionByRepoPath,
+          ),
           groupMultiChatColumnWidth: clampGroupMultiChatColumnWidthPx(
             Number(persisted.groupMultiChatColumnWidth ?? currentState.groupMultiChatColumnWidth),
           ),
@@ -1122,6 +1247,7 @@ export function useDroneHubAppModelUiState() {
       setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
       setGroupBroadcastExpanded: s.setGroupBroadcastExpanded,
       setSelectedChat: s.setSelectedChat,
+      rememberRepoChatSelection: s.rememberRepoChatSelection,
       setDraftChat: s.setDraftChat,
       setSidebarCollapsed: s.setSidebarCollapsed,
       setReposModalOpen: s.setReposModalOpen,
@@ -1202,6 +1328,8 @@ export function useDroneSidebarUiState() {
       setSelectedDrone: s.setSelectedDrone,
       setSelectedDroneIds: s.setSelectedDroneIds,
       setSelectedChat: s.setSelectedChat,
+      setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
+      setDraftChat: s.setDraftChat,
       setActiveRepoPath: s.setActiveRepoPath,
       setAutoDelete: s.setAutoDelete,
       setHomeOpen: s.setHomeOpen,

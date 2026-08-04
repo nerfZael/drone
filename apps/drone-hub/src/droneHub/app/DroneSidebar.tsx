@@ -1619,6 +1619,9 @@ export function DroneSidebar({
     setSelectedDrone,
     setSelectedDroneIds,
     setSelectedChat,
+    setSelectedGroupMultiChat,
+    setDraftChat,
+    setHomeOpen,
     setSidebarAutoMinimize,
     setShowRecentDronesOnly,
     setActiveRepoPath,
@@ -2308,9 +2311,19 @@ export function DroneSidebar({
     (item: (typeof repositoryNavigationItems)[number]) => {
       setRepositoryOverviewOpen(false);
       setActiveSidebarRepoId(item.id);
+      setAppView('workspace');
+      setHomeOpen(false);
+      setDraftChat(null);
+      setSelectedGroupMultiChat(null);
       setActiveRepoPath(item.repoPath);
     },
-    [setActiveRepoPath],
+    [
+      setActiveRepoPath,
+      setAppView,
+      setDraftChat,
+      setHomeOpen,
+      setSelectedGroupMultiChat,
+    ],
   );
   const selectPinnedDroneCard = React.useCallback(
     (drone: DroneSummary, opts?: DroneSelectionClickOptions) => {

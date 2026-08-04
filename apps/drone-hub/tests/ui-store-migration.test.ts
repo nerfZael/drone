@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
   migrateDroneHubUiPersistedState,
+  normalizeLastChatSelectionByRepoPath,
   normalizeSpawnContextByRepoKey,
+  resolveRepoChatSelectionTransition,
   resolveSpawnContextPreferencesForRepo,
 } from '../src/droneHub/app/use-drone-hub-ui-store';
 import { restoreUiPreferencesFromPersistedStorage } from '../src/droneHub/app/use-ui-preferences-settings';
@@ -45,6 +47,104 @@ describe('drone hub ui store migration', () => {
   test('returns an empty object for invalid persisted payloads', () => {
     expect(migrateDroneHubUiPersistedState(null, 5)).toEqual({});
     expect(migrateDroneHubUiPersistedState('invalid', 5)).toEqual({});
+  });
+
+  test('migrates the existing active chat into repo-scoped selection history', () => {
+    const migrated = migrateDroneHubUiPersistedState(
+      {
+        activeRepoPath: '/work/repo-a',
+        selectedDrone: 'drone-a',
+        selectedChat: 'implementation',
+      },
+      15,
+    );
+
+    expect(migrated.lastChatSelectionByRepoPath).toEqual({
+      '/work/repo-a': { droneId: 'drone-a', chatName: 'implementation' },
+    });
+  });
+
+  test('normalizes persisted repo chat selections and drops malformed entries', () => {
+    expect(
+      normalizeLastChatSelectionByRepoPath({
+        ' /work/repo-a ': { droneId: ' drone-a ', chatName: ' planning ' },
+        '/work/repo-b': { droneId: 'drone-b', chatName: '' },
+        '/work/missing-drone': { chatName: 'default' },
+        '': { droneId: 'ignored', chatName: 'default' },
+      }),
+    ).toEqual({
+      '/work/repo-a': { droneId: 'drone-a', chatName: 'planning' },
+      '/work/repo-b': { droneId: 'drone-b', chatName: 'default' },
+    });
+  });
+
+  test('restores the incoming repo chat without rewriting another repo history', () => {
+    expect(
+      resolveRepoChatSelectionTransition(
+        {
+          activeRepoPath: '/work/repo-a',
+          selectedDrone: 'drone-a',
+          selectedDroneIds: ['drone-a'],
+          selectedChat: 'implementation',
+          lastChatSelectionByRepoPath: {
+            '/work/repo-a': { droneId: 'drone-a', chatName: 'planning' },
+            '/work/repo-b': { droneId: 'drone-b', chatName: 'review' },
+          },
+        },
+        '/work/repo-b',
+      ),
+    ).toEqual({
+      activeRepoPath: '/work/repo-b',
+      selectedDrone: 'drone-b',
+      selectedDroneIds: ['drone-b'],
+      selectedChat: 'review',
+      lastChatSelectionByRepoPath: {
+        '/work/repo-a': { droneId: 'drone-a', chatName: 'planning' },
+        '/work/repo-b': { droneId: 'drone-b', chatName: 'review' },
+      },
+    });
+  });
+
+  test('starts with an empty selection for a repo without chat history', () => {
+    expect(
+      resolveRepoChatSelectionTransition(
+        {
+          activeRepoPath: '/work/repo-a',
+          selectedDrone: 'drone-a',
+          selectedDroneIds: ['drone-a'],
+          selectedChat: 'default',
+          lastChatSelectionByRepoPath: {},
+        },
+        '/work/repo-b',
+      ),
+    ).toMatchObject({
+      activeRepoPath: '/work/repo-b',
+      selectedDrone: null,
+      selectedDroneIds: [],
+      selectedChat: 'default',
+    });
+  });
+
+  test('keeps the current chat selected when opening the repository overview', () => {
+    expect(
+      resolveRepoChatSelectionTransition(
+        {
+          activeRepoPath: '/work/repo-a',
+          selectedDrone: 'drone-a',
+          selectedDroneIds: ['drone-a', 'drone-b'],
+          selectedChat: 'implementation',
+          lastChatSelectionByRepoPath: {
+            '/work/repo-a': { droneId: 'drone-a', chatName: 'implementation' },
+          },
+        },
+        '',
+      ),
+    ).toMatchObject({
+      activeRepoPath: '',
+      selectedDrone: 'drone-a',
+      selectedDroneIds: ['drone-a', 'drone-b'],
+      selectedChat: 'implementation',
+    });
   });
 
   test('normalizes invalid persisted sidebar dock sides to left', () => {
