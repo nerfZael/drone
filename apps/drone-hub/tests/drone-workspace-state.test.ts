@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { profileStorageKey } from '../src/profile-storage';
 import { openFileTab, updateFileTabContent } from '../src/droneHub/app/opened-file-tabs';
 import {
   openedFileTabsStateForDrone,
@@ -34,7 +35,15 @@ const {
   WHITEBOARD_ACTIVE_STORAGE_KEY,
   writeActiveWhiteboardId,
 } = await import('../src/droneHub/whiteboard/whiteboard-events');
-const { restoreRequiredWorkspacePanels } = await import('../src/droneHub/app/DockableDroneWorkspace');
+const { ensureWorkspaceToolPanel, restoreRequiredWorkspacePanels } = await import('../src/droneHub/app/DockableDroneWorkspace');
+const {
+  readWorkspaceExplorerWidth,
+  readWorkspaceExplorerZoom,
+  WORKSPACE_EXPLORER_WIDTH_STORAGE_KEY,
+  WORKSPACE_EXPLORER_ZOOM_STORAGE_KEY,
+  writeWorkspaceExplorerWidth,
+  writeWorkspaceExplorerZoom,
+} = await import('../src/droneHub/app/workspace-explorer-preferences');
 
 function readAppSource(relativePath: string): string {
   return fs.readFileSync(path.join(import.meta.dir, '../src/droneHub', relativePath), 'utf8');
@@ -72,15 +81,81 @@ describe('per-drone workspace state', () => {
     expect(selectedWorkspace).toContain('key={currentDrone.id}');
   });
 
-  test('keeps one globally positioned File Explorer inside the Editor', () => {
+  test('uses the same File Explorer chrome and preferences in Editor and Changes', () => {
     const editorWorkspace = readAppSource('app/DroneEditorWorkspace.tsx');
+    const changesDock = readAppSource('changes/DroneChangesDock.tsx');
+    const rightPanel = readAppSource('app/RightPanelTabContent.tsx');
     const appConfig = readAppSource('app/app-config.ts');
 
     expect(editorWorkspace).toContain("profileStorageKey('droneHub.editorExplorerLayout')");
-    expect(editorWorkspace).toContain('DEFAULT_EXPLORER_WIDTH = 240');
-    expect(editorWorkspace).not.toContain('>File Explorer<');
+    expect(editorWorkspace).toContain('<WorkspaceExplorerHeader');
+    expect(changesDock).toContain('<WorkspaceExplorerHeader');
+    expect(rightPanel).toContain('zoom={explorerZoom}');
     expect(editorWorkspace).toContain('aria-label="File Explorer"');
     expect(appConfig).toContain("if (raw === 'files') return 'editor'");
+  });
+
+  test('shares explorer width and zoom through one preference pair', () => {
+    writeWorkspaceExplorerWidth(376);
+    writeWorkspaceExplorerZoom(1.2);
+
+    expect(readWorkspaceExplorerWidth()).toBe(376);
+    expect(readWorkspaceExplorerZoom()).toBe(1.2);
+    expect(storage.getItem(WORKSPACE_EXPLORER_WIDTH_STORAGE_KEY)).toBe('376');
+    expect(storage.getItem(WORKSPACE_EXPLORER_ZOOM_STORAGE_KEY)).toBe('1.2');
+  });
+
+  test('migrates the previous Changes explorer preferences into the shared model', () => {
+    storage.setItem(profileStorageKey('droneHub.changesExplorerWidthPx'), '412');
+    storage.setItem(profileStorageKey('droneHub.changesExplorerZoom'), '0.9');
+
+    expect(readWorkspaceExplorerWidth()).toBe(412);
+    expect(readWorkspaceExplorerZoom()).toBe(0.9);
+  });
+
+  test('switches Editor and Changes inside the same Dockview panel', () => {
+    let params = { tab: 'editor', paneKey: 'bottom' };
+    let title = 'Editor';
+    let minimumWidth = 0;
+    let active = false;
+    const panel = {
+      id: 'tool:editor',
+      api: {
+        getParameters: () => params,
+        updateParameters: (next: typeof params) => {
+          params = next;
+        },
+        setTitle: (next: string) => {
+          title = next;
+        },
+        setConstraints: (next: { minimumWidth?: number }) => {
+          minimumWidth = next.minimumWidth ?? 0;
+        },
+        setActive: () => {
+          active = true;
+        },
+      },
+    };
+    const addedPanels: unknown[] = [];
+    const api = {
+      panels: [panel],
+      getPanel: () => undefined,
+      addPanel: (next: unknown) => addedPanels.push(next),
+    };
+
+    const added = ensureWorkspaceToolPanel(
+      api as unknown as Parameters<typeof ensureWorkspaceToolPanel>[0],
+      'changes',
+      'single',
+    );
+
+    expect(added).toBe(false);
+    expect(addedPanels).toHaveLength(0);
+    expect(params.tab).toBe('changes');
+    expect(params.paneKey).toBe('bottom');
+    expect(title).toBe('Changes');
+    expect(minimumWidth).toBe(480);
+    expect(active).toBe(true);
   });
 
   test('repairs an empty saved chat group and restores chat beside the editor', () => {

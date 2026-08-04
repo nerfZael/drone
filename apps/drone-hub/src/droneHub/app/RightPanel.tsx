@@ -173,7 +173,7 @@ export function RightPanel({
     <aside
       ref={asideRef}
       aria-hidden={!visible}
-      className={`relative bg-[var(--panel-alt)] flex flex-col min-h-0 overflow-hidden transition-[width,border-color] ${
+      className={`dh-utility-panel relative bg-[var(--panel-alt)] flex flex-col min-h-0 overflow-hidden transition-[width,border-color] ${
         visible ? 'flex-shrink-0 border-l border-[var(--border)]' : 'flex-shrink-0 border-l border-transparent pointer-events-none'
       }`}
       style={rightPanelStyle}

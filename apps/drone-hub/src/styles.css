@@ -30,6 +30,7 @@
 
   --border: #3b4557;
   --border-subtle: #293241;
+  --tree-guide: #293241;
   --chrome-muted: var(--muted-dim);
   --header-control-fg: #949daf;
   --field-bg: rgba(0, 0, 0, .18);
@@ -117,6 +118,19 @@
   --surface-inset-faint: rgba(0, 0, 0, .09);
   --surface-inset: rgba(0, 0, 0, .14);
   --surface-inset-strong: rgba(0, 0, 0, .24);
+  /* Dense tool panes need a firmer hierarchy than conversational surfaces. */
+  --utility-panel-bg: #11161e;
+  --utility-panel-chrome: #171d27;
+  --utility-panel-inset: #171d27;
+  --utility-panel-card: #171e28;
+  --utility-panel-card-strong: #202936;
+  --utility-panel-hover: #232d3a;
+  --utility-panel-selected: #2a3545;
+  --utility-panel-border: #465267;
+  --utility-panel-border-subtle: #323d4d;
+  --utility-panel-fg: #edf1f7;
+  --utility-panel-fg-secondary: #d2d8e3;
+  --utility-panel-muted: #adb6c7;
   --scrim: rgba(3, 6, 12, .74);
   --scrim-soft: rgba(3, 6, 12, .55);
   --panel-overlay: rgba(17, 22, 30, .96);
@@ -263,6 +277,7 @@
   --workspace-header-title-fg: #cdd6f4;
   --border: rgba(69, 71, 90, .56);
   --border-subtle: rgba(49, 50, 68, .78);
+  --tree-guide: rgba(49, 50, 68, .78);
   --chrome-muted: #7f849c;
   --header-control-fg: #9298b2;
   --field-bg: rgba(49, 50, 68, .46);
@@ -338,6 +353,18 @@
   --surface-inset-faint: rgba(17, 17, 27, .10);
   --surface-inset: rgba(205, 214, 244, .022);
   --surface-inset-strong: #313244;
+  --utility-panel-bg: #1e1e2e;
+  --utility-panel-chrome: #181825;
+  --utility-panel-inset: #181825;
+  --utility-panel-card: #242437;
+  --utility-panel-card-strong: #2b2b40;
+  --utility-panel-hover: #29293d;
+  --utility-panel-selected: #313244;
+  --utility-panel-border: rgba(88, 91, 115, .9);
+  --utility-panel-border-subtle: rgba(69, 71, 90, .82);
+  --utility-panel-fg: #dce3ff;
+  --utility-panel-fg-secondary: #cdd6f4;
+  --utility-panel-muted: #adb5d2;
   --scrim: rgba(17, 17, 27, .78);
   --scrim-soft: rgba(17, 17, 27, .54);
   --panel-overlay: rgba(24, 24, 37, .96);
@@ -467,6 +494,56 @@
   --color-border-outline: var(--border);
   --color-border-outline-variant: var(--border-subtle);
   --color-surface-primary-container: var(--accent-subtle);
+}
+
+/* Dense, information-heavy panes use a tighter and more deliberate contrast
+   ladder than chat. Scoping these aliases keeps conversational surfaces soft
+   while giving files, diffs, inspectors, and tool chrome crisp separation. */
+.dh-utility-panel {
+  --fg: var(--utility-panel-fg);
+  --fg-strong: var(--utility-panel-fg);
+  --fg-secondary: var(--utility-panel-fg-secondary);
+  --muted: color-mix(in srgb, var(--utility-panel-fg-secondary) 86%, var(--utility-panel-bg));
+  --muted-dim: var(--utility-panel-muted);
+  --panel: var(--utility-panel-bg);
+  --panel-alt: var(--utility-panel-chrome);
+  --panel-raised: var(--utility-panel-card-strong);
+  --workspace: var(--utility-panel-bg);
+  --chat-background: var(--utility-panel-bg);
+  --border: var(--utility-panel-border);
+  --border-subtle: var(--utility-panel-border-subtle);
+  --surface-softest: var(--utility-panel-card);
+  --surface-faint: color-mix(in srgb, var(--utility-panel-card) 58%, transparent);
+  --surface-soft: color-mix(in srgb, var(--utility-panel-card-strong) 72%, transparent);
+  --surface-strong: var(--utility-panel-card-strong);
+  --surface-inset-faint: color-mix(in srgb, var(--utility-panel-inset) 68%, transparent);
+  --surface-inset: var(--utility-panel-inset);
+  --surface-inset-strong: var(--utility-panel-card-strong);
+  --hover: var(--utility-panel-hover);
+  --selected: var(--utility-panel-selected);
+  color: var(--fg-secondary);
+}
+
+.dh-utility-panel.ui-panel,
+.dh-utility-panel .ui-panel {
+  background: var(--utility-panel-bg);
+}
+
+.dh-utility-panel .ui-panel-header,
+.dh-utility-panel .ui-panel-toolbar,
+.dh-utility-panel.ui-panel > .ui-panel-header,
+.dh-utility-panel.ui-panel > .ui-panel-toolbar {
+  border-color: var(--utility-panel-border-subtle);
+  background: var(--utility-panel-chrome);
+}
+
+.dh-utility-panel .dh-utility-panel-inset {
+  background: var(--utility-panel-inset);
+}
+
+.dh-utility-panel .dh-utility-panel-chrome {
+  border-color: var(--utility-panel-border-subtle);
+  background: var(--utility-panel-chrome);
 }
 
 * { box-sizing: border-box; }
@@ -871,7 +948,7 @@ code, pre {
 
 [data-sidebar-folder-node]:hover > .dh-sidebar-folder-body,
 .dh-sidebar-folder-body[data-sidebar-guide-selected='true'] {
-  border-left-color: var(--border-subtle);
+  border-left-color: var(--tree-guide);
 }
 
 .dh-sidebar-folder-body[data-sidebar-guide-drop-active='true'] {
@@ -885,7 +962,7 @@ code, pre {
 
 [data-file-explorer-directory]:hover > .dh-file-explorer-directory-body,
 .dh-file-explorer-directory-body[data-file-explorer-guide-selected='true'] {
-  border-left-color: var(--border-subtle);
+  border-left-color: var(--tree-guide);
 }
 
 .dh-changes-explorer-guide {
@@ -896,7 +973,7 @@ code, pre {
 
 [data-changes-explorer-directory]:hover > .dh-changes-explorer-directory-body > .dh-changes-explorer-guide,
 .dh-changes-explorer-directory-body[data-changes-explorer-guide-selected='true'] > .dh-changes-explorer-guide {
-  background: var(--border-subtle);
+  background: var(--tree-guide);
 }
 
 .dh-sidebar-drone-chat-body {
@@ -906,7 +983,7 @@ code, pre {
 
 [data-sidebar-drone-unit]:hover > .dh-sidebar-drone-chat-body,
 .dh-sidebar-drone-chat-body[data-sidebar-guide-selected='true'] {
-  border-left-color: var(--border-subtle);
+  border-left-color: var(--tree-guide);
 }
 
 .dh-sidebar-drone-chat-body[data-sidebar-guide-drop-active='true'] {
@@ -2737,20 +2814,20 @@ select:disabled optgroup {
   border-left: 1px solid var(--border);
   --changes-diff-font-size: 11px;
   --diff-background-color: transparent;
-  --diff-text-color: var(--fg-secondary);
+  --diff-text-color: var(--fg);
   --diff-font-family: var(--code);
   --diff-selection-background-color: var(--accent-subtle);
   --diff-selection-text-color: var(--fg);
-  --diff-gutter-insert-background-color: color-mix(in srgb, var(--green-subtle) 64%, transparent);
+  --diff-gutter-insert-background-color: color-mix(in srgb, var(--green) 12%, transparent);
   --diff-gutter-insert-text-color: var(--fg);
-  --diff-gutter-delete-background-color: color-mix(in srgb, var(--red-subtle) 64%, transparent);
+  --diff-gutter-delete-background-color: color-mix(in srgb, var(--red) 12%, transparent);
   --diff-gutter-delete-text-color: var(--fg);
   --diff-gutter-selected-background-color: var(--yellow-subtle);
   --diff-gutter-selected-text-color: var(--fg);
-  --diff-code-insert-background-color: color-mix(in srgb, var(--green-subtle) 38%, transparent);
-  --diff-code-insert-text-color: var(--fg-secondary);
-  --diff-code-delete-background-color: color-mix(in srgb, var(--red-subtle) 38%, transparent);
-  --diff-code-delete-text-color: var(--fg-secondary);
+  --diff-code-insert-background-color: color-mix(in srgb, var(--green) 8%, transparent);
+  --diff-code-insert-text-color: var(--fg);
+  --diff-code-delete-background-color: color-mix(in srgb, var(--red) 8%, transparent);
+  --diff-code-delete-text-color: var(--fg);
   --diff-code-insert-edit-background-color: color-mix(in srgb, var(--green-border) 62%, transparent);
   --diff-code-insert-edit-text-color: var(--fg);
   --diff-code-delete-edit-background-color: color-mix(in srgb, var(--red-border) 62%, transparent);
@@ -2962,12 +3039,12 @@ select:disabled optgroup {
 }
 
 .dh-changes-explorer-row:hover {
-  background: var(--surface-strong);
+  background: var(--utility-panel-hover, var(--surface-strong));
 }
 
 .dh-changes-explorer-row.is-selected,
 .dh-changes-explorer-row[aria-selected='true'] {
-  background: var(--selected);
+  background: var(--utility-panel-selected, var(--selected));
   box-shadow: none;
 }
 
@@ -2997,15 +3074,15 @@ select:disabled optgroup {
 }
 
 .dh-changes-dock .rdv-wrapper .diff .diff-gutter {
-  min-width: 3ch;
-  padding: 0 0.35ch;
+  min-width: 6.5ch;
+  padding: 0 0.5ch;
   border-right: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
-  color: var(--muted-dim);
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
 .dh-changes-dock .rdv-wrapper .diff .diff-gutter-col {
-  width: 3.75ch;
+  width: 6.5ch;
 }
 
 .dh-changes-dock .rdv-wrapper .diff .diff-gutter .dh-diff-gutter-content {
@@ -3014,6 +3091,21 @@ select:disabled optgroup {
   justify-content: flex-end;
   gap: 0.25ch;
   width: 100%;
+}
+
+/* Keep split panes visually flush while preserving a forgiving drag target. */
+.dh-changes-split-resize-handle {
+  z-index: 20;
+  width: 1px;
+}
+
+.dh-changes-split-resize-handle::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 9px;
+  transform: translateX(-50%);
 }
 
 .dh-changes-dock .rdv-wrapper .diff .diff-gutter .dh-diff-gutter-sign {
@@ -3084,8 +3176,8 @@ select:disabled optgroup {
 }
 
 .dh-changes-dock .rdv-wrapper .diff .diff-gutter-omit {
-  background: var(--surface-soft);
-  color: var(--muted-dim);
+  background: var(--utility-panel-card, var(--surface-soft));
+  color: var(--muted);
 }
 
 .dh-changes-dock .rdv-wrapper .diff .token.comment,

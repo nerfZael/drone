@@ -166,6 +166,7 @@ export function DroneFilesDock({
   onRemapOpenedFilesForPathChange,
   openedFile,
   readOnly = false,
+  zoom = 1,
 }: {
   droneId: string;
   droneName: string;
@@ -187,7 +188,26 @@ export function DroneFilesDock({
   onRemapOpenedFilesForPathChange?: (sourcePath: string, targetPath: string) => void;
   openedFile: DroneOpenedFileState;
   readOnly?: boolean;
+  zoom?: number;
 }) {
+  const explorerZoom = Math.max(0.85, Math.min(1.2, Number.isFinite(zoom) ? zoom : 1));
+  const explorerRowHeightPx = Math.max(19, Math.round(22 * explorerZoom));
+  const explorerTextSizePx = Math.max(11, Math.round(13 * explorerZoom * 10) / 10);
+  const explorerLineHeightPx = Math.max(16, Math.round(20 * explorerZoom));
+  const explorerIconSlotPx = Math.max(14, Math.round(16 * explorerZoom));
+  const explorerFileIconPx = Math.max(13, Math.round(15 * explorerZoom));
+  const explorerChevronPx = Math.max(10, Math.round(12 * explorerZoom));
+  const explorerIndentPx = Math.max(6, Math.round(8 * explorerZoom));
+  const explorerGuideOffsetPx = Math.max(9, Math.round(11 * explorerZoom));
+  const explorerRowGeometryStyle: React.CSSProperties = {
+    height: `${explorerRowHeightPx}px`,
+    fontSize: `${explorerTextSizePx}px`,
+    lineHeight: `${explorerLineHeightPx}px`,
+  };
+  const explorerIconSlotStyle: React.CSSProperties = {
+    width: explorerIconSlotPx,
+    height: explorerIconSlotPx,
+  };
   const normalizedPath = normalizeContainerPathInput(path);
   const workspaceStateKey = filesWorkspaceStateKey(droneId, normalizedPath);
   const activeOpenedFilePath = String(openedFile.path ?? '').trim();
@@ -848,20 +868,21 @@ export function DroneFilesDock({
       <div
         role="treeitem"
         aria-selected="true"
-        className="relative flex h-[22px] w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--text-13)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
-        style={{ paddingLeft: '8px' }}
+        className="relative flex w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
+        style={{ ...explorerRowGeometryStyle, paddingLeft: `${explorerIndentPx}px` }}
       >
-        <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
+        <span className="inline-flex flex-shrink-0 items-center justify-center text-[var(--muted)]" style={explorerIconSlotStyle}>
           {creatingDirectory ? (
-            <IconChevron down={false} size={12} />
+            <IconChevron down={false} size={explorerChevronPx} />
           ) : (
-            <FileTypeIcon path={actionInput || 'untitled'} size={15} />
+            <FileTypeIcon path={actionInput || 'untitled'} size={explorerFileIconPx} />
           )}
         </span>
         <InlineExplorerNameInput
           value={actionInput}
           mode={inlineNameMode}
           loading={actionLoading}
+          zoom={explorerZoom}
           onChange={setActionInput}
           onSubmit={submitInlineAction}
           onCancel={cancelInlineNameAction}
@@ -872,7 +893,7 @@ export function DroneFilesDock({
 
   function renderExplorer(nodes: FileExplorerNode[]): React.ReactNode {
     return nodes.map((node) => {
-      const indentPx = 8;
+      const indentPx = explorerIndentPx;
       if (node.kind === 'directory') {
         const open = expandedDirs[node.path] === true;
         const ignored = node.entry.isGitIgnored === true;
@@ -902,16 +923,17 @@ export function DroneFilesDock({
                   role="treeitem"
                   aria-expanded={open}
                   aria-selected="true"
-                  className="relative flex h-[22px] w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--text-13)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
-                  style={{ paddingLeft: `${indentPx}px` }}
+                  className="relative flex w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
+                  style={{ ...explorerRowGeometryStyle, paddingLeft: `${indentPx}px` }}
                 >
-                  <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
-                    <IconChevron down={open} size={12} />
+                  <span className="inline-flex flex-shrink-0 items-center justify-center text-[var(--muted)]" style={explorerIconSlotStyle}>
+                    <IconChevron down={open} size={explorerChevronPx} />
                   </span>
                   <InlineExplorerNameInput
                     value={actionInput}
                     mode="rename"
                     loading={actionLoading}
+                    zoom={explorerZoom}
                     onChange={setActionInput}
                     onSubmit={submitInlineAction}
                     onCancel={cancelInlineNameAction}
@@ -926,18 +948,18 @@ export function DroneFilesDock({
                   disabled={busy}
                   onClick={(event) => activateEntry(node.entry, event)}
                   onContextMenu={(event) => openEntryContextMenu(node.entry, event)}
-                  className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[var(--text-13)] transition-colors disabled:opacity-60 ${
+                  className={`relative flex w-full items-center gap-1 pr-1 text-left transition-colors disabled:opacity-60 ${
                     selected
                       ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                       : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                   }`}
-                  style={{ paddingLeft: `${indentPx}px` }}
+                  style={{ ...explorerRowGeometryStyle, paddingLeft: `${indentPx}px` }}
                   title={`${title}${ignored ? ' • Ignored by Git' : ''} • Click to ${open ? 'collapse' : 'expand'} • Right-click for actions`}
                 >
-                  <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)] ${ignored ? 'opacity-50' : ''}`}>
-                    <IconChevron down={open} size={12} />
+                  <span className={`inline-flex flex-shrink-0 items-center justify-center text-[var(--muted)] ${ignored ? 'opacity-50' : ''}`} style={explorerIconSlotStyle}>
+                    <IconChevron down={open} size={explorerChevronPx} />
                   </span>
-                  <span className={`min-w-0 flex-1 truncate leading-5 ${ignored ? 'text-[var(--muted-dim)] opacity-60' : ''}`}>
+                  <span className={`min-w-0 flex-1 truncate ${ignored ? 'text-[var(--muted-dim)] opacity-60' : ''}`}>
                     {node.name}
                   </span>
                   {childError ? <span className="px-1 text-[var(--text-9)] uppercase text-[var(--red)]">Error</span> : null}
@@ -953,7 +975,8 @@ export function DroneFilesDock({
             {open ? (
               <div
                 role="group"
-                className="dh-file-explorer-directory-body ml-[11px] flex flex-col border-l"
+                className="dh-file-explorer-directory-body flex flex-col border-l"
+                style={{ marginLeft: `${explorerGuideOffsetPx}px` }}
                 data-file-explorer-guide-selected={hasSelectedDescendant ? 'true' : undefined}
               >
                 {creatingInside ? renderInlineCreateRow() : null}
@@ -992,16 +1015,17 @@ export function DroneFilesDock({
             <div
               role="treeitem"
               aria-selected="true"
-              className="relative flex h-[22px] w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--text-13)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
-              style={{ paddingLeft: `${indentPx}px` }}
+              className="relative flex w-full items-center gap-1 bg-[var(--info-subtle)] pr-1 text-left text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)]"
+              style={{ ...explorerRowGeometryStyle, paddingLeft: `${indentPx}px` }}
             >
-              <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
-                <FileTypeIcon path={actionInput || entry.path} size={15} />
+              <span className="inline-flex flex-shrink-0 items-center justify-center text-[var(--muted)]" style={explorerIconSlotStyle}>
+                <FileTypeIcon path={actionInput || entry.path} size={explorerFileIconPx} />
               </span>
               <InlineExplorerNameInput
                 value={actionInput}
                 mode="rename"
                 loading={actionLoading}
+                zoom={explorerZoom}
                 onChange={setActionInput}
                 onSubmit={submitInlineAction}
                 onCancel={cancelInlineNameAction}
@@ -1015,20 +1039,20 @@ export function DroneFilesDock({
               disabled={busy}
               onClick={(event) => activateEntry(entry, event)}
               onContextMenu={(event) => openEntryContextMenu(entry, event)}
-              className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[var(--text-13)] transition-colors disabled:opacity-60 ${
+              className={`relative flex w-full items-center gap-1 pr-1 text-left transition-colors disabled:opacity-60 ${
                 selected
                   ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                   : active
                     ? 'bg-[var(--surface-soft)] text-[var(--fg)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                     : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
               }`}
-              style={{ paddingLeft: `${indentPx}px` }}
+              style={{ ...explorerRowGeometryStyle, paddingLeft: `${indentPx}px` }}
               title={`${entry.path} • ${modified}${ignored ? ' • Ignored by Git' : ''} • Right-click for actions`}
             >
-              <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)] ${ignored ? 'opacity-50' : openable ? '' : 'opacity-70'}`}>
-                <FileTypeIcon path={entry.path} size={15} />
+              <span className={`inline-flex flex-shrink-0 items-center justify-center text-[var(--muted)] ${ignored ? 'opacity-50' : openable ? '' : 'opacity-70'}`} style={explorerIconSlotStyle}>
+                <FileTypeIcon path={entry.path} size={explorerFileIconPx} />
               </span>
-              <span className={`min-w-0 flex-1 truncate leading-5 ${ignored ? 'text-[var(--muted-dim)] opacity-60' : openable ? '' : 'opacity-70'}`}>
+              <span className={`min-w-0 flex-1 truncate ${ignored ? 'text-[var(--muted-dim)] opacity-60' : openable ? '' : 'opacity-70'}`}>
                 {node.name}
               </span>
             </button>

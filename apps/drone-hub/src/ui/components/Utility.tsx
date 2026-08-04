@@ -19,10 +19,17 @@ export type UiTooltipProps = {
   content: React.ReactNode;
   children: React.ReactElement<any>;
   side?: 'top' | 'bottom';
+  align?: 'start' | 'center' | 'end';
   className?: string;
 };
 
-export function UiTooltip({ content, children, side = 'top', className }: UiTooltipProps) {
+export function UiTooltip({
+  content,
+  children,
+  side = 'top',
+  align = 'center',
+  className,
+}: UiTooltipProps) {
   const tooltipId = React.useId();
   const describedBy = [children.props['aria-describedby'], tooltipId].filter(Boolean).join(' ');
   return (
@@ -32,7 +39,12 @@ export function UiTooltip({ content, children, side = 'top', className }: UiTool
         id={tooltipId}
         role="tooltip"
         className={cn(
-          'pointer-events-none absolute left-1/2 z-[150] w-max max-w-[16rem] -translate-x-1/2 rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel-overlay)] px-2 py-1 text-center dh-type-control-compact leading-relaxed text-[var(--fg-secondary)] opacity-0 shadow-[var(--edge-highlight),var(--shadow-menu)] backdrop-blur-md transition-[opacity,transform] duration-150 group-hover/tooltip:translate-y-0 group-hover/tooltip:opacity-100 group-hover/tooltip:delay-300 group-focus-within/tooltip:translate-y-0 group-focus-within/tooltip:opacity-100',
+          'pointer-events-none absolute z-[150] w-max max-w-[16rem] rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel-overlay)] px-2 py-1 text-center dh-type-control-compact leading-relaxed text-[var(--fg-secondary)] opacity-0 shadow-[var(--edge-highlight),var(--shadow-menu)] backdrop-blur-md transition-[opacity,transform] duration-150 group-hover/tooltip:translate-y-0 group-hover/tooltip:opacity-100 group-hover/tooltip:delay-300 group-focus-within/tooltip:translate-y-0 group-focus-within/tooltip:opacity-100',
+          align === 'start'
+            ? 'left-0'
+            : align === 'end'
+              ? 'right-0'
+              : 'left-1/2 -translate-x-1/2',
           side === 'top'
             ? 'bottom-[calc(100%+0.45rem)] translate-y-0.5'
             : 'top-[calc(100%+0.45rem)] -translate-y-0.5',
@@ -42,7 +54,12 @@ export function UiTooltip({ content, children, side = 'top', className }: UiTool
         <span
           aria-hidden="true"
           className={cn(
-            'absolute left-1/2 h-1.5 w-1.5 -translate-x-1/2 rotate-45 bg-[var(--panel-overlay)]',
+            'absolute h-1.5 w-1.5 rotate-45 bg-[var(--panel-overlay)]',
+            align === 'start'
+              ? 'left-2.5'
+              : align === 'end'
+                ? 'right-2.5'
+                : 'left-1/2 -translate-x-1/2',
             side === 'top'
               ? '-bottom-[3.5px] border-b border-r border-[var(--border)]'
               : '-top-[3.5px] border-l border-t border-[var(--border)]',

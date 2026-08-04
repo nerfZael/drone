@@ -15,12 +15,24 @@ import {
   UiPanelToolbar,
   UiResizeHandle,
   UiToolbarButton,
-  UiToolbarGroup,
   UiToolbarIconButton,
   UiToolbarSegmentedControl,
 } from '../../ui/components';
 import { IconChevron } from '../icons';
 import { IconEye, IconEyeOff } from '../app/icons';
+import { WorkspaceExplorerHeader } from '../app/WorkspaceExplorerHeader';
+import {
+  clampWorkspaceExplorerZoom as clampExplorerZoom,
+  readWorkspaceExplorerWidth,
+  readWorkspaceExplorerZoom,
+  WORKSPACE_EXPLORER_WIDTH_DEFAULT_PX as EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX,
+  WORKSPACE_EXPLORER_WIDTH_MAX_PX as EXPLORER_SIDEBAR_MAX_WIDTH_PX,
+  WORKSPACE_EXPLORER_WIDTH_MIN_PX as EXPLORER_SIDEBAR_MIN_WIDTH_PX,
+  WORKSPACE_EXPLORER_ZOOM_DEFAULT as EXPLORER_ZOOM_DEFAULT,
+  WORKSPACE_EXPLORER_ZOOM_STEP as EXPLORER_ZOOM_STEP,
+  writeWorkspaceExplorerWidth,
+  writeWorkspaceExplorerZoom,
+} from '../app/workspace-explorer-preferences';
 import { FileTypeIcon } from '../files/FileTypeIcon';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import { readPullRequestMergeMethod } from '../pullRequests/pull-request-preferences';
@@ -69,13 +81,10 @@ import {
   CHANGES_CONTEXT_STORAGE_KEY,
   CHANGES_DIFF_VIEW_STORAGE_KEY,
   CHANGES_DIFF_ZOOM_STORAGE_KEY,
-  CHANGES_EXPLORER_ZOOM_STORAGE_KEY,
-  CHANGES_EXPLORER_WIDTH_STORAGE_KEY,
   CHANGES_HIDE_VIEWED_STORAGE_KEY,
   CHANGES_PRIMARY_VIEW_STORAGE_KEY,
   CHANGES_VIEW_STORAGE_KEY,
   readChangesStorage,
-  removeChangesStorage,
   writeChangesStorage,
 } from './storage';
 import {
@@ -84,12 +93,10 @@ import {
   buildExplorerTree,
   defaultKindForEntry,
   entryPathExistsInCurrentTree,
-  estimateExplorerSidebarWidth,
   explorerNodeEntries,
   fileNameForChangesPath,
   diffKey,
   effectiveKindForEntry,
-  flattenVisibleExplorerRows,
   hasStaged,
   hasUnstaged,
   parentDirPaths,
@@ -140,16 +147,9 @@ type ChangesWorkspaceUiSnapshot = {
   expandedCommitDirs: Record<string, boolean>;
   expandedCommitFiles: Record<string, boolean>;
 };
-const EXPLORER_SIDEBAR_MIN_WIDTH_PX = 180;
-const EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX = 240;
-const EXPLORER_SIDEBAR_MAX_WIDTH_PX = 480;
 const EXPLORER_SIDEBAR_MAX_RATIO = 0.45;
 const CHANGES_DIFF_MIN_WIDTH_PX = 420;
 const EXPLORER_WIDTH_UPDATE_THRESHOLD_PX = 8;
-const EXPLORER_ZOOM_MIN = 0.85;
-const EXPLORER_ZOOM_DEFAULT = 1;
-const EXPLORER_ZOOM_MAX = 1.2;
-const EXPLORER_ZOOM_STEP = 0.1;
 const COMMIT_LIST_MIN_WIDTH_PX = 220;
 const COMMIT_LIST_DEFAULT_WIDTH_PX = 300;
 const COMMIT_LIST_MAX_WIDTH_PX = 460;
@@ -370,10 +370,6 @@ function writeChangesCache<T>(cache: ChangesCacheMap<T>, key: string, payload: T
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
-}
-
-function clampExplorerZoom(value: number): number {
-  return Math.round(clampNumber(value, EXPLORER_ZOOM_MIN, EXPLORER_ZOOM_MAX) * 100) / 100;
 }
 
 function pruneRecordKeys<T>(record: Record<string, T>, validKeys: Set<string>): Record<string, T> {
@@ -619,16 +615,8 @@ function LiveDroneChangesDock({
   const commitListDragRef = React.useRef<{ pointerId: number; startX: number; startWidth: number; liveWidth: number } | null>(null);
   const commitListResizeBodyStyleRef = React.useRef<{ cursor: string; userSelect: string } | null>(null);
   const splitLayoutRef = React.useRef<HTMLDivElement | null>(null);
-  const [explorerManualWidthPx, setExplorerManualWidthPx] = React.useState<number | null>(() => {
-    const raw = Number(readChangesStorage(CHANGES_EXPLORER_WIDTH_STORAGE_KEY));
-    if (!Number.isFinite(raw) || raw < 120) return null;
-    return Math.floor(raw);
-  });
-  const [explorerZoom, setExplorerZoom] = React.useState<number>(() => {
-    const raw = Number(readChangesStorage(CHANGES_EXPLORER_ZOOM_STORAGE_KEY));
-    if (!Number.isFinite(raw)) return EXPLORER_ZOOM_DEFAULT;
-    return clampExplorerZoom(raw);
-  });
+  const [explorerManualWidthPx, setExplorerManualWidthPx] = React.useState<number>(readWorkspaceExplorerWidth);
+  const [explorerZoom, setExplorerZoom] = React.useState<number>(readWorkspaceExplorerZoom);
   const [diffZoom, setDiffZoom] = React.useState<number>(() => {
     const stored = readChangesStorage(CHANGES_DIFF_ZOOM_STORAGE_KEY);
     if (stored === null) return DIFF_ZOOM_DEFAULT;
@@ -665,7 +653,6 @@ function LiveDroneChangesDock({
   const commitInflightRef = React.useRef<Set<string>>(new Set());
   const mountedRef = React.useRef(true);
   const dockRootRef = React.useRef<HTMLDivElement | null>(null);
-  const explorerZoomPercent = Math.round(explorerZoom * 100);
   const explorerRowHeightPx = Math.max(21, Math.round(24 * explorerZoom));
   const explorerIconSizePx = Math.max(12, Math.round(13 * explorerZoom));
   const explorerLeadingSlotPx = Math.max(explorerIconSizePx, Math.round(14 * explorerZoom));
@@ -764,14 +751,10 @@ function LiveDroneChangesDock({
   }, [viewedStore]);
 
   React.useEffect(() => {
-    if (explorerManualWidthPx === null) {
-      removeChangesStorage(CHANGES_EXPLORER_WIDTH_STORAGE_KEY);
-      return;
-    }
-    writeChangesStorage(CHANGES_EXPLORER_WIDTH_STORAGE_KEY, String(Math.floor(explorerManualWidthPx)));
+    writeWorkspaceExplorerWidth(explorerManualWidthPx);
   }, [explorerManualWidthPx]);
   React.useEffect(() => {
-    writeChangesStorage(CHANGES_EXPLORER_ZOOM_STORAGE_KEY, String(explorerZoom));
+    writeWorkspaceExplorerZoom(explorerZoom);
   }, [explorerZoom]);
   React.useEffect(() => {
     writeChangesStorage(CHANGES_DIFF_ZOOM_STORAGE_KEY, String(diffZoom));
@@ -1610,8 +1593,6 @@ function LiveDroneChangesDock({
     [allExplorerTree, entryViewedStatus, primaryView],
   );
   const commitExplorerTree = React.useMemo(() => buildExplorerTree(commitEntries), [commitEntries]);
-  const activeExplorerTree = primaryView === 'commits' ? commitExplorerTree : explorerTree;
-  const activeExpandedDirs = primaryView === 'commits' ? expandedCommitDirs : expandedDirs;
 
   React.useEffect(() => {
     setExpandedDirs((prev) => {
@@ -1667,28 +1648,16 @@ function LiveDroneChangesDock({
     );
     if (explorerDragRef.current || explorerResizing) return;
     const bounds = resolveExplorerSidebarWidthBounds(splitWidth, explorerWidthOptions);
-    const rows = flattenVisibleExplorerRows(activeExplorerTree, activeExpandedDirs);
-    const autoWidth = clampNumber(
-      Math.floor(estimateExplorerSidebarWidth(rows, splitWidth, explorerWidthOptions) * explorerZoom),
-      bounds.minWidthPx,
-      bounds.maxWidthPx,
-    );
-    const nextWidth =
-      explorerManualWidthPx === null
-        ? autoWidth
-        : clampNumber(explorerManualWidthPx, bounds.minWidthPx, bounds.maxWidthPx);
+    const nextWidth = clampNumber(explorerManualWidthPx, bounds.minWidthPx, bounds.maxWidthPx);
     setExplorerWidthPx((prev) => {
       const outOfBounds = prev < bounds.minWidthPx || prev > bounds.maxWidthPx;
       if (outOfBounds || Math.abs(prev - nextWidth) >= EXPLORER_WIDTH_UPDATE_THRESHOLD_PX) return nextWidth;
       return prev;
     });
   }, [
-    activeExpandedDirs,
-    activeExplorerTree,
     explorerManualWidthPx,
     explorerResizing,
     explorerWidthOptions,
-    explorerZoom,
     viewMode,
   ]);
 
@@ -1760,7 +1729,7 @@ function LiveDroneChangesDock({
   );
 
   const resetExplorerWidthPreference = React.useCallback(() => {
-    setExplorerManualWidthPx(null);
+    setExplorerManualWidthPx(EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX);
   }, []);
 
   const decreaseExplorerZoom = React.useCallback(() => {
@@ -3368,7 +3337,7 @@ function LiveDroneChangesDock({
       <UiPanel
         ref={dockRootRef}
         flush
-        className="h-full w-full dh-changes-dock"
+        className="dh-utility-panel h-full w-full dh-changes-dock"
         surface="alternate"
         style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
       >
@@ -3381,7 +3350,7 @@ function LiveDroneChangesDock({
     <UiPanel
       ref={dockRootRef}
       flush
-      className="relative h-full w-full dh-changes-dock"
+      className="dh-utility-panel relative h-full w-full dh-changes-dock"
       surface="alternate"
       style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
     >
@@ -3762,7 +3731,7 @@ function LiveDroneChangesDock({
       ) : (
         <div ref={splitLayoutRef} className="flex-1 min-h-0 overflow-hidden flex">
           <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[var(--chat-background)]">
-            <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center justify-between gap-2">
+            <div className="dh-utility-panel-chrome sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
               <div className="min-w-0 text-[var(--text-10)] text-[var(--muted)] font-mono truncate">
                 <span title={selectedEntry?.path}>
                   {selectedEntry ? fileNameForChangesPath(selectedEntry.path) : 'No file selected'}
@@ -3859,10 +3828,11 @@ function LiveDroneChangesDock({
             }
             onResizingChange={setExplorerResizing}
             onReset={resetExplorerWidthPreference}
+            className="dh-changes-split-resize-handle"
           />
 
           <div
-            className={`shrink-0 overflow-hidden flex flex-col ${
+            className={`dh-utility-panel-inset shrink-0 overflow-hidden flex flex-col ${
               explorerResizing ? '' : 'transition-[width] duration-150 ease-out'
             }`}
             style={{
@@ -3871,39 +3841,12 @@ function LiveDroneChangesDock({
               maxWidth: `${explorerWidthPx}px`,
             }}
           >
-            <div className="shrink-0 h-8 px-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 flex items-center justify-between gap-1">
-              <span className="dh-changes-toolbar-label">
-                Files
-              </span>
-              <UiToolbarGroup label="Explorer zoom">
-                <UiToolbarButton
-                  size="xsmall"
-                  onClick={decreaseExplorerZoom}
-                  disabled={explorerZoom <= EXPLORER_ZOOM_MIN}
-                  className="w-5 px-0"
-                  title="Decrease explorer zoom"
-                >
-                  −
-                </UiToolbarButton>
-                <UiToolbarButton
-                  size="xsmall"
-                  onClick={resetExplorerZoom}
-                  className="min-w-9 px-1 font-mono"
-                  title="Reset explorer zoom"
-                >
-                  {explorerZoomPercent}%
-                </UiToolbarButton>
-                <UiToolbarButton
-                  size="xsmall"
-                  onClick={increaseExplorerZoom}
-                  disabled={explorerZoom >= EXPLORER_ZOOM_MAX}
-                  className="w-5 px-0"
-                  title="Increase explorer zoom"
-                >
-                  +
-                </UiToolbarButton>
-              </UiToolbarGroup>
-            </div>
+            <WorkspaceExplorerHeader
+              zoom={explorerZoom}
+              onDecreaseZoom={decreaseExplorerZoom}
+              onIncreaseZoom={increaseExplorerZoom}
+              onResetZoom={resetExplorerZoom}
+            />
             <div role="tree" className="flex-1 min-h-0 overflow-auto py-1">
               {workingTreeActionError ? (
                 <div className="mx-2 mb-1 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-2 py-1.5 text-[var(--text-10)] text-[var(--red)]">
@@ -3925,7 +3868,7 @@ function LiveDroneChangesDock({
                         <ChangesFileCountPill count={stagedEntries.length} tone="staged" />
                       </button>
                       {stagedSectionOpen ? (
-                        <div className="px-1.5">{renderExplorer(stagedExplorerTree, 0, 'staged')}</div>
+                        <div className="w-full">{renderExplorer(stagedExplorerTree, 0, 'staged')}</div>
                       ) : null}
                     </section>
                   ) : null}
@@ -3942,13 +3885,13 @@ function LiveDroneChangesDock({
                         <ChangesFileCountPill count={unstagedEntries.length} tone="unstaged" />
                       </button>
                       {unstagedSectionOpen ? (
-                        <div className="px-1.5">{renderExplorer(unstagedExplorerTree, 0, 'unstaged')}</div>
+                        <div className="w-full">{renderExplorer(unstagedExplorerTree, 0, 'unstaged')}</div>
                       ) : null}
                     </section>
                   ) : null}
                 </>
               ) : (
-                <div className="px-1.5">{renderExplorer(explorerTree, 0)}</div>
+                <div className="w-full">{renderExplorer(explorerTree, 0)}</div>
               )}
             </div>
           </div>

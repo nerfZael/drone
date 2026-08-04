@@ -700,7 +700,7 @@ function StaticReadOnlySidebarTree({
           </div>
         ) : null}
         {childIds.length > 0 ? (
-          <div className="ml-2.5 flex flex-col gap-0.5 border-l border-[var(--border-subtle)] pl-1.5">
+          <div className="ml-2.5 flex flex-col gap-0.5 border-l border-[var(--tree-guide)] pl-1.5">
             {childIds.map((childId) => renderNode(childId, ancestorNodeIds))}
           </div>
         ) : null}
@@ -1326,7 +1326,7 @@ function SidebarFolderTreeNode({
       </div>
 
       {!collapsed ? (
-        <div className="ml-2 flex flex-col gap-0.5 border-l border-[var(--border-subtle)] pl-1.5">
+        <div className="ml-2 flex flex-col gap-0.5 border-l border-[var(--tree-guide)] pl-1.5">
           {node.children.map((child) => (
             <SidebarFolderTreeNode
               key={child.path}

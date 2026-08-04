@@ -174,6 +174,9 @@ describe('drone hub component library', () => {
         <UiProgress value={50} label="Transfer" showValue />
         <UiToast title="Ready" description="Drone started." />
         <UiTooltip content="Keyboard shortcut"><UiButton>Hover me</UiButton></UiTooltip>
+        <UiTooltip content="Edge shortcut" side="bottom" align="end">
+          <UiButton>Edge</UiButton>
+        </UiTooltip>
         <UiKbd>⌘K</UiKbd>
         <UiTableContainer>
           <UiTable>
@@ -189,6 +192,8 @@ describe('drone hub component library', () => {
     expect(html).toContain('aria-valuenow="50"');
     expect(html).toContain('role="status"');
     expect(html).toContain('role="tooltip"');
+    expect(html).toContain('right-0');
+    expect(html).toContain('right-2.5');
     expect(html).toContain('<kbd');
     expect(html).toContain('<table');
   });

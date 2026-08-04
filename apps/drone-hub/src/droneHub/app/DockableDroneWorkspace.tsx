@@ -96,15 +96,38 @@ function canonicalWorkspaceTab(tab: RightPanelTab): RightPanelTab {
   return tab === 'files' ? 'editor' : tab;
 }
 
+function isEditorChangesTab(tab: RightPanelTab): boolean {
+  const canonicalTab = canonicalWorkspaceTab(tab);
+  return canonicalTab === 'editor' || canonicalTab === 'changes';
+}
+
 function tabFromPanelId(panelId: string): RightPanelTab | null {
   const raw = panelId.startsWith(TOOL_PANEL_PREFIX) ? panelId.slice(TOOL_PANEL_PREFIX.length) : '';
   return raw && raw in RIGHT_PANEL_TAB_LABELS ? canonicalWorkspaceTab(raw as RightPanelTab) : null;
 }
 
+type WorkspaceDockPanel = DockviewApi['panels'][number];
+
+function tabFromPanel(panel: WorkspaceDockPanel): RightPanelTab | null {
+  const idTab = tabFromPanelId(panel.id);
+  if (!idTab || !isEditorChangesTab(idTab)) return idTab;
+  const params = panel.api.getParameters<{ tab?: RightPanelTab }>();
+  return params.tab && params.tab in RIGHT_PANEL_TAB_LABELS
+    ? canonicalWorkspaceTab(params.tab)
+    : idTab;
+}
+
+function editorChangesPanels(api: DockviewApi): WorkspaceDockPanel[] {
+  return api.panels.filter((panel) => {
+    const idTab = tabFromPanelId(panel.id);
+    return Boolean(idTab && isEditorChangesTab(idTab));
+  });
+}
+
 function visibleToolTabs(api: DockviewApi): RightPanelTab[] {
   const tabs = new Set<RightPanelTab>();
   for (const panel of api.panels) {
-    const tab = tabFromPanelId(panel.id);
+    const tab = tabFromPanel(panel);
     if (tab) tabs.add(tab);
   }
   return Array.from(tabs);
@@ -178,15 +201,23 @@ function writeStoredLayout(droneId: string, layout: SerializedDockview): void {
   localStorage.setItem(workspaceLayoutStorageKey(droneId), JSON.stringify(layout));
 }
 
-function ensurePanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePaneKey, referencePanel: string = CHAT_PANEL_ID): boolean {
+export function ensureWorkspaceToolPanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePaneKey, referencePanel: string = CHAT_PANEL_ID): boolean {
   const canonicalTab = canonicalWorkspaceTab(tab);
   const id = toolPanelId(canonicalTab);
-  const existing =
-    api.getPanel(id) ??
-    (canonicalTab === 'editor' ? api.getPanel(toolPanelId('files')) : undefined);
+  const existing = isEditorChangesTab(canonicalTab)
+    ? editorChangesPanels(api)[0]
+    : api.getPanel(id);
   if (existing) {
+    if (isEditorChangesTab(canonicalTab)) {
+      const existingParams = existing.api.getParameters<{ paneKey?: WorkspacePaneKey }>();
+      existing.api.updateParameters({
+        ...existingParams,
+        tab: canonicalTab,
+        paneKey: existingParams.paneKey ?? paneKey,
+      });
+    }
     existing.api.setTitle(RIGHT_PANEL_TAB_LABELS[canonicalTab]);
-    if (canonicalTab === 'editor') {
+    if (isEditorChangesTab(canonicalTab)) {
       existing.api.setConstraints({ minimumWidth: EDITOR_PANEL_MIN_WIDTH });
     }
     existing.api.setActive();
@@ -205,7 +236,7 @@ function ensurePanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePan
     },
     initialWidth,
     initialHeight: DEFAULT_NEW_TOOL_PANEL_HEIGHT,
-    minimumWidth: canonicalTab === 'editor' ? EDITOR_PANEL_MIN_WIDTH : 260,
+    minimumWidth: isEditorChangesTab(canonicalTab) ? EDITOR_PANEL_MIN_WIDTH : 260,
     minimumHeight: 180,
   });
   return true;
@@ -233,13 +264,22 @@ export function restoreRequiredWorkspacePanels(api: DockviewApi): void {
   ensureChatPanel(api);
 }
 
-function migrateLegacyEditorPanel(api: DockviewApi): void {
-  const editorPanel = api.getPanel(toolPanelId('editor'));
-  const filesPanel = api.getPanel(toolPanelId('files'));
-  if (editorPanel && filesPanel) filesPanel.api.close();
-  const unifiedEditorPanel = editorPanel ?? filesPanel;
-  unifiedEditorPanel?.api.setTitle(RIGHT_PANEL_TAB_LABELS.editor);
-  unifiedEditorPanel?.api.setConstraints({ minimumWidth: EDITOR_PANEL_MIN_WIDTH });
+function migrateEditorChangesPanels(api: DockviewApi, activeToolTab: RightPanelTab): void {
+  const panels = editorChangesPanels(api);
+  if (panels.length === 0) return;
+  const requestedTab = isEditorChangesTab(activeToolTab)
+    ? canonicalWorkspaceTab(activeToolTab)
+    : tabFromPanel(panels[0]) ?? 'editor';
+  const survivor = panels.find((panel) => tabFromPanel(panel) === requestedTab) ?? panels[0];
+  for (const panel of panels) {
+    if (panel !== survivor) panel.api.close();
+  }
+  survivor.api.updateParameters({
+    ...survivor.api.getParameters(),
+    tab: requestedTab,
+  });
+  survivor.api.setTitle(RIGHT_PANEL_TAB_LABELS[requestedTab]);
+  survivor.api.setConstraints({ minimumWidth: EDITOR_PANEL_MIN_WIDTH });
 }
 
 function createDefaultLayout(
@@ -250,7 +290,7 @@ function createDefaultLayout(
   api.clear();
   ensureChatPanel(api);
   if (!toolPaneOpen) return;
-  ensurePanel(api, activeToolTab, 'single');
+  ensureWorkspaceToolPanel(api, activeToolTab, 'single');
 }
 
 function ChatPanel({ containerApi }: IDockviewPanelProps) {
@@ -283,7 +323,7 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: RightPanelTab; p
       flush
       surface="alternate"
       data-dockview-preview-host={previewHostedHere ? '1' : undefined}
-      className="relative h-full"
+      className="dh-utility-panel relative h-full"
     >
       {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : ctx.renderToolPane(tab, paneKey)}
     </UiPanel>
@@ -444,7 +484,7 @@ export function DockableDroneWorkspace({
       if (stored && toolPaneOpen) {
         api.fromJSON(stored, { reuseExistingPanels: true });
         restoreRequiredWorkspacePanels(api);
-        migrateLegacyEditorPanel(api);
+        migrateEditorChangesPanels(api, activeToolTab);
       } else {
         createDefaultLayout(api, activeToolTab, toolPaneOpen);
       }
@@ -471,12 +511,12 @@ export function DockableDroneWorkspace({
       });
       const activePanelDisposable = event.api.onDidActivePanelChange((panel) => {
         if (!panel) return;
-        const tab = tabFromPanelId(panel.id);
+        const tab = tabFromPanel(panel);
         if (tab) onActiveToolTabChange?.(tab);
       });
       const removeDisposable = event.api.onDidRemovePanel((panel) => {
         if (panel.id !== CHAT_PANEL_ID) {
-          const tab = tabFromPanelId(panel.id);
+          const tab = tabFromPanel(panel);
           if (tab) {
             lastAppliedToolTabRef.current = null;
           }
@@ -539,7 +579,7 @@ export function DockableDroneWorkspace({
     suppressSaveRef.current = true;
     try {
       ensureChatPanel(api);
-      addedPanel = ensurePanel(api, activeToolTab, 'single');
+      addedPanel = ensureWorkspaceToolPanel(api, activeToolTab, 'single');
     } finally {
       suppressSaveRef.current = false;
     }

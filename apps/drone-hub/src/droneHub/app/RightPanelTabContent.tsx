@@ -340,7 +340,7 @@ export function RightPanelTabContent({
   const repoUnavailableReason = repoUnavailableReasonForRuntime(drone.runtime);
   const chatName = selectedChat || 'default';
   const isCurrent = Boolean(currentDroneId && String(currentDroneId) === String(drone.id));
-  const fileExplorer = (
+  const renderFileExplorer = (explorerZoom: number) => (
     <DroneFilesDock
       key={`${paneKey}-file-explorer`}
       droneId={drone.id}
@@ -371,6 +371,7 @@ export function RightPanelTabContent({
       onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
       onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
       openedFile={openedFile}
+      zoom={explorerZoom}
     />
   );
   const fileEditor = (
@@ -489,7 +490,7 @@ export function RightPanelTabContent({
     case 'files':
     case 'editor':
       return (
-        <DroneEditorWorkspace explorer={fileExplorer} editor={fileEditor} />
+        <DroneEditorWorkspace explorer={renderFileExplorer} editor={fileEditor} />
       );
 
     case 'preview':

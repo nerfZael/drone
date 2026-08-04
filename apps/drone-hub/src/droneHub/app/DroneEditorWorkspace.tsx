@@ -1,5 +1,19 @@
 import React from 'react';
 import { profileStorageKey } from '../../profile-storage';
+import { WorkspaceExplorerHeader } from './WorkspaceExplorerHeader';
+import {
+  clampWorkspaceExplorerWidth,
+  clampWorkspaceExplorerZoom,
+  readWorkspaceExplorerWidth,
+  readWorkspaceExplorerZoom,
+  WORKSPACE_EXPLORER_WIDTH_DEFAULT_PX,
+  WORKSPACE_EXPLORER_WIDTH_MAX_PX,
+  WORKSPACE_EXPLORER_WIDTH_MIN_PX,
+  WORKSPACE_EXPLORER_ZOOM_DEFAULT,
+  WORKSPACE_EXPLORER_ZOOM_STEP,
+  writeWorkspaceExplorerWidth,
+  writeWorkspaceExplorerZoom,
+} from './workspace-explorer-preferences';
 
 type ExplorerSide = 'left' | 'right';
 
@@ -9,19 +23,21 @@ type StoredExplorerLayout = {
 };
 
 type DroneEditorWorkspaceProps = {
-  explorer: React.ReactNode;
+  explorer: (zoom: number) => React.ReactNode;
   editor: React.ReactNode;
 };
 
 const EXPLORER_LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.editorExplorerLayout');
-const DEFAULT_EXPLORER_WIDTH = 240;
-const MIN_EXPLORER_WIDTH = 180;
-const MAX_EXPLORER_WIDTH = 420;
 
 export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceProps) {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const resizePointerIdRef = React.useRef<number | null>(null);
   const [layout, setLayout] = React.useState<StoredExplorerLayout>(readExplorerLayout);
+  const [explorerZoom, setExplorerZoom] = React.useState(readWorkspaceExplorerZoom);
+
+  React.useEffect(() => {
+    writeWorkspaceExplorerZoom(explorerZoom);
+  }, [explorerZoom]);
 
   const updateLayout = React.useCallback((next: StoredExplorerLayout) => {
     const normalized = normalizeExplorerLayout(next);
@@ -86,7 +102,17 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
       style={{ width: `${layout.width}px`, maxWidth: '50%' }}
       aria-label="File Explorer"
     >
-      <div className="min-h-0 flex-1">{explorer}</div>
+      <WorkspaceExplorerHeader
+        zoom={explorerZoom}
+        onDecreaseZoom={() =>
+          setExplorerZoom((current) => clampWorkspaceExplorerZoom(current - WORKSPACE_EXPLORER_ZOOM_STEP))
+        }
+        onIncreaseZoom={() =>
+          setExplorerZoom((current) => clampWorkspaceExplorerZoom(current + WORKSPACE_EXPLORER_ZOOM_STEP))
+        }
+        onResetZoom={() => setExplorerZoom(WORKSPACE_EXPLORER_ZOOM_DEFAULT)}
+      />
+      <div className="min-h-0 flex-1">{explorer(explorerZoom)}</div>
     </aside>
   );
 
@@ -95,8 +121,8 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
       role="separator"
       aria-label="Resize File Explorer"
       aria-orientation="vertical"
-      aria-valuemin={MIN_EXPLORER_WIDTH}
-      aria-valuemax={MAX_EXPLORER_WIDTH}
+      aria-valuemin={WORKSPACE_EXPLORER_WIDTH_MIN_PX}
+      aria-valuemax={WORKSPACE_EXPLORER_WIDTH_MAX_PX}
       aria-valuenow={layout.width}
       tabIndex={0}
       onPointerDown={handleResizeStart}
@@ -105,7 +131,7 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
       onPointerCancel={finishResize}
       onLostPointerCapture={finishResize}
       onKeyDown={handleResizeKeyDown}
-      onDoubleClick={() => updateLayout({ ...layout, width: DEFAULT_EXPLORER_WIDTH })}
+      onDoubleClick={() => updateLayout({ ...layout, width: WORKSPACE_EXPLORER_WIDTH_DEFAULT_PX })}
       title="Drag to resize; double-click to reset"
       className="group relative z-10 h-full w-px flex-shrink-0 touch-none cursor-col-resize bg-[var(--border)] before:absolute before:inset-y-0 before:-left-1 before:w-2 hover:bg-[var(--accent-muted)] focus-visible:bg-[var(--accent)] focus-visible:outline-none"
     />
@@ -129,30 +155,35 @@ export function DroneEditorWorkspace({ explorer, editor }: DroneEditorWorkspaceP
 
 function clampExplorerWidth(width: number, containerWidth = Number.POSITIVE_INFINITY): number {
   const availableMaximum = Number.isFinite(containerWidth)
-    ? Math.max(MIN_EXPLORER_WIDTH, Math.floor(containerWidth / 2))
-    : MAX_EXPLORER_WIDTH;
-  const maximum = Math.min(MAX_EXPLORER_WIDTH, availableMaximum);
-  const safeWidth = Number.isFinite(width) ? Math.round(width) : DEFAULT_EXPLORER_WIDTH;
-  return Math.max(MIN_EXPLORER_WIDTH, Math.min(maximum, safeWidth));
+    ? Math.max(WORKSPACE_EXPLORER_WIDTH_MIN_PX, Math.floor(containerWidth / 2))
+    : WORKSPACE_EXPLORER_WIDTH_MAX_PX;
+  return Math.min(availableMaximum, clampWorkspaceExplorerWidth(width));
 }
 
 function normalizeExplorerLayout(raw: Partial<StoredExplorerLayout> | null | undefined): StoredExplorerLayout {
   return {
     side: raw?.side === 'right' ? 'right' : 'left',
-    width: clampExplorerWidth(Number(raw?.width ?? DEFAULT_EXPLORER_WIDTH)),
+    width: clampExplorerWidth(Number(raw?.width ?? readWorkspaceExplorerWidth())),
   };
 }
 
 function readExplorerLayout(): StoredExplorerLayout {
-  if (typeof localStorage === 'undefined') return normalizeExplorerLayout(null);
+  if (typeof localStorage === 'undefined') {
+    return { side: 'left', width: readWorkspaceExplorerWidth() };
+  }
   try {
-    return normalizeExplorerLayout(JSON.parse(localStorage.getItem(EXPLORER_LAYOUT_STORAGE_KEY) ?? 'null'));
+    const legacyLayout = JSON.parse(localStorage.getItem(EXPLORER_LAYOUT_STORAGE_KEY) ?? 'null') as Partial<StoredExplorerLayout> | null;
+    return normalizeExplorerLayout({
+      side: legacyLayout?.side,
+      width: readWorkspaceExplorerWidth(),
+    });
   } catch {
     return normalizeExplorerLayout(null);
   }
 }
 
 function writeExplorerLayout(layout: StoredExplorerLayout): void {
+  writeWorkspaceExplorerWidth(layout.width);
   if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(EXPLORER_LAYOUT_STORAGE_KEY, JSON.stringify(normalizeExplorerLayout(layout)));

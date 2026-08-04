@@ -28,7 +28,6 @@ import { requestJson } from '../http';
 import type { AgentApprovalPolicy, AgentPermissionMode } from '../../domain';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import {
-  IconBoard,
   IconChat,
   IconChevron,
   IconChevronLeft,
@@ -37,7 +36,6 @@ import {
   IconCursorApp,
   IconDownload,
   IconFileDiff,
-  IconFolder,
   IconGitCommitHorizontal,
   IconGitPullRequest,
   IconMonitor,
@@ -45,7 +43,6 @@ import {
   IconRefresh,
   IconSidebarExpand,
   IconTerminal,
-  IconTreeView,
   IconTune,
   IconVsCode,
 } from './icons';
@@ -80,7 +77,7 @@ import {
   contextMenuSeparatorClass,
   useDropdownDismiss,
 } from '../../ui/dropdown';
-import type { UiMenuSelectEntry } from '../../ui/components';
+import { UiTooltip, type UiMenuSelectEntry } from '../../ui/components';
 import { fetchDroneChatTranscript } from './chat-api';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { CliPendingPromptStrip } from './CliPendingPromptStrip';
@@ -102,6 +99,7 @@ import { parseDroneHubDragData } from './drone-hub-dnd';
 import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 import type { LocalAutoUpdates, LocalCheckoutView } from './use-local-checkout';
+import { WorkspaceToolIcon } from './WorkspaceToolIcon';
 
 type LaunchHint = {
   context: 'terminal' | 'code' | 'cursor';
@@ -433,32 +431,6 @@ function HeaderMenuChoiceGroup<T extends string>({
   );
 }
 
-function WorkspaceToolIcon({ tab }: { tab: RightPanelTab }) {
-  const className = 'h-3.5 w-3.5';
-  switch (tab) {
-    case 'terminal':
-      return <IconTerminal className={className} />;
-    case 'env':
-      return <IconTune className={className} />;
-    case 'files':
-      return <IconFolder className={className} />;
-    case 'preview':
-      return <IconMonitor className={className} />;
-    case 'changes':
-      return <IconFileDiff className={className} />;
-    case 'prs':
-      return <IconGitPullRequest className={className} />;
-    case 'canvas':
-      return <IconNetwork className={className} />;
-    case 'whiteboard':
-      return <IconBoard className={className} />;
-    case 'workflows':
-      return <IconTreeView className={className} />;
-    default:
-      return null;
-  }
-}
-
 type SelectedDroneWorkspaceProps = {
   currentDrone: DroneSummary;
   deleteMode: DroneDeleteMode;
@@ -771,14 +743,10 @@ export function SelectedDroneWorkspace({
   );
   const syncMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [syncMenuOpen, setSyncMenuOpen] = React.useState(false);
-  const workspaceToolsMenuRef = React.useRef<HTMLDivElement | null>(null);
-  const [workspaceToolsMenuOpen, setWorkspaceToolsMenuOpen] = React.useState(false);
   useDropdownDismiss(syncMenuRef, syncMenuOpen, setSyncMenuOpen);
-  useDropdownDismiss(workspaceToolsMenuRef, workspaceToolsMenuOpen, setWorkspaceToolsMenuOpen);
   React.useEffect(() => {
     setSyncMenuOpen(false);
   }, [currentDrone.id, repoOp?.kind]);
-  React.useEffect(() => setWorkspaceToolsMenuOpen(false), [currentDrone.id]);
   const hostRuntime = isHostRuntimeDrone(currentDrone);
   const dockerSnapshotSupported = !hostRuntime && currentDrone.persistVolume === false;
   const readOnlySupported =
@@ -1246,7 +1214,10 @@ export function SelectedDroneWorkspace({
 
   const openWorkspacePane = React.useCallback(
     (tab: RightPanelTab) => {
-      setWorkspaceToolsMenuOpen(false);
+      setSyncMenuOpen(false);
+      setTerminalMenuOpen(false);
+      setDroneControlsMenuOpen(false);
+      setHeaderOverflowOpen(false);
       requestRightPanelTab(tab);
     },
     [requestRightPanelTab],
@@ -1706,7 +1677,6 @@ export function SelectedDroneWorkspace({
                 setSyncMenuOpen(false);
                 setTerminalMenuOpen(false);
                 setDroneControlsMenuOpen(false);
-                setWorkspaceToolsMenuOpen(false);
                 setHeaderOverflowOpen((v) => !v);
               }}
               title="More actions"
@@ -2130,78 +2100,55 @@ export function SelectedDroneWorkspace({
             )}
           </div>
           {/* Workspace pane controls */}
-          <div className="w-px h-4 bg-[var(--border-subtle)] ml-1" />
-          <div ref={workspaceToolsMenuRef} className="relative">
-            <HeaderActionButton
-              onClick={() => {
-                setSyncMenuOpen(false);
-                setTerminalMenuOpen(false);
-                setDroneControlsMenuOpen(false);
-                setHeaderOverflowOpen(false);
-                setWorkspaceToolsMenuOpen((open) => !open);
-              }}
-              title="Open a workspace tool"
-              aria-haspopup="menu"
-              aria-expanded={workspaceToolsMenuOpen}
-              className="dh-type-header-action--emphasis"
-            >
-              <span>Tools</span>
-              <IconChevron down={!workspaceToolsMenuOpen} className="opacity-75" />
-            </HeaderActionButton>
-            {workspaceToolsMenuOpen ? (
-              <HeaderDropdownPortal
-                open={workspaceToolsMenuOpen}
-                anchorRef={workspaceToolsMenuRef}
-                width={220}
-              >
-                <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto">
-                  {rightPanelHeaderTabs(rightPanelTabs).map((tab) => {
-                    const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
-                    const active = tab === rightPanelTab;
-                    return (
-                      <button
-                        key={tab}
-                        type="button"
-                        onClick={() => openWorkspacePane(tab)}
-                        data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
-                        className={cn(
-                          dropdownMenuItemBaseClass,
-                          'flex items-center justify-between gap-3 hover:bg-[var(--hover)]',
-                          active
-                            ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-                            : 'text-[var(--fg-secondary)]',
-                        )}
-                        role="menuitem"
-                        aria-current={active ? 'true' : undefined}
-                        title={
-                          tab === 'prs' && prCount > 0
-                            ? `Open ${rightPanelTabLabels[tab]} pane (${prCount} open)`
-                            : `Open ${rightPanelTabLabels[tab]} pane`
-                        }
+          <div className="ml-1 h-5 w-px bg-[var(--border-subtle)]" />
+          <div
+            className="flex min-w-0 items-center gap-px"
+            role="toolbar"
+            aria-label="Workspace tools"
+          >
+            {rightPanelHeaderTabs(rightPanelTabs).map((tab, index, tabs) => {
+              const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
+              const active = tab === rightPanelTab;
+              const label = rightPanelTabLabels[tab];
+              const tooltip =
+                tab === 'prs' && prCount > 0 ? `${label} (${prCount} open)` : label;
+              return (
+                <UiTooltip
+                  key={tab}
+                  content={tooltip}
+                  side="bottom"
+                  align={index === tabs.length - 1 ? 'end' : 'center'}
+                >
+                  <HeaderActionButton
+                    onClick={() => openWorkspacePane(tab)}
+                    data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
+                    className={cn(
+                      'relative !h-7 !w-7 !justify-center !rounded-[4px] !px-0',
+                      active
+                        ? 'bg-[var(--surface-strong)] !text-[var(--fg)] shadow-[inset_0_-2px_0_var(--accent)]'
+                        : '!text-[var(--chrome-muted)] hover:bg-[var(--hover)] hover:!text-[var(--fg-secondary)]',
+                    )}
+                    aria-label={tooltip}
+                    aria-current={active ? 'page' : undefined}
+                  >
+                    <span
+                      className="flex h-[17px] w-[17px] items-center justify-center"
+                      aria-hidden="true"
+                    >
+                      <WorkspaceToolIcon tab={tab} className="h-[17px] w-[17px]" />
+                    </span>
+                    {tab === 'prs' && prCount > 0 ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute right-px top-px flex h-3 min-w-3 items-center justify-center rounded-full border border-[var(--app-header-bg)] bg-[var(--accent)] px-[2px] font-mono text-[7px] font-[var(--weight-bold)] leading-none tabular-nums text-[var(--accent-contrast)]"
                       >
-                        <span className="flex min-w-0 flex-1 items-center gap-2">
-                          <span
-                            className={cn(
-                              'flex h-4 w-4 shrink-0 items-center justify-center',
-                              active ? 'text-[var(--accent)]' : 'text-[var(--muted-dim)]',
-                            )}
-                            aria-hidden="true"
-                          >
-                            <WorkspaceToolIcon tab={tab} />
-                          </span>
-                          <span className="truncate">{rightPanelTabLabels[tab]}</span>
-                        </span>
-                        {tab === 'prs' && prCount > 0 ? (
-                          <span className="font-mono text-[var(--text-9)] leading-none tabular-nums text-[var(--accent)]">
-                            {prCount > 99 ? '99+' : prCount}
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              </HeaderDropdownPortal>
-            ) : null}
+                        {prCount > 99 ? '99+' : prCount}
+                      </span>
+                    ) : null}
+                  </HeaderActionButton>
+                </UiTooltip>
+              );
+            })}
           </div>
         </div>
       </DroneWorkspaceHeaderFrame>
