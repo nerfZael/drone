@@ -169,6 +169,13 @@
   --chat-composer-control-border: var(--border-subtle);
   --chat-composer-control-fg: var(--fg-secondary);
   --chat-composer-model-fg: var(--muted);
+  --chat-composer-context-track: var(--border-subtle);
+  --chat-composer-expanded-placeholder: var(--muted);
+  --chat-composer-expanded-control-bg: var(--surface-strong);
+  --chat-composer-expanded-control-border: var(--border);
+  --chat-composer-expanded-control-fg: var(--fg);
+  --chat-composer-expanded-model-fg: var(--fg-secondary);
+  --chat-composer-expanded-context-track: var(--border);
   --chat-composer-font: var(--sans);
   --chat-composer-radius: var(--radius-large);
   --chat-composer-control-radius: var(--radius-medium);
@@ -259,6 +266,17 @@
   --syntax-regex: #c6a0f6;
   --syntax-macro: #ded7ff;
   --syntax-variable: #c7cdda;
+}
+
+/* Expanded composers expose more controls at once, so their secondary chrome
+   needs a firmer hierarchy than the deliberately quiet collapsed state. */
+[data-chat-composer-expanded='true'] {
+  --chat-composer-placeholder: var(--chat-composer-expanded-placeholder);
+  --chat-composer-control-bg: var(--chat-composer-expanded-control-bg);
+  --chat-composer-control-border: var(--chat-composer-expanded-control-border);
+  --chat-composer-control-fg: var(--chat-composer-expanded-control-fg);
+  --chat-composer-model-fg: var(--chat-composer-expanded-model-fg);
+  --chat-composer-context-track: var(--chat-composer-expanded-context-track);
 }
 
 :root[data-theme='catppuccin-mocha'] {
@@ -400,7 +418,7 @@
   --chat-message-time: #7f849c;
   --chat-user-message-time: #a6adc8;
   --chat-composer-border: rgba(69, 71, 90, .56);
-  --chat-composer-focus-border: rgba(203, 166, 247, .26);
+  --chat-composer-focus-border: rgba(203, 166, 247, .38);
   --chat-composer-surface: #313244;
   --chat-composer-fg: #cdd6f4;
   --chat-composer-placeholder: #7f849c;
@@ -408,6 +426,13 @@
   --chat-composer-control-border: transparent;
   --chat-composer-control-fg: #a6adc8;
   --chat-composer-model-fg: #9399b2;
+  --chat-composer-context-track: rgba(49, 50, 68, .78);
+  --chat-composer-expanded-placeholder: #9399b2;
+  --chat-composer-expanded-control-bg: rgba(69, 71, 90, .62);
+  --chat-composer-expanded-control-border: rgba(127, 132, 156, .28);
+  --chat-composer-expanded-control-fg: #cdd6f4;
+  --chat-composer-expanded-model-fg: #bac2de;
+  --chat-composer-expanded-context-track: rgba(127, 132, 156, .42);
   --chat-composer-font: system-ui, -apple-system, sans-serif;
   --chat-composer-radius: .4375rem;
   --chat-composer-control-radius: .3125rem;
