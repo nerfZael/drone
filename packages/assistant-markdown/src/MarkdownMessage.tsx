@@ -3,6 +3,10 @@ import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
+import {
+  allocateFitTableColumnWidths,
+  type FitTableColumnMetric,
+} from './table-layout.js';
 
 type CalloutKind = 'note' | 'tip' | 'important' | 'warning' | 'caution';
 type TableMode = 'fit' | 'natural';
@@ -75,6 +79,95 @@ function tableIdFromNode(node: unknown, children: React.ReactNode): string {
   return `text:${text.slice(0, 160)}:${text.length}`;
 }
 
+function fitTableColumnMetrics(children: React.ReactNode): FitTableColumnMetric[] {
+  const rows: string[][] = [];
+
+  const visit = (node: React.ReactNode) => {
+    React.Children.forEach(node, (child) => {
+      if (!React.isValidElement<{ children?: React.ReactNode }>(child)) return;
+      if (child.type === 'tr') {
+        const cells = React.Children.toArray(child.props.children)
+          .filter((cell) => React.isValidElement(cell))
+          .map((cell) => flattenText(cell).replace(/\s+/g, ' ').trim());
+        if (cells.length > 0) rows.push(cells);
+        return;
+      }
+      visit(child.props.children);
+    });
+  };
+
+  visit(children);
+  const columnCount = rows.reduce((largest, row) => Math.max(largest, row.length), 0);
+  if (columnCount === 0) return [];
+
+  // Fixed table layout is what guarantees that wrap mode never scrolls. Give
+  // it explicit content-derived widths so it does not fall back to equal-width
+  // columns. The square root dampens long prose. A pixel minimum derived from
+  // the longest word protects compact labels and the cell's padding whenever
+  // the complete set of column minima fits in the container.
+  return Array.from({ length: columnCount }, (_, columnIndex) => {
+    let preferredWeight = 5;
+    let longestWordLength = 2;
+    for (const row of rows) {
+      const text = row[columnIndex] ?? '';
+      const longestWord = text
+        .split(/\s+/)
+        .reduce((longest, word) => Math.max(longest, word.length), 0);
+      const dampedLength = Math.ceil(Math.sqrt(text.length) * 3);
+      preferredWeight = Math.max(
+        preferredWeight,
+        Math.min(30, Math.max(longestWord, dampedLength)),
+      );
+      longestWordLength = Math.max(longestWordLength, Math.min(16, longestWord));
+    }
+    return {
+      preferredWeight,
+      // Current cells have 20px of inline padding plus borders. Seven pixels
+      // per character is conservative for the 10–12px table fonts.
+      minimumWidth: 22 + longestWordLength * 7,
+    };
+  });
+}
+
+function useFitTableColumnWidths(children: React.ReactNode) {
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+  const [availableWidth, setAvailableWidth] = React.useState<number | null>(null);
+  const metrics = React.useMemo(() => fitTableColumnMetrics(children), [children]);
+
+  React.useEffect(() => {
+    const node = wrapRef.current;
+    if (!node) return;
+
+    const updateWidth = (width: number) => {
+      const roundedWidth = roundWidthForLayout(width);
+      setAvailableWidth((current) => (current === roundedWidth ? current : roundedWidth));
+    };
+    updateWidth(node.clientWidth);
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver((entries) => {
+        updateWidth(entries[0]?.contentRect.width ?? node.clientWidth);
+      });
+      observer.observe(node);
+      return () => observer.disconnect();
+    }
+
+    const onResize = () => updateWidth(node.clientWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const columnWidths = React.useMemo(
+    () => allocateFitTableColumnWidths(metrics, availableWidth),
+    [availableWidth, metrics],
+  );
+  return { columnWidths, wrapRef };
+}
+
+function roundWidthForLayout(width: number): number {
+  return Number(Math.max(0, width).toFixed(3));
+}
+
 function MarkdownTable({
   children,
   mode,
@@ -86,6 +179,7 @@ function MarkdownTable({
   onModeChange: (mode: TableMode) => void;
   onOpenExpanded: () => void;
 }) {
+  const { columnWidths, wrapRef } = useFitTableColumnWidths(children);
   return (
     <div className="dh-markdown-block dh-markdown-block--wide">
       <div className="dh-markdown-table-toolbar">
@@ -122,8 +216,15 @@ function MarkdownTable({
           </button>
         </div>
       </div>
-      <div className={`dh-markdown-table-wrap dh-markdown-table-wrap--${mode}`}>
+      <div ref={wrapRef} className={`dh-markdown-table-wrap dh-markdown-table-wrap--${mode}`}>
         <table className={`dh-markdown-table dh-markdown-table--${mode}`} {...props}>
+          {mode === 'fit' && columnWidths.length > 0 ? (
+            <colgroup>
+              {columnWidths.map((width, index) => (
+                <col key={index} style={{ width }} />
+              ))}
+            </colgroup>
+          ) : null}
           {children}
         </table>
       </div>
@@ -142,6 +243,7 @@ function ExpandedMarkdownTableDialog({
   onModeChange: (mode: TableMode) => void;
   onClose: () => void;
 }) {
+  const { columnWidths, wrapRef } = useFitTableColumnWidths(table.children);
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -193,8 +295,15 @@ function ExpandedMarkdownTableDialog({
             </button>
           </div>
         </div>
-        <div className={`dh-markdown-table-wrap dh-markdown-table-wrap--${mode}`}>
+        <div ref={wrapRef} className={`dh-markdown-table-wrap dh-markdown-table-wrap--${mode}`}>
           <table className={`dh-markdown-table dh-markdown-table--${mode}`} {...table.props}>
+            {mode === 'fit' && columnWidths.length > 0 ? (
+              <colgroup>
+                {columnWidths.map((width, index) => (
+                  <col key={index} style={{ width }} />
+                ))}
+              </colgroup>
+            ) : null}
             {table.children}
           </table>
         </div>

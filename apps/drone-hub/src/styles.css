@@ -2097,7 +2097,7 @@ code, pre {
   margin: 0;
 }
 
-.dh-markdown-table--fit {
+.dh-markdown table.dh-markdown-table--fit {
   width: 100%;
   table-layout: fixed;
 }
