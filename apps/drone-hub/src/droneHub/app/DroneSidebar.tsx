@@ -2231,6 +2231,7 @@ export function DroneSidebar({
           Boolean(deletingDrones[drone.id]));
       const inactiveDisplayState = sidebarDroneDisplayState(drone, false, '', false, false);
       const droneUnread =
+        !droneWorking &&
         inactiveDisplayState !== 'blocked' &&
         inactiveDisplayState !== 'offline' &&
         ((drone.unreadChats?.length ?? 0) > 0 ||

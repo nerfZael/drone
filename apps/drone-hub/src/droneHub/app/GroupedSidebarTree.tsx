@@ -878,6 +878,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
       if (unread) summary.unread += 1;
       if (working) summary.working += 1;
     }
+    if (summary.working > 0) summary.unread = 0;
     return summary;
   }, [
     activeChatName,
@@ -1312,6 +1313,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           Boolean(deletingDrones[drone.id]));
       const inactiveDisplayState = sidebarDroneDisplayState(drone, false, '', false, false);
       const unread =
+        !working &&
         inactiveDisplayState !== 'blocked' &&
         inactiveDisplayState !== 'offline' &&
         ((drone.unreadChats?.length ?? 0) > 0 ||

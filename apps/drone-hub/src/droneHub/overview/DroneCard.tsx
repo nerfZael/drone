@@ -389,9 +389,20 @@ function summarizeDroneChats(
   }
   return {
     approval: approvalChats.size || (drone.approvalRequired ? 1 : 0),
-    unread: unreadChats.size,
+    unread: working > 0 ? 0 : unreadChats.size,
     working,
   };
+}
+
+function suppressUnreadWhileWorking(
+  summary: SidebarChatStateSummary,
+  droneState?: SidebarDroneDisplayState,
+): SidebarChatStateSummary {
+  const working =
+    summary.working > 0 || droneState === 'working' || droneState === 'starting';
+  return working && summary.unread > 0
+    ? { ...summary, unread: 0 }
+    : summary;
 }
 
 export function SidebarBlockedStatusIndicator({ emphasized = false }: { emphasized?: boolean }) {
@@ -585,13 +596,6 @@ export const DroneCard = React.memo(function DroneCard({
   const isDraftDrone = drone.draft === true || drone.hubPhase === 'draft';
   const chatNames = normalizedDroneChats(drone);
   const hasMultipleChats = chatNames.length > 1;
-  const effectiveChatStateSummary = hasMultipleChats
-    ? (chatStateSummary ?? summarizeDroneChats(drone, chatNames))
-    : null;
-  const unread =
-    !isDraftDrone &&
-    !hasMultipleChats &&
-    (Boolean(unreadAgentMessage) || (drone.unreadChats?.length ?? 0) > 0);
   const displayState = sidebarDroneDisplayState(
     drone,
     Boolean(busy),
@@ -599,6 +603,18 @@ export const DroneCard = React.memo(function DroneCard({
     Boolean(approvalRequired),
     !hasMultipleChats,
   );
+  const effectiveChatStateSummary = hasMultipleChats
+    ? suppressUnreadWhileWorking(
+        chatStateSummary ?? summarizeDroneChats(drone, chatNames),
+        displayState,
+      )
+    : null;
+  const unread =
+    !isDraftDrone &&
+    !hasMultipleChats &&
+    displayState !== 'working' &&
+    displayState !== 'starting' &&
+    (Boolean(unreadAgentMessage) || (drone.unreadChats?.length ?? 0) > 0);
   const previousDisplayStateRef = React.useRef<SidebarDroneDisplayState>(displayState);
   const [recentlyBlocked, setRecentlyBlocked] = React.useState(false);
   React.useEffect(() => {

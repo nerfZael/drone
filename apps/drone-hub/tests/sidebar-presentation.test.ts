@@ -328,6 +328,10 @@ describe('sidebar presentation', () => {
   });
 
   test('shows descendant state counts only on collapsed group headers in repository order', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
     const groupedTreeSource = readFileSync(
       new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
       'utf8',
@@ -344,6 +348,12 @@ describe('sidebar presentation', () => {
     );
     expect(groupedTreeSource).toContain("inactiveDisplayState !== 'blocked'");
     expect(groupedTreeSource).toContain("inactiveDisplayState !== 'offline'");
+    expect(groupedTreeSource).toContain(
+      "const unread =\n        !working &&\n        inactiveDisplayState !== 'blocked'",
+    );
+    expect(sidebarSource).toContain(
+      "const droneUnread =\n        !droneWorking &&\n        inactiveDisplayState !== 'blocked'",
+    );
     expect(countsSource.indexOf('summary.approval')).toBeLessThan(
       countsSource.indexOf('summary.unread'),
     );

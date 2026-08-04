@@ -111,7 +111,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).toContain('data-sidebar-chat-state-counts="true"');
   });
 
-  test('renders aggregate chat status counts at the right of a drone row', () => {
+  test('suppresses aggregate unread counts while the drone is working', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
         drone: drone({ chats: ['default', 'research'] }),
@@ -123,7 +123,7 @@ describe('desktop sidebar drone presentation', () => {
 
     expect(html).toContain('data-sidebar-chat-state-counts="true"');
     expect(html).toContain('aria-label="1 awaiting approval"');
-    expect(html).toContain('aria-label="2 unread"');
+    expect(html).not.toContain('aria-label="2 unread"');
     expect(html).toContain('aria-label="1 working"');
     expect(html.indexOf('>worker</span>')).toBeLessThan(
       html.indexOf('data-sidebar-chat-state-counts="true"'),
@@ -146,8 +146,42 @@ describe('desktop sidebar drone presentation', () => {
     );
 
     expect(html).toContain('aria-label="1 awaiting approval"');
-    expect(html).toContain('aria-label="2 unread"');
+    expect(html).not.toContain('aria-label="2 unread"');
     expect(html).toContain('aria-label="1 working"');
+  });
+
+  test('restores aggregate unread counts after the drone stops working', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({
+          chats: ['default', 'research'],
+          unreadChats: ['default', 'research'],
+          busyChats: [],
+        }),
+        selected: false,
+        onClick: () => {},
+      }),
+    );
+
+    expect(html).toContain('aria-label="2 unread"');
+    expect(html).not.toContain('aria-label="1 working"');
+  });
+
+  test('suppresses aggregate unread counts while a multi-chat drone is starting', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({
+          chats: ['default', 'research'],
+          unreadChats: ['research'],
+          hubPhase: 'starting',
+        }),
+        selected: false,
+        onClick: () => {},
+      }),
+    );
+
+    expect(html).toContain('title="Starting" aria-label="Starting"');
+    expect(html).not.toContain('aria-label="1 unread"');
   });
 
   test('shows a persistent to do label at the right of tagged drone rows', () => {

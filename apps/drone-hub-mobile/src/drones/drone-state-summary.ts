@@ -88,6 +88,8 @@ export function addMobileDroneToStateSummary(
   if (state === 'approval') summary.approval += 1;
   if (state === 'working' || state === 'starting') summary.working += 1;
   if (
+    state !== 'working' &&
+    state !== 'starting' &&
     inactiveState !== 'blocked' &&
     inactiveState !== 'offline' &&
     (drone.unreadChats?.length ?? 0) > 0
@@ -119,6 +121,8 @@ export function summarizeMobileDroneChats(
     if (working) summary.working += 1;
     if (unread) summary.unread += 1;
   }
+  const inactiveState = mobileDroneDisplayState(drone, false);
+  if (summary.working > 0 || inactiveState === 'starting') summary.unread = 0;
   if (summary.approval === 0 && drone.approvalRequired) summary.approval = 1;
   return summary;
 }
