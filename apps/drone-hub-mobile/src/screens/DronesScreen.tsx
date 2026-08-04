@@ -143,8 +143,9 @@ function applyChatMutationToDrone(
   const projectName = (chatName: string) =>
     rename && chatName === rename.from ? rename.to : chatName;
   const allowed = new Set(nextChats);
-  const projectList = (chatNames: readonly string[] | undefined) =>
-    [...new Set((chatNames ?? []).map(projectName).filter((chatName) => allowed.has(chatName)))];
+  const projectList = (chatNames: readonly string[] | undefined) => [
+    ...new Set((chatNames ?? []).map(projectName).filter((chatName) => allowed.has(chatName))),
+  ];
   const projectMap = <T,>(source: Record<string, T> | undefined): Record<string, T> | undefined => {
     if (!source) return undefined;
     return Object.fromEntries(
@@ -212,6 +213,7 @@ export type DronesAppHeaderState = {
   onToggleDraft?(): void;
   onNewDrone?(): void;
   onNewChat?(): void;
+  onOpenFiles?(): void;
   onRename?(): void;
   pinned?: boolean;
   pinDisabled?: boolean;
@@ -1656,9 +1658,7 @@ export function DronesScreen({
   ) => {
     setDrones((current) =>
       current.map((drone) =>
-        drone.id === droneId
-          ? applyChatMutationToDrone(drone, nextChats, rename)
-          : drone,
+        drone.id === droneId ? applyChatMutationToDrone(drone, nextChats, rename) : drone,
       ),
     );
     const currentSelected = selectedRef.current;
@@ -1669,11 +1669,7 @@ export function DronesScreen({
     setChats([...nextChats]);
   };
 
-  const createDrawerChat = async (
-    droneId: string,
-    nextChatName: string,
-    copyFrom: string,
-  ) => {
+  const createDrawerChat = async (droneId: string, nextChatName: string, copyFrom: string) => {
     const destinationId = targetId;
     const result = await requestDroneControl(destinationId, 'chat.create', {
       droneId,
@@ -1685,19 +1681,12 @@ export function DronesScreen({
     const fallbackChats = currentDrone
       ? [...new Set([...currentDrone.chats, nextChatName])]
       : [nextChatName];
-    commitDrawerChatMutation(
-      droneId,
-      normalizedChatMutationList(result?.chats, fallbackChats),
-    );
+    commitDrawerChatMutation(droneId, normalizedChatMutationList(result?.chats, fallbackChats));
     await loadDrones(true);
     return targetIdRef.current === destinationId;
   };
 
-  const renameDrawerChat = async (
-    droneId: string,
-    currentChatName: string,
-    newName: string,
-  ) => {
+  const renameDrawerChat = async (droneId: string, currentChatName: string, newName: string) => {
     const destinationId = targetId;
     const result = await requestDroneControl(destinationId, 'chat.rename', {
       droneId,
@@ -1713,11 +1702,10 @@ export function DronesScreen({
     const fallbackChats = (currentDrone?.chats ?? []).map((chatName) =>
       chatName === currentChatName ? newName : chatName,
     );
-    commitDrawerChatMutation(
-      droneId,
-      normalizedChatMutationList(result?.chats, fallbackChats),
-      { from: currentChatName, to: newName },
-    );
+    commitDrawerChatMutation(droneId, normalizedChatMutationList(result?.chats, fallbackChats), {
+      from: currentChatName,
+      to: newName,
+    });
     await loadDrones(true);
     return targetIdRef.current === destinationId;
   };
@@ -2038,6 +2026,7 @@ export function DronesScreen({
             backNavigation: true,
             onNewDrone: openNewDroneFromCurrent,
             onNewChat: () => void createNewChat(),
+            onOpenFiles: filePreview.openExplorer,
             onRename: () => openDroneRename(selected),
             pinned: droneSidebarOrder.pinnedDroneIds.includes(selected.id),
             pinDisabled: pinningDroneIds.has(selected.id),
@@ -2174,6 +2163,7 @@ export function DronesScreen({
     phoneTarget,
     requestDroneControl,
     running,
+    filePreview.openExplorer,
   ]);
   React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
@@ -2716,6 +2706,16 @@ export function DronesScreen({
         line={filePreview.line}
         loading={filePreview.loading}
         error={filePreview.error}
+        saving={filePreview.saving}
+        saveError={filePreview.saveError}
+        targetId={targetId}
+        droneId={selected?.id ?? ''}
+        chatName={chatName}
+        rootPath={filePreview.rootPath}
+        selectedPath={filePreview.selectedPath}
+        requestDroneControl={requestDroneControl}
+        onOpenPath={(path) => filePreview.open({ raw: path, path, line: null, column: null })}
+        onSave={filePreview.save}
         onClose={filePreview.close}
         onRetry={filePreview.retry}
       />

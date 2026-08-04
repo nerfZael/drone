@@ -51,14 +51,19 @@ describe('device mesh grant migrations', () => {
       {
         capability: 'drone-control',
         version: 1,
-        operations: [
-          'drones.list',
-          'drone.delete',
-          'drone.rename',
-          'chat.rename',
-          'chat.delete',
-        ],
+        operations: ['drones.list', 'drone.delete', 'drone.rename', 'chat.rename', 'chat.delete'],
       },
     ]);
+  });
+
+  test('does not silently broaden existing file preview access', () => {
+    const grants = [
+      {
+        capability: 'drone-control',
+        version: 1,
+        operations: ['drones.list', 'file.preview'],
+      },
+    ];
+    expect(migrateDeviceMeshGrants(grants)).toEqual(grants);
   });
 });

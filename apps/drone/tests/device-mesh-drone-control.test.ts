@@ -1130,6 +1130,111 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('lists and revision-safely writes files for mobile workspaces', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      requests.push({
+        url,
+        method: String(init?.method ?? 'GET'),
+        body: String(init?.body ?? ''),
+      });
+      return Response.json(
+        url.includes('/fs/list')
+          ? {
+              ok: true,
+              path: '/work/repo',
+              entries: [{ name: 'src', path: '/work/repo/src', kind: 'directory' }],
+            }
+          : { ok: true, path: '/work/repo/index.ts', size: 16, revision: 'sha256:next' },
+      );
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      const listResult: any = await capability.invoke('files.list', {
+        droneId: 'one',
+        path: '/work/repo',
+      });
+      expect(listResult.contentChunk).toMatchObject({
+        encoding: 'base64-json-utf8',
+        offset: 0,
+        done: true,
+      });
+      expect(
+        JSON.parse(Buffer.from(listResult.contentChunk.dataBase64, 'base64').toString('utf8')),
+      ).toMatchObject({ path: '/work/repo', entries: [{ name: 'src' }] });
+      await expect(
+        capability.invoke('file.write', {
+          droneId: 'one',
+          path: '/work/repo/index.ts',
+          content: 'export default 1',
+          expectedRevision: 'sha256:old',
+        }),
+      ).resolves.toMatchObject({ revision: 'sha256:next' });
+      expect(requests).toEqual([
+        {
+          url: 'http://127.0.0.1:7777/api/drones/one/fs/list?path=%2Fwork%2Frepo',
+          method: 'GET',
+          body: '',
+        },
+        {
+          url: 'http://127.0.0.1:7777/api/drones/one/fs/file',
+          method: 'POST',
+          body: JSON.stringify({
+            path: '/work/repo/index.ts',
+            content: 'export default 1',
+            expectedRevision: 'sha256:old',
+          }),
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('chunks large mobile directory listings below the mesh response limit', async () => {
+    const originalFetch = globalThis.fetch;
+    const entries = Array.from({ length: 3_000 }, (_, index) => ({
+      name: `file-${index.toString().padStart(4, '0')}-${'x'.repeat(48)}.ts`,
+      path: `/work/repo/file-${index.toString().padStart(4, '0')}-${'x'.repeat(48)}.ts`,
+      kind: 'file',
+    }));
+    globalThis.fetch = (async () =>
+      Response.json({ ok: true, path: '/work/repo', entries })) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      const first: any = await capability.invoke('files.list', {
+        droneId: 'one',
+        path: '/work/repo',
+        contentOffset: 0,
+      });
+      expect(first.contentChunk).toMatchObject({
+        encoding: 'base64-json-utf8',
+        offset: 0,
+        done: false,
+      });
+      const second: any = await capability.invoke('files.list', {
+        droneId: 'one',
+        path: '/work/repo',
+        contentOffset: first.contentChunk.bytes,
+      });
+      expect(second.contentChunk).toMatchObject({
+        encoding: 'base64-json-utf8',
+        offset: first.contentChunk.bytes,
+      });
+      expect(first.contentChunk.totalBytes).toBeGreaterThan(first.contentChunk.bytes);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('returns chunked text and media file previews', async () => {
     const originalFetch = globalThis.fetch;
     const chunkRequests: string[] = [];

@@ -64,14 +64,32 @@ describe('device protocol', () => {
     ).toBe(false);
   });
 
-  test('advertises file preview as an explicit drone permission', () => {
-    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('file.preview');
+  test('advertises file workspace operations as explicit drone permissions', () => {
+    expect(DRONE_CONTROL_CAPABILITY.operations).toEqual(
+      expect.arrayContaining(['files.list', 'file.preview', 'file.write']),
+    );
     expect(
       isGranted(
         [{ capability: 'drone-control', version: 1, operations: ['chat.read'] }],
         'drone-control',
         1,
         'file.preview',
+      ),
+    ).toBe(false);
+    expect(
+      isGranted(
+        [{ capability: 'drone-control', version: 1, operations: ['file.preview'] }],
+        'drone-control',
+        1,
+        'files.list',
+      ),
+    ).toBe(false);
+    expect(
+      isGranted(
+        [{ capability: 'drone-control', version: 1, operations: ['file.preview'] }],
+        'drone-control',
+        1,
+        'file.write',
       ),
     ).toBe(false);
   });

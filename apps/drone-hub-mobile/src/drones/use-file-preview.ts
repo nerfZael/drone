@@ -6,7 +6,11 @@ import type { DroneControlOperation } from '@drone/device-protocol';
 import { readMeshJsonContent } from '../mesh/read-mesh-json-content';
 import type { MobileFileReference } from '../local-assistant/file-reference';
 import {
+  MOBILE_FILE_EDIT_MAX_BYTES,
+  MOBILE_FILE_WRITE_PAYLOAD_MAX_BYTES,
   mobileFileName,
+  mobileDroneWorkspaceRoot,
+  mobileUtf8ByteLength,
   MOBILE_MEDIA_PREVIEW_MAX_BYTES,
   MOBILE_SVG_PREVIEW_MAX_BYTES,
   mobileWorkspaceRelativeFilePath,
@@ -55,12 +59,19 @@ export function useFilePreview({
   subscribeFileChanges?: (listener: (payload: Record<string, any>) => void) => () => void;
 }) {
   const [request, setRequest] = React.useState<PreviewRequest | null>(null);
+  const [workspaceContext, setWorkspaceContext] = React.useState<Omit<
+    PreviewRequest,
+    'path' | 'line'
+  > | null>(null);
   const [preview, setPreview] = React.useState<MobileFilePreview | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const previewFileRef = React.useRef<File | null>(null);
   const previewRef = React.useRef<MobileFilePreview | null>(null);
   const loadVersion = React.useRef(0);
+  const saveVersion = React.useRef(0);
   previewRef.current = preview;
 
   const discardCachedPreview = React.useCallback(() => {
@@ -302,18 +313,45 @@ export function useFilePreview({
           : resolveMobileDroneFilePath(selectedDrone, reference.path),
         line: reference.line,
       };
+      setWorkspaceContext({
+        targetId: nextRequest.targetId,
+        droneId: nextRequest.droneId,
+        chatName: nextRequest.chatName,
+        phoneTarget: nextRequest.phoneTarget,
+      });
+      saveVersion.current += 1;
       setRequest(nextRequest);
+      setSaving(false);
+      setSaveError(null);
       void load(nextRequest);
     },
     [chatName, load, phoneTarget, selectedDrone, targetId],
   );
 
+  const openExplorer = React.useCallback(() => {
+    if (!selectedDrone) return;
+    loadVersion.current += 1;
+    saveVersion.current += 1;
+    setWorkspaceContext({ targetId, droneId: selectedDrone.id, chatName, phoneTarget });
+    setRequest(null);
+    setPreview(null);
+    setError(null);
+    setSaveError(null);
+    setLoading(false);
+    setSaving(false);
+    discardCachedPreview();
+  }, [chatName, discardCachedPreview, phoneTarget, selectedDrone, targetId]);
+
   const close = React.useCallback(() => {
     loadVersion.current += 1;
+    saveVersion.current += 1;
+    setWorkspaceContext(null);
     setRequest(null);
     setPreview(null);
     setError(null);
     setLoading(false);
+    setSaving(false);
+    setSaveError(null);
     discardCachedPreview();
   }, [discardCachedPreview]);
 
@@ -325,9 +363,17 @@ export function useFilePreview({
     request.chatName === chatName &&
     request.phoneTarget === phoneTarget,
   );
+  const workspaceIsCurrent = Boolean(
+    workspaceContext &&
+    selectedDrone &&
+    workspaceContext.targetId === targetId &&
+    workspaceContext.droneId === selectedDrone.id &&
+    workspaceContext.chatName === chatName &&
+    workspaceContext.phoneTarget === phoneTarget,
+  );
   React.useEffect(() => {
-    if (request && !requestIsCurrent) close();
-  }, [close, request, requestIsCurrent]);
+    if (workspaceContext && !workspaceIsCurrent) close();
+  }, [close, workspaceContext, workspaceIsCurrent]);
 
   React.useEffect(() => {
     if (!request || !preview || !requestIsCurrent) return;
@@ -339,8 +385,7 @@ export function useFilePreview({
       checking = true;
       try {
         checkCount += 1;
-        const includeRevision =
-          !phoneTarget || forceRevision || checkCount % 15 === 0;
+        const includeRevision = !phoneTarget || forceRevision || checkCount % 15 === 0;
         const result = await requestDroneControl(request.targetId, 'file.preview', {
           droneId: request.droneId,
           chatName: request.chatName,
@@ -373,10 +418,7 @@ export function useFilePreview({
         checking = false;
       }
     };
-    const interval = setInterval(
-      () => void checkForChange(),
-      phoneTarget ? 2_000 : 30_000,
-    );
+    const interval = setInterval(() => void checkForChange(), phoneTarget ? 2_000 : 30_000);
     const appStateSubscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') void checkForChange(true);
     });
@@ -436,7 +478,7 @@ export function useFilePreview({
   ]);
 
   return {
-    visible: requestIsCurrent,
+    visible: workspaceIsCurrent,
     preview: requestIsCurrent ? preview : null,
     displayPath:
       requestIsCurrent && selectedDrone
@@ -445,10 +487,75 @@ export function useFilePreview({
     line: requestIsCurrent ? (request?.line ?? null) : null,
     loading: requestIsCurrent && loading,
     error: requestIsCurrent ? error : null,
+    saving: requestIsCurrent && saving,
+    saveError: requestIsCurrent ? saveError : null,
+    rootPath: selectedDrone && !phoneTarget ? mobileDroneWorkspaceRoot(selectedDrone) : '',
+    selectedPath: requestIsCurrent ? (preview?.path ?? request?.path ?? '') : '',
     open,
+    openExplorer,
     close,
     retry: () => {
       if (request && requestIsCurrent) void load(request);
+    },
+    save: async (content: string, expectedRevision?: string | null) => {
+      if (!request || !requestIsCurrent || preview?.kind !== 'text' || saving) return false;
+      const contentBytes = mobileUtf8ByteLength(content);
+      if (contentBytes > MOBILE_FILE_EDIT_MAX_BYTES) {
+        setSaveError(
+          `This edit is too large to save on mobile (${contentBytes} bytes, max ${MOBILE_FILE_EDIT_MAX_BYTES}).`,
+        );
+        return false;
+      }
+      const writePayload = {
+        droneId: request.droneId,
+        chatName: request.chatName,
+        path: preview.path,
+        content,
+        expectedRevision: expectedRevision ?? preview.revision,
+      };
+      if (
+        !request.phoneTarget &&
+        mobileUtf8ByteLength(JSON.stringify(writePayload)) > MOBILE_FILE_WRITE_PAYLOAD_MAX_BYTES
+      ) {
+        setSaveError('This edit contains too much encoded data to send safely from mobile.');
+        return false;
+      }
+      const version = ++saveVersion.current;
+      const savedPath = preview.path;
+      setSaving(true);
+      setSaveError(null);
+      try {
+        const result = await requestDroneControl(request.targetId, 'file.write', writePayload);
+        if (saveVersion.current !== version) return false;
+        setPreview((current) =>
+          current?.path === savedPath
+            ? {
+                ...current,
+                content,
+                size: Math.max(0, Number(result?.size) || contentBytes),
+                mtimeMs: Number.isFinite(Number(result?.mtimeMs))
+                  ? Number(result.mtimeMs)
+                  : current.mtimeMs,
+                revision:
+                  typeof result?.revision === 'string' && result.revision.trim()
+                    ? result.revision.trim()
+                    : current.revision,
+              }
+            : current,
+        );
+        return true;
+      } catch (nextError: any) {
+        if (saveVersion.current !== version) return false;
+        const message = String(nextError?.message ?? nextError ?? 'Unable to save file.');
+        setSaveError(
+          /not granted|not permitted|access|denied/i.test(message)
+            ? `${message}. Enable “drone-control: file.write” for this phone in Devices.`
+            : message,
+        );
+        return false;
+      } finally {
+        if (saveVersion.current === version) setSaving(false);
+      }
     },
   };
 }

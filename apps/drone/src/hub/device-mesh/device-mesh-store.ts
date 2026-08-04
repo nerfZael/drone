@@ -13,9 +13,7 @@ const TERMINAL_PAIRING_RETENTION_MS = 10 * 60_000;
 const PENDING_PAIRING_RETENTION_MS = 60 * 60_000;
 const EXPIRED_INVITATION_RETENTION_MS = 10 * 60_000;
 
-export function migrateDeviceMeshGrants(
-  grants: readonly CapabilityGrant[],
-): CapabilityGrant[] {
+export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): CapabilityGrant[] {
   const legacy = grants.find(
     (grant) => grant.capability === 'assistant-threads' && grant.version === 1,
   );

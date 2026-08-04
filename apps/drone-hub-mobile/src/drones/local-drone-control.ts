@@ -4,10 +4,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 import React from 'react';
 import { fromByteArray } from 'base64-js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import {
-  DRONE_CONTROL_CAPABILITY,
-  type DroneControlOperation,
-} from '@drone/device-protocol';
+import { DRONE_CONTROL_CAPABILITY, type DroneControlOperation } from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { useMesh } from '../mesh/MeshContext';
 import { loadLocalAssistantSettings } from '../local-assistant/local-assistant-settings';
@@ -23,6 +20,7 @@ import {
 } from './local-drone-records';
 import {
   inferMobilePreviewMime,
+  MOBILE_FILE_EDIT_MAX_BYTES,
   MOBILE_MEDIA_PREVIEW_MAX_BYTES,
   MOBILE_TEXT_PREVIEW_MAX_BYTES,
 } from './file-preview-model';
@@ -42,6 +40,18 @@ function localArtifactPathParts(raw: unknown): string[] {
     .replace(/^\.\//, '');
   if (!path || path.startsWith('/') || path.split('/').some((part) => part === '..')) {
     throw new Error('Phone artifact previews require a relative file path');
+  }
+  return path.split('/').filter((part) => part && part !== '.');
+}
+
+function localArtifactDirectoryParts(raw: unknown): string[] {
+  const path = String(raw ?? '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/\/+$/g, '');
+  if (path.startsWith('/') || path.split('/').some((part) => part === '..')) {
+    throw new Error('Phone artifact directories require a relative path');
   }
   return path.split('/').filter((part) => part && part !== '.');
 }
@@ -233,9 +243,8 @@ function useLocalDroneControlValue() {
                 ? [chatName]
                 : [],
             ),
-            approvalRequired: Object.values(drone.chats).some(
-              (threadId) =>
-                assistant.pendingApprovals.some((approval) => approval.threadId === threadId),
+            approvalRequired: Object.values(drone.chats).some((threadId) =>
+              assistant.pendingApprovals.some((approval) => approval.threadId === threadId),
             ),
             createdAt: drone.createdAt,
             lastActivityAt: Object.values(drone.chats)
@@ -264,11 +273,12 @@ function useLocalDroneControlValue() {
         if (!dronesRef.current.some((drone) => drone.id === droneId)) {
           throw new Error('Phone drone was not found');
         }
-        const next = payload.pinned === true
-          ? pinnedDroneIdsRef.current.includes(droneId)
-            ? pinnedDroneIdsRef.current
-            : [...pinnedDroneIdsRef.current, droneId]
-          : pinnedDroneIdsRef.current.filter((id) => id !== droneId);
+        const next =
+          payload.pinned === true
+            ? pinnedDroneIdsRef.current.includes(droneId)
+              ? pinnedDroneIdsRef.current
+              : [...pinnedDroneIdsRef.current, droneId]
+            : pinnedDroneIdsRef.current.filter((id) => id !== droneId);
         await AsyncStorage.setItem(LOCAL_PINNED_DRONES_KEY, JSON.stringify(next));
         pinnedDroneIdsRef.current = next;
         setPinnedDroneIds(next);
@@ -288,9 +298,7 @@ function useLocalDroneControlValue() {
             ...(payload.seedAgentPermissionMode
               ? { agentPermissionMode: payload.seedAgentPermissionMode }
               : {}),
-            ...(payload.seedApprovalPolicy === 'never'
-              ? { approvalPolicy: 'never' as const }
-              : {}),
+            ...(payload.seedApprovalPolicy === 'never' ? { approvalPolicy: 'never' as const } : {}),
           });
         }
         const drone: LocalDroneRecord = {
@@ -316,17 +324,14 @@ function useLocalDroneControlValue() {
         if (newName.length > 80) throw new Error('Drone names must be 80 characters or fewer.');
         if (
           dronesRef.current.some(
-            (candidate) =>
-              candidate.id !== drone.id && candidate.name.trim() === newName,
+            (candidate) => candidate.id !== drone.id && candidate.name.trim() === newName,
           )
         ) {
           throw new Error('A drone with that name already exists.');
         }
         const nextDrone = { ...drone, name: newName };
         await replaceDrones(
-          dronesRef.current.map((candidate) =>
-            candidate.id === drone.id ? nextDrone : candidate,
-          ),
+          dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
         );
         return {
           ok: true,
@@ -364,7 +369,8 @@ function useLocalDroneControlValue() {
       if (operation === 'chat.rename') {
         const drone = getDrone();
         const chatName = String(payload.chatName ?? '').trim();
-        if (!chatName || chatName === 'default') throw new Error('The default chat cannot be renamed.');
+        if (!chatName || chatName === 'default')
+          throw new Error('The default chat cannot be renamed.');
         const newName = parseLocalChatName(payload.newName, 'New chat name');
         if (!drone.chats[chatName]) throw new Error(`Unknown chat: ${chatName}`);
         if (newName !== chatName && drone.chats[newName]) {
@@ -384,7 +390,8 @@ function useLocalDroneControlValue() {
       if (operation === 'chat.delete') {
         const drone = getDrone();
         const chatName = String(payload.chatName ?? '').trim();
-        if (!chatName || chatName === 'default') throw new Error('The default chat cannot be deleted.');
+        if (!chatName || chatName === 'default')
+          throw new Error('The default chat cannot be deleted.');
         const threadId = drone.chats[chatName];
         if (!threadId) throw new Error(`Unknown chat: ${chatName}`);
         await assistant.deleteThread(threadId);
@@ -396,6 +403,81 @@ function useLocalDroneControlValue() {
           dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
         );
         return { ok: true, deletedChat: chatName, chats: Object.keys(nextChats) };
+      }
+      if (operation === 'files.list') {
+        const { thread } = getThread();
+        const parts = localArtifactDirectoryParts(payload.path);
+        const root = new Directory(
+          Paths.document,
+          'drone-hub-native-artifacts-v1',
+          encodeURIComponent(thread.id),
+        );
+        const directory = parts.length > 0 ? new Directory(root, ...parts) : root;
+        if (!directory.exists)
+          throw new Error(`Artifact directory not found: ${parts.join('/') || '.'}`);
+        const entries = directory.list().map((entry) => {
+          const entryPath = [...parts, entry.name].join('/');
+          const isDirectory = entry instanceof Directory;
+          const size = Number((entry as File).size);
+          const mtimeMs = Number((entry as File).modificationTime);
+          const mime = isDirectory ? '' : inferMobilePreviewMime(entry.name);
+          return {
+            name: entry.name,
+            path: entryPath,
+            kind: isDirectory ? 'directory' : 'file',
+            size: !isDirectory && Number.isFinite(size) ? Math.max(0, Math.floor(size)) : null,
+            mtimeMs: Number.isFinite(mtimeMs) ? mtimeMs : null,
+            ext: isDirectory ? null : (entry.name.split('.').at(-1)?.toLowerCase() ?? null),
+            isImage: mime.startsWith('image/'),
+            isVideo: mime.startsWith('video/'),
+          };
+        });
+        entries.sort((left, right) =>
+          left.kind === right.kind
+            ? left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
+            : left.kind === 'directory'
+              ? -1
+              : 1,
+        );
+        return {
+          contentChunk: localJsonChunk(
+            { ok: true, path: parts.join('/'), entries },
+            payload.contentOffset,
+          ),
+        };
+      }
+      if (operation === 'file.write') {
+        const { thread } = getThread();
+        const parts = localArtifactPathParts(payload.path);
+        if (typeof payload.content !== 'string') throw new Error('content must be a string');
+        const bytes = new TextEncoder().encode(payload.content);
+        if (bytes.length > MOBILE_FILE_EDIT_MAX_BYTES) {
+          throw new Error(
+            `File is too large to edit on mobile (${bytes.length} bytes, max ${MOBILE_FILE_EDIT_MAX_BYTES})`,
+          );
+        }
+        const root = new Directory(
+          Paths.document,
+          'drone-hub-native-artifacts-v1',
+          encodeURIComponent(thread.id),
+        );
+        const file = new File(root, ...parts);
+        if (!file.exists) throw new Error(`Artifact file not found: ${parts.join('/')}`);
+        const expectedRevision = String(payload.expectedRevision ?? '').trim();
+        if (expectedRevision) {
+          const currentRevision = fileRevision(await file.bytes());
+          if (currentRevision !== expectedRevision) throw new Error('File changed on disk');
+        }
+        file.write(payload.content);
+        return {
+          ok: true,
+          path: parts.join('/'),
+          size: bytes.length,
+          mtimeMs: Number.isFinite(Number(file.modificationTime))
+            ? Number(file.modificationTime)
+            : null,
+          revision: fileRevision(bytes),
+        };
       }
       if (operation === 'file.preview') {
         const { thread } = getThread();
@@ -591,13 +673,8 @@ export function LocalDroneControlProvider({ children }: { children: React.ReactN
 
   React.useEffect(
     () =>
-      mesh.registerCapabilityHandler(
-        DRONE_CONTROL_CAPABILITY,
-        (operation, payload) =>
-          requestRef.current(
-            operation as DroneControlOperation,
-            payload as Record<string, unknown>,
-          ),
+      mesh.registerCapabilityHandler(DRONE_CONTROL_CAPABILITY, (operation, payload) =>
+        requestRef.current(operation as DroneControlOperation, payload as Record<string, unknown>),
       ),
     [mesh.registerCapabilityHandler],
   );

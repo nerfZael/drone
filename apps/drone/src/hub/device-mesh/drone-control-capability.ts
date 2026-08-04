@@ -101,6 +101,7 @@ function compactPendingPrompts(value: unknown): any[] {
 const CREATE_REPO_BRANCH_PAGE_SIZE = 500;
 const CREATE_REPO_BRANCH_PAGE_BYTES = 160 * 1024;
 const MOBILE_FILE_MEDIA_MAX_BYTES = 32 * 1024 * 1024;
+const MOBILE_FILE_WRITE_MAX_BYTES = 180 * 1024;
 const MOBILE_RUN_DIFF_MAX_BYTES = 80 * 1024;
 
 function compactCreateRepoBranch(branch: unknown) {
@@ -699,6 +700,40 @@ export function createDroneControlCapability(
           `/api/drones/${encodedDrone}/repo/pull-requests/${pullNumber}/close`,
           { method: 'POST', body: '{}' },
         );
+      }
+      if (operation === 'files.list') {
+        const directoryPath = optionalText(payload.path) ?? '';
+        const listing = await localHubRequest(
+          access,
+          `/api/drones/${encodedDrone}/fs/list?path=${encodeURIComponent(directoryPath)}`,
+        );
+        return { contentChunk: meshJsonContentChunk(listing, payload.contentOffset) };
+      }
+      if (operation === 'file.write') {
+        const filePath = requiredText(payload.path, 'path');
+        if (typeof payload.content !== 'string') {
+          throw Object.assign(new Error('content must be a string'), { code: 'INVALID_REQUEST' });
+        }
+        const content = payload.content;
+        const contentBytes = Buffer.byteLength(content, 'utf8');
+        if (contentBytes > MOBILE_FILE_WRITE_MAX_BYTES) {
+          throw Object.assign(
+            new Error(
+              `file is too large to edit on mobile (${contentBytes} bytes, max ${MOBILE_FILE_WRITE_MAX_BYTES})`,
+            ),
+            { code: 'FILE_TOO_LARGE' },
+          );
+        }
+        return await localHubRequest(access, `/api/drones/${encodedDrone}/fs/file`, {
+          method: 'POST',
+          body: JSON.stringify({
+            path: filePath,
+            content,
+            ...(optionalText(payload.expectedRevision)
+              ? { expectedRevision: optionalText(payload.expectedRevision) }
+              : {}),
+          }),
+        });
       }
       if (operation === 'file.preview') {
         const filePath = requiredText(payload.path, 'path');

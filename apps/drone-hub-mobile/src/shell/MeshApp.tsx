@@ -14,6 +14,7 @@ import Check from 'lucide-react-native/icons/check';
 import Menu from 'lucide-react-native/icons/menu';
 import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
+import FolderTree from 'lucide-react-native/icons/folder-tree';
 import Pin from 'lucide-react-native/icons/pin';
 import Plus from 'lucide-react-native/icons/plus';
 import Pencil from 'lucide-react-native/icons/pencil';
@@ -93,8 +94,7 @@ function HeaderOverflowMenu({
             const Icon =
               action.icon ??
               (action.selected ? Check : action.destructive ? Trash2 : SlidersHorizontal);
-            const showSection =
-              action.section && action.section !== actions[index - 1]?.section;
+            const showSection = action.section && action.section !== actions[index - 1]?.section;
             return (
               <React.Fragment key={action.id}>
                 {showSection ? (
@@ -286,6 +286,16 @@ function Shell() {
                   label: 'New chat',
                   icon: MessageCircle,
                   onPress: dronesHeader.onNewChat,
+                },
+              ]
+            : []),
+          ...(dronesHeader.onOpenFiles
+            ? [
+                {
+                  id: 'files',
+                  label: 'Files',
+                  icon: FolderTree,
+                  onPress: dronesHeader.onOpenFiles,
                 },
               ]
             : []),

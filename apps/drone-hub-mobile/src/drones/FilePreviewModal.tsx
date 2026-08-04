@@ -1,7 +1,11 @@
 import React from 'react';
+import type { DroneControlOperation } from '@drone/device-protocol';
 import {
   ActivityIndicator,
+  Alert,
   Image,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -11,10 +15,15 @@ import {
   View,
 } from 'react-native';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
+import ChevronDown from 'lucide-react-native/icons/chevron-down';
+import ChevronUp from 'lucide-react-native/icons/chevron-up';
 import ChevronsDown from 'lucide-react-native/icons/chevrons-down';
 import ChevronsUp from 'lucide-react-native/icons/chevrons-up';
 import FileQuestion from 'lucide-react-native/icons/file-question-mark';
+import FolderTree from 'lucide-react-native/icons/folder-tree';
+import Pencil from 'lucide-react-native/icons/pencil';
 import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
+import Save from 'lucide-react-native/icons/save';
 import { useEvent } from 'expo';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,6 +32,7 @@ import { SvgXml } from 'react-native-svg';
 import { NativeFileTypeIcon } from '../components/FileTypeIcon';
 import { MobileHighlightedCode } from '../components/MobileHighlightedCode';
 import { RenderErrorBoundary } from '../components/RenderErrorBoundary';
+import { ThemedTextInput } from '../components/ThemedTextInput';
 import { colors } from '../theme';
 import {
   NativeMarkdown,
@@ -34,12 +44,15 @@ import {
   isMarkdownPreview,
   isRenderedHtmlPreviewAvailable,
   mobileHtmlPreviewMode,
+  mobileFileCanEdit,
   mobileTextPreviewContent,
+  MOBILE_FILE_EDIT_MAX_BYTES,
   MOBILE_RENDERED_HTML_PREVIEW_MAX_CHARS,
   type MobileFilePreview,
   type MobileHtmlPreviewMode,
 } from './file-preview-model';
 import { RenderedHtmlPreview } from './RenderedHtmlPreview';
+import { MobileFileExplorer } from './MobileFileExplorer';
 import { ZoomableImageStage } from './ZoomableImageStage';
 
 function MediaUnavailable({ message }: { message: string }) {
@@ -177,6 +190,16 @@ export function FilePreviewModal({
   line,
   loading,
   error,
+  saving,
+  saveError,
+  targetId,
+  droneId,
+  chatName,
+  rootPath,
+  selectedPath,
+  requestDroneControl,
+  onOpenPath,
+  onSave,
   onClose,
   onRetry,
 }: {
@@ -186,9 +209,28 @@ export function FilePreviewModal({
   line: number | null;
   loading: boolean;
   error: string | null;
+  saving: boolean;
+  saveError: string | null;
+  targetId: string;
+  droneId: string;
+  chatName: string;
+  rootPath: string;
+  selectedPath: string;
+  requestDroneControl: (
+    destinationId: string,
+    operation: DroneControlOperation,
+    payload?: any,
+  ) => Promise<any>;
+  onOpenPath(path: string): void;
+  onSave(content: string, expectedRevision?: string | null): Promise<boolean>;
   onClose(): void;
   onRetry(): void;
 }) {
+  const [explorerExpanded, setExplorerExpanded] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState('');
+  const [savedDraft, setSavedDraft] = React.useState('');
+  const [draftRevision, setDraftRevision] = React.useState<string | null>(null);
   const [markdownExpansionCommand, setMarkdownExpansionCommand] =
     React.useState<NativeMarkdownExpansionCommand | null>(null);
   const [htmlModeSelection, setHtmlModeSelection] = React.useState<{
@@ -216,6 +258,70 @@ export function FilePreviewModal({
         selection: htmlModeSelection,
       })
     : 'source';
+  const canEdit = React.useMemo(
+    () => mobileFileCanEdit(preview),
+    [preview?.content, preview?.kind, preview?.size],
+  );
+  const dirty = canEdit && draft !== savedDraft;
+
+  React.useEffect(() => {
+    setEditing(false);
+    const content = preview?.kind === 'text' ? String(preview.content ?? '') : '';
+    setDraft(content);
+    setSavedDraft(content);
+    setDraftRevision(preview?.revision ?? null);
+  }, [preview?.path]);
+
+  React.useEffect(() => {
+    if (dirty) return;
+    const content = preview?.kind === 'text' ? String(preview.content ?? '') : '';
+    setDraft(content);
+    setSavedDraft(content);
+    setDraftRevision(preview?.revision ?? null);
+  }, [dirty, preview?.content, preview?.kind, preview?.revision]);
+
+  React.useEffect(() => {
+    if (!visible) setExplorerExpanded(false);
+  }, [visible]);
+
+  const confirmDiscard = React.useCallback(
+    (continueAction: () => void) => {
+      if (saving) {
+        Alert.alert('Save in progress', 'Wait for this file to finish saving before leaving it.');
+        return;
+      }
+      if (!dirty) {
+        continueAction();
+        return;
+      }
+      Alert.alert('Discard unsaved changes?', 'Your edits to this file have not been saved.', [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: continueAction },
+      ]);
+    },
+    [dirty, saving],
+  );
+
+  const closeWorkspace = React.useCallback(
+    () => confirmDiscard(onClose),
+    [confirmDiscard, onClose],
+  );
+  const openExplorerPath = React.useCallback(
+    (path: string) =>
+      confirmDiscard(() => {
+        setExplorerExpanded(false);
+        onOpenPath(path);
+      }),
+    [confirmDiscard, onOpenPath],
+  );
+
+  const saveDraft = React.useCallback(async () => {
+    if (!dirty || saving) return;
+    if (await onSave(draft, draftRevision)) {
+      setSavedDraft(draft);
+      setDraftRevision(preview?.revision ?? draftRevision);
+    }
+  }, [dirty, draft, draftRevision, onSave, preview?.revision, saving]);
 
   React.useEffect(() => {
     setMarkdownExpansionCommand(null);
@@ -231,7 +337,7 @@ export function FilePreviewModal({
       animationType="slide"
       statusBarTranslucent
       navigationBarTranslucent
-      onRequestClose={onClose}
+      onRequestClose={closeWorkspace}
     >
       <GestureHandlerRootView style={styles.screen}>
         <SafeAreaView style={styles.screen}>
@@ -240,7 +346,7 @@ export function FilePreviewModal({
               accessibilityRole="button"
               accessibilityLabel="Close file preview"
               hitSlop={10}
-              onPress={onClose}
+              onPress={closeWorkspace}
               style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
             >
               <ChevronLeft color={colors.text} size={22} strokeWidth={2} />
@@ -251,48 +357,108 @@ export function FilePreviewModal({
                 <Text numberOfLines={1} style={styles.title}>
                   {preview?.name || displayPath.split('/').at(-1) || 'File preview'}
                 </Text>
-                <Text style={styles.readOnly}>PREVIEW</Text>
+                <Text style={styles.readOnly}>
+                  {editing ? 'EDITING' : dirty ? 'UNSAVED' : 'PREVIEW'}
+                </Text>
               </View>
               <Text numberOfLines={1} style={styles.path}>
                 {displayPath}
               </Text>
             </View>
-            {markdownPreview ? (
-              <View style={styles.headingActions}>
+            <View style={styles.headingActions}>
+              {canEdit ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Collapse all Markdown headings"
+                  accessibilityLabel={editing ? 'Stop editing file' : 'Edit file'}
                   hitSlop={8}
+                  disabled={saving}
                   onPress={() =>
-                    setMarkdownExpansionCommand((previous) => ({
-                      action: 'collapse',
-                      sequence: (previous?.sequence ?? 0) + 1,
-                    }))
+                    setEditing((current) => {
+                      if (!current) setExplorerExpanded(false);
+                      return !current;
+                    })
                   }
-                  style={({ pressed }) => [styles.headingAction, pressed && styles.pressed]}
+                  style={({ pressed }) => [
+                    styles.headingAction,
+                    editing && styles.headingActionActive,
+                    saving && styles.disabled,
+                    pressed && styles.pressed,
+                  ]}
                 >
-                  <ChevronsUp color={colors.muted} size={17} strokeWidth={2} />
+                  <Pencil
+                    color={editing ? colors.accent : colors.muted}
+                    size={16}
+                    strokeWidth={2}
+                  />
                 </Pressable>
+              ) : null}
+              {editing ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Expand all Markdown headings"
+                  accessibilityLabel="Save file"
+                  disabled={!dirty || saving}
                   hitSlop={8}
-                  onPress={() =>
-                    setMarkdownExpansionCommand((previous) => ({
-                      action: 'expand',
-                      sequence: (previous?.sequence ?? 0) + 1,
-                    }))
-                  }
-                  style={({ pressed }) => [styles.headingAction, pressed && styles.pressed]}
+                  onPress={() => void saveDraft()}
+                  style={({ pressed }) => [
+                    styles.headingAction,
+                    (!dirty || saving) && styles.disabled,
+                    pressed && styles.pressed,
+                  ]}
                 >
-                  <ChevronsDown color={colors.muted} size={17} strokeWidth={2} />
+                  {saving ? (
+                    <ActivityIndicator color={colors.accent} size="small" />
+                  ) : (
+                    <Save color={dirty ? colors.accent : colors.muted} size={17} strokeWidth={2} />
+                  )}
                 </Pressable>
-              </View>
-            ) : null}
+              ) : null}
+              {markdownPreview && !editing ? (
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Collapse all Markdown headings"
+                    hitSlop={8}
+                    onPress={() =>
+                      setMarkdownExpansionCommand((previous) => ({
+                        action: 'collapse',
+                        sequence: (previous?.sequence ?? 0) + 1,
+                      }))
+                    }
+                    style={({ pressed }) => [styles.headingAction, pressed && styles.pressed]}
+                  >
+                    <ChevronsUp color={colors.muted} size={17} strokeWidth={2} />
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Expand all Markdown headings"
+                    hitSlop={8}
+                    onPress={() =>
+                      setMarkdownExpansionCommand((previous) => ({
+                        action: 'expand',
+                        sequence: (previous?.sequence ?? 0) + 1,
+                      }))
+                    }
+                    style={({ pressed }) => [styles.headingAction, pressed && styles.pressed]}
+                  >
+                    <ChevronsDown color={colors.muted} size={17} strokeWidth={2} />
+                  </Pressable>
+                </>
+              ) : null}
+            </View>
           </View>
 
-          <View style={styles.content}>
-            {htmlPreview && !loading && !error && preview ? (
+          <KeyboardAvoidingView
+            style={styles.content}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            {saveError ? (
+              <View style={styles.saveErrorBanner}>
+                <Text numberOfLines={2} style={styles.saveErrorText}>
+                  {saveError}
+                </Text>
+              </View>
+            ) : null}
+            {htmlPreview && !editing && !loading && !error && preview ? (
               <View style={styles.htmlModeBar}>
                 <View
                   accessibilityRole="tablist"
@@ -339,7 +505,19 @@ export function FilePreviewModal({
                   <MediaUnavailable message="This file could not be rendered safely. Try opening it as plain text on the desktop." />
                 }
               >
-                {loading ? (
+                {editing && preview?.kind === 'text' ? (
+                  <ThemedTextInput
+                    accessibilityLabel={`Edit ${preview.name}`}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    multiline
+                    maxLength={MOBILE_FILE_EDIT_MAX_BYTES}
+                    textAlignVertical="top"
+                    value={draft}
+                    onChangeText={setDraft}
+                    style={styles.editorInput}
+                  />
+                ) : loading ? (
                   <View style={styles.centerState}>
                     <ActivityIndicator color={colors.accent} size="large" />
                     <Text style={styles.stateTitle}>Opening preview</Text>
@@ -399,10 +577,57 @@ export function FilePreviewModal({
                       This file is available, but its binary format cannot be displayed yet.
                     </Text>
                   </View>
-                ) : null}
+                ) : (
+                  <View style={styles.centerState}>
+                    <FolderTree color={colors.muted} size={34} strokeWidth={1.7} />
+                    <Text style={styles.stateTitle}>Choose a file</Text>
+                    <Text style={styles.stateBody}>
+                      Expand the file explorer below to browse this workspace.
+                    </Text>
+                  </View>
+                )}
               </RenderErrorBoundary>
             </View>
-          </View>
+            <View style={[styles.explorerDock, explorerExpanded && styles.explorerDockExpanded]}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  explorerExpanded ? 'Collapse file explorer' : 'Expand file explorer'
+                }
+                accessibilityState={{ expanded: explorerExpanded }}
+                onPress={() =>
+                  setExplorerExpanded((current) => {
+                    if (!current) Keyboard.dismiss();
+                    return !current;
+                  })
+                }
+                style={({ pressed }) => [styles.explorerHandle, pressed && styles.pressed]}
+              >
+                <View style={styles.explorerGrabber} />
+                <View style={styles.explorerHandleRow}>
+                  <FolderTree color={colors.accentAlt} size={17} strokeWidth={1.9} />
+                  <Text style={styles.explorerTitle}>Files</Text>
+                  <Text numberOfLines={1} style={styles.explorerSelection}>
+                    {displayPath || 'Browse workspace'}
+                  </Text>
+                  {explorerExpanded ? (
+                    <ChevronDown color={colors.muted} size={18} strokeWidth={2} />
+                  ) : (
+                    <ChevronUp color={colors.muted} size={18} strokeWidth={2} />
+                  )}
+                </View>
+              </Pressable>
+              <MobileFileExplorer
+                targetId={targetId}
+                droneId={droneId}
+                chatName={chatName}
+                rootPath={rootPath}
+                selectedPath={selectedPath}
+                requestDroneControl={requestDroneControl}
+                onOpenFile={openExplorerPath}
+              />
+            </View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </GestureHandlerRootView>
     </Modal>
@@ -438,6 +663,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 8,
   },
+  headingActionActive: { backgroundColor: colors.accentWash },
+  disabled: { opacity: 0.35 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { flexShrink: 1, color: colors.textStrong, fontSize: 15, fontWeight: '800' },
   readOnly: {
@@ -454,6 +681,14 @@ const styles = StyleSheet.create({
   },
   path: { color: colors.muted, fontFamily: 'monospace', fontSize: 9, marginTop: 3 },
   content: { flex: 1, minHeight: 0 },
+  saveErrorBanner: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.dangerBorder,
+    backgroundColor: colors.dangerDark,
+  },
+  saveErrorText: { color: colors.danger, fontSize: 10, lineHeight: 14 },
   previewNotice: {
     color: colors.muted,
     fontSize: 11,
@@ -462,6 +697,44 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   previewBody: { flex: 1, minHeight: 0 },
+  editorInput: {
+    flex: 1,
+    minHeight: 0,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    color: colors.text,
+    backgroundColor: colors.background,
+    fontFamily: 'monospace',
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  explorerDock: {
+    height: 48,
+    minHeight: 48,
+    overflow: 'hidden',
+    borderTopWidth: 1,
+    borderTopColor: colors.borderStrong,
+    backgroundColor: colors.mantle,
+  },
+  explorerDockExpanded: { height: '44%', minHeight: 220 },
+  explorerHandle: { minHeight: 48, paddingHorizontal: 12, paddingTop: 5 },
+  explorerGrabber: {
+    alignSelf: 'center',
+    width: 34,
+    height: 3,
+    marginBottom: 4,
+    borderRadius: 2,
+    backgroundColor: colors.surface2,
+  },
+  explorerHandleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  explorerTitle: { color: colors.textStrong, fontSize: 12, fontWeight: '800' },
+  explorerSelection: {
+    minWidth: 0,
+    flex: 1,
+    color: colors.mutedDim,
+    fontFamily: 'monospace',
+    fontSize: 9,
+  },
   htmlModeBar: {
     paddingHorizontal: 12,
     paddingVertical: 8,
