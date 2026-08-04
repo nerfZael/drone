@@ -95,4 +95,31 @@ describe('pending prompt retry scheduling', () => {
       await pump.reset();
     }
   });
+
+  test('allows a deferred run to schedule its own wake-up', async () => {
+    let runCount = 0;
+    let pump: PendingPromptPump;
+    pump = new PendingPromptPump({
+      normalizeDroneId: (value) => value,
+      normalizeChatName: (value) => value || 'default',
+      concurrencyLimit: () => 1,
+      defaultRetryDelayMs: () => 1_000,
+      run: async () => {
+        runCount += 1;
+        if (runCount === 1) pump.scheduleRetry('drone-1', 'default');
+      },
+    });
+
+    try {
+      pump.enqueue('drone-1', 'default');
+
+      await Bun.sleep(50);
+      expect(runCount).toBe(1);
+
+      await Bun.sleep(1_100);
+      expect(runCount).toBe(2);
+    } finally {
+      await pump.reset();
+    }
+  });
 });

@@ -89,6 +89,15 @@ describe('MCP server projection', () => {
         servers: [
           sampleServer(),
           sampleServer({
+            id: 'mcp-bridge',
+            name: 'managed-bridge',
+            command: 'node',
+            args: ['/opt/managed-bridge.js'],
+            env: undefined,
+            envPassthrough: ['DRONE_HUB_MCP_URL', 'DRONE_HUB_MCP_TOKEN'],
+            agents: ['codex'],
+          }),
+          sampleServer({
             id: 'mcp-2',
             name: 'remote',
             transport: 'http',
@@ -106,6 +115,8 @@ describe('MCP server projection', () => {
       const codexText = fs.readFileSync(codexConfig, 'utf8');
       expect(codexText).toContain('model = "gpt-5.5"');
       expect(codexText).toContain('[mcp_servers.github]');
+      expect(codexText).toContain('[mcp_servers.managed-bridge]');
+      expect(codexText).toContain('env_vars = ["DRONE_HUB_MCP_URL", "DRONE_HUB_MCP_TOKEN"]');
       expect(codexText).toContain('[mcp_servers.remote]');
       expect(codexText).toContain('url = "https://example.com/mcp"');
       expect(codexText).toContain('http_headers = { "Authorization" = "Bearer literal-token" }');

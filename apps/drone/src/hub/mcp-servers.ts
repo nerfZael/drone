@@ -26,6 +26,7 @@ export type McpServerRecord = {
   args?: string[];
   url?: string;
   env?: Record<string, string>;
+  envPassthrough?: string[];
   headers?: Record<string, string>;
   agents: McpAgentId[];
   createdAt: string;
@@ -467,6 +468,8 @@ function renderCodexMcpBlock(servers: McpServerRecord[]): string {
       lines.push(`command = ${tomlString(server.command ?? '')}`);
       if (server.args && server.args.length > 0)
         lines.push(`args = ${tomlStringArray(server.args)}`);
+      if (server.envPassthrough && server.envPassthrough.length > 0)
+        lines.push(`env_vars = ${tomlStringArray(server.envPassthrough)}`);
     }
     if (server.env && Object.keys(server.env).length > 0) {
       lines.push(`env = ${tomlInlineTable(server.env)}`);
