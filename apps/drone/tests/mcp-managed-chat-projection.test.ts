@@ -26,6 +26,7 @@ describe('managed chat MCP projection', () => {
       transport: 'stdio',
       command: 'node',
       args: ['/dvm-data/drone/dist/mcp-http-stdio-bridge.js'],
+      envPassthrough: ['DRONE_HUB_MCP_URL', 'DRONE_HUB_MCP_TOKEN'],
     });
     expect(projected.url).toBeUndefined();
     expect(projected.headers).toBeUndefined();
@@ -41,6 +42,7 @@ describe('managed chat MCP projection', () => {
       transport: 'stdio',
       command: 'node',
       args: ['/opt/drone/mcp-http-stdio-bridge.js'],
+      envPassthrough: ['DRONE_HUB_MCP_URL', 'DRONE_HUB_MCP_TOKEN'],
     });
     expect(projected.url).toBeUndefined();
     expect(projected.headers).toBeUndefined();
