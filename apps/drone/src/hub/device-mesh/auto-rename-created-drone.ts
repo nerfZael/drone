@@ -21,9 +21,11 @@ export async function autoRenameCreatedDroneFromPrompt(
   access: LocalHubAccess,
   droneIdRaw: string,
   promptRaw: string,
+  expectedNameRaw?: string,
 ): Promise<string> {
   const droneId = String(droneIdRaw ?? '').trim();
   const prompt = String(promptRaw ?? '').trim();
+  const expectedName = String(expectedNameRaw ?? '').trim();
   if (!droneId || !prompt) throw new Error('droneId and prompt are required for automatic naming');
 
   const suggestion = await localHubRequest(access, '/api/drones/name-from-message', {
@@ -53,6 +55,7 @@ export async function autoRenameCreatedDroneFromPrompt(
           source: 'mobile-create-auto-rename',
           attempt,
           suggestedBase: base,
+          ...(expectedName ? { expectedName } : {}),
         }),
       });
       return candidate;
@@ -86,8 +89,10 @@ export function scheduleCreatedDroneAutoRename(
   access: LocalHubAccess,
   droneId: string,
   prompt: string,
+  expectedName?: string,
 ): void {
-  void autoRenameCreatedDroneFromPrompt(access, droneId, prompt).catch((error: any) => {
+  void autoRenameCreatedDroneFromPrompt(access, droneId, prompt, expectedName).catch((error: any) => {
+    if (/rename precondition failed/i.test(String(error?.message ?? error ?? ''))) return;
     hubLog('warn', 'mobile-created drone auto-rename failed', {
       droneId,
       error: error?.message ?? String(error),

@@ -1023,11 +1023,9 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
               isDroneStartingOrSeeding(drone.hubPhase)
             }
             renameDisabled={
-              isOptimistic ||
               Boolean(deletingDrones[drone.id]) ||
               Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              isDroneStartingOrSeeding(drone.hubPhase)
+              Boolean(settingBaseImages[drone.id])
             }
             renameBusy={Boolean(renamingDrones[drone.id])}
             setBaseImageDisabled={

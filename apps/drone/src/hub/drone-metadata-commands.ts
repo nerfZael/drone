@@ -113,6 +113,7 @@ export async function renameDroneDisplayName(opts: {
   droneId: string;
   state?: 'real' | 'pending';
   name: string;
+  expectedName?: string;
   dependencies?: DroneMetadataCommandDependencies;
 }): Promise<CanonicalDroneLifecycleRecord> {
   const record = await commitDroneMetadataPatch({
@@ -121,7 +122,18 @@ export async function renameDroneDisplayName(opts: {
     eventType: 'drone.display-name.changed',
     payload: { name: opts.name },
     dependencies: opts.dependencies,
-    transform: (lifecycle) => ({ ...lifecycle, name: opts.name }),
+    transform: (lifecycle) => {
+      const currentName = String(lifecycle.name ?? opts.droneId).trim() || opts.droneId;
+      if (opts.expectedName !== undefined && currentName !== opts.expectedName) {
+        throw Object.assign(
+          new Error(
+            `rename precondition failed: expected "${opts.expectedName}", found "${currentName}"`,
+          ),
+          { code: 'DRONE_RENAME_PRECONDITION_FAILED' },
+        );
+      }
+      return { ...lifecycle, name: opts.name };
+    },
   });
   if ((globalThis as any).Bun) {
     await updateRegistry((registry: any) => {

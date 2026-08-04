@@ -21,6 +21,9 @@ type UseDroneMutationActionsArgs = {
   setStartupSeedByDrone: React.Dispatch<
     React.SetStateAction<Record<string, StartupSeedState>>
   >;
+  setOptimisticallyRenamedDrones: React.Dispatch<
+    React.SetStateAction<Record<string, string>>
+  >;
   onNameSuggestionFailure: (error: unknown) => void;
 };
 
@@ -32,6 +35,7 @@ export function useDroneMutationActions({
   optimisticallyDeletedDrones,
   setOptimisticallyDeletedDrones,
   setStartupSeedByDrone,
+  setOptimisticallyRenamedDrones,
   onNameSuggestionFailure,
 }: UseDroneMutationActionsArgs) {
   const [deletingDrones, setDeletingDrones] = React.useState<Record<string, boolean>>(
@@ -61,7 +65,7 @@ export function useDroneMutationActions({
       opts?: {
         showAlert?: boolean;
         migrateVolumeName?: boolean;
-        allowPending?: boolean;
+        expectedName?: string;
         source?: string;
         attempt?: number;
         suggestedBase?: string;
@@ -74,13 +78,6 @@ export function useDroneMutationActions({
       const currentName = String(current?.name ?? '').trim() || droneId;
       if (!droneId || !newName || newName === currentName) {
         return { ok: false, error: 'no-op rename' };
-      }
-      const allowPending = opts?.allowPending === true;
-      if ((!current || isDroneStartingOrSeeding(current.hubPhase)) && !allowPending) {
-        if (opts?.showAlert) {
-          window.alert(`Drone "${currentName}" is still starting.`);
-        }
-        return { ok: false, error: `drone "${droneId}" is still starting` };
       }
       if (deletingDrones[droneId] || renamingDrones[droneId] || settingBaseImages[droneId]) {
         return { ok: false, error: 'rename busy' };
@@ -98,7 +95,7 @@ export function useDroneMutationActions({
 
       setRenamingDrones((prev) => ({ ...prev, [droneId]: true }));
       try {
-        await requestJson<{ ok: true; id: string; oldName: string; newName: string }>(
+        const renamed = await requestJson<{ ok: true; id: string; oldName: string; newName: string }>(
           `/api/drones/${encodeURIComponent(droneId)}/rename`,
           {
             method: 'POST',
@@ -106,6 +103,9 @@ export function useDroneMutationActions({
             body: JSON.stringify({
               newName,
               ...(opts?.migrateVolumeName ? { migrateVolumeName: true } : {}),
+              ...(typeof opts?.expectedName === 'string' && opts.expectedName.trim()
+                ? { expectedName: opts.expectedName.trim() }
+                : {}),
               ...(typeof opts?.source === 'string' && opts.source.trim()
                 ? { source: opts.source.trim().slice(0, 64) }
                 : {}),
@@ -118,6 +118,11 @@ export function useDroneMutationActions({
             }),
           },
         );
+        const confirmedName = String(renamed?.newName ?? newName).trim() || newName;
+        setOptimisticallyRenamedDrones((prev) => ({
+          ...prev,
+          [droneId]: confirmedName,
+        }));
         setStartupSeedByDrone((prev) => {
           const existing = prev[droneId];
           if (!existing) return prev;
@@ -127,7 +132,7 @@ export function useDroneMutationActions({
         return { ok: true };
       } catch (e: any) {
         const msg = e?.message ?? String(e);
-        if (!/still starting/i.test(msg)) {
+        if (!/still starting|rename precondition failed/i.test(msg)) {
           console.error('[DroneHub] rename drone failed', { id: droneId, newName, error: e });
         }
         if (opts?.showAlert) {
@@ -143,7 +148,14 @@ export function useDroneMutationActions({
         });
       }
     },
-    [deletingDrones, renamingDrones, requestJson, setStartupSeedByDrone, settingBaseImages],
+    [
+      deletingDrones,
+      renamingDrones,
+      requestJson,
+      setOptimisticallyRenamedDrones,
+      setStartupSeedByDrone,
+      settingBaseImages,
+    ],
   );
 
   const deleteDrone = React.useCallback(
@@ -430,9 +442,16 @@ export function useDroneMutationActions({
   );
 
   const suggestAndRenameDraftDrone = React.useCallback(
-    async (droneIdRaw: string, promptRaw: string): Promise<void> => {
+    async (
+      droneIdRaw: string,
+      promptRaw: string,
+      expectedNameRaw?: string,
+    ): Promise<void> => {
       const droneId = String(droneIdRaw ?? '').trim();
       const prompt = String(promptRaw ?? '').trim();
+      const expectedName =
+        String(expectedNameRaw ?? '').trim() ||
+        String(dronesRef.current.find((d) => d.id === droneId)?.name ?? '').trim();
       if (!droneId || !prompt) return;
       try {
         const data = await requestJson<{ ok: true; name: string }>(
@@ -454,6 +473,7 @@ export function useDroneMutationActions({
         }
 
         const currentName = String(dronesRef.current.find((d) => d.id === droneId)?.name ?? '').trim();
+        if (expectedName && currentName && currentName !== expectedName) return;
         if (currentName && base === currentName) return;
 
         const makeCandidate = (n: number) => {
@@ -479,13 +499,14 @@ export function useDroneMutationActions({
             return;
           }
           const renamed = await renameDroneTo(droneId, candidate, {
-            allowPending: true,
+            ...(expectedName ? { expectedName } : {}),
             source: 'draft-auto-rename',
             attempt,
             suggestedBase: base,
           });
           if (renamed.ok) return;
           const errorMessage = String(('error' in renamed ? renamed.error : '') ?? '').trim();
+          if (/rename precondition failed/i.test(errorMessage)) return;
           lastError = errorMessage || 'rename failed';
           const msg = errorMessage.toLowerCase();
           const nameConflict =
