@@ -15,6 +15,7 @@ import type { AgentRunFileChanges } from '@blip/protocol';
 import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
 import { normalizeAgentRunActivity } from './builtin-agent-activity';
 import type { AgentRunFileChangesBaseline } from './run-file-changes';
+import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 
 export type StoredTranscriptTurn = {
   at: string;
@@ -2303,6 +2304,7 @@ export async function deleteActiveChatFromStore(opts: {
       chats: listChatsFromStore({ droneId: opts.droneId }).chats,
     };
   }
+  await cancelResourceSubscriptionsForChat(result.deletedChat);
   await getPromptQueueRepository()?.deleteChat({ droneId: opts.droneId, chatName: opts.chatName });
   return result;
 }
@@ -2411,13 +2413,19 @@ export async function deleteArchivedChatFromStore(opts: {
   archivedChatName: string;
 }): Promise<DeleteArchivedChatStoreResult> {
   const store = repository();
-  if (store) return await store.deleteArchivedChat(opts);
-  const k = key(opts.droneId, opts.archivedChatName);
-  const archivedChat = memoryArchivedChats.get(k) ?? null;
-  if (!archivedChat) return { available: true, deleted: false, archivedChat: null };
-  memoryArchivedChats.delete(k);
-  memoryArchivedChatTombstones.add(k);
-  return { available: true, deleted: true, archivedChat };
+  let result: DeleteArchivedChatStoreResult;
+  if (store) {
+    result = await store.deleteArchivedChat(opts);
+  } else {
+    const k = key(opts.droneId, opts.archivedChatName);
+    const archivedChat = memoryArchivedChats.get(k) ?? null;
+    if (!archivedChat) return { available: true, deleted: false, archivedChat: null };
+    memoryArchivedChats.delete(k);
+    memoryArchivedChatTombstones.add(k);
+    result = { available: true, deleted: true, archivedChat };
+  }
+  await cancelResourceSubscriptionsForChat(result.archivedChat?.chat);
+  return result;
 }
 
 export function listArchivedChatsFromStore(opts: { droneId?: string } = {}): ArchivedChatStoreListResult {
@@ -2542,6 +2550,16 @@ export async function deleteChatFromStore(opts: { droneId: string; chatName: str
   return deleted;
 }
 
+export async function deleteChatAndSubscriptionsFromStore(opts: {
+  droneId: string;
+  chatName: string;
+}): Promise<boolean> {
+  const chat = readChatFromStore(opts).chat;
+  const deleted = await deleteChatFromStore(opts);
+  if (deleted) await cancelResourceSubscriptionsForChat(chat);
+  return deleted;
+}
+
 export async function commitPermanentDroneDeletionInStore(opts: {
   droneId: string;
   lifecycleState: 'real' | 'archived';
@@ -2580,6 +2598,14 @@ export async function commitPermanentDroneDeletionInStore(opts: {
     archivedChatTombstonesDeleted: archivedTombstoneKeys.length,
     promptsDeleted,
   };
+}
+
+async function cancelResourceSubscriptionsForChat(chatEntry: unknown): Promise<void> {
+  const chatId = String((chatEntry as any)?.id ?? '').trim();
+  if (!chatId) return;
+  const database = getHubDatabase();
+  if (!database) return;
+  await new ResourceSubscriptionRepository(database).cancelForChat(chatId);
 }
 
 export function listChatsFromStore(opts: { droneId: string }): ChatStoreListResult {

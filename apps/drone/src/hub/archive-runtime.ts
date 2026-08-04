@@ -27,11 +27,15 @@ type ArchiveRuntimeDependencyName =
   | 'nowIso'
   | 'parseArchiveRetentionId'
   | 'parseArchiveRuntimePolicy'
+  | 'pauseResourceSubscriptionsForChat'
+  | 'pauseResourceSubscriptionsForDrone'
   | 'permanentlyDeleteCanonicalDrone'
   | 'readChatFromStore'
   | 'removeDockerSnapshotImagesBestEffort'
   | 'removeDroneRuntimeArtifacts'
   | 'restoreArchivedChatInStore'
+  | 'resumeResourceSubscriptionsForChat'
+  | 'resumeResourceSubscriptionsForDrone'
   | 'revokeMcpAccessTokensForDrone'
   | 'updateRegistry'
   | 'upsertCanonicalDroneLifecycle';
@@ -68,11 +72,15 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     nowIso,
     parseArchiveRetentionId,
     parseArchiveRuntimePolicy,
+    pauseResourceSubscriptionsForChat,
+    pauseResourceSubscriptionsForDrone,
     permanentlyDeleteCanonicalDrone,
     readChatFromStore,
     removeDockerSnapshotImagesBestEffort,
     removeDroneRuntimeArtifacts,
     restoreArchivedChatInStore,
+    resumeResourceSubscriptionsForChat,
+    resumeResourceSubscriptionsForDrone,
     revokeMcpAccessTokensForDrone,
     updateRegistry,
     upsertCanonicalDroneLifecycle,
@@ -216,6 +224,10 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
         if (Object.keys(entry.chats).length === 0) entry.chats.default = fallbackChat.chatEntry;
       });
     }
+    const archivedChatId = String(stored.archivedChat?.chat?.id ?? '').trim();
+    if (stored.archived && archivedChatId) {
+      await pauseResourceSubscriptionsForChat(archivedChatId);
+    }
     return {
       hadDrone: true,
       hadChat: stored.archived,
@@ -285,6 +297,10 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
         if (entry.archivedChats && Object.keys(entry.archivedChats).length === 0)
           delete entry.archivedChats;
       });
+    }
+    const restoredChatId = String(stored.chat?.id ?? '').trim();
+    if (stored.restored && restoredChatId) {
+      await resumeResourceSubscriptionsForChat(restoredChatId);
     }
     return {
       hadDrone: true,
@@ -461,6 +477,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
       archiveRetention: retention,
       archiveRuntimePolicy: runtimePolicy,
     });
+    await pauseResourceSubscriptionsForDrone(droneId, droneEntry);
     return {
       hadEntry: true,
       archived: true,
@@ -556,6 +573,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     delete restoredEntry.archiveRetention;
     delete restoredEntry.archiveRuntimePolicy;
     await upsertCanonicalDroneLifecycle('real', droneId, restoredEntry);
+    await resumeResourceSubscriptionsForDrone(droneId, archivedEntry);
     return {
       hadEntry: true,
       restored: true,

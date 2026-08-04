@@ -11,6 +11,13 @@ export type ResourceSubscriptionEventType = (typeof RESOURCE_SUBSCRIPTION_EVENTS
 export type ResourceSubscriptionProvider = 'drone-hub' | 'github';
 export type ResourceSubscriptionType = 'chat' | 'repository' | 'pull_request';
 export type ResourceSubscriptionStatus = 'active' | 'completed' | 'cancelled' | 'paused';
+export const RESOURCE_SUBSCRIPTION_PAUSE_REASONS = [
+  'subscriber_chat_archived',
+  'resource_chat_archived',
+  'subscriber_drone_archived',
+  'resource_drone_archived',
+] as const;
+export type ResourceSubscriptionPauseReason = (typeof RESOURCE_SUBSCRIPTION_PAUSE_REASONS)[number];
 
 export type ResourceSubscriptionSubscriber = {
   chatId: string;
@@ -28,6 +35,7 @@ export type ResourceSubscription = {
   events: ResourceSubscriptionEventType[];
   intent: string;
   status: ResourceSubscriptionStatus;
+  pauseReasons: ResourceSubscriptionPauseReason[];
   cursor: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

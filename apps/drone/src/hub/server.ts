@@ -1322,6 +1322,18 @@ let nativeChatErrorHandler: (nativeChatId: string) => Promise<string> = async ()
 let nativeChatLatestAssistantTextHandler: (nativeChatId: string) => Promise<string> = async () =>
   '';
 let deleteNativeChatSessionsHandler: (droneEntry: any) => Promise<void> = async () => {};
+type ResourceSubscriptionLifecycleHandler = {
+  pauseForChat: (chatId: string) => Promise<void>;
+  pauseForDrone: (droneId: string, chatIds: string[]) => Promise<void>;
+  resumeForChat: (chatId: string) => Promise<void>;
+  resumeForDrone: (droneId: string, chatIds: string[]) => Promise<void>;
+};
+let resourceSubscriptionLifecycleHandler: ResourceSubscriptionLifecycleHandler = {
+  pauseForChat: async () => {},
+  pauseForDrone: async () => {},
+  resumeForChat: async () => {},
+  resumeForDrone: async () => {},
+};
 let cloneNativeChatSessionHandler: (input: any) => Promise<void> = async () => {
   throw new Error('native chat runtime is not ready');
 };
@@ -1344,6 +1356,15 @@ function isRepoAttachedDrone(drone: any): boolean {
     Boolean(String((drone as any).repo?.dest ?? '').trim()) ||
     Boolean(String((drone as any).repo?.seededAt ?? '').trim())
   );
+}
+
+function resourceSubscriptionChatIds(droneEntry: any): string[] {
+  return [
+    ...Object.values<any>(droneEntry?.chats ?? {}),
+    ...Object.values<any>(droneEntry?.archivedChats ?? {}),
+  ]
+    .map((chatEntry) => String(chatEntry?.id ?? '').trim())
+    .filter(Boolean);
 }
 
 function safeDroneRefSegment(raw: unknown, fallback = 'drone'): string {
@@ -3618,11 +3639,25 @@ const {
   nowIso,
   parseArchiveRetentionId,
   parseArchiveRuntimePolicy,
+  pauseResourceSubscriptionsForChat: (chatId: string) =>
+    resourceSubscriptionLifecycleHandler.pauseForChat(chatId),
+  pauseResourceSubscriptionsForDrone: (droneId: string, droneEntry: any) =>
+    resourceSubscriptionLifecycleHandler.pauseForDrone(
+      droneId,
+      resourceSubscriptionChatIds(droneEntry),
+    ),
   permanentlyDeleteCanonicalDrone,
   readChatFromStore,
   removeDockerSnapshotImagesBestEffort,
   removeDroneRuntimeArtifacts,
   restoreArchivedChatInStore,
+  resumeResourceSubscriptionsForChat: (chatId: string) =>
+    resourceSubscriptionLifecycleHandler.resumeForChat(chatId),
+  resumeResourceSubscriptionsForDrone: (droneId: string, droneEntry: any) =>
+    resourceSubscriptionLifecycleHandler.resumeForDrone(
+      droneId,
+      resourceSubscriptionChatIds(droneEntry),
+    ),
   revokeMcpAccessTokensForDrone,
   updateRegistry,
   upsertCanonicalDroneLifecycle,
@@ -5124,6 +5159,22 @@ export async function startDroneHubApiServer(opts: {
         log: hubLog,
       })
     : null;
+  if (resourceSubscriptionService) {
+    resourceSubscriptionLifecycleHandler = {
+      pauseForChat: async (chatId) => {
+        await resourceSubscriptionService.pauseForChat(chatId);
+      },
+      pauseForDrone: async (droneId, chatIds) => {
+        await resourceSubscriptionService.pauseForDrone(droneId, chatIds);
+      },
+      resumeForChat: async (chatId) => {
+        await resourceSubscriptionService.resumeForChat(chatId);
+      },
+      resumeForDrone: async (droneId, chatIds) => {
+        await resourceSubscriptionService.resumeForDrone(droneId, chatIds);
+      },
+    };
+  }
 
   const apiRouter = new HubRouter(json, readJsonBody);
 
