@@ -1,5 +1,10 @@
 import React from 'react';
 import * as Clipboard from 'expo-clipboard';
+import {
+  numericTableColumnIndexes,
+  stableSortTableRows,
+  type NumericTableSortDirection,
+} from '@drone/markdown-table-sort';
 import ArrowRight from 'lucide-react-native/icons/arrow-right';
 import Copy from 'lucide-react-native/icons/copy';
 import {
@@ -16,6 +21,7 @@ import { colors } from '../theme';
 import { NativeMermaidDiagram } from './NativeMermaidDiagram';
 import {
   buildNativeMarkdownOutline,
+  nativeMarkdownInlineText,
   parseNativeMarkdown,
   parseNativeMarkdownInline,
   type NativeMarkdownBlock,
@@ -183,10 +189,12 @@ function InlineMarkdown({
   text,
   tone,
   onOpenFileReference,
+  interactive = true,
 }: {
   text: string;
   tone: 'assistant' | 'user';
   onOpenFileReference?: (reference: MobileFileReference) => void;
+  interactive?: boolean;
 }) {
   return (
     <>
@@ -205,9 +213,10 @@ function InlineMarkdown({
                   : token.type === 'link'
                     ? styles.link
                     : undefined;
-        const href = token.type === 'link' ? safeLink(token.href ?? '') : null;
+        const href = interactive && token.type === 'link' ? safeLink(token.href ?? '') : null;
         const fileReference =
-          onOpenFileReference && (token.type === 'code' || (token.type === 'link' && !href))
+          interactive && onOpenFileReference
+            && (token.type === 'code' || (token.type === 'link' && !href))
             ? parseMobileFileReference(token.type === 'link' ? (token.href ?? '') : token.text)
             : null;
         const renderedText = token.type === 'code' ? `\u202f${token.text}\u202f` : token.text;
@@ -219,7 +228,10 @@ function InlineMarkdown({
             accessibilityHint={fileReference ? 'Opens a read-only file preview' : undefined}
             onPress={
               href
-                ? () => void Linking.openURL(href)
+                ? (event) => {
+                    event.stopPropagation?.();
+                    void Linking.openURL(href);
+                  }
                 : fileReference
                   ? (event) => {
                       event.stopPropagation?.();
@@ -229,7 +241,10 @@ function InlineMarkdown({
             }
           >
             {token.type === 'text' ? (
-              <FileLinkedText text={renderedText} onOpenFileReference={onOpenFileReference} />
+              <FileLinkedText
+                text={renderedText}
+                onOpenFileReference={interactive ? onOpenFileReference : undefined}
+              />
             ) : (
               renderedText
             )}
@@ -237,6 +252,176 @@ function InlineMarkdown({
         );
       })}
     </>
+  );
+}
+
+type NativeMarkdownTableBlock = Extract<NativeMarkdownBlock, { type: 'table' }>;
+type NativeMarkdownTableSort = {
+  columnIndex: number;
+  direction: NumericTableSortDirection;
+};
+
+function NativeMarkdownTable({
+  block,
+  tone,
+  onOpenFileReference,
+}: {
+  block: NativeMarkdownTableBlock;
+  tone: 'assistant' | 'user';
+  onOpenFileReference?: (reference: MobileFileReference) => void;
+}) {
+  const [sort, setSort] = React.useState<NativeMarkdownTableSort | null>(null);
+  const headerLabels = React.useMemo(
+    () => block.headers.map((header) => nativeMarkdownInlineText(header).trim()),
+    [block.headers],
+  );
+  const numericValues = React.useMemo(
+    () => block.rows.map((row) => row.map((cell) => nativeMarkdownInlineText(cell).trim())),
+    [block.rows],
+  );
+  const numericColumns = React.useMemo(
+    () => new Set(numericTableColumnIndexes(numericValues, block.headers.length)),
+    [block.headers.length, numericValues],
+  );
+  const activeSort = sort && numericColumns.has(sort.columnIndex) ? sort : null;
+  const orderedRows = React.useMemo(() => {
+    const indexedRows = block.rows.map((row, originalIndex) => ({ row, originalIndex }));
+    return activeSort
+      ? stableSortTableRows(
+        indexedRows,
+        numericValues,
+        activeSort.columnIndex,
+        activeSort.direction,
+      )
+      : indexedRows;
+  }, [activeSort, block.rows, numericValues]);
+
+  React.useEffect(() => setSort(null), [block]);
+
+  return (
+    <View style={styles.tableBlock}>
+      {numericColumns.size > 0 ? (
+        <View style={styles.tableToolbar}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Reset table sort"
+            accessibilityState={{ disabled: !activeSort }}
+            disabled={!activeSort}
+            hitSlop={6}
+            onPress={(event) => {
+              event.stopPropagation();
+              setSort(null);
+            }}
+            onTouchStart={stopTouchPropagation}
+            onTouchEnd={stopTouchPropagation}
+            style={({ pressed }) => [
+              styles.tableResetButton,
+              !activeSort && styles.tableResetButtonDisabled,
+              pressed && styles.tableResetButtonPressed,
+            ]}
+          >
+            <Text style={styles.tableResetText}>Reset</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      <ScrollView
+        horizontal
+        nestedScrollEnabled
+        showsHorizontalScrollIndicator
+        style={styles.tableFrame}
+      >
+        <View style={styles.table}>
+          <View style={[styles.tableRow, styles.tableHead]}>
+            {block.headers.map((header, columnIndex) => {
+              const sortable = numericColumns.has(columnIndex);
+              if (!sortable) {
+                return (
+                  <Text
+                    selectable
+                    key={columnIndex}
+                    style={[
+                      styles.tableCell,
+                      styles.tableHeadText,
+                      tone === 'user' && styles.userText,
+                    ]}
+                  >
+                    <InlineMarkdown
+                      text={header}
+                      tone={tone}
+                      onOpenFileReference={onOpenFileReference}
+                    />
+                  </Text>
+                );
+              }
+              const direction = activeSort?.columnIndex === columnIndex
+                ? activeSort.direction
+                : null;
+              const nextDirection = direction === 'ascending' ? 'descending' : 'ascending';
+              return (
+                <Pressable
+                  key={columnIndex}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Sort ${headerLabels[columnIndex] || 'column'} ${nextDirection}`}
+                  accessibilityHint="Sorts this numeric table column"
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    setSort({ columnIndex, direction: nextDirection });
+                  }}
+                  onTouchStart={stopTouchPropagation}
+                  onTouchEnd={stopTouchPropagation}
+                  style={({ pressed }) => [
+                    styles.tableSortHeader,
+                    pressed && styles.tableSortHeaderPressed,
+                  ]}
+                >
+                  <View style={styles.tableSortHeaderContent}>
+                    <Text
+                      style={[
+                        styles.tableSortHeaderText,
+                        tone === 'user' && styles.userText,
+                      ]}
+                    >
+                      <InlineMarkdown
+                        text={header}
+                        tone={tone}
+                        interactive={false}
+                      />
+                    </Text>
+                    <Text
+                      accessibilityElementsHidden
+                      importantForAccessibility="no"
+                      style={[
+                        styles.tableSortIndicator,
+                        direction && styles.tableSortIndicatorActive,
+                      ]}
+                    >
+                      {direction === 'ascending' ? '↑' : direction === 'descending' ? '↓' : '↕'}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+          {orderedRows.map(({ row, originalIndex }) => (
+            <View key={originalIndex} style={styles.tableRow}>
+              {block.headers.map((_, cellIndex) => (
+                <Text
+                  selectable
+                  key={cellIndex}
+                  style={[styles.tableCell, tone === 'user' && styles.userText]}
+                >
+                  <InlineMarkdown
+                    text={row[cellIndex] ?? ''}
+                    tone={tone}
+                    onOpenFileReference={onOpenFileReference}
+                  />
+                </Text>
+              ))}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -334,42 +519,13 @@ function NativeMarkdownBlocks({
         if (block.type === 'divider')
           return <View key={`divider:${index}`} style={styles.divider} />;
         if (block.type === 'table') {
-          const rows = [block.headers, ...block.rows];
           return (
-            <ScrollView
+            <NativeMarkdownTable
               key={`table:${index}`}
-              horizontal
-              nestedScrollEnabled
-              showsHorizontalScrollIndicator
-              style={styles.tableFrame}
-            >
-              <View style={styles.table}>
-                {rows.map((row, rowIndex) => (
-                  <View
-                    key={rowIndex}
-                    style={[styles.tableRow, rowIndex === 0 && styles.tableHead]}
-                  >
-                    {block.headers.map((_, cellIndex) => (
-                      <Text
-                        selectable
-                        key={cellIndex}
-                        style={[
-                          styles.tableCell,
-                          rowIndex === 0 && styles.tableHeadText,
-                          tone === 'user' && styles.userText,
-                        ]}
-                      >
-                        <InlineMarkdown
-                          text={row[cellIndex] ?? ''}
-                          tone={tone}
-                          onOpenFileReference={onOpenFileReference}
-                        />
-                      </Text>
-                    ))}
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
+              block={block}
+              tone={tone}
+              onOpenFileReference={onOpenFileReference}
+            />
           );
         }
         return (
@@ -804,6 +960,23 @@ const styles = StyleSheet.create({
   listRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   listMarker: { width: 22, color: colors.chatListMarker, fontSize: 13, lineHeight: 21, textAlign: 'right' },
   divider: { height: 1, backgroundColor: colors.borderSubtle, marginVertical: 4 },
+  tableBlock: { width: '100%', minWidth: 0, alignSelf: 'stretch' },
+  tableToolbar: {
+    minHeight: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 4,
+  },
+  tableResetButton: {
+    minHeight: 26,
+    justifyContent: 'center',
+    paddingHorizontal: 7,
+    borderRadius: 6,
+  },
+  tableResetButtonPressed: { backgroundColor: colors.whiteWash },
+  tableResetButtonDisabled: { opacity: 0.42 },
+  tableResetText: { color: colors.accentAlt, fontSize: 11, fontWeight: '800' },
   tableFrame: {
     borderWidth: 1,
     borderColor: colors.surface1,
@@ -813,6 +986,39 @@ const styles = StyleSheet.create({
   table: { minWidth: 280 },
   tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.surface1 },
   tableHead: { backgroundColor: colors.surface0 },
+  tableSortHeader: {
+    width: 150,
+    minHeight: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    paddingVertical: 8,
+    borderRightWidth: 1,
+    borderRightColor: colors.surface1,
+  },
+  tableSortHeaderPressed: { backgroundColor: colors.whiteWash },
+  tableSortHeaderContent: {
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  tableSortHeaderText: {
+    flexShrink: 1,
+    color: colors.textStrong,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  tableSortIndicator: {
+    flexShrink: 0,
+    color: colors.mutedDim,
+    fontSize: 11,
+    lineHeight: 17,
+  },
+  tableSortIndicatorActive: { color: colors.accentAlt },
   tableCell: {
     width: 150,
     color: colors.text,
@@ -822,8 +1028,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRightWidth: 1,
     borderRightColor: colors.surface1,
+    textAlign: 'left',
   },
-  tableHeadText: { fontWeight: '900', color: colors.textStrong },
+  tableHeadText: { fontWeight: '900', color: colors.textStrong, textAlign: 'center' },
 });
 
 const calloutStyles = {

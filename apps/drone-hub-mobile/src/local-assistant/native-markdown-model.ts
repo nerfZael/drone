@@ -128,6 +128,10 @@ export function parseNativeMarkdownInline(text: string): NativeMarkdownInline[] 
   return result.length > 0 ? result : [{ type: 'text', text: source }];
 }
 
+export function nativeMarkdownInlineText(text: string): string {
+  return parseNativeMarkdownInline(text).map((token) => token.text).join('');
+}
+
 function tableCells(line: string): string[] {
   return line
     .trim()

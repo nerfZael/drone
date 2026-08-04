@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import {
+  numericTableColumnIndexes,
+  stableSortTableRows,
+} from '@drone/markdown-table-sort';
 import {
   buildNativeMarkdownOutline,
   nativeMarkdownHasCodeBlock,
+  nativeMarkdownInlineText,
   parseNativeMarkdown,
   parseNativeMarkdownInline,
 } from '../src/local-assistant/native-markdown-model';
@@ -52,6 +58,7 @@ const ready = true;
       { type: 'link', text: 'docs', href: 'https://example.com' },
       { type: 'text', text: '.' },
     ]);
+    expect(nativeMarkdownInlineText('**10**, `3`, and [4](https://example.com)')).toBe('10, 3, and 4');
   });
 
   test('recognizes GitHub-style callouts', () => {
@@ -104,5 +111,35 @@ const ready = true;
       { type: 'heading', level: 1, text: 'Document title' },
       { type: 'heading', level: 2, text: 'Section' },
     ]);
+  });
+
+  test('sorts only wholly numeric native table columns', () => {
+    const table = parseNativeMarkdown(
+      '| Name | **Score** | Change |\n| --- | --- | --- |\n| Alpha | **10** | -2.5 |\n| Beta | `3` | 1e2 |',
+    )[0];
+    expect(table?.type).toBe('table');
+    if (!table || table.type !== 'table') throw new Error('Expected a native Markdown table');
+
+    const numericValues = table.rows.map((row) => row.map(nativeMarkdownInlineText));
+    expect(numericTableColumnIndexes(numericValues, table.headers.length)).toEqual([1, 2]);
+    expect(stableSortTableRows(table.rows, numericValues, 1, 'ascending')).toEqual([
+      ['Beta', '`3`', '1e2'],
+      ['Alpha', '**10**', '-2.5'],
+    ]);
+  });
+
+  test('exposes accessible sort and reset controls in the native renderer', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/NativeMarkdown.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('accessibilityLabel={`Sort ${headerLabels[columnIndex]');
+    expect(source).toContain('accessibilityLabel="Reset table sort"');
+    expect(source).toContain('accessibilityState={{ disabled: !activeSort }}');
+    expect(source).toContain('onTouchStart={stopTouchPropagation}');
+    expect(source).toContain('interactive={false}');
+    expect(source).toContain('textAlign: \'left\'');
+    expect(source).toContain('textAlign: \'center\'');
   });
 });
