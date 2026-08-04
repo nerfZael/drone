@@ -35,7 +35,11 @@ const {
   WHITEBOARD_ACTIVE_STORAGE_KEY,
   writeActiveWhiteboardId,
 } = await import('../src/droneHub/whiteboard/whiteboard-events');
-const { ensureWorkspaceToolPanel, restoreRequiredWorkspacePanels } = await import('../src/droneHub/app/DockableDroneWorkspace');
+const {
+  ensureWorkspaceToolPanel,
+  migrateEditorChangesPanels,
+  restoreRequiredWorkspacePanels,
+} = await import('../src/droneHub/app/DockableDroneWorkspace');
 const {
   readWorkspaceExplorerWidth,
   readWorkspaceExplorerZoom,
@@ -79,6 +83,9 @@ describe('per-drone workspace state', () => {
     expect(workspace).toContain('workspaceLayoutStorageKey(droneId)');
     expect(workspace).toContain('writeStoredLayout(currentDrone.id, layout)');
     expect(selectedWorkspace).toContain('key={currentDrone.id}');
+    expect(selectedWorkspace).toContain('visibleToolTabsByDrone[currentDrone.id] ?? []');
+    expect(selectedWorkspace).toContain('[currentDrone.id]: tabs');
+    expect(selectedWorkspace).toContain('onVisibleToolTabsChange={handleVisibleToolTabsChange}');
   });
 
   test('uses the same File Explorer chrome and preferences in Editor and Changes', () => {
@@ -156,6 +163,51 @@ describe('per-drone workspace state', () => {
     expect(title).toBe('Changes');
     expect(minimumWidth).toBe(480);
     expect(active).toBe(true);
+  });
+
+  test('keeps a restored Editor or Changes pane independent of another drone active tab', () => {
+    let editorParams = { tab: 'editor' };
+    let editorTitle = 'Editor';
+    const editorPanel = {
+      id: 'tool:editor',
+      api: {
+        getParameters: () => editorParams,
+        updateParameters: (next: typeof editorParams) => {
+          editorParams = next;
+        },
+        setTitle: (next: string) => {
+          editorTitle = next;
+        },
+        setConstraints: () => {},
+        close: () => {},
+      },
+    };
+    const terminalPanel = {
+      id: 'tool:terminal',
+      api: { getParameters: () => ({ tab: 'terminal' }) },
+    };
+    const api = {
+      panels: [editorPanel],
+      activePanel: terminalPanel,
+    };
+
+    migrateEditorChangesPanels(
+      api as unknown as Parameters<typeof migrateEditorChangesPanels>[0],
+    );
+
+    expect(editorParams.tab).toBe('editor');
+    expect(editorTitle).toBe('Editor');
+  });
+
+  test('does not seed a new drone from the previously active workspace tool', () => {
+    const workspace = readAppSource('app/DockableDroneWorkspace.tsx');
+
+    expect(workspace).toContain("const DEFAULT_WORKSPACE_TOOL_TAB: RightPanelTab = 'editor'");
+    expect(workspace).toContain(
+      "ensureWorkspaceToolPanel(api, DEFAULT_WORKSPACE_TOOL_TAB, 'single')",
+    );
+    expect(workspace).toContain('localStorage.removeItem(LEGACY_LAYOUT_STORAGE_KEY)');
+    expect(workspace).not.toContain('migrateEditorChangesPanels(api, activeToolTab)');
   });
 
   test('repairs an empty saved chat group and restores chat beside the editor', () => {

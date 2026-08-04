@@ -48,6 +48,7 @@ type DockableDroneWorkspaceProps = {
 
 const CHAT_PANEL_ID = 'agent-chat';
 const TOOL_PANEL_PREFIX = 'tool:';
+const DEFAULT_WORKSPACE_TOOL_TAB: RightPanelTab = 'editor';
 const DEFAULT_NEW_TOOL_PANEL_WIDTH = 720;
 const DEFAULT_NEW_TOOL_PANEL_HEIGHT = 320;
 const NEW_TOOL_PANEL_MIN_WIDTH = 360;
@@ -199,6 +200,9 @@ function readStoredLayout(droneId: string): SerializedDockview | null {
 function writeStoredLayout(droneId: string, layout: SerializedDockview): void {
   if (typeof localStorage === 'undefined') return;
   localStorage.setItem(workspaceLayoutStorageKey(droneId), JSON.stringify(layout));
+  // The global layout predates per-drone workspaces. Once it has been copied
+  // into a drone-specific key, do not seed every newly visited drone with it.
+  localStorage.removeItem(LEGACY_LAYOUT_STORAGE_KEY);
 }
 
 export function ensureWorkspaceToolPanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePaneKey, referencePanel: string = CHAT_PANEL_ID): boolean {
@@ -264,12 +268,14 @@ export function restoreRequiredWorkspacePanels(api: DockviewApi): void {
   ensureChatPanel(api);
 }
 
-function migrateEditorChangesPanels(api: DockviewApi, activeToolTab: RightPanelTab): void {
+export function migrateEditorChangesPanels(api: DockviewApi): void {
   const panels = editorChangesPanels(api);
   if (panels.length === 0) return;
-  const requestedTab = isEditorChangesTab(activeToolTab)
-    ? canonicalWorkspaceTab(activeToolTab)
-    : tabFromPanel(panels[0]) ?? 'editor';
+  const activePanelTab = api.activePanel ? tabFromPanel(api.activePanel) : null;
+  const requestedTab =
+    activePanelTab && isEditorChangesTab(activePanelTab)
+      ? canonicalWorkspaceTab(activePanelTab)
+      : tabFromPanel(panels[0]) ?? DEFAULT_WORKSPACE_TOOL_TAB;
   const survivor = panels.find((panel) => tabFromPanel(panel) === requestedTab) ?? panels[0];
   for (const panel of panels) {
     if (panel !== survivor) panel.api.close();
@@ -284,13 +290,12 @@ function migrateEditorChangesPanels(api: DockviewApi, activeToolTab: RightPanelT
 
 function createDefaultLayout(
   api: DockviewApi,
-  activeToolTab: RightPanelTab,
   toolPaneOpen: boolean,
 ): void {
   api.clear();
   ensureChatPanel(api);
   if (!toolPaneOpen) return;
-  ensureWorkspaceToolPanel(api, activeToolTab, 'single');
+  ensureWorkspaceToolPanel(api, DEFAULT_WORKSPACE_TOOL_TAB, 'single');
 }
 
 function ChatPanel({ containerApi }: IDockviewPanelProps) {
@@ -485,15 +490,15 @@ export function DockableDroneWorkspace({
       if (stored && toolPaneOpen) {
         api.fromJSON(stored, { reuseExistingPanels: true });
         restoreRequiredWorkspacePanels(api);
-        migrateEditorChangesPanels(api, activeToolTab);
+        migrateEditorChangesPanels(api);
       } else {
-        createDefaultLayout(api, activeToolTab, toolPaneOpen);
+        createDefaultLayout(api, toolPaneOpen);
       }
       lastAppliedOpenRequestRef.current = openRequestNonce;
       lastAppliedToolTabRef.current = activeToolTab;
       lastAppliedOpenStateRef.current = toolPaneOpen;
     } catch {
-      createDefaultLayout(api, activeToolTab, toolPaneOpen);
+      createDefaultLayout(api, toolPaneOpen);
     } finally {
       suppressSaveRef.current = false;
       updateWorkspacePanelState();

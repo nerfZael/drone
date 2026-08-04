@@ -41,7 +41,11 @@ describe('DroneWorkspaceHeaderFrame', () => {
     expect(source).toContain('contextMenuItemBaseClass as dropdownMenuItemBaseClass');
     expect(source).toContain('<WorkspaceToolIcon tab={tab} className="h-[17px] w-[17px]" />');
     expect(source).toContain('rightPanelHeaderTabs(rightPanelTabs).map((tab, index, tabs) =>');
-    expect(source).toContain("aria-current={active ? 'page' : undefined}");
+    expect(source).toContain('const open = visibleToolTabs.includes(tab)');
+    expect(source).toContain('aria-pressed={open}');
+    expect(source).toContain('onVisibleToolTabsChange={handleVisibleToolTabsChange}');
+    expect(source).toContain("border-[var(--accent-border)] bg-[var(--accent-subtle)] !text-[var(--fg)]");
+    expect(source).not.toContain('shadow-[inset_0_-2px_0_var(--accent)]');
     expect(source).toContain("data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}");
   });
 

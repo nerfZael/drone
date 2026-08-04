@@ -675,6 +675,25 @@ export function SelectedDroneWorkspace({
     setSelectedChat,
     setTerminalEmulator,
   } = useSelectedDroneWorkspaceUiState();
+  const [visibleToolTabsByDrone, setVisibleToolTabsByDrone] = React.useState<
+    Record<string, RightPanelTab[]>
+  >({});
+  const visibleToolTabs = visibleToolTabsByDrone[currentDrone.id] ?? [];
+  const handleVisibleToolTabsChange = React.useCallback(
+    (tabs: RightPanelTab[]) => {
+      setVisibleToolTabsByDrone((current) => {
+        const previous = current[currentDrone.id] ?? [];
+        if (
+          previous.length === tabs.length &&
+          previous.every((tab, index) => tab === tabs[index])
+        ) {
+          return current;
+        }
+        return { ...current, [currentDrone.id]: tabs };
+      });
+    },
+    [currentDrone.id],
+  );
   const explicitSelectedChat = String(selectedChat ?? '').trim();
   const activeChatName = React.useMemo(
     () => explicitSelectedChat || resolveChatNameForDrone(currentDrone, selectedChat),
@@ -2108,7 +2127,7 @@ export function SelectedDroneWorkspace({
           >
             {rightPanelHeaderTabs(rightPanelTabs).map((tab, index, tabs) => {
               const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
-              const active = tab === rightPanelTab;
+              const open = visibleToolTabs.includes(tab);
               const label = rightPanelTabLabels[tab];
               const tooltip =
                 tab === 'prs' && prCount > 0 ? `${label} (${prCount} open)` : label;
@@ -2124,12 +2143,12 @@ export function SelectedDroneWorkspace({
                     data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
                     className={cn(
                       'relative !h-7 !w-7 !justify-center !rounded-[4px] !px-0',
-                      active
-                        ? 'bg-[var(--surface-strong)] !text-[var(--fg)] shadow-[inset_0_-2px_0_var(--accent)]'
+                      open
+                        ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] !text-[var(--fg)]'
                         : '!text-[var(--chrome-muted)] hover:bg-[var(--hover)] hover:!text-[var(--fg-secondary)]',
                     )}
                     aria-label={tooltip}
-                    aria-current={active ? 'page' : undefined}
+                    aria-pressed={open}
                   >
                     <span
                       className="flex h-[17px] w-[17px] items-center justify-center"
@@ -2163,6 +2182,7 @@ export function SelectedDroneWorkspace({
         renderToolPane={(tab, paneKey) => renderRightPanelTabContent(currentDrone, tab, paneKey)}
         previewTab="preview"
         onActiveToolTabChange={setRightPanelTab}
+        onVisibleToolTabsChange={handleVisibleToolTabsChange}
         onPreviewHostChange={onPersistentPreviewHostChange}
         onBeforeWorkspaceMouseDown={captureWorkspaceChatScroll}
         onAfterToolPanelRemove={restoreWorkspaceChatScroll}
