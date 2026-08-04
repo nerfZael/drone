@@ -589,7 +589,13 @@ export function createDroneControlCapability(
         });
         const createdDroneId = firstText(created?.id, created?.droneId, created?.drone?.id);
         if (!requestedName && autoRenamePrompt && createdDroneId) {
-          scheduleCreatedDroneAutoRename(access, createdDroneId, autoRenamePrompt);
+          const createdDroneName = firstText(created?.name, created?.drone?.name);
+          scheduleCreatedDroneAutoRename(
+            access,
+            createdDroneId,
+            autoRenamePrompt,
+            createdDroneName,
+          );
           return { ...created, autoRenameScheduled: true };
         }
         return created;

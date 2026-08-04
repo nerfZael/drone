@@ -5402,6 +5402,7 @@ export async function startDroneHubApiServer(opts: {
     normalizeDroneIdentity,
     normalizeDroneRuntime,
     normalizeEnvVarMap,
+    notifyCanonicalDroneRegistryWrite,
     nowIso,
     parseIsoToMs,
     removeArchivedDroneById,

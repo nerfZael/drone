@@ -3205,7 +3205,7 @@ export function DroneSidebar({
                             }
                             createChatDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
                             addToGroupDisabled={isOptimistic || movingDroneGroups || droneMutationBusy || droneProvisioning}
-                            renameDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
+                            renameDisabled={droneMutationBusy}
                             renameBusy={Boolean(renamingDrones[droneId])}
                             setBaseImageDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
                             setBaseImageBusy={Boolean(settingBaseImages[droneId])}
