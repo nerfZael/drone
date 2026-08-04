@@ -475,9 +475,10 @@ describe('subscription delivery authorization', () => {
           resolved.push(chatId);
           return chatId === existingSubscriber.chatId ? { ...existingSubscriber } : null;
         },
-        cancel: async (id) => {
+        cancelActive: async (id) => {
           cancelled.push(id);
-          return subscriptions.find((subscription) => subscription.id === id) ?? null;
+          const subscription = subscriptions.find((item) => item.id === id);
+          return subscription ? { ...subscription, status: 'cancelled' as const } : null;
         },
       },
       () => {},

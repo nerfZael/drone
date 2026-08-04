@@ -32,12 +32,10 @@ export class ResourceSubscriptionLifecycleRepository {
   async pauseForChat(chatIdRaw: string): Promise<string[]> {
     const chatId = cleanString(chatIdRaw);
     if (!chatId) return [];
-    return await this.pauseRelations({
-      subscriberChatId: chatId,
-      resourceChatIds: [chatId],
-      subscriberReason: 'subscriber_chat_archived',
-      resourceReason: 'resource_chat_archived',
-    });
+    const now = new Date().toISOString();
+    return await this.database.writeTransaction('pause resource subscriptions', (connection) =>
+      pauseResourceSubscriptionsForChatWithConnection(connection, chatId, now),
+    );
   }
 
   async pauseForDrone(droneIdRaw: string, chatIdsRaw: string[]): Promise<string[]> {
@@ -98,33 +96,34 @@ export class ResourceSubscriptionLifecycleRepository {
   async cancelForChat(chatIdRaw: string): Promise<string[]> {
     const chatId = cleanString(chatIdRaw);
     if (!chatId) return [];
-    return await this.cancelRelations({ subscriberChatId: chatId, resourceChatIds: [chatId] });
+    const now = new Date().toISOString();
+    return await this.database.writeTransaction(
+      'cancel related resource subscriptions',
+      (connection) => cancelResourceSubscriptionsForChatWithConnection(connection, chatId, now),
+    );
   }
 
   async cancelForDrone(droneIdRaw: string, chatIdsRaw: string[]): Promise<string[]> {
     const droneId = cleanString(droneIdRaw);
     if (!droneId) return [];
-    return await this.cancelRelations({
-      subscriberDroneId: droneId,
-      resourceChatIds: cleanStrings(chatIdsRaw),
-    });
+    const now = new Date().toISOString();
+    return await this.database.writeTransaction(
+      'cancel related resource subscriptions',
+      (connection) =>
+        cancelResourceSubscriptionsForDroneWithConnection(
+          connection,
+          droneId,
+          chatIdsRaw,
+          now,
+        ),
+    );
   }
 
   private async pauseRelations(input: SubscriptionRelations): Promise<string[]> {
     const now = new Date().toISOString();
-    return await this.database.writeTransaction('pause resource subscriptions', (connection) => {
-      const rows = selectRelatedSubscriptions(connection, input, ['active', 'paused']);
-      const update = connection.prepare(`
-        UPDATE resource_subscriptions
-        SET status = 'paused', pause_reasons_json = ?, updated_at = ?
-        WHERE id = ? AND status IN ('active', 'paused')
-      `);
-      for (const row of rows) {
-        update.run(JSON.stringify(pauseReasonsAfterAdding(row, input)), now, row.id);
-        failPendingDeliveries(connection, row.id, 'subscription paused', now);
-      }
-      return rows.map((row) => row.id);
-    });
+    return await this.database.writeTransaction('pause resource subscriptions', (connection) =>
+      pauseRelationsWithConnection(connection, input, now),
+    );
   }
 
   private resumeCandidates(input: SubscriptionRelations): string[] {
@@ -155,30 +154,90 @@ export class ResourceSubscriptionLifecycleRepository {
     });
   }
 
-  private async cancelRelations(
-    input: Pick<
-      SubscriptionRelations,
-      'subscriberChatId' | 'subscriberDroneId' | 'resourceChatIds'
-    >,
-  ): Promise<string[]> {
-    const now = new Date().toISOString();
-    return await this.database.writeTransaction(
-      'cancel related resource subscriptions',
-      (connection) => {
-        const rows = selectRelatedSubscriptions(connection, input, ['active', 'paused']);
-        const update = connection.prepare(`
-          UPDATE resource_subscriptions
-          SET status = 'cancelled', pause_reasons_json = '[]', completed_at = ?, updated_at = ?
-          WHERE id = ? AND status IN ('active', 'paused')
-        `);
-        for (const row of rows) {
-          update.run(now, now, row.id);
-          failPendingDeliveries(connection, row.id, 'subscription cancelled', now);
-        }
-        return rows.map((row) => row.id);
-      },
-    );
+}
+
+export function pauseResourceSubscriptionsForChatWithConnection(
+  connection: HubDatabaseConnection,
+  chatIdRaw: string,
+  now = new Date().toISOString(),
+): string[] {
+  const chatId = cleanString(chatIdRaw);
+  if (!chatId || !resourceSubscriptionTableExists(connection)) return [];
+  return pauseRelationsWithConnection(
+    connection,
+    {
+      subscriberChatId: chatId,
+      resourceChatIds: [chatId],
+      subscriberReason: 'subscriber_chat_archived',
+      resourceReason: 'resource_chat_archived',
+    },
+    now,
+  );
+}
+
+export function cancelResourceSubscriptionsForChatWithConnection(
+  connection: HubDatabaseConnection,
+  chatIdRaw: string,
+  now = new Date().toISOString(),
+): string[] {
+  const chatId = cleanString(chatIdRaw);
+  if (!chatId || !resourceSubscriptionTableExists(connection)) return [];
+  return cancelRelationsWithConnection(
+    connection,
+    { subscriberChatId: chatId, resourceChatIds: [chatId] },
+    now,
+  );
+}
+
+export function cancelResourceSubscriptionsForDroneWithConnection(
+  connection: HubDatabaseConnection,
+  droneIdRaw: string,
+  chatIdsRaw: string[],
+  now = new Date().toISOString(),
+): string[] {
+  const droneId = cleanString(droneIdRaw);
+  if (!droneId || !resourceSubscriptionTableExists(connection)) return [];
+  return cancelRelationsWithConnection(
+    connection,
+    { subscriberDroneId: droneId, resourceChatIds: cleanStrings(chatIdsRaw) },
+    now,
+  );
+}
+
+function pauseRelationsWithConnection(
+  connection: HubDatabaseConnection,
+  input: SubscriptionRelations,
+  now: string,
+): string[] {
+  const rows = selectRelatedSubscriptions(connection, input, ['active', 'paused']);
+  const update = connection.prepare(`
+    UPDATE resource_subscriptions
+    SET status = 'paused', pause_reasons_json = ?, updated_at = ?
+    WHERE id = ? AND status IN ('active', 'paused')
+  `);
+  for (const row of rows) {
+    update.run(JSON.stringify(pauseReasonsAfterAdding(row, input)), now, row.id);
+    failPendingResourceSubscriptionDeliveries(connection, row.id, 'subscription paused', now);
   }
+  return rows.map((row) => row.id);
+}
+
+function cancelRelationsWithConnection(
+  connection: HubDatabaseConnection,
+  input: Pick<SubscriptionRelations, 'subscriberChatId' | 'subscriberDroneId' | 'resourceChatIds'>,
+  now: string,
+): string[] {
+  const rows = selectRelatedSubscriptions(connection, input, ['active', 'paused']);
+  const update = connection.prepare(`
+    UPDATE resource_subscriptions
+    SET status = 'cancelled', pause_reasons_json = '[]', completed_at = ?, updated_at = ?
+    WHERE id = ? AND status IN ('active', 'paused')
+  `);
+  for (const row of rows) {
+    update.run(now, now, row.id);
+    failPendingResourceSubscriptionDeliveries(connection, row.id, 'subscription cancelled', now);
+  }
+  return rows.map((row) => row.id);
 }
 
 function selectRelatedSubscriptions(
@@ -276,22 +335,39 @@ function parsePauseReasons(raw: unknown): ResourceSubscriptionPauseReason[] {
   }
 }
 
-function failPendingDeliveries(
+export function failPendingResourceSubscriptionDeliveries(
   connection: HubDatabaseConnection,
   subscriptionId: string,
   error: string,
   now: string,
 ): void {
-  connection
+  const batchRows = connection
     .prepare(
-      `UPDATE subscription_batches
-       SET state = 'failed', updated_at = ?, last_error = ?
-       WHERE state = 'processing' AND id IN (
-         SELECT batch_id FROM subscription_deliveries
-         WHERE subscription_id = ? AND batch_id IS NOT NULL
-       )`,
+      `SELECT DISTINCT batch_id
+       FROM subscription_deliveries
+       WHERE subscription_id = ? AND state = 'processing' AND batch_id IS NOT NULL`,
     )
-    .run(now, error, subscriptionId);
+    .all(subscriptionId) as Array<{ batch_id: string }>;
+  const batchIds = batchRows.map((row) => row.batch_id);
+  if (batchIds.length > 0) {
+    const placeholders = batchIds.map(() => '?').join(', ');
+    connection
+      .prepare(
+        `UPDATE subscription_deliveries
+         SET state = 'pending', batch_id = NULL, next_attempt_at = ?, updated_at = ?,
+           last_error = 'batch interrupted by subscription lifecycle change'
+         WHERE state = 'processing' AND subscription_id != ?
+           AND batch_id IN (${placeholders})`,
+      )
+      .run(now, now, subscriptionId, ...batchIds);
+    connection
+      .prepare(
+        `UPDATE subscription_batches
+         SET state = 'failed', updated_at = ?, last_error = ?
+         WHERE state = 'processing' AND id IN (${placeholders})`,
+      )
+      .run(now, error, ...batchIds);
+  }
   connection
     .prepare(
       `UPDATE subscription_deliveries
@@ -299,6 +375,17 @@ function failPendingDeliveries(
        WHERE subscription_id = ? AND state IN ('pending', 'processing')`,
     )
     .run(error, now, subscriptionId);
+}
+
+function resourceSubscriptionTableExists(connection: HubDatabaseConnection): boolean {
+  return Boolean(
+    connection
+      .prepare(
+        `SELECT 1 FROM sqlite_schema
+         WHERE type = 'table' AND name = 'resource_subscriptions'`,
+      )
+      .get(),
+  );
 }
 
 function cleanStrings(raw: string[]): string[] {

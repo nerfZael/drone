@@ -4,7 +4,10 @@ import BetterSqlite3 from 'better-sqlite3';
 
 import type { HubDatabase, HubDatabaseConnection } from '../../src/host/hub-database';
 import { ResourceSubscriptionRepository } from '../../src/hub/subscriptions/resource-subscription-repository';
-import { ResourceSubscriptionService } from '../../src/hub/subscriptions/resource-subscription-service';
+import {
+  detectChatSubscriptionChanges,
+  ResourceSubscriptionService,
+} from '../../src/hub/subscriptions/resource-subscription-service';
 import { DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS } from '../../src/hub/subscriptions/resource-subscription-types';
 
 test('completes a paused pull request subscription without delivering its terminal event', async () => {
@@ -83,6 +86,8 @@ test('archived chats pause owned and watched subscriptions without replaying que
       'resource_chat_archived',
     ]);
     assert.equal(repository.list('subscriber-chat').length, 1);
+    await repository.cancelActive(created.subscription.id, 'subscriber-chat');
+    assert.equal(repository.get(created.subscription.id)?.status, 'paused');
 
     await repository.resumeForChat('subscriber-chat');
     assert.equal(repository.get(created.subscription.id)?.status, 'paused');
@@ -302,6 +307,157 @@ test('restoring a paused chat subscription resets its cursor to the current chat
     assert.equal(resumed?.cursor.idleArmed, false);
     assert.equal(resumed?.cursor.lastLatestId, 'current-message');
     assert.equal(resumed?.cursor.idleCauseId, '');
+  } finally {
+    close();
+  }
+});
+
+test('a transient status read failure does not leave a restored subscription paused', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    await database.writeTransaction('add canonical chat fixture', (connection) => {
+      connection.exec(`
+        CREATE TABLE canonical_chats (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          metadata_json TEXT NOT NULL
+        )
+      `);
+      connection
+        .prepare(
+          `INSERT INTO canonical_chats (drone_id, chat_name, metadata_json)
+           VALUES (?, ?, ?)`,
+        )
+        .run('watched-drone', 'default', JSON.stringify({ id: 'watched-chat' }));
+    });
+    const created = await repository.upsert({
+      subscriber: { chatId: 'subscriber-chat', droneId: 'drone-a', chatName: 'default' },
+      provider: 'drone-hub',
+      resourceType: 'chat',
+      resourceId: 'watched-chat',
+      events: ['chat.idle', 'chat.failed'],
+      intent: '',
+      cursor: { idleArmed: true, idleCauseId: 'archived-work' },
+      maxActive: 50,
+    });
+    await repository.pauseForChat('subscriber-chat');
+    const service = new ResourceSubscriptionService({
+      repository,
+      readChatStatus: async () => {
+        throw new Error('runtime temporarily unavailable');
+      },
+      wakePromptQueue: () => {},
+      log: () => {},
+    });
+
+    await service.resumeForChat('subscriber-chat');
+    const resumed = repository.get(created.subscription.id)!;
+    assert.equal(resumed.status, 'active');
+    assert.equal(resumed.cursor.needsBaseline, true);
+    const baseline = detectChatSubscriptionChanges(
+      resumed,
+      { chatId: 'watched-chat', droneId: 'watched-drone', chatName: 'default' },
+      {
+        idle: true,
+        reason: 'latest_user_failed',
+        latest: { id: 'archived-failure', role: 'user', status: 'failed' },
+      },
+    );
+    assert.deepEqual(baseline.events, []);
+    assert.equal(baseline.cursor.needsBaseline, undefined);
+    assert.equal(baseline.cursor.lastFailureId, 'archived-failure');
+  } finally {
+    close();
+  }
+});
+
+test('pausing one subscription releases unrelated deliveries from a mixed batch', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    const subscriber = { chatId: 'subscriber-chat', droneId: 'drone-a', chatName: 'default' };
+    const watched = await repository.upsert({
+      subscriber,
+      provider: 'drone-hub',
+      resourceType: 'chat',
+      resourceId: 'watched-chat',
+      events: ['chat.idle'],
+      intent: '',
+      maxActive: 50,
+    });
+    const github = await repository.upsert({
+      subscriber,
+      provider: 'github',
+      resourceType: 'repository',
+      resourceId: 'example/repository',
+      events: ['pull_request.opened'],
+      intent: '',
+      maxActive: 50,
+    });
+    await repository.appendEvent({
+      id: 'watched-chat-event',
+      providerEventId: 'drone-hub:watched-chat:idle:mixed-batch',
+      provider: 'drone-hub',
+      resourceType: 'chat',
+      resourceId: 'watched-chat',
+      parentResourceId: null,
+      eventType: 'chat.idle',
+      occurredAt: new Date().toISOString(),
+      summary: 'Watched chat became idle.',
+      providerContent: {},
+    });
+    await repository.appendEvent({
+      id: 'github-event',
+      providerEventId: 'github:example/repository#1:opened:mixed-batch',
+      provider: 'github',
+      resourceType: 'pull_request',
+      resourceId: 'example/repository#1',
+      parentResourceId: 'example/repository',
+      eventType: 'pull_request.opened',
+      occurredAt: new Date().toISOString(),
+      summary: 'Pull request opened.',
+      providerContent: {},
+    });
+
+    const claimed = await repository.claimBatch(
+      { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 },
+      new Date(Date.now() + 1_000),
+    );
+    assert.equal(claimed?.items.length, 2);
+    await repository.pauseForChat('watched-chat');
+
+    const states = database.read((connection) =>
+      connection
+        .prepare(
+          `SELECT subscription_id, state, batch_id
+           FROM subscription_deliveries`,
+        )
+        .all() as Array<{ subscription_id: string; state: string; batch_id: string | null }>,
+    );
+    assert.deepEqual(
+      Object.fromEntries(states.map((row) => [row.subscription_id, row])),
+      {
+        [github.subscription.id]: {
+          subscription_id: github.subscription.id,
+          state: 'pending',
+          batch_id: null,
+        },
+        [watched.subscription.id]: {
+          subscription_id: watched.subscription.id,
+          state: 'failed',
+          batch_id: null,
+        },
+      },
+    );
+    const retry = await repository.claimBatch(
+      { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 },
+      new Date(Date.now() + 2_000),
+    );
+    assert.deepEqual(
+      retry?.items.map((item) => item.subscription.id),
+      [github.subscription.id],
+    );
   } finally {
     close();
   }

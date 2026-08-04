@@ -27,7 +27,6 @@ type ArchiveRuntimeDependencyName =
   | 'nowIso'
   | 'parseArchiveRetentionId'
   | 'parseArchiveRuntimePolicy'
-  | 'pauseResourceSubscriptionsForChat'
   | 'pauseResourceSubscriptionsForDrone'
   | 'permanentlyDeleteCanonicalDrone'
   | 'readChatFromStore'
@@ -72,7 +71,6 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     nowIso,
     parseArchiveRetentionId,
     parseArchiveRuntimePolicy,
-    pauseResourceSubscriptionsForChat,
     pauseResourceSubscriptionsForDrone,
     permanentlyDeleteCanonicalDrone,
     readChatFromStore,
@@ -223,10 +221,6 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
         };
         if (Object.keys(entry.chats).length === 0) entry.chats.default = fallbackChat.chatEntry;
       });
-    }
-    const archivedChatId = String(stored.archivedChat?.chat?.id ?? '').trim();
-    if (stored.archived && archivedChatId) {
-      await pauseResourceSubscriptionsForChat(archivedChatId);
     }
     return {
       hadDrone: true,

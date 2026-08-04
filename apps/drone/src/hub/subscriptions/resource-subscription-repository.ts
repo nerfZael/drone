@@ -18,7 +18,10 @@ import {
   type ResourceSubscriptionSubscriber,
   type ResourceSubscriptionType,
 } from './resource-subscription-types';
-import { ResourceSubscriptionLifecycleRepository } from './resource-subscription-lifecycle-repository';
+import {
+  failPendingResourceSubscriptionDeliveries,
+  ResourceSubscriptionLifecycleRepository,
+} from './resource-subscription-lifecycle-repository';
 
 export type ResourceSubscriptionBatchItem = {
   deliveryId: string;
@@ -484,35 +487,44 @@ export class ResourceSubscriptionRepository {
   }
 
   async cancel(id: string, subscriberChatId: string): Promise<ResourceSubscription | null> {
+    return await this.cancelWithStatusGuard(id, subscriberChatId, false);
+  }
+
+  async cancelActive(id: string, subscriberChatId: string): Promise<ResourceSubscription | null> {
+    return await this.cancelWithStatusGuard(id, subscriberChatId, true);
+  }
+
+  private async cancelWithStatusGuard(
+    id: string,
+    subscriberChatId: string,
+    activeOnly: boolean,
+  ): Promise<ResourceSubscription | null> {
     const now = new Date().toISOString();
     return await this.database.writeTransaction('cancel resource subscription', (connection) => {
-      connection
+      const updated = connection
         .prepare(
           `
           UPDATE resource_subscriptions
           SET status = 'cancelled', pause_reasons_json = '[]', completed_at = ?, updated_at = ?
-          WHERE id = ? AND subscriber_chat_id = ? AND status != 'cancelled'
+          WHERE id = ? AND subscriber_chat_id = ?
+            ${activeOnly ? "AND status = 'active'" : "AND status != 'cancelled'"}
         `,
         )
         .run(now, now, id, subscriberChatId);
-      connection
-        .prepare(
-          `
-          UPDATE subscription_deliveries
-          SET state = 'failed', batch_id = NULL, last_error = 'subscription cancelled',
-            updated_at = ?
-          WHERE subscription_id = ? AND state IN ('pending', 'processing')
-            AND EXISTS (
-              SELECT 1 FROM resource_subscriptions s
-              WHERE s.id = subscription_deliveries.subscription_id
-                AND s.subscriber_chat_id = ? AND s.status = 'cancelled'
-            )
-        `,
-        )
-        .run(now, id, subscriberChatId);
       const row = connection
         .prepare('SELECT * FROM resource_subscriptions WHERE id = ? AND subscriber_chat_id = ?')
         .get(id, subscriberChatId) as SubscriptionRow | undefined;
+      if (
+        Number(updated.changes ?? 0) === 1 ||
+        (!activeOnly && row?.status === 'cancelled')
+      ) {
+        failPendingResourceSubscriptionDeliveries(
+          connection,
+          id,
+          'subscription cancelled',
+          now,
+        );
+      }
       return subscriptionFromRow(row);
     });
   }
@@ -778,6 +790,16 @@ export class ResourceSubscriptionRepository {
     );
   }
 
+  isBatchProcessing(batchId: string): boolean {
+    return this.database.read((connection) =>
+      Boolean(
+        connection
+          .prepare("SELECT 1 FROM subscription_batches WHERE id = ? AND state = 'processing'")
+          .get(batchId),
+      ),
+    );
+  }
+
   async releaseRejectedBatchItems(input: {
     batchId: string;
     rejected: ResourceSubscriptionBatchRejection[];
@@ -1012,7 +1034,7 @@ export class ResourceSubscriptionRepository {
           `
           UPDATE subscription_batches
           SET state = 'delivered', delivered_at = ?, updated_at = ?, last_error = NULL
-          WHERE id = ?
+          WHERE id = ? AND state = 'processing'
         `,
         )
         .run(now, now, batchId);

@@ -166,7 +166,7 @@ test('restart recovery does not redeliver a batch whose prompt was already queue
   }
 });
 
-test('cancelling a claimed subscription removes only its item from a mixed batch', async () => {
+test('cancelling a claimed subscription releases the other item from a mixed batch', async () => {
   const { database, close } = memoryHubDatabase();
   try {
     const repository = new ResourceSubscriptionRepository(database);
@@ -238,9 +238,17 @@ test('cancelling a claimed subscription removes only its item from a mixed batch
           .all() as Array<{ state: string; count: number }>,
     );
     assert.deepEqual(Object.fromEntries(states.map((row) => [row.state, Number(row.count)])), {
-      delivered: 1,
       failed: 1,
+      pending: 1,
     });
+    const retry = await repository.claimBatch(
+      { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 },
+      new Date(Date.now() + 2_000),
+    );
+    assert.deepEqual(
+      retry?.items.map((item) => item.subscription.id),
+      remainingItems.map((item) => item.subscription.id),
+    );
   } finally {
     close();
   }

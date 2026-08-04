@@ -1323,13 +1323,11 @@ let nativeChatLatestAssistantTextHandler: (nativeChatId: string) => Promise<stri
   '';
 let deleteNativeChatSessionsHandler: (droneEntry: any) => Promise<void> = async () => {};
 type ResourceSubscriptionLifecycleHandler = {
-  pauseForChat: (chatId: string) => Promise<void>;
   pauseForDrone: (droneId: string, chatIds: string[]) => Promise<void>;
   resumeForChat: (chatId: string) => Promise<void>;
   resumeForDrone: (droneId: string, chatIds: string[]) => Promise<void>;
 };
 let resourceSubscriptionLifecycleHandler: ResourceSubscriptionLifecycleHandler = {
-  pauseForChat: async () => {},
   pauseForDrone: async () => {},
   resumeForChat: async () => {},
   resumeForDrone: async () => {},
@@ -3639,8 +3637,6 @@ const {
   nowIso,
   parseArchiveRetentionId,
   parseArchiveRuntimePolicy,
-  pauseResourceSubscriptionsForChat: (chatId: string) =>
-    resourceSubscriptionLifecycleHandler.pauseForChat(chatId),
   pauseResourceSubscriptionsForDrone: (droneId: string, droneEntry: any) =>
     resourceSubscriptionLifecycleHandler.pauseForDrone(
       droneId,
@@ -5161,9 +5157,6 @@ export async function startDroneHubApiServer(opts: {
     : null;
   if (resourceSubscriptionService) {
     resourceSubscriptionLifecycleHandler = {
-      pauseForChat: async (chatId) => {
-        await resourceSubscriptionService.pauseForChat(chatId);
-      },
       pauseForDrone: async (droneId, chatIds) => {
         await resourceSubscriptionService.pauseForDrone(droneId, chatIds);
       },
