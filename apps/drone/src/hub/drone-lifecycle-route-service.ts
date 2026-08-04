@@ -48,6 +48,7 @@ function createDroneLifecycleServiceHandler(
     normalizeDroneIdentity,
     normalizeDroneRuntime,
     normalizeEnvVarMap,
+    notifyCanonicalDroneRegistryWrite,
     nowIso,
     parseIsoToMs,
     removeArchivedDroneById,
@@ -221,8 +222,12 @@ function createDroneLifecycleServiceHandler(
         }
 
         let newName = '';
+        let expectedName: string | undefined;
         try {
           newName = normalizeDroneDisplayName(body?.newName);
+          if (Object.prototype.hasOwnProperty.call(body ?? {}, 'expectedName')) {
+            expectedName = normalizeDroneDisplayName(body?.expectedName);
+          }
         } catch (e: any) {
           const msg = e?.message ?? String(e);
           const sourceRaw = typeof body?.source === 'string' ? body.source.trim() : '';
@@ -314,22 +319,37 @@ function createDroneLifecycleServiceHandler(
           return;
         }
         try {
-          await renameDroneDisplayName({ droneId, state: found.kind, name: newName });
-        } catch (error: any) {
-          hubLog('warn', 'drone rename failed', {
+          await renameDroneDisplayName({
             droneId,
-            oldName,
-            newName,
-            source,
-            attempt,
-            suggestedBase,
-            status: 500,
-            error: String(error?.message ?? error),
+            state: found.kind,
+            name: newName,
+            ...(expectedName !== undefined ? { expectedName } : {}),
           });
-          json(res, 500, { ok: false, error: String(error?.message ?? error) });
+        } catch (error: any) {
+          const status = error?.code === 'DRONE_RENAME_PRECONDITION_FAILED' ? 409 : 500;
+          hubLog(
+            status === 409 ? 'info' : 'warn',
+            status === 409 ? 'drone rename skipped' : 'drone rename failed',
+            {
+              droneId,
+              oldName,
+              newName,
+              source,
+              attempt,
+              suggestedBase,
+              status,
+              error: String(error?.message ?? error),
+            },
+          );
+          json(res, status, {
+            ok: false,
+            error: String(error?.message ?? error),
+            ...(error?.code ? { code: String(error.code) } : {}),
+          });
           return;
         }
 
+        notifyCanonicalDroneRegistryWrite();
         hubLog('info', 'drone renamed', {
           droneId,
           oldName,

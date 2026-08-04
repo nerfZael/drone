@@ -33,6 +33,7 @@ type DroneLifecycleDependencyName =
   | 'normalizeDroneIdentity'
   | 'normalizeDroneRuntime'
   | 'normalizeEnvVarMap'
+  | 'notifyCanonicalDroneRegistryWrite'
   | 'nowIso'
   | 'parseIsoToMs'
   | 'removeArchivedDroneById'

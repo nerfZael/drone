@@ -1528,7 +1528,11 @@ describeSocketSuite('chat management api', () => {
     const renamed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/rename`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ newName: 'auth-bugfix', source: 'draft-auto-rename' }),
+      body: JSON.stringify({
+        newName: 'auth-bugfix',
+        expectedName: 'Untitled 1',
+        source: 'draft-auto-rename',
+      }),
     });
     expect(renamed.r.status).toBe(200);
     expect(renamed.data?.ok).toBe(true);
@@ -1544,6 +1548,49 @@ describeSocketSuite('chat management api', () => {
     expect(newRef.r.status).toBe(200);
     expect(newRef.data?.ok).toBe(true);
     expect(newRef.data?.pending).toEqual([]);
+  });
+
+  test('does not let delayed automatic naming overwrite a manual pending rename', async () => {
+    const droneId = 'pending-manual-rename-wins';
+    const originalName = 'Untitled 91';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.pending = reg.pending ?? {};
+      reg.pending[droneId] = {
+        id: droneId,
+        name: originalName,
+        runtime: 'host',
+        repoPath: '',
+        containerPort: 7777,
+        build: false,
+        createdAt: now,
+        updatedAt: now,
+        phase: 'starting',
+        message: 'Starting...',
+      };
+    });
+
+    const manualRename = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/rename`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ newName: 'Keep my manual name', source: 'drone-hub-sidebar' }),
+    });
+    expect(manualRename.r.status).toBe(200);
+
+    const delayedAutoRename = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/rename`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        newName: 'Generated name',
+        expectedName: originalName,
+        source: 'draft-auto-rename',
+      }),
+    });
+    expect(delayedAutoRename.r.status).toBe(409);
+    expect(delayedAutoRename.data?.code).toBe('DRONE_RENAME_PRECONDITION_FAILED');
+
+    const regAny: any = await loadRegistry();
+    expect(String(regAny?.pending?.[droneId]?.name ?? '')).toBe('Keep my manual name');
   });
 
   test('renames both real and pending lifecycle entries when provisioning overlaps auto-rename', async () => {

@@ -83,7 +83,11 @@ type UseDroneCreationActionsArgs = {
     attachmentsRaw?: ChatSendPayload['attachments'],
   ) => { id: string } | null;
   requestJson: RequestJsonFn;
-  suggestAndRenameDraftDrone: (droneId: string, prompt: string) => Promise<void>;
+  suggestAndRenameDraftDrone: (
+    droneId: string,
+    prompt: string,
+    expectedName?: string,
+  ) => Promise<void>;
   rememberStartupSeed: (
     drones: Array<{ id: string; name: string }>,
     opts: {
@@ -609,7 +613,11 @@ export function useDroneCreationActions({
             const renameSourcePrompt = String(opts?.autoRenamePrompt ?? prompt ?? '').trim();
             if (renameSourcePrompt) {
               setDraftAutoRenaming(true);
-              void suggestAndRenameDraftDrone(droneId, renameSourcePrompt).finally(() => setDraftAutoRenaming(false));
+              void suggestAndRenameDraftDrone(
+                droneId,
+                renameSourcePrompt,
+                createdName,
+              ).finally(() => setDraftAutoRenaming(false));
             }
           }
 

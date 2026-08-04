@@ -426,7 +426,9 @@ describe('device mesh drone summaries', () => {
         method: String(init?.method ?? 'GET'),
         body: JSON.parse(String(init?.body ?? '{}')),
       });
-      if (path === '/api/drones') return Response.json({ ok: true, id: 'created-mobile' });
+      if (path === '/api/drones') {
+        return Response.json({ ok: true, id: 'created-mobile', name: 'Untitled 1' });
+      }
       if (path === '/api/drones/name-from-message') {
         return await new Promise<Response>((resolve) => {
           resolveSuggestion = resolve;
@@ -476,6 +478,7 @@ describe('device mesh drone summaries', () => {
           source: 'mobile-create-auto-rename',
           attempt: 1,
           suggestedBase: 'Review Android App',
+          expectedName: 'Untitled 1',
         },
       });
     } finally {
@@ -510,11 +513,16 @@ describe('device mesh drone summaries', () => {
           { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
           'drone-1',
           'Review the Android app',
+          'Untitled 1',
         ),
       ).resolves.toBe('Review Android App (2)');
       expect(renameBodies.map((body) => body.newName)).toEqual([
         'Review Android App',
         'Review Android App (2)',
+      ]);
+      expect(renameBodies.map((body) => body.expectedName)).toEqual([
+        'Untitled 1',
+        'Untitled 1',
       ]);
     } finally {
       globalThis.fetch = originalFetch;

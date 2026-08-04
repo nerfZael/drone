@@ -182,6 +182,7 @@ type DroneDeleteConfirmState = {
 };
 
 const DRONE_DELETE_CONCURRENCY = 4;
+const OPTIMISTIC_DRONE_RENAME_TIMEOUT_MS = 15_000;
 
 export type DroneHubAppModel = {
   sidebarProps: DroneSidebarProps;
@@ -307,6 +308,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setNameSuggestToast,
     setTerminalMenuOpen,
   } = useDroneHubAppModelUiState();
+  const [optimisticallyRenamedDrones, setOptimisticallyRenamedDrones] = React.useState<
+    Record<string, string>
+  >({});
   const [highlightedDroneIds, setHighlightedDroneIds] = React.useState<Set<string>>(
     () => new Set(),
   );
@@ -337,6 +341,38 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setActiveRepoPath,
     setChatHeaderRepoPath,
   });
+  React.useEffect(() => {
+    setOptimisticallyRenamedDrones((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const drone of polledDrones) {
+        if (next[drone.id] && next[drone.id] === String(drone.name ?? '').trim()) {
+          delete next[drone.id];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [polledDrones]);
+  React.useEffect(() => {
+    if (Object.keys(optimisticallyRenamedDrones).length === 0) return;
+    // Avoid masking a later rename forever if registry updates are unavailable.
+    const timeoutId = window.setTimeout(
+      () => setOptimisticallyRenamedDrones({}),
+      OPTIMISTIC_DRONE_RENAME_TIMEOUT_MS,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [optimisticallyRenamedDrones]);
+  const sidebarDisplayDrones = React.useMemo(
+    () =>
+      drones.map((drone) => {
+        const optimisticName = String(optimisticallyRenamedDrones[drone.id] ?? '').trim();
+        return optimisticName && optimisticName !== drone.name
+          ? { ...drone, name: optimisticName }
+          : drone;
+      }),
+    [drones, optimisticallyRenamedDrones],
+  );
   React.useEffect(() => {
     droneByIdRef.current = droneById;
   }, [droneById]);
@@ -479,7 +515,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarDroneOrderByGroup,
     hiddenSidebarGroups,
     showHiddenSidebarGroups,
-    drones,
+    drones: sidebarDisplayDrones,
     startupSeedByDrone,
     optimisticallyDeletedDrones,
     activeRepoPath,
@@ -997,6 +1033,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     optimisticallyDeletedDrones,
     setOptimisticallyDeletedDrones,
     setStartupSeedByDrone,
+    setOptimisticallyRenamedDrones,
     onNameSuggestionFailure: showNameSuggestionFailureToast,
   });
   const deleteDrone = React.useCallback(
@@ -3312,7 +3349,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         });
         preferredSelectedDroneRef.current = droneId;
         preferredSelectedDroneHoldUntilRef.current = Date.now() + STARTUP_SEED_MISSING_GRACE_MS;
-        void suggestAndRenameDraftDrone(droneId, prompt);
+        void suggestAndRenameDraftDrone(droneId, prompt, droneName);
         return { ok: true, droneId, droneName, error: null };
       } catch (err: any) {
         return { ok: false, error: err?.message ?? String(err) };
@@ -4329,7 +4366,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     repos,
     reposLoading,
     reposError,
-    drones,
+    drones: sidebarDisplayDrones,
     droneCountByRepoPath,
     uiDroneName,
     draftSidebarPlaceholder,
