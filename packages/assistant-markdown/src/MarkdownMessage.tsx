@@ -7,9 +7,18 @@ import {
   allocateFitTableColumnWidths,
   type FitTableColumnMetric,
 } from './table-layout.js';
+import {
+  numericTableColumnIndexes,
+  stableSortTableRows,
+  type NumericTableSortDirection,
+} from './table-sort.js';
 
 type CalloutKind = 'note' | 'tip' | 'important' | 'warning' | 'caution';
 type TableMode = 'fit' | 'natural';
+type TableSortState = {
+  columnIndex: number;
+  direction: NumericTableSortDirection;
+};
 type TablePropsSansChildren = Omit<React.ComponentProps<'table'>, 'children'>;
 type ExpandedTableState = {
   id: string;
@@ -80,7 +89,7 @@ function tableIdFromNode(node: unknown, children: React.ReactNode): string {
 }
 
 function fitTableColumnMetrics(children: React.ReactNode): FitTableColumnMetric[] {
-  const rows: string[][] = [];
+  const rows: Array<Array<{ text: string; sortable: boolean }>> = [];
 
   const visit = (node: React.ReactNode) => {
     React.Children.forEach(node, (child) => {
@@ -88,7 +97,12 @@ function fitTableColumnMetrics(children: React.ReactNode): FitTableColumnMetric[
       if (child.type === 'tr') {
         const cells = React.Children.toArray(child.props.children)
           .filter((cell) => React.isValidElement(cell))
-          .map((cell) => flattenText(cell).replace(/\s+/g, ' ').trim());
+          .map((cell) => ({
+            text: flattenText(cell).replace(/\s+/g, ' ').trim(),
+            sortable: Boolean(
+              (cell.props as { markdownSortableHeader?: unknown }).markdownSortableHeader,
+            ),
+          }));
         if (cells.length > 0) rows.push(cells);
         return;
       }
@@ -108,8 +122,11 @@ function fitTableColumnMetrics(children: React.ReactNode): FitTableColumnMetric[
   return Array.from({ length: columnCount }, (_, columnIndex) => {
     let preferredWeight = 5;
     let longestWordLength = 2;
+    let hasSortableHeader = false;
     for (const row of rows) {
-      const text = row[columnIndex] ?? '';
+      const cell = row[columnIndex];
+      const text = cell?.text ?? '';
+      hasSortableHeader ||= Boolean(cell?.sortable);
       const longestWord = text
         .split(/\s+/)
         .reduce((longest, word) => Math.max(longest, word.length), 0);
@@ -124,7 +141,7 @@ function fitTableColumnMetrics(children: React.ReactNode): FitTableColumnMetric[
       preferredWeight,
       // Current cells have 20px of inline padding plus borders. Seven pixels
       // per character is conservative for the 10–12px table fonts.
-      minimumWidth: 22 + longestWordLength * 7,
+      minimumWidth: 22 + longestWordLength * 7 + (hasSortableHeader ? 14 : 0),
     };
   });
 }
@@ -168,18 +185,136 @@ function roundWidthForLayout(width: number): number {
   return Number(Math.max(0, width).toFixed(3));
 }
 
+type MarkdownSortableHeader = {
+  direction: NumericTableSortDirection | null;
+  onToggle: () => void;
+};
+
+type MarkdownTableStructure = {
+  bodyRows: React.ReactElement[];
+  bodyValues: string[][];
+  columnCount: number;
+  numericColumns: ReadonlySet<number>;
+};
+
+function directElementChildren(children: React.ReactNode): React.ReactElement[] {
+  return React.Children.toArray(children).filter(React.isValidElement);
+}
+
+function intrinsicElementNamed(element: React.ReactElement, name: string): boolean {
+  return typeof element.type === 'string' && element.type === name;
+}
+
+function markdownTableStructure(children: React.ReactNode): MarkdownTableStructure {
+  const sections = directElementChildren(children);
+  const thead = sections.find((element) => intrinsicElementNamed(element, 'thead')) ?? null;
+  const tbody = sections.find((element) => intrinsicElementNamed(element, 'tbody')) ?? null;
+  const headerRow = thead
+    ? directElementChildren((thead.props as { children?: React.ReactNode }).children)
+      .find((element) => intrinsicElementNamed(element, 'tr')) ?? null
+    : null;
+  const columnCount = headerRow
+    ? directElementChildren((headerRow.props as { children?: React.ReactNode }).children).length
+    : 0;
+  const bodyRows = tbody
+    ? directElementChildren((tbody.props as { children?: React.ReactNode }).children)
+      .filter((element) => intrinsicElementNamed(element, 'tr'))
+    : [];
+  const bodyValues = bodyRows.map((row) =>
+    directElementChildren((row.props as { children?: React.ReactNode }).children)
+      .map((cell) => flattenText((cell.props as { children?: React.ReactNode }).children).trim()),
+  );
+  return {
+    bodyRows,
+    bodyValues,
+    columnCount,
+    numericColumns: new Set(numericTableColumnIndexes(bodyValues, columnCount)),
+  };
+}
+
+function renderSortableTableChildren(
+  children: React.ReactNode,
+  structure: MarkdownTableStructure,
+  sort: TableSortState | null,
+  onSortChange: (sort: TableSortState | null) => void,
+): React.ReactNode {
+  const sortedRows = sort
+    ? stableSortTableRows(
+      structure.bodyRows,
+      structure.bodyValues,
+      sort.columnIndex,
+      sort.direction,
+    )
+    : structure.bodyRows;
+
+  return React.Children.map(children, (section) => {
+    if (!React.isValidElement(section)) return section;
+    if (intrinsicElementNamed(section, 'tbody')) {
+      return React.cloneElement(section as React.ReactElement<{ children?: React.ReactNode }>, undefined, sortedRows);
+    }
+    if (!intrinsicElementNamed(section, 'thead')) return section;
+    return React.cloneElement(
+      section as React.ReactElement<{ children?: React.ReactNode }>,
+      undefined,
+      React.Children.map(
+        (section.props as { children?: React.ReactNode }).children,
+        (row) => {
+          if (!React.isValidElement(row) || !intrinsicElementNamed(row, 'tr')) return row;
+          let cellIndex = 0;
+          return React.cloneElement(
+            row as React.ReactElement<{ children?: React.ReactNode }>,
+            undefined,
+            React.Children.map(
+              (row.props as { children?: React.ReactNode }).children,
+              (cell) => {
+                if (!React.isValidElement(cell)) return cell;
+                const columnIndex = cellIndex;
+                cellIndex += 1;
+                if (!structure.numericColumns.has(columnIndex)) return cell;
+                const direction = sort?.columnIndex === columnIndex
+                  ? sort.direction
+                  : null;
+                const markdownSortableHeader: MarkdownSortableHeader = {
+                  direction,
+                  onToggle: () => onSortChange({
+                    columnIndex,
+                    direction: direction === 'ascending' ? 'descending' : 'ascending',
+                  }),
+                };
+                return React.cloneElement(cell as React.ReactElement<Record<string, unknown>>, {
+                  markdownSortableHeader,
+                });
+              },
+            ),
+          );
+        },
+      ),
+    );
+  });
+}
+
 function MarkdownTable({
   children,
   mode,
+  sort,
   onModeChange,
+  onSortChange,
   onOpenExpanded,
   ...props
 }: React.ComponentProps<'table'> & {
   mode: TableMode;
+  sort: TableSortState | null;
   onModeChange: (mode: TableMode) => void;
+  onSortChange: (sort: TableSortState | null) => void;
   onOpenExpanded: () => void;
 }) {
-  const { columnWidths, wrapRef } = useFitTableColumnWidths(children);
+  const structure = React.useMemo(() => markdownTableStructure(children), [children]);
+  const activeSort = sort && structure.numericColumns.has(sort.columnIndex) ? sort : null;
+  const renderedChildren = React.useMemo(
+    () => renderSortableTableChildren(children, structure, activeSort, onSortChange),
+    [activeSort, children, onSortChange, structure],
+  );
+  const { columnWidths, wrapRef } = useFitTableColumnWidths(renderedChildren);
   return (
     <div className="dh-markdown-block dh-markdown-block--wide">
       <div className="dh-markdown-table-toolbar">
@@ -193,6 +328,18 @@ function MarkdownTable({
         >
           Expand
         </button>
+        {structure.numericColumns.size > 0 ? (
+          <button
+            type="button"
+            className="dh-markdown-table-reset"
+            title={activeSort ? 'Restore the original row order' : 'Table is already in its original order'}
+            aria-label="Reset table sort"
+            disabled={!activeSort}
+            onClick={() => onSortChange(null)}
+          >
+            Reset
+          </button>
+        ) : null}
         <div className="dh-markdown-table-toggle" role="group" aria-label="Table display mode">
           <button
             type="button"
@@ -225,7 +372,7 @@ function MarkdownTable({
               ))}
             </colgroup>
           ) : null}
-          {children}
+          {renderedChildren}
         </table>
       </div>
     </div>
@@ -235,15 +382,28 @@ function MarkdownTable({
 function ExpandedMarkdownTableDialog({
   table,
   mode,
+  sort,
   onModeChange,
+  onSortChange,
   onClose,
 }: {
   table: ExpandedTableState;
   mode: TableMode;
+  sort: TableSortState | null;
   onModeChange: (mode: TableMode) => void;
+  onSortChange: (sort: TableSortState | null) => void;
   onClose: () => void;
 }) {
-  const { columnWidths, wrapRef } = useFitTableColumnWidths(table.children);
+  const structure = React.useMemo(
+    () => markdownTableStructure(table.children),
+    [table.children],
+  );
+  const activeSort = sort && structure.numericColumns.has(sort.columnIndex) ? sort : null;
+  const renderedChildren = React.useMemo(
+    () => renderSortableTableChildren(table.children, structure, activeSort, onSortChange),
+    [activeSort, onSortChange, structure, table.children],
+  );
+  const { columnWidths, wrapRef } = useFitTableColumnWidths(renderedChildren);
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -263,6 +423,18 @@ function ExpandedMarkdownTableDialog({
             <div className="dh-markdown-table-dialog-subtitle">Use wrap or scroll mode in a much wider viewport</div>
           </div>
           <div className="dh-markdown-table-dialog-actions">
+            {structure.numericColumns.size > 0 ? (
+              <button
+                type="button"
+                className="dh-markdown-table-reset"
+                title={activeSort ? 'Restore the original row order' : 'Table is already in its original order'}
+                aria-label="Reset table sort"
+                disabled={!activeSort}
+                onClick={() => onSortChange(null)}
+              >
+                Reset
+              </button>
+            ) : null}
             <div className="dh-markdown-table-toggle" role="group" aria-label="Expanded table display mode">
               <button
                 type="button"
@@ -304,7 +476,7 @@ function ExpandedMarkdownTableDialog({
                 ))}
               </colgroup>
             ) : null}
-            {table.children}
+            {renderedChildren}
           </table>
         </div>
       </div>
@@ -598,6 +770,8 @@ type MarkdownCodeRenderContextValue = {
   normalizedText: string;
   tableModes: Record<string, TableMode>;
   setTableMode: (tableId: string, mode: TableMode) => void;
+  tableSorts: Record<string, TableSortState>;
+  setTableSort: (tableId: string, sort: TableSortState | null) => void;
   openExpandedTable: (table: ExpandedTableState) => void;
 };
 
@@ -704,9 +878,52 @@ function StableMarkdownTableCell({ children, node: _node, ...props }: MarkdownEl
   return <td {...props}>{context?.renderMentionChildren(children) ?? children}</td>;
 }
 
-function StableMarkdownTableHeader({ children, node: _node, ...props }: MarkdownElementProps<'th'>) {
+function StableMarkdownTableHeader({
+  children,
+  node: _node,
+  markdownSortableHeader,
+  ...props
+}: MarkdownElementProps<'th'> & { markdownSortableHeader?: MarkdownSortableHeader }) {
   const context = React.useContext(MarkdownCodeRenderContext);
-  return <th {...props}>{context?.renderMentionChildren(children) ?? children}</th>;
+  const renderedChildren = context?.renderMentionChildren(children) ?? children;
+  if (!markdownSortableHeader) return <th {...props}>{renderedChildren}</th>;
+  const { direction, onToggle } = markdownSortableHeader;
+  const label = flattenText(children).replace(/\s+/g, ' ').trim() || 'column';
+  const nextDirection = direction === 'ascending' ? 'descending' : 'ascending';
+  return (
+    <th
+      {...props}
+      className={`dh-markdown-table-sortable-header ${props.className ?? ''}`.trim()}
+      aria-sort={direction ?? undefined}
+      onClick={(event) => {
+        props.onClick?.(event);
+        if (event.defaultPrevented) return;
+        const target = event.target as Element | null;
+        if (target?.closest?.('a, button, input, select, textarea, summary, [role="button"], [role="link"]')) {
+          return;
+        }
+        onToggle();
+      }}
+    >
+      <span className="dh-markdown-table-sort-content">
+        <span className="dh-markdown-table-sort-label">{renderedChildren}</span>
+        <button
+          type="button"
+          className="dh-markdown-table-sort-button"
+          title={`Sort ${label} ${nextDirection}`}
+          aria-label={`Sort ${label} ${nextDirection}`}
+          onClick={onToggle}
+        >
+          <span
+            className={`dh-markdown-table-sort-indicator ${direction ? 'is-active' : ''}`}
+            aria-hidden="true"
+          >
+            {direction === 'ascending' ? '↑' : direction === 'descending' ? '↓' : '↕'}
+          </span>
+        </button>
+      </span>
+    </th>
+  );
 }
 
 function StableMarkdownHeading1({ children, node: _node, ...props }: MarkdownElementProps<'h1'>) {
@@ -820,11 +1037,14 @@ function StableMarkdownTable({
   const context = React.useContext(MarkdownCodeRenderContext);
   const tableId = tableIdFromNode(node, children);
   const mode = context?.tableModes[tableId] ?? 'fit';
+  const sort = context?.tableSorts[tableId] ?? null;
   return (
     <MarkdownTable
       {...props}
       mode={mode}
+      sort={sort}
       onModeChange={(nextMode) => context?.setTableMode(tableId, nextMode)}
+      onSortChange={(nextSort) => context?.setTableSort(tableId, nextSort)}
       onOpenExpanded={() =>
         context?.openExpandedTable({
           id: tableId,
@@ -906,10 +1126,26 @@ export function MarkdownMessage({
     [onOpenTextMention, preparedTextMentionLinks],
   );
   const [tableModes, setTableModes] = React.useState<Record<string, TableMode>>({});
+  const [tableSorts, setTableSorts] = React.useState<Record<string, TableSortState>>({});
   const [expandedTable, setExpandedTable] = React.useState<ExpandedTableState | null>(null);
   const [expandedTableMode, setExpandedTableMode] = React.useState<TableMode>('fit');
   const setTableMode = React.useCallback((tableId: string, mode: TableMode) => {
     setTableModes((prev) => (prev[tableId] === mode ? prev : { ...prev, [tableId]: mode }));
+  }, []);
+  const setTableSort = React.useCallback((tableId: string, sort: TableSortState | null) => {
+    setTableSorts((previous) => {
+      if (!sort) {
+        if (!(tableId in previous)) return previous;
+        const next = { ...previous };
+        delete next[tableId];
+        return next;
+      }
+      const current = previous[tableId];
+      if (current?.columnIndex === sort.columnIndex && current.direction === sort.direction) {
+        return previous;
+      }
+      return { ...previous, [tableId]: sort };
+    });
   }, []);
   const openExpandedTable = React.useCallback((table: ExpandedTableState) => {
     setExpandedTable(table);
@@ -925,6 +1161,8 @@ export function MarkdownMessage({
       normalizedText,
       tableModes,
       setTableMode,
+      tableSorts,
+      setTableSort,
       openExpandedTable,
     }),
     [
@@ -936,12 +1174,15 @@ export function MarkdownMessage({
       renderCodeBlock,
       renderMentionChildren,
       setTableMode,
+      setTableSort,
       tableModes,
+      tableSorts,
     ],
   );
 
   React.useEffect(() => {
     setTableModes({});
+    setTableSorts({});
     setExpandedTable(null);
     setExpandedTableMode('fit');
   }, [normalizedText]);
@@ -962,7 +1203,9 @@ export function MarkdownMessage({
         <ExpandedMarkdownTableDialog
           table={expandedTable}
           mode={expandedTableMode}
+          sort={tableSorts[expandedTable.id] ?? null}
           onModeChange={setExpandedTableMode}
+          onSortChange={(nextSort) => setTableSort(expandedTable.id, nextSort)}
           onClose={() => setExpandedTable(null)}
         />
       ) : null}

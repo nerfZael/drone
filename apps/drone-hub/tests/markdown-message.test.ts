@@ -3,6 +3,11 @@ import { readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { allocateFitTableColumnWidths } from '../../../packages/assistant-markdown/src/table-layout';
+import {
+  numericTableColumnIndexes,
+  parsePlainTableNumber,
+  stableSortTableRows,
+} from '../../../packages/assistant-markdown/src/table-sort';
 import { MarkdownMessage } from '../src/droneHub/chat/MarkdownMessage';
 
 function renderMarkdown(
@@ -46,7 +51,111 @@ describe('MarkdownMessage', () => {
     expect(html).toContain('>Wrap<');
     expect(html).toContain('>Scroll<');
     expect(html).toContain('>Expand<');
+    expect(html).toContain('aria-label="Reset table sort"');
     expect(html).toContain('<thead>');
+  });
+
+  test('only exposes sorting controls for wholly numeric table columns', () => {
+    const html = renderMarkdown(
+      [
+        '| Name | Score | Change |',
+        '| - | -: | -: |',
+        '| Alpha | 10 | -2.5 |',
+        '| Beta | 3 | 1e2 |',
+      ].join('\n'),
+    );
+
+    expect(html).not.toContain('aria-label="Sort Name ascending"');
+    expect(html).toContain('aria-label="Sort Score ascending"');
+    expect(html).toContain('aria-label="Sort Change ascending"');
+    expect(html.match(/class="dh-markdown-table-sort-button"/g)).toHaveLength(2);
+    expect(html).not.toContain('aria-sort=');
+    expect(html).toContain('aria-label="Reset table sort" disabled=""');
+  });
+
+  test('keeps sortable header labels and indicators compact', () => {
+    const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+    const contentRule = /\.dh-markdown-table-sort-content\s*\{([^}]*)\}/.exec(styles)?.[1];
+    const buttonRule = /\.dh-markdown-table-sort-button\s*\{([^}]*)\}/.exec(styles)?.[1];
+
+    expect(contentRule).toContain('display: flex');
+    expect(contentRule).toContain('justify-content: center');
+    expect(contentRule).toContain('gap: .2rem');
+    expect(contentRule).not.toContain('justify-content: space-between');
+    expect(contentRule).toMatch(/(?:^|\n)\s*width: 100%/);
+    expect(buttonRule).toContain('min-height: 0');
+  });
+
+  test('centers sortable headers and left-aligns all body values', () => {
+    const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+    const bodyCellRule =
+      /\.dh-markdown table\.dh-markdown-table td\s*\{([^}]*)\}/.exec(styles)?.[1];
+
+    expect(bodyCellRule).toContain('text-align: left !important');
+  });
+
+  test('keeps interactive header content outside the sort button', () => {
+    const html = renderMarkdown(
+      [
+        '| [Score](https://example.com/scores) |',
+        '| -: |',
+        '| 10 |',
+        '| 3 |',
+      ].join('\n'),
+    );
+    const linkEnd = html.indexOf('</a>');
+    const sortButton = html.indexOf(
+      '<button type="button" class="dh-markdown-table-sort-button"',
+      linkEnd,
+    );
+    const headerEnd = html.indexOf('</th>', linkEnd);
+
+    expect(linkEnd).toBeGreaterThan(-1);
+    expect(sortButton).toBeGreaterThan(linkEnd);
+    expect(sortButton).toBeLessThan(headerEnd);
+  });
+
+  test('does not show a reset action on tables without sortable columns', () => {
+    const html = renderMarkdown(
+      ['| Name | State |', '| - | - |', '| Alpha | Ready |'].join('\n'),
+    );
+    expect(html).not.toContain('aria-label="Reset table sort"');
+  });
+
+  test('rejects mixed and empty columns and sorts numeric rows stably', () => {
+    const rows = [
+      ['Alpha', '10', '2'],
+      ['Beta', '-2.5', '2'],
+      ['Gamma', '1e2', ''],
+    ];
+    expect(numericTableColumnIndexes(rows, 3)).toEqual([1]);
+    expect(parsePlainTableNumber('  +.5 ')).toBe(0.5);
+    expect(parsePlainTableNumber('1,000')).toBeNull();
+    expect(parsePlainTableNumber('Infinity')).toBeNull();
+
+    const names = rows.map((row) => row[0]);
+    expect(stableSortTableRows(names, rows, 1, 'ascending')).toEqual([
+      'Beta',
+      'Alpha',
+      'Gamma',
+    ]);
+    expect(stableSortTableRows(names, rows, 2, 'descending')).toEqual(names);
+
+    const tiedRows = [['First', '2'], ['Second', '2'], ['Third', '1']];
+    expect(stableSortTableRows(tiedRows.map((row) => row[0]), tiedRows, 1, 'descending')).toEqual([
+      'First',
+      'Second',
+      'Third',
+    ]);
+
+    const largeRows = [
+      ['Larger', '9007199254740993'],
+      ['Smaller', '9007199254740992'],
+    ];
+    expect(stableSortTableRows(largeRows.map((row) => row[0]), largeRows, 1, 'ascending')).toEqual([
+      'Smaller',
+      'Larger',
+    ]);
   });
 
   test('defaults dense structured tables to wrap mode', () => {

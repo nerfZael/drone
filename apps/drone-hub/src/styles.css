@@ -2027,6 +2027,7 @@ code, pre {
 
 .dh-markdown-table-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: .5rem;
@@ -2041,7 +2042,8 @@ code, pre {
   text-transform: uppercase;
 }
 
-.dh-markdown-table-expand {
+.dh-markdown-table-expand,
+.dh-markdown-table-reset {
   appearance: none;
   border: 0;
   margin: 0;
@@ -2053,8 +2055,15 @@ code, pre {
   cursor: pointer;
 }
 
-.dh-markdown-table-expand:hover {
+.dh-markdown-table-expand:hover,
+.dh-markdown-table-reset:hover:not(:disabled) {
   color: var(--fg);
+}
+
+.dh-markdown-table-reset:disabled {
+  color: var(--muted-dim);
+  cursor: default;
+  opacity: .48;
 }
 
 .dh-markdown-table-toggle {
@@ -2117,6 +2126,67 @@ code, pre {
   word-break: break-word;
 }
 
+.dh-markdown th.dh-markdown-table-sortable-header {
+  padding: 0;
+  cursor: pointer;
+}
+
+.dh-markdown-table-sort-content {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: .2rem;
+  width: 100%;
+  min-height: 100%;
+}
+
+.dh-markdown table.dh-markdown-table td {
+  text-align: left !important;
+}
+
+.dh-markdown-table-sortable-header:hover,
+.dh-markdown-table-sortable-header:focus-within {
+  background: var(--accent-subtle);
+  color: var(--fg);
+}
+
+.dh-markdown-table-sort-button {
+  appearance: none;
+  align-self: stretch;
+  flex: 0 0 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 10px 6px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.dh-markdown-table-sort-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.dh-markdown-table-sort-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 6px 0 6px 10px;
+}
+
+.dh-markdown-table-sort-indicator {
+  flex: 0 0 auto;
+  color: var(--muted-dim);
+  font-size: .9em;
+  line-height: 1.25;
+}
+
+.dh-markdown-table-sort-indicator.is-active {
+  color: var(--accent);
+}
+
 .dh-markdown-table--natural {
   width: max-content;
   min-width: 100%;
@@ -2150,6 +2220,7 @@ code, pre {
 
 .dh-markdown-table-dialog-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
@@ -2157,6 +2228,7 @@ code, pre {
 
 .dh-markdown-table-dialog-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: .6rem;
 }
