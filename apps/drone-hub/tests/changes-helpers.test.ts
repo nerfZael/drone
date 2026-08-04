@@ -4,6 +4,7 @@ import {
   buildExplorerTree,
   entryPathExistsInCurrentTree,
   estimateExplorerSidebarWidth,
+  explorerNodeEntries,
   flattenVisibleExplorerRows,
   pullRequestStateBadge,
   resolveExplorerSidebarWidthBounds,
@@ -77,6 +78,17 @@ describe('changes explorer tree', () => {
     const tree = buildExplorerTree([change('src/deep/a/alpha.ts'), change('src/deep/b/bravo.ts'), change('top.ts')]);
     const rows = flattenVisibleExplorerRows(tree, { 'src/deep': false });
     expect(rows.map((row) => `${row.kind}:${row.depth}:${row.name}`)).toEqual(['dir:0:src/deep', 'file:0:top.ts']);
+  });
+
+  test('collects every changed file represented by a directory node', () => {
+    const entries = [change('src/deep/a.ts'), change('src/deep/b.ts'), change('src/top.ts')];
+    const tree = buildExplorerTree(entries);
+    expect(tree).toHaveLength(1);
+    expect(explorerNodeEntries(tree[0]).map((entry) => entry.path)).toEqual([
+      'src/deep/a.ts',
+      'src/deep/b.ts',
+      'src/top.ts',
+    ]);
   });
 
   test('estimates width and respects ratio + diff-pane constraints', () => {
@@ -198,7 +210,16 @@ describe('changes payload equality', () => {
       repoRoot: '/repo',
       reviewScopeId: 'wt-scope',
       branch: { head: 'main', upstream: 'origin/main', ahead: 0, behind: 0 },
-      counts: { changed: 2, staged: 1, unstaged: 1, untracked: 0, conflicted: 0 },
+      counts: {
+        changed: 2,
+        staged: 1,
+        unstaged: 1,
+        untracked: 0,
+        conflicted: 0,
+        additions: 8,
+        deletions: 3,
+        modified: 2,
+      },
       entries: [
         {
           ...change('src/app.ts'),
@@ -247,7 +268,7 @@ describe('changes payload equality', () => {
         droneConfigured: 'feature',
         droneFromRef: 'origin/feature',
       },
-      counts: { changed: 1 },
+      counts: { changed: 1, additions: 5, deletions: 2, modified: 2 },
       entries: [{ path: 'src/app.ts', originalPath: null, statusChar: 'M', statusType: 'modified' }],
     };
     const payloadB: Extract<RepoPullChangesPayload, { ok: true }> = {

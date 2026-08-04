@@ -888,6 +888,17 @@ code, pre {
   border-left-color: var(--border-subtle);
 }
 
+.dh-changes-explorer-guide {
+  z-index: 1;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+
+[data-changes-explorer-directory]:hover > .dh-changes-explorer-directory-body > .dh-changes-explorer-guide,
+.dh-changes-explorer-directory-body[data-changes-explorer-guide-selected='true'] > .dh-changes-explorer-guide {
+  background: var(--border-subtle);
+}
+
 .dh-sidebar-drone-chat-body {
   border-left-color: transparent;
   transition: border-color 120ms ease;
@@ -2956,7 +2967,7 @@ select:disabled optgroup {
 
 .dh-changes-explorer-row.is-selected,
 .dh-changes-explorer-row[aria-selected='true'] {
-  background: transparent;
+  background: var(--selected);
   box-shadow: none;
 }
 
@@ -2966,12 +2977,11 @@ select:disabled optgroup {
 }
 
 .dh-changes-dock .rdv-wrapper .diff {
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--surface-inset);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 70%, transparent);
-  overflow: hidden;
-  margin-bottom: 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  margin: 0;
 }
 
 .dh-changes-dock .rdv-wrapper .diff table {

@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { droneRootPath } from '../host/paths';
 
+const EMPTY_GIT_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
 export type RepoDiffKind = 'staged' | 'unstaged';
 
 export type RepoChangeType =
@@ -60,6 +62,9 @@ export type RepoChangesSummary = {
     unstaged: number;
     untracked: number;
     conflicted: number;
+    additions: number;
+    deletions: number;
+    modified: number;
   };
 };
 
@@ -399,6 +404,22 @@ export function parseGitNumStatZ(raw: string): RepoNumStatEntry[] {
   return out;
 }
 
+export function repoLineChangeCounts(
+  entries: Array<{ additions: number; deletions: number }>,
+): { additions: number; deletions: number; modified: number } {
+  return entries.reduce<{ additions: number; deletions: number; modified: number }>(
+    (counts, entry) => {
+      const additions = Math.max(0, Number(entry.additions) || 0);
+      const deletions = Math.max(0, Number(entry.deletions) || 0);
+      counts.additions += additions;
+      counts.deletions += deletions;
+      counts.modified += Math.min(additions, deletions);
+      return counts;
+    },
+    { additions: 0, deletions: 0, modified: 0 },
+  );
+}
+
 export function parseGitCommitList(raw: string): RepoCommitSummary[] {
   return String(raw ?? '')
     .split('\x1e')
@@ -618,38 +639,81 @@ export function parseGitStatusPorcelainV2Z(raw: string): RepoChangesSummary {
       unstaged,
       untracked,
       conflicted,
+      additions: 0,
+      deletions: 0,
+      modified: 0,
     },
   };
 }
 
-async function hashHostFileContents(repoRoot: string, repoRelativePath: string): Promise<string | null> {
+type WorktreeFileMetadata = { hash: string; lineCount: number; binary: boolean };
+
+async function readHostWorktreeFileMetadata(repoRoot: string, repoRelativePath: string): Promise<WorktreeFileMetadata | null> {
   const absPath = path.resolve(repoRoot, repoRelativePath);
   const repoWithSep = repoRoot.endsWith(path.sep) ? repoRoot : `${repoRoot}${path.sep}`;
   if (absPath !== repoRoot && !absPath.startsWith(repoWithSep)) return null;
   try {
-    const content = await fs.readFile(absPath);
+    const stat = await fs.lstat(absPath);
+    if (!stat.isFile() && !stat.isSymbolicLink()) return null;
+    const content = stat.isSymbolicLink()
+      ? await fs.readlink(absPath, { encoding: 'buffer' })
+      : await fs.readFile(absPath);
     const header = Buffer.from(`blob ${content.length}\0`, 'utf8');
-    return crypto.createHash('sha1').update(header).update(content).digest('hex');
+    const binary = content.includes(0);
+    let lineCount = 0;
+    if (!binary && content.length > 0) {
+      for (const byte of content) {
+        if (byte === 10) lineCount += 1;
+      }
+      if (content[content.length - 1] !== 10) lineCount += 1;
+    }
+    return {
+      hash: crypto.createHash('sha1').update(header).update(content).digest('hex'),
+      lineCount,
+      binary,
+    };
   } catch {
     return null;
   }
 }
 
 async function applyWorkingTreeReviewMetadata(repoRoot: string, summary: RepoChangesSummary): Promise<RepoChangesSummary> {
-  const entries = await Promise.all(
+  const trackedNumStatArgs = (baseline: string) => [
+    '-C', repoRoot, 'diff', '--numstat', '-z', baseline, '--',
+  ];
+  const trackedNumStatPromise = runLocalOrThrow('git', trackedNumStatArgs('HEAD')).catch(() =>
+    runLocalOrThrow('git', trackedNumStatArgs(EMPTY_GIT_TREE_SHA)).catch(() => ''),
+  );
+  const entryResults = await Promise.all(
     summary.entries.map(async (entry) => {
       const needsWorktreeHash = entry.isUntracked || (entry.unstagedType !== null && entry.unstagedType !== 'deleted');
-      const worktreeContentHash = needsWorktreeHash ? await hashHostFileContents(repoRoot, entry.path) : null;
+      const metadata = needsWorktreeHash ? await readHostWorktreeFileMetadata(repoRoot, entry.path) : null;
       return {
-        ...entry,
-        reviewKey: repoChangeReviewKey(entry.path, entry.originalPath),
-        reviewToken: buildWorkingTreeRepoChangeReviewToken(entry, worktreeContentHash),
+        entry: {
+          ...entry,
+          reviewKey: repoChangeReviewKey(entry.path, entry.originalPath),
+          reviewToken: buildWorkingTreeRepoChangeReviewToken(entry, metadata?.hash ?? null),
+        },
+        metadata,
       };
     })
   );
+  const entries = entryResults.map((result) => result.entry);
+  const numStatEntries = parseGitNumStatZ(await trackedNumStatPromise);
+  for (const result of entryResults) {
+    if (result.entry.isUntracked && result.metadata && !result.metadata.binary) {
+      numStatEntries.push({
+        path: result.entry.path,
+        originalPath: null,
+        additions: result.metadata.lineCount,
+        deletions: 0,
+      });
+    }
+  }
   return {
     ...summary,
     entries,
+    counts: { ...summary.counts, ...repoLineChangeCounts(numStatEntries) },
   };
 }
 

@@ -338,6 +338,11 @@ export function buildExplorerTree(entries: RepoChangeEntry[]): ExplorerNode[] {
   return toNodes(root);
 }
 
+export function explorerNodeEntries(node: ExplorerNode): RepoChangeEntry[] {
+  if (node.kind === 'file') return node.entry ? [node.entry] : [];
+  return (node.children ?? []).flatMap(explorerNodeEntries);
+}
+
 export function flattenVisibleExplorerRows(
   nodes: ExplorerNode[],
   expandedDirs: Record<string, boolean>,
@@ -375,7 +380,7 @@ export function estimateExplorerSidebarWidth(
   const desiredWidth = Math.max(
     fallbackWidthPx,
     rows.reduce((max, row) => {
-      const leftPadding = 6 + row.depth * 9;
+      const leftPadding = 6 + row.depth * 10;
       const textWidth = Math.ceil(row.name.length * avgCharWidthPx);
       const dirCountWidth = Math.max(10, String(Math.max(0, row.count)).length * 6);
       // Account for icon/gaps and right-side metadata chip/counter.
@@ -557,6 +562,9 @@ export function sameRepoChangesPayload(
     a.counts.unstaged === b.counts.unstaged &&
     a.counts.untracked === b.counts.untracked &&
     a.counts.conflicted === b.counts.conflicted &&
+    a.counts.additions === b.counts.additions &&
+    a.counts.deletions === b.counts.deletions &&
+    a.counts.modified === b.counts.modified &&
     sameUnorderedArray(a.entries, b.entries, repoChangeEntrySignature)
   );
 }
@@ -577,6 +585,9 @@ export function sameRepoPullChangesPayload(
     a.branchContext.droneConfigured === b.branchContext.droneConfigured &&
     a.branchContext.droneFromRef === b.branchContext.droneFromRef &&
     a.counts.changed === b.counts.changed &&
+    a.counts.additions === b.counts.additions &&
+    a.counts.deletions === b.counts.deletions &&
+    a.counts.modified === b.counts.modified &&
     String(a.applyPreview?.mode ?? '') === String(b.applyPreview?.mode ?? '') &&
     Number(a.applyPreview?.counts.changed ?? -1) === Number(b.applyPreview?.counts.changed ?? -1) &&
     sameUnorderedArray(a.applyPreview?.entries ?? [], b.applyPreview?.entries ?? [], repoPullChangeEntrySignature) &&

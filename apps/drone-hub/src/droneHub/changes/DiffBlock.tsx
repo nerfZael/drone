@@ -466,9 +466,9 @@ export function DiffBlock({
   }
 
   return (
-    <div className="rdv-wrapper px-2 py-2">
+    <div className="rdv-wrapper">
       {expansionError ? (
-        <div className="mb-2 px-2 py-1 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--text-10)] text-[var(--red)]">
+        <div className="m-2 px-2 py-1 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--text-10)] text-[var(--red)]">
           {expansionError}
         </div>
       ) : null}
@@ -519,7 +519,7 @@ export function DiffBlock({
         );
       })}
       {state.truncated ? (
-        <div className="mt-2 px-2 py-1 rounded border border-[var(--yellow)]/30 bg-[var(--yellow-subtle)] text-[var(--text-10)] text-[var(--yellow)]">
+        <div className="m-2 px-2 py-1 rounded border border-[var(--yellow)]/30 bg-[var(--yellow-subtle)] text-[var(--text-10)] text-[var(--yellow)]">
           Diff output is truncated.
         </div>
       ) : null}

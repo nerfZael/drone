@@ -170,7 +170,7 @@ function createRepositoryOperationServiceHandler(
       }
 
       // POST /api/drones/:name/repo/changes/action
-      // Stages, unstages, or discards the working-tree changes for one file.
+      // Stages, unstages, or discards one or more working-tree paths.
       if (
         method === 'POST' &&
         parts.length === 6 &&
@@ -199,8 +199,8 @@ function createRepositoryOperationServiceHandler(
           json(res, 400, { ok: false, error: error?.message ?? 'invalid request body' });
           return;
         }
-        const filePath = String(body?.path ?? '').trim();
-        const originalPath = String(body?.originalPath ?? '').trim();
+        const filePath = typeof body?.path === 'string' ? body.path : '';
+        const originalPath = typeof body?.originalPath === 'string' ? body.originalPath : '';
         const action = String(body?.action ?? '').trim().toLowerCase();
         const isValidRepoRelativePath = (value: string) =>
           Boolean(value) &&
@@ -208,7 +208,18 @@ function createRepositoryOperationServiceHandler(
           !path.isAbsolute(value) &&
           !/^[a-zA-Z]:[\\/]/.test(value) &&
           !value.replace(/\\/g, '/').split('/').includes('..');
-        if (!isValidRepoRelativePath(filePath) || (originalPath && !isValidRepoRelativePath(originalPath))) {
+        const requestedPathsRaw: unknown[] = Array.isArray(body?.paths)
+          ? body.paths
+          : [filePath, originalPath].filter(Boolean);
+        const requestedPaths: string[] = requestedPathsRaw.map((value) =>
+          typeof value === 'string' ? value : '',
+        );
+        if (
+          !isValidRepoRelativePath(filePath) ||
+          requestedPaths.length === 0 ||
+          requestedPaths.length > 10_000 ||
+          requestedPaths.some((value: string) => !isValidRepoRelativePath(value))
+        ) {
           json(res, 400, { ok: false, error: 'invalid file path' });
           return;
         }
@@ -252,15 +263,35 @@ function createRepositoryOperationServiceHandler(
               });
           }
 
-          const filePaths = [...new Set([filePath, originalPath].filter(Boolean))];
+          const filePaths = [...new Set(requestedPaths)];
+          const filePathChunks: string[][] = [];
+          let filePathChunk: string[] = [];
+          let filePathChunkBytes = 0;
+          for (const targetPath of filePaths) {
+            const targetBytes = Buffer.byteLength(targetPath, 'utf8') + 1;
+            if (filePathChunk.length > 0 && (filePathChunk.length >= 400 || filePathChunkBytes + targetBytes > 96 * 1024)) {
+              filePathChunks.push(filePathChunk);
+              filePathChunk = [];
+              filePathChunkBytes = 0;
+            }
+            filePathChunk.push(targetPath);
+            filePathChunkBytes += targetBytes;
+          }
+          if (filePathChunk.length > 0) filePathChunks.push(filePathChunk);
           if (action === 'stage') {
-            await runGitAction(['add', '-A', '--', ...filePaths]);
+            for (const targetPaths of filePathChunks) {
+              await runGitAction(['add', '-A', '--', ...targetPaths]);
+            }
           } else if (action === 'unstage') {
             const head = await runGitAction(['rev-parse', '--verify', 'HEAD'], [0, 128]);
             if (head.code === 0) {
-              await runGitAction(['restore', '--staged', '--', ...filePaths]);
+              for (const targetPaths of filePathChunks) {
+                await runGitAction(['restore', '--staged', '--', ...targetPaths]);
+              }
             } else {
-              await runGitAction(['rm', '--cached', '--ignore-unmatch', '--', ...filePaths]);
+              for (const targetPaths of filePathChunks) {
+                await runGitAction(['rm', '--cached', '--ignore-unmatch', '--', ...targetPaths]);
+              }
             }
           } else {
             for (const targetPath of filePaths) {
@@ -1337,7 +1368,7 @@ function createRepositoryOperationServiceHandler(
             ]),
             baseSha: summary.baseSha,
             headSha: summary.headSha,
-            counts: { changed: summary.entries.length },
+            counts: summary.counts,
             entries: attachReviewMetadataToPullEntries(summary.entries),
             applyPreview: {
               mode: repoPathRaw ? 'host-merge' : 'drone-range',

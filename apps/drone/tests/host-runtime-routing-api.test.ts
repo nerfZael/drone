@@ -466,11 +466,15 @@ describeSocketSuite('host runtime routing api', () => {
     runGit(repoRoot, ['config', 'user.name', 'Host Runtime']);
 
     const trackedPath = path.join(repoRoot, 'tracked.txt');
+    const nestedTrackedPath = path.join(repoRoot, 'nested', 'tracked.txt');
+    fs.mkdirSync(path.dirname(nestedTrackedPath), { recursive: true });
     fs.writeFileSync(trackedPath, 'base\n', 'utf8');
-    runGit(repoRoot, ['add', 'tracked.txt']);
+    fs.writeFileSync(nestedTrackedPath, 'nested base\n', 'utf8');
+    runGit(repoRoot, ['add', 'tracked.txt', 'nested/tracked.txt']);
     runGit(repoRoot, ['commit', '-m', 'init']);
-    fs.writeFileSync(trackedPath, 'base\nchanged\n', 'utf8');
+    fs.writeFileSync(trackedPath, 'changed\n', 'utf8');
     fs.writeFileSync(path.join(repoRoot, 'new.txt'), 'new\n', 'utf8');
+    fs.symlinkSync('tracked.txt', path.join(repoRoot, 'link.txt'));
 
     await seedHostDrone(droneId, {
       cwd: repoRoot,
@@ -481,6 +485,12 @@ describeSocketSuite('host runtime routing api', () => {
     expect(changesResp.r.status).toBe(200);
     expect(changesResp.data?.ok).toBe(true);
     expect(String(changesResp.data?.repoRoot ?? '')).toBe(repoRoot);
+    expect(changesResp.data?.counts).toMatchObject({
+      changed: 3,
+      additions: 3,
+      deletions: 1,
+      modified: 1,
+    });
     const changePaths = ((changesResp.data?.entries ?? []) as Array<{ path?: string }>).map((entry) =>
       String(entry?.path ?? ''),
     );
@@ -496,11 +506,15 @@ describeSocketSuite('host runtime routing api', () => {
     expect(String(diffResp.data?.kind ?? '')).toBe('unstaged');
     expect(String(diffResp.data?.diff ?? '')).toContain('+changed');
 
-    const changeAction = async (filePath: string, action: 'stage' | 'unstage' | 'discard') =>
+    const changeAction = async (
+      filePath: string,
+      action: 'stage' | 'unstage' | 'discard',
+      paths?: string[],
+    ) =>
       await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/repo/changes/action`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ path: filePath, action }),
+        body: JSON.stringify({ path: filePath, action, ...(paths ? { paths } : {}) }),
       });
 
     const stageResp = await changeAction('tracked.txt', 'stage');
@@ -520,6 +534,27 @@ describeSocketSuite('host runtime routing api', () => {
     const discardUntrackedResp = await changeAction('new.txt', 'discard');
     expect(discardUntrackedResp.r.status).toBe(200);
     expect(fs.existsSync(path.join(repoRoot, 'new.txt'))).toBe(false);
+    const discardSymlinkResp = await changeAction('link.txt', 'discard');
+    expect(discardSymlinkResp.r.status).toBe(200);
+    expect(fs.existsSync(path.join(repoRoot, 'link.txt'))).toBe(false);
+
+    const nestedUntrackedPath = path.join(repoRoot, 'nested', 'new.txt');
+    fs.writeFileSync(nestedTrackedPath, 'nested changed\n', 'utf8');
+    fs.writeFileSync(nestedUntrackedPath, 'nested new\n', 'utf8');
+    const nestedPaths = ['nested/tracked.txt', 'nested/new.txt'];
+
+    const stageFolderResp = await changeAction('nested', 'stage', nestedPaths);
+    expect(stageFolderResp.r.status).toBe(200);
+    expect(runGit(repoRoot, ['diff', '--cached', '--name-only']).trim().split('\n').sort()).toEqual(nestedPaths.slice().sort());
+
+    const unstageFolderResp = await changeAction('nested', 'unstage', nestedPaths);
+    expect(unstageFolderResp.r.status).toBe(200);
+    expect(runGit(repoRoot, ['diff', '--cached', '--name-only']).trim()).toBe('');
+
+    const discardFolderResp = await changeAction('nested', 'discard', nestedPaths);
+    expect(discardFolderResp.r.status).toBe(200);
+    expect(fs.readFileSync(nestedTrackedPath, 'utf8')).toBe('nested base\n');
+    expect(fs.existsSync(nestedUntrackedPath)).toBe(false);
   });
 
   test('returns host same-repo semantics for pull/push/reseed routes on host runtime', async () => {

@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { DroneApiRequestError } from '../src/host/api';
 import {
   createDroneDaemonWorktreeHasher,
+  droneRepoChangesSummary,
+  droneRepoPullChangesSummary,
   hashDroneFileContentsBatch,
   runGitInDroneViaDaemon,
 } from '../src/hub/drone-repo';
@@ -86,6 +88,97 @@ describe('repository changes fast path', () => {
     expect(hashes.get('src/b.ts')).toBe('b'.repeat(40));
   });
 
+  test('includes untracked file lines in container working-tree totals', async () => {
+    const result = await droneRepoChangesSummary({
+      container: 'drone-one',
+      repoPathInContainer: '/work/repo',
+      runGit: async ({ args }) => {
+        if (args[0] === 'rev-parse') return { code: 0, stdout: '/work/repo\n', stderr: '' };
+        if (args[0] === 'status') {
+          return {
+            code: 0,
+            stdout: `# branch.oid ${'a'.repeat(40)}\0# branch.head main\0? new.txt\0`,
+            stderr: '',
+          };
+        }
+        if (args[0] === 'diff' && args.includes('--numstat')) {
+          return { code: 0, stdout: '', stderr: '' };
+        }
+        throw new Error(`unexpected Git command: ${args.join(' ')}`);
+      },
+      hashWorktreeFiles: async () =>
+        new Map([['new.txt', { hash: 'b'.repeat(40), lineCount: 3, binary: false }]]),
+    });
+
+    expect(result.summary.counts).toMatchObject({
+      changed: 1,
+      untracked: 1,
+      additions: 3,
+      deletions: 0,
+      modified: 0,
+    });
+  });
+
+  test('ignores an untracked file that disappears during the line-count fallback', async () => {
+    const result = await droneRepoChangesSummary({
+      container: 'drone-one',
+      repoPathInContainer: '/work/repo',
+      runGit: async ({ args }) => {
+        if (args[0] === 'rev-parse') return { code: 0, stdout: '/work/repo\n', stderr: '' };
+        if (args[0] === 'status') {
+          return {
+            code: 0,
+            stdout: `# branch.oid ${'a'.repeat(40)}\0# branch.head main\0? gone.txt\0`,
+            stderr: '',
+          };
+        }
+        if (args[0] === 'diff' && args.includes('HEAD')) {
+          return { code: 0, stdout: '', stderr: '' };
+        }
+        if (args[0] === 'diff' && args.includes('--no-index')) {
+          return { code: 128, stdout: '', stderr: 'gone.txt: No such file or directory' };
+        }
+        throw new Error(`unexpected Git command: ${args.join(' ')}`);
+      },
+      hashWorktreeFiles: async () => new Map(),
+    });
+
+    expect(result.summary.counts).toMatchObject({
+      changed: 1,
+      additions: 0,
+      deletions: 0,
+      modified: 0,
+    });
+  });
+
+  test('reports aggregate line totals for pull-preview ranges', async () => {
+    const baseSha = 'a'.repeat(40);
+    const headSha = 'b'.repeat(40);
+    const result = await droneRepoPullChangesSummary({
+      container: 'drone-one',
+      repoPathInContainer: '/work/repo',
+      baseSha,
+      runGit: async ({ args }) => {
+        if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') {
+          return { code: 0, stdout: '/work/repo\n', stderr: '' };
+        }
+        if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
+          return { code: 0, stdout: `${headSha}\n`, stderr: '' };
+        }
+        if (args[0] === 'symbolic-ref') return { code: 0, stdout: 'feature\n', stderr: '' };
+        if (args[0] === 'diff' && args.includes('--name-status')) {
+          return { code: 0, stdout: 'M\0src/app.ts\0', stderr: '' };
+        }
+        if (args[0] === 'diff' && args.includes('--numstat')) {
+          return { code: 0, stdout: '5\t2\tsrc/app.ts\0', stderr: '' };
+        }
+        throw new Error(`unexpected Git command: ${args.join(' ')}`);
+      },
+    });
+
+    expect(result.counts).toEqual({ changed: 1, additions: 5, deletions: 2, modified: 2 });
+  });
+
   test('runs container change scans through the drone daemon', async () => {
     const responses: Array<{ status: number; body: any }> = [];
     const response = {
@@ -125,7 +218,16 @@ describe('repository changes fast path', () => {
           repoRoot: '/work/repo',
           summary: {
             branch: { head: 'main', upstream: null, oid: null, ahead: 0, behind: 0 },
-            counts: { changed: 0, staged: 0, unstaged: 0, untracked: 0, conflicted: 0 },
+            counts: {
+              changed: 0,
+              staged: 0,
+              unstaged: 0,
+              untracked: 0,
+              conflicted: 0,
+              additions: 0,
+              deletions: 0,
+              modified: 0,
+            },
             entries: [],
           },
         };
@@ -171,7 +273,16 @@ describe('repository changes fast path', () => {
           repoRoot: '/work/repo',
           reviewScopeId: 'review-scope',
           branch: { head: 'main', upstream: null, oid: null, ahead: 0, behind: 0 },
-          counts: { changed: 0, staged: 0, unstaged: 0, untracked: 0, conflicted: 0 },
+          counts: {
+            changed: 0,
+            staged: 0,
+            unstaged: 0,
+            untracked: 0,
+            conflicted: 0,
+            additions: 0,
+            deletions: 0,
+            modified: 0,
+          },
           entries: [],
         },
       },

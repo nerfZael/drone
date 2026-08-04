@@ -14,10 +14,13 @@ import {
   parseGitCommitList,
   parseGitNumStatZ,
   parseGitStatusPorcelainV2Z,
+  repoLineChangeCounts,
   repoChangeReviewKey,
   type RepoCommitDetails,
   type RepoCommitSummary,
 } from './repoOps';
+
+const EMPTY_GIT_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 export type DroneGitCommand = {
   container: string;
@@ -32,7 +35,7 @@ export type DroneGitRunner = (
 export type DroneWorktreeHasher = (opts: {
   repoRoot: string;
   repoRelativePaths: string[];
-}) => Promise<Map<string, string>>;
+}) => Promise<Map<string, { hash: string; lineCount?: number; binary?: boolean }>>;
 
 const DAEMON_GIT_HASH_REQUEST_MAX_PATHS = 5_000;
 const DAEMON_GIT_HASH_REQUEST_MAX_BYTES = 4 * 1024 * 1024;
@@ -114,16 +117,22 @@ export function createDroneDaemonWorktreeHasher(droneEntry: DroneDaemonConnectio
     try {
       const client = daemonClientForDrone(droneEntry);
       const normalizedRepoRoot = normalizeContainerPath(repoRoot);
-      const hashes = new Map<string, string>();
+      const hashes = new Map<string, { hash: string; lineCount?: number; binary?: boolean }>();
       for (const paths of daemonGitHashRequestChunks(normalizedRepoRoot, repoRelativePaths)) {
         const result = await workspaceGitHashes(client, {
           repoRoot: normalizedRepoRoot,
           paths,
         });
-        for (const entry of result.hashes
-          .map((entry) => [String(entry.path ?? ''), String(entry.hash ?? '').toLowerCase()] as const)
-          .filter((entry) => entry[0] && /^[0-9a-f]{40}$/.test(entry[1]))) {
-          hashes.set(entry[0], entry[1]);
+        for (const entry of result.hashes) {
+          const filePath = String(entry.path ?? '');
+          const hash = String(entry.hash ?? '').toLowerCase();
+          if (!filePath || !/^[0-9a-f]{40}$/.test(hash)) continue;
+          const lineCount = Number(entry.lineCount);
+          hashes.set(filePath, {
+            hash,
+            ...(Number.isFinite(lineCount) ? { lineCount: Math.max(0, Math.floor(lineCount)) } : {}),
+            ...(typeof entry.binary === 'boolean' ? { binary: entry.binary } : {}),
+          });
         }
       }
       return hashes;
@@ -170,30 +179,79 @@ export async function droneRepoChangesSummary(opts: {
     runGit: opts.runGit,
   });
   const parsed = parseGitStatusPorcelainV2Z(statusRaw.stdout);
+  let trackedNumStat = await runGitInDroneOrThrow({
+    container: opts.container,
+    repoPathInContainer,
+    args: ['diff', '--numstat', '-z', 'HEAD', '--'],
+    okCodes: [0, 128],
+    runGit: opts.runGit,
+  });
+  if (trackedNumStat.code === 128) {
+    trackedNumStat = await runGitInDroneOrThrow({
+      container: opts.container,
+      repoPathInContainer,
+      args: ['diff', '--numstat', '-z', EMPTY_GIT_TREE_SHA, '--'],
+      okCodes: [0, 128],
+      runGit: opts.runGit,
+    });
+  }
   const pathsToHash = parsed.entries
     .filter((entry) => entry.isUntracked || (entry.unstagedType !== null && entry.unstagedType !== 'deleted'))
     .map((entry) => entry.path);
-  const worktreeHashes = opts.hashWorktreeFiles
+  const worktreeMetadata: Map<string, { hash: string; lineCount?: number; binary?: boolean }> = opts.hashWorktreeFiles
     ? await opts.hashWorktreeFiles({ repoRoot, repoRelativePaths: pathsToHash })
-    : await hashDroneFileContentsBatch({
-        container: opts.container,
-        repoPathInContainer,
-        repoRelativePaths: pathsToHash,
-        runGit: opts.runGit,
-      });
+    : new Map(
+        Array.from(
+          await hashDroneFileContentsBatch({
+            container: opts.container,
+            repoPathInContainer,
+            repoRelativePaths: pathsToHash,
+            runGit: opts.runGit,
+          }),
+          ([filePath, hash]) => [filePath, { hash }],
+        ),
+      );
   const entries = parsed.entries.map((entry) => {
-    const worktreeContentHash = worktreeHashes.get(entry.path) ?? null;
+    const worktreeContentHash = worktreeMetadata.get(entry.path)?.hash ?? null;
     return {
       ...entry,
       reviewKey: repoChangeReviewKey(entry.path, entry.originalPath),
       reviewToken: buildWorkingTreeRepoChangeReviewToken(entry, worktreeContentHash),
     };
   });
+  const numStatEntries = trackedNumStat.code === 0 ? parseGitNumStatZ(trackedNumStat.stdout) : [];
+  for (const entry of entries) {
+    if (!entry.isUntracked) continue;
+    const metadata = worktreeMetadata.get(entry.path);
+    if (metadata && metadata.binary !== true && typeof metadata.lineCount === 'number') {
+      numStatEntries.push({
+        path: entry.path,
+        originalPath: null,
+        additions: metadata.lineCount,
+        deletions: 0,
+      });
+      continue;
+    }
+    const untrackedNumStat = await runGitInDroneOrThrow({
+      container: opts.container,
+      repoPathInContainer,
+      args: ['diff', '--no-index', '--numstat', '-z', '--', '/dev/null', entry.path],
+      // The file can disappear between status and this compatibility fallback.
+      // Treat Git's missing-path exit as an empty contribution instead of
+      // failing the entire Changes request.
+      okCodes: [0, 1, 128],
+      runGit: opts.runGit,
+    });
+    if (untrackedNumStat.code !== 128) {
+      numStatEntries.push(...parseGitNumStatZ(untrackedNumStat.stdout));
+    }
+  }
   return {
     repoRoot,
     summary: {
       ...parsed,
       entries,
+      counts: { ...parsed.counts, ...repoLineChangeCounts(numStatEntries) },
     },
   };
 }
@@ -433,7 +491,14 @@ export async function droneRepoPullChangesSummary(opts: {
   repoPathInContainer: string;
   baseSha?: string;
   runGit?: DroneGitRunner;
-}): Promise<{ repoRoot: string; baseSha: string; headSha: string; branchHead: string | null; entries: RepoPullChangeEntry[] }> {
+}): Promise<{
+  repoRoot: string;
+  baseSha: string;
+  headSha: string;
+  branchHead: string | null;
+  counts: { changed: number; additions: number; deletions: number; modified: number };
+  entries: RepoPullChangeEntry[];
+}> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const repoRootRaw = await runGitInDroneOrThrow({
     container: opts.container,
@@ -475,14 +540,29 @@ export async function droneRepoPullChangesSummary(opts: {
   });
   const branchHead = branchRaw.code === 0 ? String(branchRaw.stdout ?? '').trim() || null : null;
 
-  const nameStatus = await runGitInDroneOrThrow({
-    container: opts.container,
-    repoPathInContainer,
-    args: ['diff', '--name-status', '-z', `${baseSha}..${headSha}`],
-    runGit: opts.runGit,
-  });
+  const [nameStatus, numStat] = await Promise.all([
+    runGitInDroneOrThrow({
+      container: opts.container,
+      repoPathInContainer,
+      args: ['diff', '--name-status', '-z', `${baseSha}..${headSha}`],
+      runGit: opts.runGit,
+    }),
+    runGitInDroneOrThrow({
+      container: opts.container,
+      repoPathInContainer,
+      args: ['diff', '--numstat', '-z', `${baseSha}..${headSha}`],
+      runGit: opts.runGit,
+    }),
+  ]);
   const entries = parseGitNameStatusZ(nameStatus.stdout);
-  return { repoRoot, baseSha, headSha, branchHead, entries };
+  return {
+    repoRoot,
+    baseSha,
+    headSha,
+    branchHead,
+    counts: { changed: entries.length, ...repoLineChangeCounts(parseGitNumStatZ(numStat.stdout)) },
+    entries,
+  };
 }
 
 export async function droneRepoPullDiffForPath(opts: {

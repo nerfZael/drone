@@ -8,6 +8,7 @@ import { requestJson } from '../http';
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import {
   UiActionMenu,
+  UiCenteredLoadingState,
   UiPaneState,
   UiPanel,
   UiPanelStatusStrip,
@@ -58,6 +59,7 @@ import {
   DIFF_ZOOM_DEFAULT,
 } from './DiffZoomControl';
 import { CommitInspectionView } from './CommitInspectionView';
+import { ChangesFileCountPill, ChangesLineSummary } from './ChangesLineSummary';
 import { createSingleFlightPoller, singleFlightByKey } from './singleFlight';
 import { MetaChip } from './MetaChip';
 import type { DiffExpansionRange, DiffState, DiffViewType } from './types';
@@ -83,6 +85,7 @@ import {
   defaultKindForEntry,
   entryPathExistsInCurrentTree,
   estimateExplorerSidebarWidth,
+  explorerNodeEntries,
   fileNameForChangesPath,
   diffKey,
   effectiveKindForEntry,
@@ -139,8 +142,8 @@ type ChangesWorkspaceUiSnapshot = {
 };
 const EXPLORER_SIDEBAR_MIN_WIDTH_PX = 180;
 const EXPLORER_SIDEBAR_DEFAULT_WIDTH_PX = 240;
-const EXPLORER_SIDEBAR_MAX_WIDTH_PX = 360;
-const EXPLORER_SIDEBAR_MAX_RATIO = 0.36;
+const EXPLORER_SIDEBAR_MAX_WIDTH_PX = 480;
+const EXPLORER_SIDEBAR_MAX_RATIO = 0.45;
 const CHANGES_DIFF_MIN_WIDTH_PX = 420;
 const EXPLORER_WIDTH_UPDATE_THRESHOLD_PX = 8;
 const EXPLORER_ZOOM_MIN = 0.85;
@@ -276,10 +279,10 @@ function ChangesViewMenu({
       label="Changes view options"
       size="xsmall"
       triggerContent={
-        <>
+        <span className="inline-flex items-center gap-1 whitespace-nowrap">
           View
-          <IconChevron size={13} />
-        </>
+          <IconChevron down size={13} />
+        </span>
       }
       entries={[
         { kind: 'label', id: 'layout-label', label: 'Layout' },
@@ -576,8 +579,10 @@ function LiveDroneChangesDock({
   const [viewedStore, setViewedStore] = React.useState(() => readViewedChangesStore());
 
   const [selectedPath, setSelectedPath] = React.useState<string | null>(workspaceSnapshot?.selectedPath ?? null);
+  const [selectedExplorerDirectoryKey, setSelectedExplorerDirectoryKey] = React.useState<string | null>(null);
   const [selectedCommitSha, setSelectedCommitSha] = React.useState<string | null>(workspaceSnapshot?.selectedCommitSha ?? null);
   const [commitFileSelectedPath, setCommitFileSelectedPath] = React.useState<string | null>(workspaceSnapshot?.commitFileSelectedPath ?? null);
+  const [selectedCommitDirectoryPath, setSelectedCommitDirectoryPath] = React.useState<string | null>(null);
   const [splitKind, setSplitKind] = React.useState<DiffKind>(workspaceSnapshot?.splitKind ?? 'unstaged');
   const [stackedPreferredKind, setStackedPreferredKind] = React.useState<DiffKind>(workspaceSnapshot?.stackedPreferredKind ?? 'unstaged');
   const [expandedDirs, setExpandedDirs] = React.useState<Record<string, boolean>>(workspaceSnapshot?.expandedDirs ?? {});
@@ -667,7 +672,7 @@ function LiveDroneChangesDock({
   const explorerTextSizePx = Math.max(11, Math.round(12 * explorerZoom * 10) / 10);
   const explorerMetaTextSizePx = Math.max(8.5, Math.round(9.5 * explorerZoom * 10) / 10);
   const explorerIndentBasePx = Math.max(4, Math.round(5 * explorerZoom));
-  const explorerIndentStepPx = Math.max(10, Math.round(13 * explorerZoom));
+  const explorerIndentStepPx = Math.max(8, Math.round(10 * explorerZoom));
   const explorerBadgeHeightPx = Math.max(14, Math.round(15 * explorerZoom));
 
   React.useEffect(() => {
@@ -818,8 +823,10 @@ function LiveDroneChangesDock({
 
   React.useEffect(() => {
     setSelectedPath(null);
+    setSelectedExplorerDirectoryKey(null);
     setSelectedCommitSha(null);
     setCommitFileSelectedPath(null);
+    setSelectedCommitDirectoryPath(null);
   }, [droneId]);
 
   React.useEffect(() => {
@@ -2588,15 +2595,26 @@ function LiveDroneChangesDock({
   );
 
   const runWorkingTreeAction = React.useCallback(
-    async (entry: RepoChangeEntry, action: 'stage' | 'unstage' | 'discard') => {
+    async (
+      target: {
+        path: string;
+        paths: string[];
+        affectedPaths: string[];
+        isDirectory: boolean;
+        isUntracked: boolean;
+      },
+      action: 'stage' | 'unstage' | 'discard',
+    ) => {
       if (dataMode !== 'working-tree' || workingTreeActionBusy) return;
       if (
         action === 'discard' &&
         !(await confirm({
-          title: 'Discard file changes?',
-          message: entry.isUntracked
-            ? `${entry.path} is untracked and will be deleted. This cannot be undone.`
-            : `All unstaged changes in ${entry.path} will be permanently discarded.`,
+          title: target.isDirectory ? 'Discard folder changes?' : 'Discard file changes?',
+          message: target.isDirectory
+            ? `All unstaged changes in ${target.path}, including untracked files, will be permanently discarded.`
+            : target.isUntracked
+              ? `${target.path} is untracked and will be deleted. This cannot be undone.`
+              : `All unstaged changes in ${target.path} will be permanently discarded.`,
           confirmLabel: 'Discard Changes',
           destructive: true,
         }))
@@ -2604,23 +2622,25 @@ function LiveDroneChangesDock({
         return;
       }
 
-      const busyKey = `${action}:${entry.path}`;
+      const busyKey = `${action}:${target.path}`;
       setWorkingTreeActionBusy(busyKey);
       setWorkingTreeActionError(null);
       try {
         await requestJson(`/api/drones/${encodeURIComponent(droneId)}/repo/changes/action`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ path: entry.path, originalPath: entry.originalPath, action }),
+          body: JSON.stringify({ path: target.path, paths: target.paths, action }),
         });
         workingTreeChangesCache.delete(changesCacheKey('working-tree', droneId, repoPath));
+        const affectedStateKeySet = new Set(
+          target.affectedPaths.flatMap((affectedPath) => [
+            workingDiffStateKey(affectedPath, 'staged'),
+            workingDiffStateKey(affectedPath, 'unstaged'),
+          ]),
+        );
         setDiffByKey((current) =>
           Object.fromEntries(
-            Object.entries(current).filter(
-              ([key]) =>
-                key !== workingDiffStateKey(entry.path, 'staged') &&
-                key !== workingDiffStateKey(entry.path, 'unstaged'),
-            ),
+            Object.entries(current).filter(([key]) => !affectedStateKeySet.has(key)),
           ),
         );
         setRefreshNonce((value) => value + 1);
@@ -2743,6 +2763,7 @@ function LiveDroneChangesDock({
           if (!nextCommit || nextCommit.sha === selectedCommitSha) return;
           setSelectedCommitSha(nextCommit.sha);
           setCommitFileSelectedPath(null);
+          setSelectedCommitDirectoryPath(null);
           event.preventDefault();
           return;
         }
@@ -2754,6 +2775,7 @@ function LiveDroneChangesDock({
           const nextEntry = commitEntries[nextIndex];
           if (!nextEntry || nextEntry.path === commitFileSelectedPath) return;
           setCommitFileSelectedPath(nextEntry.path);
+          setSelectedCommitDirectoryPath(null);
           event.preventDefault();
           return;
         }
@@ -2779,13 +2801,20 @@ function LiveDroneChangesDock({
     const canOpenInEditor = entryPathExistsInCurrentTree(entry, dataMode);
     const viewedState = entryViewedStatus(entry);
     const canToggleViewed = primaryView === 'changes' && Boolean(activeReviewScopeId);
-    const buttonClassName = `${
+    const workingTreeTarget = {
+      path: entry.path,
+      paths: [entry.path, entry.originalPath].filter((path): path is string => Boolean(path)),
+      affectedPaths: [entry.path],
+      isDirectory: false,
+      isUntracked: entry.isUntracked,
+    };
+    const buttonClassName = `!h-5 !min-w-5 !w-5 !rounded-[3px] ${
       alwaysVisible
         ? ''
         : 'opacity-0 pointer-events-none group-hover/file:opacity-100 group-hover/file:pointer-events-auto'
     }`;
     return (
-      <div className="shrink-0 inline-flex items-center gap-1">
+      <div className="shrink-0 inline-flex items-center gap-0.5">
         {showViewedAction && canToggleViewed ? (
           <UiToolbarIconButton
             size="xsmall"
@@ -2821,7 +2850,7 @@ function LiveDroneChangesDock({
               label="Discard unstaged changes"
               icon={<DiscardChangesIcon />}
               onClick={() => {
-                void runWorkingTreeAction(entry, 'discard');
+                void runWorkingTreeAction(workingTreeTarget, 'discard');
               }}
               disabled={Boolean(workingTreeActionBusy)}
               className={buttonClassName}
@@ -2833,7 +2862,7 @@ function LiveDroneChangesDock({
               label="Stage changes"
               icon={<StageIcon />}
               onClick={() => {
-                void runWorkingTreeAction(entry, 'stage');
+                void runWorkingTreeAction(workingTreeTarget, 'stage');
               }}
               disabled={Boolean(workingTreeActionBusy)}
               className={buttonClassName}
@@ -2848,7 +2877,7 @@ function LiveDroneChangesDock({
             label="Unstage changes"
             icon={<StageIcon unstage />}
             onClick={() => {
-              void runWorkingTreeAction(entry, 'unstage');
+              void runWorkingTreeAction(workingTreeTarget, 'unstage');
             }}
             disabled={Boolean(workingTreeActionBusy)}
             className={buttonClassName}
@@ -2859,11 +2888,90 @@ function LiveDroneChangesDock({
     );
   }
 
+  function renderDirectoryQuickActions(node: ExplorerNode, workingKind?: DiffKind): React.ReactNode {
+    if (dataMode !== 'working-tree' || !workingKind) return null;
+    const actionButtonClassName = '!h-5 !min-w-5 !w-5 !rounded-[3px]';
+    const directoryEntries = explorerNodeEntries(node);
+    const target = {
+      path: node.path,
+      paths: Array.from(
+        new Set(
+          directoryEntries.flatMap((entry) =>
+            [entry.path, entry.originalPath].filter((path): path is string => Boolean(path)),
+          ),
+        ),
+      ),
+      affectedPaths: directoryEntries.map((entry) => entry.path),
+      isDirectory: true,
+      isUntracked: directoryEntries.every((entry) => entry.isUntracked),
+    };
+
+    return (
+      <div className="shrink-0 inline-flex items-center gap-0.5">
+        {workingKind === 'unstaged' ? (
+          <>
+            <UiToolbarIconButton
+              size="xsmall"
+              tone="danger"
+              label={`Discard changes in ${node.path}`}
+              icon={<DiscardChangesIcon />}
+              onClick={() => {
+                void runWorkingTreeAction(target, 'discard');
+              }}
+              disabled={Boolean(workingTreeActionBusy)}
+              className={actionButtonClassName}
+              title="Discard folder changes"
+            />
+            <UiToolbarIconButton
+              size="xsmall"
+              tone="success"
+              label={`Stage changes in ${node.path}`}
+              icon={<StageIcon />}
+              onClick={() => {
+                void runWorkingTreeAction(target, 'stage');
+              }}
+              disabled={Boolean(workingTreeActionBusy)}
+              className={actionButtonClassName}
+              title="Stage folder changes"
+            />
+          </>
+        ) : (
+          <UiToolbarIconButton
+            size="xsmall"
+            tone="warning"
+            label={`Unstage changes in ${node.path}`}
+            icon={<StageIcon unstage />}
+            onClick={() => {
+              void runWorkingTreeAction(target, 'unstage');
+            }}
+            disabled={Boolean(workingTreeActionBusy)}
+            className={actionButtonClassName}
+            title="Unstage folder changes"
+          />
+        )}
+      </div>
+    );
+  }
+
   function renderExplorer(nodes: ExplorerNode[], depth: number, workingKind?: DiffKind): React.ReactNode {
     return nodes.map((node) => {
       const indentPx = explorerIndentBasePx + depth * explorerIndentStepPx;
       if (node.kind === 'dir') {
         const open = expandedDirs[node.path] !== false;
+        const directoryKey = `${workingKind ?? dataMode}\u0000${node.path}`;
+        const selected = selectedExplorerDirectoryKey === directoryKey;
+        const hasSelectedDirectChild = Boolean(
+          node.children?.some((child) => {
+            if (child.kind === 'dir') {
+              return selectedExplorerDirectoryKey === `${workingKind ?? dataMode}\u0000${child.path}`;
+            }
+            return (
+              selectedExplorerDirectoryKey === null &&
+              child.entry?.path === selectedPath &&
+              (!workingKind || splitShownKind === workingKind)
+            );
+          }),
+        );
         const reviewSummary = workingKind ? undefined : explorerReviewSummaryByPath[node.path];
         const dirAllViewed = Boolean(
           reviewSummary && reviewSummary.viewed > 0 && reviewSummary.unviewed === 0 && reviewSummary.stale === 0,
@@ -2871,36 +2979,35 @@ function LiveDroneChangesDock({
         const dirHasChanged = Boolean(reviewSummary && reviewSummary.stale > 0);
         const dirHasViewed = Boolean(reviewSummary && reviewSummary.viewed > 0);
         return (
-          <React.Fragment key={`dir:${node.path}`}>
-            <div className="w-full relative" style={{ paddingLeft: `${indentPx}px` }}>
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute inline-flex items-center justify-center text-[var(--muted-dim)]"
-                style={{
-                  left: `${Math.max(0, indentPx - explorerLeadingSlotPx)}px`,
-                  top: '50%',
-                  width: `${explorerLeadingSlotPx}px`,
-                  height: `${explorerLeadingSlotPx}px`,
-                  transform: 'translateY(-50%)',
-                }}
-              >
-                <IconChevron down={open} size={explorerIconSizePx} />
-              </span>
+          <div
+            key={`dir:${node.path}`}
+            data-changes-explorer-directory={node.path}
+            className="flex w-full flex-col"
+          >
+            <div
+              className={`dh-changes-explorer-row group/directory flex w-full min-w-0 items-center pr-1 transition-colors ${
+                selected
+                  ? 'is-selected'
+                  : dirAllViewed
+                    ? 'opacity-65'
+                    : dirHasChanged
+                      ? 'bg-[var(--yellow-subtle)]'
+                      : ''
+              }`}
+              style={{ height: `${explorerRowHeightPx}px`, minHeight: `${explorerRowHeightPx}px` }}
+            >
               <button
                 type="button"
+                role="treeitem"
                 onClick={() => {
+                  setSelectedExplorerDirectoryKey(directoryKey);
                   setExpandedDirs((prev) => ({ ...prev, [node.path]: !open }));
                 }}
-                className={`dh-changes-explorer-row w-full rounded-[var(--radius-small)] pr-2 text-left transition-colors flex items-center gap-1.5 font-mono ${
-                  dirAllViewed
-                    ? 'opacity-65 hover:bg-[var(--surface-soft)]'
-                    : dirHasChanged
-                      ? 'bg-[var(--yellow-subtle)] hover:bg-[var(--yellow-subtle)]'
-                      : ''
-                }`}
+                aria-expanded={open}
+                aria-selected={selected}
+                className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden text-left font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
                 style={{
-                  height: `${explorerRowHeightPx}px`,
-                  minHeight: `${explorerRowHeightPx}px`,
+                  paddingLeft: `${indentPx}px`,
                 }}
                 title={
                   reviewSummary
@@ -2911,7 +3018,14 @@ function LiveDroneChangesDock({
                 }
               >
                 <span
-                  className={`truncate flex-1 ${dirAllViewed ? 'text-[var(--muted)]' : 'text-[var(--fg-secondary)]'}`}
+                  aria-hidden="true"
+                  className="pointer-events-none inline-flex shrink-0 items-center justify-center text-[var(--muted-dim)]"
+                  style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
+                >
+                  <IconChevron down={open} size={explorerIconSizePx} />
+                </span>
+                <span
+                  className={`min-w-0 truncate flex-1 ${selected ? 'text-[var(--fg)]' : dirAllViewed ? 'text-[var(--muted)]' : 'text-[var(--fg-secondary)]'}`}
                   style={{ fontSize: `${explorerTextSizePx}px` }}
                 >
                   {node.name}
@@ -2946,45 +3060,62 @@ function LiveDroneChangesDock({
                   {reviewSummary?.total ?? node.count}
                 </span>
               </button>
+              {workingKind ? (
+                <div className="pointer-events-none shrink-0 opacity-0 transition-opacity group-hover/directory:pointer-events-auto group-hover/directory:opacity-100 group-focus-within/directory:pointer-events-auto group-focus-within/directory:opacity-100">
+                  {renderDirectoryQuickActions(node, workingKind)}
+                </div>
+              ) : null}
             </div>
-            {open && node.children && node.children.length > 0 ? renderExplorer(node.children, depth + 1, workingKind) : null}
-          </React.Fragment>
+            {open && node.children && node.children.length > 0 ? (
+              <div
+                role="group"
+                className="dh-changes-explorer-directory-body relative flex w-full flex-col"
+                data-changes-explorer-guide-selected={hasSelectedDirectChild ? 'true' : undefined}
+              >
+                <span
+                  aria-hidden="true"
+                  className="dh-changes-explorer-guide pointer-events-none absolute inset-y-0 w-px"
+                  style={{ left: `${indentPx + Math.floor(explorerLeadingSlotPx / 2) - 1}px` }}
+                />
+                {renderExplorer(node.children, depth + 1, workingKind)}
+              </div>
+            ) : null}
+          </div>
         );
       }
 
       const entry = node.entry ?? null;
       if (!entry) return null;
       const active =
+        selectedExplorerDirectoryKey === null &&
         entry.path === selectedPath &&
         (!workingKind || splitShownKind === workingKind);
       const viewedState = entryViewedStatus(entry);
       return (
-        <div
-          key={`file:${entry.path}`}
-          className="w-full group/file"
-          style={{ paddingLeft: `${indentPx}px` }}
-        >
-          <div className="relative">
+        <div key={`file:${entry.path}`} className="w-full group/file">
+          <div
+            className={`dh-changes-explorer-row flex w-full min-w-0 items-center pr-1 transition-colors ${
+              active
+                ? 'is-selected'
+                : viewedState === 'viewed'
+                  ? 'opacity-60'
+                  : viewedState === 'stale'
+                    ? 'bg-[var(--yellow-subtle)]'
+                    : ''
+            }`}
+            style={{ height: `${explorerRowHeightPx}px`, minHeight: `${explorerRowHeightPx}px` }}
+          >
             <button
               type="button"
+              role="treeitem"
               onClick={() => {
+                setSelectedExplorerDirectoryKey(null);
                 setSelectedPath(entry.path);
                 if (dataMode === 'working-tree') setSplitKind(workingKind ?? defaultKindForEntry(entry));
               }}
               aria-selected={active}
-              className={`dh-changes-explorer-row w-full min-w-0 rounded-[var(--radius-small)] pr-2 text-left font-mono transition-all flex items-center gap-1.5 ${
-                active
-                  ? 'is-selected text-[var(--accent)]'
-                  : viewedState === 'viewed'
-                    ? 'opacity-60 hover:bg-[var(--surface-soft)]'
-                    : viewedState === 'stale'
-                      ? 'bg-[var(--yellow-subtle)] hover:bg-[var(--yellow-subtle)]'
-                      : ''
-              }`}
-              style={{
-                height: `${explorerRowHeightPx}px`,
-                minHeight: `${explorerRowHeightPx}px`,
-              }}
+              className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden text-left font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
+              style={{ paddingLeft: `${indentPx}px` }}
               title={
                 viewedState === 'viewed'
                   ? `${entry.path} • viewed`
@@ -2994,22 +3125,15 @@ function LiveDroneChangesDock({
               }
             >
               <span
-                className={`w-3 shrink-0 text-center font-mono font-[var(--weight-bold)] ${changesEntryStatusTextClass(entry, workingKind)}`}
-                style={{ fontSize: `${explorerMetaTextSizePx}px` }}
-                title={statusBadgeTitle(entry, dataMode)}
-              >
-                {changesEntryStatusShortLabel(entry, workingKind)}
-              </span>
-              <span
                 className={`inline-flex items-center justify-center flex-shrink-0 ${
-                  active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
+                  active ? 'text-[var(--fg)]' : 'text-[var(--muted)]'
                 }`}
                 style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
               >
                 <FileTypeIcon path={entry.path} size={explorerIconSizePx} />
               </span>
               <span
-                className={`truncate flex-1 ${active ? 'text-[var(--accent)]' : 'text-[var(--fg-secondary)]'}`}
+                className={`min-w-0 truncate flex-1 ${active ? 'text-[var(--fg)]' : 'text-[var(--fg-secondary)]'}`}
                 style={{ fontSize: `${explorerTextSizePx}px` }}
               >
                 {node.name}
@@ -3028,9 +3152,16 @@ function LiveDroneChangesDock({
                 </span>
               ) : null}
             </button>
-            <div className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 rounded bg-[var(--chat-background)] px-0.5 opacity-0 shadow-[-8px_0_12px_var(--chat-background)] transition-opacity group-hover/file:pointer-events-auto group-hover/file:opacity-100 group-focus-within/file:pointer-events-auto group-focus-within/file:opacity-100">
+            <div className="pointer-events-none shrink-0 opacity-0 transition-opacity group-hover/file:pointer-events-auto group-hover/file:opacity-100 group-focus-within/file:pointer-events-auto group-focus-within/file:opacity-100">
               {renderFileQuickActions(entry, true, false, workingKind)}
             </div>
+            <span
+              className={`w-3 shrink-0 text-center font-mono font-[var(--weight-bold)] ${changesEntryStatusTextClass(entry, workingKind)}`}
+              style={{ fontSize: `${explorerMetaTextSizePx}px` }}
+              title={statusBadgeTitle(entry, dataMode)}
+            >
+              {changesEntryStatusShortLabel(entry, workingKind)}
+            </span>
           </div>
         </div>
       );
@@ -3042,35 +3173,45 @@ function LiveDroneChangesDock({
       const indentPx = explorerIndentBasePx + depth * explorerIndentStepPx;
       if (node.kind === 'dir') {
         const open = expandedCommitDirs[node.path] !== false;
+        const selected = selectedCommitDirectoryPath === node.path;
+        const hasSelectedDirectChild = Boolean(
+          node.children?.some((child) =>
+            child.kind === 'dir'
+              ? selectedCommitDirectoryPath === child.path
+              : selectedCommitDirectoryPath === null && child.entry?.path === commitFileSelectedPath,
+          ),
+        );
         return (
-          <React.Fragment key={`commit-dir:${node.path}`}>
-            <div className="w-full relative" style={{ paddingLeft: `${indentPx}px` }}>
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute inline-flex items-center justify-center text-[var(--muted-dim)]"
-                style={{
-                  left: `${Math.max(0, indentPx - explorerLeadingSlotPx)}px`,
-                  top: '50%',
-                  width: `${explorerLeadingSlotPx}px`,
-                  height: `${explorerLeadingSlotPx}px`,
-                  transform: 'translateY(-50%)',
-                }}
-              >
-                <IconChevron down={open} size={explorerIconSizePx} />
-              </span>
+          <div
+            key={`commit-dir:${node.path}`}
+            data-changes-explorer-directory={node.path}
+            className="flex w-full flex-col"
+          >
+            <div
+              className={`dh-changes-explorer-row flex w-full min-w-0 items-center pr-1 ${selected ? 'is-selected' : ''}`}
+              style={{ height: `${explorerRowHeightPx}px`, minHeight: `${explorerRowHeightPx}px` }}
+            >
               <button
                 type="button"
+                role="treeitem"
                 onClick={() => {
+                  setSelectedCommitDirectoryPath(node.path);
                   setExpandedCommitDirs((prev) => ({ ...prev, [node.path]: !open }));
                 }}
-                className="dh-changes-explorer-row w-full rounded-[var(--radius-small)] pr-2 text-left font-mono flex items-center gap-1.5"
-                style={{
-                  height: `${explorerRowHeightPx}px`,
-                  minHeight: `${explorerRowHeightPx}px`,
-                }}
+                aria-expanded={open}
+                aria-selected={selected}
+                className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden text-left font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
+                style={{ paddingLeft: `${indentPx}px` }}
                 title={node.path}
               >
-                <span className="text-[var(--fg-secondary)] truncate flex-1" style={{ fontSize: `${explorerTextSizePx}px` }}>
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none inline-flex shrink-0 items-center justify-center text-[var(--muted-dim)]"
+                  style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
+                >
+                  <IconChevron down={open} size={explorerIconSizePx} />
+                </span>
+                <span className={`${selected ? 'text-[var(--fg)]' : 'text-[var(--fg-secondary)]'} min-w-0 truncate flex-1`} style={{ fontSize: `${explorerTextSizePx}px` }}>
                   {node.name}
                 </span>
                 <span className="text-[var(--muted-dim)] tabular-nums" style={{ fontSize: `${explorerMetaTextSizePx}px` }}>
@@ -3078,57 +3219,70 @@ function LiveDroneChangesDock({
                 </span>
               </button>
             </div>
-            {open && node.children && node.children.length > 0 ? renderCommitExplorer(node.children, depth + 1) : null}
-          </React.Fragment>
+            {open && node.children && node.children.length > 0 ? (
+              <div
+                role="group"
+                className="dh-changes-explorer-directory-body relative flex w-full flex-col"
+                data-changes-explorer-guide-selected={hasSelectedDirectChild ? 'true' : undefined}
+              >
+                <span
+                  aria-hidden="true"
+                  className="dh-changes-explorer-guide pointer-events-none absolute inset-y-0 w-px"
+                  style={{ left: `${indentPx + Math.floor(explorerLeadingSlotPx / 2) - 1}px` }}
+                />
+                {renderCommitExplorer(node.children, depth + 1)}
+              </div>
+            ) : null}
+          </div>
         );
       }
 
       const entry = node.entry ?? null;
       if (!entry) return null;
-      const active = entry.path === commitFileSelectedPath;
+      const active = selectedCommitDirectoryPath === null && entry.path === commitFileSelectedPath;
       return (
-        <div key={`commit-file:${entry.path}`} className="w-full group/file" style={{ paddingLeft: `${indentPx}px` }}>
-          <div className="relative">
+        <div key={`commit-file:${entry.path}`} className="w-full group/file">
+          <div
+            className={`dh-changes-explorer-row flex w-full min-w-0 items-center pr-1 ${active ? 'is-selected' : ''}`}
+            style={{ height: `${explorerRowHeightPx}px`, minHeight: `${explorerRowHeightPx}px` }}
+          >
             <button
               type="button"
+              role="treeitem"
               onClick={() => {
+                setSelectedCommitDirectoryPath(null);
                 setCommitFileSelectedPath(entry.path);
               }}
               aria-selected={active}
-              className={`dh-changes-explorer-row w-full min-w-0 rounded-[var(--radius-small)] pr-2 text-left font-mono transition-colors flex items-center gap-1.5 ${
-                active ? 'is-selected text-[var(--accent)]' : ''
-              }`}
-              style={{
-                height: `${explorerRowHeightPx}px`,
-                minHeight: `${explorerRowHeightPx}px`,
-              }}
+              className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden text-left font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
+              style={{ paddingLeft: `${indentPx}px` }}
               title={entry.path}
             >
               <span
-                className={`w-3 shrink-0 text-center font-mono font-[var(--weight-bold)] ${changesEntryStatusTextClass(entry)}`}
-                style={{ fontSize: `${explorerMetaTextSizePx}px` }}
-                title={statusBadgeTitle(entry, 'pull-preview')}
-              >
-                {changesEntryStatusShortLabel(entry)}
-              </span>
-              <span
                 className={`inline-flex items-center justify-center flex-shrink-0 ${
-                  active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
+                  active ? 'text-[var(--fg)]' : 'text-[var(--muted)]'
                 }`}
                 style={{ width: `${explorerLeadingSlotPx}px`, height: `${explorerLeadingSlotPx}px` }}
               >
                 <FileTypeIcon path={entry.path} size={explorerIconSizePx} />
               </span>
               <span
-                className={`truncate flex-1 ${active ? 'text-[var(--accent)]' : 'text-[var(--fg-secondary)]'}`}
+                className={`min-w-0 truncate flex-1 ${active ? 'text-[var(--fg)]' : 'text-[var(--fg-secondary)]'}`}
                 style={{ fontSize: `${explorerTextSizePx}px` }}
               >
                 {node.name}
               </span>
             </button>
-            <div className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 rounded bg-[var(--chat-background)] px-0.5 opacity-0 shadow-[-8px_0_12px_var(--chat-background)] transition-opacity group-hover/file:pointer-events-auto group-hover/file:opacity-100 group-focus-within/file:pointer-events-auto group-focus-within/file:opacity-100">
+            <div className="pointer-events-none shrink-0 opacity-0 transition-opacity group-hover/file:pointer-events-auto group-hover/file:opacity-100 group-focus-within/file:pointer-events-auto group-focus-within/file:opacity-100">
               {renderFileQuickActions(entry, true, false)}
             </div>
+            <span
+              className={`w-3 shrink-0 text-center font-mono font-[var(--weight-bold)] ${changesEntryStatusTextClass(entry)}`}
+              style={{ fontSize: `${explorerMetaTextSizePx}px` }}
+              title={statusBadgeTitle(entry, 'pull-preview')}
+            >
+              {changesEntryStatusShortLabel(entry)}
+            </span>
           </div>
         </div>
       );
@@ -3145,6 +3299,24 @@ function LiveDroneChangesDock({
         ? activePullRequestChanges
         : pullChanges?.id === droneId
           ? pullChanges
+          : null;
+  const activeLineChangeCounts =
+    dataMode === 'working-tree'
+      ? changes?.id === droneId
+        ? changes.counts
+        : null
+      : dataMode === 'pull-request'
+        ? activePullRequestChanges
+          ? {
+              ...activePullRequestChanges.counts,
+              modified: activePullRequestChanges.entries.reduce(
+                (sum, entry) => sum + Math.min(entry.additions, entry.deletions),
+                0,
+              ),
+            }
+          : null
+        : pullChanges?.id === droneId
+          ? pullChanges.counts
           : null;
   const showingInitialLoad =
     repoAttached &&
@@ -3200,7 +3372,7 @@ function LiveDroneChangesDock({
         surface="alternate"
         style={{ background: 'var(--chat-background)', ...diffZoomStyle(diffZoom) }}
       >
-        <UiPaneState kind="loading" title={initialLoadingLabel} />
+        <UiCenteredLoadingState message={initialLoadingLabel} />
       </UiPanel>
     );
   }
@@ -3252,6 +3424,9 @@ function LiveDroneChangesDock({
                     },
                   ]}
                 />
+              ) : null}
+              {primaryView === 'changes' && activeLineChangeCounts && activeLineChangeCounts.changed > 0 ? (
+                <ChangesLineSummary counts={activeLineChangeCounts} />
               ) : null}
               <UiToolbarSegmentedControl
                 label="Changes view"
@@ -3395,7 +3570,9 @@ function LiveDroneChangesDock({
             title="Could not load commits"
             description={commitListError}
           />
-        ) : commitList.length === 0 && !commitListLoading ? (
+        ) : commitListLoading && commitList.length === 0 ? (
+          <UiCenteredLoadingState message={initialLoadingLabel} />
+        ) : commitList.length === 0 ? (
           <UiPaneState
             kind="empty"
             title="No commits found"
@@ -3451,7 +3628,9 @@ function LiveDroneChangesDock({
         )
       ) : listError ? (
         <UiPaneState kind="error" title="Could not load changes" description={listError} />
-      ) : entries.length === 0 && !listLoading ? (
+      ) : listLoading && entries.length === 0 ? (
+        <UiCenteredLoadingState message={initialLoadingLabel} />
+      ) : entries.length === 0 ? (
         <UiPaneState
           kind="empty"
           title={emptyChangesTitle}
@@ -3497,7 +3676,7 @@ function LiveDroneChangesDock({
                         <span className="text-[var(--text-11)] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
                           {fileNameForChangesPath(entry.path)}
                         </span>
-                        {renderFileQuickActions(entry)}
+                        {renderFileQuickActions(entry, false, true, k)}
                         <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                           {k}{fallback ? ' (fallback)' : ''}
                         </span>
@@ -3590,7 +3769,14 @@ function LiveDroneChangesDock({
                 </span>
               </div>
               <div className="inline-flex items-center gap-1">
-                {selectedEntry ? renderFileQuickActions(selectedEntry, true) : null}
+                {selectedEntry
+                  ? renderFileQuickActions(
+                      selectedEntry,
+                      true,
+                      true,
+                      dataMode === 'working-tree' ? splitShownKind ?? undefined : undefined,
+                    )
+                  : null}
                 {dataMode === 'working-tree' ? (
                   selectedEntry && hasUnstaged(selectedEntry) && hasStaged(selectedEntry) ? (
                     <UiToolbarSegmentedControl<DiffKind>
@@ -3736,9 +3922,7 @@ function LiveDroneChangesDock({
                       >
                         <IconChevron down={stagedSectionOpen} size={11} />
                         <span className="min-w-0 flex-1 truncate">Staged Changes</span>
-                        <span className="font-mono text-[var(--text-10)] tabular-nums text-[var(--muted)]">
-                          {stagedEntries.length}
-                        </span>
+                        <ChangesFileCountPill count={stagedEntries.length} tone="staged" />
                       </button>
                       {stagedSectionOpen ? (
                         <div className="px-1.5">{renderExplorer(stagedExplorerTree, 0, 'staged')}</div>
@@ -3755,9 +3939,7 @@ function LiveDroneChangesDock({
                       >
                         <IconChevron down={unstagedSectionOpen} size={11} />
                         <span className="min-w-0 flex-1 truncate">Changes</span>
-                        <span className="font-mono text-[var(--text-10)] tabular-nums text-[var(--muted)]">
-                          {unstagedEntries.length}
-                        </span>
+                        <ChangesFileCountPill count={unstagedEntries.length} tone="unstaged" />
                       </button>
                       {unstagedSectionOpen ? (
                         <div className="px-1.5">{renderExplorer(unstagedExplorerTree, 0, 'unstaged')}</div>

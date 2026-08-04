@@ -259,6 +259,9 @@ export type RepoChangesPayload =
         unstaged: number;
         untracked: number;
         conflicted: number;
+        additions: number;
+        deletions: number;
+        modified: number;
       };
       entries: RepoChangeEntry[];
     }
@@ -319,6 +322,9 @@ export type RepoPullChangesPayload =
       branchContext: RepoPullBranchContext;
       counts: {
         changed: number;
+        additions: number;
+        deletions: number;
+        modified: number;
       };
       entries: RepoPullChangeEntry[];
       applyPreview?: {
