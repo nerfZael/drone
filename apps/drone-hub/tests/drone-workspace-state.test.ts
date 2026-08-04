@@ -200,6 +200,20 @@ describe('per-drone workspace state', () => {
     expect(workspace).toContain('unmountingRef.current = true;');
   });
 
+  test('does not reconcile Dockview move removals as closed panels', () => {
+    const workspace = readAppSource('app/DockableDroneWorkspace.tsx');
+    const removalHandler = workspace.slice(
+      workspace.indexOf('const removeDisposable = event.api.onDidRemovePanel'),
+      workspace.indexOf('updateWorkspacePanelState();', workspace.indexOf('disposablesRef.current =')),
+    );
+
+    expect(removalHandler).toContain('const timer = window.setTimeout(() => {');
+    expect(removalHandler).toContain('if (api.getPanel(panelId)) return;');
+    expect(removalHandler.indexOf('if (api.getPanel(panelId)) return;')).toBeLessThan(
+      removalHandler.indexOf('rebalanceWorkspaceGridGroups(onAfterToolPanelRemove);'),
+    );
+  });
+
   test('keeps editor tabs in drone-keyed buckets instead of clearing them on navigation', () => {
     const editorState = readAppSource('app/use-file-editor-state.ts');
 

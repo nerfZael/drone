@@ -393,6 +393,7 @@ export function DockableDroneWorkspace({
 }: DockableDroneWorkspaceProps) {
   const apiRef = React.useRef<DockviewApi | null>(null);
   const disposablesRef = React.useRef<Array<{ dispose: () => void }>>([]);
+  const removedPanelTimersRef = React.useRef<Map<string, number>>(new Map());
   const suppressSaveRef = React.useRef(false);
   const unmountingRef = React.useRef(false);
   const lastAppliedOpenRequestRef = React.useRef<number>(-1);
@@ -515,24 +516,39 @@ export function DockableDroneWorkspace({
         if (tab) onActiveToolTabChange?.(tab);
       });
       const removeDisposable = event.api.onDidRemovePanel((panel) => {
-        if (panel.id !== CHAT_PANEL_ID) {
-          const tab = tabFromPanel(panel);
-          if (tab) {
-            lastAppliedToolTabRef.current = null;
-          }
-          updateWorkspacePanelState();
-          rebalanceWorkspaceGridGroups(onAfterToolPanelRemove);
-          return;
-        }
-        window.setTimeout(() => {
+        const panelId = panel.id;
+        const tab = panelId === CHAT_PANEL_ID ? null : tabFromPanel(panel);
+        const pendingTimer = removedPanelTimersRef.current.get(panelId);
+        if (pendingTimer !== undefined) window.clearTimeout(pendingTimer);
+
+        // Dockview emits removal events while moving panels between groups as
+        // well as when panels are actually closed. Wait until the move has
+        // settled before changing React state or rebalancing the grid; doing
+        // either during the drag can interrupt Dockview and snap the panel
+        // back to its previous position.
+        const timer = window.setTimeout(() => {
+          removedPanelTimersRef.current.delete(panelId);
           const api = apiRef.current;
           if (!api) return;
+          if (api.getPanel(panelId)) return;
+
+          if (panelId !== CHAT_PANEL_ID) {
+            if (tab) lastAppliedToolTabRef.current = null;
+            updateWorkspacePanelState();
+            rebalanceWorkspaceGridGroups(onAfterToolPanelRemove);
+            return;
+          }
+
           suppressSaveRef.current = true;
-          ensureChatPanel(api);
-          updateWorkspacePanelState();
-          suppressSaveRef.current = false;
+          try {
+            ensureChatPanel(api);
+            updateWorkspacePanelState();
+          } finally {
+            suppressSaveRef.current = false;
+          }
           persistCurrentLayout();
         }, 0);
+        removedPanelTimersRef.current.set(panelId, timer);
       });
       updateWorkspacePanelState();
       disposablesRef.current.forEach((disposable) => disposable.dispose());
@@ -549,6 +565,8 @@ export function DockableDroneWorkspace({
     return () => {
       persistCurrentLayout();
       unmountingRef.current = true;
+      removedPanelTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      removedPanelTimersRef.current.clear();
       disposablesRef.current.forEach((disposable) => disposable.dispose());
       disposablesRef.current = [];
     };
