@@ -68,7 +68,6 @@
   --sidebar-row-selected-edge: rgba(177, 156, 255, .82);
   --sidebar-row-radius: var(--radius-medium);
   --sidebar-meta-fg: var(--muted-dim);
-  --sidebar-item-icon: var(--info);
   --sidebar-blocked-indicator: #ff5964;
   --sidebar-drone-compact-size: var(--type-compact);
   --sidebar-drone-size: var(--type-ui);

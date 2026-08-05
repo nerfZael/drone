@@ -313,7 +313,7 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('<View style={styles.readyStateAnchor} />');
     expect(source).toContain('width: DRAWER_TREE_LEADING_SLOT_WIDTH');
     expect(source).toContain('height: DRAWER_TREE_LEADING_SLOT_WIDTH');
-    expect(source).toContain('borderColor: colors.sidebarItemIcon');
+    expect(source).toContain('borderColor: colors.sidebarMutedDim');
     expect(source).toContain('opacity: 0.7');
   });
 
@@ -328,14 +328,30 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('d="M6 1.25 11 10.25H1L6 1.25Z"');
     expect(source).toContain('d="M6 4.15v2.75"');
     expect(source).toContain('cx="6" cy="8.5"');
-    expect(source).toContain(
-      'const color = emphasized ? colors.sidebarBlockedIndicator : colors.sidebarItemIcon;',
-    );
+    expect(source).toContain('const color = colors.sidebarBlockedIndicator;');
     expect(source).toContain('quietBlockedStatusIndicator: { opacity: 0.7 }');
     expect(source).toContain('shadowColor: colors.onlineBorder');
     expect(source).toContain('shadowOffset: { width: 0, height: 0 }');
     expect(source).toContain('const RECENT_BLOCKED_EMPHASIS_MS = 30_000;');
     expect(source).toContain('emphasized={recentlyBlocked || selected}');
+  });
+
+  test('uses the composer runtime icons and colors for container and host drone rows', () => {
+    const drawerSource = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const runtimeSource = readFileSync(
+      new URL('../src/drones/NewDroneRuntimePicker.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(drawerSource).toContain('<RuntimeIcon runtime={runtime} size={14} />');
+    expect(runtimeSource).toContain(
+      "const color = runtime === 'host' ? colors.online : colors.accent;",
+    );
+    expect(runtimeSource).toContain('<Monitor color={color}');
+    expect(runtimeSource).toContain('<Box color={color}');
   });
 
   test('renders desktop-equivalent multi-chat disclosures, including pinned drones', () => {
@@ -371,8 +387,9 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('<View accessible={false} style={styles.droneChevronSlot}>');
     expect(source).toContain('expanded={chatSectionExpanded}');
     expect(source).toContain('chatSectionExpanded ? (');
-    expect(source).toContain('<SidebarContainerIcon');
-    expect(source).toContain('color={colors.sidebarMutedDim}');
+    expect(source).toContain('<RuntimeIcon runtime={runtime} size={14} />');
+    expect(source).toContain('style={styles.droneRuntimeIconSlot}');
+    expect(source).not.toContain('<SidebarContainerIcon');
     expect(source).not.toContain('styles.droneSpineExpanded');
     expect(source).toContain('isChatDisclosure ? null : isDraft ? (');
     expect(source).toContain('mobileDroneDisplayState(drone, !hasMultipleChats)');
@@ -385,7 +402,7 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}');
     expect(source).toContain('hasActiveChildChat && styles.droneChatRailVisible');
     expect(source).toContain("borderLeftColor: 'transparent'");
-    expect(source).toContain('gap: 4,\n    paddingLeft: 4,\n    paddingRight: 6,');
+    expect(source).toContain('gap: 4,\n    paddingLeft: 18,\n    paddingRight: 6,');
     expect(source).toContain('styles.droneChatSelectionWash, { left: -selectionWashInset }');
     expect(source).toContain('<DrawerDroneChatRow');
     expect(source).toContain('drone.draftChats?.[chatName] === true');

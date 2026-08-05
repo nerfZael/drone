@@ -2,6 +2,12 @@ import React from 'react';
 
 export type DroneRuntime = 'container' | 'host';
 
+export function droneRuntimeIconToneClass(runtime: DroneRuntime): string {
+  return runtime === 'container'
+    ? '!text-[var(--accent)]'
+    : '!text-[var(--green)]';
+}
+
 export function DroneRuntimeIcon({
   runtime,
   className = 'h-3.5 w-3.5',
@@ -12,6 +18,7 @@ export function DroneRuntimeIcon({
   if (runtime === 'host') {
     return (
       <svg
+        data-drone-runtime-icon="host"
         className={className}
         viewBox="0 0 24 24"
         fill="none"
@@ -29,6 +36,7 @@ export function DroneRuntimeIcon({
 
   return (
     <svg
+      data-drone-runtime-icon="container"
       className={className}
       viewBox="0 0 24 24"
       fill="none"
@@ -47,7 +55,7 @@ export function DroneRuntimeIcon({
 export function DroneRuntimeLabel({ runtime }: { runtime: DroneRuntime }) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
-      <span className={runtime === 'container' ? 'text-[var(--accent)]' : 'text-[var(--green)]'}>
+      <span className={droneRuntimeIconToneClass(runtime)}>
         <DroneRuntimeIcon runtime={runtime} />
       </span>
       <span className="truncate">{runtime === 'container' ? 'Container' : 'Host'}</span>

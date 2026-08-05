@@ -193,7 +193,7 @@ export function DroneChatComposerMetadata({
   const subscriptions = useChatResourceSubscriptions(droneId, chatName);
 
   return (
-    <div className="flex min-w-0 w-full items-center justify-between gap-3">
+    <div className="flex min-w-0 w-full items-center justify-between gap-3 px-2">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <div className="shrink-0">
           <DroneRuntimeIndicator runtime={runtime} />

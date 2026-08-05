@@ -266,7 +266,7 @@ export function MobileFileExplorer({
         initialNumToRender={24}
         maxToRenderPerBatch={32}
         windowSize={9}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, rows.length === 0 && styles.emptyContent]}
         renderItem={({ item }) => {
           if (item.kind === 'state') {
             return item.loading ? (
@@ -375,6 +375,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   content: { paddingVertical: 5, paddingBottom: 18 },
+  emptyContent: { flexGrow: 1 },
   row: {
     minHeight: 36,
     flexDirection: 'row',
@@ -394,6 +395,7 @@ const styles = StyleSheet.create({
     paddingRight: 12,
   },
   centerState: {
+    flex: 1,
     minHeight: 84,
     alignItems: 'center',
     justifyContent: 'center',

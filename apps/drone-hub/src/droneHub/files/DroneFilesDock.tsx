@@ -1136,7 +1136,7 @@ export function DroneFilesDock({
       <div className="flex-1 min-h-0 flex overflow-hidden">
         <div className="w-full bg-[var(--panel)] flex flex-col">
           <div
-            className="flex-1 min-h-0 overflow-auto py-1 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
+            className="relative flex-1 min-h-0 overflow-auto py-1 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
             role="tree"
             aria-label="File Explorer"
             aria-multiselectable="true"
@@ -1153,7 +1153,7 @@ export function DroneFilesDock({
             }}
           >
             {showStartupPlaceholder && !startup?.timedOut ? (
-              <div className="min-h-full" role="treeitem">
+              <div className="absolute inset-0" role="treeitem">
                 <UiCenteredLoadingState
                   message={startupLabel}
                   description={[startupText, startupDetail].filter(Boolean).join(' ')}
@@ -1168,7 +1168,7 @@ export function DroneFilesDock({
                 role="treeitem"
               />
             ) : !error && loading && explorerTree.length === 0 ? (
-              <div className="min-h-full" role="treeitem">
+              <div className="absolute inset-0" role="treeitem">
                 <UiCenteredLoadingState message="Loading files…" />
               </div>
             ) : !error && !loading && explorerTree.length === 0 && !inlineNameMode ? (

@@ -51,7 +51,6 @@ import {
 } from '../drones/drone-state-summary';
 import {
   SidebarChevronIcon,
-  SidebarContainerIcon,
   SidebarFolderGitIcon,
   SidebarFolderOutlineIcon,
   SidebarPinIcon,
@@ -60,6 +59,7 @@ import {
   SidebarTreeChevronIcon,
   SidebarWorkingIcon,
 } from './SidebarIcons';
+import { RuntimeIcon } from '../drones/NewDroneRuntimePicker';
 import { useMobileSidebarExpandedFolderIds } from './use-mobile-sidebar-expanded-folder-ids';
 import { useMobileSidebarCollapsedDroneIds } from './use-mobile-sidebar-collapsed-drone-ids';
 import {
@@ -645,7 +645,7 @@ function ApprovalStatusIndicator() {
 }
 
 function BlockedStatusIndicator({ emphasized = false }: { emphasized?: boolean }) {
-  const color = emphasized ? colors.sidebarBlockedIndicator : colors.sidebarItemIcon;
+  const color = colors.sidebarBlockedIndicator;
   return (
     <View
       accessible={false}
@@ -817,14 +817,14 @@ function DrawerDroneNode({
     const timeoutId = setTimeout(() => setRecentlyBlocked(false), RECENT_BLOCKED_EMPHASIS_MS);
     return () => clearTimeout(timeoutId);
   }, [displayState]);
-  const runtimeLabel = drone.runtime.trim().toLowerCase() === 'host' ? 'host' : 'container';
+  const runtime = drone.runtime.trim().toLowerCase() === 'host' ? 'host' : 'container';
   const accessibilityLabel = [
     isChatDisclosure
       ? `${chatSectionExpanded ? 'Collapse' : 'Expand'} ${drone.name} chats`
       : `Open ${drone.name} chat`,
     stateLabel,
     unread && stateLabel !== 'Unread' ? 'unread chat' : '',
-    `${runtimeLabel} runtime`,
+    `${runtime} runtime`,
     contextLabel ? `${contextLabel} repository` : '',
     chats.length > 1 ? `${chats.length} chats` : '',
   ]
@@ -870,12 +870,8 @@ function DrawerDroneNode({
             </View>
           ) : null}
           {isChatDisclosure ? (
-            <View accessible={false} style={styles.droneContainerIconSlot}>
-              <SidebarContainerIcon
-                color={colors.sidebarMutedDim}
-                size={14}
-                strokeWidth={1.35}
-              />
+            <View accessible={false} style={styles.droneRuntimeIconSlot}>
+              <RuntimeIcon runtime={runtime} size={14} />
             </View>
           ) : null}
           {isChatDisclosure ? null : isDraft ? (
@@ -2339,12 +2335,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   droneChevron: { opacity: 0.75 },
-  droneContainerIconSlot: {
+  droneRuntimeIconSlot: {
     width: 14,
     height: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    opacity: 0.72,
   },
   switchItemTitle: {
     flex: 1,
@@ -2399,7 +2394,7 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     borderWidth: 1,
-    borderColor: colors.sidebarItemIcon,
+    borderColor: colors.sidebarMutedDim,
     opacity: 0.7,
   },
   switchStateDot: { width: 6, height: 6, borderRadius: 3 },
@@ -2441,7 +2436,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingLeft: 4,
+    paddingLeft: 18,
     paddingRight: 6,
     position: 'relative',
   },

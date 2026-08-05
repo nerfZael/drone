@@ -5,7 +5,6 @@ import {
   IconBaseImage,
   IconChevron,
   IconClone,
-  IconContainer,
   IconFolder,
   IconPin,
   IconPlus,
@@ -19,6 +18,11 @@ import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { SidebarContextMenu, type SidebarContextMenuItem } from '../app/SidebarContextMenu';
 import { formatShortcutBinding } from '../app/shortcuts';
 import { normalizedDroneChats } from '../app/chat-node-helpers';
+import {
+  DroneRuntimeIcon,
+  droneRuntimeIconToneClass,
+  type DroneRuntime,
+} from '../app/DroneRuntimeIndicator';
 
 export type DroneInlineRenameResult =
   | boolean
@@ -195,7 +199,7 @@ export function SidebarItemStateIndicator({
         showReadyAnchor ? (
           <span
             data-sidebar-ready-anchor="true"
-            className="h-1.5 w-1.5 rounded-full border border-[var(--sidebar-item-icon)] opacity-70"
+            className="h-1.5 w-1.5 rounded-full border border-[var(--muted-dim)] opacity-70"
           />
         ) : null
       ) : state === 'archiving' ? (
@@ -409,10 +413,10 @@ export function SidebarBlockedStatusIndicator({ emphasized = false }: { emphasiz
   return (
     <svg
       data-sidebar-blocked-indicator={emphasized ? 'emphasized' : 'quiet'}
-      className={`block h-3 w-3 transition-[color,opacity] ${
+      className={`block h-3 w-3 transition-opacity ${
         emphasized
           ? 'text-[var(--sidebar-blocked-indicator)] opacity-100'
-          : 'text-[var(--sidebar-item-icon)] opacity-70 group-hover/drone:text-[var(--sidebar-blocked-indicator)] group-hover/drone:opacity-100 group-hover/chat-row:text-[var(--sidebar-blocked-indicator)] group-hover/chat-row:opacity-100'
+          : 'text-[var(--sidebar-blocked-indicator)] opacity-70 group-hover/drone:opacity-100 group-hover/chat-row:opacity-100'
       }`}
       viewBox="0 0 12 12"
       fill="none"
@@ -594,6 +598,7 @@ export const DroneCard = React.memo(function DroneCard({
     setInlineRenameOpen(true);
   }, [inlineRenameRequestKey]);
   const isDraftDrone = drone.draft === true || drone.hubPhase === 'draft';
+  const runtime: DroneRuntime = drone.runtime === 'host' ? 'host' : 'container';
   const chatNames = normalizedDroneChats(drone);
   const hasMultipleChats = chatNames.length > 1;
   const displayState = sidebarDroneDisplayState(
@@ -867,8 +872,9 @@ export const DroneCard = React.memo(function DroneCard({
               strokeWidth={1.25}
               className={`flex-shrink-0 ${densityClasses.folderChevron}`}
             />
-            <IconContainer
-              className={`flex-shrink-0 ${densityClasses.icon}`}
+            <DroneRuntimeIcon
+              runtime={runtime}
+              className={`flex-shrink-0 ${densityClasses.icon} ${droneRuntimeIconToneClass(runtime)} !opacity-100`}
             />
           </>
         ) : null}

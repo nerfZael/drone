@@ -98,7 +98,7 @@ describe('multi-chat drone disclosure', () => {
     expect(source).toContain('{hasChatSection && chatSectionExpanded ? (');
   });
 
-  test('exposes the disclosure state accessibly without adding a drone icon', () => {
+  test('exposes the disclosure state accessibly with the shared runtime icon', () => {
     const source = readFileSync(
       new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
       'utf8',
@@ -108,7 +108,8 @@ describe('multi-chat drone disclosure', () => {
     expect(source).toContain(
       'className={`flex-shrink-0 ${densityClasses.folderChevron}`}',
     );
-    expect(source).toContain('<IconContainer');
+    expect(source).toContain('<DroneRuntimeIcon');
+    expect(source).toContain('droneRuntimeIconToneClass(runtime)');
     expect(source).toContain('const chatNames = normalizedDroneChats(drone);');
     expect(source).not.toContain('data-sidebar-drone-spine');
     expect(source).toContain("typeof disclosureExpanded === 'boolean' ? null : isDraftDrone ? (");
