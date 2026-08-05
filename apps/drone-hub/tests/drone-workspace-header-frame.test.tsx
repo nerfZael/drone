@@ -39,7 +39,8 @@ describe('DroneWorkspaceHeaderFrame', () => {
     expect(source).toContain("align={index === tabs.length - 1 ? 'end' : 'center'}");
     expect(source).toContain('contextMenuPanelBaseClass');
     expect(source).toContain('contextMenuItemBaseClass as dropdownMenuItemBaseClass');
-    expect(source).toContain('<WorkspaceToolIcon tab={tab} className="h-[17px] w-[17px]" />');
+    expect(source).toContain("'relative !h-9 !w-9 !justify-center");
+    expect(source).toContain('<WorkspaceToolIcon tab={tab} className="h-[22px] w-[22px]" />');
     expect(source).toContain('rightPanelHeaderTabs(rightPanelTabs).map((tab, index, tabs) =>');
     expect(source).toContain('const open = visibleToolTabs.includes(tab)');
     expect(source).toContain('aria-pressed={open}');
@@ -54,7 +55,7 @@ describe('DroneWorkspaceHeaderFrame', () => {
       const html = renderToStaticMarkup(<WorkspaceToolIcon tab={tab} />);
       expect(html).toContain(`data-workspace-tool-icon="${tab}"`);
       expect(html).toContain('stroke-width="1.75"');
-      expect(html).toContain('width="17"');
+      expect(html).toContain('width="22"');
     }
   });
 

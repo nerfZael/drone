@@ -2143,7 +2143,7 @@ export function SelectedDroneWorkspace({
                     onClick={() => openWorkspacePane(tab)}
                     data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
                     className={cn(
-                      'relative !h-7 !w-7 !justify-center !rounded-[4px] !px-0',
+                      'relative !h-9 !w-9 !justify-center !rounded-[4px] !px-0',
                       open
                         ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] !text-[var(--fg)]'
                         : '!text-[var(--chrome-muted)] hover:bg-[var(--hover)] hover:!text-[var(--fg-secondary)]',
@@ -2152,10 +2152,10 @@ export function SelectedDroneWorkspace({
                     aria-pressed={open}
                   >
                     <span
-                      className="flex h-[17px] w-[17px] items-center justify-center"
+                      className="flex h-[22px] w-[22px] items-center justify-center"
                       aria-hidden="true"
                     >
-                      <WorkspaceToolIcon tab={tab} className="h-[17px] w-[17px]" />
+                      <WorkspaceToolIcon tab={tab} className="h-[22px] w-[22px]" />
                     </span>
                     {tab === 'prs' && prCount > 0 ? (
                       <span

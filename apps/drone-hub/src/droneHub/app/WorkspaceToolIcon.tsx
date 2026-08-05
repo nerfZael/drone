@@ -14,8 +14,8 @@ function ActivityIcon({
     <svg
       data-workspace-tool-icon={tab}
       className={className}
-      width="17"
-      height="17"
+      width="22"
+      height="22"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
