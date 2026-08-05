@@ -1,38 +1,13 @@
-export type ChatResourceSubscription = {
-  id: string;
-  provider: 'drone-hub' | 'github';
-  resourceType: 'chat' | 'repository' | 'pull_request';
-  resourceId: string;
-  events: string[];
-  intent: string;
-  status: 'active';
-};
+import { eventNotificationEventLabel } from '@drone/assistant-chat';
+import {
+  normalizeChatResourceSubscriptionsPayload,
+  type ChatResourceSubscriptionInfo,
+} from '../../domain';
+
+export type ChatResourceSubscription = ChatResourceSubscriptionInfo;
 
 export function normalizeChatResourceSubscriptions(raw: unknown): ChatResourceSubscription[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((item: any) => {
-    const id = String(item?.id ?? '').trim();
-    const provider = item?.provider === 'github' ? 'github' : 'drone-hub';
-    const resourceType =
-      item?.resourceType === 'repository' || item?.resourceType === 'pull_request'
-        ? item.resourceType
-        : 'chat';
-    const resourceId = String(item?.resourceId ?? '').trim();
-    if (!id || !resourceId || item?.status !== 'active') return [];
-    return [
-      {
-        id,
-        provider,
-        resourceType,
-        resourceId,
-        events: Array.isArray(item?.events)
-          ? item.events.map((event: unknown) => String(event ?? '').trim()).filter(Boolean)
-          : [],
-        intent: String(item?.intent ?? '').trim(),
-        status: 'active' as const,
-      },
-    ];
-  });
+  return normalizeChatResourceSubscriptionsPayload(raw);
 }
 
 export function chatSubscriptionResourceLabel(
@@ -58,4 +33,3 @@ export function chatSubscriptionSummary(subscriptions: ChatResourceSubscription[
 export function chatSubscriptionEventLabel(event: string): string {
   return eventNotificationEventLabel(event);
 }
-import { eventNotificationEventLabel } from '@drone/assistant-chat';

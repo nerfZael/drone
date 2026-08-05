@@ -35,6 +35,7 @@ type ChatPromptRouteDependencyName =
   | 'isStaleDockerExecErrorMessage'
   | 'jsonWithEtag'
   | 'jsonWithKnownEtag'
+  | 'listResourceSubscriptionsForChatId'
   | 'logSlowHubRequest'
   | 'normalizeChatImageAttachments'
   | 'normalizeChatModel'
@@ -88,6 +89,7 @@ export function createChatPromptRouteHandler(
     isStaleDockerExecErrorMessage,
     jsonWithEtag,
     jsonWithKnownEtag,
+    listResourceSubscriptionsForChatId,
     logSlowHubRequest,
     normalizeChatImageAttachments,
     normalizeChatModel,
@@ -555,6 +557,7 @@ export function createChatPromptRouteHandler(
           }
           const includeTranscript = transcriptMode !== 'none';
           const includePending = !['none', 'false', '0'].includes(pendingMode);
+          const includeSubscriptions = parseBoolParam(u.searchParams.get('subscriptions'), false);
           const selection =
             transcriptMode === 'full' ? 'all' : (u.searchParams.get('turn') ?? 'all');
           const tailRaw =
@@ -572,7 +575,7 @@ export function createChatPromptRouteHandler(
             includePending,
             maintenance: 'schedule',
             includeDockerSnapshotMaintenance: true,
-            ifNoneMatch: String(req.headers['if-none-match'] ?? ''),
+            ifNoneMatch: includeSubscriptions ? '' : String(req.headers['if-none-match'] ?? ''),
             mark: (name: string) => timer.mark(name),
           });
           if ((globalThis as any).Bun) timer.mark('read');
@@ -608,21 +611,22 @@ export function createChatPromptRouteHandler(
             pendingCount: snapshot.pending.length,
             status: 200,
           });
-          if (snapshot.responseEtag) {
-            jsonWithKnownEtag(
-              req,
-              res,
-              200,
-              chatSnapshotResponseBody(snapshot, { includeTranscriptMeta: true }),
-              snapshot.responseEtag,
-            );
+          const responseBody = {
+            ...chatSnapshotResponseBody(snapshot, { includeTranscriptMeta: true }),
+            ...(includeSubscriptions
+              ? {
+                  subscriptions: snapshot.chatId
+                    ? listResourceSubscriptionsForChatId(snapshot.chatId)
+                    : [],
+                }
+              : {}),
+          };
+          if (includeSubscriptions) {
+            json(res, 200, responseBody);
+          } else if (snapshot.responseEtag) {
+            jsonWithKnownEtag(req, res, 200, responseBody, snapshot.responseEtag);
           } else {
-            jsonWithEtag(
-              req,
-              res,
-              200,
-              chatSnapshotResponseBody(snapshot, { includeTranscriptMeta: true }),
-            );
+            jsonWithEtag(req, res, 200, responseBody);
           }
           return;
         } catch (e: any) {

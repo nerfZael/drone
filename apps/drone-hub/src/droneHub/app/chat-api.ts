@@ -1,6 +1,10 @@
 import { sameAgentPlan } from '@drone/assistant-chat';
 import type { ChatSendPayload } from '../chat';
 import type { PendingPrompt, TranscriptItem } from '../types';
+import {
+  normalizeChatResourceSubscriptionsPayload,
+  type ChatResourceSubscriptionInfo,
+} from '../../domain';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -36,6 +40,8 @@ export type FetchDroneChatTranscriptResult = {
 export type FetchDroneChatStateResult = {
   transcripts: TranscriptItem[];
   pending: PendingPrompt[];
+  chatId: string | null;
+  subscriptions: ChatResourceSubscriptionInfo[];
 };
 
 export type DroneChatEventRef = {
@@ -329,16 +335,21 @@ export async function fetchDroneChatState(
     qs.set('tail', String(Math.floor(opts.tail)));
     qs.set('transcript', 'tail');
   }
+  qs.set('subscriptions', 'true');
   const data = await requestJson<{
     ok: true;
+    chatId?: string | null;
     transcripts: TranscriptItem[];
     pending: PendingPrompt[];
+    subscriptions?: unknown;
   }>(
     `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/state?${qs.toString()}`,
   );
   return {
     transcripts: Array.isArray(data?.transcripts) ? data.transcripts : [],
     pending: Array.isArray(data?.pending) ? data.pending : [],
+    chatId: String(data?.chatId ?? '').trim() || null,
+    subscriptions: normalizeChatResourceSubscriptionsPayload(data?.subscriptions),
   };
 }
 

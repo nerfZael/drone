@@ -25,7 +25,11 @@ import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { StatusBadge } from '../overview';
 import { TypingDots } from '../overview/icons';
 import { requestJson } from '../http';
-import type { AgentApprovalPolicy, AgentPermissionMode } from '../../domain';
+import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
+  ChatResourceSubscriptionInfo,
+} from '../../domain';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import {
   IconChat,
@@ -455,6 +459,8 @@ type SelectedDroneWorkspaceProps = {
   agentDisabled: boolean;
   agentLabel: string;
   chatRuntimeMetadataAvailable: boolean;
+  chatId: string | null;
+  chatSubscriptions: ChatResourceSubscriptionInfo[];
   modelControlEnabled: boolean;
   availableChatModels: ChatModelOption[];
   currentModel: string | null;
@@ -582,6 +588,8 @@ export function SelectedDroneWorkspace({
   currentAgentKey,
   agentLabel,
   chatRuntimeMetadataAvailable,
+  chatId,
+  chatSubscriptions,
   modelControlEnabled,
   availableChatModels,
   currentModel,
@@ -2300,8 +2308,8 @@ export function SelectedDroneWorkspace({
                     composerTopAction={
                       <DroneChatComposerMetadata
                         runtime={hostRuntime ? 'host' : 'container'}
-                        droneId={currentDrone.id}
-                        chatName={activeChatName}
+                        chatId={chatId}
+                        initialSubscriptions={chatSubscriptions}
                         branch={currentDrone.repoBranch}
                       />
                     }
@@ -2423,8 +2431,8 @@ export function SelectedDroneWorkspace({
                   composerTopAction={
                     <DroneChatComposerMetadata
                       runtime={hostRuntime ? 'host' : 'container'}
-                      droneId={currentDrone.id}
-                      chatName={activeChatName}
+                      chatId={chatId}
+                      initialSubscriptions={chatSubscriptions}
                       branch={currentDrone.repoBranch}
                     />
                   }

@@ -1555,12 +1555,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         selectionAnchorRef.current = droneId;
       }
     },
-    [
-      selectedDroneSet,
-      selectionAnchorRef,
-      setGroupMoveError,
-      setSelectedDroneIds,
-    ],
+    [selectedDroneSet, selectionAnchorRef, setGroupMoveError, setSelectedDroneIds],
   );
   const {
     selectDroneCard: selectDroneCardBase,
@@ -2466,6 +2461,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       ? {
           name: currentDrone.name,
           chat: startupSeedForCurrentDrone.chatName || selectedChat || 'default',
+          chatId: null,
+          subscriptions: [],
           agent: startupSeedForCurrentDrone.agent,
           agentLocked: false,
           model: startupSeedForCurrentDrone.model ?? null,
@@ -3050,11 +3047,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [
-    goBackEditorLocationFromShortcut,
-    goForwardEditorLocationFromShortcut,
-    quickOpenOpen,
-  ]);
+  }, [goBackEditorLocationFromShortcut, goForwardEditorLocationFromShortcut, quickOpenOpen]);
 
   const openMarkdownFileReference = React.useCallback(
     (ref: MarkdownFileReference) => {
@@ -4588,6 +4581,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     agentDisabled,
     agentLabel,
     chatRuntimeMetadataAvailable,
+    chatId: chatInfo?.chatId ?? null,
+    chatSubscriptions: chatInfo?.subscriptions ?? [],
     modelControlEnabled,
     availableChatModels,
     currentModel,

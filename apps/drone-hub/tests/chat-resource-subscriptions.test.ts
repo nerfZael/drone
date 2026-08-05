@@ -5,6 +5,7 @@ import { renderEventNotificationPrompt } from '@drone/assistant-chat';
 
 import {
   ChatSubscriptionIndicator,
+  DroneChatComposerMetadata,
   DroneBranchIndicator,
 } from '../src/droneHub/app/ChatComposerMetadata';
 import {
@@ -68,14 +69,10 @@ describe('chat resource subscription presentation', () => {
       },
     ]);
 
-    expect(chatSubscriptionSummary(subscriptions.slice(0, 1))).toBe(
-      'PR merged · acme/widgets#42',
-    );
+    expect(chatSubscriptionSummary(subscriptions.slice(0, 1))).toBe('PR merged · acme/widgets#42');
     expect(chatSubscriptionSummary(subscriptions.slice(1))).toBe('PR opened · acme/widgets');
     expect(chatSubscriptionSummary(subscriptions)).toBe('Subscriptions · 2');
-    expect(chatSubscriptionResourceLabel(subscriptions[0]!)).toBe(
-      'Pull request · acme/widgets#42',
-    );
+    expect(chatSubscriptionResourceLabel(subscriptions[0]!)).toBe('Pull request · acme/widgets#42');
 
     const html = renderToStaticMarkup(
       React.createElement(ChatSubscriptionIndicator, { subscriptions }),
@@ -83,6 +80,30 @@ describe('chat resource subscription presentation', () => {
     expect(html).toContain('data-chat-subscription-indicator="true"');
     expect(html).toContain('Subscriptions · 2');
     expect(html).not.toContain('role="dialog"');
+  });
+
+  test('renders the primary chat subscription snapshot without a client fetch', () => {
+    const subscriptions = normalizeChatResourceSubscriptions([
+      {
+        id: 'one',
+        provider: 'github',
+        resourceType: 'pull_request',
+        resourceId: 'acme/widgets#42',
+        events: ['pull_request.merged'],
+        status: 'active',
+      },
+    ]);
+
+    const html = renderToStaticMarkup(
+      React.createElement(DroneChatComposerMetadata, {
+        runtime: 'container',
+        chatId: 'chat-1',
+        initialSubscriptions: subscriptions,
+      }),
+    );
+
+    expect(html).toContain('data-chat-subscription-indicator="true"');
+    expect(html).toContain('PR merged · acme/widgets#42');
   });
 
   test('shows a read-only current branch indicator only when a branch is available', () => {
@@ -110,9 +131,7 @@ describe('chat resource subscription presentation', () => {
         },
       ],
     });
-    const html = renderToStaticMarkup(
-      React.createElement(SubscriptionEventMessage, { prompt }),
-    );
+    const html = renderToStaticMarkup(React.createElement(SubscriptionEventMessage, { prompt }));
     expect(html).toContain('Event notification');
     expect(html).toContain('PR merged');
     expect(html).toContain('Pull request · acme/widgets#42');

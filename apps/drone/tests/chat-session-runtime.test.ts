@@ -1,0 +1,46 @@
+import { describe, expect, test } from 'bun:test';
+
+import { resolveStoredChatEntry } from '../src/hub/chat-session-runtime';
+
+describe('chat session runtime storage resolution', () => {
+  test('returns an existing canonical chat without enqueueing a legacy import', async () => {
+    const canonical = { id: 'canonical-chat', turns: [] };
+    let importCount = 0;
+
+    const resolved = await resolveStoredChatEntry({
+      droneId: 'drone-1',
+      chatName: 'default',
+      registryChatEntry: { id: 'legacy-chat' },
+      readChatFromStore: () => ({ available: true, chat: canonical }),
+      importChatFromRegistry: async () => {
+        importCount += 1;
+      },
+    });
+
+    expect(resolved).toBe(canonical);
+    expect(importCount).toBe(0);
+  });
+
+  test('imports once when the canonical chat is genuinely missing', async () => {
+    const imported = { id: 'imported-chat', turns: [] };
+    let readCount = 0;
+    let importCount = 0;
+
+    const resolved = await resolveStoredChatEntry({
+      droneId: 'drone-1',
+      chatName: 'default',
+      registryChatEntry: { id: 'legacy-chat' },
+      readChatFromStore: () => ({
+        available: true,
+        chat: readCount++ === 0 ? null : imported,
+      }),
+      importChatFromRegistry: async () => {
+        importCount += 1;
+      },
+    });
+
+    expect(resolved).toBe(imported);
+    expect(importCount).toBe(1);
+    expect(readCount).toBe(2);
+  });
+});

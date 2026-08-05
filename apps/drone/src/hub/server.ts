@@ -5663,6 +5663,8 @@ export async function startDroneHubApiServer(opts: {
     jsonWithKnownEtag,
     listChatReadStatesFromStore,
     listChatsFromStore,
+    listResourceSubscriptionsForChatId: (chatId: string) =>
+      resourceSubscriptionService?.list(chatId, false) ?? [],
     logSlowHubRequest,
     markChatReadInStore,
     markChatUnreadInStore,

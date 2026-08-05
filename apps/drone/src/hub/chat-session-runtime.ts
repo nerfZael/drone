@@ -17,6 +17,37 @@ import { normalizeSilentCompletion } from '../host/silent-completion';
 
 type TranscriptTurn = any;
 
+export async function resolveStoredChatEntry(input: {
+  droneId: string;
+  chatName: string;
+  registryChatEntry: any;
+  readChatFromStore: (opts: { droneId: string; chatName: string }) => {
+    available: boolean;
+    chat: any | null;
+  };
+  importChatFromRegistry: (opts: {
+    droneId: string;
+    chatName: string;
+    chatEntry: any;
+  }) => Promise<unknown>;
+}): Promise<any> {
+  const stored = input.readChatFromStore({
+    droneId: input.droneId,
+    chatName: input.chatName,
+  });
+  if (stored.available && stored.chat) return stored.chat;
+  await input.importChatFromRegistry({
+    droneId: input.droneId,
+    chatName: input.chatName,
+    chatEntry: input.registryChatEntry,
+  });
+  const imported = input.readChatFromStore({
+    droneId: input.droneId,
+    chatName: input.chatName,
+  });
+  return imported.available ? imported.chat : input.registryChatEntry;
+}
+
 function normalizeAgentRunFileChanges(raw: unknown): AgentRunFileChanges | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const candidate = raw as Partial<AgentRunFileChanges>;
@@ -162,11 +193,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     upsertChatInStore,
   } = dependencies;
 
-  function buildNewChatEntry(opts: {
-    droneEntry: any;
-    createdAt: string;
-    sourceChatEntry?: any;
-  }) {
+  function buildNewChatEntry(opts: { droneEntry: any; createdAt: string; sourceChatEntry?: any }) {
     const agent = opts.sourceChatEntry
       ? inferChatAgent(opts.sourceChatEntry, opts.droneEntry)
       : defaultChatAgentConfigForDrone(opts.droneEntry);
@@ -441,8 +468,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
   function assertReadOnlySupportedForAgent(agent: ChatAgentConfig): void {
     if (agent.kind === 'native') return;
     if (agent.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'blip')) return;
-    const label =
-      agent.kind === 'builtin' ? agent.id : agent.label || agent.id || 'custom agent';
+    const label = agent.kind === 'builtin' ? agent.id : agent.label || agent.id || 'custom agent';
     const error: Error & { statusCode?: number } = new Error(
       `agent access controls are currently supported for native, Codex, and Blip chats only (selected: ${label})`,
     );
@@ -451,10 +477,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
   }
 
   function supportsApprovalPolicy(agent: ChatAgentConfig): boolean {
-    return (
-      agent.kind === 'native' ||
-      (agent.kind === 'builtin' && agent.id === 'codex')
-    );
+    return agent.kind === 'native' || (agent.kind === 'builtin' && agent.id === 'codex');
   }
 
   function assertApprovalPolicySupportedForAgent(
@@ -470,10 +493,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       error.statusCode = 400;
       throw error;
     }
-    if (
-      policy === 'agent-decides' &&
-      !(agent.kind === 'builtin' && agent.id === 'codex')
-    ) {
+    if (policy === 'agent-decides' && !(agent.kind === 'builtin' && agent.id === 'codex')) {
       const error: Error & { statusCode?: number } = new Error(
         'agent-decides approval policy is only available for Codex chats',
       );
@@ -697,9 +717,13 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     chatName: string,
     chatEntry: any,
   ): Promise<any> {
-    await importChatFromRegistry({ droneId, chatName, chatEntry });
-    const read = readChatFromStore({ droneId, chatName });
-    return read.available ? read.chat : chatEntry;
+    return await resolveStoredChatEntry({
+      droneId,
+      chatName,
+      registryChatEntry: chatEntry,
+      readChatFromStore,
+      importChatFromRegistry,
+    });
   }
 
   type ChatStateContext =
@@ -776,6 +800,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         id: string;
         name: string;
         chat: string;
+        chatId: string | null;
         selection: string;
         transcripts: any[];
         pending: PendingPrompt[];
@@ -845,7 +870,9 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     droneId: string;
     chatName: string;
   }): Promise<PendingPrompt[]> {
-    return (await readPendingPrompts({ droneId: opts.droneId, chatName: opts.chatName })).slice(-50);
+    return (await readPendingPrompts({ droneId: opts.droneId, chatName: opts.chatName })).slice(
+      -50,
+    );
   }
 
   function formatTranscriptRow(turnIndex: number, turn: any): any {
@@ -876,11 +903,11 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         ? normalizeAgentPlan(agentPlanRaw, agentPlanSource, String(agentPlanRaw?.updatedAt ?? ''))
         : undefined;
     const ok = Boolean(turn?.ok);
-    const { output, silentCompletion } = normalizeSilentCompletion(
-      ok,
-      turn?.output,
-      { explicitlySilent: (turn as any)?.silentCompletion === true, prompt, promptId: id },
-    );
+    const { output, silentCompletion } = normalizeSilentCompletion(ok, turn?.output, {
+      explicitlySilent: (turn as any)?.silentCompletion === true,
+      prompt,
+      promptId: id,
+    });
     const error = ok ? undefined : String(turn?.error ?? 'failed');
     return {
       turn: turnIndex + 1,
@@ -1045,6 +1072,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         id: context.droneId,
         name: context.droneName,
         chat: opts.chatName,
+        chatId: null,
         selection: opts.selection,
         transcripts: [],
         pending: opts.includePending
@@ -1099,6 +1127,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       id: droneId,
       name: context.droneName,
       chat: opts.chatName,
+      chatId: String((entry as any)?.id ?? '').trim() || null,
       selection: transcriptResult?.selection ?? opts.selection,
       transcripts: transcriptResult?.transcripts ?? [],
       pending,
@@ -1140,6 +1169,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         id: resolved.id,
         name: droneName,
         chat: opts.chatName,
+        chatId: null,
         selection: opts.selection,
         transcripts: [],
         pending,
@@ -1193,6 +1223,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         id: resolved.id,
         name: droneName,
         chat: opts.chatName,
+        chatId: String((version.chat as any)?.id ?? '').trim() || null,
         selection: opts.selection,
         transcripts: [],
         pending: [],
@@ -1240,6 +1271,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       id: resolved.id,
       name: droneName,
       chat: opts.chatName,
+      chatId: String((version.chat as any)?.id ?? '').trim() || null,
       selection: opts.selection,
       transcripts,
       pending,
@@ -1260,6 +1292,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       id: snapshot.id,
       name: snapshot.name,
       chat: snapshot.chat,
+      chatId: snapshot.chatId,
       selection: snapshot.selection,
       transcripts: snapshot.transcripts,
       pending: snapshot.pending,

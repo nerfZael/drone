@@ -55,13 +55,32 @@ describe('drone hub domain helpers', () => {
       chat: 'default',
       sessionName: 'drone-hub-chat-default',
       createdAt: '2026-02-10T00:00:00.000Z',
+      chatId: 'chat-123',
+      subscriptions: [
+        {
+          id: 'subscription-1',
+          provider: 'github',
+          resourceType: 'pull_request',
+          resourceId: 'acme/widgets#42',
+          events: ['pull_request.merged'],
+          intent: 'Continue after merge.',
+          status: 'active',
+        },
+      ],
       model: 'gpt-5.2',
       agentLocked: true,
       agent: { kind: 'custom', id: 'reviewer', label: 'Reviewer', command: 'review --strict' },
     });
-    expect(custom.agent).toEqual({ kind: 'custom', id: 'reviewer', label: 'Reviewer', command: 'review --strict' });
+    expect(custom.agent).toEqual({
+      kind: 'custom',
+      id: 'reviewer',
+      label: 'Reviewer',
+      command: 'review --strict',
+    });
     expect(custom.model).toBe('gpt-5.2');
     expect(custom.agentLocked).toBe(true);
+    expect(custom.chatId).toBe('chat-123');
+    expect(custom.subscriptions).toHaveLength(1);
 
     const builtin = normalizeChatInfoPayload({
       name: 'auth-drone',

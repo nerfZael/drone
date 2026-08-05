@@ -20,15 +20,23 @@ function sameSubscriptions(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function useChatResourceSubscriptions(droneIdRaw: string, chatNameRaw: string) {
-  const droneId = String(droneIdRaw ?? '').trim();
-  const chatName = String(chatNameRaw ?? '').trim() || 'default';
-  const [subscriptions, setSubscriptions] = React.useState<ChatResourceSubscription[]>([]);
+function useChatResourceSubscriptions(
+  chatIdRaw: string | null | undefined,
+  initialSubscriptionsRaw: unknown,
+) {
+  const chatId = String(chatIdRaw ?? '').trim();
+  const initialSubscriptions = React.useMemo(
+    () => normalizeChatResourceSubscriptions(initialSubscriptionsRaw),
+    [initialSubscriptionsRaw],
+  );
+  const [snapshot, setSnapshot] = React.useState<{
+    chatId: string;
+    subscriptions: ChatResourceSubscription[];
+  }>(() => ({ chatId, subscriptions: initialSubscriptions }));
 
   React.useEffect(() => {
     let mounted = true;
     let busy = false;
-    let subscriberChatId = '';
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const schedule = () => {
@@ -37,25 +45,19 @@ function useChatResourceSubscriptions(droneIdRaw: string, chatNameRaw: string) {
       timer = setTimeout(() => void load(), SUBSCRIPTION_REFRESH_MS);
     };
     const load = async () => {
-      if (!droneId || busy) return;
+      if (!chatId || busy) return;
       busy = true;
       try {
-        if (!subscriberChatId) {
-          const metadata = await requestJson<any>(
-            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}`,
-          );
-          subscriberChatId = String(metadata?.chatId ?? '').trim();
-        }
-        if (!subscriberChatId) {
-          if (mounted) setSubscriptions([]);
-          return;
-        }
         const response = await requestJson<any>(
-          `/api/resource-subscriptions?subscriberChatId=${encodeURIComponent(subscriberChatId)}`,
+          `/api/resource-subscriptions?subscriberChatId=${encodeURIComponent(chatId)}`,
         );
         if (!mounted) return;
         const next = normalizeChatResourceSubscriptions(response?.subscriptions);
-        setSubscriptions((current) => (sameSubscriptions(current, next) ? current : next));
+        setSnapshot((current) =>
+          current.chatId === chatId && sameSubscriptions(current.subscriptions, next)
+            ? current
+            : { chatId, subscriptions: next },
+        );
       } catch {
         // Keep the last known active list across transient Hub/API failures.
       } finally {
@@ -70,17 +72,17 @@ function useChatResourceSubscriptions(droneIdRaw: string, chatNameRaw: string) {
       void load();
     };
 
-    setSubscriptions([]);
-    void load();
+    setSnapshot({ chatId, subscriptions: initialSubscriptions });
+    schedule();
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       mounted = false;
       if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [chatName, droneId]);
+  }, [chatId, initialSubscriptions]);
 
-  return subscriptions;
+  return snapshot.chatId === chatId ? snapshot.subscriptions : initialSubscriptions;
 }
 
 function SubscriptionIcon() {
@@ -150,7 +152,8 @@ export function ChatSubscriptionIndicator({
               Chat subscriptions
             </div>
             <div className="mt-0.5 text-[var(--text-10)] text-[var(--muted-dim)]">
-              This chat is watching {subscriptions.length} resource{subscriptions.length === 1 ? '' : 's'}.
+              This chat is watching {subscriptions.length} resource
+              {subscriptions.length === 1 ? '' : 's'}.
             </div>
           </div>
           <div className="max-h-[min(20rem,55vh)] overflow-y-auto p-1.5">
@@ -181,16 +184,16 @@ export function ChatSubscriptionIndicator({
 
 export function DroneChatComposerMetadata({
   runtime,
-  droneId,
-  chatName,
+  chatId,
+  initialSubscriptions,
   branch,
 }: {
   runtime: DroneRuntime;
-  droneId: string;
-  chatName: string;
+  chatId?: string | null;
+  initialSubscriptions?: unknown;
   branch?: string | null;
 }) {
-  const subscriptions = useChatResourceSubscriptions(droneId, chatName);
+  const subscriptions = useChatResourceSubscriptions(chatId, initialSubscriptions);
 
   return (
     <div className="flex min-w-0 w-full items-center justify-between gap-3 px-2">

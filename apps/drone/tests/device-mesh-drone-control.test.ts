@@ -522,10 +522,7 @@ describe('device mesh drone summaries', () => {
         'Review Android App',
         'Review Android App (2)',
       ]);
-      expect(renameBodies.map((body) => body.expectedName)).toEqual([
-        'Untitled 1',
-        'Untitled 1',
-      ]);
+      expect(renameBodies.map((body) => body.expectedName)).toEqual(['Untitled 1', 'Untitled 1']);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -877,22 +874,7 @@ describe('device mesh drone summaries', () => {
         url.pathname === '/api/resource-subscriptions'
           ? (() => {
               subscriptionRequests += 1;
-              return {
-                ok: true,
-                subscriptions: [
-                  {
-                    id: 'subscription-1',
-                    provider: 'github',
-                    resourceType: 'pull_request',
-                    resourceId: 'acme/widgets#42',
-                    events: ['pull_request.merged'],
-                    intent: 'Continue after merge.',
-                    status: 'active',
-                    cursor: { private: 'internal-state' },
-                    lastError: 'not for clients',
-                  },
-                ],
-              };
+              return { ok: true, subscriptions: [] };
             })()
           : url.pathname.endsWith('/pending')
             ? { ok: true, pending: [] }
@@ -901,6 +883,19 @@ describe('device mesh drone summaries', () => {
               : {
                   ok: true,
                   chatId: 'subscriber-chat-1',
+                  subscriptions: [
+                    {
+                      id: 'subscription-1',
+                      provider: 'github',
+                      resourceType: 'pull_request',
+                      resourceId: 'acme/widgets#42',
+                      events: ['pull_request.merged'],
+                      intent: 'Continue after merge.',
+                      status: 'active',
+                      cursor: { private: 'internal-state' },
+                      lastError: 'not for clients',
+                    },
+                  ],
                   agent: { kind: 'builtin', id: 'codex' },
                   turns: [{ id: 'turn-1', prompt: 'hello', output: 'hi' }],
                   readState: { unread: false },
@@ -928,7 +923,7 @@ describe('device mesh drone summaries', () => {
       });
       expect(result.subscriptions[0].cursor).toBeUndefined();
       expect(result.subscriptions[0].lastError).toBeUndefined();
-      expect(subscriptionRequests).toBe(1);
+      expect(subscriptionRequests).toBe(0);
 
       await expect(
         capability.invoke('chat.read', {
@@ -937,7 +932,7 @@ describe('device mesh drone summaries', () => {
           turnId: 'turn-1',
         }),
       ).resolves.toMatchObject({ historyKind: 'turn-content', turnId: 'turn-1' });
-      expect(subscriptionRequests).toBe(1);
+      expect(subscriptionRequests).toBe(0);
     } finally {
       globalThis.fetch = originalFetch;
     }

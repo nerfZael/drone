@@ -36,6 +36,7 @@ type ChatManagementRouteDependencyName =
   | 'isDraftChatEntry'
   | 'listChatReadStatesFromStore'
   | 'listChatsFromStore'
+  | 'listResourceSubscriptionsForChatId'
   | 'logSlowHubRequest'
   | 'markChatReadInStore'
   | 'markChatUnreadInStore'
@@ -120,6 +121,7 @@ export function createChatManagementRouteHandler(
     isDraftChatEntry,
     listChatReadStatesFromStore,
     listChatsFromStore,
+    listResourceSubscriptionsForChatId,
     logSlowHubRequest,
     markChatReadInStore,
     markChatUnreadInStore,
@@ -796,8 +798,10 @@ export function createChatManagementRouteHandler(
           }
           const chatEntry = (await importResolvedChatToStore(droneId, chatName, c)) ?? c;
           const durableChatId =
-            String((c as any)?.id ?? '').trim() ||
-            String((chatEntry as any)?.id ?? '').trim();
+            String((c as any)?.id ?? '').trim() || String((chatEntry as any)?.id ?? '').trim();
+          const subscriptions = durableChatId
+            ? listResourceSubscriptionsForChatId(durableChatId)
+            : [];
           timer.mark('import');
           const agent = inferChatAgent(chatEntry as any, resolved.drone);
           const agentLocked = await chatHasAgentLockingHistory(chatEntry, agent);
@@ -816,6 +820,7 @@ export function createChatManagementRouteHandler(
             ok: true,
             id: droneId,
             chatId: durableChatId || null,
+            subscriptions,
             name: droneName,
             chat: chatName,
             agent,

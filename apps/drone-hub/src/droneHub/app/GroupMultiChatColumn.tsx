@@ -59,6 +59,7 @@ import { parseDroneHubDragData, useDroneHubActiveDrag } from './drone-hub-dnd';
 import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 import { DroneChatComposerMetadata } from './ChatComposerMetadata';
+import type { ChatResourceSubscriptionInfo } from '../../domain';
 
 const DirtyDroneApplyModal = React.lazy(async () => {
   const { DirtyDroneApplyModal } = await import('./DirtyDroneApplyModal');
@@ -117,6 +118,10 @@ export function GroupMultiChatColumn({
   const chatCacheKey = React.useMemo(() => `${drone.id}\u0000${chatName}`, [chatName, drone.id]);
   const droneHome = React.useMemo(() => droneHomePath(drone), [drone]);
   const [transcripts, setTranscripts] = React.useState<TranscriptItem[] | null>(null);
+  const [chatId, setChatId] = React.useState<string | null>(null);
+  const [chatSubscriptions, setChatSubscriptions] = React.useState<ChatResourceSubscriptionInfo[]>(
+    [],
+  );
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [promptError, setPromptError] = React.useState<string | null>(null);
@@ -223,6 +228,8 @@ export function GroupMultiChatColumn({
     };
 
     setTranscripts(null);
+    setChatId(null);
+    setChatSubscriptions([]);
     setInitialPendingResp(null);
     transcriptEtagRef.current = null;
     fullTranscriptLoadedRef.current = false;
@@ -301,6 +308,8 @@ export function GroupMultiChatColumn({
           });
           if (!mounted) return false;
           loadedInitialTail = true;
+          setChatId(data.chatId);
+          setChatSubscriptions(data.subscriptions);
           setInitialPendingResp({ key: chatCacheKey, pending: data.pending });
           setTranscripts((prev) =>
             sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts,
@@ -1134,8 +1143,8 @@ export function GroupMultiChatColumn({
         composerTopAction={
           <DroneChatComposerMetadata
             runtime={hostRuntime ? 'host' : 'container'}
-            droneId={drone.id}
-            chatName={chatName}
+            chatId={chatId}
+            initialSubscriptions={chatSubscriptions}
             branch={drone.repoBranch}
           />
         }

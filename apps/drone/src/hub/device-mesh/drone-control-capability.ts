@@ -133,7 +133,9 @@ function compactChatSubscriptions(value: unknown): Array<Record<string, unknown>
         provider,
         resourceType,
         resourceId,
-        events: textList(entry.events).slice(0, 20).map((event) => truncateUtf8(event, 160)),
+        events: textList(entry.events)
+          .slice(0, 20)
+          .map((event) => truncateUtf8(event, 160)),
         intent: truncateUtf8(entry.intent, 2_000).trim(),
         status: 'active',
       },
@@ -969,7 +971,6 @@ export function createDroneControlCapability(
           localHubRequest(access, chatPath),
           localHubRequest(access, `${chatPath}/pending`),
         ]);
-        const subscriberChatId = optionalText(result?.chatId);
         const contentOnlyRead = Boolean(
           optionalText(payload.messageId) || optionalText(payload.turnId),
         );
@@ -977,23 +978,17 @@ export function createDroneControlCapability(
         const latestAgentRevision = Number.isSafeInteger(result?.readState?.latestAgentRevision)
           ? Number(result.readState.latestAgentRevision)
           : 0;
-        const [subscriptionsResult, marked] = await Promise.all([
-          subscriberChatId && !contentOnlyRead
-            ? localHubRequest(
-                access,
-                `/api/resource-subscriptions?subscriberChatId=${encodeURIComponent(subscriberChatId)}`,
-              ).catch(() => ({ subscriptions: null }))
-            : Promise.resolve({ subscriptions: [] }),
-          localHubRequest(access, `${chatPath}/read`, {
-            method: 'POST',
-            body: JSON.stringify({
-              latestAgentTurnId,
-              latestAgentRevision,
-              updatedByDeviceId: context?.sourceDevice?.id ?? null,
-            }),
+        const subscriptions = contentOnlyRead
+          ? []
+          : compactChatSubscriptions(result?.subscriptions);
+        const marked = await localHubRequest(access, `${chatPath}/read`, {
+          method: 'POST',
+          body: JSON.stringify({
+            latestAgentTurnId,
+            latestAgentRevision,
+            updatedByDeviceId: context?.sourceDevice?.id ?? null,
           }),
-        ]);
-        const subscriptions = compactChatSubscriptions(subscriptionsResult?.subscriptions);
+        });
         if (result?.agent?.kind === 'native') {
           const { nativeChatId, snapshot: ensured } = await resolveNativeChat();
           const messageId = optionalText(payload.messageId);
