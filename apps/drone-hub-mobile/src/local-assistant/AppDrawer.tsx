@@ -1277,7 +1277,7 @@ function DrawerVoiceRecordingIndicator() {
   const actionTokenRef = React.useRef(0);
   const recorderErrorRef = React.useRef(error);
   recorderErrorRef.current = error;
-  const canStop = status === 'recording' || status === 'paused';
+  const canStop = status === 'recording' || status === 'paused' || status === 'stopped';
   const visible = status !== 'idle' || copying || Boolean(error) || Boolean(copyError);
   const statusText =
     error ||

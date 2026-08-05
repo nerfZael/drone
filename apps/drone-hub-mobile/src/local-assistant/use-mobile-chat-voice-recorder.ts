@@ -1,8 +1,9 @@
 import React from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import {
   getRecordingPermissionsAsync,
   RecordingPresets,
+  requestNotificationPermissionsAsync,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   useAudioRecorder,
@@ -16,8 +17,9 @@ import { ensureMobileRecordingPermission } from './mobile-recording-permission';
 import { transcribeMobileVoiceRecording } from './mobile-groq-transcription';
 import {
   MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES,
+  isUnexpectedMobileVoiceRecordingCompletion,
   resolveMobileVoiceRecorderEvent,
-  shouldDiscardMobileVoiceWhenInactive,
+  shouldCancelMobileVoiceWhenInactive,
   type MobileVoiceRecordingStatus,
 } from './mobile-voice-transcription-model';
 
@@ -58,6 +60,17 @@ async function waitForAppForeground(): Promise<boolean> {
   });
 }
 
+async function ensureBackgroundRecordingPermission(): Promise<void> {
+  if (Platform.OS !== 'android' || Number(Platform.Version) < 33) return;
+  const permission = await requestNotificationPermissionsAsync();
+  if (permission.granted) return;
+  throw new Error(
+    permission.canAskAgain === false
+      ? 'Notification permission is disabled. Enable it in the phone’s system settings to record while the screen is locked.'
+      : 'Notification permission is required to keep recording while the screen is locked.',
+  );
+}
+
 export function useMobileChatVoiceRecorder({
   onError,
 }: {
@@ -72,8 +85,36 @@ export function useMobileChatVoiceRecorder({
   const recorderRef = React.useRef<AudioRecorder | null>(null);
   const recordingUriRef = React.useRef<string | null>(null);
 
+  const setStatusValue = React.useCallback((next: MobileVoiceRecordingStatus) => {
+    statusRef.current = next;
+    if (mountedRef.current) setStatus(next);
+  }, []);
+
+  const deactivateRecordingMode = React.useCallback(async () => {
+    await setAudioModeAsync({
+      allowsRecording: false,
+      allowsBackgroundRecording: false,
+    }).catch(() => undefined);
+  }, []);
+
   const handleNativeStatus = React.useCallback(
     (next: RecordingStatus) => {
+      if (
+        isUnexpectedMobileVoiceRecordingCompletion({
+          status: statusRef.current,
+          activeUri: recordingUriRef.current,
+          eventUri: next.url,
+          finished: next.isFinished,
+          failed: next.hasError || Boolean(next.mediaServicesDidReset),
+          stopPending: Boolean(stopPromiseRef.current),
+        })
+      ) {
+        recordingUriRef.current = next.url;
+        setStatusValue('stopped');
+        void deactivateRecordingMode();
+        if (mountedRef.current) onError('');
+        return;
+      }
       // stop() completion events can arrive after the next recording has begun.
       // Never let an event from an older file replace or cancel the active session.
       const event = resolveMobileVoiceRecorderEvent({
@@ -100,7 +141,10 @@ export function useMobileChatVoiceRecorder({
       } else {
         deleteRecordingFile(uri);
       }
-      void setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
+      void setAudioModeAsync({
+        allowsRecording: false,
+        allowsBackgroundRecording: false,
+      }).catch(() => undefined);
       if (mountedRef.current) {
         setStatus('idle');
         onError(
@@ -113,19 +157,10 @@ export function useMobileChatVoiceRecorder({
         );
       }
     },
-    [onError],
+    [deactivateRecordingMode, onError, setStatusValue],
   );
   const recorder = useAudioRecorder(MOBILE_VOICE_RECORDING_OPTIONS, handleNativeStatus);
   const recorderState = useAudioRecorderState(recorder, 250);
-
-  const setStatusValue = React.useCallback((next: MobileVoiceRecordingStatus) => {
-    statusRef.current = next;
-    if (mountedRef.current) setStatus(next);
-  }, []);
-
-  const deactivateRecordingMode = React.useCallback(async () => {
-    await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
-  }, []);
 
   React.useLayoutEffect(() => {
     recorderRef.current = recorder;
@@ -201,11 +236,17 @@ export function useMobileChatVoiceRecorder({
             : 'Microphone permission was denied.',
         );
       }
+      await ensureBackgroundRecordingPermission();
+      if (generationRef.current !== generation || !mountedRef.current) return;
       if (!(await waitForAppForeground())) {
         throw new Error('Voice recording was cancelled when the app left the foreground.');
       }
       if (generationRef.current !== generation || !mountedRef.current) return;
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await setAudioModeAsync({
+        allowsRecording: true,
+        allowsBackgroundRecording: true,
+        playsInSilentMode: true,
+      });
       if (generationRef.current !== generation || !mountedRef.current) {
         await deactivateRecordingMode();
         return;
@@ -245,17 +286,13 @@ export function useMobileChatVoiceRecorder({
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') return;
       const interruptedStatus = statusRef.current;
-      // Android can temporarily report a non-active state while its microphone
-      // permission UI is open. The startup flow checks AppState after permission
-      // and recorder preparation, so only discard sessions that have really begun.
-      if (shouldDiscardMobileVoiceWhenInactive(interruptedStatus)) {
+      // The native background audio session keeps active and paused recordings
+      // alive through screen lock. Startup synchronizes itself with foreground
+      // state, while network transcription remains foreground-only/cancellable.
+      if (shouldCancelMobileVoiceWhenInactive(interruptedStatus)) {
         void discardRecording().then(() => {
           if (mountedRef.current) {
-            onError(
-              interruptedStatus === 'transcribing'
-                ? 'Voice transcription was cancelled when the app left the foreground.'
-                : 'Voice recording was discarded when the app left the foreground.',
-            );
+            onError('Voice transcription was cancelled when the app left the foreground.');
           }
         });
       }
@@ -278,15 +315,24 @@ export function useMobileChatVoiceRecorder({
   }, [onError, recorder, setStatusValue]);
 
   const transcribeRecording = React.useCallback(async (): Promise<string> => {
-    if (statusRef.current !== 'recording' && statusRef.current !== 'paused') return '';
+    const alreadyStopped = statusRef.current === 'stopped';
+    if (
+      !alreadyStopped &&
+      statusRef.current !== 'recording' &&
+      statusRef.current !== 'paused'
+    ) {
+      return '';
+    }
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     let uri = '';
     let controller: AbortController | null = null;
     try {
       uri = recordingUriRef.current || recorder.uri || '';
-      await recorder.stop();
-      uri ||= recorder.uri || '';
+      if (!alreadyStopped) {
+        await recorder.stop();
+        uri ||= recorder.uri || '';
+      }
       if (!uri) throw new Error('The voice recording could not be saved.');
       recordingUriRef.current = uri;
       await deactivateRecordingMode();
@@ -312,7 +358,9 @@ export function useMobileChatVoiceRecorder({
       return '';
     } finally {
       if (transcribeAbortRef.current === controller) transcribeAbortRef.current = null;
-      if (generationRef.current !== generation && uri) deleteRecordingFile(uri);
+      // The transcription helper deletes uploaded files itself. This second,
+      // idempotent cleanup also covers failures before the upload begins.
+      deleteRecordingFile(uri);
       if (recordingUriRef.current === uri) recordingUriRef.current = null;
       await deactivateRecordingMode();
       if (generationRef.current === generation) setStatusValue('idle');

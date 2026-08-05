@@ -420,7 +420,9 @@ describe('device mesh drone summaries', () => {
   test('schedules automatic naming for unnamed mobile-created drones', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ path: string; method: string; body: any }> = [];
-    let resolveSuggestion: ((response: Response) => void) | null = null;
+    const suggestions: Array<{ droneId: string; prompt: string }> = [];
+    const renames: any[] = [];
+    let resolveSuggestion: ((name: string) => void) | null = null;
     globalThis.fetch = (async (input, init) => {
       const path = new URL(String(input)).pathname;
       requests.push({
@@ -431,18 +433,29 @@ describe('device mesh drone summaries', () => {
       if (path === '/api/drones') {
         return Response.json({ ok: true, id: 'created-mobile', name: 'Untitled 1' });
       }
-      if (path === '/api/drones/name-from-message') {
-        return await new Promise<Response>((resolve) => {
-          resolveSuggestion = resolve;
-        });
-      }
-      return Response.json({ ok: true, renamed: true });
+      throw new Error(`unexpected loopback request: ${path}`);
     }) as typeof fetch;
     try {
-      const capability = createDroneControlCapability({
-        baseUrl: () => 'http://127.0.0.1:7777',
-        apiToken: 'test',
-      });
+      const capability = createDroneControlCapability(
+        {
+          baseUrl: () => 'http://127.0.0.1:7777',
+          apiToken: 'test',
+        },
+        undefined,
+        {
+          createdDroneAutoRename: {
+            suggestName: async (input) => {
+              suggestions.push(input);
+              return await new Promise<string>((resolve) => {
+                resolveSuggestion = resolve;
+              });
+            },
+            renameDrone: async (input) => {
+              renames.push(input);
+            },
+          },
+        },
+      );
       await expect(
         capability.invoke('drone.create.container', {
           seedAgent: { kind: 'builtin', id: 'codex' },
@@ -460,72 +473,54 @@ describe('device mesh drone summaries', () => {
         },
       });
       expect(requests[0]?.body.autoRenamePrompt).toBeUndefined();
-      expect(requests[1]).toMatchObject({
-        path: '/api/drones/name-from-message',
-        body: {
-          message: 'Review the Android app',
-          source: 'mobile-create-auto-rename',
+      expect(suggestions).toEqual([
+        {
+          prompt: 'Review the Android app',
           droneId: 'created-mobile',
         },
-      });
+      ]);
 
-      resolveSuggestion?.(Response.json({ ok: true, name: 'Review Android App' }));
-      for (let attempt = 0; attempt < 10 && requests.length < 3; attempt += 1) {
+      resolveSuggestion?.('Review Android App');
+      for (let attempt = 0; attempt < 10 && renames.length < 1; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
-      expect(requests[2]).toMatchObject({
-        path: '/api/drones/created-mobile/rename',
-        body: {
-          newName: 'Review Android App',
-          source: 'mobile-create-auto-rename',
-          attempt: 1,
-          suggestedBase: 'Review Android App',
-          expectedName: 'Untitled 1',
-        },
+      expect(renames[0]).toMatchObject({
+        droneId: 'created-mobile',
+        newName: 'Review Android App',
+        source: 'mobile-create-auto-rename',
+        attempt: 1,
+        suggestedBase: 'Review Android App',
+        expectedName: 'Untitled 1',
       });
+      expect(requests).toHaveLength(1);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
   test('chooses a numbered automatic name when the first suggestion is already used', async () => {
-    const originalFetch = globalThis.fetch;
     const renameBodies: any[] = [];
-    globalThis.fetch = (async (input, init) => {
-      const path = new URL(String(input)).pathname;
-      if (path === '/api/drones/name-from-message') {
-        return Response.json({ ok: true, name: 'Review Android App' });
-      }
-      if (path === '/api/drones/drone-1/rename') {
-        const body = JSON.parse(String(init?.body ?? '{}'));
-        renameBodies.push(body);
-        if (renameBodies.length === 1) {
-          return Response.json(
-            { ok: false, error: 'drone already exists: Review Android App' },
-            { status: 409 },
-          );
-        }
-        return Response.json({ ok: true, renamed: true });
-      }
-      return Response.json({ ok: true });
-    }) as typeof fetch;
-    try {
-      await expect(
-        autoRenameCreatedDroneFromPrompt(
-          { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
-          'drone-1',
-          'Review the Android app',
-          'Untitled 1',
-        ),
-      ).resolves.toBe('Review Android App (2)');
-      expect(renameBodies.map((body) => body.newName)).toEqual([
-        'Review Android App',
-        'Review Android App (2)',
-      ]);
-      expect(renameBodies.map((body) => body.expectedName)).toEqual(['Untitled 1', 'Untitled 1']);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    await expect(
+      autoRenameCreatedDroneFromPrompt(
+        {
+          suggestName: async () => 'Review Android App',
+          renameDrone: async (input) => {
+            renameBodies.push(input);
+            if (renameBodies.length === 1) {
+              throw new Error('drone already exists: Review Android App');
+            }
+          },
+        },
+        'drone-1',
+        'Review the Android app',
+        'Untitled 1',
+      ),
+    ).resolves.toBe('Review Android App (2)');
+    expect(renameBodies.map((body) => body.newName)).toEqual([
+      'Review Android App',
+      'Review Android App (2)',
+    ]);
+    expect(renameBodies.map((body) => body.expectedName)).toEqual(['Untitled 1', 'Untitled 1']);
   });
 
   test('keeps a successful create when automatic naming is unavailable', async () => {
@@ -546,10 +541,21 @@ describe('device mesh drone summaries', () => {
       );
     }) as typeof fetch;
     try {
-      const capability = createDroneControlCapability({
-        baseUrl: () => 'http://127.0.0.1:7777',
-        apiToken: 'test',
-      });
+      const capability = createDroneControlCapability(
+        {
+          baseUrl: () => 'http://127.0.0.1:7777',
+          apiToken: 'test',
+        },
+        undefined,
+        {
+          createdDroneAutoRename: {
+            suggestName: async () => {
+              throw new Error('Connect Codex or configure an OpenAI API key in Settings.');
+            },
+            renameDrone: async () => undefined,
+          },
+        },
+      );
       await expect(
         capability.invoke('drone.create.host', {
           seedPrompt: 'Review the Android app',

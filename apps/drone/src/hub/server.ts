@@ -86,7 +86,10 @@ import {
   terminalOutput as droneTerminalOutput,
   terminalPrompt as droneTerminalPrompt,
 } from '../host/api';
-import { suggestDroneNameFromMessage } from './drone-name-from-message';
+import {
+  retryTemporaryNameSuggestion,
+  suggestDroneNameFromMessage,
+} from './drone-name-from-message';
 import { buildAutoRenamedChatCandidate, isGeneratedChatName } from './chat-auto-rename';
 import type {
   AgentApprovalPolicy,
@@ -3906,6 +3909,114 @@ async function logHubLlmStartupSnapshot() {
   });
 }
 
+async function suggestCreatedDroneNameDirect(input: {
+  droneId: string;
+  prompt: string;
+}): Promise<string> {
+  const source = 'mobile-create-auto-rename';
+  const { provider, ...resolved } = await resolveNameSuggestionLlmSettings();
+  if (!resolved.apiKey) {
+    await logProviderApiKeyResolution(
+      'warn',
+      'name-from-message rejected: missing Codex connection and OpenAI key',
+      provider,
+      {
+        source,
+        requestedDroneId: input.droneId,
+        messageLength: input.prompt.length,
+      },
+    );
+    throw new Error('Connect Codex or configure an OpenAI API key in Settings.');
+  }
+  const name = await retryTemporaryNameSuggestion(
+    () =>
+      suggestDroneNameFromMessage(input.prompt, {
+        provider,
+        apiKey: resolved.apiKey!,
+        style: 'display',
+      }),
+    {
+      onRetry: ({ attempt, delayMs, error }) => {
+        hubLog('warn', 'name-from-message temporary failure; retrying', {
+          provider,
+          source,
+          requestedDroneId: input.droneId,
+          attempt,
+          delayMs,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    },
+  );
+  hubLog('info', 'name-from-message suggested', {
+    provider,
+    source,
+    requestedDroneId: input.droneId,
+    suggestedName: name,
+    messageLength: input.prompt.length,
+  });
+  return name;
+}
+
+async function renameCreatedDroneDirect(input: {
+  droneId: string;
+  newName: string;
+  expectedName?: string;
+  source: 'mobile-create-auto-rename';
+  attempt: number;
+  suggestedBase: string;
+}): Promise<void> {
+  const registry: any = await loadRegistry();
+  const found = findDroneIdByRef(registry, input.droneId);
+  if (!found) throw new Error(`unknown drone: ${input.droneId}`);
+
+  const currentEntry =
+    (found.kind === 'real' ? registry?.drones?.[found.id] : registry?.pending?.[found.id]) ?? null;
+  const droneId =
+    normalizeDroneIdentity(currentEntry?.id) || normalizeDroneIdentity(found.id) || found.id;
+  const oldName = String(currentEntry?.name ?? input.droneId).trim() || input.droneId;
+  const newName = normalizeDroneDisplayName(input.newName);
+  if (oldName === newName) return;
+
+  const conflictingReal = Object.entries(registry?.drones ?? {}).find(
+    ([key, entry]: [string, any]) =>
+      (normalizeDroneIdentity(entry?.id) || key) !== droneId &&
+      String(entry?.name ?? '').trim() === newName,
+  );
+  const conflictingPending = Object.entries(registry?.pending ?? {}).find(
+    ([key, entry]: [string, any]) =>
+      (normalizeDroneIdentity(entry?.id) || key) !== droneId &&
+      String(entry?.name ?? '').trim() === newName,
+  );
+  if (conflictingReal || conflictingPending) {
+    throw new Error(`${conflictingPending ? 'pending ' : ''}drone already exists: ${newName}`);
+  }
+
+  hubLog('info', 'drone rename requested', {
+    droneId,
+    oldName,
+    newName,
+    source: input.source,
+    attempt: input.attempt,
+    suggestedBase: input.suggestedBase,
+  });
+  await renameDroneDisplayName({
+    droneId,
+    state: found.kind,
+    name: newName,
+    ...(input.expectedName ? { expectedName: normalizeDroneDisplayName(input.expectedName) } : {}),
+  });
+  notifyDroneRegistryWrite?.();
+  hubLog('info', 'drone renamed', {
+    droneId,
+    oldName,
+    newName,
+    source: input.source,
+    attempt: input.attempt,
+    suggestedBase: input.suggestedBase,
+  });
+}
+
 function normalizeContainerMcpUrl(raw: unknown): string {
   const value = String(raw ?? '').trim();
   if (!value) return '';
@@ -3956,6 +4067,10 @@ export async function startDroneHubApiServer(opts: {
     apiToken,
     localHubBaseUrl: () => `http://127.0.0.1:${actualPort}`,
     ingressPort: opts.deviceMeshIngressPort,
+    createdDroneAutoRename: {
+      suggestName: suggestCreatedDroneNameDirect,
+      renameDrone: renameCreatedDroneDirect,
+    },
   });
 
   const allowedOrigins = new Set<string>();

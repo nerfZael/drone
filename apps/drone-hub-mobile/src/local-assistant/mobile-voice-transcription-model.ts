@@ -3,6 +3,7 @@ export type MobileVoiceRecordingStatus =
   | 'starting'
   | 'recording'
   | 'paused'
+  | 'stopped'
   | 'transcribing';
 
 export const MOBILE_GROQ_TRANSCRIPTION_MODEL = 'whisper-large-v3-turbo';
@@ -70,14 +71,33 @@ export function mobileVoiceStatusLabel(status: MobileVoiceRecordingStatus): stri
   if (status === 'starting') return 'Starting…';
   if (status === 'recording') return 'Recording';
   if (status === 'paused') return 'Paused';
+  if (status === 'stopped') return 'Recording stopped';
   if (status === 'transcribing') return 'Transcribing…';
   return '';
 }
 
-export function shouldDiscardMobileVoiceWhenInactive(
+export function isUnexpectedMobileVoiceRecordingCompletion(input: {
+  status: MobileVoiceRecordingStatus;
+  activeUri: string | null;
+  eventUri: string | null;
+  finished: boolean;
+  failed: boolean;
+  stopPending: boolean;
+}): boolean {
+  return (
+    input.finished &&
+    !input.failed &&
+    !input.stopPending &&
+    (input.status === 'recording' || input.status === 'paused') &&
+    Boolean(input.activeUri) &&
+    input.eventUri === input.activeUri
+  );
+}
+
+export function shouldCancelMobileVoiceWhenInactive(
   status: MobileVoiceRecordingStatus,
 ): boolean {
-  return status === 'recording' || status === 'paused' || status === 'transcribing';
+  return status === 'transcribing';
 }
 
 export function resolveMobileGroqTranscriptionResponse(input: {

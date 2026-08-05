@@ -195,7 +195,8 @@ export function AssistantComposer({
   const voiceActive = voiceStatus !== 'idle';
   const voiceActiveRef = React.useRef(voiceActive);
   voiceActiveRef.current = voiceActive;
-  const voiceCanPauseOrStop = voiceStatus === 'recording' || voiceStatus === 'paused';
+  const voiceCanPause = voiceStatus === 'recording' || voiceStatus === 'paused';
+  const voiceCanStop = voiceCanPause || voiceStatus === 'stopped';
   const attachmentsEnabled = showAttachments && Boolean(onAddAttachment);
   const attachmentActionDisabled =
     attachmentActionsDisabled ||
@@ -226,7 +227,7 @@ export function AssistantComposer({
       voiceActive,
     });
   const canSend =
-    (Boolean(value.trim()) || hasAttachments || voiceCanPauseOrStop) &&
+    (Boolean(value.trim()) || hasAttachments || voiceCanStop) &&
     !sending &&
     editable &&
     !sendBlocked &&
@@ -313,7 +314,7 @@ export function AssistantComposer({
 
   const stopVoiceForAction = React.useCallback(
     async (action: 'append' | 'send'): Promise<string | null> => {
-      if (!voiceCanPauseOrStop || voiceActionInFlight) return null;
+      if (!voiceCanStop || voiceActionInFlight) return null;
       const token = voiceActionTokenRef.current + 1;
       voiceActionTokenRef.current = token;
       setVoiceActionInFlight(true);
@@ -337,7 +338,7 @@ export function AssistantComposer({
         if (voiceActionTokenRef.current === token) setVoiceActionInFlight(false);
       }
     },
-    [onChangeText, stopRecordingForTranscript, voiceActionInFlight, voiceCanPauseOrStop],
+    [onChangeText, stopRecordingForTranscript, voiceActionInFlight, voiceCanStop],
   );
 
   const stopVoiceAndFillDraft = React.useCallback(async () => {
@@ -546,14 +547,14 @@ export function AssistantComposer({
                     label={voiceStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
                     icon={voiceStatus === 'paused' ? Play : Pause}
                     tone={voiceStatus === 'paused' ? 'paused' : 'default'}
-                    disabled={!voiceCanPauseOrStop || voiceActionInFlight}
+                    disabled={!voiceCanPause || voiceActionInFlight}
                     onPress={toggleRecordingPause}
                   />
                   <VoiceIconButton
                     label="Stop recording and transcribe"
                     icon={Square}
                     tone="success"
-                    disabled={!voiceCanPauseOrStop || voiceActionInFlight}
+                    disabled={!voiceCanStop || voiceActionInFlight}
                     onPress={() => void stopVoiceAndFillDraft()}
                   />
                 </View>

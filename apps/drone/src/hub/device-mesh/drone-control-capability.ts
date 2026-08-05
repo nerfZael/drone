@@ -623,7 +623,12 @@ export function createDroneControlCapability(
           body: JSON.stringify(createPayload),
         });
         const createdDroneId = firstText(created?.id, created?.droneId, created?.drone?.id);
-        if (!requestedName && autoRenamePrompt && createdDroneId && options?.createdDroneAutoRename) {
+        if (
+          !requestedName &&
+          autoRenamePrompt &&
+          createdDroneId &&
+          options?.createdDroneAutoRename
+        ) {
           const createdDroneName = firstText(created?.name, created?.drone?.name);
           scheduleCreatedDroneAutoRename(
             options.createdDroneAutoRename,

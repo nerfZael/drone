@@ -92,11 +92,13 @@ export function scheduleCreatedDroneAutoRename(
   prompt: string,
   expectedName?: string,
 ): void {
-  void autoRenameCreatedDroneFromPrompt(operations, droneId, prompt, expectedName).catch((error: any) => {
-    if (/rename precondition failed/i.test(String(error?.message ?? error ?? ''))) return;
-    hubLog('warn', 'mobile-created drone auto-rename failed', {
-      droneId,
-      error: error?.message ?? String(error),
-    });
-  });
+  void autoRenameCreatedDroneFromPrompt(operations, droneId, prompt, expectedName).catch(
+    (error: any) => {
+      if (/rename precondition failed/i.test(String(error?.message ?? error ?? ''))) return;
+      hubLog('warn', 'mobile-created drone auto-rename failed', {
+        droneId,
+        error: error?.message ?? String(error),
+      });
+    },
+  );
 }
