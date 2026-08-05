@@ -14,14 +14,16 @@ export async function permanentlyDeleteCanonicalDrone(opts: {
   droneId: string;
   lifecycleState: 'real' | 'archived';
 }): Promise<PermanentDroneChatCleanupResult> {
+  const transcriptStore = getTranscriptStore();
   await getCanonicalDroneLifecycle(opts.droneId);
   getPromptQueueRepository();
-  const transcriptStore = getTranscriptStore();
   let cleanup: PermanentDroneChatCleanupResult;
   if (transcriptStore) {
     cleanup = await commitPermanentDroneDeletionInStore(opts);
   } else {
-    const removedLifecycle = Boolean(await deleteCanonicalDroneLifecycle(opts.droneId, opts.lifecycleState));
+    const removedLifecycle = Boolean(
+      await deleteCanonicalDroneLifecycle(opts.droneId, opts.lifecycleState),
+    );
     cleanup = removedLifecycle
       ? { ...(await commitPermanentDroneDeletionInStore(opts)), removedLifecycle: true }
       : {

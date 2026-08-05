@@ -66,7 +66,7 @@ import { DEFAULT_DEVICE_MESH_INGRESS_PORT } from './hub/device-mesh/device-mesh-
 import { parseHubRunnerProcessesFromPsOutput, parseHubUiServerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import { startDroneHubApiServer } from './hub/server';
 import {
-  deleteChatFromStore,
+  deleteChatAndSubscriptionsFromStore,
   importChatFromRegistry,
   patchChatMetadataInStore,
   readChatFromStore,
@@ -2986,7 +2986,7 @@ program
       if (d.chats) delete d.chats[chatName];
       (reg as any).drones[key] = d;
     });
-    else await deleteChatFromStore({ droneId, chatName });
+    else await deleteChatAndSubscriptionsFromStore({ droneId, chatName });
     printCommandOutput({ ok: true, name: String(name), chat: chatName, removed: had });
   });
 

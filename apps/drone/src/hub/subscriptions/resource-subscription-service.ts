@@ -122,7 +122,8 @@ export class ResourceSubscriptionService {
           item.resourceType === resource.resourceType &&
           item.resourceId === resource.resourceId,
       );
-    let cursor = existing?.status === 'active' ? existing.cursor : undefined;
+    let cursor =
+      existing?.status === 'active' || existing?.status === 'paused' ? existing.cursor : undefined;
     if (resource.provider === 'drone-hub') {
       const location = this.deps.repository.resolveChatResource(resource.resourceId);
       if (!location) throw new Error(`unknown DroneHub chat resource: ${resource.resourceId}`);
@@ -179,6 +180,20 @@ export class ResourceSubscriptionService {
     return await this.deps.repository.cancel(id, subscriberChatId);
   }
 
+  async pauseForDrone(droneId: string, chatIds: string[]): Promise<ResourceSubscription[]> {
+    return await this.deps.repository.pauseForDrone(droneId, chatIds);
+  }
+
+  async resumeForChat(chatId: string): Promise<ResourceSubscription[]> {
+    await this.resetResumeCursors(this.deps.repository.resumeCandidatesForChat(chatId));
+    return await this.deps.repository.resumeForChat(chatId);
+  }
+
+  async resumeForDrone(droneId: string, chatIds: string[]): Promise<ResourceSubscription[]> {
+    await this.resetResumeCursors(this.deps.repository.resumeCandidatesForDrone(droneId, chatIds));
+    return await this.deps.repository.resumeForDrone(droneId, chatIds);
+  }
+
   async tick(): Promise<void> {
     if (this.running) return;
     this.running = true;
@@ -221,13 +236,48 @@ export class ResourceSubscriptionService {
     return value;
   }
 
+  private async resetResumeCursors(subscriptions: ResourceSubscription[]): Promise<void> {
+    for (const subscription of subscriptions) {
+      if (subscription.provider === 'github') continue;
+      const location = this.deps.repository.resolveChatResource(subscription.resourceId);
+      if (!location) {
+        await this.deps.repository.cancel(subscription.id, subscription.subscriber.chatId);
+        continue;
+      }
+      try {
+        const status = await this.deps.readChatStatus(location);
+        await this.deps.repository.updateSubscriptionCursor(
+          subscription.id,
+          chatCursor(location, status),
+        );
+      } catch (error) {
+        await this.deps.repository.updateSubscriptionCursor(subscription.id, {
+          ...subscription.cursor,
+          targetDroneId: location.droneId,
+          targetChatName: location.chatName,
+          needsBaseline: true,
+          idleArmed: false,
+          idleCauseId: '',
+        });
+        this.deps.log('warn', 'chat subscription resume baseline deferred', {
+          subscriptionId: subscription.id,
+          resourceId: subscription.resourceId,
+          error: errorMessage(error),
+        });
+      }
+    }
+  }
+
   private async pollChats(): Promise<void> {
     const subscriptions = this.deps.repository.listActive('drone-hub');
     for (const subscription of subscriptions) {
       try {
         const location = this.deps.repository.resolveChatResource(subscription.resourceId);
         if (!location) {
-          await this.deps.repository.cancel(subscription.id, subscription.subscriber.chatId);
+          await this.deps.repository.cancelActive(
+            subscription.id,
+            subscription.subscriber.chatId,
+          );
           continue;
         }
         const status = await this.deps.readChatStatus(location);
@@ -395,6 +445,13 @@ export class ResourceSubscriptionService {
       }
       const deliverableBatch = { ...batch, items: deliverableItems };
       await this.deps.repository.updateSubscriberLocation(batch.id, currentSubscriber);
+      if (!this.deps.repository.isBatchProcessing(batch.id)) {
+        this.deps.log('info', 'resource subscription batch stopped before prompt enqueue', {
+          batchId: batch.id,
+          subscriberChatId: currentSubscriber.chatId,
+        });
+        return;
+      }
       const queue = getPromptQueueRepository();
       if (!queue) throw new Error('prompt queue is unavailable');
       const prompt = renderSubscriptionPrompt(deliverableBatch);
@@ -430,7 +487,7 @@ export class ResourceSubscriptionService {
 export async function cancelOrphanedResourceSubscriptions(
   repository: Pick<
     ResourceSubscriptionRepository,
-    'listActive' | 'resolveChatResource' | 'cancel'
+    'listActive' | 'resolveChatResource' | 'cancelActive'
   >,
   log: ResourceSubscriptionServiceDependencies['log'],
 ): Promise<void> {
@@ -442,11 +499,13 @@ export async function cancelOrphanedResourceSubscriptions(
       subscriberExists.set(chatId, Boolean(repository.resolveChatResource(chatId)));
     }
     if (subscriberExists.get(chatId)) continue;
-    await repository.cancel(subscription.id, chatId);
-    log('info', 'cancelled resource subscription for deleted conversation', {
-      subscriptionId: subscription.id,
-      subscriberChatId: chatId,
-    });
+    const cancelled = await repository.cancelActive(subscription.id, chatId);
+    if (cancelled?.status === 'cancelled') {
+      log('info', 'cancelled resource subscription for deleted conversation', {
+        subscriptionId: subscription.id,
+        subscriberChatId: chatId,
+      });
+    }
   }
 }
 
@@ -561,6 +620,9 @@ export function detectChatSubscriptionChanges(
   location: ChatResourceLocation,
   status: ChatSubscriptionStatus,
 ): { cursor: Record<string, any>; events: ResourceEvent[] } {
+  if (subscription.cursor.needsBaseline === true) {
+    return { cursor: chatCursor(location, status), events: [] };
+  }
   const cursor = normalizeChatCursor(subscription.cursor, location, status);
   const events: ResourceEvent[] = [];
   const latestId = String(status.latest?.id ?? '').trim();
