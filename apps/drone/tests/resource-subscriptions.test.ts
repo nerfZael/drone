@@ -31,6 +31,7 @@ const chatSubscription: ResourceSubscription = {
   events: ['chat.idle', 'chat.failed'],
   intent: '',
   status: 'active',
+  pauseReasons: [],
   cursor: {
     targetDroneId: 'drone-b',
     targetChatName: 'default',
@@ -472,13 +473,12 @@ describe('subscription delivery authorization', () => {
         listActive: () => subscriptions,
         resolveChatResource: (chatId) => {
           resolved.push(chatId);
-          return chatId === existingSubscriber.chatId
-            ? { ...existingSubscriber }
-            : null;
+          return chatId === existingSubscriber.chatId ? { ...existingSubscriber } : null;
         },
-        cancel: async (id) => {
+        cancelActive: async (id) => {
           cancelled.push(id);
-          return subscriptions.find((subscription) => subscription.id === id) ?? null;
+          const subscription = subscriptions.find((item) => item.id === id);
+          return subscription ? { ...subscription, status: 'cancelled' as const } : null;
         },
       },
       () => {},
@@ -561,7 +561,9 @@ describe('silent subscription completions', () => {
       output: 'Result: [[NO_REPLY]]',
       silentCompletion: false,
     });
-    expect(normalizeSilentCompletion(true, '[[NO_REPLY]]', { prompt: 'Print the marker.' })).toEqual({
+    expect(
+      normalizeSilentCompletion(true, '[[NO_REPLY]]', { prompt: 'Print the marker.' }),
+    ).toEqual({
       output: '[[NO_REPLY]]',
       silentCompletion: false,
     });

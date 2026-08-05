@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import BetterSqlite3 from 'better-sqlite3';
 
-import type { HubDatabase, HubDatabaseConnection } from '../../src/host/hub-database';
 import { PromptQueueRepository } from '../../src/host/prompt-queue-repository';
 import { ResourceSubscriptionRepository } from '../../src/hub/subscriptions/resource-subscription-repository';
 import { DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS } from '../../src/hub/subscriptions/resource-subscription-types';
+import { memoryHubDatabase } from './helpers/memory-hub-database';
 
 test('deduplicates and batches repository events for the owning conversation', async () => {
   const { database, close } = memoryHubDatabase();
@@ -166,7 +165,7 @@ test('restart recovery does not redeliver a batch whose prompt was already queue
   }
 });
 
-test('cancelling a claimed subscription removes only its item from a mixed batch', async () => {
+test('cancelling a claimed subscription releases the other item from a mixed batch', async () => {
   const { database, close } = memoryHubDatabase();
   try {
     const repository = new ResourceSubscriptionRepository(database);
@@ -238,9 +237,17 @@ test('cancelling a claimed subscription removes only its item from a mixed batch
           .all() as Array<{ state: string; count: number }>,
     );
     assert.deepEqual(Object.fromEntries(states.map((row) => [row.state, Number(row.count)])), {
-      delivered: 1,
       failed: 1,
+      pending: 1,
     });
+    const retry = await repository.claimBatch(
+      { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 },
+      new Date(Date.now() + 2_000),
+    );
+    assert.deepEqual(
+      retry?.items.map((item) => item.subscription.id),
+      remainingItems.map((item) => item.subscription.id),
+    );
   } finally {
     close();
   }
@@ -398,39 +405,6 @@ test('GitHub polling resumes from a fresh cursor after the last watcher is cance
     close();
   }
 });
-
-function memoryHubDatabase(): { database: HubDatabase; close: () => void } {
-  const connection = new BetterSqlite3(':memory:') as HubDatabaseConnection;
-  connection.pragma('foreign_keys = ON');
-  const database: HubDatabase = {
-    path: ':memory:',
-    openedAt: new Date().toISOString(),
-    read(operation) {
-      return operation(connection);
-    },
-    async writeTransaction(_label, operation) {
-      return connection.transaction(() => operation(connection)).immediate();
-    },
-    diagnostics() {
-      return {
-        available: true,
-        path: ':memory:',
-        failureKind: null,
-        unavailableReason: null,
-        openedAt: this.openedAt,
-        schemaVersion: null,
-        appliedMigrationCount: null,
-        journalMode: 'memory',
-        synchronous: 2,
-        busyTimeoutMs: 0,
-        foreignKeys: true,
-        queuedWrites: 0,
-        activeWrite: null,
-      };
-    },
-  };
-  return { database, close: () => connection.close() };
-}
 
 async function appendOpenedEvent(
   repository: ResourceSubscriptionRepository,

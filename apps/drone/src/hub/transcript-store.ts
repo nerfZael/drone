@@ -15,6 +15,12 @@ import type { AgentRunFileChanges } from '@blip/protocol';
 import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
 import { normalizeAgentRunActivity } from './builtin-agent-activity';
 import type { AgentRunFileChangesBaseline } from './run-file-changes';
+import {
+  cancelResourceSubscriptionsForChatWithConnection,
+  cancelResourceSubscriptionsForDroneWithConnection,
+  pauseResourceSubscriptionsForChatWithConnection,
+} from './subscriptions/resource-subscription-lifecycle-repository';
+import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 
 export type StoredTranscriptTurn = {
   at: string;
@@ -917,6 +923,25 @@ function appendChatEvent(
   });
 }
 
+function deleteChatWithConnection(
+  connection: HubDatabaseConnection,
+  opts: { droneId: string; chatName: string },
+): boolean {
+  const info = connection
+    .prepare('DELETE FROM canonical_chats WHERE drone_id = ? AND chat_name = ?')
+    .run(opts.droneId, opts.chatName);
+  connection
+    .prepare(
+      `INSERT OR REPLACE INTO canonical_chat_tombstones (
+        drone_id, chat_name, reason, replacement_chat_name, deleted_at
+      ) VALUES (?, ?, 'deleted', NULL, ?)`,
+    )
+    .run(opts.droneId, opts.chatName, new Date().toISOString());
+  const deleted = Number(info.changes) === 1;
+  if (deleted) appendChatEvent(connection, 'chat.deleted', opts.droneId, opts.chatName, {});
+  return deleted;
+}
+
 export class ChatTranscriptRepository {
   constructor(private readonly database: HubDatabase) {
     database.read((connection) => applyHubDatabaseMigrations(connection, CHAT_STORE_MIGRATIONS, 'chats'));
@@ -1139,6 +1164,7 @@ export class ChatTranscriptRepository {
       if (opts.chatName === 'default') throw new Error('cannot delete default chat');
       const current = this.projectChatWithConnection(connection, opts.droneId, opts.chatName);
       if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
+      cancelResourceSubscriptionsForChatWithConnection(connection, current.id);
       connection.prepare('DELETE FROM canonical_chats WHERE drone_id = ? AND chat_name = ?')
         .run(opts.droneId, opts.chatName);
       connection.prepare(`INSERT OR REPLACE INTO canonical_chat_tombstones (
@@ -1207,6 +1233,7 @@ export class ChatTranscriptRepository {
         deleteAt: opts.deleteAt,
         archiveRetention: opts.archiveRetention,
       };
+      pauseResourceSubscriptionsForChatWithConnection(connection, chat.id, opts.archivedAt);
       connection.prepare(`INSERT INTO canonical_archived_chats (
         drone_id, chat_name, archived_at, delete_at, archive_retention, chat_json, source_hash
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1297,6 +1324,7 @@ export class ChatTranscriptRepository {
     return await this.database.writeTransaction('delete canonical archived chat', (connection) => {
       const record = archivedChatRecord(this.archivedChatRow(connection, opts.droneId, opts.archivedChatName) ?? undefined);
       if (!record) return { available: true, deleted: false, archivedChat: null };
+      cancelResourceSubscriptionsForChatWithConnection(connection, record.chat?.id);
       connection.prepare('DELETE FROM canonical_archived_chats WHERE drone_id = ? AND chat_name = ?')
         .run(opts.droneId, opts.archivedChatName);
       connection.prepare(`INSERT OR REPLACE INTO canonical_archived_chat_tombstones (
@@ -1428,18 +1456,21 @@ export class ChatTranscriptRepository {
   }
 
   async deleteChat(opts: { droneId: string; chatName: string }): Promise<boolean> {
-    return await this.database.writeTransaction('delete canonical chat', (connection) => {
-      const info = connection
-        .prepare('DELETE FROM canonical_chats WHERE drone_id = ? AND chat_name = ?')
-        .run(opts.droneId, opts.chatName);
-      connection.prepare(`INSERT OR REPLACE INTO canonical_chat_tombstones (
-        drone_id, chat_name, reason, replacement_chat_name, deleted_at
-      ) VALUES (?, ?, 'deleted', NULL, ?)`).run(opts.droneId, opts.chatName, new Date().toISOString());
-      if (Number(info.changes) === 1) {
-        appendChatEvent(connection, 'chat.deleted', opts.droneId, opts.chatName, {});
-      }
-      return Number(info.changes) === 1;
-    });
+    return await this.database.writeTransaction('delete canonical chat', (connection) =>
+      deleteChatWithConnection(connection, opts),
+    );
+  }
+
+  async deleteChatAndSubscriptions(opts: { droneId: string; chatName: string }): Promise<boolean> {
+    return await this.database.writeTransaction(
+      'delete canonical chat and subscriptions',
+      (connection) => {
+        const chat = this.projectChatWithConnection(connection, opts.droneId, opts.chatName);
+        if (!chat) return false;
+        cancelResourceSubscriptionsForChatWithConnection(connection, chat.id);
+        return deleteChatWithConnection(connection, opts);
+      },
+    );
   }
 
   async commitPermanentDroneDeletion(opts: {
@@ -1482,6 +1513,21 @@ export class ChatTranscriptRepository {
       const promptsDeleted = count('prompts');
       const alreadyDeleted = Boolean(connection.prepare(`SELECT 1 FROM canonical_drone_chat_tombstones
         WHERE drone_id = ?`).get(opts.droneId));
+
+      const chatIds = (
+        connection
+          .prepare(
+            `SELECT json_extract(metadata_json, '$.id') AS chat_id
+             FROM canonical_chats WHERE drone_id = ?
+             UNION
+             SELECT json_extract(chat_json, '$.id') AS chat_id
+             FROM canonical_archived_chats WHERE drone_id = ?`,
+          )
+          .all(opts.droneId, opts.droneId) as Array<{ chat_id: string | null }>
+      )
+        .map((row) => String(row.chat_id ?? '').trim())
+        .filter(Boolean);
+      cancelResourceSubscriptionsForDroneWithConnection(connection, opts.droneId, chatIds);
 
       connection.prepare(`INSERT OR IGNORE INTO canonical_drone_chat_tombstones (
         drone_id, deleted_at, reason
@@ -2302,6 +2348,7 @@ export async function deleteActiveChatFromStore(opts: {
       deletedChat: current,
       chats: listChatsFromStore({ droneId: opts.droneId }).chats,
     };
+    await cancelResourceSubscriptionsForChat(current);
   }
   await getPromptQueueRepository()?.deleteChat({ droneId: opts.droneId, chatName: opts.chatName });
   return result;
@@ -2350,6 +2397,7 @@ export async function archiveChatInStore(opts: {
       chatEntry: opts.fallbackChat.chatEntry,
     });
   }
+  await pauseResourceSubscriptionsForChat(record.chat);
   return {
     available: true,
     archived: true,
@@ -2411,13 +2459,19 @@ export async function deleteArchivedChatFromStore(opts: {
   archivedChatName: string;
 }): Promise<DeleteArchivedChatStoreResult> {
   const store = repository();
-  if (store) return await store.deleteArchivedChat(opts);
-  const k = key(opts.droneId, opts.archivedChatName);
-  const archivedChat = memoryArchivedChats.get(k) ?? null;
-  if (!archivedChat) return { available: true, deleted: false, archivedChat: null };
-  memoryArchivedChats.delete(k);
-  memoryArchivedChatTombstones.add(k);
-  return { available: true, deleted: true, archivedChat };
+  let result: DeleteArchivedChatStoreResult;
+  if (store) {
+    result = await store.deleteArchivedChat(opts);
+  } else {
+    const k = key(opts.droneId, opts.archivedChatName);
+    const archivedChat = memoryArchivedChats.get(k) ?? null;
+    if (!archivedChat) return { available: true, deleted: false, archivedChat: null };
+    memoryArchivedChats.delete(k);
+    memoryArchivedChatTombstones.add(k);
+    result = { available: true, deleted: true, archivedChat };
+    await cancelResourceSubscriptionsForChat(result.archivedChat?.chat);
+  }
+  return result;
 }
 
 export function listArchivedChatsFromStore(opts: { droneId?: string } = {}): ArchivedChatStoreListResult {
@@ -2542,6 +2596,18 @@ export async function deleteChatFromStore(opts: { droneId: string; chatName: str
   return deleted;
 }
 
+export async function deleteChatAndSubscriptionsFromStore(opts: {
+  droneId: string;
+  chatName: string;
+}): Promise<boolean> {
+  const store = repository();
+  if (store) return await store.deleteChatAndSubscriptions(opts);
+  const chat = readChatFromStore(opts).chat;
+  const deleted = await deleteChatFromStore(opts);
+  if (deleted) await cancelResourceSubscriptionsForChat(chat);
+  return deleted;
+}
+
 export async function commitPermanentDroneDeletionInStore(opts: {
   droneId: string;
   lifecycleState: 'real' | 'archived';
@@ -2553,6 +2619,12 @@ export async function commitPermanentDroneDeletionInStore(opts: {
   const archivedChatKeys = [...memoryArchivedChats.keys()].filter((item) => item.startsWith(prefix));
   const chatTombstoneKeys = [...memoryChatTombstones].filter((item) => item.startsWith(prefix));
   const archivedTombstoneKeys = [...memoryArchivedChatTombstones].filter((item) => item.startsWith(prefix));
+  const chatIds = [
+    ...activeChatKeys.map((item) => memoryChats.get(item)),
+    ...archivedChatKeys.map((item) => memoryArchivedChats.get(item)?.chat),
+  ]
+    .map((chat) => String((chat as any)?.id ?? '').trim())
+    .filter(Boolean);
   const turnsDeleted = [...memoryTurns.entries()]
     .filter(([item]) => item.startsWith(prefix))
     .reduce((total, [, turns]) => total + turns.size, 0);
@@ -2560,6 +2632,7 @@ export async function commitPermanentDroneDeletionInStore(opts: {
     .filter(([item]) => item.startsWith(prefix))
     .reduce((total, [, prompts]) => total + prompts.size, 0);
   const alreadyDeleted = memoryDroneChatTombstones.has(opts.droneId);
+  await cancelResourceSubscriptionsForDrone(opts.droneId, chatIds);
   for (const item of activeChatKeys) memoryChats.delete(item);
   for (const item of [...memoryTurns.keys()].filter((keyValue) => keyValue.startsWith(prefix))) memoryTurns.delete(item);
   for (const item of [...memoryPrompts.keys()].filter((keyValue) => keyValue.startsWith(prefix))) memoryPrompts.delete(item);
@@ -2580,6 +2653,31 @@ export async function commitPermanentDroneDeletionInStore(opts: {
     archivedChatTombstonesDeleted: archivedTombstoneKeys.length,
     promptsDeleted,
   };
+}
+
+async function cancelResourceSubscriptionsForChat(chatEntry: unknown): Promise<void> {
+  const chatId = String((chatEntry as any)?.id ?? '').trim();
+  if (!chatId) return;
+  const database = getHubDatabase();
+  if (!database) return;
+  await new ResourceSubscriptionRepository(database).cancelForChat(chatId);
+}
+
+async function pauseResourceSubscriptionsForChat(chatEntry: unknown): Promise<void> {
+  const chatId = String((chatEntry as any)?.id ?? '').trim();
+  if (!chatId) return;
+  const database = getHubDatabase();
+  if (!database) return;
+  await new ResourceSubscriptionRepository(database).pauseForChat(chatId);
+}
+
+async function cancelResourceSubscriptionsForDrone(
+  droneId: string,
+  chatIds: string[],
+): Promise<void> {
+  const database = getHubDatabase();
+  if (!database) return;
+  await new ResourceSubscriptionRepository(database).cancelForDrone(droneId, chatIds);
 }
 
 export function listChatsFromStore(opts: { droneId: string }): ChatStoreListResult {

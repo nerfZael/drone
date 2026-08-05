@@ -3,10 +3,10 @@ import crypto from 'node:crypto';
 import {
   applyHubDatabaseMigrations,
   type HubDatabase,
-  type HubDatabaseConnection,
   type HubDatabaseMigration,
 } from '../../host/hub-database';
 import {
+  parseResourceSubscriptionPauseReasons,
   resourceRef,
   type ResourceEvent,
   type ResourceSubscription,
@@ -17,6 +17,10 @@ import {
   type ResourceSubscriptionSubscriber,
   type ResourceSubscriptionType,
 } from './resource-subscription-types';
+import {
+  failPendingResourceSubscriptionDeliveries,
+  ResourceSubscriptionLifecycleRepository,
+} from './resource-subscription-lifecycle-repository';
 
 export type ResourceSubscriptionBatchItem = {
   deliveryId: string;
@@ -143,6 +147,18 @@ export const RESOURCE_SUBSCRIPTION_MIGRATIONS: readonly HubDatabaseMigration[] =
       `);
     },
   },
+  {
+    version: 2,
+    name: 'resource subscription pause reasons',
+    migrate(connection) {
+      connection.exec(`
+        ALTER TABLE resource_subscriptions
+          ADD COLUMN pause_reasons_json TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE resource_subscriptions
+          ADD COLUMN delivery_after TEXT;
+      `);
+    },
+  },
 ];
 
 type SubscriptionRow = {
@@ -156,6 +172,8 @@ type SubscriptionRow = {
   events_json: string;
   intent: string;
   status: ResourceSubscriptionStatus;
+  pause_reasons_json: string;
+  delivery_after: string | null;
   cursor_json: string;
   created_at: string;
   updated_at: string;
@@ -188,6 +206,8 @@ type DeliveryJoinRow = EventRow & {
   events_json: string;
   intent: string;
   status: ResourceSubscriptionStatus;
+  pause_reasons_json: string;
+  delivery_after: string | null;
   cursor_json: string;
   subscription_created_at: string;
   subscription_updated_at: string;
@@ -196,6 +216,8 @@ type DeliveryJoinRow = EventRow & {
 };
 
 export class ResourceSubscriptionRepository {
+  private readonly lifecycleRepository: ResourceSubscriptionLifecycleRepository;
+
   constructor(private readonly database: HubDatabase) {
     this.database.read((connection) =>
       applyHubDatabaseMigrations(
@@ -204,6 +226,7 @@ export class ResourceSubscriptionRepository {
         'resource-subscriptions',
       ),
     );
+    this.lifecycleRepository = new ResourceSubscriptionLifecycleRepository(database);
   }
 
   resolveChatResource(resourceIdRaw: string): ChatResourceLocation | null {
@@ -246,7 +269,7 @@ export class ResourceSubscriptionRepository {
         .prepare(
           `
           SELECT * FROM resource_subscriptions
-          WHERE subscriber_chat_id = ? ${includeInactive ? '' : "AND status = 'active'"}
+          WHERE subscriber_chat_id = ? ${includeInactive ? '' : "AND status IN ('active', 'paused')"}
           ORDER BY updated_at DESC, id DESC
         `,
         )
@@ -298,12 +321,12 @@ export class ResourceSubscriptionRepository {
         .get(input.subscriber.chatId, input.provider, input.resourceType, input.resourceId) as
         | SubscriptionRow
         | undefined;
-      if (!current || current.status !== 'active') {
+      if (!current || (current.status !== 'active' && current.status !== 'paused')) {
         const count = connection
           .prepare(
             `
             SELECT COUNT(*) AS count FROM resource_subscriptions
-            WHERE subscriber_chat_id = ? AND status = 'active'
+            WHERE subscriber_chat_id = ? AND status IN ('active', 'paused')
           `,
           )
           .get(input.subscriber.chatId) as { count: number };
@@ -331,21 +354,33 @@ export class ResourceSubscriptionRepository {
             )
             .get(input.initialPollCursor.resourceId, input.initialPollCursor.resourceId)
         : false;
+      const nextStatus = current?.status === 'paused' ? 'paused' : 'active';
+      const pauseReasons =
+        current?.status === 'paused'
+          ? parseResourceSubscriptionPauseReasons(current.pause_reasons_json)
+          : [];
       connection
         .prepare(
           `
           INSERT INTO resource_subscriptions (
             id, subscriber_chat_id, subscriber_drone_id, subscriber_chat_name,
             provider, resource_type, resource_id, events_json, intent, status,
-            cursor_json, created_at, updated_at, completed_at, last_error
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, NULL)
+            pause_reasons_json, delivery_after, cursor_json, created_at, updated_at,
+            completed_at, last_error
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL)
           ON CONFLICT (subscriber_chat_id, provider, resource_type, resource_id)
           DO UPDATE SET
             subscriber_drone_id = excluded.subscriber_drone_id,
             subscriber_chat_name = excluded.subscriber_chat_name,
             events_json = excluded.events_json,
             intent = excluded.intent,
-            status = 'active',
+            status = excluded.status,
+            pause_reasons_json = excluded.pause_reasons_json,
+            delivery_after = CASE
+              WHEN resource_subscriptions.status = 'paused'
+                THEN resource_subscriptions.delivery_after
+              ELSE excluded.delivery_after
+            END,
             cursor_json = excluded.cursor_json,
             updated_at = excluded.updated_at,
             completed_at = NULL,
@@ -362,6 +397,8 @@ export class ResourceSubscriptionRepository {
           input.resourceId,
           JSON.stringify(input.events),
           input.intent,
+          nextStatus,
+          JSON.stringify(pauseReasons),
           JSON.stringify(input.cursor ?? parseObject(current?.cursor_json)),
           createdAt,
           now,
@@ -434,37 +471,90 @@ export class ResourceSubscriptionRepository {
   }
 
   async cancel(id: string, subscriberChatId: string): Promise<ResourceSubscription | null> {
+    return await this.cancelWithStatusGuard(id, subscriberChatId, false);
+  }
+
+  async cancelActive(id: string, subscriberChatId: string): Promise<ResourceSubscription | null> {
+    return await this.cancelWithStatusGuard(id, subscriberChatId, true);
+  }
+
+  private async cancelWithStatusGuard(
+    id: string,
+    subscriberChatId: string,
+    activeOnly: boolean,
+  ): Promise<ResourceSubscription | null> {
     const now = new Date().toISOString();
     return await this.database.writeTransaction('cancel resource subscription', (connection) => {
-      connection
+      const updated = connection
         .prepare(
           `
           UPDATE resource_subscriptions
-          SET status = 'cancelled', completed_at = ?, updated_at = ?
-          WHERE id = ? AND subscriber_chat_id = ? AND status != 'cancelled'
+          SET status = 'cancelled', pause_reasons_json = '[]', completed_at = ?, updated_at = ?
+          WHERE id = ? AND subscriber_chat_id = ?
+            ${activeOnly ? "AND status = 'active'" : "AND status != 'cancelled'"}
         `,
         )
         .run(now, now, id, subscriberChatId);
-      connection
-        .prepare(
-          `
-          UPDATE subscription_deliveries
-          SET state = 'failed', batch_id = NULL, last_error = 'subscription cancelled',
-            updated_at = ?
-          WHERE subscription_id = ? AND state IN ('pending', 'processing')
-            AND EXISTS (
-              SELECT 1 FROM resource_subscriptions s
-              WHERE s.id = subscription_deliveries.subscription_id
-                AND s.subscriber_chat_id = ? AND s.status = 'cancelled'
-            )
-        `,
-        )
-        .run(now, id, subscriberChatId);
       const row = connection
         .prepare('SELECT * FROM resource_subscriptions WHERE id = ? AND subscriber_chat_id = ?')
         .get(id, subscriberChatId) as SubscriptionRow | undefined;
+      if (
+        Number(updated.changes ?? 0) === 1 ||
+        (!activeOnly && row?.status === 'cancelled')
+      ) {
+        failPendingResourceSubscriptionDeliveries(
+          connection,
+          id,
+          'subscription cancelled',
+          now,
+        );
+      }
       return subscriptionFromRow(row);
     });
+  }
+
+  async pauseForChat(chatIdRaw: string): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(await this.lifecycleRepository.pauseForChat(chatIdRaw));
+  }
+
+  async pauseForDrone(droneIdRaw: string, chatIdsRaw: string[]): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(
+      await this.lifecycleRepository.pauseForDrone(droneIdRaw, chatIdsRaw),
+    );
+  }
+
+  resumeCandidatesForChat(chatIdRaw: string): ResourceSubscription[] {
+    return this.subscriptionsForIds(this.lifecycleRepository.resumeCandidatesForChat(chatIdRaw));
+  }
+
+  resumeCandidatesForDrone(droneIdRaw: string, chatIdsRaw: string[]): ResourceSubscription[] {
+    return this.subscriptionsForIds(
+      this.lifecycleRepository.resumeCandidatesForDrone(droneIdRaw, chatIdsRaw),
+    );
+  }
+
+  async resumeForChat(chatIdRaw: string): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(await this.lifecycleRepository.resumeForChat(chatIdRaw));
+  }
+
+  async resumeForDrone(droneIdRaw: string, chatIdsRaw: string[]): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(
+      await this.lifecycleRepository.resumeForDrone(droneIdRaw, chatIdsRaw),
+    );
+  }
+
+  async cancelForChat(chatIdRaw: string): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(await this.lifecycleRepository.cancelForChat(chatIdRaw));
+  }
+
+  async cancelForDrone(droneIdRaw: string, chatIdsRaw: string[]): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(
+      await this.lifecycleRepository.cancelForDrone(droneIdRaw, chatIdsRaw),
+    );
+  }
+
+  private subscriptionsForIds(ids: string[]): ResourceSubscription[] {
+    return ids.map((id) => this.get(id)).filter(isPresent);
   }
 
   async updateSubscriptionCursor(id: string, cursor: Record<string, unknown>): Promise<void> {
@@ -560,6 +650,7 @@ export class ResourceSubscriptionRepository {
           `
           SELECT * FROM resource_subscriptions
           WHERE status = 'active' AND provider = ?
+            AND (delivery_after IS NULL OR ? >= delivery_after)
             AND (
               (resource_type = ? AND resource_id = ?)
               OR (resource_type = 'repository' AND resource_id = ?)
@@ -568,6 +659,7 @@ export class ResourceSubscriptionRepository {
         )
         .all(
           event.provider,
+          event.occurredAt,
           event.resourceType,
           event.resourceId,
           event.parentResourceId ?? '',
@@ -591,9 +683,9 @@ export class ResourceSubscriptionRepository {
           .prepare(
             `
             UPDATE resource_subscriptions
-            SET status = 'completed', completed_at = ?, updated_at = ?
+            SET status = 'completed', pause_reasons_json = '[]', completed_at = ?, updated_at = ?
             WHERE provider = 'github' AND resource_type = 'pull_request'
-              AND resource_id = ? AND status = 'active'
+              AND resource_id = ? AND status IN ('active', 'paused')
           `,
           )
           .run(now, now, event.resourceId);
@@ -679,6 +771,16 @@ export class ResourceSubscriptionRepository {
           )
           .run(location.droneId, location.chatName, now, location.chatId);
       },
+    );
+  }
+
+  isBatchProcessing(batchId: string): boolean {
+    return this.database.read((connection) =>
+      Boolean(
+        connection
+          .prepare("SELECT 1 FROM subscription_batches WHERE id = ? AND state = 'processing'")
+          .get(batchId),
+      ),
     );
   }
 
@@ -788,12 +890,7 @@ export class ResourceSubscriptionRepository {
           LIMIT 20
         `,
         )
-        .all(
-          cutoff,
-          nowIso,
-          hourAgo,
-          settings.maxAutomatedRunsPerConversationPerHour,
-        ) as Array<{
+        .all(cutoff, nowIso, hourAgo, settings.maxAutomatedRunsPerConversationPerHour) as Array<{
         subscriber_chat_id: string;
         subscriber_drone_id: string;
         subscriber_chat_name: string;
@@ -814,6 +911,8 @@ export class ResourceSubscriptionRepository {
               s.events_json,
               s.intent,
               s.status,
+              s.pause_reasons_json,
+              s.delivery_after,
               s.cursor_json,
               s.created_at AS subscription_created_at,
               s.updated_at AS subscription_updated_at,
@@ -886,6 +985,8 @@ export class ResourceSubscriptionRepository {
               events_json: row.events_json,
               intent: row.intent,
               status: row.status,
+              pause_reasons_json: row.pause_reasons_json,
+              delivery_after: row.delivery_after,
               cursor_json: row.cursor_json,
               created_at: row.subscription_created_at,
               updated_at: row.subscription_updated_at,
@@ -917,7 +1018,7 @@ export class ResourceSubscriptionRepository {
           `
           UPDATE subscription_batches
           SET state = 'delivered', delivered_at = ?, updated_at = ?, last_error = NULL
-          WHERE id = ?
+          WHERE id = ? AND state = 'processing'
         `,
         )
         .run(now, now, batchId);
@@ -1087,6 +1188,7 @@ function subscriptionFromRow(row: SubscriptionRow | undefined): ResourceSubscrip
     events: parseEvents(row.events_json),
     intent: row.intent,
     status: row.status,
+    pauseReasons: parseResourceSubscriptionPauseReasons(row.pause_reasons_json),
     cursor: parseObject(row.cursor_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
