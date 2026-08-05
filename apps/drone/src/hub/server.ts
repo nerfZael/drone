@@ -396,6 +396,7 @@ import {
   resolveLlmSettingsResponse,
   resolveSpeechSettingsResponse,
   resolveUiPreferencesSettingsResponse,
+  resolveUserContextSettingsResponse,
   startCodexLogin,
   upsertStoredDeleteActionSettings,
   upsertStoredFilesystemSettings,
@@ -404,6 +405,7 @@ import {
   upsertStoredProviderApiKey,
   upsertStoredUiPreferencesSettings,
   updatePinnedDronePreference,
+  updateStoredUserTimeZone,
   type LlmProviderId,
   type StoredApiKeyProviderId,
   type UiPreferencesSettings,
@@ -5250,6 +5252,7 @@ export async function startDroneHubApiServer(opts: {
     resolveUiPreferencesSettingsResponse,
     upsertStoredUiPreferencesSettings,
     updatePinnedDronePreference,
+    resolveUserContextSettingsResponse,
     notifyPinnedDronesChanged: () => {
       const at = nowIso();
       assistantService.emitExternalUiAction({ type: 'reload_pinned_drones', at });
@@ -5286,6 +5289,7 @@ export async function startDroneHubApiServer(opts: {
     submitAssistantPrompt,
     validateAssistantPromptImages,
     saveAssistantArtifactUploads,
+    updateStoredUserTimeZone,
   });
   registerAgentRunDiffRoutes(apiRouter);
   registerNativeChatRoutes(apiRouter, {
@@ -5718,6 +5722,7 @@ export async function startDroneHubApiServer(opts: {
     shouldAutoRenameChatOnPrompt,
     stopChatResponse,
     stopSingleDroneChatActivity,
+    updateStoredUserTimeZone,
     updateChatInStore,
     waitForDroneDaemonReady,
     withLockedDroneContainer,

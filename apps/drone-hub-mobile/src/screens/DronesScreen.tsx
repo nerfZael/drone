@@ -44,6 +44,7 @@ import {
 import { DroneRuntimeIndicator } from '../drones/NewDroneRuntimePicker';
 import { DroneBranchIndicator } from '../drones/DroneBranchIndicator';
 import { ChatSubscriptionIndicator } from '../drones/ChatSubscriptionIndicator';
+import { clientTimeZone } from '../drones/client-time-zone';
 import {
   normalizeMobileChatSubscriptions,
   type MobileChatSubscription,
@@ -1072,11 +1073,13 @@ export function DronesScreen({
     prompt: string;
     attachments: readonly MobileChatAttachment[];
   }) => {
+    const userTimeZone = clientTimeZone();
     if (input.destinationId === mesh.identity?.id) {
       return await requestDroneControl(input.destinationId, 'chat.prompt', {
         droneId: input.droneId,
         chatName: input.chatName,
         prompt: input.prompt,
+        ...(userTimeZone ? { userTimeZone } : {}),
         ...(input.attachments.length > 0
           ? { attachments: inlinePromptAttachments(input.attachments) }
           : {}),
@@ -1100,6 +1103,7 @@ export function DronesScreen({
         droneId: input.droneId,
         chatName: input.chatName,
         prompt: input.prompt,
+        ...(userTimeZone ? { userTimeZone } : {}),
         ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
       });
     } catch (error) {

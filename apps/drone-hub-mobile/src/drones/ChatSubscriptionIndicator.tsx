@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii } from '../theme';
 import {
   mobileChatSubscriptionEventLabel,
+  mobileChatSubscriptionNextRunLabel,
   mobileChatSubscriptionResourceLabel,
   mobileChatSubscriptionSummary,
   type MobileChatSubscription,
@@ -77,19 +78,29 @@ export function ChatSubscriptionIndicator({
               </Pressable>
             </View>
             <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-              {subscriptions.map((subscription) => (
-                <View key={subscription.id} style={styles.card}>
-                  <Text style={styles.resource}>
-                    {mobileChatSubscriptionResourceLabel(subscription)}
-                  </Text>
-                  <Text style={styles.events}>
-                    {subscription.events.map(mobileChatSubscriptionEventLabel).join(', ')}
-                  </Text>
-                  {subscription.intent ? (
-                    <Text style={styles.intent}>{subscription.intent}</Text>
-                  ) : null}
-                </View>
-              ))}
+              {subscriptions.map((subscription) => {
+                const nextRun = mobileChatSubscriptionNextRunLabel(subscription);
+                return (
+                  <View key={subscription.id} style={styles.card}>
+                    <Text style={styles.resource}>
+                      {mobileChatSubscriptionResourceLabel(subscription)}
+                    </Text>
+                    {subscription.resourceType === 'cron' &&
+                    subscription.resourceConfig?.expression ? (
+                      <Text numberOfLines={1} style={styles.cronExpression}>
+                        Cron · {subscription.resourceConfig.expression}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.events}>
+                      {subscription.events.map(mobileChatSubscriptionEventLabel).join(', ')}
+                    </Text>
+                    {nextRun ? <Text style={styles.nextRun}>{nextRun}</Text> : null}
+                    {subscription.intent ? (
+                      <Text style={styles.intent}>{subscription.intent}</Text>
+                    ) : null}
+                  </View>
+                );
+              })}
             </ScrollView>
           </View>
         </View>
@@ -164,6 +175,14 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   resource: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  cronExpression: {
+    color: colors.mutedDim,
+    fontFamily: 'monospace',
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 4,
+  },
   events: { color: colors.mutedDim, fontSize: 10, lineHeight: 15, marginTop: 4 },
+  nextRun: { color: colors.mutedDim, fontSize: 10, lineHeight: 15, marginTop: 3 },
   intent: { color: colors.muted, fontSize: 11, lineHeight: 16, marginTop: 8 },
 });

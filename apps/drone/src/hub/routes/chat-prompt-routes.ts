@@ -53,6 +53,7 @@ type ChatPromptRouteDependencyName =
   | 'resolveDroneOrRespond'
   | 'shouldAutoRenameChatOnPrompt'
   | 'stopChatResponse'
+  | 'updateStoredUserTimeZone'
   | 'waitForDroneDaemonReady'
   | 'withLockedDroneContainer';
 
@@ -107,6 +108,7 @@ export function createChatPromptRouteHandler(
     resolveDroneOrRespond,
     shouldAutoRenameChatOnPrompt,
     stopChatResponse,
+    updateStoredUserTimeZone,
     waitForDroneDaemonReady,
     withLockedDroneContainer,
   } = deps;
@@ -141,6 +143,10 @@ export function createChatPromptRouteHandler(
           });
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
+        }
+
+        if (body?.userTimeZone != null) {
+          await updateStoredUserTimeZone(body.userTimeZone).catch(() => undefined);
         }
 
         let prompt = String(body?.prompt ?? '').trim();

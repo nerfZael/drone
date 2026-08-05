@@ -33,7 +33,7 @@ export const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY =
   'When you send a drone chat message and need the result later, call subscribe_to_chats_idle on the target chat. This returns immediately so you can continue other work. If there is nothing else to do, end your turn; the system will resume this thread when the subscribed chats become idle.';
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
-  'When you start asynchronous work and need the result later, use subscribe_to_resource_events for chat idle or failure events and GitHub pull-request events. It returns immediately; end your turn when there is nothing else to do, and the system will resume this conversation when subscribed events arrive.';
+  'When you start asynchronous work and need the result later, use subscribe_to_resource_events for chat idle, failure, or GitHub pull-request events. Use subscribe_to_cron for recurring time-based work. These tools return immediately; end your turn when there is nothing else to do, and the system will resume this conversation when subscribed events arrive.';
 export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
   'Use list_targets to discover the workspaces enabled for this chat, including its optional private Artifacts workspace. Use set_target to choose the default workspace before a sequence of file operations, or pass target explicitly on an individual workspace tool. When two or more workspaces are available, use transfer_files to copy a file or folder directly between them.';
 export const ASSISTANT_SINGLE_TARGET_PROMPT_LINE =
@@ -288,6 +288,12 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     description: 'Resume this conversation when selected DroneHub chat or GitHub events occur.',
   },
   {
+    name: 'subscribe_to_cron',
+    label: 'Subscribe to cron',
+    category: 'chats',
+    description: 'Resume this conversation on a durable recurring cron schedule.',
+  },
+  {
     name: 'list_resource_subscriptions',
     label: 'List resource subscriptions',
     category: 'chats',
@@ -414,6 +420,7 @@ const DRONE_HUB_MCP_TOOL_NAMES = new Set([
   'list_chat_idle_subscriptions',
   'cancel_chat_idle_subscription',
   'subscribe_to_resource_events',
+  'subscribe_to_cron',
   'list_resource_subscriptions',
   'get_resource_subscription',
   'update_resource_subscription',

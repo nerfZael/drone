@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { normalizeCronSubscription } from '../../src/hub/subscriptions/cron-subscription';
 import { ResourceSubscriptionRepository } from '../../src/hub/subscriptions/resource-subscription-repository';
 import {
   detectChatSubscriptionChanges,
@@ -254,6 +255,47 @@ test('restoring a paused GitHub subscription skips archived-time events', async 
       )?.items.length,
       1,
     );
+  } finally {
+    close();
+  }
+});
+
+test('restoring a paused cron subscription schedules only the next future occurrence', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    const archivedAt = new Date(Date.now() - 60 * 60 * 1_000);
+    const schedule = normalizeCronSubscription('* * * * *', 'UTC', archivedAt);
+    const created = await repository.upsert({
+      subscriber: { chatId: 'subscriber-chat', droneId: 'drone-a', chatName: 'default' },
+      provider: 'drone-hub',
+      resourceType: 'cron',
+      resourceId: schedule.resourceId,
+      resourceConfig: schedule.resourceConfig,
+      events: ['cron.triggered'],
+      intent: 'Run the scheduled check.',
+      nextEventAt: schedule.nextEventAt,
+      maxActive: 50,
+    });
+    await repository.pauseForChat('subscriber-chat');
+    let chatStatusReads = 0;
+    const service = new ResourceSubscriptionService({
+      repository,
+      readChatStatus: async () => {
+        chatStatusReads += 1;
+        return { idle: true, reason: 'idle', latest: null };
+      },
+      wakePromptQueue: () => {},
+      log: () => {},
+    });
+
+    const resumedAfter = Date.now();
+    await service.resumeForChat('subscriber-chat');
+    const resumed = repository.get(created.subscription.id)!;
+    assert.equal(resumed.status, 'active');
+    assert.equal(chatStatusReads, 0);
+    assert.ok(Date.parse(resumed.nextEventAt ?? '') > resumedAfter);
+    assert.deepEqual(repository.listDueCron(new Date()), []);
   } finally {
     close();
   }

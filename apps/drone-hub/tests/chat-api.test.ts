@@ -126,6 +126,9 @@ describe('chat api request scopes', () => {
 
     expect(body.promptId).toBe('optimistic-prompt-1');
     expect(body.submittedAt).toBe('2026-07-24T12:34:56.000Z');
+    expect(body.userTimeZone).toBe(
+      new Intl.DateTimeFormat('en-US').resolvedOptions().timeZone,
+    );
     expect(body.autoRenameHandledByClient).toBe(true);
     expect(body.deliveryMode).toBe('asap');
   });

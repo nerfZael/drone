@@ -5,11 +5,12 @@ export const RESOURCE_SUBSCRIPTION_EVENTS = [
   'pull_request.comment.created',
   'pull_request.merged',
   'pull_request.closed',
+  'cron.triggered',
 ] as const;
 
 export type ResourceSubscriptionEventType = (typeof RESOURCE_SUBSCRIPTION_EVENTS)[number];
 export type ResourceSubscriptionProvider = 'drone-hub' | 'github';
-export type ResourceSubscriptionType = 'chat' | 'repository' | 'pull_request';
+export type ResourceSubscriptionType = 'chat' | 'repository' | 'pull_request' | 'cron';
 export type ResourceSubscriptionStatus = 'active' | 'completed' | 'cancelled' | 'paused';
 export const RESOURCE_SUBSCRIPTION_PAUSE_REASONS = [
   'subscriber_chat_archived',
@@ -49,11 +50,13 @@ export type ResourceSubscription = {
   resourceType: ResourceSubscriptionType;
   resourceId: string;
   resourceRef: string;
+  resourceConfig: Record<string, unknown>;
   events: ResourceSubscriptionEventType[];
   intent: string;
   status: ResourceSubscriptionStatus;
   pauseReasons: ResourceSubscriptionPauseReason[];
   cursor: Record<string, unknown>;
+  nextEventAt: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;

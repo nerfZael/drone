@@ -240,6 +240,25 @@ async function requestJson(pathname: string, init: RequestInit = {}, timeoutMs =
   }
 }
 
+function localMachineTimeZone(): string {
+  try {
+    return new Intl.DateTimeFormat('en-US').resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+async function defaultCronTimeZone(): Promise<string> {
+  try {
+    const response = await requestJson('/api/settings/user-context', { method: 'GET' });
+    const timeZone = cleanString(response?.userContext?.timeZone);
+    if (timeZone) return timeZone;
+  } catch {
+    // Standalone MCP clients may connect to an older or temporarily unavailable Hub.
+  }
+  return localMachineTimeZone();
+}
+
 function toolResult(data: Record<string, unknown>): any {
   return {
     content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
@@ -1969,6 +1988,34 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     const response = await requestJson('/api/resource-subscriptions', {
       method: 'POST',
       body: JSON.stringify({ ...args, subscriber }),
+    });
+    return toolResult({
+      ok: true,
+      created: response?.created === true,
+      subscription: mcpSubscription(response?.subscription),
+    });
+  });
+
+  server.registerTool('subscribe_to_cron', {
+    title: 'Subscribe to cron',
+    description:
+      'Durably resume this conversation on a recurring five-field cron schedule. The minimum frequency is once per minute. If timeZone is omitted, DroneHub uses the latest timezone reported by the user interface, then the MCP host machine timezone, then UTC. An explicit timeZone always wins. Missed occurrences are coalesced, and delivery can be delayed by batching, queue load, or rate limits. The subscription remains active until cancelled.',
+    inputSchema: {
+      expression: z.string().min(1).max(200),
+      timeZone: z
+        .string()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe('Optional IANA timezone. Omit it to use the user interface timezone.'),
+      intent: z.string().min(1).max(2_000),
+    },
+  }, async (args) => {
+    const subscriber = subscriptionSubscriber(context);
+    const timeZone = cleanString(args.timeZone) || (await defaultCronTimeZone());
+    const response = await requestJson('/api/resource-subscriptions/cron', {
+      method: 'POST',
+      body: JSON.stringify({ ...args, timeZone, subscriber }),
     });
     return toolResult({
       ok: true,

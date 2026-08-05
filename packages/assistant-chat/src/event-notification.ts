@@ -208,6 +208,7 @@ export function eventNotificationResourceTypeLabel(resourceTypeRaw: unknown): st
   if (resourceType === 'pull_request') return 'Pull request';
   if (resourceType === 'repository') return 'Repository';
   if (resourceType === 'chat') return 'Chat';
+  if (resourceType === 'cron') return 'Schedule';
   return resourceType.replace(/_/g, ' ') || 'Resource';
 }
 
@@ -220,6 +221,7 @@ export function eventNotificationEventLabel(eventTypeRaw: unknown): string {
     'pull_request.comment.created': 'PR comment added',
     'pull_request.merged': 'PR merged',
     'pull_request.closed': 'PR closed',
+    'cron.triggered': 'Scheduled run',
   };
   return (
     labels[eventType] ||
@@ -235,8 +237,24 @@ export function eventNotificationEventLabel(eventTypeRaw: unknown): string {
 export function eventNotificationResourceLabel(input: {
   resourceType?: unknown;
   resourceId?: unknown;
+  providerContentText?: unknown;
 }): string {
   const type = eventNotificationResourceTypeLabel(input.resourceType);
+  if (String(input.resourceType ?? '').trim() === 'cron') {
+    try {
+      const content = JSON.parse(String(input.providerContentText ?? '')) as Record<
+        string,
+        unknown
+      >;
+      const description = String(content?.description ?? '').trim();
+      const expression = String(content?.expression ?? '').trim();
+      const timeZone = String(content?.timeZone ?? '').trim();
+      const schedule = [description || expression, timeZone].filter(Boolean).join(' · ');
+      if (schedule) return `${type} · ${schedule}`;
+    } catch {
+      // Fall back to the resource ID for legacy or truncated notifications.
+    }
+  }
   const id = String(input.resourceId ?? '').trim();
   return id ? `${type} · ${id}` : type;
 }
