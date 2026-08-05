@@ -596,8 +596,10 @@ describe('mobile sidebar presentation', () => {
       pinnedSelectionStart,
     );
     const pinnedSelectionSource = drawerSource.slice(pinnedSelectionStart, pinnedSelectionEnd);
-    expect(pinnedSelectionSource).not.toContain('setActiveRepoId');
+    expect(pinnedSelectionSource).toContain('const repoId = resolveDroneRepoId(droneId)');
+    expect(pinnedSelectionSource).toContain('if (repoId) setActiveRepoId(repoId)');
     expect(pinnedSelectionSource).toContain('onSelectDroneChat?.(droneId, chatName)');
+    expect(drawerSource).toContain('const repoId = resolveDroneRepoId(activeDroneId)');
     expect(dronesSource).toContain('onTogglePinned: () =>');
     expect(dronesSource).toContain('void setDronePinned(');
     expect(shellSource).toContain("id: 'toggle-pin'");

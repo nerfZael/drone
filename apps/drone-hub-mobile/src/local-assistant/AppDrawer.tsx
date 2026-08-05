@@ -1490,12 +1490,24 @@ function AppDrawerView({
     () => new Map(droneGroups.map((group) => [group.repoPath, group.label])),
     [droneGroups],
   );
+  const resolveDroneRepoId = React.useCallback(
+    (droneId: string): string | null => {
+      const drone = drones.find((item) => item.id === droneId);
+      if (!drone) return null;
+      return (
+        droneGroups.find((group) => group.repoPath === drone.repoPath)?.id ?? null
+      );
+    },
+    [droneGroups, drones],
+  );
   const selectPinnedDroneChat = React.useCallback(
     (droneId: string, chatName: string) => {
       setSelectedContainerDroneId('');
+      const repoId = resolveDroneRepoId(droneId);
+      if (repoId) setActiveRepoId(repoId);
       onSelectDroneChat?.(droneId, chatName);
     },
-    [onSelectDroneChat],
+    [onSelectDroneChat, resolveDroneRepoId],
   );
   const openChatActions = React.useCallback(
     (target: DrawerChatActionTarget) => {
@@ -1640,6 +1652,11 @@ function AppDrawerView({
   React.useEffect(() => {
     setActiveRepoId(null);
   }, [activeDeviceId]);
+  React.useEffect(() => {
+    if (!activeDroneId) return;
+    const repoId = resolveDroneRepoId(activeDroneId);
+    if (repoId) setActiveRepoId(repoId);
+  }, [activeDeviceId, activeDroneId, resolveDroneRepoId]);
   const listStatus =
     dronesLoading && drones.length === 0 ? (
       <View

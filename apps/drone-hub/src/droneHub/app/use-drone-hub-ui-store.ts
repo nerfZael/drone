@@ -1290,6 +1290,7 @@ export function useDroneSidebarUiState() {
       homeOpen: s.homeOpen,
       selectedDrone: s.selectedDrone,
       selectedChat: s.selectedChat,
+      lastChatSelectionByRepoPath: s.lastChatSelectionByRepoPath,
       selectedGroupMultiChat: s.selectedGroupMultiChat,
       sidebarReposCollapsed: s.sidebarReposCollapsed,
       sidebarAutoMinimize: s.sidebarAutoMinimize,

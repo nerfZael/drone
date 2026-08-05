@@ -96,6 +96,16 @@ describe('multi-chat drone disclosure', () => {
     expect(source.match(/onSelectDroneContainer\(drone(?:Id|\.id)\);/g)).toHaveLength(2);
     expect(source).toContain('const showChatRows = hasChatSection && chatSectionExpanded;');
     expect(source).toContain('{hasChatSection && chatSectionExpanded ? (');
+    const containerSelectionStart = source.indexOf('const selectGroupedDroneContainer');
+    const containerSelectionEnd = source.indexOf(
+      'const focusGroupedDroneChat',
+      containerSelectionStart,
+    );
+    const containerSelectionSource = source.slice(
+      containerSelectionStart,
+      containerSelectionEnd,
+    );
+    expect(containerSelectionSource).not.toContain('onSetDroneSelectionFromFolder');
   });
 
   test('exposes the disclosure state accessibly with the shared runtime icon', () => {
