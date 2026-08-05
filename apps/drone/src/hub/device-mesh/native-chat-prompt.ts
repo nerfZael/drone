@@ -6,6 +6,7 @@ export async function submitNativeChatPrompt(
   prompt: string,
   attachments: Array<{ name: string; mime: string; dataBase64: string }> = [],
   deliveryMode?: 'queue' | 'asap',
+  userTimeZone?: string,
 ): Promise<any> {
   const response = await fetch(
     new URL(
@@ -26,6 +27,7 @@ export async function submitNativeChatPrompt(
           mime: attachment.mime,
           dataBase64: attachment.dataBase64,
         })),
+        ...(userTimeZone ? { userTimeZone } : {}),
         ...(deliveryMode ? { deliveryMode } : {}),
       }),
     },

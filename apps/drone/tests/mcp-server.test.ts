@@ -303,6 +303,125 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('creates cron subscriptions in the timezone last reported by the user interface', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-cron-subscription-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      let requestBody: any = null;
+      let userContextRequests = 0;
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
+        );
+        if (url.pathname === '/api/settings/user-context') {
+          userContextRequests += 1;
+          return Response.json({
+            ok: true,
+            userContext: { timeZone: 'America/Los_Angeles' },
+          });
+        }
+        if (url.pathname === '/api/resource-subscriptions/cron') {
+          requestBody = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+          return Response.json({
+            ok: true,
+            created: true,
+            subscription: {
+              id: 'cron-subscription-1',
+              provider: 'drone-hub',
+              resourceType: 'cron',
+              resourceId: 'v1:hourly',
+              resourceConfig: { expression: '0 * * * *', timeZone: 'America/Los_Angeles' },
+              events: ['cron.triggered'],
+              intent: 'Check the deployment.',
+              nextEventAt: '2026-08-05T13:00:00.000Z',
+              status: 'active',
+              cursor: { hidden: true },
+              subscriber: { chatId: 'subscriber-chat' },
+            },
+          });
+        }
+        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'managed-chat-test-token';
+
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'cron-subscription',
+          principal: {
+            kind: 'chat',
+            tokenId: 'chat:drone-a:default',
+            name: 'Drone A / default',
+            droneId: 'drone-a',
+            chatName: 'default',
+            chatId: 'subscriber-chat',
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['drone-a'],
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+            selectedDroneRefs: ['drone-a'],
+          },
+        });
+        const result = await client.callTool({
+          name: 'subscribe_to_cron',
+          arguments: {
+            expression: '0 * * * *',
+            intent: 'Check the deployment.',
+          },
+        });
+        expect(result.isError).not.toBe(true);
+        expect(requestBody).toMatchObject({
+          expression: '0 * * * *',
+          timeZone: 'America/Los_Angeles',
+          intent: 'Check the deployment.',
+          subscriber: {
+            chatId: 'subscriber-chat',
+            droneId: 'drone-a',
+            chatName: 'default',
+          },
+        });
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          created: true,
+          subscription: {
+            id: 'cron-subscription-1',
+            resourceType: 'cron',
+            nextEventAt: '2026-08-05T13:00:00.000Z',
+          },
+        });
+        expect((result.structuredContent as any)?.subscription?.cursor).toBeUndefined();
+        expect((result.structuredContent as any)?.subscription?.subscriber).toBeUndefined();
+
+        await client.callTool({
+          name: 'subscribe_to_cron',
+          arguments: {
+            expression: '0 22 * * *',
+            timeZone: 'Europe/Paris',
+            intent: 'Run the nightly report.',
+          },
+        });
+        expect(requestBody).toMatchObject({
+          expression: '0 22 * * *',
+          timeZone: 'Europe/Paris',
+          intent: 'Run the nightly report.',
+        });
+        expect(userContextRequests).toBe(1);
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
   test('keeps same-named repository groups isolated across MCP list, create, move, and reorder tools', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-groups-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;

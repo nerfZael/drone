@@ -159,6 +159,23 @@ export const RESOURCE_SUBSCRIPTION_MIGRATIONS: readonly HubDatabaseMigration[] =
       `);
     },
   },
+  {
+    version: 3,
+    name: 'scheduled resource subscriptions',
+    migrate(connection) {
+      connection.exec(`
+        ALTER TABLE resource_subscriptions
+          ADD COLUMN resource_config_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE resource_subscriptions
+          ADD COLUMN next_event_at TEXT;
+
+        CREATE INDEX idx_resource_subscriptions_due
+          ON resource_subscriptions (next_event_at, id)
+          WHERE status = 'active' AND provider = 'drone-hub'
+            AND resource_type = 'cron' AND next_event_at IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 type SubscriptionRow = {
@@ -169,12 +186,14 @@ type SubscriptionRow = {
   provider: ResourceSubscriptionProvider;
   resource_type: ResourceSubscriptionType;
   resource_id: string;
+  resource_config_json: string;
   events_json: string;
   intent: string;
   status: ResourceSubscriptionStatus;
   pause_reasons_json: string;
   delivery_after: string | null;
   cursor_json: string;
+  next_event_at: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -203,12 +222,14 @@ type DeliveryJoinRow = EventRow & {
   subscription_provider: ResourceSubscriptionProvider;
   subscription_resource_type: ResourceSubscriptionType;
   subscription_resource_id: string;
+  resource_config_json: string;
   events_json: string;
   intent: string;
   status: ResourceSubscriptionStatus;
   pause_reasons_json: string;
   delivery_after: string | null;
   cursor_json: string;
+  next_event_at: string | null;
   subscription_created_at: string;
   subscription_updated_at: string;
   completed_at: string | null;
@@ -293,14 +314,33 @@ export class ResourceSubscriptionRepository {
     });
   }
 
+  listDueCron(now = new Date()): ResourceSubscription[] {
+    return this.database.read((connection) => {
+      const rows = connection
+        .prepare(
+          `
+          SELECT * FROM resource_subscriptions
+          WHERE status = 'active' AND provider = 'drone-hub' AND resource_type = 'cron'
+            AND next_event_at IS NOT NULL AND next_event_at <= ?
+            AND (delivery_after IS NULL OR next_event_at >= delivery_after)
+          ORDER BY next_event_at, id
+        `,
+        )
+        .all(now.toISOString()) as SubscriptionRow[];
+      return rows.map(subscriptionFromRow).filter(isPresent);
+    });
+  }
+
   async upsert(input: {
     subscriber: ResourceSubscriptionSubscriber;
     provider: ResourceSubscriptionProvider;
     resourceType: ResourceSubscriptionType;
     resourceId: string;
+    resourceConfig?: Record<string, unknown>;
     events: ResourceSubscriptionEventType[];
     intent: string;
     cursor?: Record<string, unknown>;
+    nextEventAt?: string | null;
     initialPollCursor?: {
       provider: ResourceSubscriptionProvider;
       resourceType: ResourceSubscriptionType;
@@ -364,14 +404,15 @@ export class ResourceSubscriptionRepository {
           `
           INSERT INTO resource_subscriptions (
             id, subscriber_chat_id, subscriber_drone_id, subscriber_chat_name,
-            provider, resource_type, resource_id, events_json, intent, status,
-            pause_reasons_json, delivery_after, cursor_json, created_at, updated_at,
-            completed_at, last_error
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL)
+            provider, resource_type, resource_id, resource_config_json, events_json,
+            intent, status, pause_reasons_json, delivery_after, cursor_json,
+            next_event_at, created_at, updated_at, completed_at, last_error
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, NULL)
           ON CONFLICT (subscriber_chat_id, provider, resource_type, resource_id)
           DO UPDATE SET
             subscriber_drone_id = excluded.subscriber_drone_id,
             subscriber_chat_name = excluded.subscriber_chat_name,
+            resource_config_json = excluded.resource_config_json,
             events_json = excluded.events_json,
             intent = excluded.intent,
             status = excluded.status,
@@ -382,6 +423,7 @@ export class ResourceSubscriptionRepository {
               ELSE excluded.delivery_after
             END,
             cursor_json = excluded.cursor_json,
+            next_event_at = excluded.next_event_at,
             updated_at = excluded.updated_at,
             completed_at = NULL,
             last_error = NULL
@@ -395,11 +437,13 @@ export class ResourceSubscriptionRepository {
           input.provider,
           input.resourceType,
           input.resourceId,
+          JSON.stringify(input.resourceConfig ?? {}),
           JSON.stringify(input.events),
           input.intent,
           nextStatus,
           JSON.stringify(pauseReasons),
           JSON.stringify(input.cursor ?? parseObject(current?.cursor_json)),
+          input.nextEventAt ?? null,
           createdAt,
           now,
         );
@@ -569,6 +613,22 @@ export class ResourceSubscriptionRepository {
     });
   }
 
+  async updateNextEventAt(id: string, nextEventAt: string): Promise<void> {
+    const parsed = Date.parse(nextEventAt);
+    if (!Number.isFinite(parsed)) throw new Error('next event timestamp must be a valid date');
+    await this.database.writeTransaction('update subscription next event', (connection) => {
+      connection
+        .prepare(
+          `
+          UPDATE resource_subscriptions
+          SET next_event_at = ?, updated_at = ?
+          WHERE id = ? AND provider = 'drone-hub' AND resource_type = 'cron'
+        `,
+        )
+        .run(new Date(parsed).toISOString(), new Date().toISOString(), id);
+    });
+  }
+
   pollCursor(
     provider: ResourceSubscriptionProvider,
     resourceType: ResourceSubscriptionType,
@@ -618,6 +678,9 @@ export class ResourceSubscriptionRepository {
   }
 
   async appendEvent(event: ResourceEvent): Promise<boolean> {
+    if (event.resourceType === 'cron') {
+      throw new Error('cron events must be appended with appendCronOccurrence');
+    }
     const now = new Date().toISOString();
     return await this.database.writeTransaction('append resource event', (connection) => {
       const inserted = connection
@@ -691,6 +754,105 @@ export class ResourceSubscriptionRepository {
           .run(now, now, event.resourceId);
       }
       return true;
+    });
+  }
+
+  async appendCronOccurrence(event: ResourceEvent, nextEventAt: string): Promise<number> {
+    if (
+      event.provider !== 'drone-hub' ||
+      event.resourceType !== 'cron' ||
+      event.eventType !== 'cron.triggered'
+    ) {
+      throw new Error('appendCronOccurrence requires a DroneHub cron event');
+    }
+    const occurredAtMs = Date.parse(event.occurredAt);
+    const nextEventAtMs = Date.parse(nextEventAt);
+    if (!Number.isFinite(occurredAtMs) || !Number.isFinite(nextEventAtMs)) {
+      throw new Error('cron occurrence timestamps must be valid dates');
+    }
+    if (nextEventAtMs <= occurredAtMs) {
+      throw new Error('cron next event must be after the current occurrence');
+    }
+    const now = new Date().toISOString();
+    return await this.database.writeTransaction('append cron occurrence', (connection) => {
+      connection
+        .prepare(
+          `
+          INSERT OR IGNORE INTO resource_events (
+            id, provider_event_id, provider, resource_type, resource_id,
+            parent_resource_id, event_type, occurred_at, summary,
+            provider_content_json, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        )
+        .run(
+          event.id,
+          event.providerEventId,
+          event.provider,
+          event.resourceType,
+          event.resourceId,
+          event.parentResourceId,
+          event.eventType,
+          event.occurredAt,
+          event.summary,
+          JSON.stringify(event.providerContent),
+          now,
+        );
+      const storedEvent = connection
+        .prepare('SELECT id FROM resource_events WHERE provider_event_id = ?')
+        .get(event.providerEventId) as { id: string } | undefined;
+      if (!storedEvent) throw new Error('cron occurrence was not stored');
+
+      const subscriptions = connection
+        .prepare(
+          `
+          SELECT * FROM resource_subscriptions
+          WHERE status = 'active' AND provider = 'drone-hub' AND resource_type = 'cron'
+            AND resource_id = ? AND next_event_at IS NOT NULL AND next_event_at <= ?
+            AND (delivery_after IS NULL OR ? >= delivery_after)
+          ORDER BY id
+        `,
+        )
+        .all(event.resourceId, event.occurredAt, event.occurredAt) as SubscriptionRow[];
+      const supersedePending = connection.prepare(`
+        UPDATE subscription_deliveries
+        SET state = 'failed', batch_id = NULL, last_error = 'superseded by newer cron occurrence',
+          updated_at = ?
+        WHERE subscription_id = ? AND state = 'pending' AND event_id != ?
+          AND event_id IN (
+            SELECT id FROM resource_events
+            WHERE provider = 'drone-hub' AND resource_type = 'cron'
+          )
+      `);
+      const insertDelivery = connection.prepare(`
+        INSERT OR IGNORE INTO subscription_deliveries (
+          id, subscription_id, event_id, state, available_at, attempt_count,
+          next_attempt_at, batch_id, delivered_at, last_error, created_at, updated_at
+        ) VALUES (?, ?, ?, 'pending', ?, 0, ?, NULL, NULL, NULL, ?, ?)
+      `);
+      const advanceSubscription = connection.prepare(`
+        UPDATE resource_subscriptions
+        SET next_event_at = ?, updated_at = ?, last_error = NULL
+        WHERE id = ? AND status = 'active' AND next_event_at <= ?
+      `);
+      let deliveryCount = 0;
+      for (const row of subscriptions) {
+        if (parseEvents(row.events_json).includes(event.eventType)) {
+          supersedePending.run(now, row.id, storedEvent.id);
+          const inserted = insertDelivery.run(
+            crypto.randomUUID(),
+            row.id,
+            storedEvent.id,
+            now,
+            now,
+            now,
+            now,
+          );
+          deliveryCount += Number(inserted.changes ?? 0);
+        }
+        advanceSubscription.run(nextEventAt, now, row.id, event.occurredAt);
+      }
+      return deliveryCount;
     });
   }
 
@@ -908,12 +1070,14 @@ export class ResourceSubscriptionRepository {
               s.provider AS subscription_provider,
               s.resource_type AS subscription_resource_type,
               s.resource_id AS subscription_resource_id,
+              s.resource_config_json,
               s.events_json,
               s.intent,
               s.status,
               s.pause_reasons_json,
               s.delivery_after,
               s.cursor_json,
+              s.next_event_at,
               s.created_at AS subscription_created_at,
               s.updated_at AS subscription_updated_at,
               s.completed_at,
@@ -982,12 +1146,14 @@ export class ResourceSubscriptionRepository {
               provider: row.subscription_provider,
               resource_type: row.subscription_resource_type,
               resource_id: row.subscription_resource_id,
+              resource_config_json: row.resource_config_json,
               events_json: row.events_json,
               intent: row.intent,
               status: row.status,
               pause_reasons_json: row.pause_reasons_json,
               delivery_after: row.delivery_after,
               cursor_json: row.cursor_json,
+              next_event_at: row.next_event_at,
               created_at: row.subscription_created_at,
               updated_at: row.subscription_updated_at,
               completed_at: row.completed_at,
@@ -1185,11 +1351,13 @@ function subscriptionFromRow(row: SubscriptionRow | undefined): ResourceSubscrip
     resourceType: row.resource_type,
     resourceId: row.resource_id,
     resourceRef: resourceRef(row.provider, row.resource_type, row.resource_id),
+    resourceConfig: parseObject(row.resource_config_json),
     events: parseEvents(row.events_json),
     intent: row.intent,
     status: row.status,
     pauseReasons: parseResourceSubscriptionPauseReasons(row.pause_reasons_json),
     cursor: parseObject(row.cursor_json),
+    nextEventAt: row.next_event_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,

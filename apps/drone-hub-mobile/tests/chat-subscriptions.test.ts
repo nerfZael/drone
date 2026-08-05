@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  mobileChatSubscriptionNextRunLabel,
   mobileChatSubscriptionResourceLabel,
   mobileChatSubscriptionSummary,
   normalizeMobileChatSubscriptions,
@@ -44,5 +45,43 @@ describe('mobile chat subscription presentation', () => {
       'PR opened · acme/widgets',
     );
     expect(mobileChatSubscriptionResourceLabel(subscriptions[0]!)).toBe('Chat · target-chat');
+  });
+
+  test('presents cron subscriptions by expression, time zone, and next run', () => {
+    const [subscription] = normalizeMobileChatSubscriptions([
+      {
+        id: 'hourly-check',
+        provider: 'drone-hub',
+        resourceType: 'cron',
+        resourceId: 'v1:opaque-schedule-hash',
+        resourceConfig: {
+          expression: '0 * * * *',
+          timeZone: 'America/New_York',
+          description: 'Every hour',
+        },
+        events: ['cron.triggered'],
+        intent: 'Check the deployment.',
+        status: 'active',
+        nextEventAt: '2026-08-05T13:00:00.000Z',
+      },
+    ]);
+
+    expect(subscription).toMatchObject({
+      resourceType: 'cron',
+      resourceConfig: {
+        expression: '0 * * * *',
+        timeZone: 'America/New_York',
+        description: 'Every hour',
+      },
+      nextEventAt: '2026-08-05T13:00:00.000Z',
+    });
+    expect(mobileChatSubscriptionSummary([subscription!])).toBe(
+      'Scheduled run · Every hour · America/New_York',
+    );
+    expect(mobileChatSubscriptionResourceLabel(subscription!)).toBe(
+      'Schedule · Every hour · America/New_York',
+    );
+    expect(mobileChatSubscriptionNextRunLabel(subscription!)).toStartWith('Next run · ');
+    expect(mobileChatSubscriptionSummary([subscription!])).not.toContain('opaque-schedule-hash');
   });
 });

@@ -32,7 +32,7 @@ export function createResourceSubscriptionDeliveryAuthorizer(deps: {
       );
     };
 
-    if (subscription.provider === 'drone-hub') {
+    if (subscription.provider === 'drone-hub' && subscription.resourceType === 'chat') {
       const target = deps.resolveChatResource(subscription.resourceId);
       return Boolean(target && canReadDrone(registry?.drones?.[target.droneId]));
     }

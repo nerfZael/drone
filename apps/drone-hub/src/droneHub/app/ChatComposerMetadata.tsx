@@ -5,6 +5,7 @@ import { useDropdownDismiss } from '../../ui/dropdown';
 import { DroneRuntimeIndicator, type DroneRuntime } from './DroneRuntimeIndicator';
 import {
   chatSubscriptionEventLabel,
+  chatSubscriptionNextRunLabel,
   chatSubscriptionResourceLabel,
   chatSubscriptionSummary,
   normalizeChatResourceSubscriptions,
@@ -121,7 +122,13 @@ export function ChatSubscriptionIndicator({
   const hoverSummary = subscriptions
     .map((subscription) => {
       const events = subscription.events.map(chatSubscriptionEventLabel).join(', ');
-      return `${chatSubscriptionResourceLabel(subscription)}${events ? ` — ${events}` : ''}`;
+      const nextRun = chatSubscriptionNextRunLabel(subscription);
+      return [
+        `${chatSubscriptionResourceLabel(subscription)}${events ? ` — ${events}` : ''}`,
+        nextRun,
+      ]
+        .filter(Boolean)
+        .join(' — ');
     })
     .join('\n');
 
@@ -157,24 +164,41 @@ export function ChatSubscriptionIndicator({
             </div>
           </div>
           <div className="max-h-[min(20rem,55vh)] overflow-y-auto p-1.5">
-            {subscriptions.map((subscription) => (
-              <div
-                key={subscription.id}
-                className="rounded-[var(--radius-medium)] px-2.5 py-2 hover:bg-[var(--surface-soft)]"
-              >
-                <div className="truncate text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
-                  {chatSubscriptionResourceLabel(subscription)}
-                </div>
-                <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
-                  {subscription.events.map(chatSubscriptionEventLabel).join(', ')}
-                </div>
-                {subscription.intent ? (
-                  <div className="mt-1.5 whitespace-pre-wrap text-[var(--text-10)] leading-4 text-[var(--muted)]">
-                    {subscription.intent}
+            {subscriptions.map((subscription) => {
+              const nextRun = chatSubscriptionNextRunLabel(subscription);
+              return (
+                <div
+                  key={subscription.id}
+                  className="rounded-[var(--radius-medium)] px-2.5 py-2 hover:bg-[var(--surface-soft)]"
+                >
+                  <div className="truncate text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+                    {chatSubscriptionResourceLabel(subscription)}
                   </div>
-                ) : null}
-              </div>
-            ))}
+                  {subscription.resourceType === 'cron' &&
+                  subscription.resourceConfig?.expression ? (
+                    <div className="mt-1 truncate font-mono text-[var(--text-10)] text-[var(--muted-dim)]">
+                      Cron · {subscription.resourceConfig.expression}
+                    </div>
+                  ) : null}
+                  <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
+                    {subscription.events.map(chatSubscriptionEventLabel).join(', ')}
+                  </div>
+                  {nextRun ? (
+                    <time
+                      dateTime={subscription.nextEventAt ?? undefined}
+                      className="mt-1 block text-[var(--text-10)] text-[var(--muted-dim)]"
+                    >
+                      {nextRun}
+                    </time>
+                  ) : null}
+                  {subscription.intent ? (
+                    <div className="mt-1.5 whitespace-pre-wrap text-[var(--text-10)] leading-4 text-[var(--muted)]">
+                      {subscription.intent}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}

@@ -126,16 +126,28 @@ function compactChatSubscriptions(value: unknown): Array<Record<string, unknown>
     const resourceId = truncateUtf8(entry.resourceId, 800).trim();
     if (!id || !resourceId || entry.status !== 'active') return [];
     const provider = entry.provider === 'github' ? 'github' : 'drone-hub';
-    const resourceType =
-      entry.resourceType === 'repository' || entry.resourceType === 'pull_request'
-        ? entry.resourceType
-        : 'chat';
+    const resourceType = ['chat', 'repository', 'pull_request', 'cron'].includes(
+      String(entry.resourceType),
+    )
+      ? String(entry.resourceType)
+      : 'chat';
+    const resourceConfig = object(entry.resourceConfig);
     return [
       {
         id,
         provider,
         resourceType,
         resourceId,
+        ...(resourceType === 'cron'
+          ? {
+              resourceConfig: {
+                expression: truncateUtf8(resourceConfig.expression, 200).trim(),
+                description: truncateUtf8(resourceConfig.description, 500).trim(),
+                timeZone: truncateUtf8(resourceConfig.timeZone, 100).trim() || 'UTC',
+              },
+              nextEventAt: truncateUtf8(entry.nextEventAt, 100).trim() || null,
+            }
+          : {}),
         events: textList(entry.events)
           .slice(0, 20)
           .map((event) => truncateUtf8(event, 160)),
@@ -1249,6 +1261,7 @@ export function createDroneControlCapability(
           );
         }
         const prompt = String(payload.prompt ?? '').trim();
+        const userTimeZone = optionalText(payload.userTimeZone);
         const deliveryMode =
           payload.deliveryMode === 'asap'
             ? 'asap'
@@ -1281,6 +1294,7 @@ export function createDroneControlCapability(
               prompt,
               attachments,
               deliveryMode,
+              userTimeZone,
             );
             return {
               accepted: true,
@@ -1294,6 +1308,7 @@ export function createDroneControlCapability(
             body: JSON.stringify({
               prompt,
               attachments,
+              ...(userTimeZone ? { userTimeZone } : {}),
               ...(deliveryMode ? { deliveryMode } : {}),
             }),
           });

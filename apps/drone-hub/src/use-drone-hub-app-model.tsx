@@ -13,6 +13,7 @@ import {
   resetGuidedOnboardingDismissals,
 } from './onboarding/control';
 import { copyText } from './droneHub/app/clipboard';
+import { clientTimeZone } from './droneHub/app/client-time-zone';
 import { isCanvasDraftNodeId, useDroneCanvasStore } from './droneHub/canvas/use-drone-canvas-store';
 import {
   WHITEBOARD_OPEN_EVENT,
@@ -3182,6 +3183,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         const droneLabel = drone ? uiDroneName(drone.name) : droneId;
         return `${droneLabel} / ${chatName}`;
       });
+      const userTimeZone = clientTimeZone();
 
       const results = await Promise.allSettled(
         targets.map(async ({ droneId, chatName }) => {
@@ -3205,6 +3207,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
                 prompt,
                 attachments: [],
                 submittedAt: new Date().toISOString(),
+                ...(userTimeZone ? { userTimeZone } : {}),
                 autoRenameHandledByClient: true,
               }),
             },

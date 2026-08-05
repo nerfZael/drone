@@ -9,6 +9,7 @@ import {
   DroneBranchIndicator,
 } from '../src/droneHub/app/ChatComposerMetadata';
 import {
+  chatSubscriptionNextRunLabel,
   chatSubscriptionResourceLabel,
   chatSubscriptionSummary,
   normalizeChatResourceSubscriptions,
@@ -42,11 +43,51 @@ describe('chat resource subscription presentation', () => {
         provider: 'github',
         resourceType: 'pull_request',
         resourceId: 'acme/widgets#42',
+        resourceConfig: null,
         events: ['pull_request.merged'],
         intent: 'Continue after merge.',
         status: 'active',
+        nextEventAt: null,
       },
     ]);
+  });
+
+  test('presents cron subscriptions by schedule instead of their internal resource ID', () => {
+    const [subscription] = normalizeChatResourceSubscriptions([
+      {
+        id: 'hourly-check',
+        provider: 'drone-hub',
+        resourceType: 'cron',
+        resourceId: 'v1:opaque-schedule-hash',
+        resourceConfig: {
+          expression: '0 * * * *',
+          timeZone: 'America/New_York',
+          description: 'Every hour',
+        },
+        events: ['cron.triggered'],
+        intent: 'Check the deployment.',
+        status: 'active',
+        nextEventAt: '2026-08-05T13:00:00.000Z',
+      },
+    ]);
+
+    expect(subscription).toMatchObject({
+      resourceType: 'cron',
+      resourceConfig: {
+        expression: '0 * * * *',
+        timeZone: 'America/New_York',
+        description: 'Every hour',
+      },
+      nextEventAt: '2026-08-05T13:00:00.000Z',
+    });
+    expect(chatSubscriptionSummary([subscription!])).toBe(
+      'Scheduled run · Every hour · America/New_York',
+    );
+    expect(chatSubscriptionResourceLabel(subscription!)).toBe(
+      'Schedule · Every hour · America/New_York',
+    );
+    expect(chatSubscriptionNextRunLabel(subscription!)).toStartWith('Next run · ');
+    expect(chatSubscriptionSummary([subscription!])).not.toContain('opaque-schedule-hash');
   });
 
   test('uses the resource for one subscription and a count for several', () => {

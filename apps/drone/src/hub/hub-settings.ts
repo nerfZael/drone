@@ -134,6 +134,9 @@ export type UiPreferencesSettings = {
   repoBranchSource: 'host' | 'remote';
   repoCreateRemoteBranch: string;
 };
+export type UserContextSettings = {
+  timeZone: string | null;
+};
 
 const ARCHIVE_RETENTION_MS_MAP: Record<ArchiveRetentionId, number> = {
   '1h': 60 * 60 * 1000,
@@ -324,6 +327,7 @@ const SETTING_KEYS = {
   deleteAction: 'delete-action',
   filesystem: 'filesystem',
   speech: 'speech',
+  userContext: 'user-context',
 } as const;
 
 type LegacySetting<T> = { value: T; updatedAt: string | null };
@@ -877,6 +881,40 @@ export async function resolveSpeechSettingsResponse(): Promise<{
       voices: GROQ_SPEECH_VOICES,
     },
   };
+}
+
+export function parseIanaTimeZone(raw: unknown): string | null {
+  const requested = String(raw ?? '').trim();
+  if (!requested) return null;
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: requested }).resolvedOptions().timeZone;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveUserContextSettings(): Promise<UserContextSettings> {
+  const record = await getCanonicalSetting<Partial<UserContextSettings>>(
+    SETTING_KEYS.userContext,
+    () => null,
+  );
+  return { timeZone: parseIanaTimeZone(record?.value?.timeZone) };
+}
+
+export async function updateStoredUserTimeZone(raw: unknown): Promise<UserContextSettings> {
+  const timeZone = parseIanaTimeZone(raw);
+  if (!timeZone) throw new Error('timeZone must be a valid IANA time zone');
+  const current = await resolveUserContextSettings();
+  if (current.timeZone === timeZone) return current;
+  await putCanonicalSetting(SETTING_KEYS.userContext, { timeZone });
+  return { timeZone };
+}
+
+export async function resolveUserContextSettingsResponse(): Promise<{
+  ok: true;
+  userContext: UserContextSettings;
+}> {
+  return { ok: true, userContext: await resolveUserContextSettings() };
 }
 
 const UI_PREFERENCES_SETTING_KEY = 'ui-preferences';

@@ -4,6 +4,12 @@ import { renderEventNotificationPrompt } from '@drone/assistant-chat';
 import { getPromptQueueRepository } from '../../host/prompt-queue-repository';
 import { resolveGithubToken } from '../github-pull-requests';
 import {
+  cronOccurrenceEvent,
+  cronSubscriptionConfig,
+  dueCronOccurrence,
+  normalizeCronSubscription,
+} from './cron-subscription';
+import {
   githubRepositoryIdFromPullRequest,
   initialGithubRepositoryPollCursor,
   normalizeGithubPullRequestId,
@@ -101,7 +107,10 @@ export class ResourceSubscriptionService {
     const subscriber = normalizeSubscriber(input.subscriber);
     const resource = normalizeResource(input.provider, input.resourceType, input.resourceId);
     const events = normalizeEvents(resource.provider, resource.resourceType, input.events);
-    if (resource.provider === 'github' && resource.resourceType !== 'chat') {
+    if (
+      resource.provider === 'github' &&
+      (resource.resourceType === 'repository' || resource.resourceType === 'pull_request')
+    ) {
       await validateGithubSubscriptionResource(resource.resourceType, resource.resourceId);
     }
     const intent = String(input.intent ?? '')
@@ -151,6 +160,44 @@ export class ResourceSubscriptionService {
             },
           }
         : {}),
+      maxActive: settings.maxActiveSubscriptionsPerConversation,
+    });
+  }
+
+  async subscribeToCron(input: {
+    subscriber: ResourceSubscriptionSubscriber;
+    expression: string;
+    timeZone?: string;
+    intent: string;
+  }): Promise<{ created: boolean; subscription: ResourceSubscription }> {
+    const subscriber = normalizeSubscriber(input.subscriber);
+    const intent = String(input.intent ?? '')
+      .trim()
+      .slice(0, 2_000);
+    if (!intent) throw new Error('cron subscriptions require an intent');
+    const schedule = normalizeCronSubscription(input.expression, input.timeZone);
+    const existing = this.deps.repository
+      .list(subscriber.chatId, true)
+      .find(
+        (item) =>
+          item.provider === 'drone-hub' &&
+          item.resourceType === 'cron' &&
+          item.resourceId === schedule.resourceId,
+      );
+    const settings = await this.settings();
+    return await this.deps.repository.upsert({
+      subscriber,
+      provider: 'drone-hub',
+      resourceType: 'cron',
+      resourceId: schedule.resourceId,
+      resourceConfig: schedule.resourceConfig,
+      events: ['cron.triggered'],
+      intent,
+      cursor: {},
+      nextEventAt:
+        (existing?.status === 'active' || existing?.status === 'paused') && existing.nextEventAt
+          ? existing.nextEventAt
+          : schedule.nextEventAt,
       maxActive: settings.maxActiveSubscriptionsPerConversation,
     });
   }
@@ -205,6 +252,7 @@ export class ResourceSubscriptionService {
         await cancelOrphanedResourceSubscriptions(this.deps.repository, this.deps.log);
       }
       await this.pollChats();
+      await this.pollCron(new Date());
       if (Date.now() - this.lastGithubPollAt >= settings.githubPollingIntervalMs) {
         this.lastGithubPollAt = Date.now();
         await this.pollGithub();
@@ -239,6 +287,15 @@ export class ResourceSubscriptionService {
   private async resetResumeCursors(subscriptions: ResourceSubscription[]): Promise<void> {
     for (const subscription of subscriptions) {
       if (subscription.provider === 'github') continue;
+      if (subscription.resourceType === 'cron') {
+        const config = cronSubscriptionConfig(subscription.resourceConfig);
+        const schedule = normalizeCronSubscription(config.expression, config.timeZone);
+        if (schedule.resourceId !== subscription.resourceId) {
+          throw new Error(`cron subscription ${subscription.id} has inconsistent configuration`);
+        }
+        await this.deps.repository.updateNextEventAt(subscription.id, schedule.nextEventAt);
+        continue;
+      }
       const location = this.deps.repository.resolveChatResource(subscription.resourceId);
       if (!location) {
         await this.deps.repository.cancel(subscription.id, subscription.subscriber.chatId);
@@ -269,7 +326,9 @@ export class ResourceSubscriptionService {
   }
 
   private async pollChats(): Promise<void> {
-    const subscriptions = this.deps.repository.listActive('drone-hub');
+    const subscriptions = this.deps.repository
+      .listActive('drone-hub')
+      .filter((subscription) => subscription.resourceType === 'chat');
     for (const subscription of subscriptions) {
       try {
         const location = this.deps.repository.resolveChatResource(subscription.resourceId);
@@ -288,6 +347,42 @@ export class ResourceSubscriptionService {
         }
       } catch (error) {
         this.deps.log('warn', 'chat subscription poll failed', {
+          subscriptionId: subscription.id,
+          resourceId: subscription.resourceId,
+          error: errorMessage(error),
+        });
+      }
+    }
+  }
+
+  private async pollCron(now: Date): Promise<void> {
+    const dueByResource = new Map<string, ResourceSubscription>();
+    for (const subscription of this.deps.repository.listDueCron(now)) {
+      if (!dueByResource.has(subscription.resourceId)) {
+        dueByResource.set(subscription.resourceId, subscription);
+      }
+    }
+    for (const subscription of dueByResource.values()) {
+      try {
+        const config = cronSubscriptionConfig(subscription.resourceConfig);
+        const occurrence = dueCronOccurrence(
+          config,
+          subscription.resourceId,
+          subscription.nextEventAt ?? '',
+          now,
+        );
+        if (!occurrence) continue;
+        await this.deps.repository.appendCronOccurrence(
+          cronOccurrenceEvent({
+            resourceId: subscription.resourceId,
+            config,
+            occurrence,
+            observedAt: now.toISOString(),
+          }),
+          occurrence.nextEventAt,
+        );
+      } catch (error) {
+        this.deps.log('warn', 'cron subscription poll failed', {
           subscriptionId: subscription.id,
           resourceId: subscription.resourceId,
           error: errorMessage(error),
@@ -550,7 +645,9 @@ function normalizeEvents(
 ): ResourceSubscriptionEventType[] {
   const supported = new Set<ResourceSubscriptionEventType>(
     provider === 'drone-hub'
-      ? ['chat.idle', 'chat.failed']
+      ? resourceType === 'cron'
+        ? ['cron.triggered']
+        : ['chat.idle', 'chat.failed']
       : resourceType === 'repository'
         ? [
             'pull_request.opened',
