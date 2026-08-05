@@ -122,14 +122,19 @@ describe('mobile drone sidebar model', () => {
 
   test('uses non-empty legacy repository metadata before falling back to Ungrouped', () => {
     const drones = normalizeMobileDrones([
-      { id: 'nested', repoPath: '', repo: { path: '/work/nested' } },
-      { id: 'legacy', repositoryPath: '/work/legacy' },
+      {
+        id: 'nested',
+        repoPath: '',
+        repo: { path: '/work/nested', branch: 'feature/nested' },
+      },
+      { id: 'legacy', repositoryPath: '/work/legacy', repoBranch: 'dvm/work' },
     ]);
 
     expect(buildMobileDroneRepoGroups(drones).map((group) => group.label)).toEqual([
       'legacy',
       'nested',
     ]);
+    expect(drones.map((drone) => drone.repoBranch)).toEqual(['feature/nested', 'dvm/work']);
   });
 
   test('preserves an explicit detached repository state', () => {

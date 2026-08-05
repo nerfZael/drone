@@ -58,6 +58,7 @@ import { useChatMcpAccess } from './use-chat-mcp-access';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from './drone-hub-dnd';
 import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
+import { DroneChatComposerMetadata } from './ChatComposerMetadata';
 
 const DirtyDroneApplyModal = React.lazy(async () => {
   const { DirtyDroneApplyModal } = await import('./DirtyDroneApplyModal');
@@ -1130,6 +1131,14 @@ export function GroupMultiChatColumn({
         disabled={sendingPrompt || isDroneStartingOrSeeding(drone.hubPhase)}
         autoFocus={false}
         modeHint=""
+        composerTopAction={
+          <DroneChatComposerMetadata
+            runtime={hostRuntime ? 'host' : 'container'}
+            droneId={drone.id}
+            chatName={chatName}
+            branch={drone.repoBranch}
+          />
+        }
         composerControls={composerControls}
         onStop={canStopResponse ? stopResponse : undefined}
         stopping={stoppingResponse}

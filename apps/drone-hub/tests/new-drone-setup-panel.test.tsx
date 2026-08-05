@@ -4,6 +4,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { NewDroneSetupPanel } from '../src/droneHub/app/NewDroneSetupPanel';
 import { NewDroneTargetControls } from '../src/droneHub/app/NewDroneTargetControls';
+import { DroneRuntimeIndicator } from '../src/droneHub/app/DroneRuntimeIndicator';
 
 const baseProps: React.ComponentProps<typeof NewDroneSetupPanel> = {
   createRuntime: 'container',
@@ -79,6 +80,15 @@ describe('new drone setup panel', () => {
 
     expect(html).toContain('Execution target: Container');
     expect(html).toContain('Branch: main');
+  });
+
+  test('renders an existing drone runtime as a read-only indicator', () => {
+    const html = renderToStaticMarkup(<DroneRuntimeIndicator runtime="host" />);
+
+    expect(html).toContain('data-drone-runtime-indicator="host"');
+    expect(html).toContain('aria-label="Execution target: Host"');
+    expect(html).toContain('Host');
+    expect(html).not.toContain('<button');
   });
 
   test('renders a selected remote branch in the upper target row', () => {

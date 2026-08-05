@@ -9,6 +9,7 @@ import {
   newDroneHostBranchLabel,
   parseNewDroneBranchPickerValue,
 } from './new-drone-branch-picker';
+import { DroneRuntimeIcon, DroneRuntimeLabel } from './DroneRuntimeIndicator';
 
 type NewDroneTargetControlsProps = {
   createRuntime: CreateRuntime;
@@ -29,54 +30,13 @@ type NewDroneTargetControlsProps = {
 const INLINE_TRIGGER_CLASS =
   '!h-8 justify-start !gap-1 !border-transparent !bg-transparent px-2 text-[.6875rem] !font-medium normal-case tracking-normal !text-[var(--chat-composer-model-fg)] hover:!opacity-70';
 
-function RuntimeIcon({
-  runtime,
-  className = 'h-3.5 w-3.5',
-}: {
-  runtime: CreateRuntime;
-  className?: string;
-}) {
-  if (runtime === 'host') {
-    return (
-      <svg
-        className={className}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <rect x="3" y="4" width="18" height="13" rx="2" />
-        <path d="M8 21h8M12 17v4" />
-      </svg>
-    );
-  }
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
-      <path d="m4.4 7.7 7.6 4.2 7.6-4.2M12 12v9" />
-    </svg>
-  );
-}
-
 const RUNTIME_ENTRIES: UiMenuSelectEntry[] = [
   {
     value: 'container',
     label: (
       <span className="flex min-w-0 items-center gap-2">
         <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[.3125rem] bg-[var(--accent-subtle)] text-[var(--accent)]">
-          <RuntimeIcon runtime="container" />
+          <DroneRuntimeIcon runtime="container" />
         </span>
         <span className="min-w-0">
           <span className="block text-[var(--fg)]">Container</span>
@@ -94,7 +54,7 @@ const RUNTIME_ENTRIES: UiMenuSelectEntry[] = [
     label: (
       <span className="flex min-w-0 items-center gap-2">
         <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[.3125rem] bg-[var(--green-subtle)] text-[var(--green)]">
-          <RuntimeIcon runtime="host" />
+          <DroneRuntimeIcon runtime="host" />
         </span>
         <span className="min-w-0">
           <span className="block text-[var(--fg)]">Host</span>
@@ -121,17 +81,6 @@ function Chevron({ open }: { open: boolean }) {
     >
       <path d="M4.427 6.573a.25.25 0 0 1 .177-.073h6.792a.25.25 0 0 1 .177.427l-3.396 3.396a.25.25 0 0 1-.354 0L4.427 6.927a.25.25 0 0 1 0-.354Z" />
     </svg>
-  );
-}
-
-function RuntimeLabel({ runtime }: { runtime: CreateRuntime }) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      <span className={runtime === 'container' ? 'text-[var(--accent)]' : 'text-[var(--green)]'}>
-        <RuntimeIcon runtime={runtime} />
-      </span>
-      <span className="truncate">{runtime === 'container' ? 'Container' : 'Host'}</span>
-    </span>
   );
 }
 
@@ -177,9 +126,9 @@ export function NewDroneTargetControls({
         entries={RUNTIME_ENTRIES}
         disabled={disabled}
         title={`Execution target: ${createRuntime === 'container' ? 'Container' : 'Host'}`}
-        triggerLabel={<RuntimeLabel runtime={createRuntime} />}
+        triggerLabel={<DroneRuntimeLabel runtime={createRuntime} />}
         triggerLabelClassName="flex min-w-0"
-        triggerClassName={`${INLINE_TRIGGER_CLASS} min-w-[5.75rem]`}
+        triggerClassName={`${INLINE_TRIGGER_CLASS} !pl-0 min-w-[5.75rem]`}
         chevron={(open) => <Chevron open={open} />}
         panelClassName="bottom-full !mt-0 mb-1.5 w-[14rem]"
         header="Execution target"

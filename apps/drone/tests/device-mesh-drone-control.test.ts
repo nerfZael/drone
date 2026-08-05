@@ -14,6 +14,7 @@ describe('device mesh drone summaries', () => {
         runtime: 'container',
         group: 'Review',
         repoPath: '/work/repo',
+        repoBranch: 'dvm/work',
         cwd: '/work/repo/subdir',
         fleetParentId: 'drone_parent',
         chats: ['default', 'review'],
@@ -28,6 +29,7 @@ describe('device mesh drone summaries', () => {
     ).toMatchObject({
       id: 'drone_child',
       repoPath: '/work/repo',
+      repoBranch: 'dvm/work',
       cwd: '/work/repo/subdir',
       repoAttached: true,
       fleetParentId: 'drone_parent',
@@ -861,6 +863,81 @@ describe('device mesh drone summaries', () => {
         url: 'http://127.0.0.1:7777/api/drones/Untitled%206/chats/default/pending/prompt-2',
         method: 'DELETE',
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('includes the active DroneHub MCP subscriptions in mobile chat reads', async () => {
+    const originalFetch = globalThis.fetch;
+    let subscriptionRequests = 0;
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      const body =
+        url.pathname === '/api/resource-subscriptions'
+          ? (() => {
+              subscriptionRequests += 1;
+              return {
+                ok: true,
+                subscriptions: [
+                  {
+                    id: 'subscription-1',
+                    provider: 'github',
+                    resourceType: 'pull_request',
+                    resourceId: 'acme/widgets#42',
+                    events: ['pull_request.merged'],
+                    intent: 'Continue after merge.',
+                    status: 'active',
+                    cursor: { private: 'internal-state' },
+                    lastError: 'not for clients',
+                  },
+                ],
+              };
+            })()
+          : url.pathname.endsWith('/pending')
+            ? { ok: true, pending: [] }
+            : url.pathname.endsWith('/read')
+              ? { ok: true, readState: { unread: false } }
+              : {
+                  ok: true,
+                  chatId: 'subscriber-chat-1',
+                  agent: { kind: 'builtin', id: 'codex' },
+                  turns: [{ id: 'turn-1', prompt: 'hello', output: 'hi' }],
+                  readState: { unread: false },
+                };
+      return Response.json(body);
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+
+      const result: any = await capability.invoke('chat.read', {
+        droneId: 'drone-1',
+        chatName: 'default',
+      });
+      expect(result).toMatchObject({
+        subscriptions: [
+          {
+            id: 'subscription-1',
+            resourceId: 'acme/widgets#42',
+            status: 'active',
+          },
+        ],
+      });
+      expect(result.subscriptions[0].cursor).toBeUndefined();
+      expect(result.subscriptions[0].lastError).toBeUndefined();
+      expect(subscriptionRequests).toBe(1);
+
+      await expect(
+        capability.invoke('chat.read', {
+          droneId: 'drone-1',
+          chatName: 'default',
+          turnId: 'turn-1',
+        }),
+      ).resolves.toMatchObject({ historyKind: 'turn-content', turnId: 'turn-1' });
+      expect(subscriptionRequests).toBe(1);
     } finally {
       globalThis.fetch = originalFetch;
     }

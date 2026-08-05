@@ -41,6 +41,13 @@ import {
   type MobileDroneCreateDefaults,
   type MobileDroneCreatePayload,
 } from '../drones/NewDroneScreen';
+import { DroneRuntimeIndicator } from '../drones/NewDroneRuntimePicker';
+import { DroneBranchIndicator } from '../drones/DroneBranchIndicator';
+import { ChatSubscriptionIndicator } from '../drones/ChatSubscriptionIndicator';
+import {
+  normalizeMobileChatSubscriptions,
+  type MobileChatSubscription,
+} from '../drones/chat-subscriptions';
 import {
   mobileDroneCreatePreferencesFromPayload,
   resolveMobileDroneCreateDefaults,
@@ -357,6 +364,7 @@ export function DronesScreen({
   const [olderHistoryBusy, setOlderHistoryBusy] = React.useState(false);
   const [fullMessageBusyId, setFullMessageBusyId] = React.useState('');
   const [nativeChatId, setNativeChatId] = React.useState('');
+  const [chatSubscriptions, setChatSubscriptions] = React.useState<MobileChatSubscription[]>([]);
   const [nativeThread, setNativeThread] = React.useState<any | null>(null);
   const [accessOpen, setAccessOpen] = React.useState(false);
   const [accessDirty, setAccessDirty] = React.useState(false);
@@ -426,6 +434,7 @@ export function DronesScreen({
     setChatHistoryPage(EMPTY_CHAT_HISTORY_PAGE);
     setOlderHistoryBusy(false);
     setPromptAttachments([]);
+    setChatSubscriptions([]);
   }, [chatName, selected?.id, targetId]);
 
   const run = async (key: string, task: () => Promise<void>) => {
@@ -774,6 +783,9 @@ export function DronesScreen({
         : null;
     setNativeMessages(richMessages);
     setNativeChatId(String(result?.nativeChatId ?? '').trim());
+    if (Array.isArray(result?.subscriptions)) {
+      setChatSubscriptions(normalizeMobileChatSubscriptions(result.subscriptions));
+    }
     setNativeThread(result?.thread ?? null);
     setPendingApprovals(Array.isArray(result?.pendingApprovals) ? result.pendingApprovals : []);
     const nextTurns = Array.isArray(result?.turns) ? result.turns : [];
@@ -2618,6 +2630,15 @@ export function DronesScreen({
                         />
                       ))}
                     </ScrollView>
+                    <View style={styles.composerMetadataRow}>
+                      <View style={styles.composerMetadataLeading}>
+                        <DroneRuntimeIndicator
+                          runtime={selected.runtime === 'host' ? 'host' : 'container'}
+                        />
+                        <ChatSubscriptionIndicator subscriptions={chatSubscriptions} />
+                      </View>
+                      <DroneBranchIndicator branch={selected.repoBranch} />
+                    </View>
                     <AssistantComposer
                       focusKey={composerFocusKey}
                       voiceResetKey={`${targetId}:${selected.id}:${chatName}`}
@@ -2963,5 +2984,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 10,
+  },
+  composerMetadataRow: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    alignSelf: 'stretch',
+    gap: 8,
+    paddingHorizontal: 9,
+  },
+  composerMetadataLeading: {
+    minWidth: 0,
+    flexShrink: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
 });

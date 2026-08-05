@@ -100,6 +100,7 @@ import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 import type { LocalAutoUpdates, LocalCheckoutView } from './use-local-checkout';
 import { WorkspaceToolIcon } from './WorkspaceToolIcon';
+import { DroneChatComposerMetadata } from './ChatComposerMetadata';
 
 type LaunchHint = {
   context: 'terminal' | 'code' | 'cursor';
@@ -2296,6 +2297,14 @@ export function SelectedDroneWorkspace({
                     onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
                     promotingNewChatActionById={promotingNewChatActionById}
                     promoteNewChatActionErrorById={promoteNewChatActionErrorById}
+                    composerTopAction={
+                      <DroneChatComposerMetadata
+                        runtime={hostRuntime ? 'host' : 'container'}
+                        droneId={currentDrone.id}
+                        chatName={activeChatName}
+                        branch={currentDrone.repoBranch}
+                      />
+                    }
                     messageFeatures={{
                       onSpawnTask: spawnCurrentDroneHubTask,
                       linkedPullRequestContext,
@@ -2411,6 +2420,14 @@ export function SelectedDroneWorkspace({
                   sending={sendingPrompt && !chatInputWaiting}
                   publishing={publishingDraft}
                   waiting={chatInputWaiting}
+                  composerTopAction={
+                    <DroneChatComposerMetadata
+                      runtime={hostRuntime ? 'host' : 'container'}
+                      droneId={currentDrone.id}
+                      chatName={activeChatName}
+                      branch={currentDrone.repoBranch}
+                    />
+                  }
                   composerControls={externalComposerControls}
                   autoFocus={shouldAutoFocusInput}
                   onStop={

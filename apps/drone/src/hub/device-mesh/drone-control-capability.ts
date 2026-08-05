@@ -115,6 +115,33 @@ function compactCreateRepoBranch(branch: unknown) {
   };
 }
 
+function compactChatSubscriptions(value: unknown): Array<Record<string, unknown>> | null {
+  if (!Array.isArray(value)) return null;
+  const subscriptions = value.flatMap((subscription) => {
+    const entry = object(subscription);
+    const id = truncateUtf8(entry.id, 160).trim();
+    const resourceId = truncateUtf8(entry.resourceId, 800).trim();
+    if (!id || !resourceId || entry.status !== 'active') return [];
+    const provider = entry.provider === 'github' ? 'github' : 'drone-hub';
+    const resourceType =
+      entry.resourceType === 'repository' || entry.resourceType === 'pull_request'
+        ? entry.resourceType
+        : 'chat';
+    return [
+      {
+        id,
+        provider,
+        resourceType,
+        resourceId,
+        events: textList(entry.events).slice(0, 20).map((event) => truncateUtf8(event, 160)),
+        intent: truncateUtf8(entry.intent, 2_000).trim(),
+        status: 'active',
+      },
+    ];
+  });
+  return subscriptions.slice(0, 50);
+}
+
 function requiredPositiveInteger(value: unknown, label: string): number {
   const normalized =
     typeof value === 'number'
@@ -164,6 +191,7 @@ export function deviceMeshDroneSummary(drone: any) {
       drone?.repo?.hostPath,
       drone?.repo?.dest,
     ),
+    repoBranch: firstText(drone?.repoBranch, drone?.repo?.branch) || null,
     cwd: firstText(drone?.cwd, drone?.workingDirectory),
     repoAttached: Boolean(
       drone?.repoAttached ??
@@ -941,18 +969,31 @@ export function createDroneControlCapability(
           localHubRequest(access, chatPath),
           localHubRequest(access, `${chatPath}/pending`),
         ]);
+        const subscriberChatId = optionalText(result?.chatId);
+        const contentOnlyRead = Boolean(
+          optionalText(payload.messageId) || optionalText(payload.turnId),
+        );
         const latestAgentTurnId = optionalText(result?.readState?.latestAgentTurnId) ?? null;
         const latestAgentRevision = Number.isSafeInteger(result?.readState?.latestAgentRevision)
           ? Number(result.readState.latestAgentRevision)
           : 0;
-        const marked = await localHubRequest(access, `${chatPath}/read`, {
-          method: 'POST',
-          body: JSON.stringify({
-            latestAgentTurnId,
-            latestAgentRevision,
-            updatedByDeviceId: context?.sourceDevice?.id ?? null,
+        const [subscriptionsResult, marked] = await Promise.all([
+          subscriberChatId && !contentOnlyRead
+            ? localHubRequest(
+                access,
+                `/api/resource-subscriptions?subscriberChatId=${encodeURIComponent(subscriberChatId)}`,
+              ).catch(() => ({ subscriptions: null }))
+            : Promise.resolve({ subscriptions: [] }),
+          localHubRequest(access, `${chatPath}/read`, {
+            method: 'POST',
+            body: JSON.stringify({
+              latestAgentTurnId,
+              latestAgentRevision,
+              updatedByDeviceId: context?.sourceDevice?.id ?? null,
+            }),
           }),
-        });
+        ]);
+        const subscriptions = compactChatSubscriptions(subscriptionsResult?.subscriptions);
         if (result?.agent?.kind === 'native') {
           const { nativeChatId, snapshot: ensured } = await resolveNativeChat();
           const messageId = optionalText(payload.messageId);
@@ -992,6 +1033,7 @@ export function createDroneControlCapability(
               result.agentPermissionMode ??
               'full-access',
             approvalPolicy: nativeResponse.thread?.approvalPolicy ?? result.approvalPolicy ?? 'ask',
+            ...(subscriptions ? { subscriptions } : {}),
           };
         }
         const turnId = optionalText(payload.turnId);
@@ -1041,6 +1083,7 @@ export function createDroneControlCapability(
             result.approvalPolicy === 'agent-decides' || result.approvalPolicy === 'never'
               ? result.approvalPolicy
               : 'ask',
+          ...(subscriptions ? { subscriptions } : {}),
         };
       }
       if (operation === 'chat.models') {

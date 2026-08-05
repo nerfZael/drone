@@ -289,6 +289,7 @@ export function AssistantDock({
   onCreateNewChatAutoFocusHandled,
   promotingNewChatActionById = {},
   promoteNewChatActionErrorById = {},
+  composerTopAction,
 }: {
   nativeChat: NativeChatBinding;
   messageFeatures: AssistantMessageFeatures;
@@ -301,6 +302,7 @@ export function AssistantDock({
   onCreateNewChatAutoFocusHandled?: (promptId: string) => void;
   promotingNewChatActionById?: Record<string, true>;
   promoteNewChatActionErrorById?: Record<string, string>;
+  composerTopAction?: React.ReactNode;
 }) {
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
   const nativeDroneId = nativeChat.droneId;
@@ -2401,6 +2403,7 @@ export function AssistantDock({
               sending={scopeSyncBusy}
               waiting={running}
               disabled={!activeThread}
+              composerTopAction={composerTopAction}
               composerContext={nativeComposerContext}
               composerControls={nativeComposerControls}
               composerStatus={

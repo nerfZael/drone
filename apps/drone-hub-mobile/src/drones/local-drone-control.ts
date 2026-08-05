@@ -564,6 +564,7 @@ function useLocalDroneControlValue() {
           reasoning: thread.thinkingLevel,
           agentPermissionMode: thread.agentPermissionMode ?? 'full-access',
           approvalPolicy: thread.approvalPolicy ?? (thread.autoApprove ? 'never' : 'ask'),
+          subscriptions: [],
           readState: { unread: false },
         };
       }

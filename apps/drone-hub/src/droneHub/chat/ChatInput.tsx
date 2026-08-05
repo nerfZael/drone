@@ -604,7 +604,7 @@ export function ChatInput({
           </div>
         )}
         {composerTopAction ? (
-          <div className="mb-1 flex min-h-7 items-center justify-end px-1">
+          <div className="mb-1 flex min-h-7 items-center justify-start">
             {composerTopAction}
           </div>
         ) : null}

@@ -17,12 +17,36 @@ const RUNTIME_OPTIONS: Array<{
   { value: 'host', label: 'Host', detail: 'This hub' },
 ];
 
-function RuntimeIcon({ runtime, size = 15 }: { runtime: MobileDroneCreateRuntime; size?: number }) {
+export function RuntimeIcon({
+  runtime,
+  size = 15,
+}: {
+  runtime: MobileDroneCreateRuntime;
+  size?: number;
+}) {
   const color = runtime === 'host' ? colors.online : colors.accent;
   return runtime === 'host' ? (
     <Monitor color={color} size={size} strokeWidth={2} />
   ) : (
     <Box color={color} size={size} strokeWidth={2} />
+  );
+}
+
+export function DroneRuntimeIndicator({ runtime }: { runtime: MobileDroneCreateRuntime }) {
+  const label = runtime === 'host' ? 'Host' : 'Container';
+
+  return (
+    <View
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={`Execution target: ${label}`}
+      style={styles.indicator}
+    >
+      <RuntimeIcon runtime={runtime} />
+      <Text numberOfLines={1} style={styles.triggerLabel}>
+        {label}
+      </Text>
+    </View>
   );
 }
 
@@ -128,7 +152,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingHorizontal: 7,
+    paddingRight: 7,
+  },
+  indicator: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   triggerLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: '600' },
   chevronOpen: { transform: [{ rotate: '180deg' }] },

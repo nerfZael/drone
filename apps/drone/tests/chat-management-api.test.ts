@@ -702,6 +702,8 @@ describeSocketSuite('chat management api', () => {
     const registry: any = await loadRegistry();
     const chat = registry?.drones?.[droneId]?.chats?.default;
     expect(String(chat?.id ?? '')).toMatch(/^[0-9a-f-]{36}$/i);
+    const metadata = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(metadata.data?.chatId).toBe(chat.id);
     expect(chat?.droneHubMcpAccessScope).toMatchObject({
       readMode: 'selected',
       writeMode: 'all',

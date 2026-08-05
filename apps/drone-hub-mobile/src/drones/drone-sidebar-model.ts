@@ -30,6 +30,7 @@ export type MobileDroneSummary = {
   status: string;
   group: string | null;
   repoPath: string;
+  repoBranch?: string | null;
   cwd?: string;
   repoAttached?: boolean;
   fleetParentId: string | null;
@@ -343,6 +344,7 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
       text(repo.path) ||
       text(repo.hostPath) ||
       text(repo.dest),
+    repoBranch: text(value.repoBranch) || text(repo.branch) || null,
     cwd: text(value.cwd || value.workingDirectory),
     repoAttached:
       typeof value.repoAttached === 'boolean'
