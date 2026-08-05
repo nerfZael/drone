@@ -146,7 +146,11 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('Drones will appear when it reconnects.');
     expect(dronesSource).toContain("subtitle: 'Offline · reconnecting automatically'");
     expect(dronesSource).toContain("{activeTarget?.name ?? 'This device'} is offline");
+    expect(dronesSource).toContain("'Reconnecting to device'");
+    expect(dronesSource).toContain("'Reconnecting…'");
+    expect(dronesSource).toContain('mesh.retryDeviceConnection(targetId)');
     expect(dronesSource).toContain('This chat is readable. Sending will resume');
+    expect(drawerSource).toContain("device.connectionState === 'reconnecting'");
     expect(dronesSource).toContain('editable={targetReachable}');
     expect(dronesSource).toContain('disabled={!targetReachable}');
     expect(dronesSource).toContain("disabled={!targetReachable || busy === 'prompt'}");

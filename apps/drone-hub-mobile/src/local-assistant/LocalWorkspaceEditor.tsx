@@ -4,6 +4,7 @@ import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import { Button, ConfirmDialog, ErrorBanner, Label } from '../components/Ui';
+import { mobileDeviceConnectionLabel } from '../drones/mobile-device-reachability';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { useLocalAssistant } from './LocalAssistantContext';
@@ -122,7 +123,7 @@ export function LocalWorkspaceEditor({
       .map((device) => ({
         id: device.id,
         name: device.name,
-        connected: mesh.connectedDeviceIds.includes(device.id),
+        connected: mesh.connectionStatesByDevice[device.id] === 'connected',
       }))
       .sort((left, right) => left.id.localeCompare(right.id)),
   );
@@ -147,7 +148,7 @@ export function LocalWorkspaceEditor({
       availableDevices.map((device) => ({
         id: device.id,
         name: device.name,
-        connected: mesh.connectedDeviceIds.includes(device.id),
+        connected: mesh.connectionStatesByDevice[device.id] === 'connected',
         loading: true,
         error: null,
         workspaces: [],
@@ -286,7 +287,10 @@ export function LocalWorkspaceEditor({
                 <View style={styles.deviceCopy}>
                   <Text style={styles.deviceName}>{device.name}</Text>
                   <Text style={styles.deviceMeta}>
-                    {device.connected ? 'Online' : 'Offline'}
+                    {mobileDeviceConnectionLabel(
+                      mesh.connectionStatesByDevice[device.id] ??
+                        (device.connected ? 'connected' : 'offline'),
+                    )}
                     {selectedCount ? ` · ${selectedCount} selected` : ''}
                   </Text>
                 </View>

@@ -15,6 +15,7 @@ import { DeviceMeshStore } from './device-mesh-store';
 import { DeviceRouteManager } from './device-route-manager';
 import { DesktopDroneControlHttp } from './desktop-drone-control-http';
 import { createDroneControlCapability } from './drone-control-capability';
+import type { CreatedDroneAutoRenameOperations } from './auto-rename-created-drone';
 import { CrossDeviceAssistantPolicyHttp } from './features/cross-device-assistant/policy-http';
 import { CrossDeviceAssistantPolicyStore } from './features/cross-device-assistant/policy-store';
 import { RemoteWorkspaceTarget } from './features/cross-device-assistant/remote-workspace-target';
@@ -27,6 +28,7 @@ export async function createDeviceMeshService(options: {
   apiToken: string;
   localHubBaseUrl(): string;
   ingressPort?: number;
+  createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
 }) {
   const identity = await loadOrCreateDeviceIdentity(options.rootDir);
   const store = new DeviceMeshStore(path.join(options.rootDir, 'state.json'), identity);
@@ -48,6 +50,7 @@ export async function createDeviceMeshService(options: {
       { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
       chatAttachments,
       {
+        createdDroneAutoRename: options.createdDroneAutoRename,
         broadcastFileChange: (payload, targetDeviceIds) =>
           router.broadcastCapabilityEvent(
             'drone-control',

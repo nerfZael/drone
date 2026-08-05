@@ -5,7 +5,10 @@ import {
   normalizePendingPromptState,
 } from '@drone/assistant-chat';
 import type { CapabilityHandler } from './device-mesh-types';
-import { scheduleCreatedDroneAutoRename } from './auto-rename-created-drone';
+import {
+  scheduleCreatedDroneAutoRename,
+  type CreatedDroneAutoRenameOperations,
+} from './auto-rename-created-drone';
 import {
   boundedDroneChatPage,
   compactAgentPlanForMesh,
@@ -246,6 +249,7 @@ export function createDroneControlCapability(
   access: LocalHubAccess,
   chatAttachments?: MeshChatAttachmentStore,
   options?: {
+    createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
     broadcastFileChange?: (
       payload: Record<string, any>,
       targetDeviceIds: string[],
@@ -619,10 +623,10 @@ export function createDroneControlCapability(
           body: JSON.stringify(createPayload),
         });
         const createdDroneId = firstText(created?.id, created?.droneId, created?.drone?.id);
-        if (!requestedName && autoRenamePrompt && createdDroneId) {
+        if (!requestedName && autoRenamePrompt && createdDroneId && options?.createdDroneAutoRename) {
           const createdDroneName = firstText(created?.name, created?.drone?.name);
           scheduleCreatedDroneAutoRename(
-            access,
+            options.createdDroneAutoRename,
             createdDroneId,
             autoRenamePrompt,
             createdDroneName,

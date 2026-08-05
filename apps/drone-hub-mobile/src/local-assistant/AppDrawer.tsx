@@ -60,6 +60,7 @@ import {
   SidebarWorkingIcon,
 } from './SidebarIcons';
 import { RuntimeIcon } from '../drones/NewDroneRuntimePicker';
+import type { MeshDeviceConnectionState } from '../mesh/MeshConnectionManager';
 import { useMobileSidebarExpandedFolderIds } from './use-mobile-sidebar-expanded-folder-ids';
 import { useMobileSidebarCollapsedDroneIds } from './use-mobile-sidebar-collapsed-drone-ids';
 import {
@@ -84,9 +85,17 @@ export type DrawerDevicePickerItem = {
   id: string;
   name: string;
   connected: boolean;
+  connectionState?: MeshDeviceConnectionState;
   detail?: string;
   platform: string;
 };
+
+function deviceConnectionLabel(device: DrawerDevicePickerItem | undefined): string {
+  if (!device) return 'offline';
+  if (device.connectionState === 'reconnecting') return 'reconnecting';
+  if (device.connectionState === 'suspended') return 'connection paused';
+  return device.connected ? 'online' : 'offline';
+}
 
 function devicePlatformLabel(platform: string): string {
   if (platform === 'android') return 'Android';
@@ -284,7 +293,7 @@ function DrawerDevicePicker({
     <View style={styles.devicePickerSection}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${activeDevice?.name ?? 'Choose device'}, ${activeDevice?.connected ? 'online' : 'offline'}. Choose device.`}
+        accessibilityLabel={`${activeDevice?.name ?? 'Choose device'}, ${deviceConnectionLabel(activeDevice)}. Choose device.`}
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen((current) => !current)}
         style={({ pressed }) => [
@@ -320,7 +329,7 @@ function DrawerDevicePicker({
                 <Pressable
                   key={device.id}
                   accessibilityRole="button"
-                  accessibilityLabel={`${device.name}, ${device.connected ? 'online' : 'offline'}, ${devicePlatformLabel(device.platform)}`}
+                  accessibilityLabel={`${device.name}, ${deviceConnectionLabel(device)}, ${devicePlatformLabel(device.platform)}`}
                   accessibilityState={{ selected: active }}
                   onPress={() => {
                     setOpen(false);

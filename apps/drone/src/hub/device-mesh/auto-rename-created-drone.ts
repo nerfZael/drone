@@ -1,5 +1,16 @@
 import { hubLog } from '../hub-settings';
-import { localHubRequest, type LocalHubAccess } from './local-hub-request';
+
+export type CreatedDroneAutoRenameOperations = {
+  suggestName(input: { droneId: string; prompt: string }): Promise<string>;
+  renameDrone(input: {
+    droneId: string;
+    newName: string;
+    expectedName?: string;
+    source: 'mobile-create-auto-rename';
+    attempt: number;
+    suggestedBase: string;
+  }): Promise<void>;
+};
 
 const AUTO_RENAME_MAX_RETRY_MS = 5 * 60 * 1000;
 const AUTO_RENAME_MAX_ATTEMPTS = 240;
@@ -18,7 +29,7 @@ function wait(delayMs: number): Promise<void> {
 }
 
 export async function autoRenameCreatedDroneFromPrompt(
-  access: LocalHubAccess,
+  operations: CreatedDroneAutoRenameOperations,
   droneIdRaw: string,
   promptRaw: string,
   expectedNameRaw?: string,
@@ -28,15 +39,7 @@ export async function autoRenameCreatedDroneFromPrompt(
   const expectedName = String(expectedNameRaw ?? '').trim();
   if (!droneId || !prompt) throw new Error('droneId and prompt are required for automatic naming');
 
-  const suggestion = await localHubRequest(access, '/api/drones/name-from-message', {
-    method: 'POST',
-    body: JSON.stringify({
-      message: prompt,
-      source: 'mobile-create-auto-rename',
-      droneId,
-    }),
-  });
-  const base = String(suggestion?.name ?? '').trim();
+  const base = String(await operations.suggestName({ droneId, prompt })).trim();
   if (!base) throw new Error('name suggestion returned an empty drone name');
 
   const startedAtMs = Date.now();
@@ -48,15 +51,13 @@ export async function autoRenameCreatedDroneFromPrompt(
       throw new Error(`name suggestion produced an invalid drone name: "${candidate}"`);
     }
     try {
-      await localHubRequest(access, `/api/drones/${encodeURIComponent(droneId)}/rename`, {
-        method: 'POST',
-        body: JSON.stringify({
-          newName: candidate,
-          source: 'mobile-create-auto-rename',
-          attempt,
-          suggestedBase: base,
-          ...(expectedName ? { expectedName } : {}),
-        }),
+      await operations.renameDrone({
+        droneId,
+        newName: candidate,
+        source: 'mobile-create-auto-rename',
+        attempt,
+        suggestedBase: base,
+        ...(expectedName ? { expectedName } : {}),
       });
       return candidate;
     } catch (error: any) {
@@ -86,12 +87,12 @@ export async function autoRenameCreatedDroneFromPrompt(
 }
 
 export function scheduleCreatedDroneAutoRename(
-  access: LocalHubAccess,
+  operations: CreatedDroneAutoRenameOperations,
   droneId: string,
   prompt: string,
   expectedName?: string,
 ): void {
-  void autoRenameCreatedDroneFromPrompt(access, droneId, prompt, expectedName).catch((error: any) => {
+  void autoRenameCreatedDroneFromPrompt(operations, droneId, prompt, expectedName).catch((error: any) => {
     if (/rename precondition failed/i.test(String(error?.message ?? error ?? ''))) return;
     hubLog('warn', 'mobile-created drone auto-rename failed', {
       droneId,

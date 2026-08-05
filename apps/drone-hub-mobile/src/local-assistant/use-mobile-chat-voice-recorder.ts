@@ -1,6 +1,7 @@
 import React from 'react';
 import { AppState } from 'react-native';
 import {
+  getRecordingPermissionsAsync,
   RecordingPresets,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
@@ -11,6 +12,7 @@ import {
 } from 'expo-audio';
 import { File } from 'expo-file-system';
 import { readGroqApiKey } from './local-assistant-settings';
+import { ensureMobileRecordingPermission } from './mobile-recording-permission';
 import { transcribeMobileVoiceRecording } from './mobile-groq-transcription';
 import {
   MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES,
@@ -187,9 +189,18 @@ export function useMobileChatVoiceRecorder({
         );
       }
       if (generationRef.current !== generation || !mountedRef.current) return;
-      const permission = await requestRecordingPermissionsAsync();
+      const permission = await ensureMobileRecordingPermission({
+        getPermission: getRecordingPermissionsAsync,
+        requestPermission: requestRecordingPermissionsAsync,
+      });
       if (generationRef.current !== generation || !mountedRef.current) return;
-      if (!permission.granted) throw new Error('Microphone permission was denied.');
+      if (!permission.granted) {
+        throw new Error(
+          permission.canAskAgain === false
+            ? 'Microphone permission is disabled. Enable it in the phone’s system settings.'
+            : 'Microphone permission was denied.',
+        );
+      }
       if (!(await waitForAppForeground())) {
         throw new Error('Voice recording was cancelled when the app left the foreground.');
       }

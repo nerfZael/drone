@@ -14,6 +14,11 @@ import {
 } from '../security/device-identity';
 import { MeshSocket } from './MeshSocket';
 import {
+  MeshConnectionManager,
+  type MeshAppState,
+  type MeshDeviceConnectionState,
+} from './MeshConnectionManager';
+import {
   MobileCapabilityRouter,
   type MobileCapabilityHandler,
   type RegisteredMobileCapability,
@@ -32,7 +37,7 @@ type MeshContextValue = {
   identity: MobileDeviceIdentity | null;
   profile: MeshProfile | null;
   devices: MeshDevice[];
-  connectedDeviceIds: string[];
+  connectionStatesByDevice: Record<string, MeshDeviceConnectionState>;
   connectionErrorsByDevice: Record<string, string>;
   loading: boolean;
   error: string | null;
@@ -52,6 +57,7 @@ type MeshContextValue = {
     mime: string;
     bytes: Uint8Array;
   }): Promise<{ attachmentId: string; name: string; mime: string; size: number }>;
+  retryDeviceConnection(deviceId: string): Promise<void>;
   refreshDevices(): Promise<void>;
   subscribe(
     capability: string,
@@ -78,7 +84,6 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     Record<string, string>
   >({});
   const [revision, setRevision] = React.useState(0);
-  const sockets = React.useRef<MeshSocket[]>([]);
   const profileRef = React.useRef<MeshProfile | null>(null);
   const capabilityHandlers = React.useRef(new Map<string, RegisteredMobileCapability>());
   const capabilityRouter = React.useRef<MobileCapabilityRouter | null>(null);
@@ -97,6 +102,27 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         subscription.listener(event);
     }
   }, []);
+  const connectionManagerRef = React.useRef<MeshConnectionManager<MeshSocket> | null>(null);
+  if (!connectionManagerRef.current) {
+    connectionManagerRef.current = new MeshConnectionManager<MeshSocket>({
+      onChange: () => setRevision((value) => value + 1),
+      onConnectionError: (deviceId, nextError) => {
+        if (!nextError && connectionManagerRef.current?.connectedDeviceIds.length) setError(null);
+        setConnectionErrorsByDevice((current) => {
+          if (!nextError) {
+            if (!(deviceId in current)) return current;
+            const next = { ...current };
+            delete next[deviceId];
+            return next;
+          }
+          const message = nextError.message;
+          if (current[deviceId] === message) return current;
+          return { ...current, [deviceId]: message };
+        });
+      },
+    });
+  }
+  const connectionManager = connectionManagerRef.current;
 
   profileRef.current = profile;
 
@@ -113,61 +139,38 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const connectSocket = React.useCallback(async (socket: MeshSocket) => {
-    const deviceId = socket.connection.deviceId;
-    try {
-      await socket.connect();
-      if (!sockets.current.includes(socket)) return;
-      setConnectionErrorsByDevice((current) => {
-        if (!(deviceId in current)) return current;
-        const next = { ...current };
-        delete next[deviceId];
-        return next;
-      });
-    } catch (nextError: any) {
-      if (sockets.current.includes(socket)) {
-        setConnectionErrorsByDevice((current) => ({
-          ...current,
-          [deviceId]: nextError?.message ?? String(nextError),
-        }));
-      }
-      throw nextError;
-    }
-  }, []);
-
   const connect = React.useCallback(
     async (nextProfile: MeshProfile, nextIdentity: MobileDeviceIdentity) => {
-      sockets.current.forEach((socket) => socket.disconnect());
       const nextSockets = [...nextProfile.connections]
         .sort((left, right) => Number(left.role === 'backup') - Number(right.role === 'backup'))
-        .map(
-          (connection) =>
-            new MeshSocket(
-              connection,
-              nextProfile.networkId,
-              nextIdentity,
-              nextProfile.devices.find((device) => device.id === connection.deviceId)?.publicKey ??
-                {},
-              () => {
-                setRevision((value) => value + 1);
-              },
-              () => {
-                if (topologyRefreshTimer.current) clearTimeout(topologyRefreshTimer.current);
-                topologyRefreshTimer.current = setTimeout(() => void refreshRef.current(), 300);
-              },
-              emitCapabilityEvent,
-              capabilityRouter.current!,
-            ),
-        );
-      sockets.current = nextSockets;
+        .map((connection) => {
+          let socket!: MeshSocket;
+          socket = new MeshSocket(
+            connection,
+            nextProfile.networkId,
+            nextIdentity,
+            nextProfile.devices.find((device) => device.id === connection.deviceId)?.publicKey ??
+              {},
+            () => connectionManager.handleSocketState(socket),
+            () => {
+              if (topologyRefreshTimer.current) clearTimeout(topologyRefreshTimer.current);
+              topologyRefreshTimer.current = setTimeout(() => void refreshRef.current(), 300);
+            },
+            emitCapabilityEvent,
+            capabilityRouter.current!,
+          );
+          return socket;
+        });
+      connectionManager.replaceSockets(nextSockets);
       const connectionIds = new Set(nextSockets.map((socket) => socket.connection.deviceId));
       setConnectionErrorsByDevice((current) =>
         Object.fromEntries(
           Object.entries(current).filter(([deviceId]) => connectionIds.has(deviceId)),
         ),
       );
-      const results = await Promise.allSettled(nextSockets.map(connectSocket));
-      if (sockets.current !== nextSockets) return;
+      if (AppState.currentState !== 'active') return;
+      const results = await connectionManager.connectAll();
+      if (!connectionManager.isCurrentSet(nextSockets)) return;
       if (!results.some((result) => result.status === 'fulfilled')) {
         const rejected = results.find(
           (result): result is PromiseRejectedResult => result.status === 'rejected',
@@ -175,7 +178,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         throw rejected?.reason ?? new Error('No paired device is reachable');
       }
     },
-    [connectSocket, emitCapabilityEvent],
+    [connectionManager, emitCapabilityEvent],
   );
 
   const subscribe = React.useCallback(
@@ -214,28 +217,25 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
       if (topologyRefreshTimer.current) clearTimeout(topologyRefreshTimer.current);
-      sockets.current.forEach((socket) => socket.disconnect());
+      connectionManager.clear(false);
     };
-  }, [connect]);
+  }, [connect, connectionManager]);
 
   React.useEffect(() => {
+    connectionManager.handleAppState((AppState.currentState ?? 'unknown') as MeshAppState);
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') sockets.current.forEach((socket) => socket.disconnect());
-      else if (profile && identity)
-        void connect(profile, identity).catch((nextError) => setError(nextError.message));
+      connectionManager.handleAppState(state as MeshAppState);
     });
     return () => subscription.remove();
-  }, [connect, identity, profile]);
+  }, [connectionManager]);
 
   React.useEffect(() => {
     const timer = setInterval(() => {
       if (AppState.currentState !== 'active') return;
-      for (const socket of sockets.current) {
-        if (!socket.connected) void connectSocket(socket).catch(() => undefined);
-      }
+      void connectionManager.ensureConnected();
     }, 10_000);
     return () => clearInterval(timer);
-  }, [connectSocket]);
+  }, [connectionManager]);
 
   const request = React.useCallback(
     async (
@@ -245,15 +245,11 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       payload: unknown = {},
       signal?: AbortSignal,
     ) => {
-      const direct = sockets.current.find(
-        (socket) => socket.connected && socket.connection.deviceId === targetDeviceId,
-      );
-      const relay = sockets.current.find((socket) => socket.connected);
-      const socket = direct ?? relay;
+      const socket = connectionManager.routeFor(targetDeviceId);
       if (!socket) throw new Error('No paired device is connected');
       return await socket.request(targetDeviceId, capability, operation, payload, signal);
     },
-    [],
+    [connectionManager],
   );
 
   const uploadChatAttachment = React.useCallback(
@@ -265,7 +261,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       mime: string;
       bytes: Uint8Array;
     }) => {
-      const direct = sockets.current.find(
+      const direct = connectionManager.sockets.find(
         (socket) => socket.connected && socket.connection.deviceId === input.targetDeviceId,
       );
       const knownEndpoint = profile?.devices.find(
@@ -282,11 +278,14 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
           request(input.targetDeviceId, 'drone-control', 'chat.prompt', payload),
       });
     },
-    [profile?.devices, request],
+    [connectionManager, profile?.devices, request],
   );
 
   const refreshDevices = React.useCallback(async () => {
-    const target = sockets.current.find((socket) => socket.connected)?.connection.deviceId;
+    if (connectionManager.connectedDeviceIds.length === 0) {
+      await connectionManager.ensureAnyConnected(true);
+    }
+    const target = connectionManager.connectedDeviceIds[0];
     if (!target) return;
     const result: any = await request(target, 'device-core', 'devices.list');
     if (!Array.isArray(result?.devices)) return;
@@ -338,15 +337,24 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         JSON.stringify(next.connections) !== JSON.stringify(profile?.connections);
       if (identity && routesChanged) await connect(next, identity);
     }
-  }, [connect, identity, profile, request]);
+  }, [connect, connectionManager, identity, profile, request]);
   refreshRef.current = refreshDevices;
+
+  const retryDeviceConnection = React.useCallback(
+    async (deviceId: string) => {
+      const connected = await connectionManager.ensureDeviceConnected(deviceId, true);
+      if (!connected && connectionManager.connectedDeviceIds.length === 0) return;
+      await refreshDevices();
+    },
+    [connectionManager, refreshDevices],
+  );
 
   const renameSelf = React.useCallback(
     async (rawName: string) => {
       if (!identity || !profile) throw new Error('Device identity is not ready');
       const name = rawName.trim().slice(0, 80);
       if (!name) throw new Error('Device name is required');
-      const targets = sockets.current
+      const targets = connectionManager.sockets
         .filter((socket) => socket.connected)
         .map((socket) => socket.connection.deviceId);
       if (targets.length === 0) throw new Error('No paired device is connected');
@@ -378,7 +386,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       profileRef.current = next;
       setProfile(next);
     },
-    [identity, profile, request],
+    [connectionManager, identity, profile, request],
   );
 
   const pair = React.useCallback(
@@ -426,14 +434,13 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
   );
 
   const forgetMesh = React.useCallback(async () => {
-    sockets.current.forEach((socket) => socket.disconnect());
-    sockets.current = [];
+    connectionManager.clear();
     await clearMeshProfile();
     profileRef.current = null;
     setProfile(null);
     setError(null);
     setConnectionErrorsByDevice({});
-  }, []);
+  }, [connectionManager]);
 
   const makePrimary = React.useCallback(
     async (deviceId: string) => {
@@ -457,15 +464,14 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     identity,
     profile,
     devices: profile?.devices ?? [],
-    connectedDeviceIds: sockets.current
-      .filter((socket) => socket.connected)
-      .map((socket) => socket.connection.deviceId),
+    connectionStatesByDevice: connectionManager.connectionStatesByDevice,
     connectionErrorsByDevice,
     loading,
     error,
     pair,
     request,
     uploadChatAttachment,
+    retryDeviceConnection,
     refreshDevices,
     subscribe,
     registerCapabilityHandler,

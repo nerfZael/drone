@@ -10,6 +10,7 @@ import Trash2 from 'lucide-react-native/icons/trash-2';
 import { TopTabs, type TopTabOption } from '../components/TopTabs';
 import { ThemedTextInput } from '../components/ThemedTextInput';
 import { Button, ConfirmDialog, ErrorBanner, Label, textStyles } from '../components/Ui';
+import { mobileDeviceConnectionLabel } from '../drones/mobile-device-reachability';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSettingsCard';
@@ -139,9 +140,9 @@ export function SettingsScreen({
                         <Text style={styles.role}>{connection.role}</Text>
                         <Text style={styles.result}>
                           {results[connection.deviceId] ??
-                            (mesh.connectedDeviceIds.includes(connection.deviceId)
-                              ? 'CONNECTED'
-                              : 'OFFLINE')}
+                            mobileDeviceConnectionLabel(
+                              mesh.connectionStatesByDevice[connection.deviceId] ?? 'offline',
+                            ).toUpperCase()}
                         </Text>
                       </View>
                     </View>

@@ -173,6 +173,7 @@ function Shell() {
               id: currentId,
               name: current?.name ?? mesh.identity?.name ?? 'This device',
               connected: true,
+              connectionState: 'connected' as const,
               detail: 'This device',
               platform: current?.platform ?? 'android',
             },
@@ -181,11 +182,12 @@ function Shell() {
       ...others.map((device) => ({
         id: device.id,
         name: device.name,
-        connected: mesh.connectedDeviceIds.includes(device.id),
+        connected: mesh.connectionStatesByDevice[device.id] === 'connected',
+        connectionState: mesh.connectionStatesByDevice[device.id] ?? 'offline',
         platform: device.platform,
       })),
     ];
-  }, [mesh.connectedDeviceIds, mesh.devices, mesh.identity?.id, mesh.identity?.name]);
+  }, [mesh.connectionStatesByDevice, mesh.devices, mesh.identity?.id, mesh.identity?.name]);
   const activeDeviceId = deviceSelectionLoaded
     ? resolveAvailableDeviceSelection(devicePickerItems, selectedDeviceId)
     : '';

@@ -17,6 +17,7 @@ import Smartphone from 'lucide-react-native/icons/smartphone';
 import type { CapabilityDescriptor, CapabilityGrant, MeshDevice } from '@drone/device-protocol';
 import { Button, ConfirmDialog, ErrorBanner, textStyles } from '../components/Ui';
 import { currentDeviceFirst, permissionChangeCount } from '../devices/device-permissions-model';
+import { mobileDeviceConnectionLabel } from '../drones/mobile-device-reachability';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 
@@ -174,7 +175,10 @@ export function DevicesScreen() {
         <View style={styles.list}>
           {orderedDevices.map((device) => {
             const self = device.id === mesh.identity?.id;
-            const connected = self || mesh.connectedDeviceIds.includes(device.id);
+            const connectionState = self
+              ? 'connected'
+              : (mesh.connectionStatesByDevice[device.id] ?? 'offline');
+            const connected = connectionState === 'connected';
             const selected = device.id === selectedDeviceId;
             const expanded = selected && permissionsExpanded;
             const connectionError = self ? null : mesh.connectionErrorsByDevice[device.id];
@@ -220,7 +224,7 @@ export function DevicesScreen() {
                   <View style={styles.status}>
                     <View style={[styles.dot, connected && styles.dotConnected]} />
                     <Text style={[styles.statusText, connected && styles.statusTextConnected]}>
-                      {connected ? 'Online' : 'Offline'}
+                      {mobileDeviceConnectionLabel(connectionState)}
                     </Text>
                   </View>
                   <View style={styles.disclosureSlot}>

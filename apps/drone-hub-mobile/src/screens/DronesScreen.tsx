@@ -92,7 +92,7 @@ import {
 } from '../drones/mobile-pending-prompts';
 import { useDroneLinkedPullRequests } from '../drones/use-drone-linked-pull-requests';
 import { useLocalDroneControl } from '../drones/local-drone-control';
-import { mobileDeviceReachable } from '../drones/mobile-device-reachability';
+import { mobileDeviceConnectionState } from '../drones/mobile-device-reachability';
 import { ChatAttachmentStrip } from '../drones/ChatAttachmentStrip';
 import { FilePreviewModal } from '../drones/FilePreviewModal';
 import { useFilePreview } from '../drones/use-file-preview';
@@ -282,11 +282,14 @@ export function DronesScreen({
   const targetId = selectedDeviceId;
   const phoneTarget = Boolean(targetId && targetId === mesh.identity?.id);
   const targetSupportsDrones = phoneTarget || targets.some((target) => target.id === targetId);
-  const targetReachable = mobileDeviceReachable({
+  const targetConnectionState = mobileDeviceConnectionState({
     targetDeviceId: targetId,
     selfDeviceId: mesh.identity?.id,
-    connectedDeviceIds: mesh.connectedDeviceIds,
+    connectionStatesByDevice: mesh.connectionStatesByDevice,
   });
+  const targetReachable = targetConnectionState === 'connected';
+  const targetReconnecting =
+    targetConnectionState === 'reconnecting' || targetConnectionState === 'suspended';
   const requestDroneControl = React.useCallback(
     (destinationId: string, operation: DroneControlOperation, payload?: any) =>
       destinationId === mesh.identity?.id
@@ -2370,7 +2373,9 @@ export function DronesScreen({
               }
             : undefined
         }
-        onRetryDrones={() => void (targetReachable ? loadDrones() : mesh.refreshDevices())}
+        onRetryDrones={() =>
+          void (targetReachable ? loadDrones() : mesh.retryDeviceConnection(targetId))
+        }
         onSelectDevice={(deviceId) => {
           selectedRef.current = null;
           chatReadVersion.current += 1;
@@ -2403,23 +2408,37 @@ export function DronesScreen({
         {!targetReachable && targetSupportsDrones && !selected ? (
           <View style={styles.deviceOffline}>
             <View style={styles.deviceOfflineIcon}>
-              <WifiOff color={colors.warning} size={28} strokeWidth={1.7} />
+              {targetReconnecting ? (
+                <ActivityIndicator color={colors.warning} size="small" />
+              ) : (
+                <WifiOff color={colors.warning} size={28} strokeWidth={1.7} />
+              )}
               <View style={styles.deviceOfflineIndicator} />
             </View>
             <Text style={styles.deviceOfflineTitle}>
-              {activeTarget?.name ?? 'This device'} is offline
+              {targetConnectionState === 'reconnecting'
+                ? `Reconnecting to ${activeTarget?.name ?? 'this device'}`
+                : targetConnectionState === 'suspended'
+                  ? `${activeTarget?.name ?? 'This device'} connection paused`
+                  : `${activeTarget?.name ?? 'This device'} is offline`}
             </Text>
             <Text style={styles.deviceOfflineBody}>
-              Drone Hub can’t reach this device. Make sure the app is running there and that both
-              devices are connected to the internet or the same local network.
+              {targetReconnecting
+                ? 'Drone Hub is restoring the secure connection. This normally takes a moment.'
+                : 'Drone Hub can’t reach this device. Make sure the app is running there and that both devices are connected to the internet or the same local network.'}
             </Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => void mesh.refreshDevices()}
-              style={({ pressed }) => [styles.deviceOfflineRetry, pressed && styles.chatTabPressed]}
-            >
-              <Text style={styles.deviceOfflineRetryText}>Retry connection</Text>
-            </Pressable>
+            {!targetReconnecting ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void mesh.retryDeviceConnection(targetId)}
+                style={({ pressed }) => [
+                  styles.deviceOfflineRetry,
+                  pressed && styles.chatTabPressed,
+                ]}
+              >
+                <Text style={styles.deviceOfflineRetryText}>Retry connection</Text>
+              </Pressable>
+            ) : null}
             <View style={styles.deviceOfflineAutomatic}>
               <View style={styles.deviceOfflinePulse} />
               <Text style={styles.deviceOfflineAutomaticText}>Checking automatically</Text>
@@ -2433,9 +2452,17 @@ export function DronesScreen({
               <View style={styles.offlineChatNotice}>
                 <View style={styles.deviceOfflineIndicator} />
                 <View style={styles.offlineChatNoticeCopy}>
-                  <Text style={styles.offlineChatNoticeTitle}>Device offline</Text>
+                  <Text style={styles.offlineChatNoticeTitle}>
+                    {targetConnectionState === 'reconnecting'
+                      ? 'Reconnecting to device'
+                      : targetConnectionState === 'suspended'
+                        ? 'Connection paused'
+                        : 'Device offline'}
+                  </Text>
                   <Text style={styles.offlineChatNoticeBody}>
-                    This chat is readable. Sending will resume when it reconnects.
+                    {targetReconnecting
+                      ? 'This chat is readable. Sending will resume as soon as the secure connection is restored.'
+                      : 'This chat is readable. Sending will resume when it reconnects.'}
                   </Text>
                 </View>
               </View>
@@ -2653,7 +2680,13 @@ export function DronesScreen({
                       running={running}
                       editable={targetReachable}
                       queueWhileRunning={targetReachable}
-                      placeholder={targetReachable ? 'Ask the agent' : 'Device offline'}
+                      placeholder={
+                        targetReachable
+                          ? 'Ask the agent'
+                          : targetReconnecting
+                            ? 'Reconnecting…'
+                            : 'Device offline'
+                      }
                       hasAttachments={promptAttachments.length > 0}
                       onAddAttachment={addPromptAttachment}
                       attachmentActionsDisabled={!targetReachable || (phoneTarget && running)}
