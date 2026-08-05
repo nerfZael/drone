@@ -2,6 +2,8 @@
 
 A Bun + Turborepo monorepo for running and managing **agent-enabled “drone” containers**.
 
+See [SECOND_TEST_PULL_REQUEST.md](SECOND_TEST_PULL_REQUEST.md) for the second pull request workflow check.
+
 - **`dvm`** (`apps/dvm`): CLI for managing Docker containers as “VM-like” machines, including tmux-backed persistent sessions and optional agent setup.
 - **`drone`** (`apps/drone`): host CLI + in-container daemon that exposes a local REST API for controlling processes/sessions inside a container (implemented on top of `dvm`).
 - **`drone-hub`** (`apps/drone-hub`): web UI for listing/grouping drones and interacting with them (Vite/React).
