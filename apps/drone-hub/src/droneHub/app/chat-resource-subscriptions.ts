@@ -50,14 +50,12 @@ export function chatSubscriptionResourceLabel(
 export function chatSubscriptionSummary(subscriptions: ChatResourceSubscription[]): string {
   if (subscriptions.length === 0) return '';
   if (subscriptions.length > 1) return `Subscriptions · ${subscriptions.length}`;
-  return `Subscribed · ${subscriptions[0]!.resourceId}`;
+  const subscription = subscriptions[0]!;
+  const events = subscription.events.map(chatSubscriptionEventLabel).join(', ');
+  return [events, subscription.resourceId].filter(Boolean).join(' · ');
 }
 
 export function chatSubscriptionEventLabel(event: string): string {
-  return String(event ?? '')
-    .trim()
-    .split('.')
-    .map((part) => part.replace(/_/g, ' '))
-    .filter(Boolean)
-    .join(' · ');
+  return eventNotificationEventLabel(event);
 }
+import { eventNotificationEventLabel } from '@drone/assistant-chat';

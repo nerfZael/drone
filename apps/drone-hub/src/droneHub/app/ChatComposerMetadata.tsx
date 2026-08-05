@@ -117,11 +117,14 @@ export function ChatSubscriptionIndicator({
   if (subscriptions.length === 0) return null;
   const summary = chatSubscriptionSummary(subscriptions);
   const hoverSummary = subscriptions
-    .map((subscription) => chatSubscriptionResourceLabel(subscription))
+    .map((subscription) => {
+      const events = subscription.events.map(chatSubscriptionEventLabel).join(', ');
+      return `${chatSubscriptionResourceLabel(subscription)}${events ? ` — ${events}` : ''}`;
+    })
     .join('\n');
 
   return (
-    <div ref={rootRef} className="relative min-w-0">
+    <div ref={rootRef} className="relative min-w-0 flex-1">
       <button
         type="button"
         data-chat-subscription-indicator="true"
@@ -129,7 +132,7 @@ export function ChatSubscriptionIndicator({
         aria-haspopup="dialog"
         onClick={() => setOpen((current) => !current)}
         title={hoverSummary}
-        className="inline-flex min-h-7 max-w-[min(16rem,42vw)] items-center gap-1.5 rounded px-1.5 text-[.6875rem] font-medium text-[var(--muted-dim)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--chat-composer-control-fg)]"
+        className="inline-flex min-h-7 max-w-full items-center gap-1.5 rounded px-1.5 text-[.6875rem] font-medium text-[var(--muted-dim)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--chat-composer-control-fg)]"
       >
         <span className="text-[var(--accent)]">
           <SubscriptionIcon />
@@ -191,8 +194,10 @@ export function DroneChatComposerMetadata({
 
   return (
     <div className="flex min-w-0 w-full items-center justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-2">
-        <DroneRuntimeIndicator runtime={runtime} />
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="shrink-0">
+          <DroneRuntimeIndicator runtime={runtime} />
+        </div>
         <ChatSubscriptionIndicator subscriptions={subscriptions} />
       </div>
       <DroneBranchIndicator branch={branch} />

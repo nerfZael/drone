@@ -27,6 +27,7 @@ import {
   agentRunWorkspacePreviewEntries,
   messageImageParts,
   messageText,
+  parseEventNotificationPrompt,
   renderItemsFromMessages,
   toolActivityIsSettled,
   toolLabel,
@@ -66,6 +67,7 @@ import {
   type MobileTranscriptRun,
 } from './mobile-transcript-runs';
 import { shouldToggleMessageTimestamp } from './message-touch-model';
+import { MobileEventNotification } from '../drones/MobileEventNotification';
 
 function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
   const dots = React.useRef([
@@ -1514,6 +1516,7 @@ export function MobileAssistantTranscript({
       return null;
     const user = item.message.role === 'user';
     const assistant = item.message.role === 'assistant';
+    const eventNotification = user ? parseEventNotificationPrompt(text) : null;
     const userCodeBlock = user && nativeMarkdownHasCodeBlock(text);
     const timestamp = messageTimestamp(item.message);
     const timestampKey = `${item.key}:${String(timestamp ?? '')}`;
@@ -1526,6 +1529,15 @@ export function MobileAssistantTranscript({
               sourceMessageIndex: item.sourceMessageIndex,
             })
         : undefined;
+    if (eventNotification) {
+      return (
+        <MobileEventNotification
+          key={item.key}
+          notification={eventNotification}
+          onLongPress={openMessageActions}
+        />
+      );
+    }
     const content = (
       <>
         {assistant && structuredAssistantContent ? (

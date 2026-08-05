@@ -34,7 +34,9 @@ export function normalizeMobileChatSubscriptions(raw: unknown): MobileChatSubscr
 export function mobileChatSubscriptionSummary(subscriptions: MobileChatSubscription[]): string {
   if (subscriptions.length === 0) return '';
   if (subscriptions.length > 1) return `Subscriptions · ${subscriptions.length}`;
-  return `Subscribed · ${subscriptions[0]!.resourceId}`;
+  const subscription = subscriptions[0]!;
+  const events = subscription.events.map(mobileChatSubscriptionEventLabel).join(', ');
+  return [events, subscription.resourceId].filter(Boolean).join(' · ');
 }
 
 export function mobileChatSubscriptionResourceLabel(
@@ -50,10 +52,6 @@ export function mobileChatSubscriptionResourceLabel(
 }
 
 export function mobileChatSubscriptionEventLabel(event: string): string {
-  return String(event ?? '')
-    .trim()
-    .split('.')
-    .map((part) => part.replace(/_/g, ' '))
-    .filter(Boolean)
-    .join(' · ');
+  return eventNotificationEventLabel(event);
 }
+import { eventNotificationEventLabel } from '@drone/assistant-chat';

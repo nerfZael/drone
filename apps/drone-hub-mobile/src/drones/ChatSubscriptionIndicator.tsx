@@ -101,7 +101,7 @@ export function ChatSubscriptionIndicator({
 const styles = StyleSheet.create({
   trigger: {
     minHeight: 32,
-    maxWidth: 230,
+    minWidth: 0,
     flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',

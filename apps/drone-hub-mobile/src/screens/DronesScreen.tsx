@@ -2996,7 +2996,7 @@ const styles = StyleSheet.create({
   },
   composerMetadataLeading: {
     minWidth: 0,
-    flexShrink: 1,
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,

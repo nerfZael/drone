@@ -24,7 +24,7 @@ import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
 import { CreateNewChatNowButton, QueuedNewChatLabel } from './QueuedNewChatAction';
 import {
   isSubscriptionEventPrompt,
-  SubscriptionEventBadge,
+  SubscriptionEventMessage,
 } from './SubscriptionEventBadge';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
@@ -160,46 +160,45 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       {badgeLabel}
     </span>
   ) : null;
-  const pendingHeader = statusBadge || isSubscriptionEvent ? (
-    <span className="inline-flex items-center gap-1.5">
-      {isSubscriptionEvent ? <SubscriptionEventBadge /> : null}
-      {statusBadge}
-    </span>
-  ) : null;
+  const pendingHeader = statusBadge;
 
   return (
     <div className={`animate-fade-in ${isFailed && !isStopped ? 'opacity-90' : ''}`}>
-      <UserChatMessage
-        at={item.at}
-        showRoleIcons={showRoleIcons}
-        headerEnd={pendingHeader}
-        headerAttached={Boolean(actionPresentation)}
-        text={promptText}
-        autoExpand={autoExpandPrompt}
-        onOpenFileReference={onOpenFileReference}
-        onOpenLink={onOpenLink}
-        attachmentContent={
-          <>
-            <ImageAttachmentChips
-              attachments={attachments}
-              droneId={droneId}
-              droneHomePath={droneHomePath}
-              onOpenFileReference={onOpenFileReference}
-            />
-            {queuedFooter}
-            {actionPresentation?.state === 'failed' && item.error ? (
-              <div className="mt-2 whitespace-pre-wrap text-[var(--text-10)] text-[var(--red)]">
-                {stripAnsi(item.error)}
-              </div>
-            ) : null}
-            {createNewChatError ? (
-              <div className="mt-2 text-[var(--text-10)] text-[var(--red)]">
-                {stripAnsi(createNewChatError)}
-              </div>
-            ) : null}
-          </>
-        }
-      />
+      {isSubscriptionEvent ? (
+        <SubscriptionEventMessage prompt={item.prompt} at={item.at} />
+      ) : (
+        <UserChatMessage
+          at={item.at}
+          showRoleIcons={showRoleIcons}
+          headerEnd={pendingHeader}
+          headerAttached={Boolean(actionPresentation)}
+          text={promptText}
+          autoExpand={autoExpandPrompt}
+          onOpenFileReference={onOpenFileReference}
+          onOpenLink={onOpenLink}
+          attachmentContent={
+            <>
+              <ImageAttachmentChips
+                attachments={attachments}
+                droneId={droneId}
+                droneHomePath={droneHomePath}
+                onOpenFileReference={onOpenFileReference}
+              />
+              {queuedFooter}
+              {actionPresentation?.state === 'failed' && item.error ? (
+                <div className="mt-2 whitespace-pre-wrap text-[var(--text-10)] text-[var(--red)]">
+                  {stripAnsi(item.error)}
+                </div>
+              ) : null}
+              {createNewChatError ? (
+                <div className="mt-2 text-[var(--text-10)] text-[var(--red)]">
+                  {stripAnsi(createNewChatError)}
+                </div>
+              ) : null}
+            </>
+          }
+        />
+      )}
 
       {activity && !isFailed ? (
         <AgentRunActivityView

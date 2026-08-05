@@ -4,12 +4,14 @@ import X from 'lucide-react-native/icons/x';
 import Square from 'lucide-react-native/icons/square';
 import MessageSquarePlus from 'lucide-react-native/icons/message-square-plus';
 import {
+  parseEventNotificationPrompt,
   resolveChatQueueActionPresentation,
   stoppedRunDetail,
   type AgentPlan,
   type SendInNewChatQueueAction,
 } from '@drone/assistant-chat';
 import { colors } from '../theme';
+import { MobileEventNotification } from '../drones/MobileEventNotification';
 
 export type MobileQueuedPrompt = {
   id: string;
@@ -42,6 +44,12 @@ export function QueuedPromptRows({
   return (
     <View>
       {prompts.map((prompt) => {
+        const eventNotification = parseEventNotificationPrompt(prompt.prompt);
+        if (eventNotification) {
+          return (
+            <MobileEventNotification key={prompt.id} notification={eventNotification} />
+          );
+        }
         const attachmentCount = Math.max(
           0,
           Number(prompt.attachmentCount ?? prompt.imageCount) || 0,

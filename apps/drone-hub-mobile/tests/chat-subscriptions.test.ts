@@ -38,7 +38,10 @@ describe('mobile chat subscription presentation', () => {
     expect(subscriptions).toHaveLength(2);
     expect(mobileChatSubscriptionSummary(subscriptions)).toBe('Subscriptions · 2');
     expect(mobileChatSubscriptionSummary(subscriptions.slice(0, 1))).toBe(
-      'Subscribed · target-chat',
+      'Chat idle, Chat failed · target-chat',
+    );
+    expect(mobileChatSubscriptionSummary(subscriptions.slice(1))).toBe(
+      'PR opened · acme/widgets',
     );
     expect(mobileChatSubscriptionResourceLabel(subscriptions[0]!)).toBe('Chat · target-chat');
   });

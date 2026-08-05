@@ -1,6 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'bun:test';
+import { renderEventNotificationPrompt } from '@drone/assistant-chat';
 
 import {
   ChatSubscriptionIndicator,
@@ -11,6 +12,7 @@ import {
   chatSubscriptionSummary,
   normalizeChatResourceSubscriptions,
 } from '../src/droneHub/app/chat-resource-subscriptions';
+import { SubscriptionEventMessage } from '../src/droneHub/chat/SubscriptionEventBadge';
 
 describe('chat resource subscription presentation', () => {
   test('keeps only active, displayable subscriptions', () => {
@@ -67,8 +69,9 @@ describe('chat resource subscription presentation', () => {
     ]);
 
     expect(chatSubscriptionSummary(subscriptions.slice(0, 1))).toBe(
-      'Subscribed · acme/widgets#42',
+      'PR merged · acme/widgets#42',
     );
+    expect(chatSubscriptionSummary(subscriptions.slice(1))).toBe('PR opened · acme/widgets');
     expect(chatSubscriptionSummary(subscriptions)).toBe('Subscriptions · 2');
     expect(chatSubscriptionResourceLabel(subscriptions[0]!)).toBe(
       'Pull request · acme/widgets#42',
@@ -91,5 +94,29 @@ describe('chat resource subscription presentation', () => {
     expect(renderToStaticMarkup(React.createElement(DroneBranchIndicator, { branch: null }))).toBe(
       '',
     );
+  });
+
+  test('renders automated events as expandable notifications without exposing intent', () => {
+    const prompt = renderEventNotificationPrompt({
+      events: [
+        {
+          provider: 'github',
+          resourceType: 'pull_request',
+          resourceId: 'acme/widgets#42',
+          eventType: 'pull_request.merged',
+          intent: 'Deploy after merge.',
+          summary: 'Pull request #42 merged.',
+          providerContent: { mergedBy: 'octocat' },
+        },
+      ],
+    });
+    const html = renderToStaticMarkup(
+      React.createElement(SubscriptionEventMessage, { prompt }),
+    );
+    expect(html).toContain('Event notification');
+    expect(html).toContain('PR merged');
+    expect(html).toContain('Pull request · acme/widgets#42');
+    expect(html).not.toContain('Deploy after merge.');
+    expect(html).not.toContain('dronehub_event_notification');
   });
 });
