@@ -5,7 +5,7 @@ import type {
   ResourceSubscriptionStatus,
   ResourceSubscriptionType,
 } from './resource-subscription-types';
-import { RESOURCE_SUBSCRIPTION_PAUSE_REASONS } from './resource-subscription-types';
+import { parseResourceSubscriptionPauseReasons } from './resource-subscription-types';
 
 type LifecycleSubscriptionRow = {
   id: string;
@@ -30,92 +30,50 @@ export class ResourceSubscriptionLifecycleRepository {
   constructor(private readonly database: HubDatabase) {}
 
   async pauseForChat(chatIdRaw: string): Promise<string[]> {
-    const chatId = cleanString(chatIdRaw);
-    if (!chatId) return [];
-    const now = new Date().toISOString();
-    return await this.database.writeTransaction('pause resource subscriptions', (connection) =>
-      pauseResourceSubscriptionsForChatWithConnection(connection, chatId, now),
-    );
+    const relations = chatRelations(chatIdRaw);
+    return relations ? await this.pauseRelations(relations) : [];
   }
 
   async pauseForDrone(droneIdRaw: string, chatIdsRaw: string[]): Promise<string[]> {
-    const droneId = cleanString(droneIdRaw);
-    if (!droneId) return [];
-    return await this.pauseRelations({
-      subscriberDroneId: droneId,
-      resourceChatIds: cleanStrings(chatIdsRaw),
-      subscriberReason: 'subscriber_drone_archived',
-      resourceReason: 'resource_drone_archived',
-    });
+    const relations = droneRelations(droneIdRaw, chatIdsRaw);
+    return relations ? await this.pauseRelations(relations) : [];
   }
 
   resumeCandidatesForChat(chatIdRaw: string): string[] {
-    const chatId = cleanString(chatIdRaw);
-    if (!chatId) return [];
-    return this.resumeCandidates({
-      subscriberChatId: chatId,
-      resourceChatIds: [chatId],
-      subscriberReason: 'subscriber_chat_archived',
-      resourceReason: 'resource_chat_archived',
-    });
+    const relations = chatRelations(chatIdRaw);
+    return relations ? this.resumeCandidates(relations) : [];
   }
 
   resumeCandidatesForDrone(droneIdRaw: string, chatIdsRaw: string[]): string[] {
-    const droneId = cleanString(droneIdRaw);
-    if (!droneId) return [];
-    return this.resumeCandidates({
-      subscriberDroneId: droneId,
-      resourceChatIds: cleanStrings(chatIdsRaw),
-      subscriberReason: 'subscriber_drone_archived',
-      resourceReason: 'resource_drone_archived',
-    });
+    const relations = droneRelations(droneIdRaw, chatIdsRaw);
+    return relations ? this.resumeCandidates(relations) : [];
   }
 
   async resumeForChat(chatIdRaw: string): Promise<string[]> {
-    const chatId = cleanString(chatIdRaw);
-    if (!chatId) return [];
-    return await this.resumeRelations({
-      subscriberChatId: chatId,
-      resourceChatIds: [chatId],
-      subscriberReason: 'subscriber_chat_archived',
-      resourceReason: 'resource_chat_archived',
-    });
+    const relations = chatRelations(chatIdRaw);
+    return relations ? await this.resumeRelations(relations) : [];
   }
 
   async resumeForDrone(droneIdRaw: string, chatIdsRaw: string[]): Promise<string[]> {
-    const droneId = cleanString(droneIdRaw);
-    if (!droneId) return [];
-    return await this.resumeRelations({
-      subscriberDroneId: droneId,
-      resourceChatIds: cleanStrings(chatIdsRaw),
-      subscriberReason: 'subscriber_drone_archived',
-      resourceReason: 'resource_drone_archived',
-    });
+    const relations = droneRelations(droneIdRaw, chatIdsRaw);
+    return relations ? await this.resumeRelations(relations) : [];
   }
 
   async cancelForChat(chatIdRaw: string): Promise<string[]> {
-    const chatId = cleanString(chatIdRaw);
-    if (!chatId) return [];
-    const now = new Date().toISOString();
-    return await this.database.writeTransaction(
-      'cancel related resource subscriptions',
-      (connection) => cancelResourceSubscriptionsForChatWithConnection(connection, chatId, now),
-    );
+    const relations = chatRelations(chatIdRaw);
+    return relations ? await this.cancelRelations(relations) : [];
   }
 
   async cancelForDrone(droneIdRaw: string, chatIdsRaw: string[]): Promise<string[]> {
-    const droneId = cleanString(droneIdRaw);
-    if (!droneId) return [];
+    const relations = droneRelations(droneIdRaw, chatIdsRaw);
+    return relations ? await this.cancelRelations(relations) : [];
+  }
+
+  private async cancelRelations(input: SubscriptionRelations): Promise<string[]> {
     const now = new Date().toISOString();
     return await this.database.writeTransaction(
       'cancel related resource subscriptions',
-      (connection) =>
-        cancelResourceSubscriptionsForDroneWithConnection(
-          connection,
-          droneId,
-          chatIdsRaw,
-          now,
-        ),
+      (connection) => cancelRelationsWithConnection(connection, input, now),
     );
   }
 
@@ -153,7 +111,6 @@ export class ResourceSubscriptionLifecycleRepository {
       return rows.map((row) => row.id);
     });
   }
-
 }
 
 export function pauseResourceSubscriptionsForChatWithConnection(
@@ -161,18 +118,9 @@ export function pauseResourceSubscriptionsForChatWithConnection(
   chatIdRaw: string,
   now = new Date().toISOString(),
 ): string[] {
-  const chatId = cleanString(chatIdRaw);
-  if (!chatId || !resourceSubscriptionTableExists(connection)) return [];
-  return pauseRelationsWithConnection(
-    connection,
-    {
-      subscriberChatId: chatId,
-      resourceChatIds: [chatId],
-      subscriberReason: 'subscriber_chat_archived',
-      resourceReason: 'resource_chat_archived',
-    },
-    now,
-  );
+  const relations = chatRelations(chatIdRaw);
+  if (!relations || !resourceSubscriptionTableExists(connection)) return [];
+  return pauseRelationsWithConnection(connection, relations, now);
 }
 
 export function cancelResourceSubscriptionsForChatWithConnection(
@@ -180,13 +128,9 @@ export function cancelResourceSubscriptionsForChatWithConnection(
   chatIdRaw: string,
   now = new Date().toISOString(),
 ): string[] {
-  const chatId = cleanString(chatIdRaw);
-  if (!chatId || !resourceSubscriptionTableExists(connection)) return [];
-  return cancelRelationsWithConnection(
-    connection,
-    { subscriberChatId: chatId, resourceChatIds: [chatId] },
-    now,
-  );
+  const relations = chatRelations(chatIdRaw);
+  if (!relations || !resourceSubscriptionTableExists(connection)) return [];
+  return cancelRelationsWithConnection(connection, relations, now);
 }
 
 export function cancelResourceSubscriptionsForDroneWithConnection(
@@ -195,13 +139,9 @@ export function cancelResourceSubscriptionsForDroneWithConnection(
   chatIdsRaw: string[],
   now = new Date().toISOString(),
 ): string[] {
-  const droneId = cleanString(droneIdRaw);
-  if (!droneId || !resourceSubscriptionTableExists(connection)) return [];
-  return cancelRelationsWithConnection(
-    connection,
-    { subscriberDroneId: droneId, resourceChatIds: cleanStrings(chatIdsRaw) },
-    now,
-  );
+  const relations = droneRelations(droneIdRaw, chatIdsRaw);
+  if (!relations || !resourceSubscriptionTableExists(connection)) return [];
+  return cancelRelationsWithConnection(connection, relations, now);
 }
 
 function pauseRelationsWithConnection(
@@ -278,7 +218,7 @@ function pauseReasonsAfterAdding(
   row: LifecycleSubscriptionRow,
   input: SubscriptionRelations,
 ): ResourceSubscriptionPauseReason[] {
-  const reasons = new Set(parsePauseReasons(row.pause_reasons_json));
+  const reasons = new Set(parseResourceSubscriptionPauseReasons(row.pause_reasons_json));
   if (subscriberMatches(row, input) && input.subscriberReason) reasons.add(input.subscriberReason);
   if (resourceMatches(row, input) && input.resourceReason) reasons.add(input.resourceReason);
   return [...reasons];
@@ -288,7 +228,7 @@ function pauseReasonsAfterRemoving(
   row: LifecycleSubscriptionRow,
   input: SubscriptionRelations,
 ): ResourceSubscriptionPauseReason[] {
-  const reasons = new Set(parsePauseReasons(row.pause_reasons_json));
+  const reasons = new Set(parseResourceSubscriptionPauseReasons(row.pause_reasons_json));
   if (subscriberMatches(row, input) && input.subscriberReason) {
     reasons.delete(input.subscriberReason);
   }
@@ -315,24 +255,6 @@ function resourceMatches(
     row.resource_type === 'chat' &&
     input.resourceChatIds.includes(row.resource_id)
   );
-}
-
-function parsePauseReasons(raw: unknown): ResourceSubscriptionPauseReason[] {
-  const supported = new Set<ResourceSubscriptionPauseReason>(RESOURCE_SUBSCRIPTION_PAUSE_REASONS);
-  try {
-    const value = JSON.parse(String(raw ?? ''));
-    return Array.isArray(value)
-      ? ([
-          ...new Set(
-            value
-              .map((item) => cleanString(item))
-              .filter((item) => supported.has(item as ResourceSubscriptionPauseReason)),
-          ),
-        ] as ResourceSubscriptionPauseReason[])
-      : [];
-  } catch {
-    return [];
-  }
 }
 
 export function failPendingResourceSubscriptionDeliveries(
@@ -390,6 +312,30 @@ function resourceSubscriptionTableExists(connection: HubDatabaseConnection): boo
 
 function cleanStrings(raw: string[]): string[] {
   return [...new Set((raw ?? []).map((item) => cleanString(item)).filter(Boolean))];
+}
+
+function chatRelations(chatIdRaw: string): SubscriptionRelations | null {
+  const chatId = cleanString(chatIdRaw);
+  return chatId
+    ? {
+        subscriberChatId: chatId,
+        resourceChatIds: [chatId],
+        subscriberReason: 'subscriber_chat_archived',
+        resourceReason: 'resource_chat_archived',
+      }
+    : null;
+}
+
+function droneRelations(droneIdRaw: string, chatIdsRaw: string[]): SubscriptionRelations | null {
+  const droneId = cleanString(droneIdRaw);
+  return droneId
+    ? {
+        subscriberDroneId: droneId,
+        resourceChatIds: cleanStrings(chatIdsRaw),
+        subscriberReason: 'subscriber_drone_archived',
+        resourceReason: 'resource_drone_archived',
+      }
+    : null;
 }
 
 function cleanString(raw: unknown): string {

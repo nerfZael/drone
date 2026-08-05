@@ -6,12 +6,11 @@ import {
   type HubDatabaseMigration,
 } from '../../host/hub-database';
 import {
-  RESOURCE_SUBSCRIPTION_PAUSE_REASONS,
+  parseResourceSubscriptionPauseReasons,
   resourceRef,
   type ResourceEvent,
   type ResourceSubscription,
   type ResourceSubscriptionEventType,
-  type ResourceSubscriptionPauseReason,
   type ResourceSubscriptionProvider,
   type ResourceSubscriptionSettings,
   type ResourceSubscriptionStatus,
@@ -248,23 +247,6 @@ export class ResourceSubscriptionRepository {
     });
   }
 
-  chatResourceIdsForDrone(droneIdRaw: string): string[] {
-    const droneId = cleanString(droneIdRaw);
-    if (!droneId) return [];
-    return this.database.read((connection) => {
-      const rows = connection
-        .prepare(
-          `SELECT json_extract(metadata_json, '$.id') AS chat_id
-           FROM canonical_chats WHERE drone_id = ?
-           UNION
-           SELECT json_extract(chat_json, '$.id') AS chat_id
-           FROM canonical_archived_chats WHERE drone_id = ?`,
-        )
-        .all(droneId, droneId) as Array<{ chat_id: string | null }>;
-      return rows.map((row) => cleanString(row.chat_id)).filter(Boolean);
-    });
-  }
-
   get(idRaw: string, subscriberChatId?: string): ResourceSubscription | null {
     const id = cleanString(idRaw);
     if (!id) return null;
@@ -374,7 +356,9 @@ export class ResourceSubscriptionRepository {
         : false;
       const nextStatus = current?.status === 'paused' ? 'paused' : 'active';
       const pauseReasons =
-        current?.status === 'paused' ? parsePauseReasons(current.pause_reasons_json) : [];
+        current?.status === 'paused'
+          ? parseResourceSubscriptionPauseReasons(current.pause_reasons_json)
+          : [];
       connection
         .prepare(
           `
@@ -1183,20 +1167,6 @@ function parseEvents(raw: unknown): ResourceSubscriptionEventType[] {
     : [];
 }
 
-function parsePauseReasons(raw: unknown): ResourceSubscriptionPauseReason[] {
-  const supported = new Set<ResourceSubscriptionPauseReason>(RESOURCE_SUBSCRIPTION_PAUSE_REASONS);
-  const value = parseJson(raw);
-  return Array.isArray(value)
-    ? ([
-        ...new Set(
-          value
-            .map((item) => cleanString(item))
-            .filter((item) => supported.has(item as ResourceSubscriptionPauseReason)),
-        ),
-      ] as ResourceSubscriptionPauseReason[])
-    : [];
-}
-
 function cleanString(raw: unknown, fallback = ''): string {
   const value = String(raw ?? '').trim();
   return value || fallback;
@@ -1218,7 +1188,7 @@ function subscriptionFromRow(row: SubscriptionRow | undefined): ResourceSubscrip
     events: parseEvents(row.events_json),
     intent: row.intent,
     status: row.status,
-    pauseReasons: parsePauseReasons(row.pause_reasons_json),
+    pauseReasons: parseResourceSubscriptionPauseReasons(row.pause_reasons_json),
     cursor: parseObject(row.cursor_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,

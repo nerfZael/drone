@@ -19,6 +19,23 @@ export const RESOURCE_SUBSCRIPTION_PAUSE_REASONS = [
 ] as const;
 export type ResourceSubscriptionPauseReason = (typeof RESOURCE_SUBSCRIPTION_PAUSE_REASONS)[number];
 
+export function parseResourceSubscriptionPauseReasons(
+  raw: unknown,
+): ResourceSubscriptionPauseReason[] {
+  try {
+    const value = JSON.parse(String(raw ?? ''));
+    if (!Array.isArray(value)) return [];
+    const supported = new Set<string>(RESOURCE_SUBSCRIPTION_PAUSE_REASONS);
+    return [
+      ...new Set(
+        value.map((item) => String(item ?? '').trim()).filter((item) => supported.has(item)),
+      ),
+    ] as ResourceSubscriptionPauseReason[];
+  } catch {
+    return [];
+  }
+}
+
 export type ResourceSubscriptionSubscriber = {
   chatId: string;
   droneId: string;

@@ -1,4 +1,3 @@
-import { getHubDatabase } from '../host/hub-database';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 import {
   commitPermanentDroneDeletionInStore,
@@ -9,7 +8,6 @@ import {
   deleteCanonicalDroneLifecycle,
   getCanonicalDroneLifecycle,
 } from './drone-lifecycle-service';
-import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 import { deleteDroneWorkflowRecords } from './workflows/workflow-store';
 
 export async function permanentlyDeleteCanonicalDrone(opts: {
@@ -17,9 +15,6 @@ export async function permanentlyDeleteCanonicalDrone(opts: {
   lifecycleState: 'real' | 'archived';
 }): Promise<PermanentDroneChatCleanupResult> {
   const transcriptStore = getTranscriptStore();
-  const database = getHubDatabase();
-  const subscriptionRepository = database ? new ResourceSubscriptionRepository(database) : null;
-  const chatIds = subscriptionRepository?.chatResourceIdsForDrone(opts.droneId) ?? [];
   await getCanonicalDroneLifecycle(opts.droneId);
   getPromptQueueRepository();
   let cleanup: PermanentDroneChatCleanupResult;
@@ -43,7 +38,6 @@ export async function permanentlyDeleteCanonicalDrone(opts: {
           promptsDeleted: 0,
         };
   }
-  await subscriptionRepository?.cancelForDrone(opts.droneId, chatIds);
   await deleteDroneWorkflowRecords(opts.droneId);
   return cleanup;
 }

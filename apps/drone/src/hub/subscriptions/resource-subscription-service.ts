@@ -179,10 +179,6 @@ export class ResourceSubscriptionService {
     return await this.deps.repository.cancel(id, subscriberChatId);
   }
 
-  async pauseForChat(chatId: string): Promise<ResourceSubscription[]> {
-    return await this.deps.repository.pauseForChat(chatId);
-  }
-
   async pauseForDrone(droneId: string, chatIds: string[]): Promise<ResourceSubscription[]> {
     return await this.deps.repository.pauseForDrone(droneId, chatIds);
   }
