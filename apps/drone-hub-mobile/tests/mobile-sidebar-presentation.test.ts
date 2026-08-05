@@ -518,6 +518,10 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('borderBottomWidth: StyleSheet.hairlineWidth,');
     expect(drawerSource).toContain('color={colors.sidebarMutedDim}');
     expect(drawerSource).toContain('style={styles.pinnedHeaderIcon}');
+    expect(drawerSource).toContain("accessibilityLabel={collapsed ? 'Expand pinned drones' : 'Collapse pinned drones'}");
+    expect(drawerSource).toContain('accessibilityState={{ expanded: !collapsed }}');
+    expect(drawerSource).toContain('onPress={onToggleCollapsed}');
+    expect(drawerSource).toContain('? drones.map((drone) => (');
     expect(drawerSource).toContain("fontSize: 10.5,\n    fontWeight: '400',");
     expect(drawerSource).toContain(
       '<Text numberOfLines={1} style={styles.switchItemContextBadge}>',
@@ -561,7 +565,11 @@ describe('mobile sidebar presentation', () => {
     );
     expect(drawerSource).toContain("current === 'top' ? 'bottom' : 'top'");
     expect(drawerSource).toContain('AsyncStorage.setItem(PINNED_SIDEBAR_PLACEMENT_KEY, next)');
+    expect(drawerSource).toContain('AsyncStorage.setItem(PINNED_SIDEBAR_COLLAPSED_KEY');
     expect(drawerSource).toContain("React.useState<PinnedSidebarPlacement>('bottom')");
+    expect(drawerSource).toContain('React.useState(false)');
+    expect(drawerSource).toContain('collapsed={pinnedSidebarCollapsed}');
+    expect(drawerSource).toContain('onToggleCollapsed={togglePinnedSidebarCollapsed}');
     expect(drawerSource).toContain("stored === 'top' || stored === 'bottom'");
     expect(drawerSource).toContain(
       "placement === 'top' ? 'Move pinned drones to bottom' : 'Move pinned drones to top'",

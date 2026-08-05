@@ -60,6 +60,12 @@ describe('desktop pinned drone presentation', () => {
     );
     expect(sidebarSource).toContain('group/active-repository sticky top-0 z-20');
     expect(sidebarSource).toContain('data-sidebar-pinned-placement-toggle="true"');
+    expect(sidebarSource).toContain('data-sidebar-pinned-collapse-toggle="true"');
+    expect(sidebarSource).toContain('data-sidebar-pinned-collapsed={pinnedSidebarCollapsed');
+    expect(sidebarSource).toContain('onClick={() => setPinnedSidebarCollapsed((current) => !current)}');
+    expect(sidebarSource).toContain('aria-expanded={!pinnedSidebarCollapsed}');
+    expect(sidebarSource).toContain('{!pinnedSidebarCollapsed ? (');
+    expect(sidebarSource).toContain('min-h-8 cursor-pointer items-center');
     expect(sidebarSource).toContain("current === 'top' ? 'bottom' : 'top'");
     expect(sidebarSource).toContain("? 'Move pinned drones to bottom'");
     expect(sidebarSource).toContain(": 'Move pinned drones to top'");
@@ -101,7 +107,7 @@ describe('desktop pinned drone presentation', () => {
     expect(sidebarSource).toContain('onSelectDroneChat(selectedDroneId, activeChatName)');
     expect(sidebarSource).not.toContain('leadingIcon={<IconPin');
     expect(sidebarSource).toContain(
-      'className="flex min-h-8 items-center gap-1.5 border-b border-[var(--border-subtle)] px-1"',
+      'className="flex min-h-8 cursor-pointer items-center gap-1.5 border-b border-[var(--border-subtle)] px-1"',
     );
     expect(sidebarSource).toContain(
       '<IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />',

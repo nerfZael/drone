@@ -135,6 +135,7 @@ const DRAWER_TREE_DEPTH_INDENT = 10;
 const DRAWER_TREE_LEADING_SLOT_WIDTH = 12;
 const DRAWER_TREE_LEADING_GAP = 6;
 const PINNED_SIDEBAR_PLACEMENT_KEY = 'droneHubMobile.pinnedSidebarPlacement';
+const PINNED_SIDEBAR_COLLAPSED_KEY = 'droneHubMobile.pinnedSidebarCollapsed';
 type PinnedSidebarPlacement = 'top' | 'bottom';
 
 function drawerTreeRowPaddingLeft(depth: number): number {
@@ -1125,6 +1126,7 @@ function DrawerDroneEntry({
 function DrawerPinnedDrones({
   drones,
   placement,
+  collapsed,
   separateFromRepositoryList,
   repoLabelByPath,
   sidebarChatOrderByDrone,
@@ -1137,10 +1139,12 @@ function DrawerPinnedDrones({
   onSelectContainer,
   onOpenChatActions,
   onSelect,
+  onToggleCollapsed,
   onTogglePlacement,
 }: {
   drones: MobileDroneSummary[];
   placement: PinnedSidebarPlacement;
+  collapsed: boolean;
   separateFromRepositoryList: boolean;
   repoLabelByPath: ReadonlyMap<string, string>;
   sidebarChatOrderByDrone: Record<string, string[]>;
@@ -1153,6 +1157,7 @@ function DrawerPinnedDrones({
   onSelectContainer(droneId: string): void;
   onOpenChatActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
+  onToggleCollapsed(): void;
   onTogglePlacement(): void;
 }) {
   if (drones.length === 0) return null;
@@ -1166,13 +1171,24 @@ function DrawerPinnedDrones({
       accessibilityLabel="Pinned drones"
     >
       <View style={styles.pinnedHeader}>
-        <SidebarPinIcon
-          color={colors.sidebarMutedDim}
-          size={14}
-          strokeWidth={1.7}
-          style={styles.pinnedHeaderIcon}
-        />
-        <Text style={styles.pinnedHeaderText}>Pinned</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={collapsed ? 'Expand pinned drones' : 'Collapse pinned drones'}
+          accessibilityState={{ expanded: !collapsed }}
+          onPress={onToggleCollapsed}
+          style={({ pressed }) => [
+            styles.pinnedHeaderToggle,
+            pressed && styles.sidebarRowPressed,
+          ]}
+        >
+          <SidebarPinIcon
+            color={colors.sidebarMutedDim}
+            size={14}
+            strokeWidth={1.7}
+            style={styles.pinnedHeaderIcon}
+          />
+          <Text style={styles.pinnedHeaderText}>Pinned</Text>
+        </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={
@@ -1202,24 +1218,26 @@ function DrawerPinnedDrones({
           )}
         </Pressable>
       </View>
-      {drones.map((drone) => (
-        <DrawerDroneNode
-          key={`pinned:${drone.id}`}
-          node={{ drone, children: [] }}
-          depth={0}
-          contextLabel={repoLabelByPath.get(drone.repoPath) ?? 'Ungrouped'}
-          sidebarChatOrderByDrone={sidebarChatOrderByDrone}
-          collapsedDroneIds={collapsedDroneIds}
-          selectedContainerDroneId={selectedContainerDroneId}
-          activeDroneId={activeDroneId}
-          activeChatName={activeChatName}
-          droneOperationById={droneOperationById}
-          onToggleDrone={onToggleDrone}
-          onSelectContainer={onSelectContainer}
-          onOpenChatActions={onOpenChatActions}
-          onSelect={onSelect}
-        />
-      ))}
+      {!collapsed
+        ? drones.map((drone) => (
+            <DrawerDroneNode
+              key={`pinned:${drone.id}`}
+              node={{ drone, children: [] }}
+              depth={0}
+              contextLabel={repoLabelByPath.get(drone.repoPath) ?? 'Ungrouped'}
+              sidebarChatOrderByDrone={sidebarChatOrderByDrone}
+              collapsedDroneIds={collapsedDroneIds}
+              selectedContainerDroneId={selectedContainerDroneId}
+              activeDroneId={activeDroneId}
+              activeChatName={activeChatName}
+              droneOperationById={droneOperationById}
+              onToggleDrone={onToggleDrone}
+              onSelectContainer={onSelectContainer}
+              onOpenChatActions={onOpenChatActions}
+              onSelect={onSelect}
+            />
+          ))
+        : null}
     </View>
   );
 }
@@ -1406,6 +1424,7 @@ function AppDrawerView({
   const insets = useSafeAreaInsets();
   const [pinnedSidebarPlacement, setPinnedSidebarPlacement] =
     React.useState<PinnedSidebarPlacement>('bottom');
+  const [pinnedSidebarCollapsed, setPinnedSidebarCollapsed] = React.useState(false);
   React.useEffect(() => {
     let active = true;
     void AsyncStorage.getItem(PINNED_SIDEBAR_PLACEMENT_KEY)
@@ -1419,10 +1438,30 @@ function AppDrawerView({
       active = false;
     };
   }, []);
+  React.useEffect(() => {
+    let active = true;
+    void AsyncStorage.getItem(PINNED_SIDEBAR_COLLAPSED_KEY)
+      .then((stored) => {
+        if (active) setPinnedSidebarCollapsed(stored === 'true');
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
   const togglePinnedSidebarPlacement = React.useCallback(() => {
     setPinnedSidebarPlacement((current) => {
       const next = current === 'top' ? 'bottom' : 'top';
       void AsyncStorage.setItem(PINNED_SIDEBAR_PLACEMENT_KEY, next).catch(() => undefined);
+      return next;
+    });
+  }, []);
+  const togglePinnedSidebarCollapsed = React.useCallback(() => {
+    setPinnedSidebarCollapsed((current) => {
+      const next = !current;
+      void AsyncStorage.setItem(PINNED_SIDEBAR_COLLAPSED_KEY, next ? 'true' : 'false').catch(
+        () => undefined,
+      );
       return next;
     });
   }, []);
@@ -1629,6 +1668,7 @@ function AppDrawerView({
     <DrawerPinnedDrones
       drones={globalPinnedDrones}
       placement={pinnedSidebarPlacement}
+      collapsed={pinnedSidebarCollapsed}
       separateFromRepositoryList={!activeRepo}
       repoLabelByPath={repoLabelByPath}
       sidebarChatOrderByDrone={droneSidebarOrder.sidebarChatOrderByDrone}
@@ -1641,6 +1681,7 @@ function AppDrawerView({
       onSelectContainer={setSelectedContainerDroneId}
       onOpenChatActions={openChatActions}
       onSelect={selectPinnedDroneChat}
+      onToggleCollapsed={togglePinnedSidebarCollapsed}
       onTogglePlacement={togglePinnedSidebarPlacement}
     />
   );
@@ -2279,6 +2320,14 @@ const styles = StyleSheet.create({
     paddingRight: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.borderSubtle,
+  },
+  pinnedHeaderToggle: {
+    minHeight: 32,
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   pinnedHeaderText: {
     flex: 1,

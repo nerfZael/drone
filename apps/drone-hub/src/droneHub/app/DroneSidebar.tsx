@@ -1587,6 +1587,7 @@ export function DroneSidebar({
     sidebarDensityMode,
     activeRepoPath,
     pinnedSidebarPlacement,
+    pinnedSidebarCollapsed,
     selectedDrone,
     selectedChat,
     lastChatSelectionByRepoPath,
@@ -1608,6 +1609,7 @@ export function DroneSidebar({
     setSidebarDensityMode,
     setSidebarDockSide,
     setPinnedSidebarPlacement,
+    setPinnedSidebarCollapsed,
     setCollapsedGroups,
     setSidebarGroupOrder,
     setSidebarRepoScopedGroupByPath,
@@ -3164,6 +3166,7 @@ export function DroneSidebar({
                 <section
                   data-sidebar-pinned-section="true"
                   data-sidebar-pinned-placement={pinnedSidebarPlacement}
+                  data-sidebar-pinned-collapsed={pinnedSidebarCollapsed ? 'true' : 'false'}
                   className={
                     pinnedSidebarPlacement === 'bottom'
                       ? 'border-t border-[var(--border-subtle)]'
@@ -3171,11 +3174,21 @@ export function DroneSidebar({
                   }
                   aria-label="Pinned drones"
                 >
-                <div className="flex min-h-8 items-center gap-1.5 border-b border-[var(--border-subtle)] px-1">
-                  <IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
-                  <span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-normal text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">
-                    Pinned
-                  </span>
+                <div className="flex min-h-8 cursor-pointer items-center gap-1.5 border-b border-[var(--border-subtle)] px-1">
+                  <button
+                    type="button"
+                    data-sidebar-pinned-collapse-toggle="true"
+                    onClick={() => setPinnedSidebarCollapsed((current) => !current)}
+                    className="flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
+                    title={pinnedSidebarCollapsed ? 'Expand pinned drones' : 'Collapse pinned drones'}
+                    aria-label={pinnedSidebarCollapsed ? 'Expand pinned drones' : 'Collapse pinned drones'}
+                    aria-expanded={!pinnedSidebarCollapsed}
+                  >
+                    <IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
+                    <span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-normal text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">
+                      Pinned
+                    </span>
+                  </button>
                   <button
                     type="button"
                     data-sidebar-pinned-placement-toggle="true"
@@ -3184,7 +3197,7 @@ export function DroneSidebar({
                         current === 'top' ? 'bottom' : 'top',
                       )
                     }
-                    className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted-dim)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
+                    className="inline-flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded-[.25rem] text-[var(--muted-dim)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
                     title={
                       pinnedSidebarPlacement === 'top'
                         ? 'Move pinned drones to bottom'
@@ -3204,6 +3217,7 @@ export function DroneSidebar({
                     />
                   </button>
                 </div>
+                {!pinnedSidebarCollapsed ? (
                 <div className="flex flex-col gap-0.5 pb-1">
                   {globalPinnedDrones.map((drone) => {
                     const droneId = String(drone.id ?? '').trim();
@@ -3393,6 +3407,7 @@ export function DroneSidebar({
                     );
                   })}
                 </div>
+                ) : null}
                 </section>
               ) : null}
             </PinnedSidebarPlacementSlot>
