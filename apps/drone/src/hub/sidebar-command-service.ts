@@ -1,26 +1,18 @@
 import {
   parseSidebarMoveCommandRequest,
-  applySidebarMove,
-  normalizeSidebarLayout,
-  sidebarLayoutPatch,
-  sidebarMoveDestination,
   type SidebarMoveCommandRequest,
   type SidebarMoveCommandResult,
 } from '@drone/device-protocol';
-import { localHubRequest, type LocalHubAccess } from './local-hub-request';
+import {
+  applySidebarMove,
+  normalizeSidebarLayout,
+  sidebarLayoutPatch,
+  sidebarMoveDroneIds,
+  sidebarMoveDestination,
+} from '@drone/hub-model';
+import { localHubRequest, type LocalHubAccess } from './device-mesh/local-hub-request';
 
 type SidebarCommandResult = SidebarMoveCommandResult & Record<string, unknown>;
-
-function object(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function currentExpectedVersion(value: unknown): number | null | undefined {
-  if (value === null) return null;
-  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
-}
 
 export class SidebarCommandService {
   private tail: Promise<void> = Promise.resolve();
@@ -63,10 +55,23 @@ export class SidebarCommandService {
         });
       }
       if (request.intent.itemKind === 'drone') {
+        const movingDroneIds = sidebarMoveDroneIds(request.intent);
+        if (request.intent.targetParentDroneId !== undefined) {
+          for (const droneId of movingDroneIds) {
+            await localHubRequest(
+              this.access,
+              `/api/fleet/actors/${encodeURIComponent(droneId)}/parent`,
+              {
+                method: 'POST',
+                body: JSON.stringify({ parent: request.intent.targetParentDroneId }),
+              },
+            );
+          }
+        }
         const result = await localHubRequest(this.access, '/api/drones/group-set', {
           method: 'POST',
           body: JSON.stringify({
-            droneIds: [request.intent.droneId],
+            droneIds: movingDroneIds,
             group: destination.targetGroup,
           }),
         });
@@ -133,4 +138,15 @@ export class SidebarCommandService {
     }
     throw new Error('Failed to apply sidebar move');
   }
+}
+
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function currentExpectedVersion(value: unknown): number | null | undefined {
+  if (value === null) return null;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }

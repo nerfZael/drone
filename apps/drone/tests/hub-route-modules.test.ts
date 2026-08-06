@@ -5,6 +5,7 @@ import { createEditorRouteHandler } from '../src/hub/routes/editor-routes';
 import { registerFleetRoutes } from '../src/hub/routes/fleet-routes';
 import { registerOperationalRoutes } from '../src/hub/routes/operational-routes';
 import { registerSettingsRoutes } from '../src/hub/routes/settings-routes';
+import { registerSidebarRoutes } from '../src/hub/routes/sidebar-routes';
 import { registerSystemRoutes } from '../src/hub/routes/system-routes';
 import { createTerminalRouteHandler } from '../src/hub/routes/terminal-routes';
 
@@ -402,43 +403,6 @@ describe('extracted Hub route modules', () => {
     ]);
   });
 
-  test('passes a pinned-drone batch to one atomic settings update', async () => {
-    const { router, request, responses } = routeHarness({
-      droneIds: ['alpha', 'bravo'],
-      pinned: true,
-    });
-    const updates: Array<{ droneIds: unknown; pinned: boolean }> = [];
-    let notificationCount = 0;
-    registerSettingsRoutes(router, {
-      updatePinnedDronePreference: async (droneIds: unknown, pinned: boolean) => {
-        updates.push({ droneIds, pinned });
-        return {
-          uiPreferences: { pinnedDroneIds: ['alpha', 'bravo'] },
-          updatedAt: '2026-07-22T12:00:00.000Z',
-          version: 2,
-        };
-      },
-      notifyPinnedDronesChanged: async () => {
-        notificationCount += 1;
-      },
-    } as any);
-
-    expect(await request('POST', '/api/settings/ui-preferences/pinned-drones')).toBe(true);
-    expect(updates).toEqual([{ droneIds: ['alpha', 'bravo'], pinned: true }]);
-    expect(notificationCount).toBe(1);
-    expect(responses).toEqual([
-      {
-        status: 200,
-        body: {
-          ok: true,
-          uiPreferences: { pinnedDroneIds: ['alpha', 'bravo'] },
-          updatedAt: '2026-07-22T12:00:00.000Z',
-          version: 2,
-        },
-      },
-    ]);
-  });
-
   test('notifies desktop clients after a general UI preference write', async () => {
     const requestBody = {
       uiPreferences: { sidebarNodeOrderByParent: { group: ['drone:a', 'drone:b'] } },
@@ -500,6 +464,37 @@ describe('extracted Hub route modules', () => {
     expect({ generalNotifications, snapshotNotifications }).toEqual({
       generalNotifications: 0,
       snapshotNotifications: 1,
+    });
+  });
+
+  test('routes desktop sidebar commands through the shared command service', async () => {
+    const body = {
+      mutationId: 'desktop-1',
+      intent: { kind: 'set-pinned', droneIds: ['alpha'], pinned: true },
+    };
+    const { router, request, responses } = routeHarness(body);
+    const received: unknown[] = [];
+    registerSidebarRoutes(router, {
+      move: async (value: unknown) => {
+        received.push(value);
+        return {
+          ok: true,
+          mutationId: 'desktop-1',
+          version: 2,
+          uiPreferences: {
+            sidebarNodeOrderByParent: {},
+            sidebarChatOrderByDrone: {},
+            pinnedDroneIds: ['alpha'],
+          },
+        };
+      },
+    } as any);
+
+    expect(await request('POST', '/api/sidebar/move')).toBe(true);
+    expect(received).toEqual([body]);
+    expect(responses[0]).toMatchObject({
+      status: 200,
+      body: { ok: true, mutationId: 'desktop-1', version: 2 },
     });
   });
 

@@ -302,6 +302,7 @@ import { registerResourceSubscriptionRoutes } from './routes/resource-subscripti
 import { createRepositoryRouteHandler } from './routes/repository-operation-routes';
 import { registerRepositoryRoutes } from './routes/repository-routes';
 import { registerSettingsRoutes } from './routes/settings-routes';
+import { registerSidebarRoutes } from './routes/sidebar-routes';
 import { registerSystemRoutes } from './routes/system-routes';
 import { createTerminalRouteHandler } from './routes/terminal-routes';
 import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
@@ -316,6 +317,7 @@ import {
 } from './workflows/workflow-child-drone-metadata';
 import { registerWorkflowFeature } from './workflows/workflow-feature';
 import { DroneHubMcpHttpTransport } from './mcp-http-transport';
+import { SidebarCommandService } from './sidebar-command-service';
 import {
   assertDroneDaemonRuntimeReady,
   launchHostDroneDaemon,
@@ -407,7 +409,6 @@ import {
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
   upsertStoredUiPreferencesSettings,
-  updatePinnedDronePreference,
   updateStoredUserTimeZone,
   type LlmProviderId,
   type StoredApiKeyProviderId,
@@ -4064,9 +4065,14 @@ export async function startDroneHubApiServer(opts: {
   const mcpToken = String(opts.mcpToken ?? '').trim();
   if (mcpToken) await revokeLegacyProjectedDroneMcpTokens();
   let actualPort = opts.port;
+  const sidebarCommands = new SidebarCommandService({
+    baseUrl: () => `http://127.0.0.1:${actualPort}`,
+    apiToken,
+  });
   const deviceMesh = await createDeviceMeshService({
     rootDir: droneRootPath('device-mesh'),
     apiToken,
+    sidebarCommands,
     localHubBaseUrl: () => `http://127.0.0.1:${actualPort}`,
     ingressPort: opts.deviceMeshIngressPort,
     createdDroneAutoRename: {
@@ -5373,7 +5379,6 @@ export async function startDroneHubApiServer(opts: {
     droneRootPath,
     resolveUiPreferencesSettingsResponse,
     upsertStoredUiPreferencesSettings,
-    updatePinnedDronePreference,
     resolveUserContextSettingsResponse,
     notifyUiPreferencesChanged: () => {
       const at = nowIso();
@@ -5385,11 +5390,6 @@ export async function startDroneHubApiServer(opts: {
       scheduleDroneRegistryBroadcasterRefresh(150, true);
       void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
     },
-    notifyPinnedDronesChanged: () => {
-      const at = nowIso();
-      assistantService.emitExternalUiAction({ type: 'reload_pinned_drones', at });
-      void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
-    },
     clampIntParam,
     readHubLogTail,
     HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,
@@ -5397,6 +5397,8 @@ export async function startDroneHubApiServer(opts: {
     HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES,
     HUB_SETTINGS_LOG_MAX_TAIL_LINES,
   });
+
+  registerSidebarRoutes(apiRouter, sidebarCommands);
 
   registerCatalogRoutes(apiRouter, {
     mcpToken,

@@ -58,8 +58,6 @@ describe('device mesh grant migrations', () => {
           'chat.rename',
           'chat.delete',
           'sidebar.move',
-          'sidebar.order.update',
-          'sidebar.item.move',
         ],
       },
     ]);
@@ -76,7 +74,7 @@ describe('device mesh grant migrations', () => {
     expect(migrateDeviceMeshGrants(grants)).toEqual(grants);
   });
 
-  test('upgrades an existing complete sidebar grant to the atomic move command', () => {
+  test('replaces legacy sidebar grants with the atomic move command', () => {
     expect(
       migrateDeviceMeshGrants([
         {
@@ -89,7 +87,25 @@ describe('device mesh grant migrations', () => {
       {
         capability: 'drone-control',
         version: 1,
-        operations: ['drones.list', 'sidebar.order.update', 'sidebar.item.move', 'sidebar.move'],
+        operations: ['drones.list', 'sidebar.move'],
+      },
+    ]);
+  });
+
+  test('preserves existing pin access through the atomic sidebar grant', () => {
+    expect(
+      migrateDeviceMeshGrants([
+        {
+          capability: 'drone-control',
+          version: 1,
+          operations: ['drones.list', 'drone.pin.update'],
+        },
+      ]),
+    ).toEqual([
+      {
+        capability: 'drone-control',
+        version: 1,
+        operations: ['drones.list', 'sidebar.move'],
       },
     ]);
   });
