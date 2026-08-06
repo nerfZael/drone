@@ -21,6 +21,7 @@ import { CrossDeviceAssistantPolicyStore } from './features/cross-device-assista
 import { RemoteWorkspaceTarget } from './features/cross-device-assistant/remote-workspace-target';
 import { createWorkspaceCapability } from './features/cross-device-assistant/workspace-capability';
 import { createProviderCredentialsCapability } from './features/provider-credentials/provider-credentials-capability';
+import type { SidebarCommandService } from '../sidebar-command-service';
 import { ProviderCredentialsHttp } from './features/provider-credentials/provider-credentials-http';
 
 export async function createDeviceMeshService(options: {
@@ -29,6 +30,7 @@ export async function createDeviceMeshService(options: {
   localHubBaseUrl(): string;
   ingressPort?: number;
   createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
+  sidebarCommands?: SidebarCommandService;
 }) {
   const identity = await loadOrCreateDeviceIdentity(options.rootDir);
   const store = new DeviceMeshStore(path.join(options.rootDir, 'state.json'), identity);
@@ -50,6 +52,7 @@ export async function createDeviceMeshService(options: {
       { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
       chatAttachments,
       {
+        sidebarCommands: options.sidebarCommands,
         createdDroneAutoRename: options.createdDroneAutoRename,
         broadcastFileChange: (payload, targetDeviceIds) =>
           router.broadcastCapabilityEvent(

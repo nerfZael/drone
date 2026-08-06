@@ -16,7 +16,6 @@ import {
   SidebarReorderDropIndicator,
   sidebarDropPlacementFromRects,
 } from './sidebar-reorder-ui';
-import { reorderVisiblePinnedDroneIds } from './pinned-drone-order';
 
 type PinnedDroneDropTarget = {
   droneId: string;
@@ -55,13 +54,15 @@ function dropTargetFromEvent(
 
 export function usePinnedDroneReorder({
   enabled,
-  visibleDroneIds,
-  setPinnedDroneIds,
+  onReorder,
   onPrepareDroneDragStart,
 }: {
   enabled: boolean;
-  visibleDroneIds: string[];
-  setPinnedDroneIds: React.Dispatch<React.SetStateAction<string[]>>;
+  onReorder: (
+    activeDroneId: string,
+    overDroneId: string,
+    placement: SidebarGroupDropPlacement,
+  ) => void;
   onPrepareDroneDragStart: (droneId: string, draggedDroneIds?: readonly string[]) => void;
 }): PinnedDroneDropTarget | null {
   const [dropTarget, setDropTarget] = React.useState<PinnedDroneDropTarget | null>(null);
@@ -96,15 +97,7 @@ export function usePinnedDroneReorder({
       const active = parseDroneHubDragData(event.active.data.current);
       const target = dropTargetFromEvent(event);
       if (active?.type === 'sidebar-pinned-drone' && target) {
-        setPinnedDroneIds((current) =>
-          reorderVisiblePinnedDroneIds(
-            current,
-            visibleDroneIds,
-            active.droneId,
-            target.droneId,
-            target.placement,
-          ),
-        );
+        onReorder(active.droneId, target.droneId, target.placement);
       }
       clearDropTarget();
     },

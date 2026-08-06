@@ -5,6 +5,7 @@ import {
 } from './sidebar-group-paths';
 import { normalizeSidebarGroupOrder, reorderSidebarEntryOrder, type SidebarGroupDropPlacement } from './sidebar-group-order';
 import {
+  mergeVisibleSidebarNodeOrderByParent,
   orderSidebarNodeIds,
   SIDEBAR_ROOT_PARENT_ID,
   sidebarDroneNodeId,
@@ -13,6 +14,7 @@ import {
 } from '@drone/hub-model/sidebar';
 
 export {
+  mergeVisibleSidebarNodeOrderByParent,
   orderSidebarNodeIds,
   SIDEBAR_ROOT_PARENT_ID,
   sidebarDroneNodeId,
@@ -58,28 +60,6 @@ function normalizeNodeOrderMap(value: Record<string, string[]>): Record<string, 
     out[parentId] = normalized;
   }
   return out;
-}
-
-export function mergeVisibleSidebarNodeOrderByParent(
-  map: Record<string, string[]>,
-  visibleChildIdsByParent: Record<string, string[]>,
-): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
-  const parentIds = new Set<string>([...Object.keys(map), ...Object.keys(visibleChildIdsByParent)]);
-
-  for (const parentId of parentIds) {
-    const visibleChildIds = normalizeSidebarGroupOrder(visibleChildIdsByParent[parentId] ?? []);
-    const existingOrder = normalizeSidebarGroupOrder(map[parentId] ?? []);
-    if (visibleChildIds.length === 0) {
-      if (existingOrder.length > 0) out[parentId] = existingOrder;
-      continue;
-    }
-    const visibleChildIdSet = new Set(visibleChildIds);
-    const hiddenEntries = existingOrder.filter((entry) => !visibleChildIdSet.has(entry));
-    out[parentId] = normalizeSidebarGroupOrder([...visibleChildIds, ...hiddenEntries]);
-  }
-
-  return normalizeNodeOrderMap(out);
 }
 
 export function reorderSidebarNodeParentOrder(
