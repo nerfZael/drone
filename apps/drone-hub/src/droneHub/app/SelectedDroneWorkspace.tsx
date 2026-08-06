@@ -72,7 +72,6 @@ import {
   isDroneStartingOrSeeding,
   resolveChatNameForDrone,
 } from './helpers';
-import { isDroneProvisioningPhase } from '../hub-phase';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
 import {
@@ -885,11 +884,7 @@ export function SelectedDroneWorkspace({
     void useRepoLocally(mode);
   };
   const {
-    fleetBadgeAssigning,
     fleetBadgeDropActive,
-    fleetBadgeError,
-    fleetBadgeSummaryText,
-    fleetBadgeTitle,
     fleetDropHintVisible,
     fleetDropHintText,
     onFleetDropDragLeave,
@@ -915,12 +910,6 @@ export function SelectedDroneWorkspace({
     !nativeChatActive &&
     !chatConfigFailed &&
     (currentChatIsDraft || !hasChats || chatRuntimeMetadataAvailable);
-  const showFleetBadge =
-    !isDroneProvisioningPhase(currentDrone.hubPhase) &&
-    (fleetBadgeAssigning ||
-      fleetBadgeDropActive ||
-      (!currentDroneIsDraft &&
-        (Boolean(fleetBadgeError) || /\b[1-9]\d*\b/.test(fleetBadgeSummaryText))));
   const selectedChatDockerSnapshotBusy = React.useMemo(
     () =>
       (transcripts ?? []).some((item) => {
@@ -1396,32 +1385,6 @@ export function SelectedDroneWorkspace({
                       hubMessage={currentDrone.hubMessage}
                     />
                   )}
-                  {showFleetBadge ? (
-                    <div
-                      className={cn(
-                        'inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] transition-all',
-                        fleetBadgeDropActive
-                          ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--fg-secondary)] shadow-[var(--glow-accent)]'
-                          : fleetBadgeError
-                            ? 'border-[var(--red-border)] bg-[var(--danger-panel)] text-[var(--red)] hover:border-[var(--red-border)]'
-                            : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]',
-                      )}
-                      title={
-                        fleetBadgeError ? `${fleetBadgeTitle} ${fleetBadgeError}` : fleetBadgeTitle
-                      }
-                      aria-label={`${fleetBadgeSummaryText}. Drop drones here to assign them.`}
-                    >
-                      <span
-                        className="uppercase tracking-[0.12em]"
-                        style={{ fontFamily: 'var(--display)' }}
-                      >
-                        Relationships
-                      </span>
-                      <span className="font-mono text-[var(--text-10)] text-inherit">
-                        {fleetBadgeAssigning ? 'Assigning…' : fleetBadgeSummaryText}
-                      </span>
-                    </div>
-                  ) : null}
                 </div>
               </div>
             </div>

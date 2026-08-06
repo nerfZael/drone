@@ -83,6 +83,7 @@ import {
   MobileSidebarDragTarget,
   type MobileSidebarDragTargetData,
 } from './MobileSidebarDragDrop';
+import { resolveMobileSidebarRepositoryAlignment } from './mobile-sidebar-repository-navigation';
 
 export function appDrawerWidth(windowWidth: number): number {
   return Math.max(0, windowWidth);
@@ -1850,6 +1851,7 @@ function AppDrawerView({
     [droneGroups],
   );
   const [activeRepoId, setActiveRepoId] = React.useState<string | null>(null);
+  const alignedActiveDroneSelectionKeyRef = React.useRef<string | null>(null);
   const { expandedFolderIds, toggleFolder } = useMobileSidebarExpandedFolderIds();
   const { collapsedDroneIds, toggleDrone } = useMobileSidebarCollapsedDroneIds();
   const [selectedContainerDroneId, setSelectedContainerDroneId] = React.useState('');
@@ -2046,10 +2048,16 @@ function AppDrawerView({
     setActiveRepoId(null);
   }, [activeDeviceId]);
   React.useEffect(() => {
-    if (!activeDroneId) return;
-    const repoId = resolveDroneRepoId(activeDroneId);
-    if (repoId) setActiveRepoId(repoId);
-  }, [activeDeviceId, activeDroneId, resolveDroneRepoId]);
+    const alignment = resolveMobileSidebarRepositoryAlignment({
+      open,
+      activeDeviceId,
+      activeDroneId,
+      resolvedRepoId: open && activeDroneId ? resolveDroneRepoId(activeDroneId) : null,
+      alignedSelectionKey: alignedActiveDroneSelectionKeyRef.current,
+    });
+    alignedActiveDroneSelectionKeyRef.current = alignment.alignedSelectionKey;
+    if (alignment.repoIdToOpen) setActiveRepoId(alignment.repoIdToOpen);
+  }, [activeDeviceId, activeDroneId, open, resolveDroneRepoId]);
   const listStatus =
     dronesLoading && drones.length === 0 ? (
       <View

@@ -1,17 +1,12 @@
 import React from 'react';
 import { useDndMonitor, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
 import type { DroneSummary } from '../types';
-import { fetchFleetActor, type FleetActorPayload } from '../fleet/fleet-api';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from './drone-hub-dnd';
 import { assignedDroneIdsFromData, resolveAssignedDroneIdsFromTransfer } from './drone-hub-dnd-utils';
-import { isDroneProvisioningPhase } from '../hub-phase';
 import {
   CANVAS_ASSIGNMENT_PREVIEW_EVENT,
-  FLEET_ASSIGNMENT_UPDATED_EVENT,
   normalizeCanvasAssignmentPreviewDetail,
-  normalizeFleetAssignmentUpdatedDetail,
   type CanvasAssignmentPreviewDetail,
-  type FleetAssignmentUpdatedDetail,
 } from './fleet-assignment-events';
 
 export function useFleetAssignmentDropState({
@@ -27,14 +22,9 @@ export function useFleetAssignmentDropState({
 }) {
   const activeSidebarDrag = useDroneHubActiveDrag();
   const fleetDropId = React.useMemo(() => `fleet-assignment-drop:${currentDrone.id}`, [currentDrone.id]);
-  const [fleetBadgeData, setFleetBadgeData] = React.useState<FleetActorPayload | null>(null);
-  const [fleetBadgeLoading, setFleetBadgeLoading] = React.useState(true);
-  const [fleetBadgeAssigning, setFleetBadgeAssigning] = React.useState(false);
-  const [fleetBadgeError, setFleetBadgeError] = React.useState<string | null>(null);
   const [fleetBadgeSidebarDropActive, setFleetBadgeSidebarDropActive] = React.useState(false);
   const [fleetBadgeNativeDropActive, setFleetBadgeNativeDropActive] = React.useState(false);
   const [canvasAssignmentPreview, setCanvasAssignmentPreview] = React.useState<CanvasAssignmentPreviewDetail | null>(null);
-  const fleetBadgeDataRef = React.useRef<FleetActorPayload | null>(null);
   const { setNodeRef: setFleetDropNodeRef } = useDroppable({
     id: fleetDropId,
     data: { type: 'fleet-assignment-drop', droneId: currentDrone.id },
@@ -44,15 +34,11 @@ export function useFleetAssignmentDropState({
     (targetIdsRaw: string[]) => {
       const targetIds = Array.from(new Set(targetIdsRaw.map((item) => String(item ?? '').trim()).filter(Boolean)));
       if (targetIds.length === 0) return;
-      setFleetBadgeAssigning(true);
-      setFleetBadgeError(null);
       const result = onRequestDropActions(currentDrone.id, targetIds);
       if (!result.ok) {
         const message = String(result.error ?? '').trim() || 'Unable to open drop actions.';
-        setFleetBadgeError(message);
         openDroneErrorModal(currentDrone, message, null);
       }
-      setFleetBadgeAssigning(false);
     },
     [currentDrone, onRequestDropActions, openDroneErrorModal],
   );
@@ -77,82 +63,25 @@ export function useFleetAssignmentDropState({
   );
 
   React.useEffect(() => {
-    fleetBadgeDataRef.current = fleetBadgeData;
-  }, [fleetBadgeData]);
-
-  React.useEffect(() => {
     const onCanvasAssignmentPreview = (event: Event) => {
       const detail = normalizeCanvasAssignmentPreviewDetail(
         (event as CustomEvent<CanvasAssignmentPreviewDetail | null>).detail,
       );
       setCanvasAssignmentPreview(detail);
     };
-    const onFleetAssignmentUpdated = (event: Event) => {
-      const detail = normalizeFleetAssignmentUpdatedDetail(
-        (event as CustomEvent<FleetAssignmentUpdatedDetail | null>).detail,
-      );
-      if (!detail || detail.ownerDroneId !== currentDrone.id) return;
-      setFleetBadgeData(detail.actor);
-      setFleetBadgeError(null);
-    };
     window.addEventListener(CANVAS_ASSIGNMENT_PREVIEW_EVENT, onCanvasAssignmentPreview as EventListener);
-    window.addEventListener(FLEET_ASSIGNMENT_UPDATED_EVENT, onFleetAssignmentUpdated as EventListener);
     window.addEventListener('mouseup', clearTransientDropState);
     window.addEventListener('dragend', clearTransientDropState);
     window.addEventListener('drop', clearTransientDropState);
     window.addEventListener('blur', clearTransientDropState);
     return () => {
       window.removeEventListener(CANVAS_ASSIGNMENT_PREVIEW_EVENT, onCanvasAssignmentPreview as EventListener);
-      window.removeEventListener(FLEET_ASSIGNMENT_UPDATED_EVENT, onFleetAssignmentUpdated as EventListener);
       window.removeEventListener('mouseup', clearTransientDropState);
       window.removeEventListener('dragend', clearTransientDropState);
       window.removeEventListener('drop', clearTransientDropState);
       window.removeEventListener('blur', clearTransientDropState);
     };
   }, [clearTransientDropState, currentDrone.id]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    setFleetBadgeData(null);
-    setFleetBadgeError(null);
-    if (isDroneProvisioningPhase(currentDrone.hubPhase)) {
-      setFleetBadgeLoading(false);
-      return () => {
-        cancelled = true;
-      };
-    }
-    setFleetBadgeLoading(true);
-
-    const tick = async (silent: boolean) => {
-      if (cancelled) return;
-      if (!silent) setFleetBadgeLoading(true);
-      try {
-        const next = await fetchFleetActor(currentDrone.id);
-        if (cancelled) return;
-        setFleetBadgeData(next);
-        setFleetBadgeError(null);
-      } catch (error: any) {
-        if (cancelled) return;
-        const message = String(error?.message ?? error ?? '').trim();
-        if (!silent || !fleetBadgeDataRef.current) {
-          setFleetBadgeData(null);
-          setFleetBadgeError(message || null);
-        }
-      } finally {
-        if (!cancelled && !silent) setFleetBadgeLoading(false);
-      }
-    };
-
-    void tick(false);
-    const intervalId = window.setInterval(() => {
-      void tick(true);
-    }, 12_000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [currentDrone.hubPhase, currentDrone.id]);
 
   useDndMonitor({
     onDragMove: updateFleetDropState,
@@ -168,8 +97,6 @@ export function useFleetAssignmentDropState({
     },
   });
 
-  const fleetChildrenCount = fleetBadgeData?.relationships.children.length ?? 0;
-  const fleetAssignedCount = fleetBadgeData?.relationships.assigned.length ?? 0;
   const sidebarDraggedDroneIds = React.useMemo(
     () =>
       assignedDroneIdsFromData(activeSidebarDrag).filter((droneId) => droneId && droneId !== currentDrone.id),
@@ -186,15 +113,6 @@ export function useFleetAssignmentDropState({
     fleetBadgeSidebarDropActive ||
     fleetBadgeNativeDropActive ||
     String(canvasAssignmentPreview?.overDroneId ?? '').trim() === currentDrone.id;
-  const fleetBadgeTitle = fleetBadgeDropActive
-    ? `Drop drones here to assign them to ${currentDroneLabel}.`
-    : `Relationship summary for ${currentDroneLabel}. Drop drones here to assign them.`;
-  const fleetBadgeSummaryText =
-    fleetBadgeLoading && !fleetBadgeData
-      ? 'Loading…'
-      : fleetBadgeData
-        ? `${fleetChildrenCount} child${fleetChildrenCount === 1 ? '' : 'ren'} · ${fleetAssignedCount} assigned`
-        : 'Unavailable';
   const fleetDropHintText = fleetBadgeDropActive
     ? `Release to assign ${fleetDropHintCount} drone${fleetDropHintCount === 1 ? '' : 's'} to ${currentDroneLabel}.`
     : `Drop ${fleetDropHintCount} drone${fleetDropHintCount === 1 ? '' : 's'} anywhere in this chat to assign them to ${currentDroneLabel}.`;
@@ -225,11 +143,7 @@ export function useFleetAssignmentDropState({
   );
 
   return {
-    fleetBadgeAssigning,
     fleetBadgeDropActive,
-    fleetBadgeError,
-    fleetBadgeSummaryText,
-    fleetBadgeTitle,
     fleetDropHintVisible,
     fleetDropHintText,
     onFleetDropDragLeave,
