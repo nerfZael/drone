@@ -1500,7 +1500,7 @@ export function DronesScreen({
       let optimisticPromptId = '';
       if (targetIdRef.current === destinationId && createdDroneId && startsWithChat) {
         const optimisticDrone = normalizeMobileDrone(
-          result?.drone ?? {
+          {
             id: createdDroneId,
             name: result?.name ?? payload.name ?? createdDroneId,
             runtime: payload.runtime,
@@ -1510,6 +1510,13 @@ export function DronesScreen({
             repoPath: payload.repoPath,
             chats: ['default'],
             busyChats: ['default'],
+            ...(result?.drone && typeof result.drone === 'object' ? result.drone : {}),
+            groupId: result?.drone?.groupId ?? result?.groupId,
+            createdAt:
+              result?.drone?.createdAt ??
+              result?.createdAt ??
+              payload.seedSubmittedAt ??
+              new Date().toISOString(),
           },
         );
         if (optimisticDrone) {

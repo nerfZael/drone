@@ -206,6 +206,7 @@ export function deviceMeshDroneSummary(drone: any) {
     phase: String(drone?.phase ?? drone?.hubPhase ?? drone?.hub?.phase ?? ''),
     status: String(drone?.status ?? drone?.hubMessage ?? ''),
     group: drone?.group ?? null,
+    groupId: String(drone?.groupId ?? '').trim() || null,
     repoPath: firstText(
       drone?.repoPath,
       drone?.repositoryPath,
@@ -580,6 +581,21 @@ export function createDroneControlCapability(
                 })
                 .filter(([name]) => Boolean(name)),
             ),
+            groups: groups.flatMap((group: unknown) => {
+              const entry = object(group);
+              const id = String(entry.id ?? '').trim();
+              const name = String(entry.name ?? '').trim();
+              if (!id || !name) return [];
+              return [
+                {
+                  id,
+                  name,
+                  repoPath: String(entry.repoPath ?? '').trim(),
+                  parentId: String(entry.parentId ?? '').trim() || null,
+                  createdAt: String(entry.createdAt ?? '').trim() || null,
+                },
+              ];
+            }),
             sidebarGroupOrder: textList(preferences.sidebarGroupOrder),
             sidebarDroneOrderByGroup: textListMap(preferences.sidebarDroneOrderByGroup),
             sidebarNodeOrderByParent: textListMap(preferences.sidebarNodeOrderByParent),

@@ -18,6 +18,7 @@ import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameS
 import { McpIdleSubscriptionStore } from './assistant/mcp-idle-subscription-store';
 import { GROQ_SPEECH_MAX_CHARS, GROQ_SPEECH_VOICES } from './groq-speech';
 import { droneSummary } from './mcp-summaries';
+import { placeMcpRepoScopedGroupNodeAtTop } from './mcp-sidebar-group-order';
 import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
 import { isWorkflowChildDroneEntry } from './workflows/workflow-child-drone-metadata';
 import type { RenameDroneCommand } from './drone-rename-command';
@@ -814,14 +815,30 @@ async function insertNewGroupsAtParentTop(
     ? !beforeIds.has(group.id)
     : !beforeScopesAndNames.has(`${group.repoPath}\0${group.name}`));
   if (newGroups.length === 0) return { updated: false, groups: targetGroups };
+  const droneResponse = await requestDroneSummaries();
+  const sidebarDrones = Array.isArray(droneResponse?.drones)
+    ? droneResponse.drones
+        .filter((drone: any) => !isWorkflowChildDroneEntry(drone))
+        .map(droneSummary)
+    : [];
   const saved = await updateUiPreferences((uiPreferences) => {
     let sidebarGroupOrder = uiPreferences.sidebarGroupOrder;
+    let sidebarNodeOrderByParent = uiPreferences.sidebarNodeOrderByParent;
     for (const group of newGroups) {
       sidebarGroupOrder = insertGroupTokenAtParentTop(sidebarGroupOrder, afterGroups, group);
+      sidebarNodeOrderByParent = placeMcpRepoScopedGroupNodeAtTop({
+        nodeOrderByParent: sidebarNodeOrderByParent,
+        groupOrder: sidebarGroupOrder,
+        droneOrderByGroup: uiPreferences.sidebarDroneOrderByGroup,
+        groups: afterGroups,
+        drones: sidebarDrones,
+        group,
+      });
     }
     return {
       ...uiPreferences,
       sidebarGroupOrder,
+      sidebarNodeOrderByParent,
     };
   });
   return { updated: true, groups: targetGroups, sidebarGroupOrder: saved.sidebarGroupOrder };

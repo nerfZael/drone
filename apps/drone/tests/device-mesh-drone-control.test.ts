@@ -13,6 +13,7 @@ describe('device mesh drone summaries', () => {
         name: 'Child',
         runtime: 'container',
         group: 'Review',
+        groupId: 'group-review',
         repoPath: '/work/repo',
         repoBranch: 'dvm/work',
         cwd: '/work/repo/subdir',
@@ -34,6 +35,7 @@ describe('device mesh drone summaries', () => {
       repoAttached: true,
       fleetParentId: 'drone_parent',
       group: 'Review',
+      groupId: 'group-review',
       chats: ['default', 'review'],
       draftChats: { review: true },
       busyChats: ['review'],
@@ -113,7 +115,15 @@ describe('device mesh drone summaries', () => {
               : pathname === '/api/groups'
                 ? {
                     ok: true,
-                    groups: [{ name: 'Review', createdAt: '2026-07-13T10:00:00.000Z' }],
+                    groups: [
+                      {
+                        id: 'group-review',
+                        name: 'Review',
+                        repoPath: '/work/one',
+                        parentId: null,
+                        createdAt: '2026-07-13T10:00:00.000Z',
+                      },
+                    ],
                   }
                 : pathname === '/api/settings/ui-preferences'
                   ? {
@@ -154,6 +164,15 @@ describe('device mesh drone summaries', () => {
           preferenceUpdatedAt: '2026-07-14T11:00:00.000Z',
           registeredRepoPaths: ['/work/one', '/work/empty'],
           groupCreatedAtByName: { Review: '2026-07-13T10:00:00.000Z' },
+          groups: [
+            {
+              id: 'group-review',
+              name: 'Review',
+              repoPath: '/work/one',
+              parentId: null,
+              createdAt: '2026-07-13T10:00:00.000Z',
+            },
+          ],
           sidebarGroupOrder: ['repo:repo:/work/one'],
           sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
           sidebarNodeOrderByParent: { root: ['drone:one'] },
