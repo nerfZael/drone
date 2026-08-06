@@ -276,6 +276,183 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('merges mobile sidebar reorders into the current UI preferences', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ method: string; body: any }> = [];
+    globalThis.fetch = (async (_input, init) => {
+      const method = String(init?.method ?? 'GET');
+      requests.push({
+        method,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      if (method === 'GET') {
+        return Response.json({
+          ok: true,
+          version: 12,
+          uiPreferences: {
+            sidebarDensityMode: 'compact',
+            sidebarNodeOrderByParent: { root: ['drone:old'] },
+            sidebarChatOrderByDrone: { old: ['default'] },
+            pinnedDroneIds: ['old'],
+            spawnModel: 'keep-me',
+          },
+        });
+      }
+      return Response.json({
+        ok: true,
+        version: 13,
+        uiPreferences: requests.at(-1)?.body.uiPreferences,
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('sidebar.order.update', {
+          expectedVersion: 12,
+          sidebar: {
+            sidebarNodeOrderByParent: { root: ['drone:new', 'drone:old'] },
+            sidebarChatOrderByDrone: { old: ['review', 'default'] },
+            pinnedDroneIds: ['new', 'old'],
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true, version: 13 });
+      expect(requests).toEqual([
+        { method: 'GET', body: undefined },
+        {
+          method: 'POST',
+          body: {
+            expectedVersion: 12,
+            uiPreferences: {
+              sidebarDensityMode: 'compact',
+              sidebarNodeOrderByParent: { root: ['drone:new', 'drone:old'] },
+              sidebarChatOrderByDrone: { old: ['review', 'default'] },
+              pinnedDroneIds: ['new', 'old'],
+              spawnModel: 'keep-me',
+            },
+          },
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('preserves sidebar fields omitted by a scoped mobile reorder', async () => {
+    const originalFetch = globalThis.fetch;
+    let postedPreferences: any = null;
+    globalThis.fetch = (async (_input, init) => {
+      if (String(init?.method ?? 'GET') === 'GET') {
+        return Response.json({
+          ok: true,
+          version: 7,
+          uiPreferences: {
+            sidebarNodeOrderByParent: { root: ['drone:old'] },
+            sidebarChatOrderByDrone: { old: ['default'] },
+            pinnedDroneIds: ['old'],
+          },
+        });
+      }
+      postedPreferences = JSON.parse(String(init?.body)).uiPreferences;
+      return Response.json({ ok: true, version: 8, uiPreferences: postedPreferences });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await capability.invoke('sidebar.order.update', {
+        expectedVersion: 7,
+        sidebar: { sidebarNodeOrderByParent: { root: ['drone:new', 'drone:old'] } },
+      });
+      expect(postedPreferences).toEqual({
+        sidebarNodeOrderByParent: { root: ['drone:new', 'drone:old'] },
+        sidebarChatOrderByDrone: { old: ['default'] },
+        pinnedDroneIds: ['old'],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('moves mobile sidebar drones and folders through canonical group APIs', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ pathname: string; method: string; body: any }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = new URL(String(input));
+      requests.push({
+        pathname: url.pathname,
+        method: String(init?.method ?? 'GET'),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await capability.invoke('sidebar.item.move', {
+        itemKind: 'drone',
+        repoPath: '/work/repo',
+        droneId: 'drone one',
+        targetGroup: 'Review',
+      });
+      await capability.invoke('sidebar.item.move', {
+        itemKind: 'folder',
+        repoPath: '/work/repo',
+        sourceGroup: 'Review/Needs work',
+        targetGroup: 'Done',
+      });
+      await capability.invoke('sidebar.item.move', {
+        itemKind: 'drone',
+        repoPath: '/work/repo',
+        droneId: 'drone two',
+        targetGroup: null,
+      });
+      await capability.invoke('sidebar.item.move', {
+        itemKind: 'folder',
+        repoPath: '/work/repo',
+        sourceGroup: 'Done/Nested',
+        targetGroup: null,
+      });
+      expect(requests).toEqual([
+        {
+          pathname: '/api/drones/group-set',
+          method: 'POST',
+          body: { droneIds: ['drone one'], group: 'Review' },
+        },
+        {
+          pathname: '/api/groups/Review%2FNeeds%20work/rename',
+          method: 'POST',
+          body: { repoPath: '/work/repo', newName: 'Done/Needs work' },
+        },
+        {
+          pathname: '/api/drones/group-set',
+          method: 'POST',
+          body: { droneIds: ['drone two'], group: null },
+        },
+        {
+          pathname: '/api/groups/Done%2FNested/rename',
+          method: 'POST',
+          body: { repoPath: '/work/repo', newName: 'Nested' },
+        },
+      ]);
+      await expect(
+        capability.invoke('sidebar.item.move', {
+          itemKind: 'folder',
+          repoPath: '/work/repo',
+          sourceGroup: 'Review',
+          targetGroup: 'Review/Nested',
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('bounds lazy branch pages and rejects unregistered repository paths', async () => {
     const originalFetch = globalThis.fetch;
     let branchRequests = 0;

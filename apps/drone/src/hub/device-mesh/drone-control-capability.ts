@@ -33,6 +33,23 @@ function requiredText(value: unknown, label: string): string {
   return result;
 }
 
+function normalizedGroupPath(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .replace(/[\\/]+/g, '/')
+    .replace(/^\/+|\/+$/g, '');
+}
+
+function groupPathContains(pathRaw: unknown, parentRaw: unknown): boolean {
+  const path = normalizedGroupPath(pathRaw);
+  const parent = normalizedGroupPath(parentRaw);
+  return Boolean(path && parent && (path === parent || path.startsWith(`${parent}/`)));
+}
+
+function groupBaseName(value: unknown): string {
+  return normalizedGroupPath(value).split('/').filter(Boolean).at(-1) ?? '';
+}
+
 function firstText(...values: unknown[]): string {
   for (const value of values) {
     const result = String(value ?? '').trim();
@@ -639,6 +656,80 @@ export function createDroneControlCapability(
           return { ...created, autoRenameScheduled: true };
         }
         return created;
+      }
+
+      if (operation === 'sidebar.order.update') {
+        const current = await localHubRequest(access, '/api/settings/ui-preferences');
+        const currentPreferences = object(current.uiPreferences);
+        const sidebar = object(payload.sidebar);
+        const nextPreferences = {
+          ...currentPreferences,
+          ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarNodeOrderByParent')
+            ? { sidebarNodeOrderByParent: textListMap(sidebar.sidebarNodeOrderByParent) }
+            : {}),
+          ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarChatOrderByDrone')
+            ? { sidebarChatOrderByDrone: textListMap(sidebar.sidebarChatOrderByDrone) }
+            : {}),
+          ...(Object.prototype.hasOwnProperty.call(sidebar, 'pinnedDroneIds')
+            ? { pinnedDroneIds: textList(sidebar.pinnedDroneIds) }
+            : {}),
+        };
+        const expectedVersion = Number(payload.expectedVersion);
+        return await localHubRequest(access, '/api/settings/ui-preferences', {
+          method: 'POST',
+          body: JSON.stringify({
+            uiPreferences: nextPreferences,
+            ...(Number.isSafeInteger(expectedVersion) && expectedVersion > 0
+              ? { expectedVersion }
+              : {}),
+          }),
+        });
+      }
+
+      if (operation === 'sidebar.item.move') {
+        const itemKind = requiredText(payload.itemKind, 'itemKind');
+        const repoPath = optionalText(payload.repoPath) ?? '';
+        const targetGroup = optionalText(payload.targetGroup);
+        if (itemKind === 'drone') {
+          const droneId = requiredText(payload.droneId, 'droneId');
+          const result = await localHubRequest(access, '/api/drones/group-set', {
+            method: 'POST',
+            body: JSON.stringify({ droneIds: [droneId], group: targetGroup ?? null }),
+          });
+          const rejected = Array.isArray(result.rejected) ? result.rejected : [];
+          if (rejected.length > 0) {
+            throw Object.assign(
+              new Error(String(object(rejected[0]).error ?? 'drone could not be moved')),
+              { code: 'OPERATION_FAILED' },
+            );
+          }
+          return result;
+        }
+        if (itemKind !== 'folder') {
+          throw Object.assign(new Error('itemKind must be drone or folder'), {
+            code: 'INVALID_REQUEST',
+          });
+        }
+        const sourceGroup = requiredText(payload.sourceGroup, 'sourceGroup');
+        if (
+          targetGroup != null &&
+          (sourceGroup === targetGroup || groupPathContains(targetGroup, sourceGroup))
+        ) {
+          throw Object.assign(new Error('cannot move a group into itself or its subtree'), {
+            code: 'INVALID_REQUEST',
+          });
+        }
+        const nextGroup = normalizedGroupPath(
+          targetGroup ? `${targetGroup}/${groupBaseName(sourceGroup)}` : groupBaseName(sourceGroup),
+        );
+        return await localHubRequest(
+          access,
+          `/api/groups/${encodeURIComponent(sourceGroup)}/rename`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ repoPath, newName: nextGroup }),
+          },
+        );
       }
 
       const droneId = requiredText(payload.droneId, 'droneId');

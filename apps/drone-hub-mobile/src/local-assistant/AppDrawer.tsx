@@ -39,7 +39,15 @@ import {
   type MobileDroneSummary,
   type MobileDroneTreeNode,
 } from '../drones/drone-sidebar-model';
-import { resolvePinnedSidebarDrones } from '@drone/hub-model/sidebar';
+import {
+  resolvePinnedSidebarDrones,
+  sidebarDroneNodeId,
+  sidebarFolderNodeId,
+} from '@drone/hub-model/sidebar';
+import {
+  firstMobileSidebarInsertionTarget,
+  type MobileSidebarMutationRequest,
+} from '../drones/mobile-sidebar-reorder';
 import {
   addMobileDroneToStateSummary,
   EMPTY_MOBILE_DRONE_STATE_SUMMARY,
@@ -69,6 +77,12 @@ import {
   TextInputDialog,
   type ContextMenuAction,
 } from '../components/Ui';
+import {
+  MobileSidebarDragDropProvider,
+  MobileSidebarDragArea,
+  MobileSidebarDragTarget,
+  type MobileSidebarDragTargetData,
+} from './MobileSidebarDragDrop';
 
 export function appDrawerWidth(windowWidth: number): number {
   return Math.max(0, windowWidth);
@@ -125,6 +139,7 @@ export type AppDrawerProps = {
   onCreateDroneChat?(droneId: string, chatName: string, copyFrom: string): Promise<boolean>;
   onRenameDroneChat?(droneId: string, chatName: string, newName: string): Promise<boolean>;
   onDeleteDroneChat?(droneId: string, chatName: string): Promise<boolean>;
+  onReorderSidebar?(request: MobileSidebarMutationRequest): void;
   onSelectDevice?(deviceId: string): void;
 };
 
@@ -137,6 +152,9 @@ type RegisterDrawer = (props: AppDrawerProps | null) => void;
 
 const AppDrawerHostContext = React.createContext<RegisterDrawer | null>(null);
 const DrawerWorkingPhaseContext = React.createContext<Animated.Value | null>(null);
+const DrawerSidebarReorderContext = React.createContext<
+  ((request: MobileSidebarMutationRequest) => void) | null
+>(null);
 const DRAWER_WORKING_SPIN_DURATION_MS = 1_600;
 const RECENT_BLOCKED_EMPHASIS_MS = 30_000;
 const DRAWER_TREE_ROW_PADDING_LEFT = 12;
@@ -149,6 +167,12 @@ type PinnedSidebarPlacement = 'top' | 'bottom';
 
 function drawerTreeRowPaddingLeft(depth: number): number {
   return DRAWER_TREE_ROW_PADDING_LEFT + Math.max(0, depth) * DRAWER_TREE_DEPTH_INDENT;
+}
+
+function mobileSidebarEntryNodeId(entry: MobileDroneSidebarEntry): string {
+  return entry.kind === 'drone'
+    ? sidebarDroneNodeId(entry.node.drone.id)
+    : sidebarFolderNodeId(entry.folder.id);
 }
 
 export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
@@ -375,10 +399,7 @@ function DrawerDevicePicker({
                 setOpen(false);
                 onOpenDeviceSettings();
               }}
-              style={({ pressed }) => [
-                styles.deviceSettingsAction,
-                pressed && styles.pressed,
-              ]}
+              style={({ pressed }) => [styles.deviceSettingsAction, pressed && styles.pressed]}
             >
               <Text style={styles.deviceSettingsActionLabel}>Manage devices</Text>
             </Pressable>
@@ -477,9 +498,7 @@ function DroneStateCounts({
       {summary.working > 0 ? (
         <View
           accessibilityLabel={
-            entity === 'chat'
-              ? `${summary.working} working chats`
-              : `${summary.working} working`
+            entity === 'chat' ? `${summary.working} working chats` : `${summary.working} working`
           }
           style={styles.fleetState}
         >
@@ -550,11 +569,7 @@ function SwitchItemStatusIndicator({
   );
 }
 
-function OperationStatusIndicator({
-  operation,
-}: {
-  operation: 'archiving' | 'deleting';
-}) {
+function OperationStatusIndicator({ operation }: { operation: 'archiving' | 'deleting' }) {
   const sharedPhase = React.useContext(DrawerWorkingPhaseContext);
   const rotate = sharedPhase?.interpolate({
     inputRange: [0, 1],
@@ -687,6 +702,8 @@ function UnreadStatusIndicator() {
 function DrawerDroneChatRow({
   drone,
   chatName,
+  chatNames,
+  dragScope,
   activeDroneId,
   activeChatName,
   selectionWashInset,
@@ -695,12 +712,15 @@ function DrawerDroneChatRow({
 }: {
   drone: MobileDroneSummary;
   chatName: string;
+  chatNames: string[];
+  dragScope: string;
   activeDroneId: string;
   activeChatName: string;
   selectionWashInset: number;
   onOpenActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
+  const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
   const selected = drone.id === activeDroneId && chatName === activeChatName;
   const suppressPressAfterLongPressRef = React.useRef(false);
   const draft = drone.draftChats?.[chatName] === true;
@@ -711,54 +731,106 @@ function DrawerDroneChatRow({
     selected && Boolean(drone.approvalRequired),
   );
   const stateLabel = unread && displayState === 'idle' ? 'Unread' : switchStateLabel(displayState);
+  const reorderChat = React.useCallback(
+    (overChatName: string, placement: 'before' | 'inside' | 'after') => {
+      if (placement === 'inside') return;
+      reorderSidebar?.({
+        kind: 'chat',
+        droneId: drone.id,
+        chatNames,
+        activeChatName: chatName,
+        overChatName,
+        placement,
+      });
+    },
+    [chatName, chatNames, drone.id, reorderSidebar],
+  );
+  const moveChat = React.useCallback(
+    (direction: 'up' | 'down') => {
+      const index = chatNames.indexOf(chatName);
+      const overChatName = chatNames[index + (direction === 'up' ? -1 : 1)];
+      if (!overChatName) return;
+      reorderChat(overChatName, direction === 'up' ? 'before' : 'after');
+    },
+    [chatName, chatNames, reorderChat],
+  );
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${drone.name} / ${chatName}, ${stateLabel}`}
-      accessibilityState={{ selected }}
-      delayLongPress={400}
-      onLongPress={() => {
-        if (!onOpenActions) return;
-        suppressPressAfterLongPressRef.current = true;
-        onOpenActions({ drone, chatName });
-      }}
-      onPressOut={() => {
-        if (!suppressPressAfterLongPressRef.current) return;
-        setTimeout(() => {
-          suppressPressAfterLongPressRef.current = false;
-        }, 0);
-      }}
-      onPress={() => {
-        if (suppressPressAfterLongPressRef.current) {
-          suppressPressAfterLongPressRef.current = false;
-          return;
-        }
-        onSelect(drone.id, chatName);
-      }}
-      style={({ pressed }) => [
-        styles.droneChatRow,
-        pressed && !selected && styles.sidebarRowPressed,
-      ]}
-    >
-      {selected ? (
-        <View style={[styles.droneChatSelectionWash, { left: -selectionWashInset }]} />
-      ) : null}
-      {selected ? <View style={styles.sidebarSelectionEdge} /> : null}
-      <SwitchItemStatusIndicator state={displayState} unread={unread} showReadyAnchor />
-      <Text
-        numberOfLines={1}
-        style={[styles.droneChatLabel, selected && styles.droneChatLabelActive]}
+    <MobileSidebarDragTarget scope={dragScope} itemId={chatName}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${drone.name} / ${chatName}, ${stateLabel}`}
+        accessibilityState={{ selected }}
+        delayLongPress={600}
+        onLongPress={() => {
+          if (!onOpenActions) return;
+          suppressPressAfterLongPressRef.current = true;
+          onOpenActions({ drone, chatName });
+        }}
+        onPressOut={() => {
+          if (!suppressPressAfterLongPressRef.current) return;
+          setTimeout(() => {
+            suppressPressAfterLongPressRef.current = false;
+          }, 0);
+        }}
+        onPress={() => {
+          if (suppressPressAfterLongPressRef.current) {
+            suppressPressAfterLongPressRef.current = false;
+            return;
+          }
+          onSelect(drone.id, chatName);
+        }}
+        style={({ pressed }) => [
+          styles.droneChatRow,
+          pressed && !selected && styles.sidebarRowPressed,
+        ]}
       >
-        {chatName}
-      </Text>
-      {draft ? <Text style={styles.droneChatDraftBadge}>Draft</Text> : null}
-    </Pressable>
+        {selected ? (
+          <View style={[styles.droneChatSelectionWash, { left: -selectionWashInset }]} />
+        ) : null}
+        {selected ? <View style={styles.sidebarSelectionEdge} /> : null}
+        <SwitchItemStatusIndicator state={displayState} unread={unread} showReadyAnchor />
+        {reorderSidebar && chatNames.length > 1 ? (
+          <MobileSidebarDragArea
+            scope={dragScope}
+            itemId={chatName}
+            label={`${drone.name} / ${chatName} chat`}
+            onDrop={reorderChat}
+            onMoveAccessibility={moveChat}
+          >
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.droneChatLabel,
+                styles.draggableRowLabel,
+                selected && styles.droneChatLabelActive,
+              ]}
+            >
+              {chatName}
+            </Text>
+          </MobileSidebarDragArea>
+        ) : (
+          <Text
+            numberOfLines={1}
+            style={[styles.droneChatLabel, selected && styles.droneChatLabelActive]}
+          >
+            {chatName}
+          </Text>
+        )}
+        {draft ? <Text style={styles.droneChatDraftBadge}>Draft</Text> : null}
+      </Pressable>
+    </MobileSidebarDragTarget>
   );
 }
 
 function DrawerDroneNode({
   node,
   depth,
+  parentId,
+  siblingNodeIds,
+  treeScope,
+  repoPath,
+  parentGroupPath,
+  pinnedDroneIds,
   contextLabel,
   sidebarChatOrderByDrone,
   collapsedDroneIds,
@@ -774,6 +846,12 @@ function DrawerDroneNode({
 }: {
   node: MobileDroneTreeNode;
   depth: number;
+  parentId: string;
+  siblingNodeIds: string[];
+  treeScope?: string;
+  repoPath?: string;
+  parentGroupPath?: string | null;
+  pinnedDroneIds?: string[];
   contextLabel?: string;
   sidebarChatOrderByDrone: Record<string, string[]>;
   collapsedDroneIds: ReadonlySet<string>;
@@ -787,6 +865,7 @@ function DrawerDroneNode({
   onOpenChatActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
+  const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
   const { drone } = node;
   const chats = orderedMobileDroneChats(drone, sidebarChatOrderByDrone[drone.id]);
   const selected = drone.id === activeDroneId;
@@ -802,8 +881,7 @@ function DrawerDroneNode({
   const operation = droneOperationById[drone.id] as 'archiving' | 'deleting' | undefined;
   const displayState = operation ?? mobileDroneDisplayState(drone, !hasMultipleChats);
   const isDraft = drone.draft === true || drone.phase.trim().toLowerCase() === 'draft';
-  const unread =
-    !isDraft && !hasMultipleChats && (drone.unreadChats?.length ?? 0) > 0;
+  const unread = !isDraft && !hasMultipleChats && (drone.unreadChats?.length ?? 0) > 0;
   const chatStateSummary = React.useMemo(
     () => summarizeMobileDroneChats(drone, selected ? activeChatName : ''),
     [activeChatName, drone, selected],
@@ -840,83 +918,208 @@ function DrawerDroneNode({
   ]
     .filter(Boolean)
     .join(', ');
+  const dragScope = pinnedDroneIds ? `pinned-drones` : `tree:${parentId}`;
+  const dragItemId = pinnedDroneIds ? drone.id : sidebarDroneNodeId(drone.id);
+  const reorderDrone = React.useCallback(
+    (
+      overNodeId: string,
+      placement: 'before' | 'inside' | 'after',
+      target?: MobileSidebarDragTargetData,
+    ) => {
+      if (!reorderSidebar) return;
+      if (pinnedDroneIds) {
+        if (placement === 'inside') return;
+        reorderSidebar({
+          kind: 'pinned-drone',
+          visibleDroneIds: pinnedDroneIds,
+          activeDroneId: drone.id,
+          overDroneId: overNodeId,
+          placement,
+        });
+        return;
+      }
+      if (placement === 'inside' && target?.folderPath) {
+        const insertAtStart = target.insidePosition === 'start';
+        const firstChildNodeId = firstMobileSidebarInsertionTarget(
+          target.childItemIds,
+          dragItemId,
+        );
+        reorderSidebar({
+          kind: 'move-into-folder',
+          itemKind: 'drone',
+          repoPath: repoPath ?? drone.repoPath,
+          droneId: drone.id,
+          sourceParentId: parentId,
+          sourceSiblingNodeIds: siblingNodeIds,
+          targetGroup: target.folderPath,
+          targetParentId: overNodeId,
+          targetSiblingNodeIds: target.childItemIds ?? [],
+          targetOverNodeId: insertAtStart ? firstChildNodeId : undefined,
+          placement: insertAtStart ? 'before' : placement,
+        });
+        return;
+      }
+      if (placement === 'inside') return;
+      if (target?.parentId && target.parentId !== parentId) {
+        reorderSidebar({
+          kind: 'move-into-folder',
+          itemKind: 'drone',
+          repoPath: repoPath ?? drone.repoPath,
+          droneId: drone.id,
+          sourceParentId: parentId,
+          sourceSiblingNodeIds: siblingNodeIds,
+          targetGroup: target.parentGroupPath ?? null,
+          targetParentId: target.parentId,
+          targetSiblingNodeIds: target.siblingItemIds ?? [],
+          targetOverNodeId: overNodeId,
+          placement,
+        });
+        return;
+      }
+      reorderSidebar({
+        kind: 'tree-entry',
+        parentId,
+        siblingNodeIds,
+        activeNodeId: dragItemId,
+        overNodeId,
+        placement,
+      });
+    },
+    [
+      dragItemId,
+      drone.id,
+      drone.repoPath,
+      parentId,
+      pinnedDroneIds,
+      reorderSidebar,
+      repoPath,
+      siblingNodeIds,
+    ],
+  );
+  const moveDrone = React.useCallback(
+    (direction: 'up' | 'down') => {
+      const index = siblingNodeIds.indexOf(dragItemId);
+      const overNodeId = siblingNodeIds[index + (direction === 'up' ? -1 : 1)];
+      if (!overNodeId) return;
+      reorderDrone(overNodeId, direction === 'up' ? 'before' : 'after');
+    },
+    [dragItemId, reorderDrone, siblingNodeIds],
+  );
   return (
     <View style={styles.droneNode}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{
-          selected: parentSelected,
-          disabled: Boolean(operation),
-          expanded: isChatDisclosure ? chatSectionExpanded : undefined,
-        }}
-        accessibilityLabel={accessibilityLabel}
-        disabled={Boolean(operation)}
-        onPress={() => {
-          if (isChatDisclosure) {
-            onSelectContainer(drone.id);
-            onToggleDrone(drone.id);
-            return;
-          }
-          onSelect(drone.id, selectedChat);
-        }}
-        style={({ pressed }) => [
-          styles.switchItemRow,
-          { paddingLeft: drawerTreeRowPaddingLeft(depth), paddingRight: 6 },
-          parentSelected && styles.switchItemRowActive,
-          pressed && !parentSelected && styles.sidebarRowPressed,
-        ]}
+      <MobileSidebarDragTarget
+        scope={dragScope}
+        treeScope={treeScope}
+        itemId={dragItemId}
+        data={
+          pinnedDroneIds
+            ? undefined
+            : {
+                parentId,
+                parentGroupPath: parentGroupPath ?? null,
+                siblingItemIds: siblingNodeIds,
+              }
+        }
       >
-        {parentSelected ? <View style={styles.sidebarSelectionEdge} /> : null}
-        <View style={styles.switchItemMain}>
-          {isChatDisclosure ? (
-            <View accessible={false} style={styles.droneChevronSlot}>
-              <SidebarTreeChevronIcon
-                color={colors.sidebarMutedDim}
-                size={16}
-                strokeWidth={1.25}
-                expanded={chatSectionExpanded}
-                style={styles.droneChevron}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{
+            selected: parentSelected,
+            disabled: Boolean(operation),
+            expanded: isChatDisclosure ? chatSectionExpanded : undefined,
+          }}
+          accessibilityLabel={accessibilityLabel}
+          disabled={Boolean(operation)}
+          onPress={() => {
+            if (isChatDisclosure) {
+              onSelectContainer(drone.id);
+              onToggleDrone(drone.id);
+              return;
+            }
+            onSelect(drone.id, selectedChat);
+          }}
+          style={({ pressed }) => [
+            styles.switchItemRow,
+            { paddingLeft: drawerTreeRowPaddingLeft(depth), paddingRight: 6 },
+            parentSelected && styles.switchItemRowActive,
+            pressed && !parentSelected && styles.sidebarRowPressed,
+          ]}
+        >
+          {parentSelected ? <View style={styles.sidebarSelectionEdge} /> : null}
+          <View style={styles.switchItemMain}>
+            {isChatDisclosure ? (
+              <View accessible={false} style={styles.droneChevronSlot}>
+                <SidebarTreeChevronIcon
+                  color={colors.sidebarMutedDim}
+                  size={16}
+                  strokeWidth={1.25}
+                  expanded={chatSectionExpanded}
+                  style={styles.droneChevron}
+                />
+              </View>
+            ) : null}
+            {isChatDisclosure ? (
+              <View accessible={false} style={styles.droneRuntimeIconSlot}>
+                <RuntimeIcon runtime={runtime} size={14} />
+              </View>
+            ) : null}
+            {isChatDisclosure ? null : isDraft ? (
+              <View accessible={false} style={styles.switchItemStatus} />
+            ) : (
+              <SwitchItemStatusIndicator
+                state={displayState}
+                unread={unread}
+                emphasized={recentlyBlocked || selected}
               />
-            </View>
-          ) : null}
-          {isChatDisclosure ? (
-            <View accessible={false} style={styles.droneRuntimeIconSlot}>
-              <RuntimeIcon runtime={runtime} size={14} />
-            </View>
-          ) : null}
-          {isChatDisclosure ? null : isDraft ? (
-            <View accessible={false} style={styles.switchItemStatus} />
-          ) : (
-            <SwitchItemStatusIndicator
-              state={displayState}
-              unread={unread}
-              emphasized={recentlyBlocked || selected}
-            />
-          )}
-          <Text
-            numberOfLines={1}
-            style={[styles.switchItemTitle, parentSelected && styles.switchItemTitleActive]}
-          >
-            {drone.name}
-          </Text>
-          {isDraft ? (
-            <Text accessibilityLabel="Draft drone" style={styles.switchItemDraftBadge}>
-              Draft
-            </Text>
-          ) : null}
-          {hasMultipleChats && contextLabel ? (
-            <DroneStateCounts summary={chatStateSummary} compact entity="chat" />
-          ) : null}
-          {contextLabel ? (
-            <Text numberOfLines={1} style={styles.switchItemContextBadge}>
-              {contextLabel}
-            </Text>
-          ) : null}
-          {hasMultipleChats && !contextLabel ? (
-            <DroneStateCounts summary={chatStateSummary} compact entity="chat" />
-          ) : null}
-        </View>
-      </Pressable>
+            )}
+            {reorderSidebar && (siblingNodeIds.length > 1 || Boolean(treeScope)) ? (
+              <MobileSidebarDragArea
+                scope={dragScope}
+                treeScope={treeScope}
+                itemId={dragItemId}
+                label={`${drone.name} drone`}
+                disabled={Boolean(operation)}
+                onDrop={reorderDrone}
+                onMoveAccessibility={moveDrone}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.switchItemTitle,
+                    styles.draggableRowLabel,
+                    parentSelected && styles.switchItemTitleActive,
+                  ]}
+                >
+                  {drone.name}
+                </Text>
+              </MobileSidebarDragArea>
+            ) : (
+              <Text
+                numberOfLines={1}
+                style={[styles.switchItemTitle, parentSelected && styles.switchItemTitleActive]}
+              >
+                {drone.name}
+              </Text>
+            )}
+            {isDraft ? (
+              <Text accessibilityLabel="Draft drone" style={styles.switchItemDraftBadge}>
+                Draft
+              </Text>
+            ) : null}
+            {hasMultipleChats && contextLabel ? (
+              <DroneStateCounts summary={chatStateSummary} compact entity="chat" />
+            ) : null}
+            {contextLabel ? (
+              <Text numberOfLines={1} style={styles.switchItemContextBadge}>
+                {contextLabel}
+              </Text>
+            ) : null}
+            {hasMultipleChats && !contextLabel ? (
+              <DroneStateCounts summary={chatStateSummary} compact entity="chat" />
+            ) : null}
+          </View>
+        </Pressable>
+      </MobileSidebarDragTarget>
       {showChats && chats.length > 1 ? (
         chatSectionExpanded ? (
           <View
@@ -931,6 +1134,8 @@ function DrawerDroneNode({
                 key={`${drone.id}:${chatName}`}
                 drone={drone}
                 chatName={chatName}
+                chatNames={chats}
+                dragScope={`${dragScope}:chat:${drone.id}`}
                 activeDroneId={activeDroneId}
                 activeChatName={activeChatName}
                 selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}
@@ -948,6 +1153,11 @@ function DrawerDroneNode({
               key={child.drone.id}
               node={child}
               depth={depth}
+              parentId={sidebarDroneNodeId(drone.id)}
+              siblingNodeIds={node.children.map((entry) => sidebarDroneNodeId(entry.drone.id))}
+              treeScope={treeScope}
+              repoPath={repoPath}
+              parentGroupPath={parentGroupPath}
               sidebarChatOrderByDrone={sidebarChatOrderByDrone}
               collapsedDroneIds={collapsedDroneIds}
               selectedContainerDroneId={selectedContainerDroneId}
@@ -969,6 +1179,11 @@ function DrawerDroneNode({
 function DrawerDroneFolder({
   folder,
   depth,
+  parentId,
+  siblingNodeIds,
+  treeScope,
+  repoPath,
+  parentGroupPath,
   expandedFolderIds,
   collapsedDroneIds,
   selectedContainerDroneId,
@@ -984,6 +1199,11 @@ function DrawerDroneFolder({
 }: {
   folder: MobileDroneGroupFolder;
   depth: number;
+  parentId: string;
+  siblingNodeIds: string[];
+  treeScope: string;
+  repoPath: string;
+  parentGroupPath: string | null;
   expandedFolderIds: ReadonlySet<string>;
   collapsedDroneIds: ReadonlySet<string>;
   selectedContainerDroneId: string;
@@ -997,38 +1217,141 @@ function DrawerDroneFolder({
   onOpenChatActions?(target: DrawerChatActionTarget): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
+  const reorderSidebar = React.useContext(DrawerSidebarReorderContext);
   const collapsed = !expandedFolderIds.has(folder.id);
   const hasSelectedDirectDrone = folder.roots.some((node) => node.drone.id === activeDroneId);
   const stateSummary = React.useMemo(
     () => summarizeDroneScope(folder.roots, folder.children),
     [folder.children, folder.roots],
   );
+  const nodeId = sidebarFolderNodeId(folder.id);
+  const childNodeIds = folder.entries.map(mobileSidebarEntryNodeId);
+  const dragScope = `tree:${parentId}`;
+  const moveFolder = React.useCallback(
+    (
+      overNodeId: string,
+      placement: 'before' | 'inside' | 'after',
+      target?: MobileSidebarDragTargetData,
+    ) => {
+      if (!reorderSidebar) return;
+      if (placement === 'inside' && target?.folderPath) {
+        const insertAtStart = target.insidePosition === 'start';
+        const firstChildNodeId = firstMobileSidebarInsertionTarget(
+          target.childItemIds,
+          nodeId,
+        );
+        reorderSidebar({
+          kind: 'move-into-folder',
+          itemKind: 'folder',
+          repoPath,
+          sourceGroup: folder.path,
+          sourceNodeId: nodeId,
+          sourceParentId: parentId,
+          sourceSiblingNodeIds: siblingNodeIds,
+          targetGroup: target.folderPath,
+          targetParentId: overNodeId,
+          targetSiblingNodeIds: target.childItemIds ?? [],
+          targetOverNodeId: insertAtStart ? firstChildNodeId : undefined,
+          placement: insertAtStart ? 'before' : placement,
+        });
+        return;
+      }
+      if (placement === 'inside') return;
+      if (target?.parentId && target.parentId !== parentId) {
+        reorderSidebar({
+          kind: 'move-into-folder',
+          itemKind: 'folder',
+          repoPath,
+          sourceGroup: folder.path,
+          sourceNodeId: nodeId,
+          sourceParentId: parentId,
+          sourceSiblingNodeIds: siblingNodeIds,
+          targetGroup: target.parentGroupPath ?? null,
+          targetParentId: target.parentId,
+          targetSiblingNodeIds: target.siblingItemIds ?? [],
+          targetOverNodeId: overNodeId,
+          placement,
+        });
+        return;
+      }
+      reorderSidebar({
+        kind: 'tree-entry',
+        parentId,
+        siblingNodeIds,
+        activeNodeId: nodeId,
+        overNodeId,
+        placement,
+      });
+    },
+    [folder.path, nodeId, parentId, repoPath, reorderSidebar, siblingNodeIds],
+  );
+  const moveFolderAccessibility = React.useCallback(
+    (direction: 'up' | 'down') => {
+      const index = siblingNodeIds.indexOf(nodeId);
+      const overNodeId = siblingNodeIds[index + (direction === 'up' ? -1 : 1)];
+      if (!overNodeId) return;
+      moveFolder(overNodeId, direction === 'up' ? 'before' : 'after');
+    },
+    [moveFolder, nodeId, siblingNodeIds],
+  );
   return (
     <View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: !collapsed }}
-        onPress={() => onToggleFolder(folder.id)}
-        style={({ pressed }) => [
-          styles.groupRow,
-          { paddingLeft: drawerTreeRowPaddingLeft(depth) },
-          pressed && styles.sidebarRowPressed,
-        ]}
+      <MobileSidebarDragTarget
+        scope={dragScope}
+        treeScope={treeScope}
+        itemId={nodeId}
+        data={{
+          parentId,
+          parentGroupPath,
+          siblingItemIds: siblingNodeIds,
+          childItemIds: childNodeIds,
+          folderPath: folder.path,
+        }}
+        canDropInside={(activeItemId) => {
+          if (!activeItemId.startsWith('folder:')) return true;
+          return nodeId !== activeItemId && !nodeId.startsWith(`${activeItemId}/`);
+        }}
       >
-        <View style={styles.folderChevronSlot}>
-          <SidebarTreeChevronIcon
-            color={colors.sidebarMutedDim}
-            size={16}
-            strokeWidth={1.25}
-            expanded={!collapsed}
-            style={styles.folderChevron}
-          />
-        </View>
-        <Text numberOfLines={1} style={styles.groupName}>
-          {folder.label}
-        </Text>
-        {collapsed ? <DroneStateCounts summary={stateSummary} compact /> : null}
-      </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: !collapsed }}
+          onPress={() => onToggleFolder(folder.id)}
+          style={({ pressed }) => [
+            styles.groupRow,
+            { paddingLeft: drawerTreeRowPaddingLeft(depth) },
+            pressed && styles.sidebarRowPressed,
+          ]}
+        >
+          <View style={styles.folderChevronSlot}>
+            <SidebarTreeChevronIcon
+              color={colors.sidebarMutedDim}
+              size={16}
+              strokeWidth={1.25}
+              expanded={!collapsed}
+              style={styles.folderChevron}
+            />
+          </View>
+          {reorderSidebar ? (
+            <MobileSidebarDragArea
+              scope={dragScope}
+              treeScope={treeScope}
+              itemId={nodeId}
+              label={`${folder.label} group`}
+              onDrop={moveFolder}
+              onMoveAccessibility={moveFolderAccessibility}
+            >
+              <Text numberOfLines={1} style={[styles.groupName, styles.draggableRowLabel]}>
+                {folder.label}
+              </Text>
+            </MobileSidebarDragArea>
+          ) : (
+            <Text numberOfLines={1} style={styles.groupName}>
+              {folder.label}
+            </Text>
+          )}
+          {collapsed ? <DroneStateCounts summary={stateSummary} compact /> : null}
+        </Pressable>
+      </MobileSidebarDragTarget>
       {!collapsed ? (
         <View style={styles.groupChildren}>
           {hasSelectedDirectDrone ? (
@@ -1046,6 +1369,11 @@ function DrawerDroneFolder({
               }
               entry={entry}
               depth={depth + 1}
+              parentId={sidebarFolderNodeId(folder.id)}
+              siblingNodeIds={childNodeIds}
+              treeScope={treeScope}
+              repoPath={repoPath}
+              parentGroupPath={folder.path}
               expandedFolderIds={expandedFolderIds}
               collapsedDroneIds={collapsedDroneIds}
               selectedContainerDroneId={selectedContainerDroneId}
@@ -1069,6 +1397,11 @@ function DrawerDroneFolder({
 function DrawerDroneEntry({
   entry,
   depth,
+  parentId,
+  siblingNodeIds,
+  treeScope,
+  repoPath,
+  parentGroupPath,
   expandedFolderIds,
   collapsedDroneIds,
   selectedContainerDroneId,
@@ -1084,6 +1417,11 @@ function DrawerDroneEntry({
 }: {
   entry: MobileDroneSidebarEntry;
   depth: number;
+  parentId: string;
+  siblingNodeIds: string[];
+  treeScope: string;
+  repoPath: string;
+  parentGroupPath: string | null;
   expandedFolderIds: ReadonlySet<string>;
   collapsedDroneIds: ReadonlySet<string>;
   selectedContainerDroneId: string;
@@ -1101,6 +1439,11 @@ function DrawerDroneEntry({
     <DrawerDroneNode
       node={entry.node}
       depth={depth}
+      parentId={parentId}
+      siblingNodeIds={siblingNodeIds}
+      treeScope={treeScope}
+      repoPath={repoPath}
+      parentGroupPath={parentGroupPath}
       sidebarChatOrderByDrone={sidebarChatOrderByDrone}
       collapsedDroneIds={collapsedDroneIds}
       selectedContainerDroneId={selectedContainerDroneId}
@@ -1116,6 +1459,11 @@ function DrawerDroneEntry({
     <DrawerDroneFolder
       folder={entry.folder}
       depth={depth}
+      parentId={parentId}
+      siblingNodeIds={siblingNodeIds}
+      treeScope={treeScope}
+      repoPath={repoPath}
+      parentGroupPath={parentGroupPath}
       expandedFolderIds={expandedFolderIds}
       collapsedDroneIds={collapsedDroneIds}
       selectedContainerDroneId={selectedContainerDroneId}
@@ -1185,10 +1533,7 @@ function DrawerPinnedDrones({
           accessibilityLabel={collapsed ? 'Expand pinned drones' : 'Collapse pinned drones'}
           accessibilityState={{ expanded: !collapsed }}
           onPress={onToggleCollapsed}
-          style={({ pressed }) => [
-            styles.pinnedHeaderToggle,
-            pressed && styles.sidebarRowPressed,
-          ]}
+          style={({ pressed }) => [styles.pinnedHeaderToggle, pressed && styles.sidebarRowPressed]}
         >
           <SidebarPinIcon
             color={colors.sidebarMutedDim}
@@ -1233,6 +1578,9 @@ function DrawerPinnedDrones({
               key={`pinned:${drone.id}`}
               node={{ drone, children: [] }}
               depth={0}
+              parentId="pinned"
+              siblingNodeIds={drones.map((item) => item.id)}
+              pinnedDroneIds={drones.map((item) => item.id)}
               contextLabel={repoLabelByPath.get(drone.repoPath) ?? 'Ungrouped'}
               sidebarChatOrderByDrone={sidebarChatOrderByDrone}
               collapsedDroneIds={collapsedDroneIds}
@@ -1427,6 +1775,7 @@ function AppDrawerView({
   onCreateDroneChat,
   onRenameDroneChat,
   onDeleteDroneChat,
+  onReorderSidebar,
   onSelectDevice,
   onClose,
 }: AppDrawerProps) {
@@ -1504,13 +1853,17 @@ function AppDrawerView({
   const { expandedFolderIds, toggleFolder } = useMobileSidebarExpandedFolderIds();
   const { collapsedDroneIds, toggleDrone } = useMobileSidebarCollapsedDroneIds();
   const [selectedContainerDroneId, setSelectedContainerDroneId] = React.useState('');
-  const [chatActionTarget, setChatActionTarget] = React.useState<DrawerChatActionTarget | null>(null);
+  const [chatActionTarget, setChatActionTarget] = React.useState<DrawerChatActionTarget | null>(
+    null,
+  );
   const [chatEditor, setChatEditor] = React.useState<{
     mode: 'create' | 'rename';
     target: DrawerChatActionTarget;
     value: string;
   } | null>(null);
-  const [deleteChatTarget, setDeleteChatTarget] = React.useState<DrawerChatActionTarget | null>(null);
+  const [deleteChatTarget, setDeleteChatTarget] = React.useState<DrawerChatActionTarget | null>(
+    null,
+  );
   const [chatMutationBusy, setChatMutationBusy] = React.useState(false);
   const [chatMutationError, setChatMutationError] = React.useState<string | null>(null);
   React.useEffect(() => {
@@ -1542,9 +1895,7 @@ function AppDrawerView({
     (droneId: string): string | null => {
       const drone = drones.find((item) => item.id === droneId);
       if (!drone) return null;
-      return (
-        droneGroups.find((group) => group.repoPath === drone.repoPath)?.id ?? null
-      );
+      return droneGroups.find((group) => group.repoPath === drone.repoPath)?.id ?? null;
     },
     [droneGroups, drones],
   );
@@ -1559,10 +1910,8 @@ function AppDrawerView({
   );
   const openChatActions = React.useCallback(
     (target: DrawerChatActionTarget) => {
-      if (
-        !dronesReachable ||
-        (!onCreateDroneChat && !onRenameDroneChat && !onDeleteDroneChat)
-      ) return;
+      if (!dronesReachable || (!onCreateDroneChat && !onRenameDroneChat && !onDeleteDroneChat))
+        return;
       setChatMutationError(null);
       setChatActionTarget(target);
     },
@@ -1612,13 +1961,7 @@ function AppDrawerView({
     } finally {
       setChatMutationBusy(false);
     }
-  }, [
-    chatEditor,
-    chatMutationBusy,
-    onCreateDroneChat,
-    onRenameDroneChat,
-    onSelectDroneChat,
-  ]);
+  }, [chatEditor, chatMutationBusy, onCreateDroneChat, onRenameDroneChat, onSelectDroneChat]);
   const confirmDeleteChat = React.useCallback(async () => {
     if (!deleteChatTarget || chatMutationBusy || !onDeleteDroneChat) return;
     setChatMutationBusy(true);
@@ -1758,307 +2101,318 @@ function AppDrawerView({
 
   return (
     <DrawerWorkingPhaseContext.Provider value={workingPhase}>
-      <View
-        renderToHardwareTextureAndroid
-        style={[
-          styles.drawerContent,
-          {
-            paddingTop: insets.top,
-            paddingBottom: insets.bottom,
-          },
-        ]}
-      >
-        <View style={styles.header}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open project list"
-            disabled={!dronesNavigationItem}
-            onPress={() => {
-              setActiveRepoId(null);
-              dronesNavigationItem?.onPress();
-            }}
-            style={({ pressed }) => [styles.headerCopy, pressed && styles.pressed]}
+      <DrawerSidebarReorderContext.Provider value={onReorderSidebar ?? null}>
+        <MobileSidebarDragDropProvider>
+          <View
+            renderToHardwareTextureAndroid
+            style={[
+              styles.drawerContent,
+              {
+                paddingTop: insets.top,
+                paddingBottom: insets.bottom,
+              },
+            ]}
           >
-            <Text style={styles.title}>Drone Hub</Text>
-          </Pressable>
-          {devicesNavigationItem ? (
-            <DrawerDevicePicker
-              devices={devicePickerItems}
-              activeDeviceId={activeDeviceId}
-              onSelect={onSelectDevice}
-              onOpenDeviceSettings={devicesNavigationItem?.onPress}
-            />
-          ) : null}
-          {settingsNavigationItem ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Open settings"
-              accessibilityState={{ selected: settingsNavigationItem.active }}
-              onPress={settingsNavigationItem.onPress}
-              style={({ pressed }) => [
-                styles.headerSettings,
-                settingsNavigationItem.active && styles.headerSettingsActive,
-                pressed && styles.pressed,
-              ]}
-            >
-              <SidebarSettingsIcon
-                color={
-                  settingsNavigationItem.active ? colors.accent : colors.sidebarActionFg
-                }
-                size={16}
-                strokeWidth={settingsNavigationItem.active ? 2.2 : 1.9}
-              />
-            </Pressable>
-          ) : null}
-        </View>
-        {showDrones ? (
-          <>
-            {pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null}
-            {activeRepo ? (
-              <FlatList<MobileDroneSidebarEntry>
-                key={`repo:${activeRepo.id}`}
-                style={styles.scroll}
-                contentContainerStyle={styles.droneList}
-                data={activeRepo.entries}
-                keyExtractor={(entry) =>
-                  entry.kind === 'drone'
-                    ? `drone:${entry.node.drone.id}`
-                    : `folder:${entry.folder.id}`
-                }
-                renderItem={({ item: entry }) => (
-                  <DrawerDroneEntry
-                    entry={entry}
-                    depth={0}
-                    expandedFolderIds={expandedFolderIds}
-                    collapsedDroneIds={collapsedDroneIds}
-                    selectedContainerDroneId={selectedContainerDroneId}
-                    sidebarChatOrderByDrone={droneSidebarOrder.sidebarChatOrderByDrone}
-                    activeDroneId={activeDroneId}
-                    activeChatName={activeChatName}
-                    droneOperationById={droneOperationById}
-                    onToggleFolder={toggleFolder}
-                    onToggleDrone={toggleDrone}
-                    onSelectContainer={setSelectedContainerDroneId}
-                    onOpenChatActions={openChatActions}
-                    onSelect={(droneId, chatName) => {
-                      setSelectedContainerDroneId('');
-                      onSelectDroneChat?.(droneId, chatName);
-                    }}
+            <View style={styles.header}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open project list"
+                disabled={!dronesNavigationItem}
+                onPress={() => {
+                  setActiveRepoId(null);
+                  dronesNavigationItem?.onPress();
+                }}
+                style={({ pressed }) => [styles.headerCopy, pressed && styles.pressed]}
+              >
+                <Text style={styles.title}>Drone Hub</Text>
+              </Pressable>
+              {devicesNavigationItem ? (
+                <DrawerDevicePicker
+                  devices={devicePickerItems}
+                  activeDeviceId={activeDeviceId}
+                  onSelect={onSelectDevice}
+                  onOpenDeviceSettings={devicesNavigationItem?.onPress}
+                />
+              ) : null}
+              {settingsNavigationItem ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Open settings"
+                  accessibilityState={{ selected: settingsNavigationItem.active }}
+                  onPress={settingsNavigationItem.onPress}
+                  style={({ pressed }) => [
+                    styles.headerSettings,
+                    settingsNavigationItem.active && styles.headerSettingsActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <SidebarSettingsIcon
+                    color={settingsNavigationItem.active ? colors.accent : colors.sidebarActionFg}
+                    size={16}
+                    strokeWidth={settingsNavigationItem.active ? 2.2 : 1.9}
                   />
-                )}
-                ListHeaderComponent={
-                  <>
-                    <View
-                      style={[
-                        styles.repoNavigationHead,
-                        pinnedSidebarPlacement === 'top' &&
-                          globalPinnedDrones.length > 0 &&
-                          styles.repoNavigationHeadBelowPinned,
-                      ]}
-                    >
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Back to repositories"
-                        onPress={() => setActiveRepoId(null)}
-                        style={({ pressed }) => [
-                          styles.repoNavigationBack,
-                          pressed && styles.pressed,
-                        ]}
-                      >
-                        <View style={styles.groupIcon}>
-                          <SidebarFolderGitIcon
-                            color={colors.sidebarActionFg}
-                            size={14}
-                            strokeWidth={1.9}
-                          />
-                          <View style={styles.groupChevron}>
-                            <SidebarChevronIcon
-                              color={colors.sidebarActionFg}
-                              size={10}
-                              strokeWidth={2.3}
-                              direction="left"
-                            />
-                          </View>
-                        </View>
-                        <View style={styles.repoCopy}>
-                          <Text numberOfLines={1} style={styles.repoNavigationTitle}>
-                            {activeRepo.label}
-                          </Text>
-                          <Text numberOfLines={1} style={styles.repoNavigationPath}>
-                            {activeRepo.repoPath || 'No repository'}
-                          </Text>
-                        </View>
-                        <DroneStateCounts
-                          summary={
-                            repoStateSummaries.get(activeRepo.id) ??
-                            EMPTY_MOBILE_DRONE_STATE_SUMMARY
-                          }
-                          compact
-                        />
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Create drone in ${activeRepo.label}`}
-                        accessibilityState={{ disabled: !onCreateDrone }}
-                        disabled={!onCreateDrone}
-                        onPress={() => onCreateDrone?.(activeRepo.repoPath)}
-                        style={({ pressed }) => [
-                          styles.repoCreate,
-                          !onCreateDrone && styles.repoCreateDisabled,
-                          pressed && styles.pressed,
-                        ]}
-                      >
-                        <SidebarPlusIcon color={colors.accent} size={16} />
-                      </Pressable>
-                    </View>
-                  </>
-                }
-                ListFooterComponent={listStatus}
-                stickyHeaderIndices={[0]}
-                initialNumToRender={10}
-                maxToRenderPerBatch={8}
-                updateCellsBatchingPeriod={24}
-                windowSize={7}
-                removeClippedSubviews={Platform.OS === 'android'}
-                keyboardShouldPersistTaps="handled"
-              />
-            ) : (
-              <FlatList<MobileDroneRepoGroup>
-                key="repositories"
-                style={styles.scroll}
-                contentContainerStyle={styles.droneList}
-                data={droneGroups}
-                keyExtractor={(group) => group.id}
-                renderItem={({ item: group }) => {
-                  const stateSummary =
-                    repoStateSummaries.get(group.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY;
-                  const containsSelectedDrone =
-                    droneTreeContains(group.roots, activeDroneId) ||
-                    group.folders.some((folder) => droneFolderContains(folder, activeDroneId));
-                  const isUngrouped = !group.repoPath;
-                  return (
-                    <View>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Open ${group.label} repository`}
-                        accessibilityState={{ selected: containsSelectedDrone }}
-                        onPress={() => setActiveRepoId(group.id)}
-                        style={({ pressed }) => [
-                          styles.repoRow,
-                          containsSelectedDrone && styles.repoRowActive,
-                          pressed && !containsSelectedDrone && styles.sidebarRowPressed,
-                        ]}
-                      >
-                        {containsSelectedDrone ? (
-                          <View style={styles.sidebarSelectionEdge} />
-                        ) : null}
-                        <View style={styles.repoIconSlot}>
-                          {isUngrouped ? (
-                            <SidebarFolderOutlineIcon
-                              color={containsSelectedDrone ? colors.accent : colors.sidebarMetaFg}
-                              size={14}
-                            />
-                          ) : (
-                            <SidebarFolderGitIcon
-                              color={containsSelectedDrone ? colors.accent : colors.sidebarActionFg}
-                              size={14}
-                              strokeWidth={1.9}
-                            />
-                          )}
-                        </View>
-                        <View style={styles.repoCopy}>
-                          <Text
-                            numberOfLines={1}
-                            style={[
-                              styles.repoName,
-                              containsSelectedDrone && styles.repoNameActive,
+                </Pressable>
+              ) : null}
+            </View>
+            {showDrones ? (
+              <>
+                {pinnedSidebarPlacement === 'top' ? pinnedDronesSection : null}
+                {activeRepo ? (
+                  <FlatList<MobileDroneSidebarEntry>
+                    key={`repo:${activeRepo.id}`}
+                    style={styles.scroll}
+                    contentContainerStyle={styles.droneList}
+                    data={activeRepo.entries}
+                    keyExtractor={(entry) =>
+                      entry.kind === 'drone'
+                        ? `drone:${entry.node.drone.id}`
+                        : `folder:${entry.folder.id}`
+                    }
+                    renderItem={({ item: entry }) => (
+                      <DrawerDroneEntry
+                        entry={entry}
+                        depth={0}
+                        parentId={sidebarFolderNodeId(activeRepo.id)}
+                        siblingNodeIds={activeRepo.entries.map(mobileSidebarEntryNodeId)}
+                        treeScope={`repo:${activeRepo.id}`}
+                        repoPath={activeRepo.repoPath}
+                        parentGroupPath={null}
+                        expandedFolderIds={expandedFolderIds}
+                        collapsedDroneIds={collapsedDroneIds}
+                        selectedContainerDroneId={selectedContainerDroneId}
+                        sidebarChatOrderByDrone={droneSidebarOrder.sidebarChatOrderByDrone}
+                        activeDroneId={activeDroneId}
+                        activeChatName={activeChatName}
+                        droneOperationById={droneOperationById}
+                        onToggleFolder={toggleFolder}
+                        onToggleDrone={toggleDrone}
+                        onSelectContainer={setSelectedContainerDroneId}
+                        onOpenChatActions={openChatActions}
+                        onSelect={(droneId, chatName) => {
+                          setSelectedContainerDroneId('');
+                          onSelectDroneChat?.(droneId, chatName);
+                        }}
+                      />
+                    )}
+                    ListHeaderComponent={
+                      <>
+                        <View
+                          style={[
+                            styles.repoNavigationHead,
+                            pinnedSidebarPlacement === 'top' &&
+                              globalPinnedDrones.length > 0 &&
+                              styles.repoNavigationHeadBelowPinned,
+                          ]}
+                        >
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Back to repositories"
+                            onPress={() => setActiveRepoId(null)}
+                            style={({ pressed }) => [
+                              styles.repoNavigationBack,
+                              pressed && styles.pressed,
                             ]}
                           >
-                            {group.label}
-                          </Text>
-                          <Text numberOfLines={1} style={styles.repoPath}>
-                            {group.repoPath || 'Drones without a repository'}
-                          </Text>
+                            <View style={styles.groupIcon}>
+                              <SidebarFolderGitIcon
+                                color={colors.sidebarActionFg}
+                                size={14}
+                                strokeWidth={1.9}
+                              />
+                              <View style={styles.groupChevron}>
+                                <SidebarChevronIcon
+                                  color={colors.sidebarActionFg}
+                                  size={10}
+                                  strokeWidth={2.3}
+                                  direction="left"
+                                />
+                              </View>
+                            </View>
+                            <View style={styles.repoCopy}>
+                              <Text numberOfLines={1} style={styles.repoNavigationTitle}>
+                                {activeRepo.label}
+                              </Text>
+                              <Text numberOfLines={1} style={styles.repoNavigationPath}>
+                                {activeRepo.repoPath || 'No repository'}
+                              </Text>
+                            </View>
+                            <DroneStateCounts
+                              summary={
+                                repoStateSummaries.get(activeRepo.id) ??
+                                EMPTY_MOBILE_DRONE_STATE_SUMMARY
+                              }
+                              compact
+                            />
+                          </Pressable>
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Create drone in ${activeRepo.label}`}
+                            accessibilityState={{ disabled: !onCreateDrone }}
+                            disabled={!onCreateDrone}
+                            onPress={() => onCreateDrone?.(activeRepo.repoPath)}
+                            style={({ pressed }) => [
+                              styles.repoCreate,
+                              !onCreateDrone && styles.repoCreateDisabled,
+                              pressed && styles.pressed,
+                            ]}
+                          >
+                            <SidebarPlusIcon color={colors.accent} size={16} />
+                          </Pressable>
                         </View>
-                        <DroneStateCounts summary={stateSummary} compact />
-                      </Pressable>
-                      {isUngrouped ? <View style={styles.repoUngroupedDivider} /> : null}
-                    </View>
-                  );
-                }}
-                ListFooterComponent={listStatus}
-                initialNumToRender={10}
-                maxToRenderPerBatch={8}
-                updateCellsBatchingPeriod={24}
-                windowSize={7}
-                removeClippedSubviews={Platform.OS === 'android'}
-                keyboardShouldPersistTaps="handled"
-              />
+                      </>
+                    }
+                    ListFooterComponent={listStatus}
+                    stickyHeaderIndices={[0]}
+                    initialNumToRender={10}
+                    maxToRenderPerBatch={8}
+                    updateCellsBatchingPeriod={24}
+                    windowSize={7}
+                    removeClippedSubviews={Platform.OS === 'android'}
+                    keyboardShouldPersistTaps="handled"
+                  />
+                ) : (
+                  <FlatList<MobileDroneRepoGroup>
+                    key="repositories"
+                    style={styles.scroll}
+                    contentContainerStyle={styles.droneList}
+                    data={droneGroups}
+                    keyExtractor={(group) => group.id}
+                    renderItem={({ item: group }) => {
+                      const stateSummary =
+                        repoStateSummaries.get(group.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY;
+                      const containsSelectedDrone =
+                        droneTreeContains(group.roots, activeDroneId) ||
+                        group.folders.some((folder) => droneFolderContains(folder, activeDroneId));
+                      const isUngrouped = !group.repoPath;
+                      return (
+                        <View>
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open ${group.label} repository`}
+                            accessibilityState={{ selected: containsSelectedDrone }}
+                            onPress={() => setActiveRepoId(group.id)}
+                            style={({ pressed }) => [
+                              styles.repoRow,
+                              containsSelectedDrone && styles.repoRowActive,
+                              pressed && !containsSelectedDrone && styles.sidebarRowPressed,
+                            ]}
+                          >
+                            {containsSelectedDrone ? (
+                              <View style={styles.sidebarSelectionEdge} />
+                            ) : null}
+                            <View style={styles.repoIconSlot}>
+                              {isUngrouped ? (
+                                <SidebarFolderOutlineIcon
+                                  color={
+                                    containsSelectedDrone ? colors.accent : colors.sidebarMetaFg
+                                  }
+                                  size={14}
+                                />
+                              ) : (
+                                <SidebarFolderGitIcon
+                                  color={
+                                    containsSelectedDrone ? colors.accent : colors.sidebarActionFg
+                                  }
+                                  size={14}
+                                  strokeWidth={1.9}
+                                />
+                              )}
+                            </View>
+                            <View style={styles.repoCopy}>
+                              <Text
+                                numberOfLines={1}
+                                style={[
+                                  styles.repoName,
+                                  containsSelectedDrone && styles.repoNameActive,
+                                ]}
+                              >
+                                {group.label}
+                              </Text>
+                              <Text numberOfLines={1} style={styles.repoPath}>
+                                {group.repoPath || 'Drones without a repository'}
+                              </Text>
+                            </View>
+                            <DroneStateCounts summary={stateSummary} compact />
+                          </Pressable>
+                          {isUngrouped ? <View style={styles.repoUngroupedDivider} /> : null}
+                        </View>
+                      );
+                    }}
+                    ListFooterComponent={listStatus}
+                    initialNumToRender={10}
+                    maxToRenderPerBatch={8}
+                    updateCellsBatchingPeriod={24}
+                    windowSize={7}
+                    removeClippedSubviews={Platform.OS === 'android'}
+                    keyboardShouldPersistTaps="handled"
+                  />
+                )}
+                {pinnedSidebarPlacement === 'bottom' ? pinnedDronesSection : null}
+              </>
+            ) : (
+              <View style={styles.drawerFill} />
             )}
-            {pinnedSidebarPlacement === 'bottom' ? pinnedDronesSection : null}
-          </>
-        ) : (
-          <View style={styles.drawerFill} />
-        )}
-        <DrawerVoiceRecordingIndicator />
-      </View>
-      <ContextMenu
-        visible={Boolean(chatActionTarget)}
-        title={
-          chatActionTarget
-            ? `${chatActionTarget.drone.name} / ${chatActionTarget.chatName}`
-            : 'Chat actions'
-        }
-        actions={chatContextActions}
-        onClose={() => setChatActionTarget(null)}
-      />
-      <TextInputDialog
-        visible={Boolean(chatEditor)}
-        title={chatEditor?.mode === 'rename' ? 'Rename chat' : 'Create chat'}
-        message={
-          chatEditor?.mode === 'rename'
-            ? `Choose a new name for “${chatEditor.target.chatName}”.`
-            : `Create a chat in ${chatEditor?.target.drone.name ?? 'this drone'}.`
-        }
-        value={chatEditor?.value ?? ''}
-        error={chatMutationError}
-        confirmLabel={chatEditor?.mode === 'rename' ? 'Rename' : 'Create'}
-        confirmDisabled={
-          chatEditor?.mode === 'rename' &&
-          chatEditor.value.trim() === chatEditor.target.chatName
-        }
-        busy={chatMutationBusy}
-        maxLength={64}
-        onChangeText={(value) => {
-          setChatMutationError(null);
-          setChatEditor((current) => (current ? { ...current, value } : current));
-        }}
-        onCancel={() => {
-          if (!chatMutationBusy) {
-            setChatEditor(null);
-            setChatMutationError(null);
-          }
-        }}
-        onConfirm={() => void submitChatEditor()}
-      />
-      <ConfirmDialog
-        visible={Boolean(deleteChatTarget)}
-        title="Delete chat?"
-        message={
-          chatMutationError ||
-          `Delete “${deleteChatTarget?.chatName ?? ''}” from ${deleteChatTarget?.drone.name ?? 'this drone'}?`
-        }
-        confirmLabel="Delete"
-        destructive
-        busy={chatMutationBusy}
-        onCancel={() => {
-          if (!chatMutationBusy) {
-            setDeleteChatTarget(null);
-            setChatMutationError(null);
-          }
-        }}
-        onConfirm={() => void confirmDeleteChat()}
-      />
+            <DrawerVoiceRecordingIndicator />
+          </View>
+          <ContextMenu
+            visible={Boolean(chatActionTarget)}
+            title={
+              chatActionTarget
+                ? `${chatActionTarget.drone.name} / ${chatActionTarget.chatName}`
+                : 'Chat actions'
+            }
+            actions={chatContextActions}
+            onClose={() => setChatActionTarget(null)}
+          />
+          <TextInputDialog
+            visible={Boolean(chatEditor)}
+            title={chatEditor?.mode === 'rename' ? 'Rename chat' : 'Create chat'}
+            message={
+              chatEditor?.mode === 'rename'
+                ? `Choose a new name for “${chatEditor.target.chatName}”.`
+                : `Create a chat in ${chatEditor?.target.drone.name ?? 'this drone'}.`
+            }
+            value={chatEditor?.value ?? ''}
+            error={chatMutationError}
+            confirmLabel={chatEditor?.mode === 'rename' ? 'Rename' : 'Create'}
+            confirmDisabled={
+              chatEditor?.mode === 'rename' &&
+              chatEditor.value.trim() === chatEditor.target.chatName
+            }
+            busy={chatMutationBusy}
+            maxLength={64}
+            onChangeText={(value) => {
+              setChatMutationError(null);
+              setChatEditor((current) => (current ? { ...current, value } : current));
+            }}
+            onCancel={() => {
+              if (!chatMutationBusy) {
+                setChatEditor(null);
+                setChatMutationError(null);
+              }
+            }}
+            onConfirm={() => void submitChatEditor()}
+          />
+          <ConfirmDialog
+            visible={Boolean(deleteChatTarget)}
+            title="Delete chat?"
+            message={
+              chatMutationError ||
+              `Delete “${deleteChatTarget?.chatName ?? ''}” from ${deleteChatTarget?.drone.name ?? 'this drone'}?`
+            }
+            confirmLabel="Delete"
+            destructive
+            busy={chatMutationBusy}
+            onCancel={() => {
+              if (!chatMutationBusy) {
+                setDeleteChatTarget(null);
+                setChatMutationError(null);
+              }
+            }}
+            onConfirm={() => void confirmDeleteChat()}
+          />
+        </MobileSidebarDragDropProvider>
+      </DrawerSidebarReorderContext.Provider>
     </DrawerWorkingPhaseContext.Provider>
   );
 }
@@ -2423,6 +2777,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '400',
   },
+  draggableRowLabel: { flex: 0 },
   switchItemTitleActive: { color: colors.sidebarDroneActiveFg },
   switchItemDraftBadge: {
     flexShrink: 0,
@@ -2474,7 +2829,12 @@ const styles = StyleSheet.create({
   },
   switchStateDot: { width: 6, height: 6, borderRadius: 3 },
   workingStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
-  operationStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
+  operationStatusIndicator: {
+    width: 12,
+    height: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   operationStatusGlyph: { position: 'absolute' },
   stateStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   quietBlockedStatusIndicator: { opacity: 0.7 },

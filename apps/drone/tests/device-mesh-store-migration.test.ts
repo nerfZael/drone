@@ -51,7 +51,15 @@ describe('device mesh grant migrations', () => {
       {
         capability: 'drone-control',
         version: 1,
-        operations: ['drones.list', 'drone.delete', 'drone.rename', 'chat.rename', 'chat.delete'],
+        operations: [
+          'drones.list',
+          'drone.delete',
+          'drone.rename',
+          'chat.rename',
+          'chat.delete',
+          'sidebar.order.update',
+          'sidebar.item.move',
+        ],
       },
     ]);
   });

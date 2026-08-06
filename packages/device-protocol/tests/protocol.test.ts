@@ -98,6 +98,11 @@ describe('device protocol', () => {
     expect(DRONE_CONTROL_CAPABILITY.operations).toContain('drone.rename');
   });
 
+  test('advertises sidebar ordering as an explicit permission', () => {
+    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.order.update');
+    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.item.move');
+  });
+
   test('advertises chat rename and delete as explicit permissions', () => {
     expect(DRONE_CONTROL_CAPABILITY.operations).toEqual(
       expect.arrayContaining(['chat.rename', 'chat.delete']),

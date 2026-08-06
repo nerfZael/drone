@@ -27,7 +27,20 @@ import {
 
 const LOCAL_DRONES_KEY = 'droneHub.nativeDrones.v1';
 const LOCAL_PINNED_DRONES_KEY = 'droneHub.nativePinnedDrones.v1';
+const LOCAL_SIDEBAR_ORDER_KEY = 'droneHub.nativeSidebarOrder.v1';
 const LOCAL_PREVIEW_CHUNK_BYTES = 128 * 1024;
+
+function localStringListMap(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).flatMap(([keyRaw, items]) => {
+      const key = keyRaw.trim();
+      if (!key || !Array.isArray(items)) return [];
+      const list = [...new Set(items.map((item) => String(item ?? '').trim()).filter(Boolean))];
+      return list.length > 0 ? [[key, list] as const] : [];
+    }),
+  );
+}
 
 function fileRevision(bytes: Uint8Array): string {
   return `sha256:${Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -113,6 +126,10 @@ function useLocalDroneControlValue() {
   const [loading, setLoading] = React.useState(true);
   const dronesRef = React.useRef<LocalDroneRecord[]>([]);
   const pinnedDroneIdsRef = React.useRef<string[]>([]);
+  const sidebarOrderRef = React.useRef({
+    sidebarNodeOrderByParent: {} as Record<string, string[]>,
+    sidebarChatOrderByDrone: {} as Record<string, string[]>,
+  });
   const writeRef = React.useRef(Promise.resolve());
   const loadedRef = React.useRef(false);
   const readyRef = React.useRef<{
@@ -166,13 +183,27 @@ function useLocalDroneControlValue() {
           : [];
       })
       .catch((): string[] => []);
-    void Promise.all([loadDrones, loadPinnedDroneIds])
-      .then(([nextDrones, nextPinnedDroneIds]) => {
+    const loadSidebarOrder = AsyncStorage.getItem(LOCAL_SIDEBAR_ORDER_KEY)
+      .then((stored) => {
+        const value: unknown = stored ? JSON.parse(stored) : {};
+        const source =
+          value && typeof value === 'object' && !Array.isArray(value)
+            ? (value as Record<string, unknown>)
+            : {};
+        return {
+          sidebarNodeOrderByParent: localStringListMap(source.sidebarNodeOrderByParent),
+          sidebarChatOrderByDrone: localStringListMap(source.sidebarChatOrderByDrone),
+        };
+      })
+      .catch(() => ({ sidebarNodeOrderByParent: {}, sidebarChatOrderByDrone: {} }));
+    void Promise.all([loadDrones, loadPinnedDroneIds, loadSidebarOrder])
+      .then(([nextDrones, nextPinnedDroneIds, nextSidebarOrder]) => {
         if (!active) return;
         dronesRef.current = nextDrones;
         setDrones(nextDrones);
         pinnedDroneIdsRef.current = nextPinnedDroneIds;
         setPinnedDroneIds(nextPinnedDroneIds);
+        sidebarOrderRef.current = nextSidebarOrder;
       })
       .finally(() => {
         if (!active) return;
@@ -257,8 +288,8 @@ function useLocalDroneControlValue() {
             groupCreatedAtByName: {},
             sidebarGroupOrder: [],
             sidebarDroneOrderByGroup: {},
-            sidebarNodeOrderByParent: {},
-            sidebarChatOrderByDrone: {},
+            sidebarNodeOrderByParent: sidebarOrderRef.current.sidebarNodeOrderByParent,
+            sidebarChatOrderByDrone: sidebarOrderRef.current.sidebarChatOrderByDrone,
             pinnedDroneIds: pinnedDroneIdsRef.current,
           },
           createOptions: { repos: [] },
@@ -283,6 +314,86 @@ function useLocalDroneControlValue() {
         pinnedDroneIdsRef.current = next;
         setPinnedDroneIds(next);
         return { ok: true, uiPreferences: { pinnedDroneIds: next } };
+      }
+      if (operation === 'sidebar.order.update') {
+        const sidebar =
+          payload.sidebar && typeof payload.sidebar === 'object' && !Array.isArray(payload.sidebar)
+            ? (payload.sidebar as Record<string, unknown>)
+            : {};
+        const hasNodeOrder = Object.prototype.hasOwnProperty.call(
+          sidebar,
+          'sidebarNodeOrderByParent',
+        );
+        const hasChatOrder = Object.prototype.hasOwnProperty.call(
+          sidebar,
+          'sidebarChatOrderByDrone',
+        );
+        const next = {
+          sidebarNodeOrderByParent: hasNodeOrder
+            ? localStringListMap(sidebar.sidebarNodeOrderByParent)
+            : sidebarOrderRef.current.sidebarNodeOrderByParent,
+          sidebarChatOrderByDrone: hasChatOrder
+            ? localStringListMap(sidebar.sidebarChatOrderByDrone)
+            : sidebarOrderRef.current.sidebarChatOrderByDrone,
+        };
+        const nextPinnedDroneIds = Object.prototype.hasOwnProperty.call(sidebar, 'pinnedDroneIds')
+          ? [
+              ...new Set<string>(
+                (Array.isArray(sidebar.pinnedDroneIds) ? sidebar.pinnedDroneIds : [])
+                  .map((id: unknown) => String(id ?? '').trim())
+                  .filter(Boolean),
+              ),
+            ]
+          : pinnedDroneIdsRef.current;
+        await Promise.all([
+          AsyncStorage.setItem(LOCAL_SIDEBAR_ORDER_KEY, JSON.stringify(next)),
+          AsyncStorage.setItem(LOCAL_PINNED_DRONES_KEY, JSON.stringify(nextPinnedDroneIds)),
+        ]);
+        sidebarOrderRef.current = next;
+        pinnedDroneIdsRef.current = nextPinnedDroneIds;
+        setPinnedDroneIds(nextPinnedDroneIds);
+        return {
+          ok: true,
+          uiPreferences: { ...next, pinnedDroneIds: nextPinnedDroneIds },
+        };
+      }
+      if (operation === 'sidebar.item.move') {
+        const itemKind = String(payload.itemKind ?? '').trim();
+        const targetGroup = String(payload.targetGroup ?? '').trim();
+        if (itemKind === 'drone') {
+          const droneId = String(payload.droneId ?? '').trim();
+          if (!dronesRef.current.some((drone) => drone.id === droneId)) {
+            throw new Error('Phone drone was not found');
+          }
+          await replaceDrones(
+            dronesRef.current.map((drone) =>
+              drone.id === droneId ? { ...drone, group: targetGroup || null } : drone,
+            ),
+          );
+          return { ok: true, moved: [droneId], group: targetGroup || null };
+        }
+        if (itemKind !== 'folder') throw new Error('Item must be a drone or group.');
+        const sourceGroup = String(payload.sourceGroup ?? '').trim();
+        const nextGroup = String(payload.nextGroup ?? '').trim();
+        if (!sourceGroup || !nextGroup)
+          throw new Error('Source and destination groups are required.');
+        if (targetGroup === sourceGroup || targetGroup.startsWith(`${sourceGroup}/`)) {
+          throw new Error('A group cannot be moved into itself or its subgroup.');
+        }
+        await replaceDrones(
+          dronesRef.current.map((drone) => {
+            const group = String(drone.group ?? '').trim();
+            if (group !== sourceGroup && !group.startsWith(`${sourceGroup}/`)) return drone;
+            return {
+              ...drone,
+              group:
+                group === sourceGroup
+                  ? nextGroup
+                  : `${nextGroup}/${group.slice(sourceGroup.length + 1)}`,
+            };
+          }),
+        );
+        return { ok: true, sourceGroup, group: nextGroup };
       }
       if (operation === 'drone.create.host') {
         const name = uniqueDroneName(dronesRef.current, payload.name);
