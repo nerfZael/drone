@@ -67,7 +67,7 @@ describe('device protocol', () => {
 
   test('advertises file workspace operations as explicit drone permissions', () => {
     expect(DRONE_CONTROL_CAPABILITY.operations).toEqual(
-      expect.arrayContaining(['files.list', 'file.preview', 'file.write']),
+      expect.arrayContaining(['files.list', 'file.preview', 'file.write', 'file.action']),
     );
     expect(
       isGranted(
@@ -91,6 +91,14 @@ describe('device protocol', () => {
         'drone-control',
         1,
         'file.write',
+      ),
+    ).toBe(false);
+    expect(
+      isGranted(
+        [{ capability: 'drone-control', version: 1, operations: ['file.write'] }],
+        'drone-control',
+        1,
+        'file.action',
       ),
     ).toBe(false);
   });

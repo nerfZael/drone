@@ -1829,7 +1829,7 @@ describe('device mesh drone summaries', () => {
     }
   });
 
-  test('lists and revision-safely writes files for mobile workspaces', async () => {
+  test('lists, mutates, and revision-safely writes files for mobile workspaces', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; method: string; body: string }> = [];
     globalThis.fetch = (async (input, init) => {
@@ -1867,6 +1867,21 @@ describe('device mesh drone summaries', () => {
         JSON.parse(Buffer.from(listResult.contentChunk.dataBase64, 'base64').toString('utf8')),
       ).toMatchObject({ path: '/work/repo', entries: [{ name: 'src' }] });
       await expect(
+        capability.invoke('file.action', {
+          droneId: 'one',
+          action: 'create-file',
+          targetDir: '/work/repo',
+          name: 'notes.txt',
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        capability.invoke('file.action', {
+          droneId: 'one',
+          action: 'delete',
+          path: '/work/repo/notes.txt',
+        }),
+      ).rejects.toThrow('unsupported mobile filesystem action');
+      await expect(
         capability.invoke('file.write', {
           droneId: 'one',
           path: '/work/repo/index.ts',
@@ -1879,6 +1894,15 @@ describe('device mesh drone summaries', () => {
           url: 'http://127.0.0.1:7777/api/drones/one/fs/list?path=%2Fwork%2Frepo',
           method: 'GET',
           body: '',
+        },
+        {
+          url: 'http://127.0.0.1:7777/api/drones/one/fs/action',
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'create-file',
+            targetDir: '/work/repo',
+            name: 'notes.txt',
+          }),
         },
         {
           url: 'http://127.0.0.1:7777/api/drones/one/fs/file',

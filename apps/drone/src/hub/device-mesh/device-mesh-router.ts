@@ -56,7 +56,8 @@ function isBulkTransferRequest(request: SignedCapabilityRequest): boolean {
     request.capability === 'drone-control' &&
     (request.operation === 'files.list' ||
       request.operation === 'file.preview' ||
-      request.operation === 'file.write')
+      request.operation === 'file.write' ||
+      request.operation === 'file.action')
   )
     return true;
   return (

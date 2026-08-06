@@ -28,6 +28,7 @@ export const DRONE_CONTROL_OPERATIONS = [
   'files.list',
   'file.preview',
   'file.write',
+  'file.action',
   'repo.pull-requests.read',
   'repo.pull-requests.merge',
   'repo.pull-requests.close',

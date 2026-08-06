@@ -950,6 +950,30 @@ export function createDroneControlCapability(
         );
         return { contentChunk: meshJsonContentChunk(listing, payload.contentOffset) };
       }
+      if (operation === 'file.action') {
+        const action = requiredText(payload.action, 'action');
+        if (action !== 'create-file' && action !== 'create-directory' && action !== 'rename') {
+          throw Object.assign(new Error('unsupported mobile filesystem action'), {
+            code: 'INVALID_REQUEST',
+          });
+        }
+        const body =
+          action === 'rename'
+            ? {
+                action,
+                path: requiredText(payload.path, 'path'),
+                name: requiredText(payload.name, 'name'),
+              }
+            : {
+                action,
+                targetDir: requiredText(payload.targetDir, 'targetDir'),
+                name: requiredText(payload.name, 'name'),
+              };
+        return await localHubRequest(access, `/api/drones/${encodedDrone}/fs/action`, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+      }
       if (operation === 'file.write') {
         const filePath = requiredText(payload.path, 'path');
         if (typeof payload.content !== 'string') {

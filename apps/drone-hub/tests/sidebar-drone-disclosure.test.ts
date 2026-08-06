@@ -116,7 +116,13 @@ describe('multi-chat drone disclosure', () => {
 
     expect(source).toContain('aria-expanded={disclosureExpanded}');
     expect(source).toContain(
-      'className={`flex-shrink-0 ${densityClasses.folderChevron}`}',
+      'data-sidebar-disclosure-slot="true"',
+    );
+    expect(source).toContain(
+      'className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center leading-none"',
+    );
+    expect(source).toContain(
+      'className={`max-w-none flex-shrink-0 !translate-x-0 ${densityClasses.folderChevron}`}',
     );
     expect(source).toContain('<DroneRuntimeIcon');
     expect(source).toContain('droneRuntimeIconToneClass(runtime)');

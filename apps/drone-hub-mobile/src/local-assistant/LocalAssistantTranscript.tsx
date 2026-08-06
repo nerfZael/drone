@@ -58,6 +58,7 @@ import { LinkedPullRequestAttachments } from '../drones/LinkedPullRequestAttachm
 import type { MobileLinkedPullRequestContext } from '../drones/use-drone-linked-pull-requests';
 import {
   groupMobileTranscriptRuns,
+  latestTruncatedMobileAgentMessage,
   limitMobileRunToolItems,
   mobileTranscriptGroupStartedAt,
   mobileRunIsThinking,
@@ -1433,6 +1434,31 @@ export function MobileAssistantTranscript({
     message: AssistantMessage;
     sourceMessageIndex: number;
   } | null>(null);
+  const autoLoadedFullMessageIdRef = React.useRef('');
+  const latestTruncatedAgentMessage = React.useMemo(
+    () => latestTruncatedMobileAgentMessage(messages),
+    [messages],
+  );
+  const latestTruncatedAgentMessageId = String(latestTruncatedAgentMessage?.id ?? '').trim();
+  React.useEffect(() => {
+    if (!latestTruncatedAgentMessage || !latestTruncatedAgentMessageId) {
+      autoLoadedFullMessageIdRef.current = '';
+      return;
+    }
+    if (
+      !onLoadFullMessage ||
+      fullMessageLoadingId ||
+      autoLoadedFullMessageIdRef.current === latestTruncatedAgentMessageId
+    )
+      return;
+    autoLoadedFullMessageIdRef.current = latestTruncatedAgentMessageId;
+    onLoadFullMessage(latestTruncatedAgentMessage);
+  }, [
+    fullMessageLoadingId,
+    latestTruncatedAgentMessage,
+    latestTruncatedAgentMessageId,
+    onLoadFullMessage,
+  ]);
   const toggleMessageTimestamp = React.useCallback((key: string) => {
     setVisibleMessageTimestamps((current) => {
       const next = new Set(current);

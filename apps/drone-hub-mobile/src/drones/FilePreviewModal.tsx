@@ -24,6 +24,7 @@ import FolderTree from 'lucide-react-native/icons/folder-tree';
 import Pencil from 'lucide-react-native/icons/pencil';
 import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
 import Save from 'lucide-react-native/icons/save';
+import WrapText from 'lucide-react-native/icons/text-wrap';
 import { useEvent } from 'expo';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -123,10 +124,12 @@ function TextPreview({
   preview,
   line,
   markdownExpansionCommand,
+  wordWrap,
 }: {
   preview: MobileFilePreview;
   line: number | null;
   markdownExpansionCommand: NativeMarkdownExpansionCommand | null;
+  wordWrap: boolean;
 }) {
   const scrollRef = React.useRef<ScrollView | null>(null);
   const safePreview = mobileTextPreviewContent(preview.content);
@@ -165,20 +168,41 @@ function TextPreview({
             : 'This file is large. Showing plain text to keep the preview responsive.'}
         </Text>
       ) : null}
-      <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.textRow}>
-        {code ? (
-          <MobileHighlightedCode
-            content={safePreview.content}
-            path={preview.path}
-            mime={preview.mime}
-            style={[styles.textContent, styles.codeContent]}
-          />
-        ) : (
-          <Text selectable style={styles.textContent}>
-            {safePreview.content}
-          </Text>
-        )}
-      </ScrollView>
+      {wordWrap ? (
+        <View style={[styles.textRow, styles.textRowWrapped]}>
+          {code ? (
+            <MobileHighlightedCode
+              content={safePreview.content}
+              path={preview.path}
+              mime={preview.mime}
+              style={[styles.textContent, styles.codeContent, styles.textContentWrapped]}
+            />
+          ) : (
+            <Text selectable style={[styles.textContent, styles.textContentWrapped]}>
+              {safePreview.content}
+            </Text>
+          )}
+        </View>
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator
+          contentContainerStyle={styles.textRow}
+        >
+          {code ? (
+            <MobileHighlightedCode
+              content={safePreview.content}
+              path={preview.path}
+              mime={preview.mime}
+              style={[styles.textContent, styles.codeContent]}
+            />
+          ) : (
+            <Text selectable style={styles.textContent}>
+              {safePreview.content}
+            </Text>
+          )}
+        </ScrollView>
+      )}
     </ScrollView>
   );
 }
@@ -227,6 +251,7 @@ export function FilePreviewModal({
   onRetry(): void;
 }) {
   const [explorerExpanded, setExplorerExpanded] = React.useState(false);
+  const [wordWrap, setWordWrap] = React.useState(true);
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
   const [savedDraft, setSavedDraft] = React.useState('');
@@ -309,7 +334,6 @@ export function FilePreviewModal({
   const openExplorerPath = React.useCallback(
     (path: string) =>
       confirmDiscard(() => {
-        setExplorerExpanded(false);
         onOpenPath(path);
       }),
     [confirmDiscard, onOpenPath],
@@ -388,6 +412,29 @@ export function FilePreviewModal({
                   <Pencil
                     color={editing ? colors.accent : colors.muted}
                     size={16}
+                    strokeWidth={2}
+                  />
+                </Pressable>
+              ) : null}
+              {preview?.kind === 'text' &&
+              !markdownPreview &&
+              (!htmlPreview || htmlMode === 'source') &&
+              !editing ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={wordWrap ? 'Turn off word wrap' : 'Turn on word wrap'}
+                  accessibilityState={{ checked: wordWrap }}
+                  hitSlop={8}
+                  onPress={() => setWordWrap((current) => !current)}
+                  style={({ pressed }) => [
+                    styles.headingAction,
+                    wordWrap && styles.headingActionActive,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <WrapText
+                    color={wordWrap ? colors.accent : colors.muted}
+                    size={17}
                     strokeWidth={2}
                   />
                 </Pressable>
@@ -551,6 +598,7 @@ export function FilePreviewModal({
                     preview={preview}
                     line={line}
                     markdownExpansionCommand={markdownExpansionCommand}
+                    wordWrap={wordWrap}
                   />
                 ) : preview?.kind === 'image' &&
                   preview.mime === 'image/svg+xml' &&
@@ -787,7 +835,9 @@ const styles = StyleSheet.create({
   markdownContent: { paddingHorizontal: 16, paddingVertical: 18, paddingBottom: 52 },
   textVerticalContent: { minWidth: '100%' },
   textRow: { minWidth: '100%', paddingHorizontal: 14, paddingVertical: 16, paddingBottom: 48 },
+  textRowWrapped: { width: '100%' },
   textContent: { color: colors.text, fontSize: 14, lineHeight: 21 },
+  textContentWrapped: { width: '100%', flexShrink: 1 },
   codeContent: { fontFamily: 'monospace', fontSize: 12, lineHeight: 19 },
   mediaStage: {
     flex: 1,

@@ -867,11 +867,17 @@ export const DroneCard = React.memo(function DroneCard({
       >
         {typeof disclosureExpanded === 'boolean' ? (
           <>
-            <IconChevron
-              down={disclosureExpanded}
-              strokeWidth={1.25}
-              className={`flex-shrink-0 ${densityClasses.folderChevron}`}
-            />
+            <span
+              data-sidebar-disclosure-slot="true"
+              className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center leading-none"
+              aria-hidden="true"
+            >
+              <IconChevron
+                down={disclosureExpanded}
+                strokeWidth={1.25}
+                className={`max-w-none flex-shrink-0 !translate-x-0 ${densityClasses.folderChevron}`}
+              />
+            </span>
             <DroneRuntimeIcon
               runtime={runtime}
               className={`flex-shrink-0 ${densityClasses.icon} ${droneRuntimeIconToneClass(runtime)} !opacity-100`}

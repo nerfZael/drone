@@ -76,6 +76,16 @@ function localArtifactDirectoryParts(raw: unknown): string[] {
   return path.split('/').filter((part) => part && part !== '.');
 }
 
+function localArtifactChildName(raw: unknown): string {
+  const name = String(raw ?? '').trim();
+  if (!name) throw new Error('Name is required.');
+  if (name === '.' || name === '..' || /[\\/\0\r\n\t]/.test(name)) {
+    throw new Error('Name cannot contain a path separator or invalid whitespace.');
+  }
+  if (name.length > 255) throw new Error('Name must be 255 characters or fewer.');
+  return name;
+}
+
 function localJsonChunk(value: unknown, offsetRaw: unknown) {
   const content = new TextEncoder().encode(JSON.stringify(value));
   const requested = Number(offsetRaw);
@@ -609,6 +619,49 @@ function useLocalDroneControlValue() {
             { ok: true, path: parts.join('/'), entries },
             payload.contentOffset,
           ),
+        };
+      }
+      if (operation === 'file.action') {
+        const { thread } = getThread();
+        const action = String(payload.action ?? '').trim();
+        if (action !== 'create-file' && action !== 'create-directory' && action !== 'rename') {
+          throw new Error('Unsupported file action.');
+        }
+        const name = localArtifactChildName(payload.name);
+        const root = new Directory(
+          Paths.document,
+          'drone-hub-native-artifacts-v1',
+          encodeURIComponent(thread.id),
+        );
+        if (action === 'create-file' || action === 'create-directory') {
+          const parentParts = localArtifactDirectoryParts(payload.targetDir);
+          const parent = parentParts.length > 0 ? new Directory(root, ...parentParts) : root;
+          if (!parent.exists) {
+            throw new Error(`Artifact directory not found: ${parentParts.join('/') || '.'}`);
+          }
+          const created =
+            action === 'create-file' ? parent.createFile(name, null) : parent.createDirectory(name);
+          return {
+            ok: true,
+            action,
+            path: [...parentParts, created.name].join('/'),
+            targetDir: parentParts.join('/'),
+          };
+        }
+        const sourceParts = localArtifactPathParts(payload.path);
+        const sourceName = sourceParts.at(-1)!;
+        const parentParts = sourceParts.slice(0, -1);
+        const parent = parentParts.length > 0 ? new Directory(root, ...parentParts) : root;
+        const sourceFile = new File(parent, sourceName);
+        const sourceDirectory = new Directory(parent, sourceName);
+        if (sourceFile.exists) sourceFile.rename(name);
+        else if (sourceDirectory.exists) sourceDirectory.rename(name);
+        else throw new Error(`Artifact path not found: ${sourceParts.join('/')}`);
+        return {
+          ok: true,
+          action,
+          path: sourceParts.join('/'),
+          targetPath: [...parentParts, name].join('/'),
         };
       }
       if (operation === 'file.write') {

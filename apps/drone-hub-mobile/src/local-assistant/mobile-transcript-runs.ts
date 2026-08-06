@@ -235,6 +235,19 @@ export function workingDurationLabel(durationMs: number): string {
   return `${seconds}s`;
 }
 
+export function latestTruncatedMobileAgentMessage(
+  messages: readonly AssistantMessage[],
+): AssistantMessage | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== 'assistant') continue;
+    return message.meshTruncated === true && String(message.id ?? '').trim()
+      ? message
+      : undefined;
+  }
+  return undefined;
+}
+
 export function mobileRunIsThinking(run: Pick<MobileTranscriptRun, 'active' | 'items'>): boolean {
   if (!run.active) return false;
   const lastItem = [...run.items].reverse().find((item) => item.type !== 'runSummary');

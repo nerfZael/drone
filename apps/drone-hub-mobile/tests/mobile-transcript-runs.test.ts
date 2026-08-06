@@ -6,6 +6,7 @@ import {
 } from '@drone/assistant-chat';
 import {
   groupMobileTranscriptRuns,
+  latestTruncatedMobileAgentMessage,
   limitMobileRunToolItems,
   mobileRunIsThinking,
   mobileRunDetails,
@@ -15,6 +16,44 @@ import {
 } from '../src/local-assistant/mobile-transcript-runs';
 
 describe('mobile transcript runs', () => {
+  test('automatically targets only the latest agent message for full-content loading', () => {
+    const olderTruncated = {
+      id: 'assistant-1',
+      role: 'assistant' as const,
+      content: 'Older bounded answer',
+      meshTruncated: true,
+    };
+    const latestTruncated = {
+      id: 'assistant-2',
+      role: 'assistant' as const,
+      content: 'Latest bounded answer',
+      meshTruncated: true,
+    };
+
+    expect(
+      latestTruncatedMobileAgentMessage([
+        olderTruncated,
+        { role: 'user', content: 'Follow up' },
+        latestTruncated,
+        { role: 'runSummary', content: '' },
+      ]),
+    ).toBe(latestTruncated);
+  });
+
+  test('does not load an older truncated message when the latest agent message is full', () => {
+    expect(
+      latestTruncatedMobileAgentMessage([
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: 'Older bounded answer',
+          meshTruncated: true,
+        },
+        { id: 'assistant-2', role: 'assistant', content: 'Latest full answer' },
+      ]),
+    ).toBeUndefined();
+  });
+
   test('keeps only the five latest tool calls in an automatic live expansion', () => {
     const items = [
       {
