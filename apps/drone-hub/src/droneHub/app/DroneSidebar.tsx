@@ -110,7 +110,7 @@ import {
   type ChatEditorState,
   type FolderEditorState,
 } from './use-sidebar-interactions';
-import { useSidebarRootDnd } from './use-sidebar-root-dnd';
+import { useSidebarUngroupedDrop } from './use-sidebar-ungrouped-drop';
 import { useDroneHubRuntimeStore } from './use-drone-hub-runtime-store';
 import { isDroneStartingOrSeeding } from './helpers';
 import { AddDroneToGroupDialog } from './AddDroneToGroupDialog';
@@ -1457,20 +1457,10 @@ export function DroneSidebar({
     },
     [clearGroupedFolderSelection, onPrepareDroneDragStart, setSelectedSidebarNodeId],
   );
-  const {
-    activeDraggedDroneIds,
-    dragOverGroup,
-    dragOverSidebarGroup,
-    dragOverUngrouped,
-    draggingSidebarGroup,
-  } = useSidebarRootDnd({
+  const { activeDraggedDroneIds, dragOverUngrouped } = useSidebarUngroupedDrop({
     activeDrag,
     isRepoGroupingMode,
-    moveFolderIntoGroup,
     runOptimisticMoveDronesToGroup,
-    setSidebarGroupOrder,
-    sidebarGroupOrder,
-    sidebarGroups,
     sidebarHasUngroupedGroup,
   });
 
