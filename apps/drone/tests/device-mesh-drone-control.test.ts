@@ -930,7 +930,7 @@ describe('device mesh drone summaries', () => {
       if (url.endsWith('/read')) {
         markReadBody = String(init?.body ?? '');
       }
-      const body = url.endsWith('/pending')
+      const body = url.includes('/state?')
         ? {
             ok: true,
             pending: [
@@ -948,6 +948,19 @@ describe('device mesh drone summaries', () => {
                 state: 'sent',
               },
             ],
+            transcripts: [
+              { id: 'prompt-completed', turn: 1, prompt: 'Review the code' },
+              ...Array.from({ length: 100 }, (_, index) => ({
+                id: `later-${index + 1}`,
+                turn: index + 2,
+                prompt: `Later prompt ${index + 1}`,
+              })),
+            ],
+            readState: {
+              unread: true,
+              latestAgentTurnId: 'turn-1',
+              latestAgentRevision: 2,
+            },
           }
         : url.endsWith('/pending/prompt-2')
           ? { ok: true, cancelled: true, promptId: 'prompt-2' }
@@ -960,22 +973,7 @@ describe('device mesh drone summaries', () => {
                   latestAgentRevision: 2,
                 },
               }
-            : {
-                ok: true,
-                turns: [
-                  { id: 'prompt-completed', turn: 1, prompt: 'Review the code' },
-                  ...Array.from({ length: 100 }, (_, index) => ({
-                    id: `later-${index + 1}`,
-                    turn: index + 2,
-                    prompt: `Later prompt ${index + 1}`,
-                  })),
-                ],
-                readState: {
-                  unread: true,
-                  latestAgentTurnId: 'turn-1',
-                  latestAgentRevision: 2,
-                },
-              };
+            : { ok: true };
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -1030,53 +1028,61 @@ describe('device mesh drone summaries', () => {
   test('includes the active DroneHub MCP subscriptions in mobile chat reads', async () => {
     const originalFetch = globalThis.fetch;
     let subscriptionRequests = 0;
+    let readCursorWrites = 0;
+    const stateRequests: string[] = [];
     globalThis.fetch = (async (input) => {
       const url = new URL(String(input));
+      if (url.pathname.endsWith('/state')) stateRequests.push(`${url.pathname}${url.search}`);
       const body =
         url.pathname === '/api/resource-subscriptions'
           ? (() => {
               subscriptionRequests += 1;
               return { ok: true, subscriptions: [] };
             })()
-          : url.pathname.endsWith('/pending')
-            ? { ok: true, pending: [] }
-            : url.pathname.endsWith('/read')
-              ? { ok: true, readState: { unread: false } }
-              : {
-                  ok: true,
-                  chatId: 'subscriber-chat-1',
-                  subscriptions: [
-                    {
-                      id: 'subscription-1',
-                      provider: 'github',
-                      resourceType: 'pull_request',
-                      resourceId: 'acme/widgets#42',
-                      events: ['pull_request.merged'],
-                      intent: 'Continue after merge.',
-                      status: 'active',
-                      cursor: { private: 'internal-state' },
-                      lastError: 'not for clients',
+          : url.pathname.endsWith('/read')
+            ? (() => {
+                readCursorWrites += 1;
+                return { ok: true, readState: { unread: false } };
+              })()
+            : {
+                ok: true,
+                chatId: 'subscriber-chat-1',
+                subscriptions: [
+                  {
+                    id: 'subscription-1',
+                    provider: 'github',
+                    resourceType: 'pull_request',
+                    resourceId: 'acme/widgets#42',
+                    events: ['pull_request.merged'],
+                    intent: 'Continue after merge.',
+                    status: 'active',
+                    cursor: { private: 'internal-state' },
+                    lastError: 'not for clients',
+                  },
+                  {
+                    id: 'subscription-2',
+                    provider: 'drone-hub',
+                    resourceType: 'cron',
+                    resourceId: 'v1:hourly',
+                    resourceConfig: {
+                      expression: '0 * * * *',
+                      timeZone: 'UTC',
+                      description: 'Every hour',
                     },
-                    {
-                      id: 'subscription-2',
-                      provider: 'drone-hub',
-                      resourceType: 'cron',
-                      resourceId: 'v1:hourly',
-                      resourceConfig: {
-                        expression: '0 * * * *',
-                        timeZone: 'UTC',
-                        description: 'Every hour',
-                      },
-                      events: ['cron.triggered'],
-                      intent: 'Check the deployment.',
-                      nextEventAt: '2026-08-05T13:00:00.000Z',
-                      status: 'active',
-                    },
-                  ],
-                  agent: { kind: 'builtin', id: 'codex' },
-                  turns: [{ id: 'turn-1', prompt: 'hello', output: 'hi' }],
-                  readState: { unread: false },
-                };
+                    events: ['cron.triggered'],
+                    intent: 'Check the deployment.',
+                    nextEventAt: '2026-08-05T13:00:00.000Z',
+                    status: 'active',
+                  },
+                ],
+                agent: { kind: 'builtin', id: 'codex' },
+                transcripts: [{ id: 'turn-1', prompt: 'hello', output: 'hi' }],
+                readState: {
+                  unread: false,
+                  latestAgentTurnId: 'turn-1',
+                  latestAgentRevision: 1,
+                },
+              };
       return Response.json(body);
     }) as typeof fetch;
     try {
@@ -1118,9 +1124,110 @@ describe('device mesh drone summaries', () => {
           droneId: 'drone-1',
           chatName: 'default',
           turnId: 'turn-1',
+          turnNumber: 1,
         }),
       ).resolves.toMatchObject({ historyKind: 'turn-content', turnId: 'turn-1' });
       expect(subscriptionRequests).toBe(0);
+      expect(readCursorWrites).toBe(1);
+      expect(stateRequests).toEqual([
+        '/api/drones/drone-1/chats/default/state?transcript=page&limit=100&pending=all&subscriptions=1&readState=1&transcriptMeta=0',
+        '/api/drones/drone-1/chats/default/state?transcript=selected&turn=1&pending=none&subscriptions=0&readState=0&transcriptMeta=0',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('does not download the full transcript when an exact numbered turn is stale', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      requests.push(`${url.pathname}${url.search}`);
+      if (url.pathname.endsWith('/state')) {
+        return Response.json({
+          ok: true,
+          agent: { kind: 'builtin', id: 'codex' },
+          transcripts: [{ id: 'different-turn', turn: 1 }],
+          readState: { unread: false, latestAgentTurnId: null, latestAgentRevision: 0 },
+        });
+      }
+      if (url.pathname.endsWith('/read')) {
+        return Response.json({ ok: true, readState: { unread: false } });
+      }
+      return Response.json({
+        ok: true,
+        turns: [{ id: 'requested-turn', turn: 1, prompt: 'legacy content' }],
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+
+      await expect(
+        capability.invoke('chat.read', {
+          droneId: 'drone-1',
+          chatName: 'default',
+          turnId: 'requested-turn',
+          turnNumber: 1,
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect(requests.some((request) => request.endsWith('/chats/default'))).toBe(false);
+
+      await expect(
+        capability.invoke('chat.read', {
+          droneId: 'drone-1',
+          chatName: 'default',
+          turnId: 'requested-turn',
+        }),
+      ).resolves.toMatchObject({ historyKind: 'turn-content', turnId: 'requested-turn' });
+      expect(requests).toContain('/api/drones/drone-1/chats/default');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('keeps the legacy transcript path for custom-agent chats', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      requests.push(`${url.pathname}${url.search}`);
+      if (url.pathname.endsWith('/state')) {
+        return Response.json(
+          { ok: false, error: 'transcript is unavailable for custom agents' },
+          { status: 410 },
+        );
+      }
+      if (url.pathname.endsWith('/pending')) {
+        return Response.json({ ok: true, pending: [] });
+      }
+      if (url.pathname.endsWith('/read')) {
+        return Response.json({ ok: true, readState: { unread: false } });
+      }
+      return Response.json({
+        ok: true,
+        agent: { kind: 'custom', id: 'custom-test', command: 'custom-agent' },
+        turns: [{ id: 'custom-turn', turn: 1, prompt: 'run it', output: 'done' }],
+        readState: { unread: true, latestAgentTurnId: 'custom-turn', latestAgentRevision: 1 },
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+
+      await expect(
+        capability.invoke('chat.read', { droneId: 'drone-1', chatName: 'default' }),
+      ).resolves.toMatchObject({
+        historyKind: 'turns',
+        turns: [{ id: 'custom-turn', prompt: 'run it', output: 'done' }],
+      });
+      expect(requests).toContain('/api/drones/drone-1/chats/default');
+      expect(requests).toContain('/api/drones/drone-1/chats/default/pending');
     } finally {
       globalThis.fetch = originalFetch;
     }

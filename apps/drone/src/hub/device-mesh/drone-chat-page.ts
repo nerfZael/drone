@@ -305,7 +305,11 @@ export function boundedDroneChatPage(
     turns.unshift(turn);
     bytes += turnBytes;
   }
-  const start = Math.max(0, end - turns.length);
+  const firstTurnNumber = Number(turns[0]?.turn);
+  const start =
+    turns.length > 0 && Number.isSafeInteger(firstTurnNumber) && firstTurnNumber > 0
+      ? firstTurnNumber - 1
+      : Math.max(0, end - turns.length);
   return {
     turns,
     page: {

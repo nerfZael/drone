@@ -806,6 +806,9 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         pending: PendingPrompt[];
         agent?: ChatAgentConfig;
         model: string | null;
+        reasoning: string | null;
+        agentPermissionMode: AgentPermissionMode;
+        approvalPolicy: AgentApprovalPolicy;
         turnCount: number;
         transcriptEtag: string | null;
         responseEtag?: string;
@@ -819,6 +822,18 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       };
 
   type ChatSnapshotMaintenance = 'none' | 'run' | 'schedule';
+
+  function chatSnapshotConfig(chat: any) {
+    const approvalPolicy =
+      chat?.approvalPolicy === 'agent-decides' || chat?.approvalPolicy === 'never'
+        ? chat.approvalPolicy
+        : 'ask';
+    return {
+      reasoning: normalizeChatReasoning(chat?.reasoning),
+      agentPermissionMode: normalizeAgentPermissionMode(chat?.agentPermissionMode),
+      approvalPolicy: approvalPolicy as AgentApprovalPolicy,
+    };
+  }
 
   function runChatReadMaintenance(opts: {
     droneId: string;
@@ -1084,6 +1099,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
           ? await readPendingStartupPrompts({ droneId: context.droneId, chatName: opts.chatName })
           : [],
         model: normalizeChatModel((context.pendingEntry as any)?.model),
+        ...chatSnapshotConfig(context.pendingEntry),
         turnCount: 0,
         transcriptEtag: null,
       };
@@ -1138,6 +1154,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       pending,
       agent,
       model: normalizeChatModel((entry as any)?.model),
+      ...chatSnapshotConfig(entry),
       turnCount: transcriptResult?.turnCount ?? 0,
       transcriptEtag: transcriptResult?.etag ?? null,
     };
@@ -1179,6 +1196,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         transcripts: [],
         pending,
         model: normalizeChatModel((resolved.pending as any)?.model),
+        ...chatSnapshotConfig(resolved.pending),
         turnCount: 0,
         transcriptEtag: null,
       };
@@ -1234,6 +1252,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         pending: [],
         agent,
         model: normalizeChatModel((version.chat as any)?.model),
+        ...chatSnapshotConfig(version.chat),
         turnCount: version.turnCount,
         transcriptEtag: responseEtag,
         responseEtag,
@@ -1282,6 +1301,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       pending,
       agent,
       model: normalizeChatModel((version.chat as any)?.model),
+      ...chatSnapshotConfig(version.chat),
       turnCount: version.turnCount,
       transcriptEtag: responseEtag,
       responseEtag,
@@ -1303,6 +1323,9 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       pending: snapshot.pending,
       ...(snapshot.agent ? { agent: snapshot.agent } : {}),
       model: snapshot.model,
+      reasoning: snapshot.reasoning,
+      agentPermissionMode: snapshot.agentPermissionMode,
+      approvalPolicy: snapshot.approvalPolicy,
       ...(opts?.includeTranscriptMeta
         ? {
             transcript: {
@@ -1541,6 +1564,20 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const sel = String(selRaw || 'last')
       .trim()
       .toLowerCase();
+    if (sel.startsWith('page:')) {
+      const [, beforeText = '', limitText = '100'] = sel.split(':');
+      const before = beforeText ? Number(beforeText) : turnsLen;
+      const limit = Number(limitText);
+      if (!Number.isSafeInteger(before) || before < 0) {
+        throw new Error('invalid before cursor (expected non-negative integer)');
+      }
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+        throw new Error('invalid page limit (expected integer from 1 to 100)');
+      }
+      const end = Math.min(before, turnsLen);
+      const start = Math.max(0, end - limit);
+      return Array.from({ length: end - start }, (_, index) => start + index);
+    }
     if (sel === 'all') return Array.from({ length: turnsLen }, (_, i) => i);
     if (sel === 'last') return turnsLen > 0 ? [turnsLen - 1] : [];
     const n = Number(sel);

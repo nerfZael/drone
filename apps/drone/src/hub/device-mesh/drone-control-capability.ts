@@ -1016,13 +1016,41 @@ export function createDroneControlCapability(
             },
           };
         }
-        const [result, pendingResult] = await Promise.all([
-          localHubRequest(access, chatPath),
-          localHubRequest(access, `${chatPath}/pending`),
-        ]);
-        const contentOnlyRead = Boolean(
-          optionalText(payload.messageId) || optionalText(payload.turnId),
-        );
+        const messageId = optionalText(payload.messageId);
+        const turnId = optionalText(payload.turnId);
+        const contentOnlyRead = Boolean(messageId || turnId);
+        const turnNumber = Number(payload.turnNumber);
+        const hasTurnNumber = Number.isSafeInteger(turnNumber) && turnNumber > 0;
+        const selectedTurnQuery =
+          turnId && hasTurnNumber
+            ? `selected&turn=${turnNumber}`
+            : turnId || messageId
+              ? 'none'
+              : 'page&limit=100';
+        const before = Number(payload.before);
+        const beforeQuery = Number.isSafeInteger(before) && before > 0 ? `&before=${before}` : '';
+        let legacyTranscriptLoaded = false;
+        let result: any;
+        try {
+          result = await localHubRequest(
+            access,
+            `${chatPath}/state?transcript=${selectedTurnQuery}&pending=${contentOnlyRead ? 'none' : 'all'}&subscriptions=${contentOnlyRead ? '0' : '1'}&readState=${contentOnlyRead ? '0' : '1'}&transcriptMeta=0${beforeQuery}`,
+          );
+        } catch (error: any) {
+          if (error?.code !== 'HUB_410') throw error;
+          const [legacy, pendingResult] = await Promise.all([
+            localHubRequest(access, chatPath),
+            contentOnlyRead
+              ? Promise.resolve(null)
+              : localHubRequest(access, `${chatPath}/pending`),
+          ]);
+          result = {
+            ...legacy,
+            transcripts: Array.isArray(legacy?.turns) ? legacy.turns : [],
+            pending: pendingResult?.pending,
+          };
+          legacyTranscriptLoaded = true;
+        }
         const latestAgentTurnId = optionalText(result?.readState?.latestAgentTurnId) ?? null;
         const latestAgentRevision = Number.isSafeInteger(result?.readState?.latestAgentRevision)
           ? Number(result.readState.latestAgentRevision)
@@ -1030,17 +1058,18 @@ export function createDroneControlCapability(
         const subscriptions = contentOnlyRead
           ? []
           : compactChatSubscriptions(result?.subscriptions);
-        const marked = await localHubRequest(access, `${chatPath}/read`, {
-          method: 'POST',
-          body: JSON.stringify({
-            latestAgentTurnId,
-            latestAgentRevision,
-            updatedByDeviceId: context?.sourceDevice?.id ?? null,
-          }),
-        });
+        const marked = contentOnlyRead
+          ? null
+          : await localHubRequest(access, `${chatPath}/read`, {
+              method: 'POST',
+              body: JSON.stringify({
+                latestAgentTurnId,
+                latestAgentRevision,
+                updatedByDeviceId: context?.sourceDevice?.id ?? null,
+              }),
+            });
         if (result?.agent?.kind === 'native') {
           const { nativeChatId, snapshot: ensured } = await resolveNativeChat();
-          const messageId = optionalText(payload.messageId);
           if (messageId) {
             const entry = await localHubRequest(
               access,
@@ -1057,7 +1086,7 @@ export function createDroneControlCapability(
           }
           const history = await localHubRequest(
             access,
-            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=200${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
+            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=60${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
           );
           const nativeResponse = compactNativeChatReadResponse({
             nativeChatId,
@@ -1080,9 +1109,8 @@ export function createDroneControlCapability(
             ...(subscriptions ? { subscriptions } : {}),
           };
         }
-        const turnId = optionalText(payload.turnId);
         if (turnId) {
-          const turn = (Array.isArray(result?.turns) ? result.turns : []).find(
+          let turn = (Array.isArray(result?.transcripts) ? result.transcripts : []).find(
             (item: any, index: number) => {
               const itemId = String(item?.id ?? '').trim();
               const turnNumber = Number(item?.turn);
@@ -1092,6 +1120,20 @@ export function createDroneControlCapability(
               );
             },
           );
+          if (!turn && !hasTurnNumber && !legacyTranscriptLoaded) {
+            const legacy = await localHubRequest(access, chatPath);
+            turn = (Array.isArray(legacy?.turns) ? legacy.turns : []).find(
+              (item: any, index: number) => {
+                const itemId = String(item?.id ?? '').trim();
+                const turnNumber = Number(item?.turn);
+                return (
+                  (itemId ||
+                    (Number.isFinite(turnNumber) ? `turn-${turnNumber}` : `turn-${index}`)) ===
+                  turnId
+                );
+              },
+            );
+          }
           if (!turn)
             throw Object.assign(new Error(`unknown chat turn: ${turnId}`), {
               code: 'NOT_FOUND',
@@ -1104,7 +1146,10 @@ export function createDroneControlCapability(
             contentChunk: meshJsonContentChunk(turn, payload.contentOffset),
           };
         }
-        const turnPage = boundedDroneChatPage(result.turns, payload.before);
+        const turnPage = boundedDroneChatPage(
+          result.transcripts,
+          legacyTranscriptLoaded ? payload.before : undefined,
+        );
         return {
           droneId,
           chatName,
@@ -1114,8 +1159,8 @@ export function createDroneControlCapability(
           model: result.model ?? null,
           reasoning: result.reasoning ?? null,
           pending: filterCompletedPendingPrompts(
-            compactPendingPrompts(pendingResult?.pending),
-            result.turns,
+            compactPendingPrompts(result?.pending),
+            result.transcripts,
           ),
           readState: marked?.readState ?? result?.readState ?? null,
           agentPermissionMode:
