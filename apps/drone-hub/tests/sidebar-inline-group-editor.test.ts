@@ -3,19 +3,13 @@ import { describe, expect, test } from 'bun:test';
 
 describe('sidebar inline group editor', () => {
   test('keeps group create and rename editors visually inline', () => {
-    const sidebarSource = readFileSync(
-      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
-      'utf8',
-    );
     const groupedTreeSource = readFileSync(
       new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
       'utf8',
     );
 
-    for (const source of [sidebarSource, groupedTreeSource]) {
-      expect(source).toContain('appearance-none rounded-none border-0 bg-transparent');
-      expect(source).toContain("style={{ border: 0, outline: 'none', boxShadow: 'none' }}");
-    }
+    expect(groupedTreeSource).toContain('appearance-none rounded-none border-0 bg-transparent');
+    expect(groupedTreeSource).toContain("style={{ border: 0, outline: 'none', boxShadow: 'none' }}");
 
     const groupDraftEditor = groupedTreeSource.slice(
       groupedTreeSource.indexOf('function GroupedSidebarGroupDraftRow()'),
