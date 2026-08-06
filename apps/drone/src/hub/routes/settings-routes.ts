@@ -81,6 +81,7 @@ export interface SettingsRouteDependencies {
   updatePinnedDronePreference: ServiceFunction;
   resolveUserContextSettingsResponse: ServiceFunction;
   notifyUiPreferencesChanged: ServiceFunction;
+  notifyUiPreferencesSnapshotChanged: ServiceFunction;
   notifyPinnedDronesChanged: ServiceFunction;
   clampIntParam: (value: string | null, fallback: number, min: number, max: number) => number;
   readHubLogTail: ServiceFunction;
@@ -155,6 +156,7 @@ export function registerSettingsRoutes(
     updatePinnedDronePreference,
     resolveUserContextSettingsResponse,
     notifyUiPreferencesChanged,
+    notifyUiPreferencesSnapshotChanged,
     notifyPinnedDronesChanged,
     clampIntParam,
     readHubLogTail,
@@ -681,27 +683,34 @@ export function registerSettingsRoutes(
       }
       throw error;
     }
-    await notifyUiPreferencesChanged();
+    if (body?.notificationMode === 'sidebar_snapshot') {
+      await notifyUiPreferencesSnapshotChanged();
+    } else {
+      await notifyUiPreferencesChanged();
+    }
     respond(200, await resolveUiPreferencesSettingsResponse());
   });
 
-  apiRouter.post('/api/settings/ui-preferences/pinned-drones', async ({ readJson, json: respond }) => {
-    const body = await readJson<any>();
-    try {
-      const saved = await updatePinnedDronePreference(
-        Array.isArray(body?.droneIds) ? body.droneIds : body?.droneId,
-        body?.pinned === true,
-      );
-      await notifyPinnedDronesChanged();
-      respond(200, { ok: true, ...saved });
-    } catch (error: any) {
-      if (error instanceof UiPreferencesSettingsValidationError) {
-        respond(400, { ok: false, error: error.message });
-        return;
+  apiRouter.post(
+    '/api/settings/ui-preferences/pinned-drones',
+    async ({ readJson, json: respond }) => {
+      const body = await readJson<any>();
+      try {
+        const saved = await updatePinnedDronePreference(
+          Array.isArray(body?.droneIds) ? body.droneIds : body?.droneId,
+          body?.pinned === true,
+        );
+        await notifyPinnedDronesChanged();
+        respond(200, { ok: true, ...saved });
+      } catch (error: any) {
+        if (error instanceof UiPreferencesSettingsValidationError) {
+          respond(400, { ok: false, error: error.message });
+          return;
+        }
+        throw error;
       }
-      throw error;
-    }
-  });
+    },
+  );
 
   apiRouter.get('/api/settings/hub/logs', async ({ url, json: respond }) => {
     const maxBytes = clampIntParam(

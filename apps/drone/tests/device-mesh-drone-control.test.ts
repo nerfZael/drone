@@ -564,6 +564,305 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('commits group membership and destination order in one mobile move operation', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ pathname: string; method: string; body: any }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = new URL(String(input));
+      const method = String(init?.method ?? 'GET');
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      requests.push({ pathname: url.pathname, method, body });
+      if (url.pathname === '/api/drones/group-set') {
+        return Response.json({ ok: true, moved: [{ id: 'host', group: 'Review' }], rejected: [] });
+      }
+      if (method === 'GET') {
+        return Response.json({
+          ok: true,
+          version: 20,
+          uiPreferences: {
+            sidebarNodeOrderByParent: { 'folder:Review': ['drone:a', 'drone:b'] },
+          },
+        });
+      }
+      return Response.json({ ok: true, version: 21, uiPreferences: body.uiPreferences });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('sidebar.item.move', {
+          itemKind: 'drone',
+          repoPath: '/work/repo',
+          droneId: 'host',
+          targetGroup: 'Review',
+          expectedVersion: 19,
+          baseSidebar: {
+            sidebarNodeOrderByParent: { 'folder:Review': ['drone:a', 'drone:b'] },
+          },
+          sidebar: {
+            sidebarNodeOrderByParent: {
+              'folder:Review': ['drone:a', 'drone:host', 'drone:b'],
+            },
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true, version: 21 });
+
+      expect(requests).toEqual([
+        {
+          pathname: '/api/drones/group-set',
+          method: 'POST',
+          body: { droneIds: ['host'], group: 'Review' },
+        },
+        { pathname: '/api/settings/ui-preferences', method: 'GET', body: undefined },
+        {
+          pathname: '/api/settings/ui-preferences',
+          method: 'POST',
+          body: {
+            expectedVersion: 20,
+            notificationMode: 'sidebar_snapshot',
+            uiPreferences: {
+              sidebarNodeOrderByParent: {
+                'folder:Review': ['drone:a', 'drone:host', 'drone:b'],
+              },
+            },
+          },
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('applies a typed sidebar move intent to the latest Hub snapshot exactly once', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ pathname: string; method: string; body: any }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = new URL(String(input));
+      const method = String(init?.method ?? 'GET');
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      requests.push({ pathname: url.pathname, method, body });
+      if (url.pathname === '/api/drones/group-set') {
+        return Response.json({ ok: true, moved: [{ id: 'host', group: 'Review' }], rejected: [] });
+      }
+      if (method === 'GET') {
+        return Response.json({
+          ok: true,
+          version: 40,
+          uiPreferences: {
+            theme: 'dark',
+            sidebarNodeOrderByParent: {
+              root: ['drone:host', 'folder:Review'],
+              'folder:Review': ['drone:first', 'drone:second'],
+            },
+          },
+        });
+      }
+      return Response.json({ ok: true, version: 41, uiPreferences: body.uiPreferences });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      const command = {
+        mutationId: 'move-host-1',
+        expectedVersion: 39,
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'drone',
+          repoPath: '/work/repo',
+          droneId: 'host',
+          sourceParentId: 'root',
+          sourceSiblingNodeIds: ['drone:host', 'folder:Review'],
+          targetGroup: 'Review',
+          targetParentId: 'folder:Review',
+          targetSiblingNodeIds: ['drone:first', 'drone:second'],
+          targetOverNodeId: 'drone:second',
+          placement: 'before',
+        },
+      };
+      await expect(capability.invoke('sidebar.move', command)).resolves.toMatchObject({
+        ok: true,
+        mutationId: 'move-host-1',
+        version: 41,
+      });
+      await expect(capability.invoke('sidebar.move', command)).resolves.toMatchObject({
+        mutationId: 'move-host-1',
+      });
+
+      expect(requests).toEqual([
+        {
+          pathname: '/api/drones/group-set',
+          method: 'POST',
+          body: { droneIds: ['host'], group: 'Review' },
+        },
+        { pathname: '/api/settings/ui-preferences', method: 'GET', body: undefined },
+        {
+          pathname: '/api/settings/ui-preferences',
+          method: 'POST',
+          body: {
+            expectedVersion: 40,
+            notificationMode: 'sidebar_snapshot',
+            uiPreferences: {
+              theme: 'dark',
+              sidebarNodeOrderByParent: {
+                root: ['folder:Review'],
+                'folder:Review': ['drone:first', 'drone:host', 'drone:second'],
+              },
+            },
+          },
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('serializes concurrent sidebar commands so each reads the prior committed revision', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    let version = 8;
+    let uiPreferences: Record<string, unknown> = {
+      sidebarChatOrderByDrone: { host: ['one', 'two', 'three'] },
+    };
+    globalThis.fetch = (async (input, init) => {
+      const url = new URL(String(input));
+      const method = String(init?.method ?? 'GET');
+      if (method === 'GET') {
+        requests.push(`GET:${version}`);
+        await Promise.resolve();
+        return Response.json({ ok: true, version, uiPreferences });
+      }
+      const body = JSON.parse(String(init?.body));
+      requests.push(`POST:${body.expectedVersion}`);
+      uiPreferences = body.uiPreferences;
+      version += 1;
+      return Response.json({ ok: true, version, uiPreferences });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await Promise.all([
+        capability.invoke('sidebar.move', {
+          mutationId: 'chat-order-1',
+          intent: {
+            kind: 'chat',
+            droneId: 'host',
+            chatNames: ['one', 'two', 'three'],
+            activeChatName: 'three',
+            overChatName: 'one',
+            placement: 'before',
+          },
+        }),
+        capability.invoke('sidebar.move', {
+          mutationId: 'chat-order-2',
+          intent: {
+            kind: 'chat',
+            droneId: 'host',
+            chatNames: ['three', 'one', 'two'],
+            activeChatName: 'two',
+            overChatName: 'one',
+            placement: 'before',
+          },
+        }),
+      ]);
+      expect(requests).toEqual(['GET:8', 'POST:8', 'GET:9', 'POST:9']);
+      expect(uiPreferences).toMatchObject({
+        sidebarChatOrderByDrone: { host: ['three', 'two', 'one'] },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('creates the first sidebar preference record with a null expected version', async () => {
+    const originalFetch = globalThis.fetch;
+    const postedBodies: any[] = [];
+    globalThis.fetch = (async (_input, init) => {
+      if (String(init?.method ?? 'GET') === 'GET') {
+        return Response.json({ ok: true, version: null, uiPreferences: {} });
+      }
+      const body = JSON.parse(String(init?.body));
+      postedBodies.push(body);
+      return Response.json({ ok: true, version: 1, uiPreferences: body.uiPreferences });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('sidebar.move', {
+          mutationId: 'first-sidebar-write',
+          expectedVersion: null,
+          intent: {
+            kind: 'chat',
+            droneId: 'host',
+            chatNames: ['default', 'review'],
+            activeChatName: 'review',
+            overChatName: 'default',
+            placement: 'before',
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true, version: 1 });
+      expect(postedBodies).toEqual([
+        {
+          expectedVersion: null,
+          notificationMode: 'sidebar_snapshot',
+          uiPreferences: { sidebarChatOrderByDrone: { host: ['review', 'default'] } },
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('requires both move and order grants before starting a combined sidebar move', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestCount = 0;
+    globalThis.fetch = (async () => {
+      requestCount += 1;
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke(
+          'sidebar.item.move',
+          {
+            itemKind: 'drone',
+            droneId: 'host',
+            targetGroup: 'Review',
+            sidebar: { sidebarNodeOrderByParent: { 'folder:Review': ['drone:host'] } },
+          },
+          {
+            requestId: 'move-1',
+            sourceDevice: {
+              id: 'phone-1',
+              grants: [
+                {
+                  capability: 'drone-control',
+                  version: 1,
+                  operations: ['sidebar.item.move'],
+                },
+              ],
+            },
+          } as any,
+        ),
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+      expect(requestCount).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('bounds lazy branch pages and rejects unregistered repository paths', async () => {
     const originalFetch = globalThis.fetch;
     let branchRequests = 0;

@@ -10,6 +10,12 @@
       "types": "./dist/index.d.ts",
       "require": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./sidebar": {
+      "types": "./src/sidebar.ts",
+      "import": "./src/sidebar.ts",
+      "require": "./dist/sidebar.js",
+      "default": "./src/sidebar.ts"
     }
   },
   "scripts": {

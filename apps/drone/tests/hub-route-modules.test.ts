@@ -131,7 +131,12 @@ describe('extracted Hub route modules', () => {
         idle: true,
       }),
       resolveGroqApiKeySettings: async () => ({ apiKey: null }),
-      resolveSpeechSettings: async () => ({ enabled: true, muted: false, volume: 1, voice: 'troy' }),
+      resolveSpeechSettings: async () => ({
+        enabled: true,
+        muted: false,
+        volume: 1,
+        voice: 'troy',
+      }),
       emitAssistantUiAction: () => {},
       hubLog: () => {},
     });
@@ -168,7 +173,12 @@ describe('extracted Hub route modules', () => {
       loadCanonicalActiveModel: async () => ({ drones: {} }),
       summarizeAssistantChatIdle: () => null,
       resolveGroqApiKeySettings: async () => ({ apiKey: 'groq-secret' }),
-      resolveSpeechSettings: async () => ({ enabled: true, muted: false, volume: 0.75, voice: 'troy' }),
+      resolveSpeechSettings: async () => ({
+        enabled: true,
+        muted: false,
+        volume: 0.75,
+        voice: 'troy',
+      }),
       emitAssistantUiAction: (action: unknown, threadId: string) => {
         emittedActions.push({ action, threadId });
       },
@@ -438,10 +448,7 @@ describe('extracted Hub route modules', () => {
     const writes: Array<{ preferences: unknown; expectedVersion: unknown }> = [];
     let notificationCount = 0;
     registerSettingsRoutes(router, {
-      upsertStoredUiPreferencesSettings: async (
-        preferences: unknown,
-        expectedVersion: unknown,
-      ) => {
+      upsertStoredUiPreferencesSettings: async (preferences: unknown, expectedVersion: unknown) => {
         writes.push({ preferences, expectedVersion });
       },
       notifyUiPreferencesChanged: async () => {
@@ -462,6 +469,38 @@ describe('extracted Hub route modules', () => {
     expect(notificationCount).toBe(1);
     expect(responses).toHaveLength(1);
     expect(responses[0]).toMatchObject({ status: 200, body: { ok: true, version: 13 } });
+  });
+
+  test('publishes a combined sidebar move through the registry snapshot stream', async () => {
+    const requestBody = {
+      uiPreferences: { sidebarNodeOrderByParent: { group: ['drone:b', 'drone:a'] } },
+      expectedVersion: 13,
+      notificationMode: 'sidebar_snapshot',
+    };
+    const { router, request } = routeHarness(requestBody);
+    let generalNotifications = 0;
+    let snapshotNotifications = 0;
+    registerSettingsRoutes(router, {
+      upsertStoredUiPreferencesSettings: async () => undefined,
+      notifyUiPreferencesChanged: async () => {
+        generalNotifications += 1;
+      },
+      notifyUiPreferencesSnapshotChanged: async () => {
+        snapshotNotifications += 1;
+      },
+      resolveUiPreferencesSettingsResponse: async () => ({
+        ok: true,
+        uiPreferences: requestBody.uiPreferences,
+        updatedAt: '2026-08-06T10:00:00.000Z',
+        version: 14,
+      }),
+    } as any);
+
+    expect(await request('POST', '/api/settings/ui-preferences')).toBe(true);
+    expect({ generalNotifications, snapshotNotifications }).toEqual({
+      generalNotifications: 0,
+      snapshotNotifications: 1,
+    });
   });
 
   test('saves speech settings and notifies active MCP sessions', async () => {
@@ -490,9 +529,11 @@ describe('extracted Hub route modules', () => {
     expect(await request('POST', '/api/settings/speech')).toBe(true);
     expect(stored).toEqual(requested);
     expect(notified).toEqual({ ...requested, voices: ['hannah', 'troy'] });
-    expect(responses).toEqual([{
-      status: 200,
-      body: { ok: true, speech: { ...requested, voices: ['hannah', 'troy'] } },
-    }]);
+    expect(responses).toEqual([
+      {
+        status: 200,
+        body: { ok: true, speech: { ...requested, voices: ['hannah', 'troy'] } },
+      },
+    ]);
   });
 });

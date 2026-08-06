@@ -35,6 +35,7 @@ export const DRONE_CONTROL_OPERATIONS = [
   'drone.create.host',
   'drone.rename',
   'drone.pin.update',
+  'sidebar.move',
   'sidebar.order.update',
   'sidebar.item.move',
   'drone.delete',

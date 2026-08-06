@@ -295,17 +295,22 @@ export function DronesScreen({
     (capability) => capability.id === 'drone-control' && capability.version === 1,
   );
   const selfDevice = mesh.devices.find((device) => device.id === mesh.identity?.id);
-  const targetCanReorderSidebar =
+  const targetCanUseSidebarMoveCommand =
     phoneTarget ||
-    (Boolean(
+    (Boolean(targetDroneControlCapability?.operations.includes('sidebar.move')) &&
+      Boolean(selfDevice && isGranted(selfDevice.grants, 'drone-control', 1, 'sidebar.move')));
+  const targetCanUseLegacySidebarMove =
+    !phoneTarget &&
+    Boolean(
       targetDroneControlCapability?.operations.includes('sidebar.order.update') &&
-        targetDroneControlCapability.operations.includes('sidebar.item.move'),
+      targetDroneControlCapability.operations.includes('sidebar.item.move'),
     ) &&
-      Boolean(
-        selfDevice &&
-          isGranted(selfDevice.grants, 'drone-control', 1, 'sidebar.order.update') &&
-          isGranted(selfDevice.grants, 'drone-control', 1, 'sidebar.item.move'),
-      ));
+    Boolean(
+      selfDevice &&
+      isGranted(selfDevice.grants, 'drone-control', 1, 'sidebar.order.update') &&
+      isGranted(selfDevice.grants, 'drone-control', 1, 'sidebar.item.move'),
+    );
+  const targetCanReorderSidebar = targetCanUseSidebarMoveCommand || targetCanUseLegacySidebarMove;
   const targetConnectionState = mobileDeviceConnectionState({
     targetDeviceId: targetId,
     selfDeviceId: mesh.identity?.id,
@@ -667,20 +672,30 @@ export function DronesScreen({
         const writeMove = async () => {
           try {
             if (targetIdRef.current !== destinationId) return;
-            await requestDroneControl(destinationId, 'sidebar.item.move', {
-              itemKind: request.itemKind,
-              repoPath: request.repoPath,
-              targetGroup: destination.targetGroup,
-              ...(request.itemKind === 'drone'
-                ? { droneId: request.droneId }
-                : { sourceGroup: request.sourceGroup, nextGroup: destination.nextGroup }),
-            });
+            const mutationId = `sidebar:${destinationId}:${Date.now()}:${generation}`;
+            const result = targetCanUseSidebarMoveCommand
+              ? await requestDroneControl(destinationId, 'sidebar.move', {
+                  mutationId,
+                  intent: request,
+                  expectedVersion: sidebarPreferenceVersionRef.current,
+                })
+              : await (async () => {
+                  const moved = await requestDroneControl(destinationId, 'sidebar.item.move', {
+                    itemKind: request.itemKind,
+                    repoPath: request.repoPath,
+                    targetGroup: destination.targetGroup,
+                    ...(request.itemKind === 'drone'
+                      ? { droneId: request.droneId }
+                      : { sourceGroup: request.sourceGroup, nextGroup: destination.nextGroup }),
+                  });
+                  const ordered = await requestDroneControl(destinationId, 'sidebar.order.update', {
+                    sidebar: mobileSidebarPreferencePatch(nextOrder, request),
+                    baseSidebar: mobileSidebarPreferencePatch(current.sidebar, request),
+                    expectedVersion: sidebarPreferenceVersionRef.current,
+                  });
+                  return { ...moved, ...ordered };
+                })();
             if (targetIdRef.current !== destinationId) return;
-            const result = await requestDroneControl(destinationId, 'sidebar.order.update', {
-              sidebar: mobileSidebarPreferencePatch(nextOrder, request),
-              baseSidebar: mobileSidebarPreferencePatch(current.sidebar, request),
-              expectedVersion: sidebarPreferenceVersionRef.current,
-            });
             const savedVersion =
               Number.isSafeInteger(result?.version) && Number(result.version) >= 0
                 ? Number(result.version)
@@ -690,7 +705,18 @@ export function DronesScreen({
               targetIdRef.current === destinationId &&
               sidebarWriteGenerationRef.current === generation
             ) {
-              setDroneSidebarOrder(nextOrder, savedVersion);
+              const savedPayload = normalizeMobileDroneListPayload({
+                drones: [],
+                sidebar: result?.uiPreferences ?? {},
+              });
+              const savedOrder: MobileDroneSidebarOrder = {
+                ...nextOrder,
+                sidebarNodeOrderByParent: savedPayload.sidebar.sidebarNodeOrderByParent,
+                sidebarChatOrderByDrone: savedPayload.sidebar.sidebarChatOrderByDrone,
+                pinnedDroneIds: savedPayload.sidebar.pinnedDroneIds,
+              };
+              droneSidebarOrderRef.current = savedOrder;
+              setDroneSidebarOrder(savedOrder, savedVersion);
             }
           } catch (nextError: any) {
             if (
@@ -731,11 +757,17 @@ export function DronesScreen({
         let reloadSidebar = false;
         try {
           if (targetIdRef.current !== destinationId) return;
-          const result = await requestDroneControl(destinationId, 'sidebar.order.update', {
-            sidebar: mobileSidebarPreferencePatch(nextOrder, request),
-            baseSidebar: mobileSidebarPreferencePatch(previousOrder, request),
-            expectedVersion: sidebarPreferenceVersionRef.current,
-          });
+          const result = targetCanUseSidebarMoveCommand
+            ? await requestDroneControl(destinationId, 'sidebar.move', {
+                mutationId: `sidebar:${destinationId}:${Date.now()}:${generation}`,
+                intent: request,
+                expectedVersion: sidebarPreferenceVersionRef.current,
+              })
+            : await requestDroneControl(destinationId, 'sidebar.order.update', {
+                sidebar: mobileSidebarPreferencePatch(nextOrder, request),
+                baseSidebar: mobileSidebarPreferencePatch(previousOrder, request),
+                expectedVersion: sidebarPreferenceVersionRef.current,
+              });
           if (targetIdRef.current !== destinationId) return;
           const savedVersion =
             Number.isSafeInteger(result?.version) && Number(result.version) >= 0
@@ -780,7 +812,13 @@ export function DronesScreen({
         () => undefined,
       );
     },
-    [commitDroneListSnapshot, requestDroneControl, setDroneSidebarOrder, targetId],
+    [
+      commitDroneListSnapshot,
+      requestDroneControl,
+      setDroneSidebarOrder,
+      targetCanUseSidebarMoveCommand,
+      targetId,
+    ],
   );
 
   React.useEffect(() => {

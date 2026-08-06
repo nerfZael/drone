@@ -4,7 +4,13 @@ import { Directory, File, Paths } from 'expo-file-system';
 import React from 'react';
 import { fromByteArray } from 'base64-js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { DRONE_CONTROL_CAPABILITY, type DroneControlOperation } from '@drone/device-protocol';
+import {
+  DRONE_CONTROL_CAPABILITY,
+  applySidebarMove,
+  normalizeSidebarLayout,
+  parseSidebarMoveCommandRequest,
+  type DroneControlOperation,
+} from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { useMesh } from '../mesh/MeshContext';
 import { loadLocalAssistantSettings } from '../local-assistant/local-assistant-settings';
@@ -13,6 +19,7 @@ import {
   normalizeLocalAssistantThinkingLevel,
 } from '../local-assistant/local-assistant-model';
 import type { LocalAssistantPromptImage } from '../local-assistant/local-assistant-types';
+import { applyOptimisticMobileSidebarMove } from './mobile-sidebar-reorder';
 import {
   cleanLocalDroneRecords,
   createLegacyPhoneDroneRecord,
@@ -233,6 +240,48 @@ function useLocalDroneControlValue() {
         if (!thread) throw new Error('Phone drone chat was not found');
         return { drone, chatName, thread };
       };
+      const writeSidebarOrder = async () => {
+        const sidebar =
+          payload.sidebar && typeof payload.sidebar === 'object' && !Array.isArray(payload.sidebar)
+            ? (payload.sidebar as Record<string, unknown>)
+            : {};
+        const hasNodeOrder = Object.prototype.hasOwnProperty.call(
+          sidebar,
+          'sidebarNodeOrderByParent',
+        );
+        const hasChatOrder = Object.prototype.hasOwnProperty.call(
+          sidebar,
+          'sidebarChatOrderByDrone',
+        );
+        const next = {
+          sidebarNodeOrderByParent: hasNodeOrder
+            ? localStringListMap(sidebar.sidebarNodeOrderByParent)
+            : sidebarOrderRef.current.sidebarNodeOrderByParent,
+          sidebarChatOrderByDrone: hasChatOrder
+            ? localStringListMap(sidebar.sidebarChatOrderByDrone)
+            : sidebarOrderRef.current.sidebarChatOrderByDrone,
+        };
+        const nextPinnedDroneIds = Object.prototype.hasOwnProperty.call(sidebar, 'pinnedDroneIds')
+          ? [
+              ...new Set<string>(
+                (Array.isArray(sidebar.pinnedDroneIds) ? sidebar.pinnedDroneIds : [])
+                  .map((id: unknown) => String(id ?? '').trim())
+                  .filter(Boolean),
+              ),
+            ]
+          : pinnedDroneIdsRef.current;
+        await Promise.all([
+          AsyncStorage.setItem(LOCAL_SIDEBAR_ORDER_KEY, JSON.stringify(next)),
+          AsyncStorage.setItem(LOCAL_PINNED_DRONES_KEY, JSON.stringify(nextPinnedDroneIds)),
+        ]);
+        sidebarOrderRef.current = next;
+        pinnedDroneIdsRef.current = nextPinnedDroneIds;
+        setPinnedDroneIds(nextPinnedDroneIds);
+        return {
+          ok: true,
+          uiPreferences: { ...next, pinnedDroneIds: nextPinnedDroneIds },
+        };
+      };
 
       if (operation === 'drones.list') {
         if (payload.createModelAgent === 'native') {
@@ -315,47 +364,50 @@ function useLocalDroneControlValue() {
         setPinnedDroneIds(next);
         return { ok: true, uiPreferences: { pinnedDroneIds: next } };
       }
+      if (operation === 'sidebar.move') {
+        const command = parseSidebarMoveCommandRequest(payload);
+        const write = writeRef.current.then(async () => {
+          const currentLayout = normalizeSidebarLayout({
+            ...sidebarOrderRef.current,
+            pinnedDroneIds: pinnedDroneIdsRef.current,
+          });
+          const nextLayout = applySidebarMove(currentLayout, command.intent);
+          const nextDrones =
+            command.intent.kind === 'move-into-folder'
+              ? applyOptimisticMobileSidebarMove(dronesRef.current, command.intent)
+              : dronesRef.current;
+          const nextOrder = {
+            sidebarNodeOrderByParent: nextLayout.sidebarNodeOrderByParent,
+            sidebarChatOrderByDrone: nextLayout.sidebarChatOrderByDrone,
+          };
+          await Promise.all([
+            AsyncStorage.setItem(LOCAL_DRONES_KEY, JSON.stringify(nextDrones)),
+            AsyncStorage.setItem(LOCAL_SIDEBAR_ORDER_KEY, JSON.stringify(nextOrder)),
+            AsyncStorage.setItem(
+              LOCAL_PINNED_DRONES_KEY,
+              JSON.stringify(nextLayout.pinnedDroneIds),
+            ),
+          ]);
+          dronesRef.current = nextDrones;
+          sidebarOrderRef.current = nextOrder;
+          pinnedDroneIdsRef.current = nextLayout.pinnedDroneIds;
+          setDrones(nextDrones);
+          setPinnedDroneIds(nextLayout.pinnedDroneIds);
+          return {
+            ok: true,
+            mutationId: command.mutationId,
+            version: null,
+            uiPreferences: nextLayout,
+          };
+        });
+        writeRef.current = write.then(
+          () => undefined,
+          () => undefined,
+        );
+        return await write;
+      }
       if (operation === 'sidebar.order.update') {
-        const sidebar =
-          payload.sidebar && typeof payload.sidebar === 'object' && !Array.isArray(payload.sidebar)
-            ? (payload.sidebar as Record<string, unknown>)
-            : {};
-        const hasNodeOrder = Object.prototype.hasOwnProperty.call(
-          sidebar,
-          'sidebarNodeOrderByParent',
-        );
-        const hasChatOrder = Object.prototype.hasOwnProperty.call(
-          sidebar,
-          'sidebarChatOrderByDrone',
-        );
-        const next = {
-          sidebarNodeOrderByParent: hasNodeOrder
-            ? localStringListMap(sidebar.sidebarNodeOrderByParent)
-            : sidebarOrderRef.current.sidebarNodeOrderByParent,
-          sidebarChatOrderByDrone: hasChatOrder
-            ? localStringListMap(sidebar.sidebarChatOrderByDrone)
-            : sidebarOrderRef.current.sidebarChatOrderByDrone,
-        };
-        const nextPinnedDroneIds = Object.prototype.hasOwnProperty.call(sidebar, 'pinnedDroneIds')
-          ? [
-              ...new Set<string>(
-                (Array.isArray(sidebar.pinnedDroneIds) ? sidebar.pinnedDroneIds : [])
-                  .map((id: unknown) => String(id ?? '').trim())
-                  .filter(Boolean),
-              ),
-            ]
-          : pinnedDroneIdsRef.current;
-        await Promise.all([
-          AsyncStorage.setItem(LOCAL_SIDEBAR_ORDER_KEY, JSON.stringify(next)),
-          AsyncStorage.setItem(LOCAL_PINNED_DRONES_KEY, JSON.stringify(nextPinnedDroneIds)),
-        ]);
-        sidebarOrderRef.current = next;
-        pinnedDroneIdsRef.current = nextPinnedDroneIds;
-        setPinnedDroneIds(nextPinnedDroneIds);
-        return {
-          ok: true,
-          uiPreferences: { ...next, pinnedDroneIds: nextPinnedDroneIds },
-        };
+        return await writeSidebarOrder();
       }
       if (operation === 'sidebar.item.move') {
         const itemKind = String(payload.itemKind ?? '').trim();
@@ -370,7 +422,8 @@ function useLocalDroneControlValue() {
               drone.id === droneId ? { ...drone, group: targetGroup || null } : drone,
             ),
           );
-          return { ok: true, moved: [droneId], group: targetGroup || null };
+          const orderResult = await writeSidebarOrder();
+          return { ...orderResult, moved: [droneId], group: targetGroup || null };
         }
         if (itemKind !== 'folder') throw new Error('Item must be a drone or group.');
         const sourceGroup = String(payload.sourceGroup ?? '').trim();
@@ -393,7 +446,8 @@ function useLocalDroneControlValue() {
             };
           }),
         );
-        return { ok: true, sourceGroup, group: nextGroup };
+        const orderResult = await writeSidebarOrder();
+        return { ...orderResult, sourceGroup, group: nextGroup };
       }
       if (operation === 'drone.create.host') {
         const name = uniqueDroneName(dronesRef.current, payload.name);

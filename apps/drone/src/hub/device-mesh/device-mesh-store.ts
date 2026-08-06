@@ -32,9 +32,16 @@ export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): Cap
       'drone.rename',
       'chat.rename',
       'chat.delete',
+      'sidebar.move',
       'sidebar.order.update',
       'sidebar.item.move',
     );
+  }
+  if (
+    droneControl?.operations.includes('sidebar.order.update') &&
+    droneControl.operations.includes('sidebar.item.move')
+  ) {
+    operations.push('sidebar.move');
   }
   if (operations.length === 0) return next;
   if (!droneControl) {

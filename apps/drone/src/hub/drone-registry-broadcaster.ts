@@ -1,16 +1,28 @@
 import type { ServerResponse } from 'node:http';
 
-export type DroneRegistrySnapshot = { ok: true; drones: any[] };
+export type DroneRegistrySnapshot = {
+  ok: true;
+  drones: any[];
+  groups?: any[];
+  uiPreferences?: Record<string, unknown>;
+  preferenceUpdatedAt?: string | null;
+  preferenceVersion?: number | null;
+};
 
 export class DroneRegistryBroadcaster {
   readonly clients = new Set<ServerResponse>();
 
   private lastById = new Map<string, string>();
   private lastSnapshot: DroneRegistrySnapshot | null = null;
+  private lastPreferenceVersion: number | null | undefined;
+  private lastPreferencesSerialized: string | undefined;
+  private lastGroupsSerialized: string | undefined;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private refreshTimeout: ReturnType<typeof setTimeout> | null = null;
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   private busy = false;
+  private refreshPending = false;
+  private pendingBroadcastSnapshot = false;
 
   constructor(
     private readonly deps: {
@@ -34,10 +46,19 @@ export class DroneRegistryBroadcaster {
   }
 
   async refresh(opts?: { broadcastSnapshot?: boolean }): Promise<DroneRegistrySnapshot | null> {
-    if (this.busy) return this.lastSnapshot;
+    if (this.busy) {
+      this.refreshPending = true;
+      this.pendingBroadcastSnapshot ||= opts?.broadcastSnapshot === true;
+      return this.lastSnapshot;
+    }
     this.busy = true;
     try {
       const snapshot = await this.deps.buildSnapshot();
+      // A refresh requested while this snapshot was being assembled means the underlying state
+      // may already be newer. Publishing both would make clients briefly render the stale state
+      // before the guaranteed follow-up refresh. Leave the current baseline untouched and let
+      // that follow-up publish the coherent snapshot instead.
+      if (this.refreshPending) return snapshot;
       const nextById = new Map(
         snapshot.drones
           .map((drone) => [String(drone?.id ?? '').trim(), JSON.stringify(drone)] as const)
@@ -46,6 +67,9 @@ export class DroneRegistryBroadcaster {
 
       if (opts?.broadcastSnapshot || !this.lastSnapshot) {
         this.lastSnapshot = snapshot;
+        this.lastPreferenceVersion = snapshot.preferenceVersion;
+        this.lastPreferencesSerialized = JSON.stringify(snapshot.uiPreferences ?? {});
+        this.lastGroupsSerialized = JSON.stringify(snapshot.groups ?? []);
         this.lastById = nextById;
         this.broadcast('snapshot', snapshot);
         return snapshot;
@@ -62,14 +86,27 @@ export class DroneRegistryBroadcaster {
         if (!nextById.has(id)) removedIds.push(id);
       }
 
+      const preferencesSerialized = JSON.stringify(snapshot.uiPreferences ?? {});
+      const preferencesChanged =
+        snapshot.preferenceVersion !== this.lastPreferenceVersion ||
+        preferencesSerialized !== this.lastPreferencesSerialized;
+      const groupsSerialized = JSON.stringify(snapshot.groups ?? []);
+      const groupsChanged = groupsSerialized !== this.lastGroupsSerialized;
       this.lastSnapshot = snapshot;
+      this.lastPreferenceVersion = snapshot.preferenceVersion;
+      this.lastPreferencesSerialized = preferencesSerialized;
+      this.lastGroupsSerialized = groupsSerialized;
       this.lastById = nextById;
-      if (upserts.length > 0 || removedIds.length > 0) {
+      if (upserts.length > 0 || removedIds.length > 0 || preferencesChanged || groupsChanged) {
         this.broadcast('delta', {
           ok: true,
           upserts,
           removedIds,
           order: snapshot.drones.map((drone) => String(drone?.id ?? '').trim()).filter(Boolean),
+          ...(snapshot.groups ? { groups: snapshot.groups } : {}),
+          ...(snapshot.uiPreferences ? { uiPreferences: snapshot.uiPreferences } : {}),
+          preferenceUpdatedAt: snapshot.preferenceUpdatedAt ?? null,
+          preferenceVersion: snapshot.preferenceVersion ?? null,
         });
       }
       return snapshot;
@@ -78,11 +115,18 @@ export class DroneRegistryBroadcaster {
       return null;
     } finally {
       this.busy = false;
+      if (this.refreshPending) {
+        const broadcastSnapshot = this.pendingBroadcastSnapshot;
+        this.refreshPending = false;
+        this.pendingBroadcastSnapshot = false;
+        void this.refresh(broadcastSnapshot ? { broadcastSnapshot: true } : undefined);
+      }
     }
   }
 
-  schedule(delayMs = 150): void {
-    if (this.clients.size === 0 || this.refreshTimeout) return;
+  schedule(delayMs = 150, restart = false): void {
+    if (this.clients.size === 0 || (this.refreshTimeout && !restart)) return;
+    if (this.refreshTimeout) clearTimeout(this.refreshTimeout);
     this.refreshTimeout = setTimeout(
       () => {
         this.refreshTimeout = null;
@@ -119,5 +163,7 @@ export class DroneRegistryBroadcaster {
     this.refreshTimeout = null;
     this.keepAliveTimer = null;
     this.busy = false;
+    this.refreshPending = false;
+    this.pendingBroadcastSnapshot = false;
   }
 }

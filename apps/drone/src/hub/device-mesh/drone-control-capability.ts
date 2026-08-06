@@ -1,4 +1,8 @@
-import { DRONE_CONTROL_CAPABILITY, MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
+import {
+  DRONE_CONTROL_CAPABILITY,
+  MESH_BINARY_CHUNK_BYTES,
+  isGranted,
+} from '@drone/device-protocol';
 import {
   filterCompletedPendingPrompts,
   isSendInNewChatQueueAction,
@@ -21,6 +25,7 @@ import { meshJsonContentChunk } from './mesh-content-chunk';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { compactNativeChatReadResponse } from './native-chat-response';
 import { submitNativeChatPrompt } from './native-chat-prompt';
+import { SidebarCommandService } from './sidebar-command-service';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -291,6 +296,76 @@ export function deviceMeshDroneSummary(drone: any) {
   };
 }
 
+async function updateSidebarOrderPreferences(
+  access: LocalHubAccess,
+  payload: any,
+  notificationMode?: 'sidebar_snapshot',
+) {
+  const sidebar = object(payload.sidebar);
+  const baseSidebar = object(payload.baseSidebar);
+  const canRebase = Object.keys(baseSidebar).length > 0;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const current = await localHubRequest(access, '/api/settings/ui-preferences');
+    const currentPreferences = object(current.uiPreferences);
+    const nextPreferences = {
+      ...currentPreferences,
+      ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarNodeOrderByParent')
+        ? {
+            sidebarNodeOrderByParent:
+              canRebase &&
+              Object.prototype.hasOwnProperty.call(baseSidebar, 'sidebarNodeOrderByParent')
+                ? mergeChangedTextListMap(
+                    currentPreferences.sidebarNodeOrderByParent,
+                    baseSidebar.sidebarNodeOrderByParent,
+                    sidebar.sidebarNodeOrderByParent,
+                  )
+                : textListMap(sidebar.sidebarNodeOrderByParent),
+          }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarChatOrderByDrone')
+        ? {
+            sidebarChatOrderByDrone:
+              canRebase &&
+              Object.prototype.hasOwnProperty.call(baseSidebar, 'sidebarChatOrderByDrone')
+                ? mergeChangedTextListMap(
+                    currentPreferences.sidebarChatOrderByDrone,
+                    baseSidebar.sidebarChatOrderByDrone,
+                    sidebar.sidebarChatOrderByDrone,
+                  )
+                : textListMap(sidebar.sidebarChatOrderByDrone),
+          }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(sidebar, 'pinnedDroneIds')
+        ? { pinnedDroneIds: textList(sidebar.pinnedDroneIds) }
+        : {}),
+    };
+    const requestedVersion = Number(payload.expectedVersion);
+    const currentVersion = Number(current.version);
+    const expectedVersion = canRebase
+      ? Number.isSafeInteger(currentVersion) && currentVersion > 0
+        ? currentVersion
+        : current.version === null
+          ? null
+          : undefined
+      : Number.isSafeInteger(requestedVersion) && requestedVersion > 0
+        ? requestedVersion
+        : undefined;
+    try {
+      return await localHubRequest(access, '/api/settings/ui-preferences', {
+        method: 'POST',
+        body: JSON.stringify({
+          uiPreferences: nextPreferences,
+          ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+          ...(notificationMode ? { notificationMode } : {}),
+        }),
+      });
+    } catch (error: any) {
+      if (!canRebase || error?.code !== 'HUB_409' || attempt === 3) throw error;
+    }
+  }
+  throw new Error('Failed to update sidebar order');
+}
+
 export function createDroneControlCapability(
   access: LocalHubAccess,
   chatAttachments?: MeshChatAttachmentStore,
@@ -302,6 +377,7 @@ export function createDroneControlCapability(
     ) => void | Promise<void>;
   },
 ): CapabilityHandler {
+  const sidebarCommands = new SidebarCommandService(access);
   type FileWatch = {
     droneId: string;
     path: string;
@@ -687,73 +763,37 @@ export function createDroneControlCapability(
         return created;
       }
 
+      if (operation === 'sidebar.move') {
+        return await sidebarCommands.move(payload);
+      }
+
       if (operation === 'sidebar.order.update') {
-        const sidebar = object(payload.sidebar);
-        const baseSidebar = object(payload.baseSidebar);
-        const canRebase = Object.keys(baseSidebar).length > 0;
-        for (let attempt = 0; attempt < 4; attempt += 1) {
-          const current = await localHubRequest(access, '/api/settings/ui-preferences');
-          const currentPreferences = object(current.uiPreferences);
-          const nextPreferences = {
-            ...currentPreferences,
-            ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarNodeOrderByParent')
-              ? {
-                  sidebarNodeOrderByParent:
-                    canRebase && Object.prototype.hasOwnProperty.call(baseSidebar, 'sidebarNodeOrderByParent')
-                      ? mergeChangedTextListMap(
-                          currentPreferences.sidebarNodeOrderByParent,
-                          baseSidebar.sidebarNodeOrderByParent,
-                          sidebar.sidebarNodeOrderByParent,
-                        )
-                      : textListMap(sidebar.sidebarNodeOrderByParent),
-                }
-              : {}),
-            ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarChatOrderByDrone')
-              ? {
-                  sidebarChatOrderByDrone:
-                    canRebase && Object.prototype.hasOwnProperty.call(baseSidebar, 'sidebarChatOrderByDrone')
-                      ? mergeChangedTextListMap(
-                          currentPreferences.sidebarChatOrderByDrone,
-                          baseSidebar.sidebarChatOrderByDrone,
-                          sidebar.sidebarChatOrderByDrone,
-                        )
-                      : textListMap(sidebar.sidebarChatOrderByDrone),
-                }
-              : {}),
-            ...(Object.prototype.hasOwnProperty.call(sidebar, 'pinnedDroneIds')
-              ? { pinnedDroneIds: textList(sidebar.pinnedDroneIds) }
-              : {}),
-          };
-          const requestedVersion = Number(payload.expectedVersion);
-          const currentVersion = Number(current.version);
-          const expectedVersion = canRebase
-            ? Number.isSafeInteger(currentVersion) && currentVersion > 0
-              ? currentVersion
-              : current.version === null
-                ? null
-                : undefined
-            : Number.isSafeInteger(requestedVersion) && requestedVersion > 0
-              ? requestedVersion
-              : undefined;
-          try {
-            return await localHubRequest(access, '/api/settings/ui-preferences', {
-              method: 'POST',
-              body: JSON.stringify({
-                uiPreferences: nextPreferences,
-                ...(expectedVersion !== undefined ? { expectedVersion } : {}),
-              }),
-            });
-          } catch (error: any) {
-            if (!canRebase || error?.code !== 'HUB_409' || attempt === 3) throw error;
-          }
-        }
-        throw new Error('Failed to update sidebar order');
+        return await updateSidebarOrderPreferences(access, payload);
       }
 
       if (operation === 'sidebar.item.move') {
         const itemKind = requiredText(payload.itemKind, 'itemKind');
         const repoPath = optionalText(payload.repoPath) ?? '';
         const targetGroup = optionalText(payload.targetGroup);
+        const hasSidebarOrder = Object.keys(object(payload.sidebar)).length > 0;
+        if (
+          hasSidebarOrder &&
+          context?.sourceDevice &&
+          !isGranted(context.sourceDevice.grants, 'drone-control', 1, 'sidebar.order.update')
+        ) {
+          throw Object.assign(new Error('sidebar order update is not granted'), {
+            code: 'PERMISSION_DENIED',
+          });
+        }
+        const withSidebarOrder = async (moveResult: any) => {
+          if (!hasSidebarOrder) return moveResult;
+          const orderResult = await updateSidebarOrderPreferences(
+            access,
+            payload,
+            'sidebar_snapshot',
+          );
+          return { ...moveResult, ...orderResult };
+        };
         if (itemKind === 'drone') {
           const droneId = requiredText(payload.droneId, 'droneId');
           const result = await localHubRequest(access, '/api/drones/group-set', {
@@ -767,7 +807,7 @@ export function createDroneControlCapability(
               { code: 'OPERATION_FAILED' },
             );
           }
-          return result;
+          return await withSidebarOrder(result);
         }
         if (itemKind !== 'folder') {
           throw Object.assign(new Error('itemKind must be drone or folder'), {
@@ -786,7 +826,7 @@ export function createDroneControlCapability(
         const nextGroup = normalizedGroupPath(
           targetGroup ? `${targetGroup}/${groupBaseName(sourceGroup)}` : groupBaseName(sourceGroup),
         );
-        return await localHubRequest(
+        const result = await localHubRequest(
           access,
           `/api/groups/${encodeURIComponent(sourceGroup)}/rename`,
           {
@@ -794,6 +834,7 @@ export function createDroneControlCapability(
             body: JSON.stringify({ repoPath, newName: nextGroup }),
           },
         );
+        return await withSidebarOrder(result);
       }
 
       const droneId = requiredText(payload.droneId, 'droneId');

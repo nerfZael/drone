@@ -279,7 +279,7 @@ import {
   type ContainerFsEntry,
 } from './filesystem-media';
 import { DroneChatBroadcaster } from './drone-chat-broadcaster';
-import { DroneRegistryBroadcaster } from './drone-registry-broadcaster';
+import { DroneRegistryBroadcaster, type DroneRegistrySnapshot } from './drone-registry-broadcaster';
 import { createTerminalWebSocketServer } from './terminal-websocket-server';
 import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgrade';
 import { registerAssistantRoutes } from './routes/assistant-routes';
@@ -4337,7 +4337,6 @@ export async function startDroneHubApiServer(opts: {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   }
 
-  type DroneRegistrySnapshot = { ok: true; drones: any[] };
   type CachedDroneStatusSummary = {
     hostPort: number | null;
     statusOk: boolean;
@@ -5086,9 +5085,10 @@ export async function startDroneHubApiServer(opts: {
   }
 
   async function buildDroneRegistrySnapshot(source: string): Promise<DroneRegistrySnapshot> {
-    const [regAny, canonicalGroups] = await Promise.all([
+    const [regAny, canonicalGroups, preferences] = await Promise.all([
       loadPreparedDroneRegistryForSummary(source),
       listCanonicalGroups(),
+      resolveUiPreferencesSettingsResponse(),
     ]);
     const groupIdByScopeAndName = new Map(
       canonicalGroups.map((group) => [`${group.repoPath}\0${group.name}`, group.id]),
@@ -5150,7 +5150,14 @@ export async function startDroneHubApiServer(opts: {
             }
           : drone;
       });
-    return { ok: true, drones };
+    return {
+      ok: true,
+      drones,
+      groups: canonicalGroups,
+      uiPreferences: preferences.uiPreferences,
+      preferenceUpdatedAt: preferences.updatedAt,
+      preferenceVersion: preferences.version,
+    };
   }
 
   const droneChatBroadcaster = new DroneChatBroadcaster({
@@ -5172,8 +5179,8 @@ export async function startDroneHubApiServer(opts: {
   const refreshDroneRegistryBroadcasterSnapshot = (opts?: { broadcastSnapshot?: boolean }) =>
     droneRegistryBroadcaster.refresh(opts);
   const scheduleDroneChatEventRefresh = (delayMs = 100) => droneChatBroadcaster.schedule(delayMs);
-  const scheduleDroneRegistryBroadcasterRefresh = (delayMs = 150) =>
-    droneRegistryBroadcaster.schedule(delayMs);
+  const scheduleDroneRegistryBroadcasterRefresh = (delayMs = 150, restart = false) =>
+    droneRegistryBroadcaster.schedule(delayMs, restart);
   const startDroneChatBroadcaster = () => droneChatBroadcaster.start();
   const startDroneRegistryBroadcaster = () => droneRegistryBroadcaster.start();
   const stopDroneChatBroadcasterIfIdle = () => droneChatBroadcaster.stopIfIdle();
@@ -5371,6 +5378,11 @@ export async function startDroneHubApiServer(opts: {
     notifyUiPreferencesChanged: () => {
       const at = nowIso();
       assistantService.emitExternalUiAction({ type: 'reload_ui_preferences', at });
+      void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
+    },
+    notifyUiPreferencesSnapshotChanged: () => {
+      const at = nowIso();
+      scheduleDroneRegistryBroadcasterRefresh(150, true);
       void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
     },
     notifyPinnedDronesChanged: () => {

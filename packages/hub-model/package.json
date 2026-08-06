@@ -21,6 +21,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test tests"
   },
+  "dependencies": {
+    "@drone/device-protocol": "workspace:*"
+  },
   "devDependencies": {
     "typescript": "^5.6.3"
   }

@@ -5,6 +5,7 @@ import {
   isGranted,
   pairingClaimSigningText,
   parsePairingPayload,
+  parseSidebarMoveCommandRequest,
   PROVIDER_CREDENTIALS_CAPABILITY,
   runWorkspaceCommandJob,
 } from '../src';
@@ -99,8 +100,71 @@ describe('device protocol', () => {
   });
 
   test('advertises sidebar ordering as an explicit permission', () => {
+    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.move');
     expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.order.update');
     expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.item.move');
+  });
+
+  test('validates sidebar commands at the protocol boundary', () => {
+    expect(
+      parseSidebarMoveCommandRequest({
+        mutationId: 'move-1',
+        expectedVersion: 12,
+        intent: {
+          kind: 'chat',
+          droneId: ' host ',
+          chatNames: ['default', 'review', 'review'],
+          activeChatName: 'review',
+          overChatName: 'default',
+          placement: 'before',
+        },
+      }),
+    ).toEqual({
+      mutationId: 'move-1',
+      expectedVersion: 12,
+      intent: {
+        kind: 'chat',
+        droneId: 'host',
+        chatNames: ['default', 'review'],
+        activeChatName: 'review',
+        overChatName: 'default',
+        placement: 'before',
+      },
+    });
+    expect(() =>
+      parseSidebarMoveCommandRequest({
+        mutationId: 'move-2',
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'folder',
+          repoPath: '/repo',
+          sourceGroup: 'Review',
+          sourceNodeId: 'folder:Review',
+          sourceParentId: 'root',
+          sourceSiblingNodeIds: [],
+          targetGroup: null,
+          targetParentId: 'folder:Review',
+          targetSiblingNodeIds: [],
+          placement: 'sideways',
+        },
+      }),
+    ).toThrow('placement');
+    expect(() =>
+      parseSidebarMoveCommandRequest({
+        mutationId: 'move-3',
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'drone',
+          repoPath: '/repo',
+          droneId: 'host',
+          sourceParentId: 'root',
+          sourceSiblingNodeIds: ['drone:host'],
+          targetGroup: 42,
+          targetParentId: 'root',
+          targetSiblingNodeIds: [],
+        },
+      }),
+    ).toThrow('targetGroup');
   });
 
   test('advertises chat rename and delete as explicit permissions', () => {

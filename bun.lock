@@ -407,6 +407,9 @@
     "packages/hub-model": {
       "name": "@drone/hub-model",
       "version": "0.1.0",
+      "dependencies": {
+        "@drone/device-protocol": "workspace:*",
+      },
       "devDependencies": {
         "typescript": "^5.6.3",
       },
