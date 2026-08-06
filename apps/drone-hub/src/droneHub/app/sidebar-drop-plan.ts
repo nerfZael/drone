@@ -218,12 +218,13 @@ function planRepoRootReorder(
   preferredTarget: SidebarTreeDropTarget | null | undefined,
 ): SidebarDropPlan | null {
   if (target.kind !== 'tree-node') return null;
+  const hoveredNode = nodeTree.nodesById[target.nodeId];
+  if (!isVirtualRepoRootNode(hoveredNode) || hoveredNode.id === sourceNode.id) return null;
   const resolvedTarget = preferredTarget ?? normalizeTreeTarget(nodeTree, target);
   const targetNode = resolvedTarget && nodeTree.nodesById[resolvedTarget.nodeId];
   if (
     !resolvedTarget ||
     !isVirtualRepoRootNode(targetNode) ||
-    targetNode.id === sourceNode.id ||
     resolvedTarget.placement === 'into'
   ) {
     return null;
@@ -298,19 +299,23 @@ function resolveTreeTarget(
   if (target.kind === 'folder-body') {
     const folderNode = nodeTree.nodesById[target.folderNodeId];
     if (!folderNode || folderNode.kind !== 'folder') return null;
-    return target.insertionTarget ?? { nodeId: folderNode.id, placement: 'into' };
+    const insertionNode = target.insertionTarget
+      ? nodeTree.nodesById[target.insertionTarget.nodeId]
+      : null;
+    return insertionNode?.parentId === folderNode.id
+      ? target.insertionTarget
+      : { nodeId: folderNode.id, placement: 'into' };
   }
-  if (preferredTarget) return preferredTarget;
-  if (target.kind === 'chat') {
-    return normalizeTreeTarget(nodeTree, {
-      nodeId: sidebarDroneNodeId(target.droneId),
-      placement: 'after',
-    });
-  }
-  if (target.kind === 'drone-tail') {
-    return normalizeTreeTarget(nodeTree, { nodeId: target.nodeId, placement: 'after' });
-  }
-  return normalizeTreeTarget(nodeTree, target);
+  const fallbackTarget =
+    target.kind === 'chat'
+      ? normalizeTreeTarget(nodeTree, {
+          nodeId: sidebarDroneNodeId(target.droneId),
+          placement: 'after',
+        })
+      : target.kind === 'drone-tail'
+        ? normalizeTreeTarget(nodeTree, { nodeId: target.nodeId, placement: 'after' })
+        : normalizeTreeTarget(nodeTree, target);
+  return fallbackTarget ? preferredTarget ?? fallbackTarget : null;
 }
 
 function normalizeTreeTarget(
@@ -336,10 +341,10 @@ function treePreview(
   target: SidebarDropTarget,
   resolvedTarget: SidebarTreeDropTarget,
 ): Omit<SidebarDropPlan, 'intent'> {
-  const emptyFolderBody = target.kind === 'folder-body' && !target.insertionTarget;
+  const highlightFolderBody = target.kind === 'folder-body' && resolvedTarget.placement === 'into';
   return {
-    treeTarget: emptyFolderBody ? null : resolvedTarget,
-    folderBodyId: emptyFolderBody ? target.folderNodeId : null,
+    treeTarget: highlightFolderBody ? null : resolvedTarget,
+    folderBodyId: highlightFolderBody ? target.folderNodeId : null,
     chatTarget: null,
   };
 }

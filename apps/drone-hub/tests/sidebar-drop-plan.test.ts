@@ -113,6 +113,77 @@ describe('sidebar drop planner', () => {
       dropPlan(droneDrag('a'), { kind: 'tree-node', nodeId: childId, placement: 'after' }),
     ).toBeNull();
   });
+
+  test('rejects a stale preview when the final tree target is missing', () => {
+    expect(
+      planSidebarDrop({
+        active: droneDrag('a'),
+        target: { kind: 'drone-tail', nodeId: sidebarDroneNodeId('missing') },
+        nodeTree: tree,
+        droneById: drones('a'),
+        sidebarChatOrderByDrone: {},
+        preferredTreeTarget: { nodeId: sidebarDroneNodeId('b'), placement: 'before' },
+      }),
+    ).toBeNull();
+  });
+
+  test('falls back to the hovered folder when its DOM insertion anchor is stale', () => {
+    const result = dropPlan(droneDrag('a'), {
+      kind: 'folder-body',
+      folderNodeId: targetFolderId,
+      insertionTarget: { nodeId: childId, placement: 'before' },
+    });
+
+    expect(result).toMatchObject({
+      treeTarget: null,
+      folderBodyId: targetFolderId,
+      intent: {
+        kind: 'move-into-folder',
+        targetParentId: targetFolderId,
+        placement: 'inside',
+      },
+    });
+  });
+
+  test('only reorders repository roots when the final hovered node is another root', () => {
+    const repoSourceId = sidebarFolderNodeId('repo:first');
+    const repoTargetId = sidebarFolderNodeId('repo:second');
+    const repoTree = nodeTree({ [root]: [repoSourceId, repoTargetId, targetFolderId] });
+    for (const id of [repoSourceId, repoTargetId]) {
+      const node = repoTree.nodesById[id];
+      if (node?.kind === 'folder') {
+        node.groupKind = 'repo';
+        node.groupPath = null;
+      }
+    }
+    const active = {
+      type: 'sidebar-folder' as const,
+      folderNodeId: repoSourceId,
+      folderPath: 'repo:first',
+      groupKind: 'repo' as const,
+      label: 'first',
+    };
+    const args = {
+      active,
+      nodeTree: repoTree,
+      droneById: {},
+      sidebarChatOrderByDrone: {},
+    };
+
+    expect(
+      planSidebarDrop({
+        ...args,
+        target: { kind: 'tree-node', nodeId: repoTargetId, placement: 'before' },
+      })?.intent,
+    ).toMatchObject({ kind: 'tree-entry', activeNodeId: repoSourceId });
+    expect(
+      planSidebarDrop({
+        ...args,
+        target: { kind: 'tree-node', nodeId: targetFolderId, placement: 'before' },
+        preferredTreeTarget: { nodeId: repoTargetId, placement: 'before' },
+      }),
+    ).toBeNull();
+  });
 });
 
 function dropPlan(
