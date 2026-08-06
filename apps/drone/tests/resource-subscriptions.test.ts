@@ -12,6 +12,12 @@ import {
 import { normalizeResourceSubscriptionSettings } from '../src/hub/subscriptions/resource-subscription-settings';
 import { createResourceSubscriptionDeliveryAuthorizer } from '../src/hub/subscriptions/create-resource-subscription-delivery-authorizer';
 import {
+  cronOccurrenceEvent,
+  cronSubscriptionConfig,
+  dueCronOccurrence,
+  normalizeCronSubscription,
+} from '../src/hub/subscriptions/cron-subscription';
+import {
   cancelOrphanedResourceSubscriptions,
   detectChatSubscriptionChanges,
   renderSubscriptionPrompt,
@@ -28,6 +34,7 @@ const chatSubscription: ResourceSubscription = {
   resourceType: 'chat',
   resourceId: 'target-chat',
   resourceRef: 'drone-hub:chat:target-chat',
+  resourceConfig: {},
   events: ['chat.idle', 'chat.failed'],
   intent: '',
   status: 'active',
@@ -40,6 +47,7 @@ const chatSubscription: ResourceSubscription = {
     lastLatestId: 'old',
     lastFailureId: '',
   },
+  nextEventAt: null,
   createdAt: '2026-08-01T00:00:00.000Z',
   updatedAt: '2026-08-01T00:00:00.000Z',
   completedAt: null,
@@ -63,6 +71,108 @@ describe('resource subscription identifiers', () => {
     expect(() => normalizeGithubRepositoryId('getsentry')).toThrow('owner/repository');
     expect(() => normalizeGithubPullRequestId('getsentry/junior')).toThrow(
       'owner/repository#number',
+    );
+  });
+});
+
+describe('cron subscription scheduling', () => {
+  test('normalizes five-field schedules and computes the first future occurrence', () => {
+    const schedule = normalizeCronSubscription(
+      '  0   * * * *  ',
+      'UTC',
+      new Date('2026-08-05T12:30:00.000Z'),
+    );
+    expect(schedule.resourceConfig).toEqual({
+      expression: '0 * * * *',
+      timeZone: 'UTC',
+      description: 'Every hour',
+    });
+    expect(schedule.nextEventAt).toBe('2026-08-05T13:00:00.000Z');
+    expect(
+      normalizeCronSubscription(
+        '* * * * *',
+        'UTC',
+        new Date('2026-08-05T12:30:00.000Z'),
+      ).nextEventAt,
+    ).toBe('2026-08-05T12:31:00.000Z');
+    expect(schedule.resourceId).toBe(
+      normalizeCronSubscription('0 * * * *', 'UTC', new Date('2026-08-05T12:45:00.000Z'))
+        .resourceId,
+    );
+    expect(
+      normalizeCronSubscription(
+        '0 9 * * 1-5',
+        'UTC',
+        new Date('2026-08-05T12:45:00.000Z'),
+      ).resourceConfig.description,
+    ).toBe('At 09:00 AM, Monday through Friday');
+    expect(
+      normalizeCronSubscription('0 * * * *', undefined, new Date('2026-08-05T12:45:00.000Z'))
+        .resourceConfig.timeZone,
+    ).toBe('UTC');
+    expect(
+      cronSubscriptionConfig({ expression: '0 * * * *', timeZone: 'UTC' }).description,
+    ).toBe('Every hour');
+  });
+
+  test('uses the requested time zone and rejects invalid or second-level schedules', () => {
+    expect(
+      normalizeCronSubscription(
+        '0 9 * * *',
+        'America/New_York',
+        new Date('2026-08-05T12:30:00.000Z'),
+      ).nextEventAt,
+    ).toBe('2026-08-05T13:00:00.000Z');
+    expect(() => normalizeCronSubscription('* * * * * *', 'UTC')).toThrow('five fields');
+    expect(() => normalizeCronSubscription('* * * * *', 'Mars/Olympus_Mons')).toThrow(
+      'invalid cron time zone',
+    );
+    expect(() => normalizeCronSubscription('invalid * * * *', 'UTC')).toThrow(
+      'invalid cron expression',
+    );
+  });
+
+  test('keeps local-time scheduling stable across daylight-saving changes', () => {
+    const schedule = normalizeCronSubscription(
+      '30 2 * * *',
+      'America/New_York',
+      new Date('2026-03-07T08:00:00.000Z'),
+    );
+    expect(schedule.nextEventAt).toBe('2026-03-08T07:30:00.000Z');
+    const occurrence = dueCronOccurrence(
+      schedule.resourceConfig,
+      schedule.resourceId,
+      schedule.nextEventAt,
+      new Date('2026-03-08T08:00:00.000Z'),
+    );
+    expect(occurrence?.nextEventAt).toBe('2026-03-09T06:30:00.000Z');
+  });
+
+  test('coalesces missed occurrences and produces a deterministic provider event ID', () => {
+    const schedule = normalizeCronSubscription(
+      '0 * * * *',
+      'UTC',
+      new Date('2026-08-05T09:30:00.000Z'),
+    );
+    const occurrence = dueCronOccurrence(
+      schedule.resourceConfig,
+      schedule.resourceId,
+      schedule.nextEventAt,
+      new Date('2026-08-05T12:30:00.000Z'),
+    );
+    expect(occurrence).toEqual({
+      scheduledAt: '2026-08-05T12:00:00.000Z',
+      nextEventAt: '2026-08-05T13:00:00.000Z',
+      coalescedMissedOccurrences: true,
+    });
+    const input = {
+      resourceId: schedule.resourceId,
+      config: schedule.resourceConfig,
+      occurrence: occurrence!,
+      observedAt: '2026-08-05T12:30:00.000Z',
+    };
+    expect(cronOccurrenceEvent(input).providerEventId).toBe(
+      cronOccurrenceEvent(input).providerEventId,
     );
   });
 });
@@ -456,6 +566,21 @@ describe('subscription delivery authorization', () => {
 
     expect(await authorize(chatSubscription, subscriber)).toBe(false);
     expect(await authorize(githubSubscription, subscriber)).toBe(true);
+    expect(
+      await authorize(
+        {
+          ...chatSubscription,
+          id: 'cron-subscription',
+          resourceType: 'cron',
+          resourceId: 'v1:schedule',
+          resourceRef: 'drone-hub:cron:v1:schedule',
+          resourceConfig: { expression: '* * * * *', timeZone: 'UTC' },
+          events: ['cron.triggered'],
+          nextEventAt: '2026-08-05T12:00:00.000Z',
+        },
+        subscriber,
+      ),
+    ).toBe(true);
     registry.drones['drone-a'].chats.default.droneHubMcpAccessScope.droneIds.push('drone-b');
     expect(await authorize(chatSubscription, subscriber)).toBe(true);
   });
@@ -535,6 +660,7 @@ describe('resource subscription MCP surface', () => {
   test('exposes management tools without a describe step', () => {
     const names = new Set(ASSISTANT_TOOL_SUMMARIES.map((tool) => tool.name));
     expect(names.has('subscribe_to_resource_events')).toBe(true);
+    expect(names.has('subscribe_to_cron')).toBe(true);
     expect(names.has('list_resource_subscriptions')).toBe(true);
     expect(names.has('get_resource_subscription')).toBe(true);
     expect(names.has('update_resource_subscription')).toBe(true);

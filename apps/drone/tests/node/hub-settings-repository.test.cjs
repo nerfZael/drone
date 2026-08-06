@@ -15,10 +15,12 @@ const { readRegistryJsonFromSqlite } = require('../../dist/host/sqlite-registry-
 const { saveRegistry, updateRegistry } = require('../../dist/host/registry.js');
 const {
   resolveUiPreferencesSettingsResponse,
+  resolveUserContextSettingsResponse,
   clearStoredProviderApiKey,
   resolveDeleteActionSettingsResponse,
   resolveEffectiveProviderApiKeySettings,
   updatePinnedDronePreference,
+  updateStoredUserTimeZone,
   upsertStoredDeleteActionSettings,
   upsertStoredProviderApiKey,
   UiPreferencesSettingsConflictError,
@@ -236,6 +238,20 @@ describe('remaining canonical Hub settings', () => {
     assert.equal((await resolveEffectiveProviderApiKeySettings('openai')).apiKey, 'second-key');
     useDroneDataDir(firstDir);
     assert.equal((await resolveEffectiveProviderApiKeySettings('openai')).apiKey, 'first-key');
+  });
+});
+
+describe('canonical user context settings', () => {
+  test('stores a canonical IANA timezone and rejects invalid values', async () => {
+    useTempDroneDataDir('user-time-zone');
+    assert.equal((await resolveUserContextSettingsResponse()).userContext.timeZone, null);
+
+    await updateStoredUserTimeZone('US/Pacific');
+    assert.equal(
+      (await resolveUserContextSettingsResponse()).userContext.timeZone,
+      new Intl.DateTimeFormat('en-US', { timeZone: 'US/Pacific' }).resolvedOptions().timeZone,
+    );
+    await assert.rejects(updateStoredUserTimeZone('not/a-time-zone'), /valid IANA time zone/);
   });
 });
 

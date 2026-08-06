@@ -82,6 +82,36 @@ describe('drone hub domain helpers', () => {
     expect(custom.chatId).toBe('chat-123');
     expect(custom.subscriptions).toHaveLength(1);
 
+    const scheduled = normalizeChatInfoPayload({
+      name: 'auth-drone',
+      chat: 'default',
+      subscriptions: [
+        {
+          id: 'hourly-check',
+          provider: 'drone-hub',
+          resourceType: 'cron',
+          resourceId: 'v1:hourly',
+          resourceConfig: {
+            expression: '0 * * * *',
+            timeZone: 'UTC',
+            description: 'Every hour',
+          },
+          events: ['cron.triggered'],
+          status: 'active',
+          nextEventAt: '2026-08-05T13:00:00.000Z',
+        },
+      ],
+    });
+    expect(scheduled.subscriptions[0]).toMatchObject({
+      resourceType: 'cron',
+      resourceConfig: {
+        expression: '0 * * * *',
+        timeZone: 'UTC',
+        description: 'Every hour',
+      },
+      nextEventAt: '2026-08-05T13:00:00.000Z',
+    });
+
     const builtin = normalizeChatInfoPayload({
       name: 'auth-drone',
       chat: 'default',

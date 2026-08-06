@@ -5,6 +5,7 @@ import {
   normalizeChatResourceSubscriptionsPayload,
   type ChatResourceSubscriptionInfo,
 } from '../../domain';
+import { clientTimeZone } from './client-time-zone';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -236,6 +237,7 @@ export async function sendDroneChatPrompt(
   const promptId = String(opts.promptId ?? '').trim();
   const attachments = Array.isArray(opts.attachments) ? opts.attachments : [];
   const submittedAt = String(opts.submittedAt ?? '').trim() || new Date().toISOString();
+  const userTimeZone = clientTimeZone();
   return await requestJson<SendDroneChatPromptResponse>(
     `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/prompt`,
     {
@@ -246,6 +248,7 @@ export async function sendDroneChatPrompt(
         ...(promptId ? { promptId } : {}),
         attachments,
         submittedAt,
+        ...(userTimeZone ? { userTimeZone } : {}),
         ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
         ...(opts.autoRenameHandledByClient ? { autoRenameHandledByClient: true } : {}),
       }),

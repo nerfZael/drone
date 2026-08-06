@@ -357,6 +357,7 @@ describeSocketSuite('chat management api', () => {
           promptId: 'review-after-initial',
           submittedAt: '2026-07-29T22:44:26.908Z',
           prompt: 'Review the changes and make a pull request.',
+          userTimeZone: 'America/Chicago',
         }),
       },
     );
@@ -367,6 +368,9 @@ describeSocketSuite('chat management api', () => {
       promptId: 'review-after-initial',
       pendingState: 'queued',
     });
+    const userContext = await apiFetch('/api/settings/user-context');
+    expect(userContext.r.status).toBe(200);
+    expect(userContext.data?.userContext?.timeZone).toBe('America/Chicago');
     if (queue) {
       const queued = queue.list({
         droneId,

@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   eventNotificationDataFields,
   eventNotificationEventLabel,
+  eventNotificationResourceLabel,
+  eventNotificationResourceTypeLabel,
   parseEventNotificationPrompt,
   renderEventNotificationPrompt,
 } from '../src/event-notification';
@@ -42,6 +44,19 @@ describe('event notification prompts', () => {
     });
     expect(parseEventNotificationPrompt(prompt)).not.toHaveProperty('events.0.intent');
     expect(eventNotificationEventLabel('pull_request.merged')).toBe('PR merged');
+    expect(eventNotificationEventLabel('cron.triggered')).toBe('Scheduled run');
+    expect(eventNotificationResourceTypeLabel('cron')).toBe('Schedule');
+    expect(
+      eventNotificationResourceLabel({
+        resourceType: 'cron',
+        resourceId: 'v1:opaque-schedule-hash',
+        providerContentText: JSON.stringify({
+          expression: '0 * * * *',
+          timeZone: 'America/New_York',
+          description: 'Every hour',
+        }),
+      }),
+    ).toBe('Schedule · Every hour · America/New_York');
   });
 
   test('formats provider content as readable fields', () => {

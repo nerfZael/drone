@@ -25,6 +25,7 @@ import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-d
 import { CodexConnectComposerNotice } from '../app/CodexConnectControl';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import { createCanvasChatNodeId } from '../app/app-config';
+import { clientTimeZone } from '../app/client-time-zone';
 import {
   beginLocalChatBusy,
   useDroneHubRuntimeStore,
@@ -1277,6 +1278,7 @@ export function AssistantDock({
         refocusInputWhenIdleRef.current = true;
         let sentOk = true;
         try {
+          const userTimeZone = clientTimeZone();
           const response = await fetch(
             `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/prompt`,
             {
@@ -1285,6 +1287,7 @@ export function AssistantDock({
               body: JSON.stringify({
                 prompt,
                 attachments: encodedAttachments,
+                ...(userTimeZone ? { userTimeZone } : {}),
                 provider: activeThread.provider,
                 model: activeThread.model,
                 thinkingLevel: activeThread.thinkingLevel,
