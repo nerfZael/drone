@@ -881,6 +881,10 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       typeof turn?.promptAt === 'string' && turn.promptAt.trim()
         ? String(turn.promptAt).trim()
         : undefined;
+    const startedAt =
+      typeof turn?.startedAt === 'string' && turn.startedAt.trim()
+        ? String(turn.startedAt).trim()
+        : undefined;
     const completedAt =
       typeof turn?.completedAt === 'string' && turn.completedAt.trim()
         ? String(turn.completedAt).trim()
@@ -913,6 +917,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       turn: turnIndex + 1,
       at,
       ...(promptAt ? { promptAt } : {}),
+      ...(startedAt ? { startedAt } : {}),
       ...(completedAt ? { completedAt } : {}),
       ...(id ? { id } : {}),
       prompt,

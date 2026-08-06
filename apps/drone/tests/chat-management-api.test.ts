@@ -1013,6 +1013,8 @@ describeSocketSuite('chat management api', () => {
 
     const firstAt = new Date(Date.now() - 60_000).toISOString();
     const secondAt = new Date().toISOString();
+    const secondStartedAt = new Date(Date.parse(secondAt) + 30_000).toISOString();
+    const secondCompletedAt = new Date(Date.parse(secondAt) + 40_000).toISOString();
     await updateRegistry((reg: any) => {
       const entry = reg?.drones?.[droneId]?.chats?.default;
       if (!entry) throw new Error('missing seeded chat entry');
@@ -1031,7 +1033,8 @@ describeSocketSuite('chat management api', () => {
           id: 'prompt-2',
           at: secondAt,
           promptAt: secondAt,
-          completedAt: secondAt,
+          startedAt: secondStartedAt,
+          completedAt: secondCompletedAt,
           prompt: 'second',
           model: 'actual-turn-model',
           reasoning: 'high',
@@ -1081,6 +1084,7 @@ describeSocketSuite('chat management api', () => {
     expect(state.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-2']);
     expect(state.data?.transcripts?.[0]?.model).toBe('actual-turn-model');
     expect(state.data?.transcripts?.[0]?.reasoning).toBe('high');
+    expect(state.data?.transcripts?.[0]?.startedAt).toBe(secondStartedAt);
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('queued-1');
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('prompt-2');
 

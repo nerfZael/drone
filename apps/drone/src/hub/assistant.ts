@@ -682,23 +682,29 @@ function normalizeAssistantEnabledTools(
   for (const item of raw) {
     const rawName = String(item ?? '').trim();
     const names =
-      rawName === 'subscribe_to_chats_idle'
-        ? ['subscribe_to_all_chats_idle']
-        : rawName === 'assistant_files'
-          ? ['list_targets', 'set_target']
-          : rawName === 'list_changed_files'
-            ? ['get_working_tree_status']
-            : rawName === 'message_drone'
-              ? ['send_message']
-              : rawName === 'read_chat_messages'
-                ? ['list_chats', 'read_chat']
-                : rawName === 'get_chat_overview'
-                  ? ['list_chats']
-                  : rawName === 'inspect_drone'
-                    ? ['list_drones']
-                    : rawName === 'set_drone_groups'
-                      ? ['set_drone_group']
-                      : [rawName];
+      rawName === 'subscribe_to_chats_idle' ||
+      rawName === 'subscribe_to_any_chat_idle' ||
+      rawName === 'subscribe_to_all_chats_idle'
+        ? ['subscribe_to_resource_events']
+        : rawName === 'list_chat_idle_subscriptions'
+          ? ['list_resource_subscriptions']
+          : rawName === 'cancel_chat_idle_subscription'
+            ? ['cancel_resource_subscription']
+            : rawName === 'assistant_files'
+              ? ['list_targets', 'set_target']
+              : rawName === 'list_changed_files'
+                ? ['get_working_tree_status']
+                : rawName === 'message_drone'
+                  ? ['send_message']
+                  : rawName === 'read_chat_messages'
+                    ? ['list_chats', 'read_chat']
+                    : rawName === 'get_chat_overview'
+                      ? ['list_chats']
+                      : rawName === 'inspect_drone'
+                        ? ['list_drones']
+                        : rawName === 'set_drone_groups'
+                          ? ['set_drone_group']
+                          : [rawName];
     for (const name of names) {
       if (!allowed.has(name) || seen.has(name)) continue;
       seen.add(name);

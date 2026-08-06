@@ -1200,6 +1200,7 @@ function agentFromPreferenceKey(value: string) {
 type McpToolRegistrationContext = {
   principal: McpTokenIdentity;
   nativeThreadId?: string;
+  legacyIdleSubscriptionTools?: boolean;
   speechEnabled?: boolean;
   onSpeechToolRegistered?: (tool: RegisteredTool) => void;
 };
@@ -1220,6 +1221,58 @@ function subscriptionSubscriber(context: McpToolRegistrationContext) {
     droneId: principal.droneId,
     chatName: principal.chatName,
   };
+}
+
+async function subscribeChatPrincipalToIdleTargets(
+  context: McpToolRegistrationContext,
+  mode: 'any' | 'all',
+  args: any,
+) {
+  const targets = normalizeIdleTargets(args);
+  if (targets.length === 0) throw new Error('targets are required');
+  const subscriber = subscriptionSubscriber(context);
+  const resources = await Promise.all(
+    targets.map(async (target) => {
+      const response = await requestJson(
+        `/api/drones/${encodeURIComponent(target.drone)}/chats`,
+        { method: 'GET' },
+      );
+      const chat = (Array.isArray(response?.chatDetails) ? response.chatDetails : []).find(
+        (item: any) => cleanString(item?.chat ?? item?.name) === target.chat,
+      );
+      const resourceId = cleanString(chat?.chatId);
+      if (!resourceId) throw new Error(`unknown chat: ${target.drone}/${target.chat}`);
+      await authorizeChatSubscriptionResource(context, resourceId);
+      return { ...target, resourceId };
+    }),
+  );
+  const targetLabels = resources.map((target) => `${target.drone}/${target.chat}`).join(', ');
+  const intent = (
+    mode === 'all'
+      ? `Wait for all requested chats to finish before completing the follow-up. Inspect every target after each event and continue waiting while any target is still running. Targets: ${targetLabels}`
+      : `Resume the requested follow-up when any target finishes. Targets: ${targetLabels}`
+  ).slice(0, 2_000);
+  const subscriptions = await Promise.all(
+    resources.map(async (target) => {
+      const response = await requestJson('/api/resource-subscriptions', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider: 'drone-hub',
+          resourceType: 'chat',
+          resourceId: target.resourceId,
+          events: ['chat.idle', 'chat.failed'],
+          intent,
+          subscriber,
+        }),
+      });
+      return {
+        target: { drone: target.drone, chat: target.chat },
+        created: response?.created === true,
+        subscription: mcpSubscription(response?.subscription),
+      };
+    }),
+  );
+  return { ok: true, mode, subscriptions };
 }
 
 function mcpSubscription(value: any): any {
@@ -2136,37 +2189,79 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     pollIntervalMs: z.number().optional(),
     expiresInMs: z.number().optional(),
   };
-  server.registerTool('subscribe_to_any_chat_idle', {
-    title: 'Subscribe to any chat idle',
-    description: 'Start a background Drone Hub idle subscription. Returns immediately with subscription status.',
-    inputSchema: idleInputSchema,
-  }, async (args, extra) => toolResult(startIdleSubscription(server, 'any', args, extra)));
+  if (context.legacyIdleSubscriptionTools !== false) {
+    server.registerTool('subscribe_to_any_chat_idle', {
+      title: 'Subscribe to any chat idle',
+      description: 'Subscribe to any target chat finishing. Managed DroneHub chats receive durable conversation wake-ups.',
+      inputSchema: idleInputSchema,
+    }, async (args, extra) => toolResult(
+      chatPrincipal(context)
+        ? await subscribeChatPrincipalToIdleTargets(context, 'any', args)
+        : startIdleSubscription(server, 'any', args, extra),
+    ));
 
-  server.registerTool('subscribe_to_all_chats_idle', {
-    title: 'Subscribe to all chats idle',
-    description: 'Start a background Drone Hub idle subscription. Returns immediately with subscription status.',
-    inputSchema: idleInputSchema,
-  }, async (args, extra) => toolResult(startIdleSubscription(server, 'all', args, extra)));
+    server.registerTool('subscribe_to_all_chats_idle', {
+      title: 'Subscribe to all chats idle',
+      description: 'Subscribe to all target chats finishing. Managed DroneHub chats receive durable conversation wake-ups.',
+      inputSchema: idleInputSchema,
+    }, async (args, extra) => toolResult(
+      chatPrincipal(context)
+        ? await subscribeChatPrincipalToIdleTargets(context, 'all', args)
+        : startIdleSubscription(server, 'all', args, extra),
+    ));
 
-  server.registerTool('list_chat_idle_subscriptions', {
-    title: 'List chat idle subscriptions',
-    description: 'List durable Drone Hub chat-idle subscriptions and their latest state.',
-    inputSchema: {},
-  }, async () => toolResult({
-    ok: true,
-    subscriptions: [...idleSubscriptions.values()].map(publicSubscription),
-  }));
+    server.registerTool('list_chat_idle_subscriptions', {
+      title: 'List chat idle subscriptions',
+      description: 'List durable Drone Hub chat-idle subscriptions and their latest state.',
+      inputSchema: {},
+    }, async () => {
+      const principal = chatPrincipal(context);
+      if (!principal) {
+        return toolResult({
+          ok: true,
+          subscriptions: [...idleSubscriptions.values()].map(publicSubscription),
+        });
+      }
+      const response = await requestJson(
+        `/api/resource-subscriptions?subscriberChatId=${encodeURIComponent(principal.chatId)}&includeInactive=false`,
+        { method: 'GET' },
+      );
+      return toolResult({
+        ok: true,
+        subscriptions: (Array.isArray(response?.subscriptions) ? response.subscriptions : [])
+          .filter(
+            (subscription: any) =>
+              subscription?.provider === 'drone-hub' &&
+              subscription?.resourceType === 'chat' &&
+              (subscription?.events?.includes('chat.idle') ||
+                subscription?.events?.includes('chat.failed')),
+          )
+          .map(mcpSubscription),
+      });
+    });
 
-  server.registerTool('cancel_chat_idle_subscription', {
-    title: 'Cancel chat idle subscription',
-    description: 'Stop a durable Drone Hub chat-idle subscription.',
-    inputSchema: { subscriptionId: z.string() },
-  }, async (args) => {
-    const subscription = idleSubscriptions.get(cleanString(args.subscriptionId));
-    if (!subscription) throw new Error(`unknown chat-idle subscription: ${args.subscriptionId}`);
-    if (subscription.status === 'active') stopIdleSubscription(subscription, 'stopped');
-    return toolResult({ ok: true, subscription: publicSubscription(subscription) });
-  });
+    server.registerTool('cancel_chat_idle_subscription', {
+      title: 'Cancel chat idle subscription',
+      description: 'Stop a durable Drone Hub chat-idle subscription.',
+      inputSchema: { subscriptionId: z.string() },
+    }, async (args) => {
+      const principal = chatPrincipal(context);
+      if (principal && !idleSubscriptions.has(cleanString(args.subscriptionId))) {
+        const response = await requestJson(
+          `/api/resource-subscriptions/${encodeURIComponent(args.subscriptionId)}?subscriberChatId=${encodeURIComponent(principal.chatId)}`,
+          { method: 'DELETE' },
+        );
+        return toolResult({
+          ok: true,
+          subscription: mcpSubscription(response?.subscription),
+        });
+      }
+      const subscription = idleSubscriptions.get(cleanString(args.subscriptionId));
+      if (!subscription) throw new Error(`unknown chat-idle subscription: ${args.subscriptionId}`);
+      if (subscription.status === 'active') stopIdleSubscription(subscription, 'stopped');
+      return toolResult({ ok: true, subscription: publicSubscription(subscription) });
+    });
+  }
 
   server.registerTool('read_chat', {
     title: 'Read drone chat',
@@ -2365,6 +2460,7 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
     principal: input?.principal ?? { kind: 'legacy', tokenId: 'legacy', name: 'Legacy Drone Hub MCP token' },
     ...(input?.correlationId ? { correlationId: input.correlationId } : {}),
     ...(input?.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
+    legacyIdleSubscriptionTools: input?.legacyIdleSubscriptionTools !== false,
     ...(input?.allowedDroneRefs ? { allowedDroneRefs: input.allowedDroneRefs } : {}),
     ...(input?.allowedWriteDroneRefs ? { allowedWriteDroneRefs: input.allowedWriteDroneRefs } : {}),
     ...(input?.allowedDroneIds ? { allowedDroneIds: input.allowedDroneIds } : {}),
@@ -2387,7 +2483,7 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
     else speechTool?.disable();
   };
   registerAuthorizedTools(server, context);
-  restoreIdleSubscriptions(server);
+  if (context.legacyIdleSubscriptionTools !== false) restoreIdleSubscriptions(server);
   return server;
 }
 
