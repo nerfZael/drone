@@ -87,7 +87,7 @@ describe('sidebar group creation actions', () => {
       'utf8',
     );
     const dndSource = readFileSync(
-      new URL('../src/droneHub/app/use-sidebar-root-dnd.ts', import.meta.url),
+      new URL('../src/droneHub/app/use-sidebar-ungrouped-drop.ts', import.meta.url),
       'utf8',
     );
 
