@@ -39,6 +39,7 @@ export interface AssistantRuntimeDependencies {
   normalizeDroneIdentity: (value: unknown) => string;
   nowIso: () => string;
   onNativePromptQueueChanged?: (owner: { droneId: string; chatName: string }) => void;
+  onNativeThreadStateChanged?: (owner: { droneId: string; chatName: string }) => void;
   summarizeDroneActivity: (entry: any) => {
     lastActivityAt: string | null;
     lastMessageAt: string | null;
@@ -54,6 +55,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     normalizeDroneIdentity,
     nowIso,
     onNativePromptQueueChanged,
+    onNativeThreadStateChanged,
     summarizeDroneActivity,
   } = deps;
   const {
@@ -869,6 +871,16 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         .then((owner) => {
           if (!owner) return;
           if (event.reason === 'canonical_history_changed') onNativePromptQueueChanged?.(owner);
+          if (
+            event.reason === 'runtime_started' ||
+            event.reason === 'approval_pending' ||
+            event.reason === 'approval_recovery_required' ||
+            event.reason === 'approval_resolved' ||
+            event.reason === 'runtime_finished' ||
+            event.reason === 'runtime_error'
+          ) {
+            onNativeThreadStateChanged?.(owner);
+          }
           return deviceMesh.broadcastDroneChatChange({
             sequence: event.sequence,
             reason: event.reason,

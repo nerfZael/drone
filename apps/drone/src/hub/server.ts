@@ -509,6 +509,7 @@ import {
   isDraftDroneEntry,
   summarizeDroneActivity,
 } from './drone-summary-helpers';
+import { mergeNativeBusyChatNames } from './native-drone-summary';
 import { summarizeAssistantChatIdle } from './assistant';
 import { saveAssistantArtifactUploads, validateAssistantPromptImages } from './assistant-artifacts';
 
@@ -518,6 +519,7 @@ const requireForHub = createRequire(__filename);
 
 let notifyDroneRegistryWrite: (() => void) | null = null;
 let notifyDroneChatWrite: ((droneId: string, chatName: string) => void) | null = null;
+let notifyDroneSummaryChange: (() => void) | null = null;
 
 async function updateRegistry<T>(
   mutator: (reg: any) => T | Promise<T>,
@@ -4237,6 +4239,9 @@ export async function startDroneHubApiServer(opts: {
       notifyDroneChatWrite?.(droneId, chatName);
       promptRuntime.enqueuePendingPromptPump(droneId, chatName);
     },
+    onNativeThreadStateChanged: () => {
+      notifyDroneSummaryChange?.();
+    },
     summarizeDroneActivity,
   });
   const nativeChatLifecycle = new NativeChatLifecycle(assistantService, blipAssistantHost);
@@ -5015,11 +5020,22 @@ export async function startDroneHubApiServer(opts: {
     const droneId = normalizeDroneIdentity(d?.id);
     const { chats, workflowChats } = partitionWorkflowChatEntries(d.chats);
     const workflowChatSet = new Set(workflowChats);
-    const busyChats = droneId
+    const pendingBusyChats = droneId
       ? busyChatNamesForDrone(d, droneId).filter(
           (chatName: string) => !workflowChatSet.has(chatName),
         )
       : [];
+    const busyChats = await mergeNativeBusyChatNames({
+      busyChatNames: pendingBusyChats,
+      chatNames: chats,
+      droneEntry: d,
+      isNativeChat: (chatEntry, droneEntry) =>
+        inferChatAgent(chatEntry, droneEntry).kind === 'native',
+      isThreadBusy: async (threadId) =>
+        assistantPromptDrains.has(threadId) ||
+        blipAssistantHost.isThreadRunning(threadId) ||
+        (await assistantService.nativeThreadHasActiveRun(threadId)),
+    });
     const approvalChats = chats.flatMap((chatName) => {
       const chatEntry = d.chats?.[chatName];
       if (inferChatAgent(chatEntry, d).kind !== 'native') return [];
@@ -5203,13 +5219,18 @@ export async function startDroneHubApiServer(opts: {
     void deviceMesh.broadcastDroneChatChange({ reason: 'registry_write', at: nowIso() });
   };
   notifyDroneRegistryWrite = notifyCanonicalDroneRegistryWrite;
+  const notifyCanonicalDroneSummaryChange = () => {
+    canonicalActiveModelCache = null;
+    invalidateDroneSummaryRegistryCache();
+    scheduleDroneRegistryBroadcasterRefresh();
+  };
+  notifyDroneSummaryChange = notifyCanonicalDroneSummaryChange;
   const notifyCanonicalPromptQueueChatWrite = (droneId: string, chatName: string) => {
     // Prompt delivery state is canonical SQLite state and does not rewrite the
     // registry. Invalidate the projection and wake chat and sidebar SSE clients
     // explicitly so live state and native-message timestamps are not delayed
     // until the fallback poll.
-    canonicalActiveModelCache = null;
-    scheduleDroneRegistryBroadcasterRefresh();
+    notifyCanonicalDroneSummaryChange();
     scheduleDroneChatEventRefresh();
     void deviceMesh.broadcastDroneChatChange({
       reason: 'chat_write',
@@ -6153,6 +6174,9 @@ export async function startDroneHubApiServer(opts: {
       }
       if (notifyDroneRegistryWrite === notifyCanonicalDroneRegistryWrite) {
         notifyDroneRegistryWrite = null;
+      }
+      if (notifyDroneSummaryChange === notifyCanonicalDroneSummaryChange) {
+        notifyDroneSummaryChange = null;
       }
       if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
         activeDroneHubMcpProjectionConfig = null;
