@@ -2123,7 +2123,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     selectedGroupMultiChatData,
     groupBroadcastPromptError,
-    groupBroadcastSending,
     sendGroupBroadcastPrompt,
   } = useGroupBroadcast({
     selectedGroupMultiChat,
@@ -4532,7 +4531,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftCreateError,
     selectedGroupMultiChatData,
     groupBroadcastPromptError,
-    groupBroadcastSending,
     sendGroupBroadcastPrompt,
     sendPromptInNewDroneChat,
     createQueuedNewChatNow,

@@ -1135,9 +1135,8 @@ export function GroupMultiChatColumn({
         draftValue={draftValue}
         onDraftValueChange={(next) => setChatInputDraft(draftKey, next)}
         promptError={promptError}
-        sending={sendingPrompt}
         waiting={waitingForAgent}
-        disabled={sendingPrompt || isDroneStartingOrSeeding(drone.hubPhase)}
+        disabled={isDroneStartingOrSeeding(drone.hubPhase)}
         autoFocus={false}
         modeHint=""
         composerTopAction={

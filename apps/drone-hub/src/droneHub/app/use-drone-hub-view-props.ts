@@ -387,7 +387,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     setActiveRepoPath,
     selectedGroupMultiChatData,
     groupBroadcastPromptError,
-    groupBroadcastSending,
     sendGroupBroadcastPrompt,
     sendPromptInNewDroneChat,
     createQueuedNewChatNow,
@@ -490,7 +489,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     pinnedToBottom,
     selectedDroneIdentity,
     promptError,
-    sendingPrompt,
     sendPromptText,
     canStopResponse,
     requestStopResponse,
@@ -617,7 +615,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
       ? {
           selectedGroupMultiChatData,
           groupBroadcastPromptError,
-          groupBroadcastSending,
           onSendGroupBroadcastPrompt: sendGroupBroadcastPrompt,
           onSendPromptInNewChat: sendPromptInNewDroneChat,
           onCreateQueuedNewChatNow: createQueuedNewChatNow,
@@ -723,7 +720,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           pinnedToBottom,
           selectedDroneIdentity,
           promptError,
-          sendingPrompt,
           sendPromptText,
           onSendPromptInNewChat: (payload, context) =>
             sendPromptInNewDroneChat(currentDrone, payload, context),

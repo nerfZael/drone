@@ -30,6 +30,11 @@ import {
   chatSendShortcut,
   type ChatMessageDeliveryMode,
 } from './chat-send-shortcuts';
+import {
+  restoreChatComposerDraftSnapshot,
+  takeChatComposerDraftSnapshot,
+  type ChatComposerDraftSnapshot,
+} from './chat-composer-draft';
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
@@ -79,7 +84,6 @@ export type ChatInputProps = {
   draftValue?: string;
   onDraftValueChange?: (next: string) => void;
   promptError: string | null;
-  sending: boolean;
   waiting: boolean;
   disabled?: boolean;
   autoFocus?: boolean;
@@ -108,7 +112,6 @@ export function ChatInput({
   draftValue,
   onDraftValueChange,
   promptError,
-  sending,
   waiting,
   disabled,
   autoFocus,
@@ -145,8 +148,9 @@ export function ChatInput({
   const draft = controlledDraftEnabled ? draftValue : uncontrolledDraft;
   const draftRef = React.useRef(draft);
   const attachmentsRef = React.useRef(attachments);
+  const draftRevisionRef = React.useRef(0);
   const composerLocked = Boolean(disabled);
-  const attachmentControlsLocked = composerLocked || sending;
+  const attachmentControlsLocked = composerLocked;
 
   const attachmentsOn = attachmentsEnabled !== false;
   const imageAttachmentCount = React.useMemo(
@@ -162,7 +166,9 @@ export function ChatInput({
     [attachments],
   );
   React.useEffect(() => {
+    if (draftRef.current === draft) return;
     draftRef.current = draft;
+    draftRevisionRef.current += 1;
   }, [draft]);
 
   React.useEffect(() => {
@@ -170,8 +176,10 @@ export function ChatInput({
   }, [attachments]);
 
   const setDraft = React.useCallback(
-    (next: React.SetStateAction<string>) => {
+    (next: React.SetStateAction<string>, markChanged = true) => {
       const resolved = typeof next === 'function' ? (next as (prev: string) => string)(draftRef.current) : next;
+      if (markChanged && resolved !== draftRef.current) draftRevisionRef.current += 1;
+      draftRef.current = resolved;
       if (controlledDraftEnabled) {
         onDraftValueChange?.(resolved);
         return;
@@ -179,6 +187,19 @@ export function ChatInput({
       setUncontrolledDraft(resolved);
     },
     [controlledDraftEnabled, onDraftValueChange],
+  );
+
+  const setComposerAttachments = React.useCallback(
+    (next: React.SetStateAction<DraftChatAttachment[]>, markChanged = true) => {
+      const resolved =
+        typeof next === 'function'
+          ? (next as (prev: DraftChatAttachment[]) => DraftChatAttachment[])(attachmentsRef.current)
+          : next;
+      if (markChanged && resolved !== attachmentsRef.current) draftRevisionRef.current += 1;
+      attachmentsRef.current = resolved;
+      setAttachments(resolved);
+    },
+    [],
   );
 
   const {
@@ -207,16 +228,20 @@ export function ChatInput({
   }, []);
 
   React.useEffect(() => {
-    if (!controlledDraftEnabled) setUncontrolledDraft('');
+    if (!controlledDraftEnabled) {
+      draftRef.current = '';
+      setUncontrolledDraft('');
+    }
     setAttachmentError(null);
     setComposerFocused(false);
     setCompactVoiceRecording(false);
     // Revoke any preview object URLs.
-    setAttachments((prev) => {
+    setComposerAttachments((prev) => {
       revokeDraftImagePreviewUrls(prev);
       return [];
-    });
-  }, [controlledDraftEnabled, resetKey]);
+    }, false);
+    draftRevisionRef.current = 0;
+  }, [controlledDraftEnabled, resetKey, setComposerAttachments]);
 
   React.useEffect(() => {
     if (!autoFocus) return;
@@ -238,15 +263,16 @@ export function ChatInput({
   });
   const showSeparateStopAction = showStopAction && allowSendWhileWaiting;
   const hasModeHint = modeHint.trim().length > 0;
-  const voiceRecordingCanPauseOrStop = voiceRecordingStatus === 'recording' || voiceRecordingStatus === 'paused';
-  const voiceRecordButtonDisabled =
-    composerLocked ||
-    sending ||
-    voiceActionInFlight;
+  const voiceRecordingCanPauseOrStop =
+    voiceRecordingStatus === 'recording' || voiceRecordingStatus === 'paused';
+  const voiceRecordButtonDisabled = composerLocked || voiceActionInFlight;
   const voicePauseButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const voiceStopButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const trimmed = draft.trim();
-  const sendDisabled = sending || composerLocked || voiceActionInFlight || (trimmed.length === 0 && attachments.length === 0 && !voiceRecordingActive);
+  const sendDisabled =
+    composerLocked ||
+    voiceActionInFlight ||
+    (trimmed.length === 0 && attachments.length === 0 && !voiceRecordingActive);
   const composerExpanded =
     alwaysExpanded ||
     composerFocused ||
@@ -254,7 +280,6 @@ export function ChatInput({
     attachments.length > 0 ||
     Boolean(composerContext) ||
     Boolean(promptError || attachmentError) ||
-    sending ||
     (voiceRecordingActive && !compactVoiceRecording);
   const voiceRecordingLabel =
     voiceRecordingStatus === 'starting'
@@ -317,7 +342,7 @@ export function ChatInput({
 
   function removeAttachment(id: string) {
     setAttachmentError(null);
-    setAttachments((prev) => {
+    setComposerAttachments((prev) => {
       const idx = prev.findIndex((a) => a.id === id);
       if (idx < 0) return prev;
       const next = prev.slice();
@@ -341,7 +366,7 @@ export function ChatInput({
     if (list.length === 0) return;
 
     setAttachmentError(null);
-    setAttachments((prev) => {
+    setComposerAttachments((prev) => {
       const next = prev.slice();
 
       for (const f of list) {
@@ -406,7 +431,7 @@ export function ChatInput({
     if (!text) return;
     const size = textByteLength(text);
     setAttachmentError(null);
-    setAttachments((prev) => {
+    setComposerAttachments((prev) => {
       const textCount = prev.filter((attachment) => attachment.kind === 'text').length;
       const name = makePastedTextAttachmentName(textCount);
       const policy = validateChatAttachments([
@@ -433,14 +458,11 @@ export function ChatInput({
   }
 
   async function submitPromptSnapshot(
-    prompt: string,
-    snapshotAttachments: DraftChatAttachment[],
+    snapshot: ChatComposerDraftSnapshot<DraftChatAttachment>,
     context: ChatSendContext,
     submit: ChatInputProps['onSend'] = onSend,
   ) {
-    if (!prompt && snapshotAttachments.length === 0) return;
-    setDraft('');
-    setAttachments([]);
+    const { prompt, attachments: snapshotAttachments } = snapshot;
     setAttachmentError(null);
     let encoded: ChatAttachmentPayload[] = [];
     try {
@@ -474,21 +496,40 @@ export function ChatInput({
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       setAttachmentError(`Failed to read attachment: ${msg}`);
-      // Restore state (best-effort).
-      setDraft((cur) => (cur.trim().length === 0 ? prompt : cur));
-      setAttachments((cur) => (cur.length === 0 ? snapshotAttachments : cur));
+      restoreSubmissionSnapshot(snapshot);
       return;
     }
 
     const ok = await submit({ prompt, attachments: encoded }, context);
     if (!ok) {
-      // Don't clobber any new text the user started typing.
-      setDraft((cur) => (cur.trim().length === 0 ? prompt : cur));
-      setAttachments((cur) => (cur.length === 0 ? snapshotAttachments : cur));
+      restoreSubmissionSnapshot(snapshot);
     } else {
       // Sent: revoke preview URLs for the snapshot attachments.
       revokeDraftImagePreviewUrls(snapshotAttachments);
     }
+  }
+
+  function takeSubmissionSnapshot(): ChatComposerDraftSnapshot<DraftChatAttachment> | null {
+    const snapshot = takeChatComposerDraftSnapshot<DraftChatAttachment>({
+      draft: draftRef,
+      attachments: attachmentsRef,
+      revision: draftRevisionRef,
+    });
+    if (!snapshot) return null;
+    setDraft('', false);
+    setComposerAttachments([], false);
+    return snapshot;
+  }
+
+  function restoreSubmissionSnapshot(snapshot: ChatComposerDraftSnapshot<DraftChatAttachment>) {
+    const restored = restoreChatComposerDraftSnapshot<DraftChatAttachment>({
+      draft: draftRef,
+      attachments: attachmentsRef,
+      revision: draftRevisionRef,
+      snapshot,
+    });
+    if (restored.draftRestored) setDraft(snapshot.prompt, false);
+    if (restored.attachmentsRestored) setComposerAttachments(snapshot.attachments, false);
   }
 
   function beginVoiceAction(): number | null {
@@ -536,23 +577,25 @@ export function ChatInput({
     context: ChatSendContext,
     submit: ChatInputProps['onSend'] = onSend,
   ) => {
-    if (sending || composerLocked) return;
-    const actionToken = beginVoiceAction();
-    if (actionToken == null) return;
+    if (composerLocked) return;
     void (async () => {
-      try {
-        const promptDraft = voiceRecordingActive ? await stopVoiceRecordingAndAppendDraft(actionToken) : draftRef.current;
-        if (promptDraft == null) return;
-        const snapshotAttachments = attachmentsRef.current.slice();
-        const prompt = promptDraft.trim();
-        if (voiceRecordingActive && !prompt && snapshotAttachments.length === 0) {
+      if (voiceRecordingActive) {
+        const actionToken = beginVoiceAction();
+        if (actionToken == null) return;
+        try {
+          const promptDraft = await stopVoiceRecordingAndAppendDraft(actionToken);
+          if (promptDraft == null) return;
+        } finally {
+          endVoiceAction(actionToken);
+        }
+        if (!draftRef.current.trim() && attachmentsRef.current.length === 0) {
           setAttachmentError((current) => current || 'No speech detected.');
           return;
         }
-        await submitPromptSnapshot(prompt, snapshotAttachments, context, submit);
-      } finally {
-        endVoiceAction(actionToken);
       }
+      const snapshot = takeSubmissionSnapshot();
+      if (!snapshot) return;
+      await submitPromptSnapshot(snapshot, context, submit);
     })();
   };
 
@@ -565,11 +608,9 @@ export function ChatInput({
         ? voiceRecordingStatus === 'transcribing'
           ? 'Transcribing...'
           : 'Sending...'
-        : sending
-          ? 'Sending...'
-          : waiting && !allowSendWhileWaiting
-            ? 'Waiting...'
-            : 'Send';
+        : waiting && !allowSendWhileWaiting
+          ? 'Waiting...'
+          : 'Send';
 
   return (
     <div

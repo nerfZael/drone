@@ -2403,9 +2403,8 @@ export function AssistantDock({
               draftValue={draft}
               onDraftValueChange={setDraft}
               promptError={attachmentError}
-              sending={scopeSyncBusy}
               waiting={running}
-              disabled={!activeThread}
+              disabled={!activeThread || scopeSyncBusy}
               composerTopAction={composerTopAction}
               composerContext={nativeComposerContext}
               composerControls={nativeComposerControls}

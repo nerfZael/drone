@@ -32,7 +32,6 @@ type GroupMultiChatData = {
 type GroupMultiChatWorkspaceProps = {
   selectedGroupMultiChatData: GroupMultiChatData;
   groupBroadcastPromptError: string | null;
-  groupBroadcastSending: boolean;
   onSendGroupBroadcastPrompt: (
     payload: ChatSendPayload,
     context: ChatSendContext,
@@ -67,7 +66,6 @@ type GroupMultiChatWorkspaceProps = {
 export function GroupMultiChatWorkspace({
   selectedGroupMultiChatData,
   groupBroadcastPromptError,
-  groupBroadcastSending,
   onSendGroupBroadcastPrompt,
   onSendPromptInNewChat,
   onCreateQueuedNewChatNow,
@@ -289,9 +287,8 @@ export function GroupMultiChatWorkspace({
           draftValue={broadcastDraftValue}
           onDraftValueChange={(next) => setChatInputDraft(broadcastDraftKey, next)}
           promptError={groupBroadcastPromptError}
-          sending={groupBroadcastSending}
           waiting={false}
-          disabled={groupBroadcastSending || selectedGroupMultiChatData.items.length === 0}
+          disabled={selectedGroupMultiChatData.items.length === 0}
           autoFocus={false}
           modeHint=""
           onSend={onSendGroupBroadcastPrompt}
