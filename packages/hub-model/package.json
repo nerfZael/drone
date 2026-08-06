@@ -22,7 +22,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/write-cjs-package.cjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "bun test tests"
+    "test": "bun run build && node --test tests/node/commonjs-entrypoint.node.cjs && bun test tests"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

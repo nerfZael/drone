@@ -94,6 +94,18 @@ describe('native chat selection state', () => {
     ).toBe('unavailable');
   });
 
+  test('shows a drone startup failure instead of a chat metadata error', () => {
+    expect(
+      chatConfigResolutionState({
+        currentChatIsDraft: false,
+        hasChats: true,
+        metadataAvailable: false,
+        loading: false,
+        startupFailed: true,
+      }),
+    ).toBe('drone-error');
+  });
+
   test('does not turn completed native prompts into generic typing state', () => {
     const sentPrompt = {
       id: 'prompt-1',

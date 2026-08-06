@@ -885,9 +885,12 @@ export function SelectedDroneWorkspace({
     hasChats,
     metadataAvailable: chatRuntimeMetadataAvailable,
     loading: loadingChatInfo,
+    startupFailed: currentDrone.hubPhase === 'error',
   });
   const chatConfigPending = chatConfigResolution === 'loading';
   const chatConfigFailed = chatConfigResolution === 'unavailable';
+  const droneStartupFailed = chatConfigResolution === 'drone-error';
+  const droneStartupError = String(currentDrone.hubMessage ?? currentDrone.statusError ?? '').trim();
   const genericChatActive =
     !nativeChatActive &&
     !chatConfigFailed &&
@@ -2213,7 +2216,24 @@ export function SelectedDroneWorkspace({
                 </div>
               ) : null}
               <div className="relative flex min-h-0 flex-1 flex-col">
-                {chatConfigPending ? (
+                {droneStartupFailed ? (
+                  <EmptyState
+                    icon={<IconChat className="h-8 w-8 text-[var(--red)]" />}
+                    title="Drone failed to start"
+                    description="The runtime failed before this chat could be created."
+                    actions={
+                      droneStartupError ? (
+                        <button
+                          type="button"
+                          className="inline-flex h-9 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-softest)] px-4 dh-type-control text-[var(--fg-secondary)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)]"
+                          onClick={() => openDroneErrorModal(currentDrone, droneStartupError, null)}
+                        >
+                          View startup error
+                        </button>
+                      ) : null
+                    }
+                  />
+                ) : chatConfigPending ? (
                   <ChatSurfaceLoadingView
                     resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}:loading`}
                     droneName={currentDrone.name}

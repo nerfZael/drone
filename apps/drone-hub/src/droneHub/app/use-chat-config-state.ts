@@ -101,6 +101,7 @@ export function useChatConfigState({
   const hasSelectedDroneSummary = selectedDroneSummary !== null;
   const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
   const selectedDroneProvisioning = isDroneStartingOrSeeding(selectedDroneHubPhase);
+  const selectedDroneStartupFailed = selectedDroneHubPhase === 'error';
   const selectedDroneHasChatList = Array.isArray(selectedDroneSummary?.chats);
   const selectedDroneRuntime =
     String(selectedDroneSummary?.runtime ?? '')
@@ -137,6 +138,12 @@ export function useChatConfigState({
       return;
     }
     if (selectedDroneProvisioning) {
+      setChatInfo(null);
+      setChatInfoError(null);
+      setLoadingChatInfo(false);
+      return;
+    }
+    if (selectedDroneStartupFailed) {
       setChatInfo(null);
       setChatInfoError(null);
       setLoadingChatInfo(false);
@@ -179,6 +186,7 @@ export function useChatConfigState({
     hasSelectedDroneSummary,
     selectedDroneHubPhase,
     selectedDroneProvisioning,
+    selectedDroneStartupFailed,
     selectedDroneHasChatList,
     selectedDroneChatsKey,
   ]);
