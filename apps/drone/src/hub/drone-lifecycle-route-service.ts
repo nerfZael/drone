@@ -17,7 +17,6 @@ function createDroneLifecycleServiceHandler(
   deps: DroneLifecycleRouteDependencies,
 ): LegacyRouteHandler {
   const {
-    DRONE_DISPLAY_NAME_MAX_LEN,
     archiveDroneById,
     archiveRetentionMs,
     cleanupExpiredArchivedChats,
@@ -44,16 +43,14 @@ function createDroneLifecycleServiceHandler(
     normalizeArchiveRuntimePolicy,
     normalizeChatName,
     normalizeDisabledRepoKeys,
-    normalizeDroneDisplayName,
     normalizeDroneIdentity,
     normalizeDroneRuntime,
     normalizeEnvVarMap,
-    notifyCanonicalDroneRegistryWrite,
     nowIso,
     parseIsoToMs,
     removeArchivedDroneById,
     removeDroneTreeById,
-    renameDroneDisplayName,
+    renameDrone,
     resolveArchiveDeleteAtIso,
     resolveDroneCliPath,
     resolveDroneOrPendingForReadRef,
@@ -189,158 +186,33 @@ function createDroneLifecycleServiceHandler(
         parts[3] === 'rename'
       ) {
         const droneRef = decodeURIComponent(parts[2]);
-        const regSnapshot: any = await loadRegistry();
-        const found = findDroneIdByRef(regSnapshot, droneRef);
-        if (!found) {
-          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
-          return;
-        }
-        const foundKey = found.id;
-        const currentEntry =
-          (found.kind === 'real'
-            ? regSnapshot?.drones?.[foundKey]
-            : regSnapshot?.pending?.[foundKey]) ?? null;
-        const droneId =
-          normalizeDroneIdentity((currentEntry as any)?.id) ||
-          normalizeDroneIdentity(foundKey) ||
-          foundKey;
-        const oldName = String(currentEntry?.name ?? droneRef).trim() || droneRef;
-
         let body: any = null;
         try {
           body = await readJsonBody(req);
         } catch (e: any) {
           const msg = e?.message ?? String(e);
           hubLog('warn', 'drone rename rejected: invalid request body', {
-            droneId,
             droneRef,
-            oldName,
             error: msg,
           });
           json(res, 400, { ok: false, error: msg });
           return;
         }
-
-        let newName = '';
-        let expectedName: string | undefined;
         try {
-          newName = normalizeDroneDisplayName(body?.newName);
-          if (Object.prototype.hasOwnProperty.call(body ?? {}, 'expectedName')) {
-            expectedName = normalizeDroneDisplayName(body?.expectedName);
-          }
-        } catch (e: any) {
-          const msg = e?.message ?? String(e);
-          const sourceRaw = typeof body?.source === 'string' ? body.source.trim() : '';
-          const source = sourceRaw ? sourceRaw.slice(0, 64) : null;
-          const attemptRaw = Number(body?.attempt);
-          const attempt =
-            Number.isFinite(attemptRaw) && attemptRaw > 0 ? Math.floor(attemptRaw) : null;
-          const suggestedBaseRaw =
-            typeof body?.suggestedBase === 'string' ? body.suggestedBase.trim() : '';
-          const suggestedBase = suggestedBaseRaw
-            ? suggestedBaseRaw.slice(0, DRONE_DISPLAY_NAME_MAX_LEN)
-            : null;
-          hubLog('warn', 'drone rename rejected: invalid target name', {
-            droneId,
+          const result = await renameDrone({
             droneRef,
-            oldName,
-            attemptedName: String(body?.newName ?? ''),
-            source,
-            attempt,
-            suggestedBase,
-            error: msg,
+            newName: body?.newName,
+            ...(Object.prototype.hasOwnProperty.call(body ?? {}, 'expectedName')
+              ? { expectedName: body.expectedName }
+              : {}),
+            source: body?.source,
+            attempt: body?.attempt,
+            suggestedBase: body?.suggestedBase,
           });
-          json(res, 400, { ok: false, error: msg });
+          json(res, 200, result);
           return;
-        }
-        const sourceRaw = typeof body?.source === 'string' ? body.source.trim() : '';
-        const source = sourceRaw ? sourceRaw.slice(0, 64) : null;
-        const attemptRaw = Number(body?.attempt);
-        const attempt =
-          Number.isFinite(attemptRaw) && attemptRaw > 0 ? Math.floor(attemptRaw) : null;
-        const suggestedBaseRaw =
-          typeof body?.suggestedBase === 'string' ? body.suggestedBase.trim() : '';
-        const suggestedBase = suggestedBaseRaw
-          ? suggestedBaseRaw.slice(0, DRONE_DISPLAY_NAME_MAX_LEN)
-          : null;
-        if (source || attempt != null || suggestedBase) {
-          hubLog('info', 'drone rename requested', {
-            droneId,
-            oldName,
-            newName,
-            source,
-            attempt,
-            suggestedBase,
-          });
-        }
-        if (oldName === newName) {
-          hubLog('info', 'drone rename no-op (same name)', {
-            droneId,
-            oldName,
-            newName,
-            source,
-            attempt,
-            suggestedBase,
-          });
-          json(res, 200, {
-            ok: true,
-            id: droneId,
-            oldName,
-            newName,
-            renamed: false,
-            reason: 'same-name',
-          });
-          return;
-        }
-        const conflictingReal = Object.entries(regSnapshot?.drones ?? {}).find(
-          ([key, entry]: [string, any]) =>
-            (normalizeDroneIdentity(entry?.id) || key) !== droneId &&
-            String(entry?.name ?? '').trim() === newName,
-        );
-        const conflictingPending = Object.entries(regSnapshot?.pending ?? {}).find(
-          ([key, entry]: [string, any]) =>
-            (normalizeDroneIdentity(entry?.id) || key) !== droneId &&
-            String(entry?.name ?? '').trim() === newName,
-        );
-        if (conflictingReal || conflictingPending) {
-          const status = 409;
-          const error = `${conflictingPending ? 'pending ' : ''}drone already exists: ${newName}`;
-          hubLog('warn', 'drone rename failed', {
-            droneId,
-            oldName,
-            newName,
-            source,
-            attempt,
-            suggestedBase,
-            status,
-            error,
-          });
-          json(res, status, { ok: false, error });
-          return;
-        }
-        try {
-          await renameDroneDisplayName({
-            droneId,
-            state: found.kind,
-            name: newName,
-            ...(expectedName !== undefined ? { expectedName } : {}),
-          });
         } catch (error: any) {
-          const status = error?.code === 'DRONE_RENAME_PRECONDITION_FAILED' ? 409 : 500;
-          hubLog(
-            status === 409 ? 'info' : 'warn',
-            status === 409 ? 'drone rename skipped' : 'drone rename failed',
-            {
-              droneId,
-              oldName,
-              newName,
-              source,
-              attempt,
-              suggestedBase,
-              status,
-              error: String(error?.message ?? error),
-            },
-          );
+          const status = Number.isInteger(error?.status) ? Number(error.status) : 500;
           json(res, status, {
             ok: false,
             error: String(error?.message ?? error),
@@ -348,18 +220,6 @@ function createDroneLifecycleServiceHandler(
           });
           return;
         }
-
-        notifyCanonicalDroneRegistryWrite();
-        hubLog('info', 'drone renamed', {
-          droneId,
-          oldName,
-          newName,
-          source,
-          attempt,
-          suggestedBase,
-        });
-        json(res, 200, { ok: true, id: droneId, oldName, newName, renamed: true });
-        return;
       }
 
       // POST /api/drones/:id/publish

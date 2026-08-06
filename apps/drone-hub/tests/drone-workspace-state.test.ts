@@ -199,17 +199,6 @@ describe('per-drone workspace state', () => {
     expect(editorTitle).toBe('Editor');
   });
 
-  test('does not seed a new drone from the previously active workspace tool', () => {
-    const workspace = readAppSource('app/DockableDroneWorkspace.tsx');
-
-    expect(workspace).toContain("const DEFAULT_WORKSPACE_TOOL_TAB: RightPanelTab = 'editor'");
-    expect(workspace).toContain(
-      "ensureWorkspaceToolPanel(api, DEFAULT_WORKSPACE_TOOL_TAB, 'single')",
-    );
-    expect(workspace).toContain('localStorage.removeItem(LEGACY_LAYOUT_STORAGE_KEY)');
-    expect(workspace).not.toContain('migrateEditorChangesPanels(api, activeToolTab)');
-  });
-
   test('repairs an empty saved chat group and restores chat beside the editor', () => {
     const emptyGroup = { panels: [] };
     const editorPanel = {

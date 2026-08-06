@@ -4,14 +4,18 @@ export {
   applySidebarReorder as applyMobileSidebarReorder,
   firstSidebarInsertionTarget as firstMobileSidebarInsertionTarget,
   reorderSidebarEntries as reorderMobileSidebarEntries,
-  sidebarLayoutPatch as mobileSidebarPreferencePatch,
   sidebarMoveDestination as mobileSidebarMoveDestination,
 } from '@drone/hub-model/sidebar';
 
+import type { SidebarMoveIntent, SidebarSetPinnedIntent } from '@drone/hub-model/sidebar';
+
 export type {
   SidebarDropPlacement as MobileSidebarDropPlacement,
-  SidebarLayoutPatch as MobileSidebarPreferencePatch,
-  SidebarMoveIntent as MobileSidebarMutationRequest,
   SidebarMoveIntoFolderIntent as MobileSidebarMoveIntoFolderRequest,
   SidebarReorderIntent as MobileSidebarReorderRequest,
 } from '@drone/hub-model/sidebar';
+
+export type MobileSidebarMutationRequest = Exclude<
+  SidebarMoveIntent,
+  SidebarSetPinnedIntent
+>;

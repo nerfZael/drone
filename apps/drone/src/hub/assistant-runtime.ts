@@ -12,6 +12,7 @@ import {
 } from './assistant/assistant-config';
 import { createInProcessDroneHubMcpClient } from './assistant/in-process-drone-hub-mcp';
 import type { McpTokenIdentity } from './mcp-tokens';
+import type { RenameDroneCommand } from './drone-rename-command';
 import { AssistantArtifactsTarget } from './assistant/targets/assistant-artifacts-target';
 import { DroneWorkspaceTarget } from './assistant/targets/workspace-targets';
 import {
@@ -39,6 +40,8 @@ export interface AssistantRuntimeDependencies {
   normalizeDroneIdentity: (value: unknown) => string;
   nowIso: () => string;
   onNativePromptQueueChanged?: (owner: { droneId: string; chatName: string }) => void;
+  onNativeThreadStateChanged?: (owner: { droneId: string; chatName: string }) => void;
+  renameDrone?: RenameDroneCommand;
   summarizeDroneActivity: (entry: any) => {
     lastActivityAt: string | null;
     lastMessageAt: string | null;
@@ -54,6 +57,8 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     normalizeDroneIdentity,
     nowIso,
     onNativePromptQueueChanged,
+    onNativeThreadStateChanged,
+    renameDrone,
     summarizeDroneActivity,
   } = deps;
   const {
@@ -486,6 +491,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         allowedWriteDroneRefs: refsFor(writableDrones),
         allowedDroneIds: readableDrones.map((drone: any) => String(drone.id ?? '')).filter(Boolean),
         principal: nativePrincipal,
+        renameDrone,
         ...(nativePrincipal ? { nativeThreadId: threadId } : {}),
       });
       const droneTargets = workspaceDrones
@@ -869,6 +875,16 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         .then((owner) => {
           if (!owner) return;
           if (event.reason === 'canonical_history_changed') onNativePromptQueueChanged?.(owner);
+          if (
+            event.reason === 'runtime_started' ||
+            event.reason === 'approval_pending' ||
+            event.reason === 'approval_recovery_required' ||
+            event.reason === 'approval_resolved' ||
+            event.reason === 'runtime_finished' ||
+            event.reason === 'runtime_error'
+          ) {
+            onNativeThreadStateChanged?.(owner);
+          }
           return deviceMesh.broadcastDroneChatChange({
             sequence: event.sequence,
             reason: event.reason,

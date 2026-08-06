@@ -71,17 +71,6 @@ export function createRenameDroneCommand(
       deps.normalizeDroneIdentity(found.id) ||
       found.id;
     const oldName = String(currentEntry?.name ?? droneRef).trim() || droneRef;
-    let newName = '';
-    let expectedName: string | undefined;
-    try {
-      newName = deps.normalizeDisplayName(input.newName);
-      if (input.expectedName !== undefined) {
-        expectedName = deps.normalizeDisplayName(input.expectedName);
-      }
-    } catch (error: any) {
-      throw commandError(String(error?.message ?? error), 400, 'DRONE_RENAME_INVALID_NAME');
-    }
-
     const sourceRaw = String(input.source ?? '').trim();
     const source = sourceRaw ? sourceRaw.slice(0, 64) : null;
     const attemptRaw = Number(input.attempt);
@@ -91,6 +80,27 @@ export function createRenameDroneCommand(
     const suggestedBase = suggestedBaseRaw
       ? suggestedBaseRaw.slice(0, deps.displayNameMaxLength)
       : null;
+    let newName = '';
+    let expectedName: string | undefined;
+    try {
+      newName = deps.normalizeDisplayName(input.newName);
+      if (input.expectedName !== undefined) {
+        expectedName = deps.normalizeDisplayName(input.expectedName);
+      }
+    } catch (error: any) {
+      const message = String(error?.message ?? error);
+      deps.log('warn', 'drone rename rejected: invalid target name', {
+        droneId,
+        droneRef,
+        oldName,
+        attemptedName: String(input.newName ?? ''),
+        source,
+        attempt,
+        suggestedBase,
+        error: message,
+      });
+      throw commandError(message, 400, 'DRONE_RENAME_INVALID_NAME');
+    }
     const logDetails = { droneId, oldName, newName, source, attempt, suggestedBase };
 
     if (source || attempt != null || suggestedBase) {

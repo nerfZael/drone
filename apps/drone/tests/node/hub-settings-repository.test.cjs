@@ -19,7 +19,6 @@ const {
   clearStoredProviderApiKey,
   resolveDeleteActionSettingsResponse,
   resolveEffectiveProviderApiKeySettings,
-  updatePinnedDronePreference,
   updateStoredUserTimeZone,
   upsertStoredDeleteActionSettings,
   upsertStoredProviderApiKey,
@@ -347,27 +346,6 @@ describe('canonical UI preferences settings', () => {
     assert.equal(resolved.uiPreferences.repoBranchSource, 'remote');
     assert.equal(resolved.uiPreferences.repoCreateRemoteBranch, 'origin/feature/voice');
     assert.equal(readRegistryJsonFromSqlite(), registryBefore);
-  });
-
-  test('updates one pinned drone without replacing other UI preferences', async () => {
-    useTempDroneDataDir('pin-drone');
-    await upsertStoredUiPreferencesSettings({
-      sidebarGroupingMode: 'repos',
-      pinnedDroneIds: ['drone-a'],
-      autoDelete: true,
-    });
-
-    const pinned = await updatePinnedDronePreference('drone-b', true);
-    assert.deepEqual(pinned.uiPreferences.pinnedDroneIds, ['drone-a', 'drone-b']);
-    assert.equal(pinned.uiPreferences.sidebarGroupingMode, 'repos');
-    assert.equal(pinned.uiPreferences.autoDelete, true);
-
-    const unpinned = await updatePinnedDronePreference('drone-a', false);
-    assert.deepEqual(unpinned.uiPreferences.pinnedDroneIds, ['drone-b']);
-    await assert.rejects(
-      () => updatePinnedDronePreference('  ', true),
-      UiPreferencesSettingsValidationError,
-    );
   });
 
   test('offers additive version-based conflict handling while preserving unconditional writes', async () => {

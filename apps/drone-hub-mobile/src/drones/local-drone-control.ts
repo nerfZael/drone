@@ -6,11 +6,10 @@ import { fromByteArray } from 'base64-js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import {
   DRONE_CONTROL_CAPABILITY,
-  applySidebarMove,
-  normalizeSidebarLayout,
   parseSidebarMoveCommandRequest,
   type DroneControlOperation,
 } from '@drone/device-protocol';
+import { applySidebarMove, normalizeSidebarLayout } from '@drone/hub-model/sidebar';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { useMesh } from '../mesh/MeshContext';
 import { loadLocalAssistantSettings } from '../local-assistant/local-assistant-settings';
@@ -250,49 +249,6 @@ function useLocalDroneControlValue() {
         if (!thread) throw new Error('Phone drone chat was not found');
         return { drone, chatName, thread };
       };
-      const writeSidebarOrder = async () => {
-        const sidebar =
-          payload.sidebar && typeof payload.sidebar === 'object' && !Array.isArray(payload.sidebar)
-            ? (payload.sidebar as Record<string, unknown>)
-            : {};
-        const hasNodeOrder = Object.prototype.hasOwnProperty.call(
-          sidebar,
-          'sidebarNodeOrderByParent',
-        );
-        const hasChatOrder = Object.prototype.hasOwnProperty.call(
-          sidebar,
-          'sidebarChatOrderByDrone',
-        );
-        const next = {
-          sidebarNodeOrderByParent: hasNodeOrder
-            ? localStringListMap(sidebar.sidebarNodeOrderByParent)
-            : sidebarOrderRef.current.sidebarNodeOrderByParent,
-          sidebarChatOrderByDrone: hasChatOrder
-            ? localStringListMap(sidebar.sidebarChatOrderByDrone)
-            : sidebarOrderRef.current.sidebarChatOrderByDrone,
-        };
-        const nextPinnedDroneIds = Object.prototype.hasOwnProperty.call(sidebar, 'pinnedDroneIds')
-          ? [
-              ...new Set<string>(
-                (Array.isArray(sidebar.pinnedDroneIds) ? sidebar.pinnedDroneIds : [])
-                  .map((id: unknown) => String(id ?? '').trim())
-                  .filter(Boolean),
-              ),
-            ]
-          : pinnedDroneIdsRef.current;
-        await Promise.all([
-          AsyncStorage.setItem(LOCAL_SIDEBAR_ORDER_KEY, JSON.stringify(next)),
-          AsyncStorage.setItem(LOCAL_PINNED_DRONES_KEY, JSON.stringify(nextPinnedDroneIds)),
-        ]);
-        sidebarOrderRef.current = next;
-        pinnedDroneIdsRef.current = nextPinnedDroneIds;
-        setPinnedDroneIds(nextPinnedDroneIds);
-        return {
-          ok: true,
-          uiPreferences: { ...next, pinnedDroneIds: nextPinnedDroneIds },
-        };
-      };
-
       if (operation === 'drones.list') {
         if (payload.createModelAgent === 'native') {
           const settings = await loadLocalAssistantSettings();
@@ -358,24 +314,16 @@ function useLocalDroneControlValue() {
       if (operation === 'drone.create.container') {
         throw new Error('Container drones are not available on this phone');
       }
-      if (operation === 'drone.pin.update') {
-        const droneId = String(payload.droneId ?? '').trim();
-        if (!dronesRef.current.some((drone) => drone.id === droneId)) {
-          throw new Error('Phone drone was not found');
-        }
-        const next =
-          payload.pinned === true
-            ? pinnedDroneIdsRef.current.includes(droneId)
-              ? pinnedDroneIdsRef.current
-              : [...pinnedDroneIdsRef.current, droneId]
-            : pinnedDroneIdsRef.current.filter((id) => id !== droneId);
-        await AsyncStorage.setItem(LOCAL_PINNED_DRONES_KEY, JSON.stringify(next));
-        pinnedDroneIdsRef.current = next;
-        setPinnedDroneIds(next);
-        return { ok: true, uiPreferences: { pinnedDroneIds: next } };
-      }
       if (operation === 'sidebar.move') {
         const command = parseSidebarMoveCommandRequest(payload);
+        if (
+          command.intent.kind === 'set-pinned' &&
+          command.intent.droneIds.some(
+            (droneId: string) => !dronesRef.current.some((drone) => drone.id === droneId),
+          )
+        ) {
+          throw new Error('Phone drone was not found');
+        }
         const write = writeRef.current.then(async () => {
           const currentLayout = normalizeSidebarLayout({
             ...sidebarOrderRef.current,
@@ -415,49 +363,6 @@ function useLocalDroneControlValue() {
           () => undefined,
         );
         return await write;
-      }
-      if (operation === 'sidebar.order.update') {
-        return await writeSidebarOrder();
-      }
-      if (operation === 'sidebar.item.move') {
-        const itemKind = String(payload.itemKind ?? '').trim();
-        const targetGroup = String(payload.targetGroup ?? '').trim();
-        if (itemKind === 'drone') {
-          const droneId = String(payload.droneId ?? '').trim();
-          if (!dronesRef.current.some((drone) => drone.id === droneId)) {
-            throw new Error('Phone drone was not found');
-          }
-          await replaceDrones(
-            dronesRef.current.map((drone) =>
-              drone.id === droneId ? { ...drone, group: targetGroup || null } : drone,
-            ),
-          );
-          const orderResult = await writeSidebarOrder();
-          return { ...orderResult, moved: [droneId], group: targetGroup || null };
-        }
-        if (itemKind !== 'folder') throw new Error('Item must be a drone or group.');
-        const sourceGroup = String(payload.sourceGroup ?? '').trim();
-        const nextGroup = String(payload.nextGroup ?? '').trim();
-        if (!sourceGroup || !nextGroup)
-          throw new Error('Source and destination groups are required.');
-        if (targetGroup === sourceGroup || targetGroup.startsWith(`${sourceGroup}/`)) {
-          throw new Error('A group cannot be moved into itself or its subgroup.');
-        }
-        await replaceDrones(
-          dronesRef.current.map((drone) => {
-            const group = String(drone.group ?? '').trim();
-            if (group !== sourceGroup && !group.startsWith(`${sourceGroup}/`)) return drone;
-            return {
-              ...drone,
-              group:
-                group === sourceGroup
-                  ? nextGroup
-                  : `${nextGroup}/${group.slice(sourceGroup.length + 1)}`,
-            };
-          }),
-        );
-        const orderResult = await writeSidebarOrder();
-        return { ...orderResult, sourceGroup, group: nextGroup };
       }
       if (operation === 'drone.create.host') {
         const name = uniqueDroneName(dronesRef.current, payload.name);

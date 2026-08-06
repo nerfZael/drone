@@ -5,7 +5,6 @@ import {
   applyOptimisticMobileSidebarMove,
   firstMobileSidebarInsertionTarget,
   mobileSidebarMoveDestination,
-  mobileSidebarPreferencePatch,
   reorderMobileSidebarEntries,
 } from '../src/drones/mobile-sidebar-reorder';
 import {
@@ -18,43 +17,6 @@ function order(overrides: Partial<MobileDroneSidebarOrder> = {}): MobileDroneSid
 }
 
 describe('mobile sidebar reorder', () => {
-  test('writes only the preference field changed by each drag operation', () => {
-    const current = order({
-      sidebarNodeOrderByParent: { root: ['drone:a'] },
-      sidebarChatOrderByDrone: { a: ['default'] },
-      pinnedDroneIds: ['a'],
-    });
-    expect(
-      mobileSidebarPreferencePatch(current, {
-        kind: 'tree-entry',
-        parentId: 'root',
-        siblingNodeIds: ['drone:a'],
-        activeNodeId: 'drone:a',
-        overNodeId: 'drone:b',
-        placement: 'after',
-      }),
-    ).toEqual({ sidebarNodeOrderByParent: { root: ['drone:a'] } });
-    expect(
-      mobileSidebarPreferencePatch(current, {
-        kind: 'chat',
-        droneId: 'a',
-        chatNames: ['default'],
-        activeChatName: 'default',
-        overChatName: 'review',
-        placement: 'after',
-      }),
-    ).toEqual({ sidebarChatOrderByDrone: { a: ['default'] } });
-    expect(
-      mobileSidebarPreferencePatch(current, {
-        kind: 'pinned-drone',
-        visibleDroneIds: ['a'],
-        activeDroneId: 'a',
-        overDroneId: 'b',
-        placement: 'after',
-      }),
-    ).toEqual({ pinnedDroneIds: ['a'] });
-  });
-
   test('uses the first child other than the active node for top insertion', () => {
     expect(
       firstMobileSidebarInsertionTarget(['drone:host', 'drone:first'], 'drone:host'),

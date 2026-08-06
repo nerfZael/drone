@@ -1,8 +1,10 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type {
   ResourceSubscriptionSettings,
   ResourceSubscriptionSettingsResponse,
 } from './settings-types';
+import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsPostMutation, useSettingsQuery } from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -11,52 +13,44 @@ export type ResourceSubscriptionSettingsDraft = Record<
   string
 > & { enabled: boolean };
 
-export type UseResourceSubscriptionSettingsResult = {
-  settings: ResourceSubscriptionSettingsResponse | null;
-  draft: ResourceSubscriptionSettingsDraft | null;
-  loading: boolean;
-  saving: boolean;
-  dirty: boolean;
-  error: string | null;
-  notice: string | null;
-  setDraft: React.Dispatch<React.SetStateAction<ResourceSubscriptionSettingsDraft | null>>;
-  load: () => Promise<void>;
-  save: () => Promise<void>;
-};
+export type UseResourceSubscriptionSettingsResult = ReturnType<typeof useResourceSubscriptionSettings>;
 
 export function useResourceSubscriptionSettings(
   requestJson: RequestJsonFn,
-): UseResourceSubscriptionSettingsResult {
-  const [settings, setSettings] = React.useState<ResourceSubscriptionSettingsResponse | null>(null);
+) {
+  const queryClient = useQueryClient();
+  const queryKey = settingsQueryKey('resource-subscriptions');
+  const query = useSettingsQuery<ResourceSubscriptionSettingsResponse>(
+    requestJson,
+    queryKey,
+    '/api/resource-subscriptions/settings',
+  );
   const [draft, setDraft] = React.useState<ResourceSubscriptionSettingsDraft | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const dirty = Boolean(
-    settings && draft && !sameDraft(draft, toDraft(settings.settings)),
+    query.data && draft && !sameDraft(draft, toDraft(query.data.settings)),
   );
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const response = await requestJson<ResourceSubscriptionSettingsResponse>(
-        '/api/resource-subscriptions/settings',
-      );
-      setSettings(response);
-      setDraft(toDraft(response.settings));
-    } catch (loadError: any) {
-      setError(loadError?.message ?? String(loadError));
-    } finally {
-      setLoading(false);
-    }
-  }, [requestJson]);
+  const applySettings = React.useCallback((data: ResourceSubscriptionSettingsResponse) => {
+    setDraft(toDraft(data.settings));
+  }, []);
 
   React.useEffect(() => {
-    void load();
-  }, [load]);
+    if (query.data) applySettings(query.data);
+  }, [applySettings, query.data]);
+
+  const load = React.useCallback(async () => {
+    setError(null);
+    setNotice(null);
+    const { data } = await query.refetch();
+    if (data) applySettings(data);
+  }, [applySettings, query.refetch]);
+
+  const saveMutation = useSettingsPostMutation<
+    ResourceSubscriptionSettingsResponse,
+    { settings: ResourceSubscriptionSettings }
+  >(requestJson, '/api/resource-subscriptions/settings');
 
   const save = React.useCallback(async () => {
     if (!draft) return;
@@ -65,29 +59,30 @@ export function useResourceSubscriptionSettings(
       setError('Each subscription setting must be a whole number within the range shown.');
       return;
     }
-    setSaving(true);
     setError(null);
     setNotice(null);
     try {
-      const response = await requestJson<ResourceSubscriptionSettingsResponse>(
-        '/api/resource-subscriptions/settings',
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ settings: parsed }),
-        },
-      );
-      setSettings(response);
-      setDraft(toDraft(response.settings));
+      const response = await saveMutation.mutateAsync({ settings: parsed });
+      queryClient.setQueryData(queryKey, response);
+      applySettings(response);
       setNotice('Saved resource subscription settings.');
-    } catch (saveError: any) {
-      setError(saveError?.message ?? String(saveError));
-    } finally {
-      setSaving(false);
+    } catch (saveError) {
+      setError(settingsErrorMessage(saveError));
     }
-  }, [draft, requestJson]);
+  }, [applySettings, draft, queryClient, queryKey, saveMutation]);
 
-  return { settings, draft, loading, saving, dirty, error, notice, setDraft, load, save };
+  return {
+    settings: query.data ?? null,
+    draft,
+    loading: query.isFetching,
+    saving: saveMutation.isPending,
+    dirty,
+    error: settingsQueryError(error, false, query),
+    notice,
+    setDraft,
+    load,
+    save,
+  };
 }
 
 function sameDraft(

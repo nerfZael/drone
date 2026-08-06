@@ -11,6 +11,12 @@ import {
   UI_PREFERENCES_SNAPSHOT_EVENT,
   type UiPreferencesSnapshotEventDetail,
 } from './ui-preferences-sync-event';
+import {
+  applySidebarMove,
+  normalizeSidebarLayout,
+  sidebarLayoutPatch,
+  type SidebarMoveIntent,
+} from '@drone/hub-model/sidebar';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -21,10 +27,12 @@ type UseUiPreferencesSettingsArgs = {
 };
 
 export type UseUiPreferencesSettingsResult = {
+  uiPreferencesReady: boolean;
   reloadUiPreferences: () => Promise<void>;
   reloadPinnedDrones: () => Promise<void>;
   setDronePinned: (droneId: string, pinned: boolean) => Promise<boolean>;
   setDronesPinned: (droneIds: readonly string[], pinned: boolean) => Promise<boolean>;
+  moveSidebar: (intent: SidebarMoveIntent) => Promise<boolean>;
 };
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -329,7 +337,11 @@ export function useUiPreferencesSettings({
   const lastSavedSerializedRef = React.useRef('');
   const lastSavedSnapshotRef = React.useRef<UiPreferencesSnapshot | null>(null);
   const lastSavedVersionRef = React.useRef<number | null>(null);
-  const pinWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const sidebarCommandQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const pendingSidebarCommandsRef = React.useRef(0);
+  const sidebarCommandSeqRef = React.useRef(0);
+  const [sidebarCommandRevision, setSidebarCommandRevision] = React.useState(0);
+  const [uiPreferencesReady, setUiPreferencesReady] = React.useState(false);
   const saveSeqRef = React.useRef(0);
   const saveTimeoutRef = React.useRef<number | null>(null);
 
@@ -453,7 +465,9 @@ export function useUiPreferencesSettings({
     return () => window.removeEventListener(UI_PREFERENCES_SNAPSHOT_EVENT, handleSnapshot);
   }, [applyUiPreferencesSnapshot]);
 
-  const reloadUiPreferences = React.useCallback(async () => {
+  const reloadUiPreferences = React.useCallback(async (options?: {
+    discardSidebarIntent?: SidebarMoveIntent;
+  }) => {
     const wasReady = readyRef.current;
     const currentSnapshot = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
     const previousBackendSnapshot = lastSavedSnapshotRef.current;
@@ -472,6 +486,15 @@ export function useUiPreferencesSettings({
             ? localStorage.getItem(profileStorageKey('droneHub.ui'))
             : null,
       });
+      if (options?.discardSidebarIntent) {
+        Object.assign(
+          nextSnapshot,
+          sidebarLayoutPatch(
+            normalizeSidebarLayout(backendSnapshot),
+            options.discardSidebarIntent,
+          ),
+        );
+      }
       lastSavedSnapshotRef.current = backendSnapshot;
       lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(backendSnapshot);
       lastSavedVersionRef.current = data.version;
@@ -480,6 +503,7 @@ export function useUiPreferencesSettings({
       // Keep the local snapshot when the backend copy is unavailable.
     } finally {
       readyRef.current = true;
+      setUiPreferencesReady(true);
     }
   }, [applyUiPreferences, cancelPendingSave, requestJson]);
 
@@ -489,6 +513,7 @@ export function useUiPreferencesSettings({
 
   React.useEffect(() => {
     if (!readyRef.current) return;
+    if (pendingSidebarCommandsRef.current > 0) return;
     const serialized = serializeUiPreferencesSnapshot(snapshot);
     if (serialized === lastSavedSerializedRef.current) return;
     const seq = saveSeqRef.current + 1;
@@ -520,50 +545,78 @@ export function useUiPreferencesSettings({
       if (saveTimeoutRef.current === timeout) saveTimeoutRef.current = null;
       window.clearTimeout(timeout);
     };
-  }, [reloadUiPreferences, requestJson, snapshot]);
+  }, [reloadUiPreferences, requestJson, sidebarCommandRevision, snapshot]);
 
-  const setDronesPinned = React.useCallback(
-    (droneIdsRaw: readonly string[], pinned: boolean): Promise<boolean> => {
-      const droneIds = normalizeOrderedStringList(droneIdsRaw);
-      if (droneIds.length === 0) return Promise.resolve(false);
+  const moveSidebar = React.useCallback(
+    (intent: SidebarMoveIntent): Promise<boolean> => {
       const write = async (): Promise<boolean> => {
+        const before = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
+        const optimisticLayout = applySidebarMove(normalizeSidebarLayout(before), intent);
+        const optimistic = normalizeUiPreferencesSnapshot({
+          ...before,
+          ...sidebarLayoutPatch(optimisticLayout, intent),
+        });
+        pendingSidebarCommandsRef.current += 1;
+        const commandSeq = sidebarCommandSeqRef.current + 1;
+        sidebarCommandSeqRef.current = commandSeq;
+        cancelPendingSave();
+        applyUiPreferences(optimistic);
         try {
-          const data = await requestJson<UiPreferencesSettingsResponse>(
-            '/api/settings/ui-preferences/pinned-drones',
+          const data = await requestJson<UiPreferencesSettingsResponse & { mutationId: string }>(
+            '/api/sidebar/move',
             {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ droneIds, pinned }),
+              body: JSON.stringify({
+                mutationId: `desktop:${Date.now()}:${commandSeq}`,
+                intent,
+              }),
             },
           );
-          const savedPinnedDroneIds = normalizeOrderedStringList(data.uiPreferences.pinnedDroneIds);
-          const backendSnapshot = normalizeUiPreferencesSnapshot(data.uiPreferences);
-          const currentSnapshot = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
+          const backend = normalizeUiPreferencesSnapshot(data.uiPreferences);
+          const current = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
           const reconciled = lastSavedSnapshotRef.current
-            ? mergeUiPreferencesChanges(
-                lastSavedSnapshotRef.current,
-                currentSnapshot,
-                backendSnapshot,
-              )
-            : backendSnapshot;
-          reconciled.pinnedDroneIds = savedPinnedDroneIds;
-          lastSavedSnapshotRef.current = backendSnapshot;
-          lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(backendSnapshot);
+            ? mergeUiPreferencesChanges(lastSavedSnapshotRef.current, current, backend)
+            : backend;
+          Object.assign(
+            reconciled,
+            sidebarLayoutPatch(normalizeSidebarLayout(backend), intent),
+          );
+          lastSavedSnapshotRef.current = backend;
+          lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(backend);
           lastSavedVersionRef.current = data.version;
           applyUiPreferences(reconciled);
           return true;
         } catch {
+          await reloadUiPreferences({ discardSidebarIntent: intent });
           return false;
+        } finally {
+          pendingSidebarCommandsRef.current = Math.max(
+            0,
+            pendingSidebarCommandsRef.current - 1,
+          );
+          if (pendingSidebarCommandsRef.current === 0) {
+            setSidebarCommandRevision((revision) => revision + 1);
+          }
         }
       };
-      const queued = pinWriteQueueRef.current.then(write, write);
-      pinWriteQueueRef.current = queued.then(
+      const queued = sidebarCommandQueueRef.current.then(write, write);
+      sidebarCommandQueueRef.current = queued.then(
         () => undefined,
         () => undefined,
       );
       return queued;
     },
-    [applyUiPreferences, requestJson],
+    [applyUiPreferences, cancelPendingSave, reloadUiPreferences, requestJson],
+  );
+
+  const setDronesPinned = React.useCallback(
+    (droneIdsRaw: readonly string[], pinned: boolean): Promise<boolean> => {
+      const droneIds = normalizeOrderedStringList(droneIdsRaw);
+      if (droneIds.length === 0) return Promise.resolve(false);
+      return moveSidebar({ kind: 'set-pinned', droneIds, pinned });
+    },
+    [moveSidebar],
   );
 
   const setDronePinned = React.useCallback(
@@ -575,5 +628,12 @@ export function useUiPreferencesSettings({
     await reloadUiPreferences();
   }, [reloadUiPreferences]);
 
-  return { reloadUiPreferences, reloadPinnedDrones, setDronePinned, setDronesPinned };
+  return {
+    uiPreferencesReady,
+    reloadUiPreferences,
+    reloadPinnedDrones,
+    setDronePinned,
+    setDronesPinned,
+    moveSidebar,
+  };
 }

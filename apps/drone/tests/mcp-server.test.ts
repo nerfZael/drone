@@ -191,6 +191,49 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('uses the shared rename command without a loopback HTTP request', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-rename-', async () => {
+      const previousFetch = globalThis.fetch;
+      const renames: any[] = [];
+      globalThis.fetch = (async (input) => {
+        throw new Error(`unexpected loopback request: ${String(input)}`);
+      }) as typeof fetch;
+      const client = await createInProcessDroneHubMcpClient({
+        correlationId: 'thread-rename',
+        allowedDroneRefs: ['drone-a'],
+        allowedWriteDroneRefs: ['drone-a'],
+        allowedDroneIds: ['drone-a'],
+        renameDrone: async (input) => {
+          renames.push(input);
+          return {
+            ok: true,
+            id: 'drone-a',
+            oldName: 'Untitled 1',
+            newName: input.newName,
+            renamed: true,
+          };
+        },
+      });
+      try {
+        const result = await client.callTool({
+          name: 'rename_drones',
+          arguments: { drone: 'drone-a', newName: 'Review proposals' },
+        });
+        expect(result.structuredContent).toMatchObject({ ok: true, total: 1 });
+        expect(renames).toEqual([
+          {
+            droneRef: 'drone-a',
+            newName: 'Review proposals',
+            source: 'drone-hub-mcp',
+          },
+        ]);
+      } finally {
+        await client.close();
+        globalThis.fetch = previousFetch;
+      }
+    });
+  });
+
   test('hides speak from new Built-in MCP catalogs when speech is disabled globally', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-speech-disabled-', async () => {
       await upsertStoredSpeechSettings({ enabled: false });

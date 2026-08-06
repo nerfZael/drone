@@ -47,6 +47,8 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     renameDroneTo,
     setDroneBaseImage,
     setDronePinned,
+    moveSidebar,
+    uiPreferencesReady,
     deleteDrone,
     reparentDronesToParent,
     openDroneErrorModal,
@@ -114,6 +116,8 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
       void setDroneBaseImage(droneId);
     },
     onSetDronePinned: setDronePinned,
+    onMoveSidebar: moveSidebar,
+    uiPreferencesReady,
     onDeleteDrone: deleteDrone,
     onOpenDroneErrorModal: openDroneErrorModal,
     onReparentDronesToParent: reparentDronesToParent,
