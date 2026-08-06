@@ -30,6 +30,7 @@ export function droneSummary(drone: any) {
     name: cleanString(drone?.name),
     group: cleanString(drone?.group) || null,
     groupId: cleanString(drone?.groupId) || null,
+    fleetParentId: cleanString(drone?.fleetParentId) || null,
     runtime: cleanString(drone?.runtime, 'container'),
     repoPath: cleanString(drone?.repoPath) || null,
     cwd: cleanString(drone?.cwd) || null,

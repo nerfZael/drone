@@ -214,6 +214,8 @@ export function buildSidebarNodeTree<TDrone extends SidebarTreeDrone>({
   sidebarNodeOrderByParent,
   sidebarGroupCreatedAtByName = {},
   sidebarGroupIdByName = {},
+  repoScopedGroupCreatedAtByPathByRepoGroup = {},
+  repoScopedGroupIdByPathByRepoGroup = {},
 }: BuildSidebarNodeTreeArgs<TDrone>): SidebarNodeTreeModel {
   const nodesById: Record<string, SidebarTreeNode> = {};
   const folderNodeByPath: Record<string, SidebarTreeFolderNode> = {};
@@ -299,14 +301,21 @@ export function buildSidebarNodeTree<TDrone extends SidebarTreeDrone>({
         repoRootNode: repoRoot,
         groupedItems,
         groupOrderIndex,
-        groupCreatedAtByName: sidebarGroupCreatedAtByName,
-        groupIdByName: sidebarGroupIdByName,
+        groupCreatedAtByName:
+          repoScopedGroupCreatedAtByPathByRepoGroup[group.group] ??
+          sidebarGroupCreatedAtByName,
+        groupIdByName:
+          repoScopedGroupIdByPathByRepoGroup[group.group] ?? sidebarGroupIdByName,
         nodesById,
         childIdsByParentDraft,
       });
       for (const [actualGroupPath, rawItems] of groupedItems) {
-        const repoScopedGroupId = String(rawItems.find((item) => String(item.groupId ?? '').trim())?.groupId ?? '').trim()
-          || sidebarGroupIdByName[actualGroupPath];
+        const repoScopedGroupId =
+          String(
+            rawItems.find((item) => String(item.groupId ?? '').trim())?.groupId ?? '',
+          ).trim() ||
+          repoScopedGroupIdByPathByRepoGroup[group.group]?.[actualGroupPath] ||
+          sidebarGroupIdByName[actualGroupPath];
         const orderedItems = orderSidebarEntries(
           rawItems,
           sidebarDroneOrderByGroup[sidebarGroupOrderToken({

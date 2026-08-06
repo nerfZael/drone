@@ -4,6 +4,8 @@ import type { BlipSessionState } from '@blip/core';
 import { loadRegistry } from '../host/registry';
 import { normalizeDroneRuntime } from '../host/runtime';
 import { HubAssistantService, type AssistantDroneSummary } from './assistant';
+import { resolveStableDroneOrPendingIdFromRef } from './drone-lifecycle-registry';
+import { fleetActorConfig } from './fleet-helpers';
 import { BlipAssistantHost } from './assistant/blip-assistant-host';
 import { loadBlipMcp, loadBlipTools } from './assistant/blip-runtime-loader';
 import {
@@ -97,6 +99,12 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         id,
         name: String((d as any)?.name ?? id).trim() || id,
         group: String((d as any)?.group ?? '').trim() || null,
+        groupId: String((d as any)?.groupId ?? '').trim() || null,
+        fleetParentId: resolveStableDroneOrPendingIdFromRef(
+          regAny,
+          fleetActorConfig(d).createdBy,
+        ),
+        createdAt: String((d as any)?.createdAt ?? '').trim() || null,
         runtime: normalizeDroneRuntime((d as any)?.runtime),
         repoPath: String((d as any)?.repoPath ?? '').trim(),
         status: hubPhase || (busyChats.length > 0 ? 'busy' : 'ready'),
@@ -116,6 +124,12 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         id,
         name: String((d as any)?.name ?? id).trim() || id,
         group: String((d as any)?.group ?? '').trim() || null,
+        groupId: String((d as any)?.groupId ?? '').trim() || null,
+        fleetParentId: resolveStableDroneOrPendingIdFromRef(
+          regAny,
+          fleetActorConfig(d).createdBy,
+        ),
+        createdAt: String((d as any)?.createdAt ?? '').trim() || null,
         runtime: normalizeDroneRuntime((d as any)?.runtime),
         repoPath: String((d as any)?.repoPath ?? '').trim(),
         status: String((d as any)?.phase ?? 'starting').trim() || 'starting',

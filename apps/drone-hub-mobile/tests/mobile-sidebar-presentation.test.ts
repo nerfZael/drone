@@ -10,6 +10,18 @@ function normalizedColor(value: string): string {
 }
 
 describe('mobile sidebar presentation', () => {
+  test('gives optimistic drone rows stable creation and group identity metadata', () => {
+    const source = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('groupId: result?.drone?.groupId ?? result?.groupId');
+    expect(source).toContain('result?.drone?.createdAt ??');
+    expect(source).toContain('result?.createdAt ??');
+    expect(source).toContain('payload.seedSubmittedAt ??');
+  });
+
   test('shares the desktop Catppuccin sidebar palette', () => {
     const desktopStyles = readFileSync(
       new URL('../../drone-hub/src/styles.css', import.meta.url),
