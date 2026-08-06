@@ -240,7 +240,9 @@ export function ChatInput({
       revokeDraftImagePreviewUrls(prev);
       return [];
     }, false);
-    draftRevisionRef.current = 0;
+    // Keep revisions monotonic so an in-flight submission from the previous
+    // chat cannot restore its draft after the composer is reset.
+    draftRevisionRef.current += 1;
   }, [controlledDraftEnabled, resetKey, setComposerAttachments]);
 
   React.useEffect(() => {
@@ -495,8 +497,10 @@ export function ChatInput({
       );
     } catch (e: any) {
       const msg = e?.message ?? String(e);
-      setAttachmentError(`Failed to read attachment: ${msg}`);
-      restoreSubmissionSnapshot(snapshot);
+      const restored = restoreSubmissionSnapshot(snapshot);
+      if (restored.draftRestored || restored.attachmentsRestored) {
+        setAttachmentError(`Failed to read attachment: ${msg}`);
+      }
       return;
     }
 
@@ -530,6 +534,8 @@ export function ChatInput({
     });
     if (restored.draftRestored) setDraft(snapshot.prompt, false);
     if (restored.attachmentsRestored) setComposerAttachments(snapshot.attachments, false);
+    else revokeDraftImagePreviewUrls(snapshot.attachments);
+    return restored;
   }
 
   function beginVoiceAction(): number | null {

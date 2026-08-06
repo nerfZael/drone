@@ -86,4 +86,19 @@ describe('chat composer draft submissions', () => {
     ).toEqual({ draftRestored: false, attachmentsRestored: false });
     expect(draft.current).toBe('');
   });
+
+  test('does not restore a submission after the composer was reset', () => {
+    const draft = { current: 'Old chat message' };
+    const attachments = { current: [{ id: 'old-chat-attachment' }] };
+    const revision = { current: 4 };
+    const snapshot = takeChatComposerDraftSnapshot({ draft, attachments, revision });
+    if (!snapshot) throw new Error('Expected a submission snapshot');
+
+    revision.current += 1;
+    const restored = restoreChatComposerDraftSnapshot({ draft, attachments, revision, snapshot });
+
+    expect(restored).toEqual({ draftRestored: false, attachmentsRestored: false });
+    expect(draft.current).toBe('');
+    expect(attachments.current).toEqual([]);
+  });
 });
