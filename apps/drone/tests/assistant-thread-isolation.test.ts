@@ -110,4 +110,25 @@ describe('native chat isolation', () => {
       expect((await assistant.threadSnapshot('native-second')).chatId).toBe('native-second');
     });
   });
+
+  test('reports active native runs independently from queued prompt state', async () => {
+    await withTempDroneDataDir('native-chat-active-run-', async () => {
+      const assistant = service();
+      await ensureTestNativeChat(assistant, {
+        id: 'native-running',
+        droneId: 'drone-a',
+      });
+
+      expect(await assistant.nativeThreadHasActiveRun('native-running')).toBe(false);
+
+      await assistant.notifyRuntimeEvent('native-running', { type: 'session_started' });
+      expect(await assistant.nativeThreadHasActiveRun('native-running')).toBe(true);
+
+      await assistant.notifyRuntimeEvent('native-running', {
+        type: 'session_finished',
+        status: 'completed',
+      });
+      expect(await assistant.nativeThreadHasActiveRun('native-running')).toBe(false);
+    });
+  });
 });
