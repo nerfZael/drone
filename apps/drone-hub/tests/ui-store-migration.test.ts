@@ -5,6 +5,7 @@ import {
   normalizeSpawnContextByRepoKey,
   resolveRepoChatSelectionTransition,
   resolveSpawnContextPreferencesForRepo,
+  useDroneHubUiStore,
 } from '../src/droneHub/app/use-drone-hub-ui-store';
 import {
   mergeUiPreferencesChanges,
@@ -13,6 +14,41 @@ import {
 } from '../src/droneHub/app/use-ui-preferences-settings';
 
 describe('drone hub ui store migration', () => {
+  test('does not publish store updates for equivalent normalized sidebar orders', () => {
+    const previous = useDroneHubUiStore.getState();
+    const previousWarn = console.warn;
+    let unsubscribe = () => undefined;
+    console.warn = () => undefined;
+    try {
+      useDroneHubUiStore.setState({
+        sidebarGroupOrder: ['group-id:review'],
+        sidebarDroneOrderByGroup: { 'group-id:review': ['drone:a', 'drone:b'] },
+        hiddenSidebarGroups: ['group-id:done'],
+      });
+      let updates = 0;
+      unsubscribe = useDroneHubUiStore.subscribe(() => {
+        updates += 1;
+      });
+
+      const state = useDroneHubUiStore.getState();
+      state.setSidebarGroupOrder([' group-id:review ', 'group-id:review']);
+      state.setSidebarDroneOrderByGroup({
+        'group-id:review': ['drone:a', 'drone:b', 'drone:b'],
+      });
+      state.setHiddenSidebarGroups(['group-id:done']);
+
+      expect(updates).toBe(0);
+    } finally {
+      unsubscribe();
+      useDroneHubUiStore.setState({
+        sidebarGroupOrder: previous.sidebarGroupOrder,
+        sidebarDroneOrderByGroup: previous.sidebarDroneOrderByGroup,
+        hiddenSidebarGroups: previous.hiddenSidebarGroups,
+      });
+      console.warn = previousWarn;
+    }
+  });
+
   test('preserves persisted browser-backed settings across version upgrades', () => {
     const migrated = migrateDroneHubUiPersistedState(
       {
@@ -152,16 +188,25 @@ describe('drone hub ui store migration', () => {
   });
 
   test('normalizes invalid persisted sidebar dock sides to left', () => {
-    expect(migrateDroneHubUiPersistedState({ sidebarDockSide: 'floating', assistantThreadSidebarDockSide: 'floating' }, 13)).toMatchObject({
+    expect(
+      migrateDroneHubUiPersistedState(
+        { sidebarDockSide: 'floating', assistantThreadSidebarDockSide: 'floating' },
+        13,
+      ),
+    ).toMatchObject({
       sidebarDockSide: 'left',
     });
   });
 
   test('normalizes the persisted pinned sidebar placement', () => {
-    expect(migrateDroneHubUiPersistedState({ pinnedSidebarPlacement: 'bottom' }, 15)).toMatchObject({
-      pinnedSidebarPlacement: 'bottom',
-    });
-    expect(migrateDroneHubUiPersistedState({ pinnedSidebarPlacement: 'floating' }, 15)).toMatchObject({
+    expect(migrateDroneHubUiPersistedState({ pinnedSidebarPlacement: 'bottom' }, 15)).toMatchObject(
+      {
+        pinnedSidebarPlacement: 'bottom',
+      },
+    );
+    expect(
+      migrateDroneHubUiPersistedState({ pinnedSidebarPlacement: 'floating' }, 15),
+    ).toMatchObject({
       pinnedSidebarPlacement: 'bottom',
     });
   });
@@ -391,19 +436,61 @@ describe('drone hub ui store migration', () => {
     const migrated = migrateDroneHubUiPersistedState(
       {
         shortcutBindings: {
-          createDraftDrone: { key: 'tab', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-          createDroneChat: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-          markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+          createDraftDrone: {
+            key: 'tab',
+            mod: false,
+            ctrl: false,
+            meta: false,
+            alt: false,
+            shift: false,
+          },
+          createDroneChat: {
+            key: 'q',
+            mod: false,
+            ctrl: false,
+            meta: false,
+            alt: false,
+            shift: false,
+          },
+          markSelectedDronesUnread: {
+            key: 'z',
+            mod: false,
+            ctrl: false,
+            meta: false,
+            alt: false,
+            shift: false,
+          },
         },
       },
       12,
     );
 
     expect(migrated.shortcutBindings).toMatchObject({
-      createDraftDrone: { key: '1', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-      createChildDraftDrone: { key: '3', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      createDraftDrone: {
+        key: '1',
+        mod: false,
+        ctrl: false,
+        meta: false,
+        alt: false,
+        shift: false,
+      },
+      createChildDraftDrone: {
+        key: '3',
+        mod: false,
+        ctrl: false,
+        meta: false,
+        alt: false,
+        shift: false,
+      },
       createDroneChat: { key: '2', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-      markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+      markSelectedDronesUnread: {
+        key: 'z',
+        mod: false,
+        ctrl: false,
+        meta: false,
+        alt: false,
+        shift: false,
+      },
     });
   });
 

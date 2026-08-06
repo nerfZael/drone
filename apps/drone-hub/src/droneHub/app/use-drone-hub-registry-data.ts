@@ -9,6 +9,8 @@ import { fetchJson, usePoll } from './hooks';
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
 
+const EMPTY_GROUP_SUMMARIES: GroupSummary[] = [];
+
 type UseDroneHubRegistryDataArgs = {
   activeRepoPath: string;
   optimisticallyDeletedDrones: Record<string, boolean>;
@@ -306,7 +308,15 @@ export function useDroneRegistryEvents(enabled = true): {
           throw new Error('Invalid drone registry snapshot.');
         logRegistryBusyDebug('snapshot', data.drones ?? []);
         syncUiPreferencesFromRegistryPayload(data);
-        if (Array.isArray((data as any).groups)) setGroups((data as any).groups);
+        if (Array.isArray((data as any).groups)) {
+          const nextGroups = (data as any).groups as GroupSummary[];
+          setGroups((current) =>
+            current &&
+            sameGroupsResponse({ ok: true, groups: current }, { ok: true, groups: nextGroups })
+              ? current
+              : nextGroups,
+          );
+        }
         setValue((prev) => mergeDroneResponse(prev, { ok: true, drones: data.drones ?? [] }));
         setConnected(true);
         setError(null);
@@ -326,7 +336,15 @@ export function useDroneRegistryEvents(enabled = true): {
         };
         logRegistryBusyDebug('delta', data.upserts ?? []);
         syncUiPreferencesFromRegistryPayload(data);
-        if (Array.isArray((data as any).groups)) setGroups((data as any).groups);
+        if (Array.isArray((data as any).groups)) {
+          const nextGroups = (data as any).groups as GroupSummary[];
+          setGroups((current) =>
+            current &&
+            sameGroupsResponse({ ok: true, groups: current }, { ok: true, groups: nextGroups })
+              ? current
+              : nextGroups,
+          );
+        }
         setValue((prev) => applyDroneDelta(prev, data));
         setConnected(true);
         setError(null);
@@ -494,13 +512,13 @@ export function useDroneHubRegistryData({
     [],
     { isEqual: sameGroupsResponse },
   );
-  const groupsResp =
+  const registryGroups =
     droneEvents.connected && droneEvents.groups
-      ? { ok: true as const, groups: droneEvents.groups }
-      : polledGroupsResp;
+      ? droneEvents.groups
+      : (polledGroupsResp?.groups ?? EMPTY_GROUP_SUMMARIES);
   const registryGroupNames = React.useMemo(() => {
     const out = new Set<string>();
-    for (const g of groupsResp?.groups ?? []) {
+    for (const g of registryGroups) {
       if (String(g?.repoPath ?? '').trim() !== String(activeRepoPath ?? '').trim()) continue;
       const name = String((g as any)?.name ?? '').trim();
       if (!name) continue;
@@ -508,10 +526,10 @@ export function useDroneHubRegistryData({
       out.add(name);
     }
     return Array.from(out.values()).sort((a, b) => a.localeCompare(b));
-  }, [activeRepoPath, groupsResp]);
+  }, [activeRepoPath, registryGroups]);
   const registryGroupCreatedAtByName = React.useMemo(() => {
     const out: Record<string, string | null> = {};
-    for (const group of groupsResp?.groups ?? []) {
+    for (const group of registryGroups) {
       if (String(group?.repoPath ?? '').trim() !== String(activeRepoPath ?? '').trim()) continue;
       const name = String(group?.name ?? '').trim();
       if (!name || isUngroupedGroupName(name)) continue;
@@ -519,17 +537,17 @@ export function useDroneHubRegistryData({
       out[name] = createdAt || null;
     }
     return out;
-  }, [activeRepoPath, groupsResp]);
+  }, [activeRepoPath, registryGroups]);
   const registryGroupIdByName = React.useMemo(() => {
     const out: Record<string, string> = {};
-    for (const group of groupsResp?.groups ?? []) {
+    for (const group of registryGroups) {
       if (String(group?.repoPath ?? '').trim() !== String(activeRepoPath ?? '').trim()) continue;
       const id = String(group?.id ?? '').trim();
       const name = String(group?.name ?? '').trim();
       if (id && name && !isUngroupedGroupName(name)) out[name] = id;
     }
     return out;
-  }, [activeRepoPath, groupsResp]);
+  }, [activeRepoPath, registryGroups]);
 
   React.useEffect(() => {
     if (reposLoading || reposError) return;
