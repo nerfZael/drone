@@ -316,12 +316,16 @@ describe('Drone Hub assistant MCP transport', () => {
         if (url.pathname === '/api/drones/drone-b/chats') {
           return Response.json({
             ok: true,
+            name: 'Build worker',
+            chats: ['default'],
             chatDetails: [{ chat: 'default', chatId: 'target-chat-b' }],
           });
         }
         if (url.pathname === '/api/drones/drone-c/chats') {
           return Response.json({
             ok: true,
+            name: 'Review worker',
+            chats: ['default', 'review'],
             chatDetails: [{ chat: 'review', chatId: 'target-chat-c' }],
           });
         }
@@ -410,6 +414,8 @@ describe('Drone Hub assistant MCP transport', () => {
             },
           });
           expect(body.intent).toContain('Wait for all requested chats to finish');
+          expect(body.intent).toContain('Targets: Build worker, Review worker/review');
+          expect(body.intent).not.toContain('drone-b/default');
         }
       } finally {
         await client?.close();

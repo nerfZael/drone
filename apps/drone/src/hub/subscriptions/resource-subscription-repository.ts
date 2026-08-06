@@ -45,6 +45,8 @@ export type ChatResourceLocation = {
   chatId: string;
   droneId: string;
   chatName: string;
+  droneName?: string;
+  droneChatCount?: number;
 };
 
 export const RESOURCE_SUBSCRIPTION_MIGRATIONS: readonly HubDatabaseMigration[] = [
@@ -253,18 +255,76 @@ export class ResourceSubscriptionRepository {
   resolveChatResource(resourceIdRaw: string): ChatResourceLocation | null {
     const resourceId = cleanString(resourceIdRaw);
     if (!resourceId) return null;
+    return this.resolveChatResources([resourceId]).get(resourceId) ?? null;
+  }
+
+  resolveChatResources(resourceIdsRaw: string[]): Map<string, ChatResourceLocation> {
+    const resourceIds = [
+      ...new Set(resourceIdsRaw.map((resourceId) => cleanString(resourceId)).filter(Boolean)),
+    ];
+    if (resourceIds.length === 0) return new Map();
     return this.database.read((connection) => {
-      const row = connection
-        .prepare(
-          `
-          SELECT drone_id, chat_name, json_extract(metadata_json, '$.id') AS chat_id
-          FROM canonical_chats
-          WHERE json_extract(metadata_json, '$.id') = ?
-          LIMIT 1
-        `,
-        )
-        .get(resourceId) as { drone_id: string; chat_name: string; chat_id: string } | undefined;
-      return row ? { chatId: row.chat_id, droneId: row.drone_id, chatName: row.chat_name } : null;
+      type ResourceLocationRow = {
+        drone_id: string;
+        chat_name: string;
+        chat_id: string;
+        drone_name?: string | null;
+        drone_chat_count: number;
+      };
+      const placeholders = resourceIds.map(() => '?').join(', ');
+      let rows: ResourceLocationRow[];
+      try {
+        rows = connection
+          .prepare(
+            `
+            WITH chat_counts AS (
+              SELECT drone_id, COUNT(*) AS count
+              FROM canonical_chats
+              GROUP BY drone_id
+            )
+            SELECT c.drone_id, c.chat_name,
+              json_extract(c.metadata_json, '$.id') AS chat_id,
+              d.name AS drone_name,
+              counts.count AS drone_chat_count
+            FROM canonical_chats c
+            INNER JOIN chat_counts counts ON counts.drone_id = c.drone_id
+            LEFT JOIN hub_canonical_drones d ON d.drone_id = c.drone_id
+            WHERE json_extract(c.metadata_json, '$.id') IN (${placeholders})
+          `,
+          )
+          .all(...resourceIds) as ResourceLocationRow[];
+      } catch {
+        // Older or partially initialized stores may not have the lifecycle read model yet.
+        rows = connection
+          .prepare(
+            `
+            WITH chat_counts AS (
+              SELECT drone_id, COUNT(*) AS count
+              FROM canonical_chats
+              GROUP BY drone_id
+            )
+            SELECT c.drone_id, c.chat_name,
+              json_extract(c.metadata_json, '$.id') AS chat_id,
+              counts.count AS drone_chat_count
+            FROM canonical_chats c
+            INNER JOIN chat_counts counts ON counts.drone_id = c.drone_id
+            WHERE json_extract(c.metadata_json, '$.id') IN (${placeholders})
+          `,
+          )
+          .all(...resourceIds) as ResourceLocationRow[];
+      }
+      return new Map(
+        rows.map((row) => [
+          row.chat_id,
+          {
+            chatId: row.chat_id,
+            droneId: row.drone_id,
+            chatName: row.chat_name,
+            ...(cleanString(row.drone_name) ? { droneName: cleanString(row.drone_name) } : {}),
+            ...(row.drone_chat_count > 0 ? { droneChatCount: row.drone_chat_count } : {}),
+          },
+        ]),
+      );
     });
   }
 

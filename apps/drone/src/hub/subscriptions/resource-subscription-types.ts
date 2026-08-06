@@ -49,6 +49,11 @@ export type ResourceSubscription = {
   provider: ResourceSubscriptionProvider;
   resourceType: ResourceSubscriptionType;
   resourceId: string;
+  /** Human-readable, request-time label. It is never used as the durable resource identity. */
+  resourceLabel?: string;
+  /** Request-time target metadata used to present legacy generated intent without internal IDs. */
+  resourceDroneId?: string;
+  resourceChatName?: string;
   resourceRef: string;
   resourceConfig: Record<string, unknown>;
   events: ResourceSubscriptionEventType[];

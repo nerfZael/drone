@@ -19,6 +19,7 @@ import {
 } from '../src/hub/subscriptions/cron-subscription';
 import {
   cancelOrphanedResourceSubscriptions,
+  chatResourceSubscriptionLabel,
   detectChatSubscriptionChanges,
   renderSubscriptionPrompt,
 } from '../src/hub/subscriptions/resource-subscription-service';
@@ -61,6 +62,27 @@ afterEach(() => {
 });
 
 describe('resource subscription identifiers', () => {
+  test('labels chat resources with drone names and omits the sole default chat', () => {
+    expect(
+      chatResourceSubscriptionLabel({
+        chatId: 'target-chat',
+        droneId: 'drone-b',
+        droneName: 'Release helper',
+        chatName: 'default',
+        droneChatCount: 1,
+      }),
+    ).toBe('Release helper');
+    expect(
+      chatResourceSubscriptionLabel({
+        chatId: 'target-chat',
+        droneId: 'drone-b',
+        droneName: 'Release helper',
+        chatName: 'review',
+        droneChatCount: 2,
+      }),
+    ).toBe('Release helper / review');
+  });
+
   test('normalizes GitHub repository and pull request IDs', () => {
     expect(normalizeGithubRepositoryId('Getsentry/Junior')).toBe('getsentry/junior');
     expect(normalizeGithubPullRequestId('Getsentry/Junior#208')).toBe('getsentry/junior#208');

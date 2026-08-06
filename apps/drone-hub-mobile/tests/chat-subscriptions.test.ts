@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  mobileChatSubscriptionDisplayIntent,
   mobileChatSubscriptionNextRunLabel,
   mobileChatSubscriptionResourceLabel,
   mobileChatSubscriptionSummary,
@@ -15,6 +16,9 @@ describe('mobile chat subscription presentation', () => {
         provider: 'drone-hub',
         resourceType: 'chat',
         resourceId: 'target-chat',
+        resourceLabel: 'Release helper / review',
+        resourceDroneId: 'drone-b',
+        resourceChatName: 'review',
         events: ['chat.idle', 'chat.failed'],
         intent: 'Wait for the target.',
         status: 'active',
@@ -39,12 +43,17 @@ describe('mobile chat subscription presentation', () => {
     expect(subscriptions).toHaveLength(2);
     expect(mobileChatSubscriptionSummary(subscriptions)).toBe('Subscriptions · 2');
     expect(mobileChatSubscriptionSummary(subscriptions.slice(0, 1))).toBe(
-      'Chat idle, Chat failed · target-chat',
+      'Chat idle, Chat failed · Release helper / review',
     );
     expect(mobileChatSubscriptionSummary(subscriptions.slice(1))).toBe(
       'PR opened · acme/widgets',
     );
-    expect(mobileChatSubscriptionResourceLabel(subscriptions[0]!)).toBe('Chat · target-chat');
+    expect(mobileChatSubscriptionResourceLabel(subscriptions[0]!)).toBe(
+      'Chat · Release helper / review',
+    );
+    expect(
+      mobileChatSubscriptionDisplayIntent('Targets: drone-b/review', subscriptions),
+    ).toBe('Targets: Release helper / review');
   });
 
   test('presents cron subscriptions by expression, time zone, and next run', () => {

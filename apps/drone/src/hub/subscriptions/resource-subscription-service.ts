@@ -85,7 +85,18 @@ export class ResourceSubscriptionService {
   }
 
   list(subscriberChatId: string, includeInactive = false): ResourceSubscription[] {
-    return this.deps.repository.list(subscriberChatId, includeInactive);
+    const subscriptions = this.deps.repository.list(subscriberChatId, includeInactive);
+    const chatResources = this.deps.repository.resolveChatResources(
+      subscriptions
+        .filter(
+          (subscription) =>
+            subscription.provider === 'drone-hub' && subscription.resourceType === 'chat',
+        )
+        .map((subscription) => subscription.resourceId),
+    );
+    return subscriptions.map((subscription) =>
+      this.withResourceLabel(subscription, chatResources.get(subscription.resourceId)),
+    );
   }
 
   get(id: string, subscriberChatId: string): ResourceSubscription | null {
@@ -94,6 +105,22 @@ export class ResourceSubscriptionService {
 
   resolveChatResource(resourceId: string): ChatResourceLocation | null {
     return this.deps.repository.resolveChatResource(resourceId);
+  }
+
+  private withResourceLabel(
+    subscription: ResourceSubscription,
+    location?: ChatResourceLocation,
+  ): ResourceSubscription {
+    if (subscription.provider !== 'drone-hub' || subscription.resourceType !== 'chat') {
+      return subscription;
+    }
+    if (!location) return subscription;
+    return {
+      ...subscription,
+      resourceLabel: chatResourceSubscriptionLabel(location),
+      resourceDroneId: location.droneId,
+      resourceChatName: location.chatName,
+    };
   }
 
   async subscribe(input: {
@@ -577,6 +604,12 @@ export class ResourceSubscriptionService {
       );
     }
   }
+}
+
+export function chatResourceSubscriptionLabel(location: ChatResourceLocation): string {
+  const droneName = String(location.droneName ?? '').trim() || location.droneId;
+  const onlyDefaultChat = location.chatName === 'default' && location.droneChatCount === 1;
+  return onlyDefaultChat ? droneName : `${droneName} / ${location.chatName}`;
 }
 
 export async function cancelOrphanedResourceSubscriptions(

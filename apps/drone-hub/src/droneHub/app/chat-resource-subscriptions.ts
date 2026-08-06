@@ -13,7 +13,7 @@ export function normalizeChatResourceSubscriptions(raw: unknown): ChatResourceSu
 export function chatSubscriptionResourceLabel(
   subscription: Pick<
     ChatResourceSubscription,
-    'resourceType' | 'resourceId' | 'resourceConfig'
+    'resourceType' | 'resourceId' | 'resourceLabel' | 'resourceConfig'
   >,
 ): string {
   if (subscription.resourceType === 'cron') {
@@ -25,7 +25,7 @@ export function chatSubscriptionResourceLabel(
   if (subscription.resourceType === 'repository') {
     return `Repository · ${subscription.resourceId}`;
   }
-  return `Chat · ${subscription.resourceId}`;
+  return `Chat · ${subscription.resourceLabel || subscription.resourceId}`;
 }
 
 export function chatSubscriptionSummary(subscriptions: ChatResourceSubscription[]): string {
@@ -36,7 +36,9 @@ export function chatSubscriptionSummary(subscriptions: ChatResourceSubscription[
   const resource =
     subscription.resourceType === 'cron'
       ? chatSubscriptionScheduleLabel(subscription)
-      : subscription.resourceId;
+      : subscription.resourceType === 'chat'
+        ? subscription.resourceLabel || subscription.resourceId
+        : subscription.resourceId;
   return [events, resource].filter(Boolean).join(' · ');
 }
 
@@ -67,6 +69,27 @@ export function chatSubscriptionNextRunLabel(
 
 export function chatSubscriptionEventLabel(event: string): string {
   return eventNotificationEventLabel(event);
+}
+
+export function chatSubscriptionDisplayIntent(
+  intent: string,
+  subscriptions: ChatResourceSubscription[],
+): string {
+  let displayed = intent;
+  for (const subscription of subscriptions) {
+    if (
+      subscription.resourceType !== 'chat' ||
+      !subscription.resourceDroneId ||
+      !subscription.resourceChatName ||
+      !subscription.resourceLabel
+    ) {
+      continue;
+    }
+    displayed = displayed
+      .split(`${subscription.resourceDroneId}/${subscription.resourceChatName}`)
+      .join(subscription.resourceLabel);
+  }
+  return displayed;
 }
 
 function chatSubscriptionScheduleLabel(

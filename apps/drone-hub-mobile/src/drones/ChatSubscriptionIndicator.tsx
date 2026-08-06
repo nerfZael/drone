@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii } from '../theme';
 import {
   mobileChatSubscriptionEventLabel,
+  mobileChatSubscriptionDisplayIntent,
   mobileChatSubscriptionNextRunLabel,
   mobileChatSubscriptionResourceLabel,
   mobileChatSubscriptionSummary,
@@ -80,6 +81,10 @@ export function ChatSubscriptionIndicator({
             <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
               {subscriptions.map((subscription) => {
                 const nextRun = mobileChatSubscriptionNextRunLabel(subscription);
+                const displayIntent = mobileChatSubscriptionDisplayIntent(
+                  subscription.intent,
+                  subscriptions,
+                );
                 return (
                   <View key={subscription.id} style={styles.card}>
                     <Text style={styles.resource}>
@@ -95,8 +100,8 @@ export function ChatSubscriptionIndicator({
                       {subscription.events.map(mobileChatSubscriptionEventLabel).join(', ')}
                     </Text>
                     {nextRun ? <Text style={styles.nextRun}>{nextRun}</Text> : null}
-                    {subscription.intent ? (
-                      <Text style={styles.intent}>{subscription.intent}</Text>
+                    {displayIntent ? (
+                      <Text style={styles.intent}>{displayIntent}</Text>
                     ) : null}
                   </View>
                 );

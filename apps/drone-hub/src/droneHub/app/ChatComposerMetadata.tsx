@@ -5,6 +5,7 @@ import { useDropdownDismiss } from '../../ui/dropdown';
 import { DroneRuntimeIndicator, type DroneRuntime } from './DroneRuntimeIndicator';
 import {
   chatSubscriptionEventLabel,
+  chatSubscriptionDisplayIntent,
   chatSubscriptionNextRunLabel,
   chatSubscriptionResourceLabel,
   chatSubscriptionSummary,
@@ -166,6 +167,10 @@ export function ChatSubscriptionIndicator({
           <div className="max-h-[min(20rem,55vh)] overflow-y-auto p-1.5">
             {subscriptions.map((subscription) => {
               const nextRun = chatSubscriptionNextRunLabel(subscription);
+              const displayIntent = chatSubscriptionDisplayIntent(
+                subscription.intent,
+                subscriptions,
+              );
               return (
                 <div
                   key={subscription.id}
@@ -191,9 +196,9 @@ export function ChatSubscriptionIndicator({
                       {nextRun}
                     </time>
                   ) : null}
-                  {subscription.intent ? (
+                  {displayIntent ? (
                     <div className="mt-1.5 whitespace-pre-wrap text-[var(--text-10)] leading-4 text-[var(--muted)]">
-                      {subscription.intent}
+                      {displayIntent}
                     </div>
                   ) : null}
                 </div>

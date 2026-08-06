@@ -10,6 +10,58 @@ import {
 import { DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS } from '../../src/hub/subscriptions/resource-subscription-types';
 import { memoryHubDatabase } from './helpers/memory-hub-database';
 
+test('resolves display names and chat counts for chat subscription resources in one batch', () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    database.read((connection) => {
+      connection.exec(`
+        CREATE TABLE canonical_chats (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          metadata_json TEXT NOT NULL
+        );
+        CREATE TABLE hub_canonical_drones (
+          drone_id TEXT NOT NULL PRIMARY KEY,
+          name TEXT NOT NULL
+        );
+        INSERT INTO hub_canonical_drones (drone_id, name)
+          VALUES ('drone-a', 'Build worker'), ('drone-b', 'Review worker');
+        INSERT INTO canonical_chats (drone_id, chat_name, metadata_json)
+          VALUES
+            ('drone-a', 'default', '{"id":"chat-a"}'),
+            ('drone-b', 'default', '{"id":"chat-b-default"}'),
+            ('drone-b', 'review', '{"id":"chat-b-review"}');
+      `);
+    });
+
+    assert.deepEqual(repository.resolveChatResources(['chat-a', 'chat-b-review']), new Map([
+      [
+        'chat-a',
+        {
+          chatId: 'chat-a',
+          droneId: 'drone-a',
+          chatName: 'default',
+          droneName: 'Build worker',
+          droneChatCount: 1,
+        },
+      ],
+      [
+        'chat-b-review',
+        {
+          chatId: 'chat-b-review',
+          droneId: 'drone-b',
+          chatName: 'review',
+          droneName: 'Review worker',
+          droneChatCount: 2,
+        },
+      ],
+    ]));
+  } finally {
+    close();
+  }
+});
+
 test('deduplicates and batches repository events for the owning conversation', async () => {
   const { database, close } = memoryHubDatabase();
   try {

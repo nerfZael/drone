@@ -9,6 +9,7 @@ import {
   DroneBranchIndicator,
 } from '../src/droneHub/app/ChatComposerMetadata';
 import {
+  chatSubscriptionDisplayIntent,
   chatSubscriptionNextRunLabel,
   chatSubscriptionResourceLabel,
   chatSubscriptionSummary,
@@ -43,6 +44,7 @@ describe('chat resource subscription presentation', () => {
         provider: 'github',
         resourceType: 'pull_request',
         resourceId: 'acme/widgets#42',
+        resourceLabel: '',
         resourceConfig: null,
         events: ['pull_request.merged'],
         intent: 'Continue after merge.',
@@ -121,6 +123,47 @@ describe('chat resource subscription presentation', () => {
     expect(html).toContain('data-chat-subscription-indicator="true"');
     expect(html).toContain('Subscriptions · 2');
     expect(html).not.toContain('role="dialog"');
+  });
+
+  test('uses the target drone and chat label instead of a durable chat ID', () => {
+    const [onlyDefaultChat, namedChat] = normalizeChatResourceSubscriptions([
+      {
+        id: 'default-watch',
+        provider: 'drone-hub',
+        resourceType: 'chat',
+        resourceId: '48ae4ad8-6dfe-4e5d-946a-4cd9c973293a',
+        resourceLabel: 'Release helper',
+        resourceDroneId: '48ae4ad8-6dfe-4e5d-946a-4cd9c973293a',
+        resourceChatName: 'default',
+        events: ['chat.idle', 'chat.failed'],
+        status: 'active',
+      },
+      {
+        id: 'review-watch',
+        provider: 'drone-hub',
+        resourceType: 'chat',
+        resourceId: 'cecb8d75-60e3-412a-b16f-5f5a10a461cf',
+        resourceLabel: 'Release helper / review',
+        resourceDroneId: 'cecb8d75-60e3-412a-b16f-5f5a10a461cf',
+        resourceChatName: 'review',
+        events: ['chat.idle'],
+        status: 'active',
+      },
+    ]);
+
+    expect(chatSubscriptionResourceLabel(onlyDefaultChat!)).toBe('Chat · Release helper');
+    expect(chatSubscriptionSummary([onlyDefaultChat!])).toBe(
+      'Chat idle, Chat failed · Release helper',
+    );
+    expect(chatSubscriptionResourceLabel(namedChat!)).toBe(
+      'Chat · Release helper / review',
+    );
+    expect(
+      chatSubscriptionDisplayIntent(
+        'Targets: 48ae4ad8-6dfe-4e5d-946a-4cd9c973293a/default, cecb8d75-60e3-412a-b16f-5f5a10a461cf/review',
+        [onlyDefaultChat!, namedChat!],
+      ),
+    ).toBe('Targets: Release helper, Release helper / review');
   });
 
   test('renders the primary chat subscription snapshot without a client fetch', () => {

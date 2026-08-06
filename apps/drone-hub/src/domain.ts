@@ -11,6 +11,9 @@ export type ChatResourceSubscriptionInfo = {
   provider: 'drone-hub' | 'github';
   resourceType: 'chat' | 'repository' | 'pull_request' | 'cron';
   resourceId: string;
+  resourceLabel: string;
+  resourceDroneId?: string;
+  resourceChatName?: string;
   resourceConfig: { expression: string; timeZone: string; description: string } | null;
   events: string[];
   intent: string;
@@ -347,12 +350,16 @@ export function normalizeChatResourceSubscriptionsPayload(
     const nextEventAt = Number.isFinite(Date.parse(nextEventAtRaw))
       ? new Date(nextEventAtRaw).toISOString()
       : null;
+    const resourceDroneId = String(item?.resourceDroneId ?? '').trim();
+    const resourceChatName = String(item?.resourceChatName ?? '').trim();
     return [
       {
         id,
         provider,
         resourceType,
         resourceId,
+        resourceLabel: String(item?.resourceLabel ?? '').trim(),
+        ...(resourceDroneId && resourceChatName ? { resourceDroneId, resourceChatName } : {}),
         resourceConfig,
         events: Array.isArray(item?.events)
           ? item.events.map((event: unknown) => String(event ?? '').trim()).filter(Boolean)

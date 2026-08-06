@@ -1243,10 +1243,16 @@ async function subscribeChatPrincipalToIdleTargets(
       const resourceId = cleanString(chat?.chatId);
       if (!resourceId) throw new Error(`unknown chat: ${target.drone}/${target.chat}`);
       await authorizeChatSubscriptionResource(context, resourceId);
-      return { ...target, resourceId };
+      const droneName = cleanString(response?.name, target.drone);
+      const chatCount = Array.isArray(response?.chats) ? response.chats.length : 0;
+      const targetLabel =
+        target.chat === 'default' && chatCount === 1
+          ? droneName
+          : `${droneName}/${target.chat}`;
+      return { ...target, resourceId, targetLabel };
     }),
   );
-  const targetLabels = resources.map((target) => `${target.drone}/${target.chat}`).join(', ');
+  const targetLabels = resources.map((target) => target.targetLabel).join(', ');
   const intent = (
     mode === 'all'
       ? `Wait for all requested chats to finish before completing the follow-up. Inspect every target after each event and continue waiting while any target is still running. Targets: ${targetLabels}`

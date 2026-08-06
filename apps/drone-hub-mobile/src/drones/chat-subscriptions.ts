@@ -3,6 +3,9 @@ export type MobileChatSubscription = {
   provider: 'drone-hub' | 'github';
   resourceType: 'chat' | 'repository' | 'pull_request' | 'cron';
   resourceId: string;
+  resourceLabel: string;
+  resourceDroneId?: string;
+  resourceChatName?: string;
   resourceConfig: { expression: string; timeZone: string; description: string } | null;
   events: string[];
   intent: string;
@@ -33,12 +36,16 @@ export function normalizeMobileChatSubscriptions(raw: unknown): MobileChatSubscr
     const nextEventAt = Number.isFinite(Date.parse(nextEventAtRaw))
       ? new Date(nextEventAtRaw).toISOString()
       : null;
+    const resourceDroneId = String(item?.resourceDroneId ?? '').trim();
+    const resourceChatName = String(item?.resourceChatName ?? '').trim();
     return [
       {
         id,
         provider: item?.provider === 'github' ? 'github' : 'drone-hub',
         resourceType,
         resourceId,
+        resourceLabel: String(item?.resourceLabel ?? '').trim(),
+        ...(resourceDroneId && resourceChatName ? { resourceDroneId, resourceChatName } : {}),
         resourceConfig,
         events: Array.isArray(item?.events)
           ? item.events.map((event: unknown) => String(event ?? '').trim()).filter(Boolean)
@@ -58,14 +65,16 @@ export function mobileChatSubscriptionSummary(subscriptions: MobileChatSubscript
   const resource =
     subscription.resourceType === 'cron'
       ? mobileChatSubscriptionScheduleLabel(subscription)
-      : subscription.resourceId;
+      : subscription.resourceType === 'chat'
+        ? subscription.resourceLabel || subscription.resourceId
+        : subscription.resourceId;
   return [events, resource].filter(Boolean).join(' · ');
 }
 
 export function mobileChatSubscriptionResourceLabel(
   subscription: Pick<
     MobileChatSubscription,
-    'resourceType' | 'resourceId' | 'resourceConfig'
+    'resourceType' | 'resourceId' | 'resourceLabel' | 'resourceConfig'
   >,
 ): string {
   if (subscription.resourceType === 'cron') {
@@ -77,7 +86,7 @@ export function mobileChatSubscriptionResourceLabel(
   if (subscription.resourceType === 'repository') {
     return `Repository · ${subscription.resourceId}`;
   }
-  return `Chat · ${subscription.resourceId}`;
+  return `Chat · ${subscription.resourceLabel || subscription.resourceId}`;
 }
 
 export function mobileChatSubscriptionNextRunLabel(
@@ -107,6 +116,27 @@ export function mobileChatSubscriptionNextRunLabel(
 
 export function mobileChatSubscriptionEventLabel(event: string): string {
   return eventNotificationEventLabel(event);
+}
+
+export function mobileChatSubscriptionDisplayIntent(
+  intent: string,
+  subscriptions: MobileChatSubscription[],
+): string {
+  let displayed = intent;
+  for (const subscription of subscriptions) {
+    if (
+      subscription.resourceType !== 'chat' ||
+      !subscription.resourceDroneId ||
+      !subscription.resourceChatName ||
+      !subscription.resourceLabel
+    ) {
+      continue;
+    }
+    displayed = displayed
+      .split(`${subscription.resourceDroneId}/${subscription.resourceChatName}`)
+      .join(subscription.resourceLabel);
+  }
+  return displayed;
 }
 
 function mobileChatSubscriptionScheduleLabel(
