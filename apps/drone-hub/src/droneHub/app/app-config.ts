@@ -29,45 +29,28 @@ export const HUB_LOGS_TAIL_LINES = 600;
 export const HUB_LOGS_MAX_BYTES = 200_000;
 export const STARTUP_SEED_MISSING_GRACE_MS = 30_000;
 
-export type RightPanelTab =
-  | 'terminal'
-  | 'env'
-  | 'files'
-  | 'editor'
-  | 'preview'
-  | 'links'
-  | 'changes'
-  | 'prs'
-  | 'canvas'
-  | 'whiteboard'
-  | 'workflows';
-export const RIGHT_PANEL_TABS: RightPanelTab[] = [
-  'terminal',
-  'env',
-  'editor',
-  'preview',
-  'links',
-  'changes',
-  'prs',
-  'canvas',
-  'whiteboard',
-  'workflows',
-];
-export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
-  terminal: 'Terminal',
-  env: 'Env',
-  files: 'Editor',
-  editor: 'Editor',
-  preview: 'Browser',
-  links: 'Links',
-  changes: 'Changes',
-  prs: 'PRs',
-  canvas: 'Canvas',
-  whiteboard: 'Whiteboard',
-  workflows: 'Workflows',
-};
+export const WORKSPACE_TOOLS = {
+  terminal: { label: 'Terminal', header: true, lazy: true },
+  env: { label: 'Env', header: true, lazy: true },
+  editor: { label: 'Editor', header: true, lazy: false },
+  preview: { label: 'Browser', header: true, lazy: true },
+  links: { label: 'Links', header: false, lazy: true },
+  changes: { label: 'Changes', header: true, lazy: true },
+  prs: { label: 'PRs', header: true, lazy: false },
+  canvas: { label: 'Canvas', header: true, lazy: true },
+  whiteboard: { label: 'Whiteboard', header: true, lazy: false },
+  workflows: { label: 'Workflows', header: true, lazy: true },
+} as const;
+export type RightPanelTab = keyof typeof WORKSPACE_TOOLS;
+export const RIGHT_PANEL_TABS = Object.keys(WORKSPACE_TOOLS) as RightPanelTab[];
+export const RIGHT_PANEL_TAB_LABELS = Object.fromEntries(
+  RIGHT_PANEL_TABS.map((tab) => [tab, WORKSPACE_TOOLS[tab].label]),
+) as Record<RightPanelTab, string>;
 export function rightPanelHeaderTabs(tabs: readonly RightPanelTab[]): RightPanelTab[] {
-  return tabs.filter((tab) => tab !== 'files' && tab !== 'links');
+  return tabs.filter((tab) => WORKSPACE_TOOLS[tab].header);
+}
+export function isRightPanelTabLazyLoaded(tab: RightPanelTab): boolean {
+  return WORKSPACE_TOOLS[tab].lazy;
 }
 export function rightPanelTabsForRuntime(runtimeRaw: unknown): RightPanelTab[] {
   void runtimeRaw;
@@ -83,10 +66,15 @@ export function clampGroupMultiChatColumnWidthPx(width: number): number {
   return Math.min(GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX, Math.max(GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX, Math.round(safe)));
 }
 
-export function parseRightPanelTab(raw: string | null | undefined, fallback: RightPanelTab): RightPanelTab {
-  if (raw === 'files') return 'editor';
-  if (raw && RIGHT_PANEL_TABS.includes(raw as RightPanelTab)) return raw as RightPanelTab;
-  return fallback;
+export function normalizeRightPanelTab(raw: unknown): RightPanelTab | null {
+  const tab = raw === 'files' ? 'editor' : raw;
+  return typeof tab === 'string' && RIGHT_PANEL_TABS.includes(tab as RightPanelTab)
+    ? (tab as RightPanelTab)
+    : null;
+}
+
+export function parseRightPanelTab(raw: unknown, fallback: RightPanelTab): RightPanelTab {
+  return normalizeRightPanelTab(raw) ?? fallback;
 }
 
 const CANVAS_CHAT_NODE_PREFIX = 'chat:';

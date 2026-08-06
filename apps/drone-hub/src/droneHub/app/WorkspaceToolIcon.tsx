@@ -52,7 +52,6 @@ export function WorkspaceToolIcon({
           <circle cx="14" cy="17" r="2" />
         </ActivityIcon>
       );
-    case 'files':
     case 'editor':
       return (
         <ActivityIcon tab={tab} className={className}>

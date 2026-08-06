@@ -18,7 +18,11 @@ import {
 } from '../../ui/components';
 import type { DroneSummary } from '../types';
 import { profileStorageKey } from '../../profile-storage';
-import { RIGHT_PANEL_TAB_LABELS, type RightPanelTab } from './app-config';
+import {
+  normalizeRightPanelTab,
+  RIGHT_PANEL_TAB_LABELS,
+  type RightPanelTab,
+} from './app-config';
 import { useMobileViewport } from './use-mobile-viewport';
 import { DRONE_WORKSPACE_STATE_DISPOSE_EVENT, disposedDroneIdFromEvent } from '../workspace-state-events';
 
@@ -91,19 +95,13 @@ function toolPanelId(tab: RightPanelTab): string {
   return `${TOOL_PANEL_PREFIX}${tab}`;
 }
 
-function canonicalWorkspaceTab(tab: RightPanelTab): RightPanelTab {
-  // Keep saved pre-unification Files panels usable without exposing a second panel.
-  return tab === 'files' ? 'editor' : tab;
-}
-
 function isEditorChangesTab(tab: RightPanelTab): boolean {
-  const canonicalTab = canonicalWorkspaceTab(tab);
-  return canonicalTab === 'editor' || canonicalTab === 'changes';
+  return tab === 'editor' || tab === 'changes';
 }
 
 function tabFromPanelId(panelId: string): RightPanelTab | null {
   const raw = panelId.startsWith(TOOL_PANEL_PREFIX) ? panelId.slice(TOOL_PANEL_PREFIX.length) : '';
-  return raw && raw in RIGHT_PANEL_TAB_LABELS ? canonicalWorkspaceTab(raw as RightPanelTab) : null;
+  return normalizeRightPanelTab(raw);
 }
 
 type WorkspaceDockPanel = DockviewApi['panels'][number];
@@ -111,10 +109,8 @@ type WorkspaceDockPanel = DockviewApi['panels'][number];
 function tabFromPanel(panel: WorkspaceDockPanel): RightPanelTab | null {
   const idTab = tabFromPanelId(panel.id);
   if (!idTab || !isEditorChangesTab(idTab)) return idTab;
-  const params = panel.api.getParameters<{ tab?: RightPanelTab }>();
-  return params.tab && params.tab in RIGHT_PANEL_TAB_LABELS
-    ? canonicalWorkspaceTab(params.tab)
-    : idTab;
+  const params = panel.api.getParameters<{ tab?: unknown }>();
+  return normalizeRightPanelTab(params.tab) ?? idTab;
 }
 
 function editorChangesPanels(api: DockviewApi): WorkspaceDockPanel[] {
@@ -205,22 +201,21 @@ function writeStoredLayout(droneId: string, layout: SerializedDockview): void {
 }
 
 export function ensureWorkspaceToolPanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePaneKey, referencePanel: string = CHAT_PANEL_ID): boolean {
-  const canonicalTab = canonicalWorkspaceTab(tab);
-  const id = toolPanelId(canonicalTab);
-  const existing = isEditorChangesTab(canonicalTab)
+  const id = toolPanelId(tab);
+  const existing = isEditorChangesTab(tab)
     ? editorChangesPanels(api)[0]
     : api.getPanel(id);
   if (existing) {
-    if (isEditorChangesTab(canonicalTab)) {
+    if (isEditorChangesTab(tab)) {
       const existingParams = existing.api.getParameters<{ paneKey?: WorkspacePaneKey }>();
       existing.api.updateParameters({
         ...existingParams,
-        tab: canonicalTab,
+        tab,
         paneKey: existingParams.paneKey ?? paneKey,
       });
     }
-    existing.api.setTitle(RIGHT_PANEL_TAB_LABELS[canonicalTab]);
-    if (isEditorChangesTab(canonicalTab)) {
+    existing.api.setTitle(RIGHT_PANEL_TAB_LABELS[tab]);
+    if (isEditorChangesTab(tab)) {
       existing.api.setConstraints({ minimumWidth: EDITOR_PANEL_MIN_WIDTH });
     }
     existing.api.setActive();
@@ -231,15 +226,15 @@ export function ensureWorkspaceToolPanel(api: DockviewApi, tab: RightPanelTab, p
   api.addPanel({
     id,
     component: 'tool',
-    title: RIGHT_PANEL_TAB_LABELS[canonicalTab],
-    params: { tab: canonicalTab, paneKey },
+    title: RIGHT_PANEL_TAB_LABELS[tab],
+    params: { tab, paneKey },
     position: {
       direction: paneKey === 'bottom' ? 'below' : 'right',
       referencePanel,
     },
     initialWidth,
     initialHeight: DEFAULT_NEW_TOOL_PANEL_HEIGHT,
-    minimumWidth: isEditorChangesTab(canonicalTab) ? EDITOR_PANEL_MIN_WIDTH : 260,
+    minimumWidth: isEditorChangesTab(tab) ? EDITOR_PANEL_MIN_WIDTH : 260,
     minimumHeight: 180,
   });
   return true;
@@ -273,7 +268,7 @@ export function migrateEditorChangesPanels(api: DockviewApi): void {
   const activePanelTab = api.activePanel ? tabFromPanel(api.activePanel) : null;
   const requestedTab =
     activePanelTab && isEditorChangesTab(activePanelTab)
-      ? canonicalWorkspaceTab(activePanelTab)
+      ? activePanelTab
       : tabFromPanel(panels[0]) ?? DEFAULT_WORKSPACE_TOOL_TAB;
   const survivor = panels.find((panel) => tabFromPanel(panel) === requestedTab) ?? panels[0];
   for (const panel of panels) {
@@ -301,11 +296,9 @@ function ChatPanel({ containerApi }: IDockviewPanelProps) {
   return <UiPanel flush className="h-full">{content}</UiPanel>;
 }
 
-function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: RightPanelTab; paneKey?: WorkspacePaneKey }>) {
+function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: unknown; paneKey?: WorkspacePaneKey }>) {
   const ctx = React.useContext(DockableDroneWorkspaceContext);
-  const tab = params.tab && params.tab in RIGHT_PANEL_TAB_LABELS
-    ? canonicalWorkspaceTab(params.tab)
-    : tabFromPanelId(api.id);
+  const tab = normalizeRightPanelTab(params.tab) ?? tabFromPanelId(api.id);
   const paneKey = params.paneKey ?? 'single';
   const previewHostedHere = Boolean(tab && tab === ctx.previewTab);
   const onPreviewHostChanged = ctx.onPreviewHostChanged;
