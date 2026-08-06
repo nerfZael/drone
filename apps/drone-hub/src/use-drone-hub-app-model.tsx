@@ -713,8 +713,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const [chatOpenRequestRevision, setChatOpenRequestRevision] = React.useState(0);
   const droneIdentityByNameRef = React.useRef<Record<string, string>>({});
   const llmSettingsState = useLlmSettings(requestJson);
-  const { reloadUiPreferences, reloadPinnedDrones, setDronePinned, setDronesPinned } =
-    useUiPreferencesSettings({ requestJson });
+  const {
+    uiPreferencesReady,
+    reloadUiPreferences,
+    reloadPinnedDrones,
+    setDronePinned,
+    setDronesPinned,
+    moveSidebar,
+  } = useUiPreferencesSettings({ requestJson });
   const selectedDronePinShortcutBusyRef = React.useRef(false);
   const renderedSidebarNodeTreeRef = React.useRef<SidebarNodeTreeModel | null>(null);
   const setRenderedSidebarNodeTree = React.useCallback((nodeTree: SidebarNodeTreeModel | null) => {
@@ -4385,6 +4391,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     renameDroneTo,
     setDroneBaseImage,
     setDronePinned,
+    moveSidebar,
+    uiPreferencesReady,
     deleteDrone: requestDeleteDrone,
     reparentDronesToParent,
     openDroneErrorModal,

@@ -317,6 +317,22 @@ describe('desktop sidebar drone presentation', () => {
     expect(deleteHtml).toContain('M21 12a9 9 0 1 1-6.219-8.56');
   });
 
+  test('shows the delete indicator on drone rows with multiple chats', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({ chats: ['default', 'review'] }),
+        selected: true,
+        onClick: () => {},
+        disclosureExpanded: true,
+        operationLabel: 'Deleting',
+      }),
+    );
+
+    expect(html).toContain('data-sidebar-operation-indicator="deleting"');
+    expect(html).toContain('title="Deleting" aria-label="Deleting"');
+    expect(html).not.toContain('data-sidebar-runtime');
+  });
+
   test('keeps destructive drone actions out of the hover rail', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
@@ -369,6 +385,8 @@ describe('desktop sidebar drone presentation', () => {
     expect(menuSource).toContain('text-[var(--muted-dim)] opacity-75');
     expect(cardSource).toContain("shortcut: 'F2'");
     expect(cardSource).toContain("shortcut: 'Delete'");
+    expect(cardSource).toContain("e.key === 'Delete'");
+    expect(cardSource).toContain('onDelete?.();');
   });
 
   test('renames drones through a borderless inline editor that cancels on blur', () => {

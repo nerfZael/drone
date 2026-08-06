@@ -1804,6 +1804,21 @@ export class HubAssistantService {
     );
   }
 
+  async nativeThreadHasActiveRun(threadIdRaw: unknown): Promise<boolean> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.threads.find((item) => item.id === threadId);
+    if (!thread) return false;
+    return (
+      this.runningThreadIds.has(threadId) ||
+      thread.status === 'running' ||
+      thread.status === 'waiting_for_approval' ||
+      Array.from(this.approvals.values()).some(
+        (approval) => approval.threadId === threadId && approval.status === 'pending',
+      )
+    );
+  }
+
   async nativeThreadError(threadIdRaw: unknown): Promise<string> {
     await this.ensureLoaded();
     const threadId = cleanOptionalString(threadIdRaw);

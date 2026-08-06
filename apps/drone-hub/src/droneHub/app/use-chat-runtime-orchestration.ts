@@ -5,7 +5,11 @@ import { stripAnsi } from '../../domain';
 import type { ChatSendContext, ChatSendPayload } from '../chat';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import type { StartupSeedState } from './app-types';
-import { formatDroneRuntimeError, isTransientDroneStartupError } from './chat-startup-errors';
+import {
+  formatDroneRuntimeError,
+  isTransientChatFetchError,
+  isTransientDroneStartupError,
+} from './chat-startup-errors';
 import {
   appendOptimisticPendingPrompt,
   createOptimisticPendingPrompt,
@@ -30,6 +34,7 @@ type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 const STOPPED_BY_USER_ERROR = 'Stopped by user.';
 const STOPPED_BEFORE_SUBMISSION_ERROR = 'Stopped before submission.';
 const INITIAL_TRANSCRIPT_TAIL_TURNS = 50;
+const TRANSIENT_TRANSCRIPT_ERROR_GRACE_ATTEMPTS = 2;
 const CHAT_RUNTIME_CACHE_TTL_MS = 30_000;
 const CHAT_RUNTIME_CACHE_MAX_ENTRIES = 200;
 
@@ -763,6 +768,7 @@ export function useChatRuntimeOrchestration({
     let busy = false;
     let eventsConnected = false;
     let reloadAfterCurrentLoad = false;
+    let consecutiveTransientFailures = 0;
     const clearTimer = () => {
       if (timer == null) return;
       clearTimeout(timer);
@@ -777,6 +783,7 @@ export function useChatRuntimeOrchestration({
       if (!shouldReadChatRuntimeForHubPhase(selectedDroneHubPhase)) return;
       busy = true;
       let keepLoading = false;
+      let retrySoon = false;
       const initial = transcriptsRef.current === null && !transcriptErrorRef.current;
       if (initial && mounted) setLoadingTranscript(true);
       try {
@@ -794,17 +801,31 @@ export function useChatRuntimeOrchestration({
         setPendingRespForChat({ key: selectedChatCacheKey, pending: data.pending });
         setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
         setTranscriptError(null);
+        consecutiveTransientFailures = 0;
       } catch (e: any) {
         if (!mounted) return;
         if (isNotFoundError(e)) {
           // Treat 404 as "no transcript yet" to avoid a scary error state for brand new chats.
           setTranscripts((prev) => (Array.isArray(prev) && prev.length === 0 ? prev : []));
           setTranscriptError(null);
+          consecutiveTransientFailures = 0;
         } else if (isTransientDroneStartupError(e)) {
           keepLoading = true;
+          retrySoon = true;
           setTranscripts(null);
           setTranscriptError(null);
+          consecutiveTransientFailures = 0;
+        } else if (isTransientChatFetchError(e)) {
+          consecutiveTransientFailures += 1;
+          retrySoon = true;
+          if (consecutiveTransientFailures <= TRANSIENT_TRANSCRIPT_ERROR_GRACE_ATTEMPTS) {
+            keepLoading = transcriptsRef.current === null;
+            setTranscriptError(null);
+          } else {
+            setTranscriptError('Connection interrupted. Retrying…');
+          }
         } else {
+          consecutiveTransientFailures = 0;
           setTranscriptError(e?.message ?? String(e));
         }
       } finally {
@@ -820,7 +841,11 @@ export function useChatRuntimeOrchestration({
           clearTimer();
           timer = setTimeout(() => {
             void load();
-          }, eventsConnected ? resolvePollIntervalMs(60_000, 60_000) : resolvePollIntervalMs(2000, 10_000));
+          }, retrySoon
+            ? resolvePollIntervalMs(1500, 5_000)
+            : eventsConnected
+              ? resolvePollIntervalMs(60_000, 60_000)
+              : resolvePollIntervalMs(2000, 10_000));
         }
       }
     };

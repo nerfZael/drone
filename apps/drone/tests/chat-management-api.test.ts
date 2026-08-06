@@ -1261,6 +1261,44 @@ describeSocketSuite('chat management api', () => {
     expect(pendingOnly.data?.pendingPrompts?.items).toEqual(pendingOnly.data?.pending);
   });
 
+  test('combined chat state returns a bounded page with chat configuration and read state', async () => {
+    const droneId = 'drone-chat-state-page';
+    await seedDrone(droneId);
+
+    await updateRegistry((reg: any) => {
+      const entry = reg?.drones?.[droneId]?.chats?.default;
+      if (!entry) throw new Error('missing seeded chat entry');
+      entry.model = 'configured-model';
+      entry.reasoning = 'high';
+      entry.agentPermissionMode = 'workspace-write';
+      entry.approvalPolicy = 'never';
+      entry.turns = Array.from({ length: 5 }, (_, index) => ({
+        id: `prompt-${index + 1}`,
+        at: new Date(Date.now() + index * 1_000).toISOString(),
+        prompt: `prompt ${index + 1}`,
+        ok: true,
+        output: `output ${index + 1}`,
+      }));
+    });
+
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=page&before=4&limit=2&pending=none&subscriptions=0&readState=1&transcriptMeta=0`,
+    );
+
+    expect(state.r.status).toBe(200);
+    expect(state.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-3', 'prompt-4']);
+    expect(state.data).toMatchObject({
+      model: 'configured-model',
+      reasoning: 'high',
+      agentPermissionMode: 'workspace-write',
+      approvalPolicy: 'never',
+      readState: { droneId, chatName: 'default' },
+    });
+    expect(state.data?.transcript).toBeUndefined();
+    expect(state.data?.pendingPrompts).toBeUndefined();
+    expect(state.data?.subscriptions).toBeUndefined();
+  });
+
   test('combined chat state rejects unknown transcript modes', async () => {
     const droneId = 'drone-chat-state-invalid-mode';
     await seedDrone(droneId);
@@ -1270,6 +1308,23 @@ describeSocketSuite('chat management api', () => {
     );
     expect(state.r.status).toBe(400);
     expect(String(state.data?.error ?? '')).toContain('invalid transcript mode');
+  });
+
+  test('combined chat state rejects invalid page cursors and limits', async () => {
+    const droneId = 'drone-chat-state-invalid-page';
+    await seedDrone(droneId);
+
+    const invalidCursor = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=page&before=-1`,
+    );
+    expect(invalidCursor.r.status).toBe(400);
+    expect(String(invalidCursor.data?.error ?? '')).toContain('invalid chat page');
+
+    const invalidLimit = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=page&limit=101`,
+    );
+    expect(invalidLimit.r.status).toBe(400);
+    expect(String(invalidLimit.data?.error ?? '')).toContain('invalid chat page');
   });
 
   test('combined chat state rejects unknown pending modes', async () => {

@@ -30,6 +30,8 @@ type PendingRequest = {
   onAbort?: () => void;
 };
 
+const MESH_REQUEST_TIMEOUT_MS = 40_000;
+
 export class MeshSocket {
   private socket: WebSocket | null = null;
   private ready = false;
@@ -153,7 +155,7 @@ export class MeshSocket {
         signal?.removeEventListener('abort', onAbort);
         this.pending.delete(request.requestId);
         reject(new Error('Target device did not respond in time.'));
-      }, 30_000);
+      }, MESH_REQUEST_TIMEOUT_MS);
       this.pending.set(request.requestId, {
         resolve,
         reject,

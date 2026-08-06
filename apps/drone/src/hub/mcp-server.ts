@@ -18,8 +18,10 @@ import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameS
 import { McpIdleSubscriptionStore } from './assistant/mcp-idle-subscription-store';
 import { GROQ_SPEECH_MAX_CHARS, GROQ_SPEECH_VOICES } from './groq-speech';
 import { droneSummary } from './mcp-summaries';
+import { placeMcpRepoScopedGroupNodeAtTop } from './mcp-sidebar-group-order';
 import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
 import { isWorkflowChildDroneEntry } from './workflows/workflow-child-drone-metadata';
+import type { RenameDroneCommand } from './drone-rename-command';
 import {
   WORKFLOW_DRONE_DEFAULTED_TOOL_NAMES,
   WORKFLOW_MCP_TOOL_NAMES,
@@ -813,14 +815,30 @@ async function insertNewGroupsAtParentTop(
     ? !beforeIds.has(group.id)
     : !beforeScopesAndNames.has(`${group.repoPath}\0${group.name}`));
   if (newGroups.length === 0) return { updated: false, groups: targetGroups };
+  const droneResponse = await requestDroneSummaries();
+  const sidebarDrones = Array.isArray(droneResponse?.drones)
+    ? droneResponse.drones
+        .filter((drone: any) => !isWorkflowChildDroneEntry(drone))
+        .map(droneSummary)
+    : [];
   const saved = await updateUiPreferences((uiPreferences) => {
     let sidebarGroupOrder = uiPreferences.sidebarGroupOrder;
+    let sidebarNodeOrderByParent = uiPreferences.sidebarNodeOrderByParent;
     for (const group of newGroups) {
       sidebarGroupOrder = insertGroupTokenAtParentTop(sidebarGroupOrder, afterGroups, group);
+      sidebarNodeOrderByParent = placeMcpRepoScopedGroupNodeAtTop({
+        nodeOrderByParent: sidebarNodeOrderByParent,
+        groupOrder: sidebarGroupOrder,
+        droneOrderByGroup: uiPreferences.sidebarDroneOrderByGroup,
+        groups: afterGroups,
+        drones: sidebarDrones,
+        group,
+      });
     }
     return {
       ...uiPreferences,
       sidebarGroupOrder,
+      sidebarNodeOrderByParent,
     };
   });
   return { updated: true, groups: targetGroups, sidebarGroupOrder: saved.sidebarGroupOrder };
@@ -1203,6 +1221,7 @@ type McpToolRegistrationContext = {
   legacyIdleSubscriptionTools?: boolean;
   speechEnabled?: boolean;
   onSpeechToolRegistered?: (tool: RegisteredTool) => void;
+  renameDrone?: RenameDroneCommand;
 };
 
 function chatPrincipal(
@@ -1560,17 +1579,27 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
   }, async (args) => {
     const renames = normalizeRenameRequests(args);
     if (renames.length === 0) throw new Error('at least one drone and newName are required');
-    const resolved = await resolveDroneRefs(renames.map((item: { drone: string }) => item.drone));
+    const resolved = context.renameDrone
+      ? null
+      : await resolveDroneRefs(renames.map((item: { drone: string }) => item.drone));
     const renamed = [];
     const rejected = [];
     for (let index = 0; index < renames.length; index += 1) {
       const request = renames[index];
-      const target = resolved[index];
       try {
-        const response = await requestJson(`/api/drones/${encodeURIComponent(target.id)}/rename`, {
-          method: 'POST',
-          body: JSON.stringify({ newName: request.newName, source: 'drone-hub-mcp' }),
-        });
+        const response = context.renameDrone
+          ? await context.renameDrone({
+              droneRef: request.drone,
+              newName: request.newName,
+              source: 'drone-hub-mcp',
+            })
+          : await requestJson(
+              `/api/drones/${encodeURIComponent(resolved![index].id)}/rename`,
+              {
+                method: 'POST',
+                body: JSON.stringify({ newName: request.newName, source: 'drone-hub-mcp' }),
+              },
+            );
         renamed.push(response);
       } catch (error: any) {
         rejected.push({ drone: request.drone, newName: request.newName, error: error?.message || String(error) });
@@ -2470,6 +2499,7 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
     ...(input?.allowedDroneRefs ? { allowedDroneRefs: input.allowedDroneRefs } : {}),
     ...(input?.allowedWriteDroneRefs ? { allowedWriteDroneRefs: input.allowedWriteDroneRefs } : {}),
     ...(input?.allowedDroneIds ? { allowedDroneIds: input.allowedDroneIds } : {}),
+    ...(input?.renameDrone ? { renameDrone: input.renameDrone } : {}),
     speechEnabled: input?.speechEnabled !== false,
     onSpeechToolRegistered: (tool) => {
       speechTool = tool;

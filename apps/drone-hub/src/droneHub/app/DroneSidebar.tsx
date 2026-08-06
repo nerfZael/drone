@@ -4,6 +4,7 @@ import { useDroppable } from '@dnd-kit/core';
 import {
   buildRepoSidebarModel,
   resolvePinnedSidebarDrones,
+  type SidebarMoveIntent,
 } from '@drone/hub-model/sidebar';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, RepoSummary } from '../types';
@@ -74,6 +75,7 @@ import {
   rewriteSidebarRepoScopedGroupMapKeysByPrefix,
 } from './sidebar-repo-scoped-groups';
 import {
+  mergeVisibleSidebarNodeOrderByParent,
   removeSidebarRepoScopedNodeOrderByGroupPrefix,
   SIDEBAR_ROOT_PARENT_ID,
   sidebarChatSidebarNodeId,
@@ -822,6 +824,8 @@ export type DroneSidebarProps = {
   ) => Promise<DroneInlineRenameResult> | DroneInlineRenameResult;
   onSetDroneBaseImage: (droneId: string) => void;
   onSetDronePinned: (droneId: string, pinned: boolean) => Promise<boolean>;
+  onMoveSidebar: (intent: SidebarMoveIntent) => Promise<boolean>;
+  uiPreferencesReady: boolean;
   onDeleteDrone: (droneId: string) => void;
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
   onReparentDronesToParent: (
@@ -888,6 +892,7 @@ export function DroneSidebar({
   renamingGroups,
   sidebarHasUngroupedGroup,
   repos,
+  reposLoading,
   dronesCount,
   droneCountByRepoPath,
   uiDroneName,
@@ -902,6 +907,8 @@ export function DroneSidebar({
   onRenameDrone,
   onSetDroneBaseImage,
   onSetDronePinned,
+  onMoveSidebar,
+  uiPreferencesReady,
   onDeleteDrone,
   onOpenDroneErrorModal,
   onReparentDronesToParent,
@@ -1096,6 +1103,56 @@ export function DroneSidebar({
     sidebarGroupCreatedAtByName,
     sidebarGroupIdByName,
     sidebarNodeOrderByParent,
+  ]);
+  const desktopSourceNodeOrderByParent = React.useMemo(() => {
+    const folderTree = buildSidebarFolderTree(
+      sidebarGroups,
+      sidebarGroupOrder,
+      sidebarGroupCreatedAtByName,
+    );
+    return buildSidebarNodeTree({
+      sidebarFolderTree: folderTree,
+      sidebarGroups,
+      sidebarGroupOrder,
+      repoScopedGroupPathsByRepoGroup,
+      sidebarDroneOrderByGroup,
+      sidebarNodeOrderByParent,
+      sidebarGroupCreatedAtByName,
+      sidebarGroupIdByName,
+    }).childIdsByParent;
+  }, [
+    repoScopedGroupPathsByRepoGroup,
+    sidebarDroneOrderByGroup,
+    sidebarGroupOrder,
+    sidebarGroups,
+    sidebarGroupCreatedAtByName,
+    sidebarGroupIdByName,
+    sidebarNodeOrderByParent,
+  ]);
+  const desktopOrderMigrationCompletedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (
+      desktopOrderMigrationCompletedRef.current ||
+      !uiPreferencesReady ||
+      dronesLoading ||
+      reposLoading
+    ) {
+      return;
+    }
+    setSidebarNodeOrderByParent((current) => {
+      const migrated = mergeVisibleSidebarNodeOrderByParent(
+        current,
+        desktopSourceNodeOrderByParent,
+      );
+      return JSON.stringify(migrated) === JSON.stringify(current) ? current : migrated;
+    });
+    desktopOrderMigrationCompletedRef.current = true;
+  }, [
+    desktopSourceNodeOrderByParent,
+    dronesLoading,
+    reposLoading,
+    setSidebarNodeOrderByParent,
+    uiPreferencesReady,
   ]);
   const handleRenameGroup = React.useCallback(
     async (group: string, nextName?: string) => {
@@ -1657,8 +1714,15 @@ export function DroneSidebar({
     pinningDroneIds.size === 0;
   const pinnedDroneDropTarget = usePinnedDroneReorder({
     enabled: pinnedDroneReorderEnabled,
-    visibleDroneIds: globalPinnedDroneIds,
-    setPinnedDroneIds,
+    onReorder: (activeDroneId, overDroneId, placement) => {
+      void onMoveSidebar({
+        kind: 'pinned-drone',
+        visibleDroneIds: globalPinnedDroneIds,
+        activeDroneId,
+        overDroneId,
+        placement,
+      });
+    },
     onPrepareDroneDragStart,
   });
   const openRepositoryOverview = React.useCallback(() => {
@@ -2938,10 +3002,8 @@ export function DroneSidebar({
                       repoScopedGroupPathsByRepoGroup={repoScopedGroupPathsByRepoGroup}
                       sidebarDroneOrderByGroup={sidebarDroneOrderByGroup}
                       sidebarNodeOrderByParent={sidebarNodeOrderByParent}
-                      setSidebarGroupOrder={setSidebarGroupOrder}
-                      setSidebarNodeOrderByParent={setSidebarNodeOrderByParent}
                       sidebarChatOrderByDrone={sidebarChatOrderByDrone}
-                      setSidebarChatOrderByDrone={setSidebarChatOrderByDrone}
+                      onMoveSidebar={onMoveSidebar}
                       droneById={sidebarDroneById}
                       selectedDroneIds={selectedDroneIds}
                       selectedDroneSet={selectedDroneSet}

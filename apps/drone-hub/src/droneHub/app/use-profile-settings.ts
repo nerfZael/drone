@@ -1,59 +1,59 @@
 import React from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { clearProfileScopedStorage, persistProfileStorageIdOverride } from '../../profile-storage';
 import type { ProfileSettingsResponse } from './settings-types';
+import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsQuery } from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
+type ProfileMutation =
+  | { action: 'create'; name: string }
+  | { action: 'activate'; name: string }
+  | { action: 'rename'; name: string; nextName: string }
+  | { action: 'delete'; name: string };
 
-export type UseProfileSettingsResult = {
-  profileSettings: ProfileSettingsResponse | null;
-  profileSettingsLoading: boolean;
-  profileSettingsError: string | null;
-  profileSettingsNotice: string | null;
-  createProfileDraft: string;
-  creatingProfile: boolean;
-  activatingProfileName: string | null;
-  renamingProfileName: string | null;
-  deletingProfileName: string | null;
-  setCreateProfileDraft: React.Dispatch<React.SetStateAction<string>>;
-  loadProfileSettings: () => Promise<void>;
-  createProfile: () => Promise<void>;
-  activateProfile: (name: string) => Promise<void>;
-  renameProfile: (name: string, nextName: string) => Promise<void>;
-  deleteProfile: (name: string) => Promise<void>;
-};
+export type UseProfileSettingsResult = ReturnType<typeof useProfileSettings>;
 
-export function useProfileSettings(requestJson: RequestJsonFn): UseProfileSettingsResult {
-  const [profileSettings, setProfileSettings] = React.useState<ProfileSettingsResponse | null>(null);
-  const [profileSettingsLoading, setProfileSettingsLoading] = React.useState(false);
+export function useProfileSettings(requestJson: RequestJsonFn) {
+  const queryClient = useQueryClient();
+  const queryKey = settingsQueryKey('profiles');
+  const query = useSettingsQuery<ProfileSettingsResponse>(requestJson, queryKey, '/api/settings/profiles');
   const [profileSettingsError, setProfileSettingsError] = React.useState<string | null>(null);
   const [profileSettingsNotice, setProfileSettingsNotice] = React.useState<string | null>(null);
   const [createProfileDraft, setCreateProfileDraft] = React.useState('');
-  const [creatingProfile, setCreatingProfile] = React.useState(false);
-  const [activatingProfileName, setActivatingProfileName] = React.useState<string | null>(null);
-  const [renamingProfileName, setRenamingProfileName] = React.useState<string | null>(null);
-  const [deletingProfileName, setDeletingProfileName] = React.useState<string | null>(null);
 
   const applyResponse = React.useCallback((data: ProfileSettingsResponse) => {
-    setProfileSettings(data);
+    queryClient.setQueryData(queryKey, data);
     persistProfileStorageIdOverride(data.activeProfile ?? null);
-  }, []);
-
-  const loadProfileSettings = React.useCallback(async () => {
-    setProfileSettingsLoading(true);
-    setProfileSettingsError(null);
-    try {
-      const data = await requestJson<ProfileSettingsResponse>('/api/settings/profiles');
-      applyResponse(data);
-    } catch (e: any) {
-      setProfileSettingsError(e?.message ?? String(e));
-    } finally {
-      setProfileSettingsLoading(false);
-    }
-  }, [applyResponse, requestJson]);
+  }, [queryClient, queryKey]);
 
   React.useEffect(() => {
-    void loadProfileSettings();
-  }, [loadProfileSettings]);
+    if (query.data) persistProfileStorageIdOverride(query.data.activeProfile ?? null);
+  }, [query.data]);
+
+  const loadProfileSettings = React.useCallback(async () => {
+    setProfileSettingsError(null);
+    await query.refetch();
+  }, [query.refetch]);
+
+  const mutation = useMutation({
+    mutationFn: (input: ProfileMutation) => {
+      if (input.action === 'create') {
+        return requestJson<ProfileSettingsResponse>('/api/settings/profiles', jsonRequest('POST', { name: input.name }));
+      }
+      if (input.action === 'activate') {
+        return requestJson<ProfileSettingsResponse>('/api/settings/profiles/activate', jsonRequest('POST', { name: input.name }));
+      }
+      if (input.action === 'rename') {
+        return requestJson<ProfileSettingsResponse>(
+          '/api/settings/profiles/rename',
+          jsonRequest('POST', { name: input.name, nextName: input.nextName }),
+        );
+      }
+      return requestJson<ProfileSettingsResponse>(`/api/settings/profiles/${encodeURIComponent(input.name)}`, {
+        method: 'DELETE',
+      });
+    },
+  });
 
   const createProfile = React.useCallback(async () => {
     const name = String(createProfileDraft ?? '').trim();
@@ -61,64 +61,47 @@ export function useProfileSettings(requestJson: RequestJsonFn): UseProfileSettin
       setProfileSettingsError('Profile name is required.');
       return;
     }
-    setCreatingProfile(true);
     setProfileSettingsError(null);
     setProfileSettingsNotice(null);
     try {
-      const data = await requestJson<ProfileSettingsResponse>('/api/settings/profiles', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
+      const data = await mutation.mutateAsync({ action: 'create', name });
       applyResponse(data);
       setCreateProfileDraft('');
       setProfileSettingsNotice(`Created profile ${data.createdProfile ?? name}.`);
-    } catch (e: any) {
-      setProfileSettingsError(e?.message ?? String(e));
-    } finally {
-      setCreatingProfile(false);
+    } catch (error) {
+      setProfileSettingsError(settingsErrorMessage(error));
     }
-  }, [applyResponse, createProfileDraft, requestJson]);
+  }, [applyResponse, createProfileDraft, mutation]);
 
   const activateProfile = React.useCallback(
     async (nameRaw: string) => {
       const name = String(nameRaw ?? '').trim();
       if (!name) return;
-      setActivatingProfileName(name);
       setProfileSettingsError(null);
       setProfileSettingsNotice(null);
       try {
-        const data = await requestJson<ProfileSettingsResponse>('/api/settings/profiles/activate', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name }),
-        });
+        const data = await mutation.mutateAsync({ action: 'activate', name });
         applyResponse(data);
         if (data.reloadRequired && typeof window !== 'undefined') {
           window.location.reload();
           return;
         }
         setProfileSettingsNotice(`Switched to profile ${data.activatedProfile ?? name}.`);
-      } catch (e: any) {
-        setProfileSettingsError(e?.message ?? String(e));
-      } finally {
-        setActivatingProfileName((current) => (current === name ? null : current));
+      } catch (error) {
+        setProfileSettingsError(settingsErrorMessage(error));
       }
     },
-    [applyResponse, requestJson],
+    [applyResponse, mutation],
   );
 
   const deleteProfile = React.useCallback(
     async (nameRaw: string) => {
       const name = String(nameRaw ?? '').trim();
       if (!name) return;
-      setDeletingProfileName(name);
       setProfileSettingsError(null);
       setProfileSettingsNotice(null);
       try {
-        const data = await requestJson<ProfileSettingsResponse>(`/api/settings/profiles/${encodeURIComponent(name)}`, {
-          method: 'DELETE',
-        });
+        const data = await mutation.mutateAsync({ action: 'delete', name });
         clearProfileScopedStorage(name);
         applyResponse(data);
         const removedContainers = Array.isArray(data.removedContainers) ? data.removedContainers.length : 0;
@@ -126,13 +109,11 @@ export function useProfileSettings(requestJson: RequestJsonFn): UseProfileSettin
         setProfileSettingsNotice(
           `Deleted profile ${data.deletedProfile ?? name}${removedContainers || removedHostRoots ? ` (${removedContainers} containers, ${removedHostRoots} host runtimes removed)` : ''}.`,
         );
-      } catch (e: any) {
-        setProfileSettingsError(e?.message ?? String(e));
-      } finally {
-        setDeletingProfileName((current) => (current === name ? null : current));
+      } catch (error) {
+        setProfileSettingsError(settingsErrorMessage(error));
       }
     },
-    [applyResponse, requestJson],
+    [applyResponse, mutation],
   );
 
   const renameProfile = React.useCallback(
@@ -143,45 +124,48 @@ export function useProfileSettings(requestJson: RequestJsonFn): UseProfileSettin
         setProfileSettingsError('Both current and new profile names are required.');
         return;
       }
-      setRenamingProfileName(name);
       setProfileSettingsError(null);
       setProfileSettingsNotice(null);
       try {
-        const data = await requestJson<ProfileSettingsResponse>('/api/settings/profiles/rename', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name, nextName }),
-        });
+        const data = await mutation.mutateAsync({ action: 'rename', name, nextName });
         applyResponse(data);
         if (data.reloadRequired && typeof window !== 'undefined') {
           window.location.reload();
           return;
         }
         setProfileSettingsNotice(`Renamed profile ${data.renamedFrom ?? name} to ${data.renamedTo ?? nextName}.`);
-      } catch (e: any) {
-        setProfileSettingsError(e?.message ?? String(e));
-      } finally {
-        setRenamingProfileName((current) => (current === name ? null : current));
+      } catch (error) {
+        setProfileSettingsError(settingsErrorMessage(error));
       }
     },
-    [applyResponse, requestJson],
+    [applyResponse, mutation],
   );
 
+  const pending = mutation.isPending ? mutation.variables : null;
+
   return {
-    profileSettings,
-    profileSettingsLoading,
-    profileSettingsError,
+    profileSettings: query.data ?? null,
+    profileSettingsLoading: query.isFetching,
+    profileSettingsError: settingsQueryError(profileSettingsError, false, query),
     profileSettingsNotice,
     createProfileDraft,
-    creatingProfile,
-    activatingProfileName,
-    renamingProfileName,
-    deletingProfileName,
+    creatingProfile: pending?.action === 'create',
+    activatingProfileName: pending?.action === 'activate' ? pending.name : null,
+    renamingProfileName: pending?.action === 'rename' ? pending.name : null,
+    deletingProfileName: pending?.action === 'delete' ? pending.name : null,
     setCreateProfileDraft,
     loadProfileSettings,
     createProfile,
     activateProfile,
     renameProfile,
     deleteProfile,
+  };
+}
+
+function jsonRequest(method: string, body: unknown): RequestInit {
+  return {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
   };
 }

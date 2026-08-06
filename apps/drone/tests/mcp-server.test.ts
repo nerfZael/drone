@@ -191,6 +191,49 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('uses the shared rename command without a loopback HTTP request', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-rename-', async () => {
+      const previousFetch = globalThis.fetch;
+      const renames: any[] = [];
+      globalThis.fetch = (async (input) => {
+        throw new Error(`unexpected loopback request: ${String(input)}`);
+      }) as typeof fetch;
+      const client = await createInProcessDroneHubMcpClient({
+        correlationId: 'thread-rename',
+        allowedDroneRefs: ['drone-a'],
+        allowedWriteDroneRefs: ['drone-a'],
+        allowedDroneIds: ['drone-a'],
+        renameDrone: async (input) => {
+          renames.push(input);
+          return {
+            ok: true,
+            id: 'drone-a',
+            oldName: 'Untitled 1',
+            newName: input.newName,
+            renamed: true,
+          };
+        },
+      });
+      try {
+        const result = await client.callTool({
+          name: 'rename_drones',
+          arguments: { drone: 'drone-a', newName: 'Review proposals' },
+        });
+        expect(result.structuredContent).toMatchObject({ ok: true, total: 1 });
+        expect(renames).toEqual([
+          {
+            droneRef: 'drone-a',
+            newName: 'Review proposals',
+            source: 'drone-hub-mcp',
+          },
+        ]);
+      } finally {
+        await client.close();
+        globalThis.fetch = previousFetch;
+      }
+    });
+  });
+
   test('hides speak from new Built-in MCP catalogs when speech is disabled globally', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-speech-disabled-', async () => {
       await upsertStoredSpeechSettings({ enabled: false });
@@ -560,6 +603,15 @@ describe('Drone Hub assistant MCP transport', () => {
       ];
       const drones = [
         { id: 'a-1', name: 'A 1', repoPath: repoA, group: 'review', groupId: 'grp_repo_a' },
+        { id: 'a-loose', name: 'A loose', repoPath: repoA, group: null, groupId: null },
+        {
+          id: 'a-child',
+          name: 'A child',
+          repoPath: repoA,
+          group: null,
+          groupId: null,
+          fleetParentId: 'a-loose',
+        },
         { id: 'b-1', name: 'B 1', repoPath: repoB, group: 'review', groupId: 'grp_repo_b' },
         { id: 'b-2', name: 'B 2', repoPath: repoB, group: 'review', groupId: 'grp_repo_b' },
         { id: 'b-3', name: 'B 3', repoPath: repoB, group: null, groupId: null },
@@ -573,6 +625,10 @@ describe('Drone Hub assistant MCP transport', () => {
         },
         sidebarNodeOrderByParent: {
           'folder:review': ['drone:a-1', 'drone:b-1', 'drone:b-2'],
+          [`folder:repo:${repoA}`]: [
+            'drone:a-loose',
+            `folder:repo-scope:repo:${repoA}:review`,
+          ],
         },
       };
       const requests: Array<{ pathname: string; search: string; method: string; body?: any }> = [];
@@ -668,6 +724,11 @@ describe('Drone Hub assistant MCP transport', () => {
           'group-id:grp_new_a',
           'group-id:grp_repo_a',
           'group-id:grp_repo_b',
+        ]);
+        expect(uiPreferences.sidebarNodeOrderByParent[`folder:repo:${repoA}`]).toEqual([
+          `folder:repo-scope:repo:${repoA}:ready`,
+          'drone:a-loose',
+          `folder:repo-scope:repo:${repoA}:review`,
         ]);
         const createRequest = requests.find((request) => request.pathname === '/api/groups' && request.method === 'POST');
         expect(createRequest?.body).toEqual({ name: 'ready', repoPath: repoA });

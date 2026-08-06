@@ -1,7 +1,6 @@
 import {
   DRONE_CONTROL_CAPABILITY,
   MESH_BINARY_CHUNK_BYTES,
-  isGranted,
 } from '@drone/device-protocol';
 import {
   filterCompletedPendingPrompts,
@@ -20,12 +19,13 @@ import {
   compactAgentRunFileChangesForMesh,
 } from './drone-chat-page';
 import { isLikelyImagePath, isLikelyVideoPath } from '../filesystem-media';
+import type { RenameDroneCommand } from '../drone-rename-command';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
 import { meshJsonContentChunk } from './mesh-content-chunk';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { compactNativeChatReadResponse } from './native-chat-response';
 import { submitNativeChatPrompt } from './native-chat-prompt';
-import { SidebarCommandService } from './sidebar-command-service';
+import { SidebarCommandService } from '../sidebar-command-service';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -36,23 +36,6 @@ function requiredText(value: unknown, label: string): string {
   const result = String(value ?? '').trim();
   if (!result) throw Object.assign(new Error(`${label} is required`), { code: 'INVALID_REQUEST' });
   return result;
-}
-
-function normalizedGroupPath(value: unknown): string {
-  return String(value ?? '')
-    .trim()
-    .replace(/[\\/]+/g, '/')
-    .replace(/^\/+|\/+$/g, '');
-}
-
-function groupPathContains(pathRaw: unknown, parentRaw: unknown): boolean {
-  const path = normalizedGroupPath(pathRaw);
-  const parent = normalizedGroupPath(parentRaw);
-  return Boolean(path && parent && (path === parent || path.startsWith(`${parent}/`)));
-}
-
-function groupBaseName(value: unknown): string {
-  return normalizedGroupPath(value).split('/').filter(Boolean).at(-1) ?? '';
 }
 
 function firstText(...values: unknown[]): string {
@@ -75,23 +58,6 @@ function textListMap(value: unknown): Record<string, string[]> {
       .map(([key, items]) => [key.trim(), textList(items)] as const)
       .filter(([key, items]) => Boolean(key && items.length)),
   );
-}
-
-function mergeChangedTextListMap(
-  currentRaw: unknown,
-  baseRaw: unknown,
-  nextRaw: unknown,
-): Record<string, string[]> {
-  const current = textListMap(currentRaw);
-  const base = textListMap(baseRaw);
-  const next = textListMap(nextRaw);
-  const merged = { ...current };
-  for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
-    if (JSON.stringify(base[key] ?? []) === JSON.stringify(next[key] ?? [])) continue;
-    if (next[key]?.length) merged[key] = next[key];
-    else delete merged[key];
-  }
-  return merged;
 }
 
 function optionalText(value: unknown): string | undefined {
@@ -240,6 +206,7 @@ export function deviceMeshDroneSummary(drone: any) {
     phase: String(drone?.phase ?? drone?.hubPhase ?? drone?.hub?.phase ?? ''),
     status: String(drone?.status ?? drone?.hubMessage ?? ''),
     group: drone?.group ?? null,
+    groupId: String(drone?.groupId ?? '').trim() || null,
     repoPath: firstText(
       drone?.repoPath,
       drone?.repositoryPath,
@@ -296,88 +263,20 @@ export function deviceMeshDroneSummary(drone: any) {
   };
 }
 
-async function updateSidebarOrderPreferences(
-  access: LocalHubAccess,
-  payload: any,
-  notificationMode?: 'sidebar_snapshot',
-) {
-  const sidebar = object(payload.sidebar);
-  const baseSidebar = object(payload.baseSidebar);
-  const canRebase = Object.keys(baseSidebar).length > 0;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const current = await localHubRequest(access, '/api/settings/ui-preferences');
-    const currentPreferences = object(current.uiPreferences);
-    const nextPreferences = {
-      ...currentPreferences,
-      ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarNodeOrderByParent')
-        ? {
-            sidebarNodeOrderByParent:
-              canRebase &&
-              Object.prototype.hasOwnProperty.call(baseSidebar, 'sidebarNodeOrderByParent')
-                ? mergeChangedTextListMap(
-                    currentPreferences.sidebarNodeOrderByParent,
-                    baseSidebar.sidebarNodeOrderByParent,
-                    sidebar.sidebarNodeOrderByParent,
-                  )
-                : textListMap(sidebar.sidebarNodeOrderByParent),
-          }
-        : {}),
-      ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarChatOrderByDrone')
-        ? {
-            sidebarChatOrderByDrone:
-              canRebase &&
-              Object.prototype.hasOwnProperty.call(baseSidebar, 'sidebarChatOrderByDrone')
-                ? mergeChangedTextListMap(
-                    currentPreferences.sidebarChatOrderByDrone,
-                    baseSidebar.sidebarChatOrderByDrone,
-                    sidebar.sidebarChatOrderByDrone,
-                  )
-                : textListMap(sidebar.sidebarChatOrderByDrone),
-          }
-        : {}),
-      ...(Object.prototype.hasOwnProperty.call(sidebar, 'pinnedDroneIds')
-        ? { pinnedDroneIds: textList(sidebar.pinnedDroneIds) }
-        : {}),
-    };
-    const requestedVersion = Number(payload.expectedVersion);
-    const currentVersion = Number(current.version);
-    const expectedVersion = canRebase
-      ? Number.isSafeInteger(currentVersion) && currentVersion > 0
-        ? currentVersion
-        : current.version === null
-          ? null
-          : undefined
-      : Number.isSafeInteger(requestedVersion) && requestedVersion > 0
-        ? requestedVersion
-        : undefined;
-    try {
-      return await localHubRequest(access, '/api/settings/ui-preferences', {
-        method: 'POST',
-        body: JSON.stringify({
-          uiPreferences: nextPreferences,
-          ...(expectedVersion !== undefined ? { expectedVersion } : {}),
-          ...(notificationMode ? { notificationMode } : {}),
-        }),
-      });
-    } catch (error: any) {
-      if (!canRebase || error?.code !== 'HUB_409' || attempt === 3) throw error;
-    }
-  }
-  throw new Error('Failed to update sidebar order');
-}
-
 export function createDroneControlCapability(
   access: LocalHubAccess,
   chatAttachments?: MeshChatAttachmentStore,
   options?: {
+    sidebarCommands?: SidebarCommandService;
     createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
+    renameDrone?: RenameDroneCommand;
     broadcastFileChange?: (
       payload: Record<string, any>,
       targetDeviceIds: string[],
     ) => void | Promise<void>;
   },
 ): CapabilityHandler {
-  const sidebarCommands = new SidebarCommandService(access);
+  const sidebarCommands = options?.sidebarCommands ?? new SidebarCommandService(access);
   type FileWatch = {
     droneId: string;
     path: string;
@@ -682,6 +581,21 @@ export function createDroneControlCapability(
                 })
                 .filter(([name]) => Boolean(name)),
             ),
+            groups: groups.flatMap((group: unknown) => {
+              const entry = object(group);
+              const id = String(entry.id ?? '').trim();
+              const name = String(entry.name ?? '').trim();
+              if (!id || !name) return [];
+              return [
+                {
+                  id,
+                  name,
+                  repoPath: String(entry.repoPath ?? '').trim(),
+                  parentId: String(entry.parentId ?? '').trim() || null,
+                  createdAt: String(entry.createdAt ?? '').trim() || null,
+                },
+              ];
+            }),
             sidebarGroupOrder: textList(preferences.sidebarGroupOrder),
             sidebarDroneOrderByGroup: textListMap(preferences.sidebarDroneOrderByGroup),
             sidebarNodeOrderByParent: textListMap(preferences.sidebarNodeOrderByParent),
@@ -767,89 +681,20 @@ export function createDroneControlCapability(
         return await sidebarCommands.move(payload);
       }
 
-      if (operation === 'sidebar.order.update') {
-        return await updateSidebarOrderPreferences(access, payload);
-      }
-
-      if (operation === 'sidebar.item.move') {
-        const itemKind = requiredText(payload.itemKind, 'itemKind');
-        const repoPath = optionalText(payload.repoPath) ?? '';
-        const targetGroup = optionalText(payload.targetGroup);
-        const hasSidebarOrder = Object.keys(object(payload.sidebar)).length > 0;
-        if (
-          hasSidebarOrder &&
-          context?.sourceDevice &&
-          !isGranted(context.sourceDevice.grants, 'drone-control', 1, 'sidebar.order.update')
-        ) {
-          throw Object.assign(new Error('sidebar order update is not granted'), {
-            code: 'PERMISSION_DENIED',
-          });
-        }
-        const withSidebarOrder = async (moveResult: any) => {
-          if (!hasSidebarOrder) return moveResult;
-          const orderResult = await updateSidebarOrderPreferences(
-            access,
-            payload,
-            'sidebar_snapshot',
-          );
-          return { ...moveResult, ...orderResult };
-        };
-        if (itemKind === 'drone') {
-          const droneId = requiredText(payload.droneId, 'droneId');
-          const result = await localHubRequest(access, '/api/drones/group-set', {
-            method: 'POST',
-            body: JSON.stringify({ droneIds: [droneId], group: targetGroup ?? null }),
-          });
-          const rejected = Array.isArray(result.rejected) ? result.rejected : [];
-          if (rejected.length > 0) {
-            throw Object.assign(
-              new Error(String(object(rejected[0]).error ?? 'drone could not be moved')),
-              { code: 'OPERATION_FAILED' },
-            );
-          }
-          return await withSidebarOrder(result);
-        }
-        if (itemKind !== 'folder') {
-          throw Object.assign(new Error('itemKind must be drone or folder'), {
-            code: 'INVALID_REQUEST',
-          });
-        }
-        const sourceGroup = requiredText(payload.sourceGroup, 'sourceGroup');
-        if (
-          targetGroup != null &&
-          (sourceGroup === targetGroup || groupPathContains(targetGroup, sourceGroup))
-        ) {
-          throw Object.assign(new Error('cannot move a group into itself or its subtree'), {
-            code: 'INVALID_REQUEST',
-          });
-        }
-        const nextGroup = normalizedGroupPath(
-          targetGroup ? `${targetGroup}/${groupBaseName(sourceGroup)}` : groupBaseName(sourceGroup),
-        );
-        const result = await localHubRequest(
-          access,
-          `/api/groups/${encodeURIComponent(sourceGroup)}/rename`,
-          {
-            method: 'POST',
-            body: JSON.stringify({ repoPath, newName: nextGroup }),
-          },
-        );
-        return await withSidebarOrder(result);
-      }
-
       const droneId = requiredText(payload.droneId, 'droneId');
       const encodedDrone = encodeURIComponent(droneId);
       if (operation === 'drone.rename') {
         const newName = requiredText(payload.newName, 'newName');
+        if (options?.renameDrone) {
+          return await options.renameDrone({
+            droneRef: droneId,
+            newName,
+            source: 'drone-hub-mobile',
+          });
+        }
         return await localHubRequest(access, `/api/drones/${encodedDrone}/rename`, {
           method: 'POST',
           body: JSON.stringify({ newName, source: 'drone-hub-mobile' }),
-        });
-      }
-      if (operation === 'drone.pin.update') {
-        return await localHubRequest(access, '/api/settings/ui-preferences/pinned-drones', {
-          method: 'POST',
-          body: JSON.stringify({ droneId, pinned: payload.pinned === true }),
         });
       }
       if (operation === 'drone.delete') {
@@ -1196,13 +1041,41 @@ export function createDroneControlCapability(
             },
           };
         }
-        const [result, pendingResult] = await Promise.all([
-          localHubRequest(access, chatPath),
-          localHubRequest(access, `${chatPath}/pending`),
-        ]);
-        const contentOnlyRead = Boolean(
-          optionalText(payload.messageId) || optionalText(payload.turnId),
-        );
+        const messageId = optionalText(payload.messageId);
+        const turnId = optionalText(payload.turnId);
+        const contentOnlyRead = Boolean(messageId || turnId);
+        const turnNumber = Number(payload.turnNumber);
+        const hasTurnNumber = Number.isSafeInteger(turnNumber) && turnNumber > 0;
+        const selectedTurnQuery =
+          turnId && hasTurnNumber
+            ? `selected&turn=${turnNumber}`
+            : turnId || messageId
+              ? 'none'
+              : 'page&limit=100';
+        const before = Number(payload.before);
+        const beforeQuery = Number.isSafeInteger(before) && before > 0 ? `&before=${before}` : '';
+        let legacyTranscriptLoaded = false;
+        let result: any;
+        try {
+          result = await localHubRequest(
+            access,
+            `${chatPath}/state?transcript=${selectedTurnQuery}&pending=${contentOnlyRead ? 'none' : 'all'}&subscriptions=${contentOnlyRead ? '0' : '1'}&readState=${contentOnlyRead ? '0' : '1'}&transcriptMeta=0${beforeQuery}`,
+          );
+        } catch (error: any) {
+          if (error?.code !== 'HUB_410') throw error;
+          const [legacy, pendingResult] = await Promise.all([
+            localHubRequest(access, chatPath),
+            contentOnlyRead
+              ? Promise.resolve(null)
+              : localHubRequest(access, `${chatPath}/pending`),
+          ]);
+          result = {
+            ...legacy,
+            transcripts: Array.isArray(legacy?.turns) ? legacy.turns : [],
+            pending: pendingResult?.pending,
+          };
+          legacyTranscriptLoaded = true;
+        }
         const latestAgentTurnId = optionalText(result?.readState?.latestAgentTurnId) ?? null;
         const latestAgentRevision = Number.isSafeInteger(result?.readState?.latestAgentRevision)
           ? Number(result.readState.latestAgentRevision)
@@ -1210,17 +1083,18 @@ export function createDroneControlCapability(
         const subscriptions = contentOnlyRead
           ? []
           : compactChatSubscriptions(result?.subscriptions);
-        const marked = await localHubRequest(access, `${chatPath}/read`, {
-          method: 'POST',
-          body: JSON.stringify({
-            latestAgentTurnId,
-            latestAgentRevision,
-            updatedByDeviceId: context?.sourceDevice?.id ?? null,
-          }),
-        });
+        const marked = contentOnlyRead
+          ? null
+          : await localHubRequest(access, `${chatPath}/read`, {
+              method: 'POST',
+              body: JSON.stringify({
+                latestAgentTurnId,
+                latestAgentRevision,
+                updatedByDeviceId: context?.sourceDevice?.id ?? null,
+              }),
+            });
         if (result?.agent?.kind === 'native') {
           const { nativeChatId, snapshot: ensured } = await resolveNativeChat();
-          const messageId = optionalText(payload.messageId);
           if (messageId) {
             const entry = await localHubRequest(
               access,
@@ -1237,7 +1111,7 @@ export function createDroneControlCapability(
           }
           const history = await localHubRequest(
             access,
-            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=200${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
+            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=60${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
           );
           const nativeResponse = compactNativeChatReadResponse({
             nativeChatId,
@@ -1260,9 +1134,8 @@ export function createDroneControlCapability(
             ...(subscriptions ? { subscriptions } : {}),
           };
         }
-        const turnId = optionalText(payload.turnId);
         if (turnId) {
-          const turn = (Array.isArray(result?.turns) ? result.turns : []).find(
+          let turn = (Array.isArray(result?.transcripts) ? result.transcripts : []).find(
             (item: any, index: number) => {
               const itemId = String(item?.id ?? '').trim();
               const turnNumber = Number(item?.turn);
@@ -1272,6 +1145,20 @@ export function createDroneControlCapability(
               );
             },
           );
+          if (!turn && !hasTurnNumber && !legacyTranscriptLoaded) {
+            const legacy = await localHubRequest(access, chatPath);
+            turn = (Array.isArray(legacy?.turns) ? legacy.turns : []).find(
+              (item: any, index: number) => {
+                const itemId = String(item?.id ?? '').trim();
+                const turnNumber = Number(item?.turn);
+                return (
+                  (itemId ||
+                    (Number.isFinite(turnNumber) ? `turn-${turnNumber}` : `turn-${index}`)) ===
+                  turnId
+                );
+              },
+            );
+          }
           if (!turn)
             throw Object.assign(new Error(`unknown chat turn: ${turnId}`), {
               code: 'NOT_FOUND',
@@ -1284,7 +1171,10 @@ export function createDroneControlCapability(
             contentChunk: meshJsonContentChunk(turn, payload.contentOffset),
           };
         }
-        const turnPage = boundedDroneChatPage(result.turns, payload.before);
+        const turnPage = boundedDroneChatPage(
+          result.transcripts,
+          legacyTranscriptLoaded ? payload.before : undefined,
+        );
         return {
           droneId,
           chatName,
@@ -1294,8 +1184,8 @@ export function createDroneControlCapability(
           model: result.model ?? null,
           reasoning: result.reasoning ?? null,
           pending: filterCompletedPendingPrompts(
-            compactPendingPrompts(pendingResult?.pending),
-            result.turns,
+            compactPendingPrompts(result?.pending),
+            result.transcripts,
           ),
           readState: marked?.readState ?? result?.readState ?? null,
           agentPermissionMode:

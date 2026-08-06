@@ -109,15 +109,12 @@ describe('device protocol', () => {
 
   test('advertises sidebar ordering as an explicit permission', () => {
     expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.move');
-    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.order.update');
-    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.item.move');
   });
 
   test('validates sidebar commands at the protocol boundary', () => {
     expect(
       parseSidebarMoveCommandRequest({
         mutationId: 'move-1',
-        expectedVersion: 12,
         intent: {
           kind: 'chat',
           droneId: ' host ',
@@ -129,7 +126,6 @@ describe('device protocol', () => {
       }),
     ).toEqual({
       mutationId: 'move-1',
-      expectedVersion: 12,
       intent: {
         kind: 'chat',
         droneId: 'host',
@@ -173,6 +169,23 @@ describe('device protocol', () => {
         },
       }),
     ).toThrow('targetGroup');
+    expect(
+      parseSidebarMoveCommandRequest({
+        mutationId: 'pin-1',
+        intent: {
+          kind: 'set-pinned',
+          droneIds: [' alpha ', 'alpha', 'bravo'],
+          pinned: true,
+        },
+      }),
+    ).toEqual({
+      mutationId: 'pin-1',
+      intent: {
+        kind: 'set-pinned',
+        droneIds: ['alpha', 'bravo'],
+        pinned: true,
+      },
+    });
   });
 
   test('advertises chat rename and delete as explicit permissions', () => {

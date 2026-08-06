@@ -14,6 +14,11 @@ const PENDING_PAIRING_RETENTION_MS = 60 * 60_000;
 const EXPIRED_INVITATION_RETENTION_MS = 10 * 60_000;
 
 export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): CapabilityGrant[] {
+  const legacySidebarOperations = new Set([
+    'sidebar.order.update',
+    'sidebar.item.move',
+    'drone.pin.update',
+  ]);
   const legacy = grants.find(
     (grant) => grant.capability === 'assistant-threads' && grant.version === 1,
   );
@@ -21,7 +26,10 @@ export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): Cap
     ...(legacy?.operations.includes('approval.resolve') ? ['chat.approval.resolve'] : []),
     ...(legacy?.operations.includes('thread.message.delete') ? ['chat.message.delete'] : []),
   ];
-  const next = grants.map((grant) => ({ ...grant, operations: [...grant.operations] }));
+  const next = grants.map((grant) => ({
+    ...grant,
+    operations: grant.operations.filter((operation: string) => !legacySidebarOperations.has(operation)),
+  }));
   const droneControl = next.find(
     (grant) => grant.capability === 'drone-control' && grant.version === 1,
   );
@@ -33,13 +41,15 @@ export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): Cap
       'chat.rename',
       'chat.delete',
       'sidebar.move',
-      'sidebar.order.update',
-      'sidebar.item.move',
     );
   }
   if (
-    droneControl?.operations.includes('sidebar.order.update') &&
-    droneControl.operations.includes('sidebar.item.move')
+    grants.some(
+      (grant) =>
+        grant.capability === 'drone-control' &&
+        grant.version === 1 &&
+        grant.operations.some((operation: string) => legacySidebarOperations.has(operation)),
+    )
   ) {
     operations.push('sidebar.move');
   }

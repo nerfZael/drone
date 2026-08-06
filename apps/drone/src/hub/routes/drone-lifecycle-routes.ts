@@ -2,7 +2,6 @@ import { DroneLifecycleService } from '../drone-lifecycle-route-service';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './legacy-route';
 
 type DroneLifecycleDependencyName =
-  | 'DRONE_DISPLAY_NAME_MAX_LEN'
   | 'archiveDroneById'
   | 'archiveRetentionMs'
   | 'cleanupExpiredArchivedChats'
@@ -29,16 +28,14 @@ type DroneLifecycleDependencyName =
   | 'normalizeArchiveRuntimePolicy'
   | 'normalizeChatName'
   | 'normalizeDisabledRepoKeys'
-  | 'normalizeDroneDisplayName'
   | 'normalizeDroneIdentity'
   | 'normalizeDroneRuntime'
   | 'normalizeEnvVarMap'
-  | 'notifyCanonicalDroneRegistryWrite'
   | 'nowIso'
   | 'parseIsoToMs'
   | 'removeArchivedDroneById'
   | 'removeDroneTreeById'
-  | 'renameDroneDisplayName'
+  | 'renameDrone'
   | 'resolveArchiveDeleteAtIso'
   | 'resolveDroneCliPath'
   | 'resolveDroneOrPendingForReadRef'

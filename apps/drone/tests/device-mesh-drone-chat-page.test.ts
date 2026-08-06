@@ -22,6 +22,21 @@ describe('device mesh drone chat pages', () => {
     expect(Number(older.turns.at(-1)?.turn)).toBeLessThan(Number(page.turns[0]?.turn));
   });
 
+  test('preserves the global cursor when the server already supplied a bounded page', () => {
+    const turns = Array.from({ length: 100 }, (_, index) => ({
+      id: `turn-${index + 401}`,
+      turn: index + 401,
+      prompt: `prompt ${index + 401}`,
+      output: 'done',
+    }));
+
+    const page = boundedDroneChatPage(turns);
+
+    expect(page.turns).toHaveLength(100);
+    expect(page.page.beforeCursor).toBe(400);
+    expect(page.page.hasOlder).toBe(true);
+  });
+
   test('marks the exact side of a turn whose content was truncated', () => {
     const [turn] = boundedDroneChatPage([
       {
@@ -92,11 +107,7 @@ describe('device mesh drone chat pages', () => {
     expect(turn?.activity).toMatchObject({
       version: 1,
       source: 'codex',
-      messages: [
-        { role: 'assistant' },
-        { role: 'toolResult' },
-        { role: 'assistant' },
-      ],
+      messages: [{ role: 'assistant' }, { role: 'toolResult' }, { role: 'assistant' }],
     });
     expect(Buffer.byteLength(JSON.stringify(turn?.activity))).toBeLessThanOrEqual(24 * 1024);
     expect(turn?.activityMeshTruncated).toBe(true);

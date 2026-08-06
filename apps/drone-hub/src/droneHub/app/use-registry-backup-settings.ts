@@ -1,46 +1,19 @@
 import React from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { RegistryBackupSettingsResponse } from './settings-types';
+import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsQuery } from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
-
-export type UseRegistryBackupSettingsResult = {
-  backupSettings: RegistryBackupSettingsResponse | null;
-  backupSettingsLoading: boolean;
-  backupSettingsError: string | null;
-  backupSettingsNotice: string | null;
-  backupsEnabledDraft: boolean;
-  hourlyEnabledDraft: boolean;
-  dailyEnabledDraft: boolean;
-  hourlyRetentionHoursDraft: string;
-  dailyRetentionDaysDraft: string;
-  savingBackupSettings: boolean;
-  runningBackup: boolean;
-  setBackupsEnabledDraft: React.Dispatch<React.SetStateAction<boolean>>;
-  setHourlyEnabledDraft: React.Dispatch<React.SetStateAction<boolean>>;
-  setDailyEnabledDraft: React.Dispatch<React.SetStateAction<boolean>>;
-  setHourlyRetentionHoursDraft: React.Dispatch<React.SetStateAction<string>>;
-  setDailyRetentionDaysDraft: React.Dispatch<React.SetStateAction<string>>;
-  loadBackupSettings: () => Promise<void>;
-  saveBackupSettings: () => Promise<void>;
-  runBackupNow: () => Promise<void>;
+type BackupSettingsInput = {
+  enabled: boolean;
+  hourlyEnabled: boolean;
+  dailyEnabled: boolean;
+  hourlyRetentionHours: number;
+  dailyRetentionDays: number;
 };
+type BackupMutation = { action: 'save'; settings: BackupSettingsInput } | { action: 'run' };
 
-function applyBackupSettings(
-  data: RegistryBackupSettingsResponse,
-  setBackupSettings: React.Dispatch<React.SetStateAction<RegistryBackupSettingsResponse | null>>,
-  setBackupsEnabledDraft: React.Dispatch<React.SetStateAction<boolean>>,
-  setHourlyEnabledDraft: React.Dispatch<React.SetStateAction<boolean>>,
-  setDailyEnabledDraft: React.Dispatch<React.SetStateAction<boolean>>,
-  setHourlyRetentionHoursDraft: React.Dispatch<React.SetStateAction<string>>,
-  setDailyRetentionDaysDraft: React.Dispatch<React.SetStateAction<string>>,
-) {
-  setBackupSettings(data);
-  setBackupsEnabledDraft(data.backupSettings.enabled);
-  setHourlyEnabledDraft(data.backupSettings.hourlyEnabled);
-  setDailyEnabledDraft(data.backupSettings.dailyEnabled);
-  setHourlyRetentionHoursDraft(String(data.backupSettings.hourlyRetentionHours));
-  setDailyRetentionDaysDraft(String(data.backupSettings.dailyRetentionDays));
-}
+export type UseRegistryBackupSettingsResult = ReturnType<typeof useRegistryBackupSettings>;
 
 function parsePositiveIntDraft(value: string): number | null {
   const trimmed = value.trim();
@@ -49,9 +22,10 @@ function parsePositiveIntDraft(value: string): number | null {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
-export function useRegistryBackupSettings(requestJson: RequestJsonFn): UseRegistryBackupSettingsResult {
-  const [backupSettings, setBackupSettings] = React.useState<RegistryBackupSettingsResponse | null>(null);
-  const [backupSettingsLoading, setBackupSettingsLoading] = React.useState(false);
+export function useRegistryBackupSettings(requestJson: RequestJsonFn) {
+  const queryClient = useQueryClient();
+  const queryKey = settingsQueryKey('backups');
+  const query = useSettingsQuery<RegistryBackupSettingsResponse>(requestJson, queryKey, '/api/settings/backups');
   const [backupSettingsError, setBackupSettingsError] = React.useState<string | null>(null);
   const [backupSettingsNotice, setBackupSettingsNotice] = React.useState<string | null>(null);
   const [backupsEnabledDraft, setBackupsEnabledDraft] = React.useState(true);
@@ -59,33 +33,43 @@ export function useRegistryBackupSettings(requestJson: RequestJsonFn): UseRegist
   const [dailyEnabledDraft, setDailyEnabledDraft] = React.useState(true);
   const [hourlyRetentionHoursDraft, setHourlyRetentionHoursDraft] = React.useState('72');
   const [dailyRetentionDaysDraft, setDailyRetentionDaysDraft] = React.useState('60');
-  const [savingBackupSettings, setSavingBackupSettings] = React.useState(false);
-  const [runningBackup, setRunningBackup] = React.useState(false);
 
-  const loadBackupSettings = React.useCallback(async () => {
-    setBackupSettingsLoading(true);
-    setBackupSettingsError(null);
-    try {
-      const data = await requestJson<RegistryBackupSettingsResponse>('/api/settings/backups');
-      applyBackupSettings(
-        data,
-        setBackupSettings,
-        setBackupsEnabledDraft,
-        setHourlyEnabledDraft,
-        setDailyEnabledDraft,
-        setHourlyRetentionHoursDraft,
-        setDailyRetentionDaysDraft,
-      );
-    } catch (e: any) {
-      setBackupSettingsError(e?.message ?? String(e));
-    } finally {
-      setBackupSettingsLoading(false);
-    }
-  }, [requestJson]);
+  const applyDrafts = React.useCallback((data: RegistryBackupSettingsResponse) => {
+    setBackupsEnabledDraft(data.backupSettings.enabled);
+    setHourlyEnabledDraft(data.backupSettings.hourlyEnabled);
+    setDailyEnabledDraft(data.backupSettings.dailyEnabled);
+    setHourlyRetentionHoursDraft(String(data.backupSettings.hourlyRetentionHours));
+    setDailyRetentionDaysDraft(String(data.backupSettings.dailyRetentionDays));
+  }, []);
 
   React.useEffect(() => {
-    void loadBackupSettings();
-  }, [loadBackupSettings]);
+    if (query.data) applyDrafts(query.data);
+  }, [applyDrafts, query.data]);
+
+  const loadBackupSettings = React.useCallback(async () => {
+    setBackupSettingsError(null);
+    const { data } = await query.refetch();
+    if (data) applyDrafts(data);
+  }, [applyDrafts, query.refetch]);
+
+  const mutation = useMutation({
+    mutationFn: (input: BackupMutation) =>
+      requestJson<RegistryBackupSettingsResponse>(
+        input.action === 'save' ? '/api/settings/backups' : '/api/settings/backups/run',
+        input.action === 'save'
+          ? {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(input.settings),
+            }
+          : { method: 'POST' },
+      ),
+  });
+
+  const applyResponse = React.useCallback((data: RegistryBackupSettingsResponse) => {
+    queryClient.setQueryData(queryKey, data);
+    applyDrafts(data);
+  }, [applyDrafts, queryClient, queryKey]);
 
   const saveBackupSettings = React.useCallback(async () => {
     setBackupSettingsError(null);
@@ -100,74 +84,51 @@ export function useRegistryBackupSettings(requestJson: RequestJsonFn): UseRegist
       setBackupSettingsError('Daily retention must be a positive whole number of days.');
       return;
     }
-    setSavingBackupSettings(true);
     try {
-      const data = await requestJson<RegistryBackupSettingsResponse>('/api/settings/backups', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
+      const data = await mutation.mutateAsync({
+        action: 'save',
+        settings: {
           enabled: backupsEnabledDraft,
           hourlyEnabled: hourlyEnabledDraft,
           dailyEnabled: dailyEnabledDraft,
           hourlyRetentionHours,
           dailyRetentionDays,
-        }),
+        },
       });
-      applyBackupSettings(
-        data,
-        setBackupSettings,
-        setBackupsEnabledDraft,
-        setHourlyEnabledDraft,
-        setDailyEnabledDraft,
-        setHourlyRetentionHoursDraft,
-        setDailyRetentionDaysDraft,
-      );
+      applyResponse(data);
       setBackupSettingsNotice('Saved backup settings.');
-    } catch (e: any) {
-      setBackupSettingsError(e?.message ?? String(e));
-    } finally {
-      setSavingBackupSettings(false);
+    } catch (error) {
+      setBackupSettingsError(settingsErrorMessage(error));
     }
-  }, [backupsEnabledDraft, dailyEnabledDraft, dailyRetentionDaysDraft, hourlyEnabledDraft, hourlyRetentionHoursDraft, requestJson]);
+  }, [applyResponse, backupsEnabledDraft, dailyEnabledDraft, dailyRetentionDaysDraft, hourlyEnabledDraft, hourlyRetentionHoursDraft, mutation]);
 
   const runBackupNow = React.useCallback(async () => {
     setBackupSettingsError(null);
     setBackupSettingsNotice(null);
-    setRunningBackup(true);
     try {
-      const data = await requestJson<RegistryBackupSettingsResponse>('/api/settings/backups/run', {
-        method: 'POST',
-      });
-      applyBackupSettings(
-        data,
-        setBackupSettings,
-        setBackupsEnabledDraft,
-        setHourlyEnabledDraft,
-        setDailyEnabledDraft,
-        setHourlyRetentionHoursDraft,
-        setDailyRetentionDaysDraft,
-      );
+      const data = await mutation.mutateAsync({ action: 'run' });
+      applyResponse(data);
       setBackupSettingsNotice(data.createdBackup?.suspect ? 'Backup quarantined because the registry looked suspicious.' : 'Manual backup created.');
-    } catch (e: any) {
-      setBackupSettingsError(e?.message ?? String(e));
-    } finally {
-      setRunningBackup(false);
+    } catch (error) {
+      setBackupSettingsError(settingsErrorMessage(error));
     }
-  }, [requestJson]);
+  }, [applyResponse, mutation]);
+
+  const pendingAction = mutation.isPending ? mutation.variables.action : null;
 
   return React.useMemo(
     () => ({
-      backupSettings,
-      backupSettingsLoading,
-      backupSettingsError,
+      backupSettings: query.data ?? null,
+      backupSettingsLoading: query.isFetching,
+      backupSettingsError: settingsQueryError(backupSettingsError, false, query),
       backupSettingsNotice,
       backupsEnabledDraft,
       hourlyEnabledDraft,
       dailyEnabledDraft,
       hourlyRetentionHoursDraft,
       dailyRetentionDaysDraft,
-      savingBackupSettings,
-      runningBackup,
+      savingBackupSettings: pendingAction === 'save',
+      runningBackup: pendingAction === 'run',
       setBackupsEnabledDraft,
       setHourlyEnabledDraft,
       setDailyEnabledDraft,
@@ -178,9 +139,10 @@ export function useRegistryBackupSettings(requestJson: RequestJsonFn): UseRegist
       runBackupNow,
     }),
     [
-      backupSettings,
+      query.data,
+      query.error,
+      query.isFetching,
       backupSettingsError,
-      backupSettingsLoading,
       backupSettingsNotice,
       backupsEnabledDraft,
       dailyEnabledDraft,
@@ -189,9 +151,8 @@ export function useRegistryBackupSettings(requestJson: RequestJsonFn): UseRegist
       hourlyRetentionHoursDraft,
       loadBackupSettings,
       runBackupNow,
-      runningBackup,
+      pendingAction,
       saveBackupSettings,
-      savingBackupSettings,
     ],
   );
 }

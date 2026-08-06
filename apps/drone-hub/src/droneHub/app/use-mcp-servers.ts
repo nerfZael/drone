@@ -1,4 +1,5 @@
 import React from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   createEmptyMcpServerDraft,
   draftFromMcpServer,
@@ -10,6 +11,7 @@ import {
   type McpServerDraftScalarKey,
   type McpServerRecord,
 } from './mcp-server-library-model';
+import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsQuery } from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -45,6 +47,14 @@ type McpTokenMutationResponse = {
   token: McpAccessTokenSummary;
   tokenValue?: string;
 };
+type McpTokenMutation =
+  | { action: 'create'; name: string }
+  | { action: 'regenerate'; tokenId: string }
+  | { action: 'revoke'; tokenId: string };
+type McpServerMutation =
+  | { action: 'save'; draft: McpServerDraft }
+  | { action: 'delete'; serverId: string }
+  | { action: 'preset' };
 
 function replaceServer(servers: McpServerRecord[], server: McpServerRecord): McpServerRecord[] {
   const next = servers.filter((entry) => entry.id !== server.id);
@@ -52,50 +62,16 @@ function replaceServer(servers: McpServerRecord[], server: McpServerRecord): Mcp
   return sortMcpServers(next);
 }
 
-export type UseMcpServersResult = {
-  mcpServers: McpServerRecord[];
-  mcpAccessTokens: McpAccessTokenSummary[];
-  mcpServersLoading: boolean;
-  mcpServersSaving: boolean;
-  mcpServersDeleting: boolean;
-  mcpAccessTokensLoading: boolean;
-  mcpAccessTokensSaving: boolean;
-  mcpServersError: string | null;
-  mcpServersNotice: string | null;
-  mcpHostTokenName: string;
-  mcpTokenRevealValue: string | null;
-  selectedMcpServerId: string | null;
-  selectedMcpServer: McpServerRecord | null;
-  mcpDraft: McpServerDraft;
-  mcpDraftDirty: boolean;
-  loadMcpServers: () => Promise<void>;
-  loadMcpAccessTokens: () => Promise<void>;
-  setMcpHostTokenName: (value: string) => void;
-  createHostMcpToken: () => Promise<void>;
-  regenerateMcpToken: (tokenId: string) => Promise<void>;
-  revokeMcpToken: (tokenId: string) => Promise<void>;
-  clearMcpTokenRevealValue: () => void;
-  selectMcpServer: (serverId: string | null) => void;
-  startNewMcpServer: () => void;
-  updateMcpDraftField: <K extends McpServerDraftScalarKey>(key: K, value: McpServerDraft[K]) => void;
-  toggleMcpDraftAgent: (agent: McpAgentId) => void;
-  resetMcpDraft: () => void;
-  saveMcpDraft: () => Promise<void>;
-  deleteSelectedMcpServer: () => Promise<void>;
-  upsertDroneHubMcpServer: () => Promise<void>;
-  clearMcpServersError: () => void;
-  clearMcpServersNotice: () => void;
-};
+export type UseMcpServersResult = ReturnType<typeof useMcpServers>;
 
-export function useMcpServers(requestJson: RequestJsonFn): UseMcpServersResult {
-  const [mcpServers, setMcpServers] = React.useState<McpServerRecord[]>([]);
-  const [mcpAccessTokens, setMcpAccessTokens] = React.useState<McpAccessTokenSummary[]>([]);
-  const [mcpServersLoading, setMcpServersLoading] = React.useState(false);
-  const [mcpServersSaving, setMcpServersSaving] = React.useState(false);
-  const [mcpServersDeleting, setMcpServersDeleting] = React.useState(false);
-  const [mcpAccessTokensLoading, setMcpAccessTokensLoading] = React.useState(false);
-  const [mcpAccessTokensSaving, setMcpAccessTokensSaving] = React.useState(false);
+export function useMcpServers(requestJson: RequestJsonFn) {
+  const queryClient = useQueryClient();
+  const serversQueryKey = settingsQueryKey('mcp-servers');
+  const tokensQueryKey = settingsQueryKey('mcp-access-tokens');
+  const serversQuery = useSettingsQuery<McpServersListResponse>(requestJson, serversQueryKey, '/api/mcp-servers');
+  const tokensQuery = useSettingsQuery<McpTokensListResponse>(requestJson, tokensQueryKey, '/api/mcp-tokens');
   const [mcpServersError, setMcpServersError] = React.useState<string | null>(null);
+  const [queryErrorDismissed, setQueryErrorDismissed] = React.useState(false);
   const [mcpServersNotice, setMcpServersNotice] = React.useState<string | null>(null);
   const [mcpHostTokenName, setMcpHostTokenName] = React.useState('host agent');
   const [mcpTokenRevealValue, setMcpTokenRevealValue] = React.useState<string | null>(null);
@@ -107,6 +83,15 @@ export function useMcpServers(requestJson: RequestJsonFn): UseMcpServersResult {
   React.useEffect(() => {
     selectedMcpServerIdRef.current = selectedMcpServerId;
   }, [selectedMcpServerId]);
+
+  const mcpServers = React.useMemo(
+    () => sortMcpServers(serversQuery.data?.servers ?? []),
+    [serversQuery.data],
+  );
+  const mcpAccessTokens = React.useMemo(
+    () => sortTokens(tokensQuery.data?.tokens ?? []),
+    [tokensQuery.data],
+  );
 
   const selectedMcpServer = React.useMemo(
     () => mcpServers.find((server) => server.id === selectedMcpServerId) ?? null,
@@ -125,108 +110,111 @@ export function useMcpServers(requestJson: RequestJsonFn): UseMcpServersResult {
     setBaselineDraft(nextDraft);
   }, []);
 
+  React.useEffect(() => {
+    if (!serversQuery.data) return;
+    const nextSelected =
+      mcpServers.find((server) => server.id === selectedMcpServerIdRef.current) ??
+      mcpServers[0] ??
+      null;
+    applySelectedServer(nextSelected);
+  }, [applySelectedServer, mcpServers, serversQuery.data]);
+
   const loadMcpServers = React.useCallback(async () => {
-    setMcpServersLoading(true);
+    setQueryErrorDismissed(false);
     setMcpServersError(null);
-    try {
-      const data = await requestJson<McpServersListResponse>('/api/mcp-servers');
-      const nextServers = sortMcpServers(data.servers ?? []);
-      setMcpServers(nextServers);
-      const nextSelected =
-        nextServers.find((server) => server.id === selectedMcpServerIdRef.current) ??
-        nextServers[0] ??
-        null;
-      applySelectedServer(nextSelected);
-    } catch (e: any) {
-      setMcpServersError(e?.message ?? String(e));
-    } finally {
-      setMcpServersLoading(false);
-    }
-  }, [applySelectedServer, requestJson]);
+    const { data } = await serversQuery.refetch();
+    if (!data) return;
+    const servers = sortMcpServers(data.servers ?? []);
+    const selected =
+      servers.find((server) => server.id === selectedMcpServerIdRef.current) ??
+      servers[0] ??
+      null;
+    applySelectedServer(selected);
+  }, [applySelectedServer, serversQuery.refetch]);
 
   const loadMcpAccessTokens = React.useCallback(async () => {
-    setMcpAccessTokensLoading(true);
+    setQueryErrorDismissed(false);
     setMcpServersError(null);
-    try {
-      const data = await requestJson<McpTokensListResponse>('/api/mcp-tokens');
-      setMcpAccessTokens([...(data.tokens ?? [])].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name)));
-    } catch (e: any) {
-      setMcpServersError(e?.message ?? String(e));
-    } finally {
-      setMcpAccessTokensLoading(false);
-    }
-  }, [requestJson]);
-
-  React.useEffect(() => {
-    void loadMcpServers();
-    void loadMcpAccessTokens();
-  }, [loadMcpAccessTokens, loadMcpServers]);
+    await tokensQuery.refetch();
+  }, [tokensQuery.refetch]);
 
   const replaceToken = React.useCallback((token: McpAccessTokenSummary) => {
-    setMcpAccessTokens((prev) => {
-      const next = prev.filter((entry) => entry.id !== token.id);
-      next.push(token);
-      return next.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
-    });
-  }, []);
+    queryClient.setQueryData<McpTokensListResponse>(tokensQueryKey, (current) => ({
+      ok: true,
+      tokens: sortTokens([...(current?.tokens ?? []).filter((entry) => entry.id !== token.id), token]),
+    }));
+  }, [queryClient, tokensQueryKey]);
+
+  const tokenMutation = useMutation({
+    mutationFn: (input: McpTokenMutation) => {
+      if (input.action === 'create') {
+        return requestJson<McpTokenMutationResponse>('/api/mcp-tokens', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: input.name, kind: 'host' }),
+        });
+      }
+      const suffix = input.action === 'regenerate' ? '/regenerate' : '';
+      return requestJson<McpTokenMutationResponse>(
+        `/api/mcp-tokens/${encodeURIComponent(input.tokenId)}${suffix}`,
+        { method: input.action === 'regenerate' ? 'POST' : 'DELETE' },
+      );
+    },
+  });
+  const serverMutation = useMutation({
+    mutationFn: async (input: McpServerMutation) => {
+      if (input.action === 'delete') {
+        await requestJson<{ ok: true; deleted: true; id: string }>(
+          `/api/mcp-servers/${encodeURIComponent(input.serverId)}`,
+          { method: 'DELETE' },
+        );
+        return { action: input.action } as const;
+      }
+      if (input.action === 'preset') {
+        const data = await requestJson<McpServerMutationResponse>('/api/mcp-servers/drone-hub-preset', {
+          method: 'POST',
+        });
+        return { action: input.action, server: data.server } as const;
+      }
+      const payload = payloadFromMcpDraft(input.draft);
+      const data = await requestJson<McpServerMutationResponse>(
+        input.draft.id ? `/api/mcp-servers/${encodeURIComponent(input.draft.id)}` : '/api/mcp-servers',
+        {
+          method: input.draft.id ? 'PUT' : 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      return { action: input.action, server: data.server } as const;
+    },
+  });
+
+  const mutateToken = React.useCallback(async (input: McpTokenMutation) => {
+    setMcpServersError(null);
+    setMcpServersNotice(null);
+    setMcpTokenRevealValue(null);
+    try {
+      const data = await tokenMutation.mutateAsync(input);
+      replaceToken(data.token);
+      setMcpTokenRevealValue(data.tokenValue ?? null);
+      const action = input.action === 'create' ? 'Created' : input.action === 'regenerate' ? 'Regenerated' : 'Revoked';
+      setMcpServersNotice(`${action} MCP token ${data.token.name}.`);
+    } catch (error) {
+      setMcpServersError(settingsErrorMessage(error));
+    }
+  }, [replaceToken, tokenMutation]);
 
   const createHostMcpToken = React.useCallback(async () => {
-    setMcpAccessTokensSaving(true);
-    setMcpServersError(null);
-    setMcpServersNotice(null);
-    setMcpTokenRevealValue(null);
-    try {
-      const data = await requestJson<McpTokenMutationResponse>('/api/mcp-tokens', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: mcpHostTokenName.trim(), kind: 'host' }),
-      });
-      replaceToken(data.token);
-      setMcpTokenRevealValue(data.tokenValue ?? null);
-      setMcpServersNotice(`Created MCP token ${data.token.name}.`);
-    } catch (e: any) {
-      setMcpServersError(e?.message ?? String(e));
-    } finally {
-      setMcpAccessTokensSaving(false);
-    }
-  }, [mcpHostTokenName, replaceToken, requestJson]);
+    await mutateToken({ action: 'create', name: mcpHostTokenName.trim() });
+  }, [mcpHostTokenName, mutateToken]);
 
   const regenerateMcpToken = React.useCallback(async (tokenId: string) => {
-    setMcpAccessTokensSaving(true);
-    setMcpServersError(null);
-    setMcpServersNotice(null);
-    setMcpTokenRevealValue(null);
-    try {
-      const data = await requestJson<McpTokenMutationResponse>(`/api/mcp-tokens/${encodeURIComponent(tokenId)}/regenerate`, {
-        method: 'POST',
-      });
-      replaceToken(data.token);
-      setMcpTokenRevealValue(data.tokenValue ?? null);
-      setMcpServersNotice(`Regenerated MCP token ${data.token.name}.`);
-    } catch (e: any) {
-      setMcpServersError(e?.message ?? String(e));
-    } finally {
-      setMcpAccessTokensSaving(false);
-    }
-  }, [replaceToken, requestJson]);
+    await mutateToken({ action: 'regenerate', tokenId });
+  }, [mutateToken]);
 
   const revokeMcpToken = React.useCallback(async (tokenId: string) => {
-    setMcpAccessTokensSaving(true);
-    setMcpServersError(null);
-    setMcpServersNotice(null);
-    setMcpTokenRevealValue(null);
-    try {
-      const data = await requestJson<McpTokenMutationResponse>(`/api/mcp-tokens/${encodeURIComponent(tokenId)}`, {
-        method: 'DELETE',
-      });
-      replaceToken(data.token);
-      setMcpServersNotice(`Revoked MCP token ${data.token.name}.`);
-    } catch (e: any) {
-      setMcpServersError(e?.message ?? String(e));
-    } finally {
-      setMcpAccessTokensSaving(false);
-    }
-  }, [replaceToken, requestJson]);
+    await mutateToken({ action: 'revoke', tokenId });
+  }, [mutateToken]);
 
   const selectMcpServer = React.useCallback(
     (serverId: string | null) => {
@@ -263,82 +251,68 @@ export function useMcpServers(requestJson: RequestJsonFn): UseMcpServersResult {
   }, [selectedMcpServer]);
 
   const saveMcpDraft = React.useCallback(async () => {
-    setMcpServersSaving(true);
     setMcpServersError(null);
     setMcpServersNotice(null);
     try {
-      const payload = payloadFromMcpDraft(mcpDraft);
-      const data = mcpDraft.id
-        ? await requestJson<McpServerMutationResponse>(`/api/mcp-servers/${encodeURIComponent(mcpDraft.id)}`, {
-            method: 'PUT',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(payload),
-          })
-        : await requestJson<McpServerMutationResponse>('/api/mcp-servers', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-      const saved = data.server;
-      setMcpServers((prev) => replaceServer(prev, saved));
+      const result = await serverMutation.mutateAsync({ action: 'save', draft: mcpDraft });
+      const saved = result.server;
+      if (!saved) throw new Error('The MCP server response did not include a server.');
+      queryClient.setQueryData<McpServersListResponse>(serversQueryKey, (current) => ({
+        ok: true,
+        servers: replaceServer(current?.servers ?? [], saved),
+      }));
       applySelectedServer(saved);
       setMcpServersNotice(mcpDraft.id ? `Saved ${saved.name}.` : `Created ${saved.name}.`);
-    } catch (e: any) {
-      setMcpServersError(e?.message ?? String(e));
-    } finally {
-      setMcpServersSaving(false);
+    } catch (error) {
+      setMcpServersError(settingsErrorMessage(error));
     }
-  }, [applySelectedServer, mcpDraft, requestJson]);
+  }, [applySelectedServer, mcpDraft, queryClient, serverMutation, serversQueryKey]);
 
   const deleteSelectedMcpServer = React.useCallback(async () => {
     if (!selectedMcpServerId) return;
-    setMcpServersDeleting(true);
     setMcpServersError(null);
     setMcpServersNotice(null);
     try {
-      await requestJson<{ ok: true; deleted: true; id: string }>(`/api/mcp-servers/${encodeURIComponent(selectedMcpServerId)}`, {
-        method: 'DELETE',
-      });
+      await serverMutation.mutateAsync({ action: 'delete', serverId: selectedMcpServerId });
       const nextServers = mcpServers.filter((server) => server.id !== selectedMcpServerId);
-      setMcpServers(nextServers);
+      queryClient.setQueryData<McpServersListResponse>(serversQueryKey, { ok: true, servers: nextServers });
       applySelectedServer(nextServers[0] ?? null);
       setMcpServersNotice('Deleted MCP server.');
-    } catch (e: any) {
-      setMcpServersError(e?.message ?? String(e));
-    } finally {
-      setMcpServersDeleting(false);
+    } catch (error) {
+      setMcpServersError(settingsErrorMessage(error));
     }
-  }, [applySelectedServer, mcpServers, requestJson, selectedMcpServerId]);
+  }, [applySelectedServer, mcpServers, queryClient, selectedMcpServerId, serverMutation, serversQueryKey]);
 
   const upsertDroneHubMcpServer = React.useCallback(async () => {
-    setMcpServersSaving(true);
     setMcpServersError(null);
     setMcpServersNotice(null);
     try {
-      const data = await requestJson<McpServerMutationResponse>('/api/mcp-servers/drone-hub-preset', {
-        method: 'POST',
-      });
-      const saved = data.server;
-      setMcpServers((prev) => replaceServer(prev, saved));
+      const result = await serverMutation.mutateAsync({ action: 'preset' });
+      const saved = result.server;
+      if (!saved) throw new Error('The MCP preset response did not include a server.');
+      queryClient.setQueryData<McpServersListResponse>(serversQueryKey, (current) => ({
+        ok: true,
+        servers: replaceServer(current?.servers ?? [], saved),
+      }));
       applySelectedServer(saved);
       void loadMcpAccessTokens();
       setMcpServersNotice('Saved Drone Hub MCP server.');
-    } catch (e: any) {
-      setMcpServersError(e?.message ?? String(e));
-    } finally {
-      setMcpServersSaving(false);
+    } catch (error) {
+      setMcpServersError(settingsErrorMessage(error));
     }
-  }, [applySelectedServer, loadMcpAccessTokens, requestJson]);
+  }, [applySelectedServer, loadMcpAccessTokens, queryClient, serverMutation, serversQueryKey]);
+
+  const pendingServerAction = serverMutation.isPending ? serverMutation.variables.action : null;
 
   return {
     mcpServers,
     mcpAccessTokens,
-    mcpServersLoading,
-    mcpServersSaving,
-    mcpServersDeleting,
-    mcpAccessTokensLoading,
-    mcpAccessTokensSaving,
-    mcpServersError,
+    mcpServersLoading: serversQuery.isFetching,
+    mcpServersSaving: pendingServerAction === 'save' || pendingServerAction === 'preset',
+    mcpServersDeleting: pendingServerAction === 'delete',
+    mcpAccessTokensLoading: tokensQuery.isFetching,
+    mcpAccessTokensSaving: tokenMutation.isPending,
+    mcpServersError: settingsQueryError(mcpServersError, queryErrorDismissed, serversQuery, tokensQuery),
     mcpServersNotice,
     mcpHostTokenName,
     mcpTokenRevealValue,
@@ -361,7 +335,14 @@ export function useMcpServers(requestJson: RequestJsonFn): UseMcpServersResult {
     saveMcpDraft,
     deleteSelectedMcpServer,
     upsertDroneHubMcpServer,
-    clearMcpServersError: () => setMcpServersError(null),
+    clearMcpServersError: () => {
+      setMcpServersError(null);
+      setQueryErrorDismissed(true);
+    },
     clearMcpServersNotice: () => setMcpServersNotice(null),
   };
+}
+
+function sortTokens(tokens: McpAccessTokenSummary[]): McpAccessTokenSummary[] {
+  return [...tokens].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
 }

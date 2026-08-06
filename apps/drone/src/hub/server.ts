@@ -302,6 +302,7 @@ import { registerResourceSubscriptionRoutes } from './routes/resource-subscripti
 import { createRepositoryRouteHandler } from './routes/repository-operation-routes';
 import { registerRepositoryRoutes } from './routes/repository-routes';
 import { registerSettingsRoutes } from './routes/settings-routes';
+import { registerSidebarRoutes } from './routes/sidebar-routes';
 import { registerSystemRoutes } from './routes/system-routes';
 import { createTerminalRouteHandler } from './routes/terminal-routes';
 import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
@@ -316,6 +317,7 @@ import {
 } from './workflows/workflow-child-drone-metadata';
 import { registerWorkflowFeature } from './workflows/workflow-feature';
 import { DroneHubMcpHttpTransport } from './mcp-http-transport';
+import { SidebarCommandService } from './sidebar-command-service';
 import {
   assertDroneDaemonRuntimeReady,
   launchHostDroneDaemon,
@@ -407,7 +409,6 @@ import {
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
   upsertStoredUiPreferencesSettings,
-  updatePinnedDronePreference,
   updateStoredUserTimeZone,
   type LlmProviderId,
   type StoredApiKeyProviderId,
@@ -493,6 +494,7 @@ import {
   setDroneGroupMetadata,
   updateDroneFleetMetadata,
 } from './drone-metadata-commands';
+import { createRenameDroneCommand } from './drone-rename-command';
 import {
   createPendingDroneStateHelpers,
   hasQueuedPromptWithId,
@@ -508,6 +510,7 @@ import {
   isDraftDroneEntry,
   summarizeDroneActivity,
 } from './drone-summary-helpers';
+import { mergeNativeBusyChatNames } from './native-drone-summary';
 import { summarizeAssistantChatIdle } from './assistant';
 import { saveAssistantArtifactUploads, validateAssistantPromptImages } from './assistant-artifacts';
 
@@ -517,6 +520,7 @@ const requireForHub = createRequire(__filename);
 
 let notifyDroneRegistryWrite: (() => void) | null = null;
 let notifyDroneChatWrite: ((droneId: string, chatName: string) => void) | null = null;
+let notifyDroneSummaryChange: (() => void) | null = null;
 
 async function updateRegistry<T>(
   mutator: (reg: any) => T | Promise<T>,
@@ -3960,65 +3964,6 @@ async function suggestCreatedDroneNameDirect(input: {
   return name;
 }
 
-async function renameCreatedDroneDirect(input: {
-  droneId: string;
-  newName: string;
-  expectedName?: string;
-  source: 'mobile-create-auto-rename';
-  attempt: number;
-  suggestedBase: string;
-}): Promise<void> {
-  const registry: any = await loadRegistry();
-  const found = findDroneIdByRef(registry, input.droneId);
-  if (!found) throw new Error(`unknown drone: ${input.droneId}`);
-
-  const currentEntry =
-    (found.kind === 'real' ? registry?.drones?.[found.id] : registry?.pending?.[found.id]) ?? null;
-  const droneId =
-    normalizeDroneIdentity(currentEntry?.id) || normalizeDroneIdentity(found.id) || found.id;
-  const oldName = String(currentEntry?.name ?? input.droneId).trim() || input.droneId;
-  const newName = normalizeDroneDisplayName(input.newName);
-  if (oldName === newName) return;
-
-  const conflictingReal = Object.entries(registry?.drones ?? {}).find(
-    ([key, entry]: [string, any]) =>
-      (normalizeDroneIdentity(entry?.id) || key) !== droneId &&
-      String(entry?.name ?? '').trim() === newName,
-  );
-  const conflictingPending = Object.entries(registry?.pending ?? {}).find(
-    ([key, entry]: [string, any]) =>
-      (normalizeDroneIdentity(entry?.id) || key) !== droneId &&
-      String(entry?.name ?? '').trim() === newName,
-  );
-  if (conflictingReal || conflictingPending) {
-    throw new Error(`${conflictingPending ? 'pending ' : ''}drone already exists: ${newName}`);
-  }
-
-  hubLog('info', 'drone rename requested', {
-    droneId,
-    oldName,
-    newName,
-    source: input.source,
-    attempt: input.attempt,
-    suggestedBase: input.suggestedBase,
-  });
-  await renameDroneDisplayName({
-    droneId,
-    state: found.kind,
-    name: newName,
-    ...(input.expectedName ? { expectedName: normalizeDroneDisplayName(input.expectedName) } : {}),
-  });
-  notifyDroneRegistryWrite?.();
-  hubLog('info', 'drone renamed', {
-    droneId,
-    oldName,
-    newName,
-    source: input.source,
-    attempt: input.attempt,
-    suggestedBase: input.suggestedBase,
-  });
-}
-
 function normalizeContainerMcpUrl(raw: unknown): string {
   const value = String(raw ?? '').trim();
   if (!value) return '';
@@ -4063,15 +4008,33 @@ export async function startDroneHubApiServer(opts: {
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
   if (mcpToken) await revokeLegacyProjectedDroneMcpTokens();
+  const renameDroneCommand = createRenameDroneCommand({
+    displayNameMaxLength: DRONE_DISPLAY_NAME_MAX_LEN,
+    findDroneIdByRef,
+    loadRegistry,
+    log: hubLog,
+    normalizeDisplayName: normalizeDroneDisplayName,
+    normalizeDroneIdentity,
+    notifyRegistryWrite: () => notifyDroneRegistryWrite?.(),
+    persistDisplayName: renameDroneDisplayName,
+  });
   let actualPort = opts.port;
+  const sidebarCommands = new SidebarCommandService({
+    baseUrl: () => `http://127.0.0.1:${actualPort}`,
+    apiToken,
+  });
   const deviceMesh = await createDeviceMeshService({
     rootDir: droneRootPath('device-mesh'),
     apiToken,
+    sidebarCommands,
     localHubBaseUrl: () => `http://127.0.0.1:${actualPort}`,
     ingressPort: opts.deviceMeshIngressPort,
+    renameDrone: renameDroneCommand,
     createdDroneAutoRename: {
       suggestName: suggestCreatedDroneNameDirect,
-      renameDrone: renameCreatedDroneDirect,
+      renameDrone: async ({ droneId, ...input }) => {
+        await renameDroneCommand({ droneRef: droneId, ...input });
+      },
     },
   });
 
@@ -4227,9 +4190,13 @@ export async function startDroneHubApiServer(opts: {
     deviceMesh,
     normalizeDroneIdentity,
     nowIso,
+    renameDrone: renameDroneCommand,
     onNativePromptQueueChanged: ({ droneId, chatName }) => {
       notifyDroneChatWrite?.(droneId, chatName);
       promptRuntime.enqueuePendingPromptPump(droneId, chatName);
+    },
+    onNativeThreadStateChanged: () => {
+      notifyDroneSummaryChange?.();
     },
     summarizeDroneActivity,
   });
@@ -4932,6 +4899,7 @@ export async function startDroneHubApiServer(opts: {
       id: normalizeDroneIdentity(p?.id) || null,
       name: String(p?.name ?? ''),
       group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
+      groupId: typeof p?.groupId === 'string' && p.groupId.trim() ? p.groupId.trim() : null,
       draft: isDraftDroneEntry(p),
       createdAt: String(p?.createdAt ?? nowIso()),
       lastActivityAt: activity.lastActivityAt,
@@ -5009,11 +4977,22 @@ export async function startDroneHubApiServer(opts: {
     const droneId = normalizeDroneIdentity(d?.id);
     const { chats, workflowChats } = partitionWorkflowChatEntries(d.chats);
     const workflowChatSet = new Set(workflowChats);
-    const busyChats = droneId
+    const pendingBusyChats = droneId
       ? busyChatNamesForDrone(d, droneId).filter(
           (chatName: string) => !workflowChatSet.has(chatName),
         )
       : [];
+    const busyChats = await mergeNativeBusyChatNames({
+      busyChatNames: pendingBusyChats,
+      chatNames: chats,
+      droneEntry: d,
+      isNativeChat: (chatEntry, droneEntry) =>
+        inferChatAgent(chatEntry, droneEntry).kind === 'native',
+      isThreadBusy: async (threadId) =>
+        assistantPromptDrains.has(threadId) ||
+        blipAssistantHost.isThreadRunning(threadId) ||
+        (await assistantService.nativeThreadHasActiveRun(threadId)),
+    });
     const approvalChats = chats.flatMap((chatName) => {
       const chatEntry = d.chats?.[chatName];
       if (inferChatAgent(chatEntry, d).kind !== 'native') return [];
@@ -5047,6 +5026,7 @@ export async function startDroneHubApiServer(opts: {
       id: normalizeDroneIdentity(d?.id) || null,
       name: d.name,
       group: d.group ?? null,
+      groupId: typeof d?.groupId === 'string' && d.groupId.trim() ? d.groupId.trim() : null,
       createdAt: d.createdAt,
       lastActivityAt: activity.lastActivityAt,
       lastMessageAt: activity.lastMessageAt,
@@ -5197,13 +5177,18 @@ export async function startDroneHubApiServer(opts: {
     void deviceMesh.broadcastDroneChatChange({ reason: 'registry_write', at: nowIso() });
   };
   notifyDroneRegistryWrite = notifyCanonicalDroneRegistryWrite;
+  const notifyCanonicalDroneSummaryChange = () => {
+    canonicalActiveModelCache = null;
+    invalidateDroneSummaryRegistryCache();
+    scheduleDroneRegistryBroadcasterRefresh();
+  };
+  notifyDroneSummaryChange = notifyCanonicalDroneSummaryChange;
   const notifyCanonicalPromptQueueChatWrite = (droneId: string, chatName: string) => {
     // Prompt delivery state is canonical SQLite state and does not rewrite the
     // registry. Invalidate the projection and wake chat and sidebar SSE clients
     // explicitly so live state and native-message timestamps are not delayed
     // until the fallback poll.
-    canonicalActiveModelCache = null;
-    scheduleDroneRegistryBroadcasterRefresh();
+    notifyCanonicalDroneSummaryChange();
     scheduleDroneChatEventRefresh();
     void deviceMesh.broadcastDroneChatChange({
       reason: 'chat_write',
@@ -5224,6 +5209,7 @@ export async function startDroneHubApiServer(opts: {
     signingSecret: mcpToken,
     log: hubLog,
     speechEnabled: initialSpeechSettings.enabled,
+    renameDrone: renameDroneCommand,
   });
   const handleDroneHubMcpRequest = (
     req: http.IncomingMessage,
@@ -5373,7 +5359,6 @@ export async function startDroneHubApiServer(opts: {
     droneRootPath,
     resolveUiPreferencesSettingsResponse,
     upsertStoredUiPreferencesSettings,
-    updatePinnedDronePreference,
     resolveUserContextSettingsResponse,
     notifyUiPreferencesChanged: () => {
       const at = nowIso();
@@ -5385,11 +5370,6 @@ export async function startDroneHubApiServer(opts: {
       scheduleDroneRegistryBroadcasterRefresh(150, true);
       void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
     },
-    notifyPinnedDronesChanged: () => {
-      const at = nowIso();
-      assistantService.emitExternalUiAction({ type: 'reload_pinned_drones', at });
-      void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
-    },
     clampIntParam,
     readHubLogTail,
     HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,
@@ -5397,6 +5377,8 @@ export async function startDroneHubApiServer(opts: {
     HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES,
     HUB_SETTINGS_LOG_MAX_TAIL_LINES,
   });
+
+  registerSidebarRoutes(apiRouter, sidebarCommands);
 
   registerCatalogRoutes(apiRouter, {
     mcpToken,
@@ -5551,7 +5533,6 @@ export async function startDroneHubApiServer(opts: {
   });
 
   const handleDroneLifecycleRoute = createDroneLifecycleRouteHandler({
-    DRONE_DISPLAY_NAME_MAX_LEN,
     archiveDroneById,
     archiveRetentionMs,
     cleanupExpiredArchivedChats,
@@ -5578,16 +5559,14 @@ export async function startDroneHubApiServer(opts: {
     normalizeArchiveRuntimePolicy,
     normalizeChatName,
     normalizeDisabledRepoKeys,
-    normalizeDroneDisplayName,
     normalizeDroneIdentity,
     normalizeDroneRuntime,
     normalizeEnvVarMap,
-    notifyCanonicalDroneRegistryWrite,
     nowIso,
     parseIsoToMs,
     removeArchivedDroneById,
     removeDroneTreeById,
-    renameDroneDisplayName,
+    renameDrone: renameDroneCommand,
     resolveArchiveDeleteAtIso,
     resolveDroneCliPath,
     resolveDroneOrPendingForReadRef,
@@ -6151,6 +6130,9 @@ export async function startDroneHubApiServer(opts: {
       }
       if (notifyDroneRegistryWrite === notifyCanonicalDroneRegistryWrite) {
         notifyDroneRegistryWrite = null;
+      }
+      if (notifyDroneSummaryChange === notifyCanonicalDroneSummaryChange) {
+        notifyDroneSummaryChange = null;
       }
       if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
         activeDroneHubMcpProjectionConfig = null;

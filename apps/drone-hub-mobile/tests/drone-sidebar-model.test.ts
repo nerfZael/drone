@@ -202,6 +202,7 @@ describe('mobile drone sidebar model', () => {
     expect(payload.sidebar).toEqual({
       registeredRepoPaths: ['/work/mapped', '/work/empty'],
       groupCreatedAtByName: { Review: '2026-07-13T10:00:00.000Z' },
+      groups: [],
       sidebarGroupOrder: ['repo:repo:/work/mapped'],
       sidebarDroneOrderByGroup: { 'group:Review': ['mapped'] },
       sidebarNodeOrderByParent: { root: ['drone:mapped'] },
@@ -498,6 +499,49 @@ describe('mobile drone sidebar model', () => {
     const roots = buildMobileDroneRepoGroups(drones)[0]!.roots;
     expect(roots.map((node) => node.drone.id)).toEqual(['parent', 'old']);
     expect(roots[0]!.children.map((node) => node.drone.id)).toEqual(['new-child', 'old-child']);
+  });
+
+  test('uses repository-scoped group identities and includes empty groups', () => {
+    const payload = normalizeMobileDroneListPayload({
+      schemaVersion: 7,
+      drones: [
+        {
+          id: 'existing-drone',
+          name: 'Existing drone',
+          repoPath: '/repo',
+          group: 'Existing',
+          groupId: 'group-existing',
+        },
+      ],
+      sidebar: {
+        snapshotComplete: true,
+        registeredRepoPaths: ['/repo'],
+        groups: [
+          {
+            id: 'group-existing',
+            name: 'Existing',
+            repoPath: '/repo',
+            parentId: null,
+            createdAt: '2026-08-01T00:00:00.000Z',
+          },
+          {
+            id: 'group-new',
+            name: 'New empty group',
+            repoPath: '/repo',
+            parentId: null,
+            createdAt: '2026-08-06T00:00:00.000Z',
+          },
+        ],
+        sidebarGroupOrder: ['group-id:group-new', 'group-id:group-existing'],
+      },
+    });
+
+    expect(payload.drones[0]?.groupId).toBe('group-existing');
+    expect(
+      buildMobileDroneRepoGroups(payload.drones, payload.sidebar)[0]?.folders.map(
+        (folder) => folder.path,
+      ),
+    ).toEqual(['New empty group', 'Existing']);
   });
 
   test('matches saved desktop repo, group, drone, and mixed node ordering', () => {

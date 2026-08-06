@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { applySidebarMove, normalizeSidebarLayout, reorderSidebarEntries } from '../src/sidebar';
+import {
+  applyOptimisticSidebarMove,
+  applySidebarMove,
+  mergeVisibleSidebarNodeOrderByParent,
+  normalizeSidebarLayout,
+  reorderSidebarEntries,
+} from '../src/sidebar';
 
 describe('canonical sidebar mutations', () => {
   test('moves an item between parents without duplicating it', () => {
@@ -117,5 +123,81 @@ describe('canonical sidebar mutations', () => {
         'before',
       ),
     ).toEqual(['drone:b', 'drone:new-first', 'drone:a', 'drone:new-last']);
+  });
+
+  test('moves a selected set together and preserves its order', () => {
+    const intent = {
+      kind: 'move-into-folder' as const,
+      itemKind: 'drone' as const,
+      repoPath: '/repo',
+      droneId: 'a',
+      droneIds: ['a', 'b'],
+      sourceParentId: 'root',
+      sourceSiblingNodeIds: ['drone:a', 'drone:b', 'folder:Review'],
+      targetGroup: 'Review',
+      targetParentId: 'folder:Review',
+      targetSiblingNodeIds: ['drone:c'],
+      placement: 'inside' as const,
+    };
+    const next = applySidebarMove(
+      normalizeSidebarLayout({
+        sidebarNodeOrderByParent: {
+          root: ['drone:a', 'drone:b', 'folder:Review'],
+          'folder:Review': ['drone:c'],
+        },
+      }),
+      intent,
+    );
+    expect(next.sidebarNodeOrderByParent).toEqual({
+      root: ['folder:Review'],
+      'folder:Review': ['drone:c', 'drone:a', 'drone:b'],
+    });
+    expect(
+      applyOptimisticSidebarMove(
+        [
+          { id: 'a', group: null },
+          { id: 'b', group: null },
+          { id: 'c', group: 'Review' },
+        ],
+        intent,
+      ),
+    ).toEqual([
+      { id: 'a', group: 'Review' },
+      { id: 'b', group: 'Review' },
+      { id: 'c', group: 'Review' },
+    ]);
+  });
+
+  test('pins and unpins without disturbing the existing pinned order', () => {
+    const pinned = applySidebarMove(
+      normalizeSidebarLayout({ pinnedDroneIds: ['a', 'hidden'] }),
+      { kind: 'set-pinned', droneIds: ['b', 'a'], pinned: true },
+    );
+    expect(pinned.pinnedDroneIds).toEqual(['a', 'hidden', 'b']);
+    expect(
+      applySidebarMove(pinned, {
+        kind: 'set-pinned',
+        droneIds: ['a'],
+        pinned: false,
+      }).pinnedDroneIds,
+    ).toEqual(['hidden', 'b']);
+  });
+
+  test('materializes desktop order while retaining hidden entries and groups', () => {
+    expect(
+      mergeVisibleSidebarNodeOrderByParent(
+        {
+          root: ['folder:hidden', 'folder:Review', 'drone:offline', 'drone:a'],
+          'folder:Review': ['drone:a', 'drone:hidden'],
+        },
+        {
+          root: ['folder:Review', 'drone:b'],
+          'folder:Review': ['drone:a'],
+        },
+      ),
+    ).toEqual({
+      root: ['folder:Review', 'drone:b', 'folder:hidden', 'drone:offline'],
+      'folder:Review': ['drone:a', 'drone:hidden'],
+    });
   });
 });

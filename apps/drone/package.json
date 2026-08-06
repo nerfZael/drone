@@ -31,6 +31,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@drone/hub-model": "workspace:*",
     "@drone/device-protocol": "workspace:*",
     "@drone/assistant-chat": "workspace:*",
     "@blip/core": "workspace:*",
