@@ -4,26 +4,21 @@ import path from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { paneModuleTimeoutMessage } from '../src/droneHub/app/AsyncPaneBoundary';
-import { RIGHT_PANEL_TABS } from '../src/droneHub/app/app-config';
+import {
+  isRightPanelTabLazyLoaded,
+  RIGHT_PANEL_TABS,
+} from '../src/droneHub/app/app-config';
 
 mock.module('../src/droneHub/whiteboard/WhiteboardDock', () => ({
   WhiteboardDock: () => null,
 }));
 
-const {
-  LAZY_RIGHT_PANEL_TABS,
-  RightPanelPaneLoadingFallback,
-  isRightPanelTabLazyLoaded,
-} = await import('../src/droneHub/app/RightPanelTabContent');
+const { RightPanelPaneLoadingFallback } = await import(
+  '../src/droneHub/app/RightPanelTabContent'
+);
 
 describe('right panel tab content', () => {
   test('tracks only non-critical right panel panes as lazy-loaded', () => {
-    expect([...LAZY_RIGHT_PANEL_TABS].sort()).toEqual(
-      RIGHT_PANEL_TABS.filter(
-        (tab) => tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs',
-      ).sort(),
-    );
-    expect(isRightPanelTabLazyLoaded('files')).toBe(false);
     expect(isRightPanelTabLazyLoaded('editor')).toBe(false);
     expect(isRightPanelTabLazyLoaded('whiteboard')).toBe(false);
     expect(isRightPanelTabLazyLoaded('prs')).toBe(false);

@@ -21,7 +21,6 @@ import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-sta
 import { WhiteboardDock } from '../whiteboard/WhiteboardDock';
 import {
   RIGHT_PANEL_TAB_LABELS,
-  RIGHT_PANEL_TABS,
   repoUnavailableReasonForRuntime,
   type RightPanelTab,
 } from './app-config';
@@ -37,13 +36,6 @@ const loadDroneLinksDock = async () => (await import('../overview/DroneLinksDock
 const loadDronePreviewDock = async () => (await import('../overview/DronePreviewDock')).DronePreviewDock;
 const loadDroneTerminalDock = async () => (await import('../terminal/DroneTerminalDock')).DroneTerminalDock;
 const loadDroneWorkflowsDock = async () => (await import('../workflows/DroneWorkflowsDock')).DroneWorkflowsDock;
-export const LAZY_RIGHT_PANEL_TABS: ReadonlySet<RightPanelTab> = new Set(
-  RIGHT_PANEL_TABS.filter((tab) => tab !== 'files' && tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs'),
-);
-
-export function isRightPanelTabLazyLoaded(tab: RightPanelTab): boolean {
-  return LAZY_RIGHT_PANEL_TABS.has(tab);
-}
 
 export function RightPanelPaneLoadingFallback({ tab }: { tab: RightPanelTab }) {
   const label = RIGHT_PANEL_TAB_LABELS[tab] ?? 'Pane';
@@ -487,7 +479,6 @@ export function RightPanelTabContent({
         </PaneModule>
       );
 
-    case 'files':
     case 'editor':
       return (
         <DroneEditorWorkspace explorer={renderFileExplorer} editor={fileEditor} />

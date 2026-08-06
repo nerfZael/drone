@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   RIGHT_PANEL_TAB_LABELS,
   RIGHT_PANEL_TABS,
+  WORKSPACE_TOOLS,
   parseRightPanelTab,
   repoUnavailableReasonForRuntime,
   rightPanelHeaderTabs,
@@ -34,6 +35,13 @@ describe('host runtime repo UX safeguards', () => {
     expect(RIGHT_PANEL_TABS).toContain('editor');
     expect(RIGHT_PANEL_TABS).toContain('links');
     expect(RIGHT_PANEL_TAB_LABELS.env).toBe('Env');
+  });
+
+  test('derives workspace tab metadata from one registry', () => {
+    expect(RIGHT_PANEL_TABS).toEqual(Object.keys(WORKSPACE_TOOLS));
+    for (const tab of RIGHT_PANEL_TABS) {
+      expect(RIGHT_PANEL_TAB_LABELS[tab]).toBe(WORKSPACE_TOOLS[tab].label);
+    }
   });
 
   test('migrates the legacy Files tab to Editor', () => {

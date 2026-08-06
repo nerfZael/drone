@@ -2257,7 +2257,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     : null;
   const filesPaneActive = Boolean(
     currentDrone &&
-    (visibleToolTabs.includes('files') || visibleToolTabs.includes('editor')),
+    visibleToolTabs.includes('editor'),
   );
   const portsPaneActive = Boolean(
     currentDrone &&
