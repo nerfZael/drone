@@ -21,11 +21,8 @@ export const ChatTranscriptFrame = React.forwardRef<HTMLDivElement, ChatTranscri
   },
   ref,
 ) {
-  const scrollNodeRef = React.useRef<HTMLDivElement | null>(null);
-  React.useImperativeHandle(ref, () => scrollNodeRef.current as HTMLDivElement);
-
   return (
-    <div ref={scrollNodeRef} className="h-full min-h-0 min-w-0 overflow-auto">
+    <div ref={ref} className="h-full min-h-0 min-w-0 overflow-auto">
       {loading ? (
         <ChatLoadingState message={loadingMessage} />
       ) : hasContent ? (
