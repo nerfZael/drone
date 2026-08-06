@@ -288,14 +288,9 @@ export function migrateEditorChangesPanels(api: DockviewApi): void {
   survivor.api.setConstraints({ minimumWidth: EDITOR_PANEL_MIN_WIDTH });
 }
 
-function createDefaultLayout(
-  api: DockviewApi,
-  toolPaneOpen: boolean,
-): void {
+function createDefaultLayout(api: DockviewApi): void {
   api.clear();
   ensureChatPanel(api);
-  if (!toolPaneOpen) return;
-  ensureWorkspaceToolPanel(api, DEFAULT_WORKSPACE_TOOL_TAB, 'single');
 }
 
 function ChatPanel({ containerApi }: IDockviewPanelProps) {
@@ -492,13 +487,13 @@ export function DockableDroneWorkspace({
         restoreRequiredWorkspacePanels(api);
         migrateEditorChangesPanels(api);
       } else {
-        createDefaultLayout(api, toolPaneOpen);
+        createDefaultLayout(api);
       }
       lastAppliedOpenRequestRef.current = openRequestNonce;
       lastAppliedToolTabRef.current = activeToolTab;
       lastAppliedOpenStateRef.current = toolPaneOpen;
     } catch {
-      createDefaultLayout(api, toolPaneOpen);
+      createDefaultLayout(api);
     } finally {
       suppressSaveRef.current = false;
       updateWorkspacePanelState();
