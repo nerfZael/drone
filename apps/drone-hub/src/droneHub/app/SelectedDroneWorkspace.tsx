@@ -528,7 +528,6 @@ type SelectedDroneWorkspaceProps = {
   pinnedToBottom: boolean;
   selectedDroneIdentity: string;
   promptError: string | null;
-  sendingPrompt: boolean;
   sendPromptText: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onSendPromptInNewChat: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   publishSelectedDraft: () => Promise<boolean>;
@@ -645,7 +644,6 @@ export function SelectedDroneWorkspace({
   pinnedToBottom,
   selectedDroneIdentity,
   promptError,
-  sendingPrompt,
   sendPromptText,
   onSendPromptInNewChat,
   publishSelectedDraft,
@@ -2385,10 +2383,6 @@ export function SelectedDroneWorkspace({
                     setChatInputDraft(chatDraftKey, next);
                   }}
                   promptError={stopResponseError || promptError}
-                  // A prompt may remain active for a long time. Queue/ASAP follow-ups
-                  // must remain available while that response is running; `sendingPrompt`
-                  // is also used for the initial request-flight state.
-                  sending={sendingPrompt && !chatInputWaiting}
                   publishing={publishingDraft}
                   waiting={chatInputWaiting}
                   composerTopAction={

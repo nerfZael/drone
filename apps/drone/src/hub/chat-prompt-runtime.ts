@@ -21,6 +21,7 @@ import {
   PendingPromptPump,
 } from './pending-prompt-pump';
 import type { PendingPrompt } from './drone-pending-prompts';
+import { chatPromptAcceptancePlan } from './prompt-acceptance';
 import { captureDroneRunFileChangesBaseline } from './run-file-changes';
 import { createTerminalPromptWakeHandler } from './terminal-prompt-wake';
 import { workflowBlipPermissionArgs } from './workflows/workflow-permissions';
@@ -2656,6 +2657,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           pendingState: 'sending',
         };
       }
+      const acceptance = chatPromptAcceptancePlan(opts.deliveryMode);
       const r = await enqueuePrompt({
         id: fallbackId,
         droneId,
@@ -2665,8 +2667,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         attachmentRefs,
         cwd: opts.cwd ?? null,
         submittedAt: opts.submittedAt ?? null,
-        deliveryMode: opts.deliveryMode === 'asap' ? 'immediate' : 'background',
-        priority: opts.deliveryMode === 'asap' ? 'asap' : 'queue',
+        deliveryMode: acceptance.enqueueMode,
+        priority: acceptance.priority,
         mark: opts.mark,
       });
       return {
@@ -2702,6 +2704,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         pending: queuedPending,
       });
       if (queuedStatus === 'active') {
+        const acceptance = chatPromptAcceptancePlan(opts.deliveryMode);
         const r = await enqueuePrompt({
           id: fallbackId,
           droneId,
@@ -2710,8 +2713,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           attachments,
           cwd: opts.cwd ?? null,
           submittedAt: opts.submittedAt ?? null,
-          deliveryMode: opts.deliveryMode === 'asap' ? 'immediate' : 'background',
-          priority: opts.deliveryMode === 'asap' ? 'asap' : 'queue',
+          deliveryMode: acceptance.enqueueMode,
+          priority: acceptance.priority,
           mark: opts.mark,
         });
         return {

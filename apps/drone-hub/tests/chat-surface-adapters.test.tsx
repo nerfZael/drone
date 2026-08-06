@@ -44,7 +44,6 @@ function renderComposer(adapter: AgentChatSurfaceAdapter) {
         resetKey="test-chat"
         droneName="Test agent"
         promptError={null}
-        sending={false}
         waiting
         draftValue="Follow up"
         onDraftValueChange={() => {}}
@@ -266,7 +265,6 @@ describe('agent chat surface adapters', () => {
           resetKey="structured-controls"
           droneName="Test agent"
           promptError={null}
-          sending={false}
           waiting={false}
           draftValue="Open controls"
           onDraftValueChange={() => {}}
@@ -307,7 +305,6 @@ describe('agent chat surface adapters', () => {
           resetKey="combined-model-picker"
           droneName="Test agent"
           promptError={null}
-          sending={false}
           waiting={false}
           draftValue="Open controls"
           onDraftValueChange={() => {}}
@@ -357,7 +354,6 @@ describe('agent chat surface adapters', () => {
           resetKey="collapsed-composer"
           droneName="Test agent"
           promptError={null}
-          sending={false}
           waiting={false}
           composerControls={{
             controls: [
@@ -392,7 +388,6 @@ describe('agent chat surface adapters', () => {
           resetKey="always-expanded-composer"
           droneName="New drone"
           promptError={null}
-          sending={false}
           waiting={false}
           alwaysExpanded
           composerControls={{

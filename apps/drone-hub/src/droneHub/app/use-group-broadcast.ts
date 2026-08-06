@@ -32,8 +32,6 @@ export function useGroupBroadcast({
   const [groupBroadcastPromptError, setGroupBroadcastPromptError] = React.useState<
     string | null
   >(null);
-  const [groupBroadcastSendingCount, setGroupBroadcastSendingCount] = React.useState(0);
-  const groupBroadcastSending = groupBroadcastSendingCount > 0;
 
   const selectedGroupMultiChatData = React.useMemo(
     () => {
@@ -85,7 +83,6 @@ export function useGroupBroadcast({
         return false;
       }
 
-      setGroupBroadcastSendingCount((c) => c + 1);
       setGroupBroadcastPromptError(null);
       try {
         const preferredChat = selectedChat || 'default';
@@ -128,8 +125,6 @@ export function useGroupBroadcast({
       } catch (err: any) {
         setGroupBroadcastPromptError(err?.message ?? String(err));
         return false;
-      } finally {
-        setGroupBroadcastSendingCount((c) => Math.max(0, c - 1));
       }
     },
     [onAutoRenameChatFromFirstPrompt, requestJson, selectedChat, selectedGroupMultiChatData],
@@ -138,7 +133,6 @@ export function useGroupBroadcast({
   return {
     selectedGroupMultiChatData,
     groupBroadcastPromptError,
-    groupBroadcastSending,
     sendGroupBroadcastPrompt,
   };
 }

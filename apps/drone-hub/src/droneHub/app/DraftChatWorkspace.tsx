@@ -386,7 +386,6 @@ export function DraftChatWorkspace({
         focusTargetId="primary-chat"
         droneName="new drone"
         promptError={draftCreateError}
-        sending={false}
         waiting={false}
         autoFocus={
           !draftCreating &&
