@@ -1,4 +1,5 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   createDraftFileTemplate,
   createEmptyDraft,
@@ -14,9 +15,9 @@ import {
   type SkillRecord,
   type SkillSourceCandidate,
   type SkillSourceCandidatePreview,
-  type SkillSourcePreviewFile,
   type SkillSourceRecord,
 } from './skill-library-model';
+import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsQuery } from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -68,64 +69,16 @@ export type {
   SkillSourceRecord,
 } from './skill-library-model';
 
-export type UseSkillLibraryResult = {
-  skills: SkillRecord[];
-  skillSources: SkillSourceRecord[];
-  sourceSkills: SkillSourceCandidate[];
-  filteredSourceSkills: SkillSourceCandidate[];
-  sourceSkillPreview: SkillSourceCandidatePreview | null;
-  selectedSourcePreviewPath: string | null;
-  selectedSourcePreviewFilePath: string | null;
-  selectedSourcePreviewFile: SkillSourcePreviewFile | null;
-  skillsLoading: boolean;
-  skillSourcesLoading: boolean;
-  sourceSkillsLoading: boolean;
-  sourceSkillPreviewLoading: boolean;
-  skillsSaving: boolean;
-  skillsDeleting: boolean;
-  sourceSkillSearch: string;
-  skillsError: string | null;
-  skillsNotice: string | null;
-  selectedSkillId: string | null;
-  selectedSourceId: string | null;
-  importingSourceSkillId: string | null;
-  selectedSkill: SkillRecord | null;
-  draft: SkillDraft;
-  draftDirty: boolean;
-  selectSkill: (skillId: string | null) => void;
-  selectSource: (sourceId: string | null) => void;
-  previewSourceSkill: (candidate: SkillSourceCandidate) => Promise<void>;
-  selectSourcePreviewFile: (filePath: string | null) => void;
-  updateDraftField: <K extends SkillDraftScalarKey>(key: K, value: SkillDraft[K]) => void;
-  appendDraftFile: (kind: SkillFileKind) => void;
-  updateDraftFile: (localId: string, patch: Partial<SkillFileDraft>) => void;
-  removeDraftFile: (localId: string) => void;
-  loadSkills: () => Promise<void>;
-  loadSkillSources: () => Promise<string | null>;
-  loadSourceSkills: (sourceId?: string | null, opts?: SourceSkillLoadOptions) => Promise<void>;
-  refreshSkillSources: () => Promise<void>;
-  startNewSkill: () => void;
-  setSourceSkillSearch: (value: string) => void;
-  importSourceSkill: (candidate: SkillSourceCandidate) => Promise<void>;
-  saveDraft: () => Promise<void>;
-  deleteSelectedSkill: () => Promise<void>;
-  resetDraft: () => void;
-  clearSkillsNotice: () => void;
-  clearSkillsError: () => void;
-};
+export type UseSkillLibraryResult = ReturnType<typeof useSkillLibrary>;
 
-export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResult {
-  const [skills, setSkills] = React.useState<SkillRecord[]>([]);
-  const [skillSources, setSkillSources] = React.useState<SkillSourceRecord[]>([]);
-  const [sourceSkills, setSourceSkills] = React.useState<SkillSourceCandidate[]>([]);
-  const [sourceSkillPreview, setSourceSkillPreview] = React.useState<SkillSourceCandidatePreview | null>(null);
-  const [skillsLoading, setSkillsLoading] = React.useState(false);
-  const [skillSourcesLoading, setSkillSourcesLoading] = React.useState(false);
-  const [sourceSkillsLoading, setSourceSkillsLoading] = React.useState(false);
-  const [sourceSkillPreviewLoading, setSourceSkillPreviewLoading] = React.useState(false);
+export function useSkillLibrary(requestJson: RequestJsonFn) {
+  const queryClient = useQueryClient();
+  const skillsQueryKey = settingsQueryKey('skills');
+  const sourcesQueryKey = settingsQueryKey('skill-sources');
   const [skillsSaving, setSkillsSaving] = React.useState(false);
   const [skillsDeleting, setSkillsDeleting] = React.useState(false);
   const [skillsError, setSkillsError] = React.useState<string | null>(null);
+  const [queryErrorDismissed, setQueryErrorDismissed] = React.useState(false);
   const [skillsNotice, setSkillsNotice] = React.useState<string | null>(null);
   const [selectedSkillId, setSelectedSkillId] = React.useState<string | null>(null);
   const [selectedSourceId, setSelectedSourceId] = React.useState<string | null>(null);
@@ -135,6 +88,32 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
   const [importingSourceSkillId, setImportingSourceSkillId] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState<SkillDraft>(() => createEmptyDraft());
   const [baselineDraft, setBaselineDraft] = React.useState<SkillDraft>(() => createEmptyDraft());
+
+  const skillsQuery = useSettingsQuery<SkillsListResponse>(requestJson, skillsQueryKey, '/api/skills');
+  const sourcesQuery = useSettingsQuery<SkillSourceListResponse>(requestJson, sourcesQueryKey, '/api/skill-sources');
+  const sourceSkillsQuery = useSettingsQuery<SkillSourceCandidatesResponse>(
+    requestJson,
+    settingsQueryKey('skill-source-candidates', selectedSourceId),
+    `/api/skill-sources/${encodeURIComponent(selectedSourceId ?? '')}/skills`,
+    Boolean(selectedSourceId),
+  );
+  const sourcePreviewQuery = useSettingsQuery<SkillSourcePreviewResponse>(
+    requestJson,
+    settingsQueryKey('skill-source-preview', selectedSourceId, selectedSourcePreviewPath),
+    `/api/skill-sources/${encodeURIComponent(selectedSourceId ?? '')}/preview?${new URLSearchParams({ path: selectedSourcePreviewPath ?? '' }).toString()}`,
+    Boolean(selectedSourceId && selectedSourcePreviewPath),
+  );
+
+  const skills = React.useMemo(() => sortSkills(skillsQuery.data?.skills ?? []), [skillsQuery.data]);
+  const skillSources = React.useMemo(
+    () => [...(sourcesQuery.data?.sources ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [sourcesQuery.data],
+  );
+  const sourceSkills = React.useMemo(
+    () => [...(sourceSkillsQuery.data?.skills ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    [sourceSkillsQuery.data],
+  );
+  const sourceSkillPreview = sourcePreviewQuery.data?.preview ?? null;
 
   const selectedSkill = React.useMemo(
     () => skills.find((skill: SkillRecord) => skill.id === selectedSkillId) ?? null,
@@ -168,16 +147,19 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
   React.useEffect(() => {
     selectedSourceIdRef.current = selectedSourceId;
   }, [selectedSourceId]);
-
-  const sourceSkillsRequestIdRef = React.useRef(0);
-  const sourcePreviewRequestIdRef = React.useRef(0);
+  const sourcePreviewPathRef = React.useRef<string | null>(selectedSourcePreviewPath);
 
   const clearSourcePreviewState = React.useCallback(() => {
-    setSourceSkillPreviewLoading(false);
-    setSourceSkillPreview(null);
+    sourcePreviewPathRef.current = null;
     setSelectedSourcePreviewPath(null);
     setSelectedSourcePreviewFilePath(null);
   }, []);
+
+  const applySelectedSource = React.useCallback((sourceId: string | null) => {
+    if (sourceId !== selectedSourceIdRef.current) clearSourcePreviewState();
+    selectedSourceIdRef.current = sourceId;
+    setSelectedSourceId(sourceId);
+  }, [clearSourcePreviewState]);
 
   const applySelectedSkill = React.useCallback((skill: SkillRecord | null) => {
     setSelectedSkillId(skill?.id ?? null);
@@ -185,6 +167,28 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
     setDraft(nextDraft);
     setBaselineDraft(nextDraft);
   }, []);
+
+  React.useEffect(() => {
+    if (!skillsQuery.data) return;
+    const nextSelected =
+      skills.find((skill) => skill.id === selectedSkillIdRef.current) ?? skills[0] ?? null;
+    applySelectedSkill(nextSelected);
+  }, [applySelectedSkill, skills, skillsQuery.data]);
+
+  React.useEffect(() => {
+    if (!sourcesQuery.data) return;
+    const current = selectedSourceIdRef.current;
+    applySelectedSource(
+      current && skillSources.some((source) => source.id === current)
+        ? current
+        : skillSources[0]?.id ?? null,
+    );
+  }, [applySelectedSource, skillSources, sourcesQuery.data]);
+
+  React.useEffect(() => {
+    if (!sourcePreviewQuery.data) return;
+    setSelectedSourcePreviewFilePath(sourcePreviewQuery.data.preview.files[0]?.path ?? null);
+  }, [sourcePreviewQuery.data]);
 
   const selectSkill = React.useCallback(
     (skillId: string | null) => {
@@ -220,81 +224,57 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
   }, []);
 
   const loadSkills = React.useCallback(async () => {
-    setSkillsLoading(true);
+    setQueryErrorDismissed(false);
     setSkillsError(null);
-    try {
-      const data = await requestJson<SkillsListResponse>('/api/skills');
-      const nextSkills = sortSkills(data.skills ?? []);
-      setSkills(nextSkills);
-      const nextSelected =
-        nextSkills.find((skill: SkillRecord) => skill.id === selectedSkillIdRef.current) ??
-        nextSkills[0] ??
-        null;
-      applySelectedSkill(nextSelected);
-    } catch (e: any) {
-      setSkillsError(e?.message ?? String(e));
-    } finally {
-      setSkillsLoading(false);
-    }
-  }, [applySelectedSkill, requestJson]);
-
-  React.useEffect(() => {
-    void loadSkills();
-  }, [loadSkills]);
+    const { data } = await skillsQuery.refetch();
+    if (!data) return;
+    const nextSkills = sortSkills(data.skills ?? []);
+    const selected =
+      nextSkills.find((skill) => skill.id === selectedSkillIdRef.current) ??
+      nextSkills[0] ??
+      null;
+    applySelectedSkill(selected);
+  }, [applySelectedSkill, skillsQuery.refetch]);
 
   const loadSkillSources = React.useCallback(async () => {
-    setSkillSourcesLoading(true);
+    setQueryErrorDismissed(false);
     setSkillsError(null);
-    try {
-      const data = await requestJson<SkillSourceListResponse>('/api/skill-sources');
-      const nextSources = [...(data.sources ?? [])].sort((a, b) => a.name.localeCompare(b.name));
-      const nextSelectedSourceId =
-        selectedSourceIdRef.current && nextSources.some((source) => source.id === selectedSourceIdRef.current)
-          ? selectedSourceIdRef.current
-          : nextSources[0]?.id ?? null;
-      setSkillSources(nextSources);
-      setSelectedSourceId(nextSelectedSourceId);
-      return nextSelectedSourceId;
-    } catch (e: any) {
-      setSkillsError(e?.message ?? String(e));
-      return null;
-    } finally {
-      setSkillSourcesLoading(false);
-    }
-  }, [requestJson]);
+    const { data, error } = await sourcesQuery.refetch();
+    if (error) return null;
+    const sources = data?.sources ?? [];
+    const current = selectedSourceIdRef.current;
+    const nextSourceId = current && sources.some((source) => source.id === current)
+      ? current
+      : sources[0]?.id ?? null;
+    applySelectedSource(nextSourceId);
+    return nextSourceId;
+  }, [applySelectedSource, sourcesQuery.refetch]);
 
   const loadSourceSkills = React.useCallback(
     async (sourceIdInput?: string | null, opts?: SourceSkillLoadOptions) => {
       const sourceId = String(sourceIdInput ?? selectedSourceId ?? '').trim();
-      sourceSkillsRequestIdRef.current += 1;
-      const requestId = sourceSkillsRequestIdRef.current;
-      sourcePreviewRequestIdRef.current += 1;
       if (!sourceId) {
-        setSourceSkillsLoading(false);
-        setSourceSkills([]);
         clearSourcePreviewState();
         return;
       }
-      setSourceSkillsLoading(true);
+      setQueryErrorDismissed(false);
       setSkillsError(null);
       clearSourcePreviewState();
       try {
-        const qs = new URLSearchParams();
-        if (opts?.refresh) qs.set('refresh', '1');
-        const suffix = qs.size > 0 ? `?${qs.toString()}` : '';
-        const data = await requestJson<SkillSourceCandidatesResponse>(`/api/skill-sources/${encodeURIComponent(sourceId)}/skills${suffix}`);
-        if (sourceSkillsRequestIdRef.current !== requestId) return;
-        const nextSkills = [...(data.skills ?? [])].sort((a, b) => a.name.localeCompare(b.name));
-        setSourceSkills(nextSkills);
-      } catch (e: any) {
-        if (sourceSkillsRequestIdRef.current !== requestId) return;
-        setSkillsError(e?.message ?? String(e));
-      } finally {
-        if (sourceSkillsRequestIdRef.current !== requestId) return;
-        setSourceSkillsLoading(false);
+        const suffix = opts?.refresh ? '?refresh=1' : '';
+        await queryClient.fetchQuery({
+          queryKey: settingsQueryKey('skill-source-candidates', sourceId),
+          queryFn: ({ signal }) =>
+            requestJson<SkillSourceCandidatesResponse>(
+              `/api/skill-sources/${encodeURIComponent(sourceId)}/skills${suffix}`,
+              { signal },
+            ),
+        });
+      } catch (error) {
+        setSkillsError(settingsErrorMessage(error));
       }
     },
-    [clearSourcePreviewState, requestJson, selectedSourceId],
+    [clearSourcePreviewState, queryClient, requestJson, selectedSourceId],
   );
 
   const refreshSkillSources = React.useCallback(async () => {
@@ -304,17 +284,10 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
   }, [loadSkillSources, loadSourceSkills]);
 
   React.useEffect(() => {
-    void loadSkillSources();
-  }, [loadSkillSources]);
-
-  React.useEffect(() => {
     if (!selectedSourceId) {
-      setSourceSkills([]);
       clearSourcePreviewState();
-      return;
     }
-    void loadSourceSkills(selectedSourceId);
-  }, [clearSourcePreviewState, loadSourceSkills, selectedSourceId]);
+  }, [clearSourcePreviewState, selectedSourceId]);
 
   const startNewSkill = React.useCallback(() => {
     applySelectedSkill(null);
@@ -348,7 +321,10 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
             body: JSON.stringify(payload),
           });
       const saved = data.skill;
-      setSkills((prev: SkillRecord[]) => replaceSkill(prev, saved));
+      queryClient.setQueryData<SkillsListResponse>(skillsQueryKey, (current) => ({
+        ok: true,
+        skills: replaceSkill(current?.skills ?? [], saved),
+      }));
       applySelectedSkill(saved);
       setSkillsNotice(draft.id ? `Saved ${saved.name}.` : `Created ${saved.name}.`);
     } catch (e: any) {
@@ -356,7 +332,7 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
     } finally {
       setSkillsSaving(false);
     }
-  }, [applySelectedSkill, draft, requestJson]);
+  }, [applySelectedSkill, draft, queryClient, requestJson, skillsQueryKey]);
 
   const importSourceSkill = React.useCallback(
     async (candidate: SkillSourceCandidate) => {
@@ -370,7 +346,10 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
           body: JSON.stringify({ path: candidate.path }),
         });
         const saved = data.skill;
-        setSkills((prev: SkillRecord[]) => replaceSkill(prev, saved));
+        queryClient.setQueryData<SkillsListResponse>(skillsQueryKey, (current) => ({
+          ok: true,
+          skills: replaceSkill(current?.skills ?? [], saved),
+        }));
         applySelectedSkill(saved);
         setSkillsNotice(`Imported ${saved.name}.`);
       } catch (e: any) {
@@ -379,38 +358,34 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
         setImportingSourceSkillId(null);
       }
     },
-    [applySelectedSkill, requestJson],
+    [applySelectedSkill, queryClient, requestJson, skillsQueryKey],
   );
 
   const previewSourceSkill = React.useCallback(
     async (candidate: SkillSourceCandidate) => {
-      sourcePreviewRequestIdRef.current += 1;
-      const requestId = sourcePreviewRequestIdRef.current;
+      sourcePreviewPathRef.current = candidate.path;
       setSelectedSourcePreviewPath(candidate.path);
-      setSourceSkillPreviewLoading(true);
-      setSourceSkillPreview(null);
       setSelectedSourcePreviewFilePath(null);
       setSkillsError(null);
       try {
         const qs = new URLSearchParams({ path: candidate.path });
-        const data = await requestJson<SkillSourcePreviewResponse>(
-          `/api/skill-sources/${encodeURIComponent(candidate.sourceId)}/preview?${qs.toString()}`,
-        );
-        if (sourcePreviewRequestIdRef.current !== requestId) return;
+        const data = await queryClient.fetchQuery({
+          queryKey: settingsQueryKey('skill-source-preview', candidate.sourceId, candidate.path),
+          queryFn: ({ signal }) => requestJson<SkillSourcePreviewResponse>(
+            `/api/skill-sources/${encodeURIComponent(candidate.sourceId)}/preview?${qs.toString()}`,
+            { signal },
+          ),
+        });
+        if (sourcePreviewPathRef.current !== candidate.path) return;
         if (selectedSourceIdRef.current !== candidate.sourceId) return;
-        setSourceSkillPreview(data.preview);
         setSelectedSourcePreviewFilePath(data.preview.files[0]?.path ?? null);
-      } catch (e: any) {
-        if (sourcePreviewRequestIdRef.current !== requestId) return;
-        setSourceSkillPreview(null);
+      } catch (error) {
+        if (sourcePreviewPathRef.current !== candidate.path) return;
         setSelectedSourcePreviewFilePath(null);
-        setSkillsError(e?.message ?? String(e));
-      } finally {
-        if (sourcePreviewRequestIdRef.current !== requestId) return;
-        setSourceSkillPreviewLoading(false);
+        setSkillsError(settingsErrorMessage(error));
       }
     },
-    [requestJson],
+    [queryClient, requestJson],
   );
 
   const deleteSelectedSkill = React.useCallback(async () => {
@@ -423,7 +398,7 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
         method: 'DELETE',
       });
       const nextSkills = skills.filter((skill: SkillRecord) => skill.id !== selectedSkillId);
-      setSkills(nextSkills);
+      queryClient.setQueryData<SkillsListResponse>(skillsQueryKey, { ok: true, skills: nextSkills });
       applySelectedSkill(nextSkills[0] ?? null);
       setSkillsNotice('Deleted skill.');
     } catch (e: any) {
@@ -431,13 +406,17 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
     } finally {
       setSkillsDeleting(false);
     }
-  }, [applySelectedSkill, requestJson, selectedSkillId, skills]);
+  }, [applySelectedSkill, queryClient, requestJson, selectedSkillId, skills, skillsQueryKey]);
 
   const clearSkillsNotice = React.useCallback(() => setSkillsNotice(null), []);
-  const clearSkillsError = React.useCallback(() => setSkillsError(null), []);
-  const selectSource = React.useCallback((sourceId: string | null) => {
-    setSelectedSourceId(sourceId);
+  const clearSkillsError = React.useCallback(() => {
+    setSkillsError(null);
+    setQueryErrorDismissed(true);
   }, []);
+  const selectSource = React.useCallback((sourceId: string | null) => {
+    setQueryErrorDismissed(false);
+    applySelectedSource(sourceId);
+  }, [applySelectedSource]);
   const selectSourcePreviewFile = React.useCallback((filePath: string | null) => {
     setSelectedSourcePreviewFilePath(filePath);
   }, []);
@@ -451,14 +430,21 @@ export function useSkillLibrary(requestJson: RequestJsonFn): UseSkillLibraryResu
     selectedSourcePreviewPath,
     selectedSourcePreviewFilePath,
     selectedSourcePreviewFile,
-    skillsLoading,
-    skillSourcesLoading,
-    sourceSkillsLoading,
-    sourceSkillPreviewLoading,
+    skillsLoading: skillsQuery.isFetching,
+    skillSourcesLoading: sourcesQuery.isFetching,
+    sourceSkillsLoading: sourceSkillsQuery.isFetching,
+    sourceSkillPreviewLoading: sourcePreviewQuery.isFetching,
     skillsSaving,
     skillsDeleting,
     sourceSkillSearch,
-    skillsError,
+    skillsError: settingsQueryError(
+      skillsError,
+      queryErrorDismissed,
+      skillsQuery,
+      sourcesQuery,
+      sourceSkillsQuery,
+      sourcePreviewQuery,
+    ),
     skillsNotice,
     selectedSkillId,
     selectedSourceId,

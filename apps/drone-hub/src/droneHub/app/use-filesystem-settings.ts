@@ -1,4 +1,5 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   bytesToMaxMiB,
   bytesToMinMiB,
@@ -7,47 +8,39 @@ import {
   parseUploadMaxMiBDraft,
 } from './filesystem-size-utils';
 import type { FilesystemSettingsResponse } from './settings-types';
+import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsPostMutation, useSettingsQuery } from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
-export type UseFilesystemSettingsResult = {
-  filesystemSettings: FilesystemSettingsResponse | null;
-  filesystemSettingsLoading: boolean;
-  filesystemSettingsError: string | null;
-  filesystemSettingsNotice: string | null;
-  uploadMaxMiBDraft: string;
-  savingFilesystemSettings: boolean;
-  setUploadMaxMiBDraft: React.Dispatch<React.SetStateAction<string>>;
-  loadFilesystemSettings: () => Promise<void>;
-  saveFilesystemSettings: () => Promise<void>;
-};
+export type UseFilesystemSettingsResult = ReturnType<typeof useFilesystemSettings>;
 
-export function useFilesystemSettings(requestJson: RequestJsonFn): UseFilesystemSettingsResult {
-  const [filesystemSettings, setFilesystemSettings] = React.useState<FilesystemSettingsResponse | null>(null);
-  const [filesystemSettingsLoading, setFilesystemSettingsLoading] = React.useState(false);
+export function useFilesystemSettings(requestJson: RequestJsonFn) {
+  const queryClient = useQueryClient();
+  const queryKey = settingsQueryKey('filesystem');
+  const query = useSettingsQuery<FilesystemSettingsResponse>(requestJson, queryKey, '/api/settings/filesystem');
   const [filesystemSettingsError, setFilesystemSettingsError] = React.useState<string | null>(null);
   const [filesystemSettingsNotice, setFilesystemSettingsNotice] = React.useState<string | null>(null);
   const [uploadMaxMiBDraft, setUploadMaxMiBDraft] = React.useState('2048');
-  const [savingFilesystemSettings, setSavingFilesystemSettings] = React.useState(false);
 
-  const loadFilesystemSettings = React.useCallback(async () => {
-    setFilesystemSettingsLoading(true);
-    setFilesystemSettingsError(null);
-    setFilesystemSettingsNotice(null);
-    try {
-      const data = await requestJson<FilesystemSettingsResponse>('/api/settings/filesystem');
-      setFilesystemSettings(data);
-      setUploadMaxMiBDraft(String(bytesToNearestMiB(data.filesystem.uploadMaxBytes)));
-    } catch (e: any) {
-      setFilesystemSettingsError(e?.message ?? String(e));
-    } finally {
-      setFilesystemSettingsLoading(false);
-    }
-  }, [requestJson]);
+  const applySettings = React.useCallback((data: FilesystemSettingsResponse) => {
+    setUploadMaxMiBDraft(String(bytesToNearestMiB(data.filesystem.uploadMaxBytes)));
+  }, []);
 
   React.useEffect(() => {
-    void loadFilesystemSettings();
-  }, [loadFilesystemSettings]);
+    if (query.data) applySettings(query.data);
+  }, [applySettings, query.data]);
+
+  const saveMutation = useSettingsPostMutation<FilesystemSettingsResponse, { uploadMaxBytes: number }>(
+    requestJson,
+    '/api/settings/filesystem',
+  );
+
+  const loadFilesystemSettings = React.useCallback(async () => {
+    setFilesystemSettingsError(null);
+    setFilesystemSettingsNotice(null);
+    const { data } = await query.refetch();
+    if (data) applySettings(data);
+  }, [applySettings, query.refetch]);
 
   const saveFilesystemSettings = React.useCallback(async () => {
     setFilesystemSettingsError(null);
@@ -58,8 +51,8 @@ export function useFilesystemSettings(requestJson: RequestJsonFn): UseFilesystem
       return;
     }
     const uploadMaxBytes = miBToBytes(uploadMaxMiB);
-    const minBytes = filesystemSettings?.filesystem.minUploadMaxBytes ?? null;
-    const maxBytes = filesystemSettings?.filesystem.maxUploadMaxBytes ?? null;
+    const minBytes = query.data?.filesystem.minUploadMaxBytes ?? null;
+    const maxBytes = query.data?.filesystem.maxUploadMaxBytes ?? null;
     if ((minBytes != null && uploadMaxBytes < minBytes) || (maxBytes != null && uploadMaxBytes > maxBytes)) {
       const minMiB = minBytes != null ? bytesToMinMiB(minBytes) : 1;
       const maxMiB = maxBytes != null ? bytesToMaxMiB(maxBytes, minMiB) : 8192;
@@ -67,31 +60,24 @@ export function useFilesystemSettings(requestJson: RequestJsonFn): UseFilesystem
       return;
     }
 
-    setSavingFilesystemSettings(true);
     try {
-      const data = await requestJson<FilesystemSettingsResponse>('/api/settings/filesystem', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ uploadMaxBytes }),
-      });
-      setFilesystemSettings(data);
+      const data = await saveMutation.mutateAsync({ uploadMaxBytes });
+      queryClient.setQueryData(queryKey, data);
+      applySettings(data);
       const savedMiB = bytesToNearestMiB(data.filesystem.uploadMaxBytes);
-      setUploadMaxMiBDraft(String(savedMiB));
       setFilesystemSettingsNotice(`Saved upload max file size to ${savedMiB} MiB.`);
-    } catch (e: any) {
-      setFilesystemSettingsError(e?.message ?? String(e));
-    } finally {
-      setSavingFilesystemSettings(false);
+    } catch (error) {
+      setFilesystemSettingsError(settingsErrorMessage(error));
     }
-  }, [filesystemSettings?.filesystem.maxUploadMaxBytes, filesystemSettings?.filesystem.minUploadMaxBytes, requestJson, uploadMaxMiBDraft]);
+  }, [applySettings, query.data?.filesystem.maxUploadMaxBytes, query.data?.filesystem.minUploadMaxBytes, queryClient, queryKey, saveMutation, uploadMaxMiBDraft]);
 
   return {
-    filesystemSettings,
-    filesystemSettingsLoading,
-    filesystemSettingsError,
+    filesystemSettings: query.data ?? null,
+    filesystemSettingsLoading: query.isFetching,
+    filesystemSettingsError: settingsQueryError(filesystemSettingsError, false, query),
     filesystemSettingsNotice,
     uploadMaxMiBDraft,
-    savingFilesystemSettings,
+    savingFilesystemSettings: saveMutation.isPending,
     setUploadMaxMiBDraft,
     loadFilesystemSettings,
     saveFilesystemSettings,

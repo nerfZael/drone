@@ -22,6 +22,21 @@ const settingsOnlyStateProps = [
   'skillLibraryState',
 ];
 
+const queryBackedSettingsHooks = [
+  'use-agents-settings.ts',
+  'use-delete-action-settings.ts',
+  'use-filesystem-settings.ts',
+  'use-github-settings.ts',
+  'use-llm-settings.ts',
+  'use-mcp-servers.ts',
+  'use-profile-settings.ts',
+  'use-registry-backup-settings.ts',
+  'use-resource-subscription-settings.ts',
+  'use-skill-library.ts',
+  'use-speech-settings.ts',
+  'use-sync-sets.ts',
+];
+
 function source(path: string) {
   return readFileSync(join(repoRoot, path), 'utf8');
 }
@@ -59,6 +74,13 @@ describe('settings-only hook startup boundary', () => {
     for (const hookName of settingsOnlyHooks) {
       expect(settingsView).toContain(`import { ${hookName}`);
       expect(settingsView).toContain(`${hookName}(requestJson`);
+    }
+  });
+
+  test('keeps settings server resources on the shared query layer', () => {
+    for (const fileName of queryBackedSettingsHooks) {
+      const hook = source(`src/droneHub/app/${fileName}`);
+      expect(hook).toContain('useSettingsQuery<');
     }
   });
 });
