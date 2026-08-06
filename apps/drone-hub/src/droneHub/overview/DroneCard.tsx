@@ -638,6 +638,8 @@ export const DroneCard = React.memo(function DroneCard({
     return () => window.clearTimeout(timeoutId);
   }, [displayState]);
   const stateLabel = sidebarDroneStateLabel(displayState, unread);
+  const showDisclosureOperationIndicator =
+    displayState === 'archiving' || displayState === 'deleting';
   const showActiveIndicator = Boolean(active) && !unread;
   const renderActiveEdge = showActiveIndicator && activeIndicatorStyle === 'edge';
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
@@ -835,6 +837,22 @@ export const DroneCard = React.memo(function DroneCard({
       onKeyDown={(e) => {
         if (disabled) return;
         if (e.target !== e.currentTarget) return;
+        if (
+          e.key === 'Delete' &&
+          !e.repeat &&
+          !e.shiftKey &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          !e.altKey &&
+          canDelete &&
+          !deleteDisabled &&
+          !deleteBusy
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          onDelete?.();
+          return;
+        }
         if (e.key === ' ' || e.key === 'Enter') {
           e.preventDefault();
           onClick();
@@ -878,10 +896,21 @@ export const DroneCard = React.memo(function DroneCard({
                 className={`max-w-none flex-shrink-0 !translate-x-0 ${densityClasses.folderChevron}`}
               />
             </span>
-            <DroneRuntimeIcon
-              runtime={runtime}
-              className={`flex-shrink-0 ${densityClasses.icon} ${droneRuntimeIconToneClass(runtime)} !opacity-100`}
-            />
+            {showDisclosureOperationIndicator ? (
+              <span
+                role="img"
+                className="inline-flex flex-shrink-0"
+                title={stateLabel}
+                aria-label={stateLabel}
+              >
+                <SidebarItemStateIndicator state={displayState} />
+              </span>
+            ) : (
+              <DroneRuntimeIcon
+                runtime={runtime}
+                className={`flex-shrink-0 ${densityClasses.icon} ${droneRuntimeIconToneClass(runtime)} !opacity-100`}
+              />
+            )}
           </>
         ) : null}
         {leadingIcon ? <span className="inline-flex flex-shrink-0 items-center">{leadingIcon}</span> : null}

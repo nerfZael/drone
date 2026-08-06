@@ -11,6 +11,16 @@ export function isTransientDroneStartupError(error: unknown): boolean {
   );
 }
 
+export function isTransientChatFetchError(error: unknown): boolean {
+  const message = errorMessage(error).toLowerCase();
+  return (
+    message === 'failed to fetch' ||
+    message === 'fetch failed' ||
+    message === 'load failed' ||
+    message.includes('networkerror when attempting to fetch resource')
+  );
+}
+
 export function formatDroneRuntimeError(error: unknown): string {
   const raw = errorMessage(error);
   if (!raw) return 'Unknown drone runtime error.';
