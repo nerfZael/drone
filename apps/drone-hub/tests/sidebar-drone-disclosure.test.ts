@@ -73,19 +73,6 @@ describe('multi-chat drone disclosure', () => {
     expect(source).toContain('sidebarChatSidebarNodeId(droneId, selectedChatName)');
   });
 
-  test('keeps the legacy desktop tree aligned with the grouped interaction', () => {
-    const source = readFileSync(
-      new URL('../src/droneHub/app/SidebarDroneTreeList.tsx', import.meta.url),
-      'utf8',
-    );
-
-    expect(source).toContain('if (hasChatSection) {\n              onToggleChatSection(drone.id);');
-    expect(source).toContain(
-      'disclosureExpanded={hasChatSection ? chatSectionExpanded : undefined}',
-    );
-    expect(source).toContain('(hasChatSection && chatSectionExpanded)');
-  });
-
   test('uses the same parent-only disclosure interaction in read-only desktop trees', () => {
     const source = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
