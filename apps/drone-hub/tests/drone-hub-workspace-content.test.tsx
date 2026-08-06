@@ -90,7 +90,6 @@ describe('DroneHubWorkspaceContent lazy workspace views', () => {
       {
         selectedDroneWorkspaceProps: {
           currentDrone: { id: 'drone-1' },
-          rightPanelOpen: false,
         } as DroneHubWorkspaceContentProps['selectedDroneWorkspaceProps'],
       },
     ],
@@ -126,7 +125,6 @@ describe('DroneHubWorkspaceContent lazy workspace views', () => {
       baseProps({
         selectedDroneWorkspaceProps: {
           currentDrone: { id: 'drone-1' },
-          rightPanelOpen: false,
         } as DroneHubWorkspaceContentProps['selectedDroneWorkspaceProps'],
       }),
     );
@@ -139,10 +137,7 @@ describe('DroneHubWorkspaceContent lazy workspace views', () => {
       baseProps({
         selectedDroneWorkspaceProps: {
           currentDrone: { id: 'drone-1' },
-          rightPanelOpen: true,
           rightPanelTab: 'terminal',
-          rightPanelSplit: false,
-          rightPanelBottomTab: 'terminal',
         } as DroneHubWorkspaceContentProps['selectedDroneWorkspaceProps'],
       }),
     );

@@ -36,6 +36,7 @@ const {
   writeActiveWhiteboardId,
 } = await import('../src/droneHub/whiteboard/whiteboard-events');
 const {
+  resetWorkspaceToChat,
   ensureWorkspaceToolPanel,
   migrateEditorChangesPanels,
   restoreRequiredWorkspacePanels,
@@ -79,13 +80,36 @@ describe('per-drone workspace state', () => {
   test('keys Dockview mounts and persisted layouts by drone', () => {
     const workspace = readAppSource('app/DockableDroneWorkspace.tsx');
     const selectedWorkspace = readAppSource('app/SelectedDroneWorkspace.tsx');
+    const workspaceTools = readAppSource('app/use-workspace-tools.ts');
 
     expect(workspace).toContain('workspaceLayoutStorageKey(droneId)');
     expect(workspace).toContain('writeStoredLayout(currentDrone.id, layout)');
     expect(selectedWorkspace).toContain('key={currentDrone.id}');
-    expect(selectedWorkspace).toContain('visibleToolTabsByDrone[currentDrone.id] ?? []');
-    expect(selectedWorkspace).toContain('[currentDrone.id]: tabs');
-    expect(selectedWorkspace).toContain('onVisibleToolTabsChange={handleVisibleToolTabsChange}');
+    expect(workspaceTools).toContain('visibleToolTabsByDrone');
+    expect(workspaceTools).toContain('[droneId]: tabs');
+    expect(selectedWorkspace).toContain('onVisibleToolTabsChange={onVisibleToolTabsChange}');
+  });
+
+  test('creates a fresh workspace with only the required chat panel', () => {
+    const addedPanels: Array<{ id?: string; component?: string }> = [];
+    let clearCount = 0;
+    const api = {
+      panels: [],
+      getPanel: () => undefined,
+      clear: () => {
+        clearCount += 1;
+      },
+      addPanel: (panel: (typeof addedPanels)[number]) => addedPanels.push(panel),
+    };
+
+    resetWorkspaceToChat(
+      api as unknown as Parameters<typeof resetWorkspaceToChat>[0],
+    );
+
+    expect(clearCount).toBe(1);
+    expect(addedPanels).toEqual([
+      expect.objectContaining({ id: 'agent-chat', component: 'chat' }),
+    ]);
   });
 
   test('uses the same File Explorer chrome and preferences in Editor and Changes', () => {

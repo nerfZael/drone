@@ -8,11 +8,6 @@ const productionSurfaces = [
     components: ['UiActionMenu', 'UiNavigationRow', 'UiPanelToolbar', 'UiToolbarIconButton'],
   },
   {
-    name: 'Right panel',
-    path: '../src/droneHub/app/RightPanel.tsx',
-    components: ['UiPaneState', 'UiResizeHandle', 'UiToolbarSegmentedControl'],
-  },
-  {
     name: 'Dockable workspace chrome',
     path: '../src/droneHub/app/DockableDroneWorkspace.tsx',
     components: ['UiPaneState', 'UiPanel', 'UiPanelToolbar', 'UiToolbarSegmentedControl'],

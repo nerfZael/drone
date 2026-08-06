@@ -12,18 +12,15 @@ export function shellTerminalPrewarmKey(opts: { droneId: string; cwd: string }):
 export function shouldPrewarmShellTerminal(opts: {
   drone: DroneSummary | null;
   cwd: string;
-  rightPanelOpen: boolean;
-  rightPanelTab: RightPanelTab;
-  rightPanelSplit: boolean;
-  rightPanelBottomTab: RightPanelTab;
+  visibleToolTabs: readonly RightPanelTab[];
 }): boolean {
   const drone = opts.drone;
   if (!drone) return false;
-  if (!opts.rightPanelOpen) return false;
+  if (opts.visibleToolTabs.length === 0) return false;
   if (String(drone.runtime ?? '').trim().toLowerCase() !== 'container') return false;
   if (!drone.statusOk) return false;
   if (isDroneStartingOrSeeding(drone.hubPhase)) return false;
   if (!String(opts.cwd ?? '').trim()) return false;
-  if (opts.rightPanelTab === 'terminal') return false;
+  if (opts.visibleToolTabs.includes('terminal')) return false;
   return true;
 }
