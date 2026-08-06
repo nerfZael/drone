@@ -27,6 +27,7 @@ import {
   agentRunWorkspacePreviewEntries,
   messageImageParts,
   messageText,
+  parseEventNotificationPrompt,
   renderItemsFromMessages,
   toolActivityIsSettled,
   toolLabel,
@@ -57,6 +58,7 @@ import { LinkedPullRequestAttachments } from '../drones/LinkedPullRequestAttachm
 import type { MobileLinkedPullRequestContext } from '../drones/use-drone-linked-pull-requests';
 import {
   groupMobileTranscriptRuns,
+  latestTruncatedMobileAgentMessage,
   limitMobileRunToolItems,
   mobileTranscriptGroupStartedAt,
   mobileRunIsThinking,
@@ -66,6 +68,7 @@ import {
   type MobileTranscriptRun,
 } from './mobile-transcript-runs';
 import { shouldToggleMessageTimestamp } from './message-touch-model';
+import { MobileEventNotification } from '../drones/MobileEventNotification';
 
 function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
   const dots = React.useRef([
@@ -1431,6 +1434,31 @@ export function MobileAssistantTranscript({
     message: AssistantMessage;
     sourceMessageIndex: number;
   } | null>(null);
+  const autoLoadedFullMessageIdRef = React.useRef('');
+  const latestTruncatedAgentMessage = React.useMemo(
+    () => latestTruncatedMobileAgentMessage(messages),
+    [messages],
+  );
+  const latestTruncatedAgentMessageId = String(latestTruncatedAgentMessage?.id ?? '').trim();
+  React.useEffect(() => {
+    if (!latestTruncatedAgentMessage || !latestTruncatedAgentMessageId) {
+      autoLoadedFullMessageIdRef.current = '';
+      return;
+    }
+    if (
+      !onLoadFullMessage ||
+      fullMessageLoadingId ||
+      autoLoadedFullMessageIdRef.current === latestTruncatedAgentMessageId
+    )
+      return;
+    autoLoadedFullMessageIdRef.current = latestTruncatedAgentMessageId;
+    onLoadFullMessage(latestTruncatedAgentMessage);
+  }, [
+    fullMessageLoadingId,
+    latestTruncatedAgentMessage,
+    latestTruncatedAgentMessageId,
+    onLoadFullMessage,
+  ]);
   const toggleMessageTimestamp = React.useCallback((key: string) => {
     setVisibleMessageTimestamps((current) => {
       const next = new Set(current);
@@ -1514,6 +1542,7 @@ export function MobileAssistantTranscript({
       return null;
     const user = item.message.role === 'user';
     const assistant = item.message.role === 'assistant';
+    const eventNotification = user ? parseEventNotificationPrompt(text) : null;
     const userCodeBlock = user && nativeMarkdownHasCodeBlock(text);
     const timestamp = messageTimestamp(item.message);
     const timestampKey = `${item.key}:${String(timestamp ?? '')}`;
@@ -1526,6 +1555,15 @@ export function MobileAssistantTranscript({
               sourceMessageIndex: item.sourceMessageIndex,
             })
         : undefined;
+    if (eventNotification) {
+      return (
+        <MobileEventNotification
+          key={item.key}
+          notification={eventNotification}
+          onLongPress={openMessageActions}
+        />
+      );
+    }
     const content = (
       <>
         {assistant && structuredAssistantContent ? (

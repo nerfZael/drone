@@ -107,7 +107,7 @@ export function AssistantContextUsageIndicator({ usage }: { usage: BlipContextUs
           cy="15"
           r={radius}
           fill="none"
-          stroke="var(--border-subtle)"
+          stroke="var(--chat-composer-context-track, var(--border-subtle))"
           strokeWidth="3"
         />
         <circle

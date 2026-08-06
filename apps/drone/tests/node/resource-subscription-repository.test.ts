@@ -1,11 +1,66 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import BetterSqlite3 from 'better-sqlite3';
 
-import type { HubDatabase, HubDatabaseConnection } from '../../src/host/hub-database';
+import { applyHubDatabaseMigrations } from '../../src/host/hub-database';
 import { PromptQueueRepository } from '../../src/host/prompt-queue-repository';
-import { ResourceSubscriptionRepository } from '../../src/hub/subscriptions/resource-subscription-repository';
+import {
+  RESOURCE_SUBSCRIPTION_MIGRATIONS,
+  ResourceSubscriptionRepository,
+} from '../../src/hub/subscriptions/resource-subscription-repository';
 import { DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS } from '../../src/hub/subscriptions/resource-subscription-types';
+import { memoryHubDatabase } from './helpers/memory-hub-database';
+
+test('resolves display names and chat counts for chat subscription resources in one batch', () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    database.read((connection) => {
+      connection.exec(`
+        CREATE TABLE canonical_chats (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          metadata_json TEXT NOT NULL
+        );
+        CREATE TABLE hub_canonical_drones (
+          drone_id TEXT NOT NULL PRIMARY KEY,
+          name TEXT NOT NULL
+        );
+        INSERT INTO hub_canonical_drones (drone_id, name)
+          VALUES ('drone-a', 'Build worker'), ('drone-b', 'Review worker');
+        INSERT INTO canonical_chats (drone_id, chat_name, metadata_json)
+          VALUES
+            ('drone-a', 'default', '{"id":"chat-a"}'),
+            ('drone-b', 'default', '{"id":"chat-b-default"}'),
+            ('drone-b', 'review', '{"id":"chat-b-review"}');
+      `);
+    });
+
+    assert.deepEqual(repository.resolveChatResources(['chat-a', 'chat-b-review']), new Map([
+      [
+        'chat-a',
+        {
+          chatId: 'chat-a',
+          droneId: 'drone-a',
+          chatName: 'default',
+          droneName: 'Build worker',
+          droneChatCount: 1,
+        },
+      ],
+      [
+        'chat-b-review',
+        {
+          chatId: 'chat-b-review',
+          droneId: 'drone-b',
+          chatName: 'review',
+          droneName: 'Review worker',
+          droneChatCount: 2,
+        },
+      ],
+    ]));
+  } finally {
+    close();
+  }
+});
 
 test('deduplicates and batches repository events for the owning conversation', async () => {
   const { database, close } = memoryHubDatabase();
@@ -166,7 +221,7 @@ test('restart recovery does not redeliver a batch whose prompt was already queue
   }
 });
 
-test('cancelling a claimed subscription removes only its item from a mixed batch', async () => {
+test('cancelling a claimed subscription releases the other item from a mixed batch', async () => {
   const { database, close } = memoryHubDatabase();
   try {
     const repository = new ResourceSubscriptionRepository(database);
@@ -238,9 +293,17 @@ test('cancelling a claimed subscription removes only its item from a mixed batch
           .all() as Array<{ state: string; count: number }>,
     );
     assert.deepEqual(Object.fromEntries(states.map((row) => [row.state, Number(row.count)])), {
-      delivered: 1,
       failed: 1,
+      pending: 1,
     });
+    const retry = await repository.claimBatch(
+      { ...DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS, batchWindowMs: 0 },
+      new Date(Date.now() + 2_000),
+    );
+    assert.deepEqual(
+      retry?.items.map((item) => item.subscription.id),
+      remainingItems.map((item) => item.subscription.id),
+    );
   } finally {
     close();
   }
@@ -399,38 +462,156 @@ test('GitHub polling resumes from a fresh cursor after the last watcher is cance
   }
 });
 
-function memoryHubDatabase(): { database: HubDatabase; close: () => void } {
-  const connection = new BetterSqlite3(':memory:') as HubDatabaseConnection;
-  connection.pragma('foreign_keys = ON');
-  const database: HubDatabase = {
-    path: ':memory:',
-    openedAt: new Date().toISOString(),
-    read(operation) {
-      return operation(connection);
-    },
-    async writeTransaction(_label, operation) {
-      return connection.transaction(() => operation(connection)).immediate();
-    },
-    diagnostics() {
-      return {
-        available: true,
-        path: ':memory:',
-        failureKind: null,
-        unavailableReason: null,
-        openedAt: this.openedAt,
-        schemaVersion: null,
-        appliedMigrationCount: null,
-        journalMode: 'memory',
-        synchronous: 2,
-        busyTimeoutMs: 0,
-        foreignKeys: true,
-        queuedWrites: 0,
-        activeWrite: null,
-      };
-    },
-  };
-  return { database, close: () => connection.close() };
-}
+test('upgrades existing resource subscription storage for scheduled subscriptions', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    database.read((connection) =>
+      applyHubDatabaseMigrations(
+        connection,
+        RESOURCE_SUBSCRIPTION_MIGRATIONS.slice(0, 2),
+        'resource-subscriptions',
+      ),
+    );
+    const repository = new ResourceSubscriptionRepository(database);
+    const created = await repository.upsert({
+      subscriber: { chatId: 'subscriber-chat', droneId: 'drone-a', chatName: 'default' },
+      provider: 'github',
+      resourceType: 'repository',
+      resourceId: 'example/migrated',
+      events: ['pull_request.opened'],
+      intent: '',
+      maxActive: 50,
+    });
+    assert.deepEqual(created.subscription.resourceConfig, {});
+    assert.equal(created.subscription.nextEventAt, null);
+  } finally {
+    close();
+  }
+});
+
+test('stores cron configuration and advances only subscriptions due for an occurrence', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    const resourceId = 'v1:hourly';
+    const config = { expression: '0 * * * *', timeZone: 'UTC' };
+    const due = await repository.upsert({
+      subscriber: { chatId: 'due-chat', droneId: 'drone-a', chatName: 'due' },
+      provider: 'drone-hub',
+      resourceType: 'cron',
+      resourceId,
+      resourceConfig: config,
+      events: ['cron.triggered'],
+      intent: 'Run the hourly check.',
+      nextEventAt: '2026-08-05T12:00:00.000Z',
+      maxActive: 50,
+    });
+    const overdue = await repository.upsert({
+      subscriber: { chatId: 'overdue-chat', droneId: 'drone-a', chatName: 'overdue' },
+      provider: 'drone-hub',
+      resourceType: 'cron',
+      resourceId,
+      resourceConfig: config,
+      events: ['cron.triggered'],
+      intent: 'Run the hourly check.',
+      nextEventAt: '2026-08-05T11:00:00.000Z',
+      maxActive: 50,
+    });
+    const future = await repository.upsert({
+      subscriber: { chatId: 'future-chat', droneId: 'drone-a', chatName: 'future' },
+      provider: 'drone-hub',
+      resourceType: 'cron',
+      resourceId,
+      resourceConfig: config,
+      events: ['cron.triggered'],
+      intent: 'Run the hourly check.',
+      nextEventAt: '2026-08-05T13:00:00.000Z',
+      maxActive: 50,
+    });
+
+    assert.deepEqual(due.subscription.resourceConfig, config);
+    assert.equal(due.subscription.nextEventAt, '2026-08-05T12:00:00.000Z');
+    assert.deepEqual(
+      new Set(
+        repository
+          .listDueCron(new Date('2026-08-05T12:30:00.000Z'))
+          .map((subscription) => subscription.id),
+      ),
+      new Set([due.subscription.id, overdue.subscription.id]),
+    );
+
+    await assert.rejects(
+      repository.appendCronOccurrence(
+        cronEvent(resourceId, '2026-08-05T12:00:00.000Z'),
+        '2026-08-05T12:00:00.000Z',
+      ),
+      /must be after/,
+    );
+
+    assert.equal(
+      await repository.appendCronOccurrence(
+        cronEvent(resourceId, '2026-08-05T12:00:00.000Z'),
+        '2026-08-05T13:00:00.000Z',
+      ),
+      2,
+    );
+    assert.equal(repository.get(due.subscription.id)?.nextEventAt, '2026-08-05T13:00:00.000Z');
+    assert.equal(
+      repository.get(overdue.subscription.id)?.nextEventAt,
+      '2026-08-05T13:00:00.000Z',
+    );
+    assert.equal(repository.get(future.subscription.id)?.nextEventAt, '2026-08-05T13:00:00.000Z');
+    assert.equal(
+      await repository.appendCronOccurrence(
+        cronEvent(resourceId, '2026-08-05T12:00:00.000Z'),
+        '2026-08-05T13:00:00.000Z',
+      ),
+      0,
+    );
+  } finally {
+    close();
+  }
+});
+
+test('a newer cron occurrence supersedes an older pending occurrence', async () => {
+  const { database, close } = memoryHubDatabase();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    const resourceId = 'v1:every-minute';
+    await repository.upsert({
+      subscriber: { chatId: 'subscriber-chat', droneId: 'drone-a', chatName: 'default' },
+      provider: 'drone-hub',
+      resourceType: 'cron',
+      resourceId,
+      resourceConfig: { expression: '* * * * *', timeZone: 'UTC' },
+      events: ['cron.triggered'],
+      intent: 'Run the check.',
+      nextEventAt: '2026-08-05T12:00:00.000Z',
+      maxActive: 50,
+    });
+    await repository.appendCronOccurrence(
+      cronEvent(resourceId, '2026-08-05T12:00:00.000Z'),
+      '2026-08-05T12:01:00.000Z',
+    );
+    await repository.appendCronOccurrence(
+      cronEvent(resourceId, '2026-08-05T12:01:00.000Z'),
+      '2026-08-05T12:02:00.000Z',
+    );
+
+    const states = database.read(
+      (connection) =>
+        connection
+          .prepare('SELECT state, COUNT(*) AS count FROM subscription_deliveries GROUP BY state')
+          .all() as Array<{ state: string; count: number }>,
+    );
+    assert.deepEqual(Object.fromEntries(states.map((row) => [row.state, Number(row.count)])), {
+      failed: 1,
+      pending: 1,
+    });
+  } finally {
+    close();
+  }
+});
 
 async function appendOpenedEvent(
   repository: ResourceSubscriptionRepository,
@@ -449,4 +630,19 @@ async function appendOpenedEvent(
     summary: 'Pull request opened.',
     providerContent: {},
   });
+}
+
+function cronEvent(resourceId: string, occurredAt: string) {
+  return {
+    id: `event-${occurredAt}`,
+    providerEventId: `drone-hub:cron:${resourceId}:${occurredAt}`,
+    provider: 'drone-hub' as const,
+    resourceType: 'cron' as const,
+    resourceId,
+    parentResourceId: null,
+    eventType: 'cron.triggered' as const,
+    occurredAt,
+    summary: 'Cron schedule triggered.',
+    providerContent: { scheduledAt: occurredAt },
+  };
 }

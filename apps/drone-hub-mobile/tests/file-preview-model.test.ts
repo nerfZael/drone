@@ -6,7 +6,11 @@ import {
   isMarkdownPreview,
   isRenderedHtmlPreviewAvailable,
   mobileHtmlPreviewMode,
+  mobileDroneWorkspaceRoot,
+  mobileFileCanEdit,
   mobileTextPreviewContent,
+  mobileUtf8ByteLength,
+  MOBILE_FILE_EDIT_MAX_BYTES,
   MOBILE_FORMATTED_TEXT_PREVIEW_MAX_CHARS,
   MOBILE_RENDERED_TEXT_PREVIEW_MAX_CHARS,
   mobileWorkspaceRelativeFilePath,
@@ -14,6 +18,70 @@ import {
 } from '../src/drones/file-preview-model';
 
 describe('mobile file preview model', () => {
+  test('resolves the explorer root for host and container drones', () => {
+    expect(
+      mobileDroneWorkspaceRoot({
+        runtime: 'container',
+        repoPath: '/host/project',
+        cwd: '',
+        repoAttached: true,
+      }),
+    ).toBe('/work/repo');
+    expect(
+      mobileDroneWorkspaceRoot({
+        runtime: 'host',
+        repoPath: '',
+        cwd: '/srv/scratch',
+        repoAttached: false,
+      }),
+    ).toBe('/srv/scratch');
+    expect(
+      mobileDroneWorkspaceRoot({
+        runtime: 'host',
+        repoPath: '/srv/project',
+        cwd: '/srv/project/packages/app',
+        repoAttached: true,
+      }),
+    ).toBe('/srv/project/packages/app');
+  });
+
+  test('bounds text editing by UTF-8 file size', () => {
+    expect(mobileUtf8ByteLength('é')).toBe(2);
+    expect(
+      mobileFileCanEdit({
+        path: 'notes.txt',
+        name: 'notes.txt',
+        kind: 'text',
+        mime: 'text/plain',
+        size: MOBILE_FILE_EDIT_MAX_BYTES,
+        mtimeMs: null,
+        content: 'notes',
+      }),
+    ).toBe(true);
+    expect(
+      mobileFileCanEdit({
+        path: 'large.txt',
+        name: 'large.txt',
+        kind: 'text',
+        mime: 'text/plain',
+        size: MOBILE_FILE_EDIT_MAX_BYTES + 1,
+        mtimeMs: null,
+        content: 'large',
+      }),
+    ).toBe(false);
+    expect(
+      mobileFileCanEdit({
+        path: 'misreported.txt',
+        name: 'misreported.txt',
+        kind: 'text',
+        mime: 'text/plain',
+        size: 1,
+        mtimeMs: null,
+        content: 'x'.repeat(MOBILE_FILE_EDIT_MAX_BYTES + 1),
+      }),
+    ).toBe(false);
+  });
+
   test('maps container paths into the selected drone repository', () => {
     const drone = {
       runtime: 'container',
@@ -35,6 +103,17 @@ describe('mobile file preview model', () => {
       '/srv/drone/src/index.ts',
     );
     expect(resolveMobileDroneFilePath(drone as any, 'README.md')).toBe('/srv/drone/README.md');
+    expect(
+      resolveMobileDroneFilePath(
+        {
+          runtime: 'host',
+          repoPath: '/srv/drone',
+          cwd: '/srv/drone/packages/app',
+          repoAttached: true,
+        },
+        'src/index.ts',
+      ),
+    ).toBe('/srv/drone/packages/app/src/index.ts');
   });
 
   test('uses the working directory for a host drone without a repository', () => {

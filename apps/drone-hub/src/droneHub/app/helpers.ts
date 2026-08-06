@@ -41,7 +41,7 @@ export function isDroneStartingOrSeeding(hubPhase: string | null | undefined): b
 }
 
 export function shouldReadChatRuntimeForHubPhase(hubPhase: string | null | undefined): boolean {
-  return !isDroneProvisioningPhase(hubPhase);
+  return hubPhase !== 'error' && !isDroneProvisioningPhase(hubPhase);
 }
 
 export function parseConflictFilesFromMessage(message: string): string[] {

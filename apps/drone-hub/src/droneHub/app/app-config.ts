@@ -1,7 +1,6 @@
 import type { ChatAgentConfig } from '../../domain';
 import { profileStorageKey } from '../../profile-storage';
 import { parseIsoTimestampMs } from './helpers';
-import type { RightPanelTabId } from './RightPanel';
 import type { StartupSeedState } from './app-types';
 
 export const BUILTIN_AGENT_OPTIONS: Array<{ key: string; label: string; agent: ChatAgentConfig }> = [
@@ -20,12 +19,6 @@ export const PORT_STATUS_POLL_INTERVAL_MS = 15_000;
 export const PORT_STATUS_TIMEOUT_MS = 1_800;
 export const DRONE_DND_MIME = 'application/x-drone-ids+json';
 export const DRONE_CHAT_DND_MIME = 'application/x-drone-chat-refs+json';
-export const RIGHT_PANEL_WIDTH_STORAGE_KEY = profileStorageKey('droneHub.rightPanelWidth');
-export const RIGHT_PANEL_SPLIT_STORAGE_KEY = profileStorageKey('droneHub.rightPanelSplit');
-export const RIGHT_PANEL_TOP_TAB_STORAGE_KEY = profileStorageKey('droneHub.rightPanelTopTab');
-export const RIGHT_PANEL_BOTTOM_TAB_STORAGE_KEY = profileStorageKey('droneHub.rightPanelBottomTab');
-export const RIGHT_PANEL_DEFAULT_WIDTH_PX = 460;
-export const RIGHT_PANEL_MIN_WIDTH_PX = 360;
 export const GROUP_MULTI_CHAT_COLUMN_WIDTH_STORAGE_KEY = profileStorageKey('droneHub.groupMultiChatColumnWidth');
 export const GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX = 420;
 export const GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX = 300;
@@ -36,35 +29,28 @@ export const HUB_LOGS_TAIL_LINES = 600;
 export const HUB_LOGS_MAX_BYTES = 200_000;
 export const STARTUP_SEED_MISSING_GRACE_MS = 30_000;
 
-export type RightPanelTab = RightPanelTabId;
-export const RIGHT_PANEL_TABS: RightPanelTab[] = [
-  'terminal',
-  'env',
-  'files',
-  'editor',
-  'preview',
-  'links',
-  'changes',
-  'prs',
-  'canvas',
-  'whiteboard',
-  'workflows',
-];
-export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
-  terminal: 'Terminal',
-  env: 'Env',
-  files: 'Files',
-  editor: 'Editor',
-  preview: 'Browser',
-  links: 'Links',
-  changes: 'Changes',
-  prs: 'PRs',
-  canvas: 'Canvas',
-  whiteboard: 'Whiteboard',
-  workflows: 'Workflows',
-};
+export const WORKSPACE_TOOLS = {
+  terminal: { label: 'Terminal', header: true, lazy: true },
+  env: { label: 'Env', header: true, lazy: true },
+  editor: { label: 'Editor', header: true, lazy: false },
+  preview: { label: 'Browser', header: true, lazy: true },
+  links: { label: 'Links', header: false, lazy: true },
+  changes: { label: 'Changes', header: true, lazy: true },
+  prs: { label: 'PRs', header: true, lazy: false },
+  canvas: { label: 'Canvas', header: true, lazy: true },
+  whiteboard: { label: 'Whiteboard', header: true, lazy: false },
+  workflows: { label: 'Workflows', header: true, lazy: true },
+} as const;
+export type RightPanelTab = keyof typeof WORKSPACE_TOOLS;
+export const RIGHT_PANEL_TABS = Object.keys(WORKSPACE_TOOLS) as RightPanelTab[];
+export const RIGHT_PANEL_TAB_LABELS = Object.fromEntries(
+  RIGHT_PANEL_TABS.map((tab) => [tab, WORKSPACE_TOOLS[tab].label]),
+) as Record<RightPanelTab, string>;
 export function rightPanelHeaderTabs(tabs: readonly RightPanelTab[]): RightPanelTab[] {
-  return tabs.filter((tab) => tab !== 'editor' && tab !== 'links');
+  return tabs.filter((tab) => WORKSPACE_TOOLS[tab].header);
+}
+export function isRightPanelTabLazyLoaded(tab: RightPanelTab): boolean {
+  return WORKSPACE_TOOLS[tab].lazy;
 }
 export function rightPanelTabsForRuntime(runtimeRaw: unknown): RightPanelTab[] {
   void runtimeRaw;
@@ -75,21 +61,20 @@ export function repoUnavailableReasonForRuntime(runtimeRaw: unknown): string | n
   return null;
 }
 
-export function viewportWidthPx(): number {
-  if (typeof window !== 'undefined' && Number.isFinite(window.innerWidth) && window.innerWidth > 0) {
-    return window.innerWidth;
-  }
-  return 1440;
-}
-
 export function clampGroupMultiChatColumnWidthPx(width: number): number {
   const safe = Number.isFinite(width) ? width : GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX;
   return Math.min(GROUP_MULTI_CHAT_COLUMN_WIDTH_MAX_PX, Math.max(GROUP_MULTI_CHAT_COLUMN_WIDTH_MIN_PX, Math.round(safe)));
 }
 
-export function parseRightPanelTab(raw: string | null | undefined, fallback: RightPanelTab): RightPanelTab {
-  if (raw && RIGHT_PANEL_TABS.includes(raw as RightPanelTab)) return raw as RightPanelTab;
-  return fallback;
+export function normalizeRightPanelTab(raw: unknown): RightPanelTab | null {
+  const tab = raw === 'files' ? 'editor' : raw;
+  return typeof tab === 'string' && RIGHT_PANEL_TABS.includes(tab as RightPanelTab)
+    ? (tab as RightPanelTab)
+    : null;
+}
+
+export function parseRightPanelTab(raw: unknown, fallback: RightPanelTab): RightPanelTab {
+  return normalizeRightPanelTab(raw) ?? fallback;
 }
 
 const CANVAS_CHAT_NODE_PREFIX = 'chat:';

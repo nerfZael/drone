@@ -46,6 +46,7 @@ type UseDroneHubLifecycleEffectsArgs = {
   toggleSelectedDronesToDoFromShortcut: () => boolean;
   openGroupMultiChat: (group: string) => void;
   openSidebarVisibleMultiChat: () => void;
+  openQuickOpenFromShortcut: () => boolean;
   toggleVoiceClipboardRecording: () => boolean;
   draftCreateOpen: boolean;
   draftCreateNameRef: React.RefObject<HTMLInputElement | null>;
@@ -60,10 +61,8 @@ type UseDroneHubLifecycleEffectsArgs = {
   setDraftSuggestedName: Setter<string>;
   setDraftNameSuggestionError: Setter<string | null>;
   draftNameSuggestSeqRef: React.MutableRefObject<number>;
-  rightPanelOpen: boolean;
   rightPanelTab: RightPanelTab;
-  rightPanelSplit: boolean;
-  rightPanelBottomTab: RightPanelTab;
+  visibleToolTabs: RightPanelTab[];
   requestRightPanelTab: (tab: RightPanelTab) => void;
   setSidebarCollapsed: Setter<boolean>;
   shortcutBindings: ShortcutBindingMap;
@@ -109,6 +108,7 @@ export function useDroneHubLifecycleEffects({
   toggleSelectedDronesToDoFromShortcut,
   openGroupMultiChat,
   openSidebarVisibleMultiChat,
+  openQuickOpenFromShortcut,
   toggleVoiceClipboardRecording,
   draftCreateOpen,
   draftCreateNameRef,
@@ -123,10 +123,8 @@ export function useDroneHubLifecycleEffects({
   setDraftSuggestedName,
   setDraftNameSuggestionError,
   draftNameSuggestSeqRef,
-  rightPanelOpen,
   rightPanelTab,
-  rightPanelSplit,
-  rightPanelBottomTab,
+  visibleToolTabs,
   requestRightPanelTab,
   setSidebarCollapsed,
   shortcutBindings,
@@ -220,9 +218,7 @@ export function useDroneHubLifecycleEffects({
     };
 
     const isCanvasOpen = (): boolean => {
-      if (!rightPanelOpen) return false;
-      if (rightPanelTab === 'canvas') return true;
-      return rightPanelSplit && rightPanelBottomTab === 'canvas';
+      return visibleToolTabs.includes('canvas');
     };
 
     const focusCanvasAndCreateDraft = (event: KeyboardEvent): boolean => {
@@ -324,9 +320,10 @@ export function useDroneHubLifecycleEffects({
         return true;
       },
       openFilesTab: () => {
-        openRightPanelTabFromShortcut('files');
+        openRightPanelTabFromShortcut('editor');
         return true;
       },
+      openQuickOpen: () => openQuickOpenFromShortcut(),
       openTerminalTab: () => {
         openRightPanelTabFromShortcut('terminal');
         return true;
@@ -426,9 +423,7 @@ export function useDroneHubLifecycleEffects({
     toggleSelectedDronesToDoFromShortcut,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
-    rightPanelBottomTab,
-    rightPanelOpen,
-    rightPanelSplit,
+    openQuickOpenFromShortcut,
     rightPanelTab,
     requestRightPanelTab,
     setSidebarCollapsed,
@@ -436,6 +431,7 @@ export function useDroneHubLifecycleEffects({
     onDeleteSelectedDroneFromInputShortcut,
     onMarkSelectedDronesUnreadShortcut,
     toggleVoiceClipboardRecording,
+    visibleToolTabs,
   ]);
 
   React.useEffect(() => {

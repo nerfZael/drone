@@ -11,6 +11,8 @@ export type AssistantDroneSummary = {
   name: string;
   group: string | null;
   groupId?: string | null;
+  fleetParentId?: string | null;
+  createdAt?: string | null;
   runtime: string;
   repoPath: string;
   status: string;

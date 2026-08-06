@@ -7,6 +7,16 @@ import type {
 } from './settings-types';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { profileStorageKey } from '../../profile-storage';
+import {
+  UI_PREFERENCES_SNAPSHOT_EVENT,
+  type UiPreferencesSnapshotEventDetail,
+} from './ui-preferences-sync-event';
+import {
+  applySidebarMove,
+  normalizeSidebarLayout,
+  sidebarLayoutPatch,
+  type SidebarMoveIntent,
+} from '@drone/hub-model/sidebar';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -17,10 +27,12 @@ type UseUiPreferencesSettingsArgs = {
 };
 
 export type UseUiPreferencesSettingsResult = {
+  uiPreferencesReady: boolean;
   reloadUiPreferences: () => Promise<void>;
   reloadPinnedDrones: () => Promise<void>;
   setDronePinned: (droneId: string, pinned: boolean) => Promise<boolean>;
   setDronesPinned: (droneIds: readonly string[], pinned: boolean) => Promise<boolean>;
+  moveSidebar: (intent: SidebarMoveIntent) => Promise<boolean>;
 };
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -38,7 +50,9 @@ function normalizeRepoBranchSource(value: unknown): 'host' | 'remote' {
 }
 
 function normalizeTrimmedText(value: unknown, maxChars: number): string {
-  return String(value ?? '').trim().slice(0, maxChars);
+  return String(value ?? '')
+    .trim()
+    .slice(0, maxChars);
 }
 
 function normalizeOrderedStringList(value: unknown): string[] {
@@ -67,7 +81,9 @@ function normalizeOrderedStringMap(value: unknown): Record<string, string[]> {
   return out;
 }
 
-function normalizeUiPreferencesSnapshot(value: Partial<UiPreferencesSnapshot> | null | undefined): UiPreferencesSnapshot {
+function normalizeUiPreferencesSnapshot(
+  value: Partial<UiPreferencesSnapshot> | null | undefined,
+): UiPreferencesSnapshot {
   return {
     sidebarGroupingMode: normalizeSidebarGroupingMode(value?.sidebarGroupingMode),
     sidebarDensityMode: normalizeSidebarDensityMode(value?.sidebarDensityMode),
@@ -82,12 +98,69 @@ function normalizeUiPreferencesSnapshot(value: Partial<UiPreferencesSnapshot> | 
     spawnModel: normalizeTrimmedText(value?.spawnModel, 200),
     repoBranchSource: normalizeRepoBranchSource(value?.repoBranchSource),
     repoCreateRemoteBranch: normalizeTrimmedText(value?.repoCreateRemoteBranch, 400),
-    pullHostBranchBeforeCreate: value?.pullHostBranchBeforeCreate !== false,
   };
 }
 
 function serializeUiPreferencesSnapshot(value: UiPreferencesSnapshot): string {
   return JSON.stringify(value);
+}
+
+function sameUiPreferenceValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function mergeOrderedStringMapChanges(
+  base: Record<string, string[]>,
+  local: Record<string, string[]>,
+  remote: Record<string, string[]>,
+): Record<string, string[]> {
+  const merged = { ...remote };
+  for (const key of new Set([...Object.keys(base), ...Object.keys(local)])) {
+    if (sameUiPreferenceValue(base[key] ?? [], local[key] ?? [])) continue;
+    if (local[key]?.length) merged[key] = local[key];
+    else delete merged[key];
+  }
+  return merged;
+}
+
+/** Rebase locally changed preference fields onto a newer server snapshot. */
+export function mergeUiPreferencesChanges(
+  baseRaw: Partial<UiPreferencesSnapshot> | null | undefined,
+  localRaw: Partial<UiPreferencesSnapshot> | null | undefined,
+  remoteRaw: Partial<UiPreferencesSnapshot> | null | undefined,
+): UiPreferencesSnapshot {
+  const base = normalizeUiPreferencesSnapshot(baseRaw);
+  const local = normalizeUiPreferencesSnapshot(localRaw);
+  const remote = normalizeUiPreferencesSnapshot(remoteRaw);
+  const localValue = <K extends keyof UiPreferencesSnapshot>(key: K): UiPreferencesSnapshot[K] =>
+    sameUiPreferenceValue(base[key], local[key]) ? remote[key] : local[key];
+  return normalizeUiPreferencesSnapshot({
+    sidebarGroupingMode: localValue('sidebarGroupingMode'),
+    sidebarDensityMode: localValue('sidebarDensityMode'),
+    sidebarGroupOrder: localValue('sidebarGroupOrder'),
+    sidebarDroneOrderByGroup: mergeOrderedStringMapChanges(
+      base.sidebarDroneOrderByGroup,
+      local.sidebarDroneOrderByGroup,
+      remote.sidebarDroneOrderByGroup,
+    ),
+    sidebarNodeOrderByParent: mergeOrderedStringMapChanges(
+      base.sidebarNodeOrderByParent,
+      local.sidebarNodeOrderByParent,
+      remote.sidebarNodeOrderByParent,
+    ),
+    sidebarChatOrderByDrone: mergeOrderedStringMapChanges(
+      base.sidebarChatOrderByDrone,
+      local.sidebarChatOrderByDrone,
+      remote.sidebarChatOrderByDrone,
+    ),
+    pinnedDroneIds: localValue('pinnedDroneIds'),
+    hiddenSidebarGroups: localValue('hiddenSidebarGroups'),
+    autoDelete: localValue('autoDelete'),
+    spawnAgentKey: localValue('spawnAgentKey'),
+    spawnModel: localValue('spawnModel'),
+    repoBranchSource: localValue('repoBranchSource'),
+    repoCreateRemoteBranch: localValue('repoCreateRemoteBranch'),
+  });
 }
 
 function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boolean {
@@ -104,31 +177,43 @@ function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boole
     value.spawnAgentKey !== 'builtin:cursor' ||
     value.spawnModel.length > 0 ||
     value.repoBranchSource !== 'host' ||
-    value.repoCreateRemoteBranch.length > 0 ||
-    value.pullHostBranchBeforeCreate !== true
+    value.repoCreateRemoteBranch.length > 0
   );
 }
 
-function mergeUiPreferencesForRecovery(base: UiPreferencesSnapshot, rescue: UiPreferencesSnapshot): UiPreferencesSnapshot {
+function mergeUiPreferencesForRecovery(
+  base: UiPreferencesSnapshot,
+  rescue: UiPreferencesSnapshot,
+): UiPreferencesSnapshot {
   return normalizeUiPreferencesSnapshot({
-    sidebarGroupingMode: base.sidebarGroupingMode === 'repos' ? rescue.sidebarGroupingMode : base.sidebarGroupingMode,
-    sidebarDensityMode: base.sidebarDensityMode === 'default' ? rescue.sidebarDensityMode : base.sidebarDensityMode,
-    sidebarGroupOrder: base.sidebarGroupOrder.length > 0 ? base.sidebarGroupOrder : rescue.sidebarGroupOrder,
+    sidebarGroupingMode:
+      base.sidebarGroupingMode === 'repos' ? rescue.sidebarGroupingMode : base.sidebarGroupingMode,
+    sidebarDensityMode:
+      base.sidebarDensityMode === 'default' ? rescue.sidebarDensityMode : base.sidebarDensityMode,
+    sidebarGroupOrder:
+      base.sidebarGroupOrder.length > 0 ? base.sidebarGroupOrder : rescue.sidebarGroupOrder,
     sidebarDroneOrderByGroup:
-      Object.keys(base.sidebarDroneOrderByGroup).length > 0 ? base.sidebarDroneOrderByGroup : rescue.sidebarDroneOrderByGroup,
+      Object.keys(base.sidebarDroneOrderByGroup).length > 0
+        ? base.sidebarDroneOrderByGroup
+        : rescue.sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent:
-      Object.keys(base.sidebarNodeOrderByParent).length > 0 ? base.sidebarNodeOrderByParent : rescue.sidebarNodeOrderByParent,
+      Object.keys(base.sidebarNodeOrderByParent).length > 0
+        ? base.sidebarNodeOrderByParent
+        : rescue.sidebarNodeOrderByParent,
     sidebarChatOrderByDrone:
-      Object.keys(base.sidebarChatOrderByDrone).length > 0 ? base.sidebarChatOrderByDrone : rescue.sidebarChatOrderByDrone,
+      Object.keys(base.sidebarChatOrderByDrone).length > 0
+        ? base.sidebarChatOrderByDrone
+        : rescue.sidebarChatOrderByDrone,
     pinnedDroneIds: base.pinnedDroneIds.length > 0 ? base.pinnedDroneIds : rescue.pinnedDroneIds,
-    hiddenSidebarGroups: base.hiddenSidebarGroups.length > 0 ? base.hiddenSidebarGroups : rescue.hiddenSidebarGroups,
+    hiddenSidebarGroups:
+      base.hiddenSidebarGroups.length > 0 ? base.hiddenSidebarGroups : rescue.hiddenSidebarGroups,
     autoDelete: base.autoDelete || rescue.autoDelete,
-    spawnAgentKey: base.spawnAgentKey !== 'builtin:cursor' ? base.spawnAgentKey : rescue.spawnAgentKey,
+    spawnAgentKey:
+      base.spawnAgentKey !== 'builtin:cursor' ? base.spawnAgentKey : rescue.spawnAgentKey,
     spawnModel: base.spawnModel || rescue.spawnModel,
-    repoBranchSource: base.repoBranchSource !== 'host' ? base.repoBranchSource : rescue.repoBranchSource,
+    repoBranchSource:
+      base.repoBranchSource !== 'host' ? base.repoBranchSource : rescue.repoBranchSource,
     repoCreateRemoteBranch: base.repoCreateRemoteBranch || rescue.repoCreateRemoteBranch,
-    pullHostBranchBeforeCreate:
-      base.pullHostBranchBeforeCreate === false ? base.pullHostBranchBeforeCreate : rescue.pullHostBranchBeforeCreate,
   });
 }
 
@@ -141,7 +226,10 @@ export function restoreUiPreferencesFromPersistedStorage(
   try {
     const parsed = JSON.parse(storageRaw) as any;
     const persistedState =
-      parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.prototype.hasOwnProperty.call(parsed, 'state')
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      Object.prototype.hasOwnProperty.call(parsed, 'state')
         ? parsed.state
         : parsed;
     const rescue = normalizeUiPreferencesSnapshot(persistedState as Partial<UiPreferencesSnapshot>);
@@ -156,7 +244,41 @@ export function restoreUiPreferencesFromPersistedStorage(
   }
 }
 
-export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettingsArgs): UseUiPreferencesSettingsResult {
+export function reconcileUiPreferencesReload({
+  backend,
+  backendUpdatedAt,
+  current,
+  previousBackend,
+  wasReady,
+  storageRaw,
+}: {
+  backend: Partial<UiPreferencesSnapshot> | null | undefined;
+  backendUpdatedAt: string | null;
+  current: Partial<UiPreferencesSnapshot> | null | undefined;
+  previousBackend: Partial<UiPreferencesSnapshot> | null | undefined;
+  wasReady: boolean;
+  storageRaw: string | null;
+}): UiPreferencesSnapshot {
+  const backendSnapshot = normalizeUiPreferencesSnapshot(backend);
+  const currentSnapshot = normalizeUiPreferencesSnapshot(current);
+  const previousBackendSnapshot = previousBackend
+    ? normalizeUiPreferencesSnapshot(previousBackend)
+    : null;
+  const hasLocalChanges =
+    wasReady &&
+    previousBackendSnapshot !== null &&
+    serializeUiPreferencesSnapshot(currentSnapshot) !==
+      serializeUiPreferencesSnapshot(previousBackendSnapshot);
+  if (hasLocalChanges && previousBackendSnapshot) {
+    return mergeUiPreferencesChanges(previousBackendSnapshot, currentSnapshot, backendSnapshot);
+  }
+  if (backendUpdatedAt) return backendSnapshot;
+  return restoreUiPreferencesFromPersistedStorage(backendSnapshot, storageRaw).snapshot;
+}
+
+export function useUiPreferencesSettings({
+  requestJson,
+}: UseUiPreferencesSettingsArgs): UseUiPreferencesSettingsResult {
   const {
     sidebarGroupingMode,
     sidebarDensityMode,
@@ -171,7 +293,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     spawnModel,
     repoBranchSource,
     repoCreateRemoteBranch,
-    pullHostBranchBeforeCreate,
     setSidebarGroupingMode,
     setSidebarDensityMode,
     setSidebarGroupOrder,
@@ -198,7 +319,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       spawnModel: s.spawnModel,
       repoBranchSource: s.repoBranchSource,
       repoCreateRemoteBranch: s.repoCreateRemoteBranch,
-      pullHostBranchBeforeCreate: s.pullHostBranchBeforeCreate,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
       setSidebarGroupOrder: s.setSidebarGroupOrder,
@@ -215,7 +335,13 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
 
   const readyRef = React.useRef(false);
   const lastSavedSerializedRef = React.useRef('');
-  const pinWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const lastSavedSnapshotRef = React.useRef<UiPreferencesSnapshot | null>(null);
+  const lastSavedVersionRef = React.useRef<number | null>(null);
+  const sidebarCommandQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const pendingSidebarCommandsRef = React.useRef(0);
+  const sidebarCommandSeqRef = React.useRef(0);
+  const [sidebarCommandRevision, setSidebarCommandRevision] = React.useState(0);
+  const [uiPreferencesReady, setUiPreferencesReady] = React.useState(false);
   const saveSeqRef = React.useRef(0);
   const saveTimeoutRef = React.useRef<number | null>(null);
 
@@ -274,12 +400,10 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
         spawnModel,
         repoBranchSource,
         repoCreateRemoteBranch,
-        pullHostBranchBeforeCreate,
       }),
     [
       autoDelete,
       hiddenSidebarGroups,
-      pullHostBranchBeforeCreate,
       repoBranchSource,
       repoCreateRemoteBranch,
       sidebarDensityMode,
@@ -294,27 +418,92 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     ],
   );
 
-  const reloadUiPreferences = React.useCallback(async () => {
+  const applyUiPreferencesSnapshot = React.useCallback(
+    (detail: UiPreferencesSnapshotEventDetail) => {
+      if (detail.updatedAt === null && detail.version === null) return;
+      if (
+        detail.version !== null &&
+        lastSavedVersionRef.current !== null &&
+        detail.version < lastSavedVersionRef.current
+      ) {
+        return;
+      }
+      const backendSnapshot = normalizeUiPreferencesSnapshot(detail.uiPreferences);
+      const backendSerialized = serializeUiPreferencesSnapshot(backendSnapshot);
+      if (
+        detail.version === lastSavedVersionRef.current &&
+        backendSerialized === lastSavedSerializedRef.current
+      ) {
+        return;
+      }
+      const currentSnapshot = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
+      const previousBackendSnapshot = lastSavedSnapshotRef.current;
+      cancelPendingSave();
+      const nextSnapshot = reconcileUiPreferencesReload({
+        backend: backendSnapshot,
+        backendUpdatedAt: detail.updatedAt,
+        current: currentSnapshot,
+        previousBackend: previousBackendSnapshot,
+        wasReady: readyRef.current,
+        storageRaw: null,
+      });
+      lastSavedSnapshotRef.current = backendSnapshot;
+      lastSavedSerializedRef.current = backendSerialized;
+      lastSavedVersionRef.current = detail.version;
+      readyRef.current = true;
+      applyUiPreferences(nextSnapshot);
+    },
+    [applyUiPreferences, cancelPendingSave],
+  );
+
+  React.useEffect(() => {
+    const handleSnapshot = (event: Event) => {
+      const detail = (event as CustomEvent<UiPreferencesSnapshotEventDetail>).detail;
+      if (detail) applyUiPreferencesSnapshot(detail);
+    };
+    window.addEventListener(UI_PREFERENCES_SNAPSHOT_EVENT, handleSnapshot);
+    return () => window.removeEventListener(UI_PREFERENCES_SNAPSHOT_EVENT, handleSnapshot);
+  }, [applyUiPreferencesSnapshot]);
+
+  const reloadUiPreferences = React.useCallback(async (options?: {
+    discardSidebarIntent?: SidebarMoveIntent;
+  }) => {
+    const wasReady = readyRef.current;
+    const currentSnapshot = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
+    const previousBackendSnapshot = lastSavedSnapshotRef.current;
     cancelPendingSave();
     try {
       const data = await requestJson<UiPreferencesSettingsResponse>('/api/settings/ui-preferences');
       const backendSnapshot = normalizeUiPreferencesSnapshot(data.uiPreferences);
-      const restored = restoreUiPreferencesFromPersistedStorage(
-        backendSnapshot,
-        typeof localStorage !== 'undefined' ? localStorage.getItem(profileStorageKey('droneHub.ui')) : null,
-      );
-      if (data.updatedAt || restored.restored) {
-        const normalized = applyUiPreferences(restored.snapshot);
-        lastSavedSerializedRef.current = restored.restored
-          ? serializeUiPreferencesSnapshot(backendSnapshot)
-          : serializeUiPreferencesSnapshot(normalized);
-      } else {
-        lastSavedSerializedRef.current = '';
+      const nextSnapshot = reconcileUiPreferencesReload({
+        backend: backendSnapshot,
+        backendUpdatedAt: data.updatedAt,
+        current: currentSnapshot,
+        previousBackend: previousBackendSnapshot,
+        wasReady,
+        storageRaw:
+          typeof localStorage !== 'undefined'
+            ? localStorage.getItem(profileStorageKey('droneHub.ui'))
+            : null,
+      });
+      if (options?.discardSidebarIntent) {
+        Object.assign(
+          nextSnapshot,
+          sidebarLayoutPatch(
+            normalizeSidebarLayout(backendSnapshot),
+            options.discardSidebarIntent,
+          ),
+        );
       }
+      lastSavedSnapshotRef.current = backendSnapshot;
+      lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(backendSnapshot);
+      lastSavedVersionRef.current = data.version;
+      applyUiPreferences(nextSnapshot);
     } catch {
       // Keep the local snapshot when the backend copy is unavailable.
     } finally {
       readyRef.current = true;
+      setUiPreferencesReady(true);
     }
   }, [applyUiPreferences, cancelPendingSave, requestJson]);
 
@@ -324,6 +513,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
 
   React.useEffect(() => {
     if (!readyRef.current) return;
+    if (pendingSidebarCommandsRef.current > 0) return;
     const serialized = serializeUiPreferencesSnapshot(snapshot);
     if (serialized === lastSavedSerializedRef.current) return;
     const seq = saveSeqRef.current + 1;
@@ -333,15 +523,21 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       void requestJson<UiPreferencesSettingsResponse>('/api/settings/ui-preferences', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ uiPreferences: snapshot }),
+        body: JSON.stringify({
+          uiPreferences: snapshot,
+          expectedVersion: lastSavedVersionRef.current,
+        }),
       })
         .then((data) => {
           if (saveSeqRef.current !== seq) return;
           const normalized = normalizeUiPreferencesSnapshot(data.uiPreferences);
+          lastSavedSnapshotRef.current = normalized;
           lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(normalized);
+          lastSavedVersionRef.current = data.version;
         })
-        .catch(() => {
+        .catch((error: any) => {
           if (saveSeqRef.current !== seq) return;
+          if (error?.status === 409) void reloadUiPreferences();
         });
     }, SAVE_DEBOUNCE_MS);
     saveTimeoutRef.current = timeout;
@@ -349,78 +545,95 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       if (saveTimeoutRef.current === timeout) saveTimeoutRef.current = null;
       window.clearTimeout(timeout);
     };
-  }, [requestJson, snapshot]);
+  }, [reloadUiPreferences, requestJson, sidebarCommandRevision, snapshot]);
 
-  const setDronesPinned = React.useCallback(
-    (droneIdsRaw: readonly string[], pinned: boolean): Promise<boolean> => {
-      const droneIds = normalizeOrderedStringList(droneIdsRaw);
-      if (droneIds.length === 0) return Promise.resolve(false);
+  const moveSidebar = React.useCallback(
+    (intent: SidebarMoveIntent): Promise<boolean> => {
       const write = async (): Promise<boolean> => {
+        const before = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
+        const optimisticLayout = applySidebarMove(normalizeSidebarLayout(before), intent);
+        const optimistic = normalizeUiPreferencesSnapshot({
+          ...before,
+          ...sidebarLayoutPatch(optimisticLayout, intent),
+        });
+        pendingSidebarCommandsRef.current += 1;
+        const commandSeq = sidebarCommandSeqRef.current + 1;
+        sidebarCommandSeqRef.current = commandSeq;
+        cancelPendingSave();
+        applyUiPreferences(optimistic);
         try {
-          const data = await requestJson<UiPreferencesSettingsResponse>(
-            '/api/settings/ui-preferences/pinned-drones',
+          const data = await requestJson<UiPreferencesSettingsResponse & { mutationId: string }>(
+            '/api/sidebar/move',
             {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ droneIds, pinned }),
+              body: JSON.stringify({
+                mutationId: `desktop:${Date.now()}:${commandSeq}`,
+                intent,
+              }),
             },
           );
-          const savedPinnedDroneIds = normalizeOrderedStringList(
-            data.uiPreferences.pinnedDroneIds,
-          );
+          const backend = normalizeUiPreferencesSnapshot(data.uiPreferences);
           const current = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
-          const currentIsDirty =
-            serializeUiPreferencesSnapshot(current) !== lastSavedSerializedRef.current;
-          setPinnedDroneIds(savedPinnedDroneIds);
-          if (!currentIsDirty) {
-            lastSavedSerializedRef.current = serializeUiPreferencesSnapshot({
-              ...current,
-              pinnedDroneIds: savedPinnedDroneIds,
-            });
-          }
+          const reconciled = lastSavedSnapshotRef.current
+            ? mergeUiPreferencesChanges(lastSavedSnapshotRef.current, current, backend)
+            : backend;
+          Object.assign(
+            reconciled,
+            sidebarLayoutPatch(normalizeSidebarLayout(backend), intent),
+          );
+          lastSavedSnapshotRef.current = backend;
+          lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(backend);
+          lastSavedVersionRef.current = data.version;
+          applyUiPreferences(reconciled);
           return true;
         } catch {
+          await reloadUiPreferences({ discardSidebarIntent: intent });
           return false;
+        } finally {
+          pendingSidebarCommandsRef.current = Math.max(
+            0,
+            pendingSidebarCommandsRef.current - 1,
+          );
+          if (pendingSidebarCommandsRef.current === 0) {
+            setSidebarCommandRevision((revision) => revision + 1);
+          }
         }
       };
-      const queued = pinWriteQueueRef.current.then(write, write);
-      pinWriteQueueRef.current = queued.then(
+      const queued = sidebarCommandQueueRef.current.then(write, write);
+      sidebarCommandQueueRef.current = queued.then(
         () => undefined,
         () => undefined,
       );
       return queued;
     },
-    [requestJson, setPinnedDroneIds],
+    [applyUiPreferences, cancelPendingSave, reloadUiPreferences, requestJson],
+  );
+
+  const setDronesPinned = React.useCallback(
+    (droneIdsRaw: readonly string[], pinned: boolean): Promise<boolean> => {
+      const droneIds = normalizeOrderedStringList(droneIdsRaw);
+      if (droneIds.length === 0) return Promise.resolve(false);
+      return moveSidebar({ kind: 'set-pinned', droneIds, pinned });
+    },
+    [moveSidebar],
   );
 
   const setDronePinned = React.useCallback(
-    (droneId: string, pinned: boolean): Promise<boolean> =>
-      setDronesPinned([droneId], pinned),
+    (droneId: string, pinned: boolean): Promise<boolean> => setDronesPinned([droneId], pinned),
     [setDronesPinned],
   );
 
   const reloadPinnedDrones = React.useCallback(async () => {
-    try {
-      const data = await requestJson<UiPreferencesSettingsResponse>(
-        '/api/settings/ui-preferences',
-      );
-      const savedPinnedDroneIds = normalizeOrderedStringList(
-        data.uiPreferences.pinnedDroneIds,
-      );
-      const current = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
-      const currentIsDirty =
-        serializeUiPreferencesSnapshot(current) !== lastSavedSerializedRef.current;
-      setPinnedDroneIds(savedPinnedDroneIds);
-      if (!currentIsDirty) {
-        lastSavedSerializedRef.current = serializeUiPreferencesSnapshot({
-          ...current,
-          pinnedDroneIds: savedPinnedDroneIds,
-        });
-      }
-    } catch {
-      // Keep the current pin list when the backend copy is unavailable.
-    }
-  }, [requestJson, setPinnedDroneIds]);
+    await reloadUiPreferences();
+  }, [reloadUiPreferences]);
 
-  return { reloadUiPreferences, reloadPinnedDrones, setDronePinned, setDronesPinned };
+  return {
+    uiPreferencesReady,
+    reloadUiPreferences,
+    reloadPinnedDrones,
+    setDronePinned,
+    setDronesPinned,
+    moveSidebar,
+  };
 }

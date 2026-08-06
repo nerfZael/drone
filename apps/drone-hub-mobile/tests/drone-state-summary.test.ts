@@ -79,7 +79,7 @@ describe('mobile drone state summary', () => {
     expect(mobileDroneChatDisplayState(drone, 'default')).toBe('blocked');
   });
 
-  test('keeps chat activity off the multi-chat drone parent state', () => {
+  test('keeps chat activity off the multi-chat parent and suppresses unread while working', () => {
     const [drone] = normalizeMobileDrones([
       {
         id: 'multi-chat',
@@ -97,16 +97,36 @@ describe('mobile drone state summary', () => {
     expect(summarizeMobileDroneChats(drone)).toEqual({
       approval: 1,
       working: 1,
-      unread: 1,
+      unread: 0,
     });
     expect(summarizeMobileDroneChats(drone, 'review')).toEqual({
       approval: 1,
       working: 1,
       unread: 0,
     });
+
+    const stopped = { ...drone, busyChats: [] };
+    expect(summarizeMobileDroneChats(stopped)).toEqual({
+      approval: 1,
+      working: 0,
+      unread: 1,
+    });
+
+    expect(
+      summarizeMobileDroneChats({
+        ...stopped,
+        approvalChats: [],
+        approvalRequired: false,
+        phase: 'starting',
+      }),
+    ).toEqual({
+      approval: 0,
+      working: 0,
+      unread: 0,
+    });
   });
 
-  test('summarizes activity without presenting blocked drones as unread', () => {
+  test('does not count working or blocked drones as unread', () => {
     const drones = normalizeMobileDrones([
       {
         id: 'working-unread',
@@ -127,7 +147,7 @@ describe('mobile drone state summary', () => {
     expect(summarizeMobileDrones(drones)).toEqual({
       approval: 1,
       working: 1,
-      unread: 2,
+      unread: 1,
     });
   });
 });

@@ -86,6 +86,28 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).not.toContain('>container</span>');
   });
 
+  test('matches composer runtime icons and colors for container and host drones', () => {
+    const renderRuntime = (runtime: 'container' | 'host') =>
+      renderToStaticMarkup(
+        createElement(DroneCard, {
+          drone: drone({ runtime, chats: ['default', 'research'] }),
+          selected: false,
+          disclosureExpanded: true,
+          onClick: () => {},
+        }),
+      );
+
+    const containerHtml = renderRuntime('container');
+    expect(containerHtml).toContain('data-drone-runtime-icon="container"');
+    expect(containerHtml).toContain('!text-[var(--accent)]');
+    expect(containerHtml).toContain('!opacity-100');
+
+    const hostHtml = renderRuntime('host');
+    expect(hostHtml).toContain('data-drone-runtime-icon="host"');
+    expect(hostHtml).toContain('!text-[var(--green)]');
+    expect(hostHtml).toContain('!opacity-100');
+  });
+
   test('keeps chat activity off a multi-chat drone parent row', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
@@ -111,7 +133,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).toContain('data-sidebar-chat-state-counts="true"');
   });
 
-  test('renders aggregate chat status counts at the right of a drone row', () => {
+  test('suppresses aggregate unread counts while the drone is working', () => {
     const html = renderToStaticMarkup(
       createElement(DroneCard, {
         drone: drone({ chats: ['default', 'research'] }),
@@ -123,7 +145,7 @@ describe('desktop sidebar drone presentation', () => {
 
     expect(html).toContain('data-sidebar-chat-state-counts="true"');
     expect(html).toContain('aria-label="1 awaiting approval"');
-    expect(html).toContain('aria-label="2 unread"');
+    expect(html).not.toContain('aria-label="2 unread"');
     expect(html).toContain('aria-label="1 working"');
     expect(html.indexOf('>worker</span>')).toBeLessThan(
       html.indexOf('data-sidebar-chat-state-counts="true"'),
@@ -146,8 +168,42 @@ describe('desktop sidebar drone presentation', () => {
     );
 
     expect(html).toContain('aria-label="1 awaiting approval"');
-    expect(html).toContain('aria-label="2 unread"');
+    expect(html).not.toContain('aria-label="2 unread"');
     expect(html).toContain('aria-label="1 working"');
+  });
+
+  test('restores aggregate unread counts after the drone stops working', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({
+          chats: ['default', 'research'],
+          unreadChats: ['default', 'research'],
+          busyChats: [],
+        }),
+        selected: false,
+        onClick: () => {},
+      }),
+    );
+
+    expect(html).toContain('aria-label="2 unread"');
+    expect(html).not.toContain('aria-label="1 working"');
+  });
+
+  test('suppresses aggregate unread counts while a multi-chat drone is starting', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({
+          chats: ['default', 'research'],
+          unreadChats: ['research'],
+          hubPhase: 'starting',
+        }),
+        selected: false,
+        onClick: () => {},
+      }),
+    );
+
+    expect(html).toContain('title="Starting" aria-label="Starting"');
+    expect(html).not.toContain('aria-label="1 unread"');
   });
 
   test('shows a persistent to do label at the right of tagged drone rows', () => {
@@ -186,7 +242,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).not.toContain('animate-[spin_1.6s_linear_infinite]');
   });
 
-  test('uses a quiet leaf accent for blocked triangles and reserves red for emphasis', () => {
+  test('keeps blocked triangles red while using opacity for emphasis', () => {
     const quietHtml = renderToStaticMarkup(
       createElement(SidebarItemStateIndicator, { state: 'blocked' }),
     );
@@ -195,8 +251,8 @@ describe('desktop sidebar drone presentation', () => {
     );
 
     expect(quietHtml).toContain('data-sidebar-blocked-indicator="quiet"');
-    expect(quietHtml).toContain('text-[var(--sidebar-item-icon)] opacity-70');
-    expect(quietHtml).toContain('group-hover/drone:text-[var(--sidebar-blocked-indicator)]');
+    expect(quietHtml).toContain('text-[var(--sidebar-blocked-indicator)] opacity-70');
+    expect(quietHtml).toContain('group-hover/drone:opacity-100');
     expect(emphasizedHtml).toContain('data-sidebar-blocked-indicator="emphasized"');
     expect(emphasizedHtml).toContain('text-[var(--sidebar-blocked-indicator)] opacity-100');
     expect(emphasizedHtml).toContain('M6 1.25 11 10.25H1L6 1.25Z');
@@ -206,7 +262,7 @@ describe('desktop sidebar drone presentation', () => {
     expect(quietHtml).not.toContain('bg-[var(--green)]');
   });
 
-  test('gives ready drones a quiet leaf accent while preserving unread emphasis', () => {
+  test('keeps ready neutral while preserving green unread emphasis', () => {
     const readyHtml = renderToStaticMarkup(
       createElement(SidebarItemStateIndicator, { state: 'idle' }),
     );
@@ -222,7 +278,8 @@ describe('desktop sidebar drone presentation', () => {
     expect(readyHtml).not.toContain('bg-[var(--muted)]');
     expect(anchoredReadyHtml).toContain('data-sidebar-ready-anchor="true"');
     expect(anchoredReadyHtml).toContain('h-1.5 w-1.5 rounded-full border');
-    expect(anchoredReadyHtml).toContain('border-[var(--sidebar-item-icon)] opacity-70');
+    expect(anchoredReadyHtml).toContain('border-[var(--muted-dim)] opacity-70');
+    expect(anchoredReadyHtml).not.toContain('var(--info)');
     expect(anchoredReadyHtml).not.toContain('bg-[var(--muted)]');
     expect(unreadHtml).toContain('rounded-full');
     expect(unreadHtml).toContain('bg-[var(--green)]');
@@ -258,6 +315,22 @@ describe('desktop sidebar drone presentation', () => {
     expect(deleteHtml).toContain('M2.25 3.25h7.5');
     expect(archiveHtml).toContain('M21 12a9 9 0 1 1-6.219-8.56');
     expect(deleteHtml).toContain('M21 12a9 9 0 1 1-6.219-8.56');
+  });
+
+  test('shows the delete indicator on drone rows with multiple chats', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({ chats: ['default', 'review'] }),
+        selected: true,
+        onClick: () => {},
+        disclosureExpanded: true,
+        operationLabel: 'Deleting',
+      }),
+    );
+
+    expect(html).toContain('data-sidebar-operation-indicator="deleting"');
+    expect(html).toContain('title="Deleting" aria-label="Deleting"');
+    expect(html).not.toContain('data-sidebar-runtime');
   });
 
   test('keeps destructive drone actions out of the hover rail', () => {
@@ -312,6 +385,8 @@ describe('desktop sidebar drone presentation', () => {
     expect(menuSource).toContain('text-[var(--muted-dim)] opacity-75');
     expect(cardSource).toContain("shortcut: 'F2'");
     expect(cardSource).toContain("shortcut: 'Delete'");
+    expect(cardSource).toContain("e.key === 'Delete'");
+    expect(cardSource).toContain('onDelete?.();');
   });
 
   test('renames drones through a borderless inline editor that cancels on blur', () => {

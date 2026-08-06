@@ -37,7 +37,6 @@ describe('draft drone create runtime support', () => {
       runtime: 'host',
       repoBranchSelection: {
         repoBranchSource: 'host',
-        pullHostBranchBeforeCreate: true,
       },
       seedAgent: { kind: 'builtin', id: 'cursor' },
       seedModel: 'gpt-5',
@@ -50,7 +49,6 @@ describe('draft drone create runtime support', () => {
       group: 'ops',
       repoPath: '/work/repo',
       runtime: 'host',
-      pullHostBranchBeforeCreate: true,
       repoBranchSource: 'host',
       seedChat: 'default',
       seedAgent: { kind: 'builtin', id: 'cursor' },
@@ -69,7 +67,6 @@ describe('draft drone create runtime support', () => {
       runtime: 'container',
       repoBranchSelection: {
         repoBranchSource: 'host',
-        pullHostBranchBeforeCreate: true,
       },
       seedAgent: null,
       seedModel: null,
@@ -81,7 +78,6 @@ describe('draft drone create runtime support', () => {
       group: 'ops',
       repoPath: '/work/repo',
       runtime: 'container',
-      pullHostBranchBeforeCreate: true,
       repoBranchSource: 'host',
     });
   });
@@ -94,7 +90,6 @@ describe('draft drone create runtime support', () => {
       runtime: 'container',
       repoBranchSelection: {
         repoBranchSource: 'remote',
-        pullHostBranchBeforeCreate: true,
         remoteBranch: 'origin/release/next',
       },
       seedAgent: null,
@@ -107,7 +102,6 @@ describe('draft drone create runtime support', () => {
       group: 'ops',
       repoPath: '/work/repo',
       runtime: 'container',
-      pullHostBranchBeforeCreate: true,
       repoBranchSource: 'remote',
       remoteBranch: 'origin/release/next',
     });
@@ -123,7 +117,6 @@ describe('draft drone create runtime support', () => {
       runtime: 'container',
       repoBranchSelection: {
         repoBranchSource: 'host',
-        pullHostBranchBeforeCreate: true,
       },
       seedAgent: null,
       seedModel: null,
@@ -137,7 +130,6 @@ describe('draft drone create runtime support', () => {
       fleetParentId: 'parent-1',
       repoSeedFromDroneId: 'parent-1',
       runtime: 'container',
-      pullHostBranchBeforeCreate: true,
       repoBranchSource: 'host',
     });
   });
@@ -149,7 +141,6 @@ describe('draft drone create runtime support', () => {
       runtime: 'container',
       repoBranchSelection: {
         repoBranchSource: 'host',
-        pullHostBranchBeforeCreate: false,
       },
       seedAgent: null,
       seedModel: null,

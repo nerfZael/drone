@@ -1,4 +1,5 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type {
   ArchiveRuntimePolicy,
   ArchiveRetentionId,
@@ -7,57 +8,31 @@ import type {
   DeleteActionSettingsResponse,
   DroneDeleteMode,
 } from './settings-types';
+import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsPostMutation, useSettingsQuery } from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
-export type UseDeleteActionSettingsResult = {
-  deleteSettings: DeleteActionSettingsResponse | null;
-  deleteSettingsLoading: boolean;
-  deleteSettingsError: string | null;
-  deleteSettingsNotice: string | null;
-  deleteModeDraft: DroneDeleteMode;
-  archiveRetentionDraft: ArchiveRetentionId;
-  archiveRuntimePolicyDraft: ArchiveRuntimePolicy;
-  savingDeleteSettings: boolean;
-  archivedDrones: ArchivedDronesResponse | null;
-  archivedDronesLoading: boolean;
-  archivedDronesError: string | null;
-  archivedChats: ArchivedChatsResponse | null;
-  archivedChatsLoading: boolean;
-  archivedChatsError: string | null;
-  archiveNotice: string | null;
-  restoringArchivedById: Record<string, boolean>;
-  deletingArchivedById: Record<string, boolean>;
-  restoringArchivedChatByKey: Record<string, boolean>;
-  deletingArchivedChatByKey: Record<string, boolean>;
-  setDeleteModeDraft: React.Dispatch<React.SetStateAction<DroneDeleteMode>>;
-  setArchiveRetentionDraft: React.Dispatch<React.SetStateAction<ArchiveRetentionId>>;
-  setArchiveRuntimePolicyDraft: React.Dispatch<React.SetStateAction<ArchiveRuntimePolicy>>;
-  loadDeleteSettings: () => Promise<void>;
-  loadArchivedDrones: () => Promise<void>;
-  loadArchivedChats: () => Promise<void>;
-  saveDeleteSettings: () => Promise<void>;
-  restoreArchivedDrone: (droneId: string) => Promise<void>;
-  permanentlyDeleteArchivedDrone: (droneId: string) => Promise<void>;
-  restoreArchivedChat: (droneId: string, chatName: string) => Promise<void>;
-  permanentlyDeleteArchivedChat: (droneId: string, chatName: string) => Promise<void>;
-};
+export type UseDeleteActionSettingsResult = ReturnType<typeof useDeleteActionSettings>;
 
-export function useDeleteActionSettings(requestJson: RequestJsonFn): UseDeleteActionSettingsResult {
-  const [deleteSettings, setDeleteSettings] = React.useState<DeleteActionSettingsResponse | null>(null);
-  const [deleteSettingsLoading, setDeleteSettingsLoading] = React.useState(false);
+export function useDeleteActionSettings(requestJson: RequestJsonFn) {
+  const queryClient = useQueryClient();
+  const deleteSettingsKey = settingsQueryKey('delete-action');
+  const archivedDronesKey = settingsQueryKey('archive', 'drones');
+  const archivedChatsKey = settingsQueryKey('archive', 'chats');
+  const deleteSettingsQuery = useSettingsQuery<DeleteActionSettingsResponse>(
+    requestJson,
+    deleteSettingsKey,
+    '/api/settings/delete-action',
+  );
+  const archivedDronesQuery = useSettingsQuery<ArchivedDronesResponse>(requestJson, archivedDronesKey, '/api/archive/drones');
+  const archivedChatsQuery = useSettingsQuery<ArchivedChatsResponse>(requestJson, archivedChatsKey, '/api/archive/chats');
   const [deleteSettingsError, setDeleteSettingsError] = React.useState<string | null>(null);
   const [deleteSettingsNotice, setDeleteSettingsNotice] = React.useState<string | null>(null);
   const [deleteModeDraft, setDeleteModeDraft] = React.useState<DroneDeleteMode>('permanent');
   const [archiveRetentionDraft, setArchiveRetentionDraft] = React.useState<ArchiveRetentionId>('1d');
   const [archiveRuntimePolicyDraft, setArchiveRuntimePolicyDraft] = React.useState<ArchiveRuntimePolicy>('keep-running');
-  const [savingDeleteSettings, setSavingDeleteSettings] = React.useState(false);
 
-  const [archivedDrones, setArchivedDrones] = React.useState<ArchivedDronesResponse | null>(null);
-  const [archivedDronesLoading, setArchivedDronesLoading] = React.useState(false);
   const [archivedDronesError, setArchivedDronesError] = React.useState<string | null>(null);
-  const [archivedChats, setArchivedChats] = React.useState<ArchivedChatsResponse | null>(null);
-  const [archivedChatsLoading, setArchivedChatsLoading] = React.useState(false);
   const [archivedChatsError, setArchivedChatsError] = React.useState<string | null>(null);
   const [archiveNotice, setArchiveNotice] = React.useState<string | null>(null);
   const [restoringArchivedById, setRestoringArchivedById] = React.useState<Record<string, boolean>>({});
@@ -65,83 +40,57 @@ export function useDeleteActionSettings(requestJson: RequestJsonFn): UseDeleteAc
   const [restoringArchivedChatByKey, setRestoringArchivedChatByKey] = React.useState<Record<string, boolean>>({});
   const [deletingArchivedChatByKey, setDeletingArchivedChatByKey] = React.useState<Record<string, boolean>>({});
 
-  const loadDeleteSettings = React.useCallback(async () => {
-    setDeleteSettingsLoading(true);
-    setDeleteSettingsError(null);
-    try {
-      const data = await requestJson<DeleteActionSettingsResponse>('/api/settings/delete-action');
-      setDeleteSettings(data);
-      setDeleteModeDraft(data.deleteAction.mode);
-      setArchiveRetentionDraft(data.deleteAction.archiveRetention);
-      setArchiveRuntimePolicyDraft(data.deleteAction.archiveRuntimePolicy ?? 'keep-running');
-    } catch (e: any) {
-      setDeleteSettingsError(e?.message ?? String(e));
-    } finally {
-      setDeleteSettingsLoading(false);
-    }
-  }, [requestJson]);
-
-  const loadArchivedDrones = React.useCallback(async () => {
-    setArchivedDronesLoading(true);
-    setArchivedDronesError(null);
-    try {
-      const data = await requestJson<ArchivedDronesResponse>('/api/archive/drones');
-      setArchivedDrones(data);
-    } catch (e: any) {
-      setArchivedDronesError(e?.message ?? String(e));
-    } finally {
-      setArchivedDronesLoading(false);
-    }
-  }, [requestJson]);
-
-  const loadArchivedChats = React.useCallback(async () => {
-    setArchivedChatsLoading(true);
-    setArchivedChatsError(null);
-    try {
-      const data = await requestJson<ArchivedChatsResponse>('/api/archive/chats');
-      setArchivedChats(data);
-    } catch (e: any) {
-      setArchivedChatsError(e?.message ?? String(e));
-    } finally {
-      setArchivedChatsLoading(false);
-    }
-  }, [requestJson]);
+  const applyDeleteSettings = React.useCallback((data: DeleteActionSettingsResponse) => {
+    setDeleteModeDraft(data.deleteAction.mode);
+    setArchiveRetentionDraft(data.deleteAction.archiveRetention);
+    setArchiveRuntimePolicyDraft(data.deleteAction.archiveRuntimePolicy ?? 'keep-running');
+  }, []);
 
   React.useEffect(() => {
-    void loadDeleteSettings();
-    void loadArchivedDrones();
-    void loadArchivedChats();
-  }, [loadArchivedChats, loadDeleteSettings, loadArchivedDrones]);
+    if (deleteSettingsQuery.data) applyDeleteSettings(deleteSettingsQuery.data);
+  }, [applyDeleteSettings, deleteSettingsQuery.data]);
+
+  const loadDeleteSettings = React.useCallback(async () => {
+    setDeleteSettingsError(null);
+    const { data } = await deleteSettingsQuery.refetch();
+    if (data) applyDeleteSettings(data);
+  }, [applyDeleteSettings, deleteSettingsQuery.refetch]);
+
+  const loadArchivedDrones = React.useCallback(async () => {
+    setArchivedDronesError(null);
+    await archivedDronesQuery.refetch();
+  }, [archivedDronesQuery.refetch]);
+
+  const loadArchivedChats = React.useCallback(async () => {
+    setArchivedChatsError(null);
+    await archivedChatsQuery.refetch();
+  }, [archivedChatsQuery.refetch]);
+
+  const saveMutation = useSettingsPostMutation<
+    DeleteActionSettingsResponse,
+    { mode: DroneDeleteMode; archiveRetention: ArchiveRetentionId; archiveRuntimePolicy: ArchiveRuntimePolicy }
+  >(requestJson, '/api/settings/delete-action');
 
   const saveDeleteSettings = React.useCallback(async () => {
-    setSavingDeleteSettings(true);
     setDeleteSettingsError(null);
     setDeleteSettingsNotice(null);
     try {
-      const data = await requestJson<DeleteActionSettingsResponse>('/api/settings/delete-action', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          mode: deleteModeDraft,
-          archiveRetention: archiveRetentionDraft,
-          archiveRuntimePolicy: archiveRuntimePolicyDraft,
-        }),
+      const data = await saveMutation.mutateAsync({
+        mode: deleteModeDraft,
+        archiveRetention: archiveRetentionDraft,
+        archiveRuntimePolicy: archiveRuntimePolicyDraft,
       });
-      setDeleteSettings(data);
-      setDeleteModeDraft(data.deleteAction.mode);
-      setArchiveRetentionDraft(data.deleteAction.archiveRetention);
-      setArchiveRuntimePolicyDraft(data.deleteAction.archiveRuntimePolicy ?? 'keep-running');
+      queryClient.setQueryData(deleteSettingsKey, data);
+      applyDeleteSettings(data);
       setDeleteSettingsNotice(
         data.deleteAction.mode === 'archive'
           ? `Trash now archives drones and chats (${data.deleteAction.archiveRuntimePolicy === 'stop' ? 'stop drones on archive' : 'keep archived drones running'}). Auto-delete after ${data.deleteAction.archiveRetention}.`
           : 'Trash now permanently deletes drones and chats.',
       );
-    } catch (e: any) {
-      setDeleteSettingsError(e?.message ?? String(e));
-    } finally {
-      setSavingDeleteSettings(false);
+    } catch (error) {
+      setDeleteSettingsError(settingsErrorMessage(error));
     }
-  }, [archiveRetentionDraft, archiveRuntimePolicyDraft, deleteModeDraft, requestJson]);
+  }, [applyDeleteSettings, archiveRetentionDraft, archiveRuntimePolicyDraft, deleteModeDraft, deleteSettingsKey, queryClient, saveMutation]);
 
   const restoreArchivedDrone = React.useCallback(
     async (droneIdRaw: string) => {
@@ -282,20 +231,20 @@ export function useDeleteActionSettings(requestJson: RequestJsonFn): UseDeleteAc
   );
 
   return {
-    deleteSettings,
-    deleteSettingsLoading,
-    deleteSettingsError,
+    deleteSettings: deleteSettingsQuery.data ?? null,
+    deleteSettingsLoading: deleteSettingsQuery.isFetching,
+    deleteSettingsError: settingsQueryError(deleteSettingsError, false, deleteSettingsQuery),
     deleteSettingsNotice,
     deleteModeDraft,
     archiveRetentionDraft,
     archiveRuntimePolicyDraft,
-    savingDeleteSettings,
-    archivedDrones,
-    archivedDronesLoading,
-    archivedDronesError,
-    archivedChats,
-    archivedChatsLoading,
-    archivedChatsError,
+    savingDeleteSettings: saveMutation.isPending,
+    archivedDrones: archivedDronesQuery.data ?? null,
+    archivedDronesLoading: archivedDronesQuery.isFetching,
+    archivedDronesError: settingsQueryError(archivedDronesError, false, archivedDronesQuery),
+    archivedChats: archivedChatsQuery.data ?? null,
+    archivedChatsLoading: archivedChatsQuery.isFetching,
+    archivedChatsError: settingsQueryError(archivedChatsError, false, archivedChatsQuery),
     archiveNotice,
     restoringArchivedById,
     deletingArchivedById,

@@ -69,7 +69,11 @@ export function useChatConfigState({
       setChatInfoStatus((previous) => {
         const previousError = previous.key === selectedChatInfoKey ? previous.error : null;
         const error = typeof next === 'function' ? next(previousError) : next;
-        return { key: selectedChatInfoKey, loading: previous.key === selectedChatInfoKey && previous.loading, error };
+        return {
+          key: selectedChatInfoKey,
+          loading: previous.key === selectedChatInfoKey && previous.loading,
+          error,
+        };
       });
     },
     [selectedChatInfoKey],
@@ -93,13 +97,16 @@ export function useChatConfigState({
     | 'blip'
     | null = chatInfo?.agent?.kind === 'builtin' ? chatInfo.agent.id : null;
 
-  const selectedDroneSummary = selectedDrone ? droneById[selectedDrone] ?? null : null;
+  const selectedDroneSummary = selectedDrone ? (droneById[selectedDrone] ?? null) : null;
   const hasSelectedDroneSummary = selectedDroneSummary !== null;
   const selectedDroneHubPhase = selectedDroneSummary?.hubPhase ?? null;
   const selectedDroneProvisioning = isDroneStartingOrSeeding(selectedDroneHubPhase);
+  const selectedDroneStartupFailed = selectedDroneHubPhase === 'error';
   const selectedDroneHasChatList = Array.isArray(selectedDroneSummary?.chats);
   const selectedDroneRuntime =
-    String(selectedDroneSummary?.runtime ?? '').trim().toLowerCase() === 'host'
+    String(selectedDroneSummary?.runtime ?? '')
+      .trim()
+      .toLowerCase() === 'host'
       ? 'host'
       : 'container';
   const modelCatalog = useAgentModelCatalog({
@@ -136,11 +143,14 @@ export function useChatConfigState({
       setLoadingChatInfo(false);
       return;
     }
+    if (selectedDroneStartupFailed) {
+      setChatInfo(null);
+      setChatInfoError(null);
+      setLoadingChatInfo(false);
+      return;
+    }
     // Avoid 404 spam: don't fetch chat info until the chat exists on this drone.
-    if (
-      selectedDroneHasChatList &&
-      !selectedDroneChatsKey.split('\u0000').includes(selectedChat)
-    ) {
+    if (selectedDroneHasChatList && !selectedDroneChatsKey.split('\u0000').includes(selectedChat)) {
       setChatInfo(null);
       setChatInfoError(null);
       setLoadingChatInfo(false);
@@ -176,6 +186,7 @@ export function useChatConfigState({
     hasSelectedDroneSummary,
     selectedDroneHubPhase,
     selectedDroneProvisioning,
+    selectedDroneStartupFailed,
     selectedDroneHasChatList,
     selectedDroneChatsKey,
   ]);
@@ -190,9 +201,7 @@ export function useChatConfigState({
       const approvalSupported =
         agent.kind === 'native' || (agent.kind === 'builtin' && agent.id === 'codex');
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(
-          chat,
-        )}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -202,20 +211,25 @@ export function useChatConfigState({
       setChatInfo((prev) => ({
         name: selectedDrone,
         chat,
+        chatId: prev?.chatId ?? null,
+        subscriptions: prev?.subscriptions ?? [],
         agent,
         agentLocked: prev?.agentLocked ?? false,
         model: prev?.model ?? null,
         reasoning: prev?.reasoning ?? null,
-        agentPermissionMode: readOnlySupported ? prev?.agentPermissionMode ?? 'full-access' : 'full-access',
+        agentPermissionMode: readOnlySupported
+          ? (prev?.agentPermissionMode ?? 'full-access')
+          : 'full-access',
         approvalPolicy:
           approvalSupported &&
           !(
             prev?.approvalPolicy === 'agent-decides' &&
             !(agent.kind === 'builtin' && agent.id === 'codex')
           )
-            ? prev?.approvalPolicy ?? 'ask'
+            ? (prev?.approvalPolicy ?? 'ask')
             : 'ask',
-        dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
+        dockerSnapshotAfterAgentMessageEnabled:
+          prev?.dockerSnapshotAfterAgentMessageEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -231,15 +245,16 @@ export function useChatConfigState({
       const hasModel = Object.prototype.hasOwnProperty.call(settings, 'model');
       const hasReasoning = Object.prototype.hasOwnProperty.call(settings, 'reasoning');
       const model = String(settings.model ?? '').trim() || null;
-      const reasoning = String(settings.reasoning ?? '').trim().toLowerCase() || null;
+      const reasoning =
+        String(settings.reasoning ?? '')
+          .trim()
+          .toLowerCase() || null;
       const body = {
         ...(hasModel ? { model } : {}),
         ...(hasReasoning ? { reasoning } : {}),
       };
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(
-          chat,
-        )}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -249,13 +264,16 @@ export function useChatConfigState({
       setChatInfo((prev) => ({
         name: selectedDrone,
         chat,
+        chatId: prev?.chatId ?? null,
+        subscriptions: prev?.subscriptions ?? [],
         agent: prev?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig),
         agentLocked: prev?.agentLocked ?? false,
-        model: hasModel ? model : prev?.model ?? null,
-        reasoning: hasReasoning ? reasoning : prev?.reasoning ?? null,
+        model: hasModel ? model : (prev?.model ?? null),
+        reasoning: hasReasoning ? reasoning : (prev?.reasoning ?? null),
         agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
         approvalPolicy: prev?.approvalPolicy ?? 'ask',
-        dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
+        dockerSnapshotAfterAgentMessageEnabled:
+          prev?.dockerSnapshotAfterAgentMessageEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -269,9 +287,7 @@ export function useChatConfigState({
       if (!selectedDrone) return;
       const chat = selectedChat || 'default';
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(
-          chat,
-        )}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -281,13 +297,16 @@ export function useChatConfigState({
       setChatInfo((prev) => ({
         name: selectedDrone,
         chat,
+        chatId: prev?.chatId ?? null,
+        subscriptions: prev?.subscriptions ?? [],
         agent: prev?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig),
         agentLocked: prev?.agentLocked ?? false,
         model: prev?.model ?? null,
         reasoning: prev?.reasoning ?? null,
         agentPermissionMode,
         approvalPolicy: prev?.approvalPolicy ?? 'ask',
-        dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
+        dockerSnapshotAfterAgentMessageEnabled:
+          prev?.dockerSnapshotAfterAgentMessageEnabled === true,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -301,9 +320,7 @@ export function useChatConfigState({
       if (!selectedDrone) return;
       const chat = selectedChat || 'default';
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(
-          chat,
-        )}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -313,6 +330,8 @@ export function useChatConfigState({
       setChatInfo((prev) => ({
         name: selectedDrone,
         chat,
+        chatId: prev?.chatId ?? null,
+        subscriptions: prev?.subscriptions ?? [],
         agent: prev?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig),
         agentLocked: prev?.agentLocked ?? false,
         model: prev?.model ?? null,
@@ -334,9 +353,7 @@ export function useChatConfigState({
       if (!selectedDrone) return;
       const chat = selectedChat || 'default';
       await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(
-          chat,
-        )}/config`,
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(chat)}/config`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -346,6 +363,8 @@ export function useChatConfigState({
       setChatInfo((prev) => ({
         name: selectedDrone,
         chat,
+        chatId: prev?.chatId ?? null,
+        subscriptions: prev?.subscriptions ?? [],
         agent: prev?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig),
         agentLocked: prev?.agentLocked ?? false,
         model: prev?.model ?? null,
@@ -361,14 +380,11 @@ export function useChatConfigState({
     [requestJson, selectedChat, selectedDrone],
   );
 
-  const handleSetAgentFailure = React.useCallback(
-    (prefix: string, err: any) => {
-      const msg = err?.message ?? String(err);
-      console.error(prefix, err);
-      setChatInfoError(msg);
-    },
-    [],
-  );
+  const handleSetAgentFailure = React.useCallback((prefix: string, err: any) => {
+    const msg = err?.message ?? String(err);
+    console.error(prefix, err);
+    setChatInfoError(msg);
+  }, []);
 
   return {
     chatInfo,

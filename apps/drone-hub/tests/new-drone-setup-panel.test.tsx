@@ -3,12 +3,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'bun:test';
 
 import { NewDroneSetupPanel } from '../src/droneHub/app/NewDroneSetupPanel';
+import { NewDroneTargetControls } from '../src/droneHub/app/NewDroneTargetControls';
+import { DroneRuntimeIndicator } from '../src/droneHub/app/DroneRuntimeIndicator';
 
 const baseProps: React.ComponentProps<typeof NewDroneSetupPanel> = {
   createRuntime: 'container',
-  onCreateRuntimeChange: () => {},
-  createPersistVolume: false,
-  onCreatePersistVolumeChange: () => {},
   spawnAgentPermissionMode: 'full-access',
   onSpawnAgentPermissionModeChange: () => {},
   spawnApprovalPolicy: 'ask',
@@ -16,6 +15,10 @@ const baseProps: React.ComponentProps<typeof NewDroneSetupPanel> = {
   spawnAgentApprovalSupported: true,
   spawnAgentReadOnlySupported: true,
   spawnAgentConfig: { kind: 'native' },
+  spawnAgentKey: 'native',
+  agentLabel: 'Built-in',
+  spawnAgentMenuEntries: [{ value: 'native', label: 'Built-in' }],
+  onSpawnAgentKeyChange: () => {},
   createRepoMenuEntries: [],
   draftCreateRepoPath: '/work/repo',
   agentsMdLibraryFiles: [
@@ -35,38 +38,66 @@ const baseProps: React.ComponentProps<typeof NewDroneSetupPanel> = {
   onDraftAgentsMdOverrideEnabledChange: () => {},
   draftAgentsMdOverride: '# Per-drone instructions',
   onDraftAgentsMdOverrideChange: () => {},
-  repoBranchSource: 'host',
-  onRepoBranchSourceChange: () => {},
-  repoCreateRemoteBranch: '',
-  onRepoCreateRemoteBranchChange: () => {},
-  draftRepoHostBranch: 'main',
-  draftRepoRemoteBranches: [],
-  draftRepoBranchesLoading: false,
-  draftRepoBranchesError: null,
   controlsLocked: false,
 };
 
+const targetProps: React.ComponentProps<typeof NewDroneTargetControls> = {
+  createRuntime: 'container',
+  onCreateRuntimeChange: () => {},
+  repoPath: '/work/repo',
+  branchSource: 'host',
+  onBranchSourceChange: () => {},
+  remoteBranch: '',
+  onRemoteBranchChange: () => {},
+  hostBranch: 'main',
+  remoteBranches: [],
+  branchesLoading: false,
+  branchesError: null,
+  disabled: false,
+};
+
 describe('new drone setup panel', () => {
-  test('renders runtime, branch, and combined access choices in one setup row', () => {
+  test('renders agent, access, repository, and advanced controls in the footer row', () => {
     const html = renderToStaticMarkup(<NewDroneSetupPanel {...baseProps} />);
 
-    expect(html).toContain('Execution target: Container');
-    expect(html).toContain('Branch: main');
+    expect(html).toContain('Choose agent');
+    expect(html).toContain('Built-in');
     expect(html).toContain('Choose chat access and approvals');
     expect(html).toContain('Execute · Ask');
-    expect(html).toContain('Pull first');
+    expect(html).toContain('No repository');
+    expect(html).toContain('Advanced');
+    expect(html).not.toContain('Execution target: Container');
+    expect(html).not.toContain('Branch: main');
+    expect(html).not.toContain('Pull first');
+    expect(html).not.toContain('Persistent volume');
     expect(html).not.toContain('Save as draft');
     expect(html).not.toContain('role="group" aria-label="Chat access"');
     expect(html).not.toContain('role="group" aria-label="Approvals"');
   });
 
-  test('hides host pull behavior when a remote branch is selected', () => {
+  test('renders runtime and branch in the upper target row', () => {
+    const html = renderToStaticMarkup(<NewDroneTargetControls {...targetProps} />);
+
+    expect(html).toContain('Execution target: Container');
+    expect(html).toContain('Branch: main');
+  });
+
+  test('renders an existing drone runtime as a read-only indicator', () => {
+    const html = renderToStaticMarkup(<DroneRuntimeIndicator runtime="host" />);
+
+    expect(html).toContain('data-drone-runtime-indicator="host"');
+    expect(html).toContain('aria-label="Execution target: Host"');
+    expect(html).toContain('Host');
+    expect(html).not.toContain('<button');
+  });
+
+  test('renders a selected remote branch in the upper target row', () => {
     const html = renderToStaticMarkup(
-      <NewDroneSetupPanel
-        {...baseProps}
-        repoBranchSource="remote"
-        repoCreateRemoteBranch="origin/feature/picker"
-        draftRepoRemoteBranches={[
+      <NewDroneTargetControls
+        {...targetProps}
+        branchSource="remote"
+        remoteBranch="origin/feature/picker"
+        remoteBranches={[
           {
             name: 'origin/feature/picker',
             remote: 'origin',
@@ -78,7 +109,6 @@ describe('new drone setup panel', () => {
     );
 
     expect(html).toContain('Branch: origin/feature/picker');
-    expect(html).not.toContain('Pull first');
   });
 
   test('renders the override editor for repo-attached container drones', () => {

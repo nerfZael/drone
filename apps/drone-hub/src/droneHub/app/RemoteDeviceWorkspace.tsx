@@ -446,7 +446,6 @@ function RemoteMain({
             resetKey={`${selectedDevice?.id}:${model.selectedDrone.id}:${model.selectedChat}`}
             droneName={model.selectedDrone.name}
             promptError={model.chatError}
-            sending={model.sending}
             waiting={model.waiting}
             allowSendWhileWaiting
             disabled={!routeAvailable}

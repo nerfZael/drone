@@ -10,6 +10,18 @@ function normalizedColor(value: string): string {
 }
 
 describe('mobile sidebar presentation', () => {
+  test('gives optimistic drone rows stable creation and group identity metadata', () => {
+    const source = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('groupId: result?.drone?.groupId ?? result?.groupId');
+    expect(source).toContain('result?.drone?.createdAt ??');
+    expect(source).toContain('result?.createdAt ??');
+    expect(source).toContain('payload.seedSubmittedAt ??');
+  });
+
   test('shares the desktop Catppuccin sidebar palette', () => {
     const desktopStyles = readFileSync(
       new URL('../../drone-hub/src/styles.css', import.meta.url),
@@ -75,14 +87,10 @@ describe('mobile sidebar presentation', () => {
       expect(desktopPathSet.has(mobilePath)).toBe(true);
     }
     expect(mobileIcons).toContain('<Rect x="5" y="5" width="6" height="6" rx="1" />');
-    expect(mobileIcons).toContain(
-      '<Path d="M6.8 1.03a1.2 1.2 0 012.4 0l.1.81',
-    );
+    expect(mobileIcons).toContain('<Path d="M6.8 1.03a1.2 1.2 0 012.4 0l.1.81');
     expect(mobileIcons).toContain("? 'm15 18-6-6 6-6'");
     expect(mobileIcons).toContain("? 'm4 6 4 4 4-4' : 'm6 4 4 4-4 4'");
-    expect(mobileIcons).toContain(
-      '<Path d="M2.25 2.5h2.6c.44 0 .84.21 1.08.58l.78 1.17',
-    );
+    expect(mobileIcons).toContain('<Path d="M2.25 2.5h2.6c.44 0 .84.21 1.08.58l.78 1.17');
     expect(mobileIcons).toContain('strokeWidth="1.2"');
   });
 
@@ -146,7 +154,11 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('Drones will appear when it reconnects.');
     expect(dronesSource).toContain("subtitle: 'Offline · reconnecting automatically'");
     expect(dronesSource).toContain("{activeTarget?.name ?? 'This device'} is offline");
+    expect(dronesSource).toContain("'Reconnecting to device'");
+    expect(dronesSource).toContain("'Reconnecting…'");
+    expect(dronesSource).toContain('mesh.retryDeviceConnection(targetId)');
     expect(dronesSource).toContain('This chat is readable. Sending will resume');
+    expect(drawerSource).toContain("device.connectionState === 'reconnecting'");
     expect(dronesSource).toContain('editable={targetReachable}');
     expect(dronesSource).toContain('disabled={!targetReachable}');
     expect(dronesSource).toContain("disabled={!targetReachable || busy === 'prompt'}");
@@ -194,7 +206,8 @@ describe('mobile sidebar presentation', () => {
     expect(source).not.toContain('repoListHeader: {');
     expect(source).toContain('style={styles.repoIconSlot}');
     expect(source).toContain('repoIconSlot: {');
-    expect(source).toContain('{isUngrouped ? (\n                            <SidebarFolderOutlineIcon');
+    expect(source).toContain('{isUngrouped ? (');
+    expect(source).toContain('<SidebarFolderOutlineIcon');
     expect(source).not.toContain('repoIconFrame: {');
     expect(source).toContain('repoUngroupedDivider: {');
     expect(source).not.toContain('styles.repoGroup');
@@ -295,7 +308,9 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain("state === 'deleting' ? (");
     expect(source).toContain('<OperationStatusIndicator operation="deleting" />');
     expect(source).toContain("operation === 'archiving' ? colors.info : colors.danger");
-    expect(source).toContain('<SidebarWorkingIcon color={colors.info} size={12} strokeWidth={2.4} />');
+    expect(source).toContain(
+      '<SidebarWorkingIcon color={colors.info} size={12} strokeWidth={2.4} />',
+    );
     expect(source).toContain('height={6}');
     expect(source).toContain('width={6}');
     expect(source).toContain("operationStatusGlyph: { position: 'absolute' }");
@@ -313,7 +328,7 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('<View style={styles.readyStateAnchor} />');
     expect(source).toContain('width: DRAWER_TREE_LEADING_SLOT_WIDTH');
     expect(source).toContain('height: DRAWER_TREE_LEADING_SLOT_WIDTH');
-    expect(source).toContain('borderColor: colors.sidebarItemIcon');
+    expect(source).toContain('borderColor: colors.sidebarMutedDim');
     expect(source).toContain('opacity: 0.7');
   });
 
@@ -328,14 +343,30 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('d="M6 1.25 11 10.25H1L6 1.25Z"');
     expect(source).toContain('d="M6 4.15v2.75"');
     expect(source).toContain('cx="6" cy="8.5"');
-    expect(source).toContain(
-      'const color = emphasized ? colors.sidebarBlockedIndicator : colors.sidebarItemIcon;',
-    );
+    expect(source).toContain('const color = colors.sidebarBlockedIndicator;');
     expect(source).toContain('quietBlockedStatusIndicator: { opacity: 0.7 }');
     expect(source).toContain('shadowColor: colors.onlineBorder');
     expect(source).toContain('shadowOffset: { width: 0, height: 0 }');
     expect(source).toContain('const RECENT_BLOCKED_EMPHASIS_MS = 30_000;');
     expect(source).toContain('emphasized={recentlyBlocked || selected}');
+  });
+
+  test('uses the composer runtime icons and colors for container and host drone rows', () => {
+    const drawerSource = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const runtimeSource = readFileSync(
+      new URL('../src/drones/NewDroneRuntimePicker.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(drawerSource).toContain('<RuntimeIcon runtime={runtime} size={14} />');
+    expect(runtimeSource).toContain(
+      "const color = runtime === 'host' ? colors.online : colors.accent;",
+    );
+    expect(runtimeSource).toContain('<Monitor color={color}');
+    expect(runtimeSource).toContain('<Box color={color}');
   });
 
   test('renders desktop-equivalent multi-chat disclosures, including pinned drones', () => {
@@ -364,20 +395,21 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('showChats && chats.length > 1 ? (');
     expect(source).toContain('const isChatDisclosure = showChats && hasMultipleChats;');
     expect(source).toContain('const chatSectionExpanded = !collapsedDroneIds.has(drone.id);');
-    expect(source).toContain(
-      'if (isChatDisclosure) {\n            onSelectContainer(drone.id);\n            onToggleDrone(drone.id);',
-    );
+    expect(source).toContain('if (isChatDisclosure) {');
+    expect(source).toContain('onSelectContainer(drone.id);');
+    expect(source).toContain('onToggleDrone(drone.id);');
     expect(source).toContain('expanded: isChatDisclosure ? chatSectionExpanded : undefined');
     expect(source).toContain('<View accessible={false} style={styles.droneChevronSlot}>');
     expect(source).toContain('expanded={chatSectionExpanded}');
     expect(source).toContain('chatSectionExpanded ? (');
-    expect(source).toContain('<SidebarContainerIcon');
-    expect(source).toContain('color={colors.sidebarMutedDim}');
+    expect(source).toContain('<RuntimeIcon runtime={runtime} size={14} />');
+    expect(source).toContain('style={styles.droneRuntimeIconSlot}');
+    expect(source).not.toContain('<SidebarContainerIcon');
     expect(source).not.toContain('styles.droneSpineExpanded');
     expect(source).toContain('isChatDisclosure ? null : isDraft ? (');
     expect(source).toContain('mobileDroneDisplayState(drone, !hasMultipleChats)');
     expect(source).toContain('!isDraft && !hasMultipleChats');
-    expect(source).toContain('summarizeMobileDroneChats(drone, selected ? activeChatName : \'\')');
+    expect(source).toContain("summarizeMobileDroneChats(drone, selected ? activeChatName : '')");
     expect(source).toContain(
       '<DroneStateCounts summary={chatStateSummary} compact entity="chat" />',
     );
@@ -385,7 +417,7 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}');
     expect(source).toContain('hasActiveChildChat && styles.droneChatRailVisible');
     expect(source).toContain("borderLeftColor: 'transparent'");
-    expect(source).toContain('gap: 4,\n    paddingLeft: 4,\n    paddingRight: 6,');
+    expect(source).toContain('gap: 4,\n    paddingLeft: 18,\n    paddingRight: 6,');
     expect(source).toContain('styles.droneChatSelectionWash, { left: -selectionWashInset }');
     expect(source).toContain('<DrawerDroneChatRow');
     expect(source).toContain('drone.draftChats?.[chatName] === true');
@@ -404,11 +436,11 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain(
       'parentSelected ? <View style={styles.sidebarSelectionEdge} /> : null',
     );
-    expect(source).toContain('delayLongPress={400}');
+    expect(source).toContain('delayLongPress={600}');
     expect(source).toContain('suppressPressAfterLongPressRef.current = true;');
     expect(source).toContain('onOpenActions({ drone, chatName });');
     expect(source).toContain('if (suppressPressAfterLongPressRef.current) {');
-    expect(source).toContain("if (!applied) return;");
+    expect(source).toContain('if (!applied) return;');
     expect(source).toContain('onSelectDroneChat?.(');
     expect(source).toContain("label: 'Create chat'");
     expect(source).toContain("label: 'Rename chat'");
@@ -493,14 +525,18 @@ describe('mobile sidebar presentation', () => {
     expect(drawerSource).toContain('data={activeRepo.entries}');
     expect(drawerSource).toContain('drones={globalPinnedDrones}');
     expect(drawerSource).toContain('<Text style={styles.pinnedHeaderText}>Pinned</Text>');
-    expect(drawerSource).toContain(
-      'pinnedSection: {\n    flexShrink: 0,\n    paddingBottom: 4,',
-    );
+    expect(drawerSource).toContain('pinnedSection: {\n    flexShrink: 0,\n    paddingBottom: 4,');
     expect(drawerSource).toContain('pinnedHeader: {\n    minHeight: 32,');
     expect(drawerSource).toContain('paddingLeft: 12,\n    paddingRight: 8,');
     expect(drawerSource).toContain('borderBottomWidth: StyleSheet.hairlineWidth,');
     expect(drawerSource).toContain('color={colors.sidebarMutedDim}');
     expect(drawerSource).toContain('style={styles.pinnedHeaderIcon}');
+    expect(drawerSource).toContain(
+      "accessibilityLabel={collapsed ? 'Expand pinned drones' : 'Collapse pinned drones'}",
+    );
+    expect(drawerSource).toContain('accessibilityState={{ expanded: !collapsed }}');
+    expect(drawerSource).toContain('onPress={onToggleCollapsed}');
+    expect(drawerSource).toContain('? drones.map((drone) => (');
     expect(drawerSource).toContain("fontSize: 10.5,\n    fontWeight: '400',");
     expect(drawerSource).toContain(
       '<Text numberOfLines={1} style={styles.switchItemContextBadge}>',
@@ -544,7 +580,11 @@ describe('mobile sidebar presentation', () => {
     );
     expect(drawerSource).toContain("current === 'top' ? 'bottom' : 'top'");
     expect(drawerSource).toContain('AsyncStorage.setItem(PINNED_SIDEBAR_PLACEMENT_KEY, next)');
+    expect(drawerSource).toContain('AsyncStorage.setItem(PINNED_SIDEBAR_COLLAPSED_KEY');
     expect(drawerSource).toContain("React.useState<PinnedSidebarPlacement>('bottom')");
+    expect(drawerSource).toContain('React.useState(false)');
+    expect(drawerSource).toContain('collapsed={pinnedSidebarCollapsed}');
+    expect(drawerSource).toContain('onToggleCollapsed={togglePinnedSidebarCollapsed}');
     expect(drawerSource).toContain("stored === 'top' || stored === 'bottom'");
     expect(drawerSource).toContain(
       "placement === 'top' ? 'Move pinned drones to bottom' : 'Move pinned drones to top'",
@@ -579,8 +619,14 @@ describe('mobile sidebar presentation', () => {
       pinnedSelectionStart,
     );
     const pinnedSelectionSource = drawerSource.slice(pinnedSelectionStart, pinnedSelectionEnd);
-    expect(pinnedSelectionSource).not.toContain('setActiveRepoId');
+    expect(pinnedSelectionSource).toContain('const repoId = resolveDroneRepoId(droneId)');
+    expect(pinnedSelectionSource).toContain('if (repoId) setActiveRepoId(repoId)');
     expect(pinnedSelectionSource).toContain('onSelectDroneChat?.(droneId, chatName)');
+    expect(drawerSource).toContain('resolveMobileSidebarRepositoryAlignment({');
+    expect(drawerSource).toContain('alignedActiveDroneSelectionKeyRef.current');
+    expect(drawerSource).toContain(
+      'if (alignment.repoIdToOpen) setActiveRepoId(alignment.repoIdToOpen)',
+    );
     expect(dronesSource).toContain('onTogglePinned: () =>');
     expect(dronesSource).toContain('void setDronePinned(');
     expect(shellSource).toContain("id: 'toggle-pin'");
@@ -621,16 +667,20 @@ describe('mobile sidebar presentation', () => {
   test('keeps the fleet drawer mounted across tabs and quiets the chat header controls', () => {
     const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
 
-    expect(shellSource).toContain("(pairingVisible || tab !== 'drones') && styles.tabContentHidden");
-    expect(shellSource).toContain('tabContentHidden: { display: \'none\' }');
+    expect(shellSource).toContain(
+      "(pairingVisible || tab !== 'drones') && styles.tabContentHidden",
+    );
+    expect(shellSource).toContain("tabContentHidden: { display: 'none' }");
     expect(shellSource).not.toContain('  AppDrawer,\n');
     expect(shellSource).toContain(
       "accessibilityLabel={hasBackNavigation ? 'Open drone navigation'",
     );
     expect(shellSource).toContain('hasBackNavigation && styles.contextBackButton');
     expect(shellSource).toContain('<ChevronLeft\n                  color={appDrawerOpen');
-    expect(shellSource).toContain('<MoreVertical color={colors.muted} size={19} strokeWidth={2} />');
-    expect(shellSource).toContain("contextBackButton: {\n    width: 28,\n    borderWidth: 0,");
+    expect(shellSource).toContain(
+      '<MoreVertical color={colors.muted} size={19} strokeWidth={2} />',
+    );
+    expect(shellSource).toContain('contextBackButton: {\n    width: 28,\n    borderWidth: 0,');
     expect(shellSource).toContain(
       "contextMenuAction: {\n    width: 36,\n    height: 36,\n    alignItems: 'center',",
     );
@@ -653,9 +703,8 @@ describe('mobile sidebar presentation', () => {
     );
 
     expect(drawerSource).toContain('accessibilityLabel="Open project list"');
-    expect(drawerSource).toContain(
-      'setActiveRepoId(null);\n              dronesNavigationItem?.onPress();',
-    );
+    expect(drawerSource).toContain('setActiveRepoId(null);');
+    expect(drawerSource).toContain('dronesNavigationItem?.onPress();');
     expect(drawerSource).not.toContain(
       'dronesNavigationItem?.onPress();\n              onClose();',
     );
@@ -720,5 +769,39 @@ describe('mobile sidebar presentation', () => {
     expect(drawerPatch).not.toContain('+          restDisplacementThreshold:');
     expect(drawerPatch).toContain('targetTranslationX.value === translateX');
     expect(drawerPatch).toContain("drawerType === 'front' ? 1 : translateX.value === 0");
+  });
+
+  test('requires a deliberate long press on names to reorder without visible grips', () => {
+    const drawerSource = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const dragSource = readFileSync(
+      new URL('../src/local-assistant/MobileSidebarDragDrop.tsx', import.meta.url),
+      'utf8',
+    );
+    const dropTargetSource = readFileSync(
+      new URL('../src/drones/mobile-sidebar-drop-target.ts', import.meta.url),
+      'utf8',
+    );
+    const dronesScreenSource = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(drawerSource).toContain('<MobileSidebarDragArea');
+    expect(drawerSource).toContain('label={`${folder.label} group`}');
+    expect(drawerSource).toContain("kind: 'move-into-folder'");
+    expect(drawerSource).toContain('canDropInside={(activeItemId) => {');
+    expect(drawerSource).not.toContain('MobileSidebarDragHandle');
+    expect(dragSource).toContain('.activateAfterLongPress(450)');
+    expect(dropTargetSource).toContain('const placement: MobileSidebarDropPlacement = inside');
+    expect(dragSource).toContain('styles.dropInside');
+    expect(dragSource).toContain('nextTarget.overData?.insidePosition');
+    expect(dragSource).toContain('styles.dropInsideStart');
+    expect(dragSource).toContain('styles.dropInsideEnd');
+    expect(dragSource).not.toContain('GripVertical');
+    expect(dronesScreenSource).toContain("isGranted(selfDevice.grants, 'drone-control', 1");
+    expect(dronesScreenSource).toContain('targetCanReorderSidebar ? reorderSidebar : undefined');
   });
 });

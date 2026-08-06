@@ -37,7 +37,9 @@ export function chatConfigResolutionState(input: {
   hasChats: boolean;
   metadataAvailable: boolean;
   loading: boolean;
-}): 'ready' | 'loading' | 'unavailable' {
+  startupFailed?: boolean;
+}): 'ready' | 'loading' | 'unavailable' | 'drone-error' {
+  if (input.startupFailed) return 'drone-error';
   if (input.currentChatIsDraft || !input.hasChats || input.metadataAvailable) return 'ready';
   return input.loading ? 'loading' : 'unavailable';
 }

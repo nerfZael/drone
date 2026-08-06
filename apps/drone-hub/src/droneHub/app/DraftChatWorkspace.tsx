@@ -8,17 +8,10 @@ import {
   type ChatSendPayload,
   PendingTranscriptTurn,
 } from '../chat';
-import type {
-  ChatComposerControl,
-  ChatComposerControlsConfig,
-} from '../chat/ChatComposerControls';
+import type { ChatComposerControl, ChatComposerControlsConfig } from '../chat/ChatComposerControls';
 import { draftChatInputResetKey, droneChatQueueKey } from './helpers';
 import type { UiMenuSelectEntry } from '../../ui/components';
-import type {
-  AgentApprovalPolicy,
-  AgentPermissionMode,
-  ChatAgentConfig,
-} from '../../domain';
+import type { AgentApprovalPolicy, AgentPermissionMode, ChatAgentConfig } from '../../domain';
 import type { AgentsMdFileSummary } from './settings-types';
 import type { DraftChatState } from './app-types';
 import type { QueuedPrompt } from './use-queued-prompts-state';
@@ -32,6 +25,7 @@ import {
 } from './drone-create-runtime';
 import { visibleDraftQueuedPrompts as resolveVisibleDraftQueuedPrompts } from './draft-chat-queue';
 import { NewDroneSetupPanel } from './NewDroneSetupPanel';
+import { NewDroneTargetControls } from './NewDroneTargetControls';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { useAgentModelCatalog } from './use-agent-model-catalog';
 
@@ -41,8 +35,6 @@ type DraftChatWorkspaceProps = {
   onCreateRuntimeChange: (value: CreateRuntime) => void;
   createAsDraft: boolean;
   onCreateAsDraftChange: (value: boolean) => void;
-  createPersistVolume: boolean;
-  onCreatePersistVolumeChange: (value: boolean) => void;
   spawnAgentPermissionMode: AgentPermissionMode;
   onSpawnAgentPermissionModeChange: (value: AgentPermissionMode) => void;
   spawnApprovalPolicy: AgentApprovalPolicy;
@@ -97,8 +89,6 @@ export function DraftChatWorkspace({
   onCreateRuntimeChange,
   createAsDraft,
   onCreateAsDraftChange,
-  createPersistVolume,
-  onCreatePersistVolumeChange,
   spawnAgentPermissionMode,
   onSpawnAgentPermissionModeChange,
   spawnApprovalPolicy,
@@ -204,21 +194,7 @@ export function DraftChatWorkspace({
         ? 'Updating the agent model catalog in the background…'
         : undefined;
   const newDroneComposerControls = React.useMemo<ChatComposerControlsConfig | undefined>(() => {
-    const controls: ChatComposerControl[] = [
-      {
-        kind: 'select',
-        id: 'new-drone-agent',
-        value: spawnAgentKey,
-        label: agentLabel,
-        title: 'Choose agent',
-        entries: filteredAgentMenuEntries,
-        onValueChange: setSpawnAgentKey,
-        disabled: controlsLocked,
-        searchable: true,
-        searchPlaceholder: 'Search agents',
-        width: 'medium',
-      },
-    ];
+    const controls: ChatComposerControl[] = [];
     if (spawnAgentConfig.kind !== 'custom') {
       controls.push({
         kind: 'model-picker',
@@ -258,15 +234,12 @@ export function DraftChatWorkspace({
       menuLabel: 'New drone options',
     };
   }, [
-    agentLabel,
     controlsLocked,
     createRuntime,
-    filteredAgentMenuEntries,
     modelChoices,
     modelCatalogStatusMessage,
     modelProvider,
     setCustomAgentModalOpen,
-    setSpawnAgentKey,
     setSpawnModel,
     setSpawnReasoning,
     spawnAgentConfig.kind,
@@ -275,7 +248,7 @@ export function DraftChatWorkspace({
     spawnReasoning,
   ]);
   const queuedDraftPrompts = draftChat.droneId
-    ? queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneId, 'default')] ?? []
+    ? (queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneId, 'default')] ?? [])
     : [];
   const visibleQueuedDraftPrompts = React.useMemo(
     () =>
@@ -293,9 +266,6 @@ export function DraftChatWorkspace({
   const idleSetupPanel = (
     <NewDroneSetupPanel
       createRuntime={createRuntime}
-      onCreateRuntimeChange={onCreateRuntimeChange}
-      createPersistVolume={createPersistVolume}
-      onCreatePersistVolumeChange={onCreatePersistVolumeChange}
       spawnAgentPermissionMode={spawnAgentPermissionMode}
       onSpawnAgentPermissionModeChange={onSpawnAgentPermissionModeChange}
       spawnApprovalPolicy={spawnApprovalPolicy}
@@ -303,6 +273,10 @@ export function DraftChatWorkspace({
       spawnAgentApprovalSupported={spawnAgentApprovalSupported}
       spawnAgentReadOnlySupported={spawnAgentReadOnlySupported}
       spawnAgentConfig={spawnAgentConfig}
+      spawnAgentKey={spawnAgentKey}
+      agentLabel={agentLabel}
+      spawnAgentMenuEntries={filteredAgentMenuEntries}
+      onSpawnAgentKeyChange={setSpawnAgentKey}
       createRepoMenuEntries={createRepoMenuEntries}
       draftCreateRepoPath={draftCreateRepoPath}
       agentsMdLibraryFiles={agentsMdLibraryFiles}
@@ -314,14 +288,6 @@ export function DraftChatWorkspace({
       onDraftAgentsMdOverrideEnabledChange={onDraftAgentsMdOverrideEnabledChange}
       draftAgentsMdOverride={draftAgentsMdOverride}
       onDraftAgentsMdOverrideChange={onDraftAgentsMdOverrideChange}
-      repoBranchSource={repoBranchSource}
-      onRepoBranchSourceChange={onRepoBranchSourceChange}
-      repoCreateRemoteBranch={repoCreateRemoteBranch}
-      onRepoCreateRemoteBranchChange={onRepoCreateRemoteBranchChange}
-      draftRepoHostBranch={draftRepoHostBranch}
-      draftRepoRemoteBranches={draftRepoRemoteBranches}
-      draftRepoBranchesLoading={draftRepoBranchesLoading}
-      draftRepoBranchesError={draftRepoBranchesError}
       controlsLocked={controlsLocked}
     />
   );
@@ -388,7 +354,17 @@ export function DraftChatWorkspace({
           <div className="mx-auto flex min-h-full w-full max-w-[760px] items-center justify-center px-6 py-12 text-center">
             <div className="relative -mt-6 max-w-[460px]">
               <div className="mx-auto mb-5 flex h-11 w-11 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel-alt)] text-[var(--accent)] shadow-[0_12px_32px_var(--shadow-color)]">
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <svg
+                  width="19"
+                  height="19"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
                   <path d="M12 3v4" />
                   <path d="M12 17v4" />
                   <path d="m4.2 7.5 3.5 2" />
@@ -401,9 +377,6 @@ export function DraftChatWorkspace({
               <h2 className="text-[1.05rem] font-[var(--weight-semibold)] tracking-tight text-[var(--fg)]">
                 Start a new drone
               </h2>
-              <p className="mt-2 text-[var(--text-12)] leading-relaxed text-[var(--muted)]">
-                Describe what you want to work on. Your first message creates the drone and opens this chat.
-              </p>
             </div>
           </div>
         )}
@@ -413,46 +386,83 @@ export function DraftChatWorkspace({
         focusTargetId="primary-chat"
         droneName="new drone"
         promptError={draftCreateError}
-        sending={false}
         waiting={false}
-        autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt && visibleQueuedDraftPrompts.length === 0}
+        autoFocus={
+          !draftCreating &&
+          !draftAutoRenaming &&
+          !draftChat.prompt &&
+          visibleQueuedDraftPrompts.length === 0
+        }
         attachmentsEnabled
         alwaysExpanded
         composerControls={newDroneComposerControls}
-        composerTopAction={!draftChat.prompt ? (
-          <button
-            type="button"
-            aria-pressed={createAsDraft}
-            onClick={() => onCreateAsDraftChange(!createAsDraft)}
-            disabled={controlsLocked}
-            title={createAsDraft ? 'This drone will be saved as a draft' : 'Save this drone as a draft'}
-            className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[.625rem] font-[var(--weight-semibold)] uppercase tracking-[0.08em] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-              createAsDraft
-                ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] text-[var(--chat-composer-placeholder)] hover:border-[var(--border)] hover:text-[var(--chat-composer-control-fg)]'
-            }`}
-          >
-            {createAsDraft ? (
-              <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="m4.5 10.5 3.4 3.4 7.6-8" />
-              </svg>
-            ) : null}
-            {createAsDraft ? 'Draft' : 'Save as draft'}
-          </button>
-        ) : null}
+        composerTopAction={
+          !draftChat.prompt ? (
+            <NewDroneTargetControls
+              createRuntime={createRuntime}
+              onCreateRuntimeChange={onCreateRuntimeChange}
+              repoPath={draftCreateRepoPath}
+              branchSource={repoBranchSource}
+              onBranchSourceChange={onRepoBranchSourceChange}
+              remoteBranch={repoCreateRemoteBranch}
+              onRemoteBranchChange={onRepoCreateRemoteBranchChange}
+              hostBranch={draftRepoHostBranch}
+              remoteBranches={draftRepoRemoteBranches}
+              branchesLoading={draftRepoBranchesLoading}
+              branchesError={draftRepoBranchesError}
+              disabled={controlsLocked}
+              actions={
+                <button
+                  type="button"
+                  aria-pressed={createAsDraft}
+                  onClick={() => onCreateAsDraftChange(!createAsDraft)}
+                  disabled={controlsLocked}
+                  title={
+                    createAsDraft
+                      ? 'This drone will be saved as a draft'
+                      : 'Save this drone as a draft'
+                  }
+                  className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[.625rem] font-[var(--weight-semibold)] uppercase tracking-[0.08em] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    createAsDraft
+                      ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                      : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] text-[var(--chat-composer-placeholder)] hover:border-[var(--border)] hover:text-[var(--chat-composer-control-fg)]'
+                  }`}
+                >
+                  {createAsDraft ? (
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 20 20"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="m4.5 10.5 3.4 3.4 7.6-8" />
+                    </svg>
+                  ) : null}
+                  {createAsDraft ? 'Draft' : 'Save as draft'}
+                </button>
+              }
+            />
+          ) : null
+        }
         composerFooter={!draftChat.prompt ? idleSetupPanel : null}
         onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
           if (!draftChat.prompt) {
             return await onStartDraftPrompt(payload, {
-              keepComposerOpen:
-                context.trigger === 'keyboard' && context.deliveryMode === 'queue',
+              keepComposerOpen: context.trigger === 'keyboard' && context.deliveryMode === 'queue',
               deliveryMode: context.deliveryMode,
             });
           }
           const droneId = String(draftChat.droneId ?? '').trim();
           if (!droneId) {
             if (!draftCreating) {
-              onSetDraftCreateError('Drone creation failed before it could be queued. Retry the first message.');
+              onSetDraftCreateError(
+                'Drone creation failed before it could be queued. Retry the first message.',
+              );
               return false;
             }
             const queued = onQueueDraftPromptDuringCreate(payload);

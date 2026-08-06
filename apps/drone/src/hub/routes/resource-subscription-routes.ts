@@ -86,6 +86,23 @@ export function registerResourceSubscriptionRoutes(
     }
   });
 
+  apiRouter.post('/api/resource-subscriptions/cron', async ({ readJson, json }) => {
+    try {
+      const current = availableService(json);
+      if (!current) return;
+      const body = await readJson<any>();
+      const result = await current.subscribeToCron({
+        subscriber: body?.subscriber,
+        expression: body?.expression,
+        timeZone: body?.timeZone,
+        intent: body?.intent,
+      });
+      json(result.created ? 201 : 200, { ok: true, ...result });
+    } catch (error) {
+      json(400, { ok: false, error: errorMessage(error) });
+    }
+  });
+
   apiRouter.patch(
     '/api/resource-subscriptions/:subscriptionId',
     async ({ params, readJson, json }) => {

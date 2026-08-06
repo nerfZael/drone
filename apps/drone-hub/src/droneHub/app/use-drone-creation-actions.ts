@@ -56,7 +56,6 @@ type UseDroneCreationActionsArgs = {
   creating: boolean;
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
-  pullHostBranchBeforeCreate: boolean;
   createRuntime: 'container' | 'host';
   createAsDraft: boolean;
   createPersistVolume: boolean;
@@ -84,7 +83,11 @@ type UseDroneCreationActionsArgs = {
     attachmentsRaw?: ChatSendPayload['attachments'],
   ) => { id: string } | null;
   requestJson: RequestJsonFn;
-  suggestAndRenameDraftDrone: (droneId: string, prompt: string) => Promise<void>;
+  suggestAndRenameDraftDrone: (
+    droneId: string,
+    prompt: string,
+    expectedName?: string,
+  ) => Promise<void>;
   rememberStartupSeed: (
     drones: Array<{ id: string; name: string }>,
     opts: {
@@ -138,7 +141,6 @@ export function useDroneCreationActions({
   creating,
   repoBranchSource,
   repoCreateRemoteBranch,
-  pullHostBranchBeforeCreate,
   createRuntime,
   createAsDraft,
   createPersistVolume,
@@ -275,7 +277,6 @@ export function useDroneCreationActions({
                 cloneChats: true,
               },
             ],
-            pullHostBranchBeforeCreate: false,
           }),
         });
         const acceptedList = Array.isArray(resp?.accepted) ? resp.accepted : [];
@@ -500,7 +501,6 @@ export function useDroneCreationActions({
             persistVolume,
             repoBranchSelection: {
               repoBranchSource: effectiveRepoBranchSource,
-              pullHostBranchBeforeCreate,
               remoteBranch,
             },
             seedAgent,
@@ -536,7 +536,6 @@ export function useDroneCreationActions({
             spawnApprovalPolicy: seedApprovalPolicy,
             repoBranchSource: effectiveRepoBranchSource,
             repoCreateRemoteBranch: remoteBranch,
-            pullHostBranchBeforeCreate,
           });
 
           if (optimisticSeeds.length > 0) {
@@ -614,7 +613,11 @@ export function useDroneCreationActions({
             const renameSourcePrompt = String(opts?.autoRenamePrompt ?? prompt ?? '').trim();
             if (renameSourcePrompt) {
               setDraftAutoRenaming(true);
-              void suggestAndRenameDraftDrone(droneId, renameSourcePrompt).finally(() => setDraftAutoRenaming(false));
+              void suggestAndRenameDraftDrone(
+                droneId,
+                renameSourcePrompt,
+                createdName,
+              ).finally(() => setDraftAutoRenaming(false));
             }
           }
 
@@ -685,7 +688,6 @@ export function useDroneCreationActions({
       addOptimisticStartupSeeds,
       clearOptimisticStartupSeeds,
       enqueueQueuedPrompt,
-      pullHostBranchBeforeCreate,
       repoBranchSource,
       repoCreateRemoteBranch,
       preferredSelectedDroneHoldUntilRef,

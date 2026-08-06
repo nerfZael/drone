@@ -4,6 +4,8 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { DroneWorkspaceHeaderFrame } from '../src/droneHub/app/DroneWorkspaceHeaderFrame';
+import { WorkspaceToolIcon } from '../src/droneHub/app/WorkspaceToolIcon';
+import { RIGHT_PANEL_TABS, rightPanelHeaderTabs } from '../src/droneHub/app/app-config';
 
 describe('DroneWorkspaceHeaderFrame', () => {
   test('keeps the compact header at its tighter fixed single-row height', () => {
@@ -26,19 +28,35 @@ describe('DroneWorkspaceHeaderFrame', () => {
     expect(source).toContain('dh-type-workspace-title !text-[.875rem]');
   });
 
-  test('groups workspace panel shortcuts into one tools menu', () => {
+  test('shows workspace panel shortcuts as an icon activity bar', () => {
     const source = readFileSync(
       new URL('../src/droneHub/app/SelectedDroneWorkspace.tsx', import.meta.url),
       'utf8',
     );
 
-    expect(source).toContain('<span>Tools</span>');
-    expect(source).toContain('aria-expanded={workspaceToolsMenuOpen}');
+    expect(source).not.toContain('<span>Tools</span>');
+    expect(source).toContain('aria-label="Workspace tools"');
+    expect(source).toContain("align={index === tabs.length - 1 ? 'end' : 'center'}");
     expect(source).toContain('contextMenuPanelBaseClass');
     expect(source).toContain('contextMenuItemBaseClass as dropdownMenuItemBaseClass');
-    expect(source).toContain('<WorkspaceToolIcon tab={tab} />');
-    expect(source).toContain('rightPanelHeaderTabs(rightPanelTabs).map((tab) =>');
+    expect(source).toContain("'relative !h-9 !w-9 !justify-center");
+    expect(source).toContain('<WorkspaceToolIcon tab={tab} className="h-[22px] w-[22px]" />');
+    expect(source).toContain('rightPanelHeaderTabs(rightPanelTabs).map((tab, index, tabs) =>');
+    expect(source).toContain('const open = visibleToolTabs.includes(tab)');
+    expect(source).toContain('aria-pressed={open}');
+    expect(source).toContain('onVisibleToolTabsChange={onVisibleToolTabsChange}');
+    expect(source).toContain("border-[var(--accent-border)] bg-[var(--accent-subtle)] !text-[var(--fg)]");
+    expect(source).not.toContain('shadow-[inset_0_-2px_0_var(--accent)]');
     expect(source).toContain("data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}");
+  });
+
+  test('uses a complete, optically consistent workspace icon set', () => {
+    for (const tab of rightPanelHeaderTabs(RIGHT_PANEL_TABS)) {
+      const html = renderToStaticMarkup(<WorkspaceToolIcon tab={tab} />);
+      expect(html).toContain(`data-workspace-tool-icon="${tab}"`);
+      expect(html).toContain('stroke-width="1.75"');
+      expect(html).toContain('width="22"');
+    }
   });
 
   test('uses context-menu icon slots for sync and action commands', () => {

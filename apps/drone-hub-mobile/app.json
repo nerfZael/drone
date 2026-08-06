@@ -25,7 +25,9 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Allow Drone Hub to record voice messages for transcription."
+          "microphonePermission": "Allow Drone Hub to record voice messages for transcription.",
+          "enableBackgroundRecording": true,
+          "enableBackgroundPlayback": false
         }
       ],
       [

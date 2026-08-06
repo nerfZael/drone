@@ -68,7 +68,6 @@ export const colors = {
   sidebarMutedDim: catppuccin.overlay2,
   sidebarDroneFg: catppuccin.subtext1,
   sidebarDroneActiveFg: catppuccin.text,
-  sidebarItemIcon: catppuccin.blue,
   sidebarSurfaceInset: 'rgba(205, 214, 244, 0.022)',
   sidebarHeaderBorder: 'rgba(69, 71, 90, 0.52)',
   selectionWash: 'rgba(147, 153, 178, 0.24)',

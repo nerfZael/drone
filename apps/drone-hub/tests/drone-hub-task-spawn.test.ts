@@ -15,7 +15,6 @@ describe('drone hub task spawn queue spec', () => {
         repoDefaults: {
           repoBranchSource: 'remote',
           repoCreateRemoteBranch: 'origin/main',
-          pullHostBranchBeforeCreate: false,
         },
       }),
     ).toEqual({
@@ -47,7 +46,6 @@ describe('drone hub task spawn queue spec', () => {
         repoDefaults: {
           repoBranchSource: 'remote',
           repoCreateRemoteBranch: 'origin/main',
-          pullHostBranchBeforeCreate: false,
         },
       }),
     ).toEqual({
@@ -56,7 +54,6 @@ describe('drone hub task spawn queue spec', () => {
       repoPath: '/work/repo',
       fleetParentId: 'dr-123',
       runtime: 'container',
-      pullHostBranchBeforeCreate: false,
       repoBranchSource: 'remote',
       remoteBranch: 'origin/main',
       seedChat: 'default',
@@ -80,14 +77,12 @@ describe('drone hub task spawn queue spec', () => {
         repoDefaults: {
           repoBranchSource: 'remote',
           repoCreateRemoteBranch: 'origin/main',
-          pullHostBranchBeforeCreate: true,
         },
       }),
     ).toEqual({
       name: 'Docs',
       fleetParentId: 'dr-123',
       runtime: 'container',
-      pullHostBranchBeforeCreate: true,
       repoBranchSource: 'host',
       seedChat: 'default',
       seedAgent: { kind: 'builtin', id: 'cursor' },

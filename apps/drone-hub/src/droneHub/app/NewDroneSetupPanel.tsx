@@ -1,14 +1,9 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import type {
-  AgentApprovalPolicy,
-  AgentPermissionMode,
-  ChatAgentConfig,
-} from '../../domain';
+import type { AgentApprovalPolicy, AgentPermissionMode, ChatAgentConfig } from '../../domain';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/components';
-import type { RepoRemoteBranchOption } from '../types';
-import type { CreateRuntime, RepoBranchSourceMode } from './drone-create-runtime';
-import { NewDroneTargetControls } from './NewDroneTargetControls';
+import type { CreateRuntime } from './drone-create-runtime';
+import { NewDroneAccessPicker } from './NewDroneAccessPicker';
 import { AgentsMdCreateSelector } from './AgentsMdCreateSelector';
 import { repoPathLabel } from './repo-path-label';
 import type { AgentsMdFileSummary } from './settings-types';
@@ -16,9 +11,6 @@ import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type NewDroneSetupPanelProps = {
   createRuntime: CreateRuntime;
-  onCreateRuntimeChange: (value: CreateRuntime) => void;
-  createPersistVolume: boolean;
-  onCreatePersistVolumeChange: (value: boolean) => void;
   spawnAgentPermissionMode: AgentPermissionMode;
   onSpawnAgentPermissionModeChange: (value: AgentPermissionMode) => void;
   spawnApprovalPolicy: AgentApprovalPolicy;
@@ -26,6 +18,10 @@ type NewDroneSetupPanelProps = {
   spawnAgentApprovalSupported: boolean;
   spawnAgentReadOnlySupported: boolean;
   spawnAgentConfig: ChatAgentConfig;
+  spawnAgentKey: string;
+  agentLabel: string;
+  spawnAgentMenuEntries: UiMenuSelectEntry[];
+  onSpawnAgentKeyChange: (value: string) => void;
   createRepoMenuEntries: UiMenuSelectEntry[];
   draftCreateRepoPath: string;
   agentsMdLibraryFiles: AgentsMdFileSummary[];
@@ -37,16 +33,11 @@ type NewDroneSetupPanelProps = {
   onDraftAgentsMdOverrideEnabledChange: (value: boolean) => void;
   draftAgentsMdOverride: string;
   onDraftAgentsMdOverrideChange: (value: string) => void;
-  repoBranchSource: RepoBranchSourceMode;
-  onRepoBranchSourceChange: (value: RepoBranchSourceMode) => void;
-  repoCreateRemoteBranch: string;
-  onRepoCreateRemoteBranchChange: (value: string) => void;
-  draftRepoHostBranch: string | null;
-  draftRepoRemoteBranches: RepoRemoteBranchOption[];
-  draftRepoBranchesLoading: boolean;
-  draftRepoBranchesError: string | null;
   controlsLocked: boolean;
 };
+
+const INLINE_TRIGGER_CLASS =
+  '!h-8 justify-start !gap-1 !border-transparent !bg-transparent px-2 text-[.6875rem] !font-medium normal-case tracking-normal !text-[var(--chat-composer-model-fg)] hover:!opacity-70';
 
 function ChevronIcon({ open }: { open: boolean }) {
   return (
@@ -67,29 +58,8 @@ function ChevronIcon({ open }: { open: boolean }) {
   );
 }
 
-function CheckIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="m4.5 10.5 3.4 3.4 7.6-8" />
-    </svg>
-  );
-}
-
 export function NewDroneSetupPanel({
   createRuntime,
-  onCreateRuntimeChange,
-  createPersistVolume,
-  onCreatePersistVolumeChange,
   spawnAgentPermissionMode,
   onSpawnAgentPermissionModeChange,
   spawnApprovalPolicy,
@@ -97,6 +67,10 @@ export function NewDroneSetupPanel({
   spawnAgentApprovalSupported,
   spawnAgentReadOnlySupported,
   spawnAgentConfig,
+  spawnAgentKey,
+  agentLabel,
+  spawnAgentMenuEntries,
+  onSpawnAgentKeyChange,
   createRepoMenuEntries,
   draftCreateRepoPath,
   agentsMdLibraryFiles,
@@ -108,14 +82,6 @@ export function NewDroneSetupPanel({
   onDraftAgentsMdOverrideEnabledChange,
   draftAgentsMdOverride,
   onDraftAgentsMdOverrideChange,
-  repoBranchSource,
-  onRepoBranchSourceChange,
-  repoCreateRemoteBranch,
-  onRepoCreateRemoteBranchChange,
-  draftRepoHostBranch,
-  draftRepoRemoteBranches,
-  draftRepoBranchesLoading,
-  draftRepoBranchesError,
   controlsLocked,
 }: NewDroneSetupPanelProps) {
   const [advancedOpen, setAdvancedOpen] = React.useState(
@@ -129,100 +95,80 @@ export function NewDroneSetupPanel({
   );
   const advancedPanelId = React.useId();
   const repositoryLabel = chatHeaderRepoPath ? repoPathLabel(chatHeaderRepoPath) : '';
-  const spawnAgentIsCodex =
-    spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex';
+  const spawnAgentIsCodex = spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex';
 
   return (
     <div className="px-1 pb-1">
-      <NewDroneTargetControls
-        createRuntime={createRuntime}
-        onCreateRuntimeChange={onCreateRuntimeChange}
-        repoPath={draftCreateRepoPath}
-        branchSource={repoBranchSource}
-        onBranchSourceChange={onRepoBranchSourceChange}
-        remoteBranch={repoCreateRemoteBranch}
-        onRemoteBranchChange={onRepoCreateRemoteBranchChange}
-        hostBranch={draftRepoHostBranch}
-        remoteBranches={draftRepoRemoteBranches}
-        branchesLoading={draftRepoBranchesLoading}
-        branchesError={draftRepoBranchesError}
-        permissionMode={spawnAgentPermissionMode}
-        onPermissionModeChange={onSpawnAgentPermissionModeChange}
-        approvalPolicy={spawnApprovalPolicy}
-        onApprovalPolicyChange={onSpawnApprovalPolicyChange}
-        readOnlySupported={spawnAgentReadOnlySupported}
-        approvalsSupported={spawnAgentApprovalSupported}
-        agentIsCodex={spawnAgentIsCodex}
-        disabled={controlsLocked}
-        actions={
-          <>
-            <button
-              type="button"
-              aria-expanded={advancedOpen}
-              aria-controls={advancedPanelId}
-              onClick={() => setAdvancedOpen((open) => !open)}
-              disabled={controlsLocked}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--chat-composer-control-radius)] px-2 text-[var(--text-10)] font-medium transition-colors hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40 ${
-                advancedOpen
-                  ? 'bg-[var(--surface-soft)] text-[var(--fg-secondary)]'
-                  : 'text-[var(--chat-composer-placeholder)] hover:text-[var(--chat-composer-control-fg)]'
-              }`}
-            >
-              <ChevronIcon open={advancedOpen} />
-              Advanced
-            </button>
-          </>
-        }
-      />
+      <div className="flex flex-wrap items-center gap-x-[.4375rem] gap-y-1.5">
+        <UiMenuSelect
+          variant="toolbar"
+          value={spawnAgentKey}
+          onValueChange={onSpawnAgentKeyChange}
+          entries={spawnAgentMenuEntries}
+          disabled={controlsLocked}
+          searchable
+          searchPlaceholder="Search agents"
+          title="Choose agent"
+          triggerLabel={agentLabel}
+          triggerClassName={`${INLINE_TRIGGER_CLASS} min-w-[7rem] max-w-[11.25rem]`}
+          panelClassName="bottom-full !mt-0 mb-1.5 w-[16.25rem]"
+          menuClassName="max-h-[15rem] overflow-y-auto"
+          header="Choose agent"
+        />
+
+        <NewDroneAccessPicker
+          permissionMode={spawnAgentPermissionMode}
+          onPermissionModeChange={onSpawnAgentPermissionModeChange}
+          approvalPolicy={spawnApprovalPolicy}
+          onApprovalPolicyChange={onSpawnApprovalPolicyChange}
+          readOnlySupported={spawnAgentReadOnlySupported}
+          approvalsSupported={spawnAgentApprovalSupported}
+          agentIsCodex={spawnAgentIsCodex}
+          disabled={controlsLocked}
+        />
+
+        <div className="ml-auto flex min-w-0 items-center gap-1.5">
+          <UiMenuSelect
+            variant="toolbar"
+            value={chatHeaderRepoPath}
+            onValueChange={setChatHeaderRepoPath}
+            entries={createRepoMenuEntries}
+            disabled={controlsLocked}
+            searchable
+            searchPlaceholder="Search repositories"
+            panelClassName="bottom-full !mt-0 mb-1.5 w-[18rem] max-w-[calc(100vw-3rem)]"
+            menuClassName="max-h-[240px] overflow-y-auto"
+            title={chatHeaderRepoPath || 'No repository'}
+            triggerLabel={repositoryLabel || 'No repository'}
+            triggerLabelClassName={
+              chatHeaderRepoPath ? 'font-mono text-[var(--text-11)]' : undefined
+            }
+            triggerClassName={`${INLINE_TRIGGER_CLASS} min-w-[6.5rem] max-w-[12rem]`}
+          />
+
+          <button
+            type="button"
+            aria-expanded={advancedOpen}
+            aria-controls={advancedPanelId}
+            onClick={() => setAdvancedOpen((open) => !open)}
+            disabled={controlsLocked}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--chat-composer-control-radius)] px-2 text-[var(--text-10)] font-medium transition-colors hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40 ${
+              advancedOpen
+                ? 'bg-[var(--surface-soft)] text-[var(--fg-secondary)]'
+                : 'text-[var(--chat-composer-placeholder)] hover:text-[var(--chat-composer-control-fg)]'
+            }`}
+          >
+            <ChevronIcon open={advancedOpen} />
+            Advanced
+          </button>
+        </div>
+      </div>
 
       {advancedOpen ? (
         <div
           id={advancedPanelId}
           className="mt-2 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 sm:p-4"
         >
-          <div className={`grid gap-4 ${createRuntime === 'container' ? 'sm:grid-cols-[18rem_auto]' : ''}`}>
-            <section className="w-full min-w-0 max-w-[18rem]">
-              <div className="mb-1.5 text-[var(--text-10)] font-[var(--weight-bold)] uppercase tracking-[0.1em] text-[var(--muted)]">
-                Repository
-              </div>
-              <UiMenuSelect
-                variant="form"
-                value={chatHeaderRepoPath}
-                onValueChange={setChatHeaderRepoPath}
-                entries={createRepoMenuEntries}
-                disabled={controlsLocked}
-                panelClassName="bottom-full !right-auto !mt-0 mb-1.5 w-[18rem] max-w-[calc(100vw-3rem)]"
-                menuClassName="max-h-[240px] overflow-y-auto"
-                title={chatHeaderRepoPath || 'No repository'}
-                triggerLabel={repositoryLabel || 'No repository'}
-                triggerLabelClassName={chatHeaderRepoPath ? 'font-mono text-[var(--text-11)]' : undefined}
-              />
-            </section>
-
-            {createRuntime === 'container' ? (
-              <section>
-                <div className="mb-1.5 text-[var(--text-10)] font-[var(--weight-bold)] uppercase tracking-[0.1em] text-[var(--muted)]">
-                  Storage
-                </div>
-                <button
-                  type="button"
-                  aria-pressed={createPersistVolume}
-                  onClick={() => onCreatePersistVolumeChange(!createPersistVolume)}
-                  disabled={controlsLocked}
-                  className={`mt-2 inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[var(--text-10)] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                    createPersistVolume
-                      ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg-secondary)]'
-                  }`}
-                  title="Keep /dvm-data between container rebuilds"
-                >
-                  {createPersistVolume ? <CheckIcon /> : null}
-                  Persistent volume
-                </button>
-              </section>
-            ) : null}
-          </div>
-
           <AgentsMdCreateSelector
             runtime={createRuntime}
             repoPath={draftCreateRepoPath}
@@ -237,7 +183,6 @@ export function NewDroneSetupPanel({
             onCustomOverrideChange={onDraftAgentsMdOverrideChange}
             disabled={controlsLocked}
             scopeLabel="this drone"
-            className="mt-4 border-t border-[var(--border-subtle)] pt-4"
           />
         </div>
       ) : null}

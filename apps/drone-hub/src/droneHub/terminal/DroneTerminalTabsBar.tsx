@@ -3,7 +3,6 @@ import {
   UiPanelToolbar,
   UiToolbarButton,
   UiToolbarGroup,
-  UiToolbarIconButton,
 } from '../../ui/components';
 import type { TerminalPaneSession } from './terminal-tabs-state';
 
@@ -27,9 +26,9 @@ export function DroneTerminalTabsBar({
   return (
     <UiPanelToolbar
       aria-label="Terminal sessions"
-      className="gap-2 bg-[var(--surface-softest)] py-1.5"
+      className="!min-h-7 !items-end !gap-1 !overflow-hidden bg-[var(--surface-softest)] !px-1.5 !pb-0 !pt-1"
     >
-      <div className="min-w-0 flex-1 flex items-center gap-1 overflow-x-auto pr-1">
+      <div className="min-w-0 flex-1 flex items-end gap-0.5 overflow-x-auto pr-0.5">
         {sessions.map((session) => {
           const active = session.id === activeSessionId;
           const busy = closingSessionId === session.id;
@@ -37,30 +36,48 @@ export function DroneTerminalTabsBar({
             <UiToolbarGroup
               key={session.id}
               label={`${session.title} terminal tab`}
-              className="min-w-0"
+              onMouseDown={(event) => {
+                if (event.button === 1) event.preventDefault();
+              }}
+              onAuxClick={(event) => {
+                if (event.button !== 1) return;
+                event.preventDefault();
+                event.stopPropagation();
+                onCloseSession(session.id);
+              }}
+              className={`group/terminal-tab min-w-0 gap-0 overflow-hidden rounded-t-md transition-colors ${
+                active
+                  ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+                  : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+              }`}
             >
               <UiToolbarButton
-                pressed={active}
-                tone="accent"
+                role="tab"
+                aria-selected={active}
+                size="xsmall"
                 onClick={() => onActivateSession(session.id)}
                 disabled={busy}
-                className="min-w-0 max-w-[180px]"
+                className="min-w-0 max-w-[160px] rounded-none !bg-transparent px-2 !text-current"
                 title={session.sessionName ? `${session.title} (${session.sessionName})` : `${session.title} (${session.cwd})`}
               >
                 {session.title}
               </UiToolbarButton>
-              <UiToolbarIconButton
-                label={busy ? `Closing ${session.title}` : `Close ${session.title}`}
-                icon={
-                  <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                    <path d="M4 4l8 8M12 4 4 12" />
-                  </svg>
-                }
+              <button
+                type="button"
+                aria-label={busy ? `Closing ${session.title}` : `Close ${session.title}`}
                 onClick={() => onCloseSession(session.id)}
                 disabled={busy}
-                size="xsmall"
+                className={`pointer-events-none inline-flex h-6 w-4 shrink-0 items-center justify-center rounded-none opacity-0 transition-[background-color,color,opacity] group-hover/terminal-tab:pointer-events-auto group-hover/terminal-tab:opacity-70 group-focus-within/terminal-tab:pointer-events-auto group-focus-within/terminal-tab:opacity-70 hover:!opacity-100 focus-visible:!opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40 ${
+                  active
+                    ? 'text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
+                    : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]'
+                }`}
                 title={busy ? 'Closing terminal…' : 'Kill terminal session and close tab'}
-              />
+              >
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                  <path d="M4 4l8 8M12 4 4 12" />
+                </svg>
+              </button>
             </UiToolbarGroup>
           );
         })}
@@ -69,16 +86,19 @@ export function DroneTerminalTabsBar({
             No terminals
           </div>
         ) : null}
+        <button
+          type="button"
+          aria-label="Open a new terminal tab"
+          onClick={onCreateSession}
+          disabled={disabled}
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-small)] text-[var(--accent)] transition-colors hover:bg-[var(--accent-subtle)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] disabled:cursor-not-allowed disabled:opacity-40"
+          title="Open a new terminal tab"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <path d="M8 3v10M3 8h10" />
+          </svg>
+        </button>
       </div>
-      <UiToolbarButton
-        onClick={onCreateSession}
-        disabled={disabled}
-        tone="accent"
-        leadingIcon={<span className="text-[var(--text-12)] leading-none">+</span>}
-        title="Open a new terminal tab"
-      >
-        New
-      </UiToolbarButton>
     </UiPanelToolbar>
   );
 }

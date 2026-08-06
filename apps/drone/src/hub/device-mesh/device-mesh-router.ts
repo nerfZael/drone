@@ -52,7 +52,14 @@ function isBulkTransferRequest(request: SignedCapabilityRequest): boolean {
     (request.operation === 'files.transfer.read' || request.operation === 'files.transfer.write')
   )
     return true;
-  if (request.capability === 'drone-control' && request.operation === 'file.preview') return true;
+  if (
+    request.capability === 'drone-control' &&
+    (request.operation === 'files.list' ||
+      request.operation === 'file.preview' ||
+      request.operation === 'file.write' ||
+      request.operation === 'file.action')
+  )
+    return true;
   return (
     request.capability === 'drone-control' &&
     request.operation === 'chat.prompt' &&
@@ -61,7 +68,10 @@ function isBulkTransferRequest(request: SignedCapabilityRequest): boolean {
 }
 
 export class DeviceMeshRouter {
-  private readonly server = new WebSocketServer({ noServer: true, maxPayload: MESH_MAX_MESSAGE_BYTES });
+  private readonly server = new WebSocketServer({
+    noServer: true,
+    maxPayload: MESH_MAX_MESSAGE_BYTES,
+  });
   private readonly connections = new Map<string, AuthenticatedSocket>();
   private readonly routes = new Map<
     string,
@@ -439,9 +449,7 @@ export class DeviceMeshRouter {
     const rateLimit = bulkTransfer ? 600 : 120;
     const rateMap = bulkTransfer ? this.bulkRequestTimes : this.requestTimes;
     const rateKey = connection.peerDeviceId;
-    const recent = (rateMap.get(rateKey) ?? []).filter(
-      (time) => time > Date.now() - 60_000,
-    );
+    const recent = (rateMap.get(rateKey) ?? []).filter((time) => time > Date.now() - 60_000);
     if (recent.length >= rateLimit) {
       send(
         connection.ws,
@@ -508,11 +516,7 @@ export class DeviceMeshRouter {
         this.routes.delete(routeKey);
         send(
           connection.ws,
-          this.errorResponse(
-            request,
-            'REQUEST_TOO_LARGE',
-            'mesh request is too large to forward',
-          ),
+          this.errorResponse(request, 'REQUEST_TOO_LARGE', 'mesh request is too large to forward'),
         );
       }
       return;

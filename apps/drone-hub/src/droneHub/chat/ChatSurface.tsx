@@ -116,7 +116,6 @@ export function ChatSurfaceLoadingView({
         onDraftValueChange={onDraftValueChange}
         focusTargetId={focusTargetId}
         promptError={null}
-        sending={false}
         waiting={false}
         disabled
         onSend={async () => false}

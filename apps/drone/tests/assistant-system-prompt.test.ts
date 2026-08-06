@@ -98,7 +98,18 @@ describe('assistant system prompt settings', () => {
   test('advertises the complete grouped tool catalog without legacy aliases', () => {
     const names = ASSISTANT_TOOL_SUMMARIES.map((tool) => tool.name);
     for (const name of ['list_targets', 'set_target', 'get_working_tree_status', 'delete_file', 'create_directory', 'delete_directory', 'move_path']) expect(names).toContain(name);
-    for (const name of ['assistant_files', 'find_files', 'list_changed_files', 'message_drone', 'read_chat_messages', 'get_current_context']) expect(names).not.toContain(name);
+    for (const name of [
+      'assistant_files',
+      'find_files',
+      'list_changed_files',
+      'message_drone',
+      'read_chat_messages',
+      'get_current_context',
+      'subscribe_to_any_chat_idle',
+      'subscribe_to_all_chats_idle',
+      'list_chat_idle_subscriptions',
+      'cancel_chat_idle_subscription',
+    ]) expect(names).not.toContain(name);
     expect(ASSISTANT_TOOL_SUMMARIES.find((tool) => tool.name === 'send_message')?.group).toEqual({ kind: 'mcp', id: 'drone-hub', label: 'Drone Hub' });
     expect(ASSISTANT_TOOL_SUMMARIES.find((tool) => tool.name === 'read_file')?.group).toBeUndefined();
   });
@@ -322,13 +333,34 @@ describe('assistant system prompt settings', () => {
     });
   });
 
-  test('migrates legacy artifact, changed-file, and MCP toggle aliases', async () => {
+  test('migrates legacy artifact, changed-file, MCP, and idle subscription aliases', async () => {
     await withTempDroneDataDir('assistant-legacy-tool-settings-', async () => {
       const service = makeAssistantService();
       const created = await ensureTestNativeChat(service, { chatName: 'legacy tools' });
-      const updated = await service.updateThread(created.chatId, { enabledTools: ['assistant_files', 'list_changed_files', 'message_drone', 'read_chat_messages'] });
+      const updated = await service.updateThread(created.chatId, {
+        enabledTools: [
+          'assistant_files',
+          'list_changed_files',
+          'message_drone',
+          'read_chat_messages',
+          'subscribe_to_all_chats_idle',
+          'subscribe_to_any_chat_idle',
+          'list_chat_idle_subscriptions',
+          'cancel_chat_idle_subscription',
+        ],
+      });
       const thread = updated.threads[0] as any;
-      expect(thread.enabledTools).toEqual(['list_targets', 'set_target', 'get_working_tree_status', 'send_message', 'list_chats', 'read_chat']);
+      expect(thread.enabledTools).toEqual([
+        'list_targets',
+        'set_target',
+        'get_working_tree_status',
+        'send_message',
+        'list_chats',
+        'read_chat',
+        'subscribe_to_resource_events',
+        'list_resource_subscriptions',
+        'cancel_resource_subscription',
+      ]);
     });
   });
 

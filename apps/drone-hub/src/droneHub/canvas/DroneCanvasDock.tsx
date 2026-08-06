@@ -355,8 +355,6 @@ export function DroneCanvasDock({
   onCreateRepoPathChange,
   createGroup,
   onCreateGroupChange,
-  pullHostBranchBeforeCreate,
-  onPullHostBranchBeforeCreateChange,
 }: {
   droneById: Record<string, DroneSummary>;
   droneNameById: Record<string, string>;
@@ -385,7 +383,6 @@ export function DroneCanvasDock({
       model: string;
       repoPath: string;
       group: string;
-      pullHostBranchBeforeCreate: boolean;
     };
   }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
   onRenameChat?: (
@@ -412,8 +409,6 @@ export function DroneCanvasDock({
   onCreateRepoPathChange: (next: string) => void;
   createGroup: string;
   onCreateGroupChange: (next: string) => void;
-  pullHostBranchBeforeCreate: boolean;
-  onPullHostBranchBeforeCreateChange: (next: boolean) => void;
 }) {
   const {
     nodesByDroneId,
@@ -1332,7 +1327,6 @@ export function DroneCanvasDock({
                     model: normalizedSpawnModel,
                     repoPath: normalizedCreateRepoPath,
                     group: normalizedCreateGroup,
-                    pullHostBranchBeforeCreate: pullHostBranchBeforeCreate === true,
                   },
                 });
                 if (result.ok && String(result.droneId ?? '').trim()) {
@@ -1470,7 +1464,6 @@ export function DroneCanvasDock({
     normalizedSpawnModel,
     onCreateCanvasDroneFromDraft,
     onSendCanvasPrompt,
-    pullHostBranchBeforeCreate,
     panning,
     removeDraftNodeIfEmpty,
     replaceNodeId,
@@ -2056,16 +2049,6 @@ export function DroneCanvasDock({
                 Clear
               </UiToolbarButton>
             </div>
-            <UiToolbarButton
-              pressed={pullHostBranchBeforeCreate}
-              onClick={() =>
-                onPullHostBranchBeforeCreateChange(!pullHostBranchBeforeCreate)
-              }
-              disabled={controlsDisabled}
-              title="Before creating a repo-attached drone, run a host git pull --ff-only on the current branch."
-            >
-              Pull host branch
-            </UiToolbarButton>
           </UiPanelToolbar>
         ) : null}
 

@@ -73,19 +73,6 @@ describe('multi-chat drone disclosure', () => {
     expect(source).toContain('sidebarChatSidebarNodeId(droneId, selectedChatName)');
   });
 
-  test('keeps the legacy desktop tree aligned with the grouped interaction', () => {
-    const source = readFileSync(
-      new URL('../src/droneHub/app/SidebarDroneTreeList.tsx', import.meta.url),
-      'utf8',
-    );
-
-    expect(source).toContain('if (hasChatSection) {\n              onToggleChatSection(drone.id);');
-    expect(source).toContain(
-      'disclosureExpanded={hasChatSection ? chatSectionExpanded : undefined}',
-    );
-    expect(source).toContain('(hasChatSection && chatSectionExpanded)');
-  });
-
   test('uses the same parent-only disclosure interaction in read-only desktop trees', () => {
     const source = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
@@ -96,9 +83,19 @@ describe('multi-chat drone disclosure', () => {
     expect(source.match(/onSelectDroneContainer\(drone(?:Id|\.id)\);/g)).toHaveLength(2);
     expect(source).toContain('const showChatRows = hasChatSection && chatSectionExpanded;');
     expect(source).toContain('{hasChatSection && chatSectionExpanded ? (');
+    const containerSelectionStart = source.indexOf('const selectGroupedDroneContainer');
+    const containerSelectionEnd = source.indexOf(
+      'const focusGroupedDroneChat',
+      containerSelectionStart,
+    );
+    const containerSelectionSource = source.slice(
+      containerSelectionStart,
+      containerSelectionEnd,
+    );
+    expect(containerSelectionSource).not.toContain('onSetDroneSelectionFromFolder');
   });
 
-  test('exposes the disclosure state accessibly without adding a drone icon', () => {
+  test('exposes the disclosure state accessibly with the shared runtime icon', () => {
     const source = readFileSync(
       new URL('../src/droneHub/overview/DroneCard.tsx', import.meta.url),
       'utf8',
@@ -106,9 +103,16 @@ describe('multi-chat drone disclosure', () => {
 
     expect(source).toContain('aria-expanded={disclosureExpanded}');
     expect(source).toContain(
-      'className={`flex-shrink-0 ${densityClasses.folderChevron}`}',
+      'data-sidebar-disclosure-slot="true"',
     );
-    expect(source).toContain('<IconContainer');
+    expect(source).toContain(
+      'className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center leading-none"',
+    );
+    expect(source).toContain(
+      'className={`max-w-none flex-shrink-0 !translate-x-0 ${densityClasses.folderChevron}`}',
+    );
+    expect(source).toContain('<DroneRuntimeIcon');
+    expect(source).toContain('droneRuntimeIconToneClass(runtime)');
     expect(source).toContain('const chatNames = normalizedDroneChats(drone);');
     expect(source).not.toContain('data-sidebar-drone-spine');
     expect(source).toContain("typeof disclosureExpanded === 'boolean' ? null : isDraftDrone ? (");

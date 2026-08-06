@@ -86,8 +86,6 @@ function createDroneProvisioningServiceHandler(
     fileExists,
     findDroneEntryByIdentity,
     findDroneIdByRef,
-    formatPullHostBranchBeforeCreateError,
-    gitPullHostBranchBeforeCreate,
     gitResolveRemoteBranchForCreate,
     getDroneRegistrySseLastSnapshot,
     isSafePromptId,
@@ -108,7 +106,6 @@ function createDroneProvisioningServiceHandler(
     parseCreateRuntime,
     parseDraftFlag,
     parsePersistVolume,
-    parsePullHostBranchBeforeCreate,
     parseRemoteBranchName,
     parseRepoBranchSourceMode,
     parseSeedAgent,
@@ -166,9 +163,6 @@ function createDroneProvisioningServiceHandler(
           return;
         }
         let remoteBranch = parseRemoteBranchName(body?.remoteBranch);
-        const pullHostBranchBeforeCreate = parsePullHostBranchBeforeCreate(
-          body?.pullHostBranchBeforeCreate,
-        );
         const build = body?.build === true;
         const containerPortRaw = body?.containerPort;
         let runtime: DroneRuntime = 'container';
@@ -430,25 +424,6 @@ function createDroneProvisioningServiceHandler(
           });
           return;
         }
-        if (repoPath && pullHostBranchBeforeCreate && !cloneFrom) {
-          if (repoBranchSource === 'remote') {
-            // Ignore pull preference for remote-branch seeding.
-          } else {
-            try {
-              const pulled = await gitPullHostBranchBeforeCreate(repoPath);
-              repoPath = pulled.repoRoot;
-            } catch (e: any) {
-              const pullError = formatPullHostBranchBeforeCreateError(e);
-              json(res, pullError.status, {
-                ok: false,
-                error: `Failed to pull host branch before creating drone: ${pullError.message}`,
-                code: 'host_branch_pull_before_create_failed',
-                reason: pullError.reason,
-              });
-              return;
-            }
-          }
-        }
         if (repoPath && repoBranchSource === 'remote' && !cloneFrom) {
           if (!remoteBranch) {
             json(res, 400, {
@@ -636,27 +611,18 @@ function createDroneProvisioningServiceHandler(
           return;
         }
 
-        const defaultPullHostBranchBeforeCreate = parsePullHostBranchBeforeCreate(
-          body?.pullHostBranchBeforeCreate,
-        );
         const preflightByIndex: Array<{
           repoPath: string;
           repoBranchSource: RepoBranchSourceMode;
           remoteBranch: string;
-          pullError: string | null;
-          pullStatus?: number;
+          error: string | null;
+          status?: number;
         }> = Array.from({ length: list.length }, () => ({
           repoPath: '',
           repoBranchSource: 'host',
           remoteBranch: '',
-          pullError: null,
+          error: null,
         }));
-        const pullByRepoPath = new Map<
-          string,
-          Promise<{
-            repoRoot: string;
-          }>
-        >();
         for (const [index, raw] of list.entries()) {
           const repoRaw = typeof raw?.repoPath === 'string' ? raw.repoPath.trim() : '';
           const repoPath = repoRaw ? repoRaw : '';
@@ -669,8 +635,8 @@ function createDroneProvisioningServiceHandler(
               repoPath,
               repoBranchSource: 'host',
               remoteBranch: '',
-              pullError: e?.message ?? String(e),
-              pullStatus: 400,
+              error: e?.message ?? String(e),
+              status: 400,
             };
             continue;
           }
@@ -682,24 +648,18 @@ function createDroneProvisioningServiceHandler(
               repoPath,
               repoBranchSource: 'host',
               remoteBranch: '',
-              pullError: e?.message ?? String(e),
-              pullStatus: 400,
+              error: e?.message ?? String(e),
+              status: 400,
             };
             continue;
           }
           let remoteBranch = parseRemoteBranchName(raw?.remoteBranch);
-          const hasPullOverride =
-            Boolean(raw) && Object.prototype.hasOwnProperty.call(raw, 'pullHostBranchBeforeCreate');
-          const shouldPullHostBranchBeforeCreate = hasPullOverride
-            ? parsePullHostBranchBeforeCreate(raw?.pullHostBranchBeforeCreate)
-            : defaultPullHostBranchBeforeCreate;
-
           if (!repoPath || cloneFromRaw) {
             preflightByIndex[index] = {
               repoPath,
               repoBranchSource,
               remoteBranch,
-              pullError: null,
+              error: null,
             };
             continue;
           }
@@ -709,8 +669,8 @@ function createDroneProvisioningServiceHandler(
               repoPath,
               repoBranchSource,
               remoteBranch,
-              pullError: 'remote branch checkout is only available for container runtime drones',
-              pullStatus: 409,
+              error: 'remote branch checkout is only available for container runtime drones',
+              status: 409,
             };
             continue;
           }
@@ -721,8 +681,8 @@ function createDroneProvisioningServiceHandler(
                 repoPath,
                 repoBranchSource,
                 remoteBranch,
-                pullError: 'missing remoteBranch for repoBranchSource=remote',
-                pullStatus: 400,
+                error: 'missing remoteBranch for repoBranchSource=remote',
+                status: 400,
               };
               continue;
             }
@@ -732,55 +692,26 @@ function createDroneProvisioningServiceHandler(
                 repoPath: resolvedRemote.repoRoot,
                 repoBranchSource,
                 remoteBranch: resolvedRemote.remoteBranch,
-                pullError: null,
+                error: null,
               };
             } catch (e: any) {
               preflightByIndex[index] = {
                 repoPath,
                 repoBranchSource,
                 remoteBranch,
-                pullError: e?.message ?? String(e),
-                pullStatus: 409,
+                error: e?.message ?? String(e),
+                status: 409,
               };
             }
             continue;
           }
 
-          if (!shouldPullHostBranchBeforeCreate) {
-            preflightByIndex[index] = {
-              repoPath,
-              repoBranchSource,
-              remoteBranch,
-              pullError: null,
-            };
-            continue;
-          }
-
-          let pullPromise = pullByRepoPath.get(repoPath);
-          if (!pullPromise) {
-            pullPromise = gitPullHostBranchBeforeCreate(repoPath) as Promise<{
-              repoRoot: string;
-            }>;
-            pullByRepoPath.set(repoPath, pullPromise);
-          }
-          try {
-            const pulled = await pullPromise;
-            preflightByIndex[index] = {
-              repoPath: pulled.repoRoot,
-              repoBranchSource,
-              remoteBranch,
-              pullError: null,
-            };
-          } catch (e: any) {
-            const pullError = formatPullHostBranchBeforeCreateError(e);
-            preflightByIndex[index] = {
-              repoPath,
-              repoBranchSource,
-              remoteBranch,
-              pullError: `Failed to pull host branch before creating drone: ${pullError.message}`,
-              pullStatus: pullError.status,
-            };
-          }
+          preflightByIndex[index] = {
+            repoPath,
+            repoBranchSource,
+            remoteBranch,
+            error: null,
+          };
         }
 
         let accepted: Array<{
@@ -860,14 +791,14 @@ function createDroneProvisioningServiceHandler(
                 repoPath: '',
                 repoBranchSource: 'host' as const,
                 remoteBranch: '',
-                pullError: null,
-                pullStatus: undefined,
+                error: null,
+                status: undefined,
               };
-              if (preflight.pullError) {
+              if (preflight.error) {
                 rejected.push({
                   name,
-                  error: preflight.pullError,
-                  status: preflight.pullStatus ?? 409,
+                  error: preflight.error,
+                  status: preflight.status ?? 409,
                 });
                 continue;
               }

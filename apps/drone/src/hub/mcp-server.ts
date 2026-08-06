@@ -18,8 +18,10 @@ import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameS
 import { McpIdleSubscriptionStore } from './assistant/mcp-idle-subscription-store';
 import { GROQ_SPEECH_MAX_CHARS, GROQ_SPEECH_VOICES } from './groq-speech';
 import { droneSummary } from './mcp-summaries';
+import { placeMcpRepoScopedGroupNodeAtTop } from './mcp-sidebar-group-order';
 import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
 import { isWorkflowChildDroneEntry } from './workflows/workflow-child-drone-metadata';
+import type { RenameDroneCommand } from './drone-rename-command';
 import {
   WORKFLOW_DRONE_DEFAULTED_TOOL_NAMES,
   WORKFLOW_MCP_TOOL_NAMES,
@@ -238,6 +240,25 @@ async function requestJson(pathname: string, init: RequestInit = {}, timeoutMs =
   } finally {
     clearTimeout(timer);
   }
+}
+
+function localMachineTimeZone(): string {
+  try {
+    return new Intl.DateTimeFormat('en-US').resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+async function defaultCronTimeZone(): Promise<string> {
+  try {
+    const response = await requestJson('/api/settings/user-context', { method: 'GET' });
+    const timeZone = cleanString(response?.userContext?.timeZone);
+    if (timeZone) return timeZone;
+  } catch {
+    // Standalone MCP clients may connect to an older or temporarily unavailable Hub.
+  }
+  return localMachineTimeZone();
 }
 
 function toolResult(data: Record<string, unknown>): any {
@@ -589,7 +610,6 @@ function normalizeUiPreferences(value: unknown) {
     spawnModel: cleanString(raw.spawnModel),
     repoBranchSource: normalizeRepoBranchSource(raw.repoBranchSource, 'host'),
     repoCreateRemoteBranch: cleanString(raw.repoCreateRemoteBranch),
-    pullHostBranchBeforeCreate: typeof raw.pullHostBranchBeforeCreate === 'boolean' ? raw.pullHostBranchBeforeCreate : true,
     spawnContextByRepoKey: raw.spawnContextByRepoKey && typeof raw.spawnContextByRepoKey === 'object' && !Array.isArray(raw.spawnContextByRepoKey)
       ? raw.spawnContextByRepoKey
       : {},
@@ -738,15 +758,40 @@ function insertGroupTokenAtParentTop(
 
 async function readUiPreferences() {
   const response = await requestJson('/api/settings/ui-preferences', { method: 'GET' });
+  return {
+    uiPreferences: normalizeUiPreferences(response?.uiPreferences),
+    version:
+      Number.isSafeInteger(response?.version) && Number(response.version) > 0
+        ? Number(response.version)
+        : response?.version === null
+          ? null
+          : undefined,
+  };
+}
+
+async function writeUiPreferences(uiPreferences: unknown, expectedVersion?: number | null) {
+  const response = await requestJson('/api/settings/ui-preferences', {
+    method: 'POST',
+    body: JSON.stringify({
+      uiPreferences: normalizeUiPreferences(uiPreferences),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+    }),
+  });
   return normalizeUiPreferences(response?.uiPreferences);
 }
 
-async function writeUiPreferences(uiPreferences: unknown) {
-  const response = await requestJson('/api/settings/ui-preferences', {
-    method: 'POST',
-    body: JSON.stringify({ uiPreferences: normalizeUiPreferences(uiPreferences) }),
-  });
-  return normalizeUiPreferences(response?.uiPreferences);
+async function updateUiPreferences(
+  update: (current: ReturnType<typeof normalizeUiPreferences>) => ReturnType<typeof normalizeUiPreferences>,
+) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const current = await readUiPreferences();
+    try {
+      return await writeUiPreferences(update(current.uiPreferences), current.version);
+    } catch (error: any) {
+      if (error?.status !== 409 || attempt === 3) throw error;
+    }
+  }
+  throw new Error('Failed to update UI preferences');
 }
 
 async function listGroups(repoPath?: string): Promise<McpGroupSummary[]> {
@@ -770,14 +815,31 @@ async function insertNewGroupsAtParentTop(
     ? !beforeIds.has(group.id)
     : !beforeScopesAndNames.has(`${group.repoPath}\0${group.name}`));
   if (newGroups.length === 0) return { updated: false, groups: targetGroups };
-  const uiPreferences = await readUiPreferences();
-  let sidebarGroupOrder = uiPreferences.sidebarGroupOrder;
-  for (const group of newGroups) {
-    sidebarGroupOrder = insertGroupTokenAtParentTop(sidebarGroupOrder, afterGroups, group);
-  }
-  const saved = await writeUiPreferences({
-    ...uiPreferences,
-    sidebarGroupOrder,
+  const droneResponse = await requestDroneSummaries();
+  const sidebarDrones = Array.isArray(droneResponse?.drones)
+    ? droneResponse.drones
+        .filter((drone: any) => !isWorkflowChildDroneEntry(drone))
+        .map(droneSummary)
+    : [];
+  const saved = await updateUiPreferences((uiPreferences) => {
+    let sidebarGroupOrder = uiPreferences.sidebarGroupOrder;
+    let sidebarNodeOrderByParent = uiPreferences.sidebarNodeOrderByParent;
+    for (const group of newGroups) {
+      sidebarGroupOrder = insertGroupTokenAtParentTop(sidebarGroupOrder, afterGroups, group);
+      sidebarNodeOrderByParent = placeMcpRepoScopedGroupNodeAtTop({
+        nodeOrderByParent: sidebarNodeOrderByParent,
+        groupOrder: sidebarGroupOrder,
+        droneOrderByGroup: uiPreferences.sidebarDroneOrderByGroup,
+        groups: afterGroups,
+        drones: sidebarDrones,
+        group,
+      });
+    }
+    return {
+      ...uiPreferences,
+      sidebarGroupOrder,
+      sidebarNodeOrderByParent,
+    };
   });
   return { updated: true, groups: targetGroups, sidebarGroupOrder: saved.sidebarGroupOrder };
 }
@@ -843,33 +905,34 @@ async function reorderDronesInUiPreferences(args: any) {
   const beforeId = beforeDrone?.id || '';
   const afterId = afterDrone?.id || '';
   const groupOrderKey = groupRecord ? sidebarGroupOrderToken(groupRecord) : sidebarGroupOrderToken(effectiveGroupName);
-  const uiPreferences = await readUiPreferences();
   const repoGroupPath = `repo:${requestedRepoPath}`;
-  const parentId = uiPreferences.sidebarGroupingMode === 'repos'
-    ? effectiveGroupName === 'Ungrouped'
-      ? sidebarFolderNodeId(repoGroupPath)
-      : sidebarFolderNodeId(`repo-scope:${repoGroupPath}:${effectiveGroupName}`)
-    : effectiveGroupName === 'Ungrouped'
-      ? 'root'
-      : sidebarFolderNodeId(effectiveGroupName);
-  const nextUiPreferences = {
-    ...uiPreferences,
-    sidebarDroneOrderByGroup: {
-      ...uiPreferences.sidebarDroneOrderByGroup,
-      [groupOrderKey]: reorderVisibleEntries(uiPreferences.sidebarDroneOrderByGroup[groupOrderKey] ?? [], scopeIds, movingIds, beforeId, afterId),
-    },
-    sidebarNodeOrderByParent: {
-      ...uiPreferences.sidebarNodeOrderByParent,
-      [parentId]: reorderVisibleEntries(
-        uiPreferences.sidebarNodeOrderByParent[parentId] ?? [],
-        scopeIds.map(sidebarDroneNodeId),
-        movingIds.map(sidebarDroneNodeId),
-        beforeId ? sidebarDroneNodeId(beforeId) : '',
-        afterId ? sidebarDroneNodeId(afterId) : '',
-      ),
-    },
-  };
-  const saved = await writeUiPreferences(nextUiPreferences);
+  let parentId = '';
+  const saved = await updateUiPreferences((uiPreferences) => {
+    parentId = uiPreferences.sidebarGroupingMode === 'repos'
+      ? effectiveGroupName === 'Ungrouped'
+        ? sidebarFolderNodeId(repoGroupPath)
+        : sidebarFolderNodeId(`repo-scope:${repoGroupPath}:${effectiveGroupName}`)
+      : effectiveGroupName === 'Ungrouped'
+        ? 'root'
+        : sidebarFolderNodeId(effectiveGroupName);
+    return {
+      ...uiPreferences,
+      sidebarDroneOrderByGroup: {
+        ...uiPreferences.sidebarDroneOrderByGroup,
+        [groupOrderKey]: reorderVisibleEntries(uiPreferences.sidebarDroneOrderByGroup[groupOrderKey] ?? [], scopeIds, movingIds, beforeId, afterId),
+      },
+      sidebarNodeOrderByParent: {
+        ...uiPreferences.sidebarNodeOrderByParent,
+        [parentId]: reorderVisibleEntries(
+          uiPreferences.sidebarNodeOrderByParent[parentId] ?? [],
+          scopeIds.map(sidebarDroneNodeId),
+          movingIds.map(sidebarDroneNodeId),
+          beforeId ? sidebarDroneNodeId(beforeId) : '',
+          afterId ? sidebarDroneNodeId(afterId) : '',
+        ),
+      },
+    };
+  });
   return {
     ok: true,
     group: effectiveGroupName,
@@ -1123,7 +1186,6 @@ async function createDronePreferences(repoPath = '') {
       spawnModel: cleanString(merged.spawnModel),
       repoBranchSource: normalizeRepoBranchSource(merged.repoBranchSource, 'host'),
       repoCreateRemoteBranch: cleanString(merged.repoCreateRemoteBranch),
-      pullHostBranchBeforeCreate: typeof merged.pullHostBranchBeforeCreate === 'boolean' ? merged.pullHostBranchBeforeCreate : true,
       source: response?.updatedAt ? 'drone_hub_ui_preferences' : 'default',
       updatedAt: cleanIsoTimestamp(response?.updatedAt),
     };
@@ -1133,7 +1195,6 @@ async function createDronePreferences(repoPath = '') {
       spawnModel: '',
       repoBranchSource: 'host' as const,
       repoCreateRemoteBranch: '',
-      pullHostBranchBeforeCreate: true,
       source: 'default',
       updatedAt: null,
       warning: error?.message || String(error),
@@ -1157,8 +1218,10 @@ function agentFromPreferenceKey(value: string) {
 type McpToolRegistrationContext = {
   principal: McpTokenIdentity;
   nativeThreadId?: string;
+  legacyIdleSubscriptionTools?: boolean;
   speechEnabled?: boolean;
   onSpeechToolRegistered?: (tool: RegisteredTool) => void;
+  renameDrone?: RenameDroneCommand;
 };
 
 function chatPrincipal(
@@ -1177,6 +1240,64 @@ function subscriptionSubscriber(context: McpToolRegistrationContext) {
     droneId: principal.droneId,
     chatName: principal.chatName,
   };
+}
+
+async function subscribeChatPrincipalToIdleTargets(
+  context: McpToolRegistrationContext,
+  mode: 'any' | 'all',
+  args: any,
+) {
+  const targets = normalizeIdleTargets(args);
+  if (targets.length === 0) throw new Error('targets are required');
+  const subscriber = subscriptionSubscriber(context);
+  const resources = await Promise.all(
+    targets.map(async (target) => {
+      const response = await requestJson(
+        `/api/drones/${encodeURIComponent(target.drone)}/chats`,
+        { method: 'GET' },
+      );
+      const chat = (Array.isArray(response?.chatDetails) ? response.chatDetails : []).find(
+        (item: any) => cleanString(item?.chat ?? item?.name) === target.chat,
+      );
+      const resourceId = cleanString(chat?.chatId);
+      if (!resourceId) throw new Error(`unknown chat: ${target.drone}/${target.chat}`);
+      await authorizeChatSubscriptionResource(context, resourceId);
+      const droneName = cleanString(response?.name, target.drone);
+      const chatCount = Array.isArray(response?.chats) ? response.chats.length : 0;
+      const targetLabel =
+        target.chat === 'default' && chatCount === 1
+          ? droneName
+          : `${droneName}/${target.chat}`;
+      return { ...target, resourceId, targetLabel };
+    }),
+  );
+  const targetLabels = resources.map((target) => target.targetLabel).join(', ');
+  const intent = (
+    mode === 'all'
+      ? `Wait for all requested chats to finish before completing the follow-up. Inspect every target after each event and continue waiting while any target is still running. Targets: ${targetLabels}`
+      : `Resume the requested follow-up when any target finishes. Targets: ${targetLabels}`
+  ).slice(0, 2_000);
+  const subscriptions = await Promise.all(
+    resources.map(async (target) => {
+      const response = await requestJson('/api/resource-subscriptions', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider: 'drone-hub',
+          resourceType: 'chat',
+          resourceId: target.resourceId,
+          events: ['chat.idle', 'chat.failed'],
+          intent,
+          subscriber,
+        }),
+      });
+      return {
+        target: { drone: target.drone, chat: target.chat },
+        created: response?.created === true,
+        subscription: mcpSubscription(response?.subscription),
+      };
+    }),
+  );
+  return { ok: true, mode, subscriptions };
 }
 
 function mcpSubscription(value: any): any {
@@ -1458,17 +1579,27 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
   }, async (args) => {
     const renames = normalizeRenameRequests(args);
     if (renames.length === 0) throw new Error('at least one drone and newName are required');
-    const resolved = await resolveDroneRefs(renames.map((item: { drone: string }) => item.drone));
+    const resolved = context.renameDrone
+      ? null
+      : await resolveDroneRefs(renames.map((item: { drone: string }) => item.drone));
     const renamed = [];
     const rejected = [];
     for (let index = 0; index < renames.length; index += 1) {
       const request = renames[index];
-      const target = resolved[index];
       try {
-        const response = await requestJson(`/api/drones/${encodeURIComponent(target.id)}/rename`, {
-          method: 'POST',
-          body: JSON.stringify({ newName: request.newName, source: 'drone-hub-mcp' }),
-        });
+        const response = context.renameDrone
+          ? await context.renameDrone({
+              droneRef: request.drone,
+              newName: request.newName,
+              source: 'drone-hub-mcp',
+            })
+          : await requestJson(
+              `/api/drones/${encodeURIComponent(resolved![index].id)}/rename`,
+              {
+                method: 'POST',
+                body: JSON.stringify({ newName: request.newName, source: 'drone-hub-mcp' }),
+              },
+            );
         renamed.push(response);
       } catch (error: any) {
         rejected.push({ drone: request.drone, newName: request.newName, error: error?.message || String(error) });
@@ -1705,7 +1836,6 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       repoPath: z.string().optional(),
       repoBranchSource: z.enum(['host', 'remote']).optional(),
       remoteBranch: z.string().optional(),
-      pullHostBranchBeforeCreate: z.boolean().optional(),
       agentsMd: z
         .string()
         .describe(
@@ -1746,7 +1876,6 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       ...(seedModel ? { seedModel } : {}),
       ...(cleanString(args.cwd) ? { cwd: cleanString(args.cwd) } : {}),
       ...(repoPath ? { repoPath, repoBranchSource } : {}),
-      ...(repoPath && repoBranchSource === 'host' ? { pullHostBranchBeforeCreate: args.pullHostBranchBeforeCreate ?? defaults.pullHostBranchBeforeCreate } : {}),
       ...(repoPath && repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
       ...(args.agentsMd !== undefined ? { agentsMd: args.agentsMd } : {}),
       ...(cleanString(args.initialMessage) ? { seedPrompt: cleanString(args.initialMessage), seedSubmittedAt: new Date().toISOString() } : {}),
@@ -1982,6 +2111,34 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     });
   });
 
+  server.registerTool('subscribe_to_cron', {
+    title: 'Subscribe to cron',
+    description:
+      'Durably resume this conversation on a recurring five-field cron schedule. The minimum frequency is once per minute. If timeZone is omitted, DroneHub uses the latest timezone reported by the user interface, then the MCP host machine timezone, then UTC. An explicit timeZone always wins. Missed occurrences are coalesced, and delivery can be delayed by batching, queue load, or rate limits. The subscription remains active until cancelled.',
+    inputSchema: {
+      expression: z.string().min(1).max(200),
+      timeZone: z
+        .string()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe('Optional IANA timezone. Omit it to use the user interface timezone.'),
+      intent: z.string().min(1).max(2_000),
+    },
+  }, async (args) => {
+    const subscriber = subscriptionSubscriber(context);
+    const timeZone = cleanString(args.timeZone) || (await defaultCronTimeZone());
+    const response = await requestJson('/api/resource-subscriptions/cron', {
+      method: 'POST',
+      body: JSON.stringify({ ...args, timeZone, subscriber }),
+    });
+    return toolResult({
+      ok: true,
+      created: response?.created === true,
+      subscription: mcpSubscription(response?.subscription),
+    });
+  });
+
   server.registerTool('list_resource_subscriptions', {
     title: 'List resource subscriptions',
     description: 'List resource subscriptions owned by this conversation.',
@@ -2067,37 +2224,79 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     pollIntervalMs: z.number().optional(),
     expiresInMs: z.number().optional(),
   };
-  server.registerTool('subscribe_to_any_chat_idle', {
-    title: 'Subscribe to any chat idle',
-    description: 'Start a background Drone Hub idle subscription. Returns immediately with subscription status.',
-    inputSchema: idleInputSchema,
-  }, async (args, extra) => toolResult(startIdleSubscription(server, 'any', args, extra)));
+  if (context.legacyIdleSubscriptionTools !== false) {
+    server.registerTool('subscribe_to_any_chat_idle', {
+      title: 'Subscribe to any chat idle',
+      description: 'Subscribe to any target chat finishing. Managed DroneHub chats receive durable conversation wake-ups.',
+      inputSchema: idleInputSchema,
+    }, async (args, extra) => toolResult(
+      chatPrincipal(context)
+        ? await subscribeChatPrincipalToIdleTargets(context, 'any', args)
+        : startIdleSubscription(server, 'any', args, extra),
+    ));
 
-  server.registerTool('subscribe_to_all_chats_idle', {
-    title: 'Subscribe to all chats idle',
-    description: 'Start a background Drone Hub idle subscription. Returns immediately with subscription status.',
-    inputSchema: idleInputSchema,
-  }, async (args, extra) => toolResult(startIdleSubscription(server, 'all', args, extra)));
+    server.registerTool('subscribe_to_all_chats_idle', {
+      title: 'Subscribe to all chats idle',
+      description: 'Subscribe to all target chats finishing. Managed DroneHub chats receive durable conversation wake-ups.',
+      inputSchema: idleInputSchema,
+    }, async (args, extra) => toolResult(
+      chatPrincipal(context)
+        ? await subscribeChatPrincipalToIdleTargets(context, 'all', args)
+        : startIdleSubscription(server, 'all', args, extra),
+    ));
 
-  server.registerTool('list_chat_idle_subscriptions', {
-    title: 'List chat idle subscriptions',
-    description: 'List durable Drone Hub chat-idle subscriptions and their latest state.',
-    inputSchema: {},
-  }, async () => toolResult({
-    ok: true,
-    subscriptions: [...idleSubscriptions.values()].map(publicSubscription),
-  }));
+    server.registerTool('list_chat_idle_subscriptions', {
+      title: 'List chat idle subscriptions',
+      description: 'List durable Drone Hub chat-idle subscriptions and their latest state.',
+      inputSchema: {},
+    }, async () => {
+      const principal = chatPrincipal(context);
+      if (!principal) {
+        return toolResult({
+          ok: true,
+          subscriptions: [...idleSubscriptions.values()].map(publicSubscription),
+        });
+      }
+      const response = await requestJson(
+        `/api/resource-subscriptions?subscriberChatId=${encodeURIComponent(principal.chatId)}&includeInactive=false`,
+        { method: 'GET' },
+      );
+      return toolResult({
+        ok: true,
+        subscriptions: (Array.isArray(response?.subscriptions) ? response.subscriptions : [])
+          .filter(
+            (subscription: any) =>
+              subscription?.provider === 'drone-hub' &&
+              subscription?.resourceType === 'chat' &&
+              (subscription?.events?.includes('chat.idle') ||
+                subscription?.events?.includes('chat.failed')),
+          )
+          .map(mcpSubscription),
+      });
+    });
 
-  server.registerTool('cancel_chat_idle_subscription', {
-    title: 'Cancel chat idle subscription',
-    description: 'Stop a durable Drone Hub chat-idle subscription.',
-    inputSchema: { subscriptionId: z.string() },
-  }, async (args) => {
-    const subscription = idleSubscriptions.get(cleanString(args.subscriptionId));
-    if (!subscription) throw new Error(`unknown chat-idle subscription: ${args.subscriptionId}`);
-    if (subscription.status === 'active') stopIdleSubscription(subscription, 'stopped');
-    return toolResult({ ok: true, subscription: publicSubscription(subscription) });
-  });
+    server.registerTool('cancel_chat_idle_subscription', {
+      title: 'Cancel chat idle subscription',
+      description: 'Stop a durable Drone Hub chat-idle subscription.',
+      inputSchema: { subscriptionId: z.string() },
+    }, async (args) => {
+      const principal = chatPrincipal(context);
+      if (principal && !idleSubscriptions.has(cleanString(args.subscriptionId))) {
+        const response = await requestJson(
+          `/api/resource-subscriptions/${encodeURIComponent(args.subscriptionId)}?subscriberChatId=${encodeURIComponent(principal.chatId)}`,
+          { method: 'DELETE' },
+        );
+        return toolResult({
+          ok: true,
+          subscription: mcpSubscription(response?.subscription),
+        });
+      }
+      const subscription = idleSubscriptions.get(cleanString(args.subscriptionId));
+      if (!subscription) throw new Error(`unknown chat-idle subscription: ${args.subscriptionId}`);
+      if (subscription.status === 'active') stopIdleSubscription(subscription, 'stopped');
+      return toolResult({ ok: true, subscription: publicSubscription(subscription) });
+    });
+  }
 
   server.registerTool('read_chat', {
     title: 'Read drone chat',
@@ -2296,9 +2495,11 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
     principal: input?.principal ?? { kind: 'legacy', tokenId: 'legacy', name: 'Legacy Drone Hub MCP token' },
     ...(input?.correlationId ? { correlationId: input.correlationId } : {}),
     ...(input?.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
+    legacyIdleSubscriptionTools: input?.legacyIdleSubscriptionTools !== false,
     ...(input?.allowedDroneRefs ? { allowedDroneRefs: input.allowedDroneRefs } : {}),
     ...(input?.allowedWriteDroneRefs ? { allowedWriteDroneRefs: input.allowedWriteDroneRefs } : {}),
     ...(input?.allowedDroneIds ? { allowedDroneIds: input.allowedDroneIds } : {}),
+    ...(input?.renameDrone ? { renameDrone: input.renameDrone } : {}),
     speechEnabled: input?.speechEnabled !== false,
     onSpeechToolRegistered: (tool) => {
       speechTool = tool;
@@ -2318,7 +2519,7 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
     else speechTool?.disable();
   };
   registerAuthorizedTools(server, context);
-  restoreIdleSubscriptions(server);
+  if (context.legacyIdleSubscriptionTools !== false) restoreIdleSubscriptions(server);
   return server;
 }
 

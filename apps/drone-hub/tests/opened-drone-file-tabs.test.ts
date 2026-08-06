@@ -36,7 +36,7 @@ describe('OpenedDroneFileTabs', () => {
 
     expect(html).toContain('index.ts<span aria-hidden="true">*</span>');
     expect(html).toContain('opacity-0');
-    expect(html).toContain('group-hover/tab:opacity-100');
+    expect(html).toContain('group-hover/tab:opacity-70');
     expect(html).not.toContain('cursor-grab');
   });
 });

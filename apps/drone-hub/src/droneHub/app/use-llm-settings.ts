@@ -1,10 +1,10 @@
 import React from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { maybeExtractApiKey } from './helpers';
 import {
   llmDefaultModelChoices,
   resolveLlmDefaultModelDraft,
   selectLlmDefaultModel,
-  type LlmDefaultModelChoice,
   type LlmDefaultModelDraft,
 } from './llm-default-model';
 import type {
@@ -13,9 +13,15 @@ import type {
   LlmProviderId,
   LlmSettingsResponse,
 } from './settings-types';
+import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsQuery } from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 type ApiKeyProviderId = 'openai' | 'gemini' | 'groq';
+type ApiKeyMutationInput = {
+  provider: ApiKeyProviderId;
+  action: 'save' | 'clear';
+  apiKey: string;
+};
 
 function providerLabel(provider: LlmProviderId | ApiKeyProviderId): string {
   if (provider === 'codex') return 'Codex';
@@ -23,123 +29,87 @@ function providerLabel(provider: LlmProviderId | ApiKeyProviderId): string {
   return provider === 'gemini' ? 'Gemini' : 'OpenAI';
 }
 
-export type UseLlmSettingsResult = {
-  llmSettings: LlmSettingsResponse | null;
-  llmSettingsLoading: boolean;
-  llmSettingsError: string | null;
-  llmProviderDraft: LlmProviderId;
-  llmDefaultModelSettings: LlmDefaultModelSettingsResponse | null;
-  llmDefaultModelDraft: LlmDefaultModelDraft;
-  llmDefaultModelChoices: LlmDefaultModelChoice[];
-  savingLlmProvider: boolean;
-  showGeminiKey: boolean;
-  revealingGeminiKey: boolean;
-  geminiSettingsDraft: string;
-  savingGeminiSettings: boolean;
-  clearingGeminiSettings: boolean;
-  openAiSettingsDraft: string;
-  savingOpenAiSettings: boolean;
-  clearingOpenAiSettings: boolean;
-  showOpenAiKey: boolean;
-  revealingOpenAiKey: boolean;
-  groqSettingsDraft: string;
-  savingGroqSettings: boolean;
-  clearingGroqSettings: boolean;
-  showGroqKey: boolean;
-  revealingGroqKey: boolean;
-  llmSettingsNotice: string | null;
-  setLlmProviderDraft: (provider: LlmProviderId) => void;
-  setLlmDefaultModelDraft: (model: string) => void;
-  setLlmDefaultReasoningDraft: (thinkingLevel: string) => void;
-  updateOpenAiSettingsDraft: (raw: string) => void;
-  updateGeminiSettingsDraft: (raw: string) => void;
-  updateGroqSettingsDraft: (raw: string) => void;
-  loadLlmSettings: () => Promise<void>;
-  saveLlmProviderSettings: () => Promise<void>;
-  toggleApiKeyVisibility: (provider: ApiKeyProviderId) => Promise<void>;
-  mutateApiKeySettings: (provider: ApiKeyProviderId, action: 'save' | 'clear') => Promise<void>;
-};
+export type UseLlmSettingsResult = ReturnType<typeof useLlmSettings>;
 
-export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult {
-  const [llmSettings, setLlmSettings] = React.useState<LlmSettingsResponse | null>(null);
-  const [llmSettingsLoading, setLlmSettingsLoading] = React.useState(false);
+export function useLlmSettings(requestJson: RequestJsonFn) {
+  const queryClient = useQueryClient();
+  const llmQueryKey = settingsQueryKey('llm');
+  const defaultModelQueryKey = settingsQueryKey('llm-default-model');
+  const llmQuery = useSettingsQuery<LlmSettingsResponse>(requestJson, llmQueryKey, '/api/settings/llm');
+  const defaultModelQuery = useSettingsQuery<LlmDefaultModelSettingsResponse>(
+    requestJson,
+    defaultModelQueryKey,
+    '/api/assistant/default-model',
+  );
   const [llmSettingsError, setLlmSettingsError] = React.useState<string | null>(null);
   const [llmProviderDraft, setLlmProviderDraftValue] = React.useState<LlmProviderId>('openai');
-  const [llmDefaultModelSettings, setLlmDefaultModelSettings] =
-    React.useState<LlmDefaultModelSettingsResponse | null>(null);
   const [llmDefaultModelDraft, setLlmDefaultModelDraftValue] =
     React.useState<LlmDefaultModelDraft>({
       provider: 'openai',
       model: '',
       thinkingLevel: '',
     });
-  const [savingLlmProvider, setSavingLlmProvider] = React.useState(false);
   const [showGeminiKey, setShowGeminiKey] = React.useState(false);
-  const [revealingGeminiKey, setRevealingGeminiKey] = React.useState(false);
   const [geminiSettingsDraft, setGeminiSettingsDraft] = React.useState('');
   const [geminiDraftLoadedFromSettings, setGeminiDraftLoadedFromSettings] = React.useState(false);
-  const [savingGeminiSettings, setSavingGeminiSettings] = React.useState(false);
-  const [clearingGeminiSettings, setClearingGeminiSettings] = React.useState(false);
   const [openAiSettingsDraft, setOpenAiSettingsDraft] = React.useState('');
   const [openAiDraftLoadedFromSettings, setOpenAiDraftLoadedFromSettings] = React.useState(false);
-  const [savingOpenAiSettings, setSavingOpenAiSettings] = React.useState(false);
-  const [clearingOpenAiSettings, setClearingOpenAiSettings] = React.useState(false);
   const [showOpenAiKey, setShowOpenAiKey] = React.useState(false);
-  const [revealingOpenAiKey, setRevealingOpenAiKey] = React.useState(false);
   const [groqSettingsDraft, setGroqSettingsDraft] = React.useState('');
   const [groqDraftLoadedFromSettings, setGroqDraftLoadedFromSettings] = React.useState(false);
-  const [savingGroqSettings, setSavingGroqSettings] = React.useState(false);
-  const [clearingGroqSettings, setClearingGroqSettings] = React.useState(false);
   const [showGroqKey, setShowGroqKey] = React.useState(false);
-  const [revealingGroqKey, setRevealingGroqKey] = React.useState(false);
   const [llmSettingsNotice, setLlmSettingsNotice] = React.useState<string | null>(null);
 
-  const loadLlmSettings = React.useCallback(async () => {
-    setLlmSettingsLoading(true);
-    setLlmSettingsError(null);
-    try {
-      const [data, defaults] = await Promise.all([
-        requestJson<LlmSettingsResponse>('/api/settings/llm'),
-        requestJson<LlmDefaultModelSettingsResponse>('/api/assistant/default-model'),
-      ]);
-      setLlmSettings(data);
-      setLlmDefaultModelSettings(defaults);
-      setLlmProviderDraftValue(data.provider.selected);
-      setLlmDefaultModelDraftValue(
-        resolveLlmDefaultModelDraft(defaults.models, data.provider.selected, defaults.defaultModel),
-      );
-    } catch (e: any) {
-      setLlmSettingsError(e?.message ?? String(e));
-    } finally {
-      setLlmSettingsLoading(false);
-    }
-  }, [requestJson]);
+  const applyLlmDrafts = React.useCallback((
+    settings: LlmSettingsResponse,
+    defaults: LlmDefaultModelSettingsResponse,
+  ) => {
+    setLlmProviderDraftValue(settings.provider.selected);
+    setLlmDefaultModelDraftValue(
+      resolveLlmDefaultModelDraft(defaults.models, settings.provider.selected, defaults.defaultModel),
+    );
+  }, []);
 
   React.useEffect(() => {
-    void loadLlmSettings();
-  }, [loadLlmSettings]);
+    if (!llmQuery.data || !defaultModelQuery.data) return;
+    applyLlmDrafts(llmQuery.data, defaultModelQuery.data);
+  }, [applyLlmDrafts, defaultModelQuery.data, llmQuery.data?.provider.selected]);
+
+  const loadLlmSettings = React.useCallback(async () => {
+    setLlmSettingsError(null);
+    const [llmResult, defaultsResult] = await Promise.all([
+      llmQuery.refetch(),
+      defaultModelQuery.refetch(),
+    ]);
+    const error = llmResult.error ?? defaultsResult.error;
+    if (error) {
+      setLlmSettingsError(settingsErrorMessage(error));
+      return;
+    }
+    if (llmResult.data && defaultsResult.data) applyLlmDrafts(llmResult.data, defaultsResult.data);
+  }, [applyLlmDrafts, defaultModelQuery.refetch, llmQuery.refetch]);
 
   const setLlmProviderDraft = React.useCallback(
     (provider: LlmProviderId) => {
       setLlmProviderDraftValue(provider);
       setLlmDefaultModelDraftValue(
         resolveLlmDefaultModelDraft(
-          llmDefaultModelSettings?.models ?? [],
+          defaultModelQuery.data?.models ?? [],
           provider,
-          llmDefaultModelSettings?.defaultModel,
+          defaultModelQuery.data?.defaultModel,
         ),
       );
     },
-    [llmDefaultModelSettings],
+    [defaultModelQuery.data],
   );
 
   const setLlmDefaultModelDraft = React.useCallback(
     (model: string) => {
       setLlmDefaultModelDraftValue((current) =>
-        selectLlmDefaultModel(llmDefaultModelSettings?.models ?? [], current, model),
+        selectLlmDefaultModel(defaultModelQuery.data?.models ?? [], current, model),
       );
     },
-    [llmDefaultModelSettings],
+    [defaultModelQuery.data],
   );
 
   const setLlmDefaultReasoningDraft = React.useCallback((thinkingLevel: string) => {
@@ -149,14 +119,14 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
   const defaultModelChoices = React.useMemo(
     () =>
       llmDefaultModelChoices(
-        llmDefaultModelSettings?.models ?? [],
+        defaultModelQuery.data?.models ?? [],
         llmDefaultModelDraft.provider,
       ),
-    [llmDefaultModelDraft.provider, llmDefaultModelSettings],
+    [defaultModelQuery.data, llmDefaultModelDraft.provider],
   );
 
   const updateProviderKeySettings = React.useCallback((provider: LlmProviderId | ApiKeyProviderId, data: ApiKeySettingsResponse) => {
-    setLlmSettings((prev) => {
+    queryClient.setQueryData<LlmSettingsResponse>(llmQueryKey, (prev) => {
       if (!prev) return prev;
       const next = {
         hasKey: data.hasKey,
@@ -169,7 +139,42 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
       if (provider === 'groq') return { ...prev, groq: next };
       return { ...prev, gemini: next };
     });
-  }, []);
+  }, [llmQueryKey, queryClient]);
+
+  const revealMutation = useMutation({
+    mutationFn: (provider: ApiKeyProviderId) =>
+      requestJson<ApiKeySettingsResponse>(`/api/settings/${provider}?reveal=1`),
+  });
+  const apiKeyMutation = useMutation({
+    mutationFn: ({ provider, action, apiKey }: ApiKeyMutationInput) =>
+      requestJson<ApiKeySettingsResponse>(`/api/settings/${provider}`, {
+        method: action === 'save' ? 'POST' : 'DELETE',
+        ...(action === 'save'
+          ? {
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ apiKey }),
+            }
+          : {}),
+      }),
+  });
+  const providerMutation = useMutation({
+    mutationFn: async () => {
+      const defaults = await requestJson<LlmDefaultModelSettingsResponse>(
+        '/api/assistant/default-model',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(llmDefaultModelDraft),
+        },
+      );
+      const settings = await requestJson<LlmSettingsResponse>('/api/settings/llm', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: llmProviderDraft }),
+      });
+      return { defaults, settings };
+    },
+  });
 
   const toggleApiKeyVisibility = React.useCallback(
     async (provider: ApiKeyProviderId) => {
@@ -177,10 +182,10 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
       const draft = provider === 'openai' ? openAiSettingsDraft : provider === 'gemini' ? geminiSettingsDraft : groqSettingsDraft;
       const hasKey =
         provider === 'openai'
-          ? Boolean(llmSettings?.openai.hasKey)
+          ? Boolean(llmQuery.data?.openai.hasKey)
           : provider === 'gemini'
-            ? Boolean(llmSettings?.gemini.hasKey)
-            : Boolean(llmSettings?.groq.hasKey);
+            ? Boolean(llmQuery.data?.gemini.hasKey)
+            : Boolean(llmQuery.data?.groq.hasKey);
       const draftLoadedFromSettings =
         provider === 'openai'
           ? openAiDraftLoadedFromSettings
@@ -212,12 +217,9 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
       }
 
       if (!draft.trim() && hasKey) {
-        if (provider === 'openai') setRevealingOpenAiKey(true);
-        else if (provider === 'gemini') setRevealingGeminiKey(true);
-        else setRevealingGroqKey(true);
         setLlmSettingsError(null);
         try {
-          const data = await requestJson<ApiKeySettingsResponse>(`/api/settings/${provider}?reveal=1`);
+          const data = await revealMutation.mutateAsync(provider);
           const apiKey = String(data.apiKey ?? '').trim();
           if (!apiKey) throw new Error(`${providerLabel(provider)} API key is unavailable.`);
           updateProviderKeySettings(provider, data);
@@ -234,10 +236,6 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
         } catch (e: any) {
           setLlmSettingsError(e?.message ?? String(e));
           return;
-        } finally {
-          if (provider === 'openai') setRevealingOpenAiKey(false);
-          else if (provider === 'gemini') setRevealingGeminiKey(false);
-          else setRevealingGroqKey(false);
         }
       }
 
@@ -250,10 +248,11 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
       geminiSettingsDraft,
       groqDraftLoadedFromSettings,
       groqSettingsDraft,
-      llmSettings,
+      llmQuery.data,
       openAiDraftLoadedFromSettings,
       openAiSettingsDraft,
       requestJson,
+      revealMutation,
       showGeminiKey,
       showGroqKey,
       showOpenAiKey,
@@ -278,28 +277,10 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
           else setGroqSettingsDraft(apiKey);
         }
       }
-      if (provider === 'openai') {
-        if (action === 'save') setSavingOpenAiSettings(true);
-        else setClearingOpenAiSettings(true);
-      } else if (provider === 'gemini') {
-        if (action === 'save') setSavingGeminiSettings(true);
-        else setClearingGeminiSettings(true);
-      } else {
-        if (action === 'save') setSavingGroqSettings(true);
-        else setClearingGroqSettings(true);
-      }
       setLlmSettingsError(null);
       setLlmSettingsNotice(null);
       try {
-        const data = await requestJson<ApiKeySettingsResponse>(`/api/settings/${provider}`, {
-          method: action === 'save' ? 'POST' : 'DELETE',
-          ...(action === 'save'
-            ? {
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ apiKey }),
-              }
-            : {}),
-        });
+        const data = await apiKeyMutation.mutateAsync({ provider, action, apiKey });
         updateProviderKeySettings(provider, data);
         if (provider === 'openai') {
           setOpenAiSettingsDraft('');
@@ -319,26 +300,14 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
         } else {
           setLlmSettingsNotice(data.hasKey && envKeyName ? `Using environment ${envKeyName}.` : `Cleared stored ${label} API key.`);
         }
-      } catch (e: any) {
-        setLlmSettingsError(e?.message ?? String(e));
-      } finally {
-        if (provider === 'openai') {
-          if (action === 'save') setSavingOpenAiSettings(false);
-          else setClearingOpenAiSettings(false);
-        } else if (provider === 'gemini') {
-          if (action === 'save') setSavingGeminiSettings(false);
-          else setClearingGeminiSettings(false);
-        } else {
-          if (action === 'save') setSavingGroqSettings(false);
-          else setClearingGroqSettings(false);
-        }
+      } catch (error) {
+        setLlmSettingsError(settingsErrorMessage(error));
       }
     },
-    [geminiSettingsDraft, groqSettingsDraft, openAiSettingsDraft, requestJson, updateProviderKeySettings],
+    [apiKeyMutation, geminiSettingsDraft, groqSettingsDraft, openAiSettingsDraft, updateProviderKeySettings],
   );
 
   const saveLlmProviderSettings = React.useCallback(async () => {
-    setSavingLlmProvider(true);
     setLlmSettingsError(null);
     setLlmSettingsNotice(null);
     try {
@@ -349,25 +318,12 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
       if (!selectedModel.reasoningLevels.includes(llmDefaultModelDraft.thinkingLevel)) {
         throw new Error('Select a supported reasoning level for this model.');
       }
-      const defaults = await requestJson<LlmDefaultModelSettingsResponse>(
-        '/api/assistant/default-model',
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(llmDefaultModelDraft),
-        },
+      const { defaults, settings: data } = await providerMutation.mutateAsync();
+      queryClient.setQueryData(defaultModelQueryKey, defaults);
+      queryClient.setQueryData<LlmSettingsResponse>(llmQueryKey, (prev) =>
+        prev ? { ...prev, provider: data.provider } : data,
       );
-      const data = await requestJson<LlmSettingsResponse>('/api/settings/llm', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ provider: llmProviderDraft }),
-      });
-      setLlmDefaultModelSettings(defaults);
-      setLlmSettings((prev) => (prev ? { ...prev, provider: data.provider } : data));
-      setLlmProviderDraftValue(data.provider.selected);
-      setLlmDefaultModelDraftValue(
-        resolveLlmDefaultModelDraft(defaults.models, data.provider.selected, defaults.defaultModel),
-      );
+      applyLlmDrafts(data, defaults);
       setLlmSettingsNotice(
         `Using ${providerLabel(data.provider.selected)} with ${selectedModel.label} (${llmDefaultModelDraft.thinkingLevel}) by default.`,
       );
@@ -378,10 +334,8 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
       // actual persisted state and a retry cannot overwrite it from stale data.
       await loadLlmSettings();
       setLlmSettingsError(message);
-    } finally {
-      setSavingLlmProvider(false);
     }
-  }, [defaultModelChoices, llmDefaultModelDraft, llmProviderDraft, loadLlmSettings, requestJson]);
+  }, [applyLlmDrafts, defaultModelChoices, defaultModelQueryKey, llmDefaultModelDraft, llmQueryKey, loadLlmSettings, providerMutation, queryClient]);
 
   const updateOpenAiSettingsDraft = React.useCallback((raw: string) => {
     setOpenAiDraftLoadedFromSettings(false);
@@ -399,29 +353,29 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
   }, []);
 
   return {
-    llmSettings,
-    llmSettingsLoading,
-    llmSettingsError,
+    llmSettings: llmQuery.data ?? null,
+    llmSettingsLoading: llmQuery.isFetching || defaultModelQuery.isFetching,
+    llmSettingsError: settingsQueryError(llmSettingsError, false, llmQuery, defaultModelQuery),
     llmProviderDraft,
-    llmDefaultModelSettings,
+    llmDefaultModelSettings: defaultModelQuery.data ?? null,
     llmDefaultModelDraft,
     llmDefaultModelChoices: defaultModelChoices,
-    savingLlmProvider,
+    savingLlmProvider: providerMutation.isPending,
     showGeminiKey,
-    revealingGeminiKey,
+    revealingGeminiKey: revealMutation.isPending && revealMutation.variables === 'gemini',
     geminiSettingsDraft,
-    savingGeminiSettings,
-    clearingGeminiSettings,
+    savingGeminiSettings: apiKeyMutation.isPending && apiKeyMutation.variables.provider === 'gemini' && apiKeyMutation.variables.action === 'save',
+    clearingGeminiSettings: apiKeyMutation.isPending && apiKeyMutation.variables.provider === 'gemini' && apiKeyMutation.variables.action === 'clear',
     openAiSettingsDraft,
-    savingOpenAiSettings,
-    clearingOpenAiSettings,
+    savingOpenAiSettings: apiKeyMutation.isPending && apiKeyMutation.variables.provider === 'openai' && apiKeyMutation.variables.action === 'save',
+    clearingOpenAiSettings: apiKeyMutation.isPending && apiKeyMutation.variables.provider === 'openai' && apiKeyMutation.variables.action === 'clear',
     showOpenAiKey,
-    revealingOpenAiKey,
+    revealingOpenAiKey: revealMutation.isPending && revealMutation.variables === 'openai',
     groqSettingsDraft,
-    savingGroqSettings,
-    clearingGroqSettings,
+    savingGroqSettings: apiKeyMutation.isPending && apiKeyMutation.variables.provider === 'groq' && apiKeyMutation.variables.action === 'save',
+    clearingGroqSettings: apiKeyMutation.isPending && apiKeyMutation.variables.provider === 'groq' && apiKeyMutation.variables.action === 'clear',
     showGroqKey,
-    revealingGroqKey,
+    revealingGroqKey: revealMutation.isPending && revealMutation.variables === 'groq',
     llmSettingsNotice,
     setLlmProviderDraft,
     setLlmDefaultModelDraft,

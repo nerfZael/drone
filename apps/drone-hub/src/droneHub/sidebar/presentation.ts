@@ -23,7 +23,7 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
   compact: {
     icon: 'h-3 w-3 text-[var(--muted-dim)] opacity-72',
     folderChevron: 'h-3.5 w-3.5 translate-x-px text-[var(--muted-dim)] opacity-72',
-    chatRow: 'h-6 pl-1 pr-1.5 text-[var(--sidebar-item-compact-size)]',
+    chatRow: 'h-6 pl-7 pr-1.5 text-[var(--sidebar-item-compact-size)]',
     chatIndent: 'ml-3 mr-1',
     childIndent: 'ml-4',
     nestedDroneIndent: 'ml-2',
@@ -40,7 +40,7 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
   default: {
     icon: 'h-3.5 w-3.5 text-[var(--muted-dim)] opacity-72',
     folderChevron: 'h-4 w-4 translate-x-px text-[var(--muted-dim)] opacity-72',
-    chatRow: 'h-[25px] pl-1 pr-1.5 text-[var(--sidebar-item-size)]',
+    chatRow: 'h-[25px] pl-7 pr-1.5 text-[var(--sidebar-item-size)]',
     chatIndent: 'ml-[14px] mr-1',
     childIndent: 'ml-5',
     nestedDroneIndent: 'ml-2.5',
@@ -57,7 +57,7 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
   comfortable: {
     icon: 'h-[15px] w-[15px] text-[var(--muted-dim)] opacity-72',
     folderChevron: 'h-[17px] w-[17px] translate-x-px text-[var(--muted-dim)] opacity-72',
-    chatRow: 'h-7 pl-1 pr-2 text-[var(--sidebar-item-comfortable-size)]',
+    chatRow: 'h-7 pl-7 pr-2 text-[var(--sidebar-item-comfortable-size)]',
     chatIndent: 'ml-[18px] mr-1',
     childIndent: 'ml-6',
     nestedDroneIndent: 'ml-3.5',

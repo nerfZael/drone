@@ -302,10 +302,10 @@ export function CommitInspectionView({
                 <div
                   role="separator"
                   aria-orientation="vertical"
-                  className={`group relative w-2 shrink-0 cursor-col-resize touch-none ${
+                  className={`dh-changes-split-resize-handle group relative shrink-0 cursor-col-resize touch-none ${
                     explorerResizing ? 'bg-[var(--accent-subtle)]' : 'bg-transparent hover:bg-[var(--hover)]'
                   }`}
-                  title="Drag to resize explorer. Double-click to reset to auto width."
+                  title="Drag to resize explorer. Double-click to reset to the default width."
                   onPointerDown={startExplorerResize}
                   onPointerMove={moveExplorerResize}
                   onPointerUp={finishExplorerResize}
@@ -321,7 +321,7 @@ export function CommitInspectionView({
                 </div>
 
                 <div
-                  className={`shrink-0 border-l border-[var(--border-subtle)] overflow-hidden flex flex-col ${
+                  className={`shrink-0 overflow-hidden flex flex-col ${
                     explorerResizing ? '' : 'transition-[width] duration-150 ease-out'
                   }`}
                   style={{
@@ -335,7 +335,7 @@ export function CommitInspectionView({
                       Files
                     </span>
                   </div>
-                  <div className="flex-1 min-h-0 overflow-auto px-1.5 py-1">{renderCommitExplorer(commitExplorerTree, 0)}</div>
+                  <div className="flex-1 min-h-0 overflow-auto py-1">{renderCommitExplorer(commitExplorerTree, 0)}</div>
                 </div>
               </div>
             )}

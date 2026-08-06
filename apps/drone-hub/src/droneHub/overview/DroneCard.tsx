@@ -5,7 +5,6 @@ import {
   IconBaseImage,
   IconChevron,
   IconClone,
-  IconContainer,
   IconFolder,
   IconPin,
   IconPlus,
@@ -19,6 +18,11 @@ import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { SidebarContextMenu, type SidebarContextMenuItem } from '../app/SidebarContextMenu';
 import { formatShortcutBinding } from '../app/shortcuts';
 import { normalizedDroneChats } from '../app/chat-node-helpers';
+import {
+  DroneRuntimeIcon,
+  droneRuntimeIconToneClass,
+  type DroneRuntime,
+} from '../app/DroneRuntimeIndicator';
 
 export type DroneInlineRenameResult =
   | boolean
@@ -195,7 +199,7 @@ export function SidebarItemStateIndicator({
         showReadyAnchor ? (
           <span
             data-sidebar-ready-anchor="true"
-            className="h-1.5 w-1.5 rounded-full border border-[var(--sidebar-item-icon)] opacity-70"
+            className="h-1.5 w-1.5 rounded-full border border-[var(--muted-dim)] opacity-70"
           />
         ) : null
       ) : state === 'archiving' ? (
@@ -389,19 +393,30 @@ function summarizeDroneChats(
   }
   return {
     approval: approvalChats.size || (drone.approvalRequired ? 1 : 0),
-    unread: unreadChats.size,
+    unread: working > 0 ? 0 : unreadChats.size,
     working,
   };
+}
+
+function suppressUnreadWhileWorking(
+  summary: SidebarChatStateSummary,
+  droneState?: SidebarDroneDisplayState,
+): SidebarChatStateSummary {
+  const working =
+    summary.working > 0 || droneState === 'working' || droneState === 'starting';
+  return working && summary.unread > 0
+    ? { ...summary, unread: 0 }
+    : summary;
 }
 
 export function SidebarBlockedStatusIndicator({ emphasized = false }: { emphasized?: boolean }) {
   return (
     <svg
       data-sidebar-blocked-indicator={emphasized ? 'emphasized' : 'quiet'}
-      className={`block h-3 w-3 transition-[color,opacity] ${
+      className={`block h-3 w-3 transition-opacity ${
         emphasized
           ? 'text-[var(--sidebar-blocked-indicator)] opacity-100'
-          : 'text-[var(--sidebar-item-icon)] opacity-70 group-hover/drone:text-[var(--sidebar-blocked-indicator)] group-hover/drone:opacity-100 group-hover/chat-row:text-[var(--sidebar-blocked-indicator)] group-hover/chat-row:opacity-100'
+          : 'text-[var(--sidebar-blocked-indicator)] opacity-70 group-hover/drone:opacity-100 group-hover/chat-row:opacity-100'
       }`}
       viewBox="0 0 12 12"
       fill="none"
@@ -583,15 +598,9 @@ export const DroneCard = React.memo(function DroneCard({
     setInlineRenameOpen(true);
   }, [inlineRenameRequestKey]);
   const isDraftDrone = drone.draft === true || drone.hubPhase === 'draft';
+  const runtime: DroneRuntime = drone.runtime === 'host' ? 'host' : 'container';
   const chatNames = normalizedDroneChats(drone);
   const hasMultipleChats = chatNames.length > 1;
-  const effectiveChatStateSummary = hasMultipleChats
-    ? (chatStateSummary ?? summarizeDroneChats(drone, chatNames))
-    : null;
-  const unread =
-    !isDraftDrone &&
-    !hasMultipleChats &&
-    (Boolean(unreadAgentMessage) || (drone.unreadChats?.length ?? 0) > 0);
   const displayState = sidebarDroneDisplayState(
     drone,
     Boolean(busy),
@@ -599,6 +608,18 @@ export const DroneCard = React.memo(function DroneCard({
     Boolean(approvalRequired),
     !hasMultipleChats,
   );
+  const effectiveChatStateSummary = hasMultipleChats
+    ? suppressUnreadWhileWorking(
+        chatStateSummary ?? summarizeDroneChats(drone, chatNames),
+        displayState,
+      )
+    : null;
+  const unread =
+    !isDraftDrone &&
+    !hasMultipleChats &&
+    displayState !== 'working' &&
+    displayState !== 'starting' &&
+    (Boolean(unreadAgentMessage) || (drone.unreadChats?.length ?? 0) > 0);
   const previousDisplayStateRef = React.useRef<SidebarDroneDisplayState>(displayState);
   const [recentlyBlocked, setRecentlyBlocked] = React.useState(false);
   React.useEffect(() => {
@@ -617,6 +638,8 @@ export const DroneCard = React.memo(function DroneCard({
     return () => window.clearTimeout(timeoutId);
   }, [displayState]);
   const stateLabel = sidebarDroneStateLabel(displayState, unread);
+  const showDisclosureOperationIndicator =
+    displayState === 'archiving' || displayState === 'deleting';
   const showActiveIndicator = Boolean(active) && !unread;
   const renderActiveEdge = showActiveIndicator && activeIndicatorStyle === 'edge';
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
@@ -814,6 +837,22 @@ export const DroneCard = React.memo(function DroneCard({
       onKeyDown={(e) => {
         if (disabled) return;
         if (e.target !== e.currentTarget) return;
+        if (
+          e.key === 'Delete' &&
+          !e.repeat &&
+          !e.shiftKey &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          !e.altKey &&
+          canDelete &&
+          !deleteDisabled &&
+          !deleteBusy
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          onDelete?.();
+          return;
+        }
         if (e.key === ' ' || e.key === 'Enter') {
           e.preventDefault();
           onClick();
@@ -846,14 +885,32 @@ export const DroneCard = React.memo(function DroneCard({
       >
         {typeof disclosureExpanded === 'boolean' ? (
           <>
-            <IconChevron
-              down={disclosureExpanded}
-              strokeWidth={1.25}
-              className={`flex-shrink-0 ${densityClasses.folderChevron}`}
-            />
-            <IconContainer
-              className={`flex-shrink-0 ${densityClasses.icon}`}
-            />
+            <span
+              data-sidebar-disclosure-slot="true"
+              className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center leading-none"
+              aria-hidden="true"
+            >
+              <IconChevron
+                down={disclosureExpanded}
+                strokeWidth={1.25}
+                className={`max-w-none flex-shrink-0 !translate-x-0 ${densityClasses.folderChevron}`}
+              />
+            </span>
+            {showDisclosureOperationIndicator ? (
+              <span
+                role="img"
+                className="inline-flex flex-shrink-0"
+                title={stateLabel}
+                aria-label={stateLabel}
+              >
+                <SidebarItemStateIndicator state={displayState} />
+              </span>
+            ) : (
+              <DroneRuntimeIcon
+                runtime={runtime}
+                className={`flex-shrink-0 ${densityClasses.icon} ${droneRuntimeIconToneClass(runtime)} !opacity-100`}
+              />
+            )}
           </>
         ) : null}
         {leadingIcon ? <span className="inline-flex flex-shrink-0 items-center">{leadingIcon}</span> : null}

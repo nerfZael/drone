@@ -6,8 +6,10 @@ import { fromByteArray } from 'base64-js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import {
   DRONE_CONTROL_CAPABILITY,
+  parseSidebarMoveCommandRequest,
   type DroneControlOperation,
 } from '@drone/device-protocol';
+import { applySidebarMove, normalizeSidebarLayout } from '@drone/hub-model/sidebar';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { useMesh } from '../mesh/MeshContext';
 import { loadLocalAssistantSettings } from '../local-assistant/local-assistant-settings';
@@ -16,6 +18,7 @@ import {
   normalizeLocalAssistantThinkingLevel,
 } from '../local-assistant/local-assistant-model';
 import type { LocalAssistantPromptImage } from '../local-assistant/local-assistant-types';
+import { applyOptimisticMobileSidebarMove } from './mobile-sidebar-reorder';
 import {
   cleanLocalDroneRecords,
   createLegacyPhoneDroneRecord,
@@ -23,13 +26,27 @@ import {
 } from './local-drone-records';
 import {
   inferMobilePreviewMime,
+  MOBILE_FILE_EDIT_MAX_BYTES,
   MOBILE_MEDIA_PREVIEW_MAX_BYTES,
   MOBILE_TEXT_PREVIEW_MAX_BYTES,
 } from './file-preview-model';
 
 const LOCAL_DRONES_KEY = 'droneHub.nativeDrones.v1';
 const LOCAL_PINNED_DRONES_KEY = 'droneHub.nativePinnedDrones.v1';
+const LOCAL_SIDEBAR_ORDER_KEY = 'droneHub.nativeSidebarOrder.v1';
 const LOCAL_PREVIEW_CHUNK_BYTES = 128 * 1024;
+
+function localStringListMap(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).flatMap(([keyRaw, items]) => {
+      const key = keyRaw.trim();
+      if (!key || !Array.isArray(items)) return [];
+      const list = [...new Set(items.map((item) => String(item ?? '').trim()).filter(Boolean))];
+      return list.length > 0 ? [[key, list] as const] : [];
+    }),
+  );
+}
 
 function fileRevision(bytes: Uint8Array): string {
   return `sha256:${Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -44,6 +61,28 @@ function localArtifactPathParts(raw: unknown): string[] {
     throw new Error('Phone artifact previews require a relative file path');
   }
   return path.split('/').filter((part) => part && part !== '.');
+}
+
+function localArtifactDirectoryParts(raw: unknown): string[] {
+  const path = String(raw ?? '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/\/+$/g, '');
+  if (path.startsWith('/') || path.split('/').some((part) => part === '..')) {
+    throw new Error('Phone artifact directories require a relative path');
+  }
+  return path.split('/').filter((part) => part && part !== '.');
+}
+
+function localArtifactChildName(raw: unknown): string {
+  const name = String(raw ?? '').trim();
+  if (!name) throw new Error('Name is required.');
+  if (name === '.' || name === '..' || /[\\/\0\r\n\t]/.test(name)) {
+    throw new Error('Name cannot contain a path separator or invalid whitespace.');
+  }
+  if (name.length > 255) throw new Error('Name must be 255 characters or fewer.');
+  return name;
 }
 
 function localJsonChunk(value: unknown, offsetRaw: unknown) {
@@ -103,6 +142,10 @@ function useLocalDroneControlValue() {
   const [loading, setLoading] = React.useState(true);
   const dronesRef = React.useRef<LocalDroneRecord[]>([]);
   const pinnedDroneIdsRef = React.useRef<string[]>([]);
+  const sidebarOrderRef = React.useRef({
+    sidebarNodeOrderByParent: {} as Record<string, string[]>,
+    sidebarChatOrderByDrone: {} as Record<string, string[]>,
+  });
   const writeRef = React.useRef(Promise.resolve());
   const loadedRef = React.useRef(false);
   const readyRef = React.useRef<{
@@ -156,13 +199,27 @@ function useLocalDroneControlValue() {
           : [];
       })
       .catch((): string[] => []);
-    void Promise.all([loadDrones, loadPinnedDroneIds])
-      .then(([nextDrones, nextPinnedDroneIds]) => {
+    const loadSidebarOrder = AsyncStorage.getItem(LOCAL_SIDEBAR_ORDER_KEY)
+      .then((stored) => {
+        const value: unknown = stored ? JSON.parse(stored) : {};
+        const source =
+          value && typeof value === 'object' && !Array.isArray(value)
+            ? (value as Record<string, unknown>)
+            : {};
+        return {
+          sidebarNodeOrderByParent: localStringListMap(source.sidebarNodeOrderByParent),
+          sidebarChatOrderByDrone: localStringListMap(source.sidebarChatOrderByDrone),
+        };
+      })
+      .catch(() => ({ sidebarNodeOrderByParent: {}, sidebarChatOrderByDrone: {} }));
+    void Promise.all([loadDrones, loadPinnedDroneIds, loadSidebarOrder])
+      .then(([nextDrones, nextPinnedDroneIds, nextSidebarOrder]) => {
         if (!active) return;
         dronesRef.current = nextDrones;
         setDrones(nextDrones);
         pinnedDroneIdsRef.current = nextPinnedDroneIds;
         setPinnedDroneIds(nextPinnedDroneIds);
+        sidebarOrderRef.current = nextSidebarOrder;
       })
       .finally(() => {
         if (!active) return;
@@ -192,7 +249,6 @@ function useLocalDroneControlValue() {
         if (!thread) throw new Error('Phone drone chat was not found');
         return { drone, chatName, thread };
       };
-
       if (operation === 'drones.list') {
         if (payload.createModelAgent === 'native') {
           const settings = await loadLocalAssistantSettings();
@@ -233,9 +289,8 @@ function useLocalDroneControlValue() {
                 ? [chatName]
                 : [],
             ),
-            approvalRequired: Object.values(drone.chats).some(
-              (threadId) =>
-                assistant.pendingApprovals.some((approval) => approval.threadId === threadId),
+            approvalRequired: Object.values(drone.chats).some((threadId) =>
+              assistant.pendingApprovals.some((approval) => approval.threadId === threadId),
             ),
             createdAt: drone.createdAt,
             lastActivityAt: Object.values(drone.chats)
@@ -248,8 +303,8 @@ function useLocalDroneControlValue() {
             groupCreatedAtByName: {},
             sidebarGroupOrder: [],
             sidebarDroneOrderByGroup: {},
-            sidebarNodeOrderByParent: {},
-            sidebarChatOrderByDrone: {},
+            sidebarNodeOrderByParent: sidebarOrderRef.current.sidebarNodeOrderByParent,
+            sidebarChatOrderByDrone: sidebarOrderRef.current.sidebarChatOrderByDrone,
             pinnedDroneIds: pinnedDroneIdsRef.current,
           },
           createOptions: { repos: [] },
@@ -259,20 +314,55 @@ function useLocalDroneControlValue() {
       if (operation === 'drone.create.container') {
         throw new Error('Container drones are not available on this phone');
       }
-      if (operation === 'drone.pin.update') {
-        const droneId = String(payload.droneId ?? '').trim();
-        if (!dronesRef.current.some((drone) => drone.id === droneId)) {
+      if (operation === 'sidebar.move') {
+        const command = parseSidebarMoveCommandRequest(payload);
+        if (
+          command.intent.kind === 'set-pinned' &&
+          command.intent.droneIds.some(
+            (droneId: string) => !dronesRef.current.some((drone) => drone.id === droneId),
+          )
+        ) {
           throw new Error('Phone drone was not found');
         }
-        const next = payload.pinned === true
-          ? pinnedDroneIdsRef.current.includes(droneId)
-            ? pinnedDroneIdsRef.current
-            : [...pinnedDroneIdsRef.current, droneId]
-          : pinnedDroneIdsRef.current.filter((id) => id !== droneId);
-        await AsyncStorage.setItem(LOCAL_PINNED_DRONES_KEY, JSON.stringify(next));
-        pinnedDroneIdsRef.current = next;
-        setPinnedDroneIds(next);
-        return { ok: true, uiPreferences: { pinnedDroneIds: next } };
+        const write = writeRef.current.then(async () => {
+          const currentLayout = normalizeSidebarLayout({
+            ...sidebarOrderRef.current,
+            pinnedDroneIds: pinnedDroneIdsRef.current,
+          });
+          const nextLayout = applySidebarMove(currentLayout, command.intent);
+          const nextDrones =
+            command.intent.kind === 'move-into-folder'
+              ? applyOptimisticMobileSidebarMove(dronesRef.current, command.intent)
+              : dronesRef.current;
+          const nextOrder = {
+            sidebarNodeOrderByParent: nextLayout.sidebarNodeOrderByParent,
+            sidebarChatOrderByDrone: nextLayout.sidebarChatOrderByDrone,
+          };
+          await Promise.all([
+            AsyncStorage.setItem(LOCAL_DRONES_KEY, JSON.stringify(nextDrones)),
+            AsyncStorage.setItem(LOCAL_SIDEBAR_ORDER_KEY, JSON.stringify(nextOrder)),
+            AsyncStorage.setItem(
+              LOCAL_PINNED_DRONES_KEY,
+              JSON.stringify(nextLayout.pinnedDroneIds),
+            ),
+          ]);
+          dronesRef.current = nextDrones;
+          sidebarOrderRef.current = nextOrder;
+          pinnedDroneIdsRef.current = nextLayout.pinnedDroneIds;
+          setDrones(nextDrones);
+          setPinnedDroneIds(nextLayout.pinnedDroneIds);
+          return {
+            ok: true,
+            mutationId: command.mutationId,
+            version: null,
+            uiPreferences: nextLayout,
+          };
+        });
+        writeRef.current = write.then(
+          () => undefined,
+          () => undefined,
+        );
+        return await write;
       }
       if (operation === 'drone.create.host') {
         const name = uniqueDroneName(dronesRef.current, payload.name);
@@ -288,9 +378,7 @@ function useLocalDroneControlValue() {
             ...(payload.seedAgentPermissionMode
               ? { agentPermissionMode: payload.seedAgentPermissionMode }
               : {}),
-            ...(payload.seedApprovalPolicy === 'never'
-              ? { approvalPolicy: 'never' as const }
-              : {}),
+            ...(payload.seedApprovalPolicy === 'never' ? { approvalPolicy: 'never' as const } : {}),
           });
         }
         const drone: LocalDroneRecord = {
@@ -316,17 +404,14 @@ function useLocalDroneControlValue() {
         if (newName.length > 80) throw new Error('Drone names must be 80 characters or fewer.');
         if (
           dronesRef.current.some(
-            (candidate) =>
-              candidate.id !== drone.id && candidate.name.trim() === newName,
+            (candidate) => candidate.id !== drone.id && candidate.name.trim() === newName,
           )
         ) {
           throw new Error('A drone with that name already exists.');
         }
         const nextDrone = { ...drone, name: newName };
         await replaceDrones(
-          dronesRef.current.map((candidate) =>
-            candidate.id === drone.id ? nextDrone : candidate,
-          ),
+          dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
         );
         return {
           ok: true,
@@ -364,7 +449,8 @@ function useLocalDroneControlValue() {
       if (operation === 'chat.rename') {
         const drone = getDrone();
         const chatName = String(payload.chatName ?? '').trim();
-        if (!chatName || chatName === 'default') throw new Error('The default chat cannot be renamed.');
+        if (!chatName || chatName === 'default')
+          throw new Error('The default chat cannot be renamed.');
         const newName = parseLocalChatName(payload.newName, 'New chat name');
         if (!drone.chats[chatName]) throw new Error(`Unknown chat: ${chatName}`);
         if (newName !== chatName && drone.chats[newName]) {
@@ -384,7 +470,8 @@ function useLocalDroneControlValue() {
       if (operation === 'chat.delete') {
         const drone = getDrone();
         const chatName = String(payload.chatName ?? '').trim();
-        if (!chatName || chatName === 'default') throw new Error('The default chat cannot be deleted.');
+        if (!chatName || chatName === 'default')
+          throw new Error('The default chat cannot be deleted.');
         const threadId = drone.chats[chatName];
         if (!threadId) throw new Error(`Unknown chat: ${chatName}`);
         await assistant.deleteThread(threadId);
@@ -396,6 +483,124 @@ function useLocalDroneControlValue() {
           dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
         );
         return { ok: true, deletedChat: chatName, chats: Object.keys(nextChats) };
+      }
+      if (operation === 'files.list') {
+        const { thread } = getThread();
+        const parts = localArtifactDirectoryParts(payload.path);
+        const root = new Directory(
+          Paths.document,
+          'drone-hub-native-artifacts-v1',
+          encodeURIComponent(thread.id),
+        );
+        const directory = parts.length > 0 ? new Directory(root, ...parts) : root;
+        if (!directory.exists)
+          throw new Error(`Artifact directory not found: ${parts.join('/') || '.'}`);
+        const entries = directory.list().map((entry) => {
+          const entryPath = [...parts, entry.name].join('/');
+          const isDirectory = entry instanceof Directory;
+          const size = Number((entry as File).size);
+          const mtimeMs = Number((entry as File).modificationTime);
+          const mime = isDirectory ? '' : inferMobilePreviewMime(entry.name);
+          return {
+            name: entry.name,
+            path: entryPath,
+            kind: isDirectory ? 'directory' : 'file',
+            size: !isDirectory && Number.isFinite(size) ? Math.max(0, Math.floor(size)) : null,
+            mtimeMs: Number.isFinite(mtimeMs) ? mtimeMs : null,
+            ext: isDirectory ? null : (entry.name.split('.').at(-1)?.toLowerCase() ?? null),
+            isImage: mime.startsWith('image/'),
+            isVideo: mime.startsWith('video/'),
+          };
+        });
+        entries.sort((left, right) =>
+          left.kind === right.kind
+            ? left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
+            : left.kind === 'directory'
+              ? -1
+              : 1,
+        );
+        return {
+          contentChunk: localJsonChunk(
+            { ok: true, path: parts.join('/'), entries },
+            payload.contentOffset,
+          ),
+        };
+      }
+      if (operation === 'file.action') {
+        const { thread } = getThread();
+        const action = String(payload.action ?? '').trim();
+        if (action !== 'create-file' && action !== 'create-directory' && action !== 'rename') {
+          throw new Error('Unsupported file action.');
+        }
+        const name = localArtifactChildName(payload.name);
+        const root = new Directory(
+          Paths.document,
+          'drone-hub-native-artifacts-v1',
+          encodeURIComponent(thread.id),
+        );
+        if (action === 'create-file' || action === 'create-directory') {
+          const parentParts = localArtifactDirectoryParts(payload.targetDir);
+          const parent = parentParts.length > 0 ? new Directory(root, ...parentParts) : root;
+          if (!parent.exists) {
+            throw new Error(`Artifact directory not found: ${parentParts.join('/') || '.'}`);
+          }
+          const created =
+            action === 'create-file' ? parent.createFile(name, null) : parent.createDirectory(name);
+          return {
+            ok: true,
+            action,
+            path: [...parentParts, created.name].join('/'),
+            targetDir: parentParts.join('/'),
+          };
+        }
+        const sourceParts = localArtifactPathParts(payload.path);
+        const sourceName = sourceParts.at(-1)!;
+        const parentParts = sourceParts.slice(0, -1);
+        const parent = parentParts.length > 0 ? new Directory(root, ...parentParts) : root;
+        const sourceFile = new File(parent, sourceName);
+        const sourceDirectory = new Directory(parent, sourceName);
+        if (sourceFile.exists) sourceFile.rename(name);
+        else if (sourceDirectory.exists) sourceDirectory.rename(name);
+        else throw new Error(`Artifact path not found: ${sourceParts.join('/')}`);
+        return {
+          ok: true,
+          action,
+          path: sourceParts.join('/'),
+          targetPath: [...parentParts, name].join('/'),
+        };
+      }
+      if (operation === 'file.write') {
+        const { thread } = getThread();
+        const parts = localArtifactPathParts(payload.path);
+        if (typeof payload.content !== 'string') throw new Error('content must be a string');
+        const bytes = new TextEncoder().encode(payload.content);
+        if (bytes.length > MOBILE_FILE_EDIT_MAX_BYTES) {
+          throw new Error(
+            `File is too large to edit on mobile (${bytes.length} bytes, max ${MOBILE_FILE_EDIT_MAX_BYTES})`,
+          );
+        }
+        const root = new Directory(
+          Paths.document,
+          'drone-hub-native-artifacts-v1',
+          encodeURIComponent(thread.id),
+        );
+        const file = new File(root, ...parts);
+        if (!file.exists) throw new Error(`Artifact file not found: ${parts.join('/')}`);
+        const expectedRevision = String(payload.expectedRevision ?? '').trim();
+        if (expectedRevision) {
+          const currentRevision = fileRevision(await file.bytes());
+          if (currentRevision !== expectedRevision) throw new Error('File changed on disk');
+        }
+        file.write(payload.content);
+        return {
+          ok: true,
+          path: parts.join('/'),
+          size: bytes.length,
+          mtimeMs: Number.isFinite(Number(file.modificationTime))
+            ? Number(file.modificationTime)
+            : null,
+          revision: fileRevision(bytes),
+        };
       }
       if (operation === 'file.preview') {
         const { thread } = getThread();
@@ -482,6 +687,7 @@ function useLocalDroneControlValue() {
           reasoning: thread.thinkingLevel,
           agentPermissionMode: thread.agentPermissionMode ?? 'full-access',
           approvalPolicy: thread.approvalPolicy ?? (thread.autoApprove ? 'never' : 'ask'),
+          subscriptions: [],
           readState: { unread: false },
         };
       }
@@ -591,13 +797,8 @@ export function LocalDroneControlProvider({ children }: { children: React.ReactN
 
   React.useEffect(
     () =>
-      mesh.registerCapabilityHandler(
-        DRONE_CONTROL_CAPABILITY,
-        (operation, payload) =>
-          requestRef.current(
-            operation as DroneControlOperation,
-            payload as Record<string, unknown>,
-          ),
+      mesh.registerCapabilityHandler(DRONE_CONTROL_CAPABILITY, (operation, payload) =>
+        requestRef.current(operation as DroneControlOperation, payload as Record<string, unknown>),
       ),
     [mesh.registerCapabilityHandler],
   );

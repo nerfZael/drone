@@ -19,6 +19,7 @@ export type AssistantRouteDependencies = {
   }) => Promise<any>;
   validateAssistantPromptImages: (attachments: any[]) => any[];
   saveAssistantArtifactUploads: (threadId: string, attachments: any[]) => Promise<any[]>;
+  updateStoredUserTimeZone: (timeZone: unknown) => Promise<unknown>;
 };
 
 export function registerAssistantRoutes(
@@ -35,6 +36,7 @@ export function registerAssistantRoutes(
     submitAssistantPrompt,
     validateAssistantPromptImages,
     saveAssistantArtifactUploads,
+    updateStoredUserTimeZone,
   } = deps;
   const errorMessage = (error: any): string => error?.message ?? String(error);
   const respondStatusError = (
@@ -446,6 +448,9 @@ export function registerAssistantRoutes(
       }, 15_000);
       (keepAlive as any).unref?.();
       try {
+        if (body?.userTimeZone != null) {
+          await updateStoredUserTimeZone(body.userTimeZone).catch(() => undefined);
+        }
         let prompt = String(body?.prompt ?? '').trim();
         const attachments = Array.isArray(body?.attachments) ? body.attachments : [];
         const promptImages = validateAssistantPromptImages(

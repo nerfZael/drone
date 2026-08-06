@@ -1,10 +1,12 @@
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type {
   AgentsFileResponse,
   AgentsMdFile,
   AgentsSettingsResponse,
 } from './settings-types';
 import { prepareAgentsMdUpload } from './agents-md-file-import';
+import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsQuery } from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -12,38 +14,12 @@ function normalizeAgentsSettingsResponse(data: AgentsSettingsResponse): AgentsSe
   return { ...data, files: Array.isArray(data.files) ? data.files : [] };
 }
 
-export type UseAgentsSettingsResult = {
-  agentsSettings: AgentsSettingsResponse | null;
-  agentsSettingsLoading: boolean;
-  agentsSettingsError: string | null;
-  agentsSettingsNotice: string | null;
-  agentsContentDraft: string;
-  savingAgentsSettings: boolean;
-  selectedAgentsFile: AgentsMdFile | null;
-  creatingAgentsFile: boolean;
-  agentsFileDraftName: string;
-  agentsFileDraftContent: string;
-  agentsFileLoading: boolean;
-  savingAgentsFile: boolean;
-  deletingAgentsFile: boolean;
-  importingAgentsFiles: boolean;
-  agentsFileDraftDirty: boolean;
-  setAgentsContentDraft: React.Dispatch<React.SetStateAction<string>>;
-  setAgentsFileDraftName: React.Dispatch<React.SetStateAction<string>>;
-  setAgentsFileDraftContent: React.Dispatch<React.SetStateAction<string>>;
-  loadAgentsSettings: () => Promise<void>;
-  saveAgentsSettings: () => Promise<void>;
-  selectAgentsFile: (fileId: string) => Promise<void>;
-  beginAgentsFile: () => void;
-  closeAgentsFile: () => void;
-  saveAgentsFile: () => Promise<void>;
-  deleteAgentsFile: () => Promise<void>;
-  importAgentsFiles: (files: File[]) => Promise<void>;
-};
+export type UseAgentsSettingsResult = ReturnType<typeof useAgentsSettings>;
 
-export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettingsResult {
-  const [agentsSettings, setAgentsSettings] = React.useState<AgentsSettingsResponse | null>(null);
-  const [agentsSettingsLoading, setAgentsSettingsLoading] = React.useState(false);
+export function useAgentsSettings(requestJson: RequestJsonFn) {
+  const queryClient = useQueryClient();
+  const queryKey = settingsQueryKey('agents');
+  const query = useSettingsQuery<AgentsSettingsResponse>(requestJson, queryKey, '/api/settings/agents');
   const [agentsSettingsError, setAgentsSettingsError] = React.useState<string | null>(null);
   const [agentsSettingsNotice, setAgentsSettingsNotice] = React.useState<string | null>(null);
   const [agentsContentDraft, setAgentsContentDraft] = React.useState('');
@@ -57,6 +33,11 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
   const [savingAgentsFile, setSavingAgentsFile] = React.useState(false);
   const [deletingAgentsFile, setDeletingAgentsFile] = React.useState(false);
   const [importingAgentsFiles, setImportingAgentsFiles] = React.useState(false);
+  const appliedAgentsContentRef = React.useRef<string | null>(null);
+  const agentsSettings = React.useMemo(
+    () => (query.data ? normalizeAgentsSettingsResponse(query.data) : null),
+    [query.data],
+  );
 
   React.useEffect(() => {
     selectedAgentsFileRef.current = selectedAgentsFile;
@@ -68,15 +49,32 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
     setAgentsFileDraftContent(file?.content ?? '');
   }, []);
 
+  const applyAgentsContent = React.useCallback((data: AgentsSettingsResponse) => {
+    appliedAgentsContentRef.current = data.agents.content;
+    setAgentsContentDraft(data.agents.content);
+  }, []);
+
+  React.useEffect(() => {
+    if (!query.data) return;
+    const data = normalizeAgentsSettingsResponse(query.data);
+    if (appliedAgentsContentRef.current !== data.agents.content) applyAgentsContent(data);
+    const selectedFileId = selectedAgentsFileRef.current?.id;
+    if (!selectedFileId || !data.files.some((file) => file.id === selectedFileId)) {
+      setFileDraft(null);
+      setCreatingAgentsFile(false);
+    }
+  }, [applyAgentsContent, query.data, setFileDraft]);
+
   const loadAgentsSettings = React.useCallback(async () => {
-    setAgentsSettingsLoading(true);
     setAgentsSettingsError(null);
     setAgentsSettingsNotice(null);
     try {
-      const response = await requestJson<AgentsSettingsResponse>('/api/settings/agents');
+      const result = await query.refetch();
+      if (result.error) throw result.error;
+      if (!result.data) return;
+      const response = result.data;
       const data = normalizeAgentsSettingsResponse(response);
-      setAgentsSettings(data);
-      setAgentsContentDraft(data.agents.content);
+      applyAgentsContent(data);
       const selectedFileId = selectedAgentsFileRef.current?.id;
       if (selectedFileId && data.files.some((file) => file.id === selectedFileId)) {
         const detail = await requestJson<{ ok: true; file: AgentsMdFile }>(
@@ -87,16 +85,10 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
         setFileDraft(null);
         setCreatingAgentsFile(false);
       }
-    } catch (e: any) {
-      setAgentsSettingsError(e?.message ?? String(e));
-    } finally {
-      setAgentsSettingsLoading(false);
+    } catch (error) {
+      setAgentsSettingsError(settingsErrorMessage(error));
     }
-  }, [requestJson, setFileDraft]);
-
-  React.useEffect(() => {
-    void loadAgentsSettings();
-  }, [loadAgentsSettings]);
+  }, [applyAgentsContent, query.refetch, requestJson, setFileDraft]);
 
   const saveAgentsSettings = React.useCallback(async () => {
     setAgentsSettingsError(null);
@@ -109,8 +101,8 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
         body: JSON.stringify({ content: agentsContentDraft }),
       });
       const data = normalizeAgentsSettingsResponse(response);
-      setAgentsSettings(data);
-      setAgentsContentDraft(data.agents.content);
+      queryClient.setQueryData(queryKey, data);
+      applyAgentsContent(data);
       setAgentsSettingsNotice(
         data.agents.enabled ? 'Saved default AGENTS.md for repo-attached container drones.' : 'Cleared the default AGENTS.md.',
       );
@@ -119,7 +111,7 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
     } finally {
       setSavingAgentsSettings(false);
     }
-  }, [agentsContentDraft, requestJson]);
+  }, [agentsContentDraft, applyAgentsContent, queryClient, queryKey, requestJson]);
 
   const selectAgentsFile = React.useCallback(
     async (fileId: string) => {
@@ -174,7 +166,7 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
           }),
         },
       );
-      setAgentsSettings(normalizeAgentsSettingsResponse(data));
+      queryClient.setQueryData(queryKey, normalizeAgentsSettingsResponse(data));
       setCreatingAgentsFile(false);
       setFileDraft(data.file);
       setAgentsSettingsNotice(
@@ -188,6 +180,8 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
   }, [
     agentsFileDraftContent,
     agentsFileDraftName,
+    queryClient,
+    queryKey,
     requestJson,
     selectedAgentsFile?.id,
     setFileDraft,
@@ -204,7 +198,7 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
         `/api/settings/agents/files/${encodeURIComponent(file.id)}`,
         { method: 'DELETE' },
       );
-      setAgentsSettings(normalizeAgentsSettingsResponse(data));
+      queryClient.setQueryData(queryKey, normalizeAgentsSettingsResponse(data));
       setCreatingAgentsFile(false);
       setFileDraft(null);
       setAgentsSettingsNotice(`Deleted ${file.name}.`);
@@ -213,7 +207,7 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
     } finally {
       setDeletingAgentsFile(false);
     }
-  }, [requestJson, selectedAgentsFile, setFileDraft]);
+  }, [queryClient, queryKey, requestJson, selectedAgentsFile, setFileDraft]);
 
   const importAgentsFiles = React.useCallback(
     async (files: File[]) => {
@@ -241,7 +235,7 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
             failures.push(`${file.name || 'File'}: ${error?.message ?? String(error)}`);
           }
         }
-        if (latestSettings) setAgentsSettings(latestSettings);
+        if (latestSettings) queryClient.setQueryData(queryKey, latestSettings);
         if (latestFile) {
           setCreatingAgentsFile(false);
           setFileDraft(latestFile);
@@ -260,7 +254,7 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
         setImportingAgentsFiles(false);
       }
     },
-    [requestJson, setFileDraft],
+    [queryClient, queryKey, requestJson, setFileDraft],
   );
 
   const agentsFileDraftDirty = creatingAgentsFile
@@ -273,8 +267,8 @@ export function useAgentsSettings(requestJson: RequestJsonFn): UseAgentsSettings
 
   return {
     agentsSettings,
-    agentsSettingsLoading,
-    agentsSettingsError,
+    agentsSettingsLoading: query.isFetching,
+    agentsSettingsError: settingsQueryError(agentsSettingsError, false, query),
     agentsSettingsNotice,
     agentsContentDraft,
     savingAgentsSettings,

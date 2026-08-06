@@ -256,7 +256,7 @@ export async function workspaceGitHashes(
   client: DroneClient,
   input: { repoRoot: string; paths: string[] },
 ): Promise<{
-  hashes: Array<{ path: string; hash: string }>;
+  hashes: Array<{ path: string; hash: string; lineCount?: number; binary?: boolean }>;
   cacheHits: number;
   hashed: number;
   durationMs: number;

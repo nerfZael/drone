@@ -5,6 +5,7 @@ import {
   isGranted,
   pairingClaimSigningText,
   parsePairingPayload,
+  parseSidebarMoveCommandRequest,
   PROVIDER_CREDENTIALS_CAPABILITY,
   runWorkspaceCommandJob,
 } from '../src';
@@ -64,8 +65,10 @@ describe('device protocol', () => {
     ).toBe(false);
   });
 
-  test('advertises file preview as an explicit drone permission', () => {
-    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('file.preview');
+  test('advertises file workspace operations as explicit drone permissions', () => {
+    expect(DRONE_CONTROL_CAPABILITY.operations).toEqual(
+      expect.arrayContaining(['files.list', 'file.preview', 'file.write', 'file.action']),
+    );
     expect(
       isGranted(
         [{ capability: 'drone-control', version: 1, operations: ['chat.read'] }],
@@ -74,10 +77,115 @@ describe('device protocol', () => {
         'file.preview',
       ),
     ).toBe(false);
+    expect(
+      isGranted(
+        [{ capability: 'drone-control', version: 1, operations: ['file.preview'] }],
+        'drone-control',
+        1,
+        'files.list',
+      ),
+    ).toBe(false);
+    expect(
+      isGranted(
+        [{ capability: 'drone-control', version: 1, operations: ['file.preview'] }],
+        'drone-control',
+        1,
+        'file.write',
+      ),
+    ).toBe(false);
+    expect(
+      isGranted(
+        [{ capability: 'drone-control', version: 1, operations: ['file.write'] }],
+        'drone-control',
+        1,
+        'file.action',
+      ),
+    ).toBe(false);
   });
 
   test('advertises drone rename as an explicit permission', () => {
     expect(DRONE_CONTROL_CAPABILITY.operations).toContain('drone.rename');
+  });
+
+  test('advertises sidebar ordering as an explicit permission', () => {
+    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('sidebar.move');
+  });
+
+  test('validates sidebar commands at the protocol boundary', () => {
+    expect(
+      parseSidebarMoveCommandRequest({
+        mutationId: 'move-1',
+        intent: {
+          kind: 'chat',
+          droneId: ' host ',
+          chatNames: ['default', 'review', 'review'],
+          activeChatName: 'review',
+          overChatName: 'default',
+          placement: 'before',
+        },
+      }),
+    ).toEqual({
+      mutationId: 'move-1',
+      intent: {
+        kind: 'chat',
+        droneId: 'host',
+        chatNames: ['default', 'review'],
+        activeChatName: 'review',
+        overChatName: 'default',
+        placement: 'before',
+      },
+    });
+    expect(() =>
+      parseSidebarMoveCommandRequest({
+        mutationId: 'move-2',
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'folder',
+          repoPath: '/repo',
+          sourceGroup: 'Review',
+          sourceNodeId: 'folder:Review',
+          sourceParentId: 'root',
+          sourceSiblingNodeIds: [],
+          targetGroup: null,
+          targetParentId: 'folder:Review',
+          targetSiblingNodeIds: [],
+          placement: 'sideways',
+        },
+      }),
+    ).toThrow('placement');
+    expect(() =>
+      parseSidebarMoveCommandRequest({
+        mutationId: 'move-3',
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'drone',
+          repoPath: '/repo',
+          droneId: 'host',
+          sourceParentId: 'root',
+          sourceSiblingNodeIds: ['drone:host'],
+          targetGroup: 42,
+          targetParentId: 'root',
+          targetSiblingNodeIds: [],
+        },
+      }),
+    ).toThrow('targetGroup');
+    expect(
+      parseSidebarMoveCommandRequest({
+        mutationId: 'pin-1',
+        intent: {
+          kind: 'set-pinned',
+          droneIds: [' alpha ', 'alpha', 'bravo'],
+          pinned: true,
+        },
+      }),
+    ).toEqual({
+      mutationId: 'pin-1',
+      intent: {
+        kind: 'set-pinned',
+        droneIds: ['alpha', 'bravo'],
+        pinned: true,
+      },
+    });
   });
 
   test('advertises chat rename and delete as explicit permissions', () => {

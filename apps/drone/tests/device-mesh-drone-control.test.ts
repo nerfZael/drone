@@ -13,7 +13,9 @@ describe('device mesh drone summaries', () => {
         name: 'Child',
         runtime: 'container',
         group: 'Review',
+        groupId: 'group-review',
         repoPath: '/work/repo',
+        repoBranch: 'dvm/work',
         cwd: '/work/repo/subdir',
         fleetParentId: 'drone_parent',
         chats: ['default', 'review'],
@@ -28,10 +30,12 @@ describe('device mesh drone summaries', () => {
     ).toMatchObject({
       id: 'drone_child',
       repoPath: '/work/repo',
+      repoBranch: 'dvm/work',
       cwd: '/work/repo/subdir',
       repoAttached: true,
       fleetParentId: 'drone_parent',
       group: 'Review',
+      groupId: 'group-review',
       chats: ['default', 'review'],
       draftChats: { review: true },
       busyChats: ['review'],
@@ -111,7 +115,15 @@ describe('device mesh drone summaries', () => {
               : pathname === '/api/groups'
                 ? {
                     ok: true,
-                    groups: [{ name: 'Review', createdAt: '2026-07-13T10:00:00.000Z' }],
+                    groups: [
+                      {
+                        id: 'group-review',
+                        name: 'Review',
+                        repoPath: '/work/one',
+                        parentId: null,
+                        createdAt: '2026-07-13T10:00:00.000Z',
+                      },
+                    ],
                   }
                 : pathname === '/api/settings/ui-preferences'
                   ? {
@@ -152,6 +164,15 @@ describe('device mesh drone summaries', () => {
           preferenceUpdatedAt: '2026-07-14T11:00:00.000Z',
           registeredRepoPaths: ['/work/one', '/work/empty'],
           groupCreatedAtByName: { Review: '2026-07-13T10:00:00.000Z' },
+          groups: [
+            {
+              id: 'group-review',
+              name: 'Review',
+              repoPath: '/work/one',
+              parentId: null,
+              createdAt: '2026-07-13T10:00:00.000Z',
+            },
+          ],
           sidebarGroupOrder: ['repo:repo:/work/one'],
           sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
           sidebarNodeOrderByParent: { root: ['drone:one'] },
@@ -239,19 +260,165 @@ describe('device mesh drone summaries', () => {
     }
   });
 
-  test('forwards pin updates to the focused UI preference endpoint', async () => {
+  test('applies a typed sidebar move intent to the latest Hub snapshot exactly once', async () => {
     const originalFetch = globalThis.fetch;
-    let request: { url: string; method: string; body: unknown } | null = null;
+    const requests: Array<{ pathname: string; method: string; body: any }> = [];
     globalThis.fetch = (async (input, init) => {
-      request = {
-        url: String(input),
-        method: String(init?.method ?? 'GET'),
-        body: JSON.parse(String(init?.body ?? '{}')),
-      };
-      return Response.json({
-        ok: true,
-        uiPreferences: { pinnedDroneIds: ['drone one'] },
+      const url = new URL(String(input));
+      const method = String(init?.method ?? 'GET');
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      requests.push({ pathname: url.pathname, method, body });
+      if (url.pathname === '/api/drones/group-set') {
+        return Response.json({ ok: true, moved: [{ id: 'host', group: 'Review' }], rejected: [] });
+      }
+      if (method === 'GET') {
+        return Response.json({
+          ok: true,
+          version: 40,
+          uiPreferences: {
+            theme: 'dark',
+            sidebarNodeOrderByParent: {
+              root: ['drone:host', 'folder:Review'],
+              'folder:Review': ['drone:first', 'drone:second'],
+            },
+          },
+        });
+      }
+      return Response.json({ ok: true, version: 41, uiPreferences: body.uiPreferences });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
       });
+      const command = {
+        mutationId: 'move-host-1',
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'drone',
+          repoPath: '/work/repo',
+          droneId: 'host',
+          targetParentDroneId: 'lead',
+          sourceParentId: 'root',
+          sourceSiblingNodeIds: ['drone:host', 'folder:Review'],
+          targetGroup: 'Review',
+          targetParentId: 'folder:Review',
+          targetSiblingNodeIds: ['drone:first', 'drone:second'],
+          targetOverNodeId: 'drone:second',
+          placement: 'before',
+        },
+      };
+      await expect(capability.invoke('sidebar.move', command)).resolves.toMatchObject({
+        ok: true,
+        mutationId: 'move-host-1',
+        version: 41,
+      });
+      await expect(capability.invoke('sidebar.move', command)).resolves.toMatchObject({
+        mutationId: 'move-host-1',
+      });
+
+      expect(requests).toEqual([
+        {
+          pathname: '/api/fleet/actors/host/parent',
+          method: 'POST',
+          body: { parent: 'lead' },
+        },
+        {
+          pathname: '/api/drones/group-set',
+          method: 'POST',
+          body: { droneIds: ['host'], group: 'Review' },
+        },
+        { pathname: '/api/settings/ui-preferences', method: 'GET', body: undefined },
+        {
+          pathname: '/api/settings/ui-preferences',
+          method: 'POST',
+          body: {
+            expectedVersion: 40,
+            notificationMode: 'sidebar_snapshot',
+            uiPreferences: {
+              theme: 'dark',
+              sidebarNodeOrderByParent: {
+                root: ['folder:Review'],
+                'folder:Review': ['drone:first', 'drone:host', 'drone:second'],
+              },
+            },
+          },
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('serializes concurrent sidebar commands so each reads the prior committed revision', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    let version = 8;
+    let uiPreferences: Record<string, unknown> = {
+      sidebarChatOrderByDrone: { host: ['one', 'two', 'three'] },
+    };
+    globalThis.fetch = (async (input, init) => {
+      const url = new URL(String(input));
+      const method = String(init?.method ?? 'GET');
+      if (method === 'GET') {
+        requests.push(`GET:${version}`);
+        await Promise.resolve();
+        return Response.json({ ok: true, version, uiPreferences });
+      }
+      const body = JSON.parse(String(init?.body));
+      requests.push(`POST:${body.expectedVersion}`);
+      uiPreferences = body.uiPreferences;
+      version += 1;
+      return Response.json({ ok: true, version, uiPreferences });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await Promise.all([
+        capability.invoke('sidebar.move', {
+          mutationId: 'chat-order-1',
+          intent: {
+            kind: 'chat',
+            droneId: 'host',
+            chatNames: ['one', 'two', 'three'],
+            activeChatName: 'three',
+            overChatName: 'one',
+            placement: 'before',
+          },
+        }),
+        capability.invoke('sidebar.move', {
+          mutationId: 'chat-order-2',
+          intent: {
+            kind: 'chat',
+            droneId: 'host',
+            chatNames: ['three', 'one', 'two'],
+            activeChatName: 'two',
+            overChatName: 'one',
+            placement: 'before',
+          },
+        }),
+      ]);
+      expect(requests).toEqual(['GET:8', 'POST:8', 'GET:9', 'POST:9']);
+      expect(uiPreferences).toMatchObject({
+        sidebarChatOrderByDrone: { host: ['three', 'two', 'one'] },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('creates the first sidebar preference record with a null expected version', async () => {
+    const originalFetch = globalThis.fetch;
+    const postedBodies: any[] = [];
+    globalThis.fetch = (async (_input, init) => {
+      if (String(init?.method ?? 'GET') === 'GET') {
+        return Response.json({ ok: true, version: null, uiPreferences: {} });
+      }
+      const body = JSON.parse(String(init?.body));
+      postedBodies.push(body);
+      return Response.json({ ok: true, version: 1, uiPreferences: body.uiPreferences });
     }) as typeof fetch;
     try {
       const capability = createDroneControlCapability({
@@ -259,20 +426,30 @@ describe('device mesh drone summaries', () => {
         apiToken: 'test',
       });
       await expect(
-        capability.invoke('drone.pin.update', { droneId: 'drone one', pinned: true }),
-      ).resolves.toMatchObject({
-        ok: true,
-        uiPreferences: { pinnedDroneIds: ['drone one'] },
-      });
-      expect(request).toEqual({
-        url: 'http://127.0.0.1:7777/api/settings/ui-preferences/pinned-drones',
-        method: 'POST',
-        body: { droneId: 'drone one', pinned: true },
-      });
+        capability.invoke('sidebar.move', {
+          mutationId: 'first-sidebar-write',
+          intent: {
+            kind: 'chat',
+            droneId: 'host',
+            chatNames: ['default', 'review'],
+            activeChatName: 'review',
+            overChatName: 'default',
+            placement: 'before',
+          },
+        }),
+      ).resolves.toMatchObject({ ok: true, version: 1 });
+      expect(postedBodies).toEqual([
+        {
+          expectedVersion: null,
+          notificationMode: 'sidebar_snapshot',
+          uiPreferences: { sidebarChatOrderByDrone: { host: ['review', 'default'] } },
+        },
+      ]);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
+
 
   test('bounds lazy branch pages and rejects unregistered repository paths', async () => {
     const originalFetch = globalThis.fetch;
@@ -383,33 +560,45 @@ describe('device mesh drone summaries', () => {
     }
   });
 
-  test('forwards mobile drone renames to the Hub rename endpoint', async () => {
+  test('uses the in-process rename command for mobile drone renames', async () => {
     const originalFetch = globalThis.fetch;
-    let request: { path: string; method: string; body: any } | null = null;
-    globalThis.fetch = (async (input, init) => {
-      request = {
-        path: new URL(String(input)).pathname,
-        method: String(init?.method ?? 'GET'),
-        body: JSON.parse(String(init?.body ?? '{}')),
-      };
-      return Response.json({ ok: true, id: 'drone-one', newName: 'Review drone' });
+    const renames: any[] = [];
+    globalThis.fetch = (async (input) => {
+      throw new Error(`unexpected loopback request: ${String(input)}`);
     }) as typeof fetch;
     try {
-      const capability = createDroneControlCapability({
-        baseUrl: () => 'http://127.0.0.1:7777',
-        apiToken: 'test',
-      });
+      const capability = createDroneControlCapability(
+        {
+          baseUrl: () => 'http://127.0.0.1:7777',
+          apiToken: 'test',
+        },
+        undefined,
+        {
+          renameDrone: async (input) => {
+            renames.push(input);
+            return {
+              ok: true,
+              id: input.droneRef,
+              oldName: 'Untitled 1',
+              newName: input.newName,
+              renamed: true,
+            };
+          },
+        },
+      );
       await expect(
         capability.invoke('drone.rename', {
           droneId: 'drone-one',
           newName: 'Review drone',
         }),
       ).resolves.toMatchObject({ ok: true, newName: 'Review drone' });
-      expect(request).toEqual({
-        path: '/api/drones/drone-one/rename',
-        method: 'POST',
-        body: { newName: 'Review drone', source: 'drone-hub-mobile' },
-      });
+      expect(renames).toEqual([
+        {
+          droneRef: 'drone-one',
+          newName: 'Review drone',
+          source: 'drone-hub-mobile',
+        },
+      ]);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -418,7 +607,9 @@ describe('device mesh drone summaries', () => {
   test('schedules automatic naming for unnamed mobile-created drones', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ path: string; method: string; body: any }> = [];
-    let resolveSuggestion: ((response: Response) => void) | null = null;
+    const suggestions: Array<{ droneId: string; prompt: string }> = [];
+    const renames: any[] = [];
+    let resolveSuggestion: ((name: string) => void) | null = null;
     globalThis.fetch = (async (input, init) => {
       const path = new URL(String(input)).pathname;
       requests.push({
@@ -426,19 +617,32 @@ describe('device mesh drone summaries', () => {
         method: String(init?.method ?? 'GET'),
         body: JSON.parse(String(init?.body ?? '{}')),
       });
-      if (path === '/api/drones') return Response.json({ ok: true, id: 'created-mobile' });
-      if (path === '/api/drones/name-from-message') {
-        return await new Promise<Response>((resolve) => {
-          resolveSuggestion = resolve;
-        });
+      if (path === '/api/drones') {
+        return Response.json({ ok: true, id: 'created-mobile', name: 'Untitled 1' });
       }
-      return Response.json({ ok: true, renamed: true });
+      throw new Error(`unexpected loopback request: ${path}`);
     }) as typeof fetch;
     try {
-      const capability = createDroneControlCapability({
-        baseUrl: () => 'http://127.0.0.1:7777',
-        apiToken: 'test',
-      });
+      const capability = createDroneControlCapability(
+        {
+          baseUrl: () => 'http://127.0.0.1:7777',
+          apiToken: 'test',
+        },
+        undefined,
+        {
+          createdDroneAutoRename: {
+            suggestName: async (input) => {
+              suggestions.push(input);
+              return await new Promise<string>((resolve) => {
+                resolveSuggestion = resolve;
+              });
+            },
+            renameDrone: async (input) => {
+              renames.push(input);
+            },
+          },
+        },
+      );
       await expect(
         capability.invoke('drone.create.container', {
           seedAgent: { kind: 'builtin', id: 'codex' },
@@ -456,69 +660,54 @@ describe('device mesh drone summaries', () => {
         },
       });
       expect(requests[0]?.body.autoRenamePrompt).toBeUndefined();
-      expect(requests[1]).toMatchObject({
-        path: '/api/drones/name-from-message',
-        body: {
-          message: 'Review the Android app',
-          source: 'mobile-create-auto-rename',
+      expect(suggestions).toEqual([
+        {
+          prompt: 'Review the Android app',
           droneId: 'created-mobile',
         },
-      });
+      ]);
 
-      resolveSuggestion?.(Response.json({ ok: true, name: 'Review Android App' }));
-      for (let attempt = 0; attempt < 10 && requests.length < 3; attempt += 1) {
+      resolveSuggestion?.('Review Android App');
+      for (let attempt = 0; attempt < 10 && renames.length < 1; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
-      expect(requests[2]).toMatchObject({
-        path: '/api/drones/created-mobile/rename',
-        body: {
-          newName: 'Review Android App',
-          source: 'mobile-create-auto-rename',
-          attempt: 1,
-          suggestedBase: 'Review Android App',
-        },
+      expect(renames[0]).toMatchObject({
+        droneId: 'created-mobile',
+        newName: 'Review Android App',
+        source: 'mobile-create-auto-rename',
+        attempt: 1,
+        suggestedBase: 'Review Android App',
+        expectedName: 'Untitled 1',
       });
+      expect(requests).toHaveLength(1);
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
   test('chooses a numbered automatic name when the first suggestion is already used', async () => {
-    const originalFetch = globalThis.fetch;
     const renameBodies: any[] = [];
-    globalThis.fetch = (async (input, init) => {
-      const path = new URL(String(input)).pathname;
-      if (path === '/api/drones/name-from-message') {
-        return Response.json({ ok: true, name: 'Review Android App' });
-      }
-      if (path === '/api/drones/drone-1/rename') {
-        const body = JSON.parse(String(init?.body ?? '{}'));
-        renameBodies.push(body);
-        if (renameBodies.length === 1) {
-          return Response.json(
-            { ok: false, error: 'drone already exists: Review Android App' },
-            { status: 409 },
-          );
-        }
-        return Response.json({ ok: true, renamed: true });
-      }
-      return Response.json({ ok: true });
-    }) as typeof fetch;
-    try {
-      await expect(
-        autoRenameCreatedDroneFromPrompt(
-          { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
-          'drone-1',
-          'Review the Android app',
-        ),
-      ).resolves.toBe('Review Android App (2)');
-      expect(renameBodies.map((body) => body.newName)).toEqual([
-        'Review Android App',
-        'Review Android App (2)',
-      ]);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    await expect(
+      autoRenameCreatedDroneFromPrompt(
+        {
+          suggestName: async () => 'Review Android App',
+          renameDrone: async (input) => {
+            renameBodies.push(input);
+            if (renameBodies.length === 1) {
+              throw new Error('drone already exists: Review Android App');
+            }
+          },
+        },
+        'drone-1',
+        'Review the Android app',
+        'Untitled 1',
+      ),
+    ).resolves.toBe('Review Android App (2)');
+    expect(renameBodies.map((body) => body.newName)).toEqual([
+      'Review Android App',
+      'Review Android App (2)',
+    ]);
+    expect(renameBodies.map((body) => body.expectedName)).toEqual(['Untitled 1', 'Untitled 1']);
   });
 
   test('keeps a successful create when automatic naming is unavailable', async () => {
@@ -539,10 +728,21 @@ describe('device mesh drone summaries', () => {
       );
     }) as typeof fetch;
     try {
-      const capability = createDroneControlCapability({
-        baseUrl: () => 'http://127.0.0.1:7777',
-        apiToken: 'test',
-      });
+      const capability = createDroneControlCapability(
+        {
+          baseUrl: () => 'http://127.0.0.1:7777',
+          apiToken: 'test',
+        },
+        undefined,
+        {
+          createdDroneAutoRename: {
+            suggestName: async () => {
+              throw new Error('Connect Codex or configure an OpenAI API key in Settings.');
+            },
+            renameDrone: async () => undefined,
+          },
+        },
+      );
       await expect(
         capability.invoke('drone.create.host', {
           seedPrompt: 'Review the Android app',
@@ -761,7 +961,7 @@ describe('device mesh drone summaries', () => {
       if (url.endsWith('/read')) {
         markReadBody = String(init?.body ?? '');
       }
-      const body = url.endsWith('/pending')
+      const body = url.includes('/state?')
         ? {
             ok: true,
             pending: [
@@ -779,6 +979,19 @@ describe('device mesh drone summaries', () => {
                 state: 'sent',
               },
             ],
+            transcripts: [
+              { id: 'prompt-completed', turn: 1, prompt: 'Review the code' },
+              ...Array.from({ length: 100 }, (_, index) => ({
+                id: `later-${index + 1}`,
+                turn: index + 2,
+                prompt: `Later prompt ${index + 1}`,
+              })),
+            ],
+            readState: {
+              unread: true,
+              latestAgentTurnId: 'turn-1',
+              latestAgentRevision: 2,
+            },
           }
         : url.endsWith('/pending/prompt-2')
           ? { ok: true, cancelled: true, promptId: 'prompt-2' }
@@ -791,22 +1004,7 @@ describe('device mesh drone summaries', () => {
                   latestAgentRevision: 2,
                 },
               }
-            : {
-                ok: true,
-                turns: [
-                  { id: 'prompt-completed', turn: 1, prompt: 'Review the code' },
-                  ...Array.from({ length: 100 }, (_, index) => ({
-                    id: `later-${index + 1}`,
-                    turn: index + 2,
-                    prompt: `Later prompt ${index + 1}`,
-                  })),
-                ],
-                readState: {
-                  unread: true,
-                  latestAgentTurnId: 'turn-1',
-                  latestAgentRevision: 2,
-                },
-              };
+            : { ok: true };
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -894,22 +1092,8 @@ describe('device mesh drone summaries', () => {
       })),
     };
     globalThis.fetch = (async (input) => {
-      const url = String(input);
-      if (url.endsWith('/pending')) {
-        return Response.json({
-          ok: true,
-          pending: Array.from({ length: 6 }, (_, index) => ({
-            id: `pending-${index}`,
-            at: `2026-08-02T12:${String(index).padStart(2, '0')}:00.000Z`,
-            prompt: `Pending ${index} ${'q'.repeat(20_000)}`,
-            state: 'sent',
-            agentPlan: largePlan,
-            activity: largeActivity,
-            fileChanges: largeFileChanges,
-          })),
-        });
-      }
-      if (url.endsWith('/read')) {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/read')) {
         return Response.json({
           ok: true,
           readState: { unread: false, latestAgentTurnId: 'turn-5', latestAgentRevision: 1 },
@@ -917,7 +1101,16 @@ describe('device mesh drone summaries', () => {
       }
       return Response.json({
         ok: true,
-        turns: Array.from({ length: 6 }, (_, index) => ({
+        pending: Array.from({ length: 6 }, (_, index) => ({
+          id: `pending-${index}`,
+          at: `2026-08-02T12:${String(index).padStart(2, '0')}:00.000Z`,
+          prompt: `Pending ${index} ${'q'.repeat(20_000)}`,
+          state: 'sent',
+          agentPlan: largePlan,
+          activity: largeActivity,
+          fileChanges: largeFileChanges,
+        })),
+        transcripts: Array.from({ length: 6 }, (_, index) => ({
           id: `turn-${index}`,
           turn: index,
           prompt: `Prompt ${index} ${'u'.repeat(30_000)}`,
@@ -948,6 +1141,214 @@ describe('device mesh drone summaries', () => {
       expect(result.pending.at(-1).activity).toBeDefined();
       expect(result.turns.length).toBeLessThan(6);
       expect(result.page.hasOlder).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('includes the active DroneHub MCP subscriptions in mobile chat reads', async () => {
+    const originalFetch = globalThis.fetch;
+    let subscriptionRequests = 0;
+    let readCursorWrites = 0;
+    const stateRequests: string[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/state')) stateRequests.push(`${url.pathname}${url.search}`);
+      const body =
+        url.pathname === '/api/resource-subscriptions'
+          ? (() => {
+              subscriptionRequests += 1;
+              return { ok: true, subscriptions: [] };
+            })()
+          : url.pathname.endsWith('/read')
+            ? (() => {
+                readCursorWrites += 1;
+                return { ok: true, readState: { unread: false } };
+              })()
+            : {
+                ok: true,
+                chatId: 'subscriber-chat-1',
+                subscriptions: [
+                  {
+                    id: 'subscription-1',
+                    provider: 'github',
+                    resourceType: 'pull_request',
+                    resourceId: 'acme/widgets#42',
+                    events: ['pull_request.merged'],
+                    intent: 'Continue after merge.',
+                    status: 'active',
+                    cursor: { private: 'internal-state' },
+                    lastError: 'not for clients',
+                  },
+                  {
+                    id: 'subscription-2',
+                    provider: 'drone-hub',
+                    resourceType: 'cron',
+                    resourceId: 'v1:hourly',
+                    resourceConfig: {
+                      expression: '0 * * * *',
+                      timeZone: 'UTC',
+                      description: 'Every hour',
+                    },
+                    events: ['cron.triggered'],
+                    intent: 'Check the deployment.',
+                    nextEventAt: '2026-08-05T13:00:00.000Z',
+                    status: 'active',
+                  },
+                ],
+                agent: { kind: 'builtin', id: 'codex' },
+                transcripts: [{ id: 'turn-1', prompt: 'hello', output: 'hi' }],
+                readState: {
+                  unread: false,
+                  latestAgentTurnId: 'turn-1',
+                  latestAgentRevision: 1,
+                },
+              };
+      return Response.json(body);
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+
+      const result: any = await capability.invoke('chat.read', {
+        droneId: 'drone-1',
+        chatName: 'default',
+      });
+      expect(result).toMatchObject({
+        subscriptions: [
+          {
+            id: 'subscription-1',
+            resourceId: 'acme/widgets#42',
+            status: 'active',
+          },
+          {
+            id: 'subscription-2',
+            resourceType: 'cron',
+            resourceConfig: {
+              expression: '0 * * * *',
+              timeZone: 'UTC',
+              description: 'Every hour',
+            },
+            nextEventAt: '2026-08-05T13:00:00.000Z',
+            status: 'active',
+          },
+        ],
+      });
+      expect(result.subscriptions[0].cursor).toBeUndefined();
+      expect(result.subscriptions[0].lastError).toBeUndefined();
+      expect(subscriptionRequests).toBe(0);
+
+      await expect(
+        capability.invoke('chat.read', {
+          droneId: 'drone-1',
+          chatName: 'default',
+          turnId: 'turn-1',
+          turnNumber: 1,
+        }),
+      ).resolves.toMatchObject({ historyKind: 'turn-content', turnId: 'turn-1' });
+      expect(subscriptionRequests).toBe(0);
+      expect(readCursorWrites).toBe(1);
+      expect(stateRequests).toEqual([
+        '/api/drones/drone-1/chats/default/state?transcript=page&limit=100&pending=all&subscriptions=1&readState=1&transcriptMeta=0',
+        '/api/drones/drone-1/chats/default/state?transcript=selected&turn=1&pending=none&subscriptions=0&readState=0&transcriptMeta=0',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('does not download the full transcript when an exact numbered turn is stale', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      requests.push(`${url.pathname}${url.search}`);
+      if (url.pathname.endsWith('/state')) {
+        return Response.json({
+          ok: true,
+          agent: { kind: 'builtin', id: 'codex' },
+          transcripts: [{ id: 'different-turn', turn: 1 }],
+          readState: { unread: false, latestAgentTurnId: null, latestAgentRevision: 0 },
+        });
+      }
+      if (url.pathname.endsWith('/read')) {
+        return Response.json({ ok: true, readState: { unread: false } });
+      }
+      return Response.json({
+        ok: true,
+        turns: [{ id: 'requested-turn', turn: 1, prompt: 'legacy content' }],
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+
+      await expect(
+        capability.invoke('chat.read', {
+          droneId: 'drone-1',
+          chatName: 'default',
+          turnId: 'requested-turn',
+          turnNumber: 1,
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect(requests.some((request) => request.endsWith('/chats/default'))).toBe(false);
+
+      await expect(
+        capability.invoke('chat.read', {
+          droneId: 'drone-1',
+          chatName: 'default',
+          turnId: 'requested-turn',
+        }),
+      ).resolves.toMatchObject({ historyKind: 'turn-content', turnId: 'requested-turn' });
+      expect(requests).toContain('/api/drones/drone-1/chats/default');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('keeps the legacy transcript path for custom-agent chats', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: string[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      requests.push(`${url.pathname}${url.search}`);
+      if (url.pathname.endsWith('/state')) {
+        return Response.json(
+          { ok: false, error: 'transcript is unavailable for custom agents' },
+          { status: 410 },
+        );
+      }
+      if (url.pathname.endsWith('/pending')) {
+        return Response.json({ ok: true, pending: [] });
+      }
+      if (url.pathname.endsWith('/read')) {
+        return Response.json({ ok: true, readState: { unread: false } });
+      }
+      return Response.json({
+        ok: true,
+        agent: { kind: 'custom', id: 'custom-test', command: 'custom-agent' },
+        turns: [{ id: 'custom-turn', turn: 1, prompt: 'run it', output: 'done' }],
+        readState: { unread: true, latestAgentTurnId: 'custom-turn', latestAgentRevision: 1 },
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+
+      await expect(
+        capability.invoke('chat.read', { droneId: 'drone-1', chatName: 'default' }),
+      ).resolves.toMatchObject({
+        historyKind: 'turns',
+        turns: [{ id: 'custom-turn', prompt: 'run it', output: 'done' }],
+      });
+      expect(requests).toContain('/api/drones/drone-1/chats/default');
+      expect(requests).toContain('/api/drones/drone-1/chats/default/pending');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -1220,6 +1621,135 @@ describe('device mesh drone summaries', () => {
           pullNumber: true,
         }),
       ).rejects.toThrow('pullNumber must be a positive integer');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('lists, mutates, and revision-safely writes files for mobile workspaces', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      requests.push({
+        url,
+        method: String(init?.method ?? 'GET'),
+        body: String(init?.body ?? ''),
+      });
+      return Response.json(
+        url.includes('/fs/list')
+          ? {
+              ok: true,
+              path: '/work/repo',
+              entries: [{ name: 'src', path: '/work/repo/src', kind: 'directory' }],
+            }
+          : { ok: true, path: '/work/repo/index.ts', size: 16, revision: 'sha256:next' },
+      );
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      const listResult: any = await capability.invoke('files.list', {
+        droneId: 'one',
+        path: '/work/repo',
+      });
+      expect(listResult.contentChunk).toMatchObject({
+        encoding: 'base64-json-utf8',
+        offset: 0,
+        done: true,
+      });
+      expect(
+        JSON.parse(Buffer.from(listResult.contentChunk.dataBase64, 'base64').toString('utf8')),
+      ).toMatchObject({ path: '/work/repo', entries: [{ name: 'src' }] });
+      await expect(
+        capability.invoke('file.action', {
+          droneId: 'one',
+          action: 'create-file',
+          targetDir: '/work/repo',
+          name: 'notes.txt',
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        capability.invoke('file.action', {
+          droneId: 'one',
+          action: 'delete',
+          path: '/work/repo/notes.txt',
+        }),
+      ).rejects.toThrow('unsupported mobile filesystem action');
+      await expect(
+        capability.invoke('file.write', {
+          droneId: 'one',
+          path: '/work/repo/index.ts',
+          content: 'export default 1',
+          expectedRevision: 'sha256:old',
+        }),
+      ).resolves.toMatchObject({ revision: 'sha256:next' });
+      expect(requests).toEqual([
+        {
+          url: 'http://127.0.0.1:7777/api/drones/one/fs/list?path=%2Fwork%2Frepo',
+          method: 'GET',
+          body: '',
+        },
+        {
+          url: 'http://127.0.0.1:7777/api/drones/one/fs/action',
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'create-file',
+            targetDir: '/work/repo',
+            name: 'notes.txt',
+          }),
+        },
+        {
+          url: 'http://127.0.0.1:7777/api/drones/one/fs/file',
+          method: 'POST',
+          body: JSON.stringify({
+            path: '/work/repo/index.ts',
+            content: 'export default 1',
+            expectedRevision: 'sha256:old',
+          }),
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('chunks large mobile directory listings below the mesh response limit', async () => {
+    const originalFetch = globalThis.fetch;
+    const entries = Array.from({ length: 3_000 }, (_, index) => ({
+      name: `file-${index.toString().padStart(4, '0')}-${'x'.repeat(48)}.ts`,
+      path: `/work/repo/file-${index.toString().padStart(4, '0')}-${'x'.repeat(48)}.ts`,
+      kind: 'file',
+    }));
+    globalThis.fetch = (async () =>
+      Response.json({ ok: true, path: '/work/repo', entries })) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      const first: any = await capability.invoke('files.list', {
+        droneId: 'one',
+        path: '/work/repo',
+        contentOffset: 0,
+      });
+      expect(first.contentChunk).toMatchObject({
+        encoding: 'base64-json-utf8',
+        offset: 0,
+        done: false,
+      });
+      const second: any = await capability.invoke('files.list', {
+        droneId: 'one',
+        path: '/work/repo',
+        contentOffset: first.contentChunk.bytes,
+      });
+      expect(second.contentChunk).toMatchObject({
+        encoding: 'base64-json-utf8',
+        offset: first.contentChunk.bytes,
+      });
+      expect(first.contentChunk.totalBytes).toBeGreaterThan(first.contentChunk.bytes);
     } finally {
       globalThis.fetch = originalFetch;
     }

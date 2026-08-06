@@ -6,9 +6,26 @@ export type ChatAgentConfig =
 export type AgentPermissionMode = 'read-only' | 'workspace-write' | 'full-access';
 export type AgentApprovalPolicy = 'ask' | 'agent-decides' | 'never';
 
+export type ChatResourceSubscriptionInfo = {
+  id: string;
+  provider: 'drone-hub' | 'github';
+  resourceType: 'chat' | 'repository' | 'pull_request' | 'cron';
+  resourceId: string;
+  resourceLabel: string;
+  resourceDroneId?: string;
+  resourceChatName?: string;
+  resourceConfig: { expression: string; timeZone: string; description: string } | null;
+  events: string[];
+  intent: string;
+  status: 'active';
+  nextEventAt: string | null;
+};
+
 export type ChatInfo = {
   name: string;
   chat: string;
+  chatId: string | null;
+  subscriptions: ChatResourceSubscriptionInfo[];
   agent: ChatAgentConfig;
   agentLocked: boolean;
   model: string | null;
@@ -35,7 +52,9 @@ function isNumberedItemStart(line: string): boolean {
   return /^\s*\d+\s*[\)\.\:]\s+/.test(line);
 }
 
-export function extractNumberedItemBlocks(text: string): Array<{ startLine: number; endLine: number; text: string }> {
+export function extractNumberedItemBlocks(
+  text: string,
+): Array<{ startLine: number; endLine: number; text: string }> {
   const lines = String(text ?? '').split('\n');
   const starts: number[] = [];
   for (let i = 0; i < lines.length; i++) {
@@ -46,9 +65,12 @@ export function extractNumberedItemBlocks(text: string): Array<{ startLine: numb
   const blocks: Array<{ startLine: number; endLine: number; text: string }> = [];
   for (let i = 0; i < starts.length; i++) {
     const startLine = starts[i];
-    const nextStart = starts[i + 1] ?? (lines.length + 1);
+    const nextStart = starts[i + 1] ?? lines.length + 1;
     const endLine = Math.max(startLine, nextStart - 1);
-    const t = lines.slice(startLine - 1, endLine).join('\n').trim();
+    const t = lines
+      .slice(startLine - 1, endLine)
+      .join('\n')
+      .trim();
     if (t) blocks.push({ startLine, endLine, text: t });
   }
   return blocks;
@@ -97,12 +119,16 @@ export function isUngroupedGroupName(name: string): boolean {
   return name.trim().toLowerCase() === 'ungrouped';
 }
 
-function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> {
+function normalizeChatInfoPayloadBase(
+  data: any,
+): Omit<ChatInfo, 'agentLocked' | 'chatId' | 'subscriptions'> {
   const name = String(data?.name ?? '');
   const chat = String(data?.chat ?? 'default').trim() || 'default';
   const modelRaw = String(data?.model ?? '').trim();
   const model = modelRaw || null;
-  const reasoningRaw = String(data?.reasoning ?? '').trim().toLowerCase();
+  const reasoningRaw = String(data?.reasoning ?? '')
+    .trim()
+    .toLowerCase();
   const reasoning = reasoningRaw || null;
   const sessionName = String(data?.sessionName ?? '').trim() || `drone-hub-chat-${chat}`;
   const createdAt = String(data?.createdAt ?? '').trim() || new Date().toISOString();
@@ -114,7 +140,8 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
     data?.approvalPolicy === 'agent-decides' || data?.approvalPolicy === 'never'
       ? data.approvalPolicy
       : 'ask';
-  const dockerSnapshotAfterAgentMessageEnabled = data?.dockerSnapshotAfterAgentMessageEnabled === true;
+  const dockerSnapshotAfterAgentMessageEnabled =
+    data?.dockerSnapshotAfterAgentMessageEnabled === true;
 
   const raw = data?.agent;
   if (raw?.kind === 'native') {
@@ -131,22 +158,28 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
       agent: { kind: 'native' },
     };
   }
-  const normalizeBuiltin = (v: any): 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip' | null => {
+  const normalizeBuiltin = (
+    v: any,
+  ): 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip' | null => {
     const id = String(v ?? '')
       .trim()
       .toLowerCase();
-    if (id === 'cursor' || id === 'codex' || id === 'claude' || id === 'opencode' || id === 'pi' || id === 'blip') return id;
+    if (
+      id === 'cursor' ||
+      id === 'codex' ||
+      id === 'claude' ||
+      id === 'opencode' ||
+      id === 'pi' ||
+      id === 'blip'
+    )
+      return id;
     if (id === 'cloud') return 'claude';
     if (id === 'open-code' || id === 'open_code') return 'opencode';
     if (id === 'pi-agent' || id === 'pi_agent') return 'pi';
     return null;
   };
   const builtinId = normalizeBuiltin(raw?.id);
-  if (
-    raw &&
-    raw.kind === 'builtin' &&
-    builtinId
-  ) {
+  if (raw && raw.kind === 'builtin' && builtinId) {
     return {
       name,
       chat,
@@ -194,7 +227,10 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
       agent: { kind: 'builtin', id: 'claude' },
     };
   }
-  if (String(data?.openCodeSessionId ?? '').trim() || String(data?.opencodeSessionId ?? '').trim()) {
+  if (
+    String(data?.openCodeSessionId ?? '').trim() ||
+    String(data?.opencodeSessionId ?? '').trim()
+  ) {
     return {
       name,
       chat,
@@ -209,16 +245,60 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
     };
   }
   if (String(data?.piSessionId ?? '').trim()) {
-    return { name, chat, model, reasoning, agentPermissionMode, approvalPolicy, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'pi' } };
+    return {
+      name,
+      chat,
+      model,
+      reasoning,
+      agentPermissionMode,
+      approvalPolicy,
+      dockerSnapshotAfterAgentMessageEnabled,
+      sessionName,
+      createdAt,
+      agent: { kind: 'builtin', id: 'pi' },
+    };
   }
   if (String(data?.blipSessionId ?? '').trim()) {
-    return { name, chat, model, reasoning, agentPermissionMode, approvalPolicy, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'blip' } };
+    return {
+      name,
+      chat,
+      model,
+      reasoning,
+      agentPermissionMode,
+      approvalPolicy,
+      dockerSnapshotAfterAgentMessageEnabled,
+      sessionName,
+      createdAt,
+      agent: { kind: 'builtin', id: 'blip' },
+    };
   }
   if (String(data?.codexThreadId ?? '').trim()) {
-    return { name, chat, model, reasoning, agentPermissionMode, approvalPolicy, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'codex' } };
+    return {
+      name,
+      chat,
+      model,
+      reasoning,
+      agentPermissionMode,
+      approvalPolicy,
+      dockerSnapshotAfterAgentMessageEnabled,
+      sessionName,
+      createdAt,
+      agent: { kind: 'builtin', id: 'codex' },
+    };
   }
   if (String(data?.chatId ?? '').trim()) {
-    return { name, chat, model, reasoning, agentPermissionMode, approvalPolicy, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'cursor' } };
+    return {
+      name,
+      chat,
+      model,
+      reasoning,
+      agentPermissionMode,
+      approvalPolicy,
+      dockerSnapshotAfterAgentMessageEnabled,
+      sessionName,
+      createdAt,
+      agent: { kind: 'builtin', id: 'cursor' },
+    };
   }
   return {
     name,
@@ -237,6 +317,57 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
 export function normalizeChatInfoPayload(data: any): ChatInfo {
   return {
     ...normalizeChatInfoPayloadBase(data),
+    chatId: String(data?.chatId ?? '').trim() || null,
+    subscriptions: normalizeChatResourceSubscriptionsPayload(data?.subscriptions),
     agentLocked: data?.agentLocked === true,
   };
+}
+
+export function normalizeChatResourceSubscriptionsPayload(
+  raw: unknown,
+): ChatResourceSubscriptionInfo[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item: any) => {
+    const id = String(item?.id ?? '').trim();
+    const provider = item?.provider === 'github' ? 'github' : 'drone-hub';
+    const resourceType = ['chat', 'repository', 'pull_request', 'cron'].includes(
+      item?.resourceType,
+    )
+      ? item.resourceType
+      : 'chat';
+    const resourceId = String(item?.resourceId ?? '').trim();
+    if (!id || !resourceId || item?.status !== 'active') return [];
+    const expression = String(item?.resourceConfig?.expression ?? '').trim();
+    const resourceConfig =
+      resourceType === 'cron' && item?.resourceConfig && typeof item.resourceConfig === 'object'
+        ? {
+            expression,
+            description: String(item.resourceConfig.description ?? '').trim() || expression,
+            timeZone: String(item.resourceConfig.timeZone ?? '').trim() || 'UTC',
+          }
+        : null;
+    const nextEventAtRaw = String(item?.nextEventAt ?? '').trim();
+    const nextEventAt = Number.isFinite(Date.parse(nextEventAtRaw))
+      ? new Date(nextEventAtRaw).toISOString()
+      : null;
+    const resourceDroneId = String(item?.resourceDroneId ?? '').trim();
+    const resourceChatName = String(item?.resourceChatName ?? '').trim();
+    return [
+      {
+        id,
+        provider,
+        resourceType,
+        resourceId,
+        resourceLabel: String(item?.resourceLabel ?? '').trim(),
+        ...(resourceDroneId && resourceChatName ? { resourceDroneId, resourceChatName } : {}),
+        resourceConfig,
+        events: Array.isArray(item?.events)
+          ? item.events.map((event: unknown) => String(event ?? '').trim()).filter(Boolean)
+          : [],
+        intent: String(item?.intent ?? '').trim(),
+        status: 'active' as const,
+        nextEventAt,
+      },
+    ];
+  });
 }

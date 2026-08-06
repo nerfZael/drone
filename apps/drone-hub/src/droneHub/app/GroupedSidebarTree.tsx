@@ -1,6 +1,5 @@
 import React from 'react';
 import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent, type DragStartEvent } from '@dnd-kit/core';
-import { isUngroupedGroupName } from '../../domain';
 import {
   DroneCard,
   SidebarApprovalStatusIndicator,
@@ -17,17 +16,19 @@ import { droneChatRequiresApproval, normalizedDroneChats } from './chat-node-hel
 import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag, type SidebarDroneDragData } from './drone-hub-dnd';
 import { isDroneStartingOrSeeding } from './helpers';
 import { IconChevron, IconColumns, IconEye, IconEyeOff, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
-import { canReorderSidebarDroneSelectionAtParent } from './sidebar-drone-drop';
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
 import type { SidebarFolderSelectionOptions } from './sidebar-folder-selection';
 import { buildSidebarDroneTree, type SidebarDroneTree } from './sidebar-drone-tree';
-import { buildSidebarNodeTree, type SidebarNodeTreeModel, type SidebarTreeDroneNode, type SidebarTreeFolderNode, type SidebarTreeNode } from './sidebar-node-tree';
+import { buildSidebarNodeTree, type SidebarNodeTreeModel, type SidebarTreeDroneNode, type SidebarTreeFolderNode } from './sidebar-node-tree';
 import {
-  moveSidebarNodeIdsBetweenParents,
-  removeDroneIdsFromSidebarNodeOrderByParent,
-  reorderSidebarNodeParentOrder,
+  planSidebarDrop,
+  sidebarNodeAllowsDropInside,
+  type SidebarDropTarget,
+  type SidebarTreeDropPlacement,
+} from './sidebar-drop-plan';
+import {
   SIDEBAR_ROOT_PARENT_ID,
   sidebarChatSidebarNodeId,
   sidebarDroneNodeId,
@@ -36,19 +37,17 @@ import {
 } from './sidebar-node-order';
 import {
   orderSidebarEntries,
-  reorderSidebarEntryOrder,
-  reorderSidebarGroupOrder,
   sidebarGroupOrderToken,
   sidebarGroupLegacyOrderToken,
   type SidebarGroupDropPlacement,
 } from './sidebar-group-order';
 import {
-  normalizeSidebarReorderTarget,
   sidebarDropPlacementFromRects,
   SidebarReorderDropIndicator,
 } from './sidebar-reorder-ui';
-import { isSameOrDescendantSidebarGroupPath, joinSidebarGroupPath, sidebarGroupBaseName } from './sidebar-group-paths';
+import { sidebarGroupBaseName } from './sidebar-group-paths';
 import type { DroneDeleteMode, SidebarDensityMode } from './settings-types';
+import type { SidebarMoveIntent } from '@drone/hub-model/sidebar';
 import { useChatApprovalRequired } from './use-drone-hub-runtime-store';
 import type { MoveDronesToGroupResult } from './use-group-management';
 import type { SidebarGroup } from './use-sidebar-view-model';
@@ -97,10 +96,8 @@ type GroupedSidebarTreeProps = {
   repoScopedGroupPathsByRepoGroup: Record<string, string[]>;
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
-  setSidebarGroupOrder: React.Dispatch<React.SetStateAction<string[]>>;
-  setSidebarNodeOrderByParent: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
   sidebarChatOrderByDrone: Record<string, string[]>;
-  setSidebarChatOrderByDrone: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
+  onMoveSidebar: (intent: SidebarMoveIntent) => Promise<boolean>;
   droneById: Record<string, DroneSummary>;
   selectedDroneIds: string[];
   selectedDroneSet: Set<string>;
@@ -201,7 +198,7 @@ type GroupedSidebarTreeProps = {
   actionsEnabled?: boolean;
 };
 
-type TreeDropPlacement = SidebarGroupDropPlacement | 'into';
+type TreeDropPlacement = SidebarTreeDropPlacement;
 
 type GroupedSidebarTreeContextValue = GroupedSidebarTreeProps & {
   nodeTree: SidebarNodeTreeModel;
@@ -445,16 +442,6 @@ function chatReorderDropId(droneIdRaw: string, chatNameRaw: string): string {
 
 function folderGroupPath(node: SidebarTreeFolderNode | null | undefined): string | null {
   return groupedFolderPathFromNode(node);
-}
-
-function folderTargetGroupPath(node: SidebarTreeFolderNode | null | undefined): string | null {
-  if (!node) return null;
-  if (node.groupKind === 'repo' && !node.groupPath) return null;
-  return folderGroupPath(node);
-}
-
-function isVirtualRepoRootNode(node: SidebarTreeNode | null | undefined): node is SidebarTreeFolderNode {
-  return Boolean(node && node.kind === 'folder' && node.groupKind === 'repo' && !node.groupPath);
 }
 
 function TreeDropGuide({ placement }: { placement: SidebarGroupDropPlacement }) {
@@ -878,6 +865,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
       if (unread) summary.unread += 1;
       if (working) summary.working += 1;
     }
+    if (summary.working > 0) summary.unread = 0;
     return summary;
   }, [
     activeChatName,
@@ -1022,11 +1010,9 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
               isDroneStartingOrSeeding(drone.hubPhase)
             }
             renameDisabled={
-              isOptimistic ||
               Boolean(deletingDrones[drone.id]) ||
               Boolean(renamingDrones[drone.id]) ||
-              Boolean(settingBaseImages[drone.id]) ||
-              isDroneStartingOrSeeding(drone.hubPhase)
+              Boolean(settingBaseImages[drone.id])
             }
             renameBusy={Boolean(renamingDrones[drone.id])}
             setBaseImageDisabled={
@@ -1312,6 +1298,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           Boolean(deletingDrones[drone.id]));
       const inactiveDisplayState = sidebarDroneDisplayState(drone, false, '', false, false);
       const unread =
+        !working &&
         inactiveDisplayState !== 'blocked' &&
         inactiveDisplayState !== 'offline' &&
         ((drone.unreadChats?.length ?? 0) > 0 ||
@@ -1622,13 +1609,11 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     repoScopedGroupPathsByRepoGroup,
     sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent,
-    setSidebarNodeOrderByParent,
     sidebarChatOrderByDrone,
-    setSidebarChatOrderByDrone,
+    onMoveSidebar,
     droneById,
     selectedDroneIds,
     selectedDroneSet,
-    onMoveDronesToGroup,
     onRenameGroup,
     onDeleteDroneChat,
     onPrepareDroneDragStart,
@@ -1694,46 +1679,6 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     setDragOverChat(null);
   }, []);
 
-  const normalizeTreeReorderTarget = React.useCallback(
-    (targetNodeIdRaw: string, placement: TreeDropPlacement): { nodeId: string; placement: TreeDropPlacement } => {
-      const targetNodeId = String(targetNodeIdRaw ?? '').trim();
-      if (!targetNodeId || placement === 'into') return { nodeId: targetNodeId, placement };
-      const targetNode = nodeTree.nodesById[targetNodeId];
-      if (!targetNode) return { nodeId: targetNodeId, placement };
-      const siblingIds = nodeTree.childIdsByParent[targetNode.parentId] ?? [];
-      const normalized = normalizeSidebarReorderTarget(siblingIds, targetNodeId, placement);
-      return {
-        nodeId: normalized.overId || targetNodeId,
-        placement: normalized.placement,
-      };
-    },
-    [nodeTree],
-  );
-
-  const normalizeChatReorderTarget = React.useCallback(
-    (
-      droneIdRaw: string,
-      chatNameRaw: string,
-      placement: SidebarGroupDropPlacement,
-    ): { chatName: string; placement: SidebarGroupDropPlacement } => {
-      const droneId = String(droneIdRaw ?? '').trim();
-      const chatName = String(chatNameRaw ?? '').trim() || 'default';
-      const drone = droneById[droneId];
-      if (!drone) return { chatName, placement };
-      const currentChats = orderSidebarEntries(
-        normalizedDroneChats(drone),
-        sidebarChatOrderByDrone[droneId] ?? [],
-        (chat) => chat,
-      );
-      const normalized = normalizeSidebarReorderTarget(currentChats, chatName, placement);
-      return {
-        chatName: normalized.overId || chatName,
-        placement: normalized.placement,
-      };
-    },
-    [droneById, sidebarChatOrderByDrone],
-  );
-
   const shouldSuppressClick = React.useCallback(() => Date.now() < suppressClicksUntilRef.current, []);
 
   const handleDeleteChat = React.useCallback(
@@ -1758,211 +1703,81 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     [deletingChats, onDeleteDroneChat],
   );
 
-  const moveFolder = React.useCallback(
-    async (sourcePathRaw: string, targetParentPathRaw: string | null) => {
-      const sourcePath = String(sourcePathRaw ?? '').trim();
-      const targetParentPath = String(targetParentPathRaw ?? '').trim() || null;
-      if (!sourcePath) return false;
-      if (targetParentPath && (targetParentPath === sourcePath || isSameOrDescendantSidebarGroupPath(targetParentPath, sourcePath))) {
-        return false;
+  const sidebarDropTargetFromEvent = React.useCallback(
+    (event: DragMoveEvent | DragOverEvent | DragEndEvent): SidebarDropTarget | null => {
+      const overData = event.over?.data.current as Record<string, unknown> | undefined;
+      if (overData?.type === 'sidebar-chat-reorder') {
+        return {
+          kind: 'chat',
+          droneId: String(overData.droneId ?? '').trim(),
+          chatName: String(overData.chatName ?? '').trim() || 'default',
+          placement: sidebarDropPlacementFromRects(
+            event.active.rect.current.translated ?? event.active.rect.current.initial,
+            event.over?.rect ?? null,
+          ),
+        };
       }
-      const nextPath = joinSidebarGroupPath([targetParentPath, sidebarGroupBaseName(sourcePath)]);
-      if (!nextPath || nextPath === sourcePath) return true;
-      return Boolean(await onRenameGroup(sourcePath, nextPath, { skipNodeOrderUpdate: true }));
+      if (overData?.type === 'sidebar-tree-node') {
+        const nodeId = String(overData.nodeId ?? '').trim();
+        const node = nodeTree.nodesById[nodeId];
+        return node
+          ? {
+              kind: 'tree-node',
+              nodeId,
+              placement: placementFromEvent(event, sidebarNodeAllowsDropInside(node)),
+            }
+          : null;
+      }
+      if (overData?.type === 'sidebar-tree-folder-body') {
+        const folderNodeId = String(overData.nodeId ?? '').trim();
+        return folderNodeId
+          ? {
+              kind: 'folder-body',
+              folderNodeId,
+              insertionTarget: resolveFolderBodyInsertionTarget(
+                folderNodeId,
+                activeRectMidY(event),
+              ),
+            }
+          : null;
+      }
+      if (overData?.type === 'sidebar-tree-drone-tail') {
+        const nodeId = String(overData.nodeId ?? '').trim();
+        return nodeId ? { kind: 'drone-tail', nodeId } : null;
+      }
+      return null;
     },
-    [onRenameGroup],
+    [nodeTree],
   );
 
-  const completeDroneTreeMove = React.useCallback(
-    async (args: {
-      movingDroneIds: string[];
-      targetParentNode: SidebarTreeNode | null;
-      targetFolderPath: string | null;
-    }) => {
-      const movingDroneIds = Array.from(
-        new Set(args.movingDroneIds.map((droneId) => String(droneId ?? '').trim()).filter(Boolean)),
-      );
-      if (movingDroneIds.length === 0) return true;
-
-      const targetParentDroneId = args.targetParentNode?.kind === 'drone' ? args.targetParentNode.droneId : null;
-      if (
-        !canReorderSidebarDroneSelectionAtParent(
-          droneById,
-          movingDroneIds,
-          targetParentDroneId,
-        )
-      ) {
-        return false;
-      }
-      const needsParentChange = movingDroneIds.some(
-        (droneId) =>
-          (String(droneById[droneId]?.fleetParentId ?? '').trim() || null) !==
-          targetParentDroneId,
-      );
-      let rollbackParentChange: (() => void) | undefined;
-      if (needsParentChange) {
-        const reparentResult = await props.onReparentDronesToParent(
-          targetParentDroneId,
-          movingDroneIds,
-          { targetGroup: args.targetFolderPath },
-        );
-        if (!reparentResult.ok) {
-          if (reparentResult.error) window.alert(reparentResult.error);
-          return false;
-        }
-        rollbackParentChange = reparentResult.rollbackOptimistic;
-      }
-
-      if (targetParentDroneId) return true;
-
-      const normalizedTargetGroup = (() => {
-        const group = String(args.targetFolderPath ?? '').trim();
-        return !group || isUngroupedGroupName(group) ? null : group;
-      })();
-      const needsGroupMove = movingDroneIds.some((droneId) => {
-        const currentGroup = String(droneById[droneId]?.group ?? '').trim();
-        const normalizedCurrentGroup = !currentGroup || isUngroupedGroupName(currentGroup) ? null : currentGroup;
-        return normalizedCurrentGroup !== normalizedTargetGroup;
-      });
-      if (!needsGroupMove) return true;
-
-      const moveResult = await onMoveDronesToGroup(normalizedTargetGroup ?? 'Ungrouped', movingDroneIds);
-      if (!moveResult.ok) {
-        rollbackParentChange?.();
-      }
-      return moveResult.ok;
-    },
-    [droneById, onMoveDronesToGroup, props],
+  const createSidebarDropPlan = React.useCallback(
+    (
+      event: DragMoveEvent | DragOverEvent | DragEndEvent,
+      preferred?: {
+        treeTarget: { nodeId: string; placement: TreeDropPlacement } | null;
+        chatTarget: { key: string; placement: SidebarGroupDropPlacement } | null;
+      },
+    ) =>
+      planSidebarDrop({
+        active: parseDroneHubDragData(event.active.data.current),
+        target: sidebarDropTargetFromEvent(event),
+        nodeTree,
+        droneById,
+        sidebarChatOrderByDrone,
+        preferredTreeTarget: preferred?.treeTarget,
+        preferredChatTarget: preferred?.chatTarget,
+      }),
+    [droneById, nodeTree, sidebarChatOrderByDrone, sidebarDropTargetFromEvent],
   );
 
   const updateTreeDragState = React.useCallback(
     (event: DragMoveEvent | DragOverEvent) => {
-      const active = parseDroneHubDragData(event.active.data.current);
-      const activeRaw = event.active.data.current as Record<string, unknown> | undefined;
-      const overData = event.over?.data.current as Record<string, unknown> | undefined;
-      const activeFolderNode =
-        activeRaw?.type === 'sidebar-folder'
-          ? nodeTree.nodesById[
-              String(activeRaw.folderNodeId ?? '').trim() || sidebarFolderNodeId(String(activeRaw.folderPath ?? '').trim())
-            ]
-          : null;
-      const draggingVirtualRepoRoot = isVirtualRepoRootNode(activeFolderNode);
-
-      if (draggingVirtualRepoRoot && overData?.type === 'sidebar-tree-node' && typeof overData.nodeId === 'string') {
-        const targetNodeId = String(overData.nodeId ?? '').trim();
-        const targetNode = nodeTree.nodesById[targetNodeId];
-        if (isVirtualRepoRootNode(targetNode) && targetNode.id !== activeFolderNode.id) {
-          const dropTarget = normalizeTreeReorderTarget(targetNodeId, placementFromEvent(event, false));
-          setDragOverChat(null);
-          setDragOverFolderBodyId(null);
-          setDragOverTreeTarget(dropTarget);
-          return;
-        }
-      }
-
-      if (draggingVirtualRepoRoot) {
-        clearDragState();
-        return;
-      }
-
-      if (active?.type === 'sidebar-chat' && overData?.type === 'sidebar-chat-reorder') {
-        const overDroneId = String(overData.droneId ?? '').trim();
-        const overChatName = String(overData.chatName ?? '').trim() || 'default';
-        if (overDroneId && overDroneId === active.droneId && overChatName !== active.chatName) {
-          const dropTarget = normalizeChatReorderTarget(
-            overDroneId,
-            overChatName,
-            sidebarDropPlacementFromRects(
-              event.active.rect.current.translated ?? event.active.rect.current.initial,
-              event.over?.rect ?? null,
-            ),
-          );
-          setDragOverTreeTarget(null);
-          setDragOverFolderBodyId(null);
-          setDragOverChat({
-            key: `${overDroneId}:${dropTarget.chatName}`,
-            placement: dropTarget.placement,
-          });
-          return;
-        }
-      }
-
-      if (
-        (active?.type === 'sidebar-drone' || activeRaw?.type === 'sidebar-folder') &&
-        overData?.type === 'sidebar-tree-drone-tail' &&
-        typeof overData.nodeId === 'string'
-      ) {
-        const targetNodeId = String(overData.nodeId ?? '').trim();
-        if (nodeTree.nodesById[targetNodeId]?.kind === 'drone') {
-          const dropTarget = normalizeTreeReorderTarget(targetNodeId, 'after');
-          setDragOverChat(null);
-          setDragOverFolderBodyId(null);
-          setDragOverTreeTarget(dropTarget);
-          return;
-        }
-      }
-
-      if (
-        (active?.type === 'sidebar-drone' || activeRaw?.type === 'sidebar-folder') &&
-        overData?.type === 'sidebar-chat-reorder' &&
-        typeof overData.droneId === 'string'
-      ) {
-        const targetNodeId = sidebarDroneNodeId(String(overData.droneId ?? '').trim());
-        if (nodeTree.nodesById[targetNodeId]?.kind === 'drone') {
-          const dropTarget = normalizeTreeReorderTarget(targetNodeId, 'after');
-          setDragOverChat(null);
-          setDragOverFolderBodyId(null);
-          setDragOverTreeTarget(dropTarget);
-          return;
-        }
-      }
-
-      if (
-        (active?.type === 'sidebar-drone' || activeRaw?.type === 'sidebar-folder') &&
-        overData?.type === 'sidebar-tree-node' &&
-        typeof overData.nodeId === 'string'
-      ) {
-        const targetNodeId = String(overData.nodeId ?? '').trim();
-        const targetNode = nodeTree.nodesById[targetNodeId];
-        if (active?.type === 'sidebar-drone' && targetNode?.kind === 'drone') {
-          const targetParentNode = nodeTree.nodesById[targetNode.parentId];
-          const targetParentDroneId =
-            targetParentNode?.kind === 'drone' ? targetParentNode.droneId : null;
-          if (
-            !canReorderSidebarDroneSelectionAtParent(
-              droneById,
-              active.droneIds,
-              targetParentDroneId,
-            )
-          ) {
-            clearDragState();
-            return;
-          }
-        }
-        const allowInto = targetNode?.kind === 'folder' && !isVirtualRepoRootNode(targetNode);
-        const dropTarget = normalizeTreeReorderTarget(targetNodeId, placementFromEvent(event, allowInto));
-        setDragOverChat(null);
-        setDragOverFolderBodyId(null);
-        setDragOverTreeTarget(dropTarget);
-        return;
-      }
-
-      if (
-        (active?.type === 'sidebar-drone' || activeRaw?.type === 'sidebar-folder') &&
-        overData?.type === 'sidebar-tree-folder-body' &&
-        typeof overData.nodeId === 'string'
-      ) {
-        const folderNodeId = String(overData.nodeId ?? '').trim();
-        const insertionTarget = resolveFolderBodyInsertionTarget(folderNodeId, activeRectMidY(event));
-        setDragOverChat(null);
-        setDragOverTreeTarget(insertionTarget);
-        setDragOverFolderBodyId(insertionTarget ? null : folderNodeId);
-        return;
-      }
-
-      clearDragState();
+      const plan = createSidebarDropPlan(event);
+      setDragOverTreeTarget(plan?.treeTarget ?? null);
+      setDragOverFolderBodyId(plan?.folderBodyId ?? null);
+      setDragOverChat(plan?.chatTarget ?? null);
     },
-    [clearDragState, droneById, nodeTree, normalizeChatReorderTarget, normalizeTreeReorderTarget],
+    [createSidebarDropPlan],
   );
 
   const dndMonitorHandlers = React.useMemo(
@@ -1980,377 +1795,24 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
               clearDragState();
             },
             onDragEnd: (event: DragEndEvent) => {
-      suppressClicksUntilRef.current = Date.now() + 180;
-      const active = parseDroneHubDragData(event.active.data.current);
-      const activeRaw = event.active.data.current as Record<string, unknown> | undefined;
-      const overData = event.over?.data.current as Record<string, unknown> | undefined;
-      const activeFolderNode =
-        activeRaw?.type === 'sidebar-folder'
-          ? nodeTree.nodesById[
-              String(activeRaw.folderNodeId ?? '').trim() || sidebarFolderNodeId(String(activeRaw.folderPath ?? '').trim())
-            ]
-          : null;
-
-      if (isVirtualRepoRootNode(activeFolderNode)) {
-        if (overData?.type === 'sidebar-tree-node' && typeof overData.nodeId === 'string') {
-          const targetNodeId = String(overData.nodeId ?? '').trim();
-          const targetNode = nodeTree.nodesById[targetNodeId];
-          if (isVirtualRepoRootNode(targetNode) && targetNode.id !== activeFolderNode.id) {
-            const fallbackTreeTarget = normalizeTreeReorderTarget(targetNodeId, placementFromEvent(event, false));
-            const resolvedTreeTarget = dragOverTreeTarget ?? fallbackTreeTarget;
-            const resolvedTargetNode = nodeTree.nodesById[resolvedTreeTarget.nodeId];
-            const placement = resolvedTreeTarget.placement;
-            if (isVirtualRepoRootNode(resolvedTargetNode) && (placement === 'before' || placement === 'after')) {
-              props.setSidebarGroupOrder((prev) =>
-                reorderSidebarGroupOrder(
-                  prev,
-                  props.sidebarGroups,
-                  { group: activeFolderNode.path, kind: 'repo' },
-                  { group: resolvedTargetNode.path, kind: 'repo' },
-                  placement,
-                ),
-              );
-            }
-          }
-        }
-        clearDragState();
-        return;
-      }
-
-      if (active?.type === 'sidebar-chat' && overData?.type === 'sidebar-chat-reorder') {
-        const overDroneId = String(overData.droneId ?? '').trim();
-        const overChatName = String(overData.chatName ?? '').trim() || 'default';
-        if (overDroneId === active.droneId && overChatName && overChatName !== active.chatName) {
-          const currentChats = orderSidebarEntries(
-            normalizedDroneChats(droneById[active.droneId]),
-            sidebarChatOrderByDrone[active.droneId] ?? [],
-            (chat) => chat,
-          );
-          const fallbackTarget = normalizeChatReorderTarget(
-            overDroneId,
-            overChatName,
-            sidebarDropPlacementFromRects(
-              event.active.rect.current.translated ?? event.active.rect.current.initial,
-              event.over?.rect ?? null,
-            ),
-          );
-          const prefix = `${overDroneId}:`;
-          const targetChatName =
-            dragOverChat?.key.startsWith(prefix)
-              ? String(dragOverChat.key.slice(prefix.length) || overChatName)
-              : fallbackTarget.chatName;
-          const placement = dragOverChat?.key.startsWith(prefix) ? dragOverChat.placement : fallbackTarget.placement;
-          setSidebarChatOrderByDrone((prev) => ({
-            ...prev,
-            [active.droneId]: reorderSidebarEntryOrder(
-              prev[active.droneId] ?? [],
-              currentChats,
-              active.chatName,
-              targetChatName,
-              placement,
-            ),
-          }));
-          clearDragState();
-          return;
-        }
-      }
-
-      if (
-        active?.type === 'sidebar-drone' &&
-        (
-          overData?.type === 'sidebar-tree-node' ||
-          overData?.type === 'sidebar-tree-folder-body' ||
-          overData?.type === 'sidebar-chat-reorder' ||
-          overData?.type === 'sidebar-tree-drone-tail'
-        )
-      ) {
-        const chatTargetNodeId =
-          overData?.type === 'sidebar-chat-reorder' ? sidebarDroneNodeId(String(overData.droneId ?? '').trim()) : null;
-        const hoveredNodeId = chatTargetNodeId ?? String(overData.nodeId ?? '').trim();
-        const folderBodyInsertionTarget =
-          overData?.type === 'sidebar-tree-folder-body'
-            ? resolveFolderBodyInsertionTarget(hoveredNodeId, activeRectMidY(event))
-            : null;
-        const targetNodeId = folderBodyInsertionTarget?.nodeId ?? hoveredNodeId;
-        const targetNode = nodeTree.nodesById[targetNodeId];
-        const hoveredFolderNode = overData?.type === 'sidebar-tree-folder-body' ? nodeTree.nodesById[hoveredNodeId] : null;
-        if (!targetNode) {
-          if (overData?.type === 'sidebar-tree-folder-body' && hoveredFolderNode?.kind === 'folder') {
-            const targetParentId = hoveredFolderNode.id;
-            const targetParentNode = nodeTree.nodesById[targetParentId];
-            const targetFolderPath = targetParentNode?.kind === 'folder' ? folderTargetGroupPath(targetParentNode) : null;
-            const sourceNode = nodeTree.nodesById[sidebarDroneNodeId(active.droneId)] as SidebarTreeDroneNode | undefined;
-            const sourceParentId = sourceNode?.parentId ?? targetParentId;
-            const movingDroneIds = active.droneIds.slice();
-            const previousNodeOrderByParent = sidebarNodeOrderByParent;
-            const movingNodeIds = movingDroneIds.map(sidebarDroneNodeId);
-            const sourceVisibleChildIds = nodeTree.childIdsByParent[sourceParentId] ?? [];
-            const targetVisibleChildIds = nodeTree.childIdsByParent[targetParentId] ?? [];
-            const nextSourceVisible = sourceVisibleChildIds.filter((entry) => !movingNodeIds.includes(entry));
-            const nextTargetVisible = targetVisibleChildIds.filter((entry) => !movingNodeIds.includes(entry));
-            setSidebarNodeOrderByParent(
-              moveSidebarNodeIdsBetweenParents({
-                map: removeDroneIdsFromSidebarNodeOrderByParent(sidebarNodeOrderByParent, movingDroneIds),
-                sourceParentId,
-                targetParentId,
-                sourceVisibleChildIds: nextSourceVisible,
-                targetVisibleChildIds: nextTargetVisible,
-                movingNodeIds,
-                overNodeId: null,
-                placement: 'into',
-              }),
-            );
-            void completeDroneTreeMove({
-              movingDroneIds,
-              targetParentNode,
-              targetFolderPath,
-            }).then((ok) => {
-              if (!ok) {
-                setSidebarNodeOrderByParent(previousNodeOrderByParent);
-              }
-            });
-          }
-          clearDragState();
-          return;
-        }
-
-        const movingDroneIds = active.droneIds.slice();
-        const allowIntoTarget = targetNode.kind === 'folder' && !isVirtualRepoRootNode(targetNode);
-        const fallbackTreeTarget =
-          overData.type === 'sidebar-chat-reorder' || overData.type === 'sidebar-tree-drone-tail'
-            ? normalizeTreeReorderTarget(targetNodeId, 'after')
-            : overData.type === 'sidebar-tree-folder-body'
-              ? {
-                  nodeId: targetNodeId,
-                  placement: (folderBodyInsertionTarget?.placement ?? 'into') as TreeDropPlacement,
-                }
-              : normalizeTreeReorderTarget(targetNodeId, placementFromEvent(event, allowIntoTarget));
-        const resolvedTreeTarget =
-          overData.type === 'sidebar-tree-folder-body' ? fallbackTreeTarget : dragOverTreeTarget ?? fallbackTreeTarget;
-        const resolvedTargetNodeId = resolvedTreeTarget.nodeId;
-        const resolvedTargetNode = nodeTree.nodesById[resolvedTargetNodeId];
-        if (!resolvedTargetNode) {
-          clearDragState();
-          return;
-        }
-        const placement = resolvedTreeTarget.placement;
-        const targetParentId =
-          overData.type === 'sidebar-chat-reorder' || overData.type === 'sidebar-tree-drone-tail'
-            ? resolvedTargetNode.parentId
-            : overData.type === 'sidebar-tree-folder-body'
-              ? folderBodyInsertionTarget
-                ? resolvedTargetNode.parentId
-                : placement === 'into' && resolvedTargetNode.kind === 'folder'
-                  ? resolvedTargetNode.id
-                  : resolvedTargetNode.parentId
-              : placement === 'into' && resolvedTargetNode.kind === 'folder'
-                ? resolvedTargetNode.id
-                : resolvedTargetNode.parentId;
-        const targetParentNode = targetParentId === SIDEBAR_ROOT_PARENT_ID ? null : nodeTree.nodesById[targetParentId];
-        const targetFolderPath = targetParentNode?.kind === 'folder' ? folderTargetGroupPath(targetParentNode) : null;
-        const sourceNode = nodeTree.nodesById[sidebarDroneNodeId(active.droneId)] as SidebarTreeDroneNode | undefined;
-        const sourceParentId = sourceNode?.parentId ?? targetParentId;
-        const sourceVisibleChildIds = nodeTree.childIdsByParent[sourceParentId] ?? [];
-        const targetVisibleChildIds = nodeTree.childIdsByParent[targetParentId] ?? [];
-        if (movingDroneIds.length === 1 && sourceParentId === targetParentId && placement !== 'into') {
-          const nextNodeOrderByParent = reorderSidebarNodeParentOrder(
-            sidebarNodeOrderByParent,
-            sourceParentId,
-            sourceVisibleChildIds,
-            sidebarDroneNodeId(active.droneId),
-            resolvedTargetNode.id,
-            placement as SidebarGroupDropPlacement,
-          );
-          setSidebarNodeOrderByParent(
-            nextNodeOrderByParent,
-          );
-          clearDragState();
-          return;
-        }
-
-        const movingNodeIds = movingDroneIds.map(sidebarDroneNodeId);
-        const nextSourceVisible = sourceVisibleChildIds.filter((entry) => !movingNodeIds.includes(entry));
-        const nextTargetVisible = targetVisibleChildIds.filter((entry) => !movingNodeIds.includes(entry));
-        const previousNodeOrderByParent = sidebarNodeOrderByParent;
-        setSidebarNodeOrderByParent(
-          moveSidebarNodeIdsBetweenParents({
-            map: removeDroneIdsFromSidebarNodeOrderByParent(sidebarNodeOrderByParent, movingDroneIds),
-            sourceParentId,
-            targetParentId,
-            sourceVisibleChildIds: nextSourceVisible,
-            targetVisibleChildIds: nextTargetVisible,
-            movingNodeIds,
-            overNodeId: placement === 'into' ? null : resolvedTargetNode.id,
-            placement,
-          }),
-        );
-        void completeDroneTreeMove({
-          movingDroneIds,
-          targetParentNode,
-          targetFolderPath,
-        }).then((ok) => {
-          if (!ok) {
-            setSidebarNodeOrderByParent(previousNodeOrderByParent);
-          }
-        });
-        clearDragState();
-        return;
-      }
-
-      if (
-        activeRaw?.type === 'sidebar-folder' &&
-        (
-          overData?.type === 'sidebar-tree-node' ||
-          overData?.type === 'sidebar-tree-folder-body' ||
-          overData?.type === 'sidebar-chat-reorder' ||
-          overData?.type === 'sidebar-tree-drone-tail'
-        )
-      ) {
-        const sourceFolderPath = String(activeRaw.folderPath ?? '').trim();
-        const sourceNodeId = String(activeRaw.folderNodeId ?? '').trim() || sidebarFolderNodeId(sourceFolderPath);
-        const sourceNode = nodeTree.nodesById[sourceNodeId];
-        const chatTargetNodeId =
-          overData?.type === 'sidebar-chat-reorder' ? sidebarDroneNodeId(String(overData.droneId ?? '').trim()) : null;
-        const hoveredNodeId = chatTargetNodeId ?? String(overData.nodeId ?? '').trim();
-        const folderBodyInsertionTarget =
-          overData?.type === 'sidebar-tree-folder-body'
-            ? resolveFolderBodyInsertionTarget(hoveredNodeId, activeRectMidY(event))
-            : null;
-        const targetNodeId = folderBodyInsertionTarget?.nodeId ?? hoveredNodeId;
-        const targetNode = nodeTree.nodesById[targetNodeId];
-        const hoveredFolderNode = overData?.type === 'sidebar-tree-folder-body' ? nodeTree.nodesById[hoveredNodeId] : null;
-        if (!sourceNode || !targetNode || targetNode.id === sourceNodeId) {
-          if (sourceNode && overData?.type === 'sidebar-tree-folder-body' && hoveredFolderNode?.kind === 'folder') {
-            const sourceParentId = sourceNode.parentId;
-            const targetParentId = hoveredFolderNode.id;
-            const targetParentNode = nodeTree.nodesById[targetParentId];
-            const targetParentPath = targetParentNode?.kind === 'folder' ? folderTargetGroupPath(targetParentNode) : null;
-            const previousNodeOrderByParent = sidebarNodeOrderByParent;
-            const sourceVisibleChildIds = nodeTree.childIdsByParent[sourceParentId] ?? [];
-            const targetVisibleChildIds = nodeTree.childIdsByParent[targetParentId] ?? [];
-            const movedFolderPath = joinSidebarGroupPath([targetParentPath, sidebarGroupBaseName(sourceFolderPath)]);
-            if (movedFolderPath) {
-              setSidebarNodeOrderByParent(
-                moveSidebarNodeIdsBetweenParents({
-                  map: sidebarNodeOrderByParent,
-                  sourceParentId,
-                  targetParentId,
-                  sourceVisibleChildIds,
-                  targetVisibleChildIds,
-                  movingNodeIds: [sidebarFolderNodeId(movedFolderPath)],
-                  overNodeId: null,
-                  placement: 'into',
-                }),
-              );
-            }
-            void moveFolder(sourceFolderPath, targetParentPath).then((ok) => {
-              if (!ok) {
-                setSidebarNodeOrderByParent(previousNodeOrderByParent);
-              }
-            });
-          }
-          clearDragState();
-          return;
-        }
-
-        const fallbackTreeTarget =
-          overData.type === 'sidebar-chat-reorder' || overData.type === 'sidebar-tree-drone-tail'
-            ? normalizeTreeReorderTarget(targetNodeId, 'after')
-            : overData.type === 'sidebar-tree-folder-body'
-              ? {
-                  nodeId: targetNodeId,
-                  placement: (folderBodyInsertionTarget?.placement ?? 'into') as TreeDropPlacement,
-                }
-              : normalizeTreeReorderTarget(
-                  targetNodeId,
-                  placementFromEvent(
-                    event,
-                    targetNode.kind === 'folder' && !isVirtualRepoRootNode(targetNode),
-                  ),
-                );
-        const resolvedTreeTarget =
-          overData.type === 'sidebar-tree-folder-body' ? fallbackTreeTarget : dragOverTreeTarget ?? fallbackTreeTarget;
-        const resolvedTargetNodeId = resolvedTreeTarget.nodeId;
-        const resolvedTargetNode = nodeTree.nodesById[resolvedTargetNodeId];
-        if (!resolvedTargetNode) {
-          clearDragState();
-          return;
-        }
-        const placement = resolvedTreeTarget.placement;
-        const sourceParentId = sourceNode.parentId;
-        const targetParentId =
-          overData.type === 'sidebar-chat-reorder' || overData.type === 'sidebar-tree-drone-tail'
-            ? resolvedTargetNode.parentId
-            : overData.type === 'sidebar-tree-folder-body' && folderBodyInsertionTarget
-              ? resolvedTargetNode.parentId
-              : placement === 'into' && resolvedTargetNode.kind === 'folder'
-                ? resolvedTargetNode.id
-                : resolvedTargetNode.parentId;
-        const sourceVisibleChildIds = nodeTree.childIdsByParent[sourceParentId] ?? [];
-        const targetVisibleChildIds = nodeTree.childIdsByParent[targetParentId] ?? [];
-        if (sourceParentId === targetParentId && placement !== 'into') {
-          const nextNodeOrderByParent = reorderSidebarNodeParentOrder(
-            sidebarNodeOrderByParent,
-            sourceParentId,
-            sourceVisibleChildIds,
-            sourceNodeId,
-            resolvedTargetNodeId,
-            placement as SidebarGroupDropPlacement,
-          );
-          setSidebarNodeOrderByParent(
-            nextNodeOrderByParent,
-          );
-          clearDragState();
-          return;
-        }
-
-        const targetParentNode = targetParentId === SIDEBAR_ROOT_PARENT_ID ? null : nodeTree.nodesById[targetParentId];
-        const targetParentPath = targetParentNode?.kind === 'folder' ? folderTargetGroupPath(targetParentNode) : null;
-        const movedFolderPath = joinSidebarGroupPath([targetParentPath, sidebarGroupBaseName(sourceFolderPath)]);
-        const previousNodeOrderByParent = sidebarNodeOrderByParent;
-        if (movedFolderPath) {
-          setSidebarNodeOrderByParent(
-            moveSidebarNodeIdsBetweenParents({
-              map: sidebarNodeOrderByParent,
-              sourceParentId,
-              targetParentId,
-              sourceVisibleChildIds,
-              targetVisibleChildIds,
-              movingNodeIds: [sidebarFolderNodeId(movedFolderPath)],
-              overNodeId: placement === 'into' ? null : resolvedTargetNodeId,
-              placement,
-            }),
-          );
-        }
-        void moveFolder(sourceFolderPath, targetParentPath).then((ok) => {
-          if (!ok) {
-            setSidebarNodeOrderByParent(previousNodeOrderByParent);
-          }
-        });
-        clearDragState();
-        return;
-      }
-
-      clearDragState();
-    },
+              suppressClicksUntilRef.current = Date.now() + 180;
+              const plan = createSidebarDropPlan(event, {
+                treeTarget: dragOverTreeTarget,
+                chatTarget: dragOverChat,
+              });
+              if (plan?.intent) void onMoveSidebar(plan.intent);
+              clearDragState();
+            },
           }
         : {},
     [
       clearDragState,
-      completeDroneTreeMove,
+      createSidebarDropPlan,
       dragOverChat,
       dragOverTreeTarget,
-      droneById,
-      moveFolder,
-      nodeTree,
-      normalizeChatReorderTarget,
-      normalizeTreeReorderTarget,
+      onMoveSidebar,
       onPrepareDroneDragStart,
-      props,
-      setSidebarChatOrderByDrone,
-      setSidebarNodeOrderByParent,
-      sidebarChatOrderByDrone,
-      sidebarNodeOrderByParent,
+      props.sidebarDndEnabled,
       updateTreeDragState,
     ],
   );
@@ -2435,9 +1897,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.selectedSidebarNodeId,
       props.setSelectedSidebarNodeId,
       props.setCollapsedDroneSections,
-      props.setSidebarChatOrderByDrone,
-      props.setSidebarGroupOrder,
-      props.setSidebarNodeOrderByParent,
+      props.onMoveSidebar,
       props.settingBaseImages,
       props.pinnedDroneIdSet,
       props.pinningDroneIds,

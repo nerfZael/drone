@@ -5,6 +5,7 @@ import type { Transport, TransportSendOptions } from '@modelcontextprotocol/sdk/
 import { createDroneHubMcpServer } from '../mcp-server';
 import type { McpTokenIdentity } from '../mcp-tokens';
 import { resolveEffectiveSpeechSettings } from '../hub-settings';
+import type { RenameDroneCommand } from '../drone-rename-command';
 
 class LinkedTransport implements Transport {
   peer?: LinkedTransport;
@@ -50,6 +51,8 @@ export async function createInProcessDroneHubMcpClient(input: {
   allowedDroneIds: string[];
   principal?: McpTokenIdentity;
   nativeThreadId?: string;
+  legacyIdleSubscriptionTools?: boolean;
+  renameDrone?: RenameDroneCommand;
 }): Promise<Client> {
   const speechSettings = await resolveEffectiveSpeechSettings();
   const principal = input.principal ?? {
@@ -59,9 +62,11 @@ export async function createInProcessDroneHubMcpClient(input: {
   };
   const server = createDroneHubMcpServer({
     principal,
+    legacyIdleSubscriptionTools: input.legacyIdleSubscriptionTools === true,
     speechEnabled: speechSettings.enabled,
     correlationId: input.correlationId,
     ...(input.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
+    ...(input.renameDrone ? { renameDrone: input.renameDrone } : {}),
     ...(principal.kind === 'chat'
       ? {}
       : {

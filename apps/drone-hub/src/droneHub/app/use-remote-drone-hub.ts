@@ -189,7 +189,6 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
   const [pendingCount, setPendingCount] = React.useState(0);
   const [loadingDrones, setLoadingDrones] = React.useState(true);
   const [loadingChat, setLoadingChat] = React.useState(false);
-  const [sending, setSending] = React.useState(false);
   const [stopping, setStopping] = React.useState(false);
   const [creatingChat, setCreatingChat] = React.useState(false);
   const [approvalBusyId, setApprovalBusyId] = React.useState('');
@@ -381,7 +380,6 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
       const droneId = selectedDrone.id;
       const chatName = selectedChat;
       const optimisticId = `desktop-optimistic-${Date.now()}`;
-      setSending(true);
       setChatError(null);
       setMessages((current) => [
         ...current,
@@ -421,8 +419,6 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
           setChatError(error?.message ?? String(error));
         }
         return false;
-      } finally {
-        if (targetRef.current === target) setSending(false);
       }
     },
     [loadChat, routeAvailable, selectedChat, selectedDrone, targetDeviceId],
@@ -502,7 +498,6 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
     waiting,
     loadingDrones,
     loadingChat,
-    sending,
     stopping,
     creatingChat,
     listError,

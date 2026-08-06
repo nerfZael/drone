@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { profileStorageKey } from '../src/profile-storage';
 import { openFileTab, updateFileTabContent } from '../src/droneHub/app/opened-file-tabs';
 import {
   openedFileTabsStateForDrone,
@@ -34,7 +35,20 @@ const {
   WHITEBOARD_ACTIVE_STORAGE_KEY,
   writeActiveWhiteboardId,
 } = await import('../src/droneHub/whiteboard/whiteboard-events');
-const { restoreRequiredWorkspacePanels } = await import('../src/droneHub/app/DockableDroneWorkspace');
+const {
+  resetWorkspaceToChat,
+  ensureWorkspaceToolPanel,
+  migrateEditorChangesPanels,
+  restoreRequiredWorkspacePanels,
+} = await import('../src/droneHub/app/DockableDroneWorkspace');
+const {
+  readWorkspaceExplorerWidth,
+  readWorkspaceExplorerZoom,
+  WORKSPACE_EXPLORER_WIDTH_STORAGE_KEY,
+  WORKSPACE_EXPLORER_ZOOM_STORAGE_KEY,
+  writeWorkspaceExplorerWidth,
+  writeWorkspaceExplorerZoom,
+} = await import('../src/droneHub/app/workspace-explorer-preferences');
 
 function readAppSource(relativePath: string): string {
   return fs.readFileSync(path.join(import.meta.dir, '../src/droneHub', relativePath), 'utf8');
@@ -66,10 +80,147 @@ describe('per-drone workspace state', () => {
   test('keys Dockview mounts and persisted layouts by drone', () => {
     const workspace = readAppSource('app/DockableDroneWorkspace.tsx');
     const selectedWorkspace = readAppSource('app/SelectedDroneWorkspace.tsx');
+    const workspaceTools = readAppSource('app/use-workspace-tools.ts');
 
     expect(workspace).toContain('workspaceLayoutStorageKey(droneId)');
     expect(workspace).toContain('writeStoredLayout(currentDrone.id, layout)');
     expect(selectedWorkspace).toContain('key={currentDrone.id}');
+    expect(workspaceTools).toContain('visibleToolTabsByDrone');
+    expect(workspaceTools).toContain('[droneId]: tabs');
+    expect(selectedWorkspace).toContain('onVisibleToolTabsChange={onVisibleToolTabsChange}');
+  });
+
+  test('creates a fresh workspace with only the required chat panel', () => {
+    const addedPanels: Array<{ id?: string; component?: string }> = [];
+    let clearCount = 0;
+    const api = {
+      panels: [],
+      getPanel: () => undefined,
+      clear: () => {
+        clearCount += 1;
+      },
+      addPanel: (panel: (typeof addedPanels)[number]) => addedPanels.push(panel),
+    };
+
+    resetWorkspaceToChat(
+      api as unknown as Parameters<typeof resetWorkspaceToChat>[0],
+    );
+
+    expect(clearCount).toBe(1);
+    expect(addedPanels).toEqual([
+      expect.objectContaining({ id: 'agent-chat', component: 'chat' }),
+    ]);
+  });
+
+  test('uses the same File Explorer chrome and preferences in Editor and Changes', () => {
+    const editorWorkspace = readAppSource('app/DroneEditorWorkspace.tsx');
+    const changesDock = readAppSource('changes/DroneChangesDock.tsx');
+    const rightPanel = readAppSource('app/RightPanelTabContent.tsx');
+    const appConfig = readAppSource('app/app-config.ts');
+
+    expect(editorWorkspace).toContain("profileStorageKey('droneHub.editorExplorerLayout')");
+    expect(editorWorkspace).toContain('<WorkspaceExplorerHeader');
+    expect(changesDock).toContain('<WorkspaceExplorerHeader');
+    expect(rightPanel).toContain('zoom={explorerZoom}');
+    expect(editorWorkspace).toContain('aria-label="File Explorer"');
+    expect(appConfig).toContain("if (raw === 'files') return 'editor'");
+  });
+
+  test('shares explorer width and zoom through one preference pair', () => {
+    writeWorkspaceExplorerWidth(376);
+    writeWorkspaceExplorerZoom(1.2);
+
+    expect(readWorkspaceExplorerWidth()).toBe(376);
+    expect(readWorkspaceExplorerZoom()).toBe(1.2);
+    expect(storage.getItem(WORKSPACE_EXPLORER_WIDTH_STORAGE_KEY)).toBe('376');
+    expect(storage.getItem(WORKSPACE_EXPLORER_ZOOM_STORAGE_KEY)).toBe('1.2');
+  });
+
+  test('migrates the previous Changes explorer preferences into the shared model', () => {
+    storage.setItem(profileStorageKey('droneHub.changesExplorerWidthPx'), '412');
+    storage.setItem(profileStorageKey('droneHub.changesExplorerZoom'), '0.9');
+
+    expect(readWorkspaceExplorerWidth()).toBe(412);
+    expect(readWorkspaceExplorerZoom()).toBe(0.9);
+  });
+
+  test('switches Editor and Changes inside the same Dockview panel', () => {
+    let params = { tab: 'editor', paneKey: 'bottom' };
+    let title = 'Editor';
+    let minimumWidth = 0;
+    let active = false;
+    const panel = {
+      id: 'tool:editor',
+      api: {
+        getParameters: () => params,
+        updateParameters: (next: typeof params) => {
+          params = next;
+        },
+        setTitle: (next: string) => {
+          title = next;
+        },
+        setConstraints: (next: { minimumWidth?: number }) => {
+          minimumWidth = next.minimumWidth ?? 0;
+        },
+        setActive: () => {
+          active = true;
+        },
+      },
+    };
+    const addedPanels: unknown[] = [];
+    const api = {
+      panels: [panel],
+      getPanel: () => undefined,
+      addPanel: (next: unknown) => addedPanels.push(next),
+    };
+
+    const added = ensureWorkspaceToolPanel(
+      api as unknown as Parameters<typeof ensureWorkspaceToolPanel>[0],
+      'changes',
+      'single',
+    );
+
+    expect(added).toBe(false);
+    expect(addedPanels).toHaveLength(0);
+    expect(params.tab).toBe('changes');
+    expect(params.paneKey).toBe('bottom');
+    expect(title).toBe('Changes');
+    expect(minimumWidth).toBe(480);
+    expect(active).toBe(true);
+  });
+
+  test('keeps a restored Editor or Changes pane independent of another drone active tab', () => {
+    let editorParams = { tab: 'editor' };
+    let editorTitle = 'Editor';
+    const editorPanel = {
+      id: 'tool:editor',
+      api: {
+        getParameters: () => editorParams,
+        updateParameters: (next: typeof editorParams) => {
+          editorParams = next;
+        },
+        setTitle: (next: string) => {
+          editorTitle = next;
+        },
+        setConstraints: () => {},
+        close: () => {},
+      },
+    };
+    const terminalPanel = {
+      id: 'tool:terminal',
+      api: { getParameters: () => ({ tab: 'terminal' }) },
+    };
+    const api = {
+      panels: [editorPanel],
+      activePanel: terminalPanel,
+    };
+
+    migrateEditorChangesPanels(
+      api as unknown as Parameters<typeof migrateEditorChangesPanels>[0],
+    );
+
+    expect(editorParams.tab).toBe('editor');
+    expect(editorTitle).toBe('Editor');
   });
 
   test('repairs an empty saved chat group and restores chat beside the editor', () => {
@@ -112,6 +263,20 @@ describe('per-drone workspace state', () => {
     expect(workspace).toContain('if (!layout.panels[CHAT_PANEL_ID]) return;');
     expect(workspace).toContain('unmountingRef.current = false;');
     expect(workspace).toContain('unmountingRef.current = true;');
+  });
+
+  test('does not reconcile Dockview move removals as closed panels', () => {
+    const workspace = readAppSource('app/DockableDroneWorkspace.tsx');
+    const removalHandler = workspace.slice(
+      workspace.indexOf('const removeDisposable = event.api.onDidRemovePanel'),
+      workspace.indexOf('updateWorkspacePanelState();', workspace.indexOf('disposablesRef.current =')),
+    );
+
+    expect(removalHandler).toContain('const timer = window.setTimeout(() => {');
+    expect(removalHandler).toContain('if (api.getPanel(panelId)) return;');
+    expect(removalHandler.indexOf('if (api.getPanel(panelId)) return;')).toBeLessThan(
+      removalHandler.indexOf('rebalanceWorkspaceGridGroups(onAfterToolPanelRemove);'),
+    );
   });
 
   test('keeps editor tabs in drone-keyed buckets instead of clearing them on navigation', () => {

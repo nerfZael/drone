@@ -175,7 +175,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
               onValueChange={control.onValueChange}
               entries={control.entries}
               disabled={control.disabled}
-              triggerClassName={`!h-8 justify-between !border-transparent !bg-transparent px-2 text-[.6875rem] !font-medium normal-case tracking-normal !text-[var(--chat-composer-model-fg)] hover:!opacity-70 ${controlWidthClass(control.width)}`}
+              triggerClassName={`!h-8 justify-start !gap-1 !border-transparent !bg-transparent px-2 text-[.6875rem] !font-medium normal-case tracking-normal !text-[var(--chat-composer-model-fg)] hover:!opacity-70 ${controlWidthClass(control.width)}`}
               title={control.title}
               triggerLabel={control.label}
               chevron={() => (

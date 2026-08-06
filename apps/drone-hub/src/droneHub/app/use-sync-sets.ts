@@ -1,8 +1,14 @@
 import React from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import type { SyncSet, SyncSetApplyResponse, SyncSetsResponse, SyncSetSourceType } from './settings-types';
+import type { SyncSetApplyResponse, SyncSetsResponse, SyncSetSourceType } from './settings-types';
+import { settingsErrorMessage, settingsQueryError, settingsQueryKey, useSettingsQuery } from './settings-query';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
+type SyncSetMutation =
+  | { action: 'create'; draft: ReturnType<typeof normalizeDraft> }
+  | { action: 'update'; id: string; draft: ReturnType<typeof normalizeDraft> }
+  | { action: 'delete'; id: string };
 
 export type SyncSetDraftInput = {
   label: string;
@@ -12,28 +18,7 @@ export type SyncSetDraftInput = {
   applyToHost: boolean;
 };
 
-export type UseSyncSetsResult = {
-  syncSets: SyncSet[];
-  syncSetsLoading: boolean;
-  syncSetsError: string | null;
-  syncSetsNotice: string | null;
-  creatingSyncSet: boolean;
-  savingSyncSetId: string | null;
-  deletingSyncSetId: string | null;
-  applyingSyncSetId: string | null;
-  loadSyncSets: () => Promise<void>;
-  createSyncSet: (draft: SyncSetDraftInput) => Promise<boolean>;
-  updateSyncSet: (syncSetId: string, draft: SyncSetDraftInput) => Promise<boolean>;
-  deleteSyncSet: (syncSetId: string, label?: string | null) => Promise<boolean>;
-  applySyncSetToExistingDrones: (syncSetId: string, label?: string | null) => Promise<boolean>;
-};
-
-function applySyncSetsResponse(
-  data: SyncSetsResponse,
-  setSyncSets: React.Dispatch<React.SetStateAction<SyncSet[]>>,
-): void {
-  setSyncSets(Array.isArray(data.syncSets) ? data.syncSets : []);
-}
+export type UseSyncSetsResult = ReturnType<typeof useSyncSets>;
 
 function normalizeDraft(draft: SyncSetDraftInput) {
   return {
@@ -57,56 +42,60 @@ function formatApplyNotice(label: string, data: SyncSetApplyResponse): string {
   return `${parts.join(' ')}.`;
 }
 
-export function useSyncSets(requestJson: RequestJsonFn): UseSyncSetsResult {
-  const [syncSets, setSyncSets] = React.useState<SyncSet[]>([]);
-  const [syncSetsLoading, setSyncSetsLoading] = React.useState(false);
+export function useSyncSets(requestJson: RequestJsonFn) {
+  const queryClient = useQueryClient();
+  const queryKey = settingsQueryKey('sync-sets');
+  const query = useSettingsQuery<SyncSetsResponse>(requestJson, queryKey, '/api/settings/sync-sets');
   const [syncSetsError, setSyncSetsError] = React.useState<string | null>(null);
   const [syncSetsNotice, setSyncSetsNotice] = React.useState<string | null>(null);
-  const [creatingSyncSet, setCreatingSyncSet] = React.useState(false);
-  const [savingSyncSetId, setSavingSyncSetId] = React.useState<string | null>(null);
-  const [deletingSyncSetId, setDeletingSyncSetId] = React.useState<string | null>(null);
-  const [applyingSyncSetId, setApplyingSyncSetId] = React.useState<string | null>(null);
 
   const loadSyncSets = React.useCallback(async () => {
-    setSyncSetsLoading(true);
     setSyncSetsError(null);
-    try {
-      const data = await requestJson<SyncSetsResponse>('/api/settings/sync-sets');
-      applySyncSetsResponse(data, setSyncSets);
-    } catch (e: any) {
-      setSyncSetsError(e?.message ?? String(e));
-    } finally {
-      setSyncSetsLoading(false);
-    }
-  }, [requestJson]);
+    await query.refetch();
+  }, [query.refetch]);
 
-  React.useEffect(() => {
-    void loadSyncSets();
-  }, [loadSyncSets]);
+  const mutation = useMutation({
+    mutationFn: (input: SyncSetMutation) => {
+      if (input.action === 'create') {
+        return requestJson<SyncSetsResponse>('/api/settings/sync-sets', jsonRequest('POST', input.draft));
+      }
+      const url = `/api/settings/sync-sets/${encodeURIComponent(input.id)}`;
+      return requestJson<SyncSetsResponse>(
+        url,
+        input.action === 'update' ? jsonRequest('PATCH', input.draft) : { method: 'DELETE' },
+      );
+    },
+  });
+  const applyMutation = useMutation({
+    mutationFn: (id: string) =>
+      requestJson<SyncSetApplyResponse>(`/api/settings/sync-sets/${encodeURIComponent(id)}/apply`, {
+        method: 'POST',
+      }),
+  });
+
+  const applyResponse = React.useCallback((data: SyncSetsResponse) => {
+    queryClient.setQueryData(queryKey, {
+      ...data,
+      syncSets: Array.isArray(data.syncSets) ? data.syncSets : [],
+    });
+  }, [queryClient, queryKey]);
 
   const createSyncSet = React.useCallback(
     async (draft: SyncSetDraftInput) => {
       const next = normalizeDraft(draft);
-      setCreatingSyncSet(true);
       setSyncSetsError(null);
       setSyncSetsNotice(null);
       try {
-        const data = await requestJson<SyncSetsResponse>('/api/settings/sync-sets', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(next),
-        });
-        applySyncSetsResponse(data, setSyncSets);
+        const data = await mutation.mutateAsync({ action: 'create', draft: next });
+        applyResponse(data);
         setSyncSetsNotice(`Created sync set ${next.label}.`);
         return true;
-      } catch (e: any) {
-        setSyncSetsError(e?.message ?? String(e));
+      } catch (error) {
+        setSyncSetsError(settingsErrorMessage(error));
         return false;
-      } finally {
-        setCreatingSyncSet(false);
       }
     },
-    [requestJson],
+    [applyResponse, mutation],
   );
 
   const updateSyncSet = React.useCallback(
@@ -114,93 +103,91 @@ export function useSyncSets(requestJson: RequestJsonFn): UseSyncSetsResult {
       const syncSetId = String(syncSetIdRaw ?? '').trim();
       if (!syncSetId) return false;
       const next = normalizeDraft(draft);
-      setSavingSyncSetId(syncSetId);
       setSyncSetsError(null);
       setSyncSetsNotice(null);
       try {
-        const data = await requestJson<SyncSetsResponse>(`/api/settings/sync-sets/${encodeURIComponent(syncSetId)}`, {
-          method: 'PATCH',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(next),
-        });
-        applySyncSetsResponse(data, setSyncSets);
+        const data = await mutation.mutateAsync({ action: 'update', id: syncSetId, draft: next });
+        applyResponse(data);
         setSyncSetsNotice(`Saved sync set ${next.label}.`);
         return true;
-      } catch (e: any) {
-        setSyncSetsError(e?.message ?? String(e));
+      } catch (error) {
+        setSyncSetsError(settingsErrorMessage(error));
         return false;
-      } finally {
-        setSavingSyncSetId((current) => (current === syncSetId ? null : current));
       }
     },
-    [requestJson],
+    [applyResponse, mutation],
   );
 
   const deleteSyncSet = React.useCallback(
     async (syncSetIdRaw: string, label?: string | null) => {
       const syncSetId = String(syncSetIdRaw ?? '').trim();
       if (!syncSetId) return false;
-      setDeletingSyncSetId(syncSetId);
       setSyncSetsError(null);
       setSyncSetsNotice(null);
       try {
-        const data = await requestJson<SyncSetsResponse>(`/api/settings/sync-sets/${encodeURIComponent(syncSetId)}`, {
-          method: 'DELETE',
-        });
-        applySyncSetsResponse(data, setSyncSets);
+        const data = await mutation.mutateAsync({ action: 'delete', id: syncSetId });
+        applyResponse(data);
         setSyncSetsNotice(`Deleted sync set ${String(label ?? syncSetId).trim() || syncSetId}.`);
         return true;
-      } catch (e: any) {
-        setSyncSetsError(e?.message ?? String(e));
+      } catch (error) {
+        setSyncSetsError(settingsErrorMessage(error));
         return false;
-      } finally {
-        setDeletingSyncSetId((current) => (current === syncSetId ? null : current));
       }
     },
-    [requestJson],
+    [applyResponse, mutation],
   );
 
   const applySyncSetToExistingDrones = React.useCallback(
     async (syncSetIdRaw: string, label?: string | null) => {
       const syncSetId = String(syncSetIdRaw ?? '').trim();
       if (!syncSetId) return false;
-      setApplyingSyncSetId(syncSetId);
       setSyncSetsError(null);
       setSyncSetsNotice(null);
       try {
-        const data = await requestJson<SyncSetApplyResponse>(`/api/settings/sync-sets/${encodeURIComponent(syncSetId)}/apply`, {
-          method: 'POST',
-        });
+        const data = await applyMutation.mutateAsync(syncSetId);
         if (data.syncSet) {
-          setSyncSets((current) => current.map((item) => (item.id === syncSetId ? data.syncSet! : item)));
+          queryClient.setQueryData<SyncSetsResponse>(queryKey, (current) => ({
+            ok: true,
+            updatedAt: current?.updatedAt ?? null,
+            syncSets: (current?.syncSets ?? []).map((item) => (item.id === syncSetId ? data.syncSet! : item)),
+          }));
         } else {
           await loadSyncSets();
         }
         setSyncSetsNotice(formatApplyNotice(String(label ?? data.syncSet?.label ?? syncSetId).trim(), data));
         return true;
-      } catch (e: any) {
-        setSyncSetsError(e?.message ?? String(e));
+      } catch (error) {
+        setSyncSetsError(settingsErrorMessage(error));
         return false;
-      } finally {
-        setApplyingSyncSetId((current) => (current === syncSetId ? null : current));
       }
     },
-    [loadSyncSets, requestJson],
+    [applyMutation, loadSyncSets, queryClient, queryKey],
   );
+
+  const pending = mutation.isPending ? mutation.variables : null;
+  const syncSets = Array.isArray(query.data?.syncSets) ? query.data.syncSets : [];
 
   return {
     syncSets,
-    syncSetsLoading,
-    syncSetsError,
+    syncSetsLoading: query.isFetching,
+    syncSetsError: settingsQueryError(syncSetsError, false, query),
     syncSetsNotice,
-    creatingSyncSet,
-    savingSyncSetId,
-    deletingSyncSetId,
-    applyingSyncSetId,
+    creatingSyncSet: pending?.action === 'create',
+    savingSyncSetId: pending?.action === 'update' ? pending.id : null,
+    deletingSyncSetId: pending?.action === 'delete' ? pending.id : null,
+    applyingSyncSetId: applyMutation.isPending ? applyMutation.variables : null,
     loadSyncSets,
     createSyncSet,
     updateSyncSet,
     deleteSyncSet,
     applySyncSetToExistingDrones,
+  };
+}
+
+function jsonRequest(method: string, body: unknown): RequestInit {
+  return {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
   };
 }

@@ -61,6 +61,19 @@ describe('sidebar presentation', () => {
     );
   });
 
+  test('opens a repository back into its remembered chat workspace', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(sidebarSource).toContain("setAppView('workspace');");
+    expect(sidebarSource).toContain('setHomeOpen(false);');
+    expect(sidebarSource).toContain('setDraftChat(null);');
+    expect(sidebarSource).toContain('setSelectedGroupMultiChat(null);');
+    expect(sidebarSource).toContain('setActiveRepoPath(item.repoPath);');
+  });
+
   test('uses the wider desktop sidebar for both the shell and dock preview', () => {
     const sidebarSource = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
@@ -84,9 +97,9 @@ describe('sidebar presentation', () => {
     expect(normal.chatRow).toContain('text-[var(--sidebar-item-size)]');
     expect(comfortable.chatRow).toContain('text-[var(--sidebar-item-comfortable-size)]');
     expect(normal.folderLabel).toContain('text-[var(--sidebar-item-size)]');
-    expect(compact.chatRow).toContain('pl-1 pr-1.5');
-    expect(normal.chatRow).toContain('pl-1 pr-1.5');
-    expect(comfortable.chatRow).toContain('pl-1 pr-2');
+    expect(compact.chatRow).toContain('pl-7 pr-1.5');
+    expect(normal.chatRow).toContain('pl-7 pr-1.5');
+    expect(comfortable.chatRow).toContain('pl-7 pr-2');
     expect(compact.folderBody).toContain('ml-[11px]');
     expect(normal.folderBody).toContain('ml-3');
     expect(comfortable.folderBody).toContain('ml-[15px]');
@@ -328,6 +341,10 @@ describe('sidebar presentation', () => {
   });
 
   test('shows descendant state counts only on collapsed group headers in repository order', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
     const groupedTreeSource = readFileSync(
       new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
       'utf8',
@@ -344,6 +361,12 @@ describe('sidebar presentation', () => {
     );
     expect(groupedTreeSource).toContain("inactiveDisplayState !== 'blocked'");
     expect(groupedTreeSource).toContain("inactiveDisplayState !== 'offline'");
+    expect(groupedTreeSource).toContain(
+      "const unread =\n        !working &&\n        inactiveDisplayState !== 'blocked'",
+    );
+    expect(sidebarSource).toContain(
+      "const droneUnread =\n        !droneWorking &&\n        inactiveDisplayState !== 'blocked'",
+    );
     expect(countsSource.indexOf('summary.approval')).toBeLessThan(
       countsSource.indexOf('summary.unread'),
     );

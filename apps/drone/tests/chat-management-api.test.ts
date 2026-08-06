@@ -16,7 +16,9 @@ import { getSocketListenSupport } from './socket-listen-support';
 
 const listenSupport = getSocketListenSupport();
 if (!listenSupport.ok && process.env.CI) {
-  throw new Error(`chat management api tests require local socket binding support: ${listenSupport.detail}`);
+  throw new Error(
+    `chat management api tests require local socket binding support: ${listenSupport.detail}`,
+  );
 }
 if (!listenSupport.ok) {
   // eslint-disable-next-line no-console
@@ -53,7 +55,10 @@ describeSocketSuite('chat management api', () => {
     return { r, data };
   };
 
-  const seedDrone = async (id: string, opts?: { runtime?: 'container' | 'host'; persistVolume?: boolean }) => {
+  const seedDrone = async (
+    id: string,
+    opts?: { runtime?: 'container' | 'host'; persistVolume?: boolean },
+  ) => {
     const now = new Date().toISOString();
     await updateRegistry((reg: any) => {
       reg.drones = reg.drones ?? {};
@@ -62,7 +67,9 @@ describeSocketSuite('chat management api', () => {
         id,
         name: id,
         runtime,
-        ...(runtime === 'container' && typeof opts?.persistVolume === 'boolean' ? { persistVolume: opts.persistVolume } : {}),
+        ...(runtime === 'container' && typeof opts?.persistVolume === 'boolean'
+          ? { persistVolume: opts.persistVolume }
+          : {}),
         hostPort: 1,
         token: 'mock-token',
         containerPort: 7777,
@@ -142,14 +149,11 @@ describeSocketSuite('chat management api', () => {
       },
     });
 
-    const marked = await apiFetch(
-      `/api/drones/${encodeURIComponent(droneId)}/chats/default/read`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ latestAgentTurnId: null, latestAgentRevision: 0 }),
-      },
-    );
+    const marked = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/read`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ latestAgentTurnId: null, latestAgentRevision: 0 }),
+    });
 
     expect(marked.r.status).toBe(200);
     expect(marked.data).toMatchObject({ ok: true, id: droneId, chat: 'default' });
@@ -190,29 +194,23 @@ describeSocketSuite('chat management api', () => {
     );
     expect(cursorless.r.status).toBe(400);
 
-    const stale = await apiFetch(
-      `/api/drones/${encodeURIComponent(droneId)}/chats/default/read`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ latestAgentTurnId: null, latestAgentRevision: 0 }),
-      },
-    );
+    const stale = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/read`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ latestAgentTurnId: null, latestAgentRevision: 0 }),
+    });
     expect(stale.r.status).toBe(200);
     expect(stale.data?.readState?.unread).toBe(true);
 
-    const read = await apiFetch(
-      `/api/drones/${encodeURIComponent(droneId)}/chats/default/read`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          latestAgentTurnId: 'turn-1',
-          latestAgentRevision: 1,
-          updatedByDeviceId: 'browser-test',
-        }),
-      },
-    );
+    const read = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/read`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        latestAgentTurnId: 'turn-1',
+        latestAgentRevision: 1,
+        updatedByDeviceId: 'browser-test',
+      }),
+    });
     expect(read.r.status).toBe(200);
     expect(read.data?.readState?.unread).toBe(false);
   });
@@ -359,6 +357,7 @@ describeSocketSuite('chat management api', () => {
           promptId: 'review-after-initial',
           submittedAt: '2026-07-29T22:44:26.908Z',
           prompt: 'Review the changes and make a pull request.',
+          userTimeZone: 'America/Chicago',
         }),
       },
     );
@@ -369,15 +368,15 @@ describeSocketSuite('chat management api', () => {
       promptId: 'review-after-initial',
       pendingState: 'queued',
     });
+    const userContext = await apiFetch('/api/settings/user-context');
+    expect(userContext.r.status).toBe(200);
+    expect(userContext.data?.userContext?.timeZone).toBe('America/Chicago');
     if (queue) {
       const queued = queue.list({
         droneId,
         chatName: 'default',
       });
-      expect(queued.map((prompt) => prompt.id)).toEqual([
-        initialPromptId,
-        'review-after-initial',
-      ]);
+      expect(queued.map((prompt) => prompt.id)).toEqual([initialPromptId, 'review-after-initial']);
       expect(queued.map((prompt) => prompt.state)).toEqual(['queued', 'queued']);
     } else {
       const pending = await apiFetch(
@@ -403,13 +402,18 @@ describeSocketSuite('chat management api', () => {
     expect(initial.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(false);
 
     let regAny: any = await loadRegistry();
-    expect(regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabled).toBeUndefined();
+    expect(
+      regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabled,
+    ).toBeUndefined();
 
-    const enabled = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dockerSnapshotAfterAgentMessageEnabled: true }),
-    });
+    const enabled = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ dockerSnapshotAfterAgentMessageEnabled: true }),
+      },
+    );
     expect(enabled.r.status).toBe(200);
     expect(enabled.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(true);
 
@@ -418,14 +422,21 @@ describeSocketSuite('chat management api', () => {
     expect(enabledAfter.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(true);
 
     regAny = await loadRegistry();
-    expect(regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabled).toBe(true);
-    expect(typeof regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabledAt).toBe('string');
+    expect(regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabled).toBe(
+      true,
+    );
+    expect(
+      typeof regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabledAt,
+    ).toBe('string');
 
-    const disabled = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dockerSnapshotAfterAgentMessageEnabled: false }),
-    });
+    const disabled = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ dockerSnapshotAfterAgentMessageEnabled: false }),
+      },
+    );
     expect(disabled.r.status).toBe(200);
     expect(disabled.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(false);
 
@@ -434,8 +445,12 @@ describeSocketSuite('chat management api', () => {
     expect(after.data?.dockerSnapshotAfterAgentMessageEnabled).toBe(false);
 
     regAny = await loadRegistry();
-    expect(regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabled).toBe(false);
-    expect(regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabledAt).toBeUndefined();
+    expect(regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabled).toBe(
+      false,
+    );
+    expect(
+      regAny?.drones?.[droneId]?.chats?.default?.dockerSnapshotAfterAgentMessageEnabledAt,
+    ).toBeUndefined();
   });
 
   test('creates a chat from the implicit default on legacy drones without chats', async () => {
@@ -502,8 +517,14 @@ describeSocketSuite('chat management api', () => {
     expect(created.data?.ok).toBe(true);
 
     const regAny: any = await loadRegistry();
-    expect(regAny?.drones?.[droneId]?.chats?.default?.agent).toEqual({ kind: 'builtin', id: 'codex' });
-    expect(regAny?.drones?.[droneId]?.chats?.review?.agent).toEqual({ kind: 'builtin', id: 'codex' });
+    expect(regAny?.drones?.[droneId]?.chats?.default?.agent).toEqual({
+      kind: 'builtin',
+      id: 'codex',
+    });
+    expect(regAny?.drones?.[droneId]?.chats?.review?.agent).toEqual({
+      kind: 'builtin',
+      id: 'codex',
+    });
   });
 
   test('renames and deletes chats with default protections', async () => {
@@ -517,11 +538,14 @@ describeSocketSuite('chat management api', () => {
     });
     expect(created.r.status).toBe(201);
 
-    const renamed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/rename`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ newName: 'qa' }),
-    });
+    const renamed = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/review/rename`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ newName: 'qa' }),
+      },
+    );
     expect(renamed.r.status).toBe(200);
     expect(renamed.data?.chat).toBe('qa');
 
@@ -532,9 +556,12 @@ describeSocketSuite('chat management api', () => {
     expect(renamedInfo.r.status).toBe(200);
     expect(renamedInfo.data?.chat).toBe('qa');
 
-    const deleteDefault = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`, {
-      method: 'DELETE',
-    });
+    const deleteDefault = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default`,
+      {
+        method: 'DELETE',
+      },
+    );
     expect(deleteDefault.r.status).toBe(400);
     expect(String(deleteDefault.data?.error ?? '')).toContain('default');
 
@@ -558,14 +585,17 @@ describeSocketSuite('chat management api', () => {
     expect(initial.r.status).toBe(200);
     expect(initial.data?.agentPermissionMode).toBe('full-access');
 
-    const updated = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        agent: { kind: 'builtin', id: 'codex' },
-        agentPermissionMode: 'read-only',
-      }),
-    });
+    const updated = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          agent: { kind: 'builtin', id: 'codex' },
+          agentPermissionMode: 'read-only',
+        }),
+      },
+    );
     expect(updated.r.status).toBe(200);
     expect(updated.data?.agentPermissionMode).toBe('read-only');
 
@@ -576,11 +606,14 @@ describeSocketSuite('chat management api', () => {
     let regAny: any = await loadRegistry();
     expect(regAny?.drones?.[droneId]?.chats?.default?.agentPermissionMode).toBe('read-only');
 
-    const disabled = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ agentPermissionMode: 'full-access' }),
-    });
+    const disabled = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentPermissionMode: 'full-access' }),
+      },
+    );
     expect(disabled.r.status).toBe(200);
     expect(disabled.data?.agentPermissionMode).toBe('full-access');
 
@@ -608,9 +641,7 @@ describeSocketSuite('chat management api', () => {
     expect(updated.data?.model).toBe('gpt-test');
     expect(updated.data?.reasoning).toBe('high');
 
-    const chatInfo = await apiFetch(
-      `/api/drones/${encodeURIComponent(droneId)}/chats/default`,
-    );
+    const chatInfo = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
     expect(chatInfo.r.status).toBe(200);
     expect(chatInfo.data?.model).toBe('gpt-test');
     expect(chatInfo.data?.reasoning).toBe('high');
@@ -625,9 +656,7 @@ describeSocketSuite('chat management api', () => {
     );
     expect(cleared.r.status).toBe(200);
 
-    const clearedInfo = await apiFetch(
-      `/api/drones/${encodeURIComponent(droneId)}/chats/default`,
-    );
+    const clearedInfo = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
     expect(clearedInfo.data?.model).toBeNull();
     expect(clearedInfo.data?.reasoning).toBeNull();
   });
@@ -702,6 +731,14 @@ describeSocketSuite('chat management api', () => {
     const registry: any = await loadRegistry();
     const chat = registry?.drones?.[droneId]?.chats?.default;
     expect(String(chat?.id ?? '')).toMatch(/^[0-9a-f-]{36}$/i);
+    const metadata = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(metadata.data?.chatId).toBe(chat.id);
+    expect(metadata.data?.subscriptions).toEqual([]);
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=none&pending=none&subscriptions=true`,
+    );
+    expect(state.data?.chatId).toBe(chat.id);
+    expect(state.data?.subscriptions).toEqual([]);
     expect(chat?.droneHubMcpAccessScope).toMatchObject({
       readMode: 'selected',
       writeMode: 'all',
@@ -824,21 +861,27 @@ describeSocketSuite('chat management api', () => {
     const droneId = 'drone-chat-agent-permission-clear';
     await seedDrone(droneId);
 
-    const readOnly = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        agent: { kind: 'builtin', id: 'codex' },
-        agentPermissionMode: 'read-only',
-      }),
-    });
+    const readOnly = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          agent: { kind: 'builtin', id: 'codex' },
+          agentPermissionMode: 'read-only',
+        }),
+      },
+    );
     expect(readOnly.r.status).toBe(200);
 
-    const switched = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ agent: { kind: 'builtin', id: 'cursor' } }),
-    });
+    const switched = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agent: { kind: 'builtin', id: 'cursor' } }),
+      },
+    );
     expect(switched.r.status).toBe(200);
 
     const chatInfo = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
@@ -854,11 +897,14 @@ describeSocketSuite('chat management api', () => {
     const droneId = 'drone-chat-agent-permission-unsupported';
     await seedDrone(droneId);
 
-    const updated = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/config`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ agentPermissionMode: 'read-only' }),
-    });
+    const updated = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentPermissionMode: 'read-only' }),
+      },
+    );
     expect(updated.r.status).toBe(400);
     expect(String(updated.data?.error ?? '')).toContain('native, Codex, and Blip');
   });
@@ -883,9 +929,7 @@ describeSocketSuite('chat management api', () => {
     expect(codex.data?.agentPermissionMode).toBe('workspace-write');
     expect(codex.data?.approvalPolicy).toBe('agent-decides');
 
-    const chatInfo = await apiFetch(
-      `/api/drones/${encodeURIComponent(droneId)}/chats/default`,
-    );
+    const chatInfo = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
     expect(chatInfo.data?.agentPermissionMode).toBe('workspace-write');
     expect(chatInfo.data?.approvalPolicy).toBe('agent-decides');
 
@@ -899,9 +943,7 @@ describeSocketSuite('chat management api', () => {
     );
     expect(native.r.status).toBe(200);
 
-    const afterSwitch = await apiFetch(
-      `/api/drones/${encodeURIComponent(droneId)}/chats/default`,
-    );
+    const afterSwitch = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
     expect(afterSwitch.data?.approvalPolicy).toBe('ask');
 
     const invalidNative = await apiFetch(
@@ -948,14 +990,19 @@ describeSocketSuite('chat management api', () => {
       ];
     });
 
-    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    const first = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`,
+    );
     expect(first.r.status).toBe(200);
     const etag = first.r.headers.get('etag');
     expect(etag).toMatch(/^"transcript-/);
 
-    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`, {
-      headers: { 'if-none-match': etag ?? '' },
-    });
+    const second = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`,
+      {
+        headers: { 'if-none-match': etag ?? '' },
+      },
+    );
     expect(second.r.status).toBe(304);
     expect(second.data).toBeNull();
   });
@@ -966,6 +1013,8 @@ describeSocketSuite('chat management api', () => {
 
     const firstAt = new Date(Date.now() - 60_000).toISOString();
     const secondAt = new Date().toISOString();
+    const secondStartedAt = new Date(Date.parse(secondAt) + 30_000).toISOString();
+    const secondCompletedAt = new Date(Date.parse(secondAt) + 40_000).toISOString();
     await updateRegistry((reg: any) => {
       const entry = reg?.drones?.[droneId]?.chats?.default;
       if (!entry) throw new Error('missing seeded chat entry');
@@ -984,7 +1033,8 @@ describeSocketSuite('chat management api', () => {
           id: 'prompt-2',
           at: secondAt,
           promptAt: secondAt,
-          completedAt: secondAt,
+          startedAt: secondStartedAt,
+          completedAt: secondCompletedAt,
           prompt: 'second',
           model: 'actual-turn-model',
           reasoning: 'high',
@@ -1010,12 +1060,18 @@ describeSocketSuite('chat management api', () => {
       ];
     });
 
-    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all&tail=1`);
+    const transcript = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all&tail=1`,
+    );
     expect(transcript.r.status).toBe(200);
-    const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pending = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     expect(pending.r.status).toBe(200);
 
-    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`);
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`,
+    );
     expect(state.r.status).toBe(200);
     expect(state.data?.ok).toBe(true);
     expect(state.data?.id).toBe(droneId);
@@ -1028,14 +1084,18 @@ describeSocketSuite('chat management api', () => {
     expect(state.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-2']);
     expect(state.data?.transcripts?.[0]?.model).toBe('actual-turn-model');
     expect(state.data?.transcripts?.[0]?.reasoning).toBe('high');
+    expect(state.data?.transcripts?.[0]?.startedAt).toBe(secondStartedAt);
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('queued-1');
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('prompt-2');
 
     const etag = state.r.headers.get('etag');
     expect(etag).toMatch(/^"sha256-/);
-    const unchanged = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`, {
-      headers: { 'if-none-match': etag ?? '' },
-    });
+    const unchanged = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`,
+      {
+        headers: { 'if-none-match': etag ?? '' },
+      },
+    );
     expect(unchanged.r.status).toBe(304);
     expect(unchanged.data).toBeNull();
 
@@ -1053,9 +1113,12 @@ describeSocketSuite('chat management api', () => {
       ];
     });
 
-    const pendingChanged = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`, {
-      headers: { 'if-none-match': etag ?? '' },
-    });
+    const pendingChanged = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`,
+      {
+        headers: { 'if-none-match': etag ?? '' },
+      },
+    );
     expect(pendingChanged.r.status).toBe(200);
     expect((pendingChanged.data?.pending ?? []).map((row: any) => row.id)).toContain('queued-2');
   });
@@ -1077,7 +1140,9 @@ describeSocketSuite('chat management api', () => {
       },
     });
 
-    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`);
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`,
+    );
     expect(state.r.status).toBe(200);
     expect(state.data?.ok).toBe(true);
     expect(state.data?.pending).toEqual(
@@ -1122,11 +1187,15 @@ describeSocketSuite('chat management api', () => {
       ];
     });
 
-    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all&tail=1`);
+    const transcript = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all&tail=1`,
+    );
     expect(transcript.r.status).toBe(200);
     expect(transcript.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-newer']);
 
-    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`);
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`,
+    );
     expect(state.r.status).toBe(200);
     expect(state.data?.transcripts).toEqual(transcript.data?.transcripts);
   });
@@ -1175,7 +1244,10 @@ describeSocketSuite('chat management api', () => {
       `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=full&pending=none`,
     );
     expect(transcriptOnly.r.status).toBe(200);
-    expect(transcriptOnly.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-1', 'prompt-2']);
+    expect(transcriptOnly.data?.transcripts?.map((row: any) => row.id)).toEqual([
+      'prompt-1',
+      'prompt-2',
+    ]);
     expect(transcriptOnly.data?.pending).toEqual([]);
     expect(transcriptOnly.data?.transcript?.items).toEqual(transcriptOnly.data?.transcripts);
     expect(transcriptOnly.data?.transcript?.total).toBe(2);
@@ -1189,20 +1261,79 @@ describeSocketSuite('chat management api', () => {
     expect(pendingOnly.data?.pendingPrompts?.items).toEqual(pendingOnly.data?.pending);
   });
 
+  test('combined chat state returns a bounded page with chat configuration and read state', async () => {
+    const droneId = 'drone-chat-state-page';
+    await seedDrone(droneId);
+
+    await updateRegistry((reg: any) => {
+      const entry = reg?.drones?.[droneId]?.chats?.default;
+      if (!entry) throw new Error('missing seeded chat entry');
+      entry.model = 'configured-model';
+      entry.reasoning = 'high';
+      entry.agentPermissionMode = 'workspace-write';
+      entry.approvalPolicy = 'never';
+      entry.turns = Array.from({ length: 5 }, (_, index) => ({
+        id: `prompt-${index + 1}`,
+        at: new Date(Date.now() + index * 1_000).toISOString(),
+        prompt: `prompt ${index + 1}`,
+        ok: true,
+        output: `output ${index + 1}`,
+      }));
+    });
+
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=page&before=4&limit=2&pending=none&subscriptions=0&readState=1&transcriptMeta=0`,
+    );
+
+    expect(state.r.status).toBe(200);
+    expect(state.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-3', 'prompt-4']);
+    expect(state.data).toMatchObject({
+      model: 'configured-model',
+      reasoning: 'high',
+      agentPermissionMode: 'workspace-write',
+      approvalPolicy: 'never',
+      readState: { droneId, chatName: 'default' },
+    });
+    expect(state.data?.transcript).toBeUndefined();
+    expect(state.data?.pendingPrompts).toBeUndefined();
+    expect(state.data?.subscriptions).toBeUndefined();
+  });
+
   test('combined chat state rejects unknown transcript modes', async () => {
     const droneId = 'drone-chat-state-invalid-mode';
     await seedDrone(droneId);
 
-    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=surprise`);
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=surprise`,
+    );
     expect(state.r.status).toBe(400);
     expect(String(state.data?.error ?? '')).toContain('invalid transcript mode');
+  });
+
+  test('combined chat state rejects invalid page cursors and limits', async () => {
+    const droneId = 'drone-chat-state-invalid-page';
+    await seedDrone(droneId);
+
+    const invalidCursor = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=page&before=-1`,
+    );
+    expect(invalidCursor.r.status).toBe(400);
+    expect(String(invalidCursor.data?.error ?? '')).toContain('invalid chat page');
+
+    const invalidLimit = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?transcript=page&limit=101`,
+    );
+    expect(invalidLimit.r.status).toBe(400);
+    expect(String(invalidLimit.data?.error ?? '')).toContain('invalid chat page');
   });
 
   test('combined chat state rejects unknown pending modes', async () => {
     const droneId = 'drone-chat-state-invalid-pending-mode';
     await seedDrone(droneId);
 
-    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?pending=surprise`);
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?pending=surprise`,
+    );
     expect(state.r.status).toBe(400);
     expect(String(state.data?.error ?? '')).toContain('invalid pending mode');
   });
@@ -1211,7 +1342,9 @@ describeSocketSuite('chat management api', () => {
     const droneId = 'drone-chat-transcript-read-only';
     await seedDrone(droneId);
 
-    const missing = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/transcript?turn=all`);
+    const missing = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/review/transcript?turn=all`,
+    );
     expect(missing.r.status).toBe(404);
 
     const reg: any = await loadRegistry();
@@ -1222,7 +1355,9 @@ describeSocketSuite('chat management api', () => {
     const droneId = 'drone-chat-pending-read-only';
     await seedDrone(droneId);
 
-    const missing = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/pending`);
+    const missing = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/review/pending`,
+    );
     expect(missing.r.status).toBe(404);
 
     const reg: any = await loadRegistry();
@@ -1233,7 +1368,9 @@ describeSocketSuite('chat management api', () => {
     const droneId = 'drone-chat-state-read-only';
     await seedDrone(droneId);
 
-    const missing = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/state?turn=all`);
+    const missing = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/review/state?turn=all`,
+    );
     expect(missing.r.status).toBe(404);
 
     const reg: any = await loadRegistry();
@@ -1251,7 +1388,9 @@ describeSocketSuite('chat management api', () => {
     });
     expect(created.r.status).toBe(201);
 
-    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/state/state?turn=all&tail=50`);
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/state/state?turn=all&tail=50`,
+    );
     expect(state.r.status).toBe(200);
     expect(state.data?.ok).toBe(true);
     expect(state.data?.chat).toBe('state');
@@ -1265,13 +1404,22 @@ describeSocketSuite('chat management api', () => {
     await updateRegistry((reg: any) => {
       const entry = reg?.drones?.[droneId]?.chats?.default;
       if (!entry) throw new Error('missing seeded chat entry');
-      entry.agent = { kind: 'custom', id: 'custom-test', label: 'Custom Test', command: 'custom-agent' };
+      entry.agent = {
+        kind: 'custom',
+        id: 'custom-test',
+        label: 'Custom Test',
+        command: 'custom-agent',
+      };
     });
 
-    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    const transcript = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`,
+    );
     expect(transcript.r.status).toBe(410);
 
-    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`);
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`,
+    );
     expect(state.r.status).toBe(410);
     expect(state.data?.ok).toBe(false);
     expect(state.data?.error).toBe(transcript.data?.error);
@@ -1300,13 +1448,15 @@ describeSocketSuite('chat management api', () => {
     });
     expect(created.r.status).toBe(201);
     await updateRegistry((reg: any) => {
-      reg.drones[droneId].chats.review.turns = [{
-        id: 'archived-turn',
-        at: '2026-01-01T00:01:00.000Z',
-        prompt: 'Review this',
-        ok: true,
-        output: 'Reviewed',
-      }];
+      reg.drones[droneId].chats.review.turns = [
+        {
+          id: 'archived-turn',
+          at: '2026-01-01T00:01:00.000Z',
+          prompt: 'Review this',
+          ok: true,
+          output: 'Reviewed',
+        },
+      ];
     });
 
     const archived = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review`, {
@@ -1327,9 +1477,12 @@ describeSocketSuite('chat management api', () => {
       ),
     ).toBe(true);
 
-    const restored = await apiFetch(`/api/archive/drones/${encodeURIComponent(droneId)}/chats/review/restore`, {
-      method: 'POST',
-    });
+    const restored = await apiFetch(
+      `/api/archive/drones/${encodeURIComponent(droneId)}/chats/review/restore`,
+      {
+        method: 'POST',
+      },
+    );
     expect(restored.r.status).toBe(200);
     expect(restored.data?.chat).toBe('review');
 
@@ -1337,16 +1490,24 @@ describeSocketSuite('chat management api', () => {
     expect(listedAfterRestore.r.status).toBe(200);
     expect((listedAfterRestore.data?.chats ?? []).includes('review')).toBe(true);
     const registryAfterRestore: any = await loadRegistry();
-    expect(registryAfterRestore?.drones?.[droneId]?.chats?.review?.turns?.[0]?.id).toBe('archived-turn');
+    expect(registryAfterRestore?.drones?.[droneId]?.chats?.review?.turns?.[0]?.id).toBe(
+      'archived-turn',
+    );
 
-    const archivedAgain = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review`, {
-      method: 'DELETE',
-    });
+    const archivedAgain = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/review`,
+      {
+        method: 'DELETE',
+      },
+    );
     expect(archivedAgain.r.status).toBe(200);
 
-    const deletedArchived = await apiFetch(`/api/archive/drones/${encodeURIComponent(droneId)}/chats/review`, {
-      method: 'DELETE',
-    });
+    const deletedArchived = await apiFetch(
+      `/api/archive/drones/${encodeURIComponent(droneId)}/chats/review`,
+      {
+        method: 'DELETE',
+      },
+    );
     expect(deletedArchived.r.status).toBe(200);
     expect(deletedArchived.data?.deletedChat).toBe('review');
 
@@ -1390,17 +1551,23 @@ describeSocketSuite('chat management api', () => {
       };
     });
 
-    const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pending = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     expect(pending.r.status).toBe(200);
     expect(pending.data?.ok).toBe(true);
     expect(pending.data?.pending).toEqual([]);
 
-    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    const transcript = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`,
+    );
     expect(transcript.r.status).toBe(200);
     expect(transcript.data?.ok).toBe(true);
     expect(transcript.data?.transcripts).toEqual([]);
 
-    const output = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/output`);
+    const output = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/output`,
+    );
     expect(output.r.status).toBe(200);
     expect(output.data?.ok).toBe(true);
     expect(String(output.data?.text ?? '')).toBe('');
@@ -1449,7 +1616,9 @@ describeSocketSuite('chat management api', () => {
     expect(chats.data?.ok).toBe(true);
     expect(chats.data?.chats).toEqual(['default', 'review']);
 
-    const state = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`);
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`,
+    );
     expect(state.r.status).toBe(200);
     expect(state.data?.ok).toBe(true);
     expect(state.data?.transcripts).toEqual([]);
@@ -1464,7 +1633,9 @@ describeSocketSuite('chat management api', () => {
       },
     ]);
 
-    const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pending = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     expect(pending.r.status).toBe(200);
     expect(state.data?.pending).toEqual(pending.data?.pending);
   });
@@ -1499,11 +1670,12 @@ describeSocketSuite('chat management api', () => {
       ];
     });
 
-    const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pending = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     expect(pending.r.status).toBe(200);
     expect(pending.data?.ok).toBe(true);
     expect(pending.data?.pending).toEqual([]);
-
   });
 
   test('renames pending drones before startup completes', async () => {
@@ -1528,7 +1700,11 @@ describeSocketSuite('chat management api', () => {
     const renamed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/rename`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ newName: 'auth-bugfix', source: 'draft-auto-rename' }),
+      body: JSON.stringify({
+        newName: 'auth-bugfix',
+        expectedName: 'Untitled 1',
+        source: 'draft-auto-rename',
+      }),
     });
     expect(renamed.r.status).toBe(200);
     expect(renamed.data?.ok).toBe(true);
@@ -1537,13 +1713,60 @@ describeSocketSuite('chat management api', () => {
     const regAny: any = await loadRegistry();
     expect(String(regAny?.pending?.[droneId]?.name ?? '')).toBe('auth-bugfix');
 
-    const oldRef = await apiFetch(`/api/drones/${encodeURIComponent('Untitled 1')}/chats/default/pending`);
+    const oldRef = await apiFetch(
+      `/api/drones/${encodeURIComponent('Untitled 1')}/chats/default/pending`,
+    );
     expect(oldRef.r.status).toBe(404);
 
-    const newRef = await apiFetch(`/api/drones/${encodeURIComponent('auth-bugfix')}/chats/default/pending`);
+    const newRef = await apiFetch(
+      `/api/drones/${encodeURIComponent('auth-bugfix')}/chats/default/pending`,
+    );
     expect(newRef.r.status).toBe(200);
     expect(newRef.data?.ok).toBe(true);
     expect(newRef.data?.pending).toEqual([]);
+  });
+
+  test('does not let delayed automatic naming overwrite a manual pending rename', async () => {
+    const droneId = 'pending-manual-rename-wins';
+    const originalName = 'Untitled 91';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.pending = reg.pending ?? {};
+      reg.pending[droneId] = {
+        id: droneId,
+        name: originalName,
+        runtime: 'host',
+        repoPath: '',
+        containerPort: 7777,
+        build: false,
+        createdAt: now,
+        updatedAt: now,
+        phase: 'starting',
+        message: 'Starting...',
+      };
+    });
+
+    const manualRename = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/rename`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ newName: 'Keep my manual name', source: 'drone-hub-sidebar' }),
+    });
+    expect(manualRename.r.status).toBe(200);
+
+    const delayedAutoRename = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/rename`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        newName: 'Generated name',
+        expectedName: originalName,
+        source: 'draft-auto-rename',
+      }),
+    });
+    expect(delayedAutoRename.r.status).toBe(409);
+    expect(delayedAutoRename.data?.code).toBe('DRONE_RENAME_PRECONDITION_FAILED');
+
+    const regAny: any = await loadRegistry();
+    expect(String(regAny?.pending?.[droneId]?.name ?? '')).toBe('Keep my manual name');
   });
 
   test('renames both real and pending lifecycle entries when provisioning overlaps auto-rename', async () => {
@@ -1596,10 +1819,14 @@ describeSocketSuite('chat management api', () => {
     expect(String(regAny?.drones?.[droneId]?.name ?? '')).toBe('task-delete-cli');
     expect(String(regAny?.pending?.[droneId]?.name ?? '')).toBe('task-delete-cli');
 
-    const oldRef = await apiFetch(`/api/drones/${encodeURIComponent('Untitled 25')}/chats/default/pending`);
+    const oldRef = await apiFetch(
+      `/api/drones/${encodeURIComponent('Untitled 25')}/chats/default/pending`,
+    );
     expect(oldRef.r.status).toBe(404);
 
-    const newRef = await apiFetch(`/api/drones/${encodeURIComponent('task-delete-cli')}/chats/default/pending`);
+    const newRef = await apiFetch(
+      `/api/drones/${encodeURIComponent('task-delete-cli')}/chats/default/pending`,
+    );
     expect(newRef.r.status).toBe(200);
     expect(newRef.data?.ok).toBe(true);
   });

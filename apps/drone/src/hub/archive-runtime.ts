@@ -27,11 +27,14 @@ type ArchiveRuntimeDependencyName =
   | 'nowIso'
   | 'parseArchiveRetentionId'
   | 'parseArchiveRuntimePolicy'
+  | 'pauseResourceSubscriptionsForDrone'
   | 'permanentlyDeleteCanonicalDrone'
   | 'readChatFromStore'
   | 'removeDockerSnapshotImagesBestEffort'
   | 'removeDroneRuntimeArtifacts'
   | 'restoreArchivedChatInStore'
+  | 'resumeResourceSubscriptionsForChat'
+  | 'resumeResourceSubscriptionsForDrone'
   | 'revokeMcpAccessTokensForDrone'
   | 'updateRegistry'
   | 'upsertCanonicalDroneLifecycle';
@@ -68,11 +71,14 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     nowIso,
     parseArchiveRetentionId,
     parseArchiveRuntimePolicy,
+    pauseResourceSubscriptionsForDrone,
     permanentlyDeleteCanonicalDrone,
     readChatFromStore,
     removeDockerSnapshotImagesBestEffort,
     removeDroneRuntimeArtifacts,
     restoreArchivedChatInStore,
+    resumeResourceSubscriptionsForChat,
+    resumeResourceSubscriptionsForDrone,
     revokeMcpAccessTokensForDrone,
     updateRegistry,
     upsertCanonicalDroneLifecycle,
@@ -286,6 +292,10 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
           delete entry.archivedChats;
       });
     }
+    const restoredChatId = String(stored.chat?.id ?? '').trim();
+    if (stored.restored && restoredChatId) {
+      await resumeResourceSubscriptionsForChat(restoredChatId);
+    }
     return {
       hadDrone: true,
       hadChat: stored.restored,
@@ -461,6 +471,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
       archiveRetention: retention,
       archiveRuntimePolicy: runtimePolicy,
     });
+    await pauseResourceSubscriptionsForDrone(droneId, droneEntry);
     return {
       hadEntry: true,
       archived: true,
@@ -556,6 +567,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     delete restoredEntry.archiveRetention;
     delete restoredEntry.archiveRuntimePolicy;
     await upsertCanonicalDroneLifecycle('real', droneId, restoredEntry);
+    await resumeResourceSubscriptionsForDrone(droneId, archivedEntry);
     return {
       hadEntry: true,
       restored: true,

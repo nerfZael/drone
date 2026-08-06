@@ -133,7 +133,9 @@ export type UiPreferencesSettings = {
   spawnModel: string;
   repoBranchSource: 'host' | 'remote';
   repoCreateRemoteBranch: string;
-  pullHostBranchBeforeCreate: boolean;
+};
+export type UserContextSettings = {
+  timeZone: string | null;
 };
 
 const ARCHIVE_RETENTION_MS_MAP: Record<ArchiveRetentionId, number> = {
@@ -149,7 +151,6 @@ const DEFAULT_SIDEBAR_GROUPING_MODE: SidebarGroupingMode = 'groups';
 const DEFAULT_SIDEBAR_DENSITY_MODE: UiPreferencesSettings['sidebarDensityMode'] = 'default';
 const DEFAULT_SPAWN_AGENT_KEY = 'builtin:cursor';
 const DEFAULT_REPO_BRANCH_SOURCE: UiPreferencesSettings['repoBranchSource'] = 'host';
-const DEFAULT_PULL_HOST_BRANCH_BEFORE_CREATE = true;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_MIN = 1 * 1024 * 1024;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_MAX = 8 * 1024 * 1024 * 1024;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT = 2 * 1024 * 1024 * 1024;
@@ -309,10 +310,6 @@ function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
     spawnModel: normalizeUiPreferenceText(raw.spawnModel, 200),
     repoBranchSource: parseRepoBranchSource(raw.repoBranchSource) ?? DEFAULT_REPO_BRANCH_SOURCE,
     repoCreateRemoteBranch: normalizeUiPreferenceText(raw.repoCreateRemoteBranch, 400),
-    pullHostBranchBeforeCreate:
-      typeof raw.pullHostBranchBeforeCreate === 'boolean'
-        ? raw.pullHostBranchBeforeCreate
-        : DEFAULT_PULL_HOST_BRANCH_BEFORE_CREATE,
   };
 }
 
@@ -330,6 +327,7 @@ const SETTING_KEYS = {
   deleteAction: 'delete-action',
   filesystem: 'filesystem',
   speech: 'speech',
+  userContext: 'user-context',
 } as const;
 
 type LegacySetting<T> = { value: T; updatedAt: string | null };
@@ -885,6 +883,40 @@ export async function resolveSpeechSettingsResponse(): Promise<{
   };
 }
 
+export function parseIanaTimeZone(raw: unknown): string | null {
+  const requested = String(raw ?? '').trim();
+  if (!requested) return null;
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: requested }).resolvedOptions().timeZone;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveUserContextSettings(): Promise<UserContextSettings> {
+  const record = await getCanonicalSetting<Partial<UserContextSettings>>(
+    SETTING_KEYS.userContext,
+    () => null,
+  );
+  return { timeZone: parseIanaTimeZone(record?.value?.timeZone) };
+}
+
+export async function updateStoredUserTimeZone(raw: unknown): Promise<UserContextSettings> {
+  const timeZone = parseIanaTimeZone(raw);
+  if (!timeZone) throw new Error('timeZone must be a valid IANA time zone');
+  const current = await resolveUserContextSettings();
+  if (current.timeZone === timeZone) return current;
+  await putCanonicalSetting(SETTING_KEYS.userContext, { timeZone });
+  return { timeZone };
+}
+
+export async function resolveUserContextSettingsResponse(): Promise<{
+  ok: true;
+  userContext: UserContextSettings;
+}> {
+  return { ok: true, userContext: await resolveUserContextSettings() };
+}
+
 const UI_PREFERENCES_SETTING_KEY = 'ui-preferences';
 
 type StoredUiPreferencesSettings = {
@@ -974,52 +1006,6 @@ export async function upsertStoredUiPreferencesSettings(
     }
     throw error;
   }
-}
-
-export function resolvePinnedDronePreferenceIds(
-  currentIdsRaw: unknown,
-  requestedIdsRaw: unknown,
-  pinned: boolean,
-): string[] {
-  const currentIds = normalizeOrderedStringList(currentIdsRaw);
-  const requestedIds = normalizeOrderedStringList(requestedIdsRaw);
-  const requestedIdSet = new Set(requestedIds);
-  if (!pinned) return currentIds.filter((droneId) => !requestedIdSet.has(droneId));
-  const currentIdSet = new Set(currentIds);
-  return [
-    ...currentIds,
-    ...requestedIds.filter((droneId) => !currentIdSet.has(droneId)),
-  ];
-}
-
-export async function updatePinnedDronePreference(
-  droneIdOrIdsRaw: unknown,
-  pinned: boolean,
-): Promise<StoredUiPreferencesSettings> {
-  const droneIds = normalizeOrderedStringList(
-    Array.isArray(droneIdOrIdsRaw) ? droneIdOrIdsRaw : [droneIdOrIdsRaw],
-  );
-  if (droneIds.length === 0) {
-    throw new UiPreferencesSettingsValidationError('droneId or droneIds is required');
-  }
-  const repository = await getHubSettingsRepository();
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const current = await getStoredUiPreferencesSettings();
-    const currentIds = current.uiPreferences.pinnedDroneIds;
-    const nextIds = resolvePinnedDronePreferenceIds(currentIds, droneIds, pinned);
-    if (nextIds.length === currentIds.length) return current;
-    try {
-      const saved = await repository.put(
-        UI_PREFERENCES_SETTING_KEY,
-        { ...current.uiPreferences, pinnedDroneIds: nextIds },
-        { expectedVersion: current.version },
-      );
-      return storedUiPreferencesFromRecord(saved);
-    } catch (error) {
-      if (!(error instanceof HubSettingVersionConflictError) || attempt === 3) throw error;
-    }
-  }
-  throw new Error('Failed to update pinned drones');
 }
 
 export async function resolveUiPreferencesSettingsResponse(): Promise<{

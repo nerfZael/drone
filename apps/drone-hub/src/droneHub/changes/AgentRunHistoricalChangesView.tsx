@@ -390,7 +390,7 @@ export function AgentRunHistoricalChangesView({
               {fileChanges.counts.changed}
             </span>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5">
+          <div className="min-h-0 flex-1 overflow-y-auto py-1.5">
             {fileChanges.workspaces.map((workspace) => {
               const metadata = workspaceMetadata[workspace.targetId];
               const entries = metadata?.entries ?? agentRunWorkspacePreviewEntries(workspace);

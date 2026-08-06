@@ -126,6 +126,9 @@ describe('chat api request scopes', () => {
 
     expect(body.promptId).toBe('optimistic-prompt-1');
     expect(body.submittedAt).toBe('2026-07-24T12:34:56.000Z');
+    expect(body.userTimeZone).toBe(
+      new Intl.DateTimeFormat('en-US').resolvedOptions().timeZone,
+    );
     expect(body.autoRenameHandledByClient).toBe(true);
     expect(body.deliveryMode).toBe('asap');
   });
@@ -135,16 +138,33 @@ describe('chat api request scopes', () => {
     const result = await fetchDroneChatState(
       async <T>(url: string): Promise<T> => {
         urls.push(url);
-        return { ok: true, transcripts: [transcriptItem()], pending: [{ id: 'pending-1' }] } as T;
+        return {
+          ok: true,
+          chatId: 'chat-1',
+          transcripts: [transcriptItem()],
+          pending: [{ id: 'pending-1' }],
+          subscriptions: [
+            {
+              id: 'subscription-1',
+              provider: 'github',
+              resourceType: 'repository',
+              resourceId: 'acme/widgets',
+              events: ['pull_request.opened'],
+              status: 'active',
+            },
+          ],
+        } as T;
       },
       { droneId: 'drone one', chatName: 'default', turn: 'all', tail: 50 },
     );
 
     expect(urls).toEqual([
-      '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail',
+      '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail&subscriptions=true',
     ]);
     expect(result.transcripts).toHaveLength(1);
     expect(result.pending).toHaveLength(1);
+    expect(result.chatId).toBe('chat-1');
+    expect(result.subscriptions).toHaveLength(1);
   });
 
   test('requests full transcript without pending prompts for explicit export', async () => {

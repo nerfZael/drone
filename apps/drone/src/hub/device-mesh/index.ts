@@ -15,11 +15,14 @@ import { DeviceMeshStore } from './device-mesh-store';
 import { DeviceRouteManager } from './device-route-manager';
 import { DesktopDroneControlHttp } from './desktop-drone-control-http';
 import { createDroneControlCapability } from './drone-control-capability';
+import type { CreatedDroneAutoRenameOperations } from './auto-rename-created-drone';
+import type { RenameDroneCommand } from '../drone-rename-command';
 import { CrossDeviceAssistantPolicyHttp } from './features/cross-device-assistant/policy-http';
 import { CrossDeviceAssistantPolicyStore } from './features/cross-device-assistant/policy-store';
 import { RemoteWorkspaceTarget } from './features/cross-device-assistant/remote-workspace-target';
 import { createWorkspaceCapability } from './features/cross-device-assistant/workspace-capability';
 import { createProviderCredentialsCapability } from './features/provider-credentials/provider-credentials-capability';
+import type { SidebarCommandService } from '../sidebar-command-service';
 import { ProviderCredentialsHttp } from './features/provider-credentials/provider-credentials-http';
 
 export async function createDeviceMeshService(options: {
@@ -27,6 +30,9 @@ export async function createDeviceMeshService(options: {
   apiToken: string;
   localHubBaseUrl(): string;
   ingressPort?: number;
+  createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
+  sidebarCommands?: SidebarCommandService;
+  renameDrone?: RenameDroneCommand;
 }) {
   const identity = await loadOrCreateDeviceIdentity(options.rootDir);
   const store = new DeviceMeshStore(path.join(options.rootDir, 'state.json'), identity);
@@ -48,6 +54,9 @@ export async function createDeviceMeshService(options: {
       { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
       chatAttachments,
       {
+        sidebarCommands: options.sidebarCommands,
+        createdDroneAutoRename: options.createdDroneAutoRename,
+        renameDrone: options.renameDrone,
         broadcastFileChange: (payload, targetDeviceIds) =>
           router.broadcastCapabilityEvent(
             'drone-control',

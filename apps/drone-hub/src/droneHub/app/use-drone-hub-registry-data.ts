@@ -1,4 +1,5 @@
 import React from 'react';
+import { dispatchUiPreferencesSnapshot } from './ui-preferences-sync-event';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, GroupSummary, RepoSummary } from '../types';
 import { isWorkflowChildDrone } from '../workflows/workflow-drone-visibility';
@@ -7,6 +8,8 @@ import { fetchJson, usePoll } from './hooks';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
+
+const EMPTY_GROUP_SUMMARIES: GroupSummary[] = [];
 
 type UseDroneHubRegistryDataArgs = {
   activeRepoPath: string;
@@ -49,7 +52,8 @@ function logRegistryBusyDebug(event: string, drones: DroneSummary[]): void {
     registryBusyDebugLastById.set(row.id, signature);
     rows.push(row);
   }
-  if (rows.length > 0) console.debug('[DroneHub][busy-debug] registry event', { event, drones: rows });
+  if (rows.length > 0)
+    console.debug('[DroneHub][busy-debug] registry event', { event, drones: rows });
 }
 
 function sameStringArray(leftRaw: unknown, rightRaw: unknown): boolean {
@@ -67,8 +71,14 @@ function sameOptionalText(left: unknown, right: unknown): boolean {
 }
 
 function sameBooleanMap(leftRaw: unknown, rightRaw: unknown): boolean {
-  const left = leftRaw && typeof leftRaw === 'object' && !Array.isArray(leftRaw) ? leftRaw as Record<string, unknown> : {};
-  const right = rightRaw && typeof rightRaw === 'object' && !Array.isArray(rightRaw) ? rightRaw as Record<string, unknown> : {};
+  const left =
+    leftRaw && typeof leftRaw === 'object' && !Array.isArray(leftRaw)
+      ? (leftRaw as Record<string, unknown>)
+      : {};
+  const right =
+    rightRaw && typeof rightRaw === 'object' && !Array.isArray(rightRaw)
+      ? (rightRaw as Record<string, unknown>)
+      : {};
   const keys = Array.from(new Set([...Object.keys(left), ...Object.keys(right)]));
   for (const key of keys) {
     const leftValue = left[key] === true;
@@ -180,7 +190,10 @@ function mergeDroneResponse(
   previous: { ok: true; drones: DroneSummary[] } | null,
   next: { ok: true; drones: DroneSummary[] },
 ): { ok: true; drones: DroneSummary[] } {
-  const drones = mergeDroneListByIdentity(previous?.drones, Array.isArray(next?.drones) ? next.drones : []);
+  const drones = mergeDroneListByIdentity(
+    previous?.drones,
+    Array.isArray(next?.drones) ? next.drones : [],
+  );
   return previous && drones === previous.drones ? previous : { ok: true, drones };
 }
 
@@ -189,7 +202,11 @@ function applyDroneDelta(
   delta: { upserts?: DroneSummary[]; removedIds?: string[]; order?: string[] },
 ): { ok: true; drones: DroneSummary[] } {
   const current = Array.isArray(previous?.drones) ? previous.drones : [];
-  const removedIds = new Set((Array.isArray(delta?.removedIds) ? delta.removedIds : []).map((id) => String(id ?? '').trim()).filter(Boolean));
+  const removedIds = new Set(
+    (Array.isArray(delta?.removedIds) ? delta.removedIds : [])
+      .map((id) => String(id ?? '').trim())
+      .filter(Boolean),
+  );
   const upserts = Array.isArray(delta?.upserts) ? delta.upserts : [];
   const upsertById = new Map(upserts.map((drone) => [drone.id, drone] as const));
   let changed = removedIds.size > 0 || upserts.length > 0;
@@ -207,7 +224,9 @@ function applyDroneDelta(
   }
 
   for (const incoming of upsertById.values()) next.push(incoming);
-  const order = Array.isArray(delta?.order) ? delta.order.map((id) => String(id ?? '').trim()).filter(Boolean) : [];
+  const order = Array.isArray(delta?.order)
+    ? delta.order.map((id) => String(id ?? '').trim()).filter(Boolean)
+    : [];
   if (order.length > 0) {
     const byId = new Map(next.map((drone) => [drone.id, drone] as const));
     const ordered: DroneSummary[] = [];
@@ -224,13 +243,32 @@ function applyDroneDelta(
   return { ok: true, drones: next };
 }
 
+function syncUiPreferencesFromRegistryPayload(data: any): void {
+  if (
+    !data?.uiPreferences ||
+    typeof data.uiPreferences !== 'object' ||
+    Array.isArray(data.uiPreferences)
+  ) {
+    return;
+  }
+  const version = Number(data.preferenceVersion);
+  dispatchUiPreferencesSnapshot({
+    uiPreferences: data.uiPreferences,
+    updatedAt:
+      typeof data.preferenceUpdatedAt === 'string' ? data.preferenceUpdatedAt.trim() || null : null,
+    version: Number.isSafeInteger(version) && version > 0 ? version : null,
+  });
+}
+
 export function useDroneRegistryEvents(enabled = true): {
   value: { ok: true; drones: DroneSummary[] } | null;
+  groups: GroupSummary[] | null;
   error: string | null;
   loading: boolean;
   connected: boolean;
 } {
   const [value, setValue] = React.useState<{ ok: true; drones: DroneSummary[] } | null>(null);
+  const [groups, setGroups] = React.useState<GroupSummary[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [connected, setConnected] = React.useState(false);
@@ -238,6 +276,7 @@ export function useDroneRegistryEvents(enabled = true): {
   React.useEffect(() => {
     if (!enabled) {
       setValue(null);
+      setGroups(null);
       setError(null);
       setLoading(false);
       setConnected(false);
@@ -261,9 +300,23 @@ export function useDroneRegistryEvents(enabled = true): {
     source.addEventListener('snapshot', (event) => {
       if (closed) return;
       try {
-        const data = JSON.parse((event as MessageEvent).data || '{}') as { ok?: boolean; drones?: DroneSummary[] };
-        if (data?.ok !== true || !Array.isArray(data.drones)) throw new Error('Invalid drone registry snapshot.');
+        const data = JSON.parse((event as MessageEvent).data || '{}') as {
+          ok?: boolean;
+          drones?: DroneSummary[];
+        };
+        if (data?.ok !== true || !Array.isArray(data.drones))
+          throw new Error('Invalid drone registry snapshot.');
         logRegistryBusyDebug('snapshot', data.drones ?? []);
+        syncUiPreferencesFromRegistryPayload(data);
+        if (Array.isArray((data as any).groups)) {
+          const nextGroups = (data as any).groups as GroupSummary[];
+          setGroups((current) =>
+            current &&
+            sameGroupsResponse({ ok: true, groups: current }, { ok: true, groups: nextGroups })
+              ? current
+              : nextGroups,
+          );
+        }
         setValue((prev) => mergeDroneResponse(prev, { ok: true, drones: data.drones ?? [] }));
         setConnected(true);
         setError(null);
@@ -276,8 +329,22 @@ export function useDroneRegistryEvents(enabled = true): {
     source.addEventListener('delta', (event) => {
       if (closed) return;
       try {
-        const data = JSON.parse((event as MessageEvent).data || '{}') as { upserts?: DroneSummary[]; removedIds?: string[]; order?: string[] };
+        const data = JSON.parse((event as MessageEvent).data || '{}') as {
+          upserts?: DroneSummary[];
+          removedIds?: string[];
+          order?: string[];
+        };
         logRegistryBusyDebug('delta', data.upserts ?? []);
+        syncUiPreferencesFromRegistryPayload(data);
+        if (Array.isArray((data as any).groups)) {
+          const nextGroups = (data as any).groups as GroupSummary[];
+          setGroups((current) =>
+            current &&
+            sameGroupsResponse({ ok: true, groups: current }, { ok: true, groups: nextGroups })
+              ? current
+              : nextGroups,
+          );
+        }
         setValue((prev) => applyDroneDelta(prev, data));
         setConnected(true);
         setError(null);
@@ -312,7 +379,7 @@ export function useDroneRegistryEvents(enabled = true): {
     };
   }, [enabled]);
 
-  return { value, error, loading, connected: connected && Boolean(value) };
+  return { value, groups, error, loading, connected: connected && Boolean(value) };
 }
 
 function sameRepoResponse(
@@ -345,9 +412,11 @@ function sameGroupsResponse(
   if (leftGroups.length !== rightGroups.length) return false;
   for (let i = 0; i < leftGroups.length; i++) {
     if (String(leftGroups[i]?.id ?? '') !== String(rightGroups[i]?.id ?? '')) return false;
-    if (String(leftGroups[i]?.repoPath ?? '') !== String(rightGroups[i]?.repoPath ?? '')) return false;
+    if (String(leftGroups[i]?.repoPath ?? '') !== String(rightGroups[i]?.repoPath ?? ''))
+      return false;
     if (String(leftGroups[i]?.name ?? '') !== String(rightGroups[i]?.name ?? '')) return false;
-    if (String(leftGroups[i]?.parentId ?? '') !== String(rightGroups[i]?.parentId ?? '')) return false;
+    if (String(leftGroups[i]?.parentId ?? '') !== String(rightGroups[i]?.parentId ?? ''))
+      return false;
     if (!sameOptionalText(leftGroups[i]?.createdAt, rightGroups[i]?.createdAt)) return false;
   }
   return true;
@@ -362,14 +431,20 @@ export function useDroneHubRegistryData({
 }: UseDroneHubRegistryDataArgs) {
   const droneEvents = useDroneRegistryEvents();
   const dronePollIntervalMs = droneEvents.connected ? 60_000 : 2_000;
-  const { value: polledDronesResp, error: dronesPollError, loading: dronesPollLoading } = usePoll<{ ok: true; drones: DroneSummary[] }>(
+  const {
+    value: polledDronesResp,
+    error: dronesPollError,
+    loading: dronesPollLoading,
+  } = usePoll<{ ok: true; drones: DroneSummary[] }>(
     () => fetchJson('/api/drones'),
     dronePollIntervalMs,
     [droneEvents.connected],
     { isEqual: sameDroneResponse },
   );
-  const dronesResp = droneEvents.connected ? droneEvents.value : polledDronesResp ?? droneEvents.value;
-  const dronesError = dronesResp ? null : dronesPollError ?? droneEvents.error;
+  const dronesResp = droneEvents.connected
+    ? droneEvents.value
+    : (polledDronesResp ?? droneEvents.value);
+  const dronesError = dronesResp ? null : (dronesPollError ?? droneEvents.error);
   const dronesLoading = !dronesResp && (droneEvents.loading || dronesPollLoading);
   const dronesErrorUi = dronesResp ? null : dronesError;
   const polledDrones = dronesResp?.drones ?? [];
@@ -410,12 +485,13 @@ export function useDroneHubRegistryData({
     });
   }, [optimisticallyDeletedDrones, polledDrones, setOptimisticallyDeletedDrones]);
 
-  const { value: reposResp, error: reposError, loading: reposLoading } = usePoll<{ ok: true; repos: RepoSummary[] }>(
-    () => fetchJson('/api/repos'),
-    5000,
-    [],
-    { isEqual: sameRepoResponse },
-  );
+  const {
+    value: reposResp,
+    error: reposError,
+    loading: reposLoading,
+  } = usePoll<{ ok: true; repos: RepoSummary[] }>(() => fetchJson('/api/repos'), 5000, [], {
+    isEqual: sameRepoResponse,
+  });
   const repos = reposResp?.repos ?? [];
   const registeredRepoPaths = React.useMemo(
     () =>
@@ -425,17 +501,24 @@ export function useDroneHubRegistryData({
         .sort((a, b) => a.localeCompare(b)),
     [repos],
   );
-  const registeredRepoPathSet = React.useMemo(() => new Set(registeredRepoPaths), [registeredRepoPaths]);
+  const registeredRepoPathSet = React.useMemo(
+    () => new Set(registeredRepoPaths),
+    [registeredRepoPaths],
+  );
 
-  const { value: groupsResp } = usePoll<{ ok: true; groups: GroupSummary[] }>(
+  const { value: polledGroupsResp } = usePoll<{ ok: true; groups: GroupSummary[] }>(
     () => fetchJson('/api/groups'),
     5000,
     [],
     { isEqual: sameGroupsResponse },
   );
+  const registryGroups =
+    droneEvents.connected && droneEvents.groups
+      ? droneEvents.groups
+      : (polledGroupsResp?.groups ?? EMPTY_GROUP_SUMMARIES);
   const registryGroupNames = React.useMemo(() => {
     const out = new Set<string>();
-    for (const g of groupsResp?.groups ?? []) {
+    for (const g of registryGroups) {
       if (String(g?.repoPath ?? '').trim() !== String(activeRepoPath ?? '').trim()) continue;
       const name = String((g as any)?.name ?? '').trim();
       if (!name) continue;
@@ -443,10 +526,10 @@ export function useDroneHubRegistryData({
       out.add(name);
     }
     return Array.from(out.values()).sort((a, b) => a.localeCompare(b));
-  }, [activeRepoPath, groupsResp]);
+  }, [activeRepoPath, registryGroups]);
   const registryGroupCreatedAtByName = React.useMemo(() => {
     const out: Record<string, string | null> = {};
-    for (const group of groupsResp?.groups ?? []) {
+    for (const group of registryGroups) {
       if (String(group?.repoPath ?? '').trim() !== String(activeRepoPath ?? '').trim()) continue;
       const name = String(group?.name ?? '').trim();
       if (!name || isUngroupedGroupName(name)) continue;
@@ -454,31 +537,33 @@ export function useDroneHubRegistryData({
       out[name] = createdAt || null;
     }
     return out;
-  }, [activeRepoPath, groupsResp]);
+  }, [activeRepoPath, registryGroups]);
   const registryGroupIdByName = React.useMemo(() => {
     const out: Record<string, string> = {};
-    for (const group of groupsResp?.groups ?? []) {
+    for (const group of registryGroups) {
       if (String(group?.repoPath ?? '').trim() !== String(activeRepoPath ?? '').trim()) continue;
       const id = String(group?.id ?? '').trim();
       const name = String(group?.name ?? '').trim();
       if (id && name && !isUngroupedGroupName(name)) out[name] = id;
     }
     return out;
-  }, [activeRepoPath, groupsResp]);
+  }, [activeRepoPath, registryGroups]);
 
   React.useEffect(() => {
+    if (reposLoading || reposError) return;
     if (!activeRepoPath) return;
     const exists = repos.some((r) => String(r?.path ?? '').trim() === activeRepoPath);
     if (!exists) setActiveRepoPath('');
-  }, [activeRepoPath, repos, setActiveRepoPath]);
+  }, [activeRepoPath, repos, reposError, reposLoading, setActiveRepoPath]);
 
   React.useEffect(() => {
+    if (reposLoading || reposError) return;
     setChatHeaderRepoPath((prev) => {
       const p = String(prev ?? '').trim();
       if (!p) return '';
       return registeredRepoPathSet.has(p) ? p : '';
     });
-  }, [registeredRepoPathSet, setChatHeaderRepoPath]);
+  }, [registeredRepoPathSet, reposError, reposLoading, setChatHeaderRepoPath]);
 
   const dronesFilteredByRepo = React.useMemo(() => {
     const targetRepo = String(activeRepoPath ?? '').trim();

@@ -6,6 +6,7 @@ export * from './agent-run-file-changes.js';
 export * from './chat-attachment-context.js';
 export * from './chat-attachment-policy.js';
 export * from './chat-queue-actions.js';
+export * from './event-notification.js';
 export * from './github-pull-request.js';
 export * from './merge-workspace-transfer-progress.js';
 export * from './model-catalog.js';

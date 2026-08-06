@@ -118,6 +118,7 @@ export type DronePortsPayload =
 export type DroneFsEntry = {
   name: string;
   path: string;
+  isGitIgnored?: boolean;
   kind: 'directory' | 'file' | 'other';
   size: number | null;
   mtimeMs: number | null;
@@ -258,6 +259,9 @@ export type RepoChangesPayload =
         unstaged: number;
         untracked: number;
         conflicted: number;
+        additions: number;
+        deletions: number;
+        modified: number;
       };
       entries: RepoChangeEntry[];
     }
@@ -318,6 +322,9 @@ export type RepoPullChangesPayload =
       branchContext: RepoPullBranchContext;
       counts: {
         changed: number;
+        additions: number;
+        deletions: number;
+        modified: number;
       };
       entries: RepoPullChangeEntry[];
       applyPreview?: {

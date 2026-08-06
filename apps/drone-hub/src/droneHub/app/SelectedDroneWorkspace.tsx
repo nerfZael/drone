@@ -25,10 +25,13 @@ import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { StatusBadge } from '../overview';
 import { TypingDots } from '../overview/icons';
 import { requestJson } from '../http';
-import type { AgentApprovalPolicy, AgentPermissionMode } from '../../domain';
+import type {
+  AgentApprovalPolicy,
+  AgentPermissionMode,
+  ChatResourceSubscriptionInfo,
+} from '../../domain';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../types';
 import {
-  IconBoard,
   IconChat,
   IconChevron,
   IconChevronLeft,
@@ -37,7 +40,6 @@ import {
   IconCursorApp,
   IconDownload,
   IconFileDiff,
-  IconFolder,
   IconGitCommitHorizontal,
   IconGitPullRequest,
   IconMonitor,
@@ -45,7 +47,6 @@ import {
   IconRefresh,
   IconSidebarExpand,
   IconTerminal,
-  IconTreeView,
   IconTune,
   IconVsCode,
 } from './icons';
@@ -71,7 +72,6 @@ import {
   isDroneStartingOrSeeding,
   resolveChatNameForDrone,
 } from './helpers';
-import { isDroneProvisioningPhase } from '../hub-phase';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
 import {
@@ -80,7 +80,7 @@ import {
   contextMenuSeparatorClass,
   useDropdownDismiss,
 } from '../../ui/dropdown';
-import type { UiMenuSelectEntry } from '../../ui/components';
+import { UiTooltip, type UiMenuSelectEntry } from '../../ui/components';
 import { fetchDroneChatTranscript } from './chat-api';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { CliPendingPromptStrip } from './CliPendingPromptStrip';
@@ -102,6 +102,8 @@ import { parseDroneHubDragData } from './drone-hub-dnd';
 import { assignedDroneIdsFromData } from './drone-hub-dnd-utils';
 import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 import type { LocalAutoUpdates, LocalCheckoutView } from './use-local-checkout';
+import { WorkspaceToolIcon } from './WorkspaceToolIcon';
+import { DroneChatComposerMetadata } from './ChatComposerMetadata';
 
 type LaunchHint = {
   context: 'terminal' | 'code' | 'cursor';
@@ -433,32 +435,6 @@ function HeaderMenuChoiceGroup<T extends string>({
   );
 }
 
-function WorkspaceToolIcon({ tab }: { tab: RightPanelTab }) {
-  const className = 'h-3.5 w-3.5';
-  switch (tab) {
-    case 'terminal':
-      return <IconTerminal className={className} />;
-    case 'env':
-      return <IconTune className={className} />;
-    case 'files':
-      return <IconFolder className={className} />;
-    case 'preview':
-      return <IconMonitor className={className} />;
-    case 'changes':
-      return <IconFileDiff className={className} />;
-    case 'prs':
-      return <IconGitPullRequest className={className} />;
-    case 'canvas':
-      return <IconNetwork className={className} />;
-    case 'whiteboard':
-      return <IconBoard className={className} />;
-    case 'workflows':
-      return <IconTreeView className={className} />;
-    default:
-      return null;
-  }
-}
-
 type SelectedDroneWorkspaceProps = {
   currentDrone: DroneSummary;
   deleteMode: DroneDeleteMode;
@@ -482,6 +458,8 @@ type SelectedDroneWorkspaceProps = {
   agentDisabled: boolean;
   agentLabel: string;
   chatRuntimeMetadataAvailable: boolean;
+  chatId: string | null;
+  chatSubscriptions: ChatResourceSubscriptionInfo[];
   modelControlEnabled: boolean;
   availableChatModels: ChatModelOption[];
   currentModel: string | null;
@@ -550,7 +528,6 @@ type SelectedDroneWorkspaceProps = {
   pinnedToBottom: boolean;
   selectedDroneIdentity: string;
   promptError: string | null;
-  sendingPrompt: boolean;
   sendPromptText: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onSendPromptInNewChat: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   publishSelectedDraft: () => Promise<boolean>;
@@ -570,8 +547,9 @@ type SelectedDroneWorkspaceProps = {
   openedEditorFileOpenFailureMessage: string | null;
   openedEditorFileOpenFailureAt: number | null;
   onOpenMarkdownFileReference: (ref: MarkdownFileReference) => void;
-  rightPanelBottomTab: RightPanelTab;
   rightPanelOpenRequestSeq: number;
+  visibleToolTabs: RightPanelTab[];
+  onVisibleToolTabsChange: (tabs: RightPanelTab[]) => void;
   renderRightPanelTabContent: (
     drone: DroneSummary,
     tab: RightPanelTab,
@@ -609,6 +587,8 @@ export function SelectedDroneWorkspace({
   currentAgentKey,
   agentLabel,
   chatRuntimeMetadataAvailable,
+  chatId,
+  chatSubscriptions,
   modelControlEnabled,
   availableChatModels,
   currentModel,
@@ -665,7 +645,6 @@ export function SelectedDroneWorkspace({
   pinnedToBottom,
   selectedDroneIdentity,
   promptError,
-  sendingPrompt,
   sendPromptText,
   onSendPromptInNewChat,
   publishSelectedDraft,
@@ -686,6 +665,8 @@ export function SelectedDroneWorkspace({
   openedEditorFileOpenFailureAt,
   onOpenMarkdownFileReference,
   rightPanelOpenRequestSeq,
+  visibleToolTabs,
+  onVisibleToolTabsChange,
   renderRightPanelTabContent,
   onPersistentPreviewHostChange,
 }: SelectedDroneWorkspaceProps) {
@@ -771,14 +752,10 @@ export function SelectedDroneWorkspace({
   );
   const syncMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [syncMenuOpen, setSyncMenuOpen] = React.useState(false);
-  const workspaceToolsMenuRef = React.useRef<HTMLDivElement | null>(null);
-  const [workspaceToolsMenuOpen, setWorkspaceToolsMenuOpen] = React.useState(false);
   useDropdownDismiss(syncMenuRef, syncMenuOpen, setSyncMenuOpen);
-  useDropdownDismiss(workspaceToolsMenuRef, workspaceToolsMenuOpen, setWorkspaceToolsMenuOpen);
   React.useEffect(() => {
     setSyncMenuOpen(false);
   }, [currentDrone.id, repoOp?.kind]);
-  React.useEffect(() => setWorkspaceToolsMenuOpen(false), [currentDrone.id]);
   const hostRuntime = isHostRuntimeDrone(currentDrone);
   const dockerSnapshotSupported = !hostRuntime && currentDrone.persistVolume === false;
   const readOnlySupported =
@@ -889,11 +866,7 @@ export function SelectedDroneWorkspace({
     void useRepoLocally(mode);
   };
   const {
-    fleetBadgeAssigning,
     fleetBadgeDropActive,
-    fleetBadgeError,
-    fleetBadgeSummaryText,
-    fleetBadgeTitle,
     fleetDropHintVisible,
     fleetDropHintText,
     onFleetDropDragLeave,
@@ -912,19 +885,16 @@ export function SelectedDroneWorkspace({
     hasChats,
     metadataAvailable: chatRuntimeMetadataAvailable,
     loading: loadingChatInfo,
+    startupFailed: currentDrone.hubPhase === 'error',
   });
   const chatConfigPending = chatConfigResolution === 'loading';
   const chatConfigFailed = chatConfigResolution === 'unavailable';
+  const droneStartupFailed = chatConfigResolution === 'drone-error';
+  const droneStartupError = String(currentDrone.hubMessage ?? currentDrone.statusError ?? '').trim();
   const genericChatActive =
     !nativeChatActive &&
     !chatConfigFailed &&
     (currentChatIsDraft || !hasChats || chatRuntimeMetadataAvailable);
-  const showFleetBadge =
-    !isDroneProvisioningPhase(currentDrone.hubPhase) &&
-    (fleetBadgeAssigning ||
-      fleetBadgeDropActive ||
-      (!currentDroneIsDraft &&
-        (Boolean(fleetBadgeError) || /\b[1-9]\d*\b/.test(fleetBadgeSummaryText))));
   const selectedChatDockerSnapshotBusy = React.useMemo(
     () =>
       (transcripts ?? []).some((item) => {
@@ -1246,7 +1216,10 @@ export function SelectedDroneWorkspace({
 
   const openWorkspacePane = React.useCallback(
     (tab: RightPanelTab) => {
-      setWorkspaceToolsMenuOpen(false);
+      setSyncMenuOpen(false);
+      setTerminalMenuOpen(false);
+      setDroneControlsMenuOpen(false);
+      setHeaderOverflowOpen(false);
       requestRightPanelTab(tab);
     },
     [requestRightPanelTab],
@@ -1397,32 +1370,6 @@ export function SelectedDroneWorkspace({
                       hubMessage={currentDrone.hubMessage}
                     />
                   )}
-                  {showFleetBadge ? (
-                    <div
-                      className={cn(
-                        'inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] transition-all',
-                        fleetBadgeDropActive
-                          ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--fg-secondary)] shadow-[var(--glow-accent)]'
-                          : fleetBadgeError
-                            ? 'border-[var(--red-border)] bg-[var(--danger-panel)] text-[var(--red)] hover:border-[var(--red-border)]'
-                            : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]',
-                      )}
-                      title={
-                        fleetBadgeError ? `${fleetBadgeTitle} ${fleetBadgeError}` : fleetBadgeTitle
-                      }
-                      aria-label={`${fleetBadgeSummaryText}. Drop drones here to assign them.`}
-                    >
-                      <span
-                        className="uppercase tracking-[0.12em]"
-                        style={{ fontFamily: 'var(--display)' }}
-                      >
-                        Relationships
-                      </span>
-                      <span className="font-mono text-[var(--text-10)] text-inherit">
-                        {fleetBadgeAssigning ? 'Assigning…' : fleetBadgeSummaryText}
-                      </span>
-                    </div>
-                  ) : null}
                 </div>
               </div>
             </div>
@@ -1706,7 +1653,6 @@ export function SelectedDroneWorkspace({
                 setSyncMenuOpen(false);
                 setTerminalMenuOpen(false);
                 setDroneControlsMenuOpen(false);
-                setWorkspaceToolsMenuOpen(false);
                 setHeaderOverflowOpen((v) => !v);
               }}
               title="More actions"
@@ -2130,78 +2076,55 @@ export function SelectedDroneWorkspace({
             )}
           </div>
           {/* Workspace pane controls */}
-          <div className="w-px h-4 bg-[var(--border-subtle)] ml-1" />
-          <div ref={workspaceToolsMenuRef} className="relative">
-            <HeaderActionButton
-              onClick={() => {
-                setSyncMenuOpen(false);
-                setTerminalMenuOpen(false);
-                setDroneControlsMenuOpen(false);
-                setHeaderOverflowOpen(false);
-                setWorkspaceToolsMenuOpen((open) => !open);
-              }}
-              title="Open a workspace tool"
-              aria-haspopup="menu"
-              aria-expanded={workspaceToolsMenuOpen}
-              className="dh-type-header-action--emphasis"
-            >
-              <span>Tools</span>
-              <IconChevron down={!workspaceToolsMenuOpen} className="opacity-75" />
-            </HeaderActionButton>
-            {workspaceToolsMenuOpen ? (
-              <HeaderDropdownPortal
-                open={workspaceToolsMenuOpen}
-                anchorRef={workspaceToolsMenuRef}
-                width={220}
-              >
-                <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto">
-                  {rightPanelHeaderTabs(rightPanelTabs).map((tab) => {
-                    const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
-                    const active = tab === rightPanelTab;
-                    return (
-                      <button
-                        key={tab}
-                        type="button"
-                        onClick={() => openWorkspacePane(tab)}
-                        data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
-                        className={cn(
-                          dropdownMenuItemBaseClass,
-                          'flex items-center justify-between gap-3 hover:bg-[var(--hover)]',
-                          active
-                            ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-                            : 'text-[var(--fg-secondary)]',
-                        )}
-                        role="menuitem"
-                        aria-current={active ? 'true' : undefined}
-                        title={
-                          tab === 'prs' && prCount > 0
-                            ? `Open ${rightPanelTabLabels[tab]} pane (${prCount} open)`
-                            : `Open ${rightPanelTabLabels[tab]} pane`
-                        }
+          <div className="ml-1 h-5 w-px bg-[var(--border-subtle)]" />
+          <div
+            className="flex min-w-0 items-center gap-px"
+            role="toolbar"
+            aria-label="Workspace tools"
+          >
+            {rightPanelHeaderTabs(rightPanelTabs).map((tab, index, tabs) => {
+              const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
+              const open = visibleToolTabs.includes(tab);
+              const label = rightPanelTabLabels[tab];
+              const tooltip =
+                tab === 'prs' && prCount > 0 ? `${label} (${prCount} open)` : label;
+              return (
+                <UiTooltip
+                  key={tab}
+                  content={tooltip}
+                  side="bottom"
+                  align={index === tabs.length - 1 ? 'end' : 'center'}
+                >
+                  <HeaderActionButton
+                    onClick={() => openWorkspacePane(tab)}
+                    data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
+                    className={cn(
+                      'relative !h-9 !w-9 !justify-center !rounded-[4px] !px-0',
+                      open
+                        ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] !text-[var(--fg)]'
+                        : '!text-[var(--chrome-muted)] hover:bg-[var(--hover)] hover:!text-[var(--fg-secondary)]',
+                    )}
+                    aria-label={tooltip}
+                    aria-pressed={open}
+                  >
+                    <span
+                      className="flex h-[22px] w-[22px] items-center justify-center"
+                      aria-hidden="true"
+                    >
+                      <WorkspaceToolIcon tab={tab} className="h-[22px] w-[22px]" />
+                    </span>
+                    {tab === 'prs' && prCount > 0 ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute right-px top-px flex h-3 min-w-3 items-center justify-center rounded-full border border-[var(--app-header-bg)] bg-[var(--accent)] px-[2px] font-mono text-[7px] font-[var(--weight-bold)] leading-none tabular-nums text-[var(--accent-contrast)]"
                       >
-                        <span className="flex min-w-0 flex-1 items-center gap-2">
-                          <span
-                            className={cn(
-                              'flex h-4 w-4 shrink-0 items-center justify-center',
-                              active ? 'text-[var(--accent)]' : 'text-[var(--muted-dim)]',
-                            )}
-                            aria-hidden="true"
-                          >
-                            <WorkspaceToolIcon tab={tab} />
-                          </span>
-                          <span className="truncate">{rightPanelTabLabels[tab]}</span>
-                        </span>
-                        {tab === 'prs' && prCount > 0 ? (
-                          <span className="font-mono text-[var(--text-9)] leading-none tabular-nums text-[var(--accent)]">
-                            {prCount > 99 ? '99+' : prCount}
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              </HeaderDropdownPortal>
-            ) : null}
+                        {prCount > 99 ? '99+' : prCount}
+                      </span>
+                    ) : null}
+                  </HeaderActionButton>
+                </UiTooltip>
+              );
+            })}
           </div>
         </div>
       </DroneWorkspaceHeaderFrame>
@@ -2210,12 +2133,12 @@ export function SelectedDroneWorkspace({
         key={currentDrone.id}
         currentDrone={currentDrone}
         paneHeaderMode={workspacePaneHeaderMode}
-        toolPaneOpen
         activeToolTab={rightPanelTab}
         openRequestNonce={rightPanelOpenRequestSeq}
         renderToolPane={(tab, paneKey) => renderRightPanelTabContent(currentDrone, tab, paneKey)}
         previewTab="preview"
         onActiveToolTabChange={setRightPanelTab}
+        onVisibleToolTabsChange={onVisibleToolTabsChange}
         onPreviewHostChange={onPersistentPreviewHostChange}
         onBeforeWorkspaceMouseDown={captureWorkspaceChatScroll}
         onAfterToolPanelRemove={restoreWorkspaceChatScroll}
@@ -2293,7 +2216,24 @@ export function SelectedDroneWorkspace({
                 </div>
               ) : null}
               <div className="relative flex min-h-0 flex-1 flex-col">
-                {chatConfigPending ? (
+                {droneStartupFailed ? (
+                  <EmptyState
+                    icon={<IconChat className="h-8 w-8 text-[var(--red)]" />}
+                    title="Drone failed to start"
+                    description="The runtime failed before this chat could be created."
+                    actions={
+                      droneStartupError ? (
+                        <button
+                          type="button"
+                          className="inline-flex h-9 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--surface-softest)] px-4 dh-type-control text-[var(--fg-secondary)] transition-colors hover:border-[var(--accent-border)] hover:bg-[var(--hover)] hover:text-[var(--fg)]"
+                          onClick={() => openDroneErrorModal(currentDrone, droneStartupError, null)}
+                        >
+                          View startup error
+                        </button>
+                      ) : null
+                    }
+                  />
+                ) : chatConfigPending ? (
                   <ChatSurfaceLoadingView
                     resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}:loading`}
                     droneName={currentDrone.name}
@@ -2329,6 +2269,14 @@ export function SelectedDroneWorkspace({
                     onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
                     promotingNewChatActionById={promotingNewChatActionById}
                     promoteNewChatActionErrorById={promoteNewChatActionErrorById}
+                    composerTopAction={
+                      <DroneChatComposerMetadata
+                        runtime={hostRuntime ? 'host' : 'container'}
+                        chatId={chatId}
+                        initialSubscriptions={chatSubscriptions}
+                        branch={currentDrone.repoBranch}
+                      />
+                    }
                     messageFeatures={{
                       onSpawnTask: spawnCurrentDroneHubTask,
                       linkedPullRequestContext,
@@ -2438,12 +2386,16 @@ export function SelectedDroneWorkspace({
                     setChatInputDraft(chatDraftKey, next);
                   }}
                   promptError={stopResponseError || promptError}
-                  // A prompt may remain active for a long time. Queue/ASAP follow-ups
-                  // must remain available while that response is running; `sendingPrompt`
-                  // is also used for the initial request-flight state.
-                  sending={sendingPrompt && !chatInputWaiting}
                   publishing={publishingDraft}
                   waiting={chatInputWaiting}
+                  composerTopAction={
+                    <DroneChatComposerMetadata
+                      runtime={hostRuntime ? 'host' : 'container'}
+                      chatId={chatId}
+                      initialSubscriptions={chatSubscriptions}
+                      branch={currentDrone.repoBranch}
+                    />
+                  }
                   composerControls={externalComposerControls}
                   autoFocus={shouldAutoFocusInput}
                   onStop={

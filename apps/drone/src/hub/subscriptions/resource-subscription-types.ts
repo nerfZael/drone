@@ -5,12 +5,37 @@ export const RESOURCE_SUBSCRIPTION_EVENTS = [
   'pull_request.comment.created',
   'pull_request.merged',
   'pull_request.closed',
+  'cron.triggered',
 ] as const;
 
 export type ResourceSubscriptionEventType = (typeof RESOURCE_SUBSCRIPTION_EVENTS)[number];
 export type ResourceSubscriptionProvider = 'drone-hub' | 'github';
-export type ResourceSubscriptionType = 'chat' | 'repository' | 'pull_request';
+export type ResourceSubscriptionType = 'chat' | 'repository' | 'pull_request' | 'cron';
 export type ResourceSubscriptionStatus = 'active' | 'completed' | 'cancelled' | 'paused';
+export const RESOURCE_SUBSCRIPTION_PAUSE_REASONS = [
+  'subscriber_chat_archived',
+  'resource_chat_archived',
+  'subscriber_drone_archived',
+  'resource_drone_archived',
+] as const;
+export type ResourceSubscriptionPauseReason = (typeof RESOURCE_SUBSCRIPTION_PAUSE_REASONS)[number];
+
+export function parseResourceSubscriptionPauseReasons(
+  raw: unknown,
+): ResourceSubscriptionPauseReason[] {
+  try {
+    const value = JSON.parse(String(raw ?? ''));
+    if (!Array.isArray(value)) return [];
+    const supported = new Set<string>(RESOURCE_SUBSCRIPTION_PAUSE_REASONS);
+    return [
+      ...new Set(
+        value.map((item) => String(item ?? '').trim()).filter((item) => supported.has(item)),
+      ),
+    ] as ResourceSubscriptionPauseReason[];
+  } catch {
+    return [];
+  }
+}
 
 export type ResourceSubscriptionSubscriber = {
   chatId: string;
@@ -24,11 +49,19 @@ export type ResourceSubscription = {
   provider: ResourceSubscriptionProvider;
   resourceType: ResourceSubscriptionType;
   resourceId: string;
+  /** Human-readable, request-time label. It is never used as the durable resource identity. */
+  resourceLabel?: string;
+  /** Request-time target metadata used to present legacy generated intent without internal IDs. */
+  resourceDroneId?: string;
+  resourceChatName?: string;
   resourceRef: string;
+  resourceConfig: Record<string, unknown>;
   events: ResourceSubscriptionEventType[];
   intent: string;
   status: ResourceSubscriptionStatus;
+  pauseReasons: ResourceSubscriptionPauseReason[];
   cursor: Record<string, unknown>;
+  nextEventAt: string | null;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;

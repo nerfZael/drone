@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import type http from 'node:http';
 import path from 'node:path';
@@ -17,6 +18,8 @@ const WORKSPACE_GIT_HASH_CACHE_MAX_ENTRIES = 20_000;
 type WorkspaceGitHashCacheEntry = {
   fingerprint: string;
   hash: string;
+  lineCount: number;
+  binary: boolean;
 };
 
 const workspaceGitHashCache = new Map<string, WorkspaceGitHashCacheEntry>();
@@ -382,7 +385,7 @@ function gitHashPathChunks(repoRoot: string, relativePaths: string[]): string[][
 }
 
 async function hashWorkspaceGitFiles(body: any): Promise<{
-  hashes: Array<{ path: string; hash: string }>;
+  hashes: Array<{ path: string; hash: string; lineCount: number; binary: boolean }>;
   cacheHits: number;
   hashed: number;
   durationMs: number;
@@ -400,19 +403,20 @@ async function hashWorkspaceGitFiles(body: any): Promise<{
   const relativePaths: string[] = Array.from(
     new Set(stringPaths.map((value) => value.trim())),
   );
-  const states = new Map<string, { absolutePath: string; fingerprint: string }>();
+  const states = new Map<string, { absolutePath: string; fingerprint: string; symbolicLink: boolean }>();
   for (let offset = 0; offset < relativePaths.length; offset += 200) {
     const chunk = relativePaths.slice(offset, offset + 200);
     const chunkStates = await Promise.all(
       chunk.map(async (relativePath) => {
         const absolutePath = pathInsideRoot(repoRoot, relativePath);
         try {
-          const stat = await fs.stat(absolutePath, { bigint: true });
-          if (!stat.isFile()) return null;
+          const stat = await fs.lstat(absolutePath, { bigint: true });
+          if (!stat.isFile() && !stat.isSymbolicLink()) return null;
           return {
             relativePath,
             absolutePath,
             fingerprint: `${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}:${stat.ino}`,
+            symbolicLink: stat.isSymbolicLink(),
           };
         } catch (error: any) {
           const code = String(error?.code ?? '');
@@ -426,7 +430,7 @@ async function hashWorkspaceGitFiles(body: any): Promise<{
     }
   }
 
-  const hashes = new Map<string, string>();
+  const hashes = new Map<string, WorkspaceGitHashCacheEntry>();
   const misses: string[] = [];
   let cacheHits = 0;
   for (const relativePath of relativePaths) {
@@ -434,7 +438,7 @@ async function hashWorkspaceGitFiles(body: any): Promise<{
     if (!state) continue;
     const cached = workspaceGitHashCache.get(state.absolutePath);
     if (cached?.fingerprint === state.fingerprint) {
-      hashes.set(relativePath, cached.hash);
+      hashes.set(relativePath, cached);
       rememberWorkspaceGitHash(state.absolutePath, cached);
       cacheHits += 1;
     } else {
@@ -442,7 +446,8 @@ async function hashWorkspaceGitFiles(body: any): Promise<{
     }
   }
 
-  for (const chunk of gitHashPathChunks(repoRoot, misses)) {
+  const regularMisses = misses.filter((relativePath) => !states.get(relativePath)?.symbolicLink);
+  for (const chunk of gitHashPathChunks(repoRoot, regularMisses)) {
     const result = await runWorkspaceCommand({
       cmd: 'git',
       args: ['-C', repoRoot, 'hash-object', '--no-filters', '--', ...chunk],
@@ -458,21 +463,54 @@ async function hashWorkspaceGitFiles(body: any): Promise<{
     const outputHashes = String(result.stdout ?? '')
       .trim()
       .split(/\r?\n/);
-    chunk.forEach((relativePath, index) => {
+    for (let index = 0; index < chunk.length; index += 1) {
+      const relativePath = chunk[index];
       const hash = String(outputHashes[index] ?? '')
         .trim()
         .toLowerCase();
       const state = states.get(relativePath);
-      if (!state || !/^[0-9a-f]{40}$/.test(hash)) return;
-      hashes.set(relativePath, hash);
-      rememberWorkspaceGitHash(state.absolutePath, { fingerprint: state.fingerprint, hash });
-    });
+      if (!state || !/^[0-9a-f]{40}$/.test(hash)) continue;
+      const content = await fs.readFile(state.absolutePath);
+      const binary = content.includes(0);
+      let lineCount = 0;
+      if (!binary && content.length > 0) {
+        for (const byte of content) {
+          if (byte === 10) lineCount += 1;
+        }
+        if (content[content.length - 1] !== 10) lineCount += 1;
+      }
+      const entry = { fingerprint: state.fingerprint, hash, lineCount, binary };
+      hashes.set(relativePath, entry);
+      rememberWorkspaceGitHash(state.absolutePath, entry);
+    }
+  }
+
+  for (const relativePath of misses) {
+    const state = states.get(relativePath);
+    if (!state?.symbolicLink) continue;
+    const content = await fs.readlink(state.absolutePath, { encoding: 'buffer' });
+    const header = Buffer.from(`blob ${content.length}\0`, 'utf8');
+    let lineCount = 0;
+    for (const byte of content) {
+      if (byte === 10) lineCount += 1;
+    }
+    if (content.length > 0 && content[content.length - 1] !== 10) lineCount += 1;
+    const entry = {
+      fingerprint: state.fingerprint,
+      hash: crypto.createHash('sha1').update(header).update(content).digest('hex'),
+      lineCount,
+      binary: false,
+    };
+    hashes.set(relativePath, entry);
+    rememberWorkspaceGitHash(state.absolutePath, entry);
   }
 
   return {
     hashes: relativePaths.flatMap((relativePath) => {
-      const hash = hashes.get(relativePath);
-      return hash ? [{ path: relativePath, hash }] : [];
+      const entry = hashes.get(relativePath);
+      return entry
+        ? [{ path: relativePath, hash: entry.hash, lineCount: entry.lineCount, binary: entry.binary }]
+        : [];
     }),
     cacheHits,
     hashed: misses.length,

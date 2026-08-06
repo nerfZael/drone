@@ -41,6 +41,14 @@ import {
   type MobileDroneCreateDefaults,
   type MobileDroneCreatePayload,
 } from '../drones/NewDroneScreen';
+import { DroneRuntimeIndicator } from '../drones/NewDroneRuntimePicker';
+import { DroneBranchIndicator } from '../drones/DroneBranchIndicator';
+import { ChatSubscriptionIndicator } from '../drones/ChatSubscriptionIndicator';
+import { clientTimeZone } from '../drones/client-time-zone';
+import {
+  normalizeMobileChatSubscriptions,
+  type MobileChatSubscription,
+} from '../drones/chat-subscriptions';
 import {
   mobileDroneCreatePreferencesFromPayload,
   resolveMobileDroneCreateDefaults,
@@ -70,6 +78,13 @@ import {
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
 import {
+  applyMobileSidebarMoveIntoFolder,
+  applyMobileSidebarReorder,
+  applyOptimisticMobileSidebarMove,
+  mobileSidebarMoveDestination,
+  type MobileSidebarMutationRequest,
+} from '../drones/mobile-sidebar-reorder';
+import {
   withMobileApprovalRequired,
   withOptimisticMobileBusyChat,
 } from '../drones/drone-state-summary';
@@ -83,9 +98,10 @@ import {
   mobileDronePendingPrompts,
   optimisticMobilePendingPrompt,
 } from '../drones/mobile-pending-prompts';
+import { MobileChatReadCoordinator } from '../drones/mobile-chat-read-coordinator';
 import { useDroneLinkedPullRequests } from '../drones/use-drone-linked-pull-requests';
 import { useLocalDroneControl } from '../drones/local-drone-control';
-import { mobileDeviceReachable } from '../drones/mobile-device-reachability';
+import { mobileDeviceConnectionState } from '../drones/mobile-device-reachability';
 import { ChatAttachmentStrip } from '../drones/ChatAttachmentStrip';
 import { FilePreviewModal } from '../drones/FilePreviewModal';
 import { useFilePreview } from '../drones/use-file-preview';
@@ -99,7 +115,7 @@ import {
   mobileDroneRenameErrorMessage,
   validateMobileDroneRename,
 } from '../drones/mobile-drone-rename';
-import type { DroneControlOperation } from '@drone/device-protocol';
+import { isGranted, type DroneControlOperation } from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { LocalWorkspaceEditor } from '../local-assistant/LocalWorkspaceEditor';
 import {
@@ -143,8 +159,9 @@ function applyChatMutationToDrone(
   const projectName = (chatName: string) =>
     rename && chatName === rename.from ? rename.to : chatName;
   const allowed = new Set(nextChats);
-  const projectList = (chatNames: readonly string[] | undefined) =>
-    [...new Set((chatNames ?? []).map(projectName).filter((chatName) => allowed.has(chatName)))];
+  const projectList = (chatNames: readonly string[] | undefined) => [
+    ...new Set((chatNames ?? []).map(projectName).filter((chatName) => allowed.has(chatName))),
+  ];
   const projectMap = <T,>(source: Record<string, T> | undefined): Record<string, T> | undefined => {
     if (!source) return undefined;
     return Object.fromEntries(
@@ -212,6 +229,7 @@ export type DronesAppHeaderState = {
   onToggleDraft?(): void;
   onNewDrone?(): void;
   onNewChat?(): void;
+  onOpenFiles?(): void;
   onRename?(): void;
   pinned?: boolean;
   pinDisabled?: boolean;
@@ -273,11 +291,22 @@ export function DronesScreen({
   const targetId = selectedDeviceId;
   const phoneTarget = Boolean(targetId && targetId === mesh.identity?.id);
   const targetSupportsDrones = phoneTarget || targets.some((target) => target.id === targetId);
-  const targetReachable = mobileDeviceReachable({
+  const targetDroneControlCapability = mesh.profile?.capabilitiesByDevice[targetId]?.find(
+    (capability) => capability.id === 'drone-control' && capability.version === 1,
+  );
+  const selfDevice = mesh.devices.find((device) => device.id === mesh.identity?.id);
+  const targetCanReorderSidebar =
+    phoneTarget ||
+    (Boolean(targetDroneControlCapability?.operations.includes('sidebar.move')) &&
+      Boolean(selfDevice && isGranted(selfDevice.grants, 'drone-control', 1, 'sidebar.move')));
+  const targetConnectionState = mobileDeviceConnectionState({
     targetDeviceId: targetId,
     selfDeviceId: mesh.identity?.id,
-    connectedDeviceIds: mesh.connectedDeviceIds,
+    connectionStatesByDevice: mesh.connectionStatesByDevice,
   });
+  const targetReachable = targetConnectionState === 'connected';
+  const targetReconnecting =
+    targetConnectionState === 'reconnecting' || targetConnectionState === 'suspended';
   const requestDroneControl = React.useCallback(
     (destinationId: string, operation: DroneControlOperation, payload?: any) =>
       destinationId === mesh.identity?.id
@@ -303,9 +332,11 @@ export function DronesScreen({
   const droneSidebarOrderRef = React.useRef<MobileDroneSidebarOrder>(
     EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   );
+  const sidebarPreferenceVersionRef = React.useRef<number | null>(null);
   const commitDroneListSnapshot = React.useCallback((next: MobileDroneListSnapshot) => {
     droneListSnapshotRef.current = next;
     droneSidebarOrderRef.current = next.sidebar;
+    sidebarPreferenceVersionRef.current = next.sidebarPreferenceVersion;
     setDroneListSnapshot(next);
   }, []);
   const setDrones = React.useCallback(
@@ -332,8 +363,13 @@ export function DronesScreen({
     },
     [commitDroneListSnapshot, targetId],
   );
-  const pinWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const pendingPinWriteCountRef = React.useRef(0);
+  const sidebarWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const pendingSidebarWriteCountRef = React.useRef(0);
+  const pendingSidebarGroupOverridesRef = React.useRef(
+    new Map<string, { generation: number; group: string | null }>(),
+  );
+  const sidebarWriteGenerationRef = React.useRef(0);
   const [selected, setSelected] = React.useState<MobileDroneSummary | null>(null);
   const [chats, setChats] = React.useState<string[]>([]);
   const [chatName, setChatName] = React.useState('default');
@@ -353,8 +389,10 @@ export function DronesScreen({
   const [chatHistoryPage, setChatHistoryPage] =
     React.useState<MobileChatHistoryPage>(EMPTY_CHAT_HISTORY_PAGE);
   const [olderHistoryBusy, setOlderHistoryBusy] = React.useState(false);
+  const [, setChatReadRevision] = React.useState(0);
   const [fullMessageBusyId, setFullMessageBusyId] = React.useState('');
   const [nativeChatId, setNativeChatId] = React.useState('');
+  const [chatSubscriptions, setChatSubscriptions] = React.useState<MobileChatSubscription[]>([]);
   const [nativeThread, setNativeThread] = React.useState<any | null>(null);
   const [accessOpen, setAccessOpen] = React.useState(false);
   const [accessDirty, setAccessDirty] = React.useState(false);
@@ -376,6 +414,7 @@ export function DronesScreen({
   const [dronesLoaded, setDronesLoaded] = React.useState(false);
   const [droneListError, setDroneListError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const chatReadErrorRef = React.useRef<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = React.useState<MobileDroneSummary | null>(null);
   const [deleting, setDeleting] = React.useState(false);
   const [renameCandidate, setRenameCandidate] = React.useState<MobileDroneSummary | null>(null);
@@ -415,6 +454,12 @@ export function DronesScreen({
   const readChatRef = React.useRef<(droneId: string, chatName: string) => Promise<void>>(
     async () => {},
   );
+  const chatReadCoordinatorRef = React.useRef<MobileChatReadCoordinator | null>(null);
+  if (!chatReadCoordinatorRef.current) {
+    chatReadCoordinatorRef.current = new MobileChatReadCoordinator(() =>
+      setChatReadRevision((value) => value + 1),
+    );
+  }
   targetIdRef.current = targetId;
   droneSidebarOrderRef.current = droneSidebarOrder;
   selectedRef.current = selected;
@@ -424,6 +469,7 @@ export function DronesScreen({
     setChatHistoryPage(EMPTY_CHAT_HISTORY_PAGE);
     setOlderHistoryBusy(false);
     setPromptAttachments([]);
+    setChatSubscriptions([]);
   }, [chatName, selected?.id, targetId]);
 
   const run = async (key: string, task: () => Promise<void>) => {
@@ -447,7 +493,7 @@ export function DronesScreen({
       const busyRequestVersion = quiet ? 0 : ++busyVersion.current;
       if (!quiet) setBusy('drones');
       if (!quiet) setDroneListError(null);
-      setError(null);
+      if (!quiet) setError(null);
       try {
         const result = await requestDroneControl(targetId, 'drones.list', {
           includeCreateOptions: false,
@@ -457,7 +503,15 @@ export function DronesScreen({
           throw new Error('The selected Drone Hub returned an invalid drone list');
         }
         const normalized = normalizeMobileDroneListPayload(result);
-        const nextDrones = normalized.drones;
+        const optimisticGroups = pendingSidebarGroupOverridesRef.current;
+        const nextDrones =
+          optimisticGroups.size > 0
+            ? normalized.drones.map((drone) =>
+                optimisticGroups.has(drone.id)
+                  ? { ...drone, group: optimisticGroups.get(drone.id)!.group }
+                  : drone,
+              )
+            : normalized.drones;
         setDeleteMode(normalized.deleteMode);
         if (normalized.createRepos.length > 0) {
           setCreateRepos((current) => {
@@ -475,8 +529,9 @@ export function DronesScreen({
           resolveMobileDroneListSnapshot({
             current: droneListSnapshotRef.current,
             targetId,
-            payload: normalized,
-            keepCurrentSidebar: pendingPinWriteCountRef.current > 0,
+            payload: { ...normalized, drones: nextDrones },
+            keepCurrentSidebar:
+              pendingPinWriteCountRef.current > 0 || pendingSidebarWriteCountRef.current > 0,
           }),
         );
         const currentSelected = selectedRef.current;
@@ -510,10 +565,7 @@ export function DronesScreen({
               setChatReasoning('');
               setChatModels([]);
               setTurns([]);
-              void readChatRef.current(nextSelected.id, fallbackChat).catch((nextError: any) => {
-                if (targetIdRef.current === targetId)
-                  setError(nextError?.message ?? String(nextError));
-              });
+              void readChatRef.current(nextSelected.id, fallbackChat).catch(() => undefined);
             }
           }
         }
@@ -567,8 +619,10 @@ export function DronesScreen({
       } catch (nextError: any) {
         if (targetIdRef.current === targetId && droneListVersion.current === requestVersion) {
           const message = nextError?.message ?? String(nextError);
-          if (!quiet) setDroneListError(message);
-          setError(message);
+          if (!quiet) {
+            setDroneListError(message);
+            setError(message);
+          }
         }
       } finally {
         if (targetIdRef.current === targetId && droneListVersion.current === requestVersion)
@@ -585,8 +639,160 @@ export function DronesScreen({
   );
   loadDronesRef.current = loadDrones;
 
+  const reorderSidebar = React.useCallback(
+    (request: MobileSidebarMutationRequest) => {
+      const destinationId = targetId;
+      if (request.kind === 'move-into-folder') {
+        const destination = mobileSidebarMoveDestination(request);
+        const current = droneListSnapshotRef.current;
+        if (!destination || current.targetId !== destinationId) return;
+        const nextOrder = applyMobileSidebarMoveIntoFolder(current.sidebar, request);
+        const nextDrones = applyOptimisticMobileSidebarMove(current.drones, request);
+        const generation = sidebarWriteGenerationRef.current + 1;
+        sidebarWriteGenerationRef.current = generation;
+        const currentGroupByDroneId = new Map(
+          current.drones.map((drone) => [drone.id, drone.group] as const),
+        );
+        for (const nextDrone of nextDrones) {
+          if (currentGroupByDroneId.get(nextDrone.id) === nextDrone.group) continue;
+          pendingSidebarGroupOverridesRef.current.set(nextDrone.id, {
+            generation,
+            group: nextDrone.group,
+          });
+        }
+        droneSidebarOrderRef.current = nextOrder;
+        commitDroneListSnapshot({ ...current, drones: nextDrones, sidebar: nextOrder });
+        pendingSidebarWriteCountRef.current += 1;
+
+        const writeMove = async () => {
+          try {
+            if (targetIdRef.current !== destinationId) return;
+            const mutationId = `sidebar:${destinationId}:${Date.now()}:${generation}`;
+            const result = await requestDroneControl(destinationId, 'sidebar.move', {
+              mutationId,
+              intent: request,
+            });
+            if (targetIdRef.current !== destinationId) return;
+            const savedVersion =
+              Number.isSafeInteger(result?.version) && Number(result.version) >= 0
+                ? Number(result.version)
+                : sidebarPreferenceVersionRef.current;
+            sidebarPreferenceVersionRef.current = savedVersion;
+            if (
+              targetIdRef.current === destinationId &&
+              sidebarWriteGenerationRef.current === generation
+            ) {
+              const savedPayload = normalizeMobileDroneListPayload({
+                drones: [],
+                sidebar: result?.uiPreferences ?? {},
+              });
+              const savedOrder: MobileDroneSidebarOrder = {
+                ...nextOrder,
+                sidebarNodeOrderByParent: savedPayload.sidebar.sidebarNodeOrderByParent,
+                sidebarChatOrderByDrone: savedPayload.sidebar.sidebarChatOrderByDrone,
+                pinnedDroneIds: savedPayload.sidebar.pinnedDroneIds,
+              };
+              droneSidebarOrderRef.current = savedOrder;
+              setDroneSidebarOrder(savedOrder, savedVersion);
+            }
+          } catch (nextError: any) {
+            if (
+              targetIdRef.current === destinationId &&
+              sidebarWriteGenerationRef.current === generation
+            ) {
+              setError(nextError?.message ?? String(nextError));
+            }
+          } finally {
+            pendingSidebarWriteCountRef.current = Math.max(
+              0,
+              pendingSidebarWriteCountRef.current - 1,
+            );
+            for (const [droneId, override] of pendingSidebarGroupOverridesRef.current) {
+              if (override.generation === generation) {
+                pendingSidebarGroupOverridesRef.current.delete(droneId);
+              }
+            }
+          }
+          if (targetIdRef.current === destinationId) await loadDronesRef.current(true);
+        };
+        const queuedMove = sidebarWriteQueueRef.current.then(writeMove, writeMove);
+        sidebarWriteQueueRef.current = queuedMove.then(
+          () => undefined,
+          () => undefined,
+        );
+        return;
+      }
+      const previousOrder = droneSidebarOrderRef.current;
+      const nextOrder = applyMobileSidebarReorder(previousOrder, request);
+      const generation = sidebarWriteGenerationRef.current + 1;
+      sidebarWriteGenerationRef.current = generation;
+      droneSidebarOrderRef.current = nextOrder;
+      setDroneSidebarOrder(nextOrder);
+      pendingSidebarWriteCountRef.current += 1;
+
+      const write = async () => {
+        let reloadSidebar = false;
+        try {
+          if (targetIdRef.current !== destinationId) return;
+          const result = await requestDroneControl(destinationId, 'sidebar.move', {
+            mutationId: `sidebar:${destinationId}:${Date.now()}:${generation}`,
+            intent: request,
+          });
+          if (targetIdRef.current !== destinationId) return;
+          const savedVersion =
+            Number.isSafeInteger(result?.version) && Number(result.version) >= 0
+              ? Number(result.version)
+              : sidebarPreferenceVersionRef.current;
+          sidebarPreferenceVersionRef.current = savedVersion;
+          if (sidebarWriteGenerationRef.current !== generation) {
+            setDroneSidebarOrder(droneSidebarOrderRef.current, savedVersion);
+            return;
+          }
+          const savedPayload = normalizeMobileDroneListPayload({
+            drones: [],
+            sidebar: result?.uiPreferences ?? {},
+          });
+          const savedOrder: MobileDroneSidebarOrder = {
+            ...nextOrder,
+            sidebarNodeOrderByParent: savedPayload.sidebar.sidebarNodeOrderByParent,
+            sidebarChatOrderByDrone: savedPayload.sidebar.sidebarChatOrderByDrone,
+            pinnedDroneIds: savedPayload.sidebar.pinnedDroneIds,
+          };
+          droneSidebarOrderRef.current = savedOrder;
+          setDroneSidebarOrder(savedOrder, savedVersion);
+        } catch (nextError: any) {
+          if (
+            targetIdRef.current === destinationId &&
+            sidebarWriteGenerationRef.current === generation
+          ) {
+            setError(nextError?.message ?? String(nextError));
+            reloadSidebar = true;
+          }
+        } finally {
+          pendingSidebarWriteCountRef.current = Math.max(
+            0,
+            pendingSidebarWriteCountRef.current - 1,
+          );
+        }
+        if (reloadSidebar) await loadDronesRef.current(true);
+      };
+      const queued = sidebarWriteQueueRef.current.then(write, write);
+      sidebarWriteQueueRef.current = queued.then(
+        () => undefined,
+        () => undefined,
+      );
+    },
+    [
+      commitDroneListSnapshot,
+      requestDroneControl,
+      setDroneSidebarOrder,
+      targetId,
+    ],
+  );
+
   React.useEffect(() => {
     const createDefaultsVersion = ++createDefaultsRequestVersion.current;
+    pendingSidebarGroupOverridesRef.current.clear();
     selectedRef.current = null;
     chatNameRef.current = 'default';
     commitDroneListSnapshot({
@@ -640,6 +846,8 @@ export function DronesScreen({
     setComposerFocusKey('');
     droneListVersion.current += 1;
     chatReadVersion.current += 1;
+    chatReadErrorRef.current = null;
+    chatReadCoordinatorRef.current?.reset();
     openDroneVersion.current += 1;
     runVersion.current += 1;
     busyVersion.current += 1;
@@ -717,20 +925,53 @@ export function DronesScreen({
       if (nextChat) await readChat(drone.id, nextChat);
     });
 
-  const readChat = async (droneId: string, nextChat: string) => {
+  const readChat = (droneId: string, nextChat: string): Promise<void> => {
     const destinationId = targetId;
-    const requestVersion = ++chatReadVersion.current;
-    const result = await requestDroneControl(destinationId, 'chat.read', {
-      droneId,
-      chatName: nextChat,
+    const key = `${destinationId}\u0000${droneId}\u0000${nextChat}`;
+    return chatReadCoordinatorRef.current!.request(key, async () => {
+      if (
+        targetIdRef.current !== destinationId ||
+        selectedRef.current?.id !== droneId ||
+        chatNameRef.current !== nextChat
+      ) {
+        return;
+      }
+      const requestVersion = ++chatReadVersion.current;
+      try {
+        const result = await requestDroneControl(destinationId, 'chat.read', {
+          droneId,
+          chatName: nextChat,
+        });
+        if (
+          targetIdRef.current !== destinationId ||
+          selectedRef.current?.id !== droneId ||
+          chatNameRef.current !== nextChat ||
+          chatReadVersion.current !== requestVersion
+        )
+          return;
+        applyChatReadResult(result, droneId, nextChat);
+        const previousChatReadError = chatReadErrorRef.current;
+        chatReadErrorRef.current = null;
+        if (previousChatReadError) {
+          setError((current) => (current === previousChatReadError ? null : current));
+        }
+      } catch (nextError: any) {
+        if (
+          targetIdRef.current === destinationId &&
+          selectedRef.current?.id === droneId &&
+          chatNameRef.current === nextChat &&
+          chatReadVersion.current === requestVersion
+        ) {
+          const message = nextError?.message ?? String(nextError);
+          chatReadErrorRef.current = message;
+          setError(message);
+        }
+        throw nextError;
+      }
     });
-    if (
-      targetIdRef.current !== destinationId ||
-      selectedRef.current?.id !== droneId ||
-      chatNameRef.current !== nextChat ||
-      chatReadVersion.current !== requestVersion
-    )
-      return;
+  };
+
+  const applyChatReadResult = (result: any, droneId: string, nextChat: string) => {
     setChatModel(String(result?.model ?? '').trim());
     setChatReasoning(String(result?.reasoning ?? '').trim());
     setChatAgentId(
@@ -772,6 +1013,9 @@ export function DronesScreen({
         : null;
     setNativeMessages(richMessages);
     setNativeChatId(String(result?.nativeChatId ?? '').trim());
+    if (Array.isArray(result?.subscriptions)) {
+      setChatSubscriptions(normalizeMobileChatSubscriptions(result.subscriptions));
+    }
     setNativeThread(result?.thread ?? null);
     setPendingApprovals(Array.isArray(result?.pendingApprovals) ? result.pendingApprovals : []);
     const nextTurns = Array.isArray(result?.turns) ? result.turns : [];
@@ -892,6 +1136,9 @@ export function DronesScreen({
     const messageId = message.id;
     const native = nativeMessages !== null;
     const turnId = native ? '' : messageId.replace(/:(?:user|assistant)$/, '');
+    const turnNumber = native
+      ? null
+      : Number(turns.find((turn) => String(turn?.id ?? turn?.turn ?? '') === turnId)?.turn);
     setFullMessageBusyId(messageId);
     setError(null);
     try {
@@ -899,7 +1146,14 @@ export function DronesScreen({
         const result = await requestDroneControl(destinationId, 'chat.read', {
           droneId,
           chatName: activeChat,
-          ...(native ? { messageId } : { turnId }),
+          ...(native
+            ? { messageId }
+            : {
+                turnId,
+                ...(Number.isSafeInteger(turnNumber) && Number(turnNumber) > 0
+                  ? { turnNumber }
+                  : {}),
+              }),
           contentOffset,
         });
         return result?.contentChunk ?? {};
@@ -939,11 +1193,7 @@ export function DronesScreen({
 
   React.useEffect(() => {
     if (!phoneTarget || !selectedRef.current) return;
-    void readChatRef
-      .current(selectedRef.current.id, chatNameRef.current)
-      .catch((nextError: any) => {
-        setError(nextError?.message ?? String(nextError));
-      });
+    void readChatRef.current(selectedRef.current.id, chatNameRef.current).catch(() => undefined);
   }, [localDroneControl.revision, phoneTarget]);
 
   React.useEffect(() => {
@@ -957,9 +1207,7 @@ export function DronesScreen({
         const activeDrone = selectedRef.current;
         const activeChat = chatNameRef.current;
         if (activeDrone)
-          void readChatRef.current(activeDrone.id, activeChat).catch((nextError: any) => {
-            if (targetIdRef.current === targetId) setError(nextError?.message ?? String(nextError));
-          });
+          void readChatRef.current(activeDrone.id, activeChat).catch(() => undefined);
       }
       dronesChanged = false;
       chatChanged = false;
@@ -1055,11 +1303,13 @@ export function DronesScreen({
     prompt: string;
     attachments: readonly MobileChatAttachment[];
   }) => {
+    const userTimeZone = clientTimeZone();
     if (input.destinationId === mesh.identity?.id) {
       return await requestDroneControl(input.destinationId, 'chat.prompt', {
         droneId: input.droneId,
         chatName: input.chatName,
         prompt: input.prompt,
+        ...(userTimeZone ? { userTimeZone } : {}),
         ...(input.attachments.length > 0
           ? { attachments: inlinePromptAttachments(input.attachments) }
           : {}),
@@ -1083,6 +1333,7 @@ export function DronesScreen({
         droneId: input.droneId,
         chatName: input.chatName,
         prompt: input.prompt,
+        ...(userTimeZone ? { userTimeZone } : {}),
         ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
       });
     } catch (error) {
@@ -1249,7 +1500,7 @@ export function DronesScreen({
       let optimisticPromptId = '';
       if (targetIdRef.current === destinationId && createdDroneId && startsWithChat) {
         const optimisticDrone = normalizeMobileDrone(
-          result?.drone ?? {
+          {
             id: createdDroneId,
             name: result?.name ?? payload.name ?? createdDroneId,
             runtime: payload.runtime,
@@ -1259,6 +1510,13 @@ export function DronesScreen({
             repoPath: payload.repoPath,
             chats: ['default'],
             busyChats: ['default'],
+            ...(result?.drone && typeof result.drone === 'object' ? result.drone : {}),
+            groupId: result?.drone?.groupId ?? result?.groupId,
+            createdAt:
+              result?.drone?.createdAt ??
+              result?.createdAt ??
+              payload.seedSubmittedAt ??
+              new Date().toISOString(),
           },
         );
         if (optimisticDrone) {
@@ -1656,9 +1914,7 @@ export function DronesScreen({
   ) => {
     setDrones((current) =>
       current.map((drone) =>
-        drone.id === droneId
-          ? applyChatMutationToDrone(drone, nextChats, rename)
-          : drone,
+        drone.id === droneId ? applyChatMutationToDrone(drone, nextChats, rename) : drone,
       ),
     );
     const currentSelected = selectedRef.current;
@@ -1669,11 +1925,7 @@ export function DronesScreen({
     setChats([...nextChats]);
   };
 
-  const createDrawerChat = async (
-    droneId: string,
-    nextChatName: string,
-    copyFrom: string,
-  ) => {
+  const createDrawerChat = async (droneId: string, nextChatName: string, copyFrom: string) => {
     const destinationId = targetId;
     const result = await requestDroneControl(destinationId, 'chat.create', {
       droneId,
@@ -1685,19 +1937,12 @@ export function DronesScreen({
     const fallbackChats = currentDrone
       ? [...new Set([...currentDrone.chats, nextChatName])]
       : [nextChatName];
-    commitDrawerChatMutation(
-      droneId,
-      normalizedChatMutationList(result?.chats, fallbackChats),
-    );
+    commitDrawerChatMutation(droneId, normalizedChatMutationList(result?.chats, fallbackChats));
     await loadDrones(true);
     return targetIdRef.current === destinationId;
   };
 
-  const renameDrawerChat = async (
-    droneId: string,
-    currentChatName: string,
-    newName: string,
-  ) => {
+  const renameDrawerChat = async (droneId: string, currentChatName: string, newName: string) => {
     const destinationId = targetId;
     const result = await requestDroneControl(destinationId, 'chat.rename', {
       droneId,
@@ -1713,11 +1958,10 @@ export function DronesScreen({
     const fallbackChats = (currentDrone?.chats ?? []).map((chatName) =>
       chatName === currentChatName ? newName : chatName,
     );
-    commitDrawerChatMutation(
-      droneId,
-      normalizedChatMutationList(result?.chats, fallbackChats),
-      { from: currentChatName, to: newName },
-    );
+    commitDrawerChatMutation(droneId, normalizedChatMutationList(result?.chats, fallbackChats), {
+      from: currentChatName,
+      to: newName,
+    });
     await loadDrones(true);
     return targetIdRef.current === destinationId;
   };
@@ -1876,7 +2120,14 @@ export function DronesScreen({
     },
     [chatName, phoneTarget, requestDroneControl, selected, targetId],
   );
-  const chatLoading = busy === 'chats' || busy === 'chat' || busy === 'create-chat';
+  const activeChatReadKey = selected ? `${targetId}\u0000${selected.id}\u0000${chatName}` : '';
+  const chatLoading =
+    busy === 'chats' ||
+    busy === 'chat' ||
+    busy === 'create-chat' ||
+    (chatReadCoordinatorRef.current!.isActive(activeChatReadKey) &&
+      nativeMessages === null &&
+      turns.length === 0);
   const latestMessageScroll = useLatestMessageScroll(
     selected ? `${selected.id}:${chatName}` : '',
     chatLoading,
@@ -1960,9 +2211,9 @@ export function DronesScreen({
         setPinningDroneIds((current) => new Set(current).add(droneId));
         setDroneSidebarOrder(optimisticOrder);
         try {
-          const result = await requestDroneControl(destinationId, 'drone.pin.update', {
-            droneId,
-            pinned,
+          const result = await requestDroneControl(destinationId, 'sidebar.move', {
+            mutationId: `sidebar-pin:${destinationId}:${Date.now()}:${droneId}`,
+            intent: { kind: 'set-pinned', droneIds: [droneId], pinned },
           });
           const savedIds: string[] = Array.isArray(result?.uiPreferences?.pinnedDroneIds)
             ? [
@@ -1980,6 +2231,9 @@ export function DronesScreen({
               Number.isSafeInteger(result?.version) && Number(result.version) >= 0
                 ? Number(result.version)
                 : undefined;
+            if (savedPreferenceVersion !== undefined) {
+              sidebarPreferenceVersionRef.current = savedPreferenceVersion;
+            }
             setDroneSidebarOrder(savedOrder, savedPreferenceVersion);
           }
         } catch (nextError: any) {
@@ -2001,8 +2255,8 @@ export function DronesScreen({
           });
         }
       };
-      const queued = pinWriteQueueRef.current.then(write, write);
-      pinWriteQueueRef.current = queued.then(
+      const queued = sidebarWriteQueueRef.current.then(write, write);
+      sidebarWriteQueueRef.current = queued.then(
         () => undefined,
         () => undefined,
       );
@@ -2038,6 +2292,7 @@ export function DronesScreen({
             backNavigation: true,
             onNewDrone: openNewDroneFromCurrent,
             onNewChat: () => void createNewChat(),
+            onOpenFiles: filePreview.openExplorer,
             onRename: () => openDroneRename(selected),
             pinned: droneSidebarOrder.pinnedDroneIds.includes(selected.id),
             pinDisabled: pinningDroneIds.has(selected.id),
@@ -2174,6 +2429,7 @@ export function DronesScreen({
     phoneTarget,
     requestDroneControl,
     running,
+    filePreview.openExplorer,
   ]);
   React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
@@ -2368,7 +2624,9 @@ export function DronesScreen({
               }
             : undefined
         }
-        onRetryDrones={() => void (targetReachable ? loadDrones() : mesh.refreshDevices())}
+        onRetryDrones={() =>
+          void (targetReachable ? loadDrones() : mesh.retryDeviceConnection(targetId))
+        }
         onSelectDevice={(deviceId) => {
           selectedRef.current = null;
           chatReadVersion.current += 1;
@@ -2392,6 +2650,7 @@ export function DronesScreen({
         onCreateDroneChat={createDrawerChat}
         onRenameDroneChat={renameDrawerChat}
         onDeleteDroneChat={deleteDrawerChat}
+        onReorderSidebar={targetReachable && targetCanReorderSidebar ? reorderSidebar : undefined}
       />
       <KeyboardAvoidingView
         style={styles.content}
@@ -2401,23 +2660,37 @@ export function DronesScreen({
         {!targetReachable && targetSupportsDrones && !selected ? (
           <View style={styles.deviceOffline}>
             <View style={styles.deviceOfflineIcon}>
-              <WifiOff color={colors.warning} size={28} strokeWidth={1.7} />
+              {targetReconnecting ? (
+                <ActivityIndicator color={colors.warning} size="small" />
+              ) : (
+                <WifiOff color={colors.warning} size={28} strokeWidth={1.7} />
+              )}
               <View style={styles.deviceOfflineIndicator} />
             </View>
             <Text style={styles.deviceOfflineTitle}>
-              {activeTarget?.name ?? 'This device'} is offline
+              {targetConnectionState === 'reconnecting'
+                ? `Reconnecting to ${activeTarget?.name ?? 'this device'}`
+                : targetConnectionState === 'suspended'
+                  ? `${activeTarget?.name ?? 'This device'} connection paused`
+                  : `${activeTarget?.name ?? 'This device'} is offline`}
             </Text>
             <Text style={styles.deviceOfflineBody}>
-              Drone Hub can’t reach this device. Make sure the app is running there and that both
-              devices are connected to the internet or the same local network.
+              {targetReconnecting
+                ? 'Drone Hub is restoring the secure connection. This normally takes a moment.'
+                : 'Drone Hub can’t reach this device. Make sure the app is running there and that both devices are connected to the internet or the same local network.'}
             </Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => void mesh.refreshDevices()}
-              style={({ pressed }) => [styles.deviceOfflineRetry, pressed && styles.chatTabPressed]}
-            >
-              <Text style={styles.deviceOfflineRetryText}>Retry connection</Text>
-            </Pressable>
+            {!targetReconnecting ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void mesh.retryDeviceConnection(targetId)}
+                style={({ pressed }) => [
+                  styles.deviceOfflineRetry,
+                  pressed && styles.chatTabPressed,
+                ]}
+              >
+                <Text style={styles.deviceOfflineRetryText}>Retry connection</Text>
+              </Pressable>
+            ) : null}
             <View style={styles.deviceOfflineAutomatic}>
               <View style={styles.deviceOfflinePulse} />
               <Text style={styles.deviceOfflineAutomaticText}>Checking automatically</Text>
@@ -2431,9 +2704,17 @@ export function DronesScreen({
               <View style={styles.offlineChatNotice}>
                 <View style={styles.deviceOfflineIndicator} />
                 <View style={styles.offlineChatNoticeCopy}>
-                  <Text style={styles.offlineChatNoticeTitle}>Device offline</Text>
+                  <Text style={styles.offlineChatNoticeTitle}>
+                    {targetConnectionState === 'reconnecting'
+                      ? 'Reconnecting to device'
+                      : targetConnectionState === 'suspended'
+                        ? 'Connection paused'
+                        : 'Device offline'}
+                  </Text>
                   <Text style={styles.offlineChatNoticeBody}>
-                    This chat is readable. Sending will resume when it reconnects.
+                    {targetReconnecting
+                      ? 'This chat is readable. Sending will resume as soon as the secure connection is restored.'
+                      : 'This chat is readable. Sending will resume when it reconnects.'}
                   </Text>
                 </View>
               </View>
@@ -2628,6 +2909,15 @@ export function DronesScreen({
                         />
                       ))}
                     </ScrollView>
+                    <View style={styles.composerMetadataRow}>
+                      <View style={styles.composerMetadataLeading}>
+                        <DroneRuntimeIndicator
+                          runtime={selected.runtime === 'host' ? 'host' : 'container'}
+                        />
+                        <ChatSubscriptionIndicator subscriptions={chatSubscriptions} />
+                      </View>
+                      <DroneBranchIndicator branch={selected.repoBranch} />
+                    </View>
                     <AssistantComposer
                       focusKey={composerFocusKey}
                       voiceResetKey={`${targetId}:${selected.id}:${chatName}`}
@@ -2642,7 +2932,13 @@ export function DronesScreen({
                       running={running}
                       editable={targetReachable}
                       queueWhileRunning={targetReachable}
-                      placeholder={targetReachable ? 'Ask the agent' : 'Device offline'}
+                      placeholder={
+                        targetReachable
+                          ? 'Ask the agent'
+                          : targetReconnecting
+                            ? 'Reconnecting…'
+                            : 'Device offline'
+                      }
                       hasAttachments={promptAttachments.length > 0}
                       onAddAttachment={addPromptAttachment}
                       attachmentActionsDisabled={!targetReachable || (phoneTarget && running)}
@@ -2716,6 +3012,16 @@ export function DronesScreen({
         line={filePreview.line}
         loading={filePreview.loading}
         error={filePreview.error}
+        saving={filePreview.saving}
+        saveError={filePreview.saveError}
+        targetId={targetId}
+        droneId={selected?.id ?? ''}
+        chatName={chatName}
+        rootPath={filePreview.rootPath}
+        selectedPath={filePreview.selectedPath}
+        requestDroneControl={requestDroneControl}
+        onOpenPath={(path) => filePreview.open({ raw: path, path, line: null, column: null })}
+        onSave={filePreview.save}
         onClose={filePreview.close}
         onRetry={filePreview.retry}
       />
@@ -2963,5 +3269,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 10,
+  },
+  composerMetadataRow: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    alignSelf: 'stretch',
+    gap: 8,
+    paddingHorizontal: 17,
+  },
+  composerMetadataLeading: {
+    minWidth: 0,
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
 });

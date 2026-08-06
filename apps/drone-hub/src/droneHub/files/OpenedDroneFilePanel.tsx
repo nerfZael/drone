@@ -1,4 +1,5 @@
 import React from 'react';
+import { UiCenteredLoadingState } from '../../ui/components';
 import {
   defaultTextFileViewModeForFile,
   editorLanguageForPath,
@@ -31,6 +32,7 @@ import {
   type MarkdownOutlineExpansionCommand,
 } from './MarkdownOutlinePreview';
 import { IsolatedHtmlPreview } from './IsolatedHtmlPreview';
+import { configureMonacoTypeScriptDiagnostics } from './editor-monaco-configuration';
 
 type MonacoEditorComponent = (typeof import('@monaco-editor/react'))['default'];
 type MonacoEditorProps = React.ComponentProps<MonacoEditorComponent>;
@@ -370,6 +372,26 @@ export function OpenedDroneFilePanel({
     openedFileShowsMarkdownPreview || openedFileShowsHtmlPreview;
   const openedFileEditorVisible =
     openedEditorIsText && Boolean(activeFilePath) && !openedFileShowsPreview;
+  const monacoOptions = React.useMemo<MonacoEditorProps['options']>(
+    () => ({
+      readOnly: Boolean(fileSaving) || readOnly,
+      fontSize: 12,
+      minimap: { enabled: false },
+      wordWrap: 'on',
+      scrollBeyondLastLine: false,
+      automaticLayout: true,
+      padding: { top: 12, bottom: 12 },
+      'semanticHighlighting.enabled': true,
+      bracketPairColorization: { enabled: true },
+      guides: {
+        indentation: true,
+        highlightActiveIndentation: true,
+        bracketPairs: false,
+        bracketPairsHorizontal: false,
+      },
+    }),
+    [fileSaving, readOnly],
+  );
   const openedFileMediaSrc = React.useMemo(() => {
     if (!activeFilePath) return '';
     if (fileKind !== 'image' && fileKind !== 'video') return '';
@@ -398,6 +420,35 @@ export function OpenedDroneFilePanel({
     editor.revealPositionInCenter?.({ lineNumber: line, column });
     editor.focus?.();
   }, [activeFilePath, fileTargetColumn, fileTargetLine, openedFileEditorVisible]);
+  const handleEditorChange = React.useCallback<NonNullable<MonacoEditorProps['onChange']>>(
+    (next) => onFileContentChange?.(next ?? ''),
+    [onFileContentChange],
+  );
+  const handleEditorBeforeMount = React.useCallback<
+    NonNullable<MonacoEditorProps['beforeMount']>
+  >((monaco) => {
+    for (const theme of DESKTOP_THEMES) {
+      const editorTheme = desktopMonacoTheme(theme.id);
+      monaco.editor.defineTheme(editorTheme.id, editorTheme.definition);
+    }
+    configureMonacoTypeScriptDiagnostics(monaco.languages.typescript);
+  }, []);
+  const handleEditorMount = React.useCallback<MonacoEditorMountHandler>(
+    (editor, monaco) => {
+      editorRef.current = editor;
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+        void onSaveFile?.(editor.getValue());
+      });
+      editor.addCommand(monaco.KeyCode.F12, () => {
+        languageActionsRef.current?.goToDefinition();
+      });
+      editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F12, () => {
+        languageActionsRef.current?.findReferences();
+      });
+      applyEditorCursorTarget();
+    },
+    [applyEditorCursorTarget, onSaveFile],
+  );
 
   React.useEffect(() => {
     if (!openedFileEditorVisible) editorRef.current = null;
@@ -548,11 +599,11 @@ export function OpenedDroneFilePanel({
   }, [findReferences, goToDefinition]);
 
   const modeButtonClassName = (disabled: boolean) =>
-    `h-7 rounded-[var(--radius-medium)] bg-transparent px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
+    `h-6 rounded-[var(--radius-small)] bg-transparent px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
       disabled ? 'cursor-not-allowed opacity-50' : ''
     }`;
   const headingActionClassName = (disabled: boolean) =>
-    `flex h-7 w-7 items-center justify-center rounded-[var(--radius-medium)] bg-transparent text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
+    `flex h-5 w-5 items-center justify-center rounded-[var(--radius-small)] bg-transparent text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
       disabled ? 'cursor-not-allowed opacity-50' : ''
     }`;
   return (
@@ -569,7 +620,7 @@ export function OpenedDroneFilePanel({
               <div className="flex items-center gap-1.5">
                 {openedFileShowsMarkdownPreview ? (
                   <div
-                    className="flex items-center gap-0.5 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] p-0.5"
+                    className="flex h-6 items-center gap-0.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] p-0.5"
                     role="group"
                     aria-label="Heading expansion"
                   >
@@ -665,8 +716,8 @@ export function OpenedDroneFilePanel({
         <div className="flex-1 min-h-[360px] flex flex-col">
           <div className="flex-1 min-h-0">
             {fileLoading ? (
-              <div className="h-full w-full flex items-center justify-center text-[var(--text-12)] text-[var(--muted)]">
-                Loading file...
+              <div className="h-full w-full">
+                <UiCenteredLoadingState message="Loading file…" />
               </div>
             ) : fileKind === 'image' && openedFileMediaSrc ? (
               <div
@@ -784,39 +835,11 @@ export function OpenedDroneFilePanel({
                     path={activeFilePath || undefined}
                     language={editorLanguageForPath(activeFilePath)}
                     value={fileContent ?? ''}
-                    onChange={(next) => onFileContentChange?.(next ?? '')}
-                    beforeMount={(monaco) => {
-                      for (const theme of DESKTOP_THEMES) {
-                        const editorTheme = desktopMonacoTheme(theme.id);
-                        monaco.editor.defineTheme(editorTheme.id, editorTheme.definition);
-                      }
-                    }}
-                    onMount={(editor, monaco) => {
-                      editorRef.current = editor;
-                      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-                        void onSaveFile?.(editor.getValue());
-                      });
-                      editor.addCommand(monaco.KeyCode.F12, () => {
-                        languageActionsRef.current?.goToDefinition();
-                      });
-                      editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.F12, () => {
-                        languageActionsRef.current?.findReferences();
-                      });
-                      applyEditorCursorTarget();
-                    }}
+                    onChange={handleEditorChange}
+                    beforeMount={handleEditorBeforeMount}
+                    onMount={handleEditorMount}
                     theme={monacoTheme.id}
-                    options={{
-                      readOnly: Boolean(fileSaving) || readOnly,
-                      fontSize: 12,
-                      minimap: { enabled: false },
-                      wordWrap: 'on',
-                      scrollBeyondLastLine: false,
-                      automaticLayout: true,
-                      padding: { top: 12, bottom: 12 },
-                      'semanticHighlighting.enabled': true,
-                      bracketPairColorization: { enabled: true },
-                      guides: { bracketPairs: true },
-                    }}
+                    options={monacoOptions}
                   />
                 </React.Suspense>
               </MonacoEditorErrorBoundary>

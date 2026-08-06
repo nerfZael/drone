@@ -14,6 +14,7 @@ import Check from 'lucide-react-native/icons/check';
 import Menu from 'lucide-react-native/icons/menu';
 import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
+import FolderTree from 'lucide-react-native/icons/folder-tree';
 import Pin from 'lucide-react-native/icons/pin';
 import Plus from 'lucide-react-native/icons/plus';
 import Pencil from 'lucide-react-native/icons/pencil';
@@ -93,8 +94,7 @@ function HeaderOverflowMenu({
             const Icon =
               action.icon ??
               (action.selected ? Check : action.destructive ? Trash2 : SlidersHorizontal);
-            const showSection =
-              action.section && action.section !== actions[index - 1]?.section;
+            const showSection = action.section && action.section !== actions[index - 1]?.section;
             return (
               <React.Fragment key={action.id}>
                 {showSection ? (
@@ -173,6 +173,7 @@ function Shell() {
               id: currentId,
               name: current?.name ?? mesh.identity?.name ?? 'This device',
               connected: true,
+              connectionState: 'connected' as const,
               detail: 'This device',
               platform: current?.platform ?? 'android',
             },
@@ -181,11 +182,12 @@ function Shell() {
       ...others.map((device) => ({
         id: device.id,
         name: device.name,
-        connected: mesh.connectedDeviceIds.includes(device.id),
+        connected: mesh.connectionStatesByDevice[device.id] === 'connected',
+        connectionState: mesh.connectionStatesByDevice[device.id] ?? 'offline',
         platform: device.platform,
       })),
     ];
-  }, [mesh.connectedDeviceIds, mesh.devices, mesh.identity?.id, mesh.identity?.name]);
+  }, [mesh.connectionStatesByDevice, mesh.devices, mesh.identity?.id, mesh.identity?.name]);
   const activeDeviceId = deviceSelectionLoaded
     ? resolveAvailableDeviceSelection(devicePickerItems, selectedDeviceId)
     : '';
@@ -286,6 +288,16 @@ function Shell() {
                   label: 'New chat',
                   icon: MessageCircle,
                   onPress: dronesHeader.onNewChat,
+                },
+              ]
+            : []),
+          ...(dronesHeader.onOpenFiles
+            ? [
+                {
+                  id: 'files',
+                  label: 'Files',
+                  icon: FolderTree,
+                  onPress: dronesHeader.onOpenFiles,
                 },
               ]
             : []),

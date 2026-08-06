@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import {
   formatMobileVoiceDuration,
+  isUnexpectedMobileVoiceRecordingCompletion,
   mergeMobileDraftWithVoiceTranscript,
   mobileVoiceRecordActionDisabled,
   mobileVoiceStatusLabel,
   resolveMobileVoiceRecorderEvent,
   resolveMobileVoiceTranscriptDraft,
   resolveMobileGroqTranscriptionResponse,
-  shouldDiscardMobileVoiceWhenInactive,
+  shouldCancelMobileVoiceWhenInactive,
 } from '../src/local-assistant/mobile-voice-transcription-model';
 
 describe('mobile voice transcription', () => {
@@ -125,14 +126,50 @@ describe('mobile voice transcription', () => {
     expect(mobileVoiceStatusLabel('starting')).toBe('Starting…');
     expect(mobileVoiceStatusLabel('recording')).toBe('Recording');
     expect(mobileVoiceStatusLabel('paused')).toBe('Paused');
+    expect(mobileVoiceStatusLabel('stopped')).toBe('Recording stopped');
     expect(mobileVoiceStatusLabel('transcribing')).toBe('Transcribing…');
   });
 
-  test('does not discard startup while Android is showing microphone permission UI', () => {
-    expect(shouldDiscardMobileVoiceWhenInactive('starting')).toBe(false);
-    expect(shouldDiscardMobileVoiceWhenInactive('recording')).toBe(true);
-    expect(shouldDiscardMobileVoiceWhenInactive('paused')).toBe(true);
-    expect(shouldDiscardMobileVoiceWhenInactive('transcribing')).toBe(true);
+  test('preserves a recording stopped from the Android foreground notification', () => {
+    expect(
+      isUnexpectedMobileVoiceRecordingCompletion({
+        status: 'recording',
+        activeUri: 'file:///recording.m4a',
+        eventUri: 'file:///recording.m4a',
+        finished: true,
+        failed: false,
+        stopPending: false,
+      }),
+    ).toBe(true);
+    expect(
+      isUnexpectedMobileVoiceRecordingCompletion({
+        status: 'recording',
+        activeUri: 'file:///recording.m4a',
+        eventUri: 'file:///recording.m4a',
+        finished: true,
+        failed: false,
+        stopPending: true,
+      }),
+    ).toBe(false);
+    expect(
+      isUnexpectedMobileVoiceRecordingCompletion({
+        status: 'recording',
+        activeUri: 'file:///recording.m4a',
+        eventUri: 'file:///previous.m4a',
+        finished: true,
+        failed: false,
+        stopPending: false,
+      }),
+    ).toBe(false);
+  });
+
+  test('keeps recordings through screen lock but cancels foreground transcription', () => {
+    expect(shouldCancelMobileVoiceWhenInactive('idle')).toBe(false);
+    expect(shouldCancelMobileVoiceWhenInactive('starting')).toBe(false);
+    expect(shouldCancelMobileVoiceWhenInactive('recording')).toBe(false);
+    expect(shouldCancelMobileVoiceWhenInactive('paused')).toBe(false);
+    expect(shouldCancelMobileVoiceWhenInactive('stopped')).toBe(false);
+    expect(shouldCancelMobileVoiceWhenInactive('transcribing')).toBe(true);
   });
 
   test('extracts a successful GROQ transcript', () => {

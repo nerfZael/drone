@@ -23,7 +23,11 @@ import { normalizeSidebarRepoScopedGroupMap } from './sidebar-repo-scoped-groups
 import { normalizeSidebarGroupOrder } from './sidebar-group-order';
 import { mergeSeenModelIds, normalizeSeenModelIds } from './spawn-model-history';
 import { profileStorageKey } from '../../profile-storage';
-import { DEFAULT_DESKTOP_THEME_ID, normalizeDesktopThemeId, type DesktopThemeId } from '../../theme';
+import {
+  DEFAULT_DESKTOP_THEME_ID,
+  normalizeDesktopThemeId,
+  type DesktopThemeId,
+} from '../../theme';
 
 type Updater<T> = T | ((prev: T) => T);
 
@@ -45,7 +49,10 @@ type SpawnContextPreferences = {
   spawnReasoning: string;
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
-  pullHostBranchBeforeCreate: boolean;
+};
+export type RepoChatSelection = {
+  droneId: string;
+  chatName: string;
 };
 const CHAT_INPUT_DRAFT_MAX_CHARS = 300_000;
 const CHAT_INPUT_DRAFT_MAX_KEYS = 80;
@@ -58,7 +65,6 @@ const DEFAULT_SPAWN_CONTEXT_PREFERENCES: SpawnContextPreferences = {
   spawnReasoning: '',
   repoBranchSource: 'host',
   repoCreateRemoteBranch: '',
-  pullHostBranchBeforeCreate: true,
 };
 
 type DroneHubUiState = {
@@ -73,6 +79,7 @@ type DroneHubUiState = {
   sidebarDensityMode: SidebarDensityMode;
   sidebarDockSide: SidebarDockSide;
   pinnedSidebarPlacement: PinnedSidebarPlacement;
+  pinnedSidebarCollapsed: boolean;
   appView: AppView;
   collapsedGroups: Record<string, boolean>;
   sidebarGroupOrder: string[];
@@ -94,6 +101,7 @@ type DroneHubUiState = {
   groupMultiChatColumnWidth: number;
   groupMultiChatStatusSort: boolean;
   selectedChat: string;
+  lastChatSelectionByRepoPath: Record<string, RepoChatSelection>;
   chatInputDrafts: Record<string, string>;
   draftChat: DraftChatState | null;
   sidebarCollapsed: boolean;
@@ -112,7 +120,6 @@ type DroneHubUiState = {
   seenModelIds: string[];
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
-  pullHostBranchBeforeCreate: boolean;
   customAgents: CustomAgentProfile[];
   customAgentModalOpen: boolean;
   newCustomAgentLabel: string;
@@ -133,6 +140,7 @@ type DroneHubUiState = {
   setSidebarDensityMode: (next: Updater<SidebarDensityMode>) => void;
   setSidebarDockSide: (next: Updater<SidebarDockSide>) => void;
   setPinnedSidebarPlacement: (next: Updater<PinnedSidebarPlacement>) => void;
+  setPinnedSidebarCollapsed: (next: Updater<boolean>) => void;
   setAppView: (next: Updater<AppView>) => void;
   setCollapsedGroups: (next: Updater<Record<string, boolean>>) => void;
   setSidebarGroupOrder: (next: Updater<string[]>) => void;
@@ -154,6 +162,7 @@ type DroneHubUiState = {
   setGroupMultiChatColumnWidth: (next: Updater<number>) => void;
   setGroupMultiChatStatusSort: (next: Updater<boolean>) => void;
   setSelectedChat: (next: Updater<string>) => void;
+  rememberRepoChatSelection: (repoPath: string, droneId: string, chatName: string) => void;
   setChatInputDraft: (draftKey: string, next: string) => void;
   setDraftChat: (next: Updater<DraftChatState | null>) => void;
   setSidebarCollapsed: (next: Updater<boolean>) => void;
@@ -172,7 +181,6 @@ type DroneHubUiState = {
   rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
   setRepoBranchSource: (next: Updater<RepoBranchSourceMode>) => void;
   setRepoCreateRemoteBranch: (next: Updater<string>) => void;
-  setPullHostBranchBeforeCreate: (next: Updater<boolean>) => void;
   setCustomAgents: (next: Updater<CustomAgentProfile[]>) => void;
   setCustomAgentModalOpen: (next: Updater<boolean>) => void;
   setNewCustomAgentLabel: (next: Updater<string>) => void;
@@ -199,10 +207,6 @@ function normalizeRepoBranchSourceMode(value: unknown): RepoBranchSourceMode {
   return value === 'remote' ? 'remote' : 'host';
 }
 
-function normalizePullHostBranchBeforeCreate(value: unknown): boolean {
-  return typeof value === 'boolean' ? value : DEFAULT_SPAWN_CONTEXT_PREFERENCES.pullHostBranchBeforeCreate;
-}
-
 function normalizeSpawnContextRepoPath(value: unknown): string {
   return typeof value === 'string' ? value.trim() : String(value ?? '').trim();
 }
@@ -221,11 +225,12 @@ function normalizeSpawnContextPreferences(
     spawnReasoning: normalizeTrimmedString(value?.spawnReasoning),
     repoBranchSource: normalizeRepoBranchSourceMode(value?.repoBranchSource),
     repoCreateRemoteBranch: normalizeTrimmedString(value?.repoCreateRemoteBranch),
-    pullHostBranchBeforeCreate: normalizePullHostBranchBeforeCreate(value?.pullHostBranchBeforeCreate),
   };
 }
 
-export function normalizeSpawnContextByRepoKey(value: unknown): Record<string, SpawnContextPreferences> {
+export function normalizeSpawnContextByRepoKey(
+  value: unknown,
+): Record<string, SpawnContextPreferences> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const out: Record<string, SpawnContextPreferences> = {};
   for (const [keyRaw, entryRaw] of Object.entries(value as Record<string, unknown>)) {
@@ -242,11 +247,7 @@ export function resolveSpawnContextPreferencesForRepo(
 ): SpawnContextPreferences {
   const map = byRepoKey ?? {};
   const repoKey = spawnContextRepoKeyForPath(repoPathRaw);
-  return (
-    map[repoKey] ??
-    map[NO_REPO_SPAWN_CONTEXT_KEY] ??
-    DEFAULT_SPAWN_CONTEXT_PREFERENCES
-  );
+  return map[repoKey] ?? map[NO_REPO_SPAWN_CONTEXT_KEY] ?? DEFAULT_SPAWN_CONTEXT_PREFERENCES;
 }
 
 function buildUpdatedSpawnContextByRepoKey(
@@ -266,8 +267,7 @@ function buildUpdatedSpawnContextByRepoKey(
     current.spawnModel === merged.spawnModel &&
     current.spawnReasoning === merged.spawnReasoning &&
     current.repoBranchSource === merged.repoBranchSource &&
-    current.repoCreateRemoteBranch === merged.repoCreateRemoteBranch &&
-    current.pullHostBranchBeforeCreate === merged.pullHostBranchBeforeCreate
+    current.repoCreateRemoteBranch === merged.repoCreateRemoteBranch
   ) {
     return prev;
   }
@@ -287,6 +287,7 @@ type DroneHubUiPersistedState = Pick<
   | 'sidebarDensityMode'
   | 'sidebarDockSide'
   | 'pinnedSidebarPlacement'
+  | 'pinnedSidebarCollapsed'
   | 'appView'
   | 'collapsedGroups'
   | 'sidebarGroupOrder'
@@ -302,6 +303,7 @@ type DroneHubUiPersistedState = Pick<
   | 'selectedDrone'
   | 'selectedDroneIds'
   | 'selectedChat'
+  | 'lastChatSelectionByRepoPath'
   | 'groupMultiChatColumnWidth'
   | 'groupMultiChatStatusSort'
   | 'outputView'
@@ -313,16 +315,96 @@ type DroneHubUiPersistedState = Pick<
   | 'seenModelIds'
   | 'repoBranchSource'
   | 'repoCreateRemoteBranch'
-  | 'pullHostBranchBeforeCreate'
   | 'customAgents'
   | 'shortcutBindings'
 >;
+
+export function normalizeLastChatSelectionByRepoPath(
+  value: unknown,
+): Record<string, RepoChatSelection> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, RepoChatSelection> = {};
+  for (const [repoPathRaw, selectionRaw] of Object.entries(value as Record<string, unknown>)) {
+    const repoPath = String(repoPathRaw ?? '').trim();
+    if (
+      !repoPath ||
+      !selectionRaw ||
+      typeof selectionRaw !== 'object' ||
+      Array.isArray(selectionRaw)
+    ) {
+      continue;
+    }
+    const selection = selectionRaw as Partial<RepoChatSelection>;
+    const droneId = String(selection.droneId ?? '').trim();
+    if (!droneId) continue;
+    out[repoPath] = {
+      droneId,
+      chatName: String(selection.chatName ?? '').trim() || 'default',
+    };
+  }
+  return out;
+}
+
+function rememberRepoChatSelection(
+  current: Record<string, RepoChatSelection>,
+  repoPathRaw: unknown,
+  droneIdRaw: unknown,
+  chatNameRaw: unknown,
+): Record<string, RepoChatSelection> {
+  const repoPath = String(repoPathRaw ?? '').trim();
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!repoPath || !droneId) return current;
+  const chatName = String(chatNameRaw ?? '').trim() || 'default';
+  const previous = current[repoPath];
+  if (previous?.droneId === droneId && previous.chatName === chatName) return current;
+  return { ...current, [repoPath]: { droneId, chatName } };
+}
+
+export function resolveRepoChatSelectionTransition(
+  state: Pick<
+    DroneHubUiState,
+    | 'activeRepoPath'
+    | 'selectedDrone'
+    | 'selectedDroneIds'
+    | 'selectedChat'
+    | 'lastChatSelectionByRepoPath'
+  >,
+  nextRepoPathRaw: unknown,
+): Pick<
+  DroneHubUiState,
+  | 'activeRepoPath'
+  | 'selectedDrone'
+  | 'selectedDroneIds'
+  | 'selectedChat'
+  | 'lastChatSelectionByRepoPath'
+> {
+  const nextRepoPath = String(nextRepoPathRaw ?? '').trim();
+  const lastChatSelectionByRepoPath = state.lastChatSelectionByRepoPath;
+  if (!nextRepoPath) {
+    return {
+      activeRepoPath: '',
+      selectedDrone: state.selectedDrone,
+      selectedDroneIds: state.selectedDroneIds,
+      selectedChat: state.selectedChat,
+      lastChatSelectionByRepoPath,
+    };
+  }
+  const remembered = nextRepoPath ? lastChatSelectionByRepoPath[nextRepoPath] : null;
+  return {
+    activeRepoPath: nextRepoPath,
+    selectedDrone: remembered?.droneId ?? null,
+    selectedDroneIds: remembered ? [remembered.droneId] : [],
+    selectedChat: remembered?.chatName ?? 'default',
+    lastChatSelectionByRepoPath,
+  };
+}
 
 export function migrateDroneHubUiPersistedState(
   persistedState: unknown,
   _version?: number,
 ): Partial<DroneHubUiPersistedState> {
-  if (!persistedState || typeof persistedState !== 'object' || Array.isArray(persistedState)) return {};
+  if (!persistedState || typeof persistedState !== 'object' || Array.isArray(persistedState))
+    return {};
   const {
     fsExplorerView: _ignoredFsExplorerView,
     transcriptInlineImages: _ignoredTranscriptInlineImages,
@@ -334,10 +416,27 @@ export function migrateDroneHubUiPersistedState(
     viewMode?: unknown;
   };
   const migrated = { ...persisted };
+  const normalizedLastChatSelections = normalizeLastChatSelectionByRepoPath(
+    (migrated as any).lastChatSelectionByRepoPath,
+  );
+  const legacyActiveRepoPath = String(migrated.activeRepoPath ?? '').trim();
+  const legacySelectedDrone = String(migrated.selectedDrone ?? '').trim();
+  if (
+    legacyActiveRepoPath &&
+    legacySelectedDrone &&
+    !normalizedLastChatSelections[legacyActiveRepoPath]
+  ) {
+    normalizedLastChatSelections[legacyActiveRepoPath] = {
+      droneId: legacySelectedDrone,
+      chatName: String(migrated.selectedChat ?? '').trim() || 'default',
+    };
+  }
+  migrated.lastChatSelectionByRepoPath = normalizedLastChatSelections;
   if (Object.prototype.hasOwnProperty.call(migrated, 'themeId')) {
     migrated.themeId = normalizeDesktopThemeId(migrated.themeId);
   }
   delete (migrated as any).automations;
+  delete (migrated as any).pullHostBranchBeforeCreate;
   delete (migrated as any).playbookRunsSelectionInitialized;
   delete (migrated as any).playbookRunsSelectedPlaybookId;
   delete (migrated as any).playbookRunsSelectedRepoPath;
@@ -349,27 +448,31 @@ export function migrateDroneHubUiPersistedState(
       migrated.pinnedSidebarPlacement,
     );
   }
+  if (Object.prototype.hasOwnProperty.call(migrated, 'pinnedSidebarCollapsed')) {
+    migrated.pinnedSidebarCollapsed = normalizeBoolean(migrated.pinnedSidebarCollapsed);
+  }
   delete (migrated as any).assistantThreadSidebarDockSide;
   const migratedShortcutBindings = migrateLegacyShortcutBindings(migrated.shortcutBindings);
   if (migratedShortcutBindings !== undefined) {
     migrated.shortcutBindings = migratedShortcutBindings as ShortcutBindingMap;
   }
-  const normalizedContexts = normalizeSpawnContextByRepoKey((migrated as any).spawnContextByRepoKey);
+  const normalizedContexts = normalizeSpawnContextByRepoKey(
+    (migrated as any).spawnContextByRepoKey,
+  );
   if (Object.keys(normalizedContexts).length > 0) {
     migrated.spawnContextByRepoKey = normalizedContexts;
-    return migrated;
+  } else {
+    const legacySpawnDefaults = normalizeSpawnContextPreferences({
+      spawnAgentKey: migrated.spawnAgentKey,
+      spawnModel: migrated.spawnModel,
+      spawnReasoning: migrated.spawnReasoning,
+      repoBranchSource: migrated.repoBranchSource,
+      repoCreateRemoteBranch: migrated.repoCreateRemoteBranch,
+    });
+    migrated.spawnContextByRepoKey = {
+      [NO_REPO_SPAWN_CONTEXT_KEY]: legacySpawnDefaults,
+    };
   }
-  const legacySpawnDefaults = normalizeSpawnContextPreferences({
-    spawnAgentKey: migrated.spawnAgentKey,
-    spawnModel: migrated.spawnModel,
-    spawnReasoning: migrated.spawnReasoning,
-    repoBranchSource: migrated.repoBranchSource,
-    repoCreateRemoteBranch: migrated.repoCreateRemoteBranch,
-    pullHostBranchBeforeCreate: migrated.pullHostBranchBeforeCreate,
-  });
-  migrated.spawnContextByRepoKey = {
-    [NO_REPO_SPAWN_CONTEXT_KEY]: legacySpawnDefaults,
-  };
   return migrated;
 }
 
@@ -414,6 +517,26 @@ function normalizeOrderedStringMap(value: unknown): Record<string, string[]> {
   return out;
 }
 
+function sameOrderedStringList(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index]);
+}
+
+function sameOrderedStringMap(
+  left: Readonly<Record<string, readonly string[]>>,
+  right: Readonly<Record<string, readonly string[]>>,
+): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(right, key) &&
+        sameOrderedStringList(left[key] ?? [], right[key] ?? []),
+    )
+  );
+}
+
 function normalizeAppView(value: unknown): AppView {
   return value === 'settings' ? 'settings' : 'workspace';
 }
@@ -431,7 +554,11 @@ function normalizeSidebarDockSide(value: unknown): SidebarDockSide {
 }
 
 function normalizePinnedSidebarPlacement(value: unknown): PinnedSidebarPlacement {
-  return String(value ?? '').trim().toLowerCase() === 'top' ? 'top' : 'bottom';
+  return String(value ?? '')
+    .trim()
+    .toLowerCase() === 'top'
+    ? 'top'
+    : 'bottom';
 }
 
 function normalizeOutputView(value: unknown): OutputView {
@@ -462,10 +589,7 @@ function normalizeChatInputDrafts(value: unknown): Record<string, string> {
   return out;
 }
 
-function isExactShortcutBinding(
-  value: unknown,
-  expected: ShortcutBinding | null,
-): boolean {
+function isExactShortcutBinding(value: unknown, expected: ShortcutBinding | null): boolean {
   const normalized = sanitizeSingleShortcutBinding(value, null);
   if (!normalized || !expected) return normalized === expected;
   return (
@@ -507,15 +631,25 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
   const createDraftRaw = raw.createDraftDrone;
   if (createDraftRaw && typeof createDraftRaw === 'object' && !Array.isArray(createDraftRaw)) {
     const binding = createDraftRaw as Record<string, unknown>;
-    const key = String(binding.key ?? '').trim().toLowerCase();
+    const key = String(binding.key ?? '')
+      .trim()
+      .toLowerCase();
     const mod = binding.mod === true;
     const ctrl = binding.ctrl === true;
     const meta = binding.meta === true;
     const alt = binding.alt === true;
     const shift = binding.shift === true;
-    const isLegacyDefaultCreateShortcut = key === 'enter' && !mod && !ctrl && !meta && !alt && !shift;
+    const isLegacyDefaultCreateShortcut =
+      key === 'enter' && !mod && !ctrl && !meta && !alt && !shift;
     if (isLegacyDefaultCreateShortcut) {
-      next.createDraftDrone = { key: 'tab', mod: false, ctrl: false, meta: false, alt: false, shift: false };
+      next.createDraftDrone = {
+        key: 'tab',
+        mod: false,
+        ctrl: false,
+        meta: false,
+        alt: false,
+        shift: false,
+      };
       changed = true;
     }
   }
@@ -529,10 +663,20 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     shift: false,
   });
   if (!hasCreateDroneChatBinding && usesLegacyUnreadShortcut) {
-    next.markSelectedDronesUnread = { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false };
+    next.markSelectedDronesUnread = {
+      key: 'z',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    };
     changed = true;
   }
-  const hasCreateChildDraftDroneBinding = Object.prototype.hasOwnProperty.call(next, 'createChildDraftDrone');
+  const hasCreateChildDraftDroneBinding = Object.prototype.hasOwnProperty.call(
+    next,
+    'createChildDraftDrone',
+  );
   const usesLegacyCreateChatShortcut = isExactShortcutBinding(next.createDroneChat, {
     key: 'q',
     mod: false,
@@ -549,9 +693,27 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     alt: false,
     shift: false,
   });
-  if (!hasCreateChildDraftDroneBinding && usesLegacyCreateChatShortcut && usesCurrentUnreadShortcut) {
-    next.createChildDraftDrone = { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false };
-    next.createDroneChat = { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false };
+  if (
+    !hasCreateChildDraftDroneBinding &&
+    usesLegacyCreateChatShortcut &&
+    usesCurrentUnreadShortcut
+  ) {
+    next.createChildDraftDrone = {
+      key: 'q',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    };
+    next.createDroneChat = {
+      key: 'w',
+      mod: false,
+      ctrl: false,
+      meta: false,
+      alt: false,
+      shift: false,
+    };
     changed = true;
   }
   const currentDefaultMigrations: Array<[keyof ShortcutBindingMap, string, string]> = [
@@ -560,14 +722,17 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     ['createDroneChat', 'w', '2'],
   ];
   for (const [actionId, previousKey, nextKey] of currentDefaultMigrations) {
-    if (!isExactShortcutBinding(next[actionId], {
-      key: previousKey,
-      mod: false,
-      ctrl: false,
-      meta: false,
-      alt: false,
-      shift: false,
-    })) continue;
+    if (
+      !isExactShortcutBinding(next[actionId], {
+        key: previousKey,
+        mod: false,
+        ctrl: false,
+        meta: false,
+        alt: false,
+        shift: false,
+      })
+    )
+      continue;
     next[actionId] = {
       key: nextKey,
       mod: false,
@@ -635,6 +800,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       sidebarDensityMode: 'default',
       sidebarDockSide: 'left',
       pinnedSidebarPlacement: 'bottom',
+      pinnedSidebarCollapsed: false,
       appView: 'workspace',
       collapsedGroups: {},
       sidebarGroupOrder: [],
@@ -656,6 +822,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       groupMultiChatColumnWidth: GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
       groupMultiChatStatusSort: false,
       selectedChat: 'default',
+      lastChatSelectionByRepoPath: {},
       chatInputDrafts: initialChatInputDrafts,
       draftChat: null,
       sidebarCollapsed: false,
@@ -676,7 +843,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       seenModelIds: [],
       repoBranchSource: DEFAULT_SPAWN_CONTEXT_PREFERENCES.repoBranchSource,
       repoCreateRemoteBranch: DEFAULT_SPAWN_CONTEXT_PREFERENCES.repoCreateRemoteBranch,
-      pullHostBranchBeforeCreate: DEFAULT_SPAWN_CONTEXT_PREFERENCES.pullHostBranchBeforeCreate,
       customAgents: [],
       customAgentModalOpen: false,
       newCustomAgentLabel: '',
@@ -688,28 +854,54 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       agentMenuOpen: false,
       setThemeId: (next) =>
         set((s) => ({ themeId: normalizeDesktopThemeId(resolveNext(s.themeId, next)) })),
-      setActiveRepoPath: (next) => set((s) => ({ activeRepoPath: resolveNext(s.activeRepoPath, next) })),
-      setSettingsActiveTab: (next) => set((s) => ({ settingsActiveTab: resolveNext(s.settingsActiveTab, next) })),
-      setChatHeaderRepoPath: (next) => set((s) => ({ chatHeaderRepoPath: resolveNext(s.chatHeaderRepoPath, next) })),
-      setSidebarReposCollapsed: (next) => set((s) => ({ sidebarReposCollapsed: resolveNext(s.sidebarReposCollapsed, next) })),
-      setSidebarAutoMinimize: (next) => set((s) => ({ sidebarAutoMinimize: resolveNext(s.sidebarAutoMinimize, next) })),
+      setActiveRepoPath: (next) =>
+        set((s) => {
+          const nextRepoPath = resolveNext(s.activeRepoPath, next);
+          if (String(nextRepoPath ?? '').trim() === String(s.activeRepoPath ?? '').trim()) {
+            return s;
+          }
+          return resolveRepoChatSelectionTransition(s, nextRepoPath);
+        }),
+      setSettingsActiveTab: (next) =>
+        set((s) => ({ settingsActiveTab: resolveNext(s.settingsActiveTab, next) })),
+      setChatHeaderRepoPath: (next) =>
+        set((s) => ({ chatHeaderRepoPath: resolveNext(s.chatHeaderRepoPath, next) })),
+      setSidebarReposCollapsed: (next) =>
+        set((s) => ({ sidebarReposCollapsed: resolveNext(s.sidebarReposCollapsed, next) })),
+      setSidebarAutoMinimize: (next) =>
+        set((s) => ({ sidebarAutoMinimize: resolveNext(s.sidebarAutoMinimize, next) })),
       setShowRecentDronesOnly: (next) =>
         set((s) => ({ showRecentDronesOnly: resolveNext(s.showRecentDronesOnly, next) })),
-      setSidebarGroupingMode: (next) => set((s) => ({ sidebarGroupingMode: resolveNext(s.sidebarGroupingMode, next) })),
+      setSidebarGroupingMode: (next) =>
+        set((s) => ({ sidebarGroupingMode: resolveNext(s.sidebarGroupingMode, next) })),
       setSidebarDensityMode: (next) =>
-        set((s) => ({ sidebarDensityMode: normalizeSidebarDensityMode(resolveNext(s.sidebarDensityMode, next)) })),
+        set((s) => ({
+          sidebarDensityMode: normalizeSidebarDensityMode(resolveNext(s.sidebarDensityMode, next)),
+        })),
       setSidebarDockSide: (next) =>
-        set((s) => ({ sidebarDockSide: normalizeSidebarDockSide(resolveNext(s.sidebarDockSide, next)) })),
+        set((s) => ({
+          sidebarDockSide: normalizeSidebarDockSide(resolveNext(s.sidebarDockSide, next)),
+        })),
       setPinnedSidebarPlacement: (next) =>
         set((s) => ({
           pinnedSidebarPlacement: normalizePinnedSidebarPlacement(
             resolveNext(s.pinnedSidebarPlacement, next),
           ),
         })),
+      setPinnedSidebarCollapsed: (next) =>
+        set((s) => ({
+          pinnedSidebarCollapsed: normalizeBoolean(resolveNext(s.pinnedSidebarCollapsed, next)),
+        })),
       setAppView: (next) => set((s) => ({ appView: resolveNext(s.appView, next) })),
-      setCollapsedGroups: (next) => set((s) => ({ collapsedGroups: resolveNext(s.collapsedGroups, next) })),
+      setCollapsedGroups: (next) =>
+        set((s) => ({ collapsedGroups: resolveNext(s.collapsedGroups, next) })),
       setSidebarGroupOrder: (next) =>
-        set((s) => ({ sidebarGroupOrder: normalizeSidebarGroupOrder(resolveNext(s.sidebarGroupOrder, next)) })),
+        set((s) => {
+          const value = normalizeSidebarGroupOrder(resolveNext(s.sidebarGroupOrder, next));
+          return sameOrderedStringList(s.sidebarGroupOrder, value)
+            ? s
+            : { sidebarGroupOrder: value };
+        }),
       setSidebarRepoScopedGroupByPath: (next) =>
         set((s) => ({
           sidebarRepoScopedGroupByPath: normalizeSidebarRepoScopedGroupMap(
@@ -717,41 +909,81 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ),
         })),
       setSidebarDroneOrderByGroup: (next) =>
-        set((s) => ({
-          sidebarDroneOrderByGroup: normalizeOrderedStringMap(resolveNext(s.sidebarDroneOrderByGroup, next)),
-        })),
+        set((s) => {
+          const value = normalizeOrderedStringMap(resolveNext(s.sidebarDroneOrderByGroup, next));
+          return sameOrderedStringMap(s.sidebarDroneOrderByGroup, value)
+            ? s
+            : { sidebarDroneOrderByGroup: value };
+        }),
       setSidebarNodeOrderByParent: (next) =>
-        set((s) => ({
-          sidebarNodeOrderByParent: normalizeOrderedStringMap(resolveNext(s.sidebarNodeOrderByParent, next)),
-        })),
+        set((s) => {
+          const value = normalizeOrderedStringMap(resolveNext(s.sidebarNodeOrderByParent, next));
+          return sameOrderedStringMap(s.sidebarNodeOrderByParent, value)
+            ? s
+            : { sidebarNodeOrderByParent: value };
+        }),
       setSidebarChatOrderByDrone: (next) =>
-        set((s) => ({
-          sidebarChatOrderByDrone: normalizeOrderedStringMap(resolveNext(s.sidebarChatOrderByDrone, next)),
-        })),
+        set((s) => {
+          const value = normalizeOrderedStringMap(resolveNext(s.sidebarChatOrderByDrone, next));
+          return sameOrderedStringMap(s.sidebarChatOrderByDrone, value)
+            ? s
+            : { sidebarChatOrderByDrone: value };
+        }),
       setPinnedDroneIds: (next) =>
-        set((s) => ({ pinnedDroneIds: normalizeSidebarGroupOrder(resolveNext(s.pinnedDroneIds, next)) })),
+        set((s) => {
+          const value = normalizeSidebarGroupOrder(resolveNext(s.pinnedDroneIds, next));
+          return sameOrderedStringList(s.pinnedDroneIds, value) ? s : { pinnedDroneIds: value };
+        }),
       setToDoDroneIds: (next) =>
-        set((s) => ({ toDoDroneIds: normalizeSidebarGroupOrder(resolveNext(s.toDoDroneIds, next)) })),
+        set((s) => {
+          const value = normalizeSidebarGroupOrder(resolveNext(s.toDoDroneIds, next));
+          return sameOrderedStringList(s.toDoDroneIds, value) ? s : { toDoDroneIds: value };
+        }),
       setHiddenSidebarGroups: (next) =>
-        set((s) => ({ hiddenSidebarGroups: normalizeSidebarGroupOrder(resolveNext(s.hiddenSidebarGroups, next)) })),
+        set((s) => {
+          const value = normalizeSidebarGroupOrder(resolveNext(s.hiddenSidebarGroups, next));
+          return sameOrderedStringList(s.hiddenSidebarGroups, value)
+            ? s
+            : { hiddenSidebarGroups: value };
+        }),
       setShowHiddenSidebarGroups: (next) =>
         set((s) => ({ showHiddenSidebarGroups: resolveNext(s.showHiddenSidebarGroups, next) })),
       setAutoDelete: (next) => set((s) => ({ autoDelete: resolveNext(s.autoDelete, next) })),
-      setTerminalEmulator: (next) => set((s) => ({ terminalEmulator: resolveNext(s.terminalEmulator, next) })),
+      setTerminalEmulator: (next) =>
+        set((s) => ({ terminalEmulator: resolveNext(s.terminalEmulator, next) })),
       setHomeOpen: (next) => set((s) => ({ homeOpen: resolveNext(s.homeOpen, next) })),
-      setSelectedDrone: (next) => set((s) => ({ selectedDrone: resolveNext(s.selectedDrone, next) })),
-      setSelectedDroneIds: (next) => set((s) => ({ selectedDroneIds: resolveNext(s.selectedDroneIds, next) })),
-      setSelectedGroupMultiChat: (next) => set((s) => ({ selectedGroupMultiChat: resolveNext(s.selectedGroupMultiChat, next) })),
-      setGroupBroadcastExpanded: (next) => set((s) => ({ groupBroadcastExpanded: resolveNext(s.groupBroadcastExpanded, next) })),
+      setSelectedDrone: (next) =>
+        set((s) => ({ selectedDrone: resolveNext(s.selectedDrone, next) })),
+      setSelectedDroneIds: (next) =>
+        set((s) => ({ selectedDroneIds: resolveNext(s.selectedDroneIds, next) })),
+      setSelectedGroupMultiChat: (next) =>
+        set((s) => ({ selectedGroupMultiChat: resolveNext(s.selectedGroupMultiChat, next) })),
+      setGroupBroadcastExpanded: (next) =>
+        set((s) => ({ groupBroadcastExpanded: resolveNext(s.groupBroadcastExpanded, next) })),
       setGroupMultiChatColumnWidth: (next) =>
         set((s) => ({
-          groupMultiChatColumnWidth: clampGroupMultiChatColumnWidthPx(resolveNext(s.groupMultiChatColumnWidth, next)),
+          groupMultiChatColumnWidth: clampGroupMultiChatColumnWidthPx(
+            resolveNext(s.groupMultiChatColumnWidth, next),
+          ),
         })),
       setGroupMultiChatStatusSort: (next) =>
         set((s) => ({
           groupMultiChatStatusSort: resolveNext(s.groupMultiChatStatusSort, next),
         })),
-      setSelectedChat: (next) => set((s) => ({ selectedChat: resolveNext(s.selectedChat, next) })),
+      setSelectedChat: (next) =>
+        set((s) => ({
+          selectedChat: String(resolveNext(s.selectedChat, next) ?? '').trim() || 'default',
+        })),
+      rememberRepoChatSelection: (repoPath, droneId, chatName) =>
+        set((s) => {
+          const next = rememberRepoChatSelection(
+            s.lastChatSelectionByRepoPath,
+            repoPath,
+            droneId,
+            chatName,
+          );
+          return next === s.lastChatSelectionByRepoPath ? s : { lastChatSelectionByRepoPath: next };
+        }),
       setChatInputDraft: (draftKeyRaw, nextRaw) =>
         set((s) => {
           const draftKey = String(draftKeyRaw ?? '').trim();
@@ -777,14 +1009,21 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           return { chatInputDrafts: merged };
         }),
       setDraftChat: (next) => set((s) => ({ draftChat: resolveNext(s.draftChat, next) })),
-      setSidebarCollapsed: (next) => set((s) => ({ sidebarCollapsed: resolveNext(s.sidebarCollapsed, next) })),
-      setReposModalOpen: (next) => set((s) => ({ reposModalOpen: resolveNext(s.reposModalOpen, next) })),
-      setDroneErrorModal: (next) => set((s) => ({ droneErrorModal: resolveNext(s.droneErrorModal, next) })),
-      setClearingDroneError: (next) => set((s) => ({ clearingDroneError: resolveNext(s.clearingDroneError, next) })),
-      setHeaderOverflowOpen: (next) => set((s) => ({ headerOverflowOpen: resolveNext(s.headerOverflowOpen, next) })),
+      setSidebarCollapsed: (next) =>
+        set((s) => ({ sidebarCollapsed: resolveNext(s.sidebarCollapsed, next) })),
+      setReposModalOpen: (next) =>
+        set((s) => ({ reposModalOpen: resolveNext(s.reposModalOpen, next) })),
+      setDroneErrorModal: (next) =>
+        set((s) => ({ droneErrorModal: resolveNext(s.droneErrorModal, next) })),
+      setClearingDroneError: (next) =>
+        set((s) => ({ clearingDroneError: resolveNext(s.clearingDroneError, next) })),
+      setHeaderOverflowOpen: (next) =>
+        set((s) => ({ headerOverflowOpen: resolveNext(s.headerOverflowOpen, next) })),
       setOutputView: (next) => set((s) => ({ outputView: resolveNext(s.outputView, next) })),
       setShowCanvasLastMessagePreviews: (next) =>
-        set((s) => ({ showCanvasLastMessagePreviews: resolveNext(s.showCanvasLastMessagePreviews, next) })),
+        set((s) => ({
+          showCanvasLastMessagePreviews: resolveNext(s.showCanvasLastMessagePreviews, next),
+        })),
       setTranscriptInlineImageOverride: (messageIdRaw, next) =>
         set((s) => {
           const messageId = String(messageIdRaw ?? '').trim();
@@ -819,15 +1058,21 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             spawnReasoning: resolved.spawnReasoning,
             repoBranchSource: resolved.repoBranchSource,
             repoCreateRemoteBranch: resolved.repoCreateRemoteBranch,
-            pullHostBranchBeforeCreate: resolved.pullHostBranchBeforeCreate,
           };
         }),
       updateSpawnContextForRepo: (repoPathRaw, patch) =>
         set((s) => {
           const repoPath = normalizeSpawnContextRepoPath(repoPathRaw);
-          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, repoPath, patch);
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
+            s.spawnContextByRepoKey,
+            repoPath,
+            patch,
+          );
           if (nextByRepoKey === s.spawnContextByRepoKey) return s;
-          if (spawnContextRepoKeyForPath(s.spawnContextRepoPath) !== spawnContextRepoKeyForPath(repoPath)) {
+          if (
+            spawnContextRepoKeyForPath(s.spawnContextRepoPath) !==
+            spawnContextRepoKeyForPath(repoPath)
+          ) {
             return { spawnContextByRepoKey: nextByRepoKey };
           }
           const resolved = resolveSpawnContextPreferencesForRepo(nextByRepoKey, repoPath);
@@ -838,15 +1083,18 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             spawnReasoning: resolved.spawnReasoning,
             repoBranchSource: resolved.repoBranchSource,
             repoCreateRemoteBranch: resolved.repoCreateRemoteBranch,
-            pullHostBranchBeforeCreate: resolved.pullHostBranchBeforeCreate,
           };
         }),
       setSpawnAgentKey: (next) =>
         set((s) => {
           const spawnAgentKey = normalizeSpawnAgentKeyValue(resolveNext(s.spawnAgentKey, next));
-          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
-            spawnAgentKey,
-          });
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
+            s.spawnContextByRepoKey,
+            s.spawnContextRepoPath,
+            {
+              spawnAgentKey,
+            },
+          );
           return {
             spawnAgentKey,
             spawnContextByRepoKey: nextByRepoKey,
@@ -855,9 +1103,13 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setSpawnModel: (next) =>
         set((s) => {
           const spawnModel = normalizeTrimmedString(resolveNext(s.spawnModel, next));
-          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
-            spawnModel,
-          });
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
+            s.spawnContextByRepoKey,
+            s.spawnContextRepoPath,
+            {
+              spawnModel,
+            },
+          );
           return {
             spawnModel,
             spawnContextByRepoKey: nextByRepoKey,
@@ -866,25 +1118,38 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setSpawnReasoning: (next) =>
         set((s) => {
           const spawnReasoning = normalizeTrimmedString(resolveNext(s.spawnReasoning, next));
-          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
-            spawnReasoning,
-          });
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
+            s.spawnContextByRepoKey,
+            s.spawnContextRepoPath,
+            {
+              spawnReasoning,
+            },
+          );
           return { spawnReasoning, spawnContextByRepoKey: nextByRepoKey };
         }),
       rememberSeenModels: (models) =>
         set((s) => {
           const next = mergeSeenModelIds(s.seenModelIds, models);
-          if (next.length === s.seenModelIds.length && next.every((id, index) => id === s.seenModelIds[index])) {
+          if (
+            next.length === s.seenModelIds.length &&
+            next.every((id, index) => id === s.seenModelIds[index])
+          ) {
             return s;
           }
           return { seenModelIds: next };
         }),
       setRepoBranchSource: (next) =>
         set((s) => {
-          const repoBranchSource = normalizeRepoBranchSourceMode(resolveNext(s.repoBranchSource, next));
-          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
-            repoBranchSource,
-          });
+          const repoBranchSource = normalizeRepoBranchSourceMode(
+            resolveNext(s.repoBranchSource, next),
+          );
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
+            s.spawnContextByRepoKey,
+            s.spawnContextRepoPath,
+            {
+              repoBranchSource,
+            },
+          );
           return {
             repoBranchSource,
             spawnContextByRepoKey: nextByRepoKey,
@@ -892,32 +1157,32 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         }),
       setRepoCreateRemoteBranch: (next) =>
         set((s) => {
-          const repoCreateRemoteBranch = normalizeTrimmedString(resolveNext(s.repoCreateRemoteBranch, next));
-          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
-            repoCreateRemoteBranch,
-          });
+          const repoCreateRemoteBranch = normalizeTrimmedString(
+            resolveNext(s.repoCreateRemoteBranch, next),
+          );
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
+            s.spawnContextByRepoKey,
+            s.spawnContextRepoPath,
+            {
+              repoCreateRemoteBranch,
+            },
+          );
           return {
             repoCreateRemoteBranch,
-            spawnContextByRepoKey: nextByRepoKey,
-          };
-        }),
-      setPullHostBranchBeforeCreate: (next) =>
-        set((s) => {
-          const pullHostBranchBeforeCreate = resolveNext(s.pullHostBranchBeforeCreate, next) === true;
-          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
-            pullHostBranchBeforeCreate,
-          });
-          return {
-            pullHostBranchBeforeCreate,
             spawnContextByRepoKey: nextByRepoKey,
           };
         }),
       setCustomAgents: (next) => set((s) => ({ customAgents: resolveNext(s.customAgents, next) })),
-      setCustomAgentModalOpen: (next) => set((s) => ({ customAgentModalOpen: resolveNext(s.customAgentModalOpen, next) })),
-      setNewCustomAgentLabel: (next) => set((s) => ({ newCustomAgentLabel: resolveNext(s.newCustomAgentLabel, next) })),
-      setNewCustomAgentCommand: (next) => set((s) => ({ newCustomAgentCommand: resolveNext(s.newCustomAgentCommand, next) })),
-      setCustomAgentError: (next) => set((s) => ({ customAgentError: resolveNext(s.customAgentError, next) })),
-      setNameSuggestToast: (next) => set((s) => ({ nameSuggestToast: resolveNext(s.nameSuggestToast, next) })),
+      setCustomAgentModalOpen: (next) =>
+        set((s) => ({ customAgentModalOpen: resolveNext(s.customAgentModalOpen, next) })),
+      setNewCustomAgentLabel: (next) =>
+        set((s) => ({ newCustomAgentLabel: resolveNext(s.newCustomAgentLabel, next) })),
+      setNewCustomAgentCommand: (next) =>
+        set((s) => ({ newCustomAgentCommand: resolveNext(s.newCustomAgentCommand, next) })),
+      setCustomAgentError: (next) =>
+        set((s) => ({ customAgentError: resolveNext(s.customAgentError, next) })),
+      setNameSuggestToast: (next) =>
+        set((s) => ({ nameSuggestToast: resolveNext(s.nameSuggestToast, next) })),
       setShortcutBindings: (next) =>
         set((s) => ({
           shortcutBindings: sanitizeShortcutBindings(resolveNext(s.shortcutBindings, next)),
@@ -930,14 +1195,17 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           },
         })),
       resetShortcutBindings: () => set({ shortcutBindings: cloneDefaultShortcutBindings() }),
-      setTerminalMenuOpen: (next) => set((s) => ({ terminalMenuOpen: resolveNext(s.terminalMenuOpen, next) })),
-      setAgentMenuOpen: (next) => set((s) => ({ agentMenuOpen: resolveNext(s.agentMenuOpen, next) })),
+      setTerminalMenuOpen: (next) =>
+        set((s) => ({ terminalMenuOpen: resolveNext(s.terminalMenuOpen, next) })),
+      setAgentMenuOpen: (next) =>
+        set((s) => ({ agentMenuOpen: resolveNext(s.agentMenuOpen, next) })),
     }),
     {
       name: profileStorageKey('droneHub.ui'),
-      version: 15,
+      version: 16,
       storage: createJSONStorage(() => localStorage),
-      migrate: (persistedState, version) => migrateDroneHubUiPersistedState(persistedState, version),
+      migrate: (persistedState, version) =>
+        migrateDroneHubUiPersistedState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({
         themeId: state.themeId,
         activeRepoPath: state.activeRepoPath,
@@ -950,6 +1218,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         sidebarDensityMode: state.sidebarDensityMode,
         sidebarDockSide: state.sidebarDockSide,
         pinnedSidebarPlacement: state.pinnedSidebarPlacement,
+        pinnedSidebarCollapsed: state.pinnedSidebarCollapsed,
         appView: state.appView,
         collapsedGroups: state.collapsedGroups,
         sidebarGroupOrder: state.sidebarGroupOrder,
@@ -965,6 +1234,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         selectedDroneIds: state.selectedDroneIds,
         toDoDroneIds: state.toDoDroneIds,
         selectedChat: state.selectedChat,
+        lastChatSelectionByRepoPath: state.lastChatSelectionByRepoPath,
         groupMultiChatColumnWidth: state.groupMultiChatColumnWidth,
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
@@ -976,7 +1246,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         seenModelIds: state.seenModelIds,
         repoBranchSource: state.repoBranchSource,
         repoCreateRemoteBranch: state.repoCreateRemoteBranch,
-        pullHostBranchBeforeCreate: state.pullHostBranchBeforeCreate,
         customAgents: state.customAgents,
         shortcutBindings: state.shortcutBindings,
       }),
@@ -1005,7 +1274,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
               ? persisted.settingsActiveTab
               : currentState.settingsActiveTab,
           appView: normalizeAppView(persisted.appView ?? currentState.appView),
-          sidebarAutoMinimize: normalizeBoolean(persisted.sidebarAutoMinimize ?? currentState.sidebarAutoMinimize),
+          sidebarAutoMinimize: normalizeBoolean(
+            persisted.sidebarAutoMinimize ?? currentState.sidebarAutoMinimize,
+          ),
           showRecentDronesOnly: normalizeBoolean(
             persisted.showRecentDronesOnly ?? currentState.showRecentDronesOnly,
           ),
@@ -1015,16 +1286,24 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           sidebarDensityMode: normalizeSidebarDensityMode(
             persisted.sidebarDensityMode ?? currentState.sidebarDensityMode,
           ),
-          sidebarDockSide: normalizeSidebarDockSide(persisted.sidebarDockSide ?? currentState.sidebarDockSide),
+          sidebarDockSide: normalizeSidebarDockSide(
+            persisted.sidebarDockSide ?? currentState.sidebarDockSide,
+          ),
           pinnedSidebarPlacement: normalizePinnedSidebarPlacement(
             persisted.pinnedSidebarPlacement ?? currentState.pinnedSidebarPlacement,
           ),
-          collapsedGroups: normalizeCollapsedGroups(persisted.collapsedGroups ?? currentState.collapsedGroups),
+          pinnedSidebarCollapsed: normalizeBoolean(
+            persisted.pinnedSidebarCollapsed ?? currentState.pinnedSidebarCollapsed,
+          ),
+          collapsedGroups: normalizeCollapsedGroups(
+            persisted.collapsedGroups ?? currentState.collapsedGroups,
+          ),
           sidebarGroupOrder: normalizeSidebarGroupOrder(
             persisted.sidebarGroupOrder ?? currentState.sidebarGroupOrder,
           ),
           sidebarRepoScopedGroupByPath: normalizeSidebarRepoScopedGroupMap(
-            (persisted as any).sidebarRepoScopedGroupByPath ?? currentState.sidebarRepoScopedGroupByPath,
+            (persisted as any).sidebarRepoScopedGroupByPath ??
+              currentState.sidebarRepoScopedGroupByPath,
           ),
           sidebarDroneOrderByGroup: normalizeOrderedStringMap(
             persisted.sidebarDroneOrderByGroup ?? currentState.sidebarDroneOrderByGroup,
@@ -1045,6 +1324,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           selectedDroneIds: normalizeSidebarGroupOrder(persisted.selectedDroneIds),
           toDoDroneIds: normalizeSidebarGroupOrder(persisted.toDoDroneIds),
           selectedChat: normalizeTrimmedString(persisted.selectedChat) || currentState.selectedChat,
+          lastChatSelectionByRepoPath: normalizeLastChatSelectionByRepoPath(
+            persisted.lastChatSelectionByRepoPath ?? currentState.lastChatSelectionByRepoPath,
+          ),
           groupMultiChatColumnWidth: clampGroupMultiChatColumnWidthPx(
             Number(persisted.groupMultiChatColumnWidth ?? currentState.groupMultiChatColumnWidth),
           ),
@@ -1058,9 +1340,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           spawnContextByRepoKey: normalizeSpawnContextByRepoKey(
             (persisted as any).spawnContextByRepoKey ?? currentState.spawnContextByRepoKey,
           ),
-          seenModelIds: normalizeSeenModelIds(
-            persisted.seenModelIds ?? currentState.seenModelIds,
-          ),
+          seenModelIds: normalizeSeenModelIds(persisted.seenModelIds ?? currentState.seenModelIds),
           repoBranchSource:
             persisted.repoBranchSource === 'remote' || persisted.repoBranchSource === 'host'
               ? persisted.repoBranchSource
@@ -1068,11 +1348,10 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           repoCreateRemoteBranch: normalizeTrimmedString(
             persisted.repoCreateRemoteBranch ?? currentState.repoCreateRemoteBranch,
           ),
-          pullHostBranchBeforeCreate: normalizeBoolean(
-            persisted.pullHostBranchBeforeCreate ?? currentState.pullHostBranchBeforeCreate,
-          ),
           customAgents: sanitizeCustomAgents(persisted.customAgents ?? currentState.customAgents),
-          shortcutBindings: sanitizeShortcutBindings(migratedShortcutBindings ?? currentState.shortcutBindings),
+          shortcutBindings: sanitizeShortcutBindings(
+            migratedShortcutBindings ?? currentState.shortcutBindings,
+          ),
         };
       },
     },
@@ -1121,7 +1400,6 @@ export function useDroneHubAppModelUiState() {
       seenModelIds: s.seenModelIds,
       repoBranchSource: s.repoBranchSource,
       repoCreateRemoteBranch: s.repoCreateRemoteBranch,
-      pullHostBranchBeforeCreate: s.pullHostBranchBeforeCreate,
       customAgents: s.customAgents,
       customAgentModalOpen: s.customAgentModalOpen,
       newCustomAgentLabel: s.newCustomAgentLabel,
@@ -1152,6 +1430,7 @@ export function useDroneHubAppModelUiState() {
       setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
       setGroupBroadcastExpanded: s.setGroupBroadcastExpanded,
       setSelectedChat: s.setSelectedChat,
+      rememberRepoChatSelection: s.rememberRepoChatSelection,
       setDraftChat: s.setDraftChat,
       setSidebarCollapsed: s.setSidebarCollapsed,
       setReposModalOpen: s.setReposModalOpen,
@@ -1168,7 +1447,6 @@ export function useDroneHubAppModelUiState() {
       rememberSeenModels: s.rememberSeenModels,
       setRepoBranchSource: s.setRepoBranchSource,
       setRepoCreateRemoteBranch: s.setRepoCreateRemoteBranch,
-      setPullHostBranchBeforeCreate: s.setPullHostBranchBeforeCreate,
       setCustomAgents: s.setCustomAgents,
       setCustomAgentModalOpen: s.setCustomAgentModalOpen,
       setNewCustomAgentLabel: s.setNewCustomAgentLabel,
@@ -1195,6 +1473,7 @@ export function useDroneSidebarUiState() {
       homeOpen: s.homeOpen,
       selectedDrone: s.selectedDrone,
       selectedChat: s.selectedChat,
+      lastChatSelectionByRepoPath: s.lastChatSelectionByRepoPath,
       selectedGroupMultiChat: s.selectedGroupMultiChat,
       sidebarReposCollapsed: s.sidebarReposCollapsed,
       sidebarAutoMinimize: s.sidebarAutoMinimize,
@@ -1203,6 +1482,7 @@ export function useDroneSidebarUiState() {
       sidebarDensityMode: s.sidebarDensityMode,
       sidebarDockSide: s.sidebarDockSide,
       pinnedSidebarPlacement: s.pinnedSidebarPlacement,
+      pinnedSidebarCollapsed: s.pinnedSidebarCollapsed,
       sidebarGroupOrder: s.sidebarGroupOrder,
       sidebarRepoScopedGroupByPath: s.sidebarRepoScopedGroupByPath,
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
@@ -1221,6 +1501,7 @@ export function useDroneSidebarUiState() {
       setSidebarDensityMode: s.setSidebarDensityMode,
       setSidebarDockSide: s.setSidebarDockSide,
       setPinnedSidebarPlacement: s.setPinnedSidebarPlacement,
+      setPinnedSidebarCollapsed: s.setPinnedSidebarCollapsed,
       setCollapsedGroups: s.setCollapsedGroups,
       setSidebarGroupOrder: s.setSidebarGroupOrder,
       setSidebarRepoScopedGroupByPath: s.setSidebarRepoScopedGroupByPath,
@@ -1233,6 +1514,8 @@ export function useDroneSidebarUiState() {
       setSelectedDrone: s.setSelectedDrone,
       setSelectedDroneIds: s.setSelectedDroneIds,
       setSelectedChat: s.setSelectedChat,
+      setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
+      setDraftChat: s.setDraftChat,
       setActiveRepoPath: s.setActiveRepoPath,
       setAutoDelete: s.setAutoDelete,
       setHomeOpen: s.setHomeOpen,

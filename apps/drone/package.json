@@ -31,6 +31,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@drone/hub-model": "workspace:*",
     "@drone/device-protocol": "workspace:*",
     "@drone/assistant-chat": "workspace:*",
     "@blip/core": "workspace:*",
@@ -45,6 +46,8 @@
     "ai": "^6.0.77",
     "better-sqlite3": "^12.10.0",
     "commander": "^12.1.0",
+    "cron-parser": "^5.7.0",
+    "cronstrue": "^3.24.0",
     "dotenv": "^17.2.4",
     "dvm": "workspace:*",
     "qrcode": "^1.5.4",

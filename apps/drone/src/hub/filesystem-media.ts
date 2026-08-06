@@ -32,6 +32,7 @@ export const FS_EDITOR_MAX_BYTES = 10 * 1024 * 1024;
 export const FS_TEXT_CHUNK_MAX_BYTES = 512 * 1024;
 export const FS_QUICK_OPEN_MAX_RESULTS = 200;
 export const FS_LIST_TIMEOUT_MS = 10_000;
+export const FS_GIT_IGNORED_PATHS_MARKER = '__GIT_IGNORED_PATHS_Z__';
 export const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30 * 60_000;
 export const ASSISTANT_BASH_MAX_TIMEOUT_MS = 60 * 60_000;
 export const ASSISTANT_BASH_MAX_OUTPUT_BYTES = 64 * 1024;
@@ -43,6 +44,7 @@ export type ContainerFsEntry = {
   name: string;
   path: string;
   relativePath?: string | null;
+  isGitIgnored?: boolean;
   kind: 'directory' | 'file' | 'other';
   size: number | null;
   mtimeMs: number | null;
@@ -164,13 +166,27 @@ export function parseContainerFsListOutput(text: string): {
   resolvedPath: string;
   entries: ContainerFsEntry[];
 } {
-  const lines = String(text ?? '')
+  const raw = String(text ?? '');
+  const ignoredSectionMarker = `\n${FS_GIT_IGNORED_PATHS_MARKER}\n`;
+  const ignoredSectionIndex = raw.indexOf(ignoredSectionMarker);
+  const listingText = ignoredSectionIndex >= 0 ? raw.slice(0, ignoredSectionIndex) : raw;
+  const ignoredText =
+    ignoredSectionIndex >= 0
+      ? raw.slice(ignoredSectionIndex + ignoredSectionMarker.length)
+      : '';
+  const lines = listingText
     .split('\n')
     .map((l) => l.replace(/\r$/, ''))
     .filter((l) => l.length > 0);
 
   let resolvedPath = '/';
   const entries: ContainerFsEntry[] = [];
+  const ignoredPaths = new Set(
+    ignoredText
+      .split('\0')
+      .filter((ignoredPath) => ignoredPath.startsWith('/'))
+      .map((ignoredPath) => path.posix.normalize(ignoredPath)),
+  );
 
   for (const line of lines) {
     if (line.startsWith('__PATH__\t')) {
@@ -208,6 +224,10 @@ export function parseContainerFsListOutput(text: string): {
       isImage,
       isVideo,
     });
+  }
+
+  for (const entry of entries) {
+    entry.isGitIgnored = ignoredPaths.has(entry.path);
   }
 
   sortFsEntries(entries);

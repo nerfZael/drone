@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -133,6 +134,7 @@ describe('drone daemon workspace API', () => {
 
     expect(first).toMatchObject({ cacheHits: 0, hashed: 1 });
     expect(first.hashes).toHaveLength(1);
+    expect(first.hashes[0]).toMatchObject({ path: 'changed.txt', lineCount: 1, binary: false });
     expect(second).toMatchObject({
       cacheHits: 1,
       hashed: 0,
@@ -147,6 +149,28 @@ describe('drone daemon workspace API', () => {
 
     expect(third).toMatchObject({ cacheHits: 0, hashed: 1 });
     expect(third.hashes[0]?.hash).not.toBe(first.hashes[0]?.hash);
+  });
+
+  test('hashes and counts symlink blobs instead of their target contents', async () => {
+    const { client, root } = await startWorkspaceServer();
+    await workspaceExec(client, { cmd: 'git', args: ['init', '--quiet', root] });
+    await fs.writeFile(path.join(root, 'target.txt'), 'target\nhas\nthree lines\n');
+    await fs.symlink('target.txt', path.join(root, 'link.txt'));
+
+    const result = await workspaceGitHashes(client, {
+      repoRoot: root,
+      paths: ['link.txt'],
+    });
+    const linkContent = Buffer.from('target.txt');
+    const expectedHash = crypto
+      .createHash('sha1')
+      .update(Buffer.from(`blob ${linkContent.length}\0`, 'utf8'))
+      .update(linkContent)
+      .digest('hex');
+
+    expect(result.hashes).toEqual([
+      { path: 'link.txt', hash: expectedHash, lineCount: 1, binary: false },
+    ]);
   });
 
   test('does not hash paths outside the requested repository', async () => {

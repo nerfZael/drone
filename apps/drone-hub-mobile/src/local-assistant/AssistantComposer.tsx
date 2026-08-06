@@ -140,8 +140,10 @@ export function AssistantComposer({
   showAttachments = true,
   hasAttachments = false,
   onAddAttachment,
+  leadingControl,
   attachmentActionsDisabled = false,
   sendBlocked = false,
+  alwaysExpanded = false,
   footer,
   onInputFocus,
   onInputBlur,
@@ -164,8 +166,10 @@ export function AssistantComposer({
   showAttachments?: boolean;
   hasAttachments?: boolean;
   onAddAttachment?(): void;
+  leadingControl?: React.ReactNode;
   attachmentActionsDisabled?: boolean;
   sendBlocked?: boolean;
+  alwaysExpanded?: boolean;
   footer?: any;
   onInputFocus?(target: number): void;
   onInputBlur?(): void;
@@ -191,7 +195,8 @@ export function AssistantComposer({
   const voiceActive = voiceStatus !== 'idle';
   const voiceActiveRef = React.useRef(voiceActive);
   voiceActiveRef.current = voiceActive;
-  const voiceCanPauseOrStop = voiceStatus === 'recording' || voiceStatus === 'paused';
+  const voiceCanPause = voiceStatus === 'recording' || voiceStatus === 'paused';
+  const voiceCanStop = voiceCanPause || voiceStatus === 'stopped';
   const attachmentsEnabled = showAttachments && Boolean(onAddAttachment);
   const attachmentActionDisabled =
     attachmentActionsDisabled ||
@@ -205,13 +210,15 @@ export function AssistantComposer({
     running,
     queueWhileRunning,
   });
-  const expanded = mobileAssistantComposerExpanded({
-    focused,
-    value,
-    hasAttachments,
-    voiceActive,
-    voiceError,
-  });
+  const expanded =
+    alwaysExpanded ||
+    mobileAssistantComposerExpanded({
+      focused,
+      value,
+      hasAttachments,
+      voiceActive,
+      voiceError,
+    });
   const showAssistantStop =
     editable &&
     mobileAssistantStopVisible({
@@ -220,7 +227,7 @@ export function AssistantComposer({
       voiceActive,
     });
   const canSend =
-    (Boolean(value.trim()) || hasAttachments || voiceCanPauseOrStop) &&
+    (Boolean(value.trim()) || hasAttachments || voiceCanStop) &&
     !sending &&
     editable &&
     !sendBlocked &&
@@ -307,7 +314,7 @@ export function AssistantComposer({
 
   const stopVoiceForAction = React.useCallback(
     async (action: 'append' | 'send'): Promise<string | null> => {
-      if (!voiceCanPauseOrStop || voiceActionInFlight) return null;
+      if (!voiceCanStop || voiceActionInFlight) return null;
       const token = voiceActionTokenRef.current + 1;
       voiceActionTokenRef.current = token;
       setVoiceActionInFlight(true);
@@ -331,7 +338,7 @@ export function AssistantComposer({
         if (voiceActionTokenRef.current === token) setVoiceActionInFlight(false);
       }
     },
-    [onChangeText, stopRecordingForTranscript, voiceActionInFlight, voiceCanPauseOrStop],
+    [onChangeText, stopRecordingForTranscript, voiceActionInFlight, voiceCanStop],
   );
 
   const stopVoiceAndFillDraft = React.useCallback(async () => {
@@ -369,7 +376,13 @@ export function AssistantComposer({
 
   return (
     <View style={styles.frame}>
-      <View style={[styles.composer, expanded && styles.composerExpanded]}>
+      <View
+        style={[
+          styles.composer,
+          expanded && styles.composerExpanded,
+          Boolean(leadingControl) && styles.composerWithLeadingControl,
+        ]}
+      >
         <ThemedTextInput
           ref={inputRef}
           value={value}
@@ -493,6 +506,7 @@ export function AssistantComposer({
                     onPress={onAddAttachment!}
                   />
                 ) : null}
+                {leadingControl}
                 <View style={styles.controlSpacer} />
                 <Pressable
                   accessibilityRole="button"
@@ -533,14 +547,14 @@ export function AssistantComposer({
                     label={voiceStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
                     icon={voiceStatus === 'paused' ? Play : Pause}
                     tone={voiceStatus === 'paused' ? 'paused' : 'default'}
-                    disabled={!voiceCanPauseOrStop || voiceActionInFlight}
+                    disabled={!voiceCanPause || voiceActionInFlight}
                     onPress={toggleRecordingPause}
                   />
                   <VoiceIconButton
                     label="Stop recording and transcribe"
                     icon={Square}
                     tone="success"
-                    disabled={!voiceCanPauseOrStop || voiceActionInFlight}
+                    disabled={!voiceCanStop || voiceActionInFlight}
                     onPress={() => void stopVoiceAndFillDraft()}
                   />
                 </View>
@@ -587,6 +601,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   composerExpanded: { borderRadius: 7, borderColor: colors.accentBorder },
+  composerWithLeadingControl: { overflow: 'visible' },
   input: {
     minHeight: 50,
     maxHeight: 132,

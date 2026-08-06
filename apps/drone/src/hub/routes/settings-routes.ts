@@ -78,8 +78,9 @@ export interface SettingsRouteDependencies {
   droneRootPath: (...parts: string[]) => string;
   resolveUiPreferencesSettingsResponse: ServiceFunction;
   upsertStoredUiPreferencesSettings: ServiceFunction;
-  updatePinnedDronePreference: ServiceFunction;
-  notifyPinnedDronesChanged: ServiceFunction;
+  resolveUserContextSettingsResponse: ServiceFunction;
+  notifyUiPreferencesChanged: ServiceFunction;
+  notifyUiPreferencesSnapshotChanged: ServiceFunction;
   clampIntParam: (value: string | null, fallback: number, min: number, max: number) => number;
   readHubLogTail: ServiceFunction;
   HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES: number;
@@ -150,8 +151,9 @@ export function registerSettingsRoutes(
     droneRootPath,
     resolveUiPreferencesSettingsResponse,
     upsertStoredUiPreferencesSettings,
-    updatePinnedDronePreference,
-    notifyPinnedDronesChanged,
+    resolveUserContextSettingsResponse,
+    notifyUiPreferencesChanged,
+    notifyUiPreferencesSnapshotChanged,
     clampIntParam,
     readHubLogTail,
     HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,
@@ -652,6 +654,10 @@ export function registerSettingsRoutes(
     respond(200, await resolveUiPreferencesSettingsResponse());
   });
 
+  apiRouter.get('/api/settings/user-context', async ({ json: respond }) => {
+    respond(200, await resolveUserContextSettingsResponse());
+  });
+
   apiRouter.post('/api/settings/ui-preferences', async ({ readJson, json: respond }) => {
     const body = await readJson<any>();
     try {
@@ -673,25 +679,12 @@ export function registerSettingsRoutes(
       }
       throw error;
     }
-    respond(200, await resolveUiPreferencesSettingsResponse());
-  });
-
-  apiRouter.post('/api/settings/ui-preferences/pinned-drones', async ({ readJson, json: respond }) => {
-    const body = await readJson<any>();
-    try {
-      const saved = await updatePinnedDronePreference(
-        Array.isArray(body?.droneIds) ? body.droneIds : body?.droneId,
-        body?.pinned === true,
-      );
-      await notifyPinnedDronesChanged();
-      respond(200, { ok: true, ...saved });
-    } catch (error: any) {
-      if (error instanceof UiPreferencesSettingsValidationError) {
-        respond(400, { ok: false, error: error.message });
-        return;
-      }
-      throw error;
+    if (body?.notificationMode === 'sidebar_snapshot') {
+      await notifyUiPreferencesSnapshotChanged();
+    } else {
+      await notifyUiPreferencesChanged();
     }
+    respond(200, await resolveUiPreferencesSettingsResponse());
   });
 
   apiRouter.get('/api/settings/hub/logs', async ({ url, json: respond }) => {

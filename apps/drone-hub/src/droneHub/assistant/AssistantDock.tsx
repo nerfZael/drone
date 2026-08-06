@@ -25,6 +25,7 @@ import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-d
 import { CodexConnectComposerNotice } from '../app/CodexConnectControl';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import { createCanvasChatNodeId } from '../app/app-config';
+import { clientTimeZone } from '../app/client-time-zone';
 import {
   beginLocalChatBusy,
   useDroneHubRuntimeStore,
@@ -289,6 +290,7 @@ export function AssistantDock({
   onCreateNewChatAutoFocusHandled,
   promotingNewChatActionById = {},
   promoteNewChatActionErrorById = {},
+  composerTopAction,
 }: {
   nativeChat: NativeChatBinding;
   messageFeatures: AssistantMessageFeatures;
@@ -301,6 +303,7 @@ export function AssistantDock({
   onCreateNewChatAutoFocusHandled?: (promptId: string) => void;
   promotingNewChatActionById?: Record<string, true>;
   promoteNewChatActionErrorById?: Record<string, string>;
+  composerTopAction?: React.ReactNode;
 }) {
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
   const nativeDroneId = nativeChat.droneId;
@@ -1275,6 +1278,7 @@ export function AssistantDock({
         refocusInputWhenIdleRef.current = true;
         let sentOk = true;
         try {
+          const userTimeZone = clientTimeZone();
           const response = await fetch(
             `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/prompt`,
             {
@@ -1283,6 +1287,7 @@ export function AssistantDock({
               body: JSON.stringify({
                 prompt,
                 attachments: encodedAttachments,
+                ...(userTimeZone ? { userTimeZone } : {}),
                 provider: activeThread.provider,
                 model: activeThread.model,
                 thinkingLevel: activeThread.thinkingLevel,
@@ -2398,9 +2403,9 @@ export function AssistantDock({
               draftValue={draft}
               onDraftValueChange={setDraft}
               promptError={attachmentError}
-              sending={scopeSyncBusy}
               waiting={running}
-              disabled={!activeThread}
+              disabled={!activeThread || scopeSyncBusy}
+              composerTopAction={composerTopAction}
               composerContext={nativeComposerContext}
               composerControls={nativeComposerControls}
               composerStatus={

@@ -33,6 +33,7 @@ type PendingDronePatch = Partial<{
 type DroneProvisioningControllerDeps = {
   NON_REPO_HOME_CWD: string;
   applyPendingDisplayNameToProvisionedDrone: (droneEntry: any, pendingEntry: any, fallbackRaw: unknown) => string;
+  cancelPendingPromptsForFailedDrone?: (opts: { droneId: string; error: string }) => Promise<number>;
   cloneChatEntryForDroneClone: (entryRaw: any) => any;
   defaultDaemonReadyTimeoutMs: () => number;
   defaultRepoSeedTimeoutMs: () => number;
@@ -92,22 +93,50 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     return value && value.length <= 32 && /^[a-z0-9._-]+$/.test(value) ? value : null;
   };
 
-  async function updatePendingDrone(droneIdRaw: string, patch: PendingDronePatch) {
+  async function updatePendingDrone(droneIdRaw: string, patch: PendingDronePatch): Promise<string | null> {
     const registry = await loadRegistry();
     const found = findDroneEntryByIdentity({ drones: registry?.pending }, droneIdRaw);
     const droneId = normalizeDroneIdentity(found?.entry?.id ?? found?.key);
-    if (!droneId) return;
+    if (!droneId) return null;
     await commitDroneMetadataPatch({
       droneId,
       state: 'pending',
       eventType: 'drone.provisioning.updated',
       payload: { phase: patch.phase ?? null },
-      transform: (pending) => ({
-        ...pending,
-        ...patch,
-        updatedAt: patch.updatedAt ?? deps.nowIso(),
-      }),
+      transform: (pending) => {
+        const updatedAt = patch.updatedAt ?? deps.nowIso();
+        const startupQueuedPrompts = patch.phase === 'error'
+          ? deps.normalizePendingStartupPrompts(pending.startupQueuedPrompts).map((prompt) =>
+              prompt.state === 'queued' || prompt.state === 'sending'
+                ? { ...prompt, state: 'failed' as const, error: patch.error ?? 'Drone failed to start.', updatedAt }
+                : prompt,
+            )
+          : pending.startupQueuedPrompts;
+        return {
+          ...pending,
+          ...patch,
+          ...(startupQueuedPrompts ? { startupQueuedPrompts } : {}),
+          updatedAt,
+        };
+      },
     });
+    return droneId;
+  }
+
+  async function failPendingDrone(droneIdRaw: string, errorRaw: unknown): Promise<void> {
+    const error = String(errorRaw ?? 'Unknown startup error.').trim() || 'Unknown startup error.';
+    const droneId = await updatePendingDrone(droneIdRaw, { phase: 'error', message: 'Failed to start', error });
+    if (!droneId) return;
+    const cancelPendingPrompts = deps.cancelPendingPromptsForFailedDrone ??
+      ((opts: { droneId: string; error: string }) => getPromptQueueRepository()?.cancelPendingForDrone(opts) ?? Promise.resolve(0));
+    try {
+      await cancelPendingPrompts({ droneId, error: `Drone failed to start: ${error}` });
+    } catch (cancelError: any) {
+      deps.hubLog('warn', 'failed to cancel prompts after drone startup failure', {
+        droneId,
+        error: String(cancelError?.message ?? cancelError),
+      });
+    }
   }
 
   function provisionConcurrencyLimit(): number {
@@ -192,7 +221,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     if (!pending) return;
     const pendingDroneId = normalizeDroneIdentity(pending?.id);
     if (!pendingDroneId) {
-      await updatePendingDrone(name, { phase: 'error', message: 'Failed to start', error: 'missing pending drone identity' });
+      await failPendingDrone(name, 'missing pending drone identity');
       return;
     }
     if (regAny?.drones?.[name]) return;
@@ -211,15 +240,11 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       : '';
     const cloneSourceRuntime = cloneSource ? normalizeDroneRuntime((cloneSource.entry as any)?.runtime) : 'container';
     if (cloneFrom && runtime === 'container' && cloneSourceRuntime !== 'container') {
-      await updatePendingDrone(name, {
-        phase: 'error',
-        message: 'Failed to start',
-        error: `clone source must use container runtime: ${cloneFrom}`,
-      });
+      await failPendingDrone(name, `clone source must use container runtime: ${cloneFrom}`);
       return;
     }
     if (cloneFrom && runtime === 'container' && !cloneSourceContainerName) {
-      await updatePendingDrone(name, { phase: 'error', message: 'Failed to start', error: `clone source not found: ${cloneFrom}` });
+      await failPendingDrone(name, `clone source not found: ${cloneFrom}`);
       return;
     }
 
@@ -254,11 +279,11 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         const imp = await deps.runNodeCli(impArgs);
         if (imp.code !== 0) {
           const impErr = (imp.stderr || imp.stdout || `drone import failed (exit ${imp.code})`).trim();
-          await updatePendingDrone(name, { phase: 'error', message: 'Failed to start', error: `${errText}\n\nImport also failed:\n${impErr}` });
+          await failPendingDrone(name, `${errText}\n\nImport also failed:\n${impErr}`);
           return;
         }
       } else {
-        await updatePendingDrone(name, { phase: 'error', message: 'Failed to start', error: errText });
+        await failPendingDrone(name, errText);
         return;
       }
     }
@@ -719,7 +744,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         const task = provisionDroneFromPending(name)
           .catch(async (e: any) => {
             const msg = e?.message ?? String(e);
-            await updatePendingDrone(name, { phase: 'error', message: 'Failed to start', error: msg });
+            await failPendingDrone(name, msg);
           })
           .finally(() => {
             PROVISION_ACTIVE -= 1;

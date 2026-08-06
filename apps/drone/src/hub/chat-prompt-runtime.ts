@@ -21,7 +21,9 @@ import {
   PendingPromptPump,
 } from './pending-prompt-pump';
 import type { PendingPrompt } from './drone-pending-prompts';
+import { chatPromptAcceptancePlan } from './prompt-acceptance';
 import { captureDroneRunFileChangesBaseline } from './run-file-changes';
+import { createTerminalPromptWakeHandler } from './terminal-prompt-wake';
 import { workflowBlipPermissionArgs } from './workflows/workflow-permissions';
 
 type ChatPromptRuntimeDependencyName =
@@ -875,24 +877,38 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatReconciliationQueue.enqueue(droneId, chatName);
   }
 
+  const handleTerminalPromptWake = createTerminalPromptWakeHandler({
+    normalizeDroneId: normalizeDroneIdentity,
+    normalizeChatName,
+    listChatNames: async (droneId) => {
+      const stored = listChatsFromStore({ droneId });
+      let registryChatNames: string[] = [];
+      try {
+        const registry = await loadRegistry();
+        const registryChats = registry?.drones?.[droneId]?.chats;
+        if (registryChats && typeof registryChats === 'object') {
+          registryChatNames = Object.keys(registryChats);
+        }
+      } catch {
+        // Canonical chat and prompt state is enough to handle the wake-up.
+      }
+      return [...(stored.available ? stored.chats : []), ...registryChatNames];
+    },
+    readPendingPrompts: async (droneId, chatName) => {
+      const stored = readChatFromStore({ droneId, chatName });
+      return stored.available && Array.isArray(stored.chat?.pendingPrompts)
+        ? stored.chat.pendingPrompts
+        : [];
+    },
+    enqueueReconcile,
+    enqueuePromptPump: enqueuePendingPromptPump,
+  });
+
   async function enqueueReconcileForDaemonPromptEvent(
     droneIdRaw: string,
     promptIdRaw: string,
   ): Promise<void> {
-    const droneId = normalizeDroneIdentity(droneIdRaw);
-    const promptId = String(promptIdRaw ?? '').trim();
-    if (!droneId || !promptId) return;
-    const regAny: any = await loadRegistry();
-    const chats = regAny?.drones?.[droneId]?.chats;
-    if (!chats || typeof chats !== 'object') return;
-    for (const [chatNameRaw, entry] of Object.entries(chats) as Array<[string, any]>) {
-      const chatName = normalizeChatName(chatNameRaw);
-      if (!chatName) continue;
-      const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
-      if (!pending.some((item: any) => String(item?.id ?? '').trim() === promptId)) continue;
-      enqueueReconcile(droneId, chatName);
-      enqueuePendingPromptPump(droneId, chatName);
-    }
+    await handleTerminalPromptWake(droneIdRaw, promptIdRaw);
   }
 
   function ensureDaemonPromptEventSubscription(droneId: string): void {
@@ -1820,7 +1836,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
               priorPendingPrompts: prior,
               transcriptDoneIds,
             });
-      if (defer) return;
+      if (defer) {
+        // Completion events are an optimization, not the only wake-up edge.
+        // Recheck so an automated prompt cannot remain queued after a missed event.
+        schedulePendingPromptPumpRetry(droneId, chatName);
+        return;
+      }
 
       if (isSendInNewChatQueueAction(p?.action)) {
         const claimed = await claimQueuedPendingPromptForSending({ droneId, chatName, id });
@@ -2636,6 +2657,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           pendingState: 'sending',
         };
       }
+      const acceptance = chatPromptAcceptancePlan(opts.deliveryMode);
       const r = await enqueuePrompt({
         id: fallbackId,
         droneId,
@@ -2645,8 +2667,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         attachmentRefs,
         cwd: opts.cwd ?? null,
         submittedAt: opts.submittedAt ?? null,
-        deliveryMode: opts.deliveryMode === 'asap' ? 'immediate' : 'background',
-        priority: opts.deliveryMode === 'asap' ? 'asap' : 'queue',
+        deliveryMode: acceptance.enqueueMode,
+        priority: acceptance.priority,
         mark: opts.mark,
       });
       return {
@@ -2682,6 +2704,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         pending: queuedPending,
       });
       if (queuedStatus === 'active') {
+        const acceptance = chatPromptAcceptancePlan(opts.deliveryMode);
         const r = await enqueuePrompt({
           id: fallbackId,
           droneId,
@@ -2690,8 +2713,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           attachments,
           cwd: opts.cwd ?? null,
           submittedAt: opts.submittedAt ?? null,
-          deliveryMode: opts.deliveryMode === 'asap' ? 'immediate' : 'background',
-          priority: opts.deliveryMode === 'asap' ? 'asap' : 'queue',
+          deliveryMode: acceptance.enqueueMode,
+          priority: acceptance.priority,
           mark: opts.mark,
         });
         return {

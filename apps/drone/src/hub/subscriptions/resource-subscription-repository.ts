@@ -3,10 +3,10 @@ import crypto from 'node:crypto';
 import {
   applyHubDatabaseMigrations,
   type HubDatabase,
-  type HubDatabaseConnection,
   type HubDatabaseMigration,
 } from '../../host/hub-database';
 import {
+  parseResourceSubscriptionPauseReasons,
   resourceRef,
   type ResourceEvent,
   type ResourceSubscription,
@@ -17,6 +17,10 @@ import {
   type ResourceSubscriptionSubscriber,
   type ResourceSubscriptionType,
 } from './resource-subscription-types';
+import {
+  failPendingResourceSubscriptionDeliveries,
+  ResourceSubscriptionLifecycleRepository,
+} from './resource-subscription-lifecycle-repository';
 
 export type ResourceSubscriptionBatchItem = {
   deliveryId: string;
@@ -41,6 +45,8 @@ export type ChatResourceLocation = {
   chatId: string;
   droneId: string;
   chatName: string;
+  droneName?: string;
+  droneChatCount?: number;
 };
 
 export const RESOURCE_SUBSCRIPTION_MIGRATIONS: readonly HubDatabaseMigration[] = [
@@ -143,6 +149,35 @@ export const RESOURCE_SUBSCRIPTION_MIGRATIONS: readonly HubDatabaseMigration[] =
       `);
     },
   },
+  {
+    version: 2,
+    name: 'resource subscription pause reasons',
+    migrate(connection) {
+      connection.exec(`
+        ALTER TABLE resource_subscriptions
+          ADD COLUMN pause_reasons_json TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE resource_subscriptions
+          ADD COLUMN delivery_after TEXT;
+      `);
+    },
+  },
+  {
+    version: 3,
+    name: 'scheduled resource subscriptions',
+    migrate(connection) {
+      connection.exec(`
+        ALTER TABLE resource_subscriptions
+          ADD COLUMN resource_config_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE resource_subscriptions
+          ADD COLUMN next_event_at TEXT;
+
+        CREATE INDEX idx_resource_subscriptions_due
+          ON resource_subscriptions (next_event_at, id)
+          WHERE status = 'active' AND provider = 'drone-hub'
+            AND resource_type = 'cron' AND next_event_at IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 type SubscriptionRow = {
@@ -153,10 +188,14 @@ type SubscriptionRow = {
   provider: ResourceSubscriptionProvider;
   resource_type: ResourceSubscriptionType;
   resource_id: string;
+  resource_config_json: string;
   events_json: string;
   intent: string;
   status: ResourceSubscriptionStatus;
+  pause_reasons_json: string;
+  delivery_after: string | null;
   cursor_json: string;
+  next_event_at: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -185,10 +224,14 @@ type DeliveryJoinRow = EventRow & {
   subscription_provider: ResourceSubscriptionProvider;
   subscription_resource_type: ResourceSubscriptionType;
   subscription_resource_id: string;
+  resource_config_json: string;
   events_json: string;
   intent: string;
   status: ResourceSubscriptionStatus;
+  pause_reasons_json: string;
+  delivery_after: string | null;
   cursor_json: string;
+  next_event_at: string | null;
   subscription_created_at: string;
   subscription_updated_at: string;
   completed_at: string | null;
@@ -196,6 +239,8 @@ type DeliveryJoinRow = EventRow & {
 };
 
 export class ResourceSubscriptionRepository {
+  private readonly lifecycleRepository: ResourceSubscriptionLifecycleRepository;
+
   constructor(private readonly database: HubDatabase) {
     this.database.read((connection) =>
       applyHubDatabaseMigrations(
@@ -204,23 +249,82 @@ export class ResourceSubscriptionRepository {
         'resource-subscriptions',
       ),
     );
+    this.lifecycleRepository = new ResourceSubscriptionLifecycleRepository(database);
   }
 
   resolveChatResource(resourceIdRaw: string): ChatResourceLocation | null {
     const resourceId = cleanString(resourceIdRaw);
     if (!resourceId) return null;
+    return this.resolveChatResources([resourceId]).get(resourceId) ?? null;
+  }
+
+  resolveChatResources(resourceIdsRaw: string[]): Map<string, ChatResourceLocation> {
+    const resourceIds = [
+      ...new Set(resourceIdsRaw.map((resourceId) => cleanString(resourceId)).filter(Boolean)),
+    ];
+    if (resourceIds.length === 0) return new Map();
     return this.database.read((connection) => {
-      const row = connection
-        .prepare(
-          `
-          SELECT drone_id, chat_name, json_extract(metadata_json, '$.id') AS chat_id
-          FROM canonical_chats
-          WHERE json_extract(metadata_json, '$.id') = ?
-          LIMIT 1
-        `,
-        )
-        .get(resourceId) as { drone_id: string; chat_name: string; chat_id: string } | undefined;
-      return row ? { chatId: row.chat_id, droneId: row.drone_id, chatName: row.chat_name } : null;
+      type ResourceLocationRow = {
+        drone_id: string;
+        chat_name: string;
+        chat_id: string;
+        drone_name?: string | null;
+        drone_chat_count: number;
+      };
+      const placeholders = resourceIds.map(() => '?').join(', ');
+      let rows: ResourceLocationRow[];
+      try {
+        rows = connection
+          .prepare(
+            `
+            WITH chat_counts AS (
+              SELECT drone_id, COUNT(*) AS count
+              FROM canonical_chats
+              GROUP BY drone_id
+            )
+            SELECT c.drone_id, c.chat_name,
+              json_extract(c.metadata_json, '$.id') AS chat_id,
+              d.name AS drone_name,
+              counts.count AS drone_chat_count
+            FROM canonical_chats c
+            INNER JOIN chat_counts counts ON counts.drone_id = c.drone_id
+            LEFT JOIN hub_canonical_drones d ON d.drone_id = c.drone_id
+            WHERE json_extract(c.metadata_json, '$.id') IN (${placeholders})
+          `,
+          )
+          .all(...resourceIds) as ResourceLocationRow[];
+      } catch {
+        // Older or partially initialized stores may not have the lifecycle read model yet.
+        rows = connection
+          .prepare(
+            `
+            WITH chat_counts AS (
+              SELECT drone_id, COUNT(*) AS count
+              FROM canonical_chats
+              GROUP BY drone_id
+            )
+            SELECT c.drone_id, c.chat_name,
+              json_extract(c.metadata_json, '$.id') AS chat_id,
+              counts.count AS drone_chat_count
+            FROM canonical_chats c
+            INNER JOIN chat_counts counts ON counts.drone_id = c.drone_id
+            WHERE json_extract(c.metadata_json, '$.id') IN (${placeholders})
+          `,
+          )
+          .all(...resourceIds) as ResourceLocationRow[];
+      }
+      return new Map(
+        rows.map((row) => [
+          row.chat_id,
+          {
+            chatId: row.chat_id,
+            droneId: row.drone_id,
+            chatName: row.chat_name,
+            ...(cleanString(row.drone_name) ? { droneName: cleanString(row.drone_name) } : {}),
+            ...(row.drone_chat_count > 0 ? { droneChatCount: row.drone_chat_count } : {}),
+          },
+        ]),
+      );
     });
   }
 
@@ -246,7 +350,7 @@ export class ResourceSubscriptionRepository {
         .prepare(
           `
           SELECT * FROM resource_subscriptions
-          WHERE subscriber_chat_id = ? ${includeInactive ? '' : "AND status = 'active'"}
+          WHERE subscriber_chat_id = ? ${includeInactive ? '' : "AND status IN ('active', 'paused')"}
           ORDER BY updated_at DESC, id DESC
         `,
         )
@@ -270,14 +374,33 @@ export class ResourceSubscriptionRepository {
     });
   }
 
+  listDueCron(now = new Date()): ResourceSubscription[] {
+    return this.database.read((connection) => {
+      const rows = connection
+        .prepare(
+          `
+          SELECT * FROM resource_subscriptions
+          WHERE status = 'active' AND provider = 'drone-hub' AND resource_type = 'cron'
+            AND next_event_at IS NOT NULL AND next_event_at <= ?
+            AND (delivery_after IS NULL OR next_event_at >= delivery_after)
+          ORDER BY next_event_at, id
+        `,
+        )
+        .all(now.toISOString()) as SubscriptionRow[];
+      return rows.map(subscriptionFromRow).filter(isPresent);
+    });
+  }
+
   async upsert(input: {
     subscriber: ResourceSubscriptionSubscriber;
     provider: ResourceSubscriptionProvider;
     resourceType: ResourceSubscriptionType;
     resourceId: string;
+    resourceConfig?: Record<string, unknown>;
     events: ResourceSubscriptionEventType[];
     intent: string;
     cursor?: Record<string, unknown>;
+    nextEventAt?: string | null;
     initialPollCursor?: {
       provider: ResourceSubscriptionProvider;
       resourceType: ResourceSubscriptionType;
@@ -298,12 +421,12 @@ export class ResourceSubscriptionRepository {
         .get(input.subscriber.chatId, input.provider, input.resourceType, input.resourceId) as
         | SubscriptionRow
         | undefined;
-      if (!current || current.status !== 'active') {
+      if (!current || (current.status !== 'active' && current.status !== 'paused')) {
         const count = connection
           .prepare(
             `
             SELECT COUNT(*) AS count FROM resource_subscriptions
-            WHERE subscriber_chat_id = ? AND status = 'active'
+            WHERE subscriber_chat_id = ? AND status IN ('active', 'paused')
           `,
           )
           .get(input.subscriber.chatId) as { count: number };
@@ -331,22 +454,36 @@ export class ResourceSubscriptionRepository {
             )
             .get(input.initialPollCursor.resourceId, input.initialPollCursor.resourceId)
         : false;
+      const nextStatus = current?.status === 'paused' ? 'paused' : 'active';
+      const pauseReasons =
+        current?.status === 'paused'
+          ? parseResourceSubscriptionPauseReasons(current.pause_reasons_json)
+          : [];
       connection
         .prepare(
           `
           INSERT INTO resource_subscriptions (
             id, subscriber_chat_id, subscriber_drone_id, subscriber_chat_name,
-            provider, resource_type, resource_id, events_json, intent, status,
-            cursor_json, created_at, updated_at, completed_at, last_error
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, NULL)
+            provider, resource_type, resource_id, resource_config_json, events_json,
+            intent, status, pause_reasons_json, delivery_after, cursor_json,
+            next_event_at, created_at, updated_at, completed_at, last_error
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, NULL)
           ON CONFLICT (subscriber_chat_id, provider, resource_type, resource_id)
           DO UPDATE SET
             subscriber_drone_id = excluded.subscriber_drone_id,
             subscriber_chat_name = excluded.subscriber_chat_name,
+            resource_config_json = excluded.resource_config_json,
             events_json = excluded.events_json,
             intent = excluded.intent,
-            status = 'active',
+            status = excluded.status,
+            pause_reasons_json = excluded.pause_reasons_json,
+            delivery_after = CASE
+              WHEN resource_subscriptions.status = 'paused'
+                THEN resource_subscriptions.delivery_after
+              ELSE excluded.delivery_after
+            END,
             cursor_json = excluded.cursor_json,
+            next_event_at = excluded.next_event_at,
             updated_at = excluded.updated_at,
             completed_at = NULL,
             last_error = NULL
@@ -360,9 +497,13 @@ export class ResourceSubscriptionRepository {
           input.provider,
           input.resourceType,
           input.resourceId,
+          JSON.stringify(input.resourceConfig ?? {}),
           JSON.stringify(input.events),
           input.intent,
+          nextStatus,
+          JSON.stringify(pauseReasons),
           JSON.stringify(input.cursor ?? parseObject(current?.cursor_json)),
+          input.nextEventAt ?? null,
           createdAt,
           now,
         );
@@ -434,37 +575,90 @@ export class ResourceSubscriptionRepository {
   }
 
   async cancel(id: string, subscriberChatId: string): Promise<ResourceSubscription | null> {
+    return await this.cancelWithStatusGuard(id, subscriberChatId, false);
+  }
+
+  async cancelActive(id: string, subscriberChatId: string): Promise<ResourceSubscription | null> {
+    return await this.cancelWithStatusGuard(id, subscriberChatId, true);
+  }
+
+  private async cancelWithStatusGuard(
+    id: string,
+    subscriberChatId: string,
+    activeOnly: boolean,
+  ): Promise<ResourceSubscription | null> {
     const now = new Date().toISOString();
     return await this.database.writeTransaction('cancel resource subscription', (connection) => {
-      connection
+      const updated = connection
         .prepare(
           `
           UPDATE resource_subscriptions
-          SET status = 'cancelled', completed_at = ?, updated_at = ?
-          WHERE id = ? AND subscriber_chat_id = ? AND status != 'cancelled'
+          SET status = 'cancelled', pause_reasons_json = '[]', completed_at = ?, updated_at = ?
+          WHERE id = ? AND subscriber_chat_id = ?
+            ${activeOnly ? "AND status = 'active'" : "AND status != 'cancelled'"}
         `,
         )
         .run(now, now, id, subscriberChatId);
-      connection
-        .prepare(
-          `
-          UPDATE subscription_deliveries
-          SET state = 'failed', batch_id = NULL, last_error = 'subscription cancelled',
-            updated_at = ?
-          WHERE subscription_id = ? AND state IN ('pending', 'processing')
-            AND EXISTS (
-              SELECT 1 FROM resource_subscriptions s
-              WHERE s.id = subscription_deliveries.subscription_id
-                AND s.subscriber_chat_id = ? AND s.status = 'cancelled'
-            )
-        `,
-        )
-        .run(now, id, subscriberChatId);
       const row = connection
         .prepare('SELECT * FROM resource_subscriptions WHERE id = ? AND subscriber_chat_id = ?')
         .get(id, subscriberChatId) as SubscriptionRow | undefined;
+      if (
+        Number(updated.changes ?? 0) === 1 ||
+        (!activeOnly && row?.status === 'cancelled')
+      ) {
+        failPendingResourceSubscriptionDeliveries(
+          connection,
+          id,
+          'subscription cancelled',
+          now,
+        );
+      }
       return subscriptionFromRow(row);
     });
+  }
+
+  async pauseForChat(chatIdRaw: string): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(await this.lifecycleRepository.pauseForChat(chatIdRaw));
+  }
+
+  async pauseForDrone(droneIdRaw: string, chatIdsRaw: string[]): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(
+      await this.lifecycleRepository.pauseForDrone(droneIdRaw, chatIdsRaw),
+    );
+  }
+
+  resumeCandidatesForChat(chatIdRaw: string): ResourceSubscription[] {
+    return this.subscriptionsForIds(this.lifecycleRepository.resumeCandidatesForChat(chatIdRaw));
+  }
+
+  resumeCandidatesForDrone(droneIdRaw: string, chatIdsRaw: string[]): ResourceSubscription[] {
+    return this.subscriptionsForIds(
+      this.lifecycleRepository.resumeCandidatesForDrone(droneIdRaw, chatIdsRaw),
+    );
+  }
+
+  async resumeForChat(chatIdRaw: string): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(await this.lifecycleRepository.resumeForChat(chatIdRaw));
+  }
+
+  async resumeForDrone(droneIdRaw: string, chatIdsRaw: string[]): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(
+      await this.lifecycleRepository.resumeForDrone(droneIdRaw, chatIdsRaw),
+    );
+  }
+
+  async cancelForChat(chatIdRaw: string): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(await this.lifecycleRepository.cancelForChat(chatIdRaw));
+  }
+
+  async cancelForDrone(droneIdRaw: string, chatIdsRaw: string[]): Promise<ResourceSubscription[]> {
+    return this.subscriptionsForIds(
+      await this.lifecycleRepository.cancelForDrone(droneIdRaw, chatIdsRaw),
+    );
+  }
+
+  private subscriptionsForIds(ids: string[]): ResourceSubscription[] {
+    return ids.map((id) => this.get(id)).filter(isPresent);
   }
 
   async updateSubscriptionCursor(id: string, cursor: Record<string, unknown>): Promise<void> {
@@ -476,6 +670,22 @@ export class ResourceSubscriptionRepository {
         `,
         )
         .run(JSON.stringify(cursor), new Date().toISOString(), id);
+    });
+  }
+
+  async updateNextEventAt(id: string, nextEventAt: string): Promise<void> {
+    const parsed = Date.parse(nextEventAt);
+    if (!Number.isFinite(parsed)) throw new Error('next event timestamp must be a valid date');
+    await this.database.writeTransaction('update subscription next event', (connection) => {
+      connection
+        .prepare(
+          `
+          UPDATE resource_subscriptions
+          SET next_event_at = ?, updated_at = ?
+          WHERE id = ? AND provider = 'drone-hub' AND resource_type = 'cron'
+        `,
+        )
+        .run(new Date(parsed).toISOString(), new Date().toISOString(), id);
     });
   }
 
@@ -528,6 +738,9 @@ export class ResourceSubscriptionRepository {
   }
 
   async appendEvent(event: ResourceEvent): Promise<boolean> {
+    if (event.resourceType === 'cron') {
+      throw new Error('cron events must be appended with appendCronOccurrence');
+    }
     const now = new Date().toISOString();
     return await this.database.writeTransaction('append resource event', (connection) => {
       const inserted = connection
@@ -560,6 +773,7 @@ export class ResourceSubscriptionRepository {
           `
           SELECT * FROM resource_subscriptions
           WHERE status = 'active' AND provider = ?
+            AND (delivery_after IS NULL OR ? >= delivery_after)
             AND (
               (resource_type = ? AND resource_id = ?)
               OR (resource_type = 'repository' AND resource_id = ?)
@@ -568,6 +782,7 @@ export class ResourceSubscriptionRepository {
         )
         .all(
           event.provider,
+          event.occurredAt,
           event.resourceType,
           event.resourceId,
           event.parentResourceId ?? '',
@@ -591,14 +806,113 @@ export class ResourceSubscriptionRepository {
           .prepare(
             `
             UPDATE resource_subscriptions
-            SET status = 'completed', completed_at = ?, updated_at = ?
+            SET status = 'completed', pause_reasons_json = '[]', completed_at = ?, updated_at = ?
             WHERE provider = 'github' AND resource_type = 'pull_request'
-              AND resource_id = ? AND status = 'active'
+              AND resource_id = ? AND status IN ('active', 'paused')
           `,
           )
           .run(now, now, event.resourceId);
       }
       return true;
+    });
+  }
+
+  async appendCronOccurrence(event: ResourceEvent, nextEventAt: string): Promise<number> {
+    if (
+      event.provider !== 'drone-hub' ||
+      event.resourceType !== 'cron' ||
+      event.eventType !== 'cron.triggered'
+    ) {
+      throw new Error('appendCronOccurrence requires a DroneHub cron event');
+    }
+    const occurredAtMs = Date.parse(event.occurredAt);
+    const nextEventAtMs = Date.parse(nextEventAt);
+    if (!Number.isFinite(occurredAtMs) || !Number.isFinite(nextEventAtMs)) {
+      throw new Error('cron occurrence timestamps must be valid dates');
+    }
+    if (nextEventAtMs <= occurredAtMs) {
+      throw new Error('cron next event must be after the current occurrence');
+    }
+    const now = new Date().toISOString();
+    return await this.database.writeTransaction('append cron occurrence', (connection) => {
+      connection
+        .prepare(
+          `
+          INSERT OR IGNORE INTO resource_events (
+            id, provider_event_id, provider, resource_type, resource_id,
+            parent_resource_id, event_type, occurred_at, summary,
+            provider_content_json, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        )
+        .run(
+          event.id,
+          event.providerEventId,
+          event.provider,
+          event.resourceType,
+          event.resourceId,
+          event.parentResourceId,
+          event.eventType,
+          event.occurredAt,
+          event.summary,
+          JSON.stringify(event.providerContent),
+          now,
+        );
+      const storedEvent = connection
+        .prepare('SELECT id FROM resource_events WHERE provider_event_id = ?')
+        .get(event.providerEventId) as { id: string } | undefined;
+      if (!storedEvent) throw new Error('cron occurrence was not stored');
+
+      const subscriptions = connection
+        .prepare(
+          `
+          SELECT * FROM resource_subscriptions
+          WHERE status = 'active' AND provider = 'drone-hub' AND resource_type = 'cron'
+            AND resource_id = ? AND next_event_at IS NOT NULL AND next_event_at <= ?
+            AND (delivery_after IS NULL OR ? >= delivery_after)
+          ORDER BY id
+        `,
+        )
+        .all(event.resourceId, event.occurredAt, event.occurredAt) as SubscriptionRow[];
+      const supersedePending = connection.prepare(`
+        UPDATE subscription_deliveries
+        SET state = 'failed', batch_id = NULL, last_error = 'superseded by newer cron occurrence',
+          updated_at = ?
+        WHERE subscription_id = ? AND state = 'pending' AND event_id != ?
+          AND event_id IN (
+            SELECT id FROM resource_events
+            WHERE provider = 'drone-hub' AND resource_type = 'cron'
+          )
+      `);
+      const insertDelivery = connection.prepare(`
+        INSERT OR IGNORE INTO subscription_deliveries (
+          id, subscription_id, event_id, state, available_at, attempt_count,
+          next_attempt_at, batch_id, delivered_at, last_error, created_at, updated_at
+        ) VALUES (?, ?, ?, 'pending', ?, 0, ?, NULL, NULL, NULL, ?, ?)
+      `);
+      const advanceSubscription = connection.prepare(`
+        UPDATE resource_subscriptions
+        SET next_event_at = ?, updated_at = ?, last_error = NULL
+        WHERE id = ? AND status = 'active' AND next_event_at <= ?
+      `);
+      let deliveryCount = 0;
+      for (const row of subscriptions) {
+        if (parseEvents(row.events_json).includes(event.eventType)) {
+          supersedePending.run(now, row.id, storedEvent.id);
+          const inserted = insertDelivery.run(
+            crypto.randomUUID(),
+            row.id,
+            storedEvent.id,
+            now,
+            now,
+            now,
+            now,
+          );
+          deliveryCount += Number(inserted.changes ?? 0);
+        }
+        advanceSubscription.run(nextEventAt, now, row.id, event.occurredAt);
+      }
+      return deliveryCount;
     });
   }
 
@@ -679,6 +993,16 @@ export class ResourceSubscriptionRepository {
           )
           .run(location.droneId, location.chatName, now, location.chatId);
       },
+    );
+  }
+
+  isBatchProcessing(batchId: string): boolean {
+    return this.database.read((connection) =>
+      Boolean(
+        connection
+          .prepare("SELECT 1 FROM subscription_batches WHERE id = ? AND state = 'processing'")
+          .get(batchId),
+      ),
     );
   }
 
@@ -788,12 +1112,7 @@ export class ResourceSubscriptionRepository {
           LIMIT 20
         `,
         )
-        .all(
-          cutoff,
-          nowIso,
-          hourAgo,
-          settings.maxAutomatedRunsPerConversationPerHour,
-        ) as Array<{
+        .all(cutoff, nowIso, hourAgo, settings.maxAutomatedRunsPerConversationPerHour) as Array<{
         subscriber_chat_id: string;
         subscriber_drone_id: string;
         subscriber_chat_name: string;
@@ -811,10 +1130,14 @@ export class ResourceSubscriptionRepository {
               s.provider AS subscription_provider,
               s.resource_type AS subscription_resource_type,
               s.resource_id AS subscription_resource_id,
+              s.resource_config_json,
               s.events_json,
               s.intent,
               s.status,
+              s.pause_reasons_json,
+              s.delivery_after,
               s.cursor_json,
+              s.next_event_at,
               s.created_at AS subscription_created_at,
               s.updated_at AS subscription_updated_at,
               s.completed_at,
@@ -883,10 +1206,14 @@ export class ResourceSubscriptionRepository {
               provider: row.subscription_provider,
               resource_type: row.subscription_resource_type,
               resource_id: row.subscription_resource_id,
+              resource_config_json: row.resource_config_json,
               events_json: row.events_json,
               intent: row.intent,
               status: row.status,
+              pause_reasons_json: row.pause_reasons_json,
+              delivery_after: row.delivery_after,
               cursor_json: row.cursor_json,
+              next_event_at: row.next_event_at,
               created_at: row.subscription_created_at,
               updated_at: row.subscription_updated_at,
               completed_at: row.completed_at,
@@ -917,7 +1244,7 @@ export class ResourceSubscriptionRepository {
           `
           UPDATE subscription_batches
           SET state = 'delivered', delivered_at = ?, updated_at = ?, last_error = NULL
-          WHERE id = ?
+          WHERE id = ? AND state = 'processing'
         `,
         )
         .run(now, now, batchId);
@@ -1084,10 +1411,13 @@ function subscriptionFromRow(row: SubscriptionRow | undefined): ResourceSubscrip
     resourceType: row.resource_type,
     resourceId: row.resource_id,
     resourceRef: resourceRef(row.provider, row.resource_type, row.resource_id),
+    resourceConfig: parseObject(row.resource_config_json),
     events: parseEvents(row.events_json),
     intent: row.intent,
     status: row.status,
+    pauseReasons: parseResourceSubscriptionPauseReasons(row.pause_reasons_json),
     cursor: parseObject(row.cursor_json),
+    nextEventAt: row.next_event_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,

@@ -29,7 +29,7 @@ import { StoppedRunNotice } from './StoppedRunNotice';
 import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
 import {
   isSubscriptionEventPrompt,
-  SubscriptionEventBadge,
+  SubscriptionEventMessage,
 } from './SubscriptionEventBadge';
 
 function sameAttachments(aRaw: unknown, bRaw: unknown): boolean {
@@ -133,22 +133,25 @@ export const TranscriptTurn = React.memo(
     );
     return (
       <div className="group/turn animate-fade-in">
-        <UserChatMessage
-          at={promptIso}
-          showRoleIcons={showRoleIcons}
-          headerEnd={isSubscriptionEvent ? <SubscriptionEventBadge /> : undefined}
-          text={promptText}
-          onOpenFileReference={onOpenFileReference}
-          onOpenLink={onOpenLink}
-          attachmentContent={
-            <ImageAttachmentChips
-              attachments={attachments}
-              droneId={droneId}
-              droneHomePath={droneHomePath}
-              onOpenFileReference={onOpenFileReference}
-            />
-          }
-        />
+        {isSubscriptionEvent ? (
+          <SubscriptionEventMessage prompt={item.prompt} at={promptIso} />
+        ) : (
+          <UserChatMessage
+            at={promptIso}
+            showRoleIcons={showRoleIcons}
+            text={promptText}
+            onOpenFileReference={onOpenFileReference}
+            onOpenLink={onOpenLink}
+            attachmentContent={
+              <ImageAttachmentChips
+                attachments={attachments}
+                droneId={droneId}
+                droneHomePath={droneHomePath}
+                onOpenFileReference={onOpenFileReference}
+              />
+            }
+          />
+        )}
 
         {completedRunDurationMs !== null && !activity && !isSilentCompletion ? (
           <AgentRunSummaryLine

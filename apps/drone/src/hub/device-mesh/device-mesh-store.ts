@@ -13,9 +13,12 @@ const TERMINAL_PAIRING_RETENTION_MS = 10 * 60_000;
 const PENDING_PAIRING_RETENTION_MS = 60 * 60_000;
 const EXPIRED_INVITATION_RETENTION_MS = 10 * 60_000;
 
-export function migrateDeviceMeshGrants(
-  grants: readonly CapabilityGrant[],
-): CapabilityGrant[] {
+export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): CapabilityGrant[] {
+  const legacySidebarOperations = new Set([
+    'sidebar.order.update',
+    'sidebar.item.move',
+    'drone.pin.update',
+  ]);
   const legacy = grants.find(
     (grant) => grant.capability === 'assistant-threads' && grant.version === 1,
   );
@@ -23,14 +26,32 @@ export function migrateDeviceMeshGrants(
     ...(legacy?.operations.includes('approval.resolve') ? ['chat.approval.resolve'] : []),
     ...(legacy?.operations.includes('thread.message.delete') ? ['chat.message.delete'] : []),
   ];
-  const next = grants.map((grant) => ({ ...grant, operations: [...grant.operations] }));
+  const next = grants.map((grant) => ({
+    ...grant,
+    operations: grant.operations.filter((operation: string) => !legacySidebarOperations.has(operation)),
+  }));
   const droneControl = next.find(
     (grant) => grant.capability === 'drone-control' && grant.version === 1,
   );
-  // Existing phones trusted to delete drones should not lose access to newer,
-  // narrower rename and per-chat management actions after an upgrade.
+  // Existing phones trusted to delete drones should not lose access to newer sidebar,
+  // rename, and per-chat management actions after an upgrade.
   if (droneControl?.operations.includes('drone.delete')) {
-    operations.push('drone.rename', 'chat.rename', 'chat.delete');
+    operations.push(
+      'drone.rename',
+      'chat.rename',
+      'chat.delete',
+      'sidebar.move',
+    );
+  }
+  if (
+    grants.some(
+      (grant) =>
+        grant.capability === 'drone-control' &&
+        grant.version === 1 &&
+        grant.operations.some((operation: string) => legacySidebarOperations.has(operation)),
+    )
+  ) {
+    operations.push('sidebar.move');
   }
   if (operations.length === 0) return next;
   if (!droneControl) {

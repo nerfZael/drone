@@ -25,14 +25,17 @@ export const DRONE_CONTROL_OPERATIONS = [
   'chat.stop',
   'chat.approval.resolve',
   'chat.message.delete',
+  'files.list',
   'file.preview',
+  'file.write',
+  'file.action',
   'repo.pull-requests.read',
   'repo.pull-requests.merge',
   'repo.pull-requests.close',
   'drone.create.container',
   'drone.create.host',
   'drone.rename',
-  'drone.pin.update',
+  'sidebar.move',
   'drone.delete',
 ] as const;
 

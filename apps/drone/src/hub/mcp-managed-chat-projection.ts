@@ -1,5 +1,7 @@
 import type { McpServerRecord } from './mcp-servers';
 
+const MANAGED_CHAT_MCP_ENV_VARS = ['DRONE_HUB_MCP_URL', 'DRONE_HUB_MCP_TOKEN'];
+
 export function isDroneHubMcpServer(server: McpServerRecord): boolean {
   return server.name === 'drone-hub' && server.transport === 'http';
 }
@@ -22,5 +24,6 @@ export function projectMcpServerForManagedChats(input: {
         ? '/dvm-data/drone/dist/mcp-http-stdio-bridge.js'
         : input.hostBridgePath,
     ],
+    envPassthrough: MANAGED_CHAT_MCP_ENV_VARS,
   };
 }

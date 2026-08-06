@@ -573,6 +573,25 @@ test('failed prompts can be dismissed from the pending queue', async () => {
   assert.deepEqual(queue.listPending({ droneId: 'alpha', chatName: 'default' }), []);
 });
 
+test('cancels every unsent prompt when a drone fails to start', async () => {
+  const queue = repository('cancel-failed-drone');
+  const at = '2026-07-10T09:00:00.000Z';
+  await queue.enqueue({ droneId: 'failed-drone', chatName: 'default', prompt: prompt('one', at) });
+  await queue.enqueue({ droneId: 'failed-drone', chatName: 'review', prompt: prompt('two', at) });
+  await queue.enqueue({ droneId: 'healthy-drone', chatName: 'default', prompt: prompt('other', at) });
+
+  assert.equal(
+    await queue.cancelPendingForDrone({
+      droneId: 'failed-drone',
+      error: 'Drone failed to start: runtime import failed',
+    }),
+    2,
+  );
+  assert.deepEqual(queue.listPending({ droneId: 'failed-drone', chatName: 'default' }), []);
+  assert.deepEqual(queue.listPending({ droneId: 'failed-drone', chatName: 'review' }), []);
+  assert.equal(queue.get({ droneId: 'healthy-drone', chatName: 'default', promptId: 'other' }).state, 'queued');
+});
+
 test('retry scheduling uses bounded backoff and becomes terminal at max attempts', async () => {
   const queue = repository('retry');
   const at = '2026-07-10T09:00:00.000Z';

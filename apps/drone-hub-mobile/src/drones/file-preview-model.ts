@@ -21,6 +21,21 @@ export const MOBILE_SVG_PREVIEW_MAX_BYTES = 512 * 1024;
 export const MOBILE_FORMATTED_TEXT_PREVIEW_MAX_CHARS = 120_000;
 export const MOBILE_RENDERED_TEXT_PREVIEW_MAX_CHARS = 400_000;
 export const MOBILE_RENDERED_HTML_PREVIEW_MAX_CHARS = 400_000;
+export const MOBILE_FILE_EDIT_MAX_BYTES = 180 * 1024;
+export const MOBILE_FILE_WRITE_PAYLOAD_MAX_BYTES = 220 * 1024;
+
+export function mobileUtf8ByteLength(raw: unknown): number {
+  return new TextEncoder().encode(String(raw ?? '')).length;
+}
+
+export function mobileFileCanEdit(preview: MobileFilePreview | null): boolean {
+  return Boolean(
+    preview?.kind === 'text' &&
+    typeof preview.content === 'string' &&
+    preview.size <= MOBILE_FILE_EDIT_MAX_BYTES &&
+    mobileUtf8ByteLength(preview.content) <= MOBILE_FILE_EDIT_MAX_BYTES,
+  );
+}
 
 export function mobileTextPreviewContent(raw: unknown): {
   content: string;
@@ -49,6 +64,18 @@ function inside(path: string, root: string): boolean {
   return Boolean(path && root && (path === root || path.startsWith(`${root}/`)));
 }
 
+export function mobileDroneWorkspaceRoot(
+  drone: Pick<MobileDroneSummary, 'runtime' | 'repoPath' | 'cwd' | 'repoAttached'>,
+): string {
+  const hostRuntime = String(drone.runtime ?? '').toLowerCase() === 'host';
+  const repoPath = normalizedPath(drone.repoPath);
+  const cwd = normalizedPath(drone.cwd);
+  const repoAttached =
+    typeof drone.repoAttached === 'boolean' ? drone.repoAttached : Boolean(repoPath);
+  if (hostRuntime) return cwd || repoPath || '/';
+  return repoAttached ? '/work/repo' : '/dvm-data/home';
+}
+
 export function resolveMobileDroneFilePath(
   drone: Pick<MobileDroneSummary, 'runtime' | 'repoPath' | 'cwd' | 'repoAttached'>,
   rawPath: string,
@@ -60,11 +87,7 @@ export function resolveMobileDroneFilePath(
   const cwd = normalizedPath(drone.cwd);
   const repoAttached =
     typeof drone.repoAttached === 'boolean' ? drone.repoAttached : Boolean(repoPath);
-  const runtimeRoot = hostRuntime
-    ? cwd || repoPath || '/'
-    : repoAttached
-      ? '/work/repo'
-      : '/dvm-data/home';
+  const runtimeRoot = mobileDroneWorkspaceRoot(drone);
 
   if (!filePath.startsWith('/')) {
     return normalizedPath(`${runtimeRoot === '/' ? '' : runtimeRoot}/${filePath}`);

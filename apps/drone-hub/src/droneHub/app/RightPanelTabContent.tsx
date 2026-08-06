@@ -21,12 +21,12 @@ import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-sta
 import { WhiteboardDock } from '../whiteboard/WhiteboardDock';
 import {
   RIGHT_PANEL_TAB_LABELS,
-  RIGHT_PANEL_TABS,
   repoUnavailableReasonForRuntime,
   type RightPanelTab,
 } from './app-config';
 import { AsyncPaneBoundary, type PaneModuleLoader } from './AsyncPaneBoundary';
 import { DroneEditorDock } from './DroneEditorDock';
+import { DroneEditorWorkspace } from './DroneEditorWorkspace';
 import { isDroneStartingOrSeeding } from './helpers';
 
 const loadDroneCanvasDock = async () => (await import('../canvas/DroneCanvasDock')).DroneCanvasDock;
@@ -36,13 +36,6 @@ const loadDroneLinksDock = async () => (await import('../overview/DroneLinksDock
 const loadDronePreviewDock = async () => (await import('../overview/DronePreviewDock')).DronePreviewDock;
 const loadDroneTerminalDock = async () => (await import('../terminal/DroneTerminalDock')).DroneTerminalDock;
 const loadDroneWorkflowsDock = async () => (await import('../workflows/DroneWorkflowsDock')).DroneWorkflowsDock;
-export const LAZY_RIGHT_PANEL_TABS: ReadonlySet<RightPanelTab> = new Set(
-  RIGHT_PANEL_TABS.filter((tab) => tab !== 'files' && tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs'),
-);
-
-export function isRightPanelTabLazyLoaded(tab: RightPanelTab): boolean {
-  return LAZY_RIGHT_PANEL_TABS.has(tab);
-}
 
 export function RightPanelPaneLoadingFallback({ tab }: { tab: RightPanelTab }) {
   const label = RIGHT_PANEL_TAB_LABELS[tab] ?? 'Pane';
@@ -150,7 +143,6 @@ type RightPanelTabContentProps = {
       model: string;
       repoPath: string;
       group: string;
-      pullHostBranchBeforeCreate: boolean;
     };
   }) => Promise<{ ok: boolean; droneId?: string; droneName?: string; error?: string | null }>;
   onRenameCanvasChat: (
@@ -177,8 +169,6 @@ type RightPanelTabContentProps = {
   onCanvasCreateRepoPathChange: (next: string) => void;
   canvasCreateGroup: string;
   onCanvasCreateGroupChange: (next: string) => void;
-  canvasPullHostBranchBeforeCreate: boolean;
-  onCanvasPullHostBranchBeforeCreateChange: (next: boolean) => void;
   currentDroneId: string | null;
   currentCanvasChatNodeId: string | null;
   defaultFsPathForCurrentDrone: string;
@@ -233,7 +223,7 @@ type RightPanelTabContentProps = {
     canGoForward: boolean;
     onQueryChange: (next: string) => void;
     onClose: () => void;
-    onOpenFile: (next: { path: string; name: string }) => void;
+    onOpenFile: (next: { path: string; name: string; line?: number | null; column?: number | null }) => void;
     onGoBack: () => void;
     onGoForward: () => void;
   };
@@ -284,8 +274,6 @@ export function RightPanelTabContent({
   onCanvasCreateRepoPathChange,
   canvasCreateGroup,
   onCanvasCreateGroupChange,
-  canvasPullHostBranchBeforeCreate,
-  onCanvasPullHostBranchBeforeCreateChange,
   currentDroneId,
   currentCanvasChatNodeId,
   defaultFsPathForCurrentDrone,
@@ -344,6 +332,57 @@ export function RightPanelTabContent({
   const repoUnavailableReason = repoUnavailableReasonForRuntime(drone.runtime);
   const chatName = selectedChat || 'default';
   const isCurrent = Boolean(currentDroneId && String(currentDroneId) === String(drone.id));
+  const renderFileExplorer = (explorerZoom: number) => (
+    <DroneFilesDock
+      key={`${paneKey}-file-explorer`}
+      droneId={drone.id}
+      droneName={drone.name}
+      droneLabel={uiDroneName(drone.name)}
+      path={currentFsPath}
+      homePath={defaultFsPathForCurrentDrone}
+      entries={fsEntries}
+      loading={fsLoading}
+      error={isCurrent ? fsErrorUi : fsError}
+      startup={
+        isCurrent
+          ? {
+              waiting: filesPane.waiting,
+              timedOut: filesPane.timedOut,
+              hubPhase: drone.hubPhase,
+              hubMessage: drone.hubMessage,
+            }
+          : null
+      }
+      onOpenPath={setCurrentFsPath}
+      onRefresh={refreshFsList}
+      onRefreshOpenedFile={onRefreshOpenedEditorFile}
+      onOpenFile={onOpenFileInEditor}
+      onOpenFileInPanel={onOpenFileInPanel}
+      onCloseOpenedFile={onCloseOpenedEditorFile}
+      onConfirmCloseOpenedFilesForPaths={onConfirmCloseOpenedEditorFilesForPaths}
+      onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
+      onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
+      openedFile={openedFile}
+      zoom={explorerZoom}
+    />
+  );
+  const fileEditor = (
+    <DroneEditorDock
+      droneId={drone.id}
+      openedFile={openedFile}
+      quickOpen={quickOpen}
+      openedFileTabs={openedFileTabs}
+      activeOpenedFileTabId={activeOpenedFileTabId}
+      onOpenedEditorFileContentChange={onOpenedEditorFileContentChange}
+      onSaveOpenedEditorFile={onSaveOpenedEditorFile}
+      onReloadOpenedEditorFileFromDisk={onReloadOpenedEditorFileFromDisk}
+      onOverwriteOpenedEditorFile={onOverwriteOpenedEditorFile}
+      onCloseOpenedEditorFile={onCloseOpenedEditorFile}
+      onActivateOpenedEditorFileTab={onActivateOpenedEditorFileTab}
+      onReorderOpenedEditorFileTabs={onReorderOpenedEditorFileTabs}
+      onOpenFileTargetInEditor={onOpenFileTargetInEditor}
+    />
+  );
 
   switch (tab) {
     case 'workflows':
@@ -392,8 +431,6 @@ export function RightPanelTabContent({
               onCreateRepoPathChange={onCanvasCreateRepoPathChange}
               createGroup={canvasCreateGroup}
               onCreateGroupChange={onCanvasCreateGroupChange}
-              pullHostBranchBeforeCreate={canvasPullHostBranchBeforeCreate}
-              onPullHostBranchBeforeCreateChange={onCanvasPullHostBranchBeforeCreateChange}
             />
           )}
         </PaneModule>
@@ -442,58 +479,9 @@ export function RightPanelTabContent({
         </PaneModule>
       );
 
-    case 'files':
-      return (
-        <DroneFilesDock
-          key={`${paneKey}-files`}
-          droneId={drone.id}
-          droneName={drone.name}
-          droneLabel={uiDroneName(drone.name)}
-          path={currentFsPath}
-          homePath={defaultFsPathForCurrentDrone}
-          entries={fsEntries}
-          loading={fsLoading}
-          error={isCurrent ? fsErrorUi : fsError}
-          startup={
-            isCurrent
-              ? {
-                  waiting: filesPane.waiting,
-                  timedOut: filesPane.timedOut,
-                  hubPhase: drone.hubPhase,
-                  hubMessage: drone.hubMessage,
-                }
-              : null
-          }
-          onOpenPath={setCurrentFsPath}
-          onRefresh={refreshFsList}
-          onRefreshOpenedFile={onRefreshOpenedEditorFile}
-          onOpenFile={onOpenFileInEditor}
-          onOpenFileInPanel={onOpenFileInPanel}
-          onCloseOpenedFile={onCloseOpenedEditorFile}
-          onConfirmCloseOpenedFilesForPaths={onConfirmCloseOpenedEditorFilesForPaths}
-          onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
-          onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
-          openedFile={openedFile}
-        />
-      );
-
     case 'editor':
       return (
-        <DroneEditorDock
-          droneId={drone.id}
-          openedFile={openedFile}
-          quickOpen={quickOpen}
-          openedFileTabs={openedFileTabs}
-          activeOpenedFileTabId={activeOpenedFileTabId}
-          onOpenedEditorFileContentChange={onOpenedEditorFileContentChange}
-          onSaveOpenedEditorFile={onSaveOpenedEditorFile}
-          onReloadOpenedEditorFileFromDisk={onReloadOpenedEditorFileFromDisk}
-          onOverwriteOpenedEditorFile={onOverwriteOpenedEditorFile}
-          onCloseOpenedEditorFile={onCloseOpenedEditorFile}
-          onActivateOpenedEditorFileTab={onActivateOpenedEditorFileTab}
-          onReorderOpenedEditorFileTabs={onReorderOpenedEditorFileTabs}
-          onOpenFileTargetInEditor={onOpenFileTargetInEditor}
-        />
+        <DroneEditorWorkspace explorer={renderFileExplorer} editor={fileEditor} />
       );
 
     case 'preview':

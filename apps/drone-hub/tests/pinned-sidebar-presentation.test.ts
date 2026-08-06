@@ -60,6 +60,12 @@ describe('desktop pinned drone presentation', () => {
     );
     expect(sidebarSource).toContain('group/active-repository sticky top-0 z-20');
     expect(sidebarSource).toContain('data-sidebar-pinned-placement-toggle="true"');
+    expect(sidebarSource).toContain('data-sidebar-pinned-collapse-toggle="true"');
+    expect(sidebarSource).toContain('data-sidebar-pinned-collapsed={pinnedSidebarCollapsed');
+    expect(sidebarSource).toContain('onClick={() => setPinnedSidebarCollapsed((current) => !current)}');
+    expect(sidebarSource).toContain('aria-expanded={!pinnedSidebarCollapsed}');
+    expect(sidebarSource).toContain('{!pinnedSidebarCollapsed ? (');
+    expect(sidebarSource).toContain('min-h-8 cursor-pointer items-center');
     expect(sidebarSource).toContain("current === 'top' ? 'bottom' : 'top'");
     expect(sidebarSource).toContain("? 'Move pinned drones to bottom'");
     expect(sidebarSource).toContain(": 'Move pinned drones to top'");
@@ -74,11 +80,34 @@ describe('desktop pinned drone presentation', () => {
     const pinnedSelectionStart = sidebarSource.indexOf('const selectPinnedDroneCard');
     const pinnedSelectionEnd = sidebarSource.indexOf('const createDroneInRepository', pinnedSelectionStart);
     const pinnedSelectionSource = sidebarSource.slice(pinnedSelectionStart, pinnedSelectionEnd);
-    expect(pinnedSelectionSource).not.toContain('openRepositoryNavigationItem');
-    expect(pinnedSelectionSource).not.toContain('setActiveRepoPath');
+    expect(pinnedSelectionSource).toContain('openPinnedDroneRepository(drone)');
+    expect(pinnedSelectionSource).toContain('lastChatSelectionByRepoPath[repoPath]');
+    expect(pinnedSelectionSource).toContain('onSelectDroneChat(drone.id, rememberedChat)');
+    expect(sidebarSource).toContain('const selectPinnedDroneContainer');
+    expect(sidebarSource).toContain("toggleDroneSection(drone.id, 'chats')");
+    const pinnedContainerStart = sidebarSource.indexOf('const selectPinnedDroneContainer');
+    const pinnedContainerEnd = sidebarSource.indexOf(
+      'const selectPinnedDroneChat',
+      pinnedContainerStart,
+    );
+    const pinnedContainerSource = sidebarSource.slice(
+      pinnedContainerStart,
+      pinnedContainerEnd,
+    );
+    expect(pinnedContainerSource).not.toContain('selectPinnedDroneCard');
+    expect(pinnedContainerSource).not.toContain('openPinnedDroneRepository');
+    expect(sidebarSource).toContain('const selectPinnedDroneChat');
+    expect(sidebarSource).toContain('handleGroupedSelectDroneChat(drone.id, chatName)');
+    expect(sidebarSource).toContain(
+      'disclosureExpanded={hasChatSection ? chatSectionExpanded : undefined}',
+    );
+    expect(sidebarSource).toContain('{hasChatSection && chatSectionExpanded ? (');
+    expect(sidebarSource).toContain('onClick={() => selectPinnedDroneChat(drone, chatName)}');
+    expect(sidebarSource).toContain('const restoredSelectionRepoAlignedRef = React.useRef(false)');
+    expect(sidebarSource).toContain('onSelectDroneChat(selectedDroneId, activeChatName)');
     expect(sidebarSource).not.toContain('leadingIcon={<IconPin');
     expect(sidebarSource).toContain(
-      'className="flex min-h-8 items-center gap-1.5 border-b border-[var(--border-subtle)] px-1"',
+      'className="flex min-h-8 cursor-pointer items-center gap-1.5 border-b border-[var(--border-subtle)] px-1"',
     );
     expect(sidebarSource).toContain(
       '<IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />',

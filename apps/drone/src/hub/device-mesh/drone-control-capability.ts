@@ -9,7 +9,10 @@ import {
   normalizePendingPromptState,
 } from '@drone/assistant-chat';
 import type { CapabilityHandler } from './device-mesh-types';
-import { scheduleCreatedDroneAutoRename } from './auto-rename-created-drone';
+import {
+  scheduleCreatedDroneAutoRename,
+  type CreatedDroneAutoRenameOperations,
+} from './auto-rename-created-drone';
 import {
   boundedDroneChatPage,
   compactAgentPlanForMesh,
@@ -18,11 +21,13 @@ import {
 } from './drone-chat-page';
 import { trimJsonArrayToBytes } from '../builtin-agent-activity';
 import { isLikelyImagePath, isLikelyVideoPath } from '../filesystem-media';
+import type { RenameDroneCommand } from '../drone-rename-command';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
 import { meshJsonContentChunk } from './mesh-content-chunk';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { compactNativeChatReadResponse } from './native-chat-response';
 import { submitNativeChatPrompt } from './native-chat-prompt';
+import { SidebarCommandService } from '../sidebar-command-service';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -126,6 +131,7 @@ function compactPendingPrompts(value: unknown): any[] {
 const CREATE_REPO_BRANCH_PAGE_SIZE = 500;
 const CREATE_REPO_BRANCH_PAGE_BYTES = 160 * 1024;
 const MOBILE_FILE_MEDIA_MAX_BYTES = 32 * 1024 * 1024;
+const MOBILE_FILE_WRITE_MAX_BYTES = 180 * 1024;
 const MOBILE_RUN_DIFF_MAX_BYTES = 80 * 1024;
 
 function compactCreateRepoBranch(branch: unknown) {
@@ -137,6 +143,47 @@ function compactCreateRepoBranch(branch: unknown) {
     remote: truncateUtf8(entry.remote, 200),
     branch: truncateUtf8(entry.branch, 600) || name,
   };
+}
+
+function compactChatSubscriptions(value: unknown): Array<Record<string, unknown>> | null {
+  if (!Array.isArray(value)) return null;
+  const subscriptions = value.flatMap((subscription) => {
+    const entry = object(subscription);
+    const id = truncateUtf8(entry.id, 160).trim();
+    const resourceId = truncateUtf8(entry.resourceId, 800).trim();
+    if (!id || !resourceId || entry.status !== 'active') return [];
+    const provider = entry.provider === 'github' ? 'github' : 'drone-hub';
+    const resourceType = ['chat', 'repository', 'pull_request', 'cron'].includes(
+      String(entry.resourceType),
+    )
+      ? String(entry.resourceType)
+      : 'chat';
+    const resourceConfig = object(entry.resourceConfig);
+    return [
+      {
+        id,
+        provider,
+        resourceType,
+        resourceId,
+        ...(resourceType === 'cron'
+          ? {
+              resourceConfig: {
+                expression: truncateUtf8(resourceConfig.expression, 200).trim(),
+                description: truncateUtf8(resourceConfig.description, 500).trim(),
+                timeZone: truncateUtf8(resourceConfig.timeZone, 100).trim() || 'UTC',
+              },
+              nextEventAt: truncateUtf8(entry.nextEventAt, 100).trim() || null,
+            }
+          : {}),
+        events: textList(entry.events)
+          .slice(0, 20)
+          .map((event) => truncateUtf8(event, 160)),
+        intent: truncateUtf8(entry.intent, 2_000).trim(),
+        status: 'active',
+      },
+    ];
+  });
+  return subscriptions.slice(0, 50);
 }
 
 function requiredPositiveInteger(value: unknown, label: string): number {
@@ -181,6 +228,7 @@ export function deviceMeshDroneSummary(drone: any) {
     phase: String(drone?.phase ?? drone?.hubPhase ?? drone?.hub?.phase ?? ''),
     status: String(drone?.status ?? drone?.hubMessage ?? ''),
     group: drone?.group ?? null,
+    groupId: String(drone?.groupId ?? '').trim() || null,
     repoPath: firstText(
       drone?.repoPath,
       drone?.repositoryPath,
@@ -188,6 +236,7 @@ export function deviceMeshDroneSummary(drone: any) {
       drone?.repo?.hostPath,
       drone?.repo?.dest,
     ),
+    repoBranch: firstText(drone?.repoBranch, drone?.repo?.branch) || null,
     cwd: firstText(drone?.cwd, drone?.workingDirectory),
     repoAttached: Boolean(
       drone?.repoAttached ??
@@ -240,12 +289,16 @@ export function createDroneControlCapability(
   access: LocalHubAccess,
   chatAttachments?: MeshChatAttachmentStore,
   options?: {
+    sidebarCommands?: SidebarCommandService;
+    createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
+    renameDrone?: RenameDroneCommand;
     broadcastFileChange?: (
       payload: Record<string, any>,
       targetDeviceIds: string[],
     ) => void | Promise<void>;
   },
 ): CapabilityHandler {
+  const sidebarCommands = options?.sidebarCommands ?? new SidebarCommandService(access);
   type FileWatch = {
     droneId: string;
     path: string;
@@ -550,6 +603,21 @@ export function createDroneControlCapability(
                 })
                 .filter(([name]) => Boolean(name)),
             ),
+            groups: groups.flatMap((group: unknown) => {
+              const entry = object(group);
+              const id = String(entry.id ?? '').trim();
+              const name = String(entry.name ?? '').trim();
+              if (!id || !name) return [];
+              return [
+                {
+                  id,
+                  name,
+                  repoPath: String(entry.repoPath ?? '').trim(),
+                  parentId: String(entry.parentId ?? '').trim() || null,
+                  createdAt: String(entry.createdAt ?? '').trim() || null,
+                },
+              ];
+            }),
             sidebarGroupOrder: textList(preferences.sidebarGroupOrder),
             sidebarDroneOrderByGroup: textListMap(preferences.sidebarDroneOrderByGroup),
             sidebarNodeOrderByParent: textListMap(preferences.sidebarNodeOrderByParent),
@@ -579,7 +647,6 @@ export function createDroneControlCapability(
           ...(typeof payload.persistVolume === 'boolean'
             ? { persistVolume: payload.persistVolume }
             : {}),
-          pullHostBranchBeforeCreate: payload.pullHostBranchBeforeCreate === true,
           repoBranchSource,
           ...(repoBranchSource === 'remote'
             ? { remoteBranch: optionalText(payload.remoteBranch) }
@@ -614,26 +681,42 @@ export function createDroneControlCapability(
           body: JSON.stringify(createPayload),
         });
         const createdDroneId = firstText(created?.id, created?.droneId, created?.drone?.id);
-        if (!requestedName && autoRenamePrompt && createdDroneId) {
-          scheduleCreatedDroneAutoRename(access, createdDroneId, autoRenamePrompt);
+        if (
+          !requestedName &&
+          autoRenamePrompt &&
+          createdDroneId &&
+          options?.createdDroneAutoRename
+        ) {
+          const createdDroneName = firstText(created?.name, created?.drone?.name);
+          scheduleCreatedDroneAutoRename(
+            options.createdDroneAutoRename,
+            createdDroneId,
+            autoRenamePrompt,
+            createdDroneName,
+          );
           return { ...created, autoRenameScheduled: true };
         }
         return created;
+      }
+
+      if (operation === 'sidebar.move') {
+        return await sidebarCommands.move(payload);
       }
 
       const droneId = requiredText(payload.droneId, 'droneId');
       const encodedDrone = encodeURIComponent(droneId);
       if (operation === 'drone.rename') {
         const newName = requiredText(payload.newName, 'newName');
+        if (options?.renameDrone) {
+          return await options.renameDrone({
+            droneRef: droneId,
+            newName,
+            source: 'drone-hub-mobile',
+          });
+        }
         return await localHubRequest(access, `/api/drones/${encodedDrone}/rename`, {
           method: 'POST',
           body: JSON.stringify({ newName, source: 'drone-hub-mobile' }),
-        });
-      }
-      if (operation === 'drone.pin.update') {
-        return await localHubRequest(access, '/api/settings/ui-preferences/pinned-drones', {
-          method: 'POST',
-          body: JSON.stringify({ droneId, pinned: payload.pinned === true }),
         });
       }
       if (operation === 'drone.delete') {
@@ -725,6 +808,64 @@ export function createDroneControlCapability(
           `/api/drones/${encodedDrone}/repo/pull-requests/${pullNumber}/close`,
           { method: 'POST', body: '{}' },
         );
+      }
+      if (operation === 'files.list') {
+        const directoryPath = optionalText(payload.path) ?? '';
+        const listing = await localHubRequest(
+          access,
+          `/api/drones/${encodedDrone}/fs/list?path=${encodeURIComponent(directoryPath)}`,
+        );
+        return { contentChunk: meshJsonContentChunk(listing, payload.contentOffset) };
+      }
+      if (operation === 'file.action') {
+        const action = requiredText(payload.action, 'action');
+        if (action !== 'create-file' && action !== 'create-directory' && action !== 'rename') {
+          throw Object.assign(new Error('unsupported mobile filesystem action'), {
+            code: 'INVALID_REQUEST',
+          });
+        }
+        const body =
+          action === 'rename'
+            ? {
+                action,
+                path: requiredText(payload.path, 'path'),
+                name: requiredText(payload.name, 'name'),
+              }
+            : {
+                action,
+                targetDir: requiredText(payload.targetDir, 'targetDir'),
+                name: requiredText(payload.name, 'name'),
+              };
+        return await localHubRequest(access, `/api/drones/${encodedDrone}/fs/action`, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+      }
+      if (operation === 'file.write') {
+        const filePath = requiredText(payload.path, 'path');
+        if (typeof payload.content !== 'string') {
+          throw Object.assign(new Error('content must be a string'), { code: 'INVALID_REQUEST' });
+        }
+        const content = payload.content;
+        const contentBytes = Buffer.byteLength(content, 'utf8');
+        if (contentBytes > MOBILE_FILE_WRITE_MAX_BYTES) {
+          throw Object.assign(
+            new Error(
+              `file is too large to edit on mobile (${contentBytes} bytes, max ${MOBILE_FILE_WRITE_MAX_BYTES})`,
+            ),
+            { code: 'FILE_TOO_LARGE' },
+          );
+        }
+        return await localHubRequest(access, `/api/drones/${encodedDrone}/fs/file`, {
+          method: 'POST',
+          body: JSON.stringify({
+            path: filePath,
+            content,
+            ...(optionalText(payload.expectedRevision)
+              ? { expectedRevision: optionalText(payload.expectedRevision) }
+              : {}),
+          }),
+        });
       }
       if (operation === 'file.preview') {
         const filePath = requiredText(payload.path, 'path');
@@ -922,25 +1063,60 @@ export function createDroneControlCapability(
             },
           };
         }
-        const [result, pendingResult] = await Promise.all([
-          localHubRequest(access, chatPath),
-          localHubRequest(access, `${chatPath}/pending`),
-        ]);
+        const messageId = optionalText(payload.messageId);
+        const turnId = optionalText(payload.turnId);
+        const contentOnlyRead = Boolean(messageId || turnId);
+        const turnNumber = Number(payload.turnNumber);
+        const hasTurnNumber = Number.isSafeInteger(turnNumber) && turnNumber > 0;
+        const selectedTurnQuery =
+          turnId && hasTurnNumber
+            ? `selected&turn=${turnNumber}`
+            : turnId || messageId
+              ? 'none'
+              : 'page&limit=100';
+        const before = Number(payload.before);
+        const beforeQuery = Number.isSafeInteger(before) && before > 0 ? `&before=${before}` : '';
+        let legacyTranscriptLoaded = false;
+        let result: any;
+        try {
+          result = await localHubRequest(
+            access,
+            `${chatPath}/state?transcript=${selectedTurnQuery}&pending=${contentOnlyRead ? 'none' : 'all'}&subscriptions=${contentOnlyRead ? '0' : '1'}&readState=${contentOnlyRead ? '0' : '1'}&transcriptMeta=0${beforeQuery}`,
+          );
+        } catch (error: any) {
+          if (error?.code !== 'HUB_410') throw error;
+          const [legacy, pendingResult] = await Promise.all([
+            localHubRequest(access, chatPath),
+            contentOnlyRead
+              ? Promise.resolve(null)
+              : localHubRequest(access, `${chatPath}/pending`),
+          ]);
+          result = {
+            ...legacy,
+            transcripts: Array.isArray(legacy?.turns) ? legacy.turns : [],
+            pending: pendingResult?.pending,
+          };
+          legacyTranscriptLoaded = true;
+        }
         const latestAgentTurnId = optionalText(result?.readState?.latestAgentTurnId) ?? null;
         const latestAgentRevision = Number.isSafeInteger(result?.readState?.latestAgentRevision)
           ? Number(result.readState.latestAgentRevision)
           : 0;
-        const marked = await localHubRequest(access, `${chatPath}/read`, {
-          method: 'POST',
-          body: JSON.stringify({
-            latestAgentTurnId,
-            latestAgentRevision,
-            updatedByDeviceId: context?.sourceDevice?.id ?? null,
-          }),
-        });
+        const subscriptions = contentOnlyRead
+          ? []
+          : compactChatSubscriptions(result?.subscriptions);
+        const marked = contentOnlyRead
+          ? null
+          : await localHubRequest(access, `${chatPath}/read`, {
+              method: 'POST',
+              body: JSON.stringify({
+                latestAgentTurnId,
+                latestAgentRevision,
+                updatedByDeviceId: context?.sourceDevice?.id ?? null,
+              }),
+            });
         if (result?.agent?.kind === 'native') {
           const { nativeChatId, snapshot: ensured } = await resolveNativeChat();
-          const messageId = optionalText(payload.messageId);
           if (messageId) {
             const entry = await localHubRequest(
               access,
@@ -957,7 +1133,7 @@ export function createDroneControlCapability(
           }
           const history = await localHubRequest(
             access,
-            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=200${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
+            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=60${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
           );
           const nativeResponse = compactNativeChatReadResponse({
             nativeChatId,
@@ -977,11 +1153,11 @@ export function createDroneControlCapability(
               result.agentPermissionMode ??
               'full-access',
             approvalPolicy: nativeResponse.thread?.approvalPolicy ?? result.approvalPolicy ?? 'ask',
+            ...(subscriptions ? { subscriptions } : {}),
           };
         }
-        const turnId = optionalText(payload.turnId);
         if (turnId) {
-          const turn = (Array.isArray(result?.turns) ? result.turns : []).find(
+          let turn = (Array.isArray(result?.transcripts) ? result.transcripts : []).find(
             (item: any, index: number) => {
               const itemId = String(item?.id ?? '').trim();
               const turnNumber = Number(item?.turn);
@@ -991,6 +1167,20 @@ export function createDroneControlCapability(
               );
             },
           );
+          if (!turn && !hasTurnNumber && !legacyTranscriptLoaded) {
+            const legacy = await localHubRequest(access, chatPath);
+            turn = (Array.isArray(legacy?.turns) ? legacy.turns : []).find(
+              (item: any, index: number) => {
+                const itemId = String(item?.id ?? '').trim();
+                const turnNumber = Number(item?.turn);
+                return (
+                  (itemId ||
+                    (Number.isFinite(turnNumber) ? `turn-${turnNumber}` : `turn-${index}`)) ===
+                  turnId
+                );
+              },
+            );
+          }
           if (!turn)
             throw Object.assign(new Error(`unknown chat turn: ${turnId}`), {
               code: 'NOT_FOUND',
@@ -1004,8 +1194,8 @@ export function createDroneControlCapability(
           };
         }
         const pending = filterCompletedPendingPrompts(
-          compactPendingPrompts(pendingResult?.pending),
-          result.turns,
+          compactPendingPrompts(result?.pending),
+          result.transcripts,
         );
         const metadata = {
           droneId,
@@ -1025,6 +1215,7 @@ export function createDroneControlCapability(
             result.approvalPolicy === 'agent-decides' || result.approvalPolicy === 'never'
               ? result.approvalPolicy
               : 'ask',
+          ...(subscriptions ? { subscriptions } : {}),
         };
         const turnBudget = Math.max(
           16 * 1024,
@@ -1032,7 +1223,11 @@ export function createDroneControlCapability(
         );
         return {
           ...metadata,
-          ...boundedDroneChatPage(result.turns, payload.before, turnBudget),
+          ...boundedDroneChatPage(
+            result.transcripts,
+            legacyTranscriptLoaded ? payload.before : undefined,
+            turnBudget,
+          ),
         };
       }
       if (operation === 'chat.models') {
@@ -1199,6 +1394,7 @@ export function createDroneControlCapability(
           );
         }
         const prompt = String(payload.prompt ?? '').trim();
+        const userTimeZone = optionalText(payload.userTimeZone);
         const deliveryMode =
           payload.deliveryMode === 'asap'
             ? 'asap'
@@ -1231,6 +1427,7 @@ export function createDroneControlCapability(
               prompt,
               attachments,
               deliveryMode,
+              userTimeZone,
             );
             return {
               accepted: true,
@@ -1244,6 +1441,7 @@ export function createDroneControlCapability(
             body: JSON.stringify({
               prompt,
               attachments,
+              ...(userTimeZone ? { userTimeZone } : {}),
               ...(deliveryMode ? { deliveryMode } : {}),
             }),
           });

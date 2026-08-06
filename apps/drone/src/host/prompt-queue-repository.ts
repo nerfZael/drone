@@ -871,6 +871,28 @@ export class PromptQueueRepository {
       };
     });
   }
+
+  async cancelPendingForDrone(opts: { droneId: string; error?: string }): Promise<number> {
+    const cancelledAt = new Date().toISOString();
+    const error = String(opts.error ?? 'Drone failed to start.').trim() || 'Drone failed to start.';
+    return await this.database.writeTransaction('cancel failed drone prompt queue', (connection) => {
+      const info = connection
+        .prepare(
+          `UPDATE prompts
+           SET state = 'cancelled', updated_at = ?, last_error = ?,
+               lease_owner = NULL, lease_expires_at = NULL,
+               payload_json = json_set(
+                 payload_json,
+                 '$.state', 'cancelled',
+                 '$.error', ?,
+                 '$.updatedAt', ?
+               )
+           WHERE drone_id = ? AND state IN ('queued', 'failed')`,
+        )
+        .run(cancelledAt, error, error, cancelledAt, opts.droneId);
+      return Number(info.changes ?? 0);
+    });
+  }
 }
 
 let cachedRepository: { database: HubDatabase; repository: PromptQueueRepository } | null = null;

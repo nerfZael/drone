@@ -18,6 +18,7 @@ export type ShortcutActionId =
   | 'openCanvasTab'
   | 'openBrowserTab'
   | 'openFilesTab'
+  | 'openQuickOpen'
   | 'openTerminalTab';
 
 export type ShortcutBinding = {
@@ -130,8 +131,13 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   },
   {
     id: 'openFilesTab',
-    label: 'Open Files tab',
-    description: 'Opens the Files workspace pane.',
+    label: 'Open Editor',
+    description: 'Opens the Editor with its built-in File Explorer.',
+  },
+  {
+    id: 'openQuickOpen',
+    label: 'Quick open file',
+    description: 'Searches files in the selected drone and opens the chosen result in the Editor.',
   },
   {
     id: 'openTerminalTab',
@@ -160,6 +166,7 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openCanvasTab: { key: 'x', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openBrowserTab: { key: 'b', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openFilesTab: { key: 'f', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openQuickOpen: { key: 'p', mod: true, ctrl: false, meta: false, alt: false, shift: false },
   openTerminalTab: { key: 't', mod: false, ctrl: false, meta: false, alt: false, shift: false },
 };
 
@@ -233,6 +240,7 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     openCanvasTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openCanvasTab),
     openBrowserTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openBrowserTab),
     openFilesTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openFilesTab),
+    openQuickOpen: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openQuickOpen),
     openTerminalTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openTerminalTab),
   };
 }

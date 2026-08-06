@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { droneRootPath } from '../host/paths';
 
+const EMPTY_GIT_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+
 export type RepoDiffKind = 'staged' | 'unstaged';
 
 export type RepoChangeType =
@@ -60,6 +62,9 @@ export type RepoChangesSummary = {
     unstaged: number;
     untracked: number;
     conflicted: number;
+    additions: number;
+    deletions: number;
+    modified: number;
   };
 };
 
@@ -399,6 +404,22 @@ export function parseGitNumStatZ(raw: string): RepoNumStatEntry[] {
   return out;
 }
 
+export function repoLineChangeCounts(
+  entries: Array<{ additions: number; deletions: number }>,
+): { additions: number; deletions: number; modified: number } {
+  return entries.reduce<{ additions: number; deletions: number; modified: number }>(
+    (counts, entry) => {
+      const additions = Math.max(0, Number(entry.additions) || 0);
+      const deletions = Math.max(0, Number(entry.deletions) || 0);
+      counts.additions += additions;
+      counts.deletions += deletions;
+      counts.modified += Math.min(additions, deletions);
+      return counts;
+    },
+    { additions: 0, deletions: 0, modified: 0 },
+  );
+}
+
 export function parseGitCommitList(raw: string): RepoCommitSummary[] {
   return String(raw ?? '')
     .split('\x1e')
@@ -618,38 +639,81 @@ export function parseGitStatusPorcelainV2Z(raw: string): RepoChangesSummary {
       unstaged,
       untracked,
       conflicted,
+      additions: 0,
+      deletions: 0,
+      modified: 0,
     },
   };
 }
 
-async function hashHostFileContents(repoRoot: string, repoRelativePath: string): Promise<string | null> {
+type WorktreeFileMetadata = { hash: string; lineCount: number; binary: boolean };
+
+async function readHostWorktreeFileMetadata(repoRoot: string, repoRelativePath: string): Promise<WorktreeFileMetadata | null> {
   const absPath = path.resolve(repoRoot, repoRelativePath);
   const repoWithSep = repoRoot.endsWith(path.sep) ? repoRoot : `${repoRoot}${path.sep}`;
   if (absPath !== repoRoot && !absPath.startsWith(repoWithSep)) return null;
   try {
-    const content = await fs.readFile(absPath);
+    const stat = await fs.lstat(absPath);
+    if (!stat.isFile() && !stat.isSymbolicLink()) return null;
+    const content = stat.isSymbolicLink()
+      ? await fs.readlink(absPath, { encoding: 'buffer' })
+      : await fs.readFile(absPath);
     const header = Buffer.from(`blob ${content.length}\0`, 'utf8');
-    return crypto.createHash('sha1').update(header).update(content).digest('hex');
+    const binary = content.includes(0);
+    let lineCount = 0;
+    if (!binary && content.length > 0) {
+      for (const byte of content) {
+        if (byte === 10) lineCount += 1;
+      }
+      if (content[content.length - 1] !== 10) lineCount += 1;
+    }
+    return {
+      hash: crypto.createHash('sha1').update(header).update(content).digest('hex'),
+      lineCount,
+      binary,
+    };
   } catch {
     return null;
   }
 }
 
 async function applyWorkingTreeReviewMetadata(repoRoot: string, summary: RepoChangesSummary): Promise<RepoChangesSummary> {
-  const entries = await Promise.all(
+  const trackedNumStatArgs = (baseline: string) => [
+    '-C', repoRoot, 'diff', '--numstat', '-z', baseline, '--',
+  ];
+  const trackedNumStatPromise = runLocalOrThrow('git', trackedNumStatArgs('HEAD')).catch(() =>
+    runLocalOrThrow('git', trackedNumStatArgs(EMPTY_GIT_TREE_SHA)).catch(() => ''),
+  );
+  const entryResults = await Promise.all(
     summary.entries.map(async (entry) => {
       const needsWorktreeHash = entry.isUntracked || (entry.unstagedType !== null && entry.unstagedType !== 'deleted');
-      const worktreeContentHash = needsWorktreeHash ? await hashHostFileContents(repoRoot, entry.path) : null;
+      const metadata = needsWorktreeHash ? await readHostWorktreeFileMetadata(repoRoot, entry.path) : null;
       return {
-        ...entry,
-        reviewKey: repoChangeReviewKey(entry.path, entry.originalPath),
-        reviewToken: buildWorkingTreeRepoChangeReviewToken(entry, worktreeContentHash),
+        entry: {
+          ...entry,
+          reviewKey: repoChangeReviewKey(entry.path, entry.originalPath),
+          reviewToken: buildWorkingTreeRepoChangeReviewToken(entry, metadata?.hash ?? null),
+        },
+        metadata,
       };
     })
   );
+  const entries = entryResults.map((result) => result.entry);
+  const numStatEntries = parseGitNumStatZ(await trackedNumStatPromise);
+  for (const result of entryResults) {
+    if (result.entry.isUntracked && result.metadata && !result.metadata.binary) {
+      numStatEntries.push({
+        path: result.entry.path,
+        originalPath: null,
+        additions: result.metadata.lineCount,
+        deletions: 0,
+      });
+    }
+  }
   return {
     ...summary,
     entries,
+    counts: { ...summary.counts, ...repoLineChangeCounts(numStatEntries) },
   };
 }
 
@@ -754,104 +818,6 @@ export async function gitResolveRemoteBranchForCreate(repoPathRaw: string, remot
     repoRoot,
     remoteBranch,
     oid,
-  };
-}
-
-export type HostRepoPullBeforeCreateErrorCode =
-  | 'not_repo'
-  | 'detached_head'
-  | 'missing_upstream'
-  | 'pull_non_fast_forward'
-  | 'pull_failed';
-
-export class HostRepoPullBeforeCreateError extends Error {
-  code: HostRepoPullBeforeCreateErrorCode;
-  details: string;
-
-  constructor(code: HostRepoPullBeforeCreateErrorCode, message: string, details?: string) {
-    super(message);
-    this.name = 'HostRepoPullBeforeCreateError';
-    this.code = code;
-    this.details = String(details ?? '').trim();
-  }
-}
-
-export function isHostRepoPullBeforeCreateError(err: unknown): err is HostRepoPullBeforeCreateError {
-  return err instanceof HostRepoPullBeforeCreateError;
-}
-
-export async function gitPullHostBranchBeforeCreate(repoPathRaw: string): Promise<{
-  repoRoot: string;
-  branch: string;
-  upstream: string;
-  beforeSha: string | null;
-  afterSha: string | null;
-  changed: boolean;
-}> {
-  const repoPath = String(repoPathRaw ?? '').trim();
-  if (!repoPath) {
-    throw new HostRepoPullBeforeCreateError('not_repo', 'missing repo path');
-  }
-
-  let repoRoot = '';
-  try {
-    repoRoot = await gitTopLevel(repoPath);
-  } catch (e: any) {
-    throw new HostRepoPullBeforeCreateError('not_repo', `path is not a git repository: ${repoPath}`, e?.message ?? String(e));
-  }
-
-  const status = await gitRepoChangesSummary(repoRoot);
-  const branch = String(status.branch.head ?? '').trim();
-  if (!branch) {
-    throw new HostRepoPullBeforeCreateError(
-      'detached_head',
-      'host repo is in detached HEAD; checkout a branch or disable pull-before-create',
-    );
-  }
-
-  const upstream = String(status.branch.upstream ?? '').trim();
-  if (!upstream) {
-    throw new HostRepoPullBeforeCreateError(
-      'missing_upstream',
-      `branch "${branch}" has no upstream tracking branch; set one or disable pull-before-create`,
-    );
-  }
-
-  const beforeSha =
-    /^[0-9a-f]{40}$/i.test(String(status.branch.oid ?? '').trim()) ? String(status.branch.oid ?? '').trim().toLowerCase() : null;
-
-  const pull = await runLocal('git', ['-C', repoRoot, 'pull', '--ff-only', '--no-rebase']);
-  if (pull.code !== 0) {
-    const details = `${String(pull.stderr ?? '')}\n${String(pull.stdout ?? '')}`.trim();
-    const nonFastForward =
-      /not possible to fast-forward|divergent branches|non-fast-forward|fatal:\s+need to specify how to reconcile divergent branches/i.test(
-        details,
-      );
-    throw new HostRepoPullBeforeCreateError(
-      nonFastForward ? 'pull_non_fast_forward' : 'pull_failed',
-      nonFastForward
-        ? `branch "${branch}" cannot fast-forward from "${upstream}"; rebase/merge manually or disable pull-before-create`
-        : `git pull --ff-only failed for branch "${branch}"`,
-      details,
-    );
-  }
-
-  let afterSha: string | null = null;
-  try {
-    const raw = await runLocalOrThrow('git', ['-C', repoRoot, 'rev-parse', 'HEAD']);
-    const parsed = String(raw ?? '').trim().toLowerCase();
-    afterSha = /^[0-9a-f]{40}$/.test(parsed) ? parsed : null;
-  } catch {
-    afterSha = null;
-  }
-
-  return {
-    repoRoot,
-    branch,
-    upstream,
-    beforeSha,
-    afterSha,
-    changed: Boolean(beforeSha && afterSha && beforeSha !== afterSha),
   };
 }
 

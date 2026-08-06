@@ -5,6 +5,7 @@ import { createEditorRouteHandler } from '../src/hub/routes/editor-routes';
 import { registerFleetRoutes } from '../src/hub/routes/fleet-routes';
 import { registerOperationalRoutes } from '../src/hub/routes/operational-routes';
 import { registerSettingsRoutes } from '../src/hub/routes/settings-routes';
+import { registerSidebarRoutes } from '../src/hub/routes/sidebar-routes';
 import { registerSystemRoutes } from '../src/hub/routes/system-routes';
 import { createTerminalRouteHandler } from '../src/hub/routes/terminal-routes';
 
@@ -131,7 +132,12 @@ describe('extracted Hub route modules', () => {
         idle: true,
       }),
       resolveGroqApiKeySettings: async () => ({ apiKey: null }),
-      resolveSpeechSettings: async () => ({ enabled: true, muted: false, volume: 1, voice: 'troy' }),
+      resolveSpeechSettings: async () => ({
+        enabled: true,
+        muted: false,
+        volume: 1,
+        voice: 'troy',
+      }),
       emitAssistantUiAction: () => {},
       hubLog: () => {},
     });
@@ -168,7 +174,12 @@ describe('extracted Hub route modules', () => {
       loadCanonicalActiveModel: async () => ({ drones: {} }),
       summarizeAssistantChatIdle: () => null,
       resolveGroqApiKeySettings: async () => ({ apiKey: 'groq-secret' }),
-      resolveSpeechSettings: async () => ({ enabled: true, muted: false, volume: 0.75, voice: 'troy' }),
+      resolveSpeechSettings: async () => ({
+        enabled: true,
+        muted: false,
+        volume: 0.75,
+        voice: 'troy',
+      }),
       emitAssistantUiAction: (action: unknown, threadId: string) => {
         emittedActions.push({ action, threadId });
       },
@@ -392,41 +403,99 @@ describe('extracted Hub route modules', () => {
     ]);
   });
 
-  test('passes a pinned-drone batch to one atomic settings update', async () => {
-    const { router, request, responses } = routeHarness({
-      droneIds: ['alpha', 'bravo'],
-      pinned: true,
-    });
-    const updates: Array<{ droneIds: unknown; pinned: boolean }> = [];
+  test('notifies desktop clients after a general UI preference write', async () => {
+    const requestBody = {
+      uiPreferences: { sidebarNodeOrderByParent: { group: ['drone:a', 'drone:b'] } },
+      expectedVersion: 12,
+    };
+    const { router, request, responses } = routeHarness(requestBody);
+    const writes: Array<{ preferences: unknown; expectedVersion: unknown }> = [];
     let notificationCount = 0;
     registerSettingsRoutes(router, {
-      updatePinnedDronePreference: async (droneIds: unknown, pinned: boolean) => {
-        updates.push({ droneIds, pinned });
-        return {
-          uiPreferences: { pinnedDroneIds: ['alpha', 'bravo'] },
-          updatedAt: '2026-07-22T12:00:00.000Z',
-          version: 2,
-        };
+      upsertStoredUiPreferencesSettings: async (preferences: unknown, expectedVersion: unknown) => {
+        writes.push({ preferences, expectedVersion });
       },
-      notifyPinnedDronesChanged: async () => {
+      notifyUiPreferencesChanged: async () => {
         notificationCount += 1;
+      },
+      resolveUiPreferencesSettingsResponse: async () => ({
+        ok: true,
+        ...requestBody,
+        updatedAt: '2026-08-06T08:24:17.707Z',
+        version: 13,
+      }),
+    } as any);
+
+    expect(await request('POST', '/api/settings/ui-preferences')).toBe(true);
+    expect(writes).toEqual([
+      { preferences: requestBody.uiPreferences, expectedVersion: requestBody.expectedVersion },
+    ]);
+    expect(notificationCount).toBe(1);
+    expect(responses).toHaveLength(1);
+    expect(responses[0]).toMatchObject({ status: 200, body: { ok: true, version: 13 } });
+  });
+
+  test('publishes a combined sidebar move through the registry snapshot stream', async () => {
+    const requestBody = {
+      uiPreferences: { sidebarNodeOrderByParent: { group: ['drone:b', 'drone:a'] } },
+      expectedVersion: 13,
+      notificationMode: 'sidebar_snapshot',
+    };
+    const { router, request } = routeHarness(requestBody);
+    let generalNotifications = 0;
+    let snapshotNotifications = 0;
+    registerSettingsRoutes(router, {
+      upsertStoredUiPreferencesSettings: async () => undefined,
+      notifyUiPreferencesChanged: async () => {
+        generalNotifications += 1;
+      },
+      notifyUiPreferencesSnapshotChanged: async () => {
+        snapshotNotifications += 1;
+      },
+      resolveUiPreferencesSettingsResponse: async () => ({
+        ok: true,
+        uiPreferences: requestBody.uiPreferences,
+        updatedAt: '2026-08-06T10:00:00.000Z',
+        version: 14,
+      }),
+    } as any);
+
+    expect(await request('POST', '/api/settings/ui-preferences')).toBe(true);
+    expect({ generalNotifications, snapshotNotifications }).toEqual({
+      generalNotifications: 0,
+      snapshotNotifications: 1,
+    });
+  });
+
+  test('routes desktop sidebar commands through the shared command service', async () => {
+    const body = {
+      mutationId: 'desktop-1',
+      intent: { kind: 'set-pinned', droneIds: ['alpha'], pinned: true },
+    };
+    const { router, request, responses } = routeHarness(body);
+    const received: unknown[] = [];
+    registerSidebarRoutes(router, {
+      move: async (value: unknown) => {
+        received.push(value);
+        return {
+          ok: true,
+          mutationId: 'desktop-1',
+          version: 2,
+          uiPreferences: {
+            sidebarNodeOrderByParent: {},
+            sidebarChatOrderByDrone: {},
+            pinnedDroneIds: ['alpha'],
+          },
+        };
       },
     } as any);
 
-    expect(await request('POST', '/api/settings/ui-preferences/pinned-drones')).toBe(true);
-    expect(updates).toEqual([{ droneIds: ['alpha', 'bravo'], pinned: true }]);
-    expect(notificationCount).toBe(1);
-    expect(responses).toEqual([
-      {
-        status: 200,
-        body: {
-          ok: true,
-          uiPreferences: { pinnedDroneIds: ['alpha', 'bravo'] },
-          updatedAt: '2026-07-22T12:00:00.000Z',
-          version: 2,
-        },
-      },
-    ]);
+    expect(await request('POST', '/api/sidebar/move')).toBe(true);
+    expect(received).toEqual([body]);
+    expect(responses[0]).toMatchObject({
+      status: 200,
+      body: { ok: true, mutationId: 'desktop-1', version: 2 },
+    });
   });
 
   test('saves speech settings and notifies active MCP sessions', async () => {
@@ -455,9 +524,11 @@ describe('extracted Hub route modules', () => {
     expect(await request('POST', '/api/settings/speech')).toBe(true);
     expect(stored).toEqual(requested);
     expect(notified).toEqual({ ...requested, voices: ['hannah', 'troy'] });
-    expect(responses).toEqual([{
-      status: 200,
-      body: { ok: true, speech: { ...requested, voices: ['hannah', 'troy'] } },
-    }]);
+    expect(responses).toEqual([
+      {
+        status: 200,
+        body: { ok: true, speech: { ...requested, voices: ['hannah', 'troy'] } },
+      },
+    ]);
   });
 });

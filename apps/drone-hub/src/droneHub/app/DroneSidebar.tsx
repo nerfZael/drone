@@ -1,9 +1,10 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { useDraggable, useDroppable } from '@dnd-kit/core';
+import { useDroppable } from '@dnd-kit/core';
 import {
   buildRepoSidebarModel,
   resolvePinnedSidebarDrones,
+  type SidebarMoveIntent,
 } from '@drone/hub-model/sidebar';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, RepoSummary } from '../types';
@@ -37,9 +38,7 @@ import {
   IconFolder,
   IconFolderGit,
   IconFolderOutline,
-  IconList,
   IconMore,
-  IconPencil,
   IconPlus,
   IconSettings,
   IconSidebarCollapse,
@@ -48,12 +47,9 @@ import {
   SkeletonLine,
 } from './icons';
 import { DesktopDevicePicker } from './DesktopDevicePicker';
-import { SidebarDroneTreeList, type SidebarDroneTreeListSharedProps } from './SidebarDroneTreeList';
 import { GroupedSidebarTree } from './GroupedSidebarTree';
 import { createCanvasChatNodeId } from './app-config';
 import { droneChatRequiresApproval, normalizedDroneChats } from './chat-node-helpers';
-import { SidebarReorderDropIndicator } from './sidebar-reorder-ui';
-import { buildSidebarDroneTree } from './sidebar-drone-tree';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import {
   migrateSidebarGroupEntryOrderMapToIds,
@@ -61,14 +57,10 @@ import {
   orderSidebarEntries,
   orderSidebarGroups,
   sidebarGroupOrderToken,
-  type SidebarGroupDropPlacement,
-  type SidebarGroupOrderKind,
 } from './sidebar-group-order';
 import {
   buildSidebarFolderTree,
-  flattenSidebarFolderTree,
   sidebarFolderDisplayLabel,
-  type SidebarFolderNode,
 } from './sidebar-folder-tree';
 import {
   buildSidebarNodeTree,
@@ -83,6 +75,7 @@ import {
   rewriteSidebarRepoScopedGroupMapKeysByPrefix,
 } from './sidebar-repo-scoped-groups';
 import {
+  mergeVisibleSidebarNodeOrderByParent,
   removeSidebarRepoScopedNodeOrderByGroupPrefix,
   SIDEBAR_ROOT_PARENT_ID,
   sidebarChatSidebarNodeId,
@@ -94,7 +87,6 @@ import {
 import {
   useDroneHubActiveDrag,
   type SidebarDragGroupRef,
-  type SidebarGroupDragData,
 } from './drone-hub-dnd';
 import type { SidebarGroup } from './use-sidebar-view-model';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
@@ -118,7 +110,7 @@ import {
   type ChatEditorState,
   type FolderEditorState,
 } from './use-sidebar-interactions';
-import { useSidebarRootDnd } from './use-sidebar-root-dnd';
+import { useSidebarUngroupedDrop } from './use-sidebar-ungrouped-drop';
 import { useDroneHubRuntimeStore } from './use-drone-hub-runtime-store';
 import { isDroneStartingOrSeeding } from './helpers';
 import { AddDroneToGroupDialog } from './AddDroneToGroupDialog';
@@ -142,7 +134,6 @@ import {
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 308;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
-const GROUP_HEADER_SINGLE_CLICK_DELAY_MS = 180;
 const AUTO_MINIMIZE_COLLAPSE_DELAY_MS = 90;
 const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
 const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
@@ -700,7 +691,7 @@ function StaticReadOnlySidebarTree({
           </div>
         ) : null}
         {childIds.length > 0 ? (
-          <div className="ml-2.5 flex flex-col gap-0.5 border-l border-[var(--border-subtle)] pl-1.5">
+          <div className="ml-2.5 flex flex-col gap-0.5 border-l border-[var(--tree-guide)] pl-1.5">
             {childIds.map((childId) => renderNode(childId, ancestorNodeIds))}
           </div>
         ) : null}
@@ -775,639 +766,6 @@ function isHeaderActionTarget(target: EventTarget | null): boolean {
     target.closest('button,a,input,textarea,select,[role="button"],[role="menuitem"]'),
   );
 }
-
-type SidebarGroupSectionProps = {
-  groupRef: SidebarDragGroupRef;
-  groupLabel: string;
-  groupToken: string;
-  kind: SidebarGroupOrderKind;
-  actualItems: DroneSummary[];
-  placeholderOnly: boolean;
-  isVirtualGroup: boolean;
-  hoveredRepoPath: string;
-  hoveredGroupName: string;
-  collapsed: boolean;
-  isDeletingGroup: boolean;
-  isRenamingGroup: boolean;
-  isDropTarget: boolean;
-  isReorderTarget: boolean;
-  isReorderDragging: boolean;
-  isHiddenGroup: boolean;
-  canRenameGroup: boolean;
-  pinGroupActionsVisible: boolean;
-  selectedGroupMultiChat: string | null;
-  dragOverSidebarGroup: { token: string; placement: SidebarGroupDropPlacement } | null;
-  showMoveDropZone: boolean;
-  sharedDroneTreeListProps: SidebarDroneTreeListSharedProps;
-  groupTree: ReturnType<typeof buildSidebarDroneTree>;
-  onToggleGroupCollapsed: (group: string) => void;
-  onRenameGroup: (group: string) => void;
-  toggleSidebarGroupHidden: (target: SidebarDragGroupRef) => void;
-  onOpenGroupMultiChat: (group: string) => void;
-};
-
-function stopGroupHeaderActionInteraction(event: React.SyntheticEvent) {
-  event.stopPropagation();
-}
-
-function SidebarGroupSection({
-  groupRef,
-  groupLabel,
-  groupToken,
-  kind,
-  actualItems,
-  placeholderOnly,
-  isVirtualGroup,
-  hoveredRepoPath,
-  hoveredGroupName,
-  collapsed,
-  isDeletingGroup,
-  isRenamingGroup,
-  isDropTarget,
-  isReorderTarget,
-  isReorderDragging,
-  isHiddenGroup,
-  canRenameGroup,
-  pinGroupActionsVisible,
-  selectedGroupMultiChat,
-  dragOverSidebarGroup,
-  showMoveDropZone,
-  sharedDroneTreeListProps,
-  groupTree,
-  onToggleGroupCollapsed,
-  onRenameGroup,
-  toggleSidebarGroupHidden,
-  onOpenGroupMultiChat,
-}: SidebarGroupSectionProps) {
-  const clickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const groupDragData = React.useMemo<SidebarGroupDragData | null>(() => {
-    const droneIds = Array.from(
-      new Set(actualItems.map((item) => String(item?.id ?? '').trim()).filter(Boolean)),
-    );
-    if (droneIds.length === 0) return null;
-    return {
-      type: 'sidebar-group',
-      groupRef,
-      groupLabel,
-      droneIds,
-    };
-  }, [actualItems, groupLabel, groupRef]);
-  const sidebarDndEnabled = sharedDroneTreeListProps.sidebarDndEnabled;
-  const {
-    attributes,
-    listeners,
-    setNodeRef: setDraggableNodeRef,
-  } = useDraggable({
-    id: `sidebar-group:${groupToken}`,
-    data: groupDragData ?? undefined,
-    disabled: !sidebarDndEnabled || !groupDragData,
-  });
-  const { setNodeRef: setReorderDropNodeRef } = useDroppable({
-    id: `sidebar-group-reorder:${groupToken}`,
-    data: {
-      type: 'sidebar-group-reorder',
-      groupRef,
-    },
-    disabled: !sidebarDndEnabled || !groupDragData,
-  });
-  const { setNodeRef: setMoveDropNodeRef } = useDroppable({
-    id: `sidebar-group-move:${groupToken}`,
-    data: {
-      type: 'sidebar-group-move',
-      group: groupRef.group,
-      kind: groupRef.kind,
-    },
-    disabled: !sidebarDndEnabled || isVirtualGroup,
-  });
-  const setHeaderNodeRef = React.useCallback(
-    (node: HTMLDivElement | null) => {
-      setDraggableNodeRef(node);
-      setReorderDropNodeRef(node);
-    },
-    [setDraggableNodeRef, setReorderDropNodeRef],
-  );
-  const actionsVisibleClass = pinGroupActionsVisible
-    ? 'opacity-100 pointer-events-auto'
-    : 'opacity-0 pointer-events-none group-hover/group-header:opacity-100 group-hover/group-header:pointer-events-auto';
-  const actionRailWidthClass = canRenameGroup
-    ? 'group-hover/group-header:w-[92px]'
-    : 'group-hover/group-header:w-[60px]';
-  const pinnedActionRailWidthClass = canRenameGroup ? 'w-[92px]' : 'w-[60px]';
-  const clearClickTimer = React.useCallback(() => {
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-    }
-  }, []);
-  React.useEffect(() => clearClickTimer, [clearClickTimer]);
-  const scheduleToggleGroupCollapsed = React.useCallback(() => {
-    clearClickTimer();
-    clickTimerRef.current = setTimeout(() => {
-      clickTimerRef.current = null;
-      onToggleGroupCollapsed(groupRef.group);
-    }, GROUP_HEADER_SINGLE_CLICK_DELAY_MS);
-  }, [clearClickTimer, groupRef.group, onToggleGroupCollapsed]);
-  const handleGroupHeaderDoubleClick = React.useCallback(
-    (event: React.MouseEvent<HTMLElement>) => {
-      if (event.target instanceof Element && event.target.closest('[data-group-drag-block="true"]'))
-        return;
-      event.preventDefault();
-      clearClickTimer();
-      onToggleGroupCollapsed(groupRef.group);
-    },
-    [clearClickTimer, groupRef.group, onToggleGroupCollapsed],
-  );
-
-  return (
-    <div
-      data-drone-sidebar-group={groupRef.group}
-      data-drone-sidebar-group-kind={kind}
-      data-drone-sidebar-group-name={hoveredGroupName || undefined}
-      data-drone-sidebar-repo-path={hoveredRepoPath || undefined}
-      className={`relative rounded-[var(--radius-medium)] border bg-[var(--surface-inset)] overflow-hidden transition-colors ${
-        isDropTarget
-          ? 'border-[var(--accent-muted)] ring-1 ring-[var(--accent-muted)]'
-          : 'border-[var(--border-subtle)]'
-      } ${isReorderDragging ? 'opacity-70' : isHiddenGroup ? 'opacity-75' : ''}`}
-    >
-      {isReorderTarget && dragOverSidebarGroup ? (
-        <SidebarReorderDropIndicator placement={dragOverSidebarGroup.placement} />
-      ) : null}
-      <div
-        ref={setHeaderNodeRef}
-        className={`group/group-header relative w-full px-3 py-2 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] transition-colors ${
-          isDropTarget ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--hover)]'
-        } ${sidebarDndEnabled && groupDragData ? 'cursor-grab touch-none active:cursor-grabbing' : ''}`}
-        onDoubleClick={handleGroupHeaderDoubleClick}
-        {...(attributes as unknown as Record<string, unknown>)}
-        {...(listeners as unknown as Record<string, unknown>)}
-      >
-        <button
-          type="button"
-          onClick={(event) => {
-            if (event.detail > 1) return;
-            scheduleToggleGroupCollapsed();
-          }}
-          className="flex items-center gap-2 min-w-0 text-left flex-1"
-          title={collapsed ? 'Expand group' : 'Collapse group'}
-        >
-          <IconChevron down={!collapsed} className="flex-shrink-0 text-[var(--muted-dim)]" />
-          <IconFolder className="flex-shrink-0 text-[var(--muted-dim)] opacity-50" />
-          <span className={`${sidebarFolderLabelClass} text-[var(--text-11)] font-normal`}>
-            {groupLabel}
-          </span>
-        </button>
-        <div
-          className={`relative flex-shrink-0 transition-[width] duration-150 ${
-            pinGroupActionsVisible ? pinnedActionRailWidthClass : `w-0 ${actionRailWidthClass}`
-          }`}
-        >
-          <div
-            data-group-drag-block="true"
-            className={`absolute inset-y-0 right-0 flex items-center justify-end gap-1 ${actionsVisibleClass}`}
-            onPointerDown={stopGroupHeaderActionInteraction}
-            onMouseDown={stopGroupHeaderActionInteraction}
-          >
-            {canRenameGroup ? (
-              <button
-                type="button"
-                onClick={() => onRenameGroup(groupRef.group)}
-                disabled={isDeletingGroup || isRenamingGroup}
-                aria-busy={isRenamingGroup}
-                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                  isDeletingGroup || isRenamingGroup
-                    ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                    : 'bg-[var(--accent-subtle)] border-[var(--accent-border)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
-                }`}
-                title={
-                  isRenamingGroup
-                    ? `Renaming group "${groupLabel}"…`
-                    : `Rename group "${groupLabel}"`
-                }
-                aria-label={
-                  isRenamingGroup
-                    ? `Renaming group "${groupLabel}"`
-                    : `Rename group "${groupLabel}"`
-                }
-              >
-                {isRenamingGroup ? (
-                  <IconSpinner className="opacity-90" />
-                ) : (
-                  <IconPencil className="opacity-90" />
-                )}
-              </button>
-            ) : null}
-            {!placeholderOnly ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => toggleSidebarGroupHidden(groupRef)}
-                  disabled={isDeletingGroup || isRenamingGroup}
-                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                    isDeletingGroup || isRenamingGroup
-                      ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : isHiddenGroup
-                        ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
-                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
-                  }`}
-                  title={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
-                  aria-label={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
-                >
-                  {isHiddenGroup ? (
-                    <IconEye className="opacity-90" />
-                  ) : (
-                    <IconEyeOff className="opacity-90" />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onOpenGroupMultiChat(groupRef.group)}
-                  disabled={isDeletingGroup}
-                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                    isDeletingGroup
-                      ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : selectedGroupMultiChat === groupRef.group
-                        ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                  }`}
-                  title={`Open "${groupLabel}" multi-chat`}
-                  aria-label={`Open "${groupLabel}" multi-chat`}
-                >
-                  <IconColumns className="opacity-90" />
-                </button>
-              </>
-            ) : null}
-          </div>
-        </div>
-      </div>
-      {!collapsed ? (
-        <div ref={setMoveDropNodeRef} className="px-1.5 py-1.5 flex flex-col gap-0">
-          <SidebarDroneTreeList
-            {...sharedDroneTreeListProps}
-            tree={groupTree}
-            showGroup={false}
-            groupOrderKey={groupToken}
-            groupName={groupRef.group}
-          />
-        </div>
-      ) : showMoveDropZone && !isVirtualGroup ? (
-        <div
-          ref={setMoveDropNodeRef}
-          className={`px-3 py-2 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
-            isDropTarget
-              ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-              : 'text-[var(--muted-dim)]'
-          }`}
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          Drop here to move into {groupLabel}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-type SidebarFolderTreeNodeProps = {
-  node: SidebarFolderNode;
-  activeRepoPath: string;
-  collapsedGroups: Record<string, boolean>;
-  deletingGroups: Record<string, boolean>;
-  renamingGroups: Record<string, boolean>;
-  hiddenSidebarGroupTokenSet: Set<string>;
-  dragOverGroup: string | null;
-  dragOverSidebarGroup: { token: string; placement: SidebarGroupDropPlacement } | null;
-  draggingSidebarGroup: string | null;
-  showMoveDropZone: boolean;
-  selectedFolderPath: string | null;
-  folderEditor: FolderEditorState | null;
-  folderEditorInputRef: React.RefObject<HTMLInputElement>;
-  selectedGroupMultiChat: string | null;
-  sharedDroneTreeListProps: SidebarDroneTreeListSharedProps;
-  onSelectFolder: (path: string) => void;
-  onToggleGroupCollapsed: (group: string) => void;
-  onOpenFolderCreate: (
-    parentPath: string | null,
-    opts?: { anchorPath?: string | null; beforeNodeId?: string | null; repoGroupPath?: string | null },
-  ) => void;
-  onStartRenameFolder: (group: string) => void;
-  onFolderEditorValueChange: (next: string) => void;
-  onSubmitFolderEditor: () => void;
-  onBlurFolderEditor: () => void;
-  onCancelFolderEditor: () => void;
-  toggleSidebarGroupHidden: (target: SidebarDragGroupRef) => void;
-  onOpenGroupMultiChat: (group: string) => void;
-};
-
-function SidebarFolderTreeNode({
-  node,
-  activeRepoPath,
-  collapsedGroups,
-  deletingGroups,
-  renamingGroups,
-  hiddenSidebarGroupTokenSet,
-  dragOverGroup,
-  dragOverSidebarGroup,
-  draggingSidebarGroup,
-  showMoveDropZone,
-  selectedFolderPath,
-  folderEditor,
-  folderEditorInputRef,
-  selectedGroupMultiChat,
-  sharedDroneTreeListProps,
-  onSelectFolder,
-  onToggleGroupCollapsed,
-  onOpenFolderCreate,
-  onStartRenameFolder,
-  onFolderEditorValueChange,
-  onSubmitFolderEditor,
-  onBlurFolderEditor,
-  onCancelFolderEditor,
-  toggleSidebarGroupHidden,
-  onOpenGroupMultiChat,
-}: SidebarFolderTreeNodeProps) {
-  const groupRef = React.useMemo<SidebarDragGroupRef>(
-    () => ({ groupId: node.groupId, group: node.path, kind: 'group' }),
-    [node.groupId, node.path],
-  );
-  const groupToken = React.useMemo(() => sidebarGroupOrderToken(groupRef), [groupRef]);
-  const groupLabel = sidebarFolderDisplayLabel(node);
-  const collapsed = isSidebarGroupCollapsed(collapsedGroups, node.path);
-  const isDeletingGroup = Boolean(deletingGroups[node.path]);
-  const isRenamingGroup = Boolean(renamingGroups[node.path]);
-  const isDropTarget = dragOverGroup === node.path;
-  const isReorderDragging = draggingSidebarGroup === groupToken;
-  const isHiddenGroup = hiddenSidebarGroupTokenSet.has(groupToken);
-  const isSelected = selectedFolderPath === node.path;
-  const canRenameGroup = !isUngroupedGroupName(node.path);
-  const showEditorInline = folderEditor?.targetPath === node.path && folderEditor.mode === 'rename';
-  const showCreateInline =
-    (folderEditor?.anchorPath ?? folderEditor?.parentPath) === node.path &&
-    folderEditor?.mode === 'create';
-  const dragData = React.useMemo<SidebarGroupDragData>(
-    () => ({
-      type: 'sidebar-group',
-      groupRef,
-      groupLabel: node.path,
-      droneIds: [],
-    }),
-    [groupRef, node.path],
-  );
-  const sidebarDndEnabled = sharedDroneTreeListProps.sidebarDndEnabled;
-  const {
-    attributes,
-    listeners,
-    setNodeRef: setDraggableNodeRef,
-  } = useDraggable({
-    id: `sidebar-folder:${groupToken}`,
-    data: dragData,
-    disabled: !sidebarDndEnabled,
-  });
-  const { setNodeRef: setMoveDropNodeRef } = useDroppable({
-    id: `sidebar-group-move:${groupToken}`,
-    data: {
-      type: 'sidebar-group-move',
-      group: node.path,
-      kind: 'group',
-    },
-    disabled: !sidebarDndEnabled,
-  });
-  const setHeaderNodeRef = React.useCallback(
-    (element: HTMLDivElement | null) => {
-      setDraggableNodeRef(element);
-      setMoveDropNodeRef(element);
-    },
-    [setDraggableNodeRef, setMoveDropNodeRef],
-  );
-  const pinGroupActionsVisible =
-    isDeletingGroup || isRenamingGroup || selectedGroupMultiChat === node.path || isSelected;
-  const actionsVisibleClass = pinGroupActionsVisible
-    ? 'opacity-100 pointer-events-auto'
-    : 'opacity-0 pointer-events-none group-hover/folder-row:opacity-100 group-hover/folder-row:pointer-events-auto';
-  const ownDroneTree = React.useMemo(() => buildSidebarDroneTree(node.ownItems), [node.ownItems]);
-  const hoveredRepoPath = String(activeRepoPath ?? '').trim();
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      <div
-        data-drone-sidebar-group={node.path}
-        data-drone-sidebar-group-kind="group"
-        data-drone-sidebar-group-name={node.path}
-        data-drone-sidebar-repo-path={hoveredRepoPath || undefined}
-        className="relative"
-      >
-        <div
-          ref={setHeaderNodeRef}
-          className={`group/folder-row relative flex min-h-8 items-center gap-1 rounded-[var(--radius-medium)] pr-1 transition-colors ${
-            isDropTarget
-              ? 'bg-[var(--accent-subtle)] ring-1 ring-[var(--accent-muted)]'
-              : isSelected
-                ? 'bg-[var(--surface-strong)]'
-                : 'hover:bg-[var(--hover)]'
-          } ${isReorderDragging ? 'opacity-70' : isHiddenGroup ? 'opacity-70' : ''}`}
-          style={{ paddingLeft: `${Math.max(0, node.depth) * 8}px` }}
-        >
-          <button
-            type="button"
-            className={`min-w-0 flex-1 rounded px-1 py-1 text-left ${sidebarDndEnabled ? 'cursor-grab touch-none active:cursor-grabbing' : ''}`}
-            onClick={() => {
-              onSelectFolder(node.path);
-              onToggleGroupCollapsed(node.path);
-            }}
-            {...(attributes as unknown as Record<string, unknown>)}
-            {...(listeners as unknown as Record<string, unknown>)}
-            title={collapsed ? `Expand ${groupLabel}` : `Collapse ${groupLabel}`}
-          >
-            <div className="flex min-w-0 items-center gap-1.5">
-              <IconChevron down={!collapsed} className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)]" />
-              {showEditorInline && folderEditor ? (
-                <input
-                  ref={folderEditorInputRef}
-                  value={folderEditor.value}
-                  onChange={(event) => onFolderEditorValueChange(event.target.value)}
-                  onBlur={onBlurFolderEditor}
-                  onClick={(event) => event.stopPropagation()}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => {
-                    event.stopPropagation();
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      onSubmitFolderEditor();
-                    } else if (event.key === 'Escape') {
-                      event.preventDefault();
-                      onCancelFolderEditor();
-                    }
-                  }}
-                  maxLength={64}
-                  aria-label="Group name"
-                  className="min-w-0 flex-1 appearance-none rounded-none border-0 bg-transparent p-0 text-[var(--text-11)] text-[var(--fg)] shadow-none outline-none ring-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
-                  style={{ border: 0, outline: 'none', boxShadow: 'none' }}
-                />
-              ) : (
-                <span className={`${sidebarFolderLabelClass} text-[var(--text-11)]`} title={node.path}>
-                  {groupLabel}
-                </span>
-              )}
-            </div>
-          </button>
-          <div
-            className={`relative flex-shrink-0 transition-[width] duration-150 ${
-              pinGroupActionsVisible ? 'w-[92px]' : 'w-0 group-hover/folder-row:w-[92px]'
-            }`}
-          >
-            <div
-              className={`absolute inset-y-0 right-0 flex items-center justify-end gap-1 ${actionsVisibleClass}`}
-              onPointerDown={stopGroupHeaderActionInteraction}
-              onMouseDown={stopGroupHeaderActionInteraction}
-            >
-              <button
-                type="button"
-                onClick={() => onOpenFolderCreate(node.path)}
-                className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
-                title={`New subfolder in "${groupLabel}"`}
-                aria-label={`New subfolder in "${groupLabel}"`}
-              >
-                <IconPlus className="opacity-90" />
-              </button>
-              {canRenameGroup ? (
-                <button
-                  type="button"
-                  onClick={() => onStartRenameFolder(node.path)}
-                  disabled={isDeletingGroup || isRenamingGroup}
-                  aria-busy={isRenamingGroup}
-                  className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
-                    isDeletingGroup || isRenamingGroup
-                      ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[var(--accent-subtle)] border-[var(--accent-border)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
-                  }`}
-                  title={`Rename folder "${groupLabel}"`}
-                  aria-label={`Rename folder "${groupLabel}"`}
-                >
-                  {isRenamingGroup ? (
-                    <IconSpinner className="opacity-90" />
-                  ) : (
-                    <IconPencil className="opacity-90" />
-                  )}
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => toggleSidebarGroupHidden(groupRef)}
-                className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
-                  isHiddenGroup
-                    ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
-                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
-                }`}
-                title={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
-                aria-label={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
-              >
-                {isHiddenGroup ? (
-                  <IconEye className="opacity-90" />
-                ) : (
-                  <IconEyeOff className="opacity-90" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => onOpenGroupMultiChat(node.path)}
-                className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
-                  selectedGroupMultiChat === node.path
-                    ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                }`}
-                title={`Open "${groupLabel}" multi-chat`}
-                aria-label={`Open "${groupLabel}" multi-chat`}
-              >
-                <IconColumns className="opacity-90" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {!collapsed ? (
-        <div className="ml-2 flex flex-col gap-0.5 border-l border-[var(--border-subtle)] pl-1.5">
-          {node.children.map((child) => (
-            <SidebarFolderTreeNode
-              key={child.path}
-              node={child}
-              activeRepoPath={activeRepoPath}
-              collapsedGroups={collapsedGroups}
-              deletingGroups={deletingGroups}
-              renamingGroups={renamingGroups}
-              hiddenSidebarGroupTokenSet={hiddenSidebarGroupTokenSet}
-              dragOverGroup={dragOverGroup}
-              dragOverSidebarGroup={dragOverSidebarGroup}
-              draggingSidebarGroup={draggingSidebarGroup}
-              showMoveDropZone={showMoveDropZone}
-              selectedFolderPath={selectedFolderPath}
-              folderEditor={folderEditor}
-              folderEditorInputRef={folderEditorInputRef}
-              selectedGroupMultiChat={selectedGroupMultiChat}
-              sharedDroneTreeListProps={sharedDroneTreeListProps}
-              onSelectFolder={onSelectFolder}
-              onToggleGroupCollapsed={onToggleGroupCollapsed}
-              onOpenFolderCreate={onOpenFolderCreate}
-              onStartRenameFolder={onStartRenameFolder}
-              onFolderEditorValueChange={onFolderEditorValueChange}
-              onSubmitFolderEditor={onSubmitFolderEditor}
-              onBlurFolderEditor={onBlurFolderEditor}
-              onCancelFolderEditor={onCancelFolderEditor}
-              toggleSidebarGroupHidden={toggleSidebarGroupHidden}
-              onOpenGroupMultiChat={onOpenGroupMultiChat}
-            />
-          ))}
-          {showCreateInline && folderEditor ? (
-            <div className="flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5">
-              <IconChevron className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-80" />
-              <input
-                ref={folderEditorInputRef}
-                value={folderEditor.value}
-                onChange={(event) => onFolderEditorValueChange(event.target.value)}
-                onBlur={onBlurFolderEditor}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    onSubmitFolderEditor();
-                  } else if (event.key === 'Escape') {
-                    event.preventDefault();
-                    onCancelFolderEditor();
-                  }
-                }}
-                maxLength={64}
-                placeholder={folderEditor.parentPath ? 'Subfolder name' : 'Folder name'}
-                className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1 text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
-              />
-            </div>
-          ) : null}
-          {folderEditor?.parentPath === node.path && folderEditor.error ? (
-            <div className="text-[var(--text-10)] text-[var(--red)]">{folderEditor.error}</div>
-          ) : null}
-          {node.ownItems.length > 0 ? (
-            <SidebarDroneTreeList
-              {...sharedDroneTreeListProps}
-              tree={ownDroneTree}
-              showGroup={false}
-              groupOrderKey={groupToken}
-              groupName={node.path}
-            />
-          ) : null}
-        </div>
-      ) : showMoveDropZone ? (
-        <div
-          className={`ml-5 rounded-[var(--radius-medium)] px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide ${isDropTarget ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--muted-dim)]'}`}
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          Drop into {groupLabel}
-        </div>
-      ) : null}
-      {showEditorInline && folderEditor?.error ? (
-        <div className="ml-5 text-[var(--text-10)] text-[var(--red)]">{folderEditor.error}</div>
-      ) : null}
-    </div>
-  );
-}
-
 export type DroneSidebarProps = {
   dronesError: string | null | undefined;
   groupMoveError: string | null;
@@ -1466,6 +824,8 @@ export type DroneSidebarProps = {
   ) => Promise<DroneInlineRenameResult> | DroneInlineRenameResult;
   onSetDroneBaseImage: (droneId: string) => void;
   onSetDronePinned: (droneId: string, pinned: boolean) => Promise<boolean>;
+  onMoveSidebar: (intent: SidebarMoveIntent) => Promise<boolean>;
+  uiPreferencesReady: boolean;
   onDeleteDrone: (droneId: string) => void;
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
   onReparentDronesToParent: (
@@ -1532,6 +892,7 @@ export function DroneSidebar({
   renamingGroups,
   sidebarHasUngroupedGroup,
   repos,
+  reposLoading,
   dronesCount,
   droneCountByRepoPath,
   uiDroneName,
@@ -1546,6 +907,8 @@ export function DroneSidebar({
   onRenameDrone,
   onSetDroneBaseImage,
   onSetDronePinned,
+  onMoveSidebar,
+  uiPreferencesReady,
   onDeleteDrone,
   onOpenDroneErrorModal,
   onReparentDronesToParent,
@@ -1587,8 +950,10 @@ export function DroneSidebar({
     sidebarDensityMode,
     activeRepoPath,
     pinnedSidebarPlacement,
+    pinnedSidebarCollapsed,
     selectedDrone,
     selectedChat,
+    lastChatSelectionByRepoPath,
     selectedGroupMultiChat,
     sidebarReposCollapsed,
     sidebarAutoMinimize,
@@ -1607,6 +972,7 @@ export function DroneSidebar({
     setSidebarDensityMode,
     setSidebarDockSide,
     setPinnedSidebarPlacement,
+    setPinnedSidebarCollapsed,
     setCollapsedGroups,
     setSidebarGroupOrder,
     setSidebarRepoScopedGroupByPath,
@@ -1619,6 +985,9 @@ export function DroneSidebar({
     setSelectedDrone,
     setSelectedDroneIds,
     setSelectedChat,
+    setSelectedGroupMultiChat,
+    setDraftChat,
+    setHomeOpen,
     setSidebarAutoMinimize,
     setShowRecentDronesOnly,
     setActiveRepoPath,
@@ -1735,6 +1104,56 @@ export function DroneSidebar({
     sidebarGroupIdByName,
     sidebarNodeOrderByParent,
   ]);
+  const desktopSourceNodeOrderByParent = React.useMemo(() => {
+    const folderTree = buildSidebarFolderTree(
+      sidebarGroups,
+      sidebarGroupOrder,
+      sidebarGroupCreatedAtByName,
+    );
+    return buildSidebarNodeTree({
+      sidebarFolderTree: folderTree,
+      sidebarGroups,
+      sidebarGroupOrder,
+      repoScopedGroupPathsByRepoGroup,
+      sidebarDroneOrderByGroup,
+      sidebarNodeOrderByParent,
+      sidebarGroupCreatedAtByName,
+      sidebarGroupIdByName,
+    }).childIdsByParent;
+  }, [
+    repoScopedGroupPathsByRepoGroup,
+    sidebarDroneOrderByGroup,
+    sidebarGroupOrder,
+    sidebarGroups,
+    sidebarGroupCreatedAtByName,
+    sidebarGroupIdByName,
+    sidebarNodeOrderByParent,
+  ]);
+  const desktopOrderMigrationCompletedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (
+      desktopOrderMigrationCompletedRef.current ||
+      !uiPreferencesReady ||
+      dronesLoading ||
+      reposLoading
+    ) {
+      return;
+    }
+    setSidebarNodeOrderByParent((current) => {
+      const migrated = mergeVisibleSidebarNodeOrderByParent(
+        current,
+        desktopSourceNodeOrderByParent,
+      );
+      return JSON.stringify(migrated) === JSON.stringify(current) ? current : migrated;
+    });
+    desktopOrderMigrationCompletedRef.current = true;
+  }, [
+    desktopSourceNodeOrderByParent,
+    dronesLoading,
+    reposLoading,
+    setSidebarNodeOrderByParent,
+    uiPreferencesReady,
+  ]);
   const handleRenameGroup = React.useCallback(
     async (group: string, nextName?: string) => {
       const ok = await onRenameGroup(group, nextName);
@@ -1811,6 +1230,7 @@ export function DroneSidebar({
     onReparentDronesToParent,
   });
   const activeChatName = String(selectedChat ?? '').trim() || 'default';
+  const pinnedDensityClasses = sidebarDensityClasses(sidebarDensityMode);
   const visibleDraftSidebarPlaceholder = React.useMemo(() => {
     if (!draftSidebarPlaceholder) return null;
     const repoPath = String(draftSidebarPlaceholder.repoPath ?? '').trim();
@@ -2019,9 +1439,8 @@ export function DroneSidebar({
   const selectGroupedDroneContainer = React.useCallback(
     (droneId: string) => {
       handleGroupedSelectDroneContainer(droneId);
-      onSetDroneSelectionFromFolder([]);
     },
-    [handleGroupedSelectDroneContainer, onSetDroneSelectionFromFolder],
+    [handleGroupedSelectDroneContainer],
   );
   const focusGroupedDroneChat = React.useCallback(
     (droneId: string, chatName: string) => {
@@ -2038,20 +1457,10 @@ export function DroneSidebar({
     },
     [clearGroupedFolderSelection, onPrepareDroneDragStart, setSelectedSidebarNodeId],
   );
-  const {
-    activeDraggedDroneIds,
-    dragOverGroup,
-    dragOverSidebarGroup,
-    dragOverUngrouped,
-    draggingSidebarGroup,
-  } = useSidebarRootDnd({
+  const { activeDraggedDroneIds, dragOverUngrouped } = useSidebarUngroupedDrop({
     activeDrag,
     isRepoGroupingMode,
-    moveFolderIntoGroup,
     runOptimisticMoveDronesToGroup,
-    setSidebarGroupOrder,
-    sidebarGroupOrder,
-    sidebarGroups,
     sidebarHasUngroupedGroup,
   });
 
@@ -2231,6 +1640,7 @@ export function DroneSidebar({
           Boolean(deletingDrones[drone.id]));
       const inactiveDisplayState = sidebarDroneDisplayState(drone, false, '', false, false);
       const droneUnread =
+        !droneWorking &&
         inactiveDisplayState !== 'blocked' &&
         inactiveDisplayState !== 'offline' &&
         ((drone.unreadChats?.length ?? 0) > 0 ||
@@ -2294,8 +1704,15 @@ export function DroneSidebar({
     pinningDroneIds.size === 0;
   const pinnedDroneDropTarget = usePinnedDroneReorder({
     enabled: pinnedDroneReorderEnabled,
-    visibleDroneIds: globalPinnedDroneIds,
-    setPinnedDroneIds,
+    onReorder: (activeDroneId, overDroneId, placement) => {
+      void onMoveSidebar({
+        kind: 'pinned-drone',
+        visibleDroneIds: globalPinnedDroneIds,
+        activeDroneId,
+        overDroneId,
+        placement,
+      });
+    },
     onPrepareDroneDragStart,
   });
   const openRepositoryOverview = React.useCallback(() => {
@@ -2307,16 +1724,99 @@ export function DroneSidebar({
     (item: (typeof repositoryNavigationItems)[number]) => {
       setRepositoryOverviewOpen(false);
       setActiveSidebarRepoId(item.id);
+      setAppView('workspace');
+      setHomeOpen(false);
+      setDraftChat(null);
+      setSelectedGroupMultiChat(null);
       setActiveRepoPath(item.repoPath);
     },
-    [setActiveRepoPath],
+    [
+      setActiveRepoPath,
+      setAppView,
+      setDraftChat,
+      setHomeOpen,
+      setSelectedGroupMultiChat,
+    ],
+  );
+  const openPinnedDroneRepository = React.useCallback(
+    (drone: DroneSummary): boolean => {
+      const repoPath = String(drone.repoPath ?? '').trim();
+      const repositoryItem = repositoryNavigationItems.find(
+        (item) => item.repoPath === repoPath,
+      );
+      if (!repositoryItem) return false;
+      openRepositoryNavigationItem(repositoryItem);
+      return true;
+    },
+    [openRepositoryNavigationItem, repositoryNavigationItems],
   );
   const selectPinnedDroneCard = React.useCallback(
     (drone: DroneSummary, opts?: DroneSelectionClickOptions) => {
+      openPinnedDroneRepository(drone);
+      const repoPath = String(drone.repoPath ?? '').trim();
+      const remembered = lastChatSelectionByRepoPath[repoPath];
+      const rememberedChat =
+        remembered?.droneId === drone.id &&
+        normalizedDroneChats(drone, { includeDefaultWhenEmpty: true }).includes(
+          remembered.chatName,
+        )
+          ? remembered.chatName
+          : null;
+      if (!opts?.toggle && !opts?.range && rememberedChat) {
+        onSelectDroneChat(drone.id, rememberedChat);
+        return;
+      }
       onSelectDroneCard(drone.id, { ...opts, orderedDroneIds: globalPinnedDroneIds });
     },
-    [globalPinnedDroneIds, onSelectDroneCard],
+    [
+      globalPinnedDroneIds,
+      lastChatSelectionByRepoPath,
+      onSelectDroneCard,
+      onSelectDroneChat,
+      openPinnedDroneRepository,
+    ],
   );
+  const selectPinnedDroneContainer = React.useCallback(
+    (drone: DroneSummary) => {
+      handleGroupedSelectDroneContainer(drone.id);
+      toggleDroneSection(drone.id, 'chats');
+    },
+    [handleGroupedSelectDroneContainer, toggleDroneSection],
+  );
+  const selectPinnedDroneChat = React.useCallback(
+    (drone: DroneSummary, chatName: string) => {
+      openPinnedDroneRepository(drone);
+      handleGroupedSelectDroneChat(drone.id, chatName);
+    },
+    [handleGroupedSelectDroneChat, openPinnedDroneRepository],
+  );
+  const restoredSelectionRepoAlignedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (restoredSelectionRepoAlignedRef.current || dronesLoading) return;
+    const selectedDroneId = String(selectedDrone ?? '').trim();
+    if (!selectedDroneId) {
+      restoredSelectionRepoAlignedRef.current = true;
+      return;
+    }
+    const restoredDrone = allDrones.find((drone) => drone.id === selectedDroneId);
+    if (!restoredDrone) return;
+    const restoredRepoPath = String(restoredDrone.repoPath ?? '').trim();
+    if (restoredRepoPath === String(activeRepoPath ?? '').trim()) {
+      restoredSelectionRepoAlignedRef.current = true;
+      return;
+    }
+    if (!openPinnedDroneRepository(restoredDrone)) return;
+    restoredSelectionRepoAlignedRef.current = true;
+    onSelectDroneChat(selectedDroneId, activeChatName);
+  }, [
+    activeChatName,
+    activeRepoPath,
+    allDrones,
+    dronesLoading,
+    onSelectDroneChat,
+    openPinnedDroneRepository,
+    selectedDrone,
+  ]);
   const createDroneInRepository = React.useCallback(
     (item: (typeof repositoryNavigationItems)[number]) => {
       openRepositoryNavigationItem(item);
@@ -2462,86 +1962,6 @@ export function DroneSidebar({
         : null,
     [activeRepositoryModel, sidebarGroupCreatedAtByName, sidebarGroupOrder],
   );
-  const sharedDroneTreeListProps = React.useMemo<SidebarDroneTreeListSharedProps>(
-    () => ({
-      droneById: sidebarDroneById,
-      sidebarDensityMode,
-      draftSidebarPlaceholderId: DRAFT_SIDEBAR_PLACEHOLDER_ID,
-      selectedDroneIds,
-      selectedDroneSet,
-      highlightedDroneIds,
-      selectedDrone,
-      activeChatName,
-      sidebarDndEnabled,
-      busyChatNodeIdSet,
-      unreadAgentMessageByChatNodeId,
-      deletingDrones,
-      deleteOperationModeById,
-      deleteMode,
-      renamingDrones,
-      settingBaseImages,
-      movingDroneGroups,
-      sidebarOptimisticDroneIdSet,
-      collapsedDroneSections,
-      setCollapsedDroneSections,
-      uiDroneName,
-      onToggleSection: toggleDroneSection,
-      onSelectDroneCard,
-      onSelectDroneChat,
-      onDeleteDroneChat,
-      onCloneDrone,
-      onAddDroneToGroup: openAddDroneToGroup,
-      onCreateDroneChat,
-      onRenameDroneChat,
-      onRenameDrone,
-      inlineRenameDroneRequest,
-      onSetDroneBaseImage,
-      onDeleteDrone,
-      onOpenDroneErrorModal,
-      onPrepareDroneDragStart,
-      onReparentDronesToParent: runOptimisticReparentDronesToParent,
-      actionsEnabled: sidebarCapabilities.actions,
-    }),
-    [
-      activeChatName,
-      busyChatNodeIdSet,
-      collapsedDroneSections,
-      deleteOperationModeById,
-      deleteMode,
-      deletingDrones,
-      sidebarCapabilities.actions,
-      movingDroneGroups,
-      onCreateDroneChat,
-      onDeleteDrone,
-      onDeleteDroneChat,
-      onCloneDrone,
-      openAddDroneToGroup,
-      onOpenDroneErrorModal,
-      onPrepareDroneDragStart,
-      onRenameDrone,
-      onRenameDroneChat,
-      inlineRenameDroneRequest,
-      onSelectDroneCard,
-      onSelectDroneChat,
-      onSetDroneBaseImage,
-      renamingDrones,
-      runOptimisticReparentDronesToParent,
-      selectedDrone,
-      selectedDroneIds,
-      selectedDroneSet,
-      highlightedDroneIds,
-      sidebarDndEnabled,
-      setCollapsedDroneSections,
-      settingBaseImages,
-      sidebarDensityMode,
-      sidebarDroneById,
-      sidebarOptimisticDroneIdSet,
-      toggleDroneSection,
-      uiDroneName,
-      unreadAgentMessageByChatNodeId,
-    ],
-  );
-
   const onSidebarWheel = React.useCallback(
     (event: React.WheelEvent<HTMLElement>) => {
       if (!(event.ctrlKey || event.metaKey)) return;
@@ -3076,6 +2496,7 @@ export function DroneSidebar({
                 <section
                   data-sidebar-pinned-section="true"
                   data-sidebar-pinned-placement={pinnedSidebarPlacement}
+                  data-sidebar-pinned-collapsed={pinnedSidebarCollapsed ? 'true' : 'false'}
                   className={
                     pinnedSidebarPlacement === 'bottom'
                       ? 'border-t border-[var(--border-subtle)]'
@@ -3083,11 +2504,21 @@ export function DroneSidebar({
                   }
                   aria-label="Pinned drones"
                 >
-                <div className="flex min-h-8 items-center gap-1.5 border-b border-[var(--border-subtle)] px-1">
-                  <IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
-                  <span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-normal text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">
-                    Pinned
-                  </span>
+                <div className="flex min-h-8 cursor-pointer items-center gap-1.5 border-b border-[var(--border-subtle)] px-1">
+                  <button
+                    type="button"
+                    data-sidebar-pinned-collapse-toggle="true"
+                    onClick={() => setPinnedSidebarCollapsed((current) => !current)}
+                    className="flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
+                    title={pinnedSidebarCollapsed ? 'Expand pinned drones' : 'Collapse pinned drones'}
+                    aria-label={pinnedSidebarCollapsed ? 'Expand pinned drones' : 'Collapse pinned drones'}
+                    aria-expanded={!pinnedSidebarCollapsed}
+                  >
+                    <IconPin className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-72" />
+                    <span className="min-w-0 flex-1 truncate text-[length:var(--text-10-5)] font-normal text-[color:var(--muted-dim)] [font-family:var(--sidebar-font)]">
+                      Pinned
+                    </span>
+                  </button>
                   <button
                     type="button"
                     data-sidebar-pinned-placement-toggle="true"
@@ -3096,7 +2527,7 @@ export function DroneSidebar({
                         current === 'top' ? 'bottom' : 'top',
                       )
                     }
-                    className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted-dim)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
+                    className="inline-flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded-[.25rem] text-[var(--muted-dim)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)]"
                     title={
                       pinnedSidebarPlacement === 'top'
                         ? 'Move pinned drones to bottom'
@@ -3116,6 +2547,7 @@ export function DroneSidebar({
                     />
                   </button>
                 </div>
+                {!pinnedSidebarCollapsed ? (
                 <div className="flex flex-col gap-0.5 pb-1">
                   {globalPinnedDrones.map((drone) => {
                     const droneId = String(drone.id ?? '').trim();
@@ -3126,8 +2558,16 @@ export function DroneSidebar({
                     const pinnedDroneIsInActiveRepository =
                       !repositoryOverviewOpen &&
                       activeRepositoryNavigationItem?.repoPath === pinnedRepoPath;
-                    const chats = Array.isArray(drone.chats) && drone.chats.length > 0 ? drone.chats : ['default'];
+                    const chats = orderSidebarEntries(
+                      normalizedDroneChats(drone, { includeDefaultWhenEmpty: true }),
+                      sidebarChatOrderByDrone[droneId] ?? [],
+                      (chatName) => chatName,
+                    );
                     const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
+                    const hasChatSection = chats.length > 1;
+                    const chatSectionExpanded =
+                      collapsedDroneSections[sidebarInlineSectionKey(droneId, 'chats')] !== true;
+                    const hasActiveChildChat = selectedDrone === droneId && hasChatSection;
                     const defaultChatNodeId = createCanvasChatNodeId(droneId, 'default');
                     const isOptimistic = sidebarOptimisticDroneIdSet.has(droneId);
                     const droneMutationBusy =
@@ -3146,82 +2586,158 @@ export function DroneSidebar({
                         dropTarget={pinnedDroneDropTarget}
                       >
                         {(dragProps) => (
-                          <DroneCard
-                            drone={drone}
-                            density={sidebarDensityMode}
-                            displayName={uiDroneName(drone.name)}
-                            selected={selectedDroneSet.has(droneId)}
-                            highlighted={highlightedDroneIds.has(droneId)}
-                            active={selectedDrone === droneId && hasOnlyDefaultChat && activeChatName === 'default'}
-                            activeIndicatorStyle="edge"
-                            busy={hasOnlyDefaultChat && busyChatNodeIdSet.has(defaultChatNodeId)}
-                            approvalRequired={
-                              hasOnlyDefaultChat &&
-                              (droneChatRequiresApproval(drone, 'default') ||
-                                Boolean(approvalRequiredByChatNodeId[defaultChatNodeId]))
-                            }
-                            operationLabel={
-                              deletingDrones[droneId]
-                                ? ((deleteOperationModeById[droneId] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
-                                : undefined
-                            }
-                            unreadAgentMessage={hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true}
-                            statusHint={pinnedDroneRepoLabel(pinnedRepoPath, pinnedRepositoryItem?.label)}
-                            pinned
-                            pinBusy={pinningDroneIds.has(droneId)}
-                            onTogglePinned={sidebarCapabilities.actions ? () => void setPinned(droneId, false) : undefined}
-                            onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}
-                            onClone={sidebarCapabilities.actions ? () => onCloneDrone(drone) : undefined}
-                            onAddToGroup={
-                              sidebarCapabilities.actions && pinnedDroneIsInActiveRepository
-                                ? () => openAddDroneToGroup(drone)
-                                : undefined
-                            }
-                            onCreateGroup={
-                              sidebarCapabilities.actions &&
-                              pinnedDroneIsInActiveRepository &&
-                              Boolean(sidebarDroneById[droneId])
-                                ? () => openGroupDraftBeforeDrone(drone)
-                                : undefined
-                            }
-                            onRename={
-                              sidebarCapabilities.actions
-                                ? (newName) => onRenameDrone(droneId, newName)
-                                : undefined
-                            }
-                            inlineRenameRequestKey={
-                              inlineRenameDroneRequest?.droneId === droneId
-                                ? inlineRenameDroneRequest.key
-                                : 0
-                            }
-                            onSetBaseImage={sidebarCapabilities.actions ? () => onSetDroneBaseImage(droneId) : undefined}
-                            onDelete={sidebarCapabilities.actions ? () => onDeleteDrone(droneId) : undefined}
-                            onErrorClick={onOpenDroneErrorModal}
-                            cloneDisabled={
-                              isOptimistic ||
-                              droneMutationBusy ||
-                              String(drone.runtime ?? 'container').trim().toLowerCase() === 'host'
-                            }
-                            createChatDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
-                            addToGroupDisabled={isOptimistic || movingDroneGroups || droneMutationBusy || droneProvisioning}
-                            renameDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
-                            renameBusy={Boolean(renamingDrones[droneId])}
-                            setBaseImageDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
-                            setBaseImageBusy={Boolean(settingBaseImages[droneId])}
-                            deleteDisabled={isOptimistic || droneMutationBusy}
-                            deleteBusy={Boolean(deletingDrones[droneId])}
-                            onClick={(rowOpts) => selectPinnedDroneCard(drone, rowOpts)}
-                            dragNodeRef={dragProps.dragNodeRef}
-                            dragAttributes={dragProps.dragAttributes}
-                            dragListeners={dragProps.dragListeners}
-                            draggable={dragProps.draggable}
-                            dragging={dragProps.dragging}
-                          />
+                          <div data-sidebar-drone-unit="true" className="flex flex-col gap-0.5">
+                            <DroneCard
+                              drone={drone}
+                              density={sidebarDensityMode}
+                              displayName={uiDroneName(drone.name)}
+                              selected={
+                                hasChatSection
+                                  ? selectedSidebarNodeId === sidebarDroneNodeId(droneId)
+                                  : selectedDroneSet.has(droneId)
+                              }
+                              highlighted={highlightedDroneIds.has(droneId)}
+                              active={
+                                selectedDrone === droneId &&
+                                ((hasOnlyDefaultChat && activeChatName === 'default') ||
+                                  (hasActiveChildChat && !chatSectionExpanded))
+                              }
+                              activeIndicatorStyle="edge"
+                              disclosureExpanded={hasChatSection ? chatSectionExpanded : undefined}
+                              disclosureLabel={
+                                hasChatSection
+                                  ? `${chatSectionExpanded ? 'Collapse' : 'Expand'} chats for ${uiDroneName(drone.name)}`
+                                  : undefined
+                              }
+                              busy={hasOnlyDefaultChat && busyChatNodeIdSet.has(defaultChatNodeId)}
+                              approvalRequired={
+                                hasOnlyDefaultChat &&
+                                (droneChatRequiresApproval(drone, 'default') ||
+                                  Boolean(approvalRequiredByChatNodeId[defaultChatNodeId]))
+                              }
+                              operationLabel={
+                                deletingDrones[droneId]
+                                  ? ((deleteOperationModeById[droneId] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
+                                  : undefined
+                              }
+                              unreadAgentMessage={hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true}
+                              statusHint={pinnedDroneRepoLabel(pinnedRepoPath, pinnedRepositoryItem?.label)}
+                              pinned
+                              pinBusy={pinningDroneIds.has(droneId)}
+                              onTogglePinned={sidebarCapabilities.actions ? () => void setPinned(droneId, false) : undefined}
+                              onCreateChat={sidebarCapabilities.actions ? () => openDroneChatCreate(drone) : undefined}
+                              onClone={sidebarCapabilities.actions ? () => onCloneDrone(drone) : undefined}
+                              onAddToGroup={
+                                sidebarCapabilities.actions && pinnedDroneIsInActiveRepository
+                                  ? () => openAddDroneToGroup(drone)
+                                  : undefined
+                              }
+                              onCreateGroup={
+                                sidebarCapabilities.actions &&
+                                pinnedDroneIsInActiveRepository &&
+                                Boolean(sidebarDroneById[droneId])
+                                  ? () => openGroupDraftBeforeDrone(drone)
+                                  : undefined
+                              }
+                              onRename={
+                                sidebarCapabilities.actions
+                                  ? (newName) => onRenameDrone(droneId, newName)
+                                  : undefined
+                              }
+                              inlineRenameRequestKey={
+                                inlineRenameDroneRequest?.droneId === droneId
+                                  ? inlineRenameDroneRequest.key
+                                  : 0
+                              }
+                              onSetBaseImage={sidebarCapabilities.actions ? () => onSetDroneBaseImage(droneId) : undefined}
+                              onDelete={sidebarCapabilities.actions ? () => onDeleteDrone(droneId) : undefined}
+                              onErrorClick={onOpenDroneErrorModal}
+                              cloneDisabled={
+                                isOptimistic ||
+                                droneMutationBusy ||
+                                String(drone.runtime ?? 'container').trim().toLowerCase() === 'host'
+                              }
+                              createChatDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
+                              addToGroupDisabled={isOptimistic || movingDroneGroups || droneMutationBusy || droneProvisioning}
+                              renameDisabled={droneMutationBusy}
+                              renameBusy={Boolean(renamingDrones[droneId])}
+                              setBaseImageDisabled={isOptimistic || droneMutationBusy || droneProvisioning}
+                              setBaseImageBusy={Boolean(settingBaseImages[droneId])}
+                              deleteDisabled={isOptimistic || droneMutationBusy}
+                              deleteBusy={Boolean(deletingDrones[droneId])}
+                              onClick={(rowOpts) =>
+                                hasChatSection
+                                  ? selectPinnedDroneContainer(drone)
+                                  : selectPinnedDroneCard(drone, rowOpts)
+                              }
+                              dragNodeRef={dragProps.dragNodeRef}
+                              dragAttributes={dragProps.dragAttributes}
+                              dragListeners={dragProps.dragListeners}
+                              draggable={dragProps.draggable}
+                              dragging={dragProps.dragging}
+                            />
+                            {hasChatSection && chatSectionExpanded ? (
+                              <div
+                                data-sidebar-guide-selected={hasActiveChildChat ? 'true' : undefined}
+                                className={`${pinnedDensityClasses.chatIndent} dh-sidebar-drone-chat-body flex flex-col gap-0.5 border-l`}
+                              >
+                                {chats.map((chatName) => {
+                                  const active = selectedDrone === droneId && activeChatName === chatName;
+                                  const chatNodeId = createCanvasChatNodeId(droneId, chatName);
+                                  const chatBusy =
+                                    (drone.busyChats ?? []).includes(chatName) ||
+                                    busyChatNodeIdSet.has(chatNodeId);
+                                  const chatUnread =
+                                    !active &&
+                                    ((drone.unreadChats ?? []).includes(chatName) ||
+                                      unreadAgentMessageByChatNodeId[chatNodeId] === true);
+                                  const chatState = sidebarChatDisplayState(
+                                    drone,
+                                    chatBusy,
+                                    droneChatRequiresApproval(drone, chatName) ||
+                                      Boolean(approvalRequiredByChatNodeId[chatNodeId]),
+                                  );
+                                  const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
+                                  return (
+                                    <button
+                                      key={`${droneId}:${chatName}`}
+                                      type="button"
+                                      className={`relative flex items-center gap-1 rounded border text-left transition-colors ${pinnedDensityClasses.chatRow} ${sidebarChatRowTone({ active })}`}
+                                      onClick={() => selectPinnedDroneChat(drone, chatName)}
+                                      aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
+                                      aria-current={active ? 'page' : undefined}
+                                    >
+                                      <span
+                                        className={sidebarChatStateClass}
+                                        title={chatStateLabel}
+                                        role="img"
+                                        aria-label={chatStateLabel}
+                                      >
+                                        <SidebarItemStateIndicator
+                                          state={chatState}
+                                          unread={chatUnread}
+                                          showReadyAnchor
+                                          emphasized={active}
+                                        />
+                                      </span>
+                                      <span className={sidebarChatLabelClass}>{chatName}</span>
+                                      {drone.draftChats?.[chatName] === true ? (
+                                        <span className="ml-auto flex-shrink-0 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase text-[var(--accent)]">
+                                          Draft
+                                        </span>
+                                      ) : null}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+                          </div>
                         )}
                       </PinnedDroneReorderItem>
                     );
                   })}
                 </div>
+                ) : null}
                 </section>
               ) : null}
             </PinnedSidebarPlacementSlot>
@@ -3476,10 +2992,8 @@ export function DroneSidebar({
                       repoScopedGroupPathsByRepoGroup={repoScopedGroupPathsByRepoGroup}
                       sidebarDroneOrderByGroup={sidebarDroneOrderByGroup}
                       sidebarNodeOrderByParent={sidebarNodeOrderByParent}
-                      setSidebarGroupOrder={setSidebarGroupOrder}
-                      setSidebarNodeOrderByParent={setSidebarNodeOrderByParent}
                       sidebarChatOrderByDrone={sidebarChatOrderByDrone}
-                      setSidebarChatOrderByDrone={setSidebarChatOrderByDrone}
+                      onMoveSidebar={onMoveSidebar}
                       droneById={sidebarDroneById}
                       selectedDroneIds={selectedDroneIds}
                       selectedDroneSet={selectedDroneSet}

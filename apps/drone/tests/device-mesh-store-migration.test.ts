@@ -57,7 +57,55 @@ describe('device mesh grant migrations', () => {
           'drone.rename',
           'chat.rename',
           'chat.delete',
+          'sidebar.move',
         ],
+      },
+    ]);
+  });
+
+  test('does not silently broaden existing file preview access', () => {
+    const grants = [
+      {
+        capability: 'drone-control',
+        version: 1,
+        operations: ['drones.list', 'file.preview'],
+      },
+    ];
+    expect(migrateDeviceMeshGrants(grants)).toEqual(grants);
+  });
+
+  test('replaces legacy sidebar grants with the atomic move command', () => {
+    expect(
+      migrateDeviceMeshGrants([
+        {
+          capability: 'drone-control',
+          version: 1,
+          operations: ['drones.list', 'sidebar.order.update', 'sidebar.item.move'],
+        },
+      ]),
+    ).toEqual([
+      {
+        capability: 'drone-control',
+        version: 1,
+        operations: ['drones.list', 'sidebar.move'],
+      },
+    ]);
+  });
+
+  test('preserves existing pin access through the atomic sidebar grant', () => {
+    expect(
+      migrateDeviceMeshGrants([
+        {
+          capability: 'drone-control',
+          version: 1,
+          operations: ['drones.list', 'drone.pin.update'],
+        },
+      ]),
+    ).toEqual([
+      {
+        capability: 'drone-control',
+        version: 1,
+        operations: ['drones.list', 'sidebar.move'],
       },
     ]);
   });

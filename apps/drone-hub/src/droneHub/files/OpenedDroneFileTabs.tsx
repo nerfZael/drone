@@ -33,8 +33,8 @@ export function OpenedDroneFileTabs({
   if (normalizedTabs.length === 0 && !trailingActions) return null;
 
   return (
-    <div className="flex items-end border-b border-[var(--border-subtle)] bg-[var(--surface-soft)]">
-      <div className="min-h-[34px] min-w-0 flex flex-1 items-end gap-1 overflow-x-auto px-2 pt-1.5" role="tablist" aria-label="Open files">
+    <div className="flex h-7 items-end border-b border-[var(--border-subtle)] bg-[var(--surface-softest)]">
+      <div className="flex h-7 min-w-0 flex-1 items-end gap-0.5 overflow-x-auto px-1.5 pt-1" role="tablist" aria-label="Open files">
         {normalizedTabs.map((tab) => {
           const active = tab.tabId === activeTabId;
           const iconPath = tab.path ?? tab.name ?? '';
@@ -77,10 +77,10 @@ export function OpenedDroneFileTabs({
                 if (!fromTabId || fromTabId === tab.tabId) return;
                 onReorderTabs(fromTabId, tab.tabId);
               }}
-              className={`group/tab flex h-8 min-w-[120px] max-w-[220px] items-center gap-1.5 rounded-t-md border px-2 text-[var(--text-11)] transition-colors ${
+              className={`group/tab flex h-6 min-w-[104px] max-w-[180px] items-center gap-0 overflow-hidden rounded-t-md text-[var(--text-11)] transition-colors ${
                 active
-                  ? 'border-[var(--border-subtle)] border-b-[var(--panel-alt)] bg-[var(--panel-alt)] text-[var(--fg-secondary)]'
-                  : 'border-transparent bg-transparent text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+                  : 'bg-transparent text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
               } ${draggingTabId === tab.tabId ? 'opacity-45' : ''}`}
               title={title}
             >
@@ -89,10 +89,10 @@ export function OpenedDroneFileTabs({
                 role="tab"
                 aria-selected={active}
                 onClick={() => onActivateTab(tab.tabId)}
-                className="min-w-0 flex-1 flex items-center gap-1.5 text-left"
+                className="flex h-6 min-w-0 flex-1 items-center gap-1 px-1.5 text-left"
                 title={title}
               >
-                <FileTypeIcon path={iconPath} className="h-3.5 w-3.5 shrink-0" size={14} />
+                <FileTypeIcon path={iconPath} className="h-3 w-3 shrink-0" size={12} />
                 <span className="truncate">
                   {displayName}
                   {tab.dirty ? <span aria-hidden="true">*</span> : null}
@@ -108,18 +108,18 @@ export function OpenedDroneFileTabs({
                   event.stopPropagation();
                   onCloseTab(tab.tabId);
                 }}
-                className="pointer-events-none shrink-0 rounded p-0.5 text-[var(--muted-dim)] opacity-0 transition-opacity hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+                className="pointer-events-none inline-flex h-6 w-4 shrink-0 items-center justify-center rounded-none text-[var(--muted-dim)] opacity-0 transition-[background-color,color,opacity] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] group-hover/tab:pointer-events-auto group-hover/tab:opacity-70 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-70 hover:!opacity-100 focus-visible:pointer-events-auto focus-visible:!opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
                 title={`Close ${displayName}`}
                 aria-label={`Close ${displayName}`}
               >
-                <IconClose className="h-3 w-3" />
+                <IconClose className="h-2.5 w-2.5" />
               </button>
             </div>
           );
         })}
       </div>
       {trailingActions ? (
-        <div className="flex h-[38px] shrink-0 items-center px-2">
+        <div className="flex h-7 shrink-0 items-center px-1.5">
           {trailingActions}
         </div>
       ) : null}

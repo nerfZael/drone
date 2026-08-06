@@ -14,8 +14,14 @@ export type QuickOpenItem = QuickOpenFile & {
   source: 'recent' | 'search';
 };
 
+export type QuickOpenParsedQuery = {
+  searchTerm: string;
+  line: number | null;
+  column: number | null;
+};
+
 const MAX_RECENT_FILES = 24;
-export const QUICK_OPEN_SEARCH_MIN_QUERY_LENGTH = 2;
+export const QUICK_OPEN_SEARCH_MIN_QUERY_LENGTH = 1;
 
 export function quickOpenNameForPath(pathRaw: string): string {
   const path = String(pathRaw ?? '').trim().replace(/\\/g, '/');
@@ -28,6 +34,22 @@ function normalizeFilePath(raw: string): string {
 
 function normalizeQuery(raw: string): string {
   return String(raw ?? '').trim().toLowerCase();
+}
+
+export function parseQuickOpenQuery(raw: string): QuickOpenParsedQuery {
+  const query = String(raw ?? '').trim();
+  const locationMatch = query.match(/^(.*?):(\d*)(?::(\d*))?$/);
+  if (!locationMatch) return { searchTerm: query, line: null, column: null };
+  if (!locationMatch[2] && locationMatch[3]) {
+    return { searchTerm: query, line: null, column: null };
+  }
+  const line = locationMatch[2] ? Math.max(1, Math.floor(Number(locationMatch[2]))) : null;
+  const column = locationMatch[3] ? Math.max(1, Math.floor(Number(locationMatch[3]))) : null;
+  return {
+    searchTerm: String(locationMatch[1] ?? '').trim(),
+    line,
+    column,
+  };
 }
 
 export function trackRecentQuickOpenFile(
@@ -49,13 +71,62 @@ export function trackRecentQuickOpenFile(
   return [next, ...recentFiles.filter((file) => normalizeFilePath(file.path) !== path)].slice(0, MAX_RECENT_FILES);
 }
 
-function matchesQuickOpenQuery(file: QuickOpenFile, query: string): boolean {
-  if (!query) return true;
-  const haystack = `${file.relativePath ?? ''}\n${file.path}\n${file.name}`.toLowerCase();
-  return query
-    .split(/\s+/)
-    .filter(Boolean)
-    .every((part) => haystack.includes(part));
+function isWordBoundary(value: string, index: number): boolean {
+  if (index <= 0) return true;
+  const previous = value[index - 1] ?? '';
+  const current = value[index] ?? '';
+  return /[\/\\._\-\s]/.test(previous) || (/[a-z0-9]/.test(previous) && /[A-Z]/.test(current));
+}
+
+function fuzzySubsequenceScore(candidateRaw: string, queryRaw: string): number | null {
+  const candidate = candidateRaw.toLowerCase();
+  const query = queryRaw.toLowerCase();
+  if (!query) return 0;
+  let candidateIndex = 0;
+  let previousMatch = -2;
+  let score = 0;
+  for (let queryIndex = 0; queryIndex < query.length; queryIndex += 1) {
+    const queryChar = query[queryIndex];
+    const matchIndex = candidate.indexOf(queryChar, candidateIndex);
+    if (matchIndex < 0) return null;
+    score += 10;
+    if (matchIndex === previousMatch + 1) score += 14;
+    if (isWordBoundary(candidateRaw, matchIndex)) score += 18;
+    score -= Math.min(12, Math.max(0, matchIndex - candidateIndex));
+    previousMatch = matchIndex;
+    candidateIndex = matchIndex + 1;
+  }
+  return score - Math.max(0, candidate.length - query.length) * 0.05;
+}
+
+function quickOpenMatchScore(file: QuickOpenFile, query: string): number | null {
+  if (!query) return 0;
+  const name = String(file.name || quickOpenNameForPath(file.path));
+  const relativePath = String(file.relativePath || file.path);
+  const lowerName = name.toLowerCase();
+  const lowerPath = relativePath.toLowerCase();
+  const tokens = query.split(/\s+/).filter(Boolean);
+  let total = 0;
+
+  for (const token of tokens) {
+    const nameFuzzy = fuzzySubsequenceScore(name, token);
+    const pathFuzzy = fuzzySubsequenceScore(relativePath, token);
+    if (nameFuzzy == null && pathFuzzy == null) return null;
+
+    let tokenScore = Math.max(
+      nameFuzzy == null ? Number.NEGATIVE_INFINITY : 500 + nameFuzzy,
+      pathFuzzy == null ? Number.NEGATIVE_INFINITY : 200 + pathFuzzy,
+    );
+    if (lowerName === token) tokenScore = Math.max(tokenScore, 1_200);
+    else if (lowerName.startsWith(token)) tokenScore = Math.max(tokenScore, 1_000 - (lowerName.length - token.length));
+    else if (lowerName.includes(token)) tokenScore = Math.max(tokenScore, 800 - lowerName.indexOf(token));
+    if (lowerPath === token) tokenScore = Math.max(tokenScore, 700);
+    else if (lowerPath.startsWith(token)) tokenScore = Math.max(tokenScore, 650);
+    else if (lowerPath.includes(token)) tokenScore = Math.max(tokenScore, 600 - lowerPath.indexOf(token) * 0.1);
+    total += tokenScore;
+  }
+
+  return total - (relativePath.match(/[\/\\]/g)?.length ?? 0) * 0.5;
 }
 
 export function buildQuickOpenItems(opts: {
@@ -64,26 +135,31 @@ export function buildQuickOpenItems(opts: {
   searchFiles: QuickOpenFile[];
   limit?: number;
 }): QuickOpenItem[] {
-  const query = normalizeQuery(opts.query);
+  const query = normalizeQuery(parseQuickOpenQuery(opts.query).searchTerm);
   const limit = Math.max(1, Math.floor(Number(opts.limit ?? 80)));
-  const seen = new Set<string>();
-  const items: QuickOpenItem[] = [];
+  const itemByPath = new Map<string, QuickOpenItem>();
 
   for (const recent of opts.recentFiles) {
     const path = normalizeFilePath(recent.path);
-    if (!path || seen.has(path)) continue;
-    if (!matchesQuickOpenQuery(recent, query)) continue;
-    seen.add(path);
-    items.push({ ...recent, path, source: 'recent' });
-    if (items.length >= limit) return items;
+    if (!path || itemByPath.has(path)) continue;
+    itemByPath.set(path, { ...recent, path, source: 'recent' });
   }
 
   for (const file of opts.searchFiles) {
     const path = normalizeFilePath(file.path);
-    if (!path || seen.has(path)) continue;
-    if (!matchesQuickOpenQuery(file, query)) continue;
-    seen.add(path);
-    items.push({
+    if (!path) continue;
+    const existing = itemByPath.get(path);
+    if (existing) {
+      itemByPath.set(path, {
+        ...existing,
+        name: existing.name || String(file.name ?? '').trim() || quickOpenNameForPath(path),
+        relativePath: existing.relativePath ?? file.relativePath ?? null,
+        size: existing.size ?? file.size ?? null,
+        mtimeMs: existing.mtimeMs ?? file.mtimeMs ?? null,
+      });
+      continue;
+    }
+    itemByPath.set(path, {
       path,
       name: String(file.name ?? '').trim() || quickOpenNameForPath(path),
       relativePath: file.relativePath ?? null,
@@ -91,17 +167,40 @@ export function buildQuickOpenItems(opts: {
       mtimeMs: Number.isFinite(Number(file.mtimeMs)) ? Math.max(0, Math.floor(Number(file.mtimeMs))) : null,
       source: 'search',
     });
-    if (items.length >= limit) return items;
   }
 
-  return items;
+  return Array.from(itemByPath.values())
+    .map((item, inputIndex) => ({
+      item,
+      inputIndex,
+      score: quickOpenMatchScore(item, query),
+      openedAt: item.source === 'recent' && 'openedAt' in item ? Number(item.openedAt ?? 0) : 0,
+    }))
+    .filter((entry): entry is typeof entry & { score: number } => entry.score != null)
+    .sort((a, b) => {
+      if (!query) return b.openedAt - a.openedAt || a.inputIndex - b.inputIndex;
+      return (
+        b.score - a.score ||
+        Number(b.item.source === 'recent') - Number(a.item.source === 'recent') ||
+        b.openedAt - a.openedAt ||
+        a.item.name.localeCompare(b.item.name)
+      );
+    })
+    .slice(0, limit)
+    .map((entry) => entry.item);
 }
 
-export function quickOpenSelectionToOpenTarget(item: QuickOpenItem): { path: string; name: string } {
+export function quickOpenSelectionToOpenTarget(
+  item: QuickOpenItem,
+  query: string = '',
+): { path: string; name: string; line: number | null; column: number | null } {
   const path = normalizeFilePath(item.path);
+  const parsedQuery = parseQuickOpenQuery(query);
   return {
     path,
     name: String(item.name ?? '').trim() || quickOpenNameForPath(path),
+    line: parsedQuery.line,
+    column: parsedQuery.column,
   };
 }
 

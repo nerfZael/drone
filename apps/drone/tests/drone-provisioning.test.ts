@@ -22,6 +22,7 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs = 1500): Promise
 function createControllerHarness(opts?: {
   duringRunNodeCli?: (context: { droneId: string; displayName: string }) => Promise<void>;
   duringPostCreateSync?: (context: { droneId: string; stage: string }) => Promise<void>;
+  runNodeCliResult?: { code: number; stdout: string; stderr: string };
 }) {
   const pendingStateHelpers = createPendingDroneStateHelpers({
     normalizeChatName: (raw: any) => String(raw ?? 'default').trim() || 'default',
@@ -37,11 +38,16 @@ function createControllerHarness(opts?: {
   const syncSharedPathsCalls: any[] = [];
   const runNodeCliCalls: string[][] = [];
   const pendingPromptPumpCalls: any[] = [];
+  const cancelPendingPromptsCalls: any[] = [];
   const events: string[] = [];
 
   const controller = createDroneProvisioningController({
     NON_REPO_HOME_CWD: '/dvm-data/home',
     applyPendingDisplayNameToProvisionedDrone: pendingStateHelpers.applyPendingDisplayNameToProvisionedDrone,
+    cancelPendingPromptsForFailedDrone: async (cancelOpts) => {
+      cancelPendingPromptsCalls.push(cancelOpts);
+      return 1;
+    },
     cloneChatEntryForDroneClone: (entryRaw: any) => JSON.parse(JSON.stringify(entryRaw ?? {})),
     defaultDaemonReadyTimeoutMs: () => 30_000,
     defaultRepoSeedTimeoutMs: () => 30_000,
@@ -75,6 +81,7 @@ function createControllerHarness(opts?: {
       const droneIdIndex = args.indexOf('--drone-id');
       const droneId = droneIdIndex >= 0 ? String(args[droneIdIndex + 1] ?? '').trim() : '';
       await opts?.duringRunNodeCli?.({ droneId, displayName });
+      if (opts?.runNodeCliResult && opts.runNodeCliResult.code !== 0) return opts.runNodeCliResult;
       await upsertCanonicalDroneLifecycle('real', droneId, {
         id: droneId,
         name: 'Untitled 25',
@@ -83,7 +90,7 @@ function createControllerHarness(opts?: {
         createdAt: '2026-03-26T11:00:00.000Z',
         chats: {},
       });
-      return { code: 0, stdout: '', stderr: '' };
+      return opts?.runNodeCliResult ?? { code: 0, stdout: '', stderr: '' };
     },
     setChatAgentConfig: async (opts) => {
       setChatAgentConfigCalls.push(opts);
@@ -122,6 +129,7 @@ function createControllerHarness(opts?: {
     syncSharedPathsCalls,
     runNodeCliCalls,
     pendingPromptPumpCalls,
+    cancelPendingPromptsCalls,
     events,
   };
 }
@@ -526,6 +534,58 @@ describe('drone provisioning controller', () => {
 
       expect(harness.runNodeCliCalls).toHaveLength(1);
       expect(harness.runNodeCliCalls[0]).toContain('--no-persist-volume');
+    });
+  });
+
+  test('cancels queued prompts when the runtime fails to start', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-failed': {
+            id: 'drone-failed',
+            name: 'failed-runtime',
+            runtime: 'host',
+            repoPath: '',
+            build: false,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+            startupQueuedPrompts: [
+              {
+                id: 'queued-review',
+                chatName: 'default',
+                at: '2026-03-26T11:01:00.000Z',
+                prompt: 'Review the changes',
+                state: 'queued',
+              },
+            ],
+          },
+        };
+      });
+
+      const harness = createControllerHarness({
+        runNodeCliResult: { code: 1, stdout: '', stderr: 'runtime import failed' },
+      });
+      harness.controller.enqueueProvisioning('drone-failed');
+
+      await waitFor(async () => {
+        const reg: any = await loadRegistry();
+        return reg?.pending?.['drone-failed']?.phase === 'error';
+      });
+
+      const reg: any = await loadRegistry();
+      expect(reg?.pending?.['drone-failed']).toMatchObject({
+        phase: 'error',
+        message: 'Failed to start',
+        error: 'runtime import failed',
+        startupQueuedPrompts: [
+          { id: 'queued-review', state: 'failed', error: 'runtime import failed' },
+        ],
+      });
+      expect(harness.cancelPendingPromptsCalls).toEqual([
+        { droneId: 'drone-failed', error: 'Drone failed to start: runtime import failed' },
+      ]);
     });
   });
 

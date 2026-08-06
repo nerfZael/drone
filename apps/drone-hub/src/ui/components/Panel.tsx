@@ -23,7 +23,7 @@ export const UiPanel = React.forwardRef<HTMLDivElement, UiPanelProps>(function U
     <div
       ref={ref}
       className={cn(
-        'flex min-h-0 min-w-0 flex-col overflow-hidden',
+        'ui-panel flex min-h-0 min-w-0 flex-col overflow-hidden',
         !flush && 'rounded-[var(--radius-large)] border border-[var(--border-subtle)]',
         surfaceClassName[surface],
         className,
@@ -57,7 +57,7 @@ export function UiPanelHeader({
   return (
     <div
       className={cn(
-        'flex shrink-0 items-start gap-2 border-b border-[var(--border-subtle)] bg-transparent',
+        'ui-panel-header flex shrink-0 items-start gap-2 border-b border-[var(--border-subtle)] bg-transparent',
         density === 'compact' ? 'min-h-8 px-2.5 py-1.5' : 'min-h-11 px-3 py-2.5',
         className,
       )}
@@ -102,7 +102,7 @@ export function UiPanelToolbar({
     <div
       role={props.role ?? 'toolbar'}
       className={cn(
-        'flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-[var(--border-subtle)] bg-transparent px-2.5 py-1.5',
+        'ui-panel-toolbar flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-[var(--border-subtle)] bg-transparent px-2.5 py-1.5',
         className,
       )}
       {...props}
@@ -118,7 +118,7 @@ export const UiPanelBody = React.forwardRef<
     <div
       ref={ref}
       className={cn(
-        'min-h-0 min-w-0 flex-1',
+        'ui-panel-body min-h-0 min-w-0 flex-1',
         scroll ? 'overflow-auto' : 'overflow-hidden',
         className,
       )}

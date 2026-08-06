@@ -191,6 +191,49 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('uses the shared rename command without a loopback HTTP request', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-rename-', async () => {
+      const previousFetch = globalThis.fetch;
+      const renames: any[] = [];
+      globalThis.fetch = (async (input) => {
+        throw new Error(`unexpected loopback request: ${String(input)}`);
+      }) as typeof fetch;
+      const client = await createInProcessDroneHubMcpClient({
+        correlationId: 'thread-rename',
+        allowedDroneRefs: ['drone-a'],
+        allowedWriteDroneRefs: ['drone-a'],
+        allowedDroneIds: ['drone-a'],
+        renameDrone: async (input) => {
+          renames.push(input);
+          return {
+            ok: true,
+            id: 'drone-a',
+            oldName: 'Untitled 1',
+            newName: input.newName,
+            renamed: true,
+          };
+        },
+      });
+      try {
+        const result = await client.callTool({
+          name: 'rename_drones',
+          arguments: { drone: 'drone-a', newName: 'Review proposals' },
+        });
+        expect(result.structuredContent).toMatchObject({ ok: true, total: 1 });
+        expect(renames).toEqual([
+          {
+            droneRef: 'drone-a',
+            newName: 'Review proposals',
+            source: 'drone-hub-mcp',
+          },
+        ]);
+      } finally {
+        await client.close();
+        globalThis.fetch = previousFetch;
+      }
+    });
+  });
+
   test('hides speak from new Built-in MCP catalogs when speech is disabled globally', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-speech-disabled-', async () => {
       await upsertStoredSpeechSettings({ enabled: false });
@@ -303,6 +346,250 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('routes legacy multi-chat idle watches through durable chat subscriptions', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-legacy-idle-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const subscriptionBodies: any[] = [];
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
+        );
+        if (url.pathname === '/api/drones/drone-b/chats') {
+          return Response.json({
+            ok: true,
+            name: 'Build worker',
+            chats: ['default'],
+            chatDetails: [{ chat: 'default', chatId: 'target-chat-b' }],
+          });
+        }
+        if (url.pathname === '/api/drones/drone-c/chats') {
+          return Response.json({
+            ok: true,
+            name: 'Review worker',
+            chats: ['default', 'review'],
+            chatDetails: [{ chat: 'review', chatId: 'target-chat-c' }],
+          });
+        }
+        if (url.pathname.startsWith('/api/resource-subscriptions/chat-resource/')) {
+          const chatId = url.pathname.split('/').at(-1);
+          return Response.json({
+            ok: true,
+            resource: {
+              chatId,
+              droneId: chatId === 'target-chat-b' ? 'drone-b' : 'drone-c',
+              chatName: chatId === 'target-chat-b' ? 'default' : 'review',
+            },
+          });
+        }
+        if (url.pathname === '/api/resource-subscriptions') {
+          const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+          subscriptionBodies.push(body);
+          return Response.json({
+            ok: true,
+            created: true,
+            subscription: {
+              id: `subscription-${subscriptionBodies.length}`,
+              provider: 'drone-hub',
+              resourceType: 'chat',
+              resourceId: body?.resourceId,
+              events: body?.events,
+              intent: body?.intent,
+              status: 'active',
+            },
+          });
+        }
+        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'managed-chat-test-token';
+
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'legacy-idle-watch',
+          allowedDroneRefs: [],
+          allowedWriteDroneRefs: [],
+          allowedDroneIds: [],
+          legacyIdleSubscriptionTools: true,
+          principal: {
+            kind: 'chat',
+            tokenId: 'chat:drone-a:default',
+            name: 'Drone A / default',
+            droneId: 'drone-a',
+            chatName: 'default',
+            chatId: 'subscriber-chat',
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['drone-a', 'drone-b', 'drone-c'],
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+            selectedDroneRefs: ['drone-a', 'drone-b', 'drone-c'],
+          },
+        });
+        const result = await client.callTool({
+          name: 'subscribe_to_all_chats_idle',
+          arguments: {
+            targets: [
+              { drone: 'drone-b', chat: 'default' },
+              { drone: 'drone-c', chat: 'review' },
+            ],
+          },
+        });
+        expect(result.isError).not.toBe(true);
+        expect(subscriptionBodies).toHaveLength(2);
+        expect(subscriptionBodies.map((body) => body.resourceId)).toEqual([
+          'target-chat-b',
+          'target-chat-c',
+        ]);
+        for (const body of subscriptionBodies) {
+          expect(body).toMatchObject({
+            provider: 'drone-hub',
+            resourceType: 'chat',
+            events: ['chat.idle', 'chat.failed'],
+            subscriber: {
+              chatId: 'subscriber-chat',
+              droneId: 'drone-a',
+              chatName: 'default',
+            },
+          });
+          expect(body.intent).toContain('Wait for all requested chats to finish');
+          expect(body.intent).toContain('Targets: Build worker, Review worker/review');
+          expect(body.intent).not.toContain('drone-b/default');
+        }
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
+  test('creates cron subscriptions in the timezone last reported by the user interface', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-cron-subscription-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      let requestBody: any = null;
+      let userContextRequests = 0;
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
+        );
+        if (url.pathname === '/api/settings/user-context') {
+          userContextRequests += 1;
+          return Response.json({
+            ok: true,
+            userContext: { timeZone: 'America/Los_Angeles' },
+          });
+        }
+        if (url.pathname === '/api/resource-subscriptions/cron') {
+          requestBody = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+          return Response.json({
+            ok: true,
+            created: true,
+            subscription: {
+              id: 'cron-subscription-1',
+              provider: 'drone-hub',
+              resourceType: 'cron',
+              resourceId: 'v1:hourly',
+              resourceConfig: { expression: '0 * * * *', timeZone: 'America/Los_Angeles' },
+              events: ['cron.triggered'],
+              intent: 'Check the deployment.',
+              nextEventAt: '2026-08-05T13:00:00.000Z',
+              status: 'active',
+              cursor: { hidden: true },
+              subscriber: { chatId: 'subscriber-chat' },
+            },
+          });
+        }
+        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'managed-chat-test-token';
+
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'cron-subscription',
+          principal: {
+            kind: 'chat',
+            tokenId: 'chat:drone-a:default',
+            name: 'Drone A / default',
+            droneId: 'drone-a',
+            chatName: 'default',
+            chatId: 'subscriber-chat',
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['drone-a'],
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+            selectedDroneRefs: ['drone-a'],
+          },
+        });
+        const result = await client.callTool({
+          name: 'subscribe_to_cron',
+          arguments: {
+            expression: '0 * * * *',
+            intent: 'Check the deployment.',
+          },
+        });
+        expect(result.isError).not.toBe(true);
+        expect(requestBody).toMatchObject({
+          expression: '0 * * * *',
+          timeZone: 'America/Los_Angeles',
+          intent: 'Check the deployment.',
+          subscriber: {
+            chatId: 'subscriber-chat',
+            droneId: 'drone-a',
+            chatName: 'default',
+          },
+        });
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          created: true,
+          subscription: {
+            id: 'cron-subscription-1',
+            resourceType: 'cron',
+            nextEventAt: '2026-08-05T13:00:00.000Z',
+          },
+        });
+        expect((result.structuredContent as any)?.subscription?.cursor).toBeUndefined();
+        expect((result.structuredContent as any)?.subscription?.subscriber).toBeUndefined();
+
+        await client.callTool({
+          name: 'subscribe_to_cron',
+          arguments: {
+            expression: '0 22 * * *',
+            timeZone: 'Europe/Paris',
+            intent: 'Run the nightly report.',
+          },
+        });
+        expect(requestBody).toMatchObject({
+          expression: '0 22 * * *',
+          timeZone: 'Europe/Paris',
+          intent: 'Run the nightly report.',
+        });
+        expect(userContextRequests).toBe(1);
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
   test('keeps same-named repository groups isolated across MCP list, create, move, and reorder tools', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-groups-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
@@ -316,6 +603,15 @@ describe('Drone Hub assistant MCP transport', () => {
       ];
       const drones = [
         { id: 'a-1', name: 'A 1', repoPath: repoA, group: 'review', groupId: 'grp_repo_a' },
+        { id: 'a-loose', name: 'A loose', repoPath: repoA, group: null, groupId: null },
+        {
+          id: 'a-child',
+          name: 'A child',
+          repoPath: repoA,
+          group: null,
+          groupId: null,
+          fleetParentId: 'a-loose',
+        },
         { id: 'b-1', name: 'B 1', repoPath: repoB, group: 'review', groupId: 'grp_repo_b' },
         { id: 'b-2', name: 'B 2', repoPath: repoB, group: 'review', groupId: 'grp_repo_b' },
         { id: 'b-3', name: 'B 3', repoPath: repoB, group: null, groupId: null },
@@ -329,6 +625,10 @@ describe('Drone Hub assistant MCP transport', () => {
         },
         sidebarNodeOrderByParent: {
           'folder:review': ['drone:a-1', 'drone:b-1', 'drone:b-2'],
+          [`folder:repo:${repoA}`]: [
+            'drone:a-loose',
+            `folder:repo-scope:repo:${repoA}:review`,
+          ],
         },
       };
       const requests: Array<{ pathname: string; search: string; method: string; body?: any }> = [];
@@ -424,6 +724,11 @@ describe('Drone Hub assistant MCP transport', () => {
           'group-id:grp_new_a',
           'group-id:grp_repo_a',
           'group-id:grp_repo_b',
+        ]);
+        expect(uiPreferences.sidebarNodeOrderByParent[`folder:repo:${repoA}`]).toEqual([
+          `folder:repo-scope:repo:${repoA}:ready`,
+          'drone:a-loose',
+          `folder:repo-scope:repo:${repoA}:review`,
         ]);
         const createRequest = requests.find((request) => request.pathname === '/api/groups' && request.method === 'POST');
         expect(createRequest?.body).toEqual({ name: 'ready', repoPath: repoA });

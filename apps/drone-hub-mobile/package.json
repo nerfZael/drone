@@ -19,6 +19,7 @@
     "@drone/device-protocol": "workspace:*",
     "@drone/file-icons": "workspace:*",
     "@drone/hub-model": "workspace:*",
+    "@drone/markdown-table-sort": "workspace:*",
     "@blip/workspace": "workspace:*",
     "@mariozechner/pi-agent-core": "workspace:*",
     "@mariozechner/pi-ai": "workspace:*",

@@ -86,7 +86,10 @@ import {
   terminalOutput as droneTerminalOutput,
   terminalPrompt as droneTerminalPrompt,
 } from '../host/api';
-import { suggestDroneNameFromMessage } from './drone-name-from-message';
+import {
+  retryTemporaryNameSuggestion,
+  suggestDroneNameFromMessage,
+} from './drone-name-from-message';
 import { buildAutoRenamedChatCandidate, isGeneratedChatName } from './chat-auto-rename';
 import type {
   AgentApprovalPolicy,
@@ -216,7 +219,6 @@ import {
   gitRepoCommitDiffForPath,
   gitRepoCommitList,
   gitCurrentBranchOrSha,
-  gitPullHostBranchBeforeCreate,
   gitRepoDiffForPath,
   gitResolveCommitSha,
   gitIsClean,
@@ -227,7 +229,6 @@ import {
   gitRepoChangesSummary,
   gitResolveRemoteBranchForCreate,
   importBundleHeadToHostRef,
-  isHostRepoPullBeforeCreateError,
   resolveBundleImportSourceRefFromListHeads,
   gitStashPop,
   gitStashPush,
@@ -278,7 +279,7 @@ import {
   type ContainerFsEntry,
 } from './filesystem-media';
 import { DroneChatBroadcaster } from './drone-chat-broadcaster';
-import { DroneRegistryBroadcaster } from './drone-registry-broadcaster';
+import { DroneRegistryBroadcaster, type DroneRegistrySnapshot } from './drone-registry-broadcaster';
 import { createTerminalWebSocketServer } from './terminal-websocket-server';
 import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgrade';
 import { registerAssistantRoutes } from './routes/assistant-routes';
@@ -301,6 +302,7 @@ import { registerResourceSubscriptionRoutes } from './routes/resource-subscripti
 import { createRepositoryRouteHandler } from './routes/repository-operation-routes';
 import { registerRepositoryRoutes } from './routes/repository-routes';
 import { registerSettingsRoutes } from './routes/settings-routes';
+import { registerSidebarRoutes } from './routes/sidebar-routes';
 import { registerSystemRoutes } from './routes/system-routes';
 import { createTerminalRouteHandler } from './routes/terminal-routes';
 import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
@@ -315,6 +317,7 @@ import {
 } from './workflows/workflow-child-drone-metadata';
 import { registerWorkflowFeature } from './workflows/workflow-feature';
 import { DroneHubMcpHttpTransport } from './mcp-http-transport';
+import { SidebarCommandService } from './sidebar-command-service';
 import {
   assertDroneDaemonRuntimeReady,
   launchHostDroneDaemon,
@@ -398,6 +401,7 @@ import {
   resolveLlmSettingsResponse,
   resolveSpeechSettingsResponse,
   resolveUiPreferencesSettingsResponse,
+  resolveUserContextSettingsResponse,
   startCodexLogin,
   upsertStoredDeleteActionSettings,
   upsertStoredFilesystemSettings,
@@ -405,7 +409,7 @@ import {
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
   upsertStoredUiPreferencesSettings,
-  updatePinnedDronePreference,
+  updateStoredUserTimeZone,
   type LlmProviderId,
   type StoredApiKeyProviderId,
   type UiPreferencesSettings,
@@ -490,6 +494,7 @@ import {
   setDroneGroupMetadata,
   updateDroneFleetMetadata,
 } from './drone-metadata-commands';
+import { createRenameDroneCommand } from './drone-rename-command';
 import {
   createPendingDroneStateHelpers,
   hasQueuedPromptWithId,
@@ -505,6 +510,7 @@ import {
   isDraftDroneEntry,
   summarizeDroneActivity,
 } from './drone-summary-helpers';
+import { mergeNativeBusyChatNames } from './native-drone-summary';
 import { summarizeAssistantChatIdle } from './assistant';
 import { saveAssistantArtifactUploads, validateAssistantPromptImages } from './assistant-artifacts';
 
@@ -514,6 +520,7 @@ const requireForHub = createRequire(__filename);
 
 let notifyDroneRegistryWrite: (() => void) | null = null;
 let notifyDroneChatWrite: ((droneId: string, chatName: string) => void) | null = null;
+let notifyDroneSummaryChange: (() => void) | null = null;
 
 async function updateRegistry<T>(
   mutator: (reg: any) => T | Promise<T>,
@@ -531,17 +538,6 @@ const HUB_SETTINGS_LOG_MAX_BYTES = 1_000_000;
 
 function normalizeApiKey(raw: unknown): string {
   return typeof raw === 'string' ? raw.trim() : '';
-}
-
-function parsePullHostBranchBeforeCreate(raw: unknown): boolean {
-  if (typeof raw === 'boolean') return raw;
-  if (raw == null) return true;
-  if (typeof raw === 'number') return raw !== 0;
-  const value = String(raw).trim().toLowerCase();
-  if (!value) return true;
-  if (value === '0' || value === 'false' || value === 'no' || value === 'off') return false;
-  if (value === '1' || value === 'true' || value === 'yes' || value === 'on') return true;
-  return true;
 }
 
 type RepoBranchSourceMode = 'host' | 'remote';
@@ -612,35 +608,6 @@ function parsePersistVolume(raw: unknown): boolean | undefined {
   if (raw == null) return undefined;
   if (typeof raw === 'boolean') return raw;
   throw new Error('invalid persistVolume (expected boolean)');
-}
-
-function formatPullHostBranchBeforeCreateError(error: unknown): {
-  status: number;
-  message: string;
-  reason: string;
-} {
-  if (isHostRepoPullBeforeCreateError(error)) {
-    switch (error.code) {
-      case 'not_repo':
-      case 'detached_head':
-      case 'missing_upstream':
-      case 'pull_non_fast_forward':
-      case 'pull_failed':
-        return {
-          status: 409,
-          message: error.message,
-          reason: error.code,
-        };
-      default:
-        break;
-    }
-  }
-  const fallback = String((error as any)?.message ?? error ?? '').trim();
-  return {
-    status: 500,
-    message: fallback || 'failed to pull host branch before create',
-    reason: 'unknown',
-  };
 }
 
 async function readLogTail(
@@ -1364,6 +1331,16 @@ let nativeChatErrorHandler: (nativeChatId: string) => Promise<string> = async ()
 let nativeChatLatestAssistantTextHandler: (nativeChatId: string) => Promise<string> = async () =>
   '';
 let deleteNativeChatSessionsHandler: (droneEntry: any) => Promise<void> = async () => {};
+type ResourceSubscriptionLifecycleHandler = {
+  pauseForDrone: (droneId: string, chatIds: string[]) => Promise<void>;
+  resumeForChat: (chatId: string) => Promise<void>;
+  resumeForDrone: (droneId: string, chatIds: string[]) => Promise<void>;
+};
+let resourceSubscriptionLifecycleHandler: ResourceSubscriptionLifecycleHandler = {
+  pauseForDrone: async () => {},
+  resumeForChat: async () => {},
+  resumeForDrone: async () => {},
+};
 let cloneNativeChatSessionHandler: (input: any) => Promise<void> = async () => {
   throw new Error('native chat runtime is not ready');
 };
@@ -1386,6 +1363,15 @@ function isRepoAttachedDrone(drone: any): boolean {
     Boolean(String((drone as any).repo?.dest ?? '').trim()) ||
     Boolean(String((drone as any).repo?.seededAt ?? '').trim())
   );
+}
+
+function resourceSubscriptionChatIds(droneEntry: any): string[] {
+  return [
+    ...Object.values<any>(droneEntry?.chats ?? {}),
+    ...Object.values<any>(droneEntry?.archivedChats ?? {}),
+  ]
+    .map((chatEntry) => String(chatEntry?.id ?? '').trim())
+    .filter(Boolean);
 }
 
 function safeDroneRefSegment(raw: unknown, fallback = 'drone'): string {
@@ -3660,11 +3646,23 @@ const {
   nowIso,
   parseArchiveRetentionId,
   parseArchiveRuntimePolicy,
+  pauseResourceSubscriptionsForDrone: (droneId: string, droneEntry: any) =>
+    resourceSubscriptionLifecycleHandler.pauseForDrone(
+      droneId,
+      resourceSubscriptionChatIds(droneEntry),
+    ),
   permanentlyDeleteCanonicalDrone,
   readChatFromStore,
   removeDockerSnapshotImagesBestEffort,
   removeDroneRuntimeArtifacts,
   restoreArchivedChatInStore,
+  resumeResourceSubscriptionsForChat: (chatId: string) =>
+    resourceSubscriptionLifecycleHandler.resumeForChat(chatId),
+  resumeResourceSubscriptionsForDrone: (droneId: string, droneEntry: any) =>
+    resourceSubscriptionLifecycleHandler.resumeForDrone(
+      droneId,
+      resourceSubscriptionChatIds(droneEntry),
+    ),
   revokeMcpAccessTokensForDrone,
   updateRegistry,
   upsertCanonicalDroneLifecycle,
@@ -3917,6 +3915,55 @@ async function logHubLlmStartupSnapshot() {
   });
 }
 
+async function suggestCreatedDroneNameDirect(input: {
+  droneId: string;
+  prompt: string;
+}): Promise<string> {
+  const source = 'mobile-create-auto-rename';
+  const { provider, ...resolved } = await resolveNameSuggestionLlmSettings();
+  if (!resolved.apiKey) {
+    await logProviderApiKeyResolution(
+      'warn',
+      'name-from-message rejected: missing Codex connection and OpenAI key',
+      provider,
+      {
+        source,
+        requestedDroneId: input.droneId,
+        messageLength: input.prompt.length,
+      },
+    );
+    throw new Error('Connect Codex or configure an OpenAI API key in Settings.');
+  }
+  const name = await retryTemporaryNameSuggestion(
+    () =>
+      suggestDroneNameFromMessage(input.prompt, {
+        provider,
+        apiKey: resolved.apiKey!,
+        style: 'display',
+      }),
+    {
+      onRetry: ({ attempt, delayMs, error }) => {
+        hubLog('warn', 'name-from-message temporary failure; retrying', {
+          provider,
+          source,
+          requestedDroneId: input.droneId,
+          attempt,
+          delayMs,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    },
+  );
+  hubLog('info', 'name-from-message suggested', {
+    provider,
+    source,
+    requestedDroneId: input.droneId,
+    suggestedName: name,
+    messageLength: input.prompt.length,
+  });
+  return name;
+}
+
 function normalizeContainerMcpUrl(raw: unknown): string {
   const value = String(raw ?? '').trim();
   if (!value) return '';
@@ -3961,12 +4008,34 @@ export async function startDroneHubApiServer(opts: {
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
   if (mcpToken) await revokeLegacyProjectedDroneMcpTokens();
+  const renameDroneCommand = createRenameDroneCommand({
+    displayNameMaxLength: DRONE_DISPLAY_NAME_MAX_LEN,
+    findDroneIdByRef,
+    loadRegistry,
+    log: hubLog,
+    normalizeDisplayName: normalizeDroneDisplayName,
+    normalizeDroneIdentity,
+    notifyRegistryWrite: () => notifyDroneRegistryWrite?.(),
+    persistDisplayName: renameDroneDisplayName,
+  });
   let actualPort = opts.port;
+  const sidebarCommands = new SidebarCommandService({
+    baseUrl: () => `http://127.0.0.1:${actualPort}`,
+    apiToken,
+  });
   const deviceMesh = await createDeviceMeshService({
     rootDir: droneRootPath('device-mesh'),
     apiToken,
+    sidebarCommands,
     localHubBaseUrl: () => `http://127.0.0.1:${actualPort}`,
     ingressPort: opts.deviceMeshIngressPort,
+    renameDrone: renameDroneCommand,
+    createdDroneAutoRename: {
+      suggestName: suggestCreatedDroneNameDirect,
+      renameDrone: async ({ droneId, ...input }) => {
+        await renameDroneCommand({ droneRef: droneId, ...input });
+      },
+    },
   });
 
   const allowedOrigins = new Set<string>();
@@ -4121,9 +4190,13 @@ export async function startDroneHubApiServer(opts: {
     deviceMesh,
     normalizeDroneIdentity,
     nowIso,
+    renameDrone: renameDroneCommand,
     onNativePromptQueueChanged: ({ droneId, chatName }) => {
       notifyDroneChatWrite?.(droneId, chatName);
       promptRuntime.enqueuePendingPromptPump(droneId, chatName);
+    },
+    onNativeThreadStateChanged: () => {
+      notifyDroneSummaryChange?.();
     },
     summarizeDroneActivity,
   });
@@ -4231,7 +4304,6 @@ export async function startDroneHubApiServer(opts: {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   }
 
-  type DroneRegistrySnapshot = { ok: true; drones: any[] };
   type CachedDroneStatusSummary = {
     hostPort: number | null;
     statusOk: boolean;
@@ -4827,6 +4899,7 @@ export async function startDroneHubApiServer(opts: {
       id: normalizeDroneIdentity(p?.id) || null,
       name: String(p?.name ?? ''),
       group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
+      groupId: typeof p?.groupId === 'string' && p.groupId.trim() ? p.groupId.trim() : null,
       draft: isDraftDroneEntry(p),
       createdAt: String(p?.createdAt ?? nowIso()),
       lastActivityAt: activity.lastActivityAt,
@@ -4904,11 +4977,22 @@ export async function startDroneHubApiServer(opts: {
     const droneId = normalizeDroneIdentity(d?.id);
     const { chats, workflowChats } = partitionWorkflowChatEntries(d.chats);
     const workflowChatSet = new Set(workflowChats);
-    const busyChats = droneId
+    const pendingBusyChats = droneId
       ? busyChatNamesForDrone(d, droneId).filter(
           (chatName: string) => !workflowChatSet.has(chatName),
         )
       : [];
+    const busyChats = await mergeNativeBusyChatNames({
+      busyChatNames: pendingBusyChats,
+      chatNames: chats,
+      droneEntry: d,
+      isNativeChat: (chatEntry, droneEntry) =>
+        inferChatAgent(chatEntry, droneEntry).kind === 'native',
+      isThreadBusy: async (threadId) =>
+        assistantPromptDrains.has(threadId) ||
+        blipAssistantHost.isThreadRunning(threadId) ||
+        (await assistantService.nativeThreadHasActiveRun(threadId)),
+    });
     const approvalChats = chats.flatMap((chatName) => {
       const chatEntry = d.chats?.[chatName];
       if (inferChatAgent(chatEntry, d).kind !== 'native') return [];
@@ -4942,6 +5026,7 @@ export async function startDroneHubApiServer(opts: {
       id: normalizeDroneIdentity(d?.id) || null,
       name: d.name,
       group: d.group ?? null,
+      groupId: typeof d?.groupId === 'string' && d.groupId.trim() ? d.groupId.trim() : null,
       createdAt: d.createdAt,
       lastActivityAt: activity.lastActivityAt,
       lastMessageAt: activity.lastMessageAt,
@@ -4980,9 +5065,10 @@ export async function startDroneHubApiServer(opts: {
   }
 
   async function buildDroneRegistrySnapshot(source: string): Promise<DroneRegistrySnapshot> {
-    const [regAny, canonicalGroups] = await Promise.all([
+    const [regAny, canonicalGroups, preferences] = await Promise.all([
       loadPreparedDroneRegistryForSummary(source),
       listCanonicalGroups(),
+      resolveUiPreferencesSettingsResponse(),
     ]);
     const groupIdByScopeAndName = new Map(
       canonicalGroups.map((group) => [`${group.repoPath}\0${group.name}`, group.id]),
@@ -5044,7 +5130,14 @@ export async function startDroneHubApiServer(opts: {
             }
           : drone;
       });
-    return { ok: true, drones };
+    return {
+      ok: true,
+      drones,
+      groups: canonicalGroups,
+      uiPreferences: preferences.uiPreferences,
+      preferenceUpdatedAt: preferences.updatedAt,
+      preferenceVersion: preferences.version,
+    };
   }
 
   const droneChatBroadcaster = new DroneChatBroadcaster({
@@ -5066,8 +5159,8 @@ export async function startDroneHubApiServer(opts: {
   const refreshDroneRegistryBroadcasterSnapshot = (opts?: { broadcastSnapshot?: boolean }) =>
     droneRegistryBroadcaster.refresh(opts);
   const scheduleDroneChatEventRefresh = (delayMs = 100) => droneChatBroadcaster.schedule(delayMs);
-  const scheduleDroneRegistryBroadcasterRefresh = (delayMs = 150) =>
-    droneRegistryBroadcaster.schedule(delayMs);
+  const scheduleDroneRegistryBroadcasterRefresh = (delayMs = 150, restart = false) =>
+    droneRegistryBroadcaster.schedule(delayMs, restart);
   const startDroneChatBroadcaster = () => droneChatBroadcaster.start();
   const startDroneRegistryBroadcaster = () => droneRegistryBroadcaster.start();
   const stopDroneChatBroadcasterIfIdle = () => droneChatBroadcaster.stopIfIdle();
@@ -5084,13 +5177,18 @@ export async function startDroneHubApiServer(opts: {
     void deviceMesh.broadcastDroneChatChange({ reason: 'registry_write', at: nowIso() });
   };
   notifyDroneRegistryWrite = notifyCanonicalDroneRegistryWrite;
+  const notifyCanonicalDroneSummaryChange = () => {
+    canonicalActiveModelCache = null;
+    invalidateDroneSummaryRegistryCache();
+    scheduleDroneRegistryBroadcasterRefresh();
+  };
+  notifyDroneSummaryChange = notifyCanonicalDroneSummaryChange;
   const notifyCanonicalPromptQueueChatWrite = (droneId: string, chatName: string) => {
     // Prompt delivery state is canonical SQLite state and does not rewrite the
     // registry. Invalidate the projection and wake chat and sidebar SSE clients
     // explicitly so live state and native-message timestamps are not delayed
     // until the fallback poll.
-    canonicalActiveModelCache = null;
-    scheduleDroneRegistryBroadcasterRefresh();
+    notifyCanonicalDroneSummaryChange();
     scheduleDroneChatEventRefresh();
     void deviceMesh.broadcastDroneChatChange({
       reason: 'chat_write',
@@ -5111,6 +5209,7 @@ export async function startDroneHubApiServer(opts: {
     signingSecret: mcpToken,
     log: hubLog,
     speechEnabled: initialSpeechSettings.enabled,
+    renameDrone: renameDroneCommand,
   });
   const handleDroneHubMcpRequest = (
     req: http.IncomingMessage,
@@ -5166,6 +5265,19 @@ export async function startDroneHubApiServer(opts: {
         log: hubLog,
       })
     : null;
+  if (resourceSubscriptionService) {
+    resourceSubscriptionLifecycleHandler = {
+      pauseForDrone: async (droneId, chatIds) => {
+        await resourceSubscriptionService.pauseForDrone(droneId, chatIds);
+      },
+      resumeForChat: async (chatId) => {
+        await resourceSubscriptionService.resumeForChat(chatId);
+      },
+      resumeForDrone: async (droneId, chatIds) => {
+        await resourceSubscriptionService.resumeForDrone(droneId, chatIds);
+      },
+    };
+  }
 
   const apiRouter = new HubRouter(json, readJsonBody);
 
@@ -5247,10 +5359,15 @@ export async function startDroneHubApiServer(opts: {
     droneRootPath,
     resolveUiPreferencesSettingsResponse,
     upsertStoredUiPreferencesSettings,
-    updatePinnedDronePreference,
-    notifyPinnedDronesChanged: () => {
+    resolveUserContextSettingsResponse,
+    notifyUiPreferencesChanged: () => {
       const at = nowIso();
-      assistantService.emitExternalUiAction({ type: 'reload_pinned_drones', at });
+      assistantService.emitExternalUiAction({ type: 'reload_ui_preferences', at });
+      void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
+    },
+    notifyUiPreferencesSnapshotChanged: () => {
+      const at = nowIso();
+      scheduleDroneRegistryBroadcasterRefresh(150, true);
       void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
     },
     clampIntParam,
@@ -5260,6 +5377,8 @@ export async function startDroneHubApiServer(opts: {
     HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES,
     HUB_SETTINGS_LOG_MAX_TAIL_LINES,
   });
+
+  registerSidebarRoutes(apiRouter, sidebarCommands);
 
   registerCatalogRoutes(apiRouter, {
     mcpToken,
@@ -5284,6 +5403,7 @@ export async function startDroneHubApiServer(opts: {
     submitAssistantPrompt,
     validateAssistantPromptImages,
     saveAssistantArtifactUploads,
+    updateStoredUserTimeZone,
   });
   registerAgentRunDiffRoutes(apiRouter);
   registerNativeChatRoutes(apiRouter, {
@@ -5413,7 +5533,6 @@ export async function startDroneHubApiServer(opts: {
   });
 
   const handleDroneLifecycleRoute = createDroneLifecycleRouteHandler({
-    DRONE_DISPLAY_NAME_MAX_LEN,
     archiveDroneById,
     archiveRetentionMs,
     cleanupExpiredArchivedChats,
@@ -5440,7 +5559,6 @@ export async function startDroneHubApiServer(opts: {
     normalizeArchiveRuntimePolicy,
     normalizeChatName,
     normalizeDisabledRepoKeys,
-    normalizeDroneDisplayName,
     normalizeDroneIdentity,
     normalizeDroneRuntime,
     normalizeEnvVarMap,
@@ -5448,7 +5566,7 @@ export async function startDroneHubApiServer(opts: {
     parseIsoToMs,
     removeArchivedDroneById,
     removeDroneTreeById,
-    renameDroneDisplayName,
+    renameDrone: renameDroneCommand,
     resolveArchiveDeleteAtIso,
     resolveDroneCliPath,
     resolveDroneOrPendingForReadRef,
@@ -5660,6 +5778,8 @@ export async function startDroneHubApiServer(opts: {
     jsonWithKnownEtag,
     listChatReadStatesFromStore,
     listChatsFromStore,
+    listResourceSubscriptionsForChatId: (chatId: string) =>
+      resourceSubscriptionService?.list(chatId, false) ?? [],
     logSlowHubRequest,
     markChatReadInStore,
     markChatUnreadInStore,
@@ -5713,6 +5833,7 @@ export async function startDroneHubApiServer(opts: {
     shouldAutoRenameChatOnPrompt,
     stopChatResponse,
     stopSingleDroneChatActivity,
+    updateStoredUserTimeZone,
     updateChatInStore,
     waitForDroneDaemonReady,
     withLockedDroneContainer,
@@ -5739,9 +5860,7 @@ export async function startDroneHubApiServer(opts: {
     fileExists,
     findDroneEntryByIdentity,
     findDroneIdByRef,
-    formatPullHostBranchBeforeCreateError,
     getDroneRegistrySseLastSnapshot: () => droneRegistryBroadcaster.snapshot,
-    gitPullHostBranchBeforeCreate,
     gitResolveRemoteBranchForCreate,
     isSafePromptId,
     loadCanonicalActiveModel,
@@ -5761,7 +5880,6 @@ export async function startDroneHubApiServer(opts: {
     parseCreateRuntime,
     parseDraftFlag,
     parsePersistVolume,
-    parsePullHostBranchBeforeCreate,
     parseRemoteBranchName,
     parseRepoBranchSourceMode,
     parseSeedAgent,
@@ -6012,6 +6130,9 @@ export async function startDroneHubApiServer(opts: {
       }
       if (notifyDroneRegistryWrite === notifyCanonicalDroneRegistryWrite) {
         notifyDroneRegistryWrite = null;
+      }
+      if (notifyDroneSummaryChange === notifyCanonicalDroneSummaryChange) {
+        notifyDroneSummaryChange = null;
       }
       if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
         activeDroneHubMcpProjectionConfig = null;

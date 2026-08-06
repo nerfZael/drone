@@ -35,6 +35,7 @@ type ChatPromptRouteDependencyName =
   | 'isStaleDockerExecErrorMessage'
   | 'jsonWithEtag'
   | 'jsonWithKnownEtag'
+  | 'listResourceSubscriptionsForChatId'
   | 'logSlowHubRequest'
   | 'normalizeChatImageAttachments'
   | 'normalizeChatModel'
@@ -45,6 +46,7 @@ type ChatPromptRouteDependencyName =
   | 'pushPendingPrompt'
   | 'pushPendingStartupPrompt'
   | 'promoteQueuedNewChatAction'
+  | 'readChatReadStateFromStore'
   | 'readChatSnapshot'
   | 'resolveChatTmuxCommand'
   | 'resolveDroneDaemonClientForEntry'
@@ -52,6 +54,7 @@ type ChatPromptRouteDependencyName =
   | 'resolveDroneOrRespond'
   | 'shouldAutoRenameChatOnPrompt'
   | 'stopChatResponse'
+  | 'updateStoredUserTimeZone'
   | 'waitForDroneDaemonReady'
   | 'withLockedDroneContainer';
 
@@ -88,6 +91,7 @@ export function createChatPromptRouteHandler(
     isStaleDockerExecErrorMessage,
     jsonWithEtag,
     jsonWithKnownEtag,
+    listResourceSubscriptionsForChatId,
     logSlowHubRequest,
     normalizeChatImageAttachments,
     normalizeChatModel,
@@ -98,6 +102,7 @@ export function createChatPromptRouteHandler(
     pushPendingPrompt,
     pushPendingStartupPrompt,
     promoteQueuedNewChatAction,
+    readChatReadStateFromStore,
     readChatSnapshot,
     resolveChatTmuxCommand,
     resolveDroneDaemonClientForEntry,
@@ -105,6 +110,7 @@ export function createChatPromptRouteHandler(
     resolveDroneOrRespond,
     shouldAutoRenameChatOnPrompt,
     stopChatResponse,
+    updateStoredUserTimeZone,
     waitForDroneDaemonReady,
     withLockedDroneContainer,
   } = deps;
@@ -139,6 +145,10 @@ export function createChatPromptRouteHandler(
           });
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
+        }
+
+        if (body?.userTimeZone != null) {
+          await updateStoredUserTimeZone(body.userTimeZone).catch(() => undefined);
         }
 
         let prompt = String(body?.prompt ?? '').trim();
@@ -520,7 +530,7 @@ export function createChatPromptRouteHandler(
         }
       }
 
-      // GET /api/drones/:id/chats/:chat/state?transcript=selected|tail|full|none&pending=none
+      // GET /api/drones/:id/chats/:chat/state?transcript=selected|tail|page|full|none&pending=none
       if (
         method === 'GET' &&
         parts.length === 6 &&
@@ -536,10 +546,26 @@ export function createChatPromptRouteHandler(
           const transcriptMode = String(u.searchParams.get('transcript') ?? 'selected')
             .trim()
             .toLowerCase();
-          if (!['selected', 'tail', 'full', 'none'].includes(transcriptMode)) {
+          if (!['selected', 'tail', 'page', 'full', 'none'].includes(transcriptMode)) {
             json(res, 400, {
               ok: false,
-              error: 'invalid transcript mode (expected selected, tail, full, or none)',
+              error: 'invalid transcript mode (expected selected, tail, page, full, or none)',
+            });
+            return;
+          }
+          const beforeText = String(u.searchParams.get('before') ?? '').trim();
+          const limitText = String(u.searchParams.get('limit') ?? '100').trim();
+          if (
+            transcriptMode === 'page' &&
+            ((beforeText &&
+              (!Number.isSafeInteger(Number(beforeText)) || Number(beforeText) < 0)) ||
+              !Number.isSafeInteger(Number(limitText)) ||
+              Number(limitText) < 1 ||
+              Number(limitText) > 100)
+          ) {
+            json(res, 400, {
+              ok: false,
+              error: 'invalid chat page (before must be non-negative and limit must be 1 to 100)',
             });
             return;
           }
@@ -555,10 +581,21 @@ export function createChatPromptRouteHandler(
           }
           const includeTranscript = transcriptMode !== 'none';
           const includePending = !['none', 'false', '0'].includes(pendingMode);
+          const includeSubscriptions = parseBoolParam(u.searchParams.get('subscriptions'), false);
+          const includeReadState = parseBoolParam(
+            u.searchParams.get('readState'),
+            includeSubscriptions,
+          );
+          const includeVolatileState = includeSubscriptions || includeReadState;
+          const includeTranscriptMeta = parseBoolParam(u.searchParams.get('transcriptMeta'), true);
           const selection =
-            transcriptMode === 'full' ? 'all' : (u.searchParams.get('turn') ?? 'all');
-          const tailRaw =
             transcriptMode === 'full'
+              ? 'all'
+              : transcriptMode === 'page'
+                ? `page:${beforeText}:${limitText}`
+                : (u.searchParams.get('turn') ?? 'all');
+          const tailRaw =
+            transcriptMode === 'full' || transcriptMode === 'page'
               ? null
               : transcriptMode === 'tail'
                 ? (u.searchParams.get('tail') ?? '50')
@@ -572,7 +609,7 @@ export function createChatPromptRouteHandler(
             includePending,
             maintenance: 'schedule',
             includeDockerSnapshotMaintenance: true,
-            ifNoneMatch: String(req.headers['if-none-match'] ?? ''),
+            ifNoneMatch: includeVolatileState ? '' : String(req.headers['if-none-match'] ?? ''),
             mark: (name: string) => timer.mark(name),
           });
           if ((globalThis as any).Bun) timer.mark('read');
@@ -608,21 +645,30 @@ export function createChatPromptRouteHandler(
             pendingCount: snapshot.pending.length,
             status: 200,
           });
-          if (snapshot.responseEtag) {
-            jsonWithKnownEtag(
-              req,
-              res,
-              200,
-              chatSnapshotResponseBody(snapshot, { includeTranscriptMeta: true }),
-              snapshot.responseEtag,
-            );
+          const responseBody = {
+            ...chatSnapshotResponseBody(snapshot, { includeTranscriptMeta }),
+            ...(includeReadState
+              ? {
+                  readState: readChatReadStateFromStore({
+                    droneId: snapshot.id,
+                    chatName,
+                  }),
+                }
+              : {}),
+            ...(includeSubscriptions
+              ? {
+                  subscriptions: snapshot.chatId
+                    ? listResourceSubscriptionsForChatId(snapshot.chatId)
+                    : [],
+                }
+              : {}),
+          };
+          if (includeVolatileState) {
+            json(res, 200, responseBody);
+          } else if (snapshot.responseEtag) {
+            jsonWithKnownEtag(req, res, 200, responseBody, snapshot.responseEtag);
           } else {
-            jsonWithEtag(
-              req,
-              res,
-              200,
-              chatSnapshotResponseBody(snapshot, { includeTranscriptMeta: true }),
-            );
+            jsonWithEtag(req, res, 200, responseBody);
           }
           return;
         } catch (e: any) {

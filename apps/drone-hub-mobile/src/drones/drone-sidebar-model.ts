@@ -29,7 +29,9 @@ export type MobileDroneSummary = {
   phase: string;
   status: string;
   group: string | null;
+  groupId?: string | null;
   repoPath: string;
+  repoBranch?: string | null;
   cwd?: string;
   repoAttached?: boolean;
   fleetParentId: string | null;
@@ -117,11 +119,20 @@ export type MobileDroneSidebarEntry =
 export type MobileDroneSidebarOrder = {
   registeredRepoPaths: string[];
   groupCreatedAtByName: Record<string, string | null>;
+  groups?: MobileDroneSidebarGroup[];
   sidebarGroupOrder: string[];
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarChatOrderByDrone: Record<string, string[]>;
   pinnedDroneIds: string[];
+};
+
+export type MobileDroneSidebarGroup = {
+  id: string;
+  name: string;
+  repoPath: string;
+  parentId: string | null;
+  createdAt: string | null;
 };
 
 export type MobileDroneSidebarSnapshotStatus = 'complete' | 'legacy' | 'partial' | 'missing';
@@ -211,6 +222,7 @@ export function normalizeMobileDroneChatModelCatalog(
 export const EMPTY_MOBILE_DRONE_SIDEBAR_ORDER: MobileDroneSidebarOrder = {
   registeredRepoPaths: [],
   groupCreatedAtByName: {},
+  groups: [],
   sidebarGroupOrder: [],
   sidebarDroneOrderByGroup: {},
   sidebarNodeOrderByParent: {},
@@ -269,6 +281,28 @@ function nullableStringMap(value: unknown): Record<string, string | null> {
       .map(([key, item]) => [text(key), text(item) || null] as const)
       .filter(([key]) => Boolean(key)),
   );
+}
+
+function mobileSidebarGroups(value: unknown): MobileDroneSidebarGroup[] {
+  if (!Array.isArray(value)) return [];
+  const seenIds = new Set<string>();
+  return value.flatMap((raw): MobileDroneSidebarGroup[] => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const group = raw as Record<string, unknown>;
+    const id = text(group.id);
+    const name = text(group.name);
+    if (!id || !name || seenIds.has(id)) return [];
+    seenIds.add(id);
+    return [
+      {
+        id,
+        name,
+        repoPath: text(group.repoPath),
+        parentId: text(group.parentId) || null,
+        createdAt: text(group.createdAt) || null,
+      },
+    ];
+  });
 }
 
 function trueBooleanMap(value: unknown): Record<string, boolean> {
@@ -337,12 +371,14 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
     phase: text(value.phase),
     status: text(value.status),
     group: text(value.group) || null,
+    groupId: text(value.groupId) || null,
     repoPath:
       text(value.repoPath) ||
       text(value.repositoryPath) ||
       text(repo.path) ||
       text(repo.hostPath) ||
       text(repo.dest),
+    repoBranch: text(value.repoBranch) || text(repo.branch) || null,
     cwd: text(value.cwd || value.workingDirectory),
     repoAttached:
       typeof value.repoAttached === 'boolean'
@@ -452,6 +488,7 @@ export function normalizeMobileDroneListPayload(raw: unknown): NormalizedMobileD
     sidebar: {
       registeredRepoPaths,
       groupCreatedAtByName: nullableStringMap(sidebar.groupCreatedAtByName),
+      groups: mobileSidebarGroups(sidebar.groups),
       sidebarGroupOrder: stringList(sidebar.sidebarGroupOrder),
       sidebarDroneOrderByGroup: stringListMap(sidebar.sidebarDroneOrderByGroup),
       sidebarNodeOrderByParent: stringListMap(sidebar.sidebarNodeOrderByParent),
@@ -589,6 +626,19 @@ export function buildMobileDroneRepoGroups(
   drones: MobileDroneSummary[],
   order: MobileDroneSidebarOrder = EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
 ): MobileDroneRepoGroup[] {
+  const repoScopedGroupPathsByRepoGroup: Record<string, string[]> = {};
+  const repoScopedGroupIdByPathByRepoGroup: Record<string, Record<string, string>> = {};
+  const repoScopedGroupCreatedAtByPathByRepoGroup: Record<
+    string,
+    Record<string, string | null>
+  > = {};
+  for (const group of order.groups ?? []) {
+    const repoGroup = group.repoPath ? `repo:${group.repoPath}` : 'repo:ungrouped';
+    (repoScopedGroupPathsByRepoGroup[repoGroup] ??= []).push(group.name);
+    (repoScopedGroupIdByPathByRepoGroup[repoGroup] ??= {})[group.name] = group.id;
+    (repoScopedGroupCreatedAtByPathByRepoGroup[repoGroup] ??= {})[group.name] =
+      group.createdAt;
+  }
   const { groups, nodeTree: tree } = buildRepoSidebarModel({
     drones,
     registeredRepoPaths: order.registeredRepoPaths,
@@ -596,6 +646,9 @@ export function buildMobileDroneRepoGroups(
     sidebarGroupOrder: order.sidebarGroupOrder,
     sidebarNodeOrderByParent: order.sidebarNodeOrderByParent,
     sidebarGroupCreatedAtByName: order.groupCreatedAtByName,
+    repoScopedGroupPathsByRepoGroup,
+    repoScopedGroupIdByPathByRepoGroup,
+    repoScopedGroupCreatedAtByPathByRepoGroup,
   });
   const dronesById = new Map(drones.map((drone) => [String(drone.id ?? '').trim(), drone]));
 
