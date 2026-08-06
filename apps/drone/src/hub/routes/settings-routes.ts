@@ -80,6 +80,7 @@ export interface SettingsRouteDependencies {
   upsertStoredUiPreferencesSettings: ServiceFunction;
   updatePinnedDronePreference: ServiceFunction;
   resolveUserContextSettingsResponse: ServiceFunction;
+  notifyUiPreferencesChanged: ServiceFunction;
   notifyPinnedDronesChanged: ServiceFunction;
   clampIntParam: (value: string | null, fallback: number, min: number, max: number) => number;
   readHubLogTail: ServiceFunction;
@@ -153,6 +154,7 @@ export function registerSettingsRoutes(
     upsertStoredUiPreferencesSettings,
     updatePinnedDronePreference,
     resolveUserContextSettingsResponse,
+    notifyUiPreferencesChanged,
     notifyPinnedDronesChanged,
     clampIntParam,
     readHubLogTail,
@@ -679,6 +681,7 @@ export function registerSettingsRoutes(
       }
       throw error;
     }
+    await notifyUiPreferencesChanged();
     respond(200, await resolveUiPreferencesSettingsResponse());
   });
 

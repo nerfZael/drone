@@ -5368,6 +5368,11 @@ export async function startDroneHubApiServer(opts: {
     upsertStoredUiPreferencesSettings,
     updatePinnedDronePreference,
     resolveUserContextSettingsResponse,
+    notifyUiPreferencesChanged: () => {
+      const at = nowIso();
+      assistantService.emitExternalUiAction({ type: 'reload_ui_preferences', at });
+      void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
+    },
     notifyPinnedDronesChanged: () => {
       const at = nowIso();
       assistantService.emitExternalUiAction({ type: 'reload_pinned_drones', at });

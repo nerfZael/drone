@@ -6,7 +6,11 @@ import {
   resolveRepoChatSelectionTransition,
   resolveSpawnContextPreferencesForRepo,
 } from '../src/droneHub/app/use-drone-hub-ui-store';
-import { restoreUiPreferencesFromPersistedStorage } from '../src/droneHub/app/use-ui-preferences-settings';
+import {
+  mergeUiPreferencesChanges,
+  reconcileUiPreferencesReload,
+  restoreUiPreferencesFromPersistedStorage,
+} from '../src/droneHub/app/use-ui-preferences-settings';
 
 describe('drone hub ui store migration', () => {
   test('preserves persisted browser-backed settings across version upgrades', () => {
@@ -276,6 +280,111 @@ describe('drone hub ui store migration', () => {
     expect(restored.snapshot.repoBranchSource).toBe('remote');
     expect(restored.snapshot.repoCreateRemoteBranch).toBe('origin/voice');
     expect(restored.snapshot.pinnedDroneIds).toEqual(['drone-b', 'drone-a']);
+  });
+
+  test('rebases a local reorder without replacing unrelated newer server preferences', () => {
+    const base = {
+      sidebarDensityMode: 'default' as const,
+      sidebarNodeOrderByParent: {
+        'folder:a': ['drone:a', 'drone:b'],
+        'folder:b': ['drone:c', 'drone:d'],
+      },
+    };
+    const local = {
+      ...base,
+      sidebarNodeOrderByParent: {
+        ...base.sidebarNodeOrderByParent,
+        'folder:a': ['drone:b', 'drone:a'],
+      },
+    };
+    const remote = {
+      ...base,
+      sidebarDensityMode: 'compact' as const,
+      sidebarNodeOrderByParent: {
+        ...base.sidebarNodeOrderByParent,
+        'folder:b': ['drone:d', 'drone:c'],
+      },
+    };
+
+    const merged = mergeUiPreferencesChanges(base, local, remote);
+
+    expect(merged.sidebarDensityMode).toBe('compact');
+    expect(merged.sidebarNodeOrderByParent).toEqual({
+      'folder:a': ['drone:b', 'drone:a'],
+      'folder:b': ['drone:d', 'drone:c'],
+    });
+  });
+
+  test('preserves an intentional local order-key deletion while rebasing', () => {
+    const base = {
+      sidebarNodeOrderByParent: {
+        'folder:a': ['drone:a'],
+        'folder:b': ['drone:b'],
+      },
+    };
+    const local = {
+      sidebarNodeOrderByParent: {
+        'folder:b': ['drone:b'],
+      },
+    };
+    const remote = {
+      sidebarNodeOrderByParent: {
+        'folder:a': ['drone:a'],
+        'folder:b': ['drone:b', 'drone:c'],
+      },
+    };
+
+    expect(mergeUiPreferencesChanges(base, local, remote).sidebarNodeOrderByParent).toEqual({
+      'folder:b': ['drone:b', 'drone:c'],
+    });
+  });
+
+  test('does not resurrect cleared server preferences from stale browser storage', () => {
+    const snapshot = reconcileUiPreferencesReload({
+      backend: {
+        sidebarGroupingMode: 'repos',
+        sidebarNodeOrderByParent: {},
+        pinnedDroneIds: [],
+      },
+      backendUpdatedAt: '2026-08-06T10:00:00.000Z',
+      current: {},
+      previousBackend: null,
+      wasReady: false,
+      storageRaw: JSON.stringify({
+        state: {
+          sidebarGroupingMode: 'groups',
+          sidebarNodeOrderByParent: { root: ['drone:stale'] },
+          pinnedDroneIds: ['drone:stale'],
+        },
+      }),
+    });
+
+    expect(snapshot.sidebarGroupingMode).toBe('repos');
+    expect(snapshot.sidebarNodeOrderByParent).toEqual({});
+    expect(snapshot.pinnedDroneIds).toEqual([]);
+  });
+
+  test('keeps unsaved local changes during a cross-client refresh', () => {
+    const snapshot = reconcileUiPreferencesReload({
+      backend: {
+        sidebarDensityMode: 'compact',
+        sidebarNodeOrderByParent: { root: ['drone:b', 'drone:a'] },
+      },
+      backendUpdatedAt: '2026-08-06T10:00:00.000Z',
+      previousBackend: {
+        sidebarDensityMode: 'default',
+        sidebarNodeOrderByParent: { root: ['drone:a', 'drone:b'] },
+      },
+      current: {
+        sidebarDensityMode: 'comfortable',
+        sidebarNodeOrderByParent: { root: ['drone:a', 'drone:b'] },
+      },
+      wasReady: true,
+      storageRaw: null,
+    });
+
+    expect(snapshot.sidebarDensityMode).toBe('comfortable');
+    expect(snapshot.sidebarNodeOrderByParent.root).toEqual(['drone:b', 'drone:a']);
   });
 
   test('migrates former creation defaults to 1/2/3', () => {

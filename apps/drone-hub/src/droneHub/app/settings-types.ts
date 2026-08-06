@@ -212,6 +212,7 @@ export type UiPreferencesSettingsResponse = {
     repoCreateRemoteBranch: string;
   };
   updatedAt: string | null;
+  version: number | null;
 };
 
 export type ProfileSettingsProfile = {

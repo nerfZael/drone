@@ -72,6 +72,23 @@ function textListMap(value: unknown): Record<string, string[]> {
   );
 }
 
+function mergeChangedTextListMap(
+  currentRaw: unknown,
+  baseRaw: unknown,
+  nextRaw: unknown,
+): Record<string, string[]> {
+  const current = textListMap(currentRaw);
+  const base = textListMap(baseRaw);
+  const next = textListMap(nextRaw);
+  const merged = { ...current };
+  for (const key of new Set([...Object.keys(base), ...Object.keys(next)])) {
+    if (JSON.stringify(base[key] ?? []) === JSON.stringify(next[key] ?? [])) continue;
+    if (next[key]?.length) merged[key] = next[key];
+    else delete merged[key];
+  }
+  return merged;
+}
+
 function optionalText(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   return value.trim() || undefined;
@@ -671,31 +688,66 @@ export function createDroneControlCapability(
       }
 
       if (operation === 'sidebar.order.update') {
-        const current = await localHubRequest(access, '/api/settings/ui-preferences');
-        const currentPreferences = object(current.uiPreferences);
         const sidebar = object(payload.sidebar);
-        const nextPreferences = {
-          ...currentPreferences,
-          ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarNodeOrderByParent')
-            ? { sidebarNodeOrderByParent: textListMap(sidebar.sidebarNodeOrderByParent) }
-            : {}),
-          ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarChatOrderByDrone')
-            ? { sidebarChatOrderByDrone: textListMap(sidebar.sidebarChatOrderByDrone) }
-            : {}),
-          ...(Object.prototype.hasOwnProperty.call(sidebar, 'pinnedDroneIds')
-            ? { pinnedDroneIds: textList(sidebar.pinnedDroneIds) }
-            : {}),
-        };
-        const expectedVersion = Number(payload.expectedVersion);
-        return await localHubRequest(access, '/api/settings/ui-preferences', {
-          method: 'POST',
-          body: JSON.stringify({
-            uiPreferences: nextPreferences,
-            ...(Number.isSafeInteger(expectedVersion) && expectedVersion > 0
-              ? { expectedVersion }
+        const baseSidebar = object(payload.baseSidebar);
+        const canRebase = Object.keys(baseSidebar).length > 0;
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const current = await localHubRequest(access, '/api/settings/ui-preferences');
+          const currentPreferences = object(current.uiPreferences);
+          const nextPreferences = {
+            ...currentPreferences,
+            ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarNodeOrderByParent')
+              ? {
+                  sidebarNodeOrderByParent:
+                    canRebase && Object.prototype.hasOwnProperty.call(baseSidebar, 'sidebarNodeOrderByParent')
+                      ? mergeChangedTextListMap(
+                          currentPreferences.sidebarNodeOrderByParent,
+                          baseSidebar.sidebarNodeOrderByParent,
+                          sidebar.sidebarNodeOrderByParent,
+                        )
+                      : textListMap(sidebar.sidebarNodeOrderByParent),
+                }
               : {}),
-          }),
-        });
+            ...(Object.prototype.hasOwnProperty.call(sidebar, 'sidebarChatOrderByDrone')
+              ? {
+                  sidebarChatOrderByDrone:
+                    canRebase && Object.prototype.hasOwnProperty.call(baseSidebar, 'sidebarChatOrderByDrone')
+                      ? mergeChangedTextListMap(
+                          currentPreferences.sidebarChatOrderByDrone,
+                          baseSidebar.sidebarChatOrderByDrone,
+                          sidebar.sidebarChatOrderByDrone,
+                        )
+                      : textListMap(sidebar.sidebarChatOrderByDrone),
+                }
+              : {}),
+            ...(Object.prototype.hasOwnProperty.call(sidebar, 'pinnedDroneIds')
+              ? { pinnedDroneIds: textList(sidebar.pinnedDroneIds) }
+              : {}),
+          };
+          const requestedVersion = Number(payload.expectedVersion);
+          const currentVersion = Number(current.version);
+          const expectedVersion = canRebase
+            ? Number.isSafeInteger(currentVersion) && currentVersion > 0
+              ? currentVersion
+              : current.version === null
+                ? null
+                : undefined
+            : Number.isSafeInteger(requestedVersion) && requestedVersion > 0
+              ? requestedVersion
+              : undefined;
+          try {
+            return await localHubRequest(access, '/api/settings/ui-preferences', {
+              method: 'POST',
+              body: JSON.stringify({
+                uiPreferences: nextPreferences,
+                ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+              }),
+            });
+          } catch (error: any) {
+            if (!canRebase || error?.code !== 'HUB_409' || attempt === 3) throw error;
+          }
+        }
+        throw new Error('Failed to update sidebar order');
       }
 
       if (operation === 'sidebar.item.move') {

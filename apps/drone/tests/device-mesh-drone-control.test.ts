@@ -377,6 +377,117 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('rebases a scoped mobile reorder onto newer preferences without replacing sibling orders', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ method: string; body: any }> = [];
+    globalThis.fetch = (async (_input, init) => {
+      const method = String(init?.method ?? 'GET');
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      requests.push({ method, body });
+      if (method === 'GET') {
+        return Response.json({
+          ok: true,
+          version: 9,
+          uiPreferences: {
+            sidebarNodeOrderByParent: {
+              'folder:a': ['drone:a', 'drone:b'],
+              'folder:b': ['drone:d', 'drone:c'],
+            },
+            sidebarDensityMode: 'compact',
+          },
+        });
+      }
+      return Response.json({ ok: true, version: 10, uiPreferences: body.uiPreferences });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await capability.invoke('sidebar.order.update', {
+        expectedVersion: 7,
+        baseSidebar: {
+          sidebarNodeOrderByParent: {
+            'folder:a': ['drone:a', 'drone:b'],
+            'folder:b': ['drone:c', 'drone:d'],
+          },
+        },
+        sidebar: {
+          sidebarNodeOrderByParent: {
+            'folder:a': ['drone:b', 'drone:a'],
+            'folder:b': ['drone:c', 'drone:d'],
+          },
+        },
+      });
+
+      expect(requests).toHaveLength(2);
+      expect(requests[1]).toEqual({
+        method: 'POST',
+        body: {
+          expectedVersion: 9,
+          uiPreferences: {
+            sidebarNodeOrderByParent: {
+              'folder:a': ['drone:b', 'drone:a'],
+              'folder:b': ['drone:d', 'drone:c'],
+            },
+            sidebarDensityMode: 'compact',
+          },
+        },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('retries a rebased mobile reorder when the preference version changes during the write', async () => {
+    const originalFetch = globalThis.fetch;
+    let readCount = 0;
+    let writeCount = 0;
+    const postedVersions: number[] = [];
+    globalThis.fetch = (async (_input, init) => {
+      const method = String(init?.method ?? 'GET');
+      if (method === 'GET') {
+        readCount += 1;
+        return Response.json({
+          ok: true,
+          version: readCount === 1 ? 4 : 5,
+          uiPreferences: {
+            sidebarChatOrderByDrone: { host: ['default', 'review'] },
+          },
+        });
+      }
+      writeCount += 1;
+      const body = JSON.parse(String(init?.body));
+      postedVersions.push(body.expectedVersion);
+      if (writeCount === 1) {
+        return Response.json(
+          { ok: false, error: 'UI preferences changed on the server' },
+          { status: 409 },
+        );
+      }
+      return Response.json({ ok: true, version: 6, uiPreferences: body.uiPreferences });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('sidebar.order.update', {
+          baseSidebar: { sidebarChatOrderByDrone: { host: ['default', 'review'] } },
+          sidebar: { sidebarChatOrderByDrone: { host: ['review', 'default'] } },
+        }),
+      ).resolves.toMatchObject({ ok: true, version: 6 });
+      expect({ readCount, writeCount, postedVersions }).toEqual({
+        readCount: 2,
+        writeCount: 2,
+        postedVersions: [4, 5],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('moves mobile sidebar drones and folders through canonical group APIs', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ pathname: string; method: string; body: any }> = [];

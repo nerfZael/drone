@@ -756,15 +756,40 @@ function insertGroupTokenAtParentTop(
 
 async function readUiPreferences() {
   const response = await requestJson('/api/settings/ui-preferences', { method: 'GET' });
+  return {
+    uiPreferences: normalizeUiPreferences(response?.uiPreferences),
+    version:
+      Number.isSafeInteger(response?.version) && Number(response.version) > 0
+        ? Number(response.version)
+        : response?.version === null
+          ? null
+          : undefined,
+  };
+}
+
+async function writeUiPreferences(uiPreferences: unknown, expectedVersion?: number | null) {
+  const response = await requestJson('/api/settings/ui-preferences', {
+    method: 'POST',
+    body: JSON.stringify({
+      uiPreferences: normalizeUiPreferences(uiPreferences),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+    }),
+  });
   return normalizeUiPreferences(response?.uiPreferences);
 }
 
-async function writeUiPreferences(uiPreferences: unknown) {
-  const response = await requestJson('/api/settings/ui-preferences', {
-    method: 'POST',
-    body: JSON.stringify({ uiPreferences: normalizeUiPreferences(uiPreferences) }),
-  });
-  return normalizeUiPreferences(response?.uiPreferences);
+async function updateUiPreferences(
+  update: (current: ReturnType<typeof normalizeUiPreferences>) => ReturnType<typeof normalizeUiPreferences>,
+) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const current = await readUiPreferences();
+    try {
+      return await writeUiPreferences(update(current.uiPreferences), current.version);
+    } catch (error: any) {
+      if (error?.status !== 409 || attempt === 3) throw error;
+    }
+  }
+  throw new Error('Failed to update UI preferences');
 }
 
 async function listGroups(repoPath?: string): Promise<McpGroupSummary[]> {
@@ -788,14 +813,15 @@ async function insertNewGroupsAtParentTop(
     ? !beforeIds.has(group.id)
     : !beforeScopesAndNames.has(`${group.repoPath}\0${group.name}`));
   if (newGroups.length === 0) return { updated: false, groups: targetGroups };
-  const uiPreferences = await readUiPreferences();
-  let sidebarGroupOrder = uiPreferences.sidebarGroupOrder;
-  for (const group of newGroups) {
-    sidebarGroupOrder = insertGroupTokenAtParentTop(sidebarGroupOrder, afterGroups, group);
-  }
-  const saved = await writeUiPreferences({
-    ...uiPreferences,
-    sidebarGroupOrder,
+  const saved = await updateUiPreferences((uiPreferences) => {
+    let sidebarGroupOrder = uiPreferences.sidebarGroupOrder;
+    for (const group of newGroups) {
+      sidebarGroupOrder = insertGroupTokenAtParentTop(sidebarGroupOrder, afterGroups, group);
+    }
+    return {
+      ...uiPreferences,
+      sidebarGroupOrder,
+    };
   });
   return { updated: true, groups: targetGroups, sidebarGroupOrder: saved.sidebarGroupOrder };
 }
@@ -861,33 +887,34 @@ async function reorderDronesInUiPreferences(args: any) {
   const beforeId = beforeDrone?.id || '';
   const afterId = afterDrone?.id || '';
   const groupOrderKey = groupRecord ? sidebarGroupOrderToken(groupRecord) : sidebarGroupOrderToken(effectiveGroupName);
-  const uiPreferences = await readUiPreferences();
   const repoGroupPath = `repo:${requestedRepoPath}`;
-  const parentId = uiPreferences.sidebarGroupingMode === 'repos'
-    ? effectiveGroupName === 'Ungrouped'
-      ? sidebarFolderNodeId(repoGroupPath)
-      : sidebarFolderNodeId(`repo-scope:${repoGroupPath}:${effectiveGroupName}`)
-    : effectiveGroupName === 'Ungrouped'
-      ? 'root'
-      : sidebarFolderNodeId(effectiveGroupName);
-  const nextUiPreferences = {
-    ...uiPreferences,
-    sidebarDroneOrderByGroup: {
-      ...uiPreferences.sidebarDroneOrderByGroup,
-      [groupOrderKey]: reorderVisibleEntries(uiPreferences.sidebarDroneOrderByGroup[groupOrderKey] ?? [], scopeIds, movingIds, beforeId, afterId),
-    },
-    sidebarNodeOrderByParent: {
-      ...uiPreferences.sidebarNodeOrderByParent,
-      [parentId]: reorderVisibleEntries(
-        uiPreferences.sidebarNodeOrderByParent[parentId] ?? [],
-        scopeIds.map(sidebarDroneNodeId),
-        movingIds.map(sidebarDroneNodeId),
-        beforeId ? sidebarDroneNodeId(beforeId) : '',
-        afterId ? sidebarDroneNodeId(afterId) : '',
-      ),
-    },
-  };
-  const saved = await writeUiPreferences(nextUiPreferences);
+  let parentId = '';
+  const saved = await updateUiPreferences((uiPreferences) => {
+    parentId = uiPreferences.sidebarGroupingMode === 'repos'
+      ? effectiveGroupName === 'Ungrouped'
+        ? sidebarFolderNodeId(repoGroupPath)
+        : sidebarFolderNodeId(`repo-scope:${repoGroupPath}:${effectiveGroupName}`)
+      : effectiveGroupName === 'Ungrouped'
+        ? 'root'
+        : sidebarFolderNodeId(effectiveGroupName);
+    return {
+      ...uiPreferences,
+      sidebarDroneOrderByGroup: {
+        ...uiPreferences.sidebarDroneOrderByGroup,
+        [groupOrderKey]: reorderVisibleEntries(uiPreferences.sidebarDroneOrderByGroup[groupOrderKey] ?? [], scopeIds, movingIds, beforeId, afterId),
+      },
+      sidebarNodeOrderByParent: {
+        ...uiPreferences.sidebarNodeOrderByParent,
+        [parentId]: reorderVisibleEntries(
+          uiPreferences.sidebarNodeOrderByParent[parentId] ?? [],
+          scopeIds.map(sidebarDroneNodeId),
+          movingIds.map(sidebarDroneNodeId),
+          beforeId ? sidebarDroneNodeId(beforeId) : '',
+          afterId ? sidebarDroneNodeId(afterId) : '',
+        ),
+      },
+    };
+  });
   return {
     ok: true,
     group: effectiveGroupName,

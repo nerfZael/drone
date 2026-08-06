@@ -678,6 +678,7 @@ export function DronesScreen({
             if (targetIdRef.current !== destinationId) return;
             const result = await requestDroneControl(destinationId, 'sidebar.order.update', {
               sidebar: mobileSidebarPreferencePatch(nextOrder, request),
+              baseSidebar: mobileSidebarPreferencePatch(current.sidebar, request),
               expectedVersion: sidebarPreferenceVersionRef.current,
             });
             const savedVersion =
@@ -718,7 +719,8 @@ export function DronesScreen({
         );
         return;
       }
-      const nextOrder = applyMobileSidebarReorder(droneSidebarOrderRef.current, request);
+      const previousOrder = droneSidebarOrderRef.current;
+      const nextOrder = applyMobileSidebarReorder(previousOrder, request);
       const generation = sidebarWriteGenerationRef.current + 1;
       sidebarWriteGenerationRef.current = generation;
       droneSidebarOrderRef.current = nextOrder;
@@ -731,6 +733,7 @@ export function DronesScreen({
           if (targetIdRef.current !== destinationId) return;
           const result = await requestDroneControl(destinationId, 'sidebar.order.update', {
             sidebar: mobileSidebarPreferencePatch(nextOrder, request),
+            baseSidebar: mobileSidebarPreferencePatch(previousOrder, request),
             expectedVersion: sidebarPreferenceVersionRef.current,
           });
           if (targetIdRef.current !== destinationId) return;

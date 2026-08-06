@@ -89,6 +89,64 @@ function serializeUiPreferencesSnapshot(value: UiPreferencesSnapshot): string {
   return JSON.stringify(value);
 }
 
+function sameUiPreferenceValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function mergeOrderedStringMapChanges(
+  base: Record<string, string[]>,
+  local: Record<string, string[]>,
+  remote: Record<string, string[]>,
+): Record<string, string[]> {
+  const merged = { ...remote };
+  for (const key of new Set([...Object.keys(base), ...Object.keys(local)])) {
+    if (sameUiPreferenceValue(base[key] ?? [], local[key] ?? [])) continue;
+    if (local[key]?.length) merged[key] = local[key];
+    else delete merged[key];
+  }
+  return merged;
+}
+
+/** Rebase locally changed preference fields onto a newer server snapshot. */
+export function mergeUiPreferencesChanges(
+  baseRaw: Partial<UiPreferencesSnapshot> | null | undefined,
+  localRaw: Partial<UiPreferencesSnapshot> | null | undefined,
+  remoteRaw: Partial<UiPreferencesSnapshot> | null | undefined,
+): UiPreferencesSnapshot {
+  const base = normalizeUiPreferencesSnapshot(baseRaw);
+  const local = normalizeUiPreferencesSnapshot(localRaw);
+  const remote = normalizeUiPreferencesSnapshot(remoteRaw);
+  const localValue = <K extends keyof UiPreferencesSnapshot>(key: K): UiPreferencesSnapshot[K] =>
+    sameUiPreferenceValue(base[key], local[key]) ? remote[key] : local[key];
+  return normalizeUiPreferencesSnapshot({
+    sidebarGroupingMode: localValue('sidebarGroupingMode'),
+    sidebarDensityMode: localValue('sidebarDensityMode'),
+    sidebarGroupOrder: localValue('sidebarGroupOrder'),
+    sidebarDroneOrderByGroup: mergeOrderedStringMapChanges(
+      base.sidebarDroneOrderByGroup,
+      local.sidebarDroneOrderByGroup,
+      remote.sidebarDroneOrderByGroup,
+    ),
+    sidebarNodeOrderByParent: mergeOrderedStringMapChanges(
+      base.sidebarNodeOrderByParent,
+      local.sidebarNodeOrderByParent,
+      remote.sidebarNodeOrderByParent,
+    ),
+    sidebarChatOrderByDrone: mergeOrderedStringMapChanges(
+      base.sidebarChatOrderByDrone,
+      local.sidebarChatOrderByDrone,
+      remote.sidebarChatOrderByDrone,
+    ),
+    pinnedDroneIds: localValue('pinnedDroneIds'),
+    hiddenSidebarGroups: localValue('hiddenSidebarGroups'),
+    autoDelete: localValue('autoDelete'),
+    spawnAgentKey: localValue('spawnAgentKey'),
+    spawnModel: localValue('spawnModel'),
+    repoBranchSource: localValue('repoBranchSource'),
+    repoCreateRemoteBranch: localValue('repoCreateRemoteBranch'),
+  });
+}
+
 function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boolean {
   return (
     value.sidebarGroupingMode === 'groups' ||
@@ -152,6 +210,42 @@ export function restoreUiPreferencesFromPersistedStorage(
   }
 }
 
+export function reconcileUiPreferencesReload({
+  backend,
+  backendUpdatedAt,
+  current,
+  previousBackend,
+  wasReady,
+  storageRaw,
+}: {
+  backend: Partial<UiPreferencesSnapshot> | null | undefined;
+  backendUpdatedAt: string | null;
+  current: Partial<UiPreferencesSnapshot> | null | undefined;
+  previousBackend: Partial<UiPreferencesSnapshot> | null | undefined;
+  wasReady: boolean;
+  storageRaw: string | null;
+}): UiPreferencesSnapshot {
+  const backendSnapshot = normalizeUiPreferencesSnapshot(backend);
+  const currentSnapshot = normalizeUiPreferencesSnapshot(current);
+  const previousBackendSnapshot = previousBackend
+    ? normalizeUiPreferencesSnapshot(previousBackend)
+    : null;
+  const hasLocalChanges =
+    wasReady &&
+    previousBackendSnapshot !== null &&
+    serializeUiPreferencesSnapshot(currentSnapshot) !==
+      serializeUiPreferencesSnapshot(previousBackendSnapshot);
+  if (hasLocalChanges && previousBackendSnapshot) {
+    return mergeUiPreferencesChanges(
+      previousBackendSnapshot,
+      currentSnapshot,
+      backendSnapshot,
+    );
+  }
+  if (backendUpdatedAt) return backendSnapshot;
+  return restoreUiPreferencesFromPersistedStorage(backendSnapshot, storageRaw).snapshot;
+}
+
 export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettingsArgs): UseUiPreferencesSettingsResult {
   const {
     sidebarGroupingMode,
@@ -209,6 +303,8 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
 
   const readyRef = React.useRef(false);
   const lastSavedSerializedRef = React.useRef('');
+  const lastSavedSnapshotRef = React.useRef<UiPreferencesSnapshot | null>(null);
+  const lastSavedVersionRef = React.useRef<number | null>(null);
   const pinWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const saveSeqRef = React.useRef(0);
   const saveTimeoutRef = React.useRef<number | null>(null);
@@ -287,22 +383,28 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
   );
 
   const reloadUiPreferences = React.useCallback(async () => {
+    const wasReady = readyRef.current;
+    const currentSnapshot = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
+    const previousBackendSnapshot = lastSavedSnapshotRef.current;
     cancelPendingSave();
     try {
       const data = await requestJson<UiPreferencesSettingsResponse>('/api/settings/ui-preferences');
       const backendSnapshot = normalizeUiPreferencesSnapshot(data.uiPreferences);
-      const restored = restoreUiPreferencesFromPersistedStorage(
-        backendSnapshot,
-        typeof localStorage !== 'undefined' ? localStorage.getItem(profileStorageKey('droneHub.ui')) : null,
-      );
-      if (data.updatedAt || restored.restored) {
-        const normalized = applyUiPreferences(restored.snapshot);
-        lastSavedSerializedRef.current = restored.restored
-          ? serializeUiPreferencesSnapshot(backendSnapshot)
-          : serializeUiPreferencesSnapshot(normalized);
-      } else {
-        lastSavedSerializedRef.current = '';
-      }
+      const nextSnapshot = reconcileUiPreferencesReload({
+        backend: backendSnapshot,
+        backendUpdatedAt: data.updatedAt,
+        current: currentSnapshot,
+        previousBackend: previousBackendSnapshot,
+        wasReady,
+        storageRaw:
+          typeof localStorage !== 'undefined'
+            ? localStorage.getItem(profileStorageKey('droneHub.ui'))
+            : null,
+      });
+      lastSavedSnapshotRef.current = backendSnapshot;
+      lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(backendSnapshot);
+      lastSavedVersionRef.current = data.version;
+      applyUiPreferences(nextSnapshot);
     } catch {
       // Keep the local snapshot when the backend copy is unavailable.
     } finally {
@@ -325,15 +427,21 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       void requestJson<UiPreferencesSettingsResponse>('/api/settings/ui-preferences', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ uiPreferences: snapshot }),
+        body: JSON.stringify({
+          uiPreferences: snapshot,
+          expectedVersion: lastSavedVersionRef.current,
+        }),
       })
         .then((data) => {
           if (saveSeqRef.current !== seq) return;
           const normalized = normalizeUiPreferencesSnapshot(data.uiPreferences);
+          lastSavedSnapshotRef.current = normalized;
           lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(normalized);
+          lastSavedVersionRef.current = data.version;
         })
-        .catch(() => {
+        .catch((error: any) => {
           if (saveSeqRef.current !== seq) return;
+          if (error?.status === 409) void reloadUiPreferences();
         });
     }, SAVE_DEBOUNCE_MS);
     saveTimeoutRef.current = timeout;
@@ -341,7 +449,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       if (saveTimeoutRef.current === timeout) saveTimeoutRef.current = null;
       window.clearTimeout(timeout);
     };
-  }, [requestJson, snapshot]);
+  }, [reloadUiPreferences, requestJson, snapshot]);
 
   const setDronesPinned = React.useCallback(
     (droneIdsRaw: readonly string[], pinned: boolean): Promise<boolean> => {
@@ -360,16 +468,20 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
           const savedPinnedDroneIds = normalizeOrderedStringList(
             data.uiPreferences.pinnedDroneIds,
           );
-          const current = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
-          const currentIsDirty =
-            serializeUiPreferencesSnapshot(current) !== lastSavedSerializedRef.current;
-          setPinnedDroneIds(savedPinnedDroneIds);
-          if (!currentIsDirty) {
-            lastSavedSerializedRef.current = serializeUiPreferencesSnapshot({
-              ...current,
-              pinnedDroneIds: savedPinnedDroneIds,
-            });
-          }
+          const backendSnapshot = normalizeUiPreferencesSnapshot(data.uiPreferences);
+          const currentSnapshot = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
+          const reconciled = lastSavedSnapshotRef.current
+            ? mergeUiPreferencesChanges(
+                lastSavedSnapshotRef.current,
+                currentSnapshot,
+                backendSnapshot,
+              )
+            : backendSnapshot;
+          reconciled.pinnedDroneIds = savedPinnedDroneIds;
+          lastSavedSnapshotRef.current = backendSnapshot;
+          lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(backendSnapshot);
+          lastSavedVersionRef.current = data.version;
+          applyUiPreferences(reconciled);
           return true;
         } catch {
           return false;
@@ -382,7 +494,7 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       );
       return queued;
     },
-    [requestJson, setPinnedDroneIds],
+    [applyUiPreferences, requestJson],
   );
 
   const setDronePinned = React.useCallback(
@@ -392,27 +504,8 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
   );
 
   const reloadPinnedDrones = React.useCallback(async () => {
-    try {
-      const data = await requestJson<UiPreferencesSettingsResponse>(
-        '/api/settings/ui-preferences',
-      );
-      const savedPinnedDroneIds = normalizeOrderedStringList(
-        data.uiPreferences.pinnedDroneIds,
-      );
-      const current = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
-      const currentIsDirty =
-        serializeUiPreferencesSnapshot(current) !== lastSavedSerializedRef.current;
-      setPinnedDroneIds(savedPinnedDroneIds);
-      if (!currentIsDirty) {
-        lastSavedSerializedRef.current = serializeUiPreferencesSnapshot({
-          ...current,
-          pinnedDroneIds: savedPinnedDroneIds,
-        });
-      }
-    } catch {
-      // Keep the current pin list when the backend copy is unavailable.
-    }
-  }, [requestJson, setPinnedDroneIds]);
+    await reloadUiPreferences();
+  }, [reloadUiPreferences]);
 
   return { reloadUiPreferences, reloadPinnedDrones, setDronePinned, setDronesPinned };
 }

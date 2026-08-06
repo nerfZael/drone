@@ -429,6 +429,41 @@ describe('extracted Hub route modules', () => {
     ]);
   });
 
+  test('notifies desktop clients after a general UI preference write', async () => {
+    const requestBody = {
+      uiPreferences: { sidebarNodeOrderByParent: { group: ['drone:a', 'drone:b'] } },
+      expectedVersion: 12,
+    };
+    const { router, request, responses } = routeHarness(requestBody);
+    const writes: Array<{ preferences: unknown; expectedVersion: unknown }> = [];
+    let notificationCount = 0;
+    registerSettingsRoutes(router, {
+      upsertStoredUiPreferencesSettings: async (
+        preferences: unknown,
+        expectedVersion: unknown,
+      ) => {
+        writes.push({ preferences, expectedVersion });
+      },
+      notifyUiPreferencesChanged: async () => {
+        notificationCount += 1;
+      },
+      resolveUiPreferencesSettingsResponse: async () => ({
+        ok: true,
+        ...requestBody,
+        updatedAt: '2026-08-06T08:24:17.707Z',
+        version: 13,
+      }),
+    } as any);
+
+    expect(await request('POST', '/api/settings/ui-preferences')).toBe(true);
+    expect(writes).toEqual([
+      { preferences: requestBody.uiPreferences, expectedVersion: requestBody.expectedVersion },
+    ]);
+    expect(notificationCount).toBe(1);
+    expect(responses).toHaveLength(1);
+    expect(responses[0]).toMatchObject({ status: 200, body: { ok: true, version: 13 } });
+  });
+
   test('saves speech settings and notifies active MCP sessions', async () => {
     const requested = {
       enabled: false,
