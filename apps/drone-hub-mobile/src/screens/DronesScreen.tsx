@@ -3255,7 +3255,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignSelf: 'stretch',
     gap: 8,
-    paddingHorizontal: 9,
+    paddingHorizontal: 17,
   },
   composerMetadataLeading: {
     minWidth: 0,
