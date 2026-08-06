@@ -12,6 +12,7 @@ import {
 } from './assistant/assistant-config';
 import { createInProcessDroneHubMcpClient } from './assistant/in-process-drone-hub-mcp';
 import type { McpTokenIdentity } from './mcp-tokens';
+import type { RenameDroneCommand } from './drone-rename-command';
 import { AssistantArtifactsTarget } from './assistant/targets/assistant-artifacts-target';
 import { DroneWorkspaceTarget } from './assistant/targets/workspace-targets';
 import {
@@ -40,6 +41,7 @@ export interface AssistantRuntimeDependencies {
   nowIso: () => string;
   onNativePromptQueueChanged?: (owner: { droneId: string; chatName: string }) => void;
   onNativeThreadStateChanged?: (owner: { droneId: string; chatName: string }) => void;
+  renameDrone?: RenameDroneCommand;
   summarizeDroneActivity: (entry: any) => {
     lastActivityAt: string | null;
     lastMessageAt: string | null;
@@ -56,6 +58,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     nowIso,
     onNativePromptQueueChanged,
     onNativeThreadStateChanged,
+    renameDrone,
     summarizeDroneActivity,
   } = deps;
   const {
@@ -488,6 +491,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         allowedWriteDroneRefs: refsFor(writableDrones),
         allowedDroneIds: readableDrones.map((drone: any) => String(drone.id ?? '')).filter(Boolean),
         principal: nativePrincipal,
+        renameDrone,
         ...(nativePrincipal ? { nativeThreadId: threadId } : {}),
       });
       const droneTargets = workspaceDrones

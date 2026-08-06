@@ -541,33 +541,45 @@ describe('device mesh drone summaries', () => {
     }
   });
 
-  test('forwards mobile drone renames to the Hub rename endpoint', async () => {
+  test('uses the in-process rename command for mobile drone renames', async () => {
     const originalFetch = globalThis.fetch;
-    let request: { path: string; method: string; body: any } | null = null;
-    globalThis.fetch = (async (input, init) => {
-      request = {
-        path: new URL(String(input)).pathname,
-        method: String(init?.method ?? 'GET'),
-        body: JSON.parse(String(init?.body ?? '{}')),
-      };
-      return Response.json({ ok: true, id: 'drone-one', newName: 'Review drone' });
+    const renames: any[] = [];
+    globalThis.fetch = (async (input) => {
+      throw new Error(`unexpected loopback request: ${String(input)}`);
     }) as typeof fetch;
     try {
-      const capability = createDroneControlCapability({
-        baseUrl: () => 'http://127.0.0.1:7777',
-        apiToken: 'test',
-      });
+      const capability = createDroneControlCapability(
+        {
+          baseUrl: () => 'http://127.0.0.1:7777',
+          apiToken: 'test',
+        },
+        undefined,
+        {
+          renameDrone: async (input) => {
+            renames.push(input);
+            return {
+              ok: true,
+              id: input.droneRef,
+              oldName: 'Untitled 1',
+              newName: input.newName,
+              renamed: true,
+            };
+          },
+        },
+      );
       await expect(
         capability.invoke('drone.rename', {
           droneId: 'drone-one',
           newName: 'Review drone',
         }),
       ).resolves.toMatchObject({ ok: true, newName: 'Review drone' });
-      expect(request).toEqual({
-        path: '/api/drones/drone-one/rename',
-        method: 'POST',
-        body: { newName: 'Review drone', source: 'drone-hub-mobile' },
-      });
+      expect(renames).toEqual([
+        {
+          droneRef: 'drone-one',
+          newName: 'Review drone',
+          source: 'drone-hub-mobile',
+        },
+      ]);
     } finally {
       globalThis.fetch = originalFetch;
     }

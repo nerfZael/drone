@@ -494,6 +494,7 @@ import {
   setDroneGroupMetadata,
   updateDroneFleetMetadata,
 } from './drone-metadata-commands';
+import { createRenameDroneCommand } from './drone-rename-command';
 import {
   createPendingDroneStateHelpers,
   hasQueuedPromptWithId,
@@ -3963,65 +3964,6 @@ async function suggestCreatedDroneNameDirect(input: {
   return name;
 }
 
-async function renameCreatedDroneDirect(input: {
-  droneId: string;
-  newName: string;
-  expectedName?: string;
-  source: 'mobile-create-auto-rename';
-  attempt: number;
-  suggestedBase: string;
-}): Promise<void> {
-  const registry: any = await loadRegistry();
-  const found = findDroneIdByRef(registry, input.droneId);
-  if (!found) throw new Error(`unknown drone: ${input.droneId}`);
-
-  const currentEntry =
-    (found.kind === 'real' ? registry?.drones?.[found.id] : registry?.pending?.[found.id]) ?? null;
-  const droneId =
-    normalizeDroneIdentity(currentEntry?.id) || normalizeDroneIdentity(found.id) || found.id;
-  const oldName = String(currentEntry?.name ?? input.droneId).trim() || input.droneId;
-  const newName = normalizeDroneDisplayName(input.newName);
-  if (oldName === newName) return;
-
-  const conflictingReal = Object.entries(registry?.drones ?? {}).find(
-    ([key, entry]: [string, any]) =>
-      (normalizeDroneIdentity(entry?.id) || key) !== droneId &&
-      String(entry?.name ?? '').trim() === newName,
-  );
-  const conflictingPending = Object.entries(registry?.pending ?? {}).find(
-    ([key, entry]: [string, any]) =>
-      (normalizeDroneIdentity(entry?.id) || key) !== droneId &&
-      String(entry?.name ?? '').trim() === newName,
-  );
-  if (conflictingReal || conflictingPending) {
-    throw new Error(`${conflictingPending ? 'pending ' : ''}drone already exists: ${newName}`);
-  }
-
-  hubLog('info', 'drone rename requested', {
-    droneId,
-    oldName,
-    newName,
-    source: input.source,
-    attempt: input.attempt,
-    suggestedBase: input.suggestedBase,
-  });
-  await renameDroneDisplayName({
-    droneId,
-    state: found.kind,
-    name: newName,
-    ...(input.expectedName ? { expectedName: normalizeDroneDisplayName(input.expectedName) } : {}),
-  });
-  notifyDroneRegistryWrite?.();
-  hubLog('info', 'drone renamed', {
-    droneId,
-    oldName,
-    newName,
-    source: input.source,
-    attempt: input.attempt,
-    suggestedBase: input.suggestedBase,
-  });
-}
-
 function normalizeContainerMcpUrl(raw: unknown): string {
   const value = String(raw ?? '').trim();
   if (!value) return '';
@@ -4066,6 +4008,16 @@ export async function startDroneHubApiServer(opts: {
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
   if (mcpToken) await revokeLegacyProjectedDroneMcpTokens();
+  const renameDroneCommand = createRenameDroneCommand({
+    displayNameMaxLength: DRONE_DISPLAY_NAME_MAX_LEN,
+    findDroneIdByRef,
+    loadRegistry,
+    log: hubLog,
+    normalizeDisplayName: normalizeDroneDisplayName,
+    normalizeDroneIdentity,
+    notifyRegistryWrite: () => notifyDroneRegistryWrite?.(),
+    persistDisplayName: renameDroneDisplayName,
+  });
   let actualPort = opts.port;
   const sidebarCommands = new SidebarCommandService({
     baseUrl: () => `http://127.0.0.1:${actualPort}`,
@@ -4077,9 +4029,12 @@ export async function startDroneHubApiServer(opts: {
     sidebarCommands,
     localHubBaseUrl: () => `http://127.0.0.1:${actualPort}`,
     ingressPort: opts.deviceMeshIngressPort,
+    renameDrone: renameDroneCommand,
     createdDroneAutoRename: {
       suggestName: suggestCreatedDroneNameDirect,
-      renameDrone: renameCreatedDroneDirect,
+      renameDrone: async ({ droneId, ...input }) => {
+        await renameDroneCommand({ droneRef: droneId, ...input });
+      },
     },
   });
 
@@ -4235,6 +4190,7 @@ export async function startDroneHubApiServer(opts: {
     deviceMesh,
     normalizeDroneIdentity,
     nowIso,
+    renameDrone: renameDroneCommand,
     onNativePromptQueueChanged: ({ droneId, chatName }) => {
       notifyDroneChatWrite?.(droneId, chatName);
       promptRuntime.enqueuePendingPromptPump(droneId, chatName);
@@ -5251,6 +5207,7 @@ export async function startDroneHubApiServer(opts: {
     signingSecret: mcpToken,
     log: hubLog,
     speechEnabled: initialSpeechSettings.enabled,
+    renameDrone: renameDroneCommand,
   });
   const handleDroneHubMcpRequest = (
     req: http.IncomingMessage,
@@ -5574,7 +5531,6 @@ export async function startDroneHubApiServer(opts: {
   });
 
   const handleDroneLifecycleRoute = createDroneLifecycleRouteHandler({
-    DRONE_DISPLAY_NAME_MAX_LEN,
     archiveDroneById,
     archiveRetentionMs,
     cleanupExpiredArchivedChats,
@@ -5601,16 +5557,14 @@ export async function startDroneHubApiServer(opts: {
     normalizeArchiveRuntimePolicy,
     normalizeChatName,
     normalizeDisabledRepoKeys,
-    normalizeDroneDisplayName,
     normalizeDroneIdentity,
     normalizeDroneRuntime,
     normalizeEnvVarMap,
-    notifyCanonicalDroneRegistryWrite,
     nowIso,
     parseIsoToMs,
     removeArchivedDroneById,
     removeDroneTreeById,
-    renameDroneDisplayName,
+    renameDrone: renameDroneCommand,
     resolveArchiveDeleteAtIso,
     resolveDroneCliPath,
     resolveDroneOrPendingForReadRef,

@@ -16,6 +16,7 @@ import { DeviceRouteManager } from './device-route-manager';
 import { DesktopDroneControlHttp } from './desktop-drone-control-http';
 import { createDroneControlCapability } from './drone-control-capability';
 import type { CreatedDroneAutoRenameOperations } from './auto-rename-created-drone';
+import type { RenameDroneCommand } from '../drone-rename-command';
 import { CrossDeviceAssistantPolicyHttp } from './features/cross-device-assistant/policy-http';
 import { CrossDeviceAssistantPolicyStore } from './features/cross-device-assistant/policy-store';
 import { RemoteWorkspaceTarget } from './features/cross-device-assistant/remote-workspace-target';
@@ -31,6 +32,7 @@ export async function createDeviceMeshService(options: {
   ingressPort?: number;
   createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
   sidebarCommands?: SidebarCommandService;
+  renameDrone?: RenameDroneCommand;
 }) {
   const identity = await loadOrCreateDeviceIdentity(options.rootDir);
   const store = new DeviceMeshStore(path.join(options.rootDir, 'state.json'), identity);
@@ -54,6 +56,7 @@ export async function createDeviceMeshService(options: {
       {
         sidebarCommands: options.sidebarCommands,
         createdDroneAutoRename: options.createdDroneAutoRename,
+        renameDrone: options.renameDrone,
         broadcastFileChange: (payload, targetDeviceIds) =>
           router.broadcastCapabilityEvent(
             'drone-control',

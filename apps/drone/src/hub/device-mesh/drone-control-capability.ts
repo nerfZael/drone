@@ -19,6 +19,7 @@ import {
   compactAgentRunFileChangesForMesh,
 } from './drone-chat-page';
 import { isLikelyImagePath, isLikelyVideoPath } from '../filesystem-media';
+import type { RenameDroneCommand } from '../drone-rename-command';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
 import { meshJsonContentChunk } from './mesh-content-chunk';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
@@ -267,6 +268,7 @@ export function createDroneControlCapability(
   options?: {
     sidebarCommands?: SidebarCommandService;
     createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
+    renameDrone?: RenameDroneCommand;
     broadcastFileChange?: (
       payload: Record<string, any>,
       targetDeviceIds: string[],
@@ -667,6 +669,13 @@ export function createDroneControlCapability(
       const encodedDrone = encodeURIComponent(droneId);
       if (operation === 'drone.rename') {
         const newName = requiredText(payload.newName, 'newName');
+        if (options?.renameDrone) {
+          return await options.renameDrone({
+            droneRef: droneId,
+            newName,
+            source: 'drone-hub-mobile',
+          });
+        }
         return await localHubRequest(access, `/api/drones/${encodedDrone}/rename`, {
           method: 'POST',
           body: JSON.stringify({ newName, source: 'drone-hub-mobile' }),
