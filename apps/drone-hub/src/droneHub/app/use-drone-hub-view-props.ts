@@ -504,8 +504,9 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     openedEditorFileOpenFailureMessage,
     openedEditorFileOpenFailureAt,
     onOpenMarkdownFileReference,
-    rightPanelBottomTab,
     rightPanelOpenRequestSeq,
+    visibleToolTabs,
+    onVisibleToolTabsChange,
     renderRightPanelTabContent,
     renderPersistentPreviewContent,
   } = args;
@@ -744,8 +745,9 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           openedEditorFileOpenFailureMessage,
           openedEditorFileOpenFailureAt,
           onOpenMarkdownFileReference,
-          rightPanelBottomTab,
           rightPanelOpenRequestSeq,
+          visibleToolTabs,
+          onVisibleToolTabsChange,
           renderRightPanelTabContent,
         }
       : null,

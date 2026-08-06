@@ -33,7 +33,6 @@ type PreviewHostState = {
 type DockableDroneWorkspaceProps = {
   currentDrone: DroneSummary;
   paneHeaderMode: WorkspacePaneHeaderMode;
-  toolPaneOpen: boolean;
   activeToolTab: RightPanelTab;
   openRequestNonce: number;
   chatContent: React.ReactNode;
@@ -288,7 +287,7 @@ export function migrateEditorChangesPanels(api: DockviewApi): void {
   survivor.api.setConstraints({ minimumWidth: EDITOR_PANEL_MIN_WIDTH });
 }
 
-function createDefaultLayout(api: DockviewApi): void {
+export function resetWorkspaceToChat(api: DockviewApi): void {
   api.clear();
   ensureChatPanel(api);
 }
@@ -365,13 +364,11 @@ function WorkspaceWatermark() {
 const DockableDroneWorkspaceContext = React.createContext<{
   chatContent: React.ReactNode;
   renderToolPane: (tab: RightPanelTab, paneKey: WorkspacePaneKey) => React.ReactNode;
-  activeToolTab: RightPanelTab;
   previewTab: RightPanelTab;
   onPreviewHostChanged: () => void;
 }>({
   chatContent: null,
   renderToolPane: () => null,
-  activeToolTab: 'editor',
   previewTab: 'preview',
   onPreviewHostChanged: () => {},
 });
@@ -379,7 +376,6 @@ const DockableDroneWorkspaceContext = React.createContext<{
 export function DockableDroneWorkspace({
   currentDrone,
   paneHeaderMode,
-  toolPaneOpen,
   activeToolTab,
   openRequestNonce,
   chatContent,
@@ -396,14 +392,13 @@ export function DockableDroneWorkspace({
   const removedPanelTimersRef = React.useRef<Map<string, number>>(new Map());
   const suppressSaveRef = React.useRef(false);
   const unmountingRef = React.useRef(false);
-  const lastAppliedOpenRequestRef = React.useRef<number>(-1);
-  const lastAppliedToolTabRef = React.useRef<RightPanelTab | null>(null);
-  const lastAppliedOpenStateRef = React.useRef<boolean | null>(null);
+  const lastAppliedOpenRequestRef = React.useRef(openRequestNonce);
   const [previewHostVersion, setPreviewHostVersion] = React.useState(0);
   const [workspacePanelCount, setWorkspacePanelCount] = React.useState(1);
   const lastReportedPreviewHostRef = React.useRef<PreviewHostState | null>(null);
   const isMobileViewport = useMobileViewport();
   const [mobileActivePanel, setMobileActivePanel] = React.useState<'chat' | 'tool'>('chat');
+  const [mobileToolPaneOpen, setMobileToolPaneOpen] = React.useState(false);
   const markPreviewHostChanged = React.useCallback(() => {
     setPreviewHostVersion((version) => version + 1);
   }, []);
@@ -425,23 +420,33 @@ export function DockableDroneWorkspace({
     () => ({
       chatContent,
       renderToolPane,
-      activeToolTab,
       previewTab,
       onPreviewHostChanged: markPreviewHostChanged,
     }),
-    [activeToolTab, chatContent, markPreviewHostChanged, previewTab, renderToolPane],
+    [chatContent, markPreviewHostChanged, previewTab, renderToolPane],
   );
   const components = React.useMemo(() => ({ chat: ChatPanel, tool: ToolPanel }), []);
 
   React.useEffect(() => {
     if (!isMobileViewport) return;
-    setMobileActivePanel(toolPaneOpen ? 'tool' : 'chat');
-  }, [activeToolTab, isMobileViewport, openRequestNonce, toolPaneOpen]);
+    const api = apiRef.current;
+    if (!api || visibleToolTabs(api).length === 0) return;
+    setMobileToolPaneOpen(true);
+    setMobileActivePanel('tool');
+  }, [isMobileViewport]);
 
   React.useEffect(() => {
     if (!isMobileViewport) return;
-    onVisibleToolTabsChange?.(toolPaneOpen ? [activeToolTab] : []);
-  }, [activeToolTab, isMobileViewport, onVisibleToolTabsChange, toolPaneOpen]);
+    onVisibleToolTabsChange?.(
+      mobileToolPaneOpen && mobileActivePanel === 'tool' ? [activeToolTab] : [],
+    );
+  }, [
+    activeToolTab,
+    isMobileViewport,
+    mobileActivePanel,
+    mobileToolPaneOpen,
+    onVisibleToolTabsChange,
+  ]);
 
   const persistCurrentLayout = React.useCallback(() => {
     const api = apiRef.current;
@@ -482,29 +487,62 @@ export function DockableDroneWorkspace({
     suppressSaveRef.current = true;
     try {
       const stored = readStoredLayout(currentDrone.id);
-      if (stored && toolPaneOpen) {
+      if (stored) {
         api.fromJSON(stored, { reuseExistingPanels: true });
         restoreRequiredWorkspacePanels(api);
         migrateEditorChangesPanels(api);
       } else {
-        createDefaultLayout(api);
+        resetWorkspaceToChat(api);
       }
-      lastAppliedOpenRequestRef.current = openRequestNonce;
-      lastAppliedToolTabRef.current = activeToolTab;
-      lastAppliedOpenStateRef.current = toolPaneOpen;
     } catch {
-      createDefaultLayout(api);
+      resetWorkspaceToChat(api);
     } finally {
       suppressSaveRef.current = false;
       updateWorkspacePanelState();
       persistCurrentLayout();
     }
-  }, [activeToolTab, currentDrone.id, openRequestNonce, persistCurrentLayout, toolPaneOpen, updateWorkspacePanelState]);
+  }, [currentDrone.id, persistCurrentLayout, updateWorkspacePanelState]);
+
+  const applyToolOpenRequest = React.useCallback(() => {
+    if (openRequestNonce === lastAppliedOpenRequestRef.current) return;
+    if (isMobileViewport) {
+      lastAppliedOpenRequestRef.current = openRequestNonce;
+      setMobileToolPaneOpen(true);
+      setMobileActivePanel('tool');
+      return;
+    }
+
+    const api = apiRef.current;
+    if (!api) return;
+    lastAppliedOpenRequestRef.current = openRequestNonce;
+    let addedPanel = false;
+    suppressSaveRef.current = true;
+    try {
+      ensureChatPanel(api);
+      addedPanel = ensureWorkspaceToolPanel(api, activeToolTab, 'single');
+    } finally {
+      suppressSaveRef.current = false;
+    }
+    updateWorkspacePanelState();
+    if (addedPanel) {
+      rebalanceWorkspaceGridGroups();
+    } else {
+      persistCurrentLayout();
+    }
+  }, [
+    activeToolTab,
+    isMobileViewport,
+    openRequestNonce,
+    persistCurrentLayout,
+    rebalanceWorkspaceGridGroups,
+    updateWorkspacePanelState,
+  ]);
 
   const handleReady = React.useCallback(
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api;
       loadLayout();
+      applyToolOpenRequest();
 
       const layoutDisposable = event.api.onDidLayoutChange(() => {
         updateWorkspacePanelState();
@@ -517,7 +555,6 @@ export function DockableDroneWorkspace({
       });
       const removeDisposable = event.api.onDidRemovePanel((panel) => {
         const panelId = panel.id;
-        const tab = panelId === CHAT_PANEL_ID ? null : tabFromPanel(panel);
         const pendingTimer = removedPanelTimersRef.current.get(panelId);
         if (pendingTimer !== undefined) window.clearTimeout(pendingTimer);
 
@@ -533,7 +570,6 @@ export function DockableDroneWorkspace({
           if (api.getPanel(panelId)) return;
 
           if (panelId !== CHAT_PANEL_ID) {
-            if (tab) lastAppliedToolTabRef.current = null;
             updateWorkspacePanelState();
             rebalanceWorkspaceGridGroups(onAfterToolPanelRemove);
             return;
@@ -554,7 +590,7 @@ export function DockableDroneWorkspace({
       disposablesRef.current.forEach((disposable) => disposable.dispose());
       disposablesRef.current = [layoutDisposable, activePanelDisposable, removeDisposable];
     },
-    [loadLayout, onActiveToolTabChange, onAfterToolPanelRemove, persistCurrentLayout, rebalanceWorkspaceGridGroups, updateWorkspacePanelState],
+    [applyToolOpenRequest, loadLayout, onActiveToolTabChange, onAfterToolPanelRemove, persistCurrentLayout, rebalanceWorkspaceGridGroups, updateWorkspacePanelState],
   );
 
   React.useLayoutEffect(() => {
@@ -578,36 +614,8 @@ export function DockableDroneWorkspace({
   }, [onBeforeWorkspaceMouseDown]);
 
   React.useEffect(() => {
-    const api = apiRef.current;
-    if (!api) return;
-    if (!toolPaneOpen) return;
-    const toolTabChanged = activeToolTab !== lastAppliedToolTabRef.current;
-    const openedFromClosed = lastAppliedOpenStateRef.current === false && toolPaneOpen;
-    if (
-      openRequestNonce === lastAppliedOpenRequestRef.current &&
-      !toolTabChanged &&
-      !openedFromClosed
-    ) {
-      return;
-    }
-    lastAppliedOpenRequestRef.current = openRequestNonce;
-    lastAppliedToolTabRef.current = activeToolTab;
-    lastAppliedOpenStateRef.current = toolPaneOpen;
-    let addedPanel = false;
-    suppressSaveRef.current = true;
-    try {
-      ensureChatPanel(api);
-      addedPanel = ensureWorkspaceToolPanel(api, activeToolTab, 'single');
-    } finally {
-      suppressSaveRef.current = false;
-    }
-    updateWorkspacePanelState();
-    if (addedPanel) {
-      rebalanceWorkspaceGridGroups();
-    } else {
-      persistCurrentLayout();
-    }
-  }, [activeToolTab, openRequestNonce, persistCurrentLayout, rebalanceWorkspaceGridGroups, toolPaneOpen, updateWorkspacePanelState]);
+    applyToolOpenRequest();
+  }, [applyToolOpenRequest]);
 
   React.useLayoutEffect(() => {
     const workspaceRoot = document.querySelector<HTMLElement>('[data-drone-workspace-root="1"]');
@@ -657,7 +665,7 @@ export function DockableDroneWorkspace({
     mobileActivePanel,
     previewHostVersion,
     reportPreviewHostChange,
-    toolPaneOpen,
+    mobileToolPaneOpen,
   ]);
 
   React.useEffect(() => {
@@ -674,7 +682,7 @@ export function DockableDroneWorkspace({
     <DockableDroneWorkspaceContext.Provider value={contextValue}>
       {isMobileViewport ? (
         <UiPanel flush className="dh-mobile-workspace flex-1">
-          {toolPaneOpen ? (
+          {mobileToolPaneOpen ? (
             <UiPanelToolbar
               aria-label="Mobile workspace panes"
               className="dh-mobile-workspace-tabs border-[var(--border)] py-1.5"
@@ -695,7 +703,7 @@ export function DockableDroneWorkspace({
             </UiPanelToolbar>
           ) : null}
           <UiPanelBody>
-            {mobileActivePanel === 'tool' && toolPaneOpen ? (
+            {mobileActivePanel === 'tool' && mobileToolPaneOpen ? (
               activeToolTab === previewTab ? (
                 <UiPanel
                   flush

@@ -70,7 +70,7 @@ import {
 } from './droneHub/app/terminal-prewarm';
 import { useQueuedPromptsState } from './droneHub/app/use-queued-prompts-state';
 import { selectedChatRespondingStatus } from './droneHub/app/optimistic-pending-prompts';
-import { useRightPanelLayout } from './droneHub/app/use-right-panel-layout';
+import { useWorkspaceTools } from './droneHub/app/use-workspace-tools';
 import {
   resolveDroneDeleteTargetIds,
   type DroneSelectionClickOptions,
@@ -114,6 +114,7 @@ import {
   unreadChatNodeIdsForDrone,
   type ManualUnreadMarker,
 } from './droneHub/app/chat-node-helpers';
+
 import { orderSidebarEntries } from './droneHub/app/sidebar-group-order';
 import { isSidebarGroupCollapsed } from './droneHub/app/is-sidebar-group-collapsed';
 import {
@@ -156,6 +157,8 @@ import { allocateUntitledDisplayName } from './droneHub/app/name-helpers';
 import { createTerminalPaneSessionsState } from './droneHub/terminal/terminal-tabs-state';
 import { useTerminalPaneSessions } from './droneHub/terminal/use-terminal-pane-sessions';
 import type { DronePortMapping, DroneSummary, PortReachabilityByHostPort } from './droneHub/types';
+
+const EMPTY_VISIBLE_TOOL_TABS: RightPanelTab[] = [];
 
 type PreviewPaneKey = 'single' | 'top' | 'bottom';
 type PreviewPaneSnapshot = {
@@ -689,17 +692,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
 
   /* ── Layout state ── */
   const {
-    rightPanelOpen,
-    setRightPanelOpen,
     requestRightPanelTab,
     rightPanelTab,
     setRightPanelTab,
-    rightPanelSplit,
-    setRightPanelSplitMode,
-    rightPanelBottomTab,
-    setRightPanelBottomTab,
     rightPanelOpenRequestSeq,
-  } = useRightPanelLayout();
+    visibleToolTabsByDrone,
+    setVisibleToolTabsForDrone,
+  } = useWorkspaceTools();
   const headerOverflowRef = React.useRef<HTMLDivElement | null>(null);
   const preferredSelectedDroneRef = React.useRef<string | null>(null);
   const preferredSelectedDroneHoldUntilRef = React.useRef<number>(0);
@@ -1687,6 +1686,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
 
   const currentDrone = selectedDrone ? (droneById[selectedDrone] ?? null) : null;
+  const currentDroneId = currentDrone?.id ?? '';
+  const visibleToolTabs =
+    visibleToolTabsByDrone[currentDroneId] ?? EMPTY_VISIBLE_TOOL_TABS;
+  const handleVisibleToolTabsChange = React.useCallback(
+    (tabs: RightPanelTab[]) => {
+      if (!currentDroneId) return;
+      setVisibleToolTabsForDrone(currentDroneId, tabs);
+    },
+    [currentDroneId, setVisibleToolTabsForDrone],
+  );
   React.useEffect(() => {
     if (!currentDrone) return;
     const repoPath = String(currentDrone.repoPath ?? '').trim();
@@ -1834,7 +1843,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         return;
       }
       if (action.type === 'close_whiteboard') {
-        if (rightPanelTab === 'whiteboard' || rightPanelBottomTab === 'whiteboard') {
+        if (visibleToolTabs.includes('whiteboard')) {
           requestRightPanelTab('editor');
         }
         return;
@@ -1878,10 +1887,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     reloadPinnedDrones,
     reloadUiPreferences,
     requestRightPanelTab,
-    rightPanelBottomTab,
-    rightPanelTab,
     selectDroneChat,
     showShortcutToast,
+    visibleToolTabs,
   ]);
   React.useEffect(
     () => () => {
@@ -2152,23 +2160,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (rightPanelTabs.length === 0) return;
     if (!rightPanelTabs.includes(rightPanelTab)) {
       setRightPanelTab(rightPanelTabs[0]);
-      return;
     }
-    const bottomTabUnsupported = !rightPanelTabs.includes(rightPanelBottomTab);
-    const bottomTabConflictsInSplit = rightPanelSplit && rightPanelBottomTab === rightPanelTab;
-    if (bottomTabUnsupported || bottomTabConflictsInSplit) {
-      const fallbackBottomTab =
-        rightPanelTabs.find((tab) => tab !== rightPanelTab) ?? rightPanelTabs[0];
-      if (fallbackBottomTab !== rightPanelBottomTab) setRightPanelBottomTab(fallbackBottomTab);
-    }
-  }, [
-    rightPanelBottomTab,
-    rightPanelSplit,
-    rightPanelTab,
-    rightPanelTabs,
-    setRightPanelBottomTab,
-    setRightPanelTab,
-  ]);
+  }, [rightPanelTab, rightPanelTabs, setRightPanelTab]);
   const deleteSelectedDroneFromInputShortcut = React.useCallback((): boolean => {
     return requestDeleteSelectedDrones();
   }, [requestDeleteSelectedDrones]);
@@ -2264,17 +2257,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     : null;
   const filesPaneActive = Boolean(
     currentDrone &&
-    rightPanelOpen &&
-    (rightPanelTab === 'files' ||
-      rightPanelTab === 'editor' ||
-      (rightPanelSplit && (rightPanelBottomTab === 'files' || rightPanelBottomTab === 'editor'))),
+    (visibleToolTabs.includes('files') || visibleToolTabs.includes('editor')),
   );
   const portsPaneActive = Boolean(
     currentDrone &&
-    rightPanelOpen &&
-    (rightPanelTab === 'preview' ||
-      rightPanelTab === 'links' ||
-      (rightPanelSplit && (rightPanelBottomTab === 'preview' || rightPanelBottomTab === 'links'))),
+    (visibleToolTabs.includes('preview') || visibleToolTabs.includes('links')),
   );
   const {
     defaultFsPathForCurrentDrone,
@@ -2307,10 +2294,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       !shouldPrewarmShellTerminal({
         drone: currentDrone,
         cwd: defaultFsPathForCurrentDrone,
-        rightPanelOpen,
-        rightPanelTab,
-        rightPanelSplit,
-        rightPanelBottomTab,
+        visibleToolTabs,
       })
     ) {
       return;
@@ -2359,11 +2343,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     currentDrone,
     defaultFsPathForCurrentDrone,
     requestJson,
-    rightPanelBottomTab,
-    rightPanelOpen,
-    rightPanelSplit,
-    rightPanelTab,
     selectedChat,
+    visibleToolTabs,
   ]);
   const {
     terminalSessionsByPane,
@@ -3092,26 +3073,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [openFileInFilesPane, resolveCurrentDroneRepoFilePath],
   );
   const revealChangesFileInFiles = React.useCallback(
-    (pane: 'top' | 'bottom' | 'single', repoRelativePath: string) => {
+    (_pane: 'top' | 'bottom' | 'single', repoRelativePath: string) => {
       const containerPath = resolveCurrentDroneRepoFilePath(repoRelativePath);
       if (!containerPath) return;
       const slash = containerPath.lastIndexOf('/');
       const parentPath = slash > 0 ? containerPath.slice(0, slash) : '/';
       setCurrentFsPath(parentPath);
-      if (pane === 'bottom') {
-        setRightPanelBottomTab('editor');
-        setRightPanelOpen(true);
-      } else {
-        requestRightPanelTab('editor');
-      }
+      requestRightPanelTab('editor');
     },
-    [
-      requestRightPanelTab,
-      resolveCurrentDroneRepoFilePath,
-      setCurrentFsPath,
-      setRightPanelBottomTab,
-      setRightPanelOpen,
-    ],
+    [requestRightPanelTab, resolveCurrentDroneRepoFilePath, setCurrentFsPath],
   );
   const onActivateChatFromCanvas = React.useCallback(
     (droneIdRaw: string, chatNameRaw: string) => {
@@ -3843,10 +3813,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftSuggestedName,
     setDraftNameSuggestionError,
     draftNameSuggestSeqRef,
-    rightPanelOpen,
     rightPanelTab,
-    rightPanelSplit,
-    rightPanelBottomTab,
+    visibleToolTabs,
     requestRightPanelTab,
     setSidebarCollapsed,
     shortcutBindings,
@@ -4169,14 +4137,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           onReorderOpenedEditorFileTabs={reorderOpenedFileTabs}
           onRevealChangesFileInFiles={revealChangesFileInFiles}
           onOpenChangesFileInEditor={openChangesFileInEditor}
-          onOpenPullRequest={(pane, _pullRequest) => {
-            if (pane === 'bottom') {
-              setRightPanelBottomTab('prs');
-              setRightPanelOpen(true);
-              return;
-            }
-            requestRightPanelTab('prs');
-          }}
+          onOpenPullRequest={() => requestRightPanelTab('prs')}
         />
       );
     },
@@ -4239,8 +4200,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       spawnAgentMenuEntries,
       spawnModel,
       setCurrentFsPath,
-      setRightPanelBottomTab,
-      setRightPanelOpen,
       setRightPanelTab,
       setSelectedPreviewUrlOverride,
       uiDroneName,
@@ -4632,11 +4591,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     terminalMenuRef,
     terminalLabel,
     terminalOptions,
-    rightPanelOpen,
-    setRightPanelOpen,
     requestRightPanelTab,
-    setRightPanelSplitMode,
-    rightPanelSplit,
     rightPanelTabs,
     rightPanelTab,
     setRightPanelTab,
@@ -4681,8 +4636,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onOpenedEditorFileContentChange: setOpenedFileContent,
     onSaveOpenedEditorFile: saveOpenedFile,
     onCloseOpenedEditorFile: closeEditorFile,
-    rightPanelBottomTab,
     rightPanelOpenRequestSeq,
+    visibleToolTabs,
+    onVisibleToolTabsChange: handleVisibleToolTabsChange,
     renderRightPanelTabContent,
     renderPersistentPreviewContent,
   });

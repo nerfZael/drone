@@ -34,10 +34,7 @@ describe('terminal prewarm helpers', () => {
       shouldPrewarmShellTerminal({
         drone: makeDrone(),
         cwd: '/work/repo',
-        rightPanelOpen: true,
-        rightPanelTab: 'preview',
-        rightPanelSplit: false,
-        rightPanelBottomTab: 'files',
+        visibleToolTabs: ['preview'],
       }),
     ).toBe(true);
   });
@@ -47,10 +44,7 @@ describe('terminal prewarm helpers', () => {
       shouldPrewarmShellTerminal({
         drone: makeDrone({ runtime: 'host' }),
         cwd: '/work/repo',
-        rightPanelOpen: true,
-        rightPanelTab: 'preview',
-        rightPanelSplit: false,
-        rightPanelBottomTab: 'files',
+        visibleToolTabs: ['preview'],
       }),
     ).toBe(false);
   });
@@ -60,10 +54,7 @@ describe('terminal prewarm helpers', () => {
       shouldPrewarmShellTerminal({
         drone: makeDrone({ hubPhase: 'starting' }),
         cwd: '/work/repo',
-        rightPanelOpen: true,
-        rightPanelTab: 'preview',
-        rightPanelSplit: false,
-        rightPanelBottomTab: 'files',
+        visibleToolTabs: ['preview'],
       }),
     ).toBe(false);
   });
@@ -73,24 +64,18 @@ describe('terminal prewarm helpers', () => {
       shouldPrewarmShellTerminal({
         drone: makeDrone(),
         cwd: '/work/repo',
-        rightPanelOpen: true,
-        rightPanelTab: 'terminal',
-        rightPanelSplit: false,
-        rightPanelBottomTab: 'files',
+        visibleToolTabs: ['terminal'],
       }),
     ).toBe(false);
   });
 
-  test('ignores stale split bottom tab state after split mode is removed', () => {
+  test('does not prewarm a fresh chat-only workspace', () => {
     expect(
       shouldPrewarmShellTerminal({
         drone: makeDrone(),
         cwd: '/work/repo',
-        rightPanelOpen: true,
-        rightPanelTab: 'preview',
-        rightPanelSplit: true,
-        rightPanelBottomTab: 'terminal',
+        visibleToolTabs: [],
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });

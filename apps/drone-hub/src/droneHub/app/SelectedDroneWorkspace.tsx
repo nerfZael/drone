@@ -547,8 +547,9 @@ type SelectedDroneWorkspaceProps = {
   openedEditorFileOpenFailureMessage: string | null;
   openedEditorFileOpenFailureAt: number | null;
   onOpenMarkdownFileReference: (ref: MarkdownFileReference) => void;
-  rightPanelBottomTab: RightPanelTab;
   rightPanelOpenRequestSeq: number;
+  visibleToolTabs: RightPanelTab[];
+  onVisibleToolTabsChange: (tabs: RightPanelTab[]) => void;
   renderRightPanelTabContent: (
     drone: DroneSummary,
     tab: RightPanelTab,
@@ -664,6 +665,8 @@ export function SelectedDroneWorkspace({
   openedEditorFileOpenFailureAt,
   onOpenMarkdownFileReference,
   rightPanelOpenRequestSeq,
+  visibleToolTabs,
+  onVisibleToolTabsChange,
   renderRightPanelTabContent,
   onPersistentPreviewHostChange,
 }: SelectedDroneWorkspaceProps) {
@@ -681,25 +684,6 @@ export function SelectedDroneWorkspace({
     setSelectedChat,
     setTerminalEmulator,
   } = useSelectedDroneWorkspaceUiState();
-  const [visibleToolTabsByDrone, setVisibleToolTabsByDrone] = React.useState<
-    Record<string, RightPanelTab[]>
-  >({});
-  const visibleToolTabs = visibleToolTabsByDrone[currentDrone.id] ?? [];
-  const handleVisibleToolTabsChange = React.useCallback(
-    (tabs: RightPanelTab[]) => {
-      setVisibleToolTabsByDrone((current) => {
-        const previous = current[currentDrone.id] ?? [];
-        if (
-          previous.length === tabs.length &&
-          previous.every((tab, index) => tab === tabs[index])
-        ) {
-          return current;
-        }
-        return { ...current, [currentDrone.id]: tabs };
-      });
-    },
-    [currentDrone.id],
-  );
   const explicitSelectedChat = String(selectedChat ?? '').trim();
   const activeChatName = React.useMemo(
     () => explicitSelectedChat || resolveChatNameForDrone(currentDrone, selectedChat),
@@ -2146,13 +2130,12 @@ export function SelectedDroneWorkspace({
         key={currentDrone.id}
         currentDrone={currentDrone}
         paneHeaderMode={workspacePaneHeaderMode}
-        toolPaneOpen
         activeToolTab={rightPanelTab}
         openRequestNonce={rightPanelOpenRequestSeq}
         renderToolPane={(tab, paneKey) => renderRightPanelTabContent(currentDrone, tab, paneKey)}
         previewTab="preview"
         onActiveToolTabChange={setRightPanelTab}
-        onVisibleToolTabsChange={handleVisibleToolTabsChange}
+        onVisibleToolTabsChange={onVisibleToolTabsChange}
         onPreviewHostChange={onPersistentPreviewHostChange}
         onBeforeWorkspaceMouseDown={captureWorkspaceChatScroll}
         onAfterToolPanelRemove={restoreWorkspaceChatScroll}
