@@ -169,29 +169,35 @@ export function boundedAssistantHistory(history: any, maxBytes = MAX_HISTORY_BYT
     },
   };
   const requestedLimit = Number.isFinite(maxBytes) ? Number(maxBytes) : MAX_HISTORY_BYTES;
-  const byteLimit = Math.max(4 * 1024, Math.min(MAX_HISTORY_BYTES, requestedLimit));
+  const byteLimit = Math.max(0, Math.min(MAX_HISTORY_BYTES, requestedLimit));
   while (result.entries.length > 1 && Buffer.byteLength(JSON.stringify(result)) > byteLimit) {
     result.entries.shift();
     result.page.hasOlder = true;
     result.page.responseTruncated = true;
   }
   if (result.entries.length === 1 && Buffer.byteLength(JSON.stringify(result)) > byteLimit) {
-    const entry = result.entries[0] as any;
-    result.entries[0] = {
-      sequence: Number(entry?.sequence ?? 0),
-      id: truncateUtf8(entry?.id, 160),
-      timestamp: truncateUtf8(entry?.timestamp, 80),
-      message: {
-        role: String(entry?.message?.role ?? 'unknown'),
-        content: truncateUtf8(
-          contentText(entry?.message?.content),
-          Math.max(256, byteLimit - 2_000),
-        ),
+    if (byteLimit < 4 * 1024) {
+      result.entries = [];
+      result.page.hasOlder = true;
+      result.page.responseTruncated = true;
+    } else {
+      const entry = result.entries[0] as any;
+      result.entries[0] = {
+        sequence: Number(entry?.sequence ?? 0),
+        id: truncateUtf8(entry?.id, 160),
+        timestamp: truncateUtf8(entry?.timestamp, 80),
+        message: {
+          role: String(entry?.message?.role ?? 'unknown'),
+          content: truncateUtf8(
+            contentText(entry?.message?.content),
+            Math.max(256, byteLimit - 2_000),
+          ),
+          meshTruncated: true,
+        },
         meshTruncated: true,
-      },
-      meshTruncated: true,
-    };
-    result.page.contentTruncated = true;
+      };
+      result.page.contentTruncated = true;
+    }
   }
   if (result.page.hasOlder && result.entries.length > 0) {
     const firstSequence = Number(result.entries[0]?.sequence);

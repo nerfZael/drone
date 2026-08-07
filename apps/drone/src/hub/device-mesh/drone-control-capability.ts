@@ -1,8 +1,4 @@
-import {
-  DRONE_CONTROL_CAPABILITY,
-  MESH_BINARY_CHUNK_BYTES,
-  MESH_CHAT_PAYLOAD_BYTES,
-} from '@drone/device-protocol';
+import { DRONE_CONTROL_CAPABILITY, MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
 import {
   filterCompletedPendingPrompts,
   isSendInNewChatQueueAction,
@@ -25,6 +21,7 @@ import type { RenameDroneCommand } from '../drone-rename-command';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
 import { meshJsonContentChunk } from './mesh-content-chunk';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
+import { fitMeshChatPayload } from './fit-mesh-chat-payload';
 import { compactNativeChatReadResponse } from './native-chat-response';
 import { submitNativeChatPrompt } from './native-chat-prompt';
 import { SidebarCommandService } from '../sidebar-command-service';
@@ -1138,26 +1135,37 @@ export function createDroneControlCapability(
             access,
             `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=60${Number.isSafeInteger(Number(payload.before)) && Number(payload.before) > 0 ? `&before=${Number(payload.before)}` : ''}`,
           );
-          const nativeResponse = compactNativeChatReadResponse({
+          const nativeThread = Array.isArray(ensured?.threads)
+            ? ensured.threads.find((item: any) => String(item?.id ?? '') === nativeChatId)
+            : null;
+          return compactNativeChatReadResponse({
             nativeChatId,
             snapshot: ensured,
             history,
+            metadata: {
+              droneId,
+              chatName,
+              agent: result.agent,
+              model:
+                nativeThread != null ? String(nativeThread.model ?? '') : (result.model ?? null),
+              reasoning: nativeThread != null ? String(nativeThread.thinkingLevel ?? '') : null,
+              readState: marked?.readState ?? result?.readState ?? null,
+              agentPermissionMode:
+                nativeThread != null
+                  ? nativeThread.agentPermissionMode === 'read-only' ||
+                    nativeThread.agentPermissionMode === 'workspace-write'
+                    ? nativeThread.agentPermissionMode
+                    : 'full-access'
+                  : (result.agentPermissionMode ?? 'full-access'),
+              approvalPolicy:
+                nativeThread != null
+                  ? nativeThread.approvalPolicy === 'never'
+                    ? 'never'
+                    : 'ask'
+                  : (result.approvalPolicy ?? 'ask'),
+              ...(subscriptions ? { subscriptions } : {}),
+            },
           });
-          return {
-            droneId,
-            chatName,
-            ...nativeResponse,
-            agent: result.agent,
-            model: nativeResponse.thread?.model ?? result.model ?? null,
-            reasoning: nativeResponse.thread?.thinkingLevel ?? null,
-            readState: marked?.readState ?? result?.readState ?? null,
-            agentPermissionMode:
-              nativeResponse.thread?.agentPermissionMode ??
-              result.agentPermissionMode ??
-              'full-access',
-            approvalPolicy: nativeResponse.thread?.approvalPolicy ?? result.approvalPolicy ?? 'ask',
-            ...(subscriptions ? { subscriptions } : {}),
-          };
         }
         if (turnId) {
           let turn = (Array.isArray(result?.transcripts) ? result.transcripts : []).find(
@@ -1220,18 +1228,13 @@ export function createDroneControlCapability(
               : 'ask',
           ...(subscriptions ? { subscriptions } : {}),
         };
-        const turnBudget = Math.max(
-          16 * 1024,
-          MESH_CHAT_PAYLOAD_BYTES - serializedBytes(metadata) - 1_024,
-        );
-        return {
-          ...metadata,
-          ...boundedDroneChatPage(
+        return fitMeshChatPayload(metadata, (turnBudget) =>
+          boundedDroneChatPage(
             result.transcripts,
             legacyTranscriptLoaded ? payload.before : undefined,
             turnBudget,
           ),
-        };
+        );
       }
       if (operation === 'chat.models') {
         const requestedNativeChatId = optionalText(payload.nativeChatId);
