@@ -522,7 +522,6 @@ const requireForHub = createRequire(__filename);
 let notifyDroneRegistryWrite: (() => void) | null = null;
 let notifyDroneChatWrite: ((droneId: string, chatName: string) => void) | null = null;
 let notifyDroneSummaryChange: (() => void) | null = null;
-let notifySidebarPreferencesWrite: (() => void) | null = null;
 
 async function updateRegistry<T>(
   mutator: (reg: any) => T | Promise<T>,
@@ -4019,6 +4018,10 @@ export async function startDroneHubApiServer(opts: {
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
   if (mcpToken) await revokeLegacyProjectedDroneMcpTokens();
+  let pendingSidebarPreferencesWrite = false;
+  let notifySidebarPreferencesWrite = () => {
+    pendingSidebarPreferencesWrite = true;
+  };
   const renameDroneCommand = createRenameDroneCommand({
     displayNameMaxLength: DRONE_DISPLAY_NAME_MAX_LEN,
     findDroneIdByRef,
@@ -4030,7 +4033,7 @@ export async function startDroneHubApiServer(opts: {
     persistDisplayName: renameDroneDisplayName,
   });
   const sidebarCommands = createSidebarCommandService({
-    notifyUiPreferencesChanged: () => notifySidebarPreferencesWrite?.(),
+    notifyUiPreferencesChanged: () => notifySidebarPreferencesWrite(),
   });
   let actualPort = opts.port;
   const deviceMesh = await createDeviceMeshService({
@@ -5199,6 +5202,10 @@ export async function startDroneHubApiServer(opts: {
     void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
   };
   notifySidebarPreferencesWrite = notifyCanonicalSidebarPreferencesWrite;
+  if (pendingSidebarPreferencesWrite) {
+    pendingSidebarPreferencesWrite = false;
+    notifySidebarPreferencesWrite();
+  }
   const notifyCanonicalPromptQueueChatWrite = (droneId: string, chatName: string) => {
     // Prompt delivery state is canonical SQLite state and does not rewrite the
     // registry. Invalidate the projection and wake chat and sidebar SSE clients
@@ -5381,7 +5388,7 @@ export async function startDroneHubApiServer(opts: {
       assistantService.emitExternalUiAction({ type: 'reload_ui_preferences', at });
       void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
     },
-    notifyUiPreferencesSnapshotChanged: () => notifySidebarPreferencesWrite?.(),
+    notifyUiPreferencesSnapshotChanged: () => notifySidebarPreferencesWrite(),
     clampIntParam,
     readHubLogTail,
     HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,
@@ -5880,6 +5887,7 @@ export async function startDroneHubApiServer(opts: {
     loadRegistry,
     logSlowHubRequest,
     makeDroneIdentity,
+    normalizeChatImageAttachments,
     normalizeChatName,
     normalizeChatReasoning,
     normalizeDroneDisplayName,
@@ -6146,9 +6154,6 @@ export async function startDroneHubApiServer(opts: {
       }
       if (notifyDroneSummaryChange === notifyCanonicalDroneSummaryChange) {
         notifyDroneSummaryChange = null;
-      }
-      if (notifySidebarPreferencesWrite === notifyCanonicalSidebarPreferencesWrite) {
-        notifySidebarPreferencesWrite = null;
       }
       if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
         activeDroneHubMcpProjectionConfig = null;

@@ -214,7 +214,13 @@ async function setDroneGroup(
   droneIdsRaw: string[],
   groupRaw: string | null,
 ): Promise<Record<string, unknown>> {
-  const droneIds = uniqueStrings(droneIdsRaw.map(normalizeDroneIdentity));
+  const droneIds = uniqueStrings(
+    droneIdsRaw.map((rawId) => {
+      const droneId = normalizeDroneIdentity(rawId);
+      if (!droneId) throw commandError('invalid drone id (empty)', 400);
+      return droneId;
+    }),
+  );
   if (droneIds.length === 0) throw commandError('missing droneIds', 400);
   const normalizedGroup = String(groupRaw ?? '').trim();
   const group =

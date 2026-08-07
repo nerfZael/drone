@@ -318,5 +318,30 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
       },
     });
     expect((await loadRegistry()).drones['sidebar-move-drone']?.group).toBe('Direct');
+
+    const invalid = await apiFetch('/api/sidebar/move', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mutationId: 'sidebar-invalid-batch-move',
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'drone',
+          repoPath: '',
+          droneId: 'sidebar-move-drone',
+          droneIds: ['sidebar-move-drone', 'x'.repeat(129)],
+          sourceParentId: 'folder:Direct',
+          sourceSiblingNodeIds: ['drone:sidebar-move-drone'],
+          targetGroup: 'InvalidTarget',
+          targetParentId: 'folder:InvalidTarget',
+          targetSiblingNodeIds: [],
+          placement: 'inside',
+        },
+      }),
+    });
+
+    expect(invalid.r.status).toBe(400);
+    expect(String(invalid.data?.error ?? '')).toContain('invalid drone id');
+    expect((await loadRegistry()).drones['sidebar-move-drone']?.group).toBe('Direct');
   });
 });
