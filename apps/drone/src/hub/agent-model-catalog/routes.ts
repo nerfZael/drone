@@ -1,6 +1,7 @@
 import type { DroneRuntime } from '../../host/runtime';
 import { parseBoolParam } from '../hub-format';
 import type { HubRouter } from '../hub-router';
+import { AGENT_MODEL_CATALOG_AGENT_IDS } from './adapters';
 
 type ServiceFunction = (...args: any[]) => any;
 
@@ -12,8 +13,57 @@ export function registerAgentModelCatalogRoutes(
     loadRegistry: ServiceFunction;
     droneRuntime: ServiceFunction;
     discoverModels: ServiceFunction;
+    hostAgentInstalled: ServiceFunction;
   },
 ): void {
+  router.post('/api/model-catalog/refresh', async ({ json }) => {
+    const installedChecks = await Promise.all(
+      AGENT_MODEL_CATALOG_AGENT_IDS.map(async (agentId) => {
+        try {
+          return { agentId, installed: Boolean(await deps.hostAgentInstalled(agentId)) };
+        } catch {
+          return { agentId, installed: false };
+        }
+      }),
+    );
+    const refreshed = await Promise.all(
+      installedChecks.map(async ({ agentId, installed }) => {
+        if (!installed) return { agent: agentId, installed, models: [] };
+        try {
+          const result = await deps.discoverModels({
+            runtime: 'host',
+            agentId,
+            forceRefresh: true,
+          });
+          return {
+            agent: agentId,
+            installed,
+            models: result.models,
+            source: result.source,
+            discoveredAt: result.discoveredAt,
+            ...(result.stale ? { stale: true } : {}),
+            ...(result.error ? { error: result.error } : {}),
+          };
+        } catch (error: any) {
+          return {
+            agent: agentId,
+            installed,
+            models: [],
+            source: 'none',
+            error: String(error?.message ?? error ?? 'Model discovery failed.'),
+          };
+        }
+      }),
+    );
+
+    json(200, {
+      ok: true,
+      runtime: 'host',
+      refreshedAt: new Date().toISOString(),
+      catalogs: refreshed,
+    });
+  });
+
   router.get('/api/model-catalog', async ({ url, fail, json }) => {
     const requestedAgent = String(url.searchParams.get('agent') ?? '').trim().toLowerCase();
     const runtime: DroneRuntime =

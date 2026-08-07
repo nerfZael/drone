@@ -69,8 +69,8 @@ export const SETTINGS_TABS: Array<{
   {
     id: 'agents',
     label: 'Agents',
-    title: 'Repo instructions',
-    description: 'Manage the default AGENTS.md injected into repo-attached container drones and configure per-repo overrides.',
+    title: 'Agents and repo instructions',
+    description: 'Refresh external-agent model lists and manage the default AGENTS.md injected into repo-attached container drones.',
   },
   {
     id: 'components',

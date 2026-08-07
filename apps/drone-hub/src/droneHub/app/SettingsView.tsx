@@ -4,6 +4,7 @@ import { AgentsSettingsSection } from './AgentsSettingsSection';
 import { ArchiveSettingsTab } from './ArchiveSettingsTab';
 import { BackupsSettingsTab } from './BackupsSettingsTab';
 import { ComponentLibraryPreview } from './ComponentLibraryPreview';
+import { ExternalAgentModelsSettingsSection } from './ExternalAgentModelsSettingsSection';
 import { GeneralSettingsTab } from './GeneralSettingsTab';
 import { DeviceMeshSettingsTab } from './DeviceMeshSettingsTab';
 import { McpServersSection } from './McpServersSection';
@@ -210,7 +211,14 @@ export function SettingsView({
     if (activeTab === 'shortcuts') return <ShortcutSettingsSection />;
     if (activeTab === 'skills') return <SkillLibrarySection skillLibrary={skillLibrary} />;
     if (activeTab === 'mcp') return <McpServersSection mcp={mcpServers} />;
-    if (activeTab === 'agents') return <AgentsSettingsSection agents={agents} />;
+    if (activeTab === 'agents') {
+      return (
+        <>
+          <ExternalAgentModelsSettingsSection requestJson={requestJson} />
+          <AgentsSettingsSection agents={agents} />
+        </>
+      );
+    }
     if (activeTab === 'components') return <ComponentLibraryPreview />;
     return <SystemLogsSettingsTab hubLogsState={hubLogsState} hubLogsTailLines={hubLogsTailLines} hubLogsMaxBytes={hubLogsMaxBytes} />;
   };
