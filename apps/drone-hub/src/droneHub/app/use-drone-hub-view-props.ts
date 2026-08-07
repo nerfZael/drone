@@ -337,13 +337,12 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     activeRepoPath,
     settingsActiveTab,
     createRuntime,
-    createAsDraft,
     repoBranchSource,
     setRepoBranchSource,
     repoCreateRemoteBranch,
     setRepoCreateRemoteBranch,
     setCreateRuntime,
-    setCreateAsDraft,
+    rememberNewDroneDraftContent,
     draftCreateMode,
     setDraftCreateMode,
     spawnAgentPermissionMode,
@@ -556,8 +555,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           draftChat,
           createRuntime,
           onCreateRuntimeChange: setCreateRuntime,
-          createAsDraft,
-          onCreateAsDraftChange: setCreateAsDraft,
           spawnAgentPermissionMode,
           onSpawnAgentPermissionModeChange: setSpawnAgentPermissionMode,
           spawnApprovalPolicy,
@@ -614,6 +611,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           onQueueDraftPromptDuringCreate: queueDraftPromptDuringCreate,
           onEnqueueQueuedPrompt: enqueueQueuedPrompt,
           onSetDraftCreateError: setDraftCreateError,
+          onDraftContentChange: (content) =>
+            rememberNewDroneDraftContent(String(draftChat.focusKey ?? ''), content),
         }
       : null,
     groupMultiChatWorkspaceProps: selectedGroupMultiChatData

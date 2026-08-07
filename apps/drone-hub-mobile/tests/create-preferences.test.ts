@@ -28,7 +28,6 @@ describe('mobile new drone preferences', () => {
     expect(preferences).toEqual({
       mode: 'with-chat',
       runtime: 'container',
-      draft: true,
       persistVolume: true,
       agent: 'codex',
       agentPermissionMode: 'read-only',
@@ -48,7 +47,6 @@ describe('mobile new drone preferences', () => {
     const remembered = normalizeMobileDroneCreatePreferences({
       mode: 'without-chat',
       runtime: 'host',
-      draft: false,
       persistVolume: true,
       agent: 'claude',
       agentPermissionMode: 'full-access',
@@ -87,7 +85,6 @@ describe('mobile new drone preferences', () => {
       mobileDroneCreatePreferencesFromSelection({
         mode: 'without-chat',
         runtime: 'container',
-        draft: false,
         persistVolume: false,
         agent: 'codex',
         agentPermissionMode: 'read-only',

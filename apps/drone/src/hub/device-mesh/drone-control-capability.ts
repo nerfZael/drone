@@ -675,6 +675,9 @@ export function createDroneControlCapability(
                 seedSubmittedAt: optionalText(payload.seedSubmittedAt) ?? new Date().toISOString(),
               }
             : {}),
+          ...(Array.isArray(payload.seedAttachments) && payload.seedAttachments.length > 0
+            ? { seedAttachments: payload.seedAttachments }
+            : {}),
         };
         const created = await localHubRequest(access, '/api/drones', {
           method: 'POST',

@@ -473,36 +473,6 @@ function Shell() {
           <Text style={styles.title}>{title}</Text>
         )}
         <View style={styles.headerActions}>
-          {tab === 'drones' && dronesHeader?.onToggleDraft ? (
-            <Pressable
-              accessibilityRole="switch"
-              accessibilityLabel="Create as draft"
-              accessibilityState={{
-                checked: Boolean(dronesHeader.draft),
-                disabled: dronesHeader.draftDisabled,
-              }}
-              disabled={dronesHeader.draftDisabled}
-              onPress={dronesHeader.onToggleDraft}
-              style={({ pressed }) => [
-                styles.draftAction,
-                dronesHeader.draftDisabled && styles.headerActionDisabled,
-                pressed && styles.actionMenuItemPressed,
-              ]}
-            >
-              <View
-                style={[styles.draftCheckbox, dronesHeader.draft && styles.draftCheckboxActive]}
-              >
-                {dronesHeader.draft ? (
-                  <Check color={colors.onAccent} size={12} strokeWidth={3} />
-                ) : null}
-              </View>
-              <Text
-                style={[styles.draftActionText, dronesHeader.draft && styles.draftActionTextActive]}
-              >
-                Draft
-              </Text>
-            </Pressable>
-          ) : null}
           {headerMenuActions.length > 0 ? (
             <Pressable
               accessibilityRole="button"
@@ -619,27 +589,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.35,
   },
   headerActions: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 7 },
-  draftAction: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    borderRadius: 17,
-    backgroundColor: 'transparent',
-  },
-  draftCheckbox: {
-    width: 17,
-    height: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 4,
-    borderWidth: 1.5,
-    borderColor: colors.accent,
-  },
-  draftCheckboxActive: { backgroundColor: colors.accent },
-  draftActionText: { color: colors.text, fontSize: 10, fontWeight: '800' },
-  draftActionTextActive: { color: colors.accent },
   headerActionDisabled: { opacity: 0.55 },
   contextMenuAction: {
     width: 36,

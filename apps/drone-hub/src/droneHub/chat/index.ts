@@ -32,6 +32,7 @@ export {
 } from './use-pinned-transcript-scroll';
 export type {
   ChatImageAttachmentPayload,
+  ChatInputDraftContent,
   ChatInputProps,
   ChatSendContext,
   ChatSendPayload,

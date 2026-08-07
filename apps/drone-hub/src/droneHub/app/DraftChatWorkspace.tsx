@@ -3,6 +3,7 @@ import { buildModelCatalogChoices } from '@drone/assistant-chat';
 import { useShallow } from 'zustand/react/shallow';
 import {
   ChatInput,
+  type ChatInputDraftContent,
   type ChatImageAttachmentPayload,
   type ChatSendContext,
   type ChatSendPayload,
@@ -33,8 +34,6 @@ type DraftChatWorkspaceProps = {
   draftChat: DraftChatState;
   createRuntime: CreateRuntime;
   onCreateRuntimeChange: (value: CreateRuntime) => void;
-  createAsDraft: boolean;
-  onCreateAsDraftChange: (value: boolean) => void;
   spawnAgentPermissionMode: AgentPermissionMode;
   onSpawnAgentPermissionModeChange: (value: AgentPermissionMode) => void;
   spawnApprovalPolicy: AgentApprovalPolicy;
@@ -81,14 +80,13 @@ type DraftChatWorkspaceProps = {
     attachments?: ChatImageAttachmentPayload[],
   ) => void;
   onSetDraftCreateError: (error: string | null) => void;
+  onDraftContentChange: (content: ChatInputDraftContent) => void;
 };
 
 export function DraftChatWorkspace({
   draftChat,
   createRuntime,
   onCreateRuntimeChange,
-  createAsDraft,
-  onCreateAsDraftChange,
   spawnAgentPermissionMode,
   onSpawnAgentPermissionModeChange,
   spawnApprovalPolicy,
@@ -127,6 +125,7 @@ export function DraftChatWorkspace({
   onQueueDraftPromptDuringCreate,
   onEnqueueQueuedPrompt,
   onSetDraftCreateError,
+  onDraftContentChange,
 }: DraftChatWorkspaceProps) {
   const {
     spawnAgentKey,
@@ -314,12 +313,6 @@ export function DraftChatWorkspace({
                 Child of {draftCreateParentDroneLabel}
               </span>
             ) : null}
-            {createAsDraft ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-2 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--accent)]">
-                <span className="h-1 w-1 rounded-full bg-current" aria-hidden="true" />
-                Draft
-              </span>
-            ) : null}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -395,6 +388,7 @@ export function DraftChatWorkspace({
         }
         attachmentsEnabled
         alwaysExpanded
+        onDraftContentChange={onDraftContentChange}
         composerControls={newDroneComposerControls}
         composerTopAction={
           !draftChat.prompt ? (
@@ -411,41 +405,6 @@ export function DraftChatWorkspace({
               branchesLoading={draftRepoBranchesLoading}
               branchesError={draftRepoBranchesError}
               disabled={controlsLocked}
-              actions={
-                <button
-                  type="button"
-                  aria-pressed={createAsDraft}
-                  onClick={() => onCreateAsDraftChange(!createAsDraft)}
-                  disabled={controlsLocked}
-                  title={
-                    createAsDraft
-                      ? 'This drone will be saved as a draft'
-                      : 'Save this drone as a draft'
-                  }
-                  className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[.625rem] font-[var(--weight-semibold)] uppercase tracking-[0.08em] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                    createAsDraft
-                      ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] text-[var(--chat-composer-placeholder)] hover:border-[var(--border)] hover:text-[var(--chat-composer-control-fg)]'
-                  }`}
-                >
-                  {createAsDraft ? (
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 20 20"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="m4.5 10.5 3.4 3.4 7.6-8" />
-                    </svg>
-                  ) : null}
-                  {createAsDraft ? 'Draft' : 'Save as draft'}
-                </button>
-              }
             />
           ) : null
         }

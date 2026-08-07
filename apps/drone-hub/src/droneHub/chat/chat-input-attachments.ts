@@ -41,6 +41,14 @@ export type DraftFileAttachment = {
 
 export type DraftChatAttachment = DraftImageAttachment | DraftTextAttachment | DraftFileAttachment;
 
+export type EncodedDraftChatAttachment = {
+  name: string;
+  mime: string;
+  size: number;
+  dataBase64: string;
+  disposition?: 'artifact' | 'prompt';
+};
+
 export function makeDraftImageAttachmentId(): string {
   // Non-crypto id; only used for React keys.
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -162,6 +170,23 @@ export async function blobToBase64(blob: Blob): Promise<string> {
     };
     r.readAsDataURL(blob);
   });
+}
+
+export async function encodeDraftChatAttachments(
+  attachments: readonly DraftChatAttachment[],
+): Promise<EncodedDraftChatAttachment[]> {
+  return await Promise.all(
+    attachments.map(async (attachment) => ({
+      name: attachment.name,
+      mime: attachment.mime,
+      size: attachment.size,
+      dataBase64:
+        attachment.kind === 'text'
+          ? await blobToBase64(new Blob([attachment.text], { type: attachment.mime }))
+          : await fileToBase64(attachment.file),
+      disposition: attachment.disposition,
+    })),
+  );
 }
 
 export function textByteLength(text: string): number {
