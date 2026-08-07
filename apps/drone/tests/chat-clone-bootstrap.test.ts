@@ -64,6 +64,27 @@ describe('chat clone transcript bootstrap', () => {
     expect(prompt).toContain('Only the most recent 2 of 3 prior turns are included.');
   });
 
+  test('bootstraps steering inputs without an invented empty assistant message', () => {
+    const prompt = maybeBootstrapPromptFromTranscript({
+      agentId: 'codex',
+      prompt: 'Continue',
+      chatEntry: {
+        turns: [
+          {
+            at: '2026-08-07T10:00:00.000Z',
+            prompt: 'Also check mobile.',
+            ok: true,
+            output: '',
+            userOnly: true,
+          },
+        ],
+      },
+    });
+
+    expect(prompt).toContain('User:\nAlso check mobile.');
+    expect(prompt).not.toContain('(no output)');
+  });
+
   test('preserves continuation ids while dropping source pending prompt state', () => {
     const cloned = cloneChatEntryForDroneClone({
       createdAt: '2026-03-17T10:00:00.000Z',

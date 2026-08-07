@@ -66,6 +66,7 @@ export type MobileDroneTurn = {
   completedAt: string;
   prompt: string;
   output: string;
+  userOnly?: boolean;
   error: string;
   ok: boolean;
   model: string;
@@ -636,8 +637,7 @@ export function buildMobileDroneRepoGroups(
     const repoGroup = group.repoPath ? `repo:${group.repoPath}` : 'repo:ungrouped';
     (repoScopedGroupPathsByRepoGroup[repoGroup] ??= []).push(group.name);
     (repoScopedGroupIdByPathByRepoGroup[repoGroup] ??= {})[group.name] = group.id;
-    (repoScopedGroupCreatedAtByPathByRepoGroup[repoGroup] ??= {})[group.name] =
-      group.createdAt;
+    (repoScopedGroupCreatedAtByPathByRepoGroup[repoGroup] ??= {})[group.name] = group.createdAt;
   }
   const { groups, nodeTree: tree } = buildRepoSidebarModel({
     drones,
@@ -770,9 +770,10 @@ export function mobileDroneTurnsToAssistantMessages(
       );
     }
     if (
-      (!activityHasResponse && output) ||
-      (!turn.ok && error) ||
-      (!activity && (turn.completedAt || turn.agentPlan))
+      !turn.userOnly &&
+      ((!activityHasResponse && output) ||
+        (!turn.ok && error) ||
+        (!activity && (turn.completedAt || turn.agentPlan)))
     ) {
       const runDetails = turn.agentPlan
         ? mobileRunDetails({ id: turn.id, plan: turn.agentPlan })
@@ -962,6 +963,7 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
         completedAt: text(turn.completedAt) || at,
         prompt: text(turn.prompt),
         output: text(turn.output),
+        ...(turn.userOnly === true ? { userOnly: true } : {}),
         error: text(turn.error),
         ok: turn.ok !== false,
         model: text(turn.model),

@@ -351,6 +351,26 @@ export async function promptEnqueue(
   return await req(client, 'POST', '/v1/prompts/enqueue', payload);
 }
 
+export async function codexPromptEnqueue(
+  client: DroneClient,
+  payload: {
+    id: string;
+    sessionKey: string;
+    launchScript: string;
+    prompt: string;
+    imagePaths?: string[];
+    existingThreadId?: string;
+    deliveryMode?: 'queue' | 'asap';
+    approvalPolicy?: 'untrusted' | 'on-request' | 'never';
+    approvalsReviewer?: 'user' | 'auto_review';
+    sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
+    model?: string;
+    effort?: string;
+  },
+) {
+  return await req(client, 'POST', '/v1/codex/enqueue', payload);
+}
+
 export async function promptGet(client: DroneClient, id: string) {
   return await req(client, 'GET', `/v1/prompts/${encodeURIComponent(id)}`);
 }

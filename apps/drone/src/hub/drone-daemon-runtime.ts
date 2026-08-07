@@ -27,6 +27,17 @@ export function resolveDroneDaemonRuntimeDir(baseDir: string = __dirname): strin
   return path.dirname(resolveDroneDaemonJsPath(baseDir));
 }
 
+export function isDroneDaemonCommandForPort(commandRaw: string, portRaw: number): boolean {
+  const command = String(commandRaw ?? '').trim();
+  const port = Math.floor(Number(portRaw));
+  if (!command || !Number.isFinite(port) || port <= 0) return false;
+  const daemonEntry = /(?:^|[\s"'])(?:[^\s"']*[\\/])?daemon\.(?:js|ts)(?=$|[\s"'])/i;
+  const portArgument = new RegExp(
+    `(?:^|\\s)--port(?:=|\\s+)["']?${port}["']?(?=\\s|$)`,
+  );
+  return daemonEntry.test(command) && portArgument.test(command);
+}
+
 export async function assertDroneDaemonRuntimeReady(runtimeDir: string): Promise<void> {
   for (const fileName of ['daemon.js', 'blip.js', 'mcp-http-stdio-bridge.js']) {
     const filePath = path.join(runtimeDir, fileName);

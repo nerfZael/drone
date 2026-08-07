@@ -67,9 +67,9 @@ export function clampGroupMultiChatColumnWidthPx(width: number): number {
 }
 
 export function normalizeRightPanelTab(raw: unknown): RightPanelTab | null {
-  const tab = raw === 'files' ? 'editor' : raw;
-  return typeof tab === 'string' && RIGHT_PANEL_TABS.includes(tab as RightPanelTab)
-    ? (tab as RightPanelTab)
+  if (raw === 'files') return 'editor';
+  return typeof raw === 'string' && RIGHT_PANEL_TABS.includes(raw as RightPanelTab)
+    ? (raw as RightPanelTab)
     : null;
 }
 

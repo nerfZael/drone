@@ -582,6 +582,7 @@ export type TranscriptItem = {
   silentCompletion?: boolean;
   error?: string;
   output: string;
+  userOnly?: boolean;
   agentPlan?: AgentPlan;
   fileChanges?: AgentRunFileChanges;
   dockerSnapshot?: {

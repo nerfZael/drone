@@ -60,6 +60,23 @@ microphone
 
 Every segment has a stable session ID, sequence number, and delivery ID. Capture continues while the queue is transcribed and delivered in strict sequence. A manual Resume after a transient failure retries the head segment with the same delivery ID. Backlogs are bounded; the UI pauses and reports a problem rather than consuming memory indefinitely.
 
+## Codex ASAP delivery
+
+Codex chats use the Codex App Server instead of launching a separate `codex exec` process for every message. The drone daemon owns one persistent App Server connection and Codex thread per stable Drone Hub chat.
+
+- A normal message starts a new turn with `turn/start`.
+- An ASAP message sent during an active turn uses `turn/steer` with the current thread ID and expected turn ID.
+- Multiple ASAP messages are offered to the active turn individually and in queue order. They are not collapsed into one prompt and do not wait for an arbitrary tool boundary in Drone Hub.
+- If Codex rejects same-turn steering because the turn ended or is in a non-steerable operation, the durable message remains queued and starts the next turn. It is never silently dropped.
+- Each request uses the Drone Hub prompt ID as Codex's `clientUserMessageId`, preserving idempotent delivery across Hub retries.
+- The daemon continues consuming events and servicing steering requests while Codex reasons, runs tools, or streams output.
+- Stop maps to `turn/interrupt`. A daemon restart fails the interrupted durable jobs explicitly so Hub recovery can retry safely instead of assuming the old in-memory App Server still exists.
+- Idle App Server processes are retired after 15 minutes. The next prompt resumes the durable Codex thread in a fresh process, preventing one permanent child process per chat.
+
+A steered Codex turn can contain several user messages but only one final assistant response. Drone Hub therefore records the initial and intermediate accepted inputs as user-only transcript entries, then associates the final response with the last accepted input. Desktop, remote desktop, and mobile render those entries without fabricated empty assistant bubbles.
+
+This App Server transport is currently Codex-only. Other built-in agents retain their existing delivery behavior until their native steering contracts are implemented and verified separately.
+
 The current Groq transcription endpoint remains the initial provider. It should accept the preferred language and recent confirmed text as optional transcription context. `whisper-large-v3-turbo` is the default, with `whisper-large-v3` as the accuracy-oriented option.
 
 ## Platform implementation
@@ -161,6 +178,8 @@ This section is updated as the implementation lands.
 - 2026-08-07: Detailed review fixed cancellation/startup races on both clients, abortable desktop uploads, mobile recovery error handling, stale iOS recording-session cleanup, and stable prompt-ID propagation through local, remote, group, Built-in, and mobile delivery paths. Built-in prompt retries now recognize an already accepted durable row before queue limits or ASAP claiming, and retry UI rows are deduplicated.
 - 2026-08-07: Lock-screen review added a scoped mobile mesh hold so remote-chat delivery remains available in the background without changing normal battery-saving suspension. Stop-time delivery failures now retain their final segment and Resume completes shutdown instead of reopening a capture session without an endpointer.
 - 2026-08-07: Added the desktop transcription metadata headers to the Hub CORS allowlist so Vite/Electron development origins can complete browser preflight requests.
+- 2026-08-07: Replaced per-message Codex CLI jobs with a daemon-managed persistent Codex App Server connection. Normal prompts use `turn/start`; every accepted ASAP prompt uses ordered same-turn `turn/steer` with thread/turn preconditions and stable client message IDs. Added queued fallback for steering races, `turn/interrupt` stop behavior, daemon-restart recovery, App Server event translation, image inputs, and user-only transcript entries across desktop and mobile. Native/other built-in agents remain unchanged in this Codex-first phase.
+- 2026-08-07: Review hardened Codex live-output ownership, start-time cancellation, plan-event translation, failed-turn thread persistence, callback error handling, and idle App Server retirement. Android notification permission is now optional: the app still asks so controls can appear in the notification drawer, but denial no longer disables foreground-service microphone capture.
 
 ## Known validation and follow-up work
 
@@ -168,3 +187,4 @@ This section is updated as the implementation lands.
 - Exercise desktop echo cancellation against actual Drone Hub speech playback and move capture to AudioWorklet if profiling shows main-thread audio gaps.
 - Build an opt-in audio corpus and measure false sends per listening hour before tuning defaults. The deterministic endpointer can be replaced by Silero or semantic VAD behind the same interface if measured results justify the extra model/runtime dependency.
 - Add an explicit desktop input-device selector if users need to override the operating-system default.
+- Extend true live steering to non-Codex agents only after their runtime-specific steering, cancellation, and transcript contracts are defined; do not assume Codex App Server semantics apply to them.

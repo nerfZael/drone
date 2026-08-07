@@ -1,12 +1,10 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import {
-  chatAttachmentPreviewLabel,
-  isSendInNewChatQueueAction,
-} from '@drone/assistant-chat';
+import { chatAttachmentPreviewLabel, isSendInNewChatQueueAction } from '@drone/assistant-chat';
 
 import type { AgentPlan } from '@drone/assistant-chat';
 import { DroneApiRequestError } from '../host/api';
+import { commandForPid } from '../host/process-inspection';
 import type { ChatImageAttachment, ChatImageAttachmentRef } from './chat-attachments';
 import type { AgentPermissionMode, BuiltinAgentId, ChatAgentConfig } from './chat-types';
 import { ChatReconciliationQueue } from './chat-reconciliation-queue';
@@ -14,6 +12,7 @@ import { createChatReconciliationExecutor } from './chat-reconciliation-executor
 import { createSendInNewChatActionRuntime } from './chat-queue-action-runtime';
 import { DaemonPromptEventMonitor } from './daemon-prompt-event-monitor';
 import { DroneDaemonRecovery } from './drone-daemon-recovery';
+import { isDroneDaemonCommandForPort } from './drone-daemon-runtime';
 import type { PendingPromptState } from './drone-pending-state';
 import {
   nativeAssistantOwnsPromptDelivery,
@@ -44,7 +43,6 @@ type ChatPromptRuntimeDependencyName =
   | 'chatNameExists'
   | 'cliSupportsModelFlag'
   | 'cloneChatEntryForDroneClone'
-  | 'codexImageAttachmentFlags'
   | 'collectDroneRuntimeDiagnostics'
   | 'compactDiagnosticError'
   | 'commitDroneMetadataPatch'
@@ -58,6 +56,7 @@ type ChatPromptRuntimeDependencyName =
   | 'defaultPromptEnqueueTimeoutMs'
   | 'defaultRepoSeedTimeoutMs'
   | 'dronePromptCancel'
+  | 'droneCodexPromptEnqueue'
   | 'dronePromptEnqueue'
   | 'dronePromptGet'
   | 'droneStatus'
@@ -179,7 +178,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatNameExists,
     cliSupportsModelFlag,
     cloneChatEntryForDroneClone,
-    codexImageAttachmentFlags,
     collectDroneRuntimeDiagnostics,
     compactDiagnosticError,
     commitDroneMetadataPatch,
@@ -193,6 +191,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     defaultPromptEnqueueTimeoutMs,
     defaultRepoSeedTimeoutMs,
     dronePromptCancel,
+    droneCodexPromptEnqueue,
     dronePromptEnqueue,
     dronePromptGet,
     droneStatus,
@@ -406,6 +405,145 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     }
   }
 
+  async function enqueueCodexTranscriptPrompt(opts: {
+    id: string;
+    drone: any;
+    waitForDaemonMs?: number;
+    sessionKey: string;
+    launchScript: string;
+    prompt: string;
+    imagePaths?: string[];
+    existingThreadId?: string;
+    deliveryMode?: 'queue' | 'asap';
+    approvalPolicy: 'untrusted' | 'on-request' | 'never';
+    approvalsReviewer: 'user' | 'auto_review';
+    sandbox: 'read-only' | 'workspace-write' | 'danger-full-access';
+    model?: string;
+    effort?: string;
+  }) {
+    const d = opts.drone;
+    const runtime = droneRuntime(d);
+    const droneId = normalizeDroneIdentity(d?.id) || String(d?.name ?? '');
+    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
+    const token = typeof d.token === 'string' ? d.token : '';
+    const hostPort =
+      typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
+        ? d.hostPort
+        : await resolveHostPort(containerName, d.containerPort);
+    if (!hostPort || !token) throw new Error('drone daemon not reachable (missing hostPort/token)');
+    const daemonReadyTimeoutMs =
+      typeof opts.waitForDaemonMs === 'number' &&
+      Number.isFinite(opts.waitForDaemonMs) &&
+      opts.waitForDaemonMs > 0
+        ? Math.floor(opts.waitForDaemonMs)
+        : defaultDaemonReadyTimeoutMs();
+    const daemonReadyAfterUpgradeTimeoutMs = Math.max(
+      daemonReadyTimeoutMs,
+      UPGRADE_DAEMON_READY_TIMEOUT_MS,
+    );
+    const client = makeClient(hostPort, token);
+    const recovery = await daemonRecovery.ensure({
+      droneId,
+      runtime,
+      client,
+      containerName,
+      containerPort: Number(d?.containerPort ?? hostPort),
+      hostPort,
+      token,
+      readyTimeoutMs: daemonReadyTimeoutMs,
+    });
+    if (recovery.recovered) {
+      hubLog('info', 'recovered drone daemon on demand', {
+        droneId,
+        runtime,
+        containerName,
+        hostPort,
+      });
+    }
+    const payload = {
+      id: opts.id,
+      sessionKey: opts.sessionKey,
+      launchScript: opts.launchScript,
+      prompt: opts.prompt,
+      ...(opts.imagePaths?.length ? { imagePaths: opts.imagePaths } : {}),
+      ...(opts.existingThreadId ? { existingThreadId: opts.existingThreadId } : {}),
+      ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
+      approvalPolicy: opts.approvalPolicy,
+      approvalsReviewer: opts.approvalsReviewer,
+      sandbox: opts.sandbox,
+      ...(opts.model ? { model: opts.model } : {}),
+      ...(opts.effort ? { effort: opts.effort } : {}),
+    };
+    const upgradeHostDaemon = async () => {
+      const oldPid = Number(d?.host?.pid);
+      if (!Number.isFinite(oldPid) || oldPid <= 0) {
+        throw new Error('host drone daemon is outdated and has no restartable process id');
+      }
+      const pid = Math.floor(oldPid);
+      const command = await commandForPid(pid);
+      if (!command || !isDroneDaemonCommandForPort(command, hostPort)) {
+        throw new Error(
+          'host drone daemon is outdated, but its recorded process id no longer identifies the expected daemon',
+        );
+      }
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        // It may have exited between the successful request and this upgrade.
+      }
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        try {
+          process.kill(pid, 0);
+          await sleepMs(100);
+        } catch {
+          break;
+        }
+      }
+      try {
+        process.kill(pid, 0);
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // Already stopped.
+      }
+      const nextPid = await launchHostDroneDaemon({ droneId, hostPort, token });
+      await waitForDroneDaemonReady(client, daemonReadyAfterUpgradeTimeoutMs);
+      await commitDroneMetadataPatch({
+        droneId,
+        state: 'real',
+        eventType: 'drone.host-daemon.upgraded',
+        payload: { pid: nextPid },
+        transform: (lifecycle: Record<string, any>) => ({
+          ...lifecycle,
+          host: {
+            ...(lifecycle?.host && typeof lifecycle.host === 'object' ? lifecycle.host : {}),
+            pid: nextPid,
+          },
+        }),
+      });
+    };
+    try {
+      await droneCodexPromptEnqueue(client, payload);
+      ensureDaemonPromptEventSubscription(droneId);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      if (runtime === 'container' && isNotFoundErrorMessage(msg)) {
+        await upgradeDroneDaemonInContainer({ containerName, containerPort: d.containerPort });
+        await waitForDroneDaemonReady(client, daemonReadyAfterUpgradeTimeoutMs);
+        await droneCodexPromptEnqueue(client, payload);
+        ensureDaemonPromptEventSubscription(droneId);
+        return;
+      }
+      if (runtime === 'host' && isNotFoundErrorMessage(msg)) {
+        await upgradeHostDaemon();
+        await droneCodexPromptEnqueue(client, payload);
+        ensureDaemonPromptEventSubscription(droneId);
+        return;
+      }
+      throw e;
+    }
+  }
+
   async function sendPromptToChat(opts: {
     id?: string;
     droneId: string;
@@ -535,7 +673,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           turnOk: true as const,
         };
       }
-      const codexImageArgs = codexImageAttachmentFlags(attachmentsForPrompt);
       const promptWithHistory =
         agent.kind === 'builtin'
           ? maybeBootstrapPromptFromTranscript({
@@ -599,10 +736,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       }
 
       if (agent.kind === 'builtin' && agent.id === 'codex') {
-        const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
-        const reasoningArg = chatReasoning
-          ? ` -c ${bashQuote(`model_reasoning_effort="${chatReasoning}"`)}`
-          : '';
         const sandboxArg =
           agentPermissionMode === 'read-only'
             ? 'read-only'
@@ -615,64 +748,42 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             : approvalPolicy === 'never'
               ? 'never'
               : 'untrusted';
-        const approvalReviewerArg =
-          approvalPolicy === 'agent-decides'
-            ? ` -c ${bashQuote('approvals_reviewer="auto_review"')}`
-            : '';
         const existingThreadId = readBuiltinTranscriptSessionId(chat, 'codex');
-        if (!existingThreadId) {
-          const script = [
-            'set -euo pipefail',
-            ...buildContainerManagedEnvLines(d),
-            ...managedEnvLines,
-            ...managedChatMcpEnvLines,
-            `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
-            cdCommand,
-            `codex --ask-for-approval ${approvalArg}${approvalReviewerArg}${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never${codexImageArgs} ${bashQuote(promptWithHistory)}`,
-          ].join('\n');
-          await enqueueTranscriptPrompt({
-            id: opts.id,
-            drone: d,
-            waitForDaemonMs: opts.waitForDaemonMs,
-            kind: 'codex',
-            script,
-            prompt: effectivePrompt,
-            deliveryMode: opts.deliveryMode,
-          });
-          return {
-            ok: true as const,
-            agent,
-            mode: 'transcript' as const,
-            chat: normalizedChat,
-            codexThreadId: null,
-            turnOk: true as const,
-          };
-        }
-
-        const script = [
+        const stableChatId = String((chat as any)?.id ?? '').trim() || normalizedChat;
+        const launchScript = [
           'set -euo pipefail',
           ...buildContainerManagedEnvLines(d),
           ...managedEnvLines,
           ...managedChatMcpEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
-          `codex --ask-for-approval ${approvalArg}${approvalReviewerArg}${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never resume${codexImageArgs} ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
+          'exec codex app-server',
         ].join('\n');
-        await enqueueTranscriptPrompt({
-          id: opts.id,
+        await enqueueCodexTranscriptPrompt({
+          id: promptId,
           drone: d,
           waitForDaemonMs: opts.waitForDaemonMs,
-          kind: 'codex',
-          script,
-          prompt: effectivePrompt,
+          sessionKey: `${normalizedChat}:${stableChatId}`,
+          launchScript,
+          prompt: promptWithHistory,
+          imagePaths: attachmentsForPrompt
+            .filter((attachment: any) => String(attachment?.mime ?? '').startsWith('image/'))
+            .map((attachment: any) => String(attachment?.path ?? '').trim())
+            .filter(Boolean),
+          ...(existingThreadId ? { existingThreadId } : {}),
           deliveryMode: opts.deliveryMode,
+          approvalPolicy: approvalArg,
+          approvalsReviewer: approvalPolicy === 'agent-decides' ? 'auto_review' : 'user',
+          sandbox: sandboxArg,
+          ...(chatModel ? { model: chatModel } : {}),
+          ...(chatReasoning ? { effort: chatReasoning } : {}),
         });
         return {
           ok: true as const,
           agent,
           mode: 'transcript' as const,
           chat: normalizedChat,
-          codexThreadId: existingThreadId,
+          codexThreadId: existingThreadId || null,
           turnOk: true as const,
         };
       }
@@ -1823,10 +1934,14 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         .map((x: any) => ({ id: String(x?.id ?? '').trim(), state: String(x?.state ?? '') }))
         .filter((x: any) => x.id);
       // Keep manual follow-ups cancellable until the earlier response reaches the transcript.
-      // A known agent session makes continuation possible, but does not make concurrent delivery safe.
+      // Codex App Server is the exception: ASAP is a same-turn `turn/steer`, so every
+      // queued steering input should be offered while the active turn can still accept it.
+      const codexAsapCanSteer =
+        p?.deliveryMode === 'asap' && agent.kind === 'builtin' && agent.id === 'codex';
       const defer =
         p?.deliveryMode === 'asap'
-          ? hasInFlightPriorPendingPrompt({
+          ? !codexAsapCanSteer &&
+            hasInFlightPriorPendingPrompt({
               priorPendingPrompts: prior,
               transcriptDoneIds,
             })

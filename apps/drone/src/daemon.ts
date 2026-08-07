@@ -22,6 +22,11 @@ import {
   readLimitedJson,
 } from './daemon-workspace';
 import { selectNextPromptJobId } from './prompt-job-scheduling';
+import {
+  CodexAppServerConnection,
+  translateCodexAppServerNotification,
+  type CodexAppServerNotification,
+} from './codex-app-server';
 
 const execFileAsync = promisify(execFile);
 
@@ -99,6 +104,21 @@ type PromptJob = {
   terminalObservedStatus?: 'success' | 'failure';
   failureReason?: string;
   error?: string;
+  codexAppServer?: {
+    sessionKey: string;
+    launchScript: string;
+    prompt: string;
+    imagePaths?: string[];
+    existingThreadId?: string;
+    threadId?: string;
+    turnId?: string;
+    outputOwner?: boolean;
+    approvalPolicy?: 'untrusted' | 'on-request' | 'never';
+    approvalsReviewer?: 'user' | 'auto_review';
+    sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
+    model?: string;
+    effort?: string;
+  };
 };
 
 const PROMPT_SESSION_MISSING_CONFIRMATIONS = 3;
@@ -106,9 +126,26 @@ const PROMPT_SESSION_MISSING_GRACE_MS = 1_500;
 const PROMPT_WRAPPER_HEARTBEAT_FRESH_MS = 6_000;
 const PROMPT_TERMINAL_EXIT_GRACE_MS = 5_000;
 const PROMPT_LATE_RECOVERY_POLL_MS = 5_000;
+const CODEX_APP_SERVER_IDLE_MS = 15 * 60_000;
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function promptErrorMessage(raw: any): string {
+  if (typeof raw?.message === 'string' && raw.message.trim()) return raw.message.trim();
+  if (typeof raw === 'string' && raw.trim()) return raw.trim();
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return String(raw ?? 'failed');
+  }
+}
+
+function isMissingCodexThreadError(raw: unknown): boolean {
+  return /(?:thread|rollout).*(?:not found|does not exist|missing|unknown)|(?:not found|missing).*(?:thread|rollout)/i.test(
+    promptErrorMessage(raw),
+  );
 }
 
 function bashQuote(s: string): string {
@@ -1369,6 +1406,442 @@ async function main() {
     return await result;
   }
 
+  type CodexAppServerSpec = NonNullable<PromptJob['codexAppServer']>;
+  type CodexDaemonSession = {
+    key: string;
+    connection: CodexAppServerConnection;
+    threadId: string | null;
+    threadReady: boolean;
+    activeTurnId: string | null;
+    activeJobIds: string[];
+    startingJobIds: string[];
+    queuedJobIds: string[];
+    cancelRequestedJobIds: Set<string>;
+    lastUsedAt: number;
+    operationTail: Promise<void>;
+  };
+
+  const codexSessions = new Map<string, CodexDaemonSession>();
+  let daemonShuttingDown = false;
+
+  async function appendCodexJobEvents(jobIds: string[], events: any[]): Promise<void> {
+    if (events.length === 0 || jobIds.length === 0) return;
+    const text = `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
+    await Promise.all(
+      jobIds.map(async (id) => {
+        const job = await loadPromptJob(promptsDir, id);
+        if (!job) return;
+        await fs.appendFile(job.stdoutPath, text, 'utf8');
+        const next = await refreshPromptJobTranscript({ ...job, updatedAt: nowIso() });
+        await savePromptJob(promptsDir, next);
+      }),
+    );
+  }
+
+  async function failCodexSessionJobs(session: CodexDaemonSession, error: Error): Promise<void> {
+    const ids = [
+      ...new Set([...session.activeJobIds, ...session.startingJobIds, ...session.queuedJobIds]),
+    ];
+    const finishedAt = nowIso();
+    await withPromptMutationLock(async () => {
+      for (const id of ids) {
+        const job = await loadPromptJob(promptsDir, id);
+        if (!job || job.state === 'done' || job.state === 'failed' || job.state === 'canceled') {
+          continue;
+        }
+        await savePromptJob(promptsDir, {
+          ...job,
+          state: 'failed',
+          finishedAt,
+          updatedAt: finishedAt,
+          exitCode: 1,
+          error: error.message,
+        });
+      }
+    });
+    session.activeJobIds = [];
+    session.startingJobIds = [];
+    session.queuedJobIds = [];
+    session.activeTurnId = null;
+    if (codexSessions.get(session.key) === session) codexSessions.delete(session.key);
+  }
+
+  function serializeCodexSession<T>(
+    session: CodexDaemonSession,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const result = session.operationTail.then(run, run);
+    session.operationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  async function completeCodexTurn(
+    session: CodexDaemonSession,
+    notification: CodexAppServerNotification,
+  ): Promise<void> {
+    const turn = notification.params?.turn ?? {};
+    const notificationTurnId = String(turn?.id ?? '').trim();
+    if (session.activeTurnId && notificationTurnId && notificationTurnId !== session.activeTurnId) {
+      return;
+    }
+    const ids = [...session.activeJobIds];
+    if (ids.length === 0) return;
+    const status = String(turn?.status ?? 'completed');
+    const finishedAt = nowIso();
+    await withPromptMutationLock(async () => {
+      for (let index = 0; index < ids.length; index += 1) {
+        const id = ids[index]!;
+        const job = await loadPromptJob(promptsDir, id);
+        if (!job) continue;
+        const outputOwner = index === ids.length - 1;
+        const state: PromptJobState =
+          job.state === 'canceled'
+            ? 'canceled'
+            : outputOwner
+              ? status === 'completed'
+                ? 'done'
+                : status === 'interrupted'
+                  ? 'canceled'
+                  : 'failed'
+              : 'done';
+        const next = await refreshPromptJobTranscript({
+          ...job,
+          state,
+          finishedAt,
+          updatedAt: finishedAt,
+          exitCode: state === 'done' ? 0 : 1,
+          ...(state === 'failed'
+            ? { error: promptErrorMessage(turn?.error ?? 'Codex turn failed') }
+            : {}),
+          codexAppServer: {
+            ...job.codexAppServer!,
+            threadId: session.threadId ?? job.codexAppServer?.threadId,
+            turnId: notificationTurnId || session.activeTurnId || job.codexAppServer?.turnId,
+            outputOwner,
+          },
+        });
+        await savePromptJob(promptsDir, next);
+      }
+    });
+    session.activeJobIds = [];
+    session.activeTurnId = null;
+    session.lastUsedAt = Date.now();
+    const nextId = session.queuedJobIds.shift();
+    if (nextId) await startCodexTurn(session, nextId);
+  }
+
+  async function handleCodexNotification(
+    session: CodexDaemonSession,
+    notification: CodexAppServerNotification,
+  ): Promise<void> {
+    await serializeCodexSession(session, async () => {
+      session.lastUsedAt = Date.now();
+      const threadId = String(
+        notification.params?.threadId ?? notification.params?.thread?.id ?? '',
+      ).trim();
+      if (threadId) session.threadId = threadId;
+      const turnId = String(
+        notification.params?.turnId ?? notification.params?.turn?.id ?? '',
+      ).trim();
+      if (notification.method === 'turn/started' && turnId) session.activeTurnId = turnId;
+      const targets = session.activeJobIds.length ? session.activeJobIds : session.startingJobIds;
+      const events = translateCodexAppServerNotification(notification);
+      if (events.length > 0) {
+        await withPromptMutationLock(() => appendCodexJobEvents(targets, events));
+      }
+      if (notification.method === 'turn/completed') {
+        await completeCodexTurn(session, notification);
+      }
+    });
+  }
+
+  function createCodexSession(spec: CodexAppServerSpec): CodexDaemonSession {
+    const key = spec.sessionKey;
+    let session!: CodexDaemonSession;
+    const connection = new CodexAppServerConnection({
+      launchScript: spec.launchScript,
+      onNotification: (notification) => handleCodexNotification(session, notification),
+      onStderr: async (text) => {
+        const targets = session.activeJobIds.length ? session.activeJobIds : session.startingJobIds;
+        await Promise.all(
+          targets.map(async (id) => {
+            const job = await loadPromptJob(promptsDir, id);
+            if (job) await fs.appendFile(job.stderrPath, text, 'utf8');
+          }),
+        );
+      },
+      onExit: (error) => {
+        if (!daemonShuttingDown && codexSessions.get(session.key) === session) {
+          return failCodexSessionJobs(session, error);
+        }
+      },
+    });
+    session = {
+      key,
+      connection,
+      threadId: spec.threadId ?? spec.existingThreadId ?? null,
+      threadReady: false,
+      activeTurnId: null,
+      activeJobIds: [],
+      startingJobIds: [],
+      queuedJobIds: [],
+      cancelRequestedJobIds: new Set(),
+      lastUsedAt: Date.now(),
+      operationTail: Promise.resolve(),
+    };
+    codexSessions.set(key, session);
+    return session;
+  }
+
+  async function ensureCodexThread(
+    session: CodexDaemonSession,
+    spec: CodexAppServerSpec,
+  ): Promise<string> {
+    if (session.threadId && session.threadReady) return session.threadId;
+    if (session.threadId) {
+      try {
+        const resumed = await session.connection.call('thread/resume', {
+          threadId: session.threadId,
+          cwd: undefined,
+          approvalPolicy: spec.approvalPolicy,
+          approvalsReviewer: spec.approvalsReviewer,
+          sandbox: spec.sandbox,
+          model: spec.model,
+        });
+        session.threadId = String(resumed?.thread?.id ?? session.threadId);
+        session.threadReady = true;
+        return session.threadId;
+      } catch (error) {
+        if (!isMissingCodexThreadError(error)) throw error;
+        session.threadId = null;
+        session.threadReady = false;
+      }
+    }
+    const started = await session.connection.call('thread/start', {
+      cwd: undefined,
+      approvalPolicy: spec.approvalPolicy,
+      approvalsReviewer: spec.approvalsReviewer,
+      sandbox: spec.sandbox,
+      model: spec.model,
+    });
+    const threadId = String(started?.thread?.id ?? '').trim();
+    if (!threadId) throw new Error('Codex App Server did not return a thread id');
+    session.threadId = threadId;
+    session.threadReady = true;
+    return threadId;
+  }
+
+  async function startCodexTurn(session: CodexDaemonSession, id: string): Promise<void> {
+    const job = await loadPromptJob(promptsDir, id);
+    const spec = job?.codexAppServer;
+    if (!job || !spec) return;
+    session.startingJobIds = [id];
+    const startedAt = nowIso();
+    await withPromptMutationLock(async () => {
+      await fs.writeFile(job.stdoutPath, '', 'utf8');
+      await fs.writeFile(job.stderrPath, '', 'utf8');
+      await savePromptJob(promptsDir, {
+        ...job,
+        state: 'running',
+        startedAt,
+        updatedAt: startedAt,
+        codexAppServer: { ...spec, outputOwner: true },
+      });
+    });
+    try {
+      const threadId = await ensureCodexThread(session, spec);
+      await withPromptMutationLock(() =>
+        appendCodexJobEvents([id], [{ type: 'thread.started', thread_id: threadId }]),
+      );
+      const response = await session.connection.call('turn/start', {
+        threadId,
+        input: [
+          { type: 'text', text: spec.prompt },
+          ...(spec.imagePaths ?? []).map((imagePath) => ({ type: 'localImage', path: imagePath })),
+        ],
+        clientUserMessageId: id,
+        ...(spec.model ? { model: spec.model } : {}),
+        ...(spec.effort ? { effort: spec.effort } : {}),
+        ...(spec.approvalPolicy ? { approvalPolicy: spec.approvalPolicy } : {}),
+        ...(spec.approvalsReviewer ? { approvalsReviewer: spec.approvalsReviewer } : {}),
+      });
+      const turnId = String(response?.turn?.id ?? session.activeTurnId ?? '').trim();
+      if (!turnId) throw new Error('Codex App Server did not return a turn id');
+      session.activeTurnId = turnId;
+      session.activeJobIds = [id];
+      session.startingJobIds = [];
+      const cancelRequested = session.cancelRequestedJobIds.delete(id);
+      await withPromptMutationLock(async () => {
+        const current = await loadPromptJob(promptsDir, id);
+        if (!current) return;
+        await savePromptJob(promptsDir, {
+          ...current,
+          updatedAt: nowIso(),
+          codexAppServer: { ...spec, threadId, turnId, outputOwner: true },
+        });
+      });
+      if (cancelRequested) {
+        await session.connection
+          .call('turn/interrupt', { threadId, turnId })
+          .catch(() => undefined);
+      }
+    } catch (error: any) {
+      session.startingJobIds = [];
+      session.cancelRequestedJobIds.delete(id);
+      const finishedAt = nowIso();
+      await withPromptMutationLock(async () => {
+        const current = await loadPromptJob(promptsDir, id);
+        if (!current) return;
+        if (current.state === 'canceled') return;
+        await savePromptJob(promptsDir, {
+          ...current,
+          state: 'failed',
+          finishedAt,
+          updatedAt: finishedAt,
+          exitCode: 1,
+          error: error?.message ?? String(error),
+        });
+      });
+      const nextId = session.queuedJobIds.shift();
+      if (nextId) await startCodexTurn(session, nextId);
+    }
+  }
+
+  async function steerCodexTurn(session: CodexDaemonSession, id: string): Promise<boolean> {
+    if (!session.activeTurnId || !session.threadId || session.activeJobIds.length === 0)
+      return false;
+    const job = await loadPromptJob(promptsDir, id);
+    const spec = job?.codexAppServer;
+    if (!job || !spec) return false;
+    const root = await loadPromptJob(promptsDir, session.activeJobIds[0]!);
+    const priorOutput = root ? await readTextSafe(root.stdoutPath) : '';
+    const startedAt = nowIso();
+    await withPromptMutationLock(async () => {
+      await fs.writeFile(job.stdoutPath, priorOutput, 'utf8');
+      await fs.writeFile(job.stderrPath, '', 'utf8');
+      await savePromptJob(promptsDir, {
+        ...job,
+        state: 'running',
+        startedAt,
+        updatedAt: startedAt,
+        codexAppServer: {
+          ...spec,
+          threadId: session.threadId!,
+          turnId: session.activeTurnId!,
+        },
+      });
+    });
+    try {
+      await session.connection.call('turn/steer', {
+        threadId: session.threadId,
+        expectedTurnId: session.activeTurnId,
+        input: [
+          { type: 'text', text: spec.prompt },
+          ...(spec.imagePaths ?? []).map((imagePath) => ({ type: 'localImage', path: imagePath })),
+        ],
+        clientUserMessageId: id,
+      });
+    } catch {
+      await withPromptMutationLock(async () => {
+        const current = await loadPromptJob(promptsDir, id);
+        if (!current) return;
+        await savePromptJob(promptsDir, {
+          ...current,
+          state: 'queued',
+          startedAt: undefined,
+          updatedAt: nowIso(),
+        });
+      });
+      return false;
+    }
+    session.activeJobIds.push(id);
+    await withPromptMutationLock(async () => {
+      for (const activeId of session.activeJobIds) {
+        const current = await loadPromptJob(promptsDir, activeId);
+        if (!current?.codexAppServer) continue;
+        await savePromptJob(promptsDir, {
+          ...current,
+          updatedAt: nowIso(),
+          codexAppServer: {
+            ...current.codexAppServer,
+            outputOwner: activeId === id,
+          },
+        });
+      }
+    });
+    return true;
+  }
+
+  async function enqueueCodexAppServerJob(
+    job: PromptJob,
+  ): Promise<'started' | 'steered' | 'queued'> {
+    const spec = job.codexAppServer!;
+    const session = codexSessions.get(spec.sessionKey) ?? createCodexSession(spec);
+    return await serializeCodexSession(session, async () => {
+      session.lastUsedAt = Date.now();
+      if (job.deliveryMode === 'asap' && (await steerCodexTurn(session, job.id))) {
+        return 'steered' as const;
+      }
+      if (session.activeTurnId || session.startingJobIds.length > 0) {
+        if (!session.queuedJobIds.includes(job.id)) session.queuedJobIds.push(job.id);
+        return 'queued' as const;
+      }
+      await startCodexTurn(session, job.id);
+      return 'started' as const;
+    });
+  }
+
+  async function cancelCodexAppServerJob(job: PromptJob): Promise<PromptJob> {
+    const spec = job.codexAppServer!;
+    const session = codexSessions.get(spec.sessionKey);
+    if (!session || job.state === 'queued') {
+      if (session) {
+        session.queuedJobIds = session.queuedJobIds.filter((id) => id !== job.id);
+      }
+      const finishedAt = nowIso();
+      const canceled = {
+        ...job,
+        state: 'canceled' as const,
+        finishedAt,
+        updatedAt: finishedAt,
+        error: 'stopped by user',
+      };
+      await withPromptMutationLock(() => savePromptJob(promptsDir, canceled));
+      return canceled;
+    }
+    if (session.startingJobIds.includes(job.id)) {
+      session.cancelRequestedJobIds.add(job.id);
+      const finishedAt = nowIso();
+      const canceled = {
+        ...job,
+        state: 'canceled' as const,
+        finishedAt,
+        updatedAt: finishedAt,
+        error: 'stopped by user',
+      };
+      await withPromptMutationLock(() => savePromptJob(promptsDir, canceled));
+      return canceled;
+    }
+    if (session.activeJobIds.includes(job.id) && session.activeTurnId && session.threadId) {
+      await serializeCodexSession(session, async () => {
+        await session.connection.call('turn/interrupt', {
+          threadId: session.threadId,
+          turnId: session.activeTurnId,
+        });
+      }).catch(() => {});
+      const deadline = Date.now() + 2_000;
+      while (Date.now() < deadline) {
+        const current = await loadPromptJob(promptsDir, job.id);
+        if (current && current.state !== 'running') return current;
+        await sleep(50);
+      }
+    }
+    return (await loadPromptJob(promptsDir, job.id)) ?? job;
+  }
+
   async function pumpPromptsUnlocked(): Promise<void> {
     const idx = await loadPromptIndex(promptsDir);
     const order = Array.isArray(idx.order) ? idx.order.map(String).filter(Boolean) : [];
@@ -1382,6 +1855,28 @@ async function main() {
     for (const id of order) {
       const job = await loadPromptJob(promptsDir, id);
       if (!job) continue;
+      if (job.codexAppServer && (job.state === 'queued' || job.state === 'running')) {
+        const session = codexSessions.get(job.codexAppServer.sessionKey);
+        const owned = Boolean(
+          session &&
+          [...session.activeJobIds, ...session.startingJobIds, ...session.queuedJobIds].includes(
+            id,
+          ),
+        );
+        const createdMs = Date.parse(job.createdAt);
+        if (!owned && Number.isFinite(createdMs) && Date.now() - createdMs > 2_000) {
+          const finishedAt = nowIso();
+          await savePromptJob(promptsDir, {
+            ...job,
+            state: 'failed',
+            finishedAt,
+            updatedAt: finishedAt,
+            exitCode: 1,
+            error: 'Codex App Server session was interrupted by a daemon restart',
+          });
+        }
+        continue;
+      }
       if (job.state === 'running') {
         const next = await advanceRunningPromptJob(job);
         if (next !== job) await savePromptJob(promptsDir, next);
@@ -1403,15 +1898,15 @@ async function main() {
     const anyRunning = await (async () => {
       for (const id of order) {
         const job = await loadPromptJob(promptsDir, id);
-        if (job && job.state === 'running') return true;
+        if (job && job.state === 'running' && !job.codexAppServer) return true;
       }
       return false;
     })();
     if (anyRunning) return;
 
-    const candidates = (
-      await Promise.all(order.map((id) => loadPromptJob(promptsDir, id)))
-    ).filter((job): job is PromptJob => Boolean(job));
+    const candidates = (await Promise.all(order.map((id) => loadPromptJob(promptsDir, id)))).filter(
+      (job): job is PromptJob => Boolean(job) && !job?.codexAppServer,
+    );
     const startId = selectNextPromptJobId(candidates);
     if (!startId) return;
     const job = await loadPromptJob(promptsDir, startId);
@@ -1444,6 +1939,22 @@ async function main() {
     // eslint-disable-next-line no-console
     console.error(`initial prompt pump failed: ${String(error?.message ?? error)}`);
   });
+  const codexIdleSweep = setInterval(() => {
+    const cutoff = Date.now() - CODEX_APP_SERVER_IDLE_MS;
+    for (const [key, session] of codexSessions) {
+      if (
+        session.lastUsedAt > cutoff ||
+        session.activeJobIds.length > 0 ||
+        session.startingJobIds.length > 0 ||
+        session.queuedJobIds.length > 0
+      ) {
+        continue;
+      }
+      codexSessions.delete(key);
+      session.connection.stop();
+    }
+  }, 60_000);
+  (codexIdleSweep as any).unref?.();
 
   async function readState(): Promise<DroneState> {
     try {
@@ -1475,12 +1986,108 @@ async function main() {
           ok: true,
           name: 'drone-daemon',
           time: new Date().toISOString(),
-          capabilities: ['workspace-v1'],
+          capabilities: ['workspace-v1', 'codex-app-server-v1'],
         });
         return;
       }
 
       if (await handleDaemonWorkspaceRequest({ req, res, method, pathname, url: u })) return;
+
+      if (method === 'POST' && pathname === '/v1/codex/enqueue') {
+        const body = await readJson(req);
+        const id = String(body?.id ?? '').trim();
+        const sessionKey = String(body?.sessionKey ?? '').trim();
+        const launchScript = String(body?.launchScript ?? '').trim();
+        const prompt = String(body?.prompt ?? '');
+        if (!id || !sessionKey || !launchScript || !prompt.trim()) {
+          json(res, 400, { error: 'id, sessionKey, launchScript, and prompt are required' });
+          return;
+        }
+        const deliveryMode = body?.deliveryMode === 'asap' ? 'asap' : 'queue';
+        const createdAt = nowIso();
+        const session = promptSessionName(id);
+        const spec: CodexAppServerSpec = {
+          sessionKey,
+          launchScript,
+          prompt,
+          ...(Array.isArray(body?.imagePaths)
+            ? {
+                imagePaths: body.imagePaths
+                  .filter(
+                    (value: unknown): value is string =>
+                      typeof value === 'string' && value.trim().startsWith('/'),
+                  )
+                  .map((value: string) => value.trim())
+                  .slice(0, 8),
+              }
+            : {}),
+          ...(typeof body?.existingThreadId === 'string' && body.existingThreadId.trim()
+            ? { existingThreadId: body.existingThreadId.trim() }
+            : {}),
+          ...(body?.approvalPolicy === 'untrusted' ||
+          body?.approvalPolicy === 'on-request' ||
+          body?.approvalPolicy === 'never'
+            ? { approvalPolicy: body.approvalPolicy }
+            : {}),
+          ...(body?.approvalsReviewer === 'user' || body?.approvalsReviewer === 'auto_review'
+            ? { approvalsReviewer: body.approvalsReviewer }
+            : {}),
+          ...(body?.sandbox === 'read-only' ||
+          body?.sandbox === 'workspace-write' ||
+          body?.sandbox === 'danger-full-access'
+            ? { sandbox: body.sandbox }
+            : {}),
+          ...(typeof body?.model === 'string' && body.model.trim()
+            ? { model: body.model.trim() }
+            : {}),
+          ...(typeof body?.effort === 'string' && body.effort.trim()
+            ? { effort: body.effort.trim() }
+            : {}),
+        };
+        const job: PromptJob = {
+          id,
+          kind: 'codex',
+          cmd: 'codex-app-server',
+          args: [],
+          createdAt,
+          updatedAt: createdAt,
+          state: 'queued',
+          deliveryMode,
+          session,
+          stdoutPath: path.join(promptOutDir, `${id}.stdout.txt`),
+          stderrPath: path.join(promptOutDir, `${id}.stderr.txt`),
+          exitPath: path.join(promptOutDir, `${id}.exit.txt`),
+          codexAppServer: spec,
+        };
+        const existing = await withPromptMutationLock(async () => {
+          const current = await loadPromptJob(promptsDir, id);
+          if (current) return current;
+          await savePromptJob(promptsDir, job);
+          const idx = await loadPromptIndex(promptsDir);
+          const order = Array.isArray(idx.order) ? idx.order.map(String) : [];
+          if (!order.includes(id)) order.push(id);
+          idx.order = order.slice(-400);
+          await savePromptIndex(promptsDir, idx);
+          return null;
+        });
+        if (existing) {
+          json(res, 200, { ok: true, id, state: existing.state, note: 'already exists' });
+          return;
+        }
+        const disposition = await enqueueCodexAppServerJob(job);
+        const current = await loadPromptJob(promptsDir, id);
+        json(res, 202, {
+          ok: true,
+          id,
+          state: current?.state ?? job.state,
+          disposition,
+          ...(current?.codexAppServer?.threadId
+            ? { threadId: current.codexAppServer.threadId }
+            : {}),
+          ...(current?.codexAppServer?.turnId ? { turnId: current.codexAppServer.turnId } : {}),
+        });
+        return;
+      }
 
       if (method === 'POST' && pathname === '/v1/prompts/enqueue') {
         const body = await readJson(req);
@@ -1633,6 +2240,11 @@ async function main() {
           // Best-effort reconcile from wrapper artifacts and corroborated
           // session liveness if it changed since the last pump.
           if (current.state === 'running') {
+            if (current.codexAppServer) {
+              const next = await refreshPromptJobTranscript(current);
+              if (next !== current) await savePromptJob(promptsDir, next);
+              return next;
+            }
             let next = await advanceRunningPromptJob(current);
             if (next.state === 'running') next = await refreshPromptJobTranscript(next);
             if (next !== current) await savePromptJob(promptsDir, next);
@@ -1669,10 +2281,16 @@ async function main() {
       const promptCancelMatch = pathname.match(/^\/v1\/prompts\/([^/]+)\/cancel$/);
       if (method === 'POST' && promptCancelMatch) {
         const id = decodeURIComponent(promptCancelMatch[1] ?? '');
+        const current = await withPromptMutationLock(() => loadPromptJob(promptsDir, id));
+        if (current?.codexAppServer) {
+          const next = await cancelCodexAppServerJob(current);
+          json(res, 200, { ok: true, job: next });
+          return;
+        }
         const next = await withPromptMutationLock(async () => {
-          const current = await loadPromptJob(promptsDir, id);
-          if (!current) return null;
-          const canceled = await cancelPromptJob(current);
+          const latest = await loadPromptJob(promptsDir, id);
+          if (!latest) return null;
+          const canceled = await cancelPromptJob(latest);
           await savePromptJob(promptsDir, canceled);
           return canceled;
         });
@@ -2051,6 +2669,18 @@ async function main() {
       json(res, status, { error: err?.message ?? String(err) });
     }
   });
+
+  const shutdown = () => {
+    if (daemonShuttingDown) return;
+    daemonShuttingDown = true;
+    clearInterval(codexIdleSweep);
+    for (const session of codexSessions.values()) session.connection.stop();
+    server.close(() => process.exit(0));
+    const forceExit = setTimeout(() => process.exit(0), 1_000);
+    (forceExit as any).unref?.();
+  };
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
 
   await new Promise<void>((resolve) => server.listen(port, host, () => resolve()));
   // eslint-disable-next-line no-console

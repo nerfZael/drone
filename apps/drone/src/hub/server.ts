@@ -78,6 +78,7 @@ import {
 import {
   procStart,
   procStop,
+  codexPromptEnqueue as droneCodexPromptEnqueue,
   promptEnqueue as dronePromptEnqueue,
   promptCancel as dronePromptCancel,
   promptGet as dronePromptGet,
@@ -327,7 +328,6 @@ import { hubChatSessionName } from './terminal-open';
 import {
   buildChatAttachmentsDirectory,
   buildChatImageAttachmentRefs,
-  codexImageAttachmentFlags,
   copyChatAttachmentsToContainer,
   normalizeChatImageAttachments,
   promptWithImageAttachments,
@@ -2420,6 +2420,7 @@ type TranscriptTurn = {
   reasoning?: string;
   ok: boolean;
   output: string;
+  userOnly?: boolean;
   error?: string;
   promptAt?: string;
   startedAt?: string;
@@ -3112,7 +3113,6 @@ promptRuntime = createChatPromptRuntime({
   chatNameExists,
   cliSupportsModelFlag,
   cloneChatEntryForDroneClone,
-  codexImageAttachmentFlags,
   collectDroneRuntimeDiagnostics,
   compactDiagnosticError,
   commitDroneMetadataPatch,
@@ -3127,6 +3127,7 @@ promptRuntime = createChatPromptRuntime({
   defaultRepoSeedTimeoutMs,
   dronePromptCancel,
   dronePromptEnqueue,
+  droneCodexPromptEnqueue,
   dronePromptGet,
   droneStatus,
   droneRuntime,

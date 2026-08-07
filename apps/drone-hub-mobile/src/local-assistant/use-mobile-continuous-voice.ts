@@ -40,6 +40,7 @@ export type StartMobileContinuousVoiceInput = {
 };
 
 const MAX_PENDING_SEGMENTS = 8;
+const MAX_RETAINED_SEGMENTS = MAX_PENDING_SEGMENTS + 1;
 
 function statusForActivity(activity: ContinuousVoiceActivity): MobileContinuousVoiceStatus {
   return activity === 'silence' ? 'listening' : activity;
@@ -155,14 +156,23 @@ export function useMobileContinuousVoice({
   const enqueue = React.useCallback(
     (segments: ContinuousVoiceSegment[]) => {
       if (!segments.length) return;
-      if (queueRef.current.length + segments.length > MAX_PENDING_SEGMENTS) {
+      const available = Math.max(0, MAX_RETAINED_SEGMENTS - queueRef.current.length);
+      const retained = segments.slice(0, available);
+      queueRef.current.push(...retained);
+      if (mountedRef.current) setPendingCount(queueRef.current.length);
+      if (retained.length < segments.length) {
+        pausedRef.current = true;
+        setStatusValue('error');
+        onError('Continuous voice stopped accepting audio because its retained backlog is full.');
+        return;
+      }
+      if (queueRef.current.length > MAX_PENDING_SEGMENTS) {
         pausedRef.current = true;
         setStatusValue('error');
         onError('Continuous voice paused because the transcription backlog is full.');
+        void drainQueue();
         return;
       }
-      queueRef.current.push(...segments);
-      if (mountedRef.current) setPendingCount(queueRef.current.length);
       void drainQueue();
     },
     [drainQueue, onError, setStatusValue],

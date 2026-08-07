@@ -292,8 +292,22 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       let job = jobResp?.job ?? null;
       let jobState = String(job?.state ?? '').trim();
       let jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
+      const appServerThreadId = String(job?.codexAppServer?.threadId ?? '').trim();
+      if (
+        jobKind === 'codex' &&
+        appServerThreadId &&
+        String(entry?.codexThreadId ?? '').trim() !== appServerThreadId
+      ) {
+        entry.codexThreadId = appServerThreadId;
+        changed = true;
+      }
       if (jobState === 'queued' || jobState === 'running') {
-        const liveState = jobState === 'running' ? parseLiveAgentState(jobKind, job) : {};
+        const ownsLiveOutput =
+          jobKind !== 'codex' ||
+          !job?.codexAppServer ||
+          job.codexAppServer.outputOwner !== false;
+        const liveState =
+          jobState === 'running' && ownsLiveOutput ? parseLiveAgentState(jobKind, job) : {};
         const parsedBlip = jobKind === 'blip' && jobState === 'running' ? liveState : null;
         const nextAgentPlan = jobState === 'running' ? liveState.agentPlan : (p as any).agentPlan;
         const nextActivity = jobState === 'running' ? liveState.activity : (p as any).activity;
@@ -415,6 +429,31 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         const startedAt = terminalStartedAt ?? promptAt;
         if (jobKind === 'codex') {
           const parsed = parseCodexJobTranscript(job);
+          if (job?.codexAppServer && job.codexAppServer.outputOwner === false) {
+            turns.push({
+              at: promptAt,
+              promptAt,
+              startedAt,
+              completedAt: finishedAt,
+              id,
+              prompt: String(p?.prompt ?? ''),
+              ...(pendingModel ? { model: pendingModel } : {}),
+              ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+              ok: true,
+              output: '',
+              userOnly: true,
+            });
+            transcriptIds.add(id);
+            pendingList[i] = {
+              ...p,
+              state: 'sent',
+              error: undefined,
+              observability: undefined,
+              updatedAt: nowIso(),
+            };
+            changed = true;
+            continue;
+          }
           const turnRuntime = await resolveCodexTurnRuntime({
             parsed,
             pendingModel,

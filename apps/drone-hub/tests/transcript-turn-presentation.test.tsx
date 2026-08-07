@@ -5,6 +5,30 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { TranscriptTurn } from '../src/droneHub/chat/TranscriptTurn';
 
 describe('completed external transcript presentation', () => {
+  test('renders an accepted steering input without inventing an assistant response', () => {
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 1,
+          at: '2026-08-07T10:00:00.000Z',
+          prompt: 'Also check the mobile path.',
+          session: 'codex-app-server',
+          logPath: '',
+          ok: true,
+          output: '',
+          userOnly: true,
+        }}
+        onSpawnDroneHubTask={async () => ({ ok: true })}
+        messageId="codex-steering-input"
+      />,
+    );
+
+    expect(html).toContain('Also check the mobile path.');
+    expect(html.match(/aria-label="Copy message"/g)).toHaveLength(1);
+    expect(html).not.toContain('Worked for');
+    expect(html).not.toContain('role="assistant"');
+  });
+
   test('shares the native duration divider, readable width, and hover timestamps', () => {
     const html = renderToStaticMarkup(
       <TranscriptTurn

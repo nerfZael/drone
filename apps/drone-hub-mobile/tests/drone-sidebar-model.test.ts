@@ -969,6 +969,26 @@ describe('mobile drone sidebar model', () => {
     });
   });
 
+  test('keeps Codex steering inputs as user-only mobile messages', () => {
+    const messages = mobileDroneTurnsToAssistantMessages([
+      {
+        id: 'steering-input',
+        at: '2026-08-07T10:00:00.000Z',
+        completedAt: '2026-08-07T10:00:02.000Z',
+        prompt: 'Also inspect the mobile path.',
+        output: '',
+        ok: true,
+        userOnly: true,
+      },
+    ]);
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: 'user',
+      content: 'Also inspect the mobile path.',
+    });
+  });
+
   test('unwraps paged native history entries for the transcript', () => {
     expect(
       normalizeMobileNativeChatHistory({

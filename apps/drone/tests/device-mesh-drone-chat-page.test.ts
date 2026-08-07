@@ -51,6 +51,19 @@ describe('device mesh drone chat pages', () => {
     expect(turn?.meshTruncated).toBe(true);
   });
 
+  test('preserves user-only steering entries for mobile rendering', () => {
+    const [turn] = boundedDroneChatPage([
+      {
+        id: 'steering-input',
+        prompt: 'Also check mobile.',
+        output: '',
+        userOnly: true,
+      },
+    ]).turns;
+
+    expect(turn).toMatchObject({ id: 'steering-input', userOnly: true });
+  });
+
   test('preserves plans, changed files, and bounded external-agent activity', () => {
     const [turn] = boundedDroneChatPage([
       {

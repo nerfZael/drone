@@ -28,6 +28,7 @@ export type StoredTranscriptTurn = {
   prompt: string;
   ok: boolean;
   output: string;
+  userOnly?: boolean;
   silentCompletion?: boolean;
   error?: string;
   promptAt?: string;
@@ -563,6 +564,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
     prompt: String(raw?.prompt ?? ''),
     ok: Boolean(raw?.ok),
     output,
+    ...(raw?.userOnly === true ? { userOnly: true } : {}),
     ...(silentCompletion ? { silentCompletion: true } : {}),
     ...(!raw?.ok ? { error: String(raw?.error ?? 'failed') } : {}),
     ...(typeof raw?.promptAt === 'string' && raw.promptAt.trim() ? { promptAt: raw.promptAt.trim() } : {}),

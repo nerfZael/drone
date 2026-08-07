@@ -7,6 +7,7 @@ type TranscriptTurnLike = {
   ok?: boolean;
   output?: string;
   error?: string;
+  userOnly?: boolean;
 };
 
 const CLONED_TRANSCRIPT_BOOTSTRAP_MAX_TURNS = 12;
@@ -59,6 +60,7 @@ function trimTranscriptBootstrapField(raw: unknown, maxChars = CLONED_TRANSCRIPT
 
 function renderTranscriptBootstrapTurn(turn: TranscriptTurnLike): string {
   const prompt = trimTranscriptBootstrapField(turn?.prompt);
+  if (turn?.userOnly === true) return ['User:', prompt || '(empty)'].join('\n');
   const output = trimTranscriptBootstrapField(turn?.output ?? '');
   const error = trimTranscriptBootstrapField(turn?.error ?? '');
   const assistantLabel = turn?.ok === false ? 'Assistant error' : 'Assistant';

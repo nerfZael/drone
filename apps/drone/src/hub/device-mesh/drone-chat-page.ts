@@ -267,6 +267,7 @@ function compactTurn(turn: any, sourceIndex: number): Record<string, unknown> {
     output: output.value,
     error: error.value,
     ok: turn?.ok !== false,
+    ...(turn?.userOnly === true ? { userOnly: true } : {}),
     model: String(turn?.model ?? ''),
     reasoning: String(turn?.reasoning ?? ''),
     ...(agentPlan ? { agentPlan } : {}),

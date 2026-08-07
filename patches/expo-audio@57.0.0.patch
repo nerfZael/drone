@@ -13,7 +13,7 @@ index e93e8d92..aa4b640c 100644
    onBufferRef.current = onBuffer;
 +  const onStatusRef = useRef(onStatus);
 +  onStatusRef.current = onStatus;
- 
+
    const stream = useReleasingSharedObject(
      () =>
 @@ -34,6 +36,7 @@ export function useAudioStream(options: AudioStreamOptions = {}): AudioStreamRes
@@ -22,7 +22,7 @@ index e93e8d92..aa4b640c 100644
        setIsStreaming(status.isStreaming);
 +      onStatusRef.current?.(status);
      });
- 
+
      const bufferSub = stream.addListener(AUDIO_STREAM_BUFFER, (buffer: AudioStreamBuffer) => {
 diff --git a/src/AudioStream.types.ts b/src/AudioStream.types.ts
 index 1f4bc46b..02b9af22 100644
@@ -36,15 +36,15 @@ index 1f4bc46b..02b9af22 100644
 +  /** Called when capture starts, stops, or is temporarily interrupted. */
 +  onStatus?: (status: AudioStreamStatus) => void;
  };
- 
+
  export type AudioStreamBuffer = {
 @@ -50,6 +53,7 @@ export type AudioStreamBuffer = {
- 
+
  export type AudioStreamStatus = {
    isStreaming: boolean;
 +  reason?: 'started' | 'stopped' | 'interrupted' | 'system-control';
  };
- 
+
  export type AudioStreamEvents = {
 diff --git a/build/AudioStream.js b/build/AudioStream.js
 index 2354b368..9f73e404 100644
@@ -112,13 +112,13 @@ index 992239ba..3b524663 100644
 --- a/android/src/main/java/expo/modules/audio/AudioModule.kt
 +++ b/android/src/main/java/expo/modules/audio/AudioModule.kt
 @@ -652,6 +652,7 @@ class AudioModule : Module() {
- 
+
        AsyncFunction("start") Coroutine { stream: AudioStream ->
          checkRecordingPermission()
 +        stream.useForegroundService = allowsBackgroundRecording
          stream.start()
        }
- 
+
 diff --git a/android/src/main/java/expo/modules/audio/AudioRecorder.kt b/android/src/main/java/expo/modules/audio/AudioRecorder.kt
 index 8eba23f6..00de1137 100644
 --- a/android/src/main/java/expo/modules/audio/AudioRecorder.kt
@@ -144,19 +144,19 @@ index 8eba23f6..00de1137 100644
 @@ -51,7 +53,10 @@ class AudioRecorder(
    var useForegroundService = false
    private var bindingContinuation: Continuation<Boolean>? = null
- 
+
 -  val serviceConnection = AudioRecordingServiceConnection(WeakReference(this), appContext)
 +  val serviceConnection = AudioRecordingServiceConnection(
 +    WeakReference<BackgroundAudioRecorder>(this),
 +    appContext
 +  )
- 
+
    private val _appContext: AppContext
      get() {
 @@ -210,6 +215,10 @@ class AudioRecorder(
      return status
    }
- 
+
 +  override fun stopBackgroundRecording() {
 +    stopRecording()
 +  }
@@ -168,42 +168,40 @@ diff --git a/android/src/main/java/expo/modules/audio/AudioStream.kt b/android/s
 index 8ecdcc12..b5f4750f 100644
 --- a/android/src/main/java/expo/modules/audio/AudioStream.kt
 +++ b/android/src/main/java/expo/modules/audio/AudioStream.kt
-@@ -3,8 +3,15 @@ package expo.modules.audio
+@@ -3,8 +3,13 @@ package expo.modules.audio
  import android.Manifest
  import android.media.AudioFormat
  import android.media.AudioRecord
 +import android.media.AudioRecordingConfiguration
 +import android.media.AudioManager
  import android.media.MediaRecorder
-+import android.content.pm.PackageManager
 +import android.os.Build
  import androidx.annotation.RequiresPermission
-+import androidx.core.content.ContextCompat
 +import expo.modules.audio.service.AudioRecordingServiceConnection
 +import expo.modules.audio.service.BackgroundAudioRecorder
  import expo.modules.kotlin.AppContext
  import expo.modules.kotlin.jni.NativeArrayBuffer
  import expo.modules.kotlin.sharedobjects.SharedObject
-@@ -15,6 +22,7 @@ import kotlinx.coroutines.isActive
+@@ -15,6 +20,7 @@ import kotlinx.coroutines.isActive
  import kotlinx.coroutines.launch
  import java.nio.ByteBuffer
  import java.nio.ByteOrder
 +import java.lang.ref.WeakReference
- 
+
  internal const val AUDIO_STREAM_BUFFER = "audioStreamBuffer"
  internal const val AUDIO_STREAM_STATUS = "audioStreamStatus"
-@@ -34,7 +42,7 @@ private data class ResolvedAudioConfig(
+@@ -34,7 +40,7 @@ private data class ResolvedAudioConfig(
  class AudioStream(
    appContext: AppContext,
    private val options: AudioStreamOptions
 -) : SharedObject(appContext) {
 +) : SharedObject(appContext), BackgroundAudioRecorder {
- 
+
    val id: String = java.util.UUID.randomUUID().toString()
- 
-@@ -50,13 +58,27 @@ class AudioStream(
+
+@@ -50,13 +56,24 @@ class AudioStream(
      private set
- 
+
    private var startTimeNanos: Long = 0
 +  private var recordingCallback: AudioManager.AudioRecordingCallback? = null
 +  private var clientSilenced = false
@@ -212,25 +210,22 @@ index 8ecdcc12..b5f4750f 100644
 +    WeakReference<BackgroundAudioRecorder>(this),
 +    appContext
 +  )
- 
+
    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
 -  fun start() {
 +  suspend fun start() {
      if (isStreaming) {
        return
      }
- 
-+    if (useForegroundService && !hasNotificationPermissions()) {
-+      throw NotificationPermissionsException()
-+    }
+
 +    if (useForegroundService) {
 +      serviceConnection.bindWithService()
 +    }
 +
      val config = resolveAudioConfig()
      val recorder = createAudioRecord(config)
- 
-@@ -74,20 +96,73 @@ class AudioStream(
+
+@@ -74,20 +91,67 @@ class AudioStream(
      audioRecord = recorder
      startTimeNanos = System.nanoTime()
      isStreaming = true
@@ -246,10 +241,10 @@ index 8ecdcc12..b5f4750f 100644
 +    }
 +    observeTemporaryMicrophoneLoss(recorder)
 +    emitStatus("started")
- 
+
      startCaptureLoop(recorder, config)
    }
- 
+
 -  fun stop() {
 +  fun stop(reason: String = "stopped") {
      if (!isStreaming) return
@@ -269,12 +264,6 @@ index 8ecdcc12..b5f4750f 100644
 +
 +  override fun stopBackgroundRecording() {
 +    stop("system-control")
-+  }
-+
-+  private fun hasNotificationPermissions(): Boolean {
-+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
-+    val context = appContext?.reactContext ?: return false
-+    return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 +  }
 +
 +  private fun observeTemporaryMicrophoneLoss(recorder: AudioRecord) {
@@ -305,12 +294,12 @@ index 8ecdcc12..b5f4750f 100644
 +    recordingCallback = null
 +    clientSilenced = false
    }
- 
+
    private fun resolveAudioConfig(): ResolvedAudioConfig {
-@@ -182,11 +257,11 @@ class AudioStream(
+@@ -182,11 +246,11 @@ class AudioStream(
      }
    }
- 
+
 -  private fun emitStatus() {
 +  private fun emitStatus(reason: String) {
      appContext?.mainQueue?.launch {
@@ -321,7 +310,7 @@ index 8ecdcc12..b5f4750f 100644
        )
      }
    }
-@@ -210,5 +285,10 @@ class AudioStream(
+@@ -210,5 +274,10 @@ class AudioStream(
    override fun sharedObjectDidRelease() {
      super.sharedObjectDidRelease()
      stop()
@@ -345,17 +334,17 @@ index 2c923033..f9722f1f 100644
  import expo.modules.kotlin.AppContext
  import java.lang.ref.WeakReference
 @@ -21,7 +20,7 @@ private const val TAG = "AudioRecordingService"
- 
+
  class AudioRecordingService : Service() {
    private val binder = AudioRecordingServiceBinder(this)
 -  private val activeRecorders = mutableSetOf<WeakReference<AudioRecorder>>()
 +  private val activeRecorders = mutableSetOf<WeakReference<BackgroundAudioRecorder>>()
    private val recorderLock = Any()
    private var notificationId = NOTIFICATION_ID
- 
+
 @@ -96,8 +95,8 @@ class AudioRecordingService : Service() {
      }
- 
+
      return NotificationCompat.Builder(this, CHANNEL_ID)
 -      .setContentTitle("Recording audio")
 -      .setContentText("Tap to return to app")
@@ -367,24 +356,24 @@ index 2c923033..f9722f1f 100644
 @@ -141,7 +140,7 @@ class AudioRecordingService : Service() {
      isRunningForeground = false
    }
- 
+
 -  fun registerRecorder(recorder: AudioRecorder) {
 +  fun registerRecorder(recorder: BackgroundAudioRecorder) {
      synchronized(recorderLock) {
        activeRecorders.removeAll { it.get() == null }
- 
+
 @@ -157,7 +156,7 @@ class AudioRecordingService : Service() {
      }
    }
- 
+
 -  fun unregisterRecorder(recorder: AudioRecorder) {
 +  fun unregisterRecorder(recorder: BackgroundAudioRecorder) {
      synchronized(recorderLock) {
        activeRecorders.removeAll { it.get() == recorder || it.get() == null }
- 
+
 @@ -169,12 +168,12 @@ class AudioRecordingService : Service() {
    }
- 
+
    private fun stopRecordingAndService() {
 -    synchronized(recorderLock) {
 -      activeRecorders.forEach { weakRef ->
@@ -396,7 +385,7 @@ index 2c923033..f9722f1f 100644
 +      snapshot
      }
 +    recorders.forEach { it.stopBackgroundRecording() }
- 
+
      stopForegroundWithNotification()
      stopSelf()
 @@ -200,3 +199,8 @@ class AudioRecordingService : Service() {
@@ -413,7 +402,7 @@ index 28be72f2..7a1e2569 100644
 --- a/android/src/main/java/expo/modules/audio/service/AudioRecordingServiceConnection.kt
 +++ b/android/src/main/java/expo/modules/audio/service/AudioRecordingServiceConnection.kt
 @@ -2,7 +2,6 @@ package expo.modules.audio.service
- 
+
  import android.content.ComponentName
  import android.os.IBinder
 -import expo.modules.audio.AudioRecorder
@@ -422,7 +411,7 @@ index 28be72f2..7a1e2569 100644
  import expo.modules.kotlin.AppContext
 @@ -20,7 +19,7 @@ import kotlin.coroutines.suspendCoroutine
  class AudioRecordingServiceBinder(val service: AudioRecordingService) : android.os.Binder()
- 
+
  class AudioRecordingServiceConnection(
 -  val recorder: WeakReference<AudioRecorder>,
 +  val recorder: WeakReference<BackgroundAudioRecorder>,
@@ -441,7 +430,7 @@ index f938eff0..5d398341 100644
 +  private var recoveryAttempt = 0
 +  private var recoveryWorkItem: DispatchWorkItem?
 +  private var notificationObservers = [NSObjectProtocol]()
- 
+
    init(options: AudioStreamOptions) {
      self.requestedSampleRate = options.sampleRate
      self.requestedChannels = options.channels
@@ -449,7 +438,7 @@ index f938eff0..5d398341 100644
      super.init()
 +    setupRecoveryObservers()
    }
- 
+
    func start() throws {
 +    let wasWanted = wantsToStream
 +    wantsToStream = true
@@ -465,29 +454,27 @@ index f938eff0..5d398341 100644
 +
 +  private func startEngine() throws {
      guard !isStreaming else { return }
- 
+
      let session = AVAudioSession.sharedInstance()
-@@ -65,9 +83,15 @@ class AudioStream: SharedObject {
-         channels = Int(hardwareFormat.channelCount)
-         setupTapWithoutConversion(engine: engine, inputNode: inputNode, format: hardwareFormat)
-         self.audioEngine = engine
+@@ -62,12 +80,7 @@ class AudioStream: SharedObject {
+     if needsConversion {
+       guard let conv = AVAudioConverter(from: hardwareFormat, to: targetFormat) else {
+-        sampleRate = hardwareFormat.sampleRate
+-        channels = Int(hardwareFormat.channelCount)
+-        setupTapWithoutConversion(engine: engine, inputNode: inputNode, format: hardwareFormat)
+-        self.audioEngine = engine
 -        try engine.start()
-+        do {
-+          try engine.start()
-+        } catch {
-+          inputNode.removeTap(onBus: 0)
-+          self.audioEngine = nil
-+          throw error
-+        }
-         isStreaming = true
+-        isStreaming = true
 -        emitStatus()
-+        emitStatus(reason: "started")
-         return
+-        return
++        throw AudioStreamException(
++          "The microphone format cannot be converted to the requested streaming format."
++        )
        }
        self.converter = conv
-@@ -94,22 +118,108 @@ class AudioStream: SharedObject {
+@@ -94,22 +107,108 @@ class AudioStream: SharedObject {
      }
- 
+
      self.audioEngine = engine
 -    try engine.start()
 +    do {
@@ -502,7 +489,7 @@ index f938eff0..5d398341 100644
 -    emitStatus()
 +    emitStatus(reason: "started")
    }
- 
+
    func stop() {
 -    guard isStreaming else { return }
 -    audioEngine?.inputNode.removeTap(onBus: 0)
@@ -565,7 +552,7 @@ index f938eff0..5d398341 100644
 +      self?.recoverAfterTemporaryAudioLoss()
 +    })
 +  }
- 
+
 -    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
 +  private func handleInterruption(_ notification: Notification) {
 +    guard wantsToStream,
@@ -603,12 +590,12 @@ index f938eff0..5d398341 100644
 +    recoveryWorkItem = work
 +    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
    }
- 
+
    private func setupTapWithoutConversion(engine: AVAudioEngine, inputNode: AVAudioInputNode, format: AVAudioFormat) {
-@@ -154,9 +264,10 @@ class AudioStream: SharedObject {
+@@ -154,9 +253,10 @@ class AudioStream: SharedObject {
      }
    }
- 
+
 -  private func emitStatus() {
 +  private func emitStatus(reason: String) {
      emit(event: AUDIO_STREAM_STATUS, payload: [
@@ -617,10 +604,10 @@ index f938eff0..5d398341 100644
 +      "reason": reason
      ])
    }
- 
-@@ -195,6 +306,7 @@ class AudioStream: SharedObject {
+
+@@ -195,6 +295,7 @@ class AudioStream: SharedObject {
    }
- 
+
    deinit {
 +    notificationObservers.forEach { NotificationCenter.default.removeObserver($0) }
      stop()

@@ -810,4 +810,190 @@ setTimeout(() => {}, 30000);
     const heartbeatAt = String(fs.readFileSync(terminal.heartbeatPath, 'utf8')).trim();
     expect(Math.abs(Date.parse(terminal.finishedAt) - Date.parse(heartbeatAt))).toBeLessThan(1_000);
   }, 25_000);
+
+  test('delivers every Codex ASAP prompt through same-turn App Server steering', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-codex-steering-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const requestsPath = path.join(tempRoot, `codex-steering-requests-${port}.jsonl`);
+    const fakeServerPath = path.join(tempRoot, `fake-codex-app-server-${port}.js`);
+    fs.writeFileSync(
+      fakeServerPath,
+      `
+const fs = require('node:fs');
+const readline = require('node:readline');
+const requestsPath = process.argv[2];
+let completionTimer = null;
+let turnSequence = 0;
+let activeTurnId = '';
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+const record = (message) => fs.appendFileSync(requestsPath, JSON.stringify(message) + '\\n');
+readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line) => {
+  const message = JSON.parse(line);
+  record(message);
+  if (message.method === 'initialize') {
+    send({ id: message.id, result: { userAgent: 'fake-codex' } });
+    return;
+  }
+  if (message.method === 'initialized') return;
+  if (message.method === 'thread/start') {
+    send({ id: message.id, result: { thread: { id: 'thread-steering', turns: [] } } });
+    send({ method: 'thread/started', params: { thread: { id: 'thread-steering' } } });
+    return;
+  }
+  if (message.method === 'turn/start') {
+    activeTurnId = 'turn-steering-' + (++turnSequence);
+    const startTurn = () => {
+      send({ id: message.id, result: { turn: { id: activeTurnId, status: 'inProgress', items: [] } } });
+      send({ method: 'turn/started', params: { threadId: 'thread-steering', turn: { id: activeTurnId, status: 'inProgress', items: [] } } });
+      completionTimer = setTimeout(() => {
+        send({ method: 'item/completed', params: { threadId: 'thread-steering', turnId: activeTurnId, completedAtMs: Date.now(), item: { id: 'answer-' + turnSequence, type: 'agentMessage', text: 'Combined steered answer.' } } });
+        send({ method: 'turn/completed', params: { threadId: 'thread-steering', turn: { id: activeTurnId, status: 'completed', items: [] } } });
+      }, 1500);
+    };
+    const prompt = String(message.params?.input?.[0]?.text ?? '');
+    if (prompt.includes('Delayed start')) setTimeout(startTurn, 500);
+    else startTurn();
+    return;
+  }
+  if (message.method === 'turn/steer') {
+    send({ id: message.id, result: { turnId: activeTurnId } });
+    return;
+  }
+  if (message.method === 'turn/interrupt') {
+    if (completionTimer) clearTimeout(completionTimer);
+    send({ id: message.id, result: {} });
+    send({ method: 'turn/completed', params: { threadId: 'thread-steering', turn: { id: activeTurnId, status: 'interrupted', items: [] } } });
+  }
+});
+`,
+      'utf8',
+    );
+
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      { cwd: process.cwd(), stdout: 'ignore', stderr: 'pipe' },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
+    const enqueue = async (id: string, prompt: string, deliveryMode: 'queue' | 'asap') => {
+      const response = await fetch(`${baseUrl}/v1/codex/enqueue`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          id,
+          sessionKey: 'chat-hey',
+          launchScript: `exec ${process.execPath} ${fakeServerPath} ${requestsPath}`,
+          prompt,
+          deliveryMode,
+          approvalPolicy: 'never',
+          sandbox: 'workspace-write',
+        }),
+      });
+      expect(response.status).toBe(202);
+      return await response.json();
+    };
+
+    const rootId = `codex-root-${port}`;
+    const steerOneId = `codex-steer-one-${port}`;
+    const steerTwoId = `codex-steer-two-${port}`;
+    expect((await enqueue(rootId, 'Initial request', 'queue')).disposition).toBe('started');
+    expect((await enqueue(steerOneId, 'First ASAP correction', 'asap')).disposition).toBe(
+      'steered',
+    );
+    expect((await enqueue(steerTwoId, 'Second ASAP correction', 'asap')).disposition).toBe(
+      'steered',
+    );
+
+    const [liveRoot, liveSteerOne, liveSteerTwo] = await Promise.all([
+      waitForRunningPromptJob(
+        baseUrl,
+        token,
+        rootId,
+        (job) => job?.codexAppServer?.outputOwner === false,
+      ),
+      waitForRunningPromptJob(
+        baseUrl,
+        token,
+        steerOneId,
+        (job) => job?.codexAppServer?.outputOwner === false,
+      ),
+      waitForRunningPromptJob(
+        baseUrl,
+        token,
+        steerTwoId,
+        (job) => job?.codexAppServer?.outputOwner === true,
+      ),
+    ]);
+    expect(liveRoot.codexAppServer.outputOwner).toBe(false);
+    expect(liveSteerOne.codexAppServer.outputOwner).toBe(false);
+    expect(liveSteerTwo.codexAppServer.outputOwner).toBe(true);
+
+    const [root, steerOne, steerTwo] = await Promise.all([
+      waitForPromptJob(baseUrl, token, rootId),
+      waitForPromptJob(baseUrl, token, steerOneId),
+      waitForPromptJob(baseUrl, token, steerTwoId),
+    ]);
+    expect(root.codexAppServer.outputOwner).toBe(false);
+    expect(steerOne.codexAppServer.outputOwner).toBe(false);
+    expect(steerTwo.codexAppServer.outputOwner).toBe(true);
+    expect(steerTwo.transcript).toMatchObject({
+      threadId: 'thread-steering',
+      message: 'Combined steered answer.',
+      terminalEvent: 'turn.completed',
+    });
+
+    const requests = fs
+      .readFileSync(requestsPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(requests.filter((request) => request.method === 'turn/start')).toHaveLength(1);
+    const steering = requests.filter((request) => request.method === 'turn/steer');
+    expect(steering).toHaveLength(2);
+    expect(steering.map((request) => request.params.clientUserMessageId)).toEqual([
+      steerOneId,
+      steerTwoId,
+    ]);
+    expect(steering.every((request) => request.params.expectedTurnId === 'turn-steering-1')).toBe(
+      true,
+    );
+
+    const delayedId = `codex-delayed-start-${port}`;
+    const delayedEnqueue = enqueue(delayedId, 'Delayed start cancellation', 'queue');
+    await waitForRunningPromptJob(
+      baseUrl,
+      token,
+      delayedId,
+      (job) => !job?.codexAppServer?.turnId,
+    );
+    const cancelResponse = await fetch(
+      `${baseUrl}/v1/prompts/${encodeURIComponent(delayedId)}/cancel`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+      },
+    );
+    expect(cancelResponse.status).toBe(200);
+    expect((await cancelResponse.json())?.job?.state).toBe('canceled');
+    await delayedEnqueue;
+    const canceled = await waitForTerminalPromptJob(baseUrl, token, delayedId);
+    expect(canceled.state).toBe('canceled');
+  }, 25_000);
 });

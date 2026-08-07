@@ -27,10 +27,7 @@ import { AgentRunSummaryLine } from './WorkingElapsedStatus';
 import { UserChatMessage } from './UserChatMessage';
 import { StoppedRunNotice } from './StoppedRunNotice';
 import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
-import {
-  isSubscriptionEventPrompt,
-  SubscriptionEventMessage,
-} from './SubscriptionEventBadge';
+import { isSubscriptionEventPrompt, SubscriptionEventMessage } from './SubscriptionEventBadge';
 
 function sameAttachments(aRaw: unknown, bRaw: unknown): boolean {
   const a = normalizeImageAttachmentRefs(aRaw);
@@ -88,6 +85,7 @@ export const TranscriptTurn = React.memo(
     const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
     const isSubscriptionEvent = isSubscriptionEventPrompt(item.prompt);
     const isSilentCompletion = item.silentCompletion === true;
+    const isUserOnly = item.userOnly === true;
     const isStopped = !item.ok && isStoppedRunError(item.error);
     const cleaned = isStopped
       ? stripAnsi(item.output || '')
@@ -99,11 +97,13 @@ export const TranscriptTurn = React.memo(
       [cleaned, item.ok],
     );
     const cleanedAgentMessage = agentMessage.text;
-    const activity = isSilentCompletion ? undefined : normalizeAgentRunActivity(item.activity);
+    const activity =
+      isSilentCompletion || isUserOnly ? undefined : normalizeAgentRunActivity(item.activity);
     const activityHasResponse = agentRunActivityHasResponse(activity);
     const activityToolCallCount =
       activity?.messages.reduce((count, message) => count + toolCalls(message).length, 0) ?? 0;
-    const showFallbackResponse = !isSilentCompletion && (!activityHasResponse || !item.ok);
+    const showFallbackResponse =
+      !isSilentCompletion && !isUserOnly && (!activityHasResponse || !item.ok);
     const renderedInlineMediaHrefs = React.useMemo(
       () =>
         collectInlineAgentMedia(cleanedAgentMessage, droneId, droneHomePath)
@@ -153,7 +153,7 @@ export const TranscriptTurn = React.memo(
           />
         )}
 
-        {completedRunDurationMs !== null && !activity && !isSilentCompletion ? (
+        {completedRunDurationMs !== null && !activity && !isSilentCompletion && !isUserOnly ? (
           <AgentRunSummaryLine
             active={false}
             durationMs={completedRunDurationMs}
@@ -342,6 +342,7 @@ export const TranscriptTurn = React.memo(
     a.item.session === b.item.session &&
     a.item.logPath === b.item.logPath &&
     a.item.output === b.item.output &&
+    a.item.userOnly === b.item.userOnly &&
     a.item.silentCompletion === b.item.silentCompletion &&
     sameAgentPlan(a.item.agentPlan, b.item.agentPlan) &&
     (a.item.error ?? '') === (b.item.error ?? '') &&

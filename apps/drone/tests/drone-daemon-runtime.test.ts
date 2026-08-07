@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   assertDroneDaemonRuntimeReady,
   hostDroneDaemonLaunchEnvironment,
+  isDroneDaemonCommandForPort,
   resolveDroneDaemonJsPath,
   resolveDroneDaemonRuntimeDir,
 } from '../src/hub/drone-daemon-runtime';
@@ -70,5 +71,23 @@ describe('drone daemon runtime resolution', () => {
 
     expect(env.PATH?.split(path.delimiter)[0]).toBe(path.dirname(executablePath));
     expect(env.DRONE_TEST_VALUE).toBe('preserved');
+  });
+
+  test('recognizes only the expected host daemon process and port', () => {
+    expect(
+      isDroneDaemonCommandForPort(
+        '/usr/bin/node /opt/drone/dist/daemon.js --host 127.0.0.1 --port 8787',
+        8787,
+      ),
+    ).toBe(true);
+    expect(
+      isDroneDaemonCommandForPort(
+        '/usr/bin/node /opt/drone/dist/daemon.js --host 127.0.0.1 --port 9999',
+        8787,
+      ),
+    ).toBe(false);
+    expect(isDroneDaemonCommandForPort('/usr/bin/node unrelated.js --port 8787', 8787)).toBe(
+      false,
+    );
   });
 });

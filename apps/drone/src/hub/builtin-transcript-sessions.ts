@@ -173,6 +173,7 @@ function createCodexJsonlParser(): {
   let lastModel: string | null = null;
   let lastReasoning: string | null = null;
   let streamedMsg = '';
+  let streamedItemId = 'response-stream';
   let terminalEvent: CodexTerminalEvent | null = null;
   let agentPlan: AgentPlan | undefined;
   let assistantSequence = 0;
@@ -346,9 +347,14 @@ function createCodexJsonlParser(): {
       if (obj.type === 'response.output_text.delta') {
         const delta = takeStringText(obj.delta);
         if (delta) {
+          const nextStreamedItemId = String(obj.item_id ?? obj.itemId ?? '').trim();
+          if (nextStreamedItemId && nextStreamedItemId !== streamedItemId) {
+            streamedMsg = '';
+            streamedItemId = nextStreamedItemId;
+          }
           streamedMsg += delta;
           lastActivityText = streamedMsg;
-          activity.upsertAssistant({ id: 'response-stream', text: streamedMsg });
+          activity.upsertAssistant({ id: streamedItemId, text: streamedMsg });
         }
         return;
       }
@@ -357,7 +363,7 @@ function createCodexJsonlParser(): {
         if (text) {
           lastMsg = text;
           lastActivityText = text;
-          activity.upsertAssistant({ id: 'response-stream', text });
+          activity.upsertAssistant({ id: streamedItemId, text });
         }
         return;
       }

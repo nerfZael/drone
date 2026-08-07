@@ -81,13 +81,13 @@ describe('mobile background recording permission', () => {
     expect(requests).toBe(0);
   });
 
-  test('explains how to recover when notification access is permanently disabled', async () => {
+  test('keeps foreground-service recording available when notification access is denied', async () => {
     await expect(
       ensureMobileBackgroundRecordingPermission({
         platform: 'android',
         platformVersion: 33,
         requestPermission: async () => ({ granted: false, canAskAgain: false }),
       }),
-    ).rejects.toThrow('system settings');
+    ).resolves.toBeUndefined();
   });
 });
