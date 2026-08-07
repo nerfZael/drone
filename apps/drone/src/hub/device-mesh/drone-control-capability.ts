@@ -1,6 +1,7 @@
 import {
   DRONE_CONTROL_CAPABILITY,
   MESH_BINARY_CHUNK_BYTES,
+  MESH_CHAT_PAYLOAD_BYTES,
 } from '@drone/device-protocol';
 import {
   filterCompletedPendingPrompts,
@@ -18,6 +19,7 @@ import {
   compactAgentRunActivityForMesh,
   compactAgentRunFileChangesForMesh,
 } from './drone-chat-page';
+import { trimJsonArrayToBytes } from '../builtin-agent-activity';
 import { isLikelyImagePath, isLikelyVideoPath } from '../filesystem-media';
 import type { RenameDroneCommand } from '../drone-rename-command';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
@@ -75,11 +77,17 @@ function truncateUtf8(value: unknown, maxBytes: number): string {
     .replace(/\uFFFD+$/u, '')}…`;
 }
 
+function serializedBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value));
+}
+
+const MOBILE_PENDING_PROMPTS_MAX_BYTES = 48 * 1024;
+
 function compactPendingPrompts(value: unknown): any[] {
   const prompts = Array.isArray(value) ? value.slice(-50) : [];
   const promptLimit = Math.max(160, Math.floor(8_000 / Math.max(1, prompts.length)));
   const errorLimit = Math.max(80, Math.floor(4_000 / Math.max(1, prompts.length)));
-  return prompts.map((prompt: any) => {
+  const compacted = prompts.map((prompt: any) => {
     const attachments = Array.isArray(prompt?.attachments) ? prompt.attachments : [];
     const startedAt = optionalText(prompt?.startedAt);
     const compactedActivity = compactAgentRunActivityForMesh(prompt?.activity);
@@ -87,8 +95,8 @@ function compactPendingPrompts(value: unknown): any[] {
     const fileChanges = compactAgentRunFileChangesForMesh(prompt?.fileChanges);
     return {
       id: String(prompt?.id ?? '').slice(0, 160),
-      at: String(prompt?.at ?? ''),
-      ...(startedAt ? { startedAt } : {}),
+      at: truncateUtf8(prompt?.at, 128),
+      ...(startedAt ? { startedAt: truncateUtf8(startedAt, 128) } : {}),
       prompt: truncateUtf8(prompt?.prompt, promptLimit),
       state: normalizePendingPromptState(prompt?.state, 'queued'),
       ...(isSendInNewChatQueueAction(prompt?.action) ? { action: prompt.action } : {}),
@@ -101,9 +109,23 @@ function compactPendingPrompts(value: unknown): any[] {
       ...(fileChanges ? { fileChanges } : {}),
       ...(compactedActivity.activity ? { activity: compactedActivity.activity } : {}),
       ...(compactedActivity.truncated ? { activityMeshTruncated: true } : {}),
-      updatedAt: String(prompt?.updatedAt ?? ''),
+      updatedAt: truncateUtf8(prompt?.updatedAt, 128),
     };
   });
+
+  // Plans, file summaries, and activity are each bounded, but several active prompts can still
+  // exceed one mesh response when those optional details are combined. Keep the core state for
+  // every prompt and shed older rich details first so the newest work keeps the richest detail.
+  for (const prompt of compacted) {
+    for (const field of ['fileChanges', 'agentPlan', 'activity'] as const) {
+      if (serializedBytes(compacted) <= MOBILE_PENDING_PROMPTS_MAX_BYTES) return compacted;
+      if (!(field in prompt)) continue;
+      delete prompt[field];
+      prompt.activityMeshTruncated = true;
+    }
+  }
+
+  return trimJsonArrayToBytes(compacted, MOBILE_PENDING_PROMPTS_MAX_BYTES).items;
 }
 
 const CREATE_REPO_BRANCH_PAGE_SIZE = 500;
@@ -1171,22 +1193,18 @@ export function createDroneControlCapability(
             contentChunk: meshJsonContentChunk(turn, payload.contentOffset),
           };
         }
-        const turnPage = boundedDroneChatPage(
+        const pending = filterCompletedPendingPrompts(
+          compactPendingPrompts(result?.pending),
           result.transcripts,
-          legacyTranscriptLoaded ? payload.before : undefined,
         );
-        return {
+        const metadata = {
           droneId,
           chatName,
           historyKind: 'turns',
-          ...turnPage,
           agent: result.agent ?? null,
           model: result.model ?? null,
           reasoning: result.reasoning ?? null,
-          pending: filterCompletedPendingPrompts(
-            compactPendingPrompts(result?.pending),
-            result.transcripts,
-          ),
+          pending,
           readState: marked?.readState ?? result?.readState ?? null,
           agentPermissionMode:
             result.agentPermissionMode === 'read-only' ||
@@ -1198,6 +1216,18 @@ export function createDroneControlCapability(
               ? result.approvalPolicy
               : 'ask',
           ...(subscriptions ? { subscriptions } : {}),
+        };
+        const turnBudget = Math.max(
+          16 * 1024,
+          MESH_CHAT_PAYLOAD_BYTES - serializedBytes(metadata) - 1_024,
+        );
+        return {
+          ...metadata,
+          ...boundedDroneChatPage(
+            result.transcripts,
+            legacyTranscriptLoaded ? payload.before : undefined,
+            turnBudget,
+          ),
         };
       }
       if (operation === 'chat.models') {
