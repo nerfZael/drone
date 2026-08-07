@@ -147,6 +147,17 @@ export function registerOperationalRoutes(
         audio,
         apiKey: groqSettings.apiKey,
         mimeType,
+        quality: req.headers['x-drone-transcription-quality'] === 'accurate' ? 'accurate' : 'fast',
+        language: String(req.headers['x-drone-transcription-language'] ?? '').trim() || null,
+        prompt: (() => {
+          const encoded = String(req.headers['x-drone-transcription-prompt-base64'] ?? '').trim();
+          if (!encoded) return null;
+          try {
+            return Buffer.from(encoded.slice(0, 8_000), 'base64').toString('utf8').slice(-1_200) || null;
+          } catch {
+            return null;
+          }
+        })(),
       });
       json(200, { ok: true, ...transcription });
     } catch (error) {

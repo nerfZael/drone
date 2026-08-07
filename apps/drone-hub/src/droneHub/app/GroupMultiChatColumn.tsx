@@ -558,6 +558,7 @@ export function GroupMultiChatColumn({
       const optimisticItem = createOptimisticPendingPrompt({
         prompt,
         attachments,
+        ...(payload.promptId ? { id: payload.promptId } : {}),
         state: optimisticPendingPromptState(waitingForAgent),
       });
       const optimisticId = String(optimisticItem?.id ?? '').trim();

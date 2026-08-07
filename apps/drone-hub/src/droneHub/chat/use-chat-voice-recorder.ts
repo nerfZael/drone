@@ -106,11 +106,32 @@ export function floatToPcm16(input: Float32Array, sourceSampleRate = CHAT_VOICE_
   return output.buffer;
 }
 
-export async function transcribeChatVoiceWav(wav: ArrayBuffer): Promise<string> {
+export async function transcribeChatVoiceWav(
+  wav: ArrayBuffer,
+  options: {
+    quality?: 'fast' | 'accurate';
+    language?: string | null;
+    prompt?: string | null;
+    signal?: AbortSignal;
+  } = {},
+): Promise<string> {
+  const promptBytes = options.prompt ? new TextEncoder().encode(options.prompt.slice(-1_200)) : null;
+  let promptBase64 = '';
+  if (promptBytes) {
+    let binary = '';
+    for (const byte of promptBytes) binary += String.fromCharCode(byte);
+    promptBase64 = window.btoa(binary);
+  }
   const response = await fetch('/api/audio/transcriptions', {
     method: 'POST',
-    headers: { 'content-type': 'audio/wav' },
+    headers: {
+      'content-type': 'audio/wav',
+      ...(options.quality ? { 'x-drone-transcription-quality': options.quality } : {}),
+      ...(options.language ? { 'x-drone-transcription-language': options.language } : {}),
+      ...(promptBase64 ? { 'x-drone-transcription-prompt-base64': promptBase64 } : {}),
+    },
     body: wav,
+    signal: options.signal,
   });
   const raw = await response.text();
   let data: TranscriptionResponse | null = null;

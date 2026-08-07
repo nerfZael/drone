@@ -58,6 +58,15 @@ describe('Hub request infrastructure', () => {
     expect(handled).toBe(true);
     expect(allowedResponse.statusCode).toBe(204);
     expect(allowedResponse.getHeader('access-control-allow-origin')).toBe('http://hub.test');
+    expect(allowedResponse.getHeader('access-control-allow-headers')).toContain(
+      'x-drone-transcription-quality',
+    );
+    expect(allowedResponse.getHeader('access-control-allow-headers')).toContain(
+      'x-drone-transcription-language',
+    );
+    expect(allowedResponse.getHeader('access-control-allow-headers')).toContain(
+      'x-drone-transcription-prompt-base64',
+    );
 
     const deniedResponse = response();
     expect(

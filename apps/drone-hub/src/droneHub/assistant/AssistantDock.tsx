@@ -1293,6 +1293,7 @@ export function AssistantDock({
                 model: activeThread.model,
                 thinkingLevel: activeThread.thinkingLevel,
                 deliveryMode,
+                ...(sharedPayload.promptId ? { promptId: sharedPayload.promptId } : {}),
               }),
             },
           );

@@ -122,7 +122,15 @@ export function withCors(
   res.setHeader('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader(
     'access-control-allow-headers',
-    'content-type,authorization,if-none-match,mcp-session-id',
+    [
+      'content-type',
+      'authorization',
+      'if-none-match',
+      'mcp-session-id',
+      'x-drone-transcription-quality',
+      'x-drone-transcription-language',
+      'x-drone-transcription-prompt-base64',
+    ].join(','),
   );
   res.setHeader('access-control-expose-headers', 'etag,mcp-session-id,server-timing');
   res.setHeader('access-control-max-age', '600');

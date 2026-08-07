@@ -531,4 +531,35 @@ describe('extracted Hub route modules', () => {
       },
     ]);
   });
+
+  test('validates and saves continuous voice input settings', async () => {
+    const requested = {
+      endThoughtPreset: 'patient',
+      customSilenceMillis: 3_000,
+      noiseHandling: 'noisy',
+      language: 'hr-HR',
+      quality: 'accurate',
+      confirmationFeedback: true,
+    };
+    const { router, request, responses } = routeHarness(requested);
+    let stored: any = null;
+    registerSettingsRoutes(router, {
+      upsertStoredVoiceInputSettings: async (input: unknown) => {
+        stored = input;
+      },
+      resolveVoiceInputSettingsResponse: async () => ({
+        ok: true,
+        voiceInput: { ...requested, silenceMillis: 4_000 },
+      }),
+    } as any);
+
+    expect(await request('POST', '/api/settings/voice-input')).toBe(true);
+    expect(stored).toEqual(requested);
+    expect(responses).toEqual([
+      {
+        status: 200,
+        body: { ok: true, voiceInput: { ...requested, silenceMillis: 4_000 } },
+      },
+    ]);
+  });
 });

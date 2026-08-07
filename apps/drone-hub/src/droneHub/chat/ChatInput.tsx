@@ -27,6 +27,10 @@ import {
   useChatVoiceRecorder,
 } from './use-chat-voice-recorder';
 import {
+  continuousVoiceStatusLabel,
+  useContinuousChatVoice,
+} from './use-continuous-chat-voice';
+import {
   ChatComposerEditor,
   type ChatComposerEditorHandle,
   type ChatComposerSelection,
@@ -128,6 +132,7 @@ export type ChatImageAttachmentPayload = ChatAttachmentPayload;
 export type ChatSendPayload = {
   prompt: string;
   attachments: ChatAttachmentPayload[];
+  promptId?: string;
 };
 
 export type ChatSendContext = {
@@ -156,6 +161,7 @@ export type ChatInputProps = {
   composerFooter?: React.ReactNode;
   alwaysExpanded?: boolean;
   allowSendWhileWaiting?: boolean;
+  continuousVoiceEnabled?: boolean;
   onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onSendInNewChat?: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onPublish?: () => Promise<boolean> | boolean;
@@ -185,6 +191,7 @@ export function ChatInput({
   composerFooter,
   alwaysExpanded = false,
   allowSendWhileWaiting = false,
+  continuousVoiceEnabled = true,
   onSend,
   onSendInNewChat,
   onPublish,
@@ -308,6 +315,23 @@ export function ChatInput({
       setAttachmentError(message.trim() ? message : null);
     }, []),
   });
+  const continuousVoice = useContinuousChatVoice({
+    resetKey,
+    onTranscript: React.useCallback(
+      async (text: string, deliveryId: string) =>
+        await onSend(
+          { prompt: text, attachments: [], promptId: deliveryId },
+          {
+            trigger: 'button',
+            deliveryMode: allowSendWhileWaiting ? 'asap' : 'queue',
+          },
+        ),
+      [allowSendWhileWaiting, onSend],
+    ),
+    onError: React.useCallback((message) => {
+      setAttachmentError(message.trim() ? message : null);
+    }, []),
+  });
 
   const resizeTextarea = React.useCallback(() => {
     const el = textareaRef.current;
@@ -353,6 +377,7 @@ export function ChatInput({
   }, [draft, resetKey, resizeTextarea]);
 
   const voiceRecordingActive = voiceRecordingStatus !== 'idle';
+  const continuousVoiceActive = continuousVoice.status !== 'idle';
   const showStopAction = chatResponseStopVisible({
     waiting,
     hasStopAction: typeof onStop === 'function',
@@ -362,7 +387,9 @@ export function ChatInput({
   const hasModeHint = modeHint.trim().length > 0;
   const voiceRecordingCanPauseOrStop =
     voiceRecordingStatus === 'recording' || voiceRecordingStatus === 'paused';
-  const voiceRecordButtonDisabled = composerLocked || voiceActionInFlight;
+  const voiceRecordButtonDisabled = composerLocked || voiceActionInFlight || continuousVoiceActive;
+  const continuousVoiceButtonDisabled =
+    !continuousVoiceEnabled || composerLocked || voiceActionInFlight || voiceRecordingActive;
   const voicePauseButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const voiceStopButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const trimmed = draft.trim();
@@ -378,6 +405,7 @@ export function ChatInput({
     attachments.length > 0 ||
     Boolean(composerContext) ||
     Boolean(promptError || attachmentError) ||
+    continuousVoiceActive ||
     (voiceRecordingActive && !compactVoiceRecording);
   const voiceRecordingLabel =
     voiceRecordingStatus === 'starting'
@@ -390,6 +418,11 @@ export function ChatInput({
             ? 'Transcribing…'
             : '';
   const voiceRecordingDuration = formatChatVoiceDuration(voiceRecordingDurationMillis);
+  const continuousVoiceDuration = formatChatVoiceDuration(continuousVoice.durationMillis);
+  const continuousVoiceLabel = continuousVoiceStatusLabel(
+    continuousVoice.status,
+    continuousVoice.pendingCount,
+  );
 
   React.useEffect(() => {
     if (editorMode) preloadMonacoEditor();
@@ -1181,6 +1214,25 @@ export function ChatInput({
                     <path d="M12 18v3" />
                   </svg>
                 </button>
+                <button
+                  type="button"
+                  data-chat-composer-collapsed-action="true"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => void continuousVoice.start()}
+                  disabled={continuousVoiceButtonDisabled}
+                  className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--accent)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Start continuous voice steering"
+                  aria-label="Start continuous voice steering"
+                  aria-pressed="false"
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 12h2" />
+                    <path d="M8 8v8" />
+                    <path d="M12 5v14" />
+                    <path d="M16 8v8" />
+                    <path d="M20 12h0" />
+                  </svg>
+                </button>
                 {showStopAction ? (
                   <button
                     type="button"
@@ -1222,6 +1274,32 @@ export function ChatInput({
             </div>
           ) : null}
 
+          {continuousVoiceActive ? (
+            <div className="flex items-center gap-[.4375rem] px-3 pb-2 pt-[.3125rem] text-[.625rem] font-medium tracking-[.015625rem]">
+              <span
+                className={`h-[.4375rem] w-[.4375rem] rounded-full ${
+                  continuousVoice.status === 'error'
+                    ? 'bg-[var(--red)]'
+                    : continuousVoice.status === 'paused'
+                      ? 'bg-[var(--yellow)]'
+                      : continuousVoice.status === 'speech'
+                        ? 'bg-[var(--green)]'
+                        : 'bg-[var(--accent)]'
+                }`}
+                aria-hidden="true"
+              />
+              <span className="text-[var(--accent)]" aria-live="polite">
+                {continuousVoiceLabel}
+              </span>
+              <span
+                className="font-mono text-[.6875rem] font-normal tabular-nums tracking-normal text-[var(--chat-composer-fg)]"
+                aria-label={`${continuousVoiceDuration} elapsed`}
+              >
+                {continuousVoiceDuration}
+              </span>
+            </div>
+          ) : null}
+
           {composerExpanded ? (
             <div
               className={`flex min-h-[2.9375rem] flex-wrap items-center gap-[.4375rem] px-[.5625rem] pb-[.5625rem] ${
@@ -1248,6 +1326,20 @@ export function ChatInput({
                     <path d="M18 6L6 18" />
                   </svg>
                 </button>
+              ) : continuousVoiceActive ? (
+                <button
+                  type="button"
+                  onMouseDown={preserveEditorFocus}
+                  onClick={() => void continuousVoice.cancel()}
+                  className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-opacity hover:opacity-70"
+                  title="Cancel continuous voice and discard unsent audio"
+                  aria-label="Cancel continuous voice and discard unsent audio"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                    <path d="M6 6l12 12" />
+                    <path d="M18 6L6 18" />
+                  </svg>
+                </button>
               ) : attachmentsOn ? (
                 <button
                   type="button"
@@ -1266,11 +1358,11 @@ export function ChatInput({
 
               <div className="min-w-2 flex-1" />
 
-              {!voiceRecordingActive ? composerStatus : null}
+              {!voiceRecordingActive && !continuousVoiceActive ? composerStatus : null}
 
-              {!voiceRecordingActive ? <ChatComposerControls config={composerControls} /> : null}
+              {!voiceRecordingActive && !continuousVoiceActive ? <ChatComposerControls config={composerControls} /> : null}
 
-              {!voiceRecordingActive && onPublish ? (
+              {!voiceRecordingActive && !continuousVoiceActive && onPublish ? (
               <button
                 type="button"
                 onClick={() => {
@@ -1328,7 +1420,44 @@ export function ChatInput({
                     </svg>
                   </button>
                 </>
+              ) : continuousVoiceActive ? (
+                <>
+                  <button
+                    type="button"
+                    onMouseDown={preserveEditorFocus}
+                    onClick={continuousVoice.togglePause}
+                    disabled={continuousVoice.status === 'starting' || continuousVoice.status === 'stopping'}
+                    className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                    title={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? 'Resume continuous voice' : 'Pause continuous voice'}
+                    aria-label={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? 'Resume continuous voice' : 'Pause continuous voice'}
+                  >
+                    {continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M8 5v14l11-7Z" />
+                      </svg>
+                    ) : (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                        <path d="M9 5v14" />
+                        <path d="M15 5v14" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={preserveEditorFocus}
+                    onClick={() => void continuousVoice.stop()}
+                    disabled={continuousVoice.status === 'starting' || continuousVoice.status === 'stopping' || continuousVoice.status === 'error'}
+                    className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                    title="Stop continuous voice after pending thoughts are sent"
+                    aria-label="Stop continuous voice after pending thoughts are sent"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <rect x="7" y="7" width="10" height="10" rx="1" />
+                    </svg>
+                  </button>
+                </>
               ) : (
+                <>
                 <button
                   type="button"
                   onMouseDown={preserveEditorFocus}
@@ -1347,6 +1476,25 @@ export function ChatInput({
                     <path d="M12 18v3" />
                   </svg>
                 </button>
+                <button
+                  type="button"
+                  onMouseDown={preserveEditorFocus}
+                  onClick={() => void continuousVoice.start()}
+                  disabled={continuousVoiceButtonDisabled}
+                  className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Start continuous voice steering"
+                  aria-label="Start continuous voice steering"
+                  aria-pressed="false"
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 12h2" />
+                    <path d="M8 8v8" />
+                    <path d="M12 5v14" />
+                    <path d="M16 8v8" />
+                    <path d="M20 12h0" />
+                  </svg>
+                </button>
+                </>
               )}
 
               {showSeparateStopAction ? (

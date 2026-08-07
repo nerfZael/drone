@@ -454,8 +454,8 @@ function RemoteMain({
             attachmentMode={model.attachmentMode}
             onStop={model.waiting ? model.stop : undefined}
             stopping={model.stopping}
-            onSend={async ({ prompt, attachments }, context) =>
-              await model.sendPrompt(prompt, attachments, context.deliveryMode)
+            onSend={async ({ prompt, attachments, promptId }, context) =>
+              await model.sendPrompt(prompt, attachments, context.deliveryMode, promptId)
             }
           />
         </>

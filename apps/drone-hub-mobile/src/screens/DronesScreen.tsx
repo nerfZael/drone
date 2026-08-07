@@ -1302,6 +1302,8 @@ export function DronesScreen({
     chatName: string;
     prompt: string;
     attachments: readonly MobileChatAttachment[];
+    deliveryMode?: 'queue' | 'asap';
+    promptId?: string;
   }) => {
     const userTimeZone = clientTimeZone();
     if (input.destinationId === mesh.identity?.id) {
@@ -1309,6 +1311,8 @@ export function DronesScreen({
         droneId: input.droneId,
         chatName: input.chatName,
         prompt: input.prompt,
+        ...(input.deliveryMode ? { deliveryMode: input.deliveryMode } : {}),
+        ...(input.promptId ? { promptId: input.promptId } : {}),
         ...(userTimeZone ? { userTimeZone } : {}),
         ...(input.attachments.length > 0
           ? { attachments: inlinePromptAttachments(input.attachments) }
@@ -1333,6 +1337,8 @@ export function DronesScreen({
         droneId: input.droneId,
         chatName: input.chatName,
         prompt: input.prompt,
+        ...(input.deliveryMode ? { deliveryMode: input.deliveryMode } : {}),
+        ...(input.promptId ? { promptId: input.promptId } : {}),
         ...(userTimeZone ? { userTimeZone } : {}),
         ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
       });
@@ -1350,27 +1356,38 @@ export function DronesScreen({
     }
   };
 
-  const sendPrompt = (promptOverride?: string) => {
+  const sendPrompt = async (
+    promptOverride?: string,
+    deliveryMode?: 'queue' | 'asap',
+    requestedPromptId?: string,
+    preserveComposer = false,
+  ): Promise<boolean> => {
     const nextPrompt = String(promptOverride ?? prompt);
-    const attachments = promptAttachments;
-    if (!selected || (!nextPrompt.trim() && attachments.length === 0)) return;
-    const optimisticId = `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const attachments = preserveComposer ? [] : promptAttachments;
+    if (!selected || (!nextPrompt.trim() && attachments.length === 0)) return false;
+    let accepted = false;
+    const optimisticId =
+      requestedPromptId || `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const promptSummary = nextPrompt.trim();
-    setPrompt('');
-    setPromptAttachments([]);
-    promptRef.current = '';
-    promptAttachmentsRef.current = [];
-    setPendingPrompts((current) => [
-      ...current,
-      optimisticMobilePendingPrompt({
+    if (!preserveComposer) {
+      setPrompt('');
+      setPromptAttachments([]);
+      promptRef.current = '';
+      promptAttachmentsRef.current = [];
+    }
+    setPendingPrompts((current) => {
+      const optimistic = optimisticMobilePendingPrompt({
         id: optimisticId,
         prompt: promptSummary,
         attachmentCount: attachments.length,
         imageCount: attachments.filter((attachment) => attachment.mime.startsWith('image/')).length,
-        state: running ? 'queued' : 'sending',
-      }),
-    ]);
-    return run('prompt', async () => {
+        state: running && deliveryMode !== 'asap' ? 'queued' : 'sending',
+      });
+      // A continuous-voice retry reuses its delivery ID. Replace any failed
+      // optimistic row from the prior attempt instead of rendering a duplicate.
+      return [...current.filter((item) => String(item?.id ?? '') !== optimisticId), optimistic];
+    });
+    await run('prompt', async () => {
       const destinationId = targetId;
       const droneId = selected.id;
       const activeChat = chatName;
@@ -1382,6 +1399,8 @@ export function DronesScreen({
           chatName: activeChat,
           prompt: nextPrompt,
           attachments,
+          deliveryMode,
+          promptId: requestedPromptId,
         });
       } catch (nextError: any) {
         setPendingPrompts((current) =>
@@ -1396,6 +1415,7 @@ export function DronesScreen({
           ),
         );
         if (
+          !preserveComposer &&
           targetIdRef.current === destinationId &&
           selectedRef.current?.id === droneId &&
           chatNameRef.current === activeChat &&
@@ -1409,6 +1429,7 @@ export function DronesScreen({
         }
         throw nextError;
       }
+      accepted = true;
       if (targetIdRef.current !== destinationId) return;
       const promptId = String(result?.promptId ?? '').trim();
       const queuedPromptId = String(result?.queuedPrompt?.id ?? '').trim();
@@ -1416,7 +1437,7 @@ export function DronesScreen({
       const acceptedPromptState = confirmedMobilePendingPromptState({
         pendingState: result?.pendingState,
         queuedPromptId,
-        optimisticState: running ? 'queued' : 'sending',
+        optimisticState: running && deliveryMode !== 'asap' ? 'queued' : 'sending',
       });
       if (acceptedPromptId)
         setPendingPrompts((current) =>
@@ -1430,6 +1451,7 @@ export function DronesScreen({
       await readChat(droneId, activeChat);
       await loadDrones(true);
     });
+    return accepted;
   };
 
   const waitForCreatedDrone = async (destinationId: string, droneId: string): Promise<void> => {
@@ -2923,7 +2945,9 @@ export function DronesScreen({
                       voiceResetKey={`${targetId}:${selected.id}:${chatName}`}
                       value={prompt}
                       onChangeText={setPrompt}
-                      onSend={(promptOverride) => void sendPrompt(promptOverride)}
+                      onSend={async (promptOverride, deliveryMode, promptId, preserveComposer) =>
+                        await sendPrompt(promptOverride, deliveryMode, promptId, preserveComposer)
+                      }
                       onStop={() => void stopChat()}
                       onOpenModel={() => void openModelPicker()}
                       modelLabel={displayedModel}

@@ -119,6 +119,17 @@ export type SpeechSettings = {
   volume: number;
   voice: GroqSpeechVoice;
 };
+export type VoiceInputEndThoughtPreset = 'quick' | 'balanced' | 'patient' | 'custom';
+export type VoiceInputNoiseHandling = 'auto' | 'quiet' | 'noisy';
+export type VoiceInputTranscriptionQuality = 'fast' | 'accurate';
+export type VoiceInputSettings = {
+  endThoughtPreset: VoiceInputEndThoughtPreset;
+  customSilenceMillis: number;
+  noiseHandling: VoiceInputNoiseHandling;
+  language: string | null;
+  quality: VoiceInputTranscriptionQuality;
+  confirmationFeedback: boolean;
+};
 export type UiPreferencesSettings = {
   sidebarGroupingMode: SidebarGroupingMode;
   sidebarDensityMode: 'compact' | 'default' | 'comfortable';
@@ -160,6 +171,29 @@ export const DEFAULT_SPEECH_SETTINGS: SpeechSettings = {
   volume: 1,
   voice: 'troy',
 };
+export const DEFAULT_VOICE_INPUT_SETTINGS: VoiceInputSettings = {
+  endThoughtPreset: 'balanced',
+  customSilenceMillis: 2_500,
+  noiseHandling: 'auto',
+  language: null,
+  quality: 'fast',
+  confirmationFeedback: false,
+};
+
+export const VOICE_INPUT_SILENCE_MILLIS_BY_PRESET: Record<
+  Exclude<VoiceInputEndThoughtPreset, 'custom'>,
+  number
+> = {
+  quick: 1_500,
+  balanced: 2_500,
+  patient: 4_000,
+};
+
+export function resolveVoiceInputSilenceMillis(settings: VoiceInputSettings): number {
+  return settings.endThoughtPreset === 'custom'
+    ? settings.customSilenceMillis
+    : VOICE_INPUT_SILENCE_MILLIS_BY_PRESET[settings.endThoughtPreset];
+}
 
 export function parseLlmProvider(raw: unknown): LlmProviderId | null {
   const s = String(raw ?? '')
@@ -327,6 +361,7 @@ const SETTING_KEYS = {
   deleteAction: 'delete-action',
   filesystem: 'filesystem',
   speech: 'speech',
+  voiceInput: 'voice-input',
   userContext: 'user-context',
 } as const;
 
@@ -879,6 +914,119 @@ export async function resolveSpeechSettingsResponse(): Promise<{
     speech: {
       ...(await resolveEffectiveSpeechSettings()),
       voices: GROQ_SPEECH_VOICES,
+    },
+  };
+}
+
+function parseVoiceInputPreset(raw: unknown): VoiceInputEndThoughtPreset | null {
+  const value = String(raw ?? '').trim().toLowerCase();
+  return value === 'quick' || value === 'balanced' || value === 'patient' || value === 'custom'
+    ? value
+    : null;
+}
+
+function parseVoiceInputNoiseHandling(raw: unknown): VoiceInputNoiseHandling | null {
+  const value = String(raw ?? '').trim().toLowerCase();
+  return value === 'auto' || value === 'quiet' || value === 'noisy' ? value : null;
+}
+
+function parseVoiceInputQuality(raw: unknown): VoiceInputTranscriptionQuality | null {
+  const value = String(raw ?? '').trim().toLowerCase();
+  return value === 'fast' || value === 'accurate' ? value : null;
+}
+
+function parseVoiceInputLanguage(raw: unknown): string | null {
+  const value = String(raw ?? '').trim();
+  if (!value || value.toLowerCase() === 'auto') return null;
+  if (value.length > 35 || !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(value)) return null;
+  return value;
+}
+
+function parseVoiceInputCustomSilenceMillis(raw: unknown): number | null {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return null;
+  const rounded = Math.round(value);
+  return rounded >= 1_000 && rounded <= 10_000 ? rounded : null;
+}
+
+export async function resolveEffectiveVoiceInputSettings(): Promise<VoiceInputSettings> {
+  const record = await getCanonicalSetting<Partial<VoiceInputSettings>>(
+    SETTING_KEYS.voiceInput,
+    () => null,
+  );
+  const stored = record?.value;
+  return {
+    endThoughtPreset:
+      parseVoiceInputPreset(stored?.endThoughtPreset) ?? DEFAULT_VOICE_INPUT_SETTINGS.endThoughtPreset,
+    customSilenceMillis:
+      parseVoiceInputCustomSilenceMillis(stored?.customSilenceMillis) ??
+      DEFAULT_VOICE_INPUT_SETTINGS.customSilenceMillis,
+    noiseHandling:
+      parseVoiceInputNoiseHandling(stored?.noiseHandling) ?? DEFAULT_VOICE_INPUT_SETTINGS.noiseHandling,
+    language: parseVoiceInputLanguage(stored?.language),
+    quality: parseVoiceInputQuality(stored?.quality) ?? DEFAULT_VOICE_INPUT_SETTINGS.quality,
+    confirmationFeedback:
+      typeof stored?.confirmationFeedback === 'boolean'
+        ? stored.confirmationFeedback
+        : DEFAULT_VOICE_INPUT_SETTINGS.confirmationFeedback,
+  };
+}
+
+export async function upsertStoredVoiceInputSettings(
+  input: Partial<VoiceInputSettings>,
+): Promise<void> {
+  const preset = input.endThoughtPreset == null ? null : parseVoiceInputPreset(input.endThoughtPreset);
+  if (input.endThoughtPreset != null && !preset) throw new Error('endThoughtPreset is not supported');
+  const silence =
+    input.customSilenceMillis == null
+      ? null
+      : parseVoiceInputCustomSilenceMillis(input.customSilenceMillis);
+  if (input.customSilenceMillis != null && silence == null) {
+    throw new Error('customSilenceMillis must be between 1000 and 10000');
+  }
+  const noise = input.noiseHandling == null ? null : parseVoiceInputNoiseHandling(input.noiseHandling);
+  if (input.noiseHandling != null && !noise) throw new Error('noiseHandling is not supported');
+  const quality = input.quality == null ? null : parseVoiceInputQuality(input.quality);
+  if (input.quality != null && !quality) throw new Error('quality is not supported');
+  const languageInput = String(input.language ?? '').trim();
+  const language = input.language == null ? null : parseVoiceInputLanguage(input.language);
+  if (
+    input.language != null &&
+    languageInput &&
+    languageInput.toLowerCase() !== 'auto' &&
+    !language
+  ) {
+    throw new Error('language must be Auto or a valid language tag');
+  }
+  if (input.confirmationFeedback != null && typeof input.confirmationFeedback !== 'boolean') {
+    throw new Error('confirmationFeedback must be a boolean');
+  }
+  const current = await resolveEffectiveVoiceInputSettings();
+  await putCanonicalSetting(SETTING_KEYS.voiceInput, {
+    endThoughtPreset: preset ?? current.endThoughtPreset,
+    customSilenceMillis: silence ?? current.customSilenceMillis,
+    noiseHandling: noise ?? current.noiseHandling,
+    language:
+      input.language === undefined
+        ? current.language
+        : !languageInput || languageInput.toLowerCase() === 'auto'
+          ? null
+          : language,
+    quality: quality ?? current.quality,
+    confirmationFeedback: input.confirmationFeedback ?? current.confirmationFeedback,
+  });
+}
+
+export async function resolveVoiceInputSettingsResponse(): Promise<{
+  ok: true;
+  voiceInput: VoiceInputSettings & { silenceMillis: number };
+}> {
+  const settings = await resolveEffectiveVoiceInputSettings();
+  return {
+    ok: true,
+    voiceInput: {
+      ...settings,
+      silenceMillis: resolveVoiceInputSilenceMillis(settings),
     },
   };
 }

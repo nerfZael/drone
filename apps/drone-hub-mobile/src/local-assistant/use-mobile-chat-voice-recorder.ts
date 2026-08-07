@@ -13,7 +13,10 @@ import {
 } from 'expo-audio';
 import { File } from 'expo-file-system';
 import { readGroqApiKey } from './local-assistant-settings';
-import { ensureMobileRecordingPermission } from './mobile-recording-permission';
+import {
+  ensureMobileBackgroundRecordingPermission,
+  ensureMobileRecordingPermission,
+} from './mobile-recording-permission';
 import { transcribeMobileVoiceRecording } from './mobile-groq-transcription';
 import {
   MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES,
@@ -61,14 +64,11 @@ async function waitForAppForeground(): Promise<boolean> {
 }
 
 async function ensureBackgroundRecordingPermission(): Promise<void> {
-  if (Platform.OS !== 'android' || Number(Platform.Version) < 33) return;
-  const permission = await requestNotificationPermissionsAsync();
-  if (permission.granted) return;
-  throw new Error(
-    permission.canAskAgain === false
-      ? 'Notification permission is disabled. Enable it in the phone’s system settings to record while the screen is locked.'
-      : 'Notification permission is required to keep recording while the screen is locked.',
-  );
+  await ensureMobileBackgroundRecordingPermission({
+    platform: Platform.OS,
+    platformVersion: Number(Platform.Version),
+    requestPermission: requestNotificationPermissionsAsync,
+  });
 }
 
 export function useMobileChatVoiceRecorder({

@@ -1,0 +1,628 @@
+diff --git a/src/AudioStream.ts b/src/AudioStream.ts
+index e93e8d92..aa4b640c 100644
+--- a/src/AudioStream.ts
++++ b/src/AudioStream.ts
+@@ -16,10 +16,12 @@ import type {
+  * Requires microphone permission via `requestRecordingPermissionsAsync()`.
+  */
+ export function useAudioStream(options: AudioStreamOptions = {}): AudioStreamResult {
+-  const { sampleRate = 48000, channels = 1, encoding = 'float32', onBuffer } = options;
++  const { sampleRate = 48000, channels = 1, encoding = 'float32', onBuffer, onStatus } = options;
+   const [isStreaming, setIsStreaming] = useState(false);
+   const onBufferRef = useRef(onBuffer);
+   onBufferRef.current = onBuffer;
++  const onStatusRef = useRef(onStatus);
++  onStatusRef.current = onStatus;
+ 
+   const stream = useReleasingSharedObject(
+     () =>
+@@ -34,6 +36,7 @@ export function useAudioStream(options: AudioStreamOptions = {}): AudioStreamRes
+   useEffect(() => {
+     const statusSub = stream.addListener(AUDIO_STREAM_STATUS, (status: AudioStreamStatus) => {
+       setIsStreaming(status.isStreaming);
++      onStatusRef.current?.(status);
+     });
+ 
+     const bufferSub = stream.addListener(AUDIO_STREAM_BUFFER, (buffer: AudioStreamBuffer) => {
+diff --git a/src/AudioStream.types.ts b/src/AudioStream.types.ts
+index 1f4bc46b..02b9af22 100644
+--- a/src/AudioStream.types.ts
++++ b/src/AudioStream.types.ts
+@@ -26,6 +26,9 @@ export type AudioStreamOptions = {
+    * Called each time a new PCM buffer is captured from the microphone.
+    */
+   onBuffer?: (buffer: AudioStreamBuffer) => void;
++
++  /** Called when capture starts, stops, or is temporarily interrupted. */
++  onStatus?: (status: AudioStreamStatus) => void;
+ };
+ 
+ export type AudioStreamBuffer = {
+@@ -50,6 +53,7 @@ export type AudioStreamBuffer = {
+ 
+ export type AudioStreamStatus = {
+   isStreaming: boolean;
++  reason?: 'started' | 'stopped' | 'interrupted' | 'system-control';
+ };
+ 
+ export type AudioStreamEvents = {
+diff --git a/build/AudioStream.js b/build/AudioStream.js
+index 2354b368..9f73e404 100644
+--- a/build/AudioStream.js
++++ b/build/AudioStream.js
+@@ -8,10 +8,12 @@ import AudioModule from './AudioModule';
+  * Requires microphone permission via `requestRecordingPermissionsAsync()`.
+  */
+ export function useAudioStream(options = {}) {
+-    const { sampleRate = 48000, channels = 1, encoding = 'float32', onBuffer } = options;
++    const { sampleRate = 48000, channels = 1, encoding = 'float32', onBuffer, onStatus } = options;
+     const [isStreaming, setIsStreaming] = useState(false);
+     const onBufferRef = useRef(onBuffer);
+     onBufferRef.current = onBuffer;
++    const onStatusRef = useRef(onStatus);
++    onStatusRef.current = onStatus;
+     const stream = useReleasingSharedObject(() => new AudioModule.AudioStream({
+         sampleRate,
+         channels,
+@@ -20,6 +22,7 @@ export function useAudioStream(options = {}) {
+     useEffect(() => {
+         const statusSub = stream.addListener(AUDIO_STREAM_STATUS, (status) => {
+             setIsStreaming(status.isStreaming);
++            onStatusRef.current?.(status);
+         });
+         const bufferSub = stream.addListener(AUDIO_STREAM_BUFFER, (buffer) => {
+             onBufferRef.current?.(buffer);
+@@ -31,4 +34,4 @@ export function useAudioStream(options = {}) {
+     }, [stream.id]);
+     return { stream, isStreaming };
+ }
+-//# sourceMappingURL=AudioStream.js.map
+\ No newline at end of file
++//# sourceMappingURL=AudioStream.js.map
+diff --git a/build/AudioStream.types.d.ts b/build/AudioStream.types.d.ts
+index da91d060..155bb8b8 100644
+--- a/build/AudioStream.types.d.ts
++++ b/build/AudioStream.types.d.ts
+@@ -21,6 +21,8 @@ export type AudioStreamOptions = {
+      * Called each time a new PCM buffer is captured from the microphone.
+      */
+     onBuffer?: (buffer: AudioStreamBuffer) => void;
++    /** Called when capture starts, stops, or is temporarily interrupted. */
++    onStatus?: (status: AudioStreamStatus) => void;
+ };
+ export type AudioStreamBuffer = {
+     /**
+@@ -40,6 +42,7 @@ export type AudioStreamBuffer = {
+ };
+ export type AudioStreamStatus = {
+     isStreaming: boolean;
++    reason?: 'started' | 'stopped' | 'interrupted' | 'system-control';
+ };
+ export type AudioStreamEvents = {
+     audioStreamBuffer(buffer: AudioStreamBuffer): void;
+@@ -73,4 +76,4 @@ export declare class AudioStream extends SharedObject<AudioStreamEvents> {
+     /** Stops capturing and releases native audio resources. */
+     stop(): void;
+ }
+-//# sourceMappingURL=AudioStream.types.d.ts.map
+\ No newline at end of file
++//# sourceMappingURL=AudioStream.types.d.ts.map
+diff --git a/android/src/main/java/expo/modules/audio/AudioModule.kt b/android/src/main/java/expo/modules/audio/AudioModule.kt
+index 992239ba..3b524663 100644
+--- a/android/src/main/java/expo/modules/audio/AudioModule.kt
++++ b/android/src/main/java/expo/modules/audio/AudioModule.kt
+@@ -652,6 +652,7 @@ class AudioModule : Module() {
+ 
+       AsyncFunction("start") Coroutine { stream: AudioStream ->
+         checkRecordingPermission()
++        stream.useForegroundService = allowsBackgroundRecording
+         stream.start()
+       }
+ 
+diff --git a/android/src/main/java/expo/modules/audio/AudioRecorder.kt b/android/src/main/java/expo/modules/audio/AudioRecorder.kt
+index 8eba23f6..00de1137 100644
+--- a/android/src/main/java/expo/modules/audio/AudioRecorder.kt
++++ b/android/src/main/java/expo/modules/audio/AudioRecorder.kt
+@@ -14,6 +14,7 @@ import android.os.Bundle
+ import androidx.core.content.ContextCompat
+ import androidx.core.net.toUri
+ import expo.modules.audio.service.AudioRecordingServiceConnection
++import expo.modules.audio.service.BackgroundAudioRecorder
+ import expo.modules.kotlin.AppContext
+ import expo.modules.kotlin.exception.CodedException
+ import expo.modules.kotlin.exception.Exceptions
+@@ -36,7 +37,8 @@ class AudioRecorder(
+   private val options: RecordingOptions
+ ) : SharedObject(appContext),
+   MediaRecorder.OnErrorListener,
+-  MediaRecorder.OnInfoListener {
++  MediaRecorder.OnInfoListener,
++  BackgroundAudioRecorder {
+   var filePath: String? = null
+   private var meteringEnabled = options.isMeteringEnabled
+   private var durationAlreadyRecorded = 0L
+@@ -51,7 +53,10 @@ class AudioRecorder(
+   var useForegroundService = false
+   private var bindingContinuation: Continuation<Boolean>? = null
+ 
+-  val serviceConnection = AudioRecordingServiceConnection(WeakReference(this), appContext)
++  val serviceConnection = AudioRecordingServiceConnection(
++    WeakReference<BackgroundAudioRecorder>(this),
++    appContext
++  )
+ 
+   private val _appContext: AppContext
+     get() {
+@@ -210,6 +215,10 @@ class AudioRecorder(
+     return status
+   }
+ 
++  override fun stopBackgroundRecording() {
++    stopRecording()
++  }
++
+   private fun reset() {
+     recordingTimerJob?.cancel()
+     recordingTimerJob = null
+diff --git a/android/src/main/java/expo/modules/audio/AudioStream.kt b/android/src/main/java/expo/modules/audio/AudioStream.kt
+index 8ecdcc12..b5f4750f 100644
+--- a/android/src/main/java/expo/modules/audio/AudioStream.kt
++++ b/android/src/main/java/expo/modules/audio/AudioStream.kt
+@@ -3,8 +3,15 @@ package expo.modules.audio
+ import android.Manifest
+ import android.media.AudioFormat
+ import android.media.AudioRecord
++import android.media.AudioRecordingConfiguration
++import android.media.AudioManager
+ import android.media.MediaRecorder
++import android.content.pm.PackageManager
++import android.os.Build
+ import androidx.annotation.RequiresPermission
++import androidx.core.content.ContextCompat
++import expo.modules.audio.service.AudioRecordingServiceConnection
++import expo.modules.audio.service.BackgroundAudioRecorder
+ import expo.modules.kotlin.AppContext
+ import expo.modules.kotlin.jni.NativeArrayBuffer
+ import expo.modules.kotlin.sharedobjects.SharedObject
+@@ -15,6 +22,7 @@ import kotlinx.coroutines.isActive
+ import kotlinx.coroutines.launch
+ import java.nio.ByteBuffer
+ import java.nio.ByteOrder
++import java.lang.ref.WeakReference
+ 
+ internal const val AUDIO_STREAM_BUFFER = "audioStreamBuffer"
+ internal const val AUDIO_STREAM_STATUS = "audioStreamStatus"
+@@ -34,7 +42,7 @@ private data class ResolvedAudioConfig(
+ class AudioStream(
+   appContext: AppContext,
+   private val options: AudioStreamOptions
+-) : SharedObject(appContext) {
++) : SharedObject(appContext), BackgroundAudioRecorder {
+ 
+   val id: String = java.util.UUID.randomUUID().toString()
+ 
+@@ -50,13 +58,27 @@ class AudioStream(
+     private set
+ 
+   private var startTimeNanos: Long = 0
++  private var recordingCallback: AudioManager.AudioRecordingCallback? = null
++  private var clientSilenced = false
++  var useForegroundService = false
++  private val serviceConnection = AudioRecordingServiceConnection(
++    WeakReference<BackgroundAudioRecorder>(this),
++    appContext
++  )
+ 
+   @RequiresPermission(Manifest.permission.RECORD_AUDIO)
+-  fun start() {
++  suspend fun start() {
+     if (isStreaming) {
+       return
+     }
+ 
++    if (useForegroundService && !hasNotificationPermissions()) {
++      throw NotificationPermissionsException()
++    }
++    if (useForegroundService) {
++      serviceConnection.bindWithService()
++    }
++
+     val config = resolveAudioConfig()
+     val recorder = createAudioRecord(config)
+ 
+@@ -74,20 +96,73 @@ class AudioStream(
+     audioRecord = recorder
+     startTimeNanos = System.nanoTime()
+     isStreaming = true
+-    emitStatus()
++    if (useForegroundService) {
++      serviceConnection.recordingServiceBinder?.service?.registerRecorder(this) ?: run {
++        recorder.stop()
++        recorder.release()
++        audioRecord = null
++        isStreaming = false
++        throw AudioRecordingServiceException("The service connection is not bound, but `allowsBackgroundRecording` is set to `true`")
++      }
++    }
++    observeTemporaryMicrophoneLoss(recorder)
++    emitStatus("started")
+ 
+     startCaptureLoop(recorder, config)
+   }
+ 
+-  fun stop() {
++  fun stop(reason: String = "stopped") {
+     if (!isStreaming) return
+     isStreaming = false
++    if (useForegroundService) {
++      serviceConnection.recordingServiceBinder?.service?.unregisterRecorder(this)
++    }
+     captureJob?.cancel()
+     captureJob = null
++    stopObservingTemporaryMicrophoneLoss(audioRecord)
+     audioRecord?.stop()
+     audioRecord?.release()
+     audioRecord = null
+-    emitStatus()
++    emitStatus(reason)
++  }
++
++  override fun stopBackgroundRecording() {
++    stop("system-control")
++  }
++
++  private fun hasNotificationPermissions(): Boolean {
++    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
++    val context = appContext?.reactContext ?: return false
++    return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
++  }
++
++  private fun observeTemporaryMicrophoneLoss(recorder: AudioRecord) {
++    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
++    val context = appContext?.reactContext ?: return
++    clientSilenced = false
++    val callback = object : AudioManager.AudioRecordingCallback() {
++      override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
++        val configuration = configs.firstOrNull {
++          it.clientAudioSessionId == recorder.audioSessionId
++        } ?: return
++        val nextSilenced = configuration.isClientSilenced
++        if (!isStreaming || nextSilenced == clientSilenced) return
++        clientSilenced = nextSilenced
++        emitStatus(if (nextSilenced) "interrupted" else "started")
++      }
++    }
++    recordingCallback = callback
++    recorder.registerAudioRecordingCallback(context.mainExecutor, callback)
++  }
++
++  private fun stopObservingTemporaryMicrophoneLoss(recorder: AudioRecord?) {
++    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
++      recordingCallback?.let { callback ->
++        recorder?.unregisterAudioRecordingCallback(callback)
++      }
++    }
++    recordingCallback = null
++    clientSilenced = false
+   }
+ 
+   private fun resolveAudioConfig(): ResolvedAudioConfig {
+@@ -182,11 +257,11 @@ class AudioStream(
+     }
+   }
+ 
+-  private fun emitStatus() {
++  private fun emitStatus(reason: String) {
+     appContext?.mainQueue?.launch {
+       emit(
+         AUDIO_STREAM_STATUS,
+-        mapOf("isStreaming" to isStreaming)
++        mapOf("isStreaming" to isStreaming, "reason" to reason)
+       )
+     }
+   }
+@@ -210,5 +285,10 @@ class AudioStream(
+   override fun sharedObjectDidRelease() {
+     super.sharedObjectDidRelease()
+     stop()
++    serviceConnection.release()
++    if (useForegroundService) {
++      serviceConnection.unbind()
++      serviceConnection.cleanup()
++    }
+   }
+ }
+diff --git a/android/src/main/java/expo/modules/audio/service/AudioRecordingService.kt b/android/src/main/java/expo/modules/audio/service/AudioRecordingService.kt
+index 2c923033..f9722f1f 100644
+--- a/android/src/main/java/expo/modules/audio/service/AudioRecordingService.kt
++++ b/android/src/main/java/expo/modules/audio/service/AudioRecordingService.kt
+@@ -12,7 +12,6 @@ import android.os.Build
+ import android.os.IBinder
+ import android.util.Log
+ import androidx.core.app.NotificationCompat
+-import expo.modules.audio.AudioRecorder
+ import expo.modules.audio.getRecordingServiceErrorMessage
+ import expo.modules.kotlin.AppContext
+ import java.lang.ref.WeakReference
+@@ -21,7 +20,7 @@ private const val TAG = "AudioRecordingService"
+ 
+ class AudioRecordingService : Service() {
+   private val binder = AudioRecordingServiceBinder(this)
+-  private val activeRecorders = mutableSetOf<WeakReference<AudioRecorder>>()
++  private val activeRecorders = mutableSetOf<WeakReference<BackgroundAudioRecorder>>()
+   private val recorderLock = Any()
+   private var notificationId = NOTIFICATION_ID
+ 
+@@ -96,8 +95,8 @@ class AudioRecordingService : Service() {
+     }
+ 
+     return NotificationCompat.Builder(this, CHANNEL_ID)
+-      .setContentTitle("Recording audio")
+-      .setContentText("Tap to return to app")
++      .setContentTitle("Drone Hub is recording audio")
++      .setContentText("Tap to return to Drone Hub")
+       .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+       .setOngoing(true)
+       .setContentIntent(contentIntent)
+@@ -141,7 +140,7 @@ class AudioRecordingService : Service() {
+     isRunningForeground = false
+   }
+ 
+-  fun registerRecorder(recorder: AudioRecorder) {
++  fun registerRecorder(recorder: BackgroundAudioRecorder) {
+     synchronized(recorderLock) {
+       activeRecorders.removeAll { it.get() == null }
+ 
+@@ -157,7 +156,7 @@ class AudioRecordingService : Service() {
+     }
+   }
+ 
+-  fun unregisterRecorder(recorder: AudioRecorder) {
++  fun unregisterRecorder(recorder: BackgroundAudioRecorder) {
+     synchronized(recorderLock) {
+       activeRecorders.removeAll { it.get() == recorder || it.get() == null }
+ 
+@@ -169,12 +168,12 @@ class AudioRecordingService : Service() {
+   }
+ 
+   private fun stopRecordingAndService() {
+-    synchronized(recorderLock) {
+-      activeRecorders.forEach { weakRef ->
+-        weakRef.get()?.stopRecording()
+-      }
++    val recorders = synchronized(recorderLock) {
++      val snapshot = activeRecorders.mapNotNull { it.get() }
+       activeRecorders.clear()
++      snapshot
+     }
++    recorders.forEach { it.stopBackgroundRecording() }
+ 
+     stopForegroundWithNotification()
+     stopSelf()
+@@ -200,3 +199,8 @@ class AudioRecordingService : Service() {
+     internal const val ACTION_STOP_RECORDING = "expo.modules.audio.action.STOP_RECORDING"
+   }
+ }
++
++/** A microphone capture that is kept alive by the recording foreground service. */
++interface BackgroundAudioRecorder {
++  fun stopBackgroundRecording()
++}
+diff --git a/android/src/main/java/expo/modules/audio/service/AudioRecordingServiceConnection.kt b/android/src/main/java/expo/modules/audio/service/AudioRecordingServiceConnection.kt
+index 28be72f2..7a1e2569 100644
+--- a/android/src/main/java/expo/modules/audio/service/AudioRecordingServiceConnection.kt
++++ b/android/src/main/java/expo/modules/audio/service/AudioRecordingServiceConnection.kt
+@@ -2,7 +2,6 @@ package expo.modules.audio.service
+ 
+ import android.content.ComponentName
+ import android.os.IBinder
+-import expo.modules.audio.AudioRecorder
+ import expo.modules.audio.AudioRecordingServiceException
+ import expo.modules.audio.getRecordingServiceErrorMessage
+ import expo.modules.kotlin.AppContext
+@@ -20,7 +19,7 @@ import kotlin.coroutines.suspendCoroutine
+ class AudioRecordingServiceBinder(val service: AudioRecordingService) : android.os.Binder()
+ 
+ class AudioRecordingServiceConnection(
+-  val recorder: WeakReference<AudioRecorder>,
++  val recorder: WeakReference<BackgroundAudioRecorder>,
+   appContext: AppContext
+ ) : BaseServiceConnection<AudioRecordingServiceBinder>(appContext) {
+   var recordingServiceBinder: AudioRecordingServiceBinder? = null
+diff --git a/ios/AudioStream.swift b/ios/AudioStream.swift
+index f938eff0..5d398341 100644
+--- a/ios/AudioStream.swift
++++ b/ios/AudioStream.swift
+@@ -18,15 +18,33 @@ class AudioStream: SharedObject {
+   private(set) var channels: Int = 0
+   private(set) var isStreaming: Bool = false
+   private var startTimestamp: AVAudioTime?
++  private var wantsToStream = false
++  private var recoveryAttempt = 0
++  private var recoveryWorkItem: DispatchWorkItem?
++  private var notificationObservers = [NSObjectProtocol]()
+ 
+   init(options: AudioStreamOptions) {
+     self.requestedSampleRate = options.sampleRate
+     self.requestedChannels = options.channels
+     self.encoding = options.encoding
+     super.init()
++    setupRecoveryObservers()
+   }
+ 
+   func start() throws {
++    let wasWanted = wantsToStream
++    wantsToStream = true
++    do {
++      try startEngine()
++      recoveryAttempt = 0
++    } catch {
++      wantsToStream = wasWanted
++      try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
++      throw error
++    }
++  }
++
++  private func startEngine() throws {
+     guard !isStreaming else { return }
+ 
+     let session = AVAudioSession.sharedInstance()
+@@ -65,9 +83,15 @@ class AudioStream: SharedObject {
+         channels = Int(hardwareFormat.channelCount)
+         setupTapWithoutConversion(engine: engine, inputNode: inputNode, format: hardwareFormat)
+         self.audioEngine = engine
+-        try engine.start()
++        do {
++          try engine.start()
++        } catch {
++          inputNode.removeTap(onBus: 0)
++          self.audioEngine = nil
++          throw error
++        }
+         isStreaming = true
+-        emitStatus()
++        emitStatus(reason: "started")
+         return
+       }
+       self.converter = conv
+@@ -94,22 +118,108 @@ class AudioStream: SharedObject {
+     }
+ 
+     self.audioEngine = engine
+-    try engine.start()
++    do {
++      try engine.start()
++    } catch {
++      inputNode.removeTap(onBus: 0)
++      self.audioEngine = nil
++      self.converter = nil
++      throw error
++    }
+     isStreaming = true
+-    emitStatus()
++    emitStatus(reason: "started")
+   }
+ 
+   func stop() {
+-    guard isStreaming else { return }
+-    audioEngine?.inputNode.removeTap(onBus: 0)
+-    audioEngine?.stop()
+-    audioEngine = nil
+-    converter = nil
+-    isStreaming = false
+-    startTimestamp = nil
+-    emitStatus()
++    wantsToStream = false
++    recoveryWorkItem?.cancel()
++    recoveryWorkItem = nil
++    stopEngine(deactivateSession: true, reason: "stopped")
++  }
++
++  private func stopEngine(deactivateSession: Bool, reason: String) {
++    if isStreaming {
++      audioEngine?.inputNode.removeTap(onBus: 0)
++      audioEngine?.stop()
++      audioEngine = nil
++      converter = nil
++      isStreaming = false
++      startTimestamp = nil
++      emitStatus(reason: reason)
++    }
++
++    if deactivateSession {
++      try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
++    }
++  }
++
++  private func setupRecoveryObservers() {
++    let center = NotificationCenter.default
++    notificationObservers.append(center.addObserver(
++      forName: AVAudioSession.interruptionNotification,
++      object: AVAudioSession.sharedInstance(),
++      queue: .main
++    ) { [weak self] notification in
++      self?.handleInterruption(notification)
++    })
++    notificationObservers.append(center.addObserver(
++      forName: .AVAudioEngineConfigurationChange,
++      object: nil,
++      queue: .main
++    ) { [weak self] _ in
++      self?.recoverAfterTemporaryAudioLoss()
++    })
++    notificationObservers.append(center.addObserver(
++      forName: AVAudioSession.routeChangeNotification,
++      object: AVAudioSession.sharedInstance(),
++      queue: .main
++    ) { [weak self] _ in
++      self?.scheduleRecovery()
++    })
++    notificationObservers.append(center.addObserver(
++      forName: AVAudioSession.mediaServicesWereResetNotification,
++      object: AVAudioSession.sharedInstance(),
++      queue: .main
++    ) { [weak self] _ in
++      self?.recoverAfterTemporaryAudioLoss()
++    })
++  }
+ 
+-    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
++  private func handleInterruption(_ notification: Notification) {
++    guard wantsToStream,
++      let rawValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
++      let type = AVAudioSession.InterruptionType(rawValue: rawValue) else {
++      return
++    }
++    if type == .began {
++      stopEngine(deactivateSession: false, reason: "interrupted")
++      return
++    }
++    scheduleRecovery()
++  }
++
++  private func recoverAfterTemporaryAudioLoss() {
++    guard wantsToStream else { return }
++    stopEngine(deactivateSession: false, reason: "interrupted")
++    scheduleRecovery()
++  }
++
++  private func scheduleRecovery() {
++    recoveryWorkItem?.cancel()
++    guard wantsToStream, !isStreaming else { return }
++    let delay = min(0.5 * pow(2.0, Double(recoveryAttempt)), 15.0)
++    let work = DispatchWorkItem { [weak self] in
++      guard let self, self.wantsToStream, !self.isStreaming else { return }
++      do {
++        try self.startEngine()
++        self.recoveryAttempt = 0
++      } catch {
++        self.recoveryAttempt += 1
++        self.scheduleRecovery()
++      }
++    }
++    recoveryWorkItem = work
++    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+   }
+ 
+   private func setupTapWithoutConversion(engine: AVAudioEngine, inputNode: AVAudioInputNode, format: AVAudioFormat) {
+@@ -154,9 +264,10 @@ class AudioStream: SharedObject {
+     }
+   }
+ 
+-  private func emitStatus() {
++  private func emitStatus(reason: String) {
+     emit(event: AUDIO_STREAM_STATUS, payload: [
+-      "isStreaming": isStreaming
++      "isStreaming": isStreaming,
++      "reason": reason
+     ])
+   }
+ 
+@@ -195,6 +306,7 @@ class AudioStream: SharedObject {
+   }
+ 
+   deinit {
++    notificationObservers.forEach { NotificationCenter.default.removeObserver($0) }
+     stop()
+   }
+ }

@@ -27,6 +27,8 @@ export class MeshConnectionManager<Socket extends ManagedMeshSocket> {
   private socketsValue: Socket[] = [];
   private readonly states = new Map<string, MeshDeviceConnectionState>();
   private lifecycle: 'active' | 'grace' | 'suspended' = 'active';
+  private appState: MeshAppState = 'active';
+  private backgroundActivityRequired = false;
   private suspendTimer: TimerHandle | null = null;
   private reconnectTimer: TimerHandle | null = null;
   private readonly backgroundGraceMs: number;
@@ -145,19 +147,42 @@ export class MeshConnectionManager<Socket extends ManagedMeshSocket> {
 
   handleAppState(state: MeshAppState): void {
     if (state === 'unknown') return;
+    this.appState = state;
     if (state === 'active') {
-      this.cancelSuspend();
-      const wasSuspended = this.lifecycle === 'suspended';
-      this.lifecycle = 'active';
-      if (wasSuspended) {
-        for (const socket of this.socketsValue) {
-          if (!socket.connected) this.states.set(socket.connection.deviceId, 'reconnecting');
-        }
-        this.onChange();
-      }
-      void this.ensureConnected(wasSuspended);
+      this.activate();
       return;
     }
+    if (this.backgroundActivityRequired) {
+      this.activate();
+      return;
+    }
+    this.scheduleSuspend();
+  }
+
+  setBackgroundActivityRequired(required: boolean): void {
+    if (this.backgroundActivityRequired === required) return;
+    this.backgroundActivityRequired = required;
+    if (required) {
+      this.activate();
+      return;
+    }
+    if (this.appState !== 'active' && this.appState !== 'unknown') this.scheduleSuspend();
+  }
+
+  private activate(): void {
+    this.cancelSuspend();
+    const wasSuspended = this.lifecycle === 'suspended';
+    this.lifecycle = 'active';
+    if (wasSuspended) {
+      for (const socket of this.socketsValue) {
+        if (!socket.connected) this.states.set(socket.connection.deviceId, 'reconnecting');
+      }
+      this.onChange();
+    }
+    void this.ensureConnected(wasSuspended);
+  }
+
+  private scheduleSuspend(): void {
     if (this.lifecycle !== 'active') return;
     this.lifecycle = 'grace';
     this.suspendTimer = this.schedule(() => {

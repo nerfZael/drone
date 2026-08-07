@@ -2656,11 +2656,20 @@ export class HubAssistantService {
       deliveryMode?: unknown;
     },
   ): Promise<AssistantQueuedPrompt> {
+    return (await this.enqueueThreadPromptWithResult(threadId, input)).prompt;
+  }
+
+  async enqueueThreadPromptWithResult(
+    threadId: string,
+    input: {
+      id?: unknown;
+      prompt?: unknown;
+      promptImages?: unknown;
+      deliveryMode?: unknown;
+    },
+  ): Promise<{ inserted: boolean; prompt: AssistantQueuedPrompt }> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
-    if (this.queuedPromptsForThread(thread, false).length >= ASSISTANT_QUEUED_PROMPT_LIMIT) {
-      throw new Error(`assistant prompt queue is full (max ${ASSISTANT_QUEUED_PROMPT_LIMIT})`);
-    }
     const prompt = String(input.prompt ?? '').trim();
     const promptImages = Array.isArray(input.promptImages)
       ? input.promptImages
@@ -2674,6 +2683,13 @@ export class HubAssistantService {
     if (!prompt && promptImages.length === 0) throw new Error('missing prompt');
     const identity = this.promptQueueIdentity(thread);
     const id = cleanOptionalString(input.id) || makeAssistantId('prompt');
+    const existing = this.requirePromptQueue().get({ ...identity, promptId: id });
+    if (existing) {
+      return { inserted: false, prompt: this.queuedPromptFromRecord(existing, false) };
+    }
+    if (this.queuedPromptsForThread(thread, false).length >= ASSISTANT_QUEUED_PROMPT_LIMIT) {
+      throw new Error(`assistant prompt queue is full (max ${ASSISTANT_QUEUED_PROMPT_LIMIT})`);
+    }
     const queued = await this.requirePromptQueue().enqueue({
       ...identity,
       prompt: {
@@ -2687,7 +2703,10 @@ export class HubAssistantService {
     });
     thread.updatedAt = nowIso();
     await this.persist();
-    return this.queuedPromptFromRecord(queued.prompt, false);
+    return {
+      inserted: queued.inserted,
+      prompt: this.queuedPromptFromRecord(queued.prompt, false),
+    };
   }
 
   async claimNextQueuedPrompt(threadId: string): Promise<AssistantQueuedPrompt | null> {

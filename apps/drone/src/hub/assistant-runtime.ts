@@ -998,13 +998,17 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       input.deliveryMode ?? (await assistantService.promptDeliveryMode(input.threadId));
     const steerImmediately =
       deliveryMode === 'asap' && blipAssistantHost.isThreadRunning(input.threadId);
-    const queued = await assistantService.enqueueThreadPrompt(input.threadId, {
+    const enqueueResult = await assistantService.enqueueThreadPromptWithResult(input.threadId, {
       id: input.promptId,
       prompt: input.prompt,
       promptImages: input.promptImages,
       deliveryMode,
     });
+    const queued = enqueueResult.prompt;
     await notifyNativePromptQueueChanged(input.threadId);
+    // Prompt IDs are idempotency keys. A retry after an accepted request must
+    // not claim or deliver the same durable queue row a second time.
+    if (!enqueueResult.inserted) return queued;
     if (steerImmediately) {
       const claimed = await assistantService.claimQueuedPrompt(input.threadId, queued.id, {
         allowConcurrent: true,

@@ -368,6 +368,7 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
       prompt: string,
       attachments: readonly ChatAttachmentPayload[] = [],
       deliveryMode: 'queue' | 'asap' = 'queue',
+      promptId?: string,
     ) => {
       if (
         !selectedDrone ||
@@ -379,10 +380,10 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
       const target = targetDeviceId;
       const droneId = selectedDrone.id;
       const chatName = selectedChat;
-      const optimisticId = `desktop-optimistic-${Date.now()}`;
+      const optimisticId = promptId || `desktop-optimistic-${Date.now()}`;
       setChatError(null);
       setMessages((current) => [
-        ...current,
+        ...current.filter((message) => message.id !== optimisticId),
         {
           id: optimisticId,
           role: 'user',
@@ -404,6 +405,7 @@ export function useRemoteDroneHub(targetDeviceId: string, routeAvailable: boolea
           droneId,
           chatName,
           prompt,
+          ...(promptId ? { promptId } : {}),
           attachments,
           deliveryMode,
           request: (payload) => remoteControl(target, 'chat.prompt', payload),

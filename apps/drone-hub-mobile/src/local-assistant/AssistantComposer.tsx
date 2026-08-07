@@ -1,6 +1,7 @@
 import React from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, type TextInput, View } from 'react-native';
 import ArrowUp from 'lucide-react-native/icons/arrow-up';
+import AudioLines from 'lucide-react-native/icons/audio-lines';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import Mic from 'lucide-react-native/icons/mic';
 import Pause from 'lucide-react-native/icons/pause';
@@ -17,6 +18,7 @@ import {
   resolveMobileVoiceTranscriptDraft,
 } from './mobile-voice-transcription-model';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
+import { mobileContinuousVoiceStatusLabel } from './use-mobile-continuous-voice';
 import {
   mobileAssistantComposerExpanded,
   mobileAssistantStopVisible,
@@ -137,6 +139,7 @@ export function AssistantComposer({
   sending = false,
   editable = true,
   queueWhileRunning = false,
+  continuousVoiceEnabled = true,
   showAttachments = true,
   hasAttachments = false,
   onAddAttachment,
@@ -154,7 +157,12 @@ export function AssistantComposer({
   voiceResetKey?: string;
   value: string;
   onChangeText(value: string): void;
-  onSend(promptOverride?: string): void;
+  onSend(
+    promptOverride?: string,
+    deliveryMode?: 'queue' | 'asap',
+    promptId?: string,
+    preserveComposer?: boolean,
+  ): void | boolean | Promise<void | boolean>;
   onStop?(): void;
   onOpenModel(): void;
   modelLabel: string;
@@ -163,6 +171,7 @@ export function AssistantComposer({
   sending?: boolean;
   editable?: boolean;
   queueWhileRunning?: boolean;
+  continuousVoiceEnabled?: boolean;
   showAttachments?: boolean;
   hasAttachments?: boolean;
   onAddAttachment?(): void;
@@ -191,8 +200,13 @@ export function AssistantComposer({
     toggleRecordingPause,
     discardRecording,
     stopRecordingForTranscript,
+    continuousVoice,
   } = useSharedMobileChatVoiceRecorder();
   const voiceActive = voiceStatus !== 'idle';
+  const continuousVoiceActive = continuousVoice.status !== 'idle';
+  const continuousVoiceOwned =
+    continuousVoiceActive && continuousVoice.targetKey === String(voiceResetKey ?? '');
+  const continuousVoiceElsewhere = continuousVoiceActive && !continuousVoiceOwned;
   const voiceActiveRef = React.useRef(voiceActive);
   voiceActiveRef.current = voiceActive;
   const voiceCanPause = voiceStatus === 'recording' || voiceStatus === 'paused';
@@ -210,6 +224,8 @@ export function AssistantComposer({
     running,
     queueWhileRunning,
   });
+  const continuousVoiceActionDisabled =
+    !continuousVoiceEnabled || voiceRecordActionDisabled || voiceActive || continuousVoiceElsewhere;
   const expanded =
     alwaysExpanded ||
     mobileAssistantComposerExpanded({
@@ -218,7 +234,7 @@ export function AssistantComposer({
       hasAttachments,
       voiceActive,
       voiceError,
-    });
+    }) || continuousVoiceOwned;
   const showAssistantStop =
     editable &&
     mobileAssistantStopVisible({
@@ -238,6 +254,11 @@ export function AssistantComposer({
   const model = compactAssistantModelName(modelLabel);
   const voiceStatusText = mobileVoiceStatusLabel(voiceStatus);
   const voiceDurationText = formatMobileVoiceDuration(voiceDurationMillis);
+  const continuousStatusText = mobileContinuousVoiceStatusLabel(
+    continuousVoice.status,
+    continuousVoice.pendingCount,
+  );
+  const continuousDurationText = formatMobileVoiceDuration(continuousVoice.durationMillis);
 
   React.useEffect(() => {
     valueRef.current = value;
@@ -270,6 +291,21 @@ export function AssistantComposer({
     setFocused(false);
     Keyboard.dismiss();
   }, [voiceActive]);
+
+  const previousVoiceTargetRef = React.useRef(String(voiceResetKey ?? ''));
+  React.useEffect(() => {
+    const previousTarget = previousVoiceTargetRef.current;
+    const nextTarget = String(voiceResetKey ?? '');
+    previousVoiceTargetRef.current = nextTarget;
+    if (
+      previousTarget &&
+      previousTarget !== nextTarget &&
+      continuousVoice.targetKey === previousTarget &&
+      continuousVoice.status !== 'idle'
+    ) {
+      void continuousVoice.stop();
+    }
+  }, [continuousVoice, voiceResetKey]);
 
   const previousRunningRef = React.useRef(running);
   React.useEffect(() => {
@@ -311,6 +347,29 @@ export function AssistantComposer({
       });
     }
   }, [startRecording]);
+
+  const beginContinuousVoice = React.useCallback(async () => {
+    const targetKey = String(voiceResetKey ?? '').trim();
+    if (!targetKey) {
+      setVoiceError('Continuous voice requires a target chat.');
+      return;
+    }
+    suppressInputFocusRef.current = true;
+    inputRef.current?.blur();
+    setFocused(false);
+    Keyboard.dismiss();
+    try {
+      await continuousVoice.start({
+        targetKey,
+        onTranscript: async (text, deliveryId) =>
+          (await onSend(text, 'asap', deliveryId, true)) !== false,
+      });
+    } finally {
+      requestAnimationFrame(() => {
+        suppressInputFocusRef.current = false;
+      });
+    }
+  }, [continuousVoice, onSend, voiceResetKey]);
 
   const stopVoiceForAction = React.useCallback(
     async (action: 'append' | 'send'): Promise<string | null> => {
@@ -415,6 +474,8 @@ export function AssistantComposer({
                 ? styles.inputWithCollapsedVoice
                 : styles.inputWithCollapsedVoiceOnly),
             !expanded && showAssistantStop && styles.inputWithCollapsedStop,
+            !expanded && styles.inputWithCollapsedContinuous,
+            !expanded && showAssistantStop && styles.inputWithCollapsedContinuousAndStop,
           ]}
         />
         {!expanded ? (
@@ -452,6 +513,26 @@ export function AssistantComposer({
             >
               <Mic color={colors.textSecondary} size={17} strokeWidth={2.1} />
             </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                continuousVoiceElsewhere
+                  ? 'Continuous voice is active in another chat'
+                  : 'Start continuous voice steering'
+              }
+              accessibilityState={{ disabled: continuousVoiceActionDisabled, checked: false }}
+              disabled={continuousVoiceActionDisabled}
+              hitSlop={6}
+              onPress={() => void beginContinuousVoice()}
+              style={({ pressed }) => [
+                styles.collapsedContinuousVoiceButton,
+                showAssistantStop && styles.collapsedContinuousVoiceButtonWithStop,
+                continuousVoiceActionDisabled && styles.disabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <AudioLines color={colors.accent} size={17} strokeWidth={2.1} />
+            </Pressable>
             {showAssistantStop ? (
               <Pressable
                 accessibilityRole="button"
@@ -465,7 +546,7 @@ export function AssistantComposer({
             ) : null}
           </>
         ) : null}
-        {voiceError || voiceStatusText ? (
+        {voiceError || voiceStatusText || (continuousVoiceOwned && continuousStatusText) ? (
           <View style={styles.voiceFeedback}>
             {voiceError ? (
               <Text
@@ -482,13 +563,18 @@ export function AssistantComposer({
                     styles.voiceStatusDot,
                     voiceStatus === 'paused' && styles.voiceStatusDotPaused,
                     voiceStatus === 'transcribing' && styles.voiceStatusDotTranscribing,
+                    continuousVoiceOwned && continuousVoice.status === 'speech' && styles.voiceStatusDotSpeech,
+                    continuousVoiceOwned && continuousVoice.status === 'error' && styles.voiceStatusDotError,
                   ]}
                 />
                 <Text accessibilityLiveRegion="polite" style={styles.voiceFeedbackText}>
-                  {voiceStatusText}
+                  {continuousVoiceOwned ? continuousStatusText : voiceStatusText}
                 </Text>
-                <Text accessibilityLabel={`${voiceDurationText} elapsed`} style={styles.voiceTimer}>
-                  {voiceDurationText}
+                <Text
+                  accessibilityLabel={`${continuousVoiceOwned ? continuousDurationText : voiceDurationText} elapsed`}
+                  style={styles.voiceTimer}
+                >
+                  {continuousVoiceOwned ? continuousDurationText : voiceDurationText}
                 </Text>
               </View>
             )}
@@ -496,7 +582,7 @@ export function AssistantComposer({
         ) : null}
         {expanded ? (
           <View style={styles.controls}>
-            {voiceStatus === 'idle' ? (
+            {voiceStatus === 'idle' && !continuousVoiceOwned ? (
               <>
                 {attachmentsEnabled ? (
                   <IconButton
@@ -531,6 +617,49 @@ export function AssistantComposer({
                   disabled={voiceRecordActionDisabled}
                   onPress={() => void beginVoiceRecording()}
                 />
+                <IconButton
+                  label={
+                    continuousVoiceElsewhere
+                      ? 'Continuous voice is active in another chat'
+                      : 'Start continuous voice steering'
+                  }
+                  icon={AudioLines}
+                  disabled={continuousVoiceActionDisabled}
+                  onPress={() => void beginContinuousVoice()}
+                />
+              </>
+            ) : continuousVoiceOwned ? (
+              <>
+                <VoiceIconButton
+                  label="Cancel continuous voice and discard unsent audio"
+                  icon={X}
+                  tone="danger"
+                  onPress={() => void continuousVoice.cancel()}
+                />
+                <View style={styles.controlSpacer} />
+                <View style={styles.voicePrimaryControls}>
+                  <VoiceIconButton
+                    label={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? 'Resume continuous voice' : 'Pause continuous voice'}
+                    icon={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? Play : Pause}
+                    tone={continuousVoice.status === 'paused' || continuousVoice.status === 'error' ? 'paused' : 'default'}
+                    disabled={
+                      continuousVoice.status === 'starting' ||
+                      continuousVoice.status === 'stopping'
+                    }
+                    onPress={() => void continuousVoice.togglePause()}
+                  />
+                  <VoiceIconButton
+                    label="Stop continuous voice after pending thoughts are sent"
+                    icon={Square}
+                    tone="success"
+                    disabled={
+                      continuousVoice.status === 'starting' ||
+                      continuousVoice.status === 'stopping' ||
+                      continuousVoice.status === 'error'
+                    }
+                    onPress={() => void continuousVoice.stop()}
+                  />
+                </View>
               </>
             ) : (
               <>
@@ -616,6 +745,8 @@ const styles = StyleSheet.create({
   inputWithCollapsedVoice: { paddingLeft: 54, paddingRight: 54 },
   inputWithCollapsedVoiceOnly: { paddingLeft: 16, paddingRight: 54 },
   inputWithCollapsedStop: { paddingRight: 97 },
+  inputWithCollapsedContinuous: { paddingRight: 97 },
+  inputWithCollapsedContinuousAndStop: { paddingRight: 140 },
   collapsedAddButton: {
     position: 'absolute',
     left: 9,
@@ -637,6 +768,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   collapsedVoiceButtonWithStop: { right: 52 },
+  collapsedContinuousVoiceButton: {
+    position: 'absolute',
+    right: 52,
+    top: 9,
+    width: 34,
+    height: 34,
+    borderRadius: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  collapsedContinuousVoiceButtonWithStop: { right: 95 },
   collapsedStopButton: {
     position: 'absolute',
     right: 9,
@@ -664,6 +806,8 @@ const styles = StyleSheet.create({
   voiceStatusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.danger },
   voiceStatusDotPaused: { backgroundColor: colors.warning },
   voiceStatusDotTranscribing: { backgroundColor: colors.accent },
+  voiceStatusDotSpeech: { backgroundColor: colors.online },
+  voiceStatusDotError: { backgroundColor: colors.danger },
   voiceFeedbackText: {
     color: colors.accent,
     fontSize: 10,

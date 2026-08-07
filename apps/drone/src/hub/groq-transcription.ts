@@ -1,5 +1,10 @@
 const GROQ_TRANSCRIPTION_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
-const GROQ_TRANSCRIPTION_MODEL = 'whisper-large-v3-turbo';
+export type GroqTranscriptionQuality = 'fast' | 'accurate';
+
+export const GROQ_TRANSCRIPTION_MODELS: Record<GroqTranscriptionQuality, string> = {
+  fast: 'whisper-large-v3-turbo',
+  accurate: 'whisper-large-v3',
+};
 
 export const GROQ_TRANSCRIPTION_MAX_BYTES = 100 * 1024 * 1024;
 
@@ -34,6 +39,9 @@ export async function transcribeAudioWithGroq(opts: {
   apiKey: string;
   mimeType?: string | null;
   signal?: AbortSignal;
+  quality?: GroqTranscriptionQuality;
+  language?: string | null;
+  prompt?: string | null;
 }): Promise<{ text: string; model: string }> {
   const audio = opts.audio;
   if (!Buffer.isBuffer(audio) || audio.length === 0) {
@@ -49,10 +57,16 @@ export async function transcribeAudioWithGroq(opts: {
   const audioBytes = new Uint8Array(audio.length);
   audioBytes.set(audio);
   const form = new FormData();
+  const quality = opts.quality === 'accurate' ? 'accurate' : 'fast';
+  const model = GROQ_TRANSCRIPTION_MODELS[quality];
   form.append('file', new Blob([audioBytes], { type: mimeType }), audioFilenameForMime(mimeType));
-  form.append('model', GROQ_TRANSCRIPTION_MODEL);
+  form.append('model', model);
   form.append('response_format', 'json');
   form.append('temperature', '0');
+  const language = String(opts.language ?? '').trim();
+  if (language) form.append('language', language.slice(0, 35));
+  const prompt = String(opts.prompt ?? '').trim();
+  if (prompt) form.append('prompt', prompt.slice(-1_200));
 
   const response = await fetch(GROQ_TRANSCRIPTION_URL, {
     method: 'POST',
@@ -78,5 +92,5 @@ export async function transcribeAudioWithGroq(opts: {
 
   const text = String(data?.text ?? '').trim();
   if (!text) throw new Error('GROQ returned an empty transcription.');
-  return { text, model: GROQ_TRANSCRIPTION_MODEL };
+  return { text, model };
 }

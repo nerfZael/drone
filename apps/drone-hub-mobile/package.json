@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "main": "expo/AppEntry.js",
+  "expo": {
+    "autolinking": {
+      "buildFromSource": ["expo-audio"]
+    }
+  },
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",

@@ -630,6 +630,7 @@ export function useChatRuntimeOrchestration({
       const originChatKey = droneChatQueueKey(originDroneId, originChat);
       const endLocalBusy = beginLocalChatBusy(createCanvasChatNodeId(originDroneId, originChat));
       const optimisticItem = addOptimisticPendingPrompt(prompt, attachments, {
+        ...(payload.promptId ? { id: payload.promptId } : {}),
         state: optimisticPendingPromptState(selectedIsResponding),
       });
       const optimisticId = String(optimisticItem?.id ?? '').trim();

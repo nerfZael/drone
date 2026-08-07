@@ -27,6 +27,7 @@ import { useRegistryBackupSettings } from './use-registry-backup-settings';
 import { useResourceSubscriptionSettings } from './use-resource-subscription-settings';
 import { useSkillLibrary } from './use-skill-library';
 import { useSpeechSettings } from './use-speech-settings';
+import { useVoiceInputSettings } from './use-voice-input-settings';
 import { useSyncSets } from './use-sync-sets';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
@@ -81,6 +82,7 @@ export function SettingsView({
   const mcpServers = useMcpServers(requestJson);
   const filesystem = useFilesystemSettings(requestJson);
   const speech = useSpeechSettings(requestJson);
+  const voiceInput = useVoiceInputSettings(requestJson);
   const syncSets = useSyncSets(requestJson);
   const profile = useProfileSettings(requestJson);
   const backups = useRegistryBackupSettings(requestJson);
@@ -93,6 +95,7 @@ export function SettingsView({
     deleteAction.deleteSettingsLoading ||
     filesystem.filesystemSettingsLoading ||
     speech.speechSettingsLoading ||
+    voiceInput.loading ||
     syncSets.syncSetsLoading ||
     profile.profileSettingsLoading ||
     backups.backupSettingsLoading ||
@@ -126,6 +129,7 @@ export function SettingsView({
     deleteAction.savingDeleteSettings ||
     filesystem.savingFilesystemSettings ||
     speech.speechSettingsSaving ||
+    voiceInput.saving ||
     syncSets.creatingSyncSet ||
     backups.savingBackupSettings ||
     backups.runningBackup ||
@@ -174,6 +178,7 @@ export function SettingsView({
     void deleteAction.loadDeleteSettings();
     void filesystem.loadFilesystemSettings();
     void speech.loadSpeechSettings();
+    void voiceInput.load();
     void syncSets.loadSyncSets();
     void agents.loadAgentsSettings();
     void deleteAction.loadArchivedDrones();
@@ -195,6 +200,7 @@ export function SettingsView({
           llm={llm}
           filesystem={filesystem}
           speech={speech}
+          voiceInput={voiceInput}
           subscriptions={subscriptions}
           onReplayOnboarding={onReplayOnboarding}
           onResetOnboarding={onResetOnboarding}

@@ -4,8 +4,15 @@ import { readFileSync } from 'node:fs';
 const appConfig = JSON.parse(
   readFileSync(new URL('../app.json', import.meta.url), 'utf8'),
 );
+const packageJson = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+);
 const androidManifest = readFileSync(
   new URL('../android/app/src/main/AndroidManifest.xml', import.meta.url),
+  'utf8',
+);
+const expoAudioPatch = readFileSync(
+  new URL('../../../patches/expo-audio@57.0.0.patch', import.meta.url),
   'utf8',
 );
 
@@ -26,5 +33,14 @@ describe('mobile background recording configuration', () => {
       'android:name="expo.modules.audio.service.AudioRecordingService"',
     );
     expect(androidManifest).toContain('android:foregroundServiceType="microphone"');
+  });
+
+  test('keeps real-time PCM capture alive and reports recoverable interruptions', () => {
+    expect(packageJson.expo?.autolinking?.buildFromSource).toContain('expo-audio');
+    expect(expoAudioPatch).toContain('BackgroundAudioRecorder');
+    expect(expoAudioPatch).toContain('stream.useForegroundService = allowsBackgroundRecording');
+    expect(expoAudioPatch).toContain('reason: "interrupted"');
+    expect(expoAudioPatch).toContain('scheduleRecovery()');
+    expect(expoAudioPatch).toContain("reason?: 'started' | 'stopped' | 'interrupted'");
   });
 });

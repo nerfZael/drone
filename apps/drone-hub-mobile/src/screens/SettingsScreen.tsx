@@ -14,6 +14,7 @@ import { mobileDeviceConnectionLabel } from '../drones/mobile-device-reachabilit
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSettingsCard';
+import { MobileVoiceInputSettingsCard } from '../local-assistant/MobileVoiceInputSettingsCard';
 
 export type SettingsTab = 'assistant' | 'devices' | 'pairing';
 
@@ -92,7 +93,10 @@ export function SettingsScreen({
           </View>
         ) : null}
         {tab === 'assistant' ? (
-          <LocalAssistantSettingsCard />
+          <>
+            <LocalAssistantSettingsCard />
+            <MobileVoiceInputSettingsCard />
+          </>
         ) : tab === 'devices' ? (
           <>
             <View style={styles.section}>

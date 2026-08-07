@@ -79,6 +79,19 @@ export type SpeechSettingsResponse = {
   };
 };
 
+export type VoiceInputSettingsResponse = {
+  ok: true;
+  voiceInput: {
+    endThoughtPreset: 'quick' | 'balanced' | 'patient' | 'custom';
+    customSilenceMillis: number;
+    silenceMillis: number;
+    noiseHandling: 'auto' | 'quiet' | 'noisy';
+    language: string | null;
+    quality: 'fast' | 'accurate';
+    confirmationFeedback: boolean;
+  };
+};
+
 export type RegistryBackupKind = 'hourly' | 'daily' | 'manual' | 'suspect';
 
 export type RegistryBackupManifest = {

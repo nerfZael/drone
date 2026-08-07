@@ -5,6 +5,7 @@ import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
 import type { UseGithubSettingsResult } from './use-github-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
 import type { UseSpeechSettingsResult } from './use-speech-settings';
+import type { UseVoiceInputSettingsResult } from './use-voice-input-settings';
 import type { UseResourceSubscriptionSettingsResult } from './use-resource-subscription-settings';
 import type { LlmProviderId } from './settings-types';
 import { CodexConnectControl } from './CodexConnectControl';
@@ -29,6 +30,7 @@ type GeneralSettingsTabProps = {
   llm: UseLlmSettingsResult;
   filesystem: UseFilesystemSettingsResult;
   speech: UseSpeechSettingsResult;
+  voiceInput: UseVoiceInputSettingsResult;
   subscriptions: UseResourceSubscriptionSettingsResult;
   onReplayOnboarding: () => void;
   onResetOnboarding: () => void;
@@ -117,6 +119,7 @@ export function GeneralSettingsTab({
   llm,
   filesystem,
   speech,
+  voiceInput,
   subscriptions,
   onReplayOnboarding,
   onResetOnboarding,
@@ -170,6 +173,18 @@ export function GeneralSettingsTab({
     saveFilesystemSettings,
   } = filesystem;
   const currentUploadMaxBytes = filesystemSettings?.filesystem.uploadMaxBytes ?? null;
+  const voiceInputDirty = Boolean(
+    voiceInput.settings &&
+      JSON.stringify(voiceInput.draft) !==
+        JSON.stringify({
+          endThoughtPreset: voiceInput.settings.voiceInput.endThoughtPreset,
+          customSilenceMillis: voiceInput.settings.voiceInput.customSilenceMillis,
+          noiseHandling: voiceInput.settings.voiceInput.noiseHandling,
+          language: voiceInput.settings.voiceInput.language,
+          quality: voiceInput.settings.voiceInput.quality,
+          confirmationFeedback: voiceInput.settings.voiceInput.confirmationFeedback,
+        }),
+  );
   const {
     speechSettings,
     speechSettingsLoading,
@@ -506,6 +521,138 @@ export function GeneralSettingsTab({
           onSave={() => void mutateApiKeySettings('groq', 'save')}
           onClear={() => void mutateApiKeySettings('groq', 'clear')}
         />
+      </div>
+
+      <div className="dh-settings-section">
+        <div>
+          <div className="dh-type-heading">Voice input</div>
+          <div className="mt-1 dh-type-supporting">
+            Configure how continuous voice steering decides that a spoken thought is complete and transcribes it.
+          </div>
+        </div>
+        {voiceInput.error ? (
+          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
+            {voiceInput.error}
+          </div>
+        ) : null}
+        {voiceInput.notice ? (
+          <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
+            {voiceInput.notice}
+          </div>
+        ) : null}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <label className="flex flex-col gap-1.5">
+            <span className="dh-type-label">End thought after</span>
+            <UiMenuSelect
+              value={voiceInput.draft.endThoughtPreset}
+              onValueChange={(value) =>
+                voiceInput.setDraft((current) => ({
+                  ...current,
+                  endThoughtPreset: value as typeof current.endThoughtPreset,
+                }))
+              }
+              disabled={voiceInput.loading || voiceInput.saving}
+              entries={[
+                { value: 'quick', label: 'Quick — 1.5 seconds' },
+                { value: 'balanced', label: 'Balanced — 2.5 seconds' },
+                { value: 'patient', label: 'Patient — 4 seconds' },
+                { value: 'custom', label: 'Custom' },
+              ]}
+              header="End-thought pause"
+            />
+          </label>
+          {voiceInput.draft.endThoughtPreset === 'custom' ? (
+            <label className="flex flex-col gap-1.5">
+              <span className="flex items-center justify-between gap-3 dh-type-label">
+                <span>Custom pause</span>
+                <span className="font-mono text-[var(--fg-secondary)]">
+                  {(voiceInput.draft.customSilenceMillis / 1_000).toFixed(1)}s
+                </span>
+              </span>
+              <UiSlider
+                min={1_000}
+                max={10_000}
+                step={250}
+                value={voiceInput.draft.customSilenceMillis}
+                onChange={(event) =>
+                  voiceInput.setDraft((current) => ({
+                    ...current,
+                    customSilenceMillis: Number(event.target.value),
+                  }))
+                }
+                aria-label="Custom end-thought pause"
+              />
+            </label>
+          ) : null}
+          <label className="flex flex-col gap-1.5">
+            <span className="dh-type-label">Noise handling</span>
+            <UiSegmentedControl
+              label="Noise handling"
+              value={voiceInput.draft.noiseHandling}
+              onValueChange={(value) =>
+                voiceInput.setDraft((current) => ({
+                  ...current,
+                  noiseHandling: value as typeof current.noiseHandling,
+                }))
+              }
+              options={[
+                { value: 'auto', label: 'Auto' },
+                { value: 'quiet', label: 'Quiet' },
+                { value: 'noisy', label: 'Noisy' },
+              ]}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="dh-type-label">Transcription quality</span>
+            <UiSegmentedControl
+              label="Transcription quality"
+              value={voiceInput.draft.quality}
+              onValueChange={(value) =>
+                voiceInput.setDraft((current) => ({
+                  ...current,
+                  quality: value as typeof current.quality,
+                }))
+              }
+              options={[
+                { value: 'fast', label: 'Fast' },
+                { value: 'accurate', label: 'Accurate' },
+              ]}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="dh-type-label">Preferred language</span>
+            <input
+              value={voiceInput.draft.language ?? ''}
+              onChange={(event) =>
+                voiceInput.setDraft((current) => ({
+                  ...current,
+                  language: event.target.value.trim() || null,
+                }))
+              }
+              placeholder="Auto (or en, hr-HR, …)"
+              spellCheck={false}
+              className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--type-ui)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:border-[var(--accent-muted)] focus:outline-none"
+            />
+          </label>
+          <UiSwitch
+            checked={voiceInput.draft.confirmationFeedback}
+            onCheckedChange={(value) =>
+              voiceInput.setDraft((current) => ({ ...current, confirmationFeedback: value }))
+            }
+            label="Send confirmation sound"
+            description="Play a short confirmation after a continuous voice thought is accepted."
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <UiButton
+            variant="primary"
+            onClick={() => void voiceInput.save()}
+            disabled={!voiceInputDirty || voiceInput.loading || voiceInput.saving}
+            loading={voiceInput.saving}
+          >
+            Save voice input settings
+          </UiButton>
+        </div>
       </div>
 
       <div className="dh-settings-section">

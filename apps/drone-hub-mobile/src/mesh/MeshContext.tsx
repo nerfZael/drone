@@ -58,6 +58,7 @@ type MeshContextValue = {
     bytes: Uint8Array;
   }): Promise<{ attachmentId: string; name: string; mime: string; size: number }>;
   retryDeviceConnection(deviceId: string): Promise<void>;
+  setBackgroundActivityRequired(required: boolean): void;
   refreshDevices(): Promise<void>;
   subscribe(
     capability: string,
@@ -349,6 +350,11 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     [connectionManager, refreshDevices],
   );
 
+  const setBackgroundActivityRequired = React.useCallback(
+    (required: boolean) => connectionManager.setBackgroundActivityRequired(required),
+    [connectionManager],
+  );
+
   const renameSelf = React.useCallback(
     async (rawName: string) => {
       if (!identity || !profile) throw new Error('Device identity is not ready');
@@ -472,6 +478,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     request,
     uploadChatAttachment,
     retryDeviceConnection,
+    setBackgroundActivityRequired,
     refreshDevices,
     subscribe,
     registerCapabilityHandler,

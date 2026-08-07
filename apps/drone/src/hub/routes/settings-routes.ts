@@ -48,6 +48,8 @@ export interface SettingsRouteDependencies {
   resolveSpeechSettingsResponse: ServiceFunction;
   upsertStoredSpeechSettings: ServiceFunction;
   notifySpeechSettingsChanged: ServiceFunction;
+  resolveVoiceInputSettingsResponse: ServiceFunction;
+  upsertStoredVoiceInputSettings: ServiceFunction;
   FILESYSTEM_UPLOAD_MAX_BYTES_MIN: number;
   FILESYSTEM_UPLOAD_MAX_BYTES_MAX: number;
   resolveRegistryBackupStatusResponse: ServiceFunction;
@@ -121,6 +123,8 @@ export function registerSettingsRoutes(
     resolveSpeechSettingsResponse,
     upsertStoredSpeechSettings,
     notifySpeechSettingsChanged,
+    resolveVoiceInputSettingsResponse,
+    upsertStoredVoiceInputSettings,
     FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
     FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
     resolveRegistryBackupStatusResponse,
@@ -343,6 +347,27 @@ export function registerSettingsRoutes(
       const settings = await resolveSpeechSettingsResponse();
       notifySpeechSettingsChanged(settings.speech);
       respond(200, settings);
+    } catch (error: any) {
+      fail(400, error?.message ?? String(error));
+    }
+  });
+
+  apiRouter.get('/api/settings/voice-input', async ({ json: respond }) => {
+    respond(200, await resolveVoiceInputSettingsResponse());
+  });
+
+  apiRouter.post('/api/settings/voice-input', async ({ readJson, fail, json: respond }) => {
+    const body = await readJson<any>();
+    try {
+      await upsertStoredVoiceInputSettings({
+        endThoughtPreset: body?.endThoughtPreset,
+        customSilenceMillis: body?.customSilenceMillis,
+        noiseHandling: body?.noiseHandling,
+        language: body?.language,
+        quality: body?.quality,
+        confirmationFeedback: body?.confirmationFeedback,
+      });
+      respond(200, await resolveVoiceInputSettingsResponse());
     } catch (error: any) {
       fail(400, error?.message ?? String(error));
     }

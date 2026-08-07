@@ -1395,6 +1395,7 @@ export function createDroneControlCapability(
         }
         const prompt = String(payload.prompt ?? '').trim();
         const userTimeZone = optionalText(payload.userTimeZone);
+        const promptId = optionalText(payload.promptId);
         const deliveryMode =
           payload.deliveryMode === 'asap'
             ? 'asap'
@@ -1428,6 +1429,7 @@ export function createDroneControlCapability(
               attachments,
               deliveryMode,
               userTimeZone,
+              promptId,
             );
             return {
               accepted: true,
@@ -1443,6 +1445,7 @@ export function createDroneControlCapability(
               attachments,
               ...(userTimeZone ? { userTimeZone } : {}),
               ...(deliveryMode ? { deliveryMode } : {}),
+              ...(promptId ? { promptId } : {}),
             }),
           });
         } finally {

@@ -20,12 +20,16 @@ describe('desktop remote chat attachments', () => {
       droneId: 'drone-1',
       chatName: 'default',
       prompt: 'Review this screenshot',
+      promptId: 'voice-session.3',
+      deliveryMode: 'asap',
       attachments: [imageAttachment(150_000)],
       request: async (payload: any) => {
         const transfer = payload.attachmentTransfer;
         if (!transfer) {
           actions.push('prompt');
           expect(payload.attachmentIds).toEqual(['attachment-1']);
+          expect(payload.promptId).toBe('voice-session.3');
+          expect(payload.deliveryMode).toBe('asap');
           return { accepted: true };
         }
         actions.push(transfer.action);

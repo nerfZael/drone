@@ -93,6 +93,7 @@ export function useGroupBroadcast({
             }
             const chatName = resolveChatNameForDrone(d, preferredChat);
             const data = await sendDroneChatPrompt(requestJson, {
+              ...(payload.promptId ? { promptId: payload.promptId } : {}),
               droneId: d.id,
               chatName,
               prompt,

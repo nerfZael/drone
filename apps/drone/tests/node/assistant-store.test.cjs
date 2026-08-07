@@ -242,6 +242,12 @@ describe('assistant SQLite store', () => {
     for (let index = 0; index < 32; index += 1) {
       await service.enqueueThreadPrompt(created.chatId, { prompt: `queued ${index}` });
     }
+    const retry = await service.enqueueThreadPromptWithResult(created.chatId, {
+      id: queuedFollowUp.id,
+      prompt: 'ordinary follow-up',
+    });
+    assert.equal(retry.inserted, false);
+    assert.equal(retry.prompt.id, queuedFollowUp.id);
     await assert.rejects(
       () => service.enqueueThreadPrompt(created.chatId, { prompt: 'one too many' }),
       /queue is full \(max 32\)/,

@@ -394,6 +394,7 @@ export function DraftChatWorkspace({
           visibleQueuedDraftPrompts.length === 0
         }
         attachmentsEnabled
+        continuousVoiceEnabled={false}
         alwaysExpanded
         composerControls={newDroneComposerControls}
         composerTopAction={

@@ -555,6 +555,7 @@ export function NewDroneScreen({
             sending={busy}
             editable={!busy}
             alwaysExpanded
+            continuousVoiceEnabled={false}
             showAttachments={!draft}
             hasAttachments={initialImages.length > 0}
             onAddAttachment={draft ? undefined : () => void addInitialImages()}

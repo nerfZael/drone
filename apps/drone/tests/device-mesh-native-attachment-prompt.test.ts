@@ -75,6 +75,8 @@ describe('device mesh native attachment prompts', () => {
             chatName: 'default',
             prompt: '',
             attachmentIds: [prepared.uploadId],
+            deliveryMode: 'asap',
+            promptId: 'mobile-voice-session.2',
           },
           context,
         ),
@@ -89,6 +91,8 @@ describe('device mesh native attachment prompts', () => {
             dataBase64: Buffer.from('image').toString('base64'),
           },
         ],
+        deliveryMode: 'asap',
+        promptId: 'mobile-voice-session.2',
       });
     } finally {
       globalThis.fetch = originalFetch;
@@ -116,6 +120,9 @@ describe('device mesh native attachment prompts', () => {
             dataBase64: Buffer.from('export const ready = true;').toString('base64'),
           },
         ],
+        'asap',
+        'Europe/Zagreb',
+        'mobile-voice-session.3',
       );
       expect(promptBody.attachments).toEqual([
         {
@@ -125,6 +132,11 @@ describe('device mesh native attachment prompts', () => {
           dataBase64: Buffer.from('export const ready = true;').toString('base64'),
         },
       ]);
+      expect(promptBody).toMatchObject({
+        deliveryMode: 'asap',
+        userTimeZone: 'Europe/Zagreb',
+        promptId: 'mobile-voice-session.3',
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }

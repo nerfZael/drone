@@ -149,6 +149,7 @@ export async function sendRemoteChatPrompt(input: {
   droneId: string;
   chatName: string;
   prompt: string;
+  promptId?: string;
   attachments: readonly ChatAttachmentPayload[];
   deliveryMode: 'queue' | 'asap';
   request: RemotePromptRequest;
@@ -169,6 +170,7 @@ export async function sendRemoteChatPrompt(input: {
       droneId: input.droneId,
       chatName: input.chatName,
       prompt: input.prompt,
+      ...(input.promptId ? { promptId: input.promptId } : {}),
       deliveryMode: input.deliveryMode,
       ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
     });

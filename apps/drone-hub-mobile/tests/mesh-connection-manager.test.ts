@@ -108,6 +108,23 @@ describe('mesh connection manager', () => {
     expect(manager.connectionStatesByDevice.desktop).toBe('connected');
   });
 
+  test('keeps transport connected for lock-screen voice and suspends after it ends', async () => {
+    const { manager, runNext } = createHarness();
+    const socket = new FakeSocket({ deviceId: 'desktop' });
+    manager.replaceSockets([socket]);
+    await manager.connectAll();
+
+    manager.setBackgroundActivityRequired(true);
+    manager.handleAppState('background');
+    expect(socket.disconnectCalls).toBe(0);
+    expect(manager.connectionStatesByDevice.desktop).toBe('connected');
+
+    manager.setBackgroundActivityRequired(false);
+    runNext();
+    expect(socket.disconnectCalls).toBe(1);
+    expect(manager.connectionStatesByDevice.desktop).toBe('suspended');
+  });
+
   test('reports reconnecting before a genuine socket failure settles offline', async () => {
     const { manager, runNext } = createHarness();
     const socket = new FakeSocket({ deviceId: 'desktop' }, [true, false]);
