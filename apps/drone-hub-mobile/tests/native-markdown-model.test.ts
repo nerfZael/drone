@@ -142,4 +142,17 @@ const ready = true;
     expect(source).toContain('textAlign: \'left\'');
     expect(source).toContain('textAlign: \'center\'');
   });
+
+  test('lets overflowing code blocks scroll or wrap without a touch-capturing container', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/NativeMarkdown.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('const [wordWrap, setWordWrap] = React.useState(false)');
+    expect(source).toContain("wordWrap ? 'Turn off code word wrap' : 'Turn on code word wrap'");
+    expect(source).toContain('<ScrollView\n          horizontal\n          nestedScrollEnabled');
+    expect(source).toContain('style={[styles.codeText, styles.codeTextWrapped]}');
+    expect(source).not.toContain('<Pressable\n      accessible={false}');
+  });
 });

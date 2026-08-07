@@ -7,6 +7,7 @@ import {
 } from '@drone/markdown-table-sort';
 import ArrowRight from 'lucide-react-native/icons/arrow-right';
 import Copy from 'lucide-react-native/icons/copy';
+import WrapText from 'lucide-react-native/icons/text-wrap';
 import {
   Linking,
   Pressable,
@@ -53,70 +54,86 @@ function codeTextWidth(text: string): number {
 }
 
 function NativeCodeBlock({ code, language }: { code: string; language: string }) {
-  const [copyVisible, setCopyVisible] = React.useState(false);
+  const [wordWrap, setWordWrap] = React.useState(false);
   const contentWidth = codeTextWidth(code);
   const languageLabel = language.trim() || 'plain text';
 
   const copyCode = React.useCallback(async () => {
     try {
       await Clipboard.setStringAsync(code);
-      setCopyVisible(false);
     } catch {
-      // Keep the action visible so the user can retry.
+      // Leave the action available so the user can retry.
     }
   }, [code]);
 
   return (
-    <Pressable
-      accessible={false}
-      onPress={(event) => {
-        event.stopPropagation();
-        setCopyVisible((visible) => !visible);
-      }}
-      onTouchStart={stopTouchPropagation}
-      onTouchEnd={stopTouchPropagation}
-      style={styles.codeBlock}
-    >
-      <ScrollView
-        horizontal
-        nestedScrollEnabled
-        scrollEnabled
-        showsHorizontalScrollIndicator
-        style={styles.codeScroll}
-        contentContainerStyle={styles.codeScrollContent}
-      >
-        <View
-          style={[
-            styles.codeContent,
-            copyVisible && styles.codeContentWithCopy,
-            { width: contentWidth + (copyVisible ? 54 : 24) },
-          ]}
-        >
+    <View style={styles.codeBlock}>
+      <View style={styles.codeToolbar}>
+        <Text numberOfLines={1} style={styles.codeLanguage}>
+          {languageLabel}
+        </Text>
+        <View style={styles.codeActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={wordWrap ? 'Turn off code word wrap' : 'Turn on code word wrap'}
+            accessibilityState={{ checked: wordWrap }}
+            hitSlop={6}
+            onPress={(event) => {
+              event.stopPropagation();
+              setWordWrap((current) => !current);
+            }}
+            style={({ pressed }) => [
+              styles.codeAction,
+              wordWrap && styles.codeActionActive,
+              pressed && styles.codeActionPressed,
+            ]}
+          >
+            <WrapText
+              color={wordWrap ? colors.accent : colors.textSecondary}
+              size={14}
+              strokeWidth={2}
+            />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Copy ${languageLabel} code`}
+            hitSlop={6}
+            onPress={(event) => {
+              event.stopPropagation();
+              void copyCode();
+            }}
+            style={({ pressed }) => [styles.codeAction, pressed && styles.codeActionPressed]}
+          >
+            <Copy color={colors.textSecondary} size={14} strokeWidth={2} />
+          </Pressable>
+        </View>
+      </View>
+      {wordWrap ? (
+        <View style={[styles.codeContent, styles.codeContentWrapped]}>
           <MobileHighlightedCode
             content={code}
             language={language}
-            style={[styles.codeText, { width: contentWidth }]}
+            style={[styles.codeText, styles.codeTextWrapped]}
           />
         </View>
-      </ScrollView>
-      {copyVisible ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Copy ${languageLabel} code`}
-          hitSlop={6}
-          onPress={(event) => {
-            event.stopPropagation();
-            void copyCode();
-          }}
-          style={({ pressed }) => [
-            styles.codeCopyButton,
-            pressed && styles.codeCopyButtonPressed,
-          ]}
+      ) : (
+        <ScrollView
+          horizontal
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator
+          style={styles.codeScroll}
+          contentContainerStyle={styles.codeScrollContent}
         >
-          <Copy color={colors.textSecondary} size={14} strokeWidth={2} />
-        </Pressable>
-      ) : null}
-    </Pressable>
+          <View style={[styles.codeContent, { width: contentWidth + 24 }]}>
+            <MobileHighlightedCode
+              content={code}
+              language={language}
+              style={[styles.codeText, { width: contentWidth }]}
+            />
+          </View>
+        </ScrollView>
+      )}
+    </View>
   );
 }
 
@@ -898,23 +915,40 @@ const styles = StyleSheet.create({
     backgroundColor: colors.mantle,
     overflow: 'hidden',
   },
-  codeCopyButton: {
-    position: 'absolute',
-    top: 7,
-    right: 7,
-    width: 30,
-    height: 30,
+  codeToolbar: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: 12,
+    paddingRight: 5,
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    backgroundColor: colors.whiteWash,
+  },
+  codeLanguage: {
+    flexShrink: 1,
+    color: colors.textSecondary,
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  codeActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  codeAction: {
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 7,
-    backgroundColor: colors.surface0,
-    zIndex: 2,
+    borderRadius: 6,
   },
-  codeCopyButtonPressed: {
-    opacity: 0.72,
-  },
+  codeActionActive: { backgroundColor: colors.accentWash },
+  codeActionPressed: { opacity: 0.68 },
   codeScroll: {
     width: '100%',
     maxWidth: '100%',
@@ -930,9 +964,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
-  codeContentWithCopy: {
-    paddingRight: 42,
-  },
+  codeContentWrapped: { width: '100%', minWidth: 0 },
   codeText: {
     color: colors.text,
     fontFamily: 'monospace',
@@ -940,6 +972,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     flexShrink: 0,
   },
+  codeTextWrapped: { width: '100%', minWidth: 0, flexShrink: 1 },
   quote: {
     borderLeftWidth: 3,
     borderLeftColor: colors.surface2,
