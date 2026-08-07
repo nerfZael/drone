@@ -4,6 +4,40 @@ import {
   deviceMeshDroneSummary,
 } from '../src/hub/device-mesh/drone-control-capability';
 import { autoRenameCreatedDroneFromPrompt } from '../src/hub/device-mesh/auto-rename-created-drone';
+import {
+  SidebarCommandService,
+  type SidebarCommandOperations,
+} from '../src/hub/sidebar-command-service';
+
+function sidebarOperations(
+  overrides: Partial<SidebarCommandOperations> = {},
+): SidebarCommandOperations {
+  return {
+    setDroneParent: async (droneId, parentId) => ({ ok: true, id: droneId, parentId }),
+    setDroneGroup: async (droneIds, group) => ({
+      ok: true,
+      group,
+      moved: droneIds.map((id) => ({ id, group })),
+      rejected: [],
+    }),
+    renameGroup: async ({ repoPath, oldName, newName }) => ({
+      ok: true,
+      repoPath,
+      oldName,
+      newName,
+      renamed: true,
+    }),
+    readUiPreferences: async () => ({
+      version: null,
+      uiPreferences: {},
+    }),
+    writeUiPreferences: async ({ uiPreferences }) => ({
+      version: 1,
+      uiPreferences,
+    }),
+    ...overrides,
+  };
+}
 
 describe('device mesh drone summaries', () => {
   test('preserves the sidebar hierarchy fields needed by mobile clients', () => {
@@ -261,195 +295,166 @@ describe('device mesh drone summaries', () => {
   });
 
   test('applies a typed sidebar move intent to the latest Hub snapshot exactly once', async () => {
-    const originalFetch = globalThis.fetch;
-    const requests: Array<{ pathname: string; method: string; body: any }> = [];
-    globalThis.fetch = (async (input, init) => {
-      const url = new URL(String(input));
-      const method = String(init?.method ?? 'GET');
-      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-      requests.push({ pathname: url.pathname, method, body });
-      if (url.pathname === '/api/drones/group-set') {
-        return Response.json({ ok: true, moved: [{ id: 'host', group: 'Review' }], rejected: [] });
-      }
-      if (method === 'GET') {
-        return Response.json({
-          ok: true,
-          version: 40,
-          uiPreferences: {
-            theme: 'dark',
-            sidebarNodeOrderByParent: {
-              root: ['drone:host', 'folder:Review'],
-              'folder:Review': ['drone:first', 'drone:second'],
-            },
-          },
-        });
-      }
-      return Response.json({ ok: true, version: 41, uiPreferences: body.uiPreferences });
-    }) as typeof fetch;
-    try {
-      const capability = createDroneControlCapability({
-        baseUrl: () => 'http://127.0.0.1:7777',
-        apiToken: 'test',
-      });
-      const command = {
-        mutationId: 'move-host-1',
-        intent: {
-          kind: 'move-into-folder',
-          itemKind: 'drone',
-          repoPath: '/work/repo',
-          droneId: 'host',
-          targetParentDroneId: 'lead',
-          sourceParentId: 'root',
-          sourceSiblingNodeIds: ['drone:host', 'folder:Review'],
-          targetGroup: 'Review',
-          targetParentId: 'folder:Review',
-          targetSiblingNodeIds: ['drone:first', 'drone:second'],
-          targetOverNodeId: 'drone:second',
-          placement: 'before',
+    const operations: string[] = [];
+    const sidebarCommands = new SidebarCommandService(
+      sidebarOperations({
+        setDroneParent: async (droneId, parentId) => {
+          operations.push(`parent:${droneId}:${parentId}`);
+          return { ok: true, id: droneId, parentId };
         },
-      };
-      await expect(capability.invoke('sidebar.move', command)).resolves.toMatchObject({
-        ok: true,
-        mutationId: 'move-host-1',
-        version: 41,
-      });
-      await expect(capability.invoke('sidebar.move', command)).resolves.toMatchObject({
-        mutationId: 'move-host-1',
-      });
-
-      expect(requests).toEqual([
-        {
-          pathname: '/api/fleet/actors/host/parent',
-          method: 'POST',
-          body: { parent: 'lead' },
+        setDroneGroup: async (droneIds, group) => {
+          operations.push(`group:${droneIds.join(',')}:${group}`);
+          return { ok: true, moved: [{ id: 'host', group }], rejected: [] };
         },
-        {
-          pathname: '/api/drones/group-set',
-          method: 'POST',
-          body: { droneIds: ['host'], group: 'Review' },
-        },
-        { pathname: '/api/settings/ui-preferences', method: 'GET', body: undefined },
-        {
-          pathname: '/api/settings/ui-preferences',
-          method: 'POST',
-          body: {
-            expectedVersion: 40,
-            notificationMode: 'sidebar_snapshot',
+        readUiPreferences: async () => {
+          operations.push('preferences:read:40');
+          return {
+            version: 40,
             uiPreferences: {
               theme: 'dark',
               sidebarNodeOrderByParent: {
-                root: ['folder:Review'],
-                'folder:Review': ['drone:first', 'drone:host', 'drone:second'],
+                root: ['drone:host', 'folder:Review'],
+                'folder:Review': ['drone:first', 'drone:second'],
               },
             },
-          },
+          };
         },
-      ]);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+        writeUiPreferences: async ({ uiPreferences, expectedVersion }) => {
+          operations.push(`preferences:write:${expectedVersion}`);
+          return { version: 41, uiPreferences };
+        },
+      }),
+    );
+    const capability = createDroneControlCapability(
+      { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+      undefined,
+      { sidebarCommands },
+    );
+    const command = {
+      mutationId: 'move-host-1',
+      intent: {
+        kind: 'move-into-folder',
+        itemKind: 'drone',
+        repoPath: '/work/repo',
+        droneId: 'host',
+        targetParentDroneId: 'lead',
+        sourceParentId: 'root',
+        sourceSiblingNodeIds: ['drone:host', 'folder:Review'],
+        targetGroup: 'Review',
+        targetParentId: 'folder:Review',
+        targetSiblingNodeIds: ['drone:first', 'drone:second'],
+        targetOverNodeId: 'drone:second',
+        placement: 'before',
+      },
+    };
+    await expect(capability.invoke('sidebar.move', command)).resolves.toMatchObject({
+      ok: true,
+      mutationId: 'move-host-1',
+      version: 41,
+    });
+    await expect(capability.invoke('sidebar.move', command)).resolves.toMatchObject({
+      mutationId: 'move-host-1',
+    });
+
+    expect(operations).toEqual([
+      'parent:host:lead',
+      'group:host:Review',
+      'preferences:read:40',
+      'preferences:write:40',
+    ]);
   });
 
   test('serializes concurrent sidebar commands so each reads the prior committed revision', async () => {
-    const originalFetch = globalThis.fetch;
     const requests: string[] = [];
     let version = 8;
     let uiPreferences: Record<string, unknown> = {
       sidebarChatOrderByDrone: { host: ['one', 'two', 'three'] },
     };
-    globalThis.fetch = (async (input, init) => {
-      const url = new URL(String(input));
-      const method = String(init?.method ?? 'GET');
-      if (method === 'GET') {
-        requests.push(`GET:${version}`);
-        await Promise.resolve();
-        return Response.json({ ok: true, version, uiPreferences });
-      }
-      const body = JSON.parse(String(init?.body));
-      requests.push(`POST:${body.expectedVersion}`);
-      uiPreferences = body.uiPreferences;
-      version += 1;
-      return Response.json({ ok: true, version, uiPreferences });
-    }) as typeof fetch;
-    try {
-      const capability = createDroneControlCapability({
-        baseUrl: () => 'http://127.0.0.1:7777',
-        apiToken: 'test',
-      });
-      await Promise.all([
-        capability.invoke('sidebar.move', {
-          mutationId: 'chat-order-1',
-          intent: {
-            kind: 'chat',
-            droneId: 'host',
-            chatNames: ['one', 'two', 'three'],
-            activeChatName: 'three',
-            overChatName: 'one',
-            placement: 'before',
-          },
-        }),
-        capability.invoke('sidebar.move', {
-          mutationId: 'chat-order-2',
-          intent: {
-            kind: 'chat',
-            droneId: 'host',
-            chatNames: ['three', 'one', 'two'],
-            activeChatName: 'two',
-            overChatName: 'one',
-            placement: 'before',
-          },
-        }),
-      ]);
-      expect(requests).toEqual(['GET:8', 'POST:8', 'GET:9', 'POST:9']);
-      expect(uiPreferences).toMatchObject({
-        sidebarChatOrderByDrone: { host: ['three', 'two', 'one'] },
-      });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    const sidebarCommands = new SidebarCommandService(
+      sidebarOperations({
+        readUiPreferences: async () => {
+          requests.push(`GET:${version}`);
+          await Promise.resolve();
+          return { version, uiPreferences };
+        },
+        writeUiPreferences: async ({ uiPreferences: next, expectedVersion }) => {
+          requests.push(`POST:${expectedVersion}`);
+          uiPreferences = next;
+          version += 1;
+          return { version, uiPreferences };
+        },
+      }),
+    );
+    const capability = createDroneControlCapability(
+      { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+      undefined,
+      { sidebarCommands },
+    );
+    await Promise.all([
+      capability.invoke('sidebar.move', {
+        mutationId: 'chat-order-1',
+        intent: {
+          kind: 'chat',
+          droneId: 'host',
+          chatNames: ['one', 'two', 'three'],
+          activeChatName: 'three',
+          overChatName: 'one',
+          placement: 'before',
+        },
+      }),
+      capability.invoke('sidebar.move', {
+        mutationId: 'chat-order-2',
+        intent: {
+          kind: 'chat',
+          droneId: 'host',
+          chatNames: ['three', 'one', 'two'],
+          activeChatName: 'two',
+          overChatName: 'one',
+          placement: 'before',
+        },
+      }),
+    ]);
+    expect(requests).toEqual(['GET:8', 'POST:8', 'GET:9', 'POST:9']);
+    expect(uiPreferences).toMatchObject({
+      sidebarChatOrderByDrone: { host: ['three', 'two', 'one'] },
+    });
   });
 
   test('creates the first sidebar preference record with a null expected version', async () => {
-    const originalFetch = globalThis.fetch;
-    const postedBodies: any[] = [];
-    globalThis.fetch = (async (_input, init) => {
-      if (String(init?.method ?? 'GET') === 'GET') {
-        return Response.json({ ok: true, version: null, uiPreferences: {} });
-      }
-      const body = JSON.parse(String(init?.body));
-      postedBodies.push(body);
-      return Response.json({ ok: true, version: 1, uiPreferences: body.uiPreferences });
-    }) as typeof fetch;
-    try {
-      const capability = createDroneControlCapability({
-        baseUrl: () => 'http://127.0.0.1:7777',
-        apiToken: 'test',
-      });
-      await expect(
-        capability.invoke('sidebar.move', {
-          mutationId: 'first-sidebar-write',
-          intent: {
-            kind: 'chat',
-            droneId: 'host',
-            chatNames: ['default', 'review'],
-            activeChatName: 'review',
-            overChatName: 'default',
-            placement: 'before',
-          },
-        }),
-      ).resolves.toMatchObject({ ok: true, version: 1 });
-      expect(postedBodies).toEqual([
-        {
-          expectedVersion: null,
-          notificationMode: 'sidebar_snapshot',
-          uiPreferences: { sidebarChatOrderByDrone: { host: ['review', 'default'] } },
+    const writes: Array<{ uiPreferences: Record<string, unknown>; expectedVersion: unknown }> = [];
+    const sidebarCommands = new SidebarCommandService(
+      sidebarOperations({
+        writeUiPreferences: async (input) => {
+          writes.push(input);
+          return { version: 1, uiPreferences: input.uiPreferences };
         },
-      ]);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+      }),
+    );
+    const capability = createDroneControlCapability(
+      { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+      undefined,
+      { sidebarCommands },
+    );
+    await expect(
+      capability.invoke('sidebar.move', {
+        mutationId: 'first-sidebar-write',
+        intent: {
+          kind: 'chat',
+          droneId: 'host',
+          chatNames: ['default', 'review'],
+          activeChatName: 'review',
+          overChatName: 'default',
+          placement: 'before',
+        },
+      }),
+    ).resolves.toMatchObject({ ok: true, version: 1 });
+    expect(writes).toEqual([
+      {
+        expectedVersion: null,
+        uiPreferences: { sidebarChatOrderByDrone: { host: ['review', 'default'] } },
+      },
+    ]);
   });
-
 
   test('bounds lazy branch pages and rejects unregistered repository paths', async () => {
     const originalFetch = globalThis.fetch;

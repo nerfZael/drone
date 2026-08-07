@@ -318,7 +318,7 @@ import {
 } from './workflows/workflow-child-drone-metadata';
 import { registerWorkflowFeature } from './workflows/workflow-feature';
 import { DroneHubMcpHttpTransport } from './mcp-http-transport';
-import { SidebarCommandService } from './sidebar-command-service';
+import { createSidebarCommandService } from './sidebar-command-service';
 import {
   assertDroneDaemonRuntimeReady,
   launchHostDroneDaemon,
@@ -522,6 +522,7 @@ const requireForHub = createRequire(__filename);
 let notifyDroneRegistryWrite: (() => void) | null = null;
 let notifyDroneChatWrite: ((droneId: string, chatName: string) => void) | null = null;
 let notifyDroneSummaryChange: (() => void) | null = null;
+let notifySidebarPreferencesWrite: (() => void) | null = null;
 
 async function updateRegistry<T>(
   mutator: (reg: any) => T | Promise<T>,
@@ -4028,11 +4029,10 @@ export async function startDroneHubApiServer(opts: {
     notifyRegistryWrite: () => notifyDroneRegistryWrite?.(),
     persistDisplayName: renameDroneDisplayName,
   });
-  let actualPort = opts.port;
-  const sidebarCommands = new SidebarCommandService({
-    baseUrl: () => `http://127.0.0.1:${actualPort}`,
-    apiToken,
+  const sidebarCommands = createSidebarCommandService({
+    notifyUiPreferencesChanged: () => notifySidebarPreferencesWrite?.(),
   });
+  let actualPort = opts.port;
   const deviceMesh = await createDeviceMeshService({
     rootDir: droneRootPath('device-mesh'),
     apiToken,
@@ -5193,6 +5193,12 @@ export async function startDroneHubApiServer(opts: {
     scheduleDroneRegistryBroadcasterRefresh();
   };
   notifyDroneSummaryChange = notifyCanonicalDroneSummaryChange;
+  const notifyCanonicalSidebarPreferencesWrite = () => {
+    const at = nowIso();
+    scheduleDroneRegistryBroadcasterRefresh(150, true);
+    void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
+  };
+  notifySidebarPreferencesWrite = notifyCanonicalSidebarPreferencesWrite;
   const notifyCanonicalPromptQueueChatWrite = (droneId: string, chatName: string) => {
     // Prompt delivery state is canonical SQLite state and does not rewrite the
     // registry. Invalidate the projection and wake chat and sidebar SSE clients
@@ -5375,11 +5381,7 @@ export async function startDroneHubApiServer(opts: {
       assistantService.emitExternalUiAction({ type: 'reload_ui_preferences', at });
       void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
     },
-    notifyUiPreferencesSnapshotChanged: () => {
-      const at = nowIso();
-      scheduleDroneRegistryBroadcasterRefresh(150, true);
-      void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
-    },
+    notifyUiPreferencesSnapshotChanged: () => notifySidebarPreferencesWrite?.(),
     clampIntParam,
     readHubLogTail,
     HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,
@@ -6144,6 +6146,9 @@ export async function startDroneHubApiServer(opts: {
       }
       if (notifyDroneSummaryChange === notifyCanonicalDroneSummaryChange) {
         notifyDroneSummaryChange = null;
+      }
+      if (notifySidebarPreferencesWrite === notifyCanonicalSidebarPreferencesWrite) {
+        notifySidebarPreferencesWrite = null;
       }
       if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
         activeDroneHubMcpProjectionConfig = null;
