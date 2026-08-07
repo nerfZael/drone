@@ -78,11 +78,17 @@ export type ChatSendContext = {
   deliveryMode: ChatMessageDeliveryMode;
 };
 
+export type ChatInputDraftContent = {
+  prompt: string;
+  attachments: readonly DraftChatAttachment[];
+};
+
 export type ChatInputProps = {
   resetKey: string;
   droneName: string;
   draftValue?: string;
   onDraftValueChange?: (next: string) => void;
+  onDraftContentChange?: (content: ChatInputDraftContent) => void;
   promptError: string | null;
   waiting: boolean;
   disabled?: boolean;
@@ -111,6 +117,7 @@ export function ChatInput({
   droneName,
   draftValue,
   onDraftValueChange,
+  onDraftContentChange,
   promptError,
   waiting,
   disabled,
@@ -142,6 +149,8 @@ export function ChatInput({
   const [compactVoiceRecording, setCompactVoiceRecording] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const onDraftContentChangeRef = React.useRef(onDraftContentChange);
+  onDraftContentChangeRef.current = onDraftContentChange;
   const voiceActionInFlightRef = React.useRef(false);
   const voiceActionTokenRef = React.useRef(0);
   const controlledDraftEnabled = typeof draftValue === 'string' && typeof onDraftValueChange === 'function';
@@ -175,11 +184,16 @@ export function ChatInput({
     attachmentsRef.current = attachments;
   }, [attachments]);
 
+  React.useEffect(() => {
+    onDraftContentChangeRef.current?.({ prompt: draft, attachments });
+  }, [attachments, draft]);
+
   const setDraft = React.useCallback(
     (next: React.SetStateAction<string>, markChanged = true) => {
       const resolved = typeof next === 'function' ? (next as (prev: string) => string)(draftRef.current) : next;
       if (markChanged && resolved !== draftRef.current) draftRevisionRef.current += 1;
       draftRef.current = resolved;
+      onDraftContentChangeRef.current?.({ prompt: resolved, attachments: attachmentsRef.current });
       if (controlledDraftEnabled) {
         onDraftValueChange?.(resolved);
         return;
@@ -197,6 +211,7 @@ export function ChatInput({
           : next;
       if (markChanged && resolved !== attachmentsRef.current) draftRevisionRef.current += 1;
       attachmentsRef.current = resolved;
+      onDraftContentChangeRef.current?.({ prompt: draftRef.current, attachments: resolved });
       setAttachments(resolved);
     },
     [],

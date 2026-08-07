@@ -533,6 +533,9 @@ describe('device mesh drone summaries', () => {
         seedReasoning: 'high',
         seedAgentPermissionMode: 'read-only',
         seedPrompt: 'Review the app',
+        seedAttachments: [
+          { name: 'screen.png', mime: 'image/png', size: 3, dataBase64: 'YWJj' },
+        ],
         autoRename: true,
       });
       expect(request).toMatchObject({
@@ -552,6 +555,9 @@ describe('device mesh drone summaries', () => {
           seedReasoning: 'high',
           seedAgentPermissionMode: 'read-only',
           seedPrompt: 'Review the app',
+          seedAttachments: [
+            { name: 'screen.png', mime: 'image/png', size: 3, dataBase64: 'YWJj' },
+          ],
         },
       });
       expect((request as { body: any } | null)?.body.autoRename).toBeUndefined();

@@ -127,7 +127,12 @@ import {
   useDroneHubWorkspaceContentProps,
 } from './droneHub/app/use-drone-hub-view-props';
 import type { MarkdownFileReference } from './droneHub/chat/MarkdownMessage';
-import type { ChatSendContext, ChatSendPayload } from './droneHub/chat';
+import type {
+  ChatInputDraftContent,
+  ChatSendContext,
+  ChatSendPayload,
+} from './droneHub/chat';
+import { encodeDraftChatAttachments } from './droneHub/chat/chat-input-attachments';
 import {
   ASSISTANT_OPEN_DRONE_CHAT_EVENT,
   type AssistantOpenDroneChatEventDetail,
@@ -313,6 +318,29 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setNameSuggestToast,
     setTerminalMenuOpen,
   } = useDroneHubAppModelUiState();
+  const newDroneDraftContentByFocusKeyRef = React.useRef(
+    new Map<string, ChatInputDraftContent>(),
+  );
+  const activeNewDroneSurfaceKeyRef = React.useRef(
+    appView === 'workspace' && draftChat && !draftChat.prompt
+      ? String(draftChat.focusKey ?? '').trim()
+      : '',
+  );
+  const rememberNewDroneDraftContent = React.useCallback(
+    (focusKeyRaw: string, content: ChatInputDraftContent) => {
+      const focusKey = String(focusKeyRaw ?? '').trim();
+      if (!focusKey) return;
+      if (!content.prompt.trim() && content.attachments.length === 0) {
+        newDroneDraftContentByFocusKeyRef.current.delete(focusKey);
+        return;
+      }
+      newDroneDraftContentByFocusKeyRef.current.set(focusKey, {
+        prompt: content.prompt,
+        attachments: [...content.attachments],
+      });
+    },
+    [],
+  );
   const [optimisticallyRenamedDrones, setOptimisticallyRenamedDrones] = React.useState<
     Record<string, string>
   >({});
@@ -405,7 +433,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     creating,
     createRuntime,
-    createAsDraft,
     createPersistVolume,
     draftCreateOpen,
     draftCreateMode,
@@ -423,7 +450,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     draftNameSuggestionError,
     setCreating,
     setCreateRuntime,
-    setCreateAsDraft,
     setCreatePersistVolume,
     setDraftCreateOpen,
     setDraftCreateMode,
@@ -1626,7 +1652,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     repoBranchSource,
     repoCreateRemoteBranch,
     createRuntime,
-    createAsDraft,
     createPersistVolume,
     spawnAgentKey,
     spawnModelForSeed,
@@ -1654,7 +1679,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setStartupSeedByDrone,
     setCreating,
     setCreateRuntime,
-    setCreateAsDraft,
     setCreatePersistVolume,
     setDraftChat,
     setDraftCreateError,
@@ -1678,6 +1702,42 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     preferredSelectedDroneRef,
     preferredSelectedDroneHoldUntilRef,
   });
+  React.useEffect(() => {
+    const currentSurfaceKey =
+      appView === 'workspace' && draftChat && !draftChat.prompt
+        ? String(draftChat.focusKey ?? '').trim()
+        : '';
+    const previousSurfaceKey = activeNewDroneSurfaceKeyRef.current;
+    activeNewDroneSurfaceKeyRef.current = currentSurfaceKey;
+    if (appView !== 'workspace' && draftChat && !draftChat.prompt) {
+      setDraftChat(null);
+    }
+    if (!previousSurfaceKey || previousSurfaceKey === currentSurfaceKey) return;
+
+    const content = newDroneDraftContentByFocusKeyRef.current.get(previousSurfaceKey);
+    newDroneDraftContentByFocusKeyRef.current.delete(previousSurfaceKey);
+    if (!content || (!content.prompt.trim() && content.attachments.length === 0)) return;
+
+    void encodeDraftChatAttachments(content.attachments)
+      .then((attachments) =>
+        createDroneFromDraft({
+          prompt: content.prompt,
+          attachments,
+          createAsDraft: true,
+          selectOnSuccess: false,
+        }),
+      )
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        showShortcutToast(message, 'Draft could not be saved');
+      });
+  }, [
+    appView,
+    createDroneFromDraft,
+    draftChat,
+    setDraftChat,
+    showShortcutToast,
+  ]);
   const cloneDroneFromSidebar = React.useCallback(
     (source: DroneSummary) => {
       void cloneDrone(source);
@@ -2522,7 +2582,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       if (!preferences) return;
       setDraftCreateMode(preferences.mode);
       setCreateRuntime(preferences.runtime);
-      setCreateAsDraft(preferences.createAsDraft);
       setCreatePersistVolume(preferences.persistVolume);
       setSpawnContextRepoPath(repoPath);
       updateSpawnContextForRepo(repoPath, {
@@ -2537,7 +2596,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [
       normalizeCreateRepoPath,
-      setCreateAsDraft,
       setCreatePersistVolume,
       setCreateRuntime,
       setDraftCreateMode,
@@ -4446,13 +4504,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onResetOnboarding: resetGuidedOnboardingDismissals,
     draftChat,
     createRuntime,
-    createAsDraft,
     repoBranchSource,
     setRepoBranchSource,
     repoCreateRemoteBranch,
     setRepoCreateRemoteBranch,
     setCreateRuntime,
-    setCreateAsDraft,
+    rememberNewDroneDraftContent,
     draftCreateMode,
     setDraftCreateMode,
     spawnAgentPermissionMode,

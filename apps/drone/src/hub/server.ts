@@ -2610,7 +2610,11 @@ const {
   normalizePendingStartupPrompts,
   resolvePendingDroneDisplayName,
   startupPromptToPendingPrompt,
-} = createPendingDroneStateHelpers({ normalizeChatName, nowIso });
+} = createPendingDroneStateHelpers({
+  normalizeChatName,
+  normalizeChatImageAttachments,
+  nowIso,
+});
 
 function makeDroneIdentity(): string {
   return crypto.randomUUID();

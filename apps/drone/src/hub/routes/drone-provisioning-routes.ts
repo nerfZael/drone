@@ -29,6 +29,7 @@ type DroneProvisioningDependencyName =
   | 'loadRegistry'
   | 'logSlowHubRequest'
   | 'makeDroneIdentity'
+  | 'normalizeChatImageAttachments'
   | 'normalizeChatName'
   | 'normalizeChatReasoning'
   | 'normalizeDroneDisplayName'

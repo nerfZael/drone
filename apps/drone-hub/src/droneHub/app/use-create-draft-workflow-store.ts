@@ -9,7 +9,6 @@ type Updater<T> = T | ((prev: T) => T);
 type CreateDraftWorkflowState = {
   creating: boolean;
   createRuntime: CreateRuntime;
-  createAsDraft: boolean;
   createPersistVolume: boolean;
   draftCreateOpen: boolean;
   draftCreateMode: DraftCreateMode;
@@ -27,7 +26,6 @@ type CreateDraftWorkflowState = {
   draftNameSuggestionError: string | null;
   setCreating: (next: Updater<boolean>) => void;
   setCreateRuntime: (next: Updater<CreateRuntime>) => void;
-  setCreateAsDraft: (next: Updater<boolean>) => void;
   setCreatePersistVolume: (next: Updater<boolean>) => void;
   setDraftCreateOpen: (next: Updater<boolean>) => void;
   setDraftCreateMode: (next: Updater<DraftCreateMode>) => void;
@@ -52,7 +50,6 @@ function resolveNext<T>(prev: T, next: Updater<T>): T {
 const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
   creating: false,
   createRuntime: 'container',
-  createAsDraft: false,
   createPersistVolume: false,
   draftCreateOpen: false,
   draftCreateMode: 'with-chat',
@@ -70,7 +67,6 @@ const useCreateDraftWorkflowStore = create<CreateDraftWorkflowState>((set) => ({
   draftNameSuggestionError: null,
   setCreating: (next) => set((s) => ({ creating: resolveNext(s.creating, next) })),
   setCreateRuntime: (next) => set((s) => ({ createRuntime: resolveNext(s.createRuntime, next) })),
-  setCreateAsDraft: (next) => set((s) => ({ createAsDraft: resolveNext(s.createAsDraft, next) })),
   setCreatePersistVolume: (next) => set((s) => ({ createPersistVolume: resolveNext(s.createPersistVolume, next) })),
   setDraftCreateOpen: (next) => set((s) => ({ draftCreateOpen: resolveNext(s.draftCreateOpen, next) })),
   setDraftCreateMode: (next) => set((s) => ({ draftCreateMode: resolveNext(s.draftCreateMode, next) })),
@@ -101,7 +97,6 @@ export function useCreateDraftWorkflowState() {
     useShallow((s) => ({
       creating: s.creating,
       createRuntime: s.createRuntime,
-      createAsDraft: s.createAsDraft,
       createPersistVolume: s.createPersistVolume,
       draftCreateOpen: s.draftCreateOpen,
       draftCreateMode: s.draftCreateMode,
@@ -119,7 +114,6 @@ export function useCreateDraftWorkflowState() {
       draftNameSuggestionError: s.draftNameSuggestionError,
       setCreating: s.setCreating,
       setCreateRuntime: s.setCreateRuntime,
-      setCreateAsDraft: s.setCreateAsDraft,
       setCreatePersistVolume: s.setCreatePersistVolume,
       setDraftCreateOpen: s.setDraftCreateOpen,
       setDraftCreateMode: s.setDraftCreateMode,
