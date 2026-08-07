@@ -27,6 +27,7 @@ describe('device mesh drone summaries', () => {
         statusOk: false,
         statusError: 'offline',
         draft: true,
+        persistVolume: false,
       }),
     ).toMatchObject({
       id: 'drone_child',
@@ -46,6 +47,7 @@ describe('device mesh drone summaries', () => {
       statusOk: false,
       statusError: 'offline',
       draft: true,
+      persistVolume: false,
     });
   });
 
@@ -562,6 +564,47 @@ describe('device mesh drone summaries', () => {
         },
       });
       expect((request as { body: any } | null)?.body.autoRename).toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('forwards clone settings from mobile drone creation', async () => {
+    const originalFetch = globalThis.fetch;
+    let request: { method: string; body: any } | null = null;
+    globalThis.fetch = (async (_input, init) => {
+      request = {
+        method: String(init?.method ?? 'GET'),
+        body: JSON.parse(String(init?.body ?? '{}')),
+      };
+      return Response.json({ ok: true, id: 'clone' });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await capability.invoke('drone.create.container', {
+        name: 'Source-copy',
+        cloneFrom: 'source',
+        cloneChats: true,
+      });
+
+      expect(request).toMatchObject({
+        method: 'POST',
+        body: {
+          name: 'Source-copy',
+          runtime: 'container',
+          cloneFrom: 'source',
+          cloneChats: true,
+        },
+      });
+      await expect(
+        capability.invoke('drone.create.host', {
+          name: 'Unsupported-copy',
+          cloneFrom: 'source',
+        }),
+      ).rejects.toThrow('Cloning is only supported for container runtime drones');
     } finally {
       globalThis.fetch = originalFetch;
     }

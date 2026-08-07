@@ -10,6 +10,20 @@ function normalizedColor(value: string): string {
 }
 
 describe('mobile sidebar presentation', () => {
+  test('offers selected container drones a clone action', () => {
+    const screenSource = readFileSync(
+      new URL('../src/screens/DronesScreen.tsx', import.meta.url),
+      'utf8',
+    );
+    const shellSource = readFileSync(new URL('../src/shell/MeshApp.tsx', import.meta.url), 'utf8');
+
+    expect(shellSource).toContain("label: 'Clone drone'");
+    expect(screenSource).toContain('cloneFrom: source.id');
+    expect(screenSource).toContain('cloneChats: true');
+    expect(screenSource).toContain("source.runtime.trim().toLowerCase() === 'host'");
+    expect(screenSource).toContain("selected.runtime.trim().toLowerCase() === 'host'");
+  });
+
   test('gives optimistic drone rows stable creation and group identity metadata', () => {
     const source = readFileSync(
       new URL('../src/screens/DronesScreen.tsx', import.meta.url),

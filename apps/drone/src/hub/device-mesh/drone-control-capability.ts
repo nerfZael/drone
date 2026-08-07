@@ -245,6 +245,9 @@ export function deviceMeshDroneSummary(drone: any) {
         drone?.repo?.dest,
       ),
     ),
+    ...(String(drone?.runtime ?? 'container').trim().toLowerCase() === 'container'
+      ? { persistVolume: drone?.persistVolume !== false }
+      : {}),
     fleetParentId: String(drone?.fleetParentId ?? '').trim() || null,
     chats: chats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean),
     draftChats:
@@ -630,6 +633,10 @@ export function createDroneControlCapability(
       if (operation === 'drone.create.container' || operation === 'drone.create.host') {
         const agent = seedAgent(payload.seedAgent);
         const requestedName = optionalText(payload.name);
+        const cloneFrom = optionalText(payload.cloneFrom);
+        if (cloneFrom && operation !== 'drone.create.container') {
+          throw new Error('Cloning is only supported for container runtime drones');
+        }
         const autoRenamePrompt =
           payload.autoRename === true
             ? (optionalText(payload.autoRenamePrompt) ?? optionalText(payload.seedPrompt))
@@ -643,6 +650,12 @@ export function createDroneControlCapability(
           ...(payload.draft === true ? { draft: true } : {}),
           ...(typeof payload.persistVolume === 'boolean'
             ? { persistVolume: payload.persistVolume }
+            : {}),
+          ...(cloneFrom
+            ? {
+                cloneFrom,
+                cloneChats: payload.cloneChats !== false,
+              }
             : {}),
           repoBranchSource,
           ...(repoBranchSource === 'remote'

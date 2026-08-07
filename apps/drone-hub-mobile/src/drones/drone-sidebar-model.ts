@@ -34,6 +34,7 @@ export type MobileDroneSummary = {
   repoBranch?: string | null;
   cwd?: string;
   repoAttached?: boolean;
+  persistVolume?: boolean;
   fleetParentId: string | null;
   chats: string[];
   draftChats?: Record<string, boolean>;
@@ -256,6 +257,18 @@ export function suggestNextMobileDroneChatName(
   return `chat-${nextIndex}`;
 }
 
+export function suggestMobileDroneCloneName(
+  sourceName: string,
+  drones: readonly Pick<MobileDroneSummary, 'name'>[],
+): string {
+  const base = `${sourceName.trim()}-copy`;
+  const taken = new Set(drones.map((drone) => drone.name.trim().toLowerCase()));
+  if (!taken.has(base.toLowerCase())) return base;
+  let index = 2;
+  while (taken.has(`${base}-${index}`.toLowerCase())) index += 1;
+  return `${base}-${index}`;
+}
+
 function text(value: unknown): string {
   return String(value ?? '').trim();
 }
@@ -391,6 +404,8 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
             text(repo.hostPath) ||
             text(repo.dest),
           ),
+    persistVolume:
+      typeof value.persistVolume === 'boolean' ? value.persistVolume : undefined,
     fleetParentId: text(value.fleetParentId) || null,
     chats,
     draftChats,

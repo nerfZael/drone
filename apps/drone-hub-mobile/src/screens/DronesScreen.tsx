@@ -70,6 +70,7 @@ import {
   normalizeMobileNativeChatHistory,
   normalizeMobileDroneListPayload,
   resolveMobileDroneListSnapshot,
+  suggestMobileDroneCloneName,
   suggestNextMobileDroneChatName,
   type MobileDroneCreateRepo,
   type MobileDroneCreateModel,
@@ -228,6 +229,8 @@ export type DronesAppHeaderState = {
   onNewDrone?(): void;
   onNewChat?(): void;
   onOpenFiles?(): void;
+  onClone?(): void;
+  cloneDisabled?: boolean;
   onRename?(): void;
   pinned?: boolean;
   pinDisabled?: boolean;
@@ -297,6 +300,12 @@ export function DronesScreen({
     phoneTarget ||
     (Boolean(targetDroneControlCapability?.operations.includes('sidebar.move')) &&
       Boolean(selfDevice && isGranted(selfDevice.grants, 'drone-control', 1, 'sidebar.move')));
+  const targetCanCloneDrone =
+    !phoneTarget &&
+    Boolean(targetDroneControlCapability?.operations.includes('drone.create.container')) &&
+    Boolean(
+      selfDevice && isGranted(selfDevice.grants, 'drone-control', 1, 'drone.create.container'),
+    );
   const targetConnectionState = mobileDeviceConnectionState({
     targetDeviceId: targetId,
     selfDeviceId: mesh.identity?.id,
@@ -2254,6 +2263,77 @@ export function DronesScreen({
     setRenameName(drone.name);
     setRenameError(null);
   }, []);
+  const cloneDrone = async (source: MobileDroneSummary): Promise<void> => {
+    if (source.runtime.trim().toLowerCase() === 'host') {
+      setError('Host runtime drones cannot be cloned.');
+      return;
+    }
+    const destinationId = targetId;
+    await run(`clone-${source.id}`, async () => {
+      const name = suggestMobileDroneCloneName(source.name, drones);
+      const result = await requestDroneControl(destinationId, 'drone.create.container', {
+        name,
+        group: source.group,
+        repoPath: source.repoAttached === false ? '' : source.repoPath,
+        persistVolume: source.persistVolume !== false,
+        cloneFrom: source.id,
+        cloneChats: true,
+      });
+      if (targetIdRef.current !== destinationId) return;
+      const clonedDroneId = String(
+        result?.id ?? result?.droneId ?? result?.drone?.id ?? '',
+      ).trim();
+      if (!clonedDroneId) throw new Error('The Drone Hub did not return the cloned drone id.');
+      const clonedDrone = normalizeMobileDrone({
+        group: source.group,
+        groupId: source.groupId,
+        repoPath: source.repoAttached === false ? '' : source.repoPath,
+        repoAttached: source.repoAttached !== false && Boolean(source.repoPath),
+        persistVolume: source.persistVolume !== false,
+        fleetParentId: null,
+        chats: source.chats,
+        busyChats: [],
+        unreadChats: [],
+        chatReadStates: {},
+        ...(result?.drone && typeof result.drone === 'object' ? result.drone : {}),
+        id: clonedDroneId,
+        name: result?.name ?? result?.drone?.name ?? name,
+        runtime: 'container',
+        phase: result?.phase ?? result?.drone?.phase ?? 'starting',
+        status: result?.status ?? result?.drone?.status ?? 'Starting…',
+        createdAt: result?.createdAt ?? result?.drone?.createdAt ?? new Date().toISOString(),
+        draft: false,
+      });
+      if (!clonedDrone) throw new Error('The Drone Hub returned an invalid cloned drone.');
+      setDrones((current) => [
+        clonedDrone,
+        ...current.filter((drone) => drone.id !== clonedDrone.id),
+      ]);
+      selectedRef.current = clonedDrone;
+      setSelected(clonedDrone);
+      const nextChats = clonedDrone.chats.length > 0 ? clonedDrone.chats : ['default'];
+      const nextChat = nextChats.includes('default') ? 'default' : nextChats[0]!;
+      chatNameRef.current = nextChat;
+      setChats(nextChats);
+      setChatName(nextChat);
+      setChatModel('');
+      setChatReasoning('');
+      setChatModelProvider('drone');
+      setChatAgentId(null);
+      setChatAgentPermissionMode('full-access');
+      setChatApprovalPolicy('ask');
+      setChatModels([]);
+      setTurns([]);
+      setNativeMessages(null);
+      setNativeChatId('');
+      setNativeThread(null);
+      setAccessOpen(false);
+      setAccessDirty(false);
+      setPendingApprovals([]);
+      setPendingPrompts([]);
+      await loadDrones(true);
+    });
+  };
   const setDronePinned = React.useCallback(
     (droneId: string, pinned: boolean): Promise<void> => {
       const destinationId = targetId;
@@ -2353,6 +2433,18 @@ export function DronesScreen({
             onNewDrone: openNewDroneFromCurrent,
             onNewChat: () => void createNewChat(),
             onOpenFiles: filePreview.openExplorer,
+            ...(targetCanCloneDrone
+              ? {
+                  onClone: () => void cloneDrone(selected),
+                  cloneDisabled:
+                    busy.startsWith('clone-') ||
+                    selected.runtime.trim().toLowerCase() === 'host' ||
+                    selected.draft === true ||
+                    ['starting', 'creating', 'seeding'].includes(
+                      selected.phase.trim().toLowerCase(),
+                    ),
+                }
+              : {}),
             onRename: () => openDroneRename(selected),
             pinned: droneSidebarOrder.pinnedDroneIds.includes(selected.id),
             pinDisabled: pinningDroneIds.has(selected.id),
@@ -2474,9 +2566,11 @@ export function DronesScreen({
     chats,
     busy,
     droneSidebarOrder.pinnedDroneIds,
+    drones,
     dronesLoading,
     pinningDroneIds,
     targetSupportsDrones,
+    targetCanCloneDrone,
     targetReachable,
     accessOpen,
     accessDirty,
