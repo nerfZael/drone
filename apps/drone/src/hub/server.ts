@@ -5883,6 +5883,7 @@ export async function startDroneHubApiServer(opts: {
     loadRegistry,
     logSlowHubRequest,
     makeDroneIdentity,
+    normalizeChatImageAttachments,
     normalizeChatName,
     normalizeChatReasoning,
     normalizeDroneDisplayName,
