@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
 import { boundedAssistantHistory } from '../src/hub/device-mesh/features/cross-device-assistant/bounded-assistant-history';
 import { compactNativeChatReadResponse } from '../src/hub/device-mesh/native-chat-response';
 
@@ -50,6 +51,19 @@ describe('mesh assistant history', () => {
     expect(history.entries.at(-1).id).toBe('message_59');
   });
 
+  test('returns no entries when response metadata consumes the history budget', () => {
+    const history: any = boundedAssistantHistory(
+      {
+        threadId: 'thread_1',
+        entries: [{ id: 'message_1', message: { role: 'assistant', content: 'Hello' } }],
+      },
+      0,
+    );
+
+    expect(history.entries).toEqual([]);
+    expect(history.page).toMatchObject({ hasOlder: true, responseTruncated: true });
+  });
+
   test('bounds one large multi-byte message and marks it as shortened', () => {
     const history: any = boundedAssistantHistory(
       {
@@ -72,6 +86,13 @@ describe('mesh assistant history', () => {
   test('keeps unified native chat responses below the mesh frame limit', () => {
     const response = compactNativeChatReadResponse({
       nativeChatId: 'native_1',
+      metadata: {
+        droneId: 'drone_1',
+        subscriptions: Array.from({ length: 40 }, (_, index) => ({
+          id: `subscription_${index}`,
+          intent: 'i'.repeat(2_000),
+        })),
+      },
       snapshot: {
         threads: [
           {
@@ -102,7 +123,9 @@ describe('mesh assistant history', () => {
       },
     });
 
-    expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThanOrEqual(205 * 1024);
+    expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThanOrEqual(
+      MESH_CHAT_PAYLOAD_BYTES,
+    );
     expect(response.history.entries.at(-1).id).toBe('message_99');
     expect(response.thread?.queuedPrompts).toHaveLength(32);
     expect(response.pendingApprovals).toHaveLength(8);

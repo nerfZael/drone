@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
 import {
   createDroneControlCapability,
   deviceMeshDroneSummary,
@@ -1141,7 +1142,9 @@ describe('device mesh drone summaries', () => {
         { sourceDevice: { id: 'phone-1' } } as never,
       );
 
-      expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(220 * 1024);
+      expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(
+        MESH_CHAT_PAYLOAD_BYTES,
+      );
       expect(result.pending).toHaveLength(6);
       expect(result.pending[0].activityMeshTruncated).toBe(true);
       expect(result.pending.at(-1).activity).toBeDefined();
