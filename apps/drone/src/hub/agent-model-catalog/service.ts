@@ -197,17 +197,69 @@ export class AgentModelCatalogService {
         };
       }
       const command = this.runtime.hostModelListCommand(request.agentId);
-      if (!command) {
-        return { models: [], error: `No host model command is configured for ${request.agentId}` };
+      if (command) {
+        const result = await this.runtime.runHost(command, timeoutMs);
+        const models = result.code === 0 ? parseAgentModelList(commandOutput(result)) : [];
+        return {
+          models,
+          installationFingerprint: `host:${request.agentId}`,
+          ...(models.length > 0
+            ? {}
+            : { error: commandOutput(result) || `No models discovered for ${request.agentId}` }),
+        };
       }
-      const result = await this.runtime.runHost(command, timeoutMs);
-      const models = result.code === 0 ? parseAgentModelList(commandOutput(result)) : [];
+
+      const installed = await this.runtime.runHost(
+        `command -v ${adapter.binary} >/dev/null 2>&1`,
+        timeoutMs,
+      );
+      if (installed.code !== 0) {
+        return { models: [], error: `${adapter.binary} is not installed on the host` };
+      }
+
+      const [help, version] = await Promise.all([
+        this.runtime.runHost(`${adapter.binary} --help`, timeoutMs),
+        this.runtime.runHost(`${adapter.binary} --version`, timeoutMs),
+      ]);
+      const versionText = commandOutput(version).replace(/\s+/g, ' ').slice(0, 200);
+      const installationFingerprint = `host:${request.agentId}:${versionText || 'unknown-version'}`;
+      const commands = modelListCommands(request.agentId, commandOutput(help));
+      for (const modelCommand of commands) {
+        const result = await this.runtime.runHost(modelCommand, timeoutMs);
+        if (result.code !== 0) continue;
+        const models = parseAgentModelList(commandOutput(result));
+        if (models.length > 0) return { models, installationFingerprint };
+      }
+
+      if (adapter.modelCacheCommand) {
+        const result = await this.runtime.runHost(adapter.modelCacheCommand, timeoutMs);
+        if (result.code === 0) {
+          const models = parseCodexModelCache(String(result.stdout ?? ''));
+          if (models.length > 0) return { models, installationFingerprint };
+        }
+      }
+
+      if (request.agentId === 'codex') {
+        const candidate = path.join(
+          this.runtime.hostHomeDirectory(),
+          '.codex',
+          'models_cache.json',
+        );
+        try {
+          const models = parseCodexModelCache(await this.runtime.readHostFile(candidate));
+          if (models.length > 0) return { models, installationFingerprint };
+        } catch {
+          // Fall through to the normal no-models result.
+        }
+      }
+
       return {
-        models,
-        installationFingerprint: `host:${request.agentId}`,
-        ...(models.length > 0
-          ? {}
-          : { error: commandOutput(result) || `No models discovered for ${request.agentId}` }),
+        models: [],
+        installationFingerprint,
+        error:
+          commands.length > 0
+            ? `No models discovered for ${request.agentId} (${commands.length} commands tried)`
+            : `No model discovery command is available for ${request.agentId}`,
       };
     }
 
@@ -246,10 +298,10 @@ export class AgentModelCatalogService {
       if (models.length > 0) return { models, installationFingerprint };
     }
 
-    if (adapter.containerCacheCommand) {
+    if (adapter.modelCacheCommand) {
       const result = await this.runtime.runContainer(
         containerName,
-        adapter.containerCacheCommand,
+        adapter.modelCacheCommand,
         timeoutMs,
       );
       if (result.code === 0) {

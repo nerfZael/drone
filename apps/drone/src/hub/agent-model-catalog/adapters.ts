@@ -4,12 +4,12 @@ type AgentModelCatalogAdapter = {
   binary: string;
   explicitCommands: readonly string[];
   hostSupported: boolean;
-  containerCacheCommand?: string;
+  modelCacheCommand?: string;
 };
 
 const CODEX_CACHE_COMMAND = [
   'set -euo pipefail',
-  'paths=("$HOME/.codex/models_cache.json" "/root/.codex/models_cache.json" "/dvm-data/home/.codex/models_cache.json")',
+  'paths=("${CODEX_HOME:-$HOME/.codex}/models_cache.json" "$HOME/.codex/models_cache.json" "/root/.codex/models_cache.json" "/dvm-data/home/.codex/models_cache.json")',
   'for p in "${paths[@]}"; do',
   '  if [ -f "$p" ]; then',
   '    cat "$p"',
@@ -23,7 +23,7 @@ const ADAPTERS: Record<BuiltinAgentId, AgentModelCatalogAdapter> = {
   cursor: {
     binary: 'agent',
     explicitCommands: ['agent --list-models', 'agent models'],
-    hostSupported: false,
+    hostSupported: true,
   },
   codex: {
     binary: 'codex',
@@ -33,23 +33,23 @@ const ADAPTERS: Record<BuiltinAgentId, AgentModelCatalogAdapter> = {
       'codex models',
       'codex models list',
     ],
-    hostSupported: false,
-    containerCacheCommand: CODEX_CACHE_COMMAND,
+    hostSupported: true,
+    modelCacheCommand: CODEX_CACHE_COMMAND,
   },
   claude: {
     binary: 'claude',
     explicitCommands: ['claude models --json', 'claude models'],
-    hostSupported: false,
+    hostSupported: true,
   },
   opencode: {
     binary: 'opencode',
     explicitCommands: ['opencode models --json', 'opencode models'],
-    hostSupported: false,
+    hostSupported: true,
   },
   pi: {
     binary: 'pi',
     explicitCommands: ['pi --list-models'],
-    hostSupported: false,
+    hostSupported: true,
   },
   blip: {
     binary: 'blip',
@@ -61,6 +61,10 @@ const ADAPTERS: Record<BuiltinAgentId, AgentModelCatalogAdapter> = {
 export function agentModelCatalogAdapter(agentId: BuiltinAgentId): AgentModelCatalogAdapter {
   return ADAPTERS[agentId];
 }
+
+export const AGENT_MODEL_CATALOG_AGENT_IDS = Object.freeze(
+  Object.keys(ADAPTERS) as BuiltinAgentId[],
+);
 
 export function modelListCommands(agentId: BuiltinAgentId, helpText: string): string[] {
   const adapter = agentModelCatalogAdapter(agentId);
