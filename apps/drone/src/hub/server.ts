@@ -164,6 +164,7 @@ import {
   readBuiltinTranscriptSessionId,
   type AgentTurnRuntimeMetadata,
 } from './builtin-transcript-sessions';
+import { agentModelCatalogAdapter } from './agent-model-catalog/adapters';
 import { AgentModelCatalogService } from './agent-model-catalog/service';
 import { createAgentModelCatalogStore } from './agent-model-catalog/store';
 import type { AgentModelCatalogTarget } from './agent-model-catalog/types';
@@ -2613,7 +2614,11 @@ const {
   normalizePendingStartupPrompts,
   resolvePendingDroneDisplayName,
   startupPromptToPendingPrompt,
-} = createPendingDroneStateHelpers({ normalizeChatName, nowIso });
+} = createPendingDroneStateHelpers({
+  normalizeChatName,
+  normalizeChatImageAttachments,
+  nowIso,
+});
 
 function makeDroneIdentity(): string {
   return crypto.randomUUID();
@@ -2834,6 +2839,11 @@ async function discoverAndRememberModelsForBuiltinAgent(opts: {
     target: sharedAgentCatalogTarget(opts),
     forceRefresh: opts.forceRefresh,
   });
+}
+
+async function isHostBuiltinAgentInstalled(agentId: BuiltinAgentId): Promise<boolean> {
+  if (agentId === 'blip') return true;
+  return (await checkHostCommand(agentModelCatalogAdapter(agentId).binary)).available;
 }
 
 async function readCodexLastTurnRuntime(opts: {
@@ -5476,6 +5486,7 @@ export async function startDroneHubApiServer(opts: {
     loadRegistry,
     droneRuntime,
     discoverModels: discoverAndRememberModelsForBuiltinAgent,
+    hostAgentInstalled: isHostBuiltinAgentInstalled,
   });
 
   registerRepositoryRoutes(apiRouter, {

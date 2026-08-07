@@ -6,6 +6,7 @@ import { parseDroneAgentsMdOverride } from './agents-config';
 import { readJsonBody, sendJson as json } from './hub-http';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 import type { DroneRuntime } from '../host/runtime';
+import type { ChatImageAttachment } from './chat-attachments';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
 
 type RepoBranchSourceMode = 'host' | 'remote';
@@ -93,6 +94,7 @@ function createDroneProvisioningServiceHandler(
     loadRegistry,
     logSlowHubRequest,
     makeDroneIdentity,
+    normalizeChatImageAttachments,
     normalizeChatName,
     normalizeChatReasoning,
     normalizeDroneDisplayName,
@@ -224,9 +226,28 @@ function createDroneProvisioningServiceHandler(
           return;
         }
 
-        const seedPrompt = String(
+        let seedPrompt = String(
           body?.seedPrompt ?? body?.initialMessage ?? body?.seed?.prompt ?? '',
         ).trim();
+        let seedAttachments: ChatImageAttachment[] = [];
+        try {
+          seedAttachments = normalizeChatImageAttachments(
+            body?.seedAttachments ?? body?.seed?.attachments,
+          );
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+        if (seedAttachments.length > 0 && !createAsDraft) {
+          json(res, 400, {
+            ok: false,
+            error: 'seedAttachments are only supported when creating a draft drone',
+          });
+          return;
+        }
+        if (!seedPrompt && seedAttachments.length > 0) {
+          seedPrompt = `Attached ${seedAttachments.length} attachment${seedAttachments.length === 1 ? '' : 's'}`;
+        }
         const seedChatName = normalizeChatName(
           body?.seedChat ?? body?.seed?.chatName ?? body?.seed?.chat ?? 'default',
         );
@@ -470,6 +491,7 @@ function createDroneProvisioningServiceHandler(
                   chatName: seedChatName,
                   at: seedSubmittedAt,
                   prompt: seedPrompt,
+                  ...(seedAttachments.length > 0 ? { attachments: seedAttachments } : {}),
                   ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
                   state: 'queued' as const,
                   updatedAt: seedSubmittedAt,
@@ -550,7 +572,7 @@ function createDroneProvisioningServiceHandler(
           }
           throw error;
         }
-        if (seedPrompt && seedPromptId) {
+        if (seedPrompt && seedPromptId && seedAttachments.length === 0) {
           await reserveInitialPromptQueuePosition({
             droneId,
             chatName: seedChatName,

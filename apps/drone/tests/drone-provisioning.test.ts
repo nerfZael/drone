@@ -25,6 +25,8 @@ function createControllerHarness(opts?: {
   runNodeCliResult?: { code: number; stdout: string; stderr: string };
 }) {
   const pendingStateHelpers = createPendingDroneStateHelpers({
+    normalizeChatImageAttachments: (raw: unknown) =>
+      Array.isArray(raw) ? (raw as any[]) : [],
     normalizeChatName: (raw: any) => String(raw ?? 'default').trim() || 'default',
     nowIso: () => '2026-03-26T12:00:00.000Z',
   });
@@ -447,6 +449,64 @@ describe('drone provisioning controller', () => {
       expect(harness.enqueuePromptCalls).toHaveLength(0);
       expect(harness.pendingPromptPumpCalls).toEqual([{ droneId: 'drone-seed-order', chatName: 'default' }]);
       expect(harness.events.indexOf('pump:drone-seed-order:default')).toBeGreaterThan(harness.events.indexOf('sync:repo-agents'));
+    });
+  });
+
+  test('stages draft image attachments when their drone is published', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      const attachment = {
+        name: 'screen.png',
+        mime: 'image/png',
+        size: 3,
+        dataBase64: 'YWJj',
+        fileName: 'screen.png',
+      };
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-draft-image': {
+            id: 'drone-draft-image',
+            name: 'draft-image',
+            runtime: 'host',
+            repoPath: '',
+            build: false,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+            startupQueuedPrompts: [
+              {
+                id: 'draft-image-prompt',
+                chatName: 'default',
+                at: '2026-03-26T11:01:00.000Z',
+                prompt: 'Review this image',
+                attachments: [attachment],
+                state: 'queued',
+              },
+            ],
+          },
+        };
+      });
+
+      const harness = createControllerHarness();
+      harness.controller.enqueueProvisioning('drone-draft-image');
+
+      await waitFor(async () => harness.pendingPromptPumpCalls.length > 0);
+
+      expect(harness.enqueuePromptCalls).toEqual([
+        {
+          id: 'draft-image-prompt',
+          droneId: 'drone-draft-image',
+          chatName: 'default',
+          prompt: 'Review this image',
+          attachments: [attachment],
+          cwd: undefined,
+          deliveryMode: 'background',
+          priority: 'queue',
+        },
+      ]);
+      expect(harness.pendingPromptPumpCalls).toEqual([
+        { droneId: 'drone-draft-image', chatName: 'default' },
+      ]);
     });
   });
 

@@ -56,4 +56,36 @@ describe('local drone records', () => {
       chats: { default: 'thread-1' },
     });
   });
+
+  test('preserves queued text and image references for local draft drones', () => {
+    expect(
+      cleanLocalDroneRecords([
+        {
+          id: 'phone-draft',
+          name: 'Phone draft',
+          group: null,
+          createdAt: '2026-08-07T00:00:00.000Z',
+          chats: { default: 'thread-1' },
+          draft: true,
+          draftPrompts: [
+            {
+              id: 'draft-prompt-1',
+              prompt: 'Review this image',
+              createdAt: '2026-08-07T00:00:00.000Z',
+              promptImages: [{ type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' }],
+            },
+          ],
+        },
+      ])[0],
+    ).toMatchObject({
+      draft: true,
+      draftPrompts: [
+        {
+          id: 'draft-prompt-1',
+          prompt: 'Review this image',
+          promptImages: [{ type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' }],
+        },
+      ],
+    });
+  });
 });

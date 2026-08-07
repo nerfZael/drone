@@ -11,6 +11,7 @@ export type AgentModelCatalogOption = ExternalAgentModelCatalogModel;
 
 const STORAGE_KEY = profileStorageKey('droneHub.agentModelCatalog.v3');
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+const CATALOG_UPDATED_EVENT = 'drone-hub:agent-model-catalog-updated';
 
 function text(value: unknown): string {
   return String(value ?? '').trim();
@@ -40,6 +41,22 @@ function writeCache(key: string, models: AgentModelCatalogOption[]) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {
     // Best-effort cache only.
+  }
+}
+
+export function cacheAgentModelCatalog(
+  runtime: 'container' | 'host',
+  agentId: string,
+  value: unknown,
+): void {
+  const cleanAgentId = text(agentId);
+  if (!cleanAgentId) return;
+  const models = normalizeAgentModelCatalog(value);
+  if (models.length === 0) return;
+  const key = `${runtime}:${cleanAgentId}`;
+  writeCache(key, models);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(CATALOG_UPDATED_EVENT, { detail: { key } }));
   }
 }
 
@@ -134,6 +151,19 @@ export function useAgentModelCatalog(opts: {
     const id = window.setInterval(() => void load(), REFRESH_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, [load, opts.enabled]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleCatalogUpdated = (event: Event) => {
+      const updatedKey = String((event as CustomEvent<{ key?: string }>).detail?.key ?? '');
+      if (updatedKey !== key) return;
+      setModels(readCache()[key] ?? []);
+      setError(null);
+      setStale(false);
+    };
+    window.addEventListener(CATALOG_UPDATED_EVENT, handleCatalogUpdated);
+    return () => window.removeEventListener(CATALOG_UPDATED_EVENT, handleCatalogUpdated);
+  }, [key]);
 
   React.useEffect(() => {
     if (

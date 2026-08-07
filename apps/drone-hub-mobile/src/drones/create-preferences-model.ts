@@ -9,7 +9,6 @@ import type {
 export type MobileDroneCreatePreferences = {
   mode: 'with-chat' | 'without-chat';
   runtime: 'container' | 'host';
-  draft: boolean;
   persistVolume: boolean;
   agent: MobileDroneAgentId;
   agentPermissionMode: MobileDroneAgentPermissionMode;
@@ -48,7 +47,6 @@ export function normalizeMobileDroneCreatePreferences(
   return {
     mode: candidate.mode === 'without-chat' ? 'without-chat' : 'with-chat',
     runtime: candidate.runtime === 'host' ? 'host' : 'container',
-    draft: candidate.draft === true,
     persistVolume: candidate.persistVolume === true,
     agent,
     agentPermissionMode:
@@ -77,7 +75,6 @@ export function mobileDroneCreatePreferencesFromPayload(
   return {
     mode: seedAgent ? 'with-chat' : 'without-chat',
     runtime: payload.runtime === 'host' ? 'host' : 'container',
-    draft: payload.draft === true,
     persistVolume: payload.runtime === 'container' && payload.persistVolume === true,
     agent,
     agentPermissionMode:

@@ -3,7 +3,6 @@ import { profileStorageKey } from '../../profile-storage';
 export type DesktopNewDronePreferences = {
   mode: 'with-chat' | 'without-chat';
   runtime: 'container' | 'host';
-  createAsDraft: boolean;
   persistVolume: boolean;
   spawnAgentKey: string;
   spawnModel: string;
@@ -34,7 +33,6 @@ export function normalizeDesktopNewDronePreferences(
     // removed empty-drone mode.
     mode: 'with-chat',
     runtime: candidate.runtime === 'host' ? 'host' : 'container',
-    createAsDraft: candidate.createAsDraft === true,
     persistVolume: candidate.persistVolume === true,
     spawnAgentKey: trimmed(candidate.spawnAgentKey) || 'builtin:cursor',
     spawnModel: trimmed(candidate.spawnModel),

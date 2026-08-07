@@ -70,7 +70,6 @@ export type MobileDroneCreatePayload = {
 export type MobileDroneCreateDefaults = {
   mode?: MobileDroneCreateMode;
   runtime?: MobileDroneCreateRuntime;
-  draft?: boolean;
   persistVolume?: boolean;
   group?: string;
   repoPath?: string;
@@ -84,24 +83,29 @@ export type MobileDroneCreateDefaults = {
   reasoning?: string;
 };
 
+export type MobileNewDroneDraftContent = {
+  hasContent: boolean;
+  payload: MobileDroneCreatePayload;
+  preferences: MobileDroneCreatePreferences;
+  initialImages: readonly MobileChatImage[];
+};
+
 export function NewDroneScreen({
   repos,
   loadingOptions,
   busy,
-  draft,
   requestError,
   initialValues,
   localDevice = false,
   onDetectModels,
   onLoadRepoBranches,
   onLoadRepoPreferences,
-  onRememberedDraftChange,
+  onDraftContentChange,
   onCreate,
 }: {
   repos: MobileDroneCreateRepo[];
   loadingOptions: boolean;
   busy: boolean;
-  draft: boolean;
   requestError: string | null;
   initialValues?: MobileDroneCreateDefaults;
   localDevice?: boolean;
@@ -112,7 +116,7 @@ export function NewDroneScreen({
   ): Promise<MobileDroneCreateModel[]>;
   onLoadRepoBranches(repoPath: string, refresh?: boolean): Promise<MobileDroneCreateRepo>;
   onLoadRepoPreferences(repoPath: string): Promise<MobileDroneCreatePreferences | null>;
-  onRememberedDraftChange(draft: boolean): void;
+  onDraftContentChange(content: MobileNewDroneDraftContent): void;
   onCreate(
     payload: MobileDroneCreatePayload,
     preferences: MobileDroneCreatePreferences,
@@ -193,10 +197,6 @@ export function NewDroneScreen({
     setRepoPath('');
     setPersistVolume(false);
   }, [localDevice]);
-
-  React.useEffect(() => {
-    if (draft) setInitialImages([]);
-  }, [draft]);
 
   React.useEffect(() => {
     const subscription = Keyboard.addListener('keyboardDidShow', () => {
@@ -333,7 +333,6 @@ export function NewDroneScreen({
     setModel('');
     setModelProvider('');
     setReasoning('');
-    onRememberedDraftChange(false);
     setBranchSource('host');
     setRemoteBranch('');
     setBranchPickerOpen(false);
@@ -347,7 +346,6 @@ export function NewDroneScreen({
       setModel(remembered.model);
       setModelProvider(remembered.provider);
       setReasoning(remembered.reasoning);
-      onRememberedDraftChange(remembered.draft);
       setBranchSource(localDevice ? 'host' : remembered.repoBranchSource);
       setRemoteBranch(localDevice ? '' : remembered.repoCreateRemoteBranch);
     });
@@ -387,6 +385,84 @@ export function NewDroneScreen({
     }
   };
 
+  const buildCreateRequest = React.useCallback(
+    (promptRaw: string, asDraft: boolean) => {
+      const prompt = String(promptRaw ?? '').trim();
+      const effectiveBranchSource = runtime === 'host' ? 'host' : branchSource;
+      const effectiveApprovalPolicy: MobileDroneApprovalPolicy =
+        agent === 'codex' && agentPermissionMode === 'full-access' && approvalPolicy === 'ask'
+          ? 'agent-decides'
+          : approvalPolicy;
+      const payload: MobileDroneCreatePayload = {
+        runtime,
+        ...(name.trim() ? { name: name.trim() } : {}),
+        ...(group.trim() ? { group: group.trim() } : {}),
+        ...(asDraft ? { draft: true } : {}),
+        ...(runtime === 'container' ? { persistVolume } : {}),
+        ...(repoPath ? { repoPath } : {}),
+        repoBranchSource: effectiveBranchSource,
+        ...(effectiveBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
+        seedAgent:
+          agent === 'native'
+            ? { kind: 'native' as const }
+            : { kind: 'builtin' as const, id: agent },
+        ...(agent === 'native' && modelProvider.trim()
+          ? { seedProvider: modelProvider.trim() }
+          : {}),
+        ...(model.trim() ? { seedModel: model.trim() } : {}),
+        ...(reasoning.trim() ? { seedReasoning: reasoning.trim() } : {}),
+        ...(agentPermissionMode !== 'full-access'
+          ? { seedAgentPermissionMode: agentPermissionMode }
+          : {}),
+        ...(effectiveApprovalPolicy !== 'ask'
+          ? { seedApprovalPolicy: effectiveApprovalPolicy }
+          : {}),
+        seedPrompt: prompt,
+        seedSubmittedAt: new Date().toISOString(),
+        ...(!name.trim() && prompt ? { autoRename: true } : {}),
+      };
+      const preferences = mobileDroneCreatePreferencesFromSelection({
+        mode,
+        runtime,
+        persistVolume: runtime === 'container' && persistVolume,
+        agent,
+        agentPermissionMode,
+        approvalPolicy: effectiveApprovalPolicy,
+        model,
+        provider: modelProvider,
+        reasoning,
+        repoBranchSource: effectiveBranchSource,
+        repoCreateRemoteBranch: effectiveBranchSource === 'remote' ? remoteBranch : '',
+      });
+      return { payload, preferences };
+    },
+    [
+      agent,
+      agentPermissionMode,
+      approvalPolicy,
+      branchSource,
+      group,
+      mode,
+      model,
+      modelProvider,
+      name,
+      persistVolume,
+      reasoning,
+      remoteBranch,
+      repoPath,
+      runtime,
+    ],
+  );
+
+  React.useEffect(() => {
+    const request = buildCreateRequest(initialMessage, true);
+    onDraftContentChange({
+      hasContent: Boolean(name.trim() || initialMessage.trim() || initialImages.length > 0),
+      ...request,
+      initialImages: [...initialImages],
+    });
+  }, [buildCreateRequest, initialImages, initialMessage, name, onDraftContentChange]);
+
   const submit = async (promptOverride?: string) => {
     const prompt = String(promptOverride ?? initialMessage).trim();
     if (!prompt && initialImages.length === 0) {
@@ -398,51 +474,8 @@ export function NewDroneScreen({
       return;
     }
     setFormError(null);
-    const effectiveBranchSource = runtime === 'host' ? 'host' : branchSource;
-    const effectiveApprovalPolicy: MobileDroneApprovalPolicy =
-      agent === 'codex' && agentPermissionMode === 'full-access' && approvalPolicy === 'ask'
-        ? 'agent-decides'
-        : approvalPolicy;
-    const payload: MobileDroneCreatePayload = {
-      runtime,
-      ...(name.trim() ? { name: name.trim() } : {}),
-      ...(group.trim() ? { group: group.trim() } : {}),
-      ...(draft ? { draft: true } : {}),
-      ...(runtime === 'container' ? { persistVolume } : {}),
-      ...(repoPath ? { repoPath } : {}),
-      repoBranchSource: effectiveBranchSource,
-      ...(effectiveBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
-      seedAgent:
-        agent === 'native' ? { kind: 'native' as const } : { kind: 'builtin' as const, id: agent },
-      ...(agent === 'native' && modelProvider.trim() ? { seedProvider: modelProvider.trim() } : {}),
-      ...(model.trim() ? { seedModel: model.trim() } : {}),
-      ...(reasoning.trim() ? { seedReasoning: reasoning.trim() } : {}),
-      ...(agentPermissionMode !== 'full-access'
-        ? { seedAgentPermissionMode: agentPermissionMode }
-        : {}),
-      ...(effectiveApprovalPolicy !== 'ask' ? { seedApprovalPolicy: effectiveApprovalPolicy } : {}),
-      seedPrompt: prompt,
-      seedSubmittedAt: new Date().toISOString(),
-      ...(!name.trim() && prompt ? { autoRename: true } : {}),
-    };
-    const created = await onCreate(
-      payload,
-      mobileDroneCreatePreferencesFromSelection({
-        mode,
-        runtime,
-        draft,
-        persistVolume: runtime === 'container' && persistVolume,
-        agent,
-        agentPermissionMode,
-        approvalPolicy: effectiveApprovalPolicy,
-        model,
-        provider: modelProvider,
-        reasoning,
-        repoBranchSource: effectiveBranchSource,
-        repoCreateRemoteBranch: effectiveBranchSource === 'remote' ? remoteBranch : '',
-      }),
-      initialImages,
-    );
+    const { payload, preferences } = buildCreateRequest(prompt, false);
+    const created = await onCreate(payload, preferences, initialImages);
     if (!created) return;
     setName('');
     setInitialMessage('');
@@ -556,9 +589,9 @@ export function NewDroneScreen({
             editable={!busy}
             alwaysExpanded
             continuousVoiceEnabled={false}
-            showAttachments={!draft}
+            showAttachments
             hasAttachments={initialImages.length > 0}
-            onAddAttachment={draft ? undefined : () => void addInitialImages()}
+            onAddAttachment={() => void addInitialImages()}
             footer={
               <>
                 <ChatAttachmentStrip

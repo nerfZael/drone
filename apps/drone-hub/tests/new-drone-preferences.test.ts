@@ -26,7 +26,6 @@ describe('desktop new drone preferences', () => {
     ).toEqual({
       mode: 'with-chat',
       runtime: 'host',
-      createAsDraft: true,
       persistVolume: true,
       spawnAgentKey: 'builtin:codex',
       spawnModel: 'gpt-5.4',
@@ -42,7 +41,6 @@ describe('desktop new drone preferences', () => {
     expect(normalizeDesktopNewDronePreferences({})).toEqual({
       mode: 'with-chat',
       runtime: 'container',
-      createAsDraft: false,
       persistVolume: false,
       spawnAgentKey: 'builtin:cursor',
       spawnModel: '',

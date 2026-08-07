@@ -296,6 +296,88 @@ describe('agent model catalog', () => {
     expect(result.error).toContain('No models discovered');
   });
 
+  test('discovers models from an agent installed on the host', async () => {
+    const hostCommands: string[] = [];
+    const runtime: AgentModelCatalogRuntime = {
+      async runContainer() {
+        return { code: 1 };
+      },
+      async runHost(command) {
+        hostCommands.push(command);
+        if (command.startsWith('command -v')) return { code: 0 };
+        if (command === 'opencode --help') return { code: 0, stdout: 'models  list models' };
+        if (command === 'opencode --version') return { code: 0, stdout: '1.2.3' };
+        if (command === 'opencode models --json') {
+          return { code: 0, stdout: JSON.stringify({ models: [{ id: 'host-model' }] }) };
+        }
+        return { code: 1 };
+      },
+      async readHostFile() {
+        throw new Error('not found');
+      },
+      hostHomeDirectory: () => '/tmp',
+      hostModelListCommand: () => null,
+      timeoutMs: () => 1_000,
+    };
+
+    const result = await new AgentModelCatalogService(runtime).get({
+      agentId: 'opencode',
+      target: { runtime: 'host', installationKey: 'shared:host' },
+      forceRefresh: true,
+    });
+
+    expect(result.models[0]?.id).toBe('host-model');
+    expect(result.source).toBe('live');
+    expect(hostCommands).toContain('command -v opencode >/dev/null 2>&1');
+  });
+
+  test('refreshes every installed host agent and reports skipped agents', async () => {
+    const responses: Array<{ status: number; body: any }> = [];
+    const discoveredAgents: string[] = [];
+    const router = new HubRouter(
+      (_response, status, body) => responses.push({ status, body }),
+      async () => ({}),
+    );
+    registerAgentModelCatalogRoutes(router, {
+      normalizeBuiltinAgentId: (value: string) => value,
+      nativeModelCatalog: async () => ({ models: [] }),
+      loadRegistry: async () => ({ drones: {} }),
+      droneRuntime: () => 'host',
+      hostAgentInstalled: async (agentId: string) => agentId === 'codex' || agentId === 'opencode',
+      discoverModels: async ({ agentId, forceRefresh, runtime }: any) => {
+        expect(forceRefresh).toBe(true);
+        expect(runtime).toBe('host');
+        discoveredAgents.push(agentId);
+        return {
+          models: [{ id: `${agentId}-model`, label: `${agentId} model` }],
+          source: 'live',
+          discoveredAt: '2026-01-01T00:00:00.000Z',
+        };
+      },
+    });
+
+    await router.handle(
+      { method: 'POST' } as any,
+      {} as any,
+      new URL('http://hub.test/api/model-catalog/refresh'),
+    );
+
+    expect(discoveredAgents.sort()).toEqual(['codex', 'opencode']);
+    expect(responses[0]?.status).toBe(200);
+    expect(responses[0]?.body).toMatchObject({
+      ok: true,
+      runtime: 'host',
+      catalogs: [
+        { agent: 'cursor', installed: false, models: [] },
+        { agent: 'codex', installed: true, models: [{ id: 'codex-model' }] },
+        { agent: 'claude', installed: false, models: [] },
+        { agent: 'opencode', installed: true, models: [{ id: 'opencode-model' }] },
+        { agent: 'pi', installed: false, models: [] },
+        { agent: 'blip', installed: false, models: [] },
+      ],
+    });
+  });
+
   test('uses another shared container when the first catalog probe fails', async () => {
     const responses: Array<{ status: number; body: any }> = [];
     const calls: Array<{ containerName: string; forceRefresh: boolean }> = [];
@@ -313,6 +395,7 @@ describe('agent model catalog', () => {
         },
       }),
       droneRuntime: (drone: any) => drone.runtime,
+      hostAgentInstalled: async () => false,
       discoverModels: async (request: any) => {
         calls.push({
           containerName: request.containerName,

@@ -2,6 +2,7 @@ import {
   normalizePendingPromptState as normalizeSharedPendingPromptState,
   type PendingPromptState,
 } from '@drone/assistant-chat';
+import type { ChatImageAttachment } from './chat-attachments';
 
 export type PendingPhase = 'draft' | 'starting' | 'creating' | 'seeding' | 'error';
 
@@ -12,6 +13,7 @@ export type PendingStartupPrompt = {
   chatName: string;
   at: string;
   prompt: string;
+  attachments?: ChatImageAttachment[];
   messageId?: string;
   cwd?: string | null;
   deliveryMode?: 'queue' | 'asap';
@@ -54,6 +56,7 @@ export function hasQueuedPromptWithId(drone: unknown, promptIdRaw: unknown): boo
 
 export function createPendingDroneStateHelpers(deps: {
   normalizeChatName: (raw: any) => string;
+  normalizeChatImageAttachments?: (raw: unknown) => ChatImageAttachment[];
   nowIso: () => string;
 }) {
   function resolvePendingDroneDisplayName(pendingEntry: any, fallbackRaw: unknown): string {
@@ -95,12 +98,21 @@ export function createPendingDroneStateHelpers(deps: {
       const prompt = normalizePendingPromptText((item as any).prompt);
       const chatName = deps.normalizeChatName((item as any).chatName);
       if (!id || !prompt.trim()) continue;
+      let attachments: ChatImageAttachment[] = [];
+      if (deps.normalizeChatImageAttachments) {
+        try {
+          attachments = deps.normalizeChatImageAttachments((item as any).attachments);
+        } catch {
+          attachments = [];
+        }
+      }
       if (chatFilter && chatName !== chatFilter) continue;
       out.push({
         id,
         chatName,
         at: typeof (item as any).at === 'string' ? String((item as any).at) : deps.nowIso(),
         prompt,
+        ...(attachments.length > 0 ? { attachments } : {}),
         ...(typeof (item as any).messageId === 'string' && String((item as any).messageId).trim()
           ? { messageId: String((item as any).messageId).trim() }
           : {}),

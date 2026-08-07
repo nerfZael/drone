@@ -273,11 +273,13 @@ function useLocalDroneControlValue() {
             id: drone.id,
             name: drone.name,
             runtime: 'host',
-            phase: 'ready',
-            status: 'ready',
+            phase: drone.draft === true ? 'draft' : 'ready',
+            status: drone.draft === true ? 'Draft' : 'ready',
+            ...(drone.draft === true ? { draft: true } : {}),
             group: drone.group,
             repoPath: '',
             chats: Object.keys(drone.chats),
+            ...(drone.draft === true ? { draftChats: { default: true } } : {}),
             busyChats: Object.entries(drone.chats).flatMap(([chatName, threadId]) =>
               assistant.runningThreadId === threadId ||
               threadById.get(threadId)?.status === 'running'
@@ -387,11 +389,22 @@ function useLocalDroneControlValue() {
           group: String(payload.group ?? '').trim() || null,
           createdAt: new Date().toISOString(),
           chats: thread ? { default: thread.id } : {},
+          ...(payload.draft === true ? { draft: true } : {}),
         };
-        await replaceDrones([drone, ...dronesRef.current]);
         const prompt = String(payload.seedPrompt ?? '').trim();
         const images = promptImages(payload.seedAttachments);
-        if (thread && (prompt || images.length > 0)) {
+        if (payload.draft === true && (prompt || images.length > 0)) {
+          drone.draftPrompts = [
+            {
+              id: `phone_draft_${Crypto.randomUUID()}`,
+              prompt,
+              promptImages: images,
+              createdAt: String(payload.seedSubmittedAt ?? '').trim() || new Date().toISOString(),
+            },
+          ];
+        }
+        await replaceDrones([drone, ...dronesRef.current]);
+        if (payload.draft !== true && thread && (prompt || images.length > 0)) {
           void assistant.sendPrompt(thread.id, prompt, images).catch(() => undefined);
         }
         return { ok: true, droneId: drone.id, drone };
@@ -665,7 +678,7 @@ function useLocalDroneControlValue() {
         };
       }
       if (operation === 'chat.read') {
-        const { thread } = getThread();
+        const { drone, thread } = getThread();
         const settings = await loadLocalAssistantSettings();
         return {
           ok: true,
@@ -676,10 +689,20 @@ function useLocalDroneControlValue() {
           pendingApprovals: assistant.pendingApprovals.filter(
             (approval) => approval.threadId === thread.id,
           ),
-          pending: thread.queuedPrompts.map((prompt) => ({
-            ...prompt,
-            state: prompt.status,
-          })),
+          pending:
+            drone.draft === true
+              ? (drone.draftPrompts ?? []).map((prompt) => ({
+                  id: prompt.id,
+                  prompt: prompt.prompt,
+                  at: prompt.createdAt,
+                  state: 'queued',
+                  attachmentCount: prompt.promptImages.length,
+                  imageCount: prompt.promptImages.length,
+                }))
+              : thread.queuedPrompts.map((prompt) => ({
+                  ...prompt,
+                  state: prompt.status,
+                })),
           thread,
           agent: { kind: 'native' },
           provider: settings.provider,
@@ -692,8 +715,32 @@ function useLocalDroneControlValue() {
         };
       }
       if (operation === 'chat.prompt') {
-        const { thread } = getThread();
+        const { drone, thread } = getThread();
         const images = promptImages(payload.attachments);
+        const prompt = String(payload.prompt ?? '').trim();
+        if (drone.draft === true) {
+          const nextPrompt = {
+            id: String(payload.promptId ?? '').trim() || `phone_draft_${Crypto.randomUUID()}`,
+            prompt,
+            promptImages: images,
+            createdAt: String(payload.submittedAt ?? '').trim() || new Date().toISOString(),
+          };
+          if (!prompt && images.length === 0) throw new Error('Add a message or image.');
+          if ((drone.draftPrompts?.length ?? 0) >= 20) {
+            throw new Error('Phone draft prompt queue is full (max 20)');
+          }
+          await replaceDrones(
+            dronesRef.current.map((candidate) =>
+              candidate.id === drone.id
+                ? {
+                    ...candidate,
+                    draftPrompts: [...(candidate.draftPrompts ?? []), nextPrompt],
+                  }
+                : candidate,
+            ),
+          );
+          return { ok: true, accepted: true, promptId: nextPrompt.id, pendingState: 'queued' };
+        }
         if (images.length > 0 && assistant.runningThreadId) {
           throw new Error('Wait for the current response before sending images.');
         }
