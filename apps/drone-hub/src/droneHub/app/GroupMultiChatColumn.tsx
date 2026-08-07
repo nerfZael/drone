@@ -157,8 +157,6 @@ export function GroupMultiChatColumn({
     () => chatInputDraftKeyForDroneChat(drone.id, chatName),
     [drone.id, chatName],
   );
-  const draftValue = useDroneHubUiStore((s) => s.chatInputDrafts[draftKey] ?? '');
-  const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
   const terminalEmulator = useDroneHubUiStore((s) => s.terminalEmulator);
   const hostRuntime = isHostRuntimeDrone(drone);
   const repoAttached = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
@@ -1131,9 +1129,8 @@ export function GroupMultiChatColumn({
       </div>
       <ChatInput
         resetKey={`group:${drone.id}:${chatName}`}
+        draftPersistenceKey={draftKey}
         droneName={drone.name}
-        draftValue={draftValue}
-        onDraftValueChange={(next) => setChatInputDraft(draftKey, next)}
         promptError={promptError}
         waiting={waitingForAgent}
         disabled={isDroneStartingOrSeeding(drone.hubPhase)}

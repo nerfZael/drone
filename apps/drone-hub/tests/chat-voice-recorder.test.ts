@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   floatToPcm16,
   formatChatVoiceDuration,
+  insertVoiceTranscriptAtSelection,
   mergeDraftWithVoiceTranscript,
   pcm16ToWav,
 } from '../src/droneHub/chat/use-chat-voice-recorder';
@@ -20,6 +21,21 @@ describe('chat voice recorder helpers', () => {
     expect(mergeDraftWithVoiceTranscript('existing draft  ', 'new transcript')).toBe('existing draft new transcript');
     expect(mergeDraftWithVoiceTranscript('existing draft\n\n', 'new transcript')).toBe('existing draft new transcript');
     expect(mergeDraftWithVoiceTranscript('existing draft', '   ')).toBe('existing draft');
+  });
+
+  test('inserts a voice transcript at the caret or over the selected text', () => {
+    expect(insertVoiceTranscriptAtSelection('hello world', 'there', 5)).toEqual({
+      value: 'hello there world',
+      caret: 11,
+    });
+    expect(insertVoiceTranscriptAtSelection('hello old world', 'new', 6, 9)).toEqual({
+      value: 'hello new world',
+      caret: 9,
+    });
+    expect(insertVoiceTranscriptAtSelection('first\nsecond', 'inserted', 6)).toEqual({
+      value: 'first\ninserted second',
+      caret: 14,
+    });
   });
 
   test('encodes pcm16 audio as a wav upload', () => {

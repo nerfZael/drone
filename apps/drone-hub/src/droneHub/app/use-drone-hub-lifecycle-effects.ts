@@ -11,6 +11,7 @@ import {
   shouldDispatchEditableShortcutAction,
   shouldHandoffDraftChatWorkspace,
 } from './lifecycle-effect-helpers';
+import { APP_SHORTCUT_BOUNDARY_SELECTOR } from './AppShortcutBoundary';
 import { useDropdownDismiss } from '../../ui/dropdown';
 import { requestSidebarGroupDraft } from './sidebar-group-draft-events';
 
@@ -168,14 +169,16 @@ export function useDroneHubLifecycleEffects({
     const focusPrimaryChatInput = (): boolean => {
       const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
       if (modalOpen) return false;
-      const primaryInput = document.querySelector<HTMLTextAreaElement>(
+      const primaryInput = document.querySelector<HTMLElement>(
         '[data-chat-input-focus-id="primary-chat"]',
       );
       if (!primaryInput) return false;
       if (primaryInput.getClientRects().length === 0) return false;
       primaryInput.focus();
-      const end = primaryInput.value.length;
-      primaryInput.setSelectionRange(end, end);
+      if (primaryInput instanceof HTMLTextAreaElement) {
+        const end = primaryInput.value.length;
+        primaryInput.setSelectionRange(end, end);
+      }
       return true;
     };
 
@@ -339,6 +342,11 @@ export function useDroneHubLifecycleEffects({
       return target.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
     };
 
+    const isAppShortcutBoundaryTarget = (target: EventTarget | null): boolean => {
+      if (!(target instanceof Element)) return false;
+      return Boolean(target.closest(APP_SHORTCUT_BOUNDARY_SELECTOR));
+    };
+
     const isPrimaryChatInputTarget = (target: EventTarget | null): boolean => {
       if (!(target instanceof HTMLElement)) return false;
       return Boolean(target.closest('[data-chat-input-focus-id="primary-chat"]'));
@@ -366,6 +374,10 @@ export function useDroneHubLifecycleEffects({
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
+      if (
+        isAppShortcutBoundaryTarget(e.target) ||
+        isAppShortcutBoundaryTarget(document.activeElement)
+      ) return;
       const captureRoot =
         e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('[data-shortcut-capture="true"]') : null;
       const deleteOnly =

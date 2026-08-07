@@ -91,13 +91,19 @@ export function ChatSurfaceComposer({ overlay, ...composer }: ChatSurfaceCompose
 
 export type ChatSurfaceLoadingViewProps = Pick<
   ChatInputProps,
-  'resetKey' | 'droneName' | 'draftValue' | 'onDraftValueChange' | 'focusTargetId'
+  | 'resetKey'
+  | 'draftPersistenceKey'
+  | 'droneName'
+  | 'draftValue'
+  | 'onDraftValueChange'
+  | 'focusTargetId'
 > & {
   loadingMessage?: string;
 };
 
 export function ChatSurfaceLoadingView({
   resetKey,
+  draftPersistenceKey,
   droneName,
   draftValue,
   onDraftValueChange,
@@ -111,6 +117,7 @@ export function ChatSurfaceLoadingView({
       </div>
       <ChatSurfaceComposer
         resetKey={resetKey}
+        draftPersistenceKey={draftPersistenceKey}
         droneName={droneName}
         draftValue={draftValue}
         onDraftValueChange={onDraftValueChange}

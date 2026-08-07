@@ -444,6 +444,7 @@ function RemoteMain({
           </div>
           <ChatInput
             resetKey={`${selectedDevice?.id}:${model.selectedDrone.id}:${model.selectedChat}`}
+            draftPersistenceKey={`remote:${selectedDevice?.id ?? 'unknown'}:drone:${model.selectedDrone.id}:chat:${model.selectedChat}`}
             droneName={model.selectedDrone.name}
             promptError={model.chatError}
             waiting={model.waiting}

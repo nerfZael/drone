@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   migrateDroneHubUiPersistedState,
+  normalizeChatInputEditorModes,
   normalizeLastChatSelectionByRepoPath,
   normalizeSpawnContextByRepoKey,
   resolveRepoChatSelectionTransition,
@@ -87,6 +88,35 @@ describe('drone hub ui store migration', () => {
   test('returns an empty object for invalid persisted payloads', () => {
     expect(migrateDroneHubUiPersistedState(null, 5)).toEqual({});
     expect(migrateDroneHubUiPersistedState('invalid', 5)).toEqual({});
+  });
+
+  test('restores editor-mode choices only for valid per-chat keys', () => {
+    expect(
+      normalizeChatInputEditorModes({
+        ' drone:a:chat:default ': true,
+        'drone:a:chat:review': false,
+        'drone:b:chat:default': 'true',
+        '': true,
+      }),
+    ).toEqual({
+      'drone:a:chat:default': true,
+    });
+    expect(
+      migrateDroneHubUiPersistedState({
+        chatInputEditorModes: { 'drone:a:chat:default': true },
+      }).chatInputEditorModes,
+    ).toEqual({ 'drone:a:chat:default': true });
+
+    const oversized = Object.fromEntries([
+      ...Array.from({ length: 82 }, (_, index) => [`drone:${index}:chat:default`, true]),
+      ['invalid:false', false],
+      ['invalid:string', 'true'],
+    ]);
+    const normalized = normalizeChatInputEditorModes(oversized);
+    expect(Object.keys(normalized)).toHaveLength(80);
+    expect(normalized['drone:0:chat:default']).toBeUndefined();
+    expect(normalized['drone:2:chat:default']).toBe(true);
+    expect(normalized['drone:81:chat:default']).toBe(true);
   });
 
   test('migrates the existing active chat into repo-scoped selection history', () => {

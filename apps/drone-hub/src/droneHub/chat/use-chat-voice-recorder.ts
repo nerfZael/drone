@@ -32,11 +32,36 @@ type TranscriptionResponse = {
 };
 
 export function mergeDraftWithVoiceTranscript(draft: string, transcript: string): string {
-  const cleanTranscript = transcript.trim();
-  if (!cleanTranscript) return draft;
   const cleanDraft = draft.trimEnd();
-  if (!cleanDraft) return cleanTranscript;
-  return `${cleanDraft} ${cleanTranscript}`;
+  return insertVoiceTranscriptAtSelection(cleanDraft, transcript, cleanDraft.length).value;
+}
+
+export type VoiceTranscriptInsertion = {
+  value: string;
+  caret: number;
+};
+
+export function insertVoiceTranscriptAtSelection(
+  draft: string,
+  transcript: string,
+  selectionStart: number,
+  selectionEnd = selectionStart,
+): VoiceTranscriptInsertion {
+  const cleanTranscript = transcript.trim();
+  const start = Math.min(Math.max(0, selectionStart), draft.length);
+  const end = Math.min(Math.max(start, selectionEnd), draft.length);
+  if (!cleanTranscript) return { value: draft, caret: start };
+
+  const before = draft.slice(0, start);
+  const after = draft.slice(end);
+  const prefix = before && !/\s$/.test(before) ? ' ' : '';
+  const suffix = after && !/^\s/.test(after) ? ' ' : '';
+  const inserted = `${prefix}${cleanTranscript}`;
+
+  return {
+    value: `${before}${inserted}${suffix}${after}`,
+    caret: start + inserted.length,
+  };
 }
 
 export function concatArrayBuffers(chunks: ArrayBuffer[], totalBytes: number): ArrayBuffer {

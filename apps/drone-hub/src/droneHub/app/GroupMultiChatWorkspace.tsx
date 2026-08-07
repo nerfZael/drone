@@ -89,7 +89,6 @@ export function GroupMultiChatWorkspace({
     setGroupMultiChatStatusSort,
     setGroupBroadcastExpanded,
     setSelectedGroupMultiChat,
-    setChatInputDraft,
   } = useDroneHubUiStore(
     useShallow((s) => ({
       selectedChat: s.selectedChat,
@@ -100,7 +99,6 @@ export function GroupMultiChatWorkspace({
       setGroupMultiChatStatusSort: s.setGroupMultiChatStatusSort,
       setGroupBroadcastExpanded: s.setGroupBroadcastExpanded,
       setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
-      setChatInputDraft: s.setChatInputDraft,
     })),
   );
   const [runtimeByDroneId, setRuntimeByDroneId] = React.useState<
@@ -113,7 +111,6 @@ export function GroupMultiChatWorkspace({
     () => `group-broadcast:${selectedGroupMultiChatData.group}:${selectedChat || 'default'}`,
     [selectedGroupMultiChatData.group, selectedChat],
   );
-  const broadcastDraftValue = useDroneHubUiStore((s) => s.chatInputDrafts[broadcastDraftKey] ?? '');
   const orderedItems = React.useMemo(
     () =>
       sortGroupMultiChatDrones({
@@ -276,16 +273,15 @@ export function GroupMultiChatWorkspace({
       <div
         className={`flex-shrink-0 overflow-hidden border-b border-[var(--border)] bg-[var(--surface-faint)] transition-[max-height,opacity,padding] duration-200 ease-out ${
           groupBroadcastExpanded
-            ? 'max-h-[220px] opacity-100 px-3'
+            ? 'max-h-[min(70vh,36rem)] opacity-100 px-3'
             : 'max-h-0 opacity-0 px-3 pointer-events-none'
         }`}
         aria-hidden={!groupBroadcastExpanded}
       >
         <ChatInput
           resetKey={`group-broadcast:${selectedGroupMultiChatData.group}:${selectedChat || 'default'}`}
+          draftPersistenceKey={broadcastDraftKey}
           droneName="all drones"
-          draftValue={broadcastDraftValue}
-          onDraftValueChange={(next) => setChatInputDraft(broadcastDraftKey, next)}
           promptError={groupBroadcastPromptError}
           waiting={false}
           disabled={selectedGroupMultiChatData.items.length === 0}

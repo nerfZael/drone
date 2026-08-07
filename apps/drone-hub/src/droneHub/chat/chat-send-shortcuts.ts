@@ -10,6 +10,17 @@ export type ChatSendShortcutInput = {
   hasContent: boolean;
 };
 
+export type ChatEditorQueueShortcutInput = Omit<ChatSendShortcutInput, 'hasContent'>;
+
+export function isChatEditorQueueShortcut(input: ChatEditorQueueShortcutInput): boolean {
+  return (
+    input.key === 'Enter' &&
+    !input.shiftKey &&
+    !input.altKey &&
+    (input.ctrlKey || input.metaKey)
+  );
+}
+
 export function chatSendShortcut(input: ChatSendShortcutInput): ChatComposerShortcutAction | null {
   if (!input.hasContent) return null;
   if (input.key === 'Tab' && !input.shiftKey && !input.ctrlKey && !input.metaKey && !input.altKey)

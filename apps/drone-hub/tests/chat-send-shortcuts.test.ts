@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { chatSendShortcut } from '../src/droneHub/chat';
+import { chatSendShortcut, isChatEditorQueueShortcut } from '../src/droneHub/chat';
 
 function shortcut(key: string, overrides: Partial<Parameters<typeof chatSendShortcut>[0]> = {}) {
   return chatSendShortcut({
@@ -27,6 +27,24 @@ describe('chat send shortcuts', () => {
   test('starts a new chat with Ctrl+Enter or Command+Enter', () => {
     expect(shortcut('Enter', { ctrlKey: true })).toBe('new-chat');
     expect(shortcut('Enter', { metaKey: true })).toBe('new-chat');
+  });
+
+  test('queues Ctrl+Enter or Command+Enter in editor mode', () => {
+    const editorShortcut = (overrides: Partial<Parameters<typeof isChatEditorQueueShortcut>[0]>) =>
+      isChatEditorQueueShortcut({
+        key: 'Enter',
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        ...overrides,
+      });
+
+    expect(editorShortcut({ ctrlKey: true })).toBe(true);
+    expect(editorShortcut({ metaKey: true })).toBe(true);
+    expect(editorShortcut({ ctrlKey: true, shiftKey: true })).toBe(false);
+    expect(editorShortcut({ metaKey: true, altKey: true })).toBe(false);
+    expect(editorShortcut({ key: 'Enter' })).toBe(false);
   });
 
   test('keeps Shift+Enter and Shift+Tab available to the editor', () => {

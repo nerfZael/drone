@@ -26,24 +26,24 @@ import { OpenedDroneFileTabs } from './OpenedDroneFileTabs';
 import type { DroneOpenedFileTabState } from './opened-file-types';
 import { VideoPreview } from '../media/VideoPreview';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
-import { DESKTOP_THEMES, desktopMonacoTheme } from '../../theme';
+import { desktopMonacoTheme } from '../../theme';
 import {
   MarkdownOutlinePreview,
   type MarkdownOutlineExpansionCommand,
 } from './MarkdownOutlinePreview';
 import { IsolatedHtmlPreview } from './IsolatedHtmlPreview';
 import { configureMonacoTypeScriptDiagnostics } from './editor-monaco-configuration';
+import { AppShortcutBoundary } from '../app/AppShortcutBoundary';
+import {
+  defineDroneHubMonacoThemes,
+  MonacoEditor,
+  MonacoEditorErrorBoundary,
+  type MonacoEditorInstance,
+  type MonacoEditorMountHandler,
+  type MonacoEditorProps,
+} from './monaco-editor-loader';
 
-type MonacoEditorComponent = (typeof import('@monaco-editor/react'))['default'];
-type MonacoEditorProps = React.ComponentProps<MonacoEditorComponent>;
-type MonacoEditorMountHandler = NonNullable<MonacoEditorProps['onMount']>;
-type MonacoEditorInstance = Parameters<MonacoEditorMountHandler>[0];
 const LARGE_TEXT_CHUNK_BYTES = 256 * 1024;
-
-const MonacoEditor = React.lazy(async (): Promise<{ default: MonacoEditorComponent }> => {
-  const module = await import('@monaco-editor/react');
-  return { default: module.default };
-});
 
 function CollapseAllHeadingsIcon() {
   return (
@@ -122,22 +122,6 @@ function PlainTextEditorFallback({
       aria-label="Plain text editor"
     />
   );
-}
-
-class MonacoEditorErrorBoundary extends React.Component<
-  { fallback: React.ReactNode; children: React.ReactNode },
-  { failed: boolean }
-> {
-  state = { failed: false };
-
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
-
-  render() {
-    if (this.state.failed) return this.props.fallback;
-    return this.props.children;
-  }
 }
 
 function LargeTextFileViewer({
@@ -427,10 +411,7 @@ export function OpenedDroneFilePanel({
   const handleEditorBeforeMount = React.useCallback<
     NonNullable<MonacoEditorProps['beforeMount']>
   >((monaco) => {
-    for (const theme of DESKTOP_THEMES) {
-      const editorTheme = desktopMonacoTheme(theme.id);
-      monaco.editor.defineTheme(editorTheme.id, editorTheme.definition);
-    }
+    defineDroneHubMonacoThemes(monaco);
     configureMonacoTypeScriptDiagnostics(monaco.languages.typescript);
   }, []);
   const handleEditorMount = React.useCallback<MonacoEditorMountHandler>(
@@ -606,6 +587,15 @@ export function OpenedDroneFilePanel({
     `flex h-5 w-5 items-center justify-center rounded-[var(--radius-small)] bg-transparent text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] ${
       disabled ? 'cursor-not-allowed opacity-50' : ''
     }`;
+  const plainTextEditorFallback = (
+    <PlainTextEditorFallback
+      value={fileContent ?? ''}
+      saving={Boolean(fileSaving)}
+      readOnly={readOnly}
+      onChange={onFileContentChange}
+      onSave={onSaveFile}
+    />
+  );
   return (
     <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]">
       <div className="min-w-0 h-full min-h-0 bg-[var(--panel-alt)] flex flex-col">
@@ -809,40 +799,25 @@ export function OpenedDroneFilePanel({
             ) : openedFileShowsHtmlPreview ? (
               <IsolatedHtmlPreview source={fileContent ?? ''} fileName={fileName} />
             ) : openedFileEditorVisible ? (
-              <MonacoEditorErrorBoundary
-                fallback={
-                  <PlainTextEditorFallback
-                    value={fileContent ?? ''}
-                    saving={Boolean(fileSaving)}
-                    readOnly={readOnly}
-                    onChange={onFileContentChange}
-                    onSave={onSaveFile}
-                  />
-                }
+              <AppShortcutBoundary
+                className="h-full w-full"
               >
-                <React.Suspense
-                  fallback={
-                    <PlainTextEditorFallback
+                <MonacoEditorErrorBoundary fallback={plainTextEditorFallback}>
+                  <React.Suspense fallback={plainTextEditorFallback}>
+                    <MonacoEditor
+                      path={activeFilePath || undefined}
+                      language={editorLanguageForPath(activeFilePath)}
                       value={fileContent ?? ''}
-                      saving={Boolean(fileSaving)}
-                      readOnly={readOnly}
-                      onChange={onFileContentChange}
-                      onSave={onSaveFile}
+                      loading={plainTextEditorFallback}
+                      onChange={handleEditorChange}
+                      beforeMount={handleEditorBeforeMount}
+                      onMount={handleEditorMount}
+                      theme={monacoTheme.id}
+                      options={monacoOptions}
                     />
-                  }
-                >
-                  <MonacoEditor
-                    path={activeFilePath || undefined}
-                    language={editorLanguageForPath(activeFilePath)}
-                    value={fileContent ?? ''}
-                    onChange={handleEditorChange}
-                    beforeMount={handleEditorBeforeMount}
-                    onMount={handleEditorMount}
-                    theme={monacoTheme.id}
-                    options={monacoOptions}
-                  />
-                </React.Suspense>
-              </MonacoEditorErrorBoundary>
+                  </React.Suspense>
+                </MonacoEditorErrorBoundary>
+              </AppShortcutBoundary>
             ) : (
               <div className="h-full w-full flex items-center justify-center text-[var(--text-12)] text-[var(--muted)]">
                 No file selected.

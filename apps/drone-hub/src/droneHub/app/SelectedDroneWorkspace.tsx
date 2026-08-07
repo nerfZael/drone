@@ -933,8 +933,6 @@ export function SelectedDroneWorkspace({
     () => chatInputDraftKeyForDroneChat(currentDrone.id, activeChatName),
     [activeChatName, currentDrone.id],
   );
-  const chatDraftValue = useDroneHubUiStore((s) => s.chatInputDrafts[chatDraftKey] ?? '');
-  const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
   const rollbackDockerSnapshot = React.useCallback(
     async (item: TranscriptItem): Promise<void> => {
       const promptId = String(item?.id ?? '').trim();
@@ -2236,11 +2234,8 @@ export function SelectedDroneWorkspace({
                 ) : chatConfigPending ? (
                   <ChatSurfaceLoadingView
                     resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}:loading`}
+                    draftPersistenceKey={chatDraftKey}
                     droneName={currentDrone.name}
-                    draftValue={chatDraftValue}
-                    onDraftValueChange={(next) => {
-                      setChatInputDraft(chatDraftKey, next);
-                    }}
                     focusTargetId="primary-chat"
                   />
                 ) : chatConfigFailed ? (
@@ -2379,12 +2374,9 @@ export function SelectedDroneWorkspace({
               {genericChatActive ? (
                 <ChatSurfaceComposer
                   resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
+                  draftPersistenceKey={chatDraftKey}
                   droneName={currentDrone.name}
                   focusTargetId="primary-chat"
-                  draftValue={chatDraftValue}
-                  onDraftValueChange={(next) => {
-                    setChatInputDraft(chatDraftKey, next);
-                  }}
                   promptError={stopResponseError || promptError}
                   publishing={publishingDraft}
                   waiting={chatInputWaiting}

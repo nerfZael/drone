@@ -55,7 +55,7 @@ export type RepoChatSelection = {
   chatName: string;
 };
 const CHAT_INPUT_DRAFT_MAX_CHARS = 300_000;
-const CHAT_INPUT_DRAFT_MAX_KEYS = 80;
+const CHAT_INPUT_PERSISTED_MAX_KEYS = 80;
 const CHAT_INPUT_DRAFTS_STORAGE_KEY = profileStorageKey('droneHub.chatInputDrafts');
 const CHAT_INPUT_DRAFTS_PERSIST_DEBOUNCE_MS = 300;
 const NO_REPO_SPAWN_CONTEXT_KEY = '__no_repo__';
@@ -103,6 +103,7 @@ type DroneHubUiState = {
   selectedChat: string;
   lastChatSelectionByRepoPath: Record<string, RepoChatSelection>;
   chatInputDrafts: Record<string, string>;
+  chatInputEditorModes: Record<string, true>;
   draftChat: DraftChatState | null;
   sidebarCollapsed: boolean;
   reposModalOpen: boolean;
@@ -164,6 +165,7 @@ type DroneHubUiState = {
   setSelectedChat: (next: Updater<string>) => void;
   rememberRepoChatSelection: (repoPath: string, droneId: string, chatName: string) => void;
   setChatInputDraft: (draftKey: string, next: string) => void;
+  setChatInputEditorMode: (draftKey: string, next: boolean) => void;
   setDraftChat: (next: Updater<DraftChatState | null>) => void;
   setSidebarCollapsed: (next: Updater<boolean>) => void;
   setReposModalOpen: (next: Updater<boolean>) => void;
@@ -304,6 +306,7 @@ type DroneHubUiPersistedState = Pick<
   | 'selectedDroneIds'
   | 'selectedChat'
   | 'lastChatSelectionByRepoPath'
+  | 'chatInputEditorModes'
   | 'groupMultiChatColumnWidth'
   | 'groupMultiChatStatusSort'
   | 'outputView'
@@ -343,6 +346,18 @@ export function normalizeLastChatSelectionByRepoPath(
     };
   }
   return out;
+}
+
+export function normalizeChatInputEditorModes(value: unknown): Record<string, true> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const entries = Object.entries(value as Record<string, unknown>);
+  const out: Record<string, true> = {};
+  for (const [keyRaw, enabled] of entries) {
+    const key = String(keyRaw ?? '').trim();
+    if (!key || enabled !== true) continue;
+    out[key] = true;
+  }
+  return trimOldestRecordEntries(out, CHAT_INPUT_PERSISTED_MAX_KEYS);
 }
 
 function rememberRepoChatSelection(
@@ -432,6 +447,9 @@ export function migrateDroneHubUiPersistedState(
     };
   }
   migrated.lastChatSelectionByRepoPath = normalizedLastChatSelections;
+  migrated.chatInputEditorModes = normalizeChatInputEditorModes(
+    (migrated as any).chatInputEditorModes,
+  );
   if (Object.prototype.hasOwnProperty.call(migrated, 'themeId')) {
     migrated.themeId = normalizeDesktopThemeId(migrated.themeId);
   }
@@ -573,20 +591,39 @@ function normalizeTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : String(value ?? '').trim();
 }
 
+function trimOldestRecordEntries<T>(value: Record<string, T>, maxKeys: number): Record<string, T> {
+  const keys = Object.keys(value);
+  if (keys.length <= maxKeys) return value;
+  const trimmed = { ...value };
+  for (const key of keys.slice(0, keys.length - maxKeys)) delete trimmed[key];
+  return trimmed;
+}
+
+function setRecentRecordEntry<T>(
+  value: Record<string, T>,
+  key: string,
+  entry: T,
+  maxKeys: number,
+): Record<string, T> {
+  const recent = { ...value };
+  delete recent[key];
+  recent[key] = entry;
+  return trimOldestRecordEntries(recent, maxKeys);
+}
+
 function normalizeChatInputDrafts(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const entries = Object.entries(value as Record<string, unknown>);
   if (entries.length === 0) return {};
   const out: Record<string, string> = {};
-  const trimmed = entries.slice(Math.max(0, entries.length - CHAT_INPUT_DRAFT_MAX_KEYS));
-  for (const [k, v] of trimmed) {
+  for (const [k, v] of entries) {
     const key = String(k ?? '').trim();
     if (!key) continue;
     const textRaw = typeof v === 'string' ? v : String(v ?? '');
     if (!textRaw) continue;
     out[key] = textRaw.slice(0, CHAT_INPUT_DRAFT_MAX_CHARS);
   }
-  return out;
+  return trimOldestRecordEntries(out, CHAT_INPUT_PERSISTED_MAX_KEYS);
 }
 
 function isExactShortcutBinding(value: unknown, expected: ShortcutBinding | null): boolean {
@@ -824,6 +861,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       selectedChat: 'default',
       lastChatSelectionByRepoPath: {},
       chatInputDrafts: initialChatInputDrafts,
+      chatInputEditorModes: {},
       draftChat: null,
       sidebarCollapsed: false,
       reposModalOpen: false,
@@ -997,16 +1035,33 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             return { chatInputDrafts: trimmed };
           }
           if (s.chatInputDrafts[draftKey] === nextText) return s;
-          const merged = { ...s.chatInputDrafts, [draftKey]: nextText };
-          const keys = Object.keys(merged);
-          if (keys.length > CHAT_INPUT_DRAFT_MAX_KEYS) {
-            const overflow = keys.length - CHAT_INPUT_DRAFT_MAX_KEYS;
-            for (const oldKey of keys.slice(0, overflow)) {
-              delete merged[oldKey];
-            }
-          }
+          const merged = setRecentRecordEntry(
+            s.chatInputDrafts,
+            draftKey,
+            nextText,
+            CHAT_INPUT_PERSISTED_MAX_KEYS,
+          );
           schedulePersistChatInputDrafts(merged);
           return { chatInputDrafts: merged };
+        }),
+      setChatInputEditorMode: (draftKeyRaw, next) =>
+        set((s) => {
+          const draftKey = String(draftKeyRaw ?? '').trim();
+          if (!draftKey) return s;
+          if (!next) {
+            if (!Object.prototype.hasOwnProperty.call(s.chatInputEditorModes, draftKey)) return s;
+            const trimmed = { ...s.chatInputEditorModes };
+            delete trimmed[draftKey];
+            return { chatInputEditorModes: trimmed };
+          }
+          if (s.chatInputEditorModes[draftKey]) return s;
+          const merged = setRecentRecordEntry<true>(
+            s.chatInputEditorModes,
+            draftKey,
+            true,
+            CHAT_INPUT_PERSISTED_MAX_KEYS,
+          );
+          return { chatInputEditorModes: merged };
         }),
       setDraftChat: (next) => set((s) => ({ draftChat: resolveNext(s.draftChat, next) })),
       setSidebarCollapsed: (next) =>
@@ -1235,6 +1290,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         toDoDroneIds: state.toDoDroneIds,
         selectedChat: state.selectedChat,
         lastChatSelectionByRepoPath: state.lastChatSelectionByRepoPath,
+        chatInputEditorModes: state.chatInputEditorModes,
         groupMultiChatColumnWidth: state.groupMultiChatColumnWidth,
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
@@ -1326,6 +1382,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           selectedChat: normalizeTrimmedString(persisted.selectedChat) || currentState.selectedChat,
           lastChatSelectionByRepoPath: normalizeLastChatSelectionByRepoPath(
             persisted.lastChatSelectionByRepoPath ?? currentState.lastChatSelectionByRepoPath,
+          ),
+          chatInputEditorModes: normalizeChatInputEditorModes(
+            persisted.chatInputEditorModes ?? currentState.chatInputEditorModes,
           ),
           groupMultiChatColumnWidth: clampGroupMultiChatColumnWidthPx(
             Number(persisted.groupMultiChatColumnWidth ?? currentState.groupMultiChatColumnWidth),

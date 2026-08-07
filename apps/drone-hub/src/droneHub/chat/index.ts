@@ -2,6 +2,8 @@ export { ChatTabs } from './ChatTabs';
 export { ChatInput } from './ChatInput';
 export {
   chatSendShortcut,
+  isChatEditorQueueShortcut,
+  type ChatEditorQueueShortcutInput,
   type ChatComposerShortcutAction,
   type ChatMessageDeliveryMode,
   type ChatSendShortcutInput,

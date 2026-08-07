@@ -25,6 +25,7 @@ import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-d
 import { CodexConnectComposerNotice } from '../app/CodexConnectControl';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import { createCanvasChatNodeId } from '../app/app-config';
+import { chatInputDraftKeyForDroneChat } from '../app/helpers';
 import { clientTimeZone } from '../app/client-time-zone';
 import {
   beginLocalChatBusy,
@@ -308,6 +309,7 @@ export function AssistantDock({
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
   const nativeDroneId = nativeChat.droneId;
   const nativeChatName = nativeChat.chatName;
+  const nativeComposerDraftKey = chatInputDraftKeyForDroneChat(nativeDroneId, nativeChatName);
   const nativeChatNodeId = createCanvasChatNodeId(nativeDroneId, nativeChatName);
   const setApprovalRequiredByChatNodeId = useDroneHubRuntimeStore(
     (state) => state.setApprovalRequiredByChatNodeId,
@@ -318,7 +320,6 @@ export function AssistantDock({
   >(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [draft, setDraft] = React.useState('');
   const [referencedDrones, setReferencedDrones] = React.useState<AssistantDroneReference[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
   const [filesOpen, setFilesOpen] = React.useState(readInitialFilesOpen);
@@ -2398,10 +2399,9 @@ export function AssistantDock({
             <ChatSurfaceComposer
               overlay={nativeComposerOverlay}
               resetKey={activeThreadId || nativeChatName}
+              draftPersistenceKey={nativeComposerDraftKey}
               droneName="assistant"
               focusTargetId="assistant-chat"
-              draftValue={draft}
-              onDraftValueChange={setDraft}
               promptError={attachmentError}
               waiting={running}
               disabled={!activeThread || scopeSyncBusy}

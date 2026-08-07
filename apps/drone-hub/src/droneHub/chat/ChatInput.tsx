@@ -23,9 +23,14 @@ import {
 } from './chat-input-attachments';
 import {
   formatChatVoiceDuration,
-  mergeDraftWithVoiceTranscript,
+  insertVoiceTranscriptAtSelection,
   useChatVoiceRecorder,
 } from './use-chat-voice-recorder';
+import {
+  ChatComposerEditor,
+  type ChatComposerEditorHandle,
+  type ChatComposerSelection,
+} from './ChatComposerEditor';
 import {
   chatSendShortcut,
   type ChatMessageDeliveryMode,
@@ -35,9 +40,61 @@ import {
   takeChatComposerDraftSnapshot,
   type ChatComposerDraftSnapshot,
 } from './chat-composer-draft';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
+import { preloadMonacoEditor } from '../files/monaco-editor-loader';
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
+
+function CodeEditorIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m8 9-3 3 3 3" />
+      <path d="m16 9 3 3-3 3" />
+      <path d="m14 5-4 14" />
+    </svg>
+  );
+}
+
+function ChatComposerEditorToggle({
+  expanded,
+  enabled,
+  onToggle,
+}: {
+  expanded: boolean;
+  enabled: boolean;
+  onToggle: () => void;
+}) {
+  const label = enabled ? 'Close editor mode' : 'Open editor mode';
+  return (
+    <button
+      type="button"
+      data-chat-composer-collapsed-action={expanded ? undefined : 'true'}
+      onMouseDown={expanded ? undefined : (event) => event.preventDefault()}
+      onPointerEnter={preloadMonacoEditor}
+      onFocus={preloadMonacoEditor}
+      onClick={onToggle}
+      aria-pressed={enabled}
+      aria-label={label}
+      className={
+        expanded
+          ? `inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border transition-opacity hover:opacity-70 ${
+              enabled
+                ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)]'
+            }`
+          : 'inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--chat-composer-fg)] transition-opacity hover:opacity-70'
+      }
+      title={
+        enabled
+          ? 'Switch back to the chat composer'
+          : 'Use a full text editor; send ASAP with the button or queue with Ctrl/Command+Enter'
+      }
+    >
+      <CodeEditorIcon />
+    </button>
+  );
+}
 
 function attachmentPolicyError(
   issue: ChatAttachmentValidationIssue,
@@ -80,6 +137,7 @@ export type ChatSendContext = {
 
 export type ChatInputProps = {
   resetKey: string;
+  draftPersistenceKey?: string;
   droneName: string;
   draftValue?: string;
   onDraftValueChange?: (next: string) => void;
@@ -108,6 +166,7 @@ export type ChatInputProps = {
 
 export function ChatInput({
   resetKey,
+  draftPersistenceKey,
   droneName,
   draftValue,
   onDraftValueChange,
@@ -140,13 +199,40 @@ export function ChatInput({
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
   const [composerFocused, setComposerFocused] = React.useState(false);
   const [compactVoiceRecording, setCompactVoiceRecording] = React.useState(false);
+  const [uncontrolledEditorMode, setUncontrolledEditorMode] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = React.useRef<ChatComposerEditorHandle | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const voiceActionInFlightRef = React.useRef(false);
   const voiceActionTokenRef = React.useRef(0);
-  const controlledDraftEnabled = typeof draftValue === 'string' && typeof onDraftValueChange === 'function';
-  const draft = controlledDraftEnabled ? draftValue : uncontrolledDraft;
+  const persistenceKey = String(draftPersistenceKey ?? '').trim();
+  const persistedDraft = useDroneHubUiStore((state) =>
+    persistenceKey ? state.chatInputDrafts[persistenceKey] ?? '' : '',
+  );
+  const persistedEditorMode = useDroneHubUiStore((state) =>
+    persistenceKey ? Boolean(state.chatInputEditorModes[persistenceKey]) : false,
+  );
+  const setChatInputDraft = useDroneHubUiStore((state) => state.setChatInputDraft);
+  const setChatInputEditorMode = useDroneHubUiStore((state) => state.setChatInputEditorMode);
+  const controlledDraftEnabled =
+    typeof draftValue === 'string' && typeof onDraftValueChange === 'function';
+  const draft = controlledDraftEnabled
+    ? draftValue
+    : persistenceKey
+      ? persistedDraft
+      : uncontrolledDraft;
+  const editorMode = persistenceKey ? persistedEditorMode : uncontrolledEditorMode;
   const draftRef = React.useRef(draft);
+  const composerSelectionRef = React.useRef<ChatComposerSelection>({
+    start: draft.length,
+    end: draft.length,
+  });
+  const composerSelectionResetKeyRef = React.useRef(resetKey);
+  if (composerSelectionResetKeyRef.current !== resetKey) {
+    composerSelectionResetKeyRef.current = resetKey;
+    composerSelectionRef.current = { start: draft.length, end: draft.length };
+  }
+  const focusAfterModeChangeRef = React.useRef(false);
   const attachmentsRef = React.useRef(attachments);
   const draftRevisionRef = React.useRef(0);
   const composerLocked = Boolean(disabled);
@@ -169,6 +255,10 @@ export function ChatInput({
     if (draftRef.current === draft) return;
     draftRef.current = draft;
     draftRevisionRef.current += 1;
+    const selection = composerSelectionRef.current;
+    if (selection.start > draft.length || selection.end > draft.length) {
+      composerSelectionRef.current = { start: draft.length, end: draft.length };
+    }
   }, [draft]);
 
   React.useEffect(() => {
@@ -184,9 +274,13 @@ export function ChatInput({
         onDraftValueChange?.(resolved);
         return;
       }
+      if (persistenceKey) {
+        setChatInputDraft(persistenceKey, resolved);
+        return;
+      }
       setUncontrolledDraft(resolved);
     },
-    [controlledDraftEnabled, onDraftValueChange],
+    [controlledDraftEnabled, onDraftValueChange, persistenceKey, setChatInputDraft],
   );
 
   const setComposerAttachments = React.useCallback(
@@ -228,7 +322,7 @@ export function ChatInput({
   }, []);
 
   React.useEffect(() => {
-    if (!controlledDraftEnabled) {
+    if (!controlledDraftEnabled && !persistenceKey) {
       draftRef.current = '';
       setUncontrolledDraft('');
     }
@@ -243,15 +337,16 @@ export function ChatInput({
     // Keep revisions monotonic so an in-flight submission from the previous
     // chat cannot restore its draft after the composer is reset.
     draftRevisionRef.current += 1;
-  }, [controlledDraftEnabled, resetKey, setComposerAttachments]);
+  }, [controlledDraftEnabled, persistenceKey, resetKey, setComposerAttachments]);
 
   React.useEffect(() => {
     if (!autoFocus) return;
     const id = requestAnimationFrame(() => {
-      textareaRef.current?.focus();
+      if (editorMode) editorRef.current?.focus();
+      else textareaRef.current?.focus();
     });
     return () => cancelAnimationFrame(id);
-  }, [autoFocus, resetKey]);
+  }, [autoFocus, editorMode, resetKey]);
 
   React.useEffect(() => {
     resizeTextarea();
@@ -276,6 +371,7 @@ export function ChatInput({
     voiceActionInFlight ||
     (trimmed.length === 0 && attachments.length === 0 && !voiceRecordingActive);
   const composerExpanded =
+    editorMode ||
     alwaysExpanded ||
     composerFocused ||
     trimmed.length > 0 ||
@@ -294,6 +390,10 @@ export function ChatInput({
             ? 'Transcribing…'
             : '';
   const voiceRecordingDuration = formatChatVoiceDuration(voiceRecordingDurationMillis);
+
+  React.useEffect(() => {
+    if (editorMode) preloadMonacoEditor();
+  }, [editorMode]);
 
   React.useEffect(() => {
     voiceActionTokenRef.current += 1;
@@ -322,8 +422,64 @@ export function ChatInput({
     previousWaitingRef.current = waiting;
     if (!startedWaiting || draftRef.current.trim() || attachmentsRef.current.length > 0) return;
     textareaRef.current?.blur();
+    editorRef.current?.blur();
     setComposerFocused(false);
   }, [waiting]);
+
+  function rememberComposerSelection(selection: ChatComposerSelection) {
+    composerSelectionRef.current = {
+      start: Math.min(Math.max(0, selection.start), draftRef.current.length),
+      end: Math.min(Math.max(selection.start, selection.end), draftRef.current.length),
+    };
+  }
+
+  function readComposerSelection(): ChatComposerSelection {
+    const editorSelection = editorMode ? editorRef.current?.getSelection() : null;
+    const textarea = textareaRef.current;
+    const selection = editorSelection ??
+      (textarea
+        ? { start: textarea.selectionStart, end: textarea.selectionEnd }
+        : composerSelectionRef.current);
+    rememberComposerSelection(selection);
+    return composerSelectionRef.current;
+  }
+
+  function focusComposerAtSelection(selection = composerSelectionRef.current) {
+    rememberComposerSelection(selection);
+    if (editorMode) {
+      editorRef.current?.setSelection(composerSelectionRef.current);
+      editorRef.current?.focus();
+      return;
+    }
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(
+      composerSelectionRef.current.start,
+      composerSelectionRef.current.end,
+    );
+  }
+
+  function preserveEditorFocus(event: React.MouseEvent<HTMLButtonElement>) {
+    if (editorMode) event.preventDefault();
+  }
+
+  function toggleEditorMode() {
+    readComposerSelection();
+    focusAfterModeChangeRef.current = true;
+    if (persistenceKey) {
+      setChatInputEditorMode(persistenceKey, !editorMode);
+    } else {
+      setUncontrolledEditorMode((current) => !current);
+    }
+  }
+
+  React.useEffect(() => {
+    if (!focusAfterModeChangeRef.current) return;
+    focusAfterModeChangeRef.current = false;
+    const id = requestAnimationFrame(() => focusComposerAtSelection());
+    return () => cancelAnimationFrame(id);
+  }, [editorMode]);
 
   function openPicker() {
     if (!attachmentsOn) return;
@@ -332,14 +488,19 @@ export function ChatInput({
   }
 
   async function beginVoiceRecordingFromComposer(compact: boolean) {
+    readComposerSelection();
     if (compact) {
       setComposerFocused(false);
       setCompactVoiceRecording(true);
     } else {
       setCompactVoiceRecording(false);
     }
+    if (editorMode) focusComposerAtSelection();
     const started = await startVoiceRecording();
     if (!started) setCompactVoiceRecording(false);
+    if (editorMode) {
+      window.requestAnimationFrame(() => focusComposerAtSelection());
+    }
   }
 
   function removeAttachment(id: string) {
@@ -459,6 +620,31 @@ export function ChatInput({
     });
   }
 
+  function handleComposerPaste(
+    clipboardData: DataTransfer,
+    preventDefault: () => void,
+    options: { allowTextAttachment: boolean },
+  ) {
+    const files = attachmentMode === 'files'
+      ? filesFromClipboardData(clipboardData)
+      : imageFilesFromClipboardData(clipboardData);
+    if (attachmentsOn && !attachmentControlsLocked && files.length > 0) {
+      preventDefault();
+      addFiles(files, { source: 'paste' });
+      return;
+    }
+    const pastedText = String(clipboardData.getData('text/plain') ?? '');
+    if (
+      options.allowTextAttachment &&
+      attachmentsOn &&
+      !attachmentControlsLocked &&
+      pastedText.length >= CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS
+    ) {
+      preventDefault();
+      addPastedTextAttachment(pastedText);
+    }
+  }
+
   async function submitPromptSnapshot(
     snapshot: ChatComposerDraftSnapshot<DraftChatAttachment>,
     context: ChatSendContext,
@@ -553,13 +739,24 @@ export function ChatInput({
     setVoiceActionInFlight(false);
   }
 
-  async function stopVoiceRecordingAndAppendDraft(actionToken: number): Promise<string | null> {
+  async function stopVoiceRecordingAndAppendDraft(
+    actionToken: number,
+  ): Promise<{ draft: string; caret: number } | null> {
     const transcript = await stopVoiceRecordingForTranscript();
     if (voiceActionTokenRef.current !== actionToken) return null;
-    if (!transcript) return draftRef.current;
-    const nextDraft = mergeDraftWithVoiceTranscript(draftRef.current, transcript);
-    setDraft(nextDraft);
-    return nextDraft;
+    if (!transcript) {
+      return { draft: draftRef.current, caret: composerSelectionRef.current.end };
+    }
+    const selection = composerSelectionRef.current;
+    const insertion = insertVoiceTranscriptAtSelection(
+      draftRef.current,
+      transcript,
+      selection.start,
+      selection.end,
+    );
+    setDraft(insertion.value);
+    rememberComposerSelection({ start: insertion.caret, end: insertion.caret });
+    return { draft: insertion.value, caret: insertion.caret };
   }
 
   async function stopVoiceRecordingAndFillDraft() {
@@ -567,12 +764,13 @@ export function ChatInput({
     if (actionToken == null) return;
     try {
       const before = draftRef.current;
-      const nextDraft = await stopVoiceRecordingAndAppendDraft(actionToken);
-      if (nextDraft == null) return;
-      if (nextDraft === before) {
+      const result = await stopVoiceRecordingAndAppendDraft(actionToken);
+      if (result == null) return;
+      if (result.draft === before) {
         setAttachmentError((current) => current || 'No speech detected.');
       } else {
-        window.requestAnimationFrame(() => textareaRef.current?.focus());
+        const insertionSelection = { start: result.caret, end: result.caret };
+        window.requestAnimationFrame(() => focusComposerAtSelection(insertionSelection));
       }
     } finally {
       endVoiceAction(actionToken);
@@ -589,8 +787,8 @@ export function ChatInput({
         const actionToken = beginVoiceAction();
         if (actionToken == null) return;
         try {
-          const promptDraft = await stopVoiceRecordingAndAppendDraft(actionToken);
-          if (promptDraft == null) return;
+          const result = await stopVoiceRecordingAndAppendDraft(actionToken);
+          if (result == null) return;
         } finally {
           endVoiceAction(actionToken);
         }
@@ -738,7 +936,7 @@ export function ChatInput({
             />
           ) : null}
 
-          <div className={`relative flex items-center ${composerExpanded ? 'px-4' : 'min-h-[3.125rem] px-[.5625rem]'}`}>
+          <div className={`relative flex ${editorMode ? 'items-stretch' : 'items-center'} ${composerExpanded ? (editorMode ? '' : 'px-4') : 'min-h-[3.125rem] px-[.5625rem]'}`}>
             {!composerExpanded && compactVoiceRecording && voiceRecordingActive ? (
               <>
                 <button
@@ -848,29 +1046,69 @@ export function ChatInput({
                 </svg>
               </button>
             ) : null}
+            {!composerExpanded && !voiceRecordingActive ? (
+              <ChatComposerEditorToggle
+                expanded={false}
+                enabled={false}
+                onToggle={toggleEditorMode}
+              />
+            ) : null}
+            {editorMode ? (
+              <div
+                className={`min-w-0 flex-1 overflow-hidden ${
+                  !composerContext && attachments.length === 0
+                    ? 'rounded-t-[var(--chat-composer-radius)]'
+                    : ''
+                }`}
+                onPasteCapture={(event) =>
+                  handleComposerPaste(
+                    event.clipboardData,
+                    () => event.preventDefault(),
+                    { allowTextAttachment: false },
+                  )
+                }
+              >
+                <ChatComposerEditor
+                  key={resetKey}
+                  ref={editorRef}
+                  value={draft}
+                  disabled={composerLocked}
+                  readOnly={voiceRecordingActive}
+                  autoFocus={autoFocus}
+                  focusTargetId={focusTargetId}
+                  initialSelection={composerSelectionRef.current}
+                  onChange={setDraft}
+                  onSelectionChange={rememberComposerSelection}
+                  onSendQueued={() =>
+                    sendNow({ trigger: 'keyboard', deliveryMode: 'queue' })
+                  }
+                  ariaLabel={`Edit message for ${droneName}`}
+                />
+              </div>
+            ) : (
             <textarea
               ref={textareaRef}
               data-chat-input-focus-id={focusTargetId || undefined}
               value={draft}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                rememberComposerSelection({
+                  start: event.target.selectionStart,
+                  end: event.target.selectionEnd,
+                });
+              }}
+              onSelect={(event) =>
+                rememberComposerSelection({
+                  start: event.currentTarget.selectionStart,
+                  end: event.currentTarget.selectionEnd,
+                })
+              }
               onPaste={(event) => {
-                const files = attachmentMode === 'files'
-                  ? filesFromClipboardData(event.clipboardData)
-                  : imageFilesFromClipboardData(event.clipboardData);
-                if (attachmentsOn && !attachmentControlsLocked && files.length > 0) {
-                  event.preventDefault();
-                  addFiles(files, { source: 'paste' });
-                  return;
-                }
-                const pastedText = String(event.clipboardData?.getData('text/plain') ?? '');
-                if (
-                  attachmentsOn &&
-                  !attachmentControlsLocked &&
-                  pastedText.length >= CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS
-                ) {
-                  event.preventDefault();
-                  addPastedTextAttachment(pastedText);
-                }
+                handleComposerPaste(
+                  event.clipboardData,
+                  () => event.preventDefault(),
+                  { allowTextAttachment: true },
+                );
               }}
               onKeyDown={(event) => {
                 if ((event.nativeEvent as any)?.isComposing) return;
@@ -913,6 +1151,7 @@ export function ChatInput({
                 onSendInNewChat ? 'Enter Tab Control+Enter Meta+Enter' : 'Enter Tab'
               }
             />
+            )}
             {!composerExpanded ? (
               <>
                 {!voiceRecordingActive && composerStatus ? (
@@ -984,10 +1223,20 @@ export function ChatInput({
           ) : null}
 
           {composerExpanded ? (
-            <div className="flex min-h-[2.9375rem] flex-wrap items-center gap-[.4375rem] px-[.5625rem] pb-[.5625rem]">
+            <div
+              className={`flex min-h-[2.9375rem] flex-wrap items-center gap-[.4375rem] px-[.5625rem] pb-[.5625rem] ${
+                editorMode ? 'pt-[.4375rem]' : ''
+              }`}
+            >
+              <ChatComposerEditorToggle
+                expanded
+                enabled={editorMode}
+                onToggle={toggleEditorMode}
+              />
               {voiceRecordingActive ? (
                 <button
                   type="button"
+                  onMouseDown={preserveEditorFocus}
                   onClick={() => void discardVoiceRecording()}
                   disabled={voiceRecordingStatus === 'transcribing' || voiceActionInFlight}
                   className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1043,6 +1292,7 @@ export function ChatInput({
                 <>
                   <button
                     type="button"
+                    onMouseDown={preserveEditorFocus}
                     onClick={() => toggleVoiceRecordingPause()}
                     disabled={voicePauseButtonDisabled}
                     className={`inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40 ${
@@ -1066,6 +1316,7 @@ export function ChatInput({
                   </button>
                   <button
                     type="button"
+                    onMouseDown={preserveEditorFocus}
                     onClick={() => void stopVoiceRecordingAndFillDraft()}
                     disabled={voiceStopButtonDisabled}
                     className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1080,6 +1331,7 @@ export function ChatInput({
               ) : (
                 <button
                   type="button"
+                  onMouseDown={preserveEditorFocus}
                   onClick={() => {
                     textareaRef.current?.blur();
                     void beginVoiceRecordingFromComposer(false);
@@ -1129,6 +1381,8 @@ export function ChatInput({
               title={
                 showStopAction && !showSeparateStopAction
                   ? 'Stop response'
+                  : editorMode
+                    ? 'Send ASAP. Queue with Ctrl/Command+Enter.'
                   : onSendInNewChat
                     ? 'Send ASAP (Enter). Queue with Tab. Send in a new chat with Ctrl/Command+Enter.'
                     : 'Send ASAP (Enter). Queue with Tab.'
