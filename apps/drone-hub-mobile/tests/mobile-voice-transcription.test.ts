@@ -58,6 +58,7 @@ describe('mobile voice transcription', () => {
         sending: false,
         running: true,
         queueWhileRunning: true,
+        microphoneAvailable: true,
       }),
     ).toBe(false);
     expect(
@@ -66,6 +67,19 @@ describe('mobile voice transcription', () => {
         sending: false,
         running: true,
         queueWhileRunning: false,
+        microphoneAvailable: true,
+      }),
+    ).toBe(true);
+  });
+
+  test('disables normal recording while continuous voice owns the microphone', () => {
+    expect(
+      mobileVoiceRecordActionDisabled({
+        editable: true,
+        sending: false,
+        running: false,
+        queueWhileRunning: true,
+        microphoneAvailable: false,
       }),
     ).toBe(true);
   });

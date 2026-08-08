@@ -30,8 +30,14 @@ export function mobileVoiceRecordActionDisabled(input: {
   sending: boolean;
   running: boolean;
   queueWhileRunning: boolean;
+  microphoneAvailable: boolean;
 }): boolean {
-  return !input.editable || input.sending || (input.running && !input.queueWhileRunning);
+  return (
+    !input.microphoneAvailable ||
+    !input.editable ||
+    input.sending ||
+    (input.running && !input.queueWhileRunning)
+  );
 }
 
 export function mergeMobileDraftWithVoiceTranscript(

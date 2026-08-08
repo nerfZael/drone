@@ -18,6 +18,10 @@ import {
   ensureMobileRecordingPermission,
 } from './mobile-recording-permission';
 import { transcribeMobileVoiceRecording } from './mobile-groq-transcription';
+import type {
+  MobileMicrophoneCoordinator,
+  MobileMicrophoneLease,
+} from './mobile-microphone-coordinator';
 import {
   MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES,
   isUnexpectedMobileVoiceRecordingCompletion,
@@ -72,8 +76,10 @@ async function ensureBackgroundRecordingPermission(): Promise<void> {
 }
 
 export function useMobileChatVoiceRecorder({
+  microphoneCoordinator,
   onError,
 }: {
+  microphoneCoordinator: MobileMicrophoneCoordinator;
   onError(message: string): void;
 }) {
   const [status, setStatus] = React.useState<MobileVoiceRecordingStatus>('idle');
@@ -85,6 +91,7 @@ export function useMobileChatVoiceRecorder({
   const transcribeAbortRef = React.useRef<AbortController | null>(null);
   const recorderRef = React.useRef<AudioRecorder | null>(null);
   const recordingUriRef = React.useRef<string | null>(null);
+  const microphoneLeaseRef = React.useRef<MobileMicrophoneLease | null>(null);
 
   const setStatusValue = React.useCallback((next: MobileVoiceRecordingStatus) => {
     statusRef.current = next;
@@ -97,6 +104,13 @@ export function useMobileChatVoiceRecorder({
       allowsBackgroundRecording: false,
     }).catch(() => undefined);
   }, []);
+
+  const releaseMicrophone = React.useCallback(async () => {
+    const lease = microphoneLeaseRef.current;
+    if (!lease) return;
+    await lease.release(deactivateRecordingMode);
+    if (microphoneLeaseRef.current === lease) microphoneLeaseRef.current = null;
+  }, [deactivateRecordingMode]);
 
   const handleNativeStatus = React.useCallback(
     (next: RecordingStatus) => {
@@ -112,7 +126,7 @@ export function useMobileChatVoiceRecorder({
       ) {
         recordingUriRef.current = next.url;
         setStatusValue('stopped');
-        void deactivateRecordingMode();
+        void releaseMicrophone();
         if (mountedRef.current) onError('');
         return;
       }
@@ -138,14 +152,12 @@ export function useMobileChatVoiceRecorder({
         void failedRecorder
           .stop()
           .catch(() => undefined)
-          .finally(() => deleteRecordingFile(uri));
+          .finally(() => deleteRecordingFile(uri))
+          .then(releaseMicrophone);
       } else {
         deleteRecordingFile(uri);
+        void releaseMicrophone();
       }
-      void setAudioModeAsync({
-        allowsRecording: false,
-        allowsBackgroundRecording: false,
-      }).catch(() => undefined);
       if (mountedRef.current) {
         setStatus('idle');
         onError(
@@ -158,7 +170,7 @@ export function useMobileChatVoiceRecorder({
         );
       }
     },
-    [deactivateRecordingMode, onError, setStatusValue],
+    [onError, releaseMicrophone, setStatusValue],
   );
   const recorder = useAudioRecorder(MOBILE_VOICE_RECORDING_OPTIONS, handleNativeStatus);
   const recorderState = useAudioRecorderState(recorder, 250);
@@ -182,9 +194,9 @@ export function useMobileChatVoiceRecorder({
       deleteRecordingFile(uri);
       // useAudioRecorder owns and releases the native recorder on unmount. Its
       // shared object must not be read or stopped from this later cleanup.
-      void deactivateRecordingMode();
+      void releaseMicrophone();
     },
-    [deactivateRecordingMode],
+    [releaseMicrophone],
   );
 
   const discardRecording = React.useCallback(async () => {
@@ -209,13 +221,23 @@ export function useMobileChatVoiceRecorder({
     uri = recordingUriRef.current || recorder.uri || uri;
     deleteRecordingFile(uri);
     recordingUriRef.current = null;
-    await deactivateRecordingMode();
+    await releaseMicrophone();
     setStatusValue('idle');
     onError('');
-  }, [deactivateRecordingMode, onError, recorder, setStatusValue]);
+  }, [onError, recorder, releaseMicrophone, setStatusValue]);
 
   const startRecordingOperation = React.useCallback(async () => {
     if (statusRef.current !== 'idle') return;
+    const microphoneLease = microphoneCoordinator.acquire('single-shot');
+    if (!microphoneLease) {
+      onError(
+        microphoneCoordinator.getSnapshot() === 'continuous'
+          ? 'Continuous voice is already using the microphone.'
+          : 'The microphone is still finishing the previous recording.',
+      );
+      return;
+    }
+    microphoneLeaseRef.current = microphoneLease;
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     const staleUri = recordingUriRef.current;
@@ -254,12 +276,10 @@ export function useMobileChatVoiceRecorder({
         playsInSilentMode: true,
       });
       if (generationRef.current !== generation || !mountedRef.current) {
-        await deactivateRecordingMode();
         return;
       }
       await recorder.prepareToRecordAsync();
       if (generationRef.current !== generation || !mountedRef.current) {
-        await deactivateRecordingMode();
         return;
       }
       const uri = recorder.uri;
@@ -271,7 +291,7 @@ export function useMobileChatVoiceRecorder({
         await recorder.stop().catch(() => undefined);
         deleteRecordingFile(uri);
         recordingUriRef.current = null;
-        await deactivateRecordingMode();
+        await releaseMicrophone();
         return;
       }
       recorder.record();
@@ -282,11 +302,11 @@ export function useMobileChatVoiceRecorder({
       await recorder.stop().catch(() => undefined);
       deleteRecordingFile(uri);
       recordingUriRef.current = null;
-      await deactivateRecordingMode();
+      await releaseMicrophone();
       setStatusValue('idle');
       onError(error?.message ?? String(error));
     }
-  }, [deactivateRecordingMode, onError, recorder, setStatusValue]);
+  }, [microphoneCoordinator, onError, recorder, releaseMicrophone, setStatusValue]);
 
   const startRecording = React.useCallback(async () => {
     if (startPromiseRef.current || statusRef.current !== 'idle') return;
@@ -352,7 +372,7 @@ export function useMobileChatVoiceRecorder({
       }
       if (!uri) throw new Error('The voice recording could not be saved.');
       recordingUriRef.current = uri;
-      await deactivateRecordingMode();
+      await releaseMicrophone();
       if (generationRef.current !== generation) {
         deleteRecordingFile(uri);
         return '';
@@ -379,10 +399,10 @@ export function useMobileChatVoiceRecorder({
       // idempotent cleanup also covers failures before the upload begins.
       deleteRecordingFile(uri);
       if (recordingUriRef.current === uri) recordingUriRef.current = null;
-      await deactivateRecordingMode();
+      await releaseMicrophone();
       if (generationRef.current === generation) setStatusValue('idle');
     }
-  }, [deactivateRecordingMode, onError, recorder, setStatusValue]);
+  }, [onError, recorder, releaseMicrophone, setStatusValue]);
 
   const stopRecordingForTranscript = React.useCallback(async (): Promise<string> => {
     if (stopPromiseRef.current) return stopPromiseRef.current;

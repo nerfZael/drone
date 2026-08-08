@@ -6,6 +6,7 @@ import {
   resolveMobileGroqTranscriptionResponse,
 } from './mobile-voice-transcription-model';
 import type { MobileVoiceInputSettings } from './mobile-voice-input-settings';
+import { uploadMobileVoiceWave } from './mobile-groq-wave-upload';
 
 const MOBILE_GROQ_TRANSCRIPTION_URL =
   'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -57,52 +58,38 @@ export async function transcribeMobileVoiceWave(input: {
   prompt?: string | null;
   signal?: AbortSignal;
 }): Promise<string> {
-  const apiKey = input.apiKey.trim();
-  if (!apiKey) throw new Error('GROQ API key is not configured on this phone.');
-  if (input.wave.length <= 44) throw new Error('The voice recording is empty.');
-  if (input.wave.length > MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES) {
-    throw new Error('The voice recording exceeds GROQ’s 25 MB upload limit.');
-  }
-  // React Native cannot construct a Blob from ArrayBuffer/ArrayBufferView values.
-  // Expo File is a native Blob, so stage the generated WAV in cache and upload it
-  // through the same runtime path as the single-shot recorder.
-  const file = new File(
-    Paths.cache,
-    `continuous-voice-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.wav`,
-  );
-  try {
-    file.create({ overwrite: true });
-    file.write(input.wave);
-    const form = new FormData();
-    form.append('file', file as unknown as Blob);
-    form.append(
-      'model',
-      input.settings.quality === 'accurate' ? 'whisper-large-v3' : MOBILE_GROQ_TRANSCRIPTION_MODEL,
-    );
-    form.append('response_format', 'json');
-    form.append('temperature', '0');
-    if (input.settings.language) form.append('language', input.settings.language);
-    const prompt = String(input.prompt ?? '').trim();
-    if (prompt) form.append('prompt', prompt.slice(-1_200));
-    const response = await fetch(MOBILE_GROQ_TRANSCRIPTION_URL, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-      signal: input.signal,
-    });
-    return resolveMobileGroqTranscriptionResponse({
-      ok: response.ok,
-      status: response.status,
-      statusText: response.statusText,
-      body: await response.text(),
-    });
-  } finally {
-    if (file.exists) {
+  return uploadMobileVoiceWave(input, {
+    stageWave(wave) {
+      // React Native cannot construct a Blob from ArrayBuffer/ArrayBufferView
+      // values. Expo File is a native Blob, so stage the generated WAV in cache.
+      const file = new File(
+        Paths.cache,
+        `continuous-voice-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.wav`,
+      );
+      const cleanup = () => {
+        if (!file.exists) return;
+        try {
+          file.delete();
+        } catch {
+          // The cache may already have removed the staged upload.
+        }
+      };
       try {
-        file.delete();
+        file.create({ overwrite: true });
+        file.write(wave);
+        return { body: file as unknown as Blob, cleanup };
       } catch {
-        // The cache may already have removed the staged upload.
+        cleanup();
+        throw new Error('The continuous voice recording could not be staged for upload.');
       }
-    }
-  }
+    },
+    createFormData: () => new FormData(),
+    fetch: async ({ authorization, body, signal }) =>
+      fetch(MOBILE_GROQ_TRANSCRIPTION_URL, {
+        method: 'POST',
+        headers: { Authorization: authorization },
+        body: body as FormData,
+        signal,
+      }),
+  });
 }

@@ -2,9 +2,14 @@ import React from 'react';
 import { useMesh } from '../mesh/MeshContext';
 import { useMobileChatVoiceRecorder } from './use-mobile-chat-voice-recorder';
 import { useMobileContinuousVoice } from './use-mobile-continuous-voice';
+import {
+  MobileMicrophoneCoordinator,
+  type MobileMicrophoneOwner,
+} from './mobile-microphone-coordinator';
 
 type MobileChatVoiceRecorderContextValue = ReturnType<typeof useMobileChatVoiceRecorder> & {
   continuousVoice: ReturnType<typeof useMobileContinuousVoice>;
+  microphoneOwner: MobileMicrophoneOwner | null;
   error: string;
   setError: React.Dispatch<React.SetStateAction<string>>;
 };
@@ -19,15 +24,25 @@ const MobileChatVoiceRecorderContext =
 export function MobileChatVoiceRecorderProvider({ children }: { children: React.ReactNode }) {
   const mesh = useMesh();
   const [error, setError] = React.useState('');
+  const [microphoneCoordinator] = React.useState(() => new MobileMicrophoneCoordinator());
+  const microphoneOwner = React.useSyncExternalStore(
+    microphoneCoordinator.subscribe,
+    microphoneCoordinator.getSnapshot,
+    microphoneCoordinator.getSnapshot,
+  );
   const handleError = React.useCallback((message: string) => setError(message.trim()), []);
-  const recorder = useMobileChatVoiceRecorder({ onError: handleError });
+  const recorder = useMobileChatVoiceRecorder({
+    microphoneCoordinator,
+    onError: handleError,
+  });
   const continuousVoice = useMobileContinuousVoice({
+    microphoneCoordinator,
     onError: handleError,
     onBackgroundActivityChange: mesh.setBackgroundActivityRequired,
   });
   const value = React.useMemo(
-    () => ({ ...recorder, continuousVoice, error, setError }),
-    [continuousVoice, error, recorder],
+    () => ({ ...recorder, continuousVoice, error, microphoneOwner, setError }),
+    [continuousVoice, error, microphoneOwner, recorder],
   );
 
   return (

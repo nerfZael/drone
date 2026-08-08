@@ -18,6 +18,11 @@ import {
 } from 'expo-audio';
 import { readGroqApiKey } from './local-assistant-settings';
 import { transcribeMobileVoiceWave } from './mobile-groq-transcription';
+import { MobileAudioStreamStartGate } from './mobile-audio-stream-start-gate';
+import type {
+  MobileMicrophoneCoordinator,
+  MobileMicrophoneLease,
+} from './mobile-microphone-coordinator';
 import {
   resolveMobileContinuousVoiceNativeAction,
   type MobileContinuousVoiceStatus,
@@ -62,9 +67,11 @@ export function mobileContinuousVoiceStatusLabel(
 }
 
 export function useMobileContinuousVoice({
+  microphoneCoordinator,
   onError,
   onBackgroundActivityChange,
 }: {
+  microphoneCoordinator: MobileMicrophoneCoordinator;
   onError(message: string): void;
   onBackgroundActivityChange(active: boolean): void;
 }) {
@@ -89,6 +96,10 @@ export function useMobileContinuousVoice({
   const nativeStatusHandlerRef = React.useRef<((status: AudioStreamStatus) => void) | null>(null);
   const nativeStopHandlerRef = React.useRef<(() => Promise<void>) | null>(null);
   const backgroundActivityRef = React.useRef(false);
+  const microphoneLeaseRef = React.useRef<MobileMicrophoneLease | null>(null);
+  const startPromiseRef = React.useRef<Promise<boolean> | null>(null);
+  const nativeStartPromiseRef = React.useRef<Promise<void> | null>(null);
+  const streamStartGateRef = React.useRef(new MobileAudioStreamStartGate());
 
   const setBackgroundActivity = React.useCallback(
     (active: boolean) => {
@@ -102,6 +113,18 @@ export function useMobileContinuousVoice({
   const setStatusValue = React.useCallback((next: MobileContinuousVoiceStatus) => {
     statusRef.current = next;
     if (mountedRef.current) setStatus(next);
+  }, []);
+
+  const releaseMicrophone = React.useCallback(async () => {
+    const lease = microphoneLeaseRef.current;
+    if (!lease) return;
+    await lease.release(async () => {
+      await setAudioModeAsync({
+        allowsRecording: false,
+        allowsBackgroundRecording: false,
+      }).catch(() => undefined);
+    });
+    if (microphoneLeaseRef.current === lease) microphoneLeaseRef.current = null;
   }, []);
 
   const drainQueue = React.useCallback((): Promise<void> => {
@@ -209,11 +232,61 @@ export function useMobileContinuousVoice({
     onStatus: handleNativeStatus,
   });
 
+  const stopNativeStreamNow = React.useCallback(() => {
+    try {
+      stream.stop();
+    } catch {
+      // The Expo shared object may already be released during provider teardown.
+    }
+  }, [stream]);
+
+  const startNativeStream = React.useCallback(async () => {
+    if (nativeStartPromiseRef.current) return nativeStartPromiseRef.current;
+    const work = (async () => {
+      await stream.start();
+    })();
+    nativeStartPromiseRef.current = work;
+    try {
+      await work;
+    } finally {
+      if (nativeStartPromiseRef.current === work) nativeStartPromiseRef.current = null;
+    }
+  }, [stream]);
+
+  const activateStream = React.useCallback(
+    async (generation: number): Promise<boolean> => {
+      return streamStartGateRef.current.start(async (isCurrent) => {
+        await setAudioModeAsync({
+          allowsRecording: true,
+          allowsBackgroundRecording: true,
+          playsInSilentMode: true,
+        });
+        if (!isCurrent() || generationRef.current !== generation) return;
+        await startNativeStream();
+        if (!isCurrent() || generationRef.current !== generation) {
+          stopNativeStreamNow();
+        }
+      });
+    },
+    [startNativeStream, stopNativeStreamNow],
+  );
+
+  const stopPendingStream = React.useCallback(async () => {
+    // This first stop invalidates Android's native start request even when it is
+    // still suspended while binding the foreground recording service.
+    await streamStartGateRef.current.cancel(stopNativeStreamNow);
+    await nativeStartPromiseRef.current?.catch(() => undefined);
+    stopNativeStreamNow();
+  }, [stopNativeStreamNow]);
+
   const cancel = React.useCallback(async () => {
+    const pendingStart = startPromiseRef.current;
     generationRef.current += 1;
     abortRef.current?.abort();
     abortRef.current = null;
-    stream.stop();
+    stopNativeStreamNow();
+    await pendingStart?.catch(() => undefined);
+    await stopPendingStream();
     setBackgroundActivity(false);
     segmenterRef.current?.discard();
     segmenterRef.current = null;
@@ -224,48 +297,66 @@ export function useMobileContinuousVoice({
     pausedRef.current = false;
     finishingRef.current = false;
     sampleCountRef.current = 0;
-    await setAudioModeAsync({ allowsRecording: false, allowsBackgroundRecording: false }).catch(
-      () => undefined,
-    );
+    await releaseMicrophone();
     if (mountedRef.current) {
       setPendingCount(0);
       setDurationMillis(0);
       setTargetKey(null);
     }
     setStatusValue('idle');
-  }, [setBackgroundActivity, setStatusValue, stream]);
+  }, [
+    releaseMicrophone,
+    setBackgroundActivity,
+    setStatusValue,
+    stopNativeStreamNow,
+    stopPendingStream,
+  ]);
 
   React.useEffect(() => {
     mountedRef.current = true;
     const subscription = AppState.addEventListener('change', (next) => {
       if (next !== 'active' || statusRef.current !== 'recovering' || stream.isStreaming) return;
       const generation = generationRef.current;
-      void setAudioModeAsync({
-        allowsRecording: true,
-        allowsBackgroundRecording: true,
-        playsInSilentMode: true,
-      })
-        .then(() => stream.start())
-        .catch((error: any) => {
-          if (generationRef.current !== generation || statusRef.current !== 'recovering') return;
-          pausedRef.current = true;
-          setStatusValue('error');
-          onError(error?.message ?? String(error));
-        });
+      void activateStream(generation).catch((error: any) => {
+        if (generationRef.current !== generation || statusRef.current !== 'recovering') return;
+        pausedRef.current = true;
+        setStatusValue('error');
+        onError(error?.message ?? String(error));
+      });
     });
     return () => {
       mountedRef.current = false;
       generationRef.current += 1;
       abortRef.current?.abort();
-      stream.stop();
+      stopNativeStreamNow();
       setBackgroundActivity(false);
+      void stopPendingStream().then(releaseMicrophone);
       subscription.remove();
     };
-  }, [onError, setBackgroundActivity, setStatusValue, stream]);
+  }, [
+    activateStream,
+    onError,
+    releaseMicrophone,
+    setBackgroundActivity,
+    setStatusValue,
+    stopNativeStreamNow,
+    stopPendingStream,
+    stream,
+  ]);
 
-  const start = React.useCallback(
+  const startOperation = React.useCallback(
     async (input: StartMobileContinuousVoiceInput): Promise<boolean> => {
       if (statusRef.current !== 'idle') return false;
+      const microphoneLease = microphoneCoordinator.acquire('continuous');
+      if (!microphoneLease) {
+        onError(
+          microphoneCoordinator.getSnapshot() === 'single-shot'
+            ? 'A voice message is already using the microphone.'
+            : 'The microphone is still finishing the previous continuous session.',
+        );
+        return false;
+      }
+      microphoneLeaseRef.current = microphoneLease;
       const generation = generationRef.current + 1;
       generationRef.current = generation;
       setStatusValue('starting');
@@ -313,32 +404,45 @@ export function useMobileContinuousVoice({
         finishingRef.current = false;
         if (mountedRef.current) setTargetKey(input.targetKey);
         setBackgroundActivity(true);
-        await setAudioModeAsync({
-          allowsRecording: true,
-          allowsBackgroundRecording: true,
-          playsInSilentMode: true,
-        });
-        if (generationRef.current !== generation) return false;
-        await stream.start();
-        if (generationRef.current !== generation) return false;
+        if (!(await activateStream(generation))) return false;
         setStatusValue('listening');
         return true;
       } catch (error: any) {
         if (generationRef.current !== generation) return false;
-        stream.stop();
+        await stopPendingStream();
         setBackgroundActivity(false);
         segmenterRef.current = null;
         onTranscriptRef.current = null;
         if (mountedRef.current) setTargetKey(null);
-        await setAudioModeAsync({ allowsRecording: false, allowsBackgroundRecording: false }).catch(
-          () => undefined,
-        );
+        await releaseMicrophone();
         setStatusValue('idle');
         onError(error?.message ?? String(error));
         return false;
       }
     },
-    [onError, setBackgroundActivity, setStatusValue, stream],
+    [
+      activateStream,
+      microphoneCoordinator,
+      onError,
+      releaseMicrophone,
+      setBackgroundActivity,
+      setStatusValue,
+      stopPendingStream,
+    ],
+  );
+
+  const start = React.useCallback(
+    async (input: StartMobileContinuousVoiceInput): Promise<boolean> => {
+      if (startPromiseRef.current || statusRef.current !== 'idle') return false;
+      const work = startOperation(input);
+      startPromiseRef.current = work;
+      try {
+        return await work;
+      } finally {
+        if (startPromiseRef.current === work) startPromiseRef.current = null;
+      }
+    },
+    [startOperation],
   );
 
   const togglePause = React.useCallback(async () => {
@@ -352,9 +456,7 @@ export function useMobileContinuousVoice({
       onTranscriptRef.current = null;
       settingsRef.current = null;
       sampleCountRef.current = 0;
-      await setAudioModeAsync({ allowsRecording: false, allowsBackgroundRecording: false }).catch(
-        () => undefined,
-      );
+      await releaseMicrophone();
       setBackgroundActivity(false);
       if (mountedRef.current) {
         setDurationMillis(0);
@@ -375,14 +477,7 @@ export function useMobileContinuousVoice({
       const generation = generationRef.current;
       try {
         if (!stream.isStreaming) {
-          await setAudioModeAsync({
-            allowsRecording: true,
-            allowsBackgroundRecording: true,
-            playsInSilentMode: true,
-          });
-          if (generationRef.current !== generation) return;
-          await stream.start();
-          if (generationRef.current !== generation) return;
+          if (!(await activateStream(generation))) return;
         }
         pausedRef.current = false;
         setStatusValue('listening');
@@ -399,14 +494,25 @@ export function useMobileContinuousVoice({
     if (statusRef.current === 'idle' || statusRef.current === 'starting') return;
     pausedRef.current = true;
     setStatusValue('paused');
-  }, [drainQueue, onError, setBackgroundActivity, setStatusValue, stream]);
+  }, [
+    activateStream,
+    drainQueue,
+    onError,
+    releaseMicrophone,
+    setBackgroundActivity,
+    setStatusValue,
+    stream,
+  ]);
 
   const stop = React.useCallback(async () => {
     if (statusRef.current === 'idle' || statusRef.current === 'error') return;
     if (statusRef.current === 'starting') {
+      const pendingStart = startPromiseRef.current;
       generationRef.current += 1;
       abortRef.current?.abort();
-      stream.stop();
+      stopNativeStreamNow();
+      await pendingStart?.catch(() => undefined);
+      await stopPendingStream();
       setBackgroundActivity(false);
       segmenterRef.current?.discard();
       segmenterRef.current = null;
@@ -414,9 +520,7 @@ export function useMobileContinuousVoice({
       onTranscriptRef.current = null;
       pausedRef.current = false;
       finishingRef.current = false;
-      await setAudioModeAsync({ allowsRecording: false, allowsBackgroundRecording: false }).catch(
-        () => undefined,
-      );
+      await releaseMicrophone();
       if (mountedRef.current) setTargetKey(null);
       setStatusValue('idle');
       return;
@@ -424,7 +528,7 @@ export function useMobileContinuousVoice({
     pausedRef.current = true;
     finishingRef.current = true;
     setStatusValue('stopping');
-    stream.stop();
+    await stopPendingStream();
     const finalSegment = segmenterRef.current?.flush() ?? null;
     segmenterRef.current = null;
     if (finalSegment) enqueue([finalSegment]);
@@ -435,16 +539,22 @@ export function useMobileContinuousVoice({
     settingsRef.current = null;
     pausedRef.current = false;
     sampleCountRef.current = 0;
-    await setAudioModeAsync({ allowsRecording: false, allowsBackgroundRecording: false }).catch(
-      () => undefined,
-    );
+    await releaseMicrophone();
     setBackgroundActivity(false);
     if (mountedRef.current) {
       setDurationMillis(0);
       setTargetKey(null);
     }
     setStatusValue('idle');
-  }, [drainQueue, enqueue, setBackgroundActivity, setStatusValue, stream]);
+  }, [
+    drainQueue,
+    enqueue,
+    releaseMicrophone,
+    setBackgroundActivity,
+    setStatusValue,
+    stopNativeStreamNow,
+    stopPendingStream,
+  ]);
 
   nativeStopHandlerRef.current = stop;
   nativeStatusHandlerRef.current = (next) => {

@@ -12,11 +12,7 @@ const androidManifest = readFileSync(
   'utf8',
 );
 const expoAudioPatch = readFileSync(
-  new URL('../../../patches/expo-audio@57.0.0.patch', import.meta.url),
-  'utf8',
-);
-const mobileGroqTranscription = readFileSync(
-  new URL('../src/local-assistant/mobile-groq-transcription.ts', import.meta.url),
+  new URL('../../../patches/expo-audio@57.0.3.patch', import.meta.url),
   'utf8',
 );
 const mobileVoiceRecorder = readFileSync(
@@ -50,21 +46,26 @@ describe('mobile background recording configuration', () => {
     expect(expoAudioPatch).toContain('reason: "interrupted"');
     expect(expoAudioPatch).toContain('scheduleRecovery()');
     expect(expoAudioPatch).toContain("reason?: 'started' | 'stopped' | 'interrupted'");
-  });
-
-  test('uploads continuous WAV data through a native file instead of an unsupported Blob part', () => {
-    expect(mobileGroqTranscription).toContain('new File(');
-    expect(mobileGroqTranscription).toContain('file.write(input.wave)');
-    expect(mobileGroqTranscription).toContain("form.append('file', file as unknown as Blob)");
-    expect(mobileGroqTranscription).not.toContain('new Blob([input.wave.buffer');
+    expect(expoAudioPatch).toContain('startRequestGeneration += 1');
   });
 
   test('serializes recorder startup and coalesces Android service binding', () => {
     expect(mobileVoiceRecorder).toContain('await pendingStart?.catch');
-    expect(expoAudioPatch).toContain('bindingWaiters.add(continuation)');
+    expect(expoAudioPatch).toContain('CompletableDeferred<Unit>');
+    expect(expoAudioPatch).toContain('pendingBinding');
     expect(expoAudioPatch).toContain('startBindingTimeout()');
+    expect(expoAudioPatch).toContain('bindingState != ServiceBindingState.BINDING');
     expect(expoAudioPatch).not.toContain(
       '+      throw AudioRecordingServiceException("Tried binding to the recording service while the previous attempt is still ongoing.")',
+    );
+  });
+
+  test('keeps foreground recording available when notification permission is denied', () => {
+    expect(expoAudioPatch).toContain(
+      '-    if (useForegroundService && !hasNotificationPermissions()) {',
+    );
+    expect(expoAudioPatch).not.toContain(
+      '+    if (useForegroundService && !hasNotificationPermissions()) {',
     );
   });
 });

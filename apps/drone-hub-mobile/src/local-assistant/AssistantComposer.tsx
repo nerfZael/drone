@@ -201,12 +201,17 @@ export function AssistantComposer({
     discardRecording,
     stopRecordingForTranscript,
     continuousVoice,
+    microphoneOwner,
   } = useSharedMobileChatVoiceRecorder();
   const voiceActive = voiceStatus !== 'idle';
   const continuousVoiceActive = continuousVoice.status !== 'idle';
   const continuousVoiceOwned =
     continuousVoiceActive && continuousVoice.targetKey === String(voiceResetKey ?? '');
   const continuousVoiceElsewhere = continuousVoiceActive && !continuousVoiceOwned;
+  const voiceRecordAccessibilityLabel =
+    microphoneOwner === 'continuous'
+      ? 'Continuous voice is using the microphone'
+      : 'Record voice message';
   const voiceActiveRef = React.useRef(voiceActive);
   voiceActiveRef.current = voiceActive;
   const voiceCanPause = voiceStatus === 'recording' || voiceStatus === 'paused';
@@ -223,6 +228,7 @@ export function AssistantComposer({
     sending,
     running,
     queueWhileRunning,
+    microphoneAvailable: microphoneOwner === null,
   });
   const continuousVoiceActionDisabled =
     !continuousVoiceEnabled || voiceRecordActionDisabled || voiceActive || continuousVoiceElsewhere;
@@ -499,7 +505,7 @@ export function AssistantComposer({
             ) : null}
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Record voice message"
+              accessibilityLabel={voiceRecordAccessibilityLabel}
               accessibilityState={{ disabled: voiceRecordActionDisabled }}
               disabled={voiceRecordActionDisabled}
               hitSlop={6}
@@ -612,7 +618,7 @@ export function AssistantComposer({
                   <ChevronDown color={colors.secondary} size={14} strokeWidth={2.2} />
                 </Pressable>
                 <IconButton
-                  label="Record voice message"
+                  label={voiceRecordAccessibilityLabel}
                   icon={Mic}
                   disabled={voiceRecordActionDisabled}
                   onPress={() => void beginVoiceRecording()}
