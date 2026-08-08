@@ -51,9 +51,7 @@ describe('changed files card', () => {
   });
 
   test('can start expanded with a capped scroll region', () => {
-    const html = renderToStaticMarkup(
-      <ChangedFilesCard fileChanges={summary} initiallyExpanded />,
-    );
+    const html = renderToStaticMarkup(<ChangedFilesCard fileChanges={summary} initiallyExpanded />);
 
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('max-h-72');
@@ -91,6 +89,86 @@ describe('changed files card', () => {
     );
 
     expect(html).toBe('');
+  });
+
+  test('labels summaries that excluded base branch movement', () => {
+    const html = renderToStaticMarkup(
+      <ChangedFilesCard
+        fileChanges={{
+          ...summary,
+          attribution: 'base-normalized',
+          baseMoved: true,
+          workspaces: summary.workspaces.map((workspace) => ({
+            ...workspace,
+            attribution: 'base-normalized' as const,
+            baseMoved: true,
+          })),
+        }}
+      />,
+    );
+
+    expect(html).toContain('Base normalized');
+    expect(html).toContain('Base branch movement was excluded from this summary');
+  });
+
+  test('shows a warning instead of inaccurate totals when attribution is unavailable', () => {
+    const html = renderToStaticMarkup(
+      <ChangedFilesCard
+        fileChanges={{
+          version: 2,
+          capturedAt: summary.capturedAt,
+          attribution: 'unavailable',
+          baseMoved: true,
+          counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
+          workspaces: [
+            {
+              targetId: 'drone:d1',
+              droneId: 'd1',
+              label: 'Drone 1',
+              attribution: 'unavailable',
+              baseMoved: true,
+              counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
+              previewEntries: [],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(html).toContain('Changed files');
+    expect(html).toContain('(unavailable)');
+    expect(html).toContain('Exact changed-file attribution is unavailable');
+    expect(html).not.toContain('title="Lines added"');
+  });
+
+  test('shows known totals and workspace warnings for partial attribution', () => {
+    const html = renderToStaticMarkup(
+      <ChangedFilesCard
+        initiallyExpanded
+        fileChanges={{
+          ...summary,
+          attribution: 'partial',
+          baseMoved: true,
+          workspaces: [
+            { ...summary.workspaces[0]!, attribution: 'exact' },
+            {
+              targetId: 'drone:d2',
+              droneId: 'd2',
+              label: 'Drone 2',
+              attribution: 'unavailable',
+              baseMoved: true,
+              counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
+              previewEntries: [],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(html).toContain('Partial');
+    expect(html).toContain('Totals include only attributed workspaces');
+    expect(html).toContain('Exact attribution is unavailable for this workspace');
+    expect(html).toContain('title="Lines added"');
   });
 
   test('builds collapsed directory chains with aggregate line counts', () => {

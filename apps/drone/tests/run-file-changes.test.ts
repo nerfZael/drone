@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
   captureDroneRunFileChangesBaseline,
+  combineAgentRunFileChanges,
   finalizeDroneRunFileChanges,
   isMutatingWorkspaceTool,
 } from '../src/hub/run-file-changes';
@@ -60,6 +61,37 @@ describe('agent run file changes', () => {
       expect(isMutatingWorkspaceTool(tool)).toBe(true);
     }
     expect(isMutatingWorkspaceTool('read_file')).toBe(false);
+  });
+
+  test('marks mixed attributed and unavailable workspaces as partial', () => {
+    const summary = combineAgentRunFileChanges([
+      {
+        targetId: 'drone:exact',
+        droneId: 'exact',
+        label: 'Exact drone',
+        counts: { changed: 1, additions: 2, deletions: 0, modified: 0 },
+        previewEntries: [
+          { path: 'run.txt', status: 'added', additions: 2, deletions: 0, modified: 0 },
+        ],
+        attribution: 'exact',
+      },
+      {
+        targetId: 'drone:unavailable',
+        droneId: 'unavailable',
+        label: 'Unavailable drone',
+        counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
+        previewEntries: [],
+        attribution: 'unavailable',
+        baseMoved: true,
+      },
+    ]);
+
+    expect(summary).toMatchObject({
+      attribution: 'partial',
+      baseMoved: true,
+      counts: { changed: 1, additions: 2, deletions: 0, modified: 0 },
+      workspaces: [{ attribution: 'exact' }, { attribution: 'unavailable' }],
+    });
   });
 
   test('reports only changes made after the run baseline', async () => {
@@ -160,5 +192,215 @@ describe('agent run file changes', () => {
     git(repoPath, 'rebase', '--quiet', 'refs/remotes/origin/main');
 
     expect(await finalizeDroneRunFileChanges({ baseline: baseline!, drone })).toBeNull();
+  });
+
+  test('excludes an adopted upstream base when the run starts clean and adds changes', async () => {
+    const repoPath = createRepository();
+    git(repoPath, 'switch', '--quiet', '-c', 'dvm/work');
+    const drone = {
+      runtime: 'host',
+      repoAttached: true,
+      repoPath,
+      name: 'Host drone',
+      repo: { baseRef: 'main' },
+    };
+    const baseline = await captureDroneRunFileChangesBaseline({ droneId: 'host-1', drone });
+
+    fs.writeFileSync(path.join(repoPath, 'run.txt'), 'added by run\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'run change');
+
+    git(repoPath, 'switch', '--quiet', '-c', 'upstream', 'refs/remotes/origin/main');
+    fs.writeFileSync(path.join(repoPath, 'upstream.txt'), 'unrelated upstream change\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'upstream');
+    git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(repoPath, 'switch', '--quiet', 'dvm/work');
+    git(repoPath, 'rebase', '--quiet', 'refs/remotes/origin/main');
+
+    // The remote can advance again after the rebase but before attribution is finalized.
+    // The adopted base is the merge base with the final checkout, not necessarily the
+    // latest remote tip.
+    git(repoPath, 'switch', '--quiet', 'upstream');
+    fs.writeFileSync(path.join(repoPath, 'later-upstream.txt'), 'arrived after the rebase\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'later upstream');
+    git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(repoPath, 'switch', '--quiet', 'dvm/work');
+
+    const summary = await finalizeDroneRunFileChanges({ baseline: baseline!, drone });
+
+    expect(summary).toMatchObject({
+      version: 2,
+      attribution: 'base-normalized',
+      baseMoved: true,
+      counts: { changed: 1, additions: 1, deletions: 0, modified: 0 },
+      workspaces: [
+        {
+          attribution: 'base-normalized',
+          baseMoved: true,
+          previewEntries: [expect.objectContaining({ path: 'run.txt', additions: 1 })],
+        },
+      ],
+    });
+  });
+
+  test('normalizes pre-existing branch changes onto an adopted upstream base', async () => {
+    const repoPath = createRepository();
+    git(repoPath, 'switch', '--quiet', '-c', 'dvm/work');
+    fs.writeFileSync(path.join(repoPath, 'before-run.txt'), 'pre-existing branch change\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'pre-existing feature');
+    const drone = {
+      runtime: 'host',
+      repoAttached: true,
+      repoPath,
+      name: 'Host drone',
+      repo: { baseRef: 'main' },
+    };
+    const baseline = await captureDroneRunFileChangesBaseline({ droneId: 'host-1', drone });
+
+    fs.writeFileSync(path.join(repoPath, 'run.txt'), 'added by run\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'run change');
+    git(repoPath, 'switch', '--quiet', '-c', 'upstream', 'refs/remotes/origin/main');
+    fs.writeFileSync(path.join(repoPath, 'upstream.txt'), 'unrelated upstream change\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'upstream');
+    git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(repoPath, 'switch', '--quiet', 'dvm/work');
+    git(repoPath, 'rebase', '--quiet', 'refs/remotes/origin/main');
+
+    const summary = await finalizeDroneRunFileChanges({ baseline: baseline!, drone });
+
+    expect(summary).toMatchObject({
+      attribution: 'base-normalized',
+      baseMoved: true,
+      counts: { changed: 1, additions: 1, deletions: 0, modified: 0 },
+      workspaces: [
+        {
+          previewEntries: [expect.objectContaining({ path: 'run.txt' })],
+        },
+      ],
+    });
+  });
+
+  test('uses the exact run diff when the remote base moves but is not adopted', async () => {
+    const repoPath = createRepository();
+    git(repoPath, 'switch', '--quiet', '-c', 'dvm/work');
+    const drone = {
+      runtime: 'host',
+      repoAttached: true,
+      repoPath,
+      name: 'Host drone',
+      repo: { baseRef: 'main' },
+    };
+    const baseline = await captureDroneRunFileChangesBaseline({ droneId: 'host-1', drone });
+
+    git(repoPath, 'switch', '--quiet', '-c', 'upstream', 'refs/remotes/origin/main');
+    fs.writeFileSync(path.join(repoPath, 'upstream.txt'), 'unrelated upstream change\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'upstream');
+    git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(repoPath, 'switch', '--quiet', 'dvm/work');
+    fs.writeFileSync(path.join(repoPath, 'run.txt'), 'added by run\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'run change');
+
+    const summary = await finalizeDroneRunFileChanges({ baseline: baseline!, drone });
+
+    expect(summary).toMatchObject({
+      attribution: 'exact',
+      baseMoved: true,
+      counts: { changed: 1, additions: 1, deletions: 0, modified: 0 },
+      workspaces: [
+        {
+          attribution: 'exact',
+          previewEntries: [expect.objectContaining({ path: 'run.txt' })],
+        },
+      ],
+    });
+  });
+
+  test('reports attribution unavailable when the base history is rewritten', async () => {
+    const repoPath = createRepository();
+    git(repoPath, 'switch', '--quiet', '-c', 'dvm/work');
+    const drone = {
+      runtime: 'host',
+      repoAttached: true,
+      repoPath,
+      name: 'Host drone',
+      repo: { baseRef: 'main' },
+    };
+    const baseline = await captureDroneRunFileChangesBaseline({ droneId: 'host-1', drone });
+
+    git(repoPath, 'switch', '--quiet', '--orphan', 'rewritten-main');
+    fs.writeFileSync(path.join(repoPath, 'rewritten.txt'), 'rewritten base history\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'rewritten upstream');
+    git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(repoPath, 'switch', '--quiet', 'dvm/work');
+    fs.writeFileSync(path.join(repoPath, 'run.txt'), 'added by run\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'run change');
+
+    const summary = await finalizeDroneRunFileChanges({ baseline: baseline!, drone });
+
+    expect(summary).toMatchObject({
+      attribution: 'unavailable',
+      baseMoved: true,
+      counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
+    });
+  });
+
+  test('reports attribution unavailable when replaying starting changes conflicts', async () => {
+    const repoPath = createRepository();
+    git(repoPath, 'switch', '--quiet', '-c', 'dvm/work');
+    fs.writeFileSync(path.join(repoPath, 'src', 'existing.ts'), 'feature before run\ntwo\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'pre-existing feature');
+    const drone = {
+      runtime: 'host',
+      repoAttached: true,
+      repoPath,
+      name: 'Host drone',
+      repo: { baseRef: 'main' },
+    };
+    const baseline = await captureDroneRunFileChangesBaseline({ droneId: 'host-1', drone });
+
+    fs.writeFileSync(path.join(repoPath, 'run.txt'), 'added by run\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'run change');
+    git(repoPath, 'switch', '--quiet', '-c', 'upstream', 'refs/remotes/origin/main');
+    fs.writeFileSync(path.join(repoPath, 'src', 'existing.ts'), 'upstream change\ntwo\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'conflicting upstream');
+    git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(repoPath, 'switch', '--quiet', 'dvm/work');
+    const rebase = spawnSync(
+      'git',
+      ['-C', repoPath, 'rebase', '--quiet', 'refs/remotes/origin/main'],
+      { encoding: 'utf8' },
+    );
+    expect(rebase.status).not.toBe(0);
+    fs.writeFileSync(path.join(repoPath, 'src', 'existing.ts'), 'resolved during run\ntwo\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, '-c', 'core.editor=true', 'rebase', '--continue');
+
+    const summary = await finalizeDroneRunFileChanges({ baseline: baseline!, drone });
+
+    expect(summary).toMatchObject({
+      version: 2,
+      attribution: 'unavailable',
+      baseMoved: true,
+      counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
+      workspaces: [
+        {
+          attribution: 'unavailable',
+          baseMoved: true,
+          previewEntries: [],
+        },
+      ],
+    });
   });
 });

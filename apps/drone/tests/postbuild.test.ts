@@ -33,7 +33,7 @@ describe('postbuild bundles', () => {
       path.join(root, 'src', 'daemon.ts'),
       '--target=node',
       '--format=cjs',
-      `--outfile=${path.join(root, 'dist', 'daemon.js')}`,
+      `--outfile=${path.join(root, 'dist', 'daemon.bundle.js')}`,
     ]);
   });
 });

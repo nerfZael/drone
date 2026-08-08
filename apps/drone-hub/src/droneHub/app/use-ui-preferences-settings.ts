@@ -5,7 +5,12 @@ import type {
   SidebarGroupingMode,
   UiPreferencesSettingsResponse,
 } from './settings-types';
-import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import {
+  normalizeSpawnContextByRepoKey,
+  resolveSpawnContextPreferencesForRepo,
+  useDroneHubUiStore,
+} from './use-drone-hub-ui-store';
+import { loadDesktopNewDronePreferencesByRepo } from './new-drone-preferences';
 import { profileStorageKey } from '../../profile-storage';
 import {
   UI_PREFERENCES_SNAPSHOT_EVENT,
@@ -47,6 +52,14 @@ function normalizeSidebarDensityMode(value: unknown): SidebarDensityMode {
 
 function normalizeRepoBranchSource(value: unknown): 'host' | 'remote' {
   return value === 'remote' ? 'remote' : 'host';
+}
+
+function normalizeSpawnAgentPermissionMode(value: unknown): 'read-only' | 'workspace-write' | 'full-access' {
+  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+}
+
+function normalizeSpawnApprovalPolicy(value: unknown): 'ask' | 'agent-decides' | 'never' {
+  return value === 'agent-decides' || value === 'never' ? value : 'ask';
 }
 
 function normalizeTrimmedText(value: unknown, maxChars: number): string {
@@ -96,13 +109,45 @@ function normalizeUiPreferencesSnapshot(
     autoDelete: value?.autoDelete === true,
     spawnAgentKey: normalizeTrimmedText(value?.spawnAgentKey, 200) || 'builtin:cursor',
     spawnModel: normalizeTrimmedText(value?.spawnModel, 200),
+    spawnReasoning: normalizeTrimmedText(value?.spawnReasoning, 200),
+    spawnAgentPermissionMode: normalizeSpawnAgentPermissionMode(value?.spawnAgentPermissionMode),
+    spawnApprovalPolicy: normalizeSpawnApprovalPolicy(value?.spawnApprovalPolicy),
     repoBranchSource: normalizeRepoBranchSource(value?.repoBranchSource),
     repoCreateRemoteBranch: normalizeTrimmedText(value?.repoCreateRemoteBranch, 400),
+    spawnContextByRepoKey: normalizeSpawnContextByRepoKey(value?.spawnContextByRepoKey),
   };
 }
 
 function serializeUiPreferencesSnapshot(value: UiPreferencesSnapshot): string {
   return JSON.stringify(value);
+}
+
+export function recoverInitialSpawnContextByRepoKey({
+  backend,
+  current,
+  remembered,
+  backendUpdated,
+}: {
+  backend: Partial<UiPreferencesSnapshot> | null | undefined;
+  current: Partial<UiPreferencesSnapshot> | null | undefined;
+  remembered: unknown;
+  backendUpdated: boolean;
+}): UiPreferencesSnapshot['spawnContextByRepoKey'] {
+  const backendSnapshot = normalizeUiPreferencesSnapshot(backend);
+  if (Object.keys(backendSnapshot.spawnContextByRepoKey).length > 0) {
+    return backendSnapshot.spawnContextByRepoKey;
+  }
+  const currentRepoContexts = {
+    ...normalizeUiPreferencesSnapshot(current).spawnContextByRepoKey,
+  };
+  if (backendUpdated) delete currentRepoContexts.__no_repo__;
+  return {
+    ...(backendUpdated
+      ? normalizeSpawnContextByRepoKey({ __no_repo__: backendSnapshot })
+      : {}),
+    ...currentRepoContexts,
+    ...normalizeSpawnContextByRepoKey(remembered),
+  };
 }
 
 function sameUiPreferenceValue(left: unknown, right: unknown): boolean {
@@ -118,6 +163,20 @@ function mergeOrderedStringMapChanges(
   for (const key of new Set([...Object.keys(base), ...Object.keys(local)])) {
     if (sameUiPreferenceValue(base[key] ?? [], local[key] ?? [])) continue;
     if (local[key]?.length) merged[key] = local[key];
+    else delete merged[key];
+  }
+  return merged;
+}
+
+function mergeRecordChanges<T>(
+  base: Record<string, T>,
+  local: Record<string, T>,
+  remote: Record<string, T>,
+): Record<string, T> {
+  const merged = { ...remote };
+  for (const key of new Set([...Object.keys(base), ...Object.keys(local)])) {
+    if (sameUiPreferenceValue(base[key], local[key])) continue;
+    if (Object.prototype.hasOwnProperty.call(local, key)) merged[key] = local[key]!;
     else delete merged[key];
   }
   return merged;
@@ -158,8 +217,16 @@ export function mergeUiPreferencesChanges(
     autoDelete: localValue('autoDelete'),
     spawnAgentKey: localValue('spawnAgentKey'),
     spawnModel: localValue('spawnModel'),
+    spawnReasoning: localValue('spawnReasoning'),
+    spawnAgentPermissionMode: localValue('spawnAgentPermissionMode'),
+    spawnApprovalPolicy: localValue('spawnApprovalPolicy'),
     repoBranchSource: localValue('repoBranchSource'),
     repoCreateRemoteBranch: localValue('repoCreateRemoteBranch'),
+    spawnContextByRepoKey: mergeRecordChanges(
+      base.spawnContextByRepoKey,
+      local.spawnContextByRepoKey,
+      remote.spawnContextByRepoKey,
+    ),
   });
 }
 
@@ -176,8 +243,12 @@ function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boole
     value.autoDelete ||
     value.spawnAgentKey !== 'builtin:cursor' ||
     value.spawnModel.length > 0 ||
+    value.spawnReasoning.length > 0 ||
+    value.spawnAgentPermissionMode !== 'full-access' ||
+    value.spawnApprovalPolicy !== 'ask' ||
     value.repoBranchSource !== 'host' ||
-    value.repoCreateRemoteBranch.length > 0
+    value.repoCreateRemoteBranch.length > 0 ||
+    Object.keys(value.spawnContextByRepoKey).length > 0
   );
 }
 
@@ -211,9 +282,19 @@ function mergeUiPreferencesForRecovery(
     spawnAgentKey:
       base.spawnAgentKey !== 'builtin:cursor' ? base.spawnAgentKey : rescue.spawnAgentKey,
     spawnModel: base.spawnModel || rescue.spawnModel,
+    spawnReasoning: base.spawnReasoning || rescue.spawnReasoning,
+    spawnAgentPermissionMode: base.spawnAgentPermissionMode !== 'full-access'
+      ? base.spawnAgentPermissionMode
+      : rescue.spawnAgentPermissionMode,
+    spawnApprovalPolicy: base.spawnApprovalPolicy !== 'ask'
+      ? base.spawnApprovalPolicy
+      : rescue.spawnApprovalPolicy,
     repoBranchSource:
       base.repoBranchSource !== 'host' ? base.repoBranchSource : rescue.repoBranchSource,
     repoCreateRemoteBranch: base.repoCreateRemoteBranch || rescue.repoCreateRemoteBranch,
+    spawnContextByRepoKey: Object.keys(base.spawnContextByRepoKey).length > 0
+      ? base.spawnContextByRepoKey
+      : rescue.spawnContextByRepoKey,
   });
 }
 
@@ -291,6 +372,10 @@ export function useUiPreferencesSettings({
     autoDelete,
     spawnAgentKey,
     spawnModel,
+    spawnReasoning,
+    spawnAgentPermissionMode,
+    spawnApprovalPolicy,
+    spawnContextByRepoKey,
     repoBranchSource,
     repoCreateRemoteBranch,
     setSidebarGroupingMode,
@@ -304,6 +389,11 @@ export function useUiPreferencesSettings({
     setAutoDelete,
     setSpawnAgentKey,
     setSpawnModel,
+    setSpawnReasoning,
+    setSpawnAgentPermissionMode,
+    setSpawnApprovalPolicy,
+    setRepoBranchSource,
+    setRepoCreateRemoteBranch,
   } = useDroneHubUiStore(
     useShallow((s) => ({
       sidebarGroupingMode: s.sidebarGroupingMode,
@@ -317,6 +407,10 @@ export function useUiPreferencesSettings({
       autoDelete: s.autoDelete,
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
+      spawnReasoning: s.spawnReasoning,
+      spawnAgentPermissionMode: s.spawnAgentPermissionMode,
+      spawnApprovalPolicy: s.spawnApprovalPolicy,
+      spawnContextByRepoKey: s.spawnContextByRepoKey,
       repoBranchSource: s.repoBranchSource,
       repoCreateRemoteBranch: s.repoCreateRemoteBranch,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
@@ -330,6 +424,11 @@ export function useUiPreferencesSettings({
       setAutoDelete: s.setAutoDelete,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
+      setSpawnReasoning: s.setSpawnReasoning,
+      setSpawnAgentPermissionMode: s.setSpawnAgentPermissionMode,
+      setSpawnApprovalPolicy: s.setSpawnApprovalPolicy,
+      setRepoBranchSource: s.setRepoBranchSource,
+      setRepoCreateRemoteBranch: s.setRepoCreateRemoteBranch,
     })),
   );
 
@@ -357,8 +456,25 @@ export function useUiPreferencesSettings({
       setPinnedDroneIds(normalized.pinnedDroneIds);
       setHiddenSidebarGroups(normalized.hiddenSidebarGroups);
       setAutoDelete(normalized.autoDelete);
-      setSpawnAgentKey(normalized.spawnAgentKey);
-      setSpawnModel(normalized.spawnModel);
+      if (Object.keys(normalized.spawnContextByRepoKey).length > 0) {
+        const current = useDroneHubUiStore.getState();
+        const resolved = resolveSpawnContextPreferencesForRepo(
+          normalized.spawnContextByRepoKey,
+          current.spawnContextRepoPath,
+        );
+        useDroneHubUiStore.setState({
+          spawnContextByRepoKey: normalized.spawnContextByRepoKey,
+          ...resolved,
+        });
+      } else {
+        setSpawnAgentKey(normalized.spawnAgentKey);
+        setSpawnModel(normalized.spawnModel);
+        setSpawnReasoning(normalized.spawnReasoning);
+        setSpawnAgentPermissionMode(normalized.spawnAgentPermissionMode);
+        setSpawnApprovalPolicy(normalized.spawnApprovalPolicy);
+        setRepoBranchSource(normalized.repoBranchSource);
+        setRepoCreateRemoteBranch(normalized.repoCreateRemoteBranch);
+      }
       return normalized;
     },
     [
@@ -372,7 +488,12 @@ export function useUiPreferencesSettings({
       setSidebarGroupOrder,
       setSidebarGroupingMode,
       setSpawnAgentKey,
+      setSpawnAgentPermissionMode,
+      setSpawnApprovalPolicy,
       setSpawnModel,
+      setSpawnReasoning,
+      setRepoBranchSource,
+      setRepoCreateRemoteBranch,
     ],
   );
 
@@ -398,8 +519,12 @@ export function useUiPreferencesSettings({
         autoDelete,
         spawnAgentKey,
         spawnModel,
+        spawnReasoning,
+        spawnAgentPermissionMode,
+        spawnApprovalPolicy,
         repoBranchSource,
         repoCreateRemoteBranch,
+        spawnContextByRepoKey,
       }),
     [
       autoDelete,
@@ -414,7 +539,11 @@ export function useUiPreferencesSettings({
       sidebarGroupOrder,
       sidebarGroupingMode,
       spawnAgentKey,
+      spawnAgentPermissionMode,
+      spawnApprovalPolicy,
       spawnModel,
+      spawnReasoning,
+      spawnContextByRepoKey,
     ],
   );
 
@@ -486,6 +615,14 @@ export function useUiPreferencesSettings({
             ? localStorage.getItem(profileStorageKey('droneHub.ui'))
             : null,
       });
+      if (!wasReady && Object.keys(backendSnapshot.spawnContextByRepoKey).length === 0) {
+        nextSnapshot.spawnContextByRepoKey = recoverInitialSpawnContextByRepoKey({
+          backend: backendSnapshot,
+          current: data.updatedAt ? currentSnapshot : nextSnapshot,
+          remembered: loadDesktopNewDronePreferencesByRepo(),
+          backendUpdated: Boolean(data.updatedAt),
+        });
+      }
       if (options?.discardSidebarIntent) {
         Object.assign(
           nextSnapshot,

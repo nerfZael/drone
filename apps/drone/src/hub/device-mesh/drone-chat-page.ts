@@ -119,6 +119,14 @@ export function compactAgentRunFileChangesForMesh(value: unknown): any | undefin
       ...(raw.version === 1 ? { repoRoot: repoRoot.value } : {}),
       ...(diffArtifactId.value ? { diffArtifactId: diffArtifactId.value } : {}),
       counts: compactFileChangeCounts(workspace?.counts),
+      ...(raw.version === 2 &&
+      (workspace?.attribution === 'exact' ||
+        workspace?.attribution === 'base-normalized' ||
+        workspace?.attribution === 'partial' ||
+        workspace?.attribution === 'unavailable')
+        ? { attribution: workspace.attribution }
+        : {}),
+      ...(raw.version === 2 && workspace?.baseMoved === true ? { baseMoved: true } : {}),
       [entriesKey]: rawEntries
         .slice(0, entriesPerWorkspace)
         .map((entry: any) => compactFileChangeEntry(entry, state)),
@@ -133,6 +141,14 @@ export function compactAgentRunFileChangesForMesh(value: unknown): any | undefin
     capturedAt: String(raw.capturedAt ?? '').slice(0, 128),
     counts: compactFileChangeCounts(raw.counts),
     workspaces,
+    ...(raw.version === 2 &&
+    (raw.attribution === 'exact' ||
+      raw.attribution === 'base-normalized' ||
+      raw.attribution === 'partial' ||
+      raw.attribution === 'unavailable')
+      ? { attribution: raw.attribution }
+      : {}),
+    ...(raw.version === 2 && raw.baseMoved === true ? { baseMoved: true } : {}),
   };
   while (Buffer.byteLength(JSON.stringify(compacted)) > MAX_FILE_CHANGES_BYTES) {
     const workspace = workspaces

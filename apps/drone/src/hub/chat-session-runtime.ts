@@ -52,9 +52,12 @@ function normalizeAgentRunFileChanges(raw: unknown): AgentRunFileChanges | undef
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const candidate = raw as Partial<AgentRunFileChanges>;
   if (candidate.version !== 1 && candidate.version !== 2) return undefined;
-  if (!Array.isArray(candidate.workspaces) || Number(candidate.counts?.changed) <= 0) {
+  if (!Array.isArray(candidate.workspaces)) return undefined;
+  if (
+    Number(candidate.counts?.changed) <= 0 &&
+    !(candidate.version === 2 && candidate.attribution === 'unavailable')
+  )
     return undefined;
-  }
   return raw as AgentRunFileChanges;
 }
 
@@ -192,6 +195,48 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     updateTranscriptTurnInStore,
     upsertChatInStore,
   } = dependencies;
+
+  function pendingSnapshotPrompts(
+    pendingEntry: any,
+    droneId: string,
+    chatName: string,
+    startupPrompts: PendingPrompt[],
+  ): PendingPrompt[] {
+    const prompts = [...startupPrompts];
+    const seed = pendingEntry?.seed;
+    const seedPrompt = String(seed?.prompt ?? '').trim();
+    const seedChatName = normalizeChatName(seed?.chatName ?? 'default');
+    if (!seedPrompt || seedChatName !== chatName) return prompts;
+
+    const seedId = String(seed?.promptId ?? '').trim() || `seed-${droneId}-${seedChatName}`;
+    const alreadyProjected = prompts.some(
+      (prompt) => prompt.id === seedId || String(prompt.prompt ?? '').trim() === seedPrompt,
+    );
+    if (alreadyProjected) return prompts;
+
+    const failed = String(pendingEntry?.phase ?? '') === 'error';
+    const at =
+      String(seed?.submittedAt ?? pendingEntry?.createdAt ?? pendingEntry?.updatedAt ?? '').trim() ||
+      nowIso();
+    prompts.push({
+      id: seedId,
+      at,
+      prompt: seedPrompt,
+      ...(typeof seed?.model === 'string' && seed.model.trim()
+        ? { model: seed.model.trim() }
+        : {}),
+      ...(typeof seed?.cwd === 'string' ? { cwd: seed.cwd } : {}),
+      state: failed ? 'failed' : 'queued',
+      ...(failed
+        ? {
+            error:
+              String(pendingEntry?.error ?? '').trim() || 'Drone failed before the prompt was sent.',
+          }
+        : {}),
+      updatedAt: String(pendingEntry?.updatedAt ?? at),
+    });
+    return prompts.sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
+  }
 
   function buildNewChatEntry(opts: { droneEntry: any; createdAt: string; sourceChatEntry?: any }) {
     const agent = opts.sourceChatEntry
@@ -1087,6 +1132,12 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       resolved,
     });
     if (context.kind === 'pending') {
+      const startupPrompts = opts.includePending
+        ? await readPendingStartupPrompts({
+            droneId: context.droneId,
+            chatName: opts.chatName,
+          })
+        : [];
       return {
         ok: true,
         id: context.droneId,
@@ -1096,7 +1147,12 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         selection: opts.selection,
         transcripts: [],
         pending: opts.includePending
-          ? await readPendingStartupPrompts({ droneId: context.droneId, chatName: opts.chatName })
+          ? pendingSnapshotPrompts(
+              context.pendingEntry,
+              context.droneId,
+              opts.chatName,
+              startupPrompts,
+            )
           : [],
         model: normalizeChatModel((context.pendingEntry as any)?.model),
         ...chatSnapshotConfig(context.pendingEntry),
@@ -1180,11 +1236,14 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         (resolved.kind === 'real' ? resolved.drone : resolved.pending)?.name ?? opts.droneRef,
       ).trim() || opts.droneRef;
     if (resolved.kind === 'pending') {
-      const pending = opts.includePending
+      const startupPrompts = opts.includePending
         ? normalizePendingStartupPrompts(
             (resolved.pending as any)?.startupQueuedPrompts,
             opts.chatName,
           ).map(startupPromptToPendingPrompt)
+        : [];
+      const pending = opts.includePending
+        ? pendingSnapshotPrompts(resolved.pending, resolved.id, opts.chatName, startupPrompts)
         : [];
       return {
         ok: true,

@@ -3316,7 +3316,7 @@ async function upgradeDroneDaemonInContainer(opts: {
   });
   const verifyStagedDaemonRuntime = await dvmExec(opts.containerName, 'bash', [
     '-lc',
-    'test -f /dvm-data/drone/dist.next/daemon.js || { echo "staged daemon runtime is missing /dvm-data/drone/dist.next/daemon.js" 1>&2; exit 1; }',
+    'test -f /dvm-data/drone/dist.next/daemon.bundle.js -o -f /dvm-data/drone/dist.next/daemon.js || { echo "staged daemon runtime is missing a daemon entry" 1>&2; exit 1; }',
   ]);
   if (verifyStagedDaemonRuntime.code !== 0) {
     throw new Error(

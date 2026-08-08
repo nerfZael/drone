@@ -142,9 +142,23 @@ export type UiPreferencesSettings = {
   autoDelete: boolean;
   spawnAgentKey: string;
   spawnModel: string;
+  spawnReasoning: string;
+  spawnAgentPermissionMode: 'read-only' | 'workspace-write' | 'full-access';
+  spawnApprovalPolicy: 'ask' | 'agent-decides' | 'never';
   repoBranchSource: 'host' | 'remote';
   repoCreateRemoteBranch: string;
+  spawnContextByRepoKey: Record<string, UiSpawnContextPreferences>;
 };
+type UiSpawnContextPreferences = Pick<
+  UiPreferencesSettings,
+  | 'spawnAgentKey'
+  | 'spawnModel'
+  | 'spawnReasoning'
+  | 'spawnAgentPermissionMode'
+  | 'spawnApprovalPolicy'
+  | 'repoBranchSource'
+  | 'repoCreateRemoteBranch'
+>;
 export type UserContextSettings = {
   timeZone: string | null;
 };
@@ -328,6 +342,38 @@ function normalizeUiPreferenceText(value: unknown, maxChars: number): string {
   return String(value ?? '').trim().slice(0, maxChars);
 }
 
+function parseSpawnAgentPermissionMode(value: unknown): UiPreferencesSettings['spawnAgentPermissionMode'] {
+  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+}
+
+function parseSpawnApprovalPolicy(value: unknown): UiPreferencesSettings['spawnApprovalPolicy'] {
+  return value === 'agent-decides' || value === 'never' ? value : 'ask';
+}
+
+function sanitizeUiSpawnContextPreferences(value: unknown): UiSpawnContextPreferences {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return {
+    spawnAgentKey: normalizeUiPreferenceText(raw.spawnAgentKey, 200) || DEFAULT_SPAWN_AGENT_KEY,
+    spawnModel: normalizeUiPreferenceText(raw.spawnModel, 200),
+    spawnReasoning: normalizeUiPreferenceText(raw.spawnReasoning, 200),
+    spawnAgentPermissionMode: parseSpawnAgentPermissionMode(raw.spawnAgentPermissionMode),
+    spawnApprovalPolicy: parseSpawnApprovalPolicy(raw.spawnApprovalPolicy),
+    repoBranchSource: parseRepoBranchSource(raw.repoBranchSource) ?? DEFAULT_REPO_BRANCH_SOURCE,
+    repoCreateRemoteBranch: normalizeUiPreferenceText(raw.repoCreateRemoteBranch, 400),
+  };
+}
+
+function sanitizeUiSpawnContextByRepoKey(value: unknown): Record<string, UiSpawnContextPreferences> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, UiSpawnContextPreferences> = {};
+  for (const [keyRaw, contextRaw] of Object.entries(value as Record<string, unknown>)) {
+    const key = String(keyRaw ?? '').trim();
+    if (!key) continue;
+    out[key] = sanitizeUiSpawnContextPreferences(contextRaw);
+  }
+  return out;
+}
+
 function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
   return {
@@ -342,8 +388,12 @@ function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
     autoDelete: raw.autoDelete === true,
     spawnAgentKey: normalizeUiPreferenceText(raw.spawnAgentKey, 200) || DEFAULT_SPAWN_AGENT_KEY,
     spawnModel: normalizeUiPreferenceText(raw.spawnModel, 200),
+    spawnReasoning: normalizeUiPreferenceText(raw.spawnReasoning, 200),
+    spawnAgentPermissionMode: parseSpawnAgentPermissionMode(raw.spawnAgentPermissionMode),
+    spawnApprovalPolicy: parseSpawnApprovalPolicy(raw.spawnApprovalPolicy),
     repoBranchSource: parseRepoBranchSource(raw.repoBranchSource) ?? DEFAULT_REPO_BRANCH_SOURCE,
     repoCreateRemoteBranch: normalizeUiPreferenceText(raw.repoCreateRemoteBranch, 400),
+    spawnContextByRepoKey: sanitizeUiSpawnContextByRepoKey(raw.spawnContextByRepoKey),
   };
 }
 

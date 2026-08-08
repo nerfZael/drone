@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+  DRONE_DAEMON_BUNDLE_FILENAME,
   hostDroneDaemonDataPath,
   hostDroneDaemonLogPath,
   hostDroneDaemonTokenPath,
@@ -10,8 +11,12 @@ import {
 
 export function resolveDroneDaemonJsPath(baseDir: string = __dirname): string {
   const candidates = [
+    // The portable bundle has a distinct name so a concurrent tsc build cannot
+    // replace it with the workspace-dependent CommonJS compilation output.
+    path.resolve(baseDir, '..', DRONE_DAEMON_BUNDLE_FILENAME),
     // Built hub: dist/hub -> dist/daemon.js
     path.resolve(baseDir, '..', 'daemon.js'),
+    path.resolve(baseDir, '..', '..', 'dist', DRONE_DAEMON_BUNDLE_FILENAME),
     // Source/dev hub: src/hub -> dist/daemon.js
     path.resolve(baseDir, '..', '..', 'dist', 'daemon.js'),
   ];
@@ -31,7 +36,8 @@ export function isDroneDaemonCommandForPort(commandRaw: string, portRaw: number)
   const command = String(commandRaw ?? '').trim();
   const port = Math.floor(Number(portRaw));
   if (!command || !Number.isFinite(port) || port <= 0) return false;
-  const daemonEntry = /(?:^|[\s"'])(?:[^\s"']*[\\/])?daemon\.(?:js|ts)(?=$|[\s"'])/i;
+  const daemonEntry =
+    /(?:^|[\s"'])(?:[^\s"']*[\\/])?daemon(?:\.bundle)?\.(?:js|ts)(?=$|[\s"'])/i;
   const portArgument = new RegExp(
     `(?:^|\\s)--port(?:=|\\s+)["']?${port}["']?(?=\\s|$)`,
   );
@@ -39,7 +45,31 @@ export function isDroneDaemonCommandForPort(commandRaw: string, portRaw: number)
 }
 
 export async function assertDroneDaemonRuntimeReady(runtimeDir: string): Promise<void> {
-  for (const fileName of ['daemon.js', 'blip.js', 'mcp-http-stdio-bridge.js']) {
+  const daemonCandidates = [DRONE_DAEMON_BUNDLE_FILENAME, 'daemon.js'];
+  let daemonPath = '';
+  for (const fileName of daemonCandidates) {
+    const candidate = path.join(runtimeDir, fileName);
+    try {
+      await fs.promises.access(candidate, fs.constants.R_OK);
+      daemonPath = candidate;
+      break;
+    } catch {
+      // Keep looking for the compatibility daemon entry.
+    }
+  }
+  if (!daemonPath) {
+    throw new Error(
+      `Missing ${path.join(runtimeDir, DRONE_DAEMON_BUNDLE_FILENAME)}. Run: bun run --filter drone build`,
+    );
+  }
+  const daemonSource = await fs.promises.readFile(daemonPath, 'utf8');
+  if (/\brequire\(["'](?:@drone|@blip|@mariozechner)\//.test(daemonSource)) {
+    throw new Error(
+      `Non-portable drone daemon runtime at ${daemonPath}. Run: bun run --filter drone build`,
+    );
+  }
+
+  for (const fileName of ['blip.js', 'mcp-http-stdio-bridge.js']) {
     const filePath = path.join(runtimeDir, fileName);
     try {
       await fs.promises.access(filePath, fs.constants.R_OK);

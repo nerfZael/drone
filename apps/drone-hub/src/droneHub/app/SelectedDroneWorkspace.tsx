@@ -60,7 +60,10 @@ import { DroneWorkspaceHeaderFrame } from './DroneWorkspaceHeaderFrame';
 import { HeaderActionButton } from './HeaderActionButton';
 import { rightPanelHeaderTabs, type RightPanelTab } from './app-config';
 import type { ChatModelOption, StartupSeedState } from './app-types';
-import { chatConfigResolutionState } from './chat-selection-model';
+import {
+  chatConfigResolutionState,
+  shouldShowDroneStartupFailureEmptyState,
+} from './chat-selection-model';
 import type { RepoOpErrorMeta } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
 import { requestChangesPullRequest } from '../changes/navigation';
@@ -891,6 +894,11 @@ export function SelectedDroneWorkspace({
   const chatConfigFailed = chatConfigResolution === 'unavailable';
   const droneStartupFailed = chatConfigResolution === 'drone-error';
   const droneStartupError = String(currentDrone.hubMessage ?? currentDrone.statusError ?? '').trim();
+  const showDroneStartupFailureEmptyState = shouldShowDroneStartupFailureEmptyState({
+    startupFailed: droneStartupFailed,
+    transcriptCount: transcripts?.length ?? 0,
+    pendingPromptCount: visiblePendingPromptsWithStartup.length,
+  });
   const genericChatActive =
     !nativeChatActive &&
     !chatConfigFailed &&
@@ -2214,7 +2222,7 @@ export function SelectedDroneWorkspace({
                 </div>
               ) : null}
               <div className="relative flex min-h-0 flex-1 flex-col">
-                {droneStartupFailed ? (
+                {showDroneStartupFailureEmptyState ? (
                   <EmptyState
                     icon={<IconChat className="h-8 w-8 text-[var(--red)]" />}
                     title="Drone failed to start"

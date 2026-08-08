@@ -29,7 +29,7 @@ function daemonBundleArgs(root) {
     path.join(root, 'src', 'daemon.ts'),
     '--target=node',
     '--format=cjs',
-    `--outfile=${path.join(root, 'dist', 'daemon.js')}`,
+    `--outfile=${path.join(root, 'dist', 'daemon.bundle.js')}`,
   ];
 }
 
@@ -82,7 +82,7 @@ async function assertBlipBundleHasErrorDetails(root) {
 }
 
 async function assertDaemonBundleIsSelfContained(root) {
-  const bundlePath = path.join(root, 'dist', 'daemon.js');
+  const bundlePath = path.join(root, 'dist', 'daemon.bundle.js');
   const content = await fs.readFile(bundlePath, 'utf8');
   if (content.includes('@drone/assistant-chat')) {
     throw new Error(`non-portable daemon bundle: ${bundlePath} retains a workspace dependency`);
@@ -132,7 +132,7 @@ async function main() {
   const root = path.resolve(__dirname, '..');
   await removeFileBestEffort(path.join(root, 'dist', 'fleet.js'));
   await removeFileBestEffort(path.join(root, 'dist', 'tasks.js'));
-  await removeFileBestEffort(path.join(root, 'dist', 'daemon.js'));
+  await removeFileBestEffort(path.join(root, 'dist', 'daemon.bundle.js'));
   await removeFileBestEffort(path.join(root, 'dist', 'blip.js'));
   await removeFileBestEffort(path.join(root, 'dist', 'mcp-http-stdio-bridge.js'));
   await ensureBlipBundleDependenciesBuilt(root);
@@ -146,7 +146,7 @@ async function main() {
   await chmodExecutableBestEffort(path.join(root, 'dist', 'blip.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'mcp-http-stdio-bridge.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'cli.js'));
-  await chmodExecutableBestEffort(path.join(root, 'dist', 'daemon.js'));
+  await chmodExecutableBestEffort(path.join(root, 'dist', 'daemon.bundle.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'hub', 'mcp-server.js'));
 }
 

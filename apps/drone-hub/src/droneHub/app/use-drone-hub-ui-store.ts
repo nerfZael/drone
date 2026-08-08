@@ -16,6 +16,7 @@ import {
 } from './shortcuts';
 import { readLocalStorageItem } from './hooks';
 import type { CustomAgentProfile } from '../types';
+import type { AgentApprovalPolicy, AgentPermissionMode } from '../../domain';
 import type { SettingsTabId } from './settings-tabs';
 import type { RepoBranchSourceMode } from './drone-create-runtime';
 import type { SidebarDensityMode } from './settings-types';
@@ -43,10 +44,12 @@ type SidebarGroupingMode = 'groups' | 'repos';
 export type SidebarDockSide = 'left' | 'right';
 export type PinnedSidebarPlacement = 'top' | 'bottom';
 type OutputView = 'screen' | 'log';
-type SpawnContextPreferences = {
+export type SpawnContextPreferences = {
   spawnAgentKey: string;
   spawnModel: string;
   spawnReasoning: string;
+  spawnAgentPermissionMode: AgentPermissionMode;
+  spawnApprovalPolicy: AgentApprovalPolicy;
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
 };
@@ -63,6 +66,8 @@ const DEFAULT_SPAWN_CONTEXT_PREFERENCES: SpawnContextPreferences = {
   spawnAgentKey: 'builtin:cursor',
   spawnModel: '',
   spawnReasoning: '',
+  spawnAgentPermissionMode: 'full-access',
+  spawnApprovalPolicy: 'ask',
   repoBranchSource: 'host',
   repoCreateRemoteBranch: '',
 };
@@ -118,6 +123,8 @@ type DroneHubUiState = {
   spawnAgentKey: string;
   spawnModel: string;
   spawnReasoning: string;
+  spawnAgentPermissionMode: AgentPermissionMode;
+  spawnApprovalPolicy: AgentApprovalPolicy;
   seenModelIds: string[];
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
@@ -180,6 +187,8 @@ type DroneHubUiState = {
   setSpawnAgentKey: (next: Updater<string>) => void;
   setSpawnModel: (next: Updater<string>) => void;
   setSpawnReasoning: (next: Updater<string>) => void;
+  setSpawnAgentPermissionMode: (next: Updater<AgentPermissionMode>) => void;
+  setSpawnApprovalPolicy: (next: Updater<AgentApprovalPolicy>) => void;
   rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
   setRepoBranchSource: (next: Updater<RepoBranchSourceMode>) => void;
   setRepoCreateRemoteBranch: (next: Updater<string>) => void;
@@ -202,11 +211,19 @@ function resolveNext<T>(prev: T, next: Updater<T>): T {
 
 function normalizeSpawnAgentKeyValue(value: unknown): string {
   const normalized = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
-  return normalized || DEFAULT_SPAWN_CONTEXT_PREFERENCES.spawnAgentKey;
+  return normalized.slice(0, 200) || DEFAULT_SPAWN_CONTEXT_PREFERENCES.spawnAgentKey;
 }
 
 function normalizeRepoBranchSourceMode(value: unknown): RepoBranchSourceMode {
   return value === 'remote' ? 'remote' : 'host';
+}
+
+function normalizeSpawnAgentPermissionMode(value: unknown): AgentPermissionMode {
+  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+}
+
+function normalizeSpawnApprovalPolicy(value: unknown): AgentApprovalPolicy {
+  return value === 'agent-decides' || value === 'never' ? value : 'ask';
 }
 
 function normalizeSpawnContextRepoPath(value: unknown): string {
@@ -223,10 +240,12 @@ function normalizeSpawnContextPreferences(
 ): SpawnContextPreferences {
   return {
     spawnAgentKey: normalizeSpawnAgentKeyValue(value?.spawnAgentKey),
-    spawnModel: normalizeTrimmedString(value?.spawnModel),
-    spawnReasoning: normalizeTrimmedString(value?.spawnReasoning),
+    spawnModel: normalizeTrimmedString(value?.spawnModel).slice(0, 200),
+    spawnReasoning: normalizeTrimmedString(value?.spawnReasoning).slice(0, 200),
+    spawnAgentPermissionMode: normalizeSpawnAgentPermissionMode(value?.spawnAgentPermissionMode),
+    spawnApprovalPolicy: normalizeSpawnApprovalPolicy(value?.spawnApprovalPolicy),
     repoBranchSource: normalizeRepoBranchSourceMode(value?.repoBranchSource),
-    repoCreateRemoteBranch: normalizeTrimmedString(value?.repoCreateRemoteBranch),
+    repoCreateRemoteBranch: normalizeTrimmedString(value?.repoCreateRemoteBranch).slice(0, 400),
   };
 }
 
@@ -268,6 +287,8 @@ function buildUpdatedSpawnContextByRepoKey(
     current.spawnAgentKey === merged.spawnAgentKey &&
     current.spawnModel === merged.spawnModel &&
     current.spawnReasoning === merged.spawnReasoning &&
+    current.spawnAgentPermissionMode === merged.spawnAgentPermissionMode &&
+    current.spawnApprovalPolicy === merged.spawnApprovalPolicy &&
     current.repoBranchSource === merged.repoBranchSource &&
     current.repoCreateRemoteBranch === merged.repoCreateRemoteBranch
   ) {
@@ -315,6 +336,8 @@ type DroneHubUiPersistedState = Pick<
   | 'spawnAgentKey'
   | 'spawnModel'
   | 'spawnReasoning'
+  | 'spawnAgentPermissionMode'
+  | 'spawnApprovalPolicy'
   | 'seenModelIds'
   | 'repoBranchSource'
   | 'repoCreateRemoteBranch'
@@ -484,6 +507,8 @@ export function migrateDroneHubUiPersistedState(
       spawnAgentKey: migrated.spawnAgentKey,
       spawnModel: migrated.spawnModel,
       spawnReasoning: migrated.spawnReasoning,
+      spawnAgentPermissionMode: migrated.spawnAgentPermissionMode,
+      spawnApprovalPolicy: migrated.spawnApprovalPolicy,
       repoBranchSource: migrated.repoBranchSource,
       repoCreateRemoteBranch: migrated.repoCreateRemoteBranch,
     });
@@ -878,6 +903,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       spawnAgentKey: DEFAULT_SPAWN_CONTEXT_PREFERENCES.spawnAgentKey,
       spawnModel: DEFAULT_SPAWN_CONTEXT_PREFERENCES.spawnModel,
       spawnReasoning: '',
+      spawnAgentPermissionMode: DEFAULT_SPAWN_CONTEXT_PREFERENCES.spawnAgentPermissionMode,
+      spawnApprovalPolicy: DEFAULT_SPAWN_CONTEXT_PREFERENCES.spawnApprovalPolicy,
       seenModelIds: [],
       repoBranchSource: DEFAULT_SPAWN_CONTEXT_PREFERENCES.repoBranchSource,
       repoCreateRemoteBranch: DEFAULT_SPAWN_CONTEXT_PREFERENCES.repoCreateRemoteBranch,
@@ -1111,6 +1138,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             spawnAgentKey: resolved.spawnAgentKey,
             spawnModel: resolved.spawnModel,
             spawnReasoning: resolved.spawnReasoning,
+            spawnAgentPermissionMode: resolved.spawnAgentPermissionMode,
+            spawnApprovalPolicy: resolved.spawnApprovalPolicy,
             repoBranchSource: resolved.repoBranchSource,
             repoCreateRemoteBranch: resolved.repoCreateRemoteBranch,
           };
@@ -1136,6 +1165,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             spawnAgentKey: resolved.spawnAgentKey,
             spawnModel: resolved.spawnModel,
             spawnReasoning: resolved.spawnReasoning,
+            spawnAgentPermissionMode: resolved.spawnAgentPermissionMode,
+            spawnApprovalPolicy: resolved.spawnApprovalPolicy,
             repoBranchSource: resolved.repoBranchSource,
             repoCreateRemoteBranch: resolved.repoCreateRemoteBranch,
           };
@@ -1157,7 +1188,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         }),
       setSpawnModel: (next) =>
         set((s) => {
-          const spawnModel = normalizeTrimmedString(resolveNext(s.spawnModel, next));
+          const spawnModel = normalizeTrimmedString(resolveNext(s.spawnModel, next)).slice(0, 200);
           const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
             s.spawnContextByRepoKey,
             s.spawnContextRepoPath,
@@ -1172,7 +1203,10 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         }),
       setSpawnReasoning: (next) =>
         set((s) => {
-          const spawnReasoning = normalizeTrimmedString(resolveNext(s.spawnReasoning, next));
+          const spawnReasoning = normalizeTrimmedString(resolveNext(s.spawnReasoning, next)).slice(
+            0,
+            200,
+          );
           const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
             s.spawnContextByRepoKey,
             s.spawnContextRepoPath,
@@ -1181,6 +1215,30 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             },
           );
           return { spawnReasoning, spawnContextByRepoKey: nextByRepoKey };
+        }),
+      setSpawnAgentPermissionMode: (next) =>
+        set((s) => {
+          const spawnAgentPermissionMode = normalizeSpawnAgentPermissionMode(
+            resolveNext(s.spawnAgentPermissionMode, next),
+          );
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
+            s.spawnContextByRepoKey,
+            s.spawnContextRepoPath,
+            { spawnAgentPermissionMode },
+          );
+          return { spawnAgentPermissionMode, spawnContextByRepoKey: nextByRepoKey };
+        }),
+      setSpawnApprovalPolicy: (next) =>
+        set((s) => {
+          const spawnApprovalPolicy = normalizeSpawnApprovalPolicy(
+            resolveNext(s.spawnApprovalPolicy, next),
+          );
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
+            s.spawnContextByRepoKey,
+            s.spawnContextRepoPath,
+            { spawnApprovalPolicy },
+          );
+          return { spawnApprovalPolicy, spawnContextByRepoKey: nextByRepoKey };
         }),
       rememberSeenModels: (models) =>
         set((s) => {
@@ -1214,7 +1272,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => {
           const repoCreateRemoteBranch = normalizeTrimmedString(
             resolveNext(s.repoCreateRemoteBranch, next),
-          );
+          ).slice(0, 400);
           const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(
             s.spawnContextByRepoKey,
             s.spawnContextRepoPath,
@@ -1257,7 +1315,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: profileStorageKey('droneHub.ui'),
-      version: 16,
+      version: 17,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState, version) =>
         migrateDroneHubUiPersistedState(persistedState, version),
@@ -1299,6 +1357,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         spawnAgentKey: state.spawnAgentKey,
         spawnModel: state.spawnModel,
         spawnReasoning: state.spawnReasoning,
+        spawnAgentPermissionMode: state.spawnAgentPermissionMode,
+        spawnApprovalPolicy: state.spawnApprovalPolicy,
         seenModelIds: state.seenModelIds,
         repoBranchSource: state.repoBranchSource,
         repoCreateRemoteBranch: state.repoCreateRemoteBranch,
@@ -1456,6 +1516,8 @@ export function useDroneHubAppModelUiState() {
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
       spawnReasoning: s.spawnReasoning,
+      spawnAgentPermissionMode: s.spawnAgentPermissionMode,
+      spawnApprovalPolicy: s.spawnApprovalPolicy,
       seenModelIds: s.seenModelIds,
       repoBranchSource: s.repoBranchSource,
       repoCreateRemoteBranch: s.repoCreateRemoteBranch,
@@ -1503,6 +1565,8 @@ export function useDroneHubAppModelUiState() {
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
       setSpawnReasoning: s.setSpawnReasoning,
+      setSpawnAgentPermissionMode: s.setSpawnAgentPermissionMode,
+      setSpawnApprovalPolicy: s.setSpawnApprovalPolicy,
       rememberSeenModels: s.rememberSeenModels,
       setRepoBranchSource: s.setRepoBranchSource,
       setRepoCreateRemoteBranch: s.setRepoCreateRemoteBranch,

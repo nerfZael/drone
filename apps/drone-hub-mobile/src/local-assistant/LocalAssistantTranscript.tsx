@@ -152,10 +152,14 @@ function ChangedFilesSummary({
     >
   >({});
   const summary = item.fileChanges;
+  const attribution = summary.version === 2 ? summary.attribution : undefined;
+  const attributionUnavailable = attribution === 'unavailable';
+  const attributionPartial = attribution === 'partial';
   const lineChanges = agentRunLineChangeBreakdown(summary.counts);
   React.useEffect(() => {
     if (!expanded) return;
     for (const workspace of summary.workspaces) {
+      if ('attribution' in workspace && workspace.attribution === 'unavailable') continue;
       if ('entries' in workspace || workspaceFiles[workspace.targetId]) continue;
       if (!workspace.diffArtifactId || !onLoadFiles) {
         setWorkspaceFiles((current) => ({
@@ -243,8 +247,13 @@ function ChangedFilesSummary({
     <View style={styles.changedFilesCard}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${summary.counts.changed} changed files`}
-        accessibilityState={{ expanded }}
+        accessibilityLabel={
+          attributionUnavailable
+            ? 'Changed-file attribution unavailable'
+            : `${summary.counts.changed} changed files`
+        }
+        accessibilityState={attributionUnavailable ? { disabled: true } : { expanded }}
+        disabled={attributionUnavailable}
         onPress={() => setExpanded((current) => !current)}
         style={({ pressed }) => [
           styles.changedFilesHeader,
@@ -253,27 +262,43 @@ function ChangedFilesSummary({
       >
         <View style={styles.changedFilesHeaderHighlight}>
           <Text numberOfLines={1} style={styles.changedFilesTitle}>
-            Changed files <Text style={styles.changedFilesCount}>({summary.counts.changed})</Text>
-          </Text>
-          <View style={styles.changedFilesCounts}>
-            <Text style={styles.changedFilesAdditions}>+{lineChanges.added}</Text>
-            <Text style={styles.changedFilesModified}>~{lineChanges.modified}</Text>
-            <Text style={styles.changedFilesDeletions}>-{lineChanges.deleted}</Text>
-            <View accessibilityElementsHidden style={styles.changedFilesCountsSeparator} />
-            <Text
-              accessibilityLabel={`${agentRunNetLineChangeLabel(lineChanges.net)} net lines`}
-              style={styles.changedFilesNet}
-            >
-              {agentRunNetLineChangeLabel(lineChanges.net)}
+            Changed files{' '}
+            <Text style={styles.changedFilesCount}>
+              {attributionUnavailable ? '(unavailable)' : `(${summary.counts.changed})`}
             </Text>
-            {expanded ? (
-              <ChevronDown color={colors.muted} size={14} />
-            ) : (
-              <ChevronRight color={colors.muted} size={14} />
-            )}
-          </View>
+          </Text>
+          {!attributionUnavailable ? (
+            <View style={styles.changedFilesCounts}>
+              <Text style={styles.changedFilesAdditions}>+{lineChanges.added}</Text>
+              <Text style={styles.changedFilesModified}>~{lineChanges.modified}</Text>
+              <Text style={styles.changedFilesDeletions}>-{lineChanges.deleted}</Text>
+              <View accessibilityElementsHidden style={styles.changedFilesCountsSeparator} />
+              <Text
+                accessibilityLabel={`${agentRunNetLineChangeLabel(lineChanges.net)} net lines`}
+                style={styles.changedFilesNet}
+              >
+                {agentRunNetLineChangeLabel(lineChanges.net)}
+              </Text>
+              {expanded ? (
+                <ChevronDown color={colors.muted} size={14} />
+              ) : (
+                <ChevronRight color={colors.muted} size={14} />
+              )}
+            </View>
+          ) : null}
         </View>
       </Pressable>
+      {attributionUnavailable ? (
+        <Text style={styles.changedFilesAttributionWarning}>
+          The base branch changed, and exact changed-file attribution is unavailable.
+        </Text>
+      ) : null}
+      {attributionPartial ? (
+        <Text style={styles.changedFilesAttributionWarning}>
+          Some workspaces could not be attributed exactly. Totals include only attributed
+          workspaces.
+        </Text>
+      ) : null}
       {expanded ? (
         <ScrollView
           nestedScrollEnabled
@@ -286,63 +311,76 @@ function ChangedFilesSummary({
               {summary.workspaces.length > 1 || workspace.targetId.startsWith('artifacts:') ? (
                 <Text style={styles.changedFilesWorkspace}>{workspace.label}</Text>
               ) : null}
-              <MobileChangedFilesTree
-                entries={entriesForWorkspace(workspace)}
-                renderFile={(entry, name) => {
-                  const renderRow = (pressed = false) => (
-                    <View style={styles.changedFilesRow}>
-                      <Text
-                        style={[
-                          styles.changedFilesStatus,
-                          pressed && styles.changedFilesStatusPressed,
-                        ]}
-                      >
-                        {agentRunFileStatusLabel(entry)}
-                      </Text>
-                      <NativeFileTypeIcon
-                        path={entry.path}
-                        size={16}
-                        opacity={pressed ? 1 : 0.86}
-                      />
-                      <Text
-                        numberOfLines={1}
-                        style={[styles.changedFilesPath, pressed && styles.changedFilesPathPressed]}
-                      >
-                        {name}
-                      </Text>
-                      {!entry.binary && (entry.additions > 0 || entry.deletions > 0) ? (
-                        <View
+              {'attribution' in workspace && workspace.attribution === 'unavailable' ? (
+                <Text style={styles.changedFilesAttributionWarning}>
+                  Exact attribution is unavailable for this workspace.
+                </Text>
+              ) : (
+                <MobileChangedFilesTree
+                  entries={entriesForWorkspace(workspace)}
+                  renderFile={(entry, name) => {
+                    const renderRow = (pressed = false) => (
+                      <View style={styles.changedFilesRow}>
+                        <Text
                           style={[
-                            styles.changedFilesLineCounts,
-                            pressed && styles.changedFilesLineCountsPressed,
+                            styles.changedFilesStatus,
+                            pressed && styles.changedFilesStatusPressed,
                           ]}
                         >
-                          {entry.additions > 0 ? (
-                            <Text style={styles.changedFilesFileAdditions}>+{entry.additions}</Text>
-                          ) : null}
-                          {entry.deletions > 0 ? (
-                            <Text style={styles.changedFilesFileDeletions}>-{entry.deletions}</Text>
-                          ) : null}
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                  return (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Review the changes captured for ${entry.path}`}
-                      onPress={() =>
-                        setReviewSelection({
-                          workspaceTargetId: workspace.targetId,
-                          entry,
-                        })
-                      }
-                    >
-                      {({ pressed }) => renderRow(pressed)}
-                    </Pressable>
-                  );
-                }}
-              />
+                          {agentRunFileStatusLabel(entry)}
+                        </Text>
+                        <NativeFileTypeIcon
+                          path={entry.path}
+                          size={16}
+                          opacity={pressed ? 1 : 0.86}
+                        />
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.changedFilesPath,
+                            pressed && styles.changedFilesPathPressed,
+                          ]}
+                        >
+                          {name}
+                        </Text>
+                        {!entry.binary && (entry.additions > 0 || entry.deletions > 0) ? (
+                          <View
+                            style={[
+                              styles.changedFilesLineCounts,
+                              pressed && styles.changedFilesLineCountsPressed,
+                            ]}
+                          >
+                            {entry.additions > 0 ? (
+                              <Text style={styles.changedFilesFileAdditions}>
+                                +{entry.additions}
+                              </Text>
+                            ) : null}
+                            {entry.deletions > 0 ? (
+                              <Text style={styles.changedFilesFileDeletions}>
+                                -{entry.deletions}
+                              </Text>
+                            ) : null}
+                          </View>
+                        ) : null}
+                      </View>
+                    );
+                    return (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Review the changes captured for ${entry.path}`}
+                        onPress={() =>
+                          setReviewSelection({
+                            workspaceTargetId: workspace.targetId,
+                            entry,
+                          })
+                        }
+                      >
+                        {({ pressed }) => renderRow(pressed)}
+                      </Pressable>
+                    );
+                  }}
+                />
+              )}
               {'entries' in workspace ? null : workspaceFiles[workspace.targetId]?.status ===
                 'loading' ? (
                 <View style={styles.changedFilesDiffLoading}>
@@ -1918,6 +1956,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   changedFilesCount: { color: colors.mutedDim },
+  changedFilesAttributionWarning: {
+    color: colors.warning,
+    fontSize: 10,
+    lineHeight: 14,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+  },
   changedFilesCounts: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   changedFilesCountsSeparator: {
     width: 1,

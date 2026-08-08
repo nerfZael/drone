@@ -41,7 +41,9 @@ export function isDroneStartingOrSeeding(hubPhase: string | null | undefined): b
 }
 
 export function shouldReadChatRuntimeForHubPhase(hubPhase: string | null | undefined): boolean {
-  return hubPhase !== 'error' && !isDroneProvisioningPhase(hubPhase);
+  // Failed pending drones still expose a read-only chat snapshot containing the
+  // persisted initial prompt and startup error.
+  return !isDroneProvisioningPhase(hubPhase);
 }
 
 export function parseConflictFilesFromMessage(message: string): string[] {

@@ -6,6 +6,7 @@ import { buildContainerDroneDaemonLaunchScript, DRONE_DAEMON_SESSION_NAME } from
 describe('buildContainerDroneDaemonLaunchScript', () => {
   test('launches the persisted drone daemon runtime with a legacy fallback path', () => {
     const script = buildContainerDroneDaemonLaunchScript(7777);
+    expect(script).toContain('/dvm-data/drone/dist/daemon.bundle.js');
     expect(script).toContain('/dvm-data/drone/dist/daemon.js');
     expect(script).toContain('/dvm-data/drone/daemon.js');
     expect(script).toContain("--host '0.0.0.0'");

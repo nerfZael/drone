@@ -1,5 +1,9 @@
 import { dvmExec, dvmSessionStart, dvmStart, type RunResult } from './dvm';
-import { buildContainerDroneDaemonLaunchScript, DRONE_DAEMON_SESSION_NAME } from './runtime';
+import {
+  buildContainerDroneDaemonLaunchScript,
+  DRONE_DAEMON_BUNDLE_FILENAME,
+  DRONE_DAEMON_SESSION_NAME,
+} from './runtime';
 
 function bashQuote(raw: string): string {
   return `'${String(raw ?? '').replace(/'/g, `'\\''`)}'`;
@@ -48,8 +52,8 @@ export async function ensureContainerDroneDaemonSession(
   const prepScript = [
     'set -euo pipefail',
     'test -f /dvm-data/drone/token || { echo "missing /dvm-data/drone/token" 1>&2; exit 20; }',
-    'if [ ! -f /dvm-data/drone/dist/daemon.js ] && [ ! -f /dvm-data/drone/daemon.js ]; then',
-    '  echo "missing drone daemon runtime (/dvm-data/drone/dist/daemon.js or /dvm-data/drone/daemon.js)" 1>&2',
+    `if [ ! -f /dvm-data/drone/dist/${DRONE_DAEMON_BUNDLE_FILENAME} ] && [ ! -f /dvm-data/drone/dist/daemon.js ] && [ ! -f /dvm-data/drone/daemon.js ]; then`,
+    `  echo "missing drone daemon runtime (/dvm-data/drone/dist/${DRONE_DAEMON_BUNDLE_FILENAME}, /dvm-data/drone/dist/daemon.js, or /dvm-data/drone/daemon.js)" 1>&2`,
     '  exit 21',
     'fi',
     `if command -v tmux >/dev/null 2>&1 && tmux has-session -t ${bashQuote(sessionName)} 2>/dev/null; then`,

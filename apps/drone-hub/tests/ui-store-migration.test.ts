@@ -10,6 +10,7 @@ import {
 } from '../src/droneHub/app/use-drone-hub-ui-store';
 import {
   mergeUiPreferencesChanges,
+  recoverInitialSpawnContextByRepoKey,
   reconcileUiPreferencesReload,
   restoreUiPreferencesFromPersistedStorage,
 } from '../src/droneHub/app/use-ui-preferences-settings';
@@ -278,6 +279,8 @@ describe('drone hub ui store migration', () => {
         spawnAgentKey: 'builtin:codex',
         spawnModel: 'gpt-5.4',
         spawnReasoning: '',
+        spawnAgentPermissionMode: 'full-access',
+        spawnApprovalPolicy: 'ask',
         repoBranchSource: 'remote',
         repoCreateRemoteBranch: 'origin/feature-x',
       },
@@ -295,6 +298,8 @@ describe('drone hub ui store migration', () => {
       '/tmp/repo-a': {
         spawnAgentKey: 'builtin:codex',
         spawnModel: 'gpt-5.4',
+        spawnAgentPermissionMode: 'workspace-write',
+        spawnApprovalPolicy: 'never',
         repoBranchSource: 'remote',
         repoCreateRemoteBranch: 'origin/feature-a',
       },
@@ -303,6 +308,8 @@ describe('drone hub ui store migration', () => {
     expect(resolveSpawnContextPreferencesForRepo(byRepo, '/tmp/repo-a')).toMatchObject({
       spawnAgentKey: 'builtin:codex',
       spawnModel: 'gpt-5.4',
+      spawnAgentPermissionMode: 'workspace-write',
+      spawnApprovalPolicy: 'never',
       repoBranchSource: 'remote',
       repoCreateRemoteBranch: 'origin/feature-a',
     });
@@ -317,6 +324,117 @@ describe('drone hub ui store migration', () => {
       spawnModel: '',
       repoBranchSource: 'host',
       repoCreateRemoteBranch: '',
+    });
+  });
+
+  test('updates access defaults for an explicit repo without changing the active repo', () => {
+    const previous = useDroneHubUiStore.getState();
+    const previousWarn = console.warn;
+    console.warn = () => undefined;
+    try {
+      const byRepo = normalizeSpawnContextByRepoKey({
+        '/tmp/repo-a': {
+          spawnAgentKey: 'builtin:codex',
+          spawnAgentPermissionMode: 'full-access',
+          spawnApprovalPolicy: 'agent-decides',
+        },
+        '/tmp/repo-b': {
+          spawnAgentKey: 'builtin:codex',
+          spawnAgentPermissionMode: 'full-access',
+          spawnApprovalPolicy: 'agent-decides',
+        },
+      });
+      useDroneHubUiStore.setState({
+        spawnContextRepoPath: '/tmp/repo-a',
+        spawnContextByRepoKey: byRepo,
+        ...byRepo['/tmp/repo-a'],
+      });
+
+      useDroneHubUiStore.getState().updateSpawnContextForRepo('/tmp/repo-b', {
+        spawnAgentPermissionMode: 'workspace-write',
+        spawnApprovalPolicy: 'ask',
+      });
+
+      const state = useDroneHubUiStore.getState();
+      expect(state.spawnContextRepoPath).toBe('/tmp/repo-a');
+      expect(state.spawnAgentPermissionMode).toBe('full-access');
+      expect(state.spawnApprovalPolicy).toBe('agent-decides');
+      expect(state.spawnContextByRepoKey['/tmp/repo-b']).toMatchObject({
+        spawnAgentPermissionMode: 'workspace-write',
+        spawnApprovalPolicy: 'ask',
+      });
+    } finally {
+      useDroneHubUiStore.setState({
+        spawnContextRepoPath: previous.spawnContextRepoPath,
+        spawnContextByRepoKey: previous.spawnContextByRepoKey,
+        spawnAgentKey: previous.spawnAgentKey,
+        spawnModel: previous.spawnModel,
+        spawnReasoning: previous.spawnReasoning,
+        spawnAgentPermissionMode: previous.spawnAgentPermissionMode,
+        spawnApprovalPolicy: previous.spawnApprovalPolicy,
+        repoBranchSource: previous.repoBranchSource,
+        repoCreateRemoteBranch: previous.repoCreateRemoteBranch,
+      });
+      console.warn = previousWarn;
+    }
+  });
+
+  test('bounds shared spawn context values to the server limits', () => {
+    const normalized = normalizeSpawnContextByRepoKey({
+      '/tmp/repo': {
+        spawnAgentKey: `builtin:${'a'.repeat(300)}`,
+        spawnModel: 'm'.repeat(300),
+        spawnReasoning: 'r'.repeat(300),
+        repoCreateRemoteBranch: 'b'.repeat(500),
+      },
+    });
+    const preferences = normalized['/tmp/repo'];
+    expect(preferences?.spawnAgentKey).toHaveLength(200);
+    expect(preferences?.spawnModel).toHaveLength(200);
+    expect(preferences?.spawnReasoning).toHaveLength(200);
+    expect(preferences?.repoCreateRemoteBranch).toHaveLength(400);
+  });
+
+  test('migrates repo defaults without replacing existing server-wide defaults', () => {
+    const recovered = recoverInitialSpawnContextByRepoKey({
+      backend: {
+        spawnAgentKey: 'builtin:codex',
+        spawnModel: 'gpt-5.5',
+        spawnReasoning: 'high',
+        spawnAgentPermissionMode: 'full-access',
+        spawnApprovalPolicy: 'agent-decides',
+      },
+      current: {
+        spawnContextByRepoKey: normalizeSpawnContextByRepoKey({
+          __no_repo__: {
+            spawnAgentKey: 'builtin:cursor',
+          },
+          '/tmp/repo-a': {
+            spawnAgentKey: 'builtin:codex',
+            spawnAgentPermissionMode: 'full-access',
+            spawnApprovalPolicy: 'agent-decides',
+          },
+        }),
+      },
+      remembered: {
+        '/tmp/repo-a': {
+          spawnAgentKey: 'builtin:codex',
+          spawnAgentPermissionMode: 'workspace-write',
+          spawnApprovalPolicy: 'ask',
+        },
+      },
+      backendUpdated: true,
+    });
+
+    expect(recovered.__no_repo__).toMatchObject({
+      spawnAgentKey: 'builtin:codex',
+      spawnModel: 'gpt-5.5',
+      spawnReasoning: 'high',
+      spawnApprovalPolicy: 'agent-decides',
+    });
+    expect(recovered['/tmp/repo-a']).toMatchObject({
+      spawnAgentPermissionMode: 'workspace-write',
+      spawnApprovalPolicy: 'ask',
     });
   });
 

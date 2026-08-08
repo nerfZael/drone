@@ -3,6 +3,7 @@ import {
   chatNamesForConfigSelection,
   chatConfigResolutionState,
   chatInfoForSelection,
+  shouldShowDroneStartupFailureEmptyState,
 } from '../src/droneHub/app/chat-selection-model';
 import {
   chatHasInFlightPrompt,
@@ -104,6 +105,23 @@ describe('native chat selection state', () => {
         startupFailed: true,
       }),
     ).toBe('drone-error');
+  });
+
+  test('shows persisted startup messages instead of replacing them with the failure empty state', () => {
+    expect(
+      shouldShowDroneStartupFailureEmptyState({
+        startupFailed: true,
+        transcriptCount: 0,
+        pendingPromptCount: 0,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowDroneStartupFailureEmptyState({
+        startupFailed: true,
+        transcriptCount: 0,
+        pendingPromptCount: 1,
+      }),
+    ).toBe(false);
   });
 
   test('does not turn completed native prompts into generic typing state', () => {

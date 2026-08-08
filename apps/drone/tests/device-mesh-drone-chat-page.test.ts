@@ -126,6 +126,64 @@ describe('device mesh drone chat pages', () => {
     expect(turn?.activityMeshTruncated).toBe(true);
   });
 
+  test('preserves unavailable changed-file attribution for remote clients', () => {
+    const [turn] = boundedDroneChatPage([
+      {
+        id: 'turn-unavailable-changes',
+        prompt: 'Update it',
+        output: 'Done',
+        fileChanges: {
+          version: 2,
+          capturedAt: '2026-08-07T00:00:00.000Z',
+          attribution: 'unavailable',
+          baseMoved: true,
+          counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
+          workspaces: [
+            {
+              targetId: 'drone:d1',
+              label: 'Drone 1',
+              attribution: 'unavailable',
+              baseMoved: true,
+              counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
+              previewEntries: [],
+            },
+          ],
+        },
+      },
+    ]).turns;
+
+    expect(turn?.fileChanges).toMatchObject({
+      version: 2,
+      attribution: 'unavailable',
+      baseMoved: true,
+      workspaces: [{ attribution: 'unavailable', baseMoved: true }],
+    });
+  });
+
+  test('preserves partial changed-file attribution for remote clients', () => {
+    const [turn] = boundedDroneChatPage([
+      {
+        id: 'turn-partial-changes',
+        prompt: 'Update both',
+        output: 'Done',
+        fileChanges: {
+          version: 2,
+          capturedAt: '2026-08-07T00:00:00.000Z',
+          attribution: 'partial',
+          baseMoved: true,
+          counts: { changed: 1, additions: 1, deletions: 0, modified: 0 },
+          workspaces: [],
+        },
+      },
+    ]).turns;
+
+    expect(turn?.fileChanges).toMatchObject({
+      version: 2,
+      attribution: 'partial',
+      baseMoved: true,
+    });
+  });
+
   test('bounds one activity message containing many large content parts', () => {
     const [turn] = boundedDroneChatPage([
       {

@@ -10,7 +10,7 @@ describe('draft drone UI state', () => {
     expect(shouldReadChatRuntimeForHubPhase('creating')).toBe(false);
     expect(shouldReadChatRuntimeForHubPhase('starting')).toBe(false);
     expect(shouldReadChatRuntimeForHubPhase('seeding')).toBe(false);
-    expect(shouldReadChatRuntimeForHubPhase('error')).toBe(false);
+    expect(shouldReadChatRuntimeForHubPhase('error')).toBe(true);
   });
 
   test('keeps the optimistic conversation mounted until provisioning and automatic naming finish', () => {

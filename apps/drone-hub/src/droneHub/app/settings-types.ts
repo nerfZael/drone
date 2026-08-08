@@ -221,8 +221,23 @@ export type UiPreferencesSettingsResponse = {
     autoDelete: boolean;
     spawnAgentKey: string;
     spawnModel: string;
+    spawnReasoning: string;
+    spawnAgentPermissionMode: 'read-only' | 'workspace-write' | 'full-access';
+    spawnApprovalPolicy: 'ask' | 'agent-decides' | 'never';
     repoBranchSource: 'host' | 'remote';
     repoCreateRemoteBranch: string;
+    spawnContextByRepoKey: Record<
+      string,
+      {
+        spawnAgentKey: string;
+        spawnModel: string;
+        spawnReasoning: string;
+        spawnAgentPermissionMode: 'read-only' | 'workspace-write' | 'full-access';
+        spawnApprovalPolicy: 'ask' | 'agent-decides' | 'never';
+        repoBranchSource: 'host' | 'remote';
+        repoCreateRemoteBranch: string;
+      }
+    >;
   };
   updatedAt: string | null;
   version: number | null;

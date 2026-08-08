@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type {
+  AgentRunFileChangeAttribution,
   AgentRunFileChangeEntry,
   AgentRunFileChanges,
   AgentRunFileChangeStatus,
@@ -43,8 +44,10 @@ export type AgentRunFileChangesBaseline = {
   label: string;
   repoRoot: string;
   treeOid: string;
+  headCommitOid?: string;
   baseRef?: string;
   baseTreeOid?: string;
+  baseCommitOid?: string;
   owner: AgentRunDiffArtifactOwner;
 };
 
@@ -205,17 +208,48 @@ function baseRefCandidates(baseRef: string): string[] {
 async function resolveBaseTree(
   runGit: GitRunner,
   baseRefRaw: unknown,
-): Promise<{ baseRef: string; treeOid: string } | null> {
+): Promise<{ baseRef: string; treeOid: string; commitOid: string } | null> {
   const baseRef = normalizeBaseRef(baseRefRaw);
   if (!baseRef) return null;
   for (const candidate of baseRefCandidates(baseRef)) {
-    const result = await runGit(['rev-parse', '--verify', `${candidate}^{tree}`]);
-    const treeOid = result.stdout.trim().toLowerCase();
-    if (result.code === 0 && /^[0-9a-f]{40,64}$/.test(treeOid)) {
-      return { baseRef, treeOid };
+    const [treeResult, commitResult] = await Promise.all([
+      runGit(['rev-parse', '--verify', `${candidate}^{tree}`]),
+      runGit(['rev-parse', '--verify', `${candidate}^{commit}`]),
+    ]);
+    const treeOid = treeResult.stdout.trim().toLowerCase();
+    const commitOid = commitResult.stdout.trim().toLowerCase();
+    if (
+      treeResult.code === 0 &&
+      commitResult.code === 0 &&
+      /^[0-9a-f]{40,64}$/.test(treeOid) &&
+      /^[0-9a-f]{40,64}$/.test(commitOid)
+    ) {
+      return { baseRef, treeOid, commitOid };
     }
   }
   return null;
+}
+
+async function resolveHeadCommit(runGit: GitRunner): Promise<string | null> {
+  const result = await runGit(['rev-parse', '--verify', 'HEAD^{commit}']);
+  const commitOid = result.stdout.trim().toLowerCase();
+  return result.code === 0 && /^[0-9a-f]{40,64}$/.test(commitOid) ? commitOid : null;
+}
+
+async function mergeBase(
+  runGit: GitRunner,
+  leftCommitOid: string,
+  rightCommitOid: string,
+): Promise<string | null> {
+  const result = await runGit(['merge-base', leftCommitOid, rightCommitOid]);
+  const commitOid = result.stdout.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+  return result.code === 0 && /^[0-9a-f]{40,64}$/.test(commitOid) ? commitOid : null;
+}
+
+async function resolveCommitTree(runGit: GitRunner, commitOid: string): Promise<string | null> {
+  const result = await runGit(['rev-parse', '--verify', `${commitOid}^{tree}`]);
+  const treeOid = result.stdout.trim().toLowerCase();
+  return result.code === 0 && /^[0-9a-f]{40,64}$/.test(treeOid) ? treeOid : null;
 }
 
 async function baseRelativePatchId(
@@ -243,6 +277,64 @@ async function baseRelativePatchId(
       .split(/\s+/)[0]
       ?.toLowerCase() ?? '';
   return /^[0-9a-f]{40,64}$/.test(patchId) ? patchId : diff.stdout ? null : 'empty';
+}
+
+const SNAPSHOT_COMMIT_ENV = {
+  GIT_AUTHOR_NAME: 'DroneHub',
+  GIT_AUTHOR_EMAIL: 'drone-hub@localhost',
+  GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z',
+  GIT_COMMITTER_NAME: 'DroneHub',
+  GIT_COMMITTER_EMAIL: 'drone-hub@localhost',
+  GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z',
+};
+
+async function snapshotCommit(runGit: GitRunner, treeOid: string, label: string): Promise<string> {
+  const commitOid = (
+    await gitOrThrow(
+      runGit,
+      ['commit-tree', treeOid, '-m', `DroneHub ${label} snapshot`],
+      SNAPSHOT_COMMIT_ENV,
+    )
+  )
+    .trim()
+    .toLowerCase();
+  if (!/^[0-9a-f]{40,64}$/.test(commitOid)) throw new Error('git returned an invalid commit id');
+  return commitOid;
+}
+
+/**
+ * Replays the changes present before the run onto the current base. This gives us a
+ * content-equivalent starting tree that can be compared with the final tree without
+ * attributing unrelated base-branch movement to the agent.
+ */
+async function normalizeBaselineTree(input: {
+  runGit: GitRunner;
+  baselineBaseTreeOid: string;
+  baselineTreeOid: string;
+  currentBaseTreeOid: string;
+}): Promise<string | null> {
+  if (input.baselineTreeOid === input.baselineBaseTreeOid) return input.currentBaseTreeOid;
+  try {
+    const [baselineBaseCommit, baselineCommit, currentBaseCommit] = await Promise.all([
+      snapshotCommit(input.runGit, input.baselineBaseTreeOid, 'baseline base'),
+      snapshotCommit(input.runGit, input.baselineTreeOid, 'baseline worktree'),
+      snapshotCommit(input.runGit, input.currentBaseTreeOid, 'current base'),
+    ]);
+    const result = await input.runGit([
+      'merge-tree',
+      '--write-tree',
+      '--no-messages',
+      '--merge-base',
+      baselineBaseCommit,
+      currentBaseCommit,
+      baselineCommit,
+    ]);
+    if (result.code !== 0) return null;
+    const treeOid = result.stdout.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+    return /^[0-9a-f]{40,64}$/.test(treeOid) ? treeOid : null;
+  } catch {
+    return null;
+  }
 }
 
 async function captureTree(
@@ -349,11 +441,15 @@ function splitGitPatches(raw: string): string[] {
 
 async function summarizeTrees(input: {
   baseline: AgentRunFileChangesBaseline;
+  fromTreeOid?: string;
   currentTreeOid: string;
   runGit: GitRunner;
+  attribution?: AgentRunFileChangeAttribution;
+  baseMoved?: boolean;
 }): Promise<AgentRunFileChangeWorkspaceV2 | null> {
-  if (input.baseline.treeOid === input.currentTreeOid) return null;
-  const revisionArgs = [input.baseline.treeOid, input.currentTreeOid];
+  const fromTreeOid = input.fromTreeOid ?? input.baseline.treeOid;
+  if (fromTreeOid === input.currentTreeOid) return null;
+  const revisionArgs = [fromTreeOid, input.currentTreeOid];
   const [nameStatusRaw, numstatRaw, patchResult] = await Promise.all([
     gitOrThrow(input.runGit, [
       'diff',
@@ -449,6 +545,22 @@ async function summarizeTrees(input: {
     counts: { changed: entries.length, additions, deletions, modified },
     previewEntries: storedEntries.slice(0, MAX_TRANSCRIPT_PREVIEW_FILES_PER_WORKSPACE),
     ...(metadataTruncated ? { metadataTruncated: true } : {}),
+    ...(input.attribution ? { attribution: input.attribution } : {}),
+    ...(input.baseMoved ? { baseMoved: true } : {}),
+  };
+}
+
+function unavailableWorkspace(
+  baseline: AgentRunFileChangesBaseline,
+): AgentRunFileChangeWorkspaceV2 {
+  return {
+    targetId: baseline.targetId,
+    ...(baseline.droneId ? { droneId: baseline.droneId } : {}),
+    label: baseline.label,
+    counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
+    previewEntries: [],
+    attribution: 'unavailable',
+    baseMoved: true,
   };
 }
 
@@ -508,6 +620,7 @@ export async function captureDroneRunFileChangesBaseline(input: {
   const target = droneId ? droneCaptureTarget(droneId, input.drone) : null;
   if (!target) return null;
   const snapshot = await captureTree(target.runGit, target.indexPath, target.cleanup);
+  const headCommitOid = await resolveHeadCommit(target.runGit);
   const base = await resolveBaseTree(target.runGit, input.drone?.repo?.baseRef);
   return {
     version: 1,
@@ -517,10 +630,12 @@ export async function captureDroneRunFileChangesBaseline(input: {
     label: target.label,
     repoRoot: snapshot.repoRoot,
     treeOid: snapshot.treeOid,
+    ...(headCommitOid ? { headCommitOid } : {}),
     ...(base
       ? {
           baseRef: base.baseRef,
           baseTreeOid: base.treeOid,
+          baseCommitOid: base.commitOid,
         }
       : {}),
     owner: { droneId, ...(input.owner ?? {}) },
@@ -537,21 +652,82 @@ export async function finalizeDroneRunFileChanges(input: {
   const target = droneCaptureTarget(droneId, input.drone);
   if (!target) return null;
   const current = await captureTree(target.runGit, target.indexPath, target.cleanup);
+  const currentHeadCommitOid = await resolveHeadCommit(target.runGit);
   if (input.baseline.treeOid === current.treeOid) return null;
+  let fromTreeOid = input.baseline.treeOid;
+  let attribution: AgentRunFileChangeAttribution = 'exact';
+  let baseMoved = false;
   if (input.baseline.baseRef && input.baseline.baseTreeOid) {
     const currentBase = await resolveBaseTree(target.runGit, input.baseline.baseRef);
     if (currentBase && currentBase.treeOid !== input.baseline.baseTreeOid) {
-      const [baselinePatchId, currentPatchId] = await Promise.all([
-        baseRelativePatchId(target.runGit, input.baseline.baseTreeOid, input.baseline.treeOid),
-        baseRelativePatchId(target.runGit, currentBase.treeOid, current.treeOid),
+      baseMoved = true;
+      if (!currentHeadCommitOid || !input.baseline.headCommitOid || !input.baseline.baseCommitOid) {
+        return combineAgentRunFileChanges([unavailableWorkspace(input.baseline)]);
+      }
+      const [baseHistoryCommon, baselineCommonBase, currentCommonBase] = await Promise.all([
+        mergeBase(target.runGit, input.baseline.baseCommitOid, currentBase.commitOid),
+        mergeBase(target.runGit, input.baseline.headCommitOid, currentBase.commitOid),
+        mergeBase(target.runGit, currentHeadCommitOid, currentBase.commitOid),
       ]);
-      if (baselinePatchId && currentPatchId && baselinePatchId === currentPatchId) return null;
+      if (baselineCommonBase === currentCommonBase || !currentCommonBase) {
+        if (baseHistoryCommon !== input.baseline.baseCommitOid) {
+          return combineAgentRunFileChanges([unavailableWorkspace(input.baseline)]);
+        }
+        const workspace = await summarizeTrees({
+          baseline: input.baseline,
+          currentTreeOid: current.treeOid,
+          runGit: target.runGit,
+          attribution: 'exact',
+          baseMoved: true,
+        });
+        return workspace ? combineAgentRunFileChanges([workspace]) : null;
+      }
+      const startingBaseInHead = await mergeBase(
+        target.runGit,
+        input.baseline.headCommitOid,
+        input.baseline.baseCommitOid,
+      );
+      if (startingBaseInHead !== input.baseline.baseCommitOid) {
+        return combineAgentRunFileChanges([unavailableWorkspace(input.baseline)]);
+      }
+      const adoptedBaseTreeOid = await resolveCommitTree(target.runGit, currentCommonBase);
+      if (!adoptedBaseTreeOid) {
+        return combineAgentRunFileChanges([unavailableWorkspace(input.baseline)]);
+      }
+      const normalizedTreeOid = await normalizeBaselineTree({
+        runGit: target.runGit,
+        baselineBaseTreeOid: input.baseline.baseTreeOid,
+        baselineTreeOid: input.baseline.treeOid,
+        currentBaseTreeOid: adoptedBaseTreeOid,
+      });
+      if (!normalizedTreeOid) {
+        // A conflict can still be a no-op when the agent only rebased an unchanged patch.
+        // Keep these sequential: patch-id uses a synchronous subprocess, which can starve
+        // the close event of a concurrently running bounded git diff under Bun.
+        const baselinePatchId = await baseRelativePatchId(
+          target.runGit,
+          input.baseline.baseTreeOid,
+          input.baseline.treeOid,
+        );
+        const currentPatchId = await baseRelativePatchId(
+          target.runGit,
+          adoptedBaseTreeOid,
+          current.treeOid,
+        );
+        if (baselinePatchId && currentPatchId && baselinePatchId === currentPatchId) return null;
+        return combineAgentRunFileChanges([unavailableWorkspace(input.baseline)]);
+      }
+      fromTreeOid = normalizedTreeOid;
+      attribution = 'base-normalized';
     }
   }
   const workspace = await summarizeTrees({
     baseline: input.baseline,
+    fromTreeOid,
     currentTreeOid: current.treeOid,
     runGit: target.runGit,
+    attribution,
+    baseMoved,
   });
   return workspace ? combineAgentRunFileChanges([workspace]) : null;
 }
@@ -647,11 +823,17 @@ export async function discardAssistantArtifactRunFileChangesBaseline(
 export function combineAgentRunFileChanges(
   workspaces: AgentRunFileChangeWorkspaceV2[],
 ): AgentRunFileChanges | null {
-  const visible = workspaces.filter((workspace) => workspace.counts.changed > 0);
+  const visible = workspaces.filter(
+    (workspace) => workspace.counts.changed > 0 || workspace.attribution === 'unavailable',
+  );
   if (visible.length === 0) return null;
   const hasModifiedCounts = visible.every(
     (workspace) => typeof workspace.counts.modified === 'number',
   );
+  const hasUnavailableWorkspace = visible.some(
+    (workspace) => workspace.attribution === 'unavailable',
+  );
+  const hasAttributedWorkspace = visible.some((workspace) => workspace.counts.changed > 0);
   return {
     version: 2,
     capturedAt: new Date().toISOString(),
@@ -669,6 +851,14 @@ export function combineAgentRunFileChanges(
         : {}),
     },
     workspaces: visible,
+    attribution: hasUnavailableWorkspace
+      ? hasAttributedWorkspace
+        ? 'partial'
+        : 'unavailable'
+      : visible.some((workspace) => workspace.attribution === 'base-normalized')
+        ? 'base-normalized'
+        : 'exact',
+    ...(visible.some((workspace) => workspace.baseMoved) ? { baseMoved: true } : {}),
     ...(visible.some((workspace) => workspace.metadataTruncated)
       ? { metadataTruncated: true }
       : {}),

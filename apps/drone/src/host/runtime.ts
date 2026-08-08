@@ -3,6 +3,7 @@ import { droneRootPath } from './paths';
 
 export type DroneRuntime = 'container' | 'host';
 export const DRONE_DAEMON_SESSION_NAME = 'drone-daemon';
+export const DRONE_DAEMON_BUNDLE_FILENAME = 'daemon.bundle.js';
 
 export function missingHostDependencyMessage(binary: string, contextRaw?: string): string {
   const tool = String(binary ?? '').trim() || 'required tool';
@@ -97,16 +98,19 @@ export function buildContainerDroneDaemonLaunchScript(
   const dataDir = String(opts?.dataDir ?? '/dvm-data/drone').trim() || '/dvm-data/drone';
   const tokenPath = String(opts?.tokenPath ?? '/dvm-data/drone/token').trim() || '/dvm-data/drone/token';
   const host = String(opts?.host ?? '0.0.0.0').trim() || '0.0.0.0';
+  const runtimeDaemonBundlePath = path.posix.join(runtimeDir, DRONE_DAEMON_BUNDLE_FILENAME);
   const runtimeDaemonPath = path.posix.join(runtimeDir, 'daemon.js');
 
   return [
     'set -euo pipefail',
-    `if [ -f ${shellQuote(runtimeDaemonPath)} ]; then`,
+    `if [ -f ${shellQuote(runtimeDaemonBundlePath)} ]; then`,
+    `  daemon_js=${shellQuote(runtimeDaemonBundlePath)}`,
+    `elif [ -f ${shellQuote(runtimeDaemonPath)} ]; then`,
     `  daemon_js=${shellQuote(runtimeDaemonPath)}`,
     `elif [ -f ${shellQuote(legacyDaemonPath)} ]; then`,
     `  daemon_js=${shellQuote(legacyDaemonPath)}`,
     'else',
-    `  echo ${shellQuote(`missing drone daemon runtime (${runtimeDaemonPath} or ${legacyDaemonPath})`)} 1>&2`,
+    `  echo ${shellQuote(`missing drone daemon runtime (${runtimeDaemonBundlePath}, ${runtimeDaemonPath}, or ${legacyDaemonPath})`)} 1>&2`,
     '  exit 1',
     'fi',
     `exec node "$daemon_js" --host ${shellQuote(host)} --port ${shellQuote(String(containerPort))} --data-dir ${shellQuote(dataDir)} --token-file ${shellQuote(tokenPath)}`,

@@ -55,7 +55,12 @@ import {
 import { ensureHubSetupState } from './host/setup-state';
 import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
 import { readRawBody } from './hub/hub-http';
-import { launchHostDroneDaemon } from './hub/drone-daemon-runtime';
+import {
+  assertDroneDaemonRuntimeReady,
+  launchHostDroneDaemon,
+  resolveDroneDaemonJsPath,
+  resolveDroneDaemonRuntimeDir,
+} from './hub/drone-daemon-runtime';
 import { cleanupLegacyRemoteHub } from './hub/legacy-remote-cleanup';
 import {
   upsertCanonicalDroneLifecycle,
@@ -1337,40 +1342,7 @@ function parseGithubSlug(remoteUrl: string | null): { owner: string; repo: strin
 
 async function ensureDaemonBuilt(_repoPath: string) {
   const runtimeDir = resolveDroneDaemonRuntimeDir();
-  for (const fileName of ['daemon.js', 'blip.js', 'mcp-http-stdio-bridge.js']) {
-    const filePath = path.join(runtimeDir, fileName);
-    try {
-      await fs.stat(filePath);
-    } catch {
-      const repoRoot = path.resolve(__dirname, '..', '..', '..');
-      throw new Error(`Missing ${filePath}. Run: cd ${repoRoot}/apps/drone && bun run build`);
-    }
-  }
-}
-
-function resolveDroneDaemonJsPath(): string {
-  // When built, __dirname is .../apps/drone/dist and daemon.js is a sibling.
-  // When running from source (ts-node), __dirname is .../apps/drone/src and daemon.js is in ../dist.
-  const candidates = [
-    path.resolve(__dirname, 'daemon.js'),
-    path.resolve(__dirname, '..', 'dist', 'daemon.js'),
-  ];
-  // Prefer an existing path, but return the first candidate for error messages.
-  for (const p of candidates) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      // (sync check is fine here; this is CLI startup)
-      fsSync.accessSync(p);
-      return p;
-    } catch {
-      // keep trying
-    }
-  }
-  return candidates[0]!;
-}
-
-function resolveDroneDaemonRuntimeDir(): string {
-  return path.dirname(resolveDroneDaemonJsPath());
+  await assertDroneDaemonRuntimeReady(runtimeDir);
 }
 
 async function resolveHostPort(container: string, containerPort: number): Promise<number> {
@@ -1505,7 +1477,7 @@ async function isDroneContainer(containerName: string): Promise<boolean> {
   // If exec fails (container not running), treat as unknown (false).
   const r = await dvmExec(containerName, 'bash', [
     '-lc',
-    'test -f /dvm-data/drone/token -a \\( -f /dvm-data/drone/dist/daemon.js -o -f /dvm-data/drone/daemon.js \\) && echo yes || echo no',
+    'test -f /dvm-data/drone/token -a \\( -f /dvm-data/drone/dist/daemon.bundle.js -o -f /dvm-data/drone/dist/daemon.js -o -f /dvm-data/drone/daemon.js \\) && echo yes || echo no',
   ]);
   return String(r.stdout ?? '').trim().split('\n').pop() === 'yes';
 }
@@ -1532,11 +1504,13 @@ const createCommand = addCreateOptions(
 );
 
 createCommand
-  .option('--no-build', 'Skip checking daemon build output')
+  .option('--no-build', 'Skip rebuilding daemon output (the existing runtime is still validated)')
   .action(async (name, options) => {
     const { repoPath, group, containerPort, runtime, cwd, mkdir, droneId, cloneContainer, persistVolume } = parseCreateOptions(options);
 
-    if (options.build) await ensureDaemonBuilt(repoPath);
+    // --no-build skips rebuilding, but never skips validating the runtime that
+    // will be copied. A transient tsc output cannot run outside the monorepo.
+    await ensureDaemonBuilt(repoPath);
 
     const token = crypto.randomBytes(32).toString('base64url');
     const stableId = droneId ?? crypto.randomUUID();

@@ -608,6 +608,13 @@ function normalizeUiPreferences(value: unknown) {
     autoDelete: raw.autoDelete === true,
     spawnAgentKey: cleanString(raw.spawnAgentKey, 'builtin:cursor'),
     spawnModel: cleanString(raw.spawnModel),
+    spawnReasoning: cleanString(raw.spawnReasoning),
+    spawnAgentPermissionMode: raw.spawnAgentPermissionMode === 'read-only' || raw.spawnAgentPermissionMode === 'workspace-write'
+      ? raw.spawnAgentPermissionMode
+      : 'full-access',
+    spawnApprovalPolicy: raw.spawnApprovalPolicy === 'agent-decides' || raw.spawnApprovalPolicy === 'never'
+      ? raw.spawnApprovalPolicy
+      : 'ask',
     repoBranchSource: normalizeRepoBranchSource(raw.repoBranchSource, 'host'),
     repoCreateRemoteBranch: cleanString(raw.repoCreateRemoteBranch),
     spawnContextByRepoKey: raw.spawnContextByRepoKey && typeof raw.spawnContextByRepoKey === 'object' && !Array.isArray(raw.spawnContextByRepoKey)
@@ -1179,11 +1186,24 @@ async function createDronePreferences(repoPath = '') {
     const response = await requestJson('/api/settings/ui-preferences', { method: 'GET' });
     const prefs = response?.uiPreferences && typeof response.uiPreferences === 'object' ? response.uiPreferences : {};
     const byRepo = prefs.spawnContextByRepoKey && typeof prefs.spawnContextByRepoKey === 'object' ? prefs.spawnContextByRepoKey : {};
-    const repoPrefs = repoPath && byRepo[repoPath] && typeof byRepo[repoPath] === 'object' ? byRepo[repoPath] : {};
+    const repoPrefsRaw = repoPath ? byRepo[repoPath] : byRepo.__no_repo__;
+    const fallbackPrefsRaw = byRepo.__no_repo__;
+    const repoPrefs = repoPrefsRaw && typeof repoPrefsRaw === 'object'
+      ? repoPrefsRaw
+      : fallbackPrefsRaw && typeof fallbackPrefsRaw === 'object'
+        ? fallbackPrefsRaw
+        : {};
     const merged = { ...prefs, ...repoPrefs };
     return {
       spawnAgentKey: cleanString(merged.spawnAgentKey, 'builtin:cursor'),
       spawnModel: cleanString(merged.spawnModel),
+      spawnReasoning: cleanString(merged.spawnReasoning),
+      spawnAgentPermissionMode: merged.spawnAgentPermissionMode === 'read-only' || merged.spawnAgentPermissionMode === 'workspace-write'
+        ? merged.spawnAgentPermissionMode
+        : 'full-access' as const,
+      spawnApprovalPolicy: merged.spawnApprovalPolicy === 'agent-decides' || merged.spawnApprovalPolicy === 'never'
+        ? merged.spawnApprovalPolicy
+        : 'ask' as const,
       repoBranchSource: normalizeRepoBranchSource(merged.repoBranchSource, 'host'),
       repoCreateRemoteBranch: cleanString(merged.repoCreateRemoteBranch),
       source: response?.updatedAt ? 'drone_hub_ui_preferences' : 'default',
@@ -1193,6 +1213,9 @@ async function createDronePreferences(repoPath = '') {
     return {
       spawnAgentKey: 'builtin:cursor',
       spawnModel: '',
+      spawnReasoning: '',
+      spawnAgentPermissionMode: 'full-access' as const,
+      spawnApprovalPolicy: 'ask' as const,
       repoBranchSource: 'host' as const,
       repoCreateRemoteBranch: '',
       source: 'default',
@@ -1858,6 +1881,20 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     const defaults = await createDronePreferences(repoPath);
     const seedAgent = args.agent == null ? agentFromPreferenceKey(defaults.spawnAgentKey) : normalizeAgent(args.agent);
     const seedModel = args.model == null ? defaults.spawnModel : cleanString(args.model);
+    const seedAgentIsCodex = seedAgent?.kind === 'builtin' && seedAgent.id === 'codex';
+    const seedAgentSupportsAccess = seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip');
+    const seedAgentPermissionMode = seedAgentSupportsAccess ? defaults.spawnAgentPermissionMode : 'full-access';
+    const seedAgentSupportsApproval = seedAgentPermissionMode === 'full-access' && seedAgentIsCodex;
+    const seedApprovalPolicy = !seedAgentSupportsApproval
+      ? 'ask'
+      : seedAgentIsCodex && defaults.spawnApprovalPolicy === 'ask'
+        ? 'agent-decides'
+        : !seedAgentIsCodex && defaults.spawnApprovalPolicy === 'agent-decides'
+          ? 'ask'
+          : defaults.spawnApprovalPolicy;
+    const seedReasoning = seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip')
+      ? defaults.spawnReasoning
+      : '';
     const repoBranchSource = normalizeRepoBranchSource(args.repoBranchSource, defaults.repoBranchSource);
     const remoteBranchRaw = args.remoteBranch == null ? defaults.repoCreateRemoteBranch : cleanString(args.remoteBranch);
     const remoteBranch = repoPath && repoBranchSource === 'remote'
@@ -1874,6 +1911,9 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
           : {}),
       ...(seedAgent ? { seedAgent } : {}),
       ...(seedModel ? { seedModel } : {}),
+      ...(seedReasoning ? { seedReasoning } : {}),
+      ...(seedAgentPermissionMode !== 'full-access' ? { seedAgentPermissionMode } : {}),
+      ...(seedApprovalPolicy !== 'ask' ? { seedApprovalPolicy } : {}),
       ...(cleanString(args.cwd) ? { cwd: cleanString(args.cwd) } : {}),
       ...(repoPath ? { repoPath, repoBranchSource } : {}),
       ...(repoPath && repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),

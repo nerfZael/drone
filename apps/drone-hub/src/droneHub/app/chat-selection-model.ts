@@ -43,3 +43,11 @@ export function chatConfigResolutionState(input: {
   if (input.currentChatIsDraft || !input.hasChats || input.metadataAvailable) return 'ready';
   return input.loading ? 'loading' : 'unavailable';
 }
+
+export function shouldShowDroneStartupFailureEmptyState(input: {
+  startupFailed: boolean;
+  transcriptCount: number;
+  pendingPromptCount: number;
+}): boolean {
+  return input.startupFailed && input.transcriptCount <= 0 && input.pendingPromptCount <= 0;
+}

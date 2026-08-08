@@ -25,6 +25,8 @@ function WorkspaceFiles({
   workspace: AgentRunFileChangeWorkspace;
   onSelectFile: (entry: AgentRunFileChangeEntry) => void;
 }) {
+  const attributionUnavailable =
+    'attribution' in workspace && workspace.attribution === 'unavailable';
   const legacyEntries = 'entries' in workspace ? workspace.entries : null;
   const [entries, setEntries] = React.useState<AgentRunFileChangeEntry[]>(legacyEntries ?? []);
   const [nextOffset, setNextOffset] = React.useState<number | null>(
@@ -41,6 +43,7 @@ function WorkspaceFiles({
     : entries;
 
   React.useEffect(() => {
+    if (attributionUnavailable) return;
     if (legacyEntries) return;
     if (!workspace.diffArtifactId) {
       setEntries(agentRunWorkspacePreviewEntries(workspace));
@@ -67,7 +70,7 @@ function WorkspaceFiles({
         setError(agentRunDiffError(reason).message);
       });
     return () => controller.abort();
-  }, [legacyEntries, retryNonce, workspace]);
+  }, [attributionUnavailable, legacyEntries, retryNonce, workspace]);
 
   const loadMore = () => {
     if (legacyEntries) {
@@ -92,6 +95,14 @@ function WorkspaceFiles({
         setError(agentRunDiffError(reason).message);
       });
   };
+
+  if (attributionUnavailable) {
+    return (
+      <div className="px-2 py-1.5 text-[var(--text-10)] text-[var(--yellow)]">
+        Exact attribution is unavailable for this workspace.
+      </div>
+    );
+  }
 
   if (status === 'loading' && visibleEntries.length === 0) {
     return (
@@ -181,6 +192,10 @@ export function ChangedFilesCard({
   }, [initiallyExpanded]);
   if (!isAgentRunFileChanges(fileChanges)) return null;
 
+  const attribution = fileChanges.version === 2 ? fileChanges.attribution : undefined;
+  const attributionUnavailable = attribution === 'unavailable';
+  const attributionNormalized = attribution === 'base-normalized';
+  const attributionPartial = attribution === 'partial';
   const lineChanges = agentRunLineChangeBreakdown(fileChanges.counts);
   const workspaceCount = fileChanges.workspaces.length;
   const firstWorkspace = fileChanges.workspaces.find((workspace) => workspace.counts.changed > 0);
@@ -210,11 +225,14 @@ export function ChangedFilesCard({
       <div className="flex items-stretch">
         <button
           type="button"
+          disabled={attributionUnavailable}
           className={`group/changed-files-header flex min-w-0 flex-1 items-center px-1 pt-1 text-left focus-visible:outline-none ${
             expanded ? 'pb-0' : 'pb-1'
           }`}
-          onClick={() => setExpanded((current) => !current)}
-          aria-expanded={expanded}
+          onClick={() => {
+            if (!attributionUnavailable) setExpanded((current) => !current);
+          }}
+          aria-expanded={attributionUnavailable ? undefined : expanded}
         >
           <span
             className={`inline-flex min-w-0 max-w-full items-center gap-2 px-2 pt-1 ${
@@ -222,34 +240,57 @@ export function ChangedFilesCard({
             }`}
           >
             <span className="min-w-0 truncate text-[var(--text-10-5)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors group-hover/changed-files-header:text-[var(--fg)] group-focus-visible/changed-files-header:text-[var(--fg)]">
-              Changed files <span className="text-[var(--muted-dim)] transition-colors group-hover/changed-files-header:text-[var(--muted)] group-focus-visible/changed-files-header:text-[var(--muted)]">({fileChanges.counts.changed})</span>
+              Changed files{' '}
+              <span className="text-[var(--muted-dim)] transition-colors group-hover/changed-files-header:text-[var(--muted)] group-focus-visible/changed-files-header:text-[var(--muted)]">
+                {attributionUnavailable ? '(unavailable)' : `(${fileChanges.counts.changed})`}
+              </span>
             </span>
-            <span className="flex shrink-0 items-center gap-1.5 font-mono text-[var(--text-10)] tabular-nums opacity-80 transition-opacity group-hover/changed-files-header:opacity-100 group-focus-visible/changed-files-header:opacity-100">
-              <span className="text-[var(--green)]" title="Lines added">
-                +{lineChanges.added}
+            {!attributionUnavailable ? (
+              <span className="flex shrink-0 items-center gap-1.5 font-mono text-[var(--text-10)] tabular-nums opacity-80 transition-opacity group-hover/changed-files-header:opacity-100 group-focus-visible/changed-files-header:opacity-100">
+                <span className="text-[var(--green)]" title="Lines added">
+                  +{lineChanges.added}
+                </span>
+                <span className="text-[var(--yellow)]" title="Lines modified">
+                  ~{lineChanges.modified}
+                </span>
+                <span className="text-[var(--red)]" title="Lines deleted">
+                  -{lineChanges.deleted}
+                </span>
+                <span className="mx-0.5 text-[var(--muted-dim)]" aria-hidden="true">
+                  │
+                </span>
+                <span
+                  className="font-[var(--weight-semibold)] text-[var(--accent)]"
+                  title="Net line change"
+                  aria-label={`${agentRunNetLineChangeLabel(lineChanges.net)} net lines`}
+                >
+                  {agentRunNetLineChangeLabel(lineChanges.net)}
+                </span>
               </span>
-              <span className="text-[var(--yellow)]" title="Lines modified">
-                ~{lineChanges.modified}
-              </span>
-              <span className="text-[var(--red)]" title="Lines deleted">
-                -{lineChanges.deleted}
-              </span>
-              <span className="mx-0.5 text-[var(--muted-dim)]" aria-hidden="true">
-                │
-              </span>
+            ) : null}
+            {attributionNormalized ? (
               <span
-                className="font-[var(--weight-semibold)] text-[var(--accent)]"
-                title="Net line change"
-                aria-label={`${agentRunNetLineChangeLabel(lineChanges.net)} net lines`}
+                className="shrink-0 rounded-full bg-[var(--accent-subtle)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--accent)]"
+                title="Base branch movement was excluded from this summary"
               >
-                {agentRunNetLineChangeLabel(lineChanges.net)}
+                Base normalized
               </span>
-            </span>
-            <IconChevron
-              down={expanded}
-              className="shrink-0 text-[var(--muted)] transition-colors group-hover/changed-files-header:text-[var(--accent)] group-focus-visible/changed-files-header:text-[var(--accent)]"
-              size={12}
-            />
+            ) : null}
+            {attributionPartial ? (
+              <span
+                className="shrink-0 rounded-full bg-[var(--yellow-subtle)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--yellow)]"
+                title="Some workspaces could not be attributed exactly"
+              >
+                Partial
+              </span>
+            ) : null}
+            {!attributionUnavailable ? (
+              <IconChevron
+                down={expanded}
+                className="shrink-0 text-[var(--muted)] transition-colors group-hover/changed-files-header:text-[var(--accent)] group-focus-visible/changed-files-header:text-[var(--accent)]"
+                size={12}
+              />
+            ) : null}
           </span>
         </button>
         <button
@@ -264,6 +305,18 @@ export function ChangedFilesCard({
           View diff
         </button>
       </div>
+      {attributionUnavailable ? (
+        <div className="px-3 pb-2 text-[var(--text-10)] text-[var(--yellow)]">
+          The base branch changed during this run, and the starting changes could not be replayed
+          safely. Exact changed-file attribution is unavailable.
+        </div>
+      ) : null}
+      {attributionPartial ? (
+        <div className="px-3 pb-2 text-[var(--text-10)] text-[var(--yellow)]">
+          Some workspaces could not be attributed exactly. Totals include only attributed
+          workspaces.
+        </div>
+      ) : null}
       {expanded ? (
         <div className="dh-changed-files-scrollbar mx-1 max-h-72 overflow-y-auto overscroll-contain rounded-[var(--radius-small)] px-1.5 pb-1.5 pt-0">
           {fileChanges.workspaces.map((workspace) => (

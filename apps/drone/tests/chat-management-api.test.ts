@@ -1640,6 +1640,58 @@ describeSocketSuite('chat management api', () => {
     expect(state.data?.pending).toEqual(pending.data?.pending);
   });
 
+  test('failed pending drones retain their initial message in chat reads', async () => {
+    const droneId = 'failed-seed-chat-state-read';
+    const submittedAt = new Date().toISOString();
+    const updatedAt = new Date(Date.parse(submittedAt) + 1_000).toISOString();
+    await updateRegistry((reg: any) => {
+      reg.pending = reg.pending ?? {};
+      reg.pending[droneId] = {
+        id: droneId,
+        name: 'Failed seed drone',
+        runtime: 'container',
+        repoPath: '',
+        containerPort: 7777,
+        build: false,
+        createdAt: submittedAt,
+        updatedAt,
+        phase: 'error',
+        message: 'Failed to start',
+        error: 'daemon exited before health check',
+        seed: {
+          chatName: 'default',
+          promptId: 'initial-seed-prompt',
+          prompt: 'This message should remain visible.',
+          submittedAt,
+          agent: { kind: 'builtin', id: 'codex' },
+        },
+        startupQueuedPrompts: [],
+      };
+    });
+
+    const state = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=50`,
+    );
+    expect(state.r.status).toBe(200);
+    expect(state.data?.transcripts).toEqual([]);
+    expect(state.data?.pending).toEqual([
+      {
+        id: 'initial-seed-prompt',
+        at: submittedAt,
+        prompt: 'This message should remain visible.',
+        state: 'failed',
+        error: 'daemon exited before health check',
+        updatedAt,
+      },
+    ]);
+
+    const pending = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
+    expect(pending.r.status).toBe(200);
+    expect(pending.data?.pending).toEqual(state.data?.pending);
+  });
+
   test('does not surface completed transcript prompts as pending', async () => {
     const droneId = 'completed-prompt-hidden';
     await seedDrone(droneId);

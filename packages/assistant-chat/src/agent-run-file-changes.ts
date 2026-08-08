@@ -24,11 +24,7 @@ export function agentRunLineChangeBreakdown(
 ): AgentRunLineChangeBreakdown {
   const additions = Math.max(0, Number(counts.additions) || 0);
   const deletions = Math.max(0, Number(counts.deletions) || 0);
-  const modified = Math.min(
-    additions,
-    deletions,
-    Math.max(0, Number(counts.modified) || 0),
-  );
+  const modified = Math.min(additions, deletions, Math.max(0, Number(counts.modified) || 0));
   return {
     net: additions - deletions,
     added: additions - modified,
@@ -68,11 +64,14 @@ type DirectoryBuilder = {
 export function isAgentRunFileChanges(value: unknown): value is AgentRunFileChanges {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const candidate = value as Partial<AgentRunFileChanges>;
-  return (
-    (candidate.version === 1 || candidate.version === 2) &&
-    Array.isArray(candidate.workspaces) &&
-    Number(candidate.counts?.changed) > 0
-  );
+  if (
+    (candidate.version !== 1 && candidate.version !== 2) ||
+    !Array.isArray(candidate.workspaces)
+  ) {
+    return false;
+  }
+  if (Number(candidate.counts?.changed) > 0) return true;
+  return candidate.version === 2 && candidate.attribution === 'unavailable';
 }
 
 export function agentRunWorkspacePreviewEntries(

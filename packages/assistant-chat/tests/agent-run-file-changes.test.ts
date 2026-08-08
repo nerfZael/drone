@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   agentRunLineChangeBreakdown,
   agentRunNetLineChangeLabel,
+  isAgentRunFileChanges,
 } from '../src/agent-run-file-changes';
 
 describe('agent run line change breakdown', () => {
@@ -39,5 +40,31 @@ describe('agent run line change breakdown', () => {
     expect(agentRunNetLineChangeLabel(7)).toBe('+7');
     expect(agentRunNetLineChangeLabel(-7)).toBe('-7');
     expect(agentRunNetLineChangeLabel(0)).toBe('±0');
+  });
+});
+
+describe('agent run file change validation', () => {
+  test('keeps unavailable attribution summaries even though they have no speculative totals', () => {
+    expect(
+      isAgentRunFileChanges({
+        version: 2,
+        capturedAt: '2026-08-07T00:00:00.000Z',
+        attribution: 'unavailable',
+        baseMoved: true,
+        counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
+        workspaces: [],
+      }),
+    ).toBe(true);
+  });
+
+  test('continues to hide ordinary empty summaries', () => {
+    expect(
+      isAgentRunFileChanges({
+        version: 2,
+        capturedAt: '2026-08-07T00:00:00.000Z',
+        counts: { changed: 0, additions: 0, deletions: 0, modified: 0 },
+        workspaces: [],
+      }),
+    ).toBe(false);
   });
 });

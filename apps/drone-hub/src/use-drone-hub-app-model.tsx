@@ -270,6 +270,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     spawnAgentKey,
     spawnModel,
     spawnReasoning,
+    spawnAgentPermissionMode,
+    spawnApprovalPolicy,
     repoBranchSource,
     repoCreateRemoteBranch,
     customAgents,
@@ -307,6 +309,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     updateSpawnContextForRepo,
     setSpawnAgentKey,
     setSpawnModel,
+    setSpawnAgentPermissionMode,
+    setSpawnApprovalPolicy,
     rememberSeenModels,
     setRepoBranchSource,
     setRepoCreateRemoteBranch,
@@ -859,9 +863,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       (spawnAgentConfig.id === 'codex' || spawnAgentConfig.id === 'blip'))
       ? String(spawnReasoning ?? '').trim() || null
       : null;
-  const [spawnAgentPermissionMode, setSpawnAgentPermissionMode] =
-    React.useState<AgentPermissionMode>('full-access');
-  const [spawnApprovalPolicy, setSpawnApprovalPolicy] = React.useState<AgentApprovalPolicy>('ask');
   const spawnAgentReadOnlySupported =
     spawnAgentConfig.kind === 'native' ||
     (spawnAgentConfig.kind === 'builtin' &&
@@ -2588,11 +2589,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         spawnAgentKey: preferences.spawnAgentKey,
         spawnModel: preferences.spawnModel,
         spawnReasoning: preferences.spawnReasoning,
+        spawnAgentPermissionMode: preferences.spawnAgentPermissionMode,
+        spawnApprovalPolicy: preferences.spawnApprovalPolicy,
+        repoBranchSource: preferences.repoBranchSource,
+        repoCreateRemoteBranch: preferences.repoCreateRemoteBranch,
       });
-      setSpawnAgentPermissionMode(preferences.spawnAgentPermissionMode);
-      setSpawnApprovalPolicy(preferences.spawnApprovalPolicy);
-      setRepoBranchSource(preferences.repoBranchSource);
-      setRepoCreateRemoteBranch(preferences.repoCreateRemoteBranch);
     },
     [
       normalizeCreateRepoPath,
@@ -2600,8 +2601,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setCreateRuntime,
       setDraftCreateMode,
       setSpawnContextRepoPath,
-      setRepoBranchSource,
-      setRepoCreateRemoteBranch,
       updateSpawnContextForRepo,
     ],
   );
@@ -2846,8 +2845,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     updateSpawnContextForRepo(currentDroneRepoAttached ? currentDroneRepoPath : '', {
       spawnAgentKey: nextAgentKey,
       spawnModel: nextModel,
+      spawnAgentPermissionMode: effectiveChatInfo.agentPermissionMode ?? 'full-access',
     });
-    setSpawnAgentPermissionMode(effectiveChatInfo.agentPermissionMode ?? 'full-access');
     lastSyncedCanvasAgentModelContextRef.current = contextKey;
   }, [
     currentDroneRepoAttached,

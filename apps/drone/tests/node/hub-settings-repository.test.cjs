@@ -266,6 +266,10 @@ describe('canonical UI preferences settings', () => {
     assert.equal(resolved.uiPreferences.autoDelete, false);
     assert.equal(resolved.uiPreferences.spawnAgentKey, 'builtin:cursor');
     assert.equal(resolved.uiPreferences.spawnModel, '');
+    assert.equal(resolved.uiPreferences.spawnReasoning, '');
+    assert.equal(resolved.uiPreferences.spawnAgentPermissionMode, 'full-access');
+    assert.equal(resolved.uiPreferences.spawnApprovalPolicy, 'ask');
+    assert.deepEqual(resolved.uiPreferences.spawnContextByRepoKey, {});
     assert.equal(resolved.uiPreferences.repoBranchSource, 'host');
     assert.equal(resolved.uiPreferences.repoCreateRemoteBranch, '');
   });
@@ -324,8 +328,22 @@ describe('canonical UI preferences settings', () => {
       autoDelete: true,
       spawnAgentKey: 'builtin:codex',
       spawnModel: 'gpt-5.5',
+      spawnReasoning: 'high',
+      spawnAgentPermissionMode: 'workspace-write',
+      spawnApprovalPolicy: 'agent-decides',
       repoBranchSource: 'remote',
       repoCreateRemoteBranch: 'origin/feature/voice',
+      spawnContextByRepoKey: {
+        '/work/repo': {
+          spawnAgentKey: 'builtin:codex',
+          spawnModel: 'gpt-5.6-codex',
+          spawnReasoning: 'xhigh',
+          spawnAgentPermissionMode: 'read-only',
+          spawnApprovalPolicy: 'never',
+          repoBranchSource: 'host',
+          repoCreateRemoteBranch: '',
+        },
+      },
     });
 
     const resolved = await resolveUiPreferencesSettingsResponse();
@@ -343,6 +361,18 @@ describe('canonical UI preferences settings', () => {
     assert.equal(resolved.uiPreferences.autoDelete, true);
     assert.equal(resolved.uiPreferences.spawnAgentKey, 'builtin:codex');
     assert.equal(resolved.uiPreferences.spawnModel, 'gpt-5.5');
+    assert.equal(resolved.uiPreferences.spawnReasoning, 'high');
+    assert.equal(resolved.uiPreferences.spawnAgentPermissionMode, 'workspace-write');
+    assert.equal(resolved.uiPreferences.spawnApprovalPolicy, 'agent-decides');
+    assert.deepEqual(resolved.uiPreferences.spawnContextByRepoKey['/work/repo'], {
+      spawnAgentKey: 'builtin:codex',
+      spawnModel: 'gpt-5.6-codex',
+      spawnReasoning: 'xhigh',
+      spawnAgentPermissionMode: 'read-only',
+      spawnApprovalPolicy: 'never',
+      repoBranchSource: 'host',
+      repoCreateRemoteBranch: '',
+    });
     assert.equal(resolved.uiPreferences.repoBranchSource, 'remote');
     assert.equal(resolved.uiPreferences.repoCreateRemoteBranch, 'origin/feature/voice');
     assert.equal(readRegistryJsonFromSqlite(), registryBefore);

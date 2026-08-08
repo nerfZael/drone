@@ -80,6 +80,9 @@ export type AgentRunFileChangeCounts = {
   modified?: number;
 };
 
+/** Confidence and normalization applied when attributing a run's file changes. */
+export type AgentRunFileChangeAttribution = "exact" | "base-normalized" | "partial" | "unavailable";
+
 export type AgentRunFileChangeWorkspaceV1 = {
   targetId: string;
   droneId?: string;
@@ -99,6 +102,10 @@ export type AgentRunFileChangeWorkspaceV2 = {
   counts: AgentRunFileChangeCounts;
   previewEntries: AgentRunFileChangeEntry[];
   metadataTruncated?: boolean;
+  /** Exact, base-normalized, partial across workspaces, or unavailable. */
+  attribution?: AgentRunFileChangeAttribution;
+  /** True when the configured base ref changed between the start and end snapshots. */
+  baseMoved?: boolean;
 };
 
 export type AgentRunFileChangeWorkspace =
@@ -119,6 +126,8 @@ export type AgentRunFileChangesV2 = {
   counts: AgentRunFileChangeCounts;
   workspaces: AgentRunFileChangeWorkspaceV2[];
   metadataTruncated?: boolean;
+  attribution?: AgentRunFileChangeAttribution;
+  baseMoved?: boolean;
 };
 
 export type AgentRunFileChanges = AgentRunFileChangesV1 | AgentRunFileChangesV2;

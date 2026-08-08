@@ -35,9 +35,9 @@ describe('drone daemon runtime resolution', () => {
     const distDir = path.join(root, 'dist');
     await fs.mkdir(sourceHubDir, { recursive: true });
     await fs.mkdir(distDir, { recursive: true });
-    await fs.writeFile(path.join(distDir, 'daemon.js'), 'module.exports = {};\n');
+    await fs.writeFile(path.join(distDir, 'daemon.bundle.js'), 'module.exports = {};\n');
 
-    expect(resolveDroneDaemonJsPath(sourceHubDir)).toBe(path.join(distDir, 'daemon.js'));
+    expect(resolveDroneDaemonJsPath(sourceHubDir)).toBe(path.join(distDir, 'daemon.bundle.js'));
     expect(resolveDroneDaemonRuntimeDir(sourceHubDir)).toBe(distDir);
   });
 
@@ -49,7 +49,7 @@ describe('drone daemon runtime resolution', () => {
 
   test('requires the daemon, supported CLI, and managed MCP bridge in the built runtime', async () => {
     const root = await makeTempRepo();
-    await fs.writeFile(path.join(root, 'daemon.js'), 'module.exports = {};\n');
+    await fs.writeFile(path.join(root, 'daemon.bundle.js'), 'module.exports = {};\n');
     await expect(assertDroneDaemonRuntimeReady(root)).rejects.toThrow(/blip\.js/);
 
     await fs.writeFile(path.join(root, 'blip.js'), 'module.exports = {};\n');
@@ -57,6 +57,18 @@ describe('drone daemon runtime resolution', () => {
 
     await fs.writeFile(path.join(root, 'mcp-http-stdio-bridge.js'), 'module.exports = {};\n');
     await expect(assertDroneDaemonRuntimeReady(root)).resolves.toBeUndefined();
+  });
+
+  test('rejects a tsc daemon output that still requires workspace packages', async () => {
+    const root = await makeTempRepo();
+    await fs.writeFile(
+      path.join(root, 'daemon.js'),
+      'const chat = require("@drone/assistant-chat");\nmodule.exports = chat;\n',
+    );
+    await fs.writeFile(path.join(root, 'blip.js'), 'module.exports = {};\n');
+    await fs.writeFile(path.join(root, 'mcp-http-stdio-bridge.js'), 'module.exports = {};\n');
+
+    await expect(assertDroneDaemonRuntimeReady(root)).rejects.toThrow(/non-portable/i);
   });
 
   test('keeps the node executable directory on the host daemon PATH', () => {
@@ -76,13 +88,13 @@ describe('drone daemon runtime resolution', () => {
   test('recognizes only the expected host daemon process and port', () => {
     expect(
       isDroneDaemonCommandForPort(
-        '/usr/bin/node /opt/drone/dist/daemon.js --host 127.0.0.1 --port 8787',
+        '/usr/bin/node /opt/drone/dist/daemon.bundle.js --host 127.0.0.1 --port 8787',
         8787,
       ),
     ).toBe(true);
     expect(
       isDroneDaemonCommandForPort(
-        '/usr/bin/node /opt/drone/dist/daemon.js --host 127.0.0.1 --port 9999',
+        '/usr/bin/node /opt/drone/dist/daemon.bundle.js --host 127.0.0.1 --port 9999',
         8787,
       ),
     ).toBe(false);

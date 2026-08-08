@@ -781,7 +781,7 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
-  test('returns draft drone creation immediately without polling for readiness', async () => {
+  test('uses repo-scoped UI defaults when creating a draft drone', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-draft-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
       const previousToken = process.env.DRONE_TOKEN;
@@ -794,7 +794,23 @@ describe('Drone Hub assistant MCP transport', () => {
         const body = method === 'POST' && typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
         requests.push({ pathname: url.pathname, method, ...(body === undefined ? {} : { body }) });
         if (url.pathname === '/api/settings/ui-preferences') {
-          return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+          return Response.json({
+            ok: true,
+            updatedAt: '2026-08-07T10:00:00.000Z',
+            uiPreferences: {
+              spawnContextByRepoKey: {
+                [repoPath]: {
+                  spawnAgentKey: 'builtin:codex',
+                  spawnModel: 'gpt-5.6-codex',
+                  spawnReasoning: 'high',
+                  spawnAgentPermissionMode: 'full-access',
+                  spawnApprovalPolicy: 'agent-decides',
+                  repoBranchSource: 'host',
+                  repoCreateRemoteBranch: '',
+                },
+              },
+            },
+          });
         }
         if (url.pathname === '/api/repos' && method === 'GET') {
           return Response.json({
@@ -843,6 +859,10 @@ describe('Drone Hub assistant MCP transport', () => {
           draft: true,
           repoPath,
           agentsMd: '# Draft-specific instructions',
+          seedAgent: { kind: 'builtin', id: 'codex' },
+          seedModel: 'gpt-5.6-codex',
+          seedReasoning: 'high',
+          seedApprovalPolicy: 'agent-decides',
         });
       } finally {
         await client?.close();

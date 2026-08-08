@@ -13,7 +13,7 @@ export type DesktopNewDronePreferences = {
   repoCreateRemoteBranch: string;
 };
 
-type DesktopNewDronePreferencesByRepo = Record<string, DesktopNewDronePreferences>;
+export type DesktopNewDronePreferencesByRepo = Record<string, DesktopNewDronePreferences>;
 
 const STORAGE_KEY = profileStorageKey('droneHub.newDronePreferences.v2');
 const NO_REPO_KEY = '__no_repo__';
@@ -70,14 +70,17 @@ export function normalizeDesktopNewDronePreferencesByRepo(
 }
 
 export function loadDesktopNewDronePreferences(repoPath: string): DesktopNewDronePreferences | null {
-  if (typeof localStorage === 'undefined') return null;
+  return loadDesktopNewDronePreferencesByRepo()[repoKey(repoPath)] ?? null;
+}
+
+export function loadDesktopNewDronePreferencesByRepo(): DesktopNewDronePreferencesByRepo {
+  if (typeof localStorage === 'undefined') return {};
   try {
-    const byRepo = normalizeDesktopNewDronePreferencesByRepo(
+    return normalizeDesktopNewDronePreferencesByRepo(
       JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}'),
     );
-    return byRepo[repoKey(repoPath)] ?? null;
   } catch {
-    return null;
+    return {};
   }
 }
 
