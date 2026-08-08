@@ -271,4 +271,77 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     expect(invalid.r.status).toBe(400);
     expect(String(invalid.data?.error ?? '')).toContain('max 64 chars');
   });
+
+  test('applies sidebar membership and ordering through the in-process command service', async () => {
+    await updateRegistry((registry: any) => {
+      registry.drones ??= {};
+      registry.drones['sidebar-move-drone'] = {
+        id: 'sidebar-move-drone',
+        name: 'sidebar-move-drone',
+        containerPort: 7777,
+        token: 'x',
+        repoPath: '',
+        createdAt: new Date().toISOString(),
+      };
+    });
+
+    const moved = await apiFetch('/api/sidebar/move', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mutationId: 'sidebar-direct-group-move',
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'drone',
+          repoPath: '',
+          droneId: 'sidebar-move-drone',
+          sourceParentId: 'root',
+          sourceSiblingNodeIds: ['drone:sidebar-move-drone', 'folder:Direct'],
+          targetGroup: 'Direct',
+          targetParentId: 'folder:Direct',
+          targetSiblingNodeIds: [],
+          placement: 'inside',
+        },
+      }),
+    });
+
+    expect(moved.r.status).toBe(200);
+    expect(moved.data).toMatchObject({
+      ok: true,
+      mutationId: 'sidebar-direct-group-move',
+      group: 'Direct',
+      uiPreferences: {
+        sidebarNodeOrderByParent: {
+          root: ['folder:Direct'],
+          'folder:Direct': ['drone:sidebar-move-drone'],
+        },
+      },
+    });
+    expect((await loadRegistry()).drones['sidebar-move-drone']?.group).toBe('Direct');
+
+    const invalid = await apiFetch('/api/sidebar/move', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mutationId: 'sidebar-invalid-batch-move',
+        intent: {
+          kind: 'move-into-folder',
+          itemKind: 'drone',
+          repoPath: '',
+          droneId: 'sidebar-move-drone',
+          droneIds: ['sidebar-move-drone', 'x'.repeat(129)],
+          sourceParentId: 'folder:Direct',
+          sourceSiblingNodeIds: ['drone:sidebar-move-drone'],
+          targetGroup: 'InvalidTarget',
+          targetParentId: 'folder:InvalidTarget',
+          targetSiblingNodeIds: [],
+          placement: 'inside',
+        },
+      }),
+    });
+
+    expect(invalid.r.status).toBe(400);
+    expect(String(invalid.data?.error ?? '')).toContain('invalid drone id');
+    expect((await loadRegistry()).drones['sidebar-move-drone']?.group).toBe('Direct');
+  });
 });
