@@ -1,6 +1,6 @@
-import { MESH_CHAT_PAYLOAD_BYTES } from '@drone/device-protocol';
 import { isSendInNewChatQueueAction } from '@drone/assistant-chat';
 import { boundedAssistantHistory } from './features/cross-device-assistant/bounded-assistant-history';
+import { fitMeshChatPayload } from './fit-mesh-chat-payload';
 
 function truncateUtf8(value: unknown, maxBytes: number): string {
   const source = String(value ?? '');
@@ -86,6 +86,7 @@ export function compactNativeChatReadResponse(input: {
   nativeChatId: string;
   snapshot: any;
   history: any;
+  metadata?: Record<string, unknown>;
 }) {
   const thread = compactThread(
     Array.isArray(input.snapshot?.threads)
@@ -115,6 +116,7 @@ export function compactNativeChatReadResponse(input: {
     state: prompt.status,
   }));
   const metadata = {
+    ...input.metadata,
     historyKind: 'messages' as const,
     nativeChatId: input.nativeChatId,
     streamingMessages,
@@ -122,9 +124,7 @@ export function compactNativeChatReadResponse(input: {
     thread,
     pending,
   };
-  const historyBudget = MESH_CHAT_PAYLOAD_BYTES - Buffer.byteLength(JSON.stringify(metadata));
-  return {
-    ...metadata,
+  return fitMeshChatPayload(metadata, (historyBudget) => ({
     history: boundedAssistantHistory(input.history, historyBudget),
-  };
+  }));
 }

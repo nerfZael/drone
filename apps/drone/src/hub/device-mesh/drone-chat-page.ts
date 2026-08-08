@@ -318,7 +318,7 @@ export function boundedDroneChatPage(
   for (let index = candidates.length - 1; index >= 0; index -= 1) {
     const turn = candidates[index]!;
     const turnBytes = Buffer.byteLength(JSON.stringify(turn));
-    if (turns.length > 0 && bytes + turnBytes > maxBytes) break;
+    if (bytes + turnBytes > maxBytes) break;
     turns.unshift(turn);
     bytes += turnBytes;
   }

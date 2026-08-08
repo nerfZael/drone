@@ -22,6 +22,17 @@ describe('device mesh drone chat pages', () => {
     expect(Number(older.turns.at(-1)?.turn)).toBeLessThan(Number(page.turns[0]?.turn));
   });
 
+  test('returns an empty page when metadata leaves no room for a turn', () => {
+    const page = boundedDroneChatPage(
+      [{ id: 'turn-1', turn: 1, prompt: 'Prompt', output: 'Response' }],
+      undefined,
+      0,
+    );
+
+    expect(page.turns).toEqual([]);
+    expect(page.page).toMatchObject({ beforeCursor: 1, hasOlder: true, responseTruncated: true });
+  });
+
   test('preserves the global cursor when the server already supplied a bounded page', () => {
     const turns = Array.from({ length: 100 }, (_, index) => ({
       id: `turn-${index + 401}`,
