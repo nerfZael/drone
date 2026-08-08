@@ -80,6 +80,7 @@ export function useMobileChatVoiceRecorder({
   const statusRef = React.useRef<MobileVoiceRecordingStatus>('idle');
   const generationRef = React.useRef(0);
   const mountedRef = React.useRef(false);
+  const startPromiseRef = React.useRef<Promise<void> | null>(null);
   const stopPromiseRef = React.useRef<Promise<string> | null>(null);
   const transcribeAbortRef = React.useRef<AbortController | null>(null);
   const recorderRef = React.useRef<AudioRecorder | null>(null);
@@ -188,16 +189,20 @@ export function useMobileChatVoiceRecorder({
 
   const discardRecording = React.useCallback(async () => {
     const previousStatus = statusRef.current;
+    const pendingStart = startPromiseRef.current;
     const controller = transcribeAbortRef.current;
     generationRef.current += 1;
     controller?.abort();
     transcribeAbortRef.current = null;
     stopPromiseRef.current = null;
-    setStatusValue('idle');
     const shouldStop =
       previousStatus === 'starting' ||
       previousStatus === 'recording' ||
       previousStatus === 'paused';
+    // prepareToRecordAsync may still be binding Android's foreground recording
+    // service. Let that native call settle before stop/retry so another prepare
+    // cannot collide with the in-flight bind.
+    await pendingStart?.catch(() => undefined);
     let uri = recordingUriRef.current || recorder.uri;
     recordingUriRef.current = uri;
     if (shouldStop) await recorder.stop().catch(() => undefined);
@@ -205,10 +210,11 @@ export function useMobileChatVoiceRecorder({
     deleteRecordingFile(uri);
     recordingUriRef.current = null;
     await deactivateRecordingMode();
+    setStatusValue('idle');
     onError('');
   }, [deactivateRecordingMode, onError, recorder, setStatusValue]);
 
-  const startRecording = React.useCallback(async () => {
+  const startRecordingOperation = React.useCallback(async () => {
     if (statusRef.current !== 'idle') return;
     const generation = generationRef.current + 1;
     generationRef.current = generation;
@@ -281,6 +287,17 @@ export function useMobileChatVoiceRecorder({
       onError(error?.message ?? String(error));
     }
   }, [deactivateRecordingMode, onError, recorder, setStatusValue]);
+
+  const startRecording = React.useCallback(async () => {
+    if (startPromiseRef.current || statusRef.current !== 'idle') return;
+    const promise = startRecordingOperation();
+    startPromiseRef.current = promise;
+    try {
+      await promise;
+    } finally {
+      if (startPromiseRef.current === promise) startPromiseRef.current = null;
+    }
+  }, [startRecordingOperation]);
 
   React.useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {

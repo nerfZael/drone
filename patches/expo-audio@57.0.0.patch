@@ -398,26 +398,127 @@ index 2c923033..f9722f1f 100644
 +  fun stopBackgroundRecording()
 +}
 diff --git a/android/src/main/java/expo/modules/audio/service/AudioRecordingServiceConnection.kt b/android/src/main/java/expo/modules/audio/service/AudioRecordingServiceConnection.kt
-index 28be72f2..7a1e2569 100644
 --- a/android/src/main/java/expo/modules/audio/service/AudioRecordingServiceConnection.kt
 +++ b/android/src/main/java/expo/modules/audio/service/AudioRecordingServiceConnection.kt
-@@ -2,7 +2,6 @@ package expo.modules.audio.service
-
- import android.content.ComponentName
- import android.os.IBinder
+@@ -5 +4,0 @@
 -import expo.modules.audio.AudioRecorder
- import expo.modules.audio.AudioRecordingServiceException
- import expo.modules.audio.getRecordingServiceErrorMessage
- import expo.modules.kotlin.AppContext
-@@ -20,7 +19,7 @@ import kotlin.coroutines.suspendCoroutine
- class AudioRecordingServiceBinder(val service: AudioRecordingService) : android.os.Binder()
-
- class AudioRecordingServiceConnection(
+@@ -23 +22 @@
 -  val recorder: WeakReference<AudioRecorder>,
 +  val recorder: WeakReference<BackgroundAudioRecorder>,
-   appContext: AppContext
- ) : BaseServiceConnection<AudioRecordingServiceBinder>(appContext) {
-   var recordingServiceBinder: AudioRecordingServiceBinder? = null
+@@ -32,0 +32 @@
++  private val bindingWaiters = mutableListOf<Continuation<Unit>>()
+@@ -36,0 +37 @@
++    failPendingBinding(AudioRecordingServiceException("The recorder has been deallocated"))
+@@ -44 +45 @@
+-        bindingContinuation?.resumeWithException(AudioRecordingServiceException("The recording service connection has failed to connect with the recording service within ${timeoutMs}ms"))
++        val exception = AudioRecordingServiceException("The recording service connection has failed to connect with the recording service within ${timeoutMs}ms")
+@@ -45,0 +47 @@
++        failPendingBinding(exception)
+@@ -54,0 +57,15 @@
++  private fun pendingBindings(): List<Continuation<Unit>> = synchronized(this) {
++    val continuations = listOfNotNull(bindingContinuation) + bindingWaiters
++    bindingContinuation = null
++    bindingWaiters.clear()
++    continuations
++  }
++
++  private fun completePendingBinding() {
++    pendingBindings().forEach { it.resume(Unit) }
++  }
++
++  private fun failPendingBinding(exception: AudioRecordingServiceException) {
++    pendingBindings().forEach { it.resumeWithException(exception) }
++  }
++
+@@ -59,12 +75,0 @@
+-    if (bindingState == ServiceBindingState.BOUND) {
+-      return
+-    }
+-
+-    if (bindingState == ServiceBindingState.BINDING) {
+-      throw AudioRecordingServiceException("Tried binding to the recording service while the previous attempt is still ongoing.")
+-    }
+-
+-    if (bindingState == ServiceBindingState.UNBINDING) {
+-      throw AudioRecordingServiceException("Tried binding to the recording service while the unbinding process is ongoing.")
+-    }
+-
+@@ -72,4 +77,33 @@
+-      if (bindingState == ServiceBindingState.UNBOUND || bindingState == ServiceBindingState.FAILED) {
+-        val reactContext = appContext.reactContext ?: run {
+-          onBindingFailed("Binding with the expo-audio playback service failed: React context lost")
+-          return@suspendCoroutine
++      synchronized(this) {
++        when (bindingState) {
++          ServiceBindingState.BOUND -> continuation.resume(Unit)
++          ServiceBindingState.BINDING -> bindingWaiters.add(continuation)
++          ServiceBindingState.UNBINDING -> continuation.resumeWithException(
++            AudioRecordingServiceException("Tried binding to the recording service while the unbinding process is ongoing.")
++          )
++          ServiceBindingState.UNBOUND, ServiceBindingState.FAILED -> {
++            val reactContext = appContext.reactContext ?: run {
++              transitionToState(ServiceBindingState.FAILED)
++              val exception = AudioRecordingServiceException("Binding with the recording service failed: React context lost")
++              onBindingFailed(exception.message ?: "React context lost", exception)
++              continuation.resumeWithException(exception)
++              return@suspendCoroutine
++            }
++
++            transitionToState(ServiceBindingState.BINDING)
++            bindingContinuation = continuation
++            val serviceRunning = try {
++              startServiceAndBind(appContext, reactContext, this, AudioRecordingService::class.java, AudioRecordingService.ACTION_START_RECORDING)
++            } catch (exception: Exception) {
++              transitionToState(ServiceBindingState.FAILED)
++              failPendingBinding(AudioRecordingServiceException(exception.message, exception))
++              return@suspendCoroutine
++            }
++
++            if (!serviceRunning) {
++              transitionToState(ServiceBindingState.FAILED)
++              failPendingBinding(AudioRecordingServiceException("Failed to start the recording service"))
++              return@suspendCoroutine
++            }
++            startBindingTimeout()
++          }
+@@ -77,9 +110,0 @@
+-        val serviceRunning = startServiceAndBind(appContext, reactContext, this, AudioRecordingService::class.java, AudioRecordingService.ACTION_START_RECORDING)
+-
+-        if (!serviceRunning) {
+-          continuation.resumeWithException(AudioRecordingServiceException("Failed to start the recording service"))
+-          return@suspendCoroutine
+-        }
+-
+-        transitionToState(ServiceBindingState.BINDING)
+-        bindingContinuation = continuation
+@@ -96 +121 @@
+-      bindingContinuation?.resumeWithException(AudioRecordingServiceException("The recorder has been deallocated"))
++      failPendingBinding(AudioRecordingServiceException("The recorder has been deallocated"))
+@@ -101 +125,0 @@
+-      bindingContinuation?.resumeWithException(AudioRecordingServiceException("Could not bind to the recording service - invalid binder type"))
+@@ -102,0 +127 @@
++      failPendingBinding(AudioRecordingServiceException("Could not bind to the recording service - invalid binder type"))
+@@ -105,3 +129,0 @@
+-    transitionToState(ServiceBindingState.BOUND)
+-
+-    bindingContinuation?.resume(Unit)
+@@ -109,0 +132,2 @@
++    transitionToState(ServiceBindingState.BOUND)
++    completePendingBinding()
+@@ -120,4 +144 @@
+-    bindingContinuation?.resumeWithException(
+-      AudioRecordingServiceException("Service binding died")
+-    )
+-    bindingContinuation = null
++    failPendingBinding(AudioRecordingServiceException("Service binding died"))
+@@ -129,4 +150 @@
+-    bindingContinuation?.resumeWithException(
+-      AudioRecordingServiceException("Service returned null binding")
+-    )
+-    bindingContinuation = null
++    failPendingBinding(AudioRecordingServiceException("Service returned null binding"))
+@@ -138,0 +157 @@
++    failPendingBinding(AudioRecordingServiceException("Service died unexpectedly"))
 diff --git a/ios/AudioStream.swift b/ios/AudioStream.swift
 index f938eff0..5d398341 100644
 --- a/ios/AudioStream.swift

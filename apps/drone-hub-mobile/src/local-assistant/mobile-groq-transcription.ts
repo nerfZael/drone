@@ -1,5 +1,5 @@
 import { fetch } from 'expo/fetch';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import {
   MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES,
   MOBILE_GROQ_TRANSCRIPTION_MODEL,
@@ -63,28 +63,46 @@ export async function transcribeMobileVoiceWave(input: {
   if (input.wave.length > MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES) {
     throw new Error('The voice recording exceeds GROQ’s 25 MB upload limit.');
   }
-  const form = new FormData();
-  const blob = new Blob([input.wave.buffer as ArrayBuffer], { type: 'audio/wav' });
-  form.append('file', blob, 'continuous-voice.wav');
-  form.append(
-    'model',
-    input.settings.quality === 'accurate' ? 'whisper-large-v3' : MOBILE_GROQ_TRANSCRIPTION_MODEL,
+  // React Native cannot construct a Blob from ArrayBuffer/ArrayBufferView values.
+  // Expo File is a native Blob, so stage the generated WAV in cache and upload it
+  // through the same runtime path as the single-shot recorder.
+  const file = new File(
+    Paths.cache,
+    `continuous-voice-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.wav`,
   );
-  form.append('response_format', 'json');
-  form.append('temperature', '0');
-  if (input.settings.language) form.append('language', input.settings.language);
-  const prompt = String(input.prompt ?? '').trim();
-  if (prompt) form.append('prompt', prompt.slice(-1_200));
-  const response = await fetch(MOBILE_GROQ_TRANSCRIPTION_URL, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
-    signal: input.signal,
-  });
-  return resolveMobileGroqTranscriptionResponse({
-    ok: response.ok,
-    status: response.status,
-    statusText: response.statusText,
-    body: await response.text(),
-  });
+  try {
+    file.create({ overwrite: true });
+    file.write(input.wave);
+    const form = new FormData();
+    form.append('file', file as unknown as Blob);
+    form.append(
+      'model',
+      input.settings.quality === 'accurate' ? 'whisper-large-v3' : MOBILE_GROQ_TRANSCRIPTION_MODEL,
+    );
+    form.append('response_format', 'json');
+    form.append('temperature', '0');
+    if (input.settings.language) form.append('language', input.settings.language);
+    const prompt = String(input.prompt ?? '').trim();
+    if (prompt) form.append('prompt', prompt.slice(-1_200));
+    const response = await fetch(MOBILE_GROQ_TRANSCRIPTION_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: input.signal,
+    });
+    return resolveMobileGroqTranscriptionResponse({
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      body: await response.text(),
+    });
+  } finally {
+    if (file.exists) {
+      try {
+        file.delete();
+      } catch {
+        // The cache may already have removed the staged upload.
+      }
+    }
+  }
 }

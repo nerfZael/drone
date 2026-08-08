@@ -15,6 +15,14 @@ const expoAudioPatch = readFileSync(
   new URL('../../../patches/expo-audio@57.0.0.patch', import.meta.url),
   'utf8',
 );
+const mobileGroqTranscription = readFileSync(
+  new URL('../src/local-assistant/mobile-groq-transcription.ts', import.meta.url),
+  'utf8',
+);
+const mobileVoiceRecorder = readFileSync(
+  new URL('../src/local-assistant/use-mobile-chat-voice-recorder.ts', import.meta.url),
+  'utf8',
+);
 
 describe('mobile background recording configuration', () => {
   test('enables background recording in the Expo Audio config plugin', () => {
@@ -42,5 +50,21 @@ describe('mobile background recording configuration', () => {
     expect(expoAudioPatch).toContain('reason: "interrupted"');
     expect(expoAudioPatch).toContain('scheduleRecovery()');
     expect(expoAudioPatch).toContain("reason?: 'started' | 'stopped' | 'interrupted'");
+  });
+
+  test('uploads continuous WAV data through a native file instead of an unsupported Blob part', () => {
+    expect(mobileGroqTranscription).toContain('new File(');
+    expect(mobileGroqTranscription).toContain('file.write(input.wave)');
+    expect(mobileGroqTranscription).toContain("form.append('file', file as unknown as Blob)");
+    expect(mobileGroqTranscription).not.toContain('new Blob([input.wave.buffer');
+  });
+
+  test('serializes recorder startup and coalesces Android service binding', () => {
+    expect(mobileVoiceRecorder).toContain('await pendingStart?.catch');
+    expect(expoAudioPatch).toContain('bindingWaiters.add(continuation)');
+    expect(expoAudioPatch).toContain('startBindingTimeout()');
+    expect(expoAudioPatch).not.toContain(
+      '+      throw AudioRecordingServiceException("Tried binding to the recording service while the previous attempt is still ongoing.")',
+    );
   });
 });
