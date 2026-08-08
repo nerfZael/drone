@@ -12,6 +12,7 @@ import {
   normalizeMobileDrones,
   orderedMobileDroneChats,
   resolveMobileDroneListSnapshot,
+  suggestMobileDroneCloneName,
   suggestNextMobileDroneChatName,
 } from '../src/drones/drone-sidebar-model';
 
@@ -81,6 +82,16 @@ describe('mobile drone sidebar model', () => {
     expect(suggestNextMobileDroneChatName(['default', 'chat-7', 'review'])).toBe('chat-8');
   });
 
+  test('names a cloned drone with the desktop suffix and avoids collisions', () => {
+    expect(suggestMobileDroneCloneName('Review', [])).toBe('Review-copy');
+    expect(
+      suggestMobileDroneCloneName('Review', [
+        { name: 'review-COPY' },
+        { name: 'Review-copy-2' },
+      ]),
+    ).toBe('Review-copy-3');
+  });
+
   test('groups drones by repo and preserves fleet and chat hierarchy', () => {
     const drones = normalizeMobileDrones([
       {
@@ -143,6 +154,12 @@ describe('mobile drone sidebar model', () => {
     ]);
 
     expect(drone?.repoAttached).toBe(false);
+  });
+
+  test('preserves container volume behavior for cloning', () => {
+    const [drone] = normalizeMobileDrones([{ id: 'ephemeral', persistVolume: false }]);
+
+    expect(drone?.persistVolume).toBe(false);
   });
 
   test('uses the versioned repository map when individual summaries omit their paths', () => {

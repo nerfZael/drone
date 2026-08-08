@@ -11,6 +11,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import Check from 'lucide-react-native/icons/check';
+import Copy from 'lucide-react-native/icons/copy';
 import Menu from 'lucide-react-native/icons/menu';
 import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
@@ -298,6 +299,17 @@ function Shell() {
                   label: 'Files',
                   icon: FolderTree,
                   onPress: dronesHeader.onOpenFiles,
+                },
+              ]
+            : []),
+          ...(dronesHeader.onClone
+            ? [
+                {
+                  id: 'clone-drone',
+                  label: 'Clone drone',
+                  icon: Copy,
+                  disabled: dronesHeader.cloneDisabled,
+                  onPress: dronesHeader.onClone,
                 },
               ]
             : []),
