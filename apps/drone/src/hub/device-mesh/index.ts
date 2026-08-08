@@ -31,7 +31,7 @@ export async function createDeviceMeshService(options: {
   localHubBaseUrl(): string;
   ingressPort?: number;
   createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
-  sidebarCommands?: SidebarCommandService;
+  sidebarCommands: SidebarCommandService;
   renameDrone?: RenameDroneCommand;
 }) {
   const identity = await loadOrCreateDeviceIdentity(options.rootDir);

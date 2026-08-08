@@ -15,9 +15,11 @@ export function registerSidebarRoutes(
           ? 400
           : error?.code === 'OPERATION_FAILED'
             ? 422
-            : upstreamStatus && Number(upstreamStatus) >= 400 && Number(upstreamStatus) < 500
-              ? Number(upstreamStatus)
-              : 500;
+            : Number.isInteger(error?.status) && error.status >= 400 && error.status < 500
+              ? Number(error.status)
+              : upstreamStatus && Number(upstreamStatus) >= 400 && Number(upstreamStatus) < 500
+                ? Number(upstreamStatus)
+                : 500;
       json(status, { ok: false, error: error?.message ?? String(error) });
     }
   });

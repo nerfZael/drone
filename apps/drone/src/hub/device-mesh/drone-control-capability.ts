@@ -24,7 +24,7 @@ import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { fitMeshChatPayload } from './fit-mesh-chat-payload';
 import { compactNativeChatReadResponse } from './native-chat-response';
 import { submitNativeChatPrompt } from './native-chat-prompt';
-import { SidebarCommandService } from '../sidebar-command-service';
+import type { SidebarCommandService } from '../sidebar-command-service';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -298,7 +298,7 @@ export function createDroneControlCapability(
     ) => void | Promise<void>;
   },
 ): CapabilityHandler {
-  const sidebarCommands = options?.sidebarCommands ?? new SidebarCommandService(access);
+  const sidebarCommands = options?.sidebarCommands;
   type FileWatch = {
     droneId: string;
     path: string;
@@ -713,6 +713,11 @@ export function createDroneControlCapability(
       }
 
       if (operation === 'sidebar.move') {
+        if (!sidebarCommands) {
+          throw Object.assign(new Error('sidebar commands are unavailable'), {
+            code: 'CAPABILITY_UNAVAILABLE',
+          });
+        }
         return await sidebarCommands.move(payload);
       }
 
