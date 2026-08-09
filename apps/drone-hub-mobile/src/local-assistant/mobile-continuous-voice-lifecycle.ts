@@ -1,13 +1,6 @@
-export type MobileContinuousVoiceStatus =
-  | 'idle'
-  | 'starting'
-  | 'listening'
-  | 'speech'
-  | 'thought-pause'
-  | 'recovering'
-  | 'paused'
-  | 'stopping'
-  | 'error';
+import type { ContinuousVoiceSessionStatus } from '@drone/assistant-chat';
+
+export type MobileContinuousVoiceStatus = ContinuousVoiceSessionStatus;
 
 export type MobileContinuousVoiceNativeReason =
   | 'started'
