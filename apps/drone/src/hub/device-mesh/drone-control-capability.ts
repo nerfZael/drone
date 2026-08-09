@@ -25,6 +25,7 @@ import { fitMeshChatPayload } from './fit-mesh-chat-payload';
 import { compactNativeChatReadResponse } from './native-chat-response';
 import { submitNativeChatPrompt } from './native-chat-prompt';
 import type { SidebarCommandService } from '../sidebar-command-service';
+import type { HubApplication } from '../application/create-hub-application';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -290,6 +291,7 @@ export function createDroneControlCapability(
   chatAttachments?: MeshChatAttachmentStore,
   options?: {
     sidebarCommands?: SidebarCommandService;
+    hubApplication?: HubApplication;
     createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
     renameDrone?: RenameDroneCommand;
     broadcastFileChange?: (
@@ -299,6 +301,7 @@ export function createDroneControlCapability(
   },
 ): CapabilityHandler {
   const sidebarCommands = options?.sidebarCommands;
+  const hubApplication = options?.hubApplication;
   type FileWatch = {
     droneId: string;
     path: string;
@@ -455,7 +458,9 @@ export function createDroneControlCapability(
         }
         const createRepoPath = optionalText(payload.createRepoPath);
         if (createRepoPath) {
-          const reposResult = await localHubRequest(access, '/api/repos');
+          const reposResult = hubApplication
+            ? await hubApplication.listRepositories()
+            : await localHubRequest(access, '/api/repos');
           const registeredRepoPaths = textList(
             Array.isArray(reposResult.repos)
               ? reposResult.repos.map((repo: unknown) => object(repo).path)
@@ -533,10 +538,16 @@ export function createDroneControlCapability(
           deleteSettingsRequest,
         ] = await Promise.allSettled([
           localHubRequest(access, '/api/drones'),
-          localHubRequest(access, '/api/repos'),
-          localHubRequest(access, '/api/groups'),
-          localHubRequest(access, '/api/settings/ui-preferences'),
-          localHubRequest(access, '/api/settings/delete-action'),
+          hubApplication
+            ? hubApplication.listRepositories()
+            : localHubRequest(access, '/api/repos'),
+          hubApplication ? hubApplication.listGroups() : localHubRequest(access, '/api/groups'),
+          hubApplication
+            ? hubApplication.uiPreferences.read()
+            : localHubRequest(access, '/api/settings/ui-preferences'),
+          hubApplication
+            ? hubApplication.readDeleteActionSettings()
+            : localHubRequest(access, '/api/settings/delete-action'),
         ]);
         if (dronesRequest.status === 'rejected') throw dronesRequest.reason;
         const result = dronesRequest.value;
@@ -740,7 +751,9 @@ export function createDroneControlCapability(
       if (operation === 'drone.delete') {
         // Do not guess for a destructive operation. Falling back to permanent deletion when the
         // settings request fails can bypass an explicitly configured archive policy.
-        const settings = await localHubRequest(access, '/api/settings/delete-action');
+        const settings = hubApplication
+          ? await hubApplication.readDeleteActionSettings()
+          : await localHubRequest(access, '/api/settings/delete-action');
         const deleteMode =
           object(settings.deleteAction).mode === 'archive' ? 'archive' : 'permanent';
         await localHubRequest(

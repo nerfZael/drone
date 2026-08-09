@@ -110,10 +110,7 @@ import {
   updateCanonicalRepositoryAgents,
   updateCanonicalRepositoryEnvironment,
 } from './groups-repositories';
-import {
-  deleteCanonicalGroupArtifacts,
-  renameCanonicalGroupOrchestration,
-} from './group-orchestration';
+import { deleteCanonicalGroupArtifacts } from './group-orchestration';
 import { resolveTranscriptPromptAt } from './transcript-order';
 import {
   applyChatReconciliationInStore,
@@ -319,6 +316,9 @@ import {
 } from './workflows/workflow-child-drone-metadata';
 import { registerWorkflowFeature } from './workflows/workflow-feature';
 import { DroneHubMcpHttpTransport } from './mcp-http-transport';
+import { createHubApplication } from './application/create-hub-application';
+import { isUngroupedGroupName } from './application/group-name';
+import type { HubApplicationEvent } from './application/hub-application-events';
 import { createSidebarCommandService } from './sidebar-command-service';
 import {
   assertDroneDaemonRuntimeReady,
@@ -411,7 +411,6 @@ import {
   upsertStoredVoiceInputSettings,
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
-  upsertStoredUiPreferencesSettings,
   updateStoredUserTimeZone,
   type LlmProviderId,
   type StoredApiKeyProviderId,
@@ -494,7 +493,6 @@ import {
   commitDroneMetadataPatch,
   renameDroneDisplayName,
   setDroneEnvironmentMetadata,
-  setDroneGroupMetadata,
   updateDroneFleetMetadata,
 } from './drone-metadata-commands';
 import { createRenameDroneCommand } from './drone-rename-command';
@@ -2082,25 +2080,8 @@ const {
   withReadonlyDroneContainer,
 });
 
-function isUngroupedGroupName(name: string): boolean {
-  return (
-    String(name ?? '')
-      .trim()
-      .toLowerCase() === 'ungrouped'
-  );
-}
-
-const GROUP_NAME_MAX_LEN = 64;
 function normalizeGroupName(raw: any): string {
   return String(raw ?? '').trim();
-}
-function validateGroupNameOrThrow(raw: any, label: string = 'group'): string {
-  const name = normalizeGroupName(raw);
-  if (!name) throw new Error(`invalid ${label} (must be non-empty)`);
-  if (name.length > GROUP_NAME_MAX_LEN)
-    throw new Error(`invalid ${label} (max ${GROUP_NAME_MAX_LEN} chars)`);
-  if (isUngroupedGroupName(name)) throw new Error(`invalid ${label} ("Ungrouped" is reserved)`);
-  return name;
 }
 
 function isSameOrDescendantGroupPath(pathRaw: any, prefixRaw: any): boolean {
@@ -4021,10 +4002,14 @@ export async function startDroneHubApiServer(opts: {
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
   if (mcpToken) await revokeLegacyProjectedDroneMcpTokens();
-  let pendingSidebarPreferencesWrite = false;
-  let notifySidebarPreferencesWrite = () => {
-    pendingSidebarPreferencesWrite = true;
+  const hubApplication = createHubApplication();
+  const pendingHubApplicationEvents: HubApplicationEvent[] = [];
+  let handleHubApplicationEvent = (event: HubApplicationEvent) => {
+    pendingHubApplicationEvents.push(event);
   };
+  const unsubscribeHubApplicationEvents = hubApplication.events.subscribe((event) => {
+    handleHubApplicationEvent(event);
+  });
   const renameDroneCommand = createRenameDroneCommand({
     displayNameMaxLength: DRONE_DISPLAY_NAME_MAX_LEN,
     findDroneIdByRef,
@@ -4035,14 +4020,13 @@ export async function startDroneHubApiServer(opts: {
     notifyRegistryWrite: () => notifyDroneRegistryWrite?.(),
     persistDisplayName: renameDroneDisplayName,
   });
-  const sidebarCommands = createSidebarCommandService({
-    notifyUiPreferencesChanged: () => notifySidebarPreferencesWrite(),
-  });
+  const sidebarCommands = createSidebarCommandService(hubApplication);
   let actualPort = opts.port;
   const deviceMesh = await createDeviceMeshService({
     rootDir: droneRootPath('device-mesh'),
     apiToken,
     sidebarCommands,
+    hubApplication,
     localHubBaseUrl: () => `http://127.0.0.1:${actualPort}`,
     ingressPort: opts.deviceMeshIngressPort,
     renameDrone: renameDroneCommand,
@@ -4207,6 +4191,7 @@ export async function startDroneHubApiServer(opts: {
     normalizeDroneIdentity,
     nowIso,
     renameDrone: renameDroneCommand,
+    hubApplication,
     onNativePromptQueueChanged: ({ droneId, chatName }) => {
       notifyDroneChatWrite?.(droneId, chatName);
       promptRuntime.enqueuePendingPromptPump(droneId, chatName);
@@ -5199,16 +5184,18 @@ export async function startDroneHubApiServer(opts: {
     scheduleDroneRegistryBroadcasterRefresh();
   };
   notifyDroneSummaryChange = notifyCanonicalDroneSummaryChange;
-  const notifyCanonicalSidebarPreferencesWrite = () => {
+  const notifyHubApplicationEvent = (event: HubApplicationEvent) => {
+    if (event.type !== 'ui-preferences.changed') return;
     const at = nowIso();
-    scheduleDroneRegistryBroadcasterRefresh(150, true);
+    if (event.notificationMode === 'sidebar-snapshot') {
+      scheduleDroneRegistryBroadcasterRefresh(150, true);
+    } else {
+      assistantService.emitExternalUiAction({ type: 'reload_ui_preferences', at });
+    }
     void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
   };
-  notifySidebarPreferencesWrite = notifyCanonicalSidebarPreferencesWrite;
-  if (pendingSidebarPreferencesWrite) {
-    pendingSidebarPreferencesWrite = false;
-    notifySidebarPreferencesWrite();
-  }
+  handleHubApplicationEvent = notifyHubApplicationEvent;
+  for (const event of pendingHubApplicationEvents.splice(0)) notifyHubApplicationEvent(event);
   const notifyCanonicalPromptQueueChatWrite = (droneId: string, chatName: string) => {
     // Prompt delivery state is canonical SQLite state and does not rewrite the
     // registry. Invalidate the projection and wake chat and sidebar SSE clients
@@ -5236,6 +5223,7 @@ export async function startDroneHubApiServer(opts: {
     log: hubLog,
     speechEnabled: initialSpeechSettings.enabled,
     renameDrone: renameDroneCommand,
+    hubApplication,
   });
   const handleDroneHubMcpRequest = (
     req: http.IncomingMessage,
@@ -5385,15 +5373,9 @@ export async function startDroneHubApiServer(opts: {
     profileSettingsErrorStatus,
     apiToken,
     droneRootPath,
-    resolveUiPreferencesSettingsResponse,
-    upsertStoredUiPreferencesSettings,
+    resolveUiPreferencesSettingsResponse: () => hubApplication.uiPreferences.read(),
+    updateUiPreferencesSettings: (input: any) => hubApplication.uiPreferences.update(input),
     resolveUserContextSettingsResponse,
-    notifyUiPreferencesChanged: () => {
-      const at = nowIso();
-      assistantService.emitExternalUiAction({ type: 'reload_ui_preferences', at });
-      void deviceMesh.broadcastDroneListChange({ reason: 'ui_preferences_write', at });
-    },
-    notifyUiPreferencesSnapshotChanged: () => notifySidebarPreferencesWrite(),
     clampIntParam,
     readHubLogTail,
     HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,
@@ -5500,7 +5482,7 @@ export async function startDroneHubApiServer(opts: {
 
   registerRepositoryRoutes(apiRouter, {
     loadRegistry,
-    listCanonicalRepositories,
+    listRepositories: hubApplication.listRepositories,
     gitListRemoteBranches,
     removeCanonicalRepository,
     withCanonicalRepositories,
@@ -5517,13 +5499,12 @@ export async function startDroneHubApiServer(opts: {
 
   registerGroupRoutes(apiRouter, {
     loadRegistry,
+    listGroups: hubApplication.listGroups,
     listCanonicalGroups,
-    normalizeGroupName,
     isUngroupedGroupName,
-    validateGroupNameOrThrow,
     nowIso,
-    ensureCanonicalGroup,
-    renameCanonicalGroupOrchestration,
+    createGroup: hubApplication.createGroup,
+    renameGroup: hubApplication.renameGroup,
     isSameOrDescendantGroupPath,
     normalizeDroneIdentity,
     deleteCanonicalGroupArtifacts,
@@ -5549,9 +5530,8 @@ export async function startDroneHubApiServer(opts: {
     resolveDroneOrRespond,
     loadRegistry,
     fleetActorPayload,
+    setDroneParent: hubApplication.setDroneParent,
     findDroneIdByRef,
-    resolveStableDroneOrPendingIdFromRef,
-    fleetDescendantIdsForActor,
     updateDroneFleetMetadata,
     fleetActorConfig,
     fleetError,
@@ -5571,12 +5551,10 @@ export async function startDroneHubApiServer(opts: {
     dvmBaseSet,
     dvmStop,
     enqueueProvisioning,
-    resolveCanonicalGroupReference,
     fileExists,
     findDroneIdByRef,
     hubLog,
     isDraftDroneEntry,
-    isUngroupedGroupName,
     loadRegistry,
     looksLikeContainerNotRunningError,
     looksLikeMissingContainerError,
@@ -5602,10 +5580,9 @@ export async function startDroneHubApiServer(opts: {
     revokeMcpAccessTokensForDrone,
     runDroneLifecycleAction,
     setDroneEnvironmentMetadata,
-    setDroneGroupMetadata,
+    setDroneGroup: hubApplication.setDroneGroup,
     stopAllDroneChatActivity,
     triggerArchiveCleanup,
-    validateGroupNameOrThrow,
     withLockedDroneContainer,
   });
 
@@ -6149,6 +6126,7 @@ export async function startDroneHubApiServer(opts: {
       cancelCodexLogin();
       resourceSubscriptionService?.stop();
       unsubscribeDeviceMeshAssistantChanges();
+      unsubscribeHubApplicationEvents();
       await deviceMesh.close();
       await hubOutboxDispatchLoop?.stop();
       if (notifyDroneChatWrite === notifyCanonicalPromptQueueChatWrite) {

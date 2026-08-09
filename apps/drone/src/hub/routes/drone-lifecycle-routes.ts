@@ -15,12 +15,10 @@ type DroneLifecycleDependencyName =
   | 'dvmBaseSet'
   | 'dvmStop'
   | 'enqueueProvisioning'
-  | 'resolveCanonicalGroupReference'
   | 'fileExists'
   | 'findDroneIdByRef'
   | 'hubLog'
   | 'isDraftDroneEntry'
-  | 'isUngroupedGroupName'
   | 'loadRegistry'
   | 'looksLikeContainerNotRunningError'
   | 'looksLikeMissingContainerError'
@@ -46,10 +44,9 @@ type DroneLifecycleDependencyName =
   | 'revokeMcpAccessTokensForDrone'
   | 'runDroneLifecycleAction'
   | 'setDroneEnvironmentMetadata'
-  | 'setDroneGroupMetadata'
+  | 'setDroneGroup'
   | 'stopAllDroneChatActivity'
   | 'triggerArchiveCleanup'
-  | 'validateGroupNameOrThrow'
   | 'withLockedDroneContainer';
 
 export type DroneLifecycleRouteDependencies =
