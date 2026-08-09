@@ -4,6 +4,7 @@ import {
   MOBILE_PULL_REQUEST_MERGE_METHOD_OPTIONS,
   mobilePullRequestActionGuardError,
   mobilePullRequestActionUnavailableReason,
+  mobilePullRequestDiffStatsPresentation,
   mobilePullRequestMergePresentation,
   normalizeMobilePullRequestMergeMethod,
   performMobilePullRequestMerge,
@@ -213,5 +214,32 @@ describe('mobile linked pull request workflow', () => {
     expect(cardSource).toContain('context.merge(pullRequest.number, action.method)');
     expect(cardSource).toContain('pullRequestCloseConfirmation');
     expect(cardSource).toContain('confirmationBusy || anyActionBusy');
+  });
+
+  test('formats linked pull request diff stats like the desktop card', () => {
+    expect(
+      mobilePullRequestDiffStatsPresentation({
+        changed: 13,
+        additions: 655,
+        deletions: 14,
+      }),
+    ).toEqual({
+      changed: 13,
+      additions: 655,
+      deletions: 14,
+      netLabel: '+641',
+      accessibilityLabel: '13 files changed, 655 additions, 14 deletions, +641 net lines',
+    });
+  });
+
+  test('keeps diff stats and draft status visible in the linked pull request card', () => {
+    const cardSource = readFileSync(
+      new URL('../src/drones/LinkedPullRequestAttachment.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(cardSource).toContain('pullRequest?.diffStats');
+    expect(cardSource).toContain('mobilePullRequestDiffStatsPresentation(stats)');
+    expect(cardSource).toContain("isDraft\n      ? 'Draft'");
   });
 });
