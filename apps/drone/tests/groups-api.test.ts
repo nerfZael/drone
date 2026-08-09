@@ -263,6 +263,26 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     expect(unchanged.data?.rejected).toEqual([]);
     expect(unchanged.data?.total).toBe(1);
 
+    const nullGroupId = await apiFetch('/api/drones/group-set', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        droneIds: ['group-move-drone'],
+        groupId: null,
+        group: 'fallback-group',
+      }),
+    });
+    expect(nullGroupId.r.status).toBe(200);
+    expect(nullGroupId.data?.group).toBe('fallback-group');
+
+    const emptyGroupId = await apiFetch('/api/drones/group-set', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ droneIds: ['group-move-drone'], groupId: '' }),
+    });
+    expect(emptyGroupId.r.status).toBe(200);
+    expect(emptyGroupId.data?.group).toBeNull();
+
     const invalid = await apiFetch('/api/drones/group-set', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

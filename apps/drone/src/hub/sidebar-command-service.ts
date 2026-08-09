@@ -5,29 +5,12 @@ import {
 } from '@drone/device-protocol';
 import {
   applySidebarMove,
-  isUngroupedGroupName,
   normalizeSidebarLayout,
   sidebarLayoutPatch,
   sidebarMoveDroneIds,
   sidebarMoveDestination,
 } from '@drone/hub-model';
-import { loadRegistry } from '../host/registry';
-import { fleetDescendantIdsForActor } from './fleet-helpers';
-import { renameCanonicalGroupOrchestration } from './group-orchestration';
-import { listCanonicalGroups } from './groups-repositories';
-import {
-  UiPreferencesSettingsConflictError,
-  UiPreferencesSettingsValidationError,
-  resolveUiPreferencesSettingsResponse,
-  upsertStoredUiPreferencesSettings,
-} from './hub-settings';
-import {
-  findDroneIdByRef,
-  normalizeDroneIdentity,
-  resolveStableDroneOrPendingIdFromRef,
-} from './drone-lifecycle-registry';
-import { resolveDroneOrPendingForReadRef } from './drone-lifecycle-service';
-import { setDroneGroupMetadata, updateDroneFleetMetadata } from './drone-metadata-commands';
+import type { HubApplication } from './application/create-hub-application';
 
 type SidebarCommandResult = SidebarMoveCommandResult & Record<string, unknown>;
 type SidebarSettingsSnapshot = {
@@ -50,29 +33,20 @@ export type SidebarCommandOperations = {
   }): Promise<SidebarSettingsSnapshot>;
 };
 
-export function createSidebarCommandService(options: {
-  notifyUiPreferencesChanged(): void | Promise<void>;
-}): SidebarCommandService {
+export function createSidebarCommandService(application: HubApplication): SidebarCommandService {
   return new SidebarCommandService({
-    setDroneParent,
-    setDroneGroup,
-    renameGroup,
-    readUiPreferences: async () => await resolveUiPreferencesSettingsResponse(),
-    writeUiPreferences: async ({ uiPreferences, expectedVersion }) => {
-      try {
-        await upsertStoredUiPreferencesSettings(uiPreferences, expectedVersion);
-      } catch (error) {
-        if (error instanceof UiPreferencesSettingsConflictError) {
-          throw commandError(error.message, 409);
-        }
-        if (error instanceof UiPreferencesSettingsValidationError) {
-          throw commandError(error.message, 400);
-        }
-        throw error;
-      }
-      await options.notifyUiPreferencesChanged();
-      return await resolveUiPreferencesSettingsResponse();
-    },
+    setDroneParent: async (droneId, parentId) =>
+      await application.setDroneParent({ droneRef: droneId, parentRef: parentId }),
+    setDroneGroup: async (droneIds, group) => await application.setDroneGroup({ droneIds, group }),
+    renameGroup: async ({ repoPath, oldName, newName }) =>
+      await application.renameGroup({ groupRef: oldName, repoPath, newName }),
+    readUiPreferences: async () => await application.uiPreferences.read(),
+    writeUiPreferences: async ({ uiPreferences, expectedVersion }) =>
+      await application.uiPreferences.update({
+        uiPreferences,
+        expectedVersion,
+        notificationMode: 'sidebar-snapshot',
+      }),
   });
 }
 
@@ -170,149 +144,12 @@ export class SidebarCommandService {
           },
         };
       } catch (error: any) {
-        if (error?.code !== 'HUB_409' || attempt === 3) throw error;
+        const conflict = error?.code === 'HUB_409' || error?.statusCode === 409;
+        if (!conflict || attempt === 3) throw error;
       }
     }
     throw new Error('Failed to apply sidebar move');
   }
-}
-
-async function setDroneParent(
-  droneId: string,
-  parentId: string | null,
-): Promise<Record<string, unknown>> {
-  const resolved = await resolveDroneOrPendingForReadRef(droneId);
-  if (!resolved) throw commandError(`unknown drone: ${droneId}`, 404);
-  if (resolved.kind !== 'real') {
-    throw commandError(`drone "${droneId}" is still starting`, 409);
-  }
-
-  const registry = await loadRegistry();
-  let nextParentId: string | null = null;
-  if (parentId) {
-    if (!findDroneIdByRef(registry, parentId)) {
-      throw commandError(`unknown drone: ${parentId}`, 404);
-    }
-    nextParentId = resolveStableDroneOrPendingIdFromRef(registry, parentId);
-    if (!nextParentId) throw commandError(`unknown drone: ${parentId}`, 404);
-    if (nextParentId === resolved.id) {
-      throw commandError('cannot make a drone its own parent', 400);
-    }
-    if (fleetDescendantIdsForActor(registry, resolved.id).includes(nextParentId)) {
-      throw commandError('cannot reparent a drone beneath one of its descendants', 400);
-    }
-  }
-
-  await updateDroneFleetMetadata({
-    droneId: resolved.id,
-    transform: (fleet) => ({ ...fleet, createdBy: nextParentId }),
-  });
-  return { ok: true, id: resolved.id, parentId: nextParentId };
-}
-
-async function setDroneGroup(
-  droneIdsRaw: string[],
-  groupRaw: string | null,
-): Promise<Record<string, unknown>> {
-  const droneIds = uniqueStrings(
-    droneIdsRaw.map((rawId) => {
-      const droneId = normalizeDroneIdentity(rawId);
-      if (!droneId) throw commandError('invalid drone id (empty)', 400);
-      return droneId;
-    }),
-  );
-  if (droneIds.length === 0) throw commandError('missing droneIds', 400);
-  const normalizedGroup = String(groupRaw ?? '').trim();
-  const group =
-    !normalizedGroup || isUngroupedGroupName(normalizedGroup)
-      ? null
-      : validateGroupName(normalizedGroup);
-  const moved: Array<Record<string, unknown>> = [];
-  const rejected: Array<{ id: string; error: string }> = [];
-
-  for (const droneId of droneIds) {
-    try {
-      const resolved = await resolveDroneOrPendingForReadRef(droneId);
-      if (!resolved) throw new Error(`unknown drone: ${droneId}`);
-      const source = resolved.kind === 'real' ? resolved.drone : resolved.pending;
-      const repoPath = String(source?.repoPath ?? '').trim();
-      const previousRaw = String(source?.group ?? '').trim();
-      const previousGroup = !previousRaw || isUngroupedGroupName(previousRaw) ? null : previousRaw;
-      if (previousGroup === group) continue;
-      const record = await setDroneGroupMetadata({
-        droneId,
-        state: resolved.kind,
-        group,
-        repoPath,
-      });
-      moved.push({
-        id: droneId,
-        name: record.name,
-        previousGroup,
-        group,
-        groupId: String(record.lifecycle.groupId ?? '').trim() || null,
-        repoPath,
-      });
-    } catch (error: any) {
-      rejected.push({ id: droneId, error: String(error?.message ?? error) });
-    }
-  }
-  return { ok: true, group, moved, rejected, total: droneIds.length };
-}
-
-async function renameGroup(input: {
-  repoPath: string;
-  oldName: string;
-  newName: string;
-}): Promise<Record<string, unknown>> {
-  const groups = await listCanonicalGroups();
-  const existing = groups.find(
-    (group) => group.repoPath === input.repoPath && group.name === input.oldName,
-  );
-  if (!existing) throw commandError(`unknown group: ${input.oldName}`, 404);
-  if (isUngroupedGroupName(existing.name)) {
-    throw commandError('cannot rename Ungrouped', 400);
-  }
-  const newName = validateGroupName(input.newName);
-  if (existing.name === newName) {
-    return {
-      ok: true,
-      oldName: existing.name,
-      newName,
-      renamed: false,
-      reason: 'same-name',
-    };
-  }
-  const result = await renameCanonicalGroupOrchestration(existing.repoPath, existing.name, newName);
-  if (!result.ok) throw commandError(result.error, result.status);
-  return {
-    ok: true,
-    id: existing.id,
-    repoPath: existing.repoPath,
-    oldName: existing.name,
-    newName,
-    renamed: true,
-    movedDrones: result.movedDrones,
-    movedPending: result.movedPending,
-  };
-}
-
-function commandError(message: string, status: number): Error {
-  return Object.assign(new Error(message), { status, code: `HUB_${status}` });
-}
-
-function validateGroupName(raw: unknown): string {
-  const name = String(raw ?? '').trim();
-  if (!name) throw commandError('invalid group (must be non-empty)', 400);
-  if (name.length > 64) throw commandError('invalid group (max 64 chars)', 400);
-  if (isUngroupedGroupName(name)) {
-    throw commandError('invalid group ("Ungrouped" is reserved)', 400);
-  }
-  return name;
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.filter(Boolean))];
 }
 
 function object(value: unknown): Record<string, unknown> {

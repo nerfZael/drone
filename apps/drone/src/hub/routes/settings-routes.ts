@@ -2,8 +2,6 @@ import crypto from 'node:crypto';
 
 import type { HubRouter } from '../hub-router';
 import {
-  UiPreferencesSettingsConflictError,
-  UiPreferencesSettingsValidationError,
   type LlmProviderId,
   type StoredApiKeyProviderId,
 } from '../hub-settings';
@@ -79,10 +77,8 @@ export interface SettingsRouteDependencies {
   apiToken: string;
   droneRootPath: (...parts: string[]) => string;
   resolveUiPreferencesSettingsResponse: ServiceFunction;
-  upsertStoredUiPreferencesSettings: ServiceFunction;
+  updateUiPreferencesSettings: ServiceFunction;
   resolveUserContextSettingsResponse: ServiceFunction;
-  notifyUiPreferencesChanged: ServiceFunction;
-  notifyUiPreferencesSnapshotChanged: ServiceFunction;
   clampIntParam: (value: string | null, fallback: number, min: number, max: number) => number;
   readHubLogTail: ServiceFunction;
   HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES: number;
@@ -154,10 +150,8 @@ export function registerSettingsRoutes(
     apiToken,
     droneRootPath,
     resolveUiPreferencesSettingsResponse,
-    upsertStoredUiPreferencesSettings,
+    updateUiPreferencesSettings,
     resolveUserContextSettingsResponse,
-    notifyUiPreferencesChanged,
-    notifyUiPreferencesSnapshotChanged,
     clampIntParam,
     readHubLogTail,
     HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,
@@ -685,31 +679,15 @@ export function registerSettingsRoutes(
 
   apiRouter.post('/api/settings/ui-preferences', async ({ readJson, json: respond }) => {
     const body = await readJson<any>();
-    try {
-      await upsertStoredUiPreferencesSettings(body?.uiPreferences, body?.expectedVersion);
-    } catch (error: any) {
-      if (error instanceof UiPreferencesSettingsConflictError) {
-        respond(409, {
-          ok: false,
-          error: error.message,
-          uiPreferences: error.uiPreferences,
-          updatedAt: error.updatedAt,
-          version: error.version,
-        });
-        return;
-      }
-      if (error instanceof UiPreferencesSettingsValidationError) {
-        respond(400, { ok: false, error: error.message });
-        return;
-      }
-      throw error;
-    }
-    if (body?.notificationMode === 'sidebar_snapshot') {
-      await notifyUiPreferencesSnapshotChanged();
-    } else {
-      await notifyUiPreferencesChanged();
-    }
-    respond(200, await resolveUiPreferencesSettingsResponse());
+    respond(
+      200,
+      await updateUiPreferencesSettings({
+        uiPreferences: body?.uiPreferences,
+        expectedVersion: body?.expectedVersion,
+        notificationMode:
+          body?.notificationMode === 'sidebar_snapshot' ? 'sidebar-snapshot' : 'default',
+      }),
+    );
   });
 
   apiRouter.get('/api/settings/hub/logs', async ({ url, json: respond }) => {

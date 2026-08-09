@@ -1,5 +1,6 @@
 import { parseBoolParam } from './hub-format';
 import { readJsonBody, sendJson as json } from './hub-http';
+import { describeHubError } from './domain-errors';
 import type { DroneRuntime } from '../host/runtime';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
 
@@ -30,12 +31,10 @@ function createDroneLifecycleServiceHandler(
     dvmBaseSet,
     dvmStop,
     enqueueProvisioning,
-    resolveCanonicalGroupReference,
     fileExists,
     findDroneIdByRef,
     hubLog,
     isDraftDroneEntry,
-    isUngroupedGroupName,
     loadRegistry,
     looksLikeContainerNotRunningError,
     looksLikeMissingContainerError,
@@ -61,10 +60,9 @@ function createDroneLifecycleServiceHandler(
     revokeMcpAccessTokensForDrone,
     runDroneLifecycleAction,
     setDroneEnvironmentMetadata,
-    setDroneGroupMetadata,
+    setDroneGroup,
     stopAllDroneChatActivity,
     triggerArchiveCleanup,
-    validateGroupNameOrThrow,
     withLockedDroneContainer,
   } = deps;
   return async ({ req, res, url: u, method, parts }) => {
@@ -86,94 +84,24 @@ function createDroneLifecycleServiceHandler(
           return;
         }
 
-        const rawList = Array.isArray(body?.droneIds)
-          ? body.droneIds
-          : Array.isArray(body?.drones)
-            ? body.drones
-            : [];
-        if (rawList.length === 0) {
-          json(res, 400, { ok: false, error: 'missing droneIds (expected non-empty array)' });
-          return;
+        try {
+          json(
+            res,
+            200,
+            await setDroneGroup({
+              droneIds: Array.isArray(body?.droneIds)
+                ? body.droneIds
+                : Array.isArray(body?.drones)
+                  ? body.drones
+                  : [],
+              group: body?.group,
+              groupId: body?.groupId,
+            }),
+          );
+        } catch (error) {
+          const descriptor = describeHubError(error);
+          json(res, descriptor.statusCode, descriptor.body);
         }
-
-        const seen = new Set<string>();
-        const dronesToMove: string[] = [];
-        for (const rawId of rawList) {
-          const id = normalizeDroneIdentity(String(rawId ?? '').trim());
-          if (!id) {
-            json(res, 400, { ok: false, error: 'invalid drone id (empty)' });
-            return;
-          }
-          if (seen.has(id)) continue;
-          seen.add(id);
-          dronesToMove.push(id);
-        }
-
-        const groupRaw = body?.groupId ?? body?.group;
-        if (!(groupRaw == null || typeof groupRaw === 'string')) {
-          json(res, 400, { ok: false, error: 'invalid group (expected string or null)' });
-          return;
-        }
-        const groupValue = String(groupRaw ?? '').trim();
-        const referencedGroup = body?.groupId ? await resolveCanonicalGroupReference(groupValue) : null;
-        if (body?.groupId && !referencedGroup) {
-          json(res, 404, { ok: false, error: `unknown group: ${groupValue}` });
-          return;
-        }
-        const resolvedGroupValue = referencedGroup?.name ?? groupValue;
-        const nextGroup = !resolvedGroupValue || isUngroupedGroupName(resolvedGroupValue) ? null : resolvedGroupValue;
-        if (nextGroup) {
-          try {
-            validateGroupNameOrThrow(nextGroup);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-        }
-
-        const moved: Array<{
-          id: string;
-          name: string;
-          previousGroup: string | null;
-          group: string | null;
-          groupId: string | null;
-          repoPath: string;
-        }> = [];
-        const rejected: Array<{ id: string; error: string }> = [];
-        for (const id of dronesToMove) {
-          try {
-            // eslint-disable-next-line no-await-in-loop
-            const resolved = await resolveDroneOrPendingForReadRef(id);
-            if (!resolved) throw new Error(`unknown drone: ${id}`);
-            const source = resolved.kind === 'real' ? resolved.drone : resolved.pending;
-            const repoPath = String(source?.repoPath ?? '').trim();
-            if (referencedGroup && referencedGroup.repoPath !== repoPath) {
-              throw new Error('group belongs to a different repository');
-            }
-            const prevRaw = String(source?.group ?? '').trim();
-            const previousGroup = !prevRaw || isUngroupedGroupName(prevRaw) ? null : prevRaw;
-            if (previousGroup === nextGroup) continue;
-            // eslint-disable-next-line no-await-in-loop
-            const record = await setDroneGroupMetadata({
-              droneId: id,
-              state: resolved.kind,
-              group: nextGroup,
-              repoPath,
-            });
-            moved.push({
-              id,
-              name: record.name,
-              previousGroup,
-              group: nextGroup,
-              groupId: String(record.groupId ?? '').trim() || null,
-              repoPath,
-            });
-          } catch (error: any) {
-            rejected.push({ id, error: String(error?.message ?? error) });
-          }
-        }
-
-        json(res, 200, { ok: true, group: nextGroup, moved, rejected, total: dronesToMove.length });
         return;
       }
 
@@ -490,8 +418,8 @@ function createDroneLifecycleServiceHandler(
         }
         if (forget) {
           for (const removedDroneId of [droneId, ...r.removedDescendants]) {
-            const removedSnapshot = regAnySnapshot?.drones?.[removedDroneId] ??
-              regAnySnapshot?.pending?.[removedDroneId];
+            const removedSnapshot =
+              regAnySnapshot?.drones?.[removedDroneId] ?? regAnySnapshot?.pending?.[removedDroneId];
             if (removedSnapshot) await deleteNativeChatSessionsForDrone(removedSnapshot);
           }
         }

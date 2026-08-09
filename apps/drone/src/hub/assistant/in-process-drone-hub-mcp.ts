@@ -3,6 +3,7 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import type { Transport, TransportSendOptions } from '@modelcontextprotocol/sdk/shared/transport.js';
 
 import { createDroneHubMcpServer } from '../mcp-server';
+import type { HubApplication } from '../application/create-hub-application';
 import type { McpTokenIdentity } from '../mcp-tokens';
 import { resolveEffectiveSpeechSettings } from '../hub-settings';
 import type { RenameDroneCommand } from '../drone-rename-command';
@@ -53,6 +54,7 @@ export async function createInProcessDroneHubMcpClient(input: {
   nativeThreadId?: string;
   legacyIdleSubscriptionTools?: boolean;
   renameDrone?: RenameDroneCommand;
+  hubApplication?: HubApplication;
 }): Promise<Client> {
   const speechSettings = await resolveEffectiveSpeechSettings();
   const principal = input.principal ?? {
@@ -67,6 +69,7 @@ export async function createInProcessDroneHubMcpClient(input: {
     correlationId: input.correlationId,
     ...(input.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
     ...(input.renameDrone ? { renameDrone: input.renameDrone } : {}),
+    ...(input.hubApplication ? { hubApplication: input.hubApplication } : {}),
     ...(principal.kind === 'chat'
       ? {}
       : {

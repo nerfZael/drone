@@ -30,4 +30,4 @@ the binary body over HTTP and then sends only the attachment id in `chat.prompt`
 destination is reachable only through another mesh device, the same session accepts bounded base64
 chunks through `chat.prompt`. HTTP is therefore an optimization, not a connectivity requirement.
 
-State is stored under the normal Drone Hub data directory in `device-mesh/`. The Hub API token is used only by local loopback adapters and is never placed in a mesh message.
+State is stored under the normal Drone Hub data directory in `device-mesh/`. In-process capabilities call the Hub application layer directly where available; the Hub API token remains only for legacy local loopback adapters and is never placed in a mesh message.

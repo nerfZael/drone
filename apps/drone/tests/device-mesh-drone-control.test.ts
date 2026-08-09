@@ -185,10 +185,53 @@ describe('device mesh drone summaries', () => {
       });
     }) as typeof fetch;
     try {
-      const capability = createDroneControlCapability({
-        baseUrl: () => 'http://127.0.0.1:7777',
-        apiToken: 'test',
-      });
+      const capability = createDroneControlCapability(
+        {
+          baseUrl: () => 'http://127.0.0.1:7777',
+          apiToken: 'test',
+        },
+        undefined,
+        {
+          hubApplication: {
+            listRepositories: async () => ({
+              ok: true,
+              repos: [{ path: '/work/one' }, { path: '/work/empty' }],
+              count: 2,
+            }),
+            listGroups: async () => ({
+              ok: true,
+              groups: [
+                {
+                  id: 'group-review',
+                  name: 'Review',
+                  repoPath: '/work/one',
+                  parentId: null,
+                  createdAt: '2026-07-13T10:00:00.000Z',
+                },
+              ],
+              total: 1,
+            }),
+            uiPreferences: {
+              read: async () => ({
+                ok: true,
+                version: 12,
+                updatedAt: '2026-07-14T11:00:00.000Z',
+                uiPreferences: {
+                  sidebarGroupOrder: ['repo:repo:/work/one'],
+                  sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
+                  sidebarNodeOrderByParent: { root: ['drone:one'] },
+                  sidebarChatOrderByDrone: { one: ['review', 'default'] },
+                  pinnedDroneIds: ['one'],
+                },
+              }),
+            },
+            readDeleteActionSettings: async () => ({
+              ok: true,
+              deleteAction: { mode: 'permanent' },
+            }),
+          } as any,
+        },
+      );
       await expect(
         capability.invoke('drones.list', { includeCreateOptions: true }),
       ).resolves.toMatchObject({
@@ -233,6 +276,10 @@ describe('device mesh drone summaries', () => {
           ],
         },
       });
+      expect(requestedPaths).not.toContain('/api/repos');
+      expect(requestedPaths).not.toContain('/api/groups');
+      expect(requestedPaths).not.toContain('/api/settings/ui-preferences');
+      expect(requestedPaths).not.toContain('/api/settings/delete-action');
       expect(requestedPaths.some((path) => path.startsWith('/api/repos/branches'))).toBe(false);
 
       await expect(

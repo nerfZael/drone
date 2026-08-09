@@ -23,6 +23,7 @@ import { RemoteWorkspaceTarget } from './features/cross-device-assistant/remote-
 import { createWorkspaceCapability } from './features/cross-device-assistant/workspace-capability';
 import { createProviderCredentialsCapability } from './features/provider-credentials/provider-credentials-capability';
 import type { SidebarCommandService } from '../sidebar-command-service';
+import type { HubApplication } from '../application/create-hub-application';
 import { ProviderCredentialsHttp } from './features/provider-credentials/provider-credentials-http';
 
 export async function createDeviceMeshService(options: {
@@ -32,6 +33,7 @@ export async function createDeviceMeshService(options: {
   ingressPort?: number;
   createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
   sidebarCommands: SidebarCommandService;
+  hubApplication?: HubApplication;
   renameDrone?: RenameDroneCommand;
 }) {
   const identity = await loadOrCreateDeviceIdentity(options.rootDir);
@@ -55,6 +57,7 @@ export async function createDeviceMeshService(options: {
       chatAttachments,
       {
         sidebarCommands: options.sidebarCommands,
+        hubApplication: options.hubApplication,
         createdDroneAutoRename: options.createdDroneAutoRename,
         renameDrone: options.renameDrone,
         broadcastFileChange: (payload, targetDeviceIds) =>
