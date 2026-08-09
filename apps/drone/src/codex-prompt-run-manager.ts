@@ -129,33 +129,55 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   }
 
   async cancel(message: TMessage): Promise<TMessage> {
+    if (isTerminal(message.state)) return message;
     const spec = message.codexAppServer;
     const session = this.sessions.get(spec.sessionKey);
-    if (!session || message.state === 'queued') {
-      if (session) {
-        session.queuedMessageIds = session.queuedMessageIds.filter((id) => id !== message.id);
-      }
+    if (!session) {
       return await this.markMessageCanceled(message);
     }
+
+    // A turn/start request can take long enough that waiting behind the session
+    // operation would make cancellation appear unresponsive. Record the request
+    // immediately; startRun will interrupt the exact turn once it has an id.
     if (session.startingRun?.messageIds.includes(message.id)) {
       session.cancelRequestedMessageIds.add(message.id);
       return await this.markMessageCanceled(message);
     }
-    if (
-      session.activeRun?.messageIds.includes(message.id) &&
-      session.activeTurnId &&
-      session.threadId
-    ) {
-      const canceled = await this.markMessageCanceled(message);
-      await this.serialize(session, async () => {
-        await session.connection.call('turn/interrupt', {
-          threadId: session.threadId,
-          turnId: session.activeTurnId,
-        });
-      }).catch(() => undefined);
-      return (await this.options.loadMessage(message.id)) ?? canceled;
-    }
-    return (await this.options.loadMessage(message.id)) ?? message;
+
+    return await this.serialize(session, async () => {
+      const current = (await this.options.loadMessage(message.id)) ?? message;
+      if (isTerminal(current.state)) return current;
+
+      if (session.queuedMessageIds.includes(message.id)) {
+        session.queuedMessageIds = session.queuedMessageIds.filter((id) => id !== message.id);
+        return await this.markMessageCanceled(current);
+      }
+
+      if (session.startingRun?.messageIds.includes(message.id)) {
+        session.cancelRequestedMessageIds.add(message.id);
+        return await this.markMessageCanceled(current);
+      }
+
+      if (
+        !session.activeRun?.messageIds.includes(message.id) ||
+        !session.activeTurnId ||
+        !session.threadId
+      ) {
+        return current;
+      }
+
+      // Re-checking the target inside the serialized operation prevents a late
+      // cancel from interrupting the next queued turn after this one completes.
+      const threadId = session.threadId;
+      const turnId = session.activeTurnId;
+      try {
+        await session.connection.call('turn/interrupt', { threadId, turnId });
+      } catch {
+        return (await this.options.loadMessage(message.id)) ?? current;
+      }
+      const latest = (await this.options.loadMessage(message.id)) ?? current;
+      return isTerminal(latest.state) ? latest : await this.markMessageCanceled(latest);
+    });
   }
 
   async runForMessage(message: TMessage): Promise<CodexPromptRun | null> {
@@ -176,6 +198,11 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   async failInterrupted(message: TMessage, reason: string, alreadyMutating = false): Promise<void> {
     const run = await this.runForMessage(message);
     if (run) {
+      if (isTerminal(run.state)) {
+        const save = () => this.saveTerminalRunMessages(run);
+        await (alreadyMutating ? save() : this.options.mutate(save));
+        return;
+      }
       await this.failRunAndMessages(run, new Error(reason), alreadyMutating);
       return;
     }
@@ -239,7 +266,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       },
       onExit: (error) => {
         if (!this.shuttingDown && this.sessions.get(session.key) === session) {
-          return this.failSession(session, error);
+          return this.serialize(session, () => this.failSession(session, error));
         }
       },
     });
@@ -326,7 +353,10 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
 
   private async startRun(session: CodexRunSession, messageId: string): Promise<void> {
     const message = await this.options.loadMessage(messageId);
-    if (!message) return;
+    if (!message || message.state !== 'queued') {
+      await this.startNextRun(session);
+      return;
+    }
     const startedAt = this.now();
     let run = await this.options.mutate(async () => {
       const created = await this.options.createRun(message, startedAt);
@@ -404,6 +434,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       return false;
     }
     const updatedAt = this.now();
+    const previousResponseMessageId = run.responseMessageId;
     const updatedRun: CodexPromptRun = {
       ...run,
       messageIds: [...run.messageIds, message.id],
@@ -412,6 +443,12 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     };
     await this.options.mutate(async () => {
       await this.options.saveRun(updatedRun);
+      if (previousResponseMessageId !== message.id) {
+        const previousResponse = await this.options.loadMessage(previousResponseMessageId);
+        if (previousResponse) {
+          await this.options.saveMessage({ ...previousResponse, updatedAt });
+        }
+      }
       await this.options.saveMessage({
         ...message,
         state: 'running',
@@ -454,27 +491,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     };
     await this.options.mutate(async () => {
       await this.options.saveRun(completedRun);
-      for (const id of completedRun.messageIds) {
-        const message = await this.options.loadMessage(id);
-        if (!message) continue;
-        const isResponseMessage = id === completedRun.responseMessageId;
-        const state =
-          message.state === 'canceled' ? 'canceled' : isResponseMessage ? runState : 'done';
-        await this.options.saveMessage({
-          ...message,
-          state,
-          finishedAt,
-          updatedAt: finishedAt,
-          exitCode: state === 'done' ? 0 : 1,
-          ...(state === 'failed' ? { error: completedRun.error } : {}),
-          codexAppServer: {
-            ...message.codexAppServer,
-            runId: completedRun.id,
-            threadId: completedRun.threadId,
-            turnId: completedRun.turnId,
-          },
-        });
-      }
+      await this.saveTerminalRunMessages(completedRun);
     });
     session.activeRun = null;
     session.activeTurnId = null;
@@ -498,6 +515,31 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     };
     await this.options.mutate(() => this.options.saveMessage(canceled));
     return canceled;
+  }
+
+  private async saveTerminalRunMessages(run: CodexPromptRun): Promise<void> {
+    const finishedAt = run.finishedAt ?? this.now();
+    for (const id of run.messageIds) {
+      const message = await this.options.loadMessage(id);
+      if (!message) continue;
+      const isResponseMessage = id === run.responseMessageId;
+      const state =
+        message.state === 'canceled' ? 'canceled' : isResponseMessage ? run.state : 'done';
+      await this.options.saveMessage({
+        ...message,
+        state,
+        finishedAt,
+        updatedAt: finishedAt,
+        exitCode: state === 'done' ? 0 : 1,
+        error: state === 'failed' ? run.error : state === 'canceled' ? message.error : undefined,
+        codexAppServer: {
+          ...message.codexAppServer,
+          runId: run.id,
+          threadId: run.threadId,
+          turnId: run.turnId,
+        },
+      });
+    }
   }
 
   private async failSession(session: CodexRunSession, error: Error): Promise<void> {

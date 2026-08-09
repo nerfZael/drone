@@ -986,6 +986,16 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
       expect(persistedMessage.codexAppServer).not.toHaveProperty('outputOwner');
     }
 
+    const rootMessagePath = path.join(dataDir, 'prompts', 'jobs', `${rootId}.json`);
+    const partiallyPersistedRoot = JSON.parse(fs.readFileSync(rootMessagePath, 'utf8'));
+    partiallyPersistedRoot.state = 'running';
+    delete partiallyPersistedRoot.finishedAt;
+    delete partiallyPersistedRoot.exitCode;
+    fs.writeFileSync(rootMessagePath, JSON.stringify(partiallyPersistedRoot, null, 2));
+    const repairedRoot = await waitForPromptJob(baseUrl, token, rootId);
+    expect(repairedRoot.state).toBe('done');
+    expect(JSON.parse(fs.readFileSync(rootMessagePath, 'utf8')).state).toBe('done');
+
     const requests = fs
       .readFileSync(requestsPath, 'utf8')
       .trim()
@@ -1001,6 +1011,39 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
     expect(steering.every((request) => request.params.expectedTurnId === 'turn-steering-1')).toBe(
       true,
     );
+
+    const canceledActiveId = `codex-cancel-active-${port}`;
+    const afterCanceledId = `codex-after-cancel-${port}`;
+    expect((await enqueue(canceledActiveId, 'Cancel this active turn', 'queue')).disposition).toBe(
+      'started',
+    );
+    expect((await enqueue(afterCanceledId, 'Run after cancellation', 'queue')).disposition).toBe(
+      'queued',
+    );
+    const activeCancelResponse = await fetch(
+      `${baseUrl}/v1/prompts/${encodeURIComponent(canceledActiveId)}/cancel`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+      },
+    );
+    expect(activeCancelResponse.status).toBe(200);
+    expect((await activeCancelResponse.json())?.job?.state).toBe('canceled');
+    expect((await waitForTerminalPromptJob(baseUrl, token, canceledActiveId)).state).toBe(
+      'canceled',
+    );
+    expect((await waitForTerminalPromptJob(baseUrl, token, afterCanceledId)).state).toBe('done');
+
+    const requestsAfterCancel = fs
+      .readFileSync(requestsPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const interruptedTurnIds = requestsAfterCancel
+      .filter((request) => request.method === 'turn/interrupt')
+      .map((request) => request.params.turnId);
+    expect(interruptedTurnIds).toContain('turn-steering-2');
+    expect(interruptedTurnIds).not.toContain('turn-steering-3');
 
     const delayedId = `codex-delayed-start-${port}`;
     const delayedEnqueue = enqueue(delayedId, 'Delayed start cancellation', 'queue');
