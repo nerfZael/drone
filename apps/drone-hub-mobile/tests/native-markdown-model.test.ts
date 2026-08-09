@@ -155,4 +155,16 @@ const ready = true;
     expect(source).toContain('style={[styles.codeText, styles.codeTextWrapped]}');
     expect(source).not.toContain('<Pressable\n      accessible={false}');
   });
+
+  test('keeps rendered Mermaid diagrams inside a horizontally scrollable frame', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/NativeMermaidDiagram.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain('<ScrollView\n        horizontal\n        nestedScrollEnabled');
+    expect(source).toContain('style={styles.scrollFrame}');
+    expect(source).toContain("maxWidth: '100%'");
+    expect(source).toContain('flexShrink: 1');
+  });
 });
