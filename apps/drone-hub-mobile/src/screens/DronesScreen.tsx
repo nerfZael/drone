@@ -128,6 +128,7 @@ import {
 const APP_HEADER_HEIGHT = 58;
 const NEW_DRONE_ATTACHMENT_READY_TIMEOUT_MS = 2 * 60_000;
 const NEW_DRONE_ATTACHMENT_READY_POLL_MS = 750;
+const MOBILE_DRONE_STARTING_PHASES = new Set(['starting', 'creating', 'seeding']);
 const EMPTY_CHAT_HISTORY_PAGE: MobileChatHistoryPage = {
   beforeCursor: null,
   hasOlder: false,
@@ -145,6 +146,10 @@ function inlinePromptAttachments(attachments: readonly MobileChatAttachment[]) {
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isMobileDroneStarting(drone: Pick<MobileDroneSummary, 'phase'>): boolean {
+  return MOBILE_DRONE_STARTING_PHASES.has(drone.phase.trim().toLowerCase());
 }
 
 function normalizedChatMutationList(raw: unknown, fallback: readonly string[]): string[] {
@@ -885,52 +890,61 @@ export function DronesScreen({
     }
   }, [targetReachable, targetId, targetSupportsDrones]);
 
-  const openDrone = (drone: MobileDroneSummary, requestedChat?: string) =>
-    run('chats', async () => {
-      createDefaultsRequestVersion.current += 1;
-      const destinationId = targetId;
-      const requestVersion = ++openDroneVersion.current;
-      chatReadVersion.current += 1;
-      const knownChats = drone.chats;
-      const knownChat =
-        requestedChat && knownChats.includes(requestedChat) ? requestedChat : (knownChats[0] ?? '');
-      selectedRef.current = drone;
-      chatNameRef.current = knownChat;
-      setSelected(drone);
-      setChats(knownChats);
-      setChatName(knownChat);
-      setChatModel('');
-      setChatReasoning('');
-      setChatAgentId(null);
-      setChatAgentPermissionMode('full-access');
-      setChatApprovalPolicy('ask');
-      setChatModels([]);
-      setTurns([]);
-      setNativeMessages(null);
-      setNativeChatId('');
-      setNativeThread(null);
-      setPendingApprovals([]);
-      setAccessOpen(false);
-      setAccessDirty(false);
-      setPendingPrompts([]);
-      const result = await requestDroneControl(destinationId, 'chats.list', {
-        droneId: drone.id,
-      });
-      if (targetIdRef.current !== destinationId || openDroneVersion.current !== requestVersion)
-        return;
-      const listedChats: string[] = Array.isArray(result?.chats)
-        ? result.chats
-            .map((chat: unknown) => String(chat ?? '').trim())
-            .filter((chat: string) => Boolean(chat))
-        : [];
-      const nextChats = listedChats.length > 0 ? [...new Set(listedChats)] : drone.chats;
-      const nextChat =
-        requestedChat && nextChats.includes(requestedChat) ? requestedChat : (nextChats[0] ?? '');
-      setChats(nextChats);
-      chatNameRef.current = nextChat;
-      setChatName(nextChat);
-      if (nextChat) await readChat(drone.id, nextChat);
+  const activateDrone = async (
+    drone: MobileDroneSummary,
+    requestedChat?: string,
+    options: { deferChatLoad?: boolean } = {},
+  ): Promise<void> => {
+    createDefaultsRequestVersion.current += 1;
+    const destinationId = targetId;
+    const requestVersion = ++openDroneVersion.current;
+    chatReadVersion.current += 1;
+    const knownChats = drone.chats;
+    const knownChat =
+      requestedChat && knownChats.includes(requestedChat) ? requestedChat : (knownChats[0] ?? '');
+    selectedRef.current = drone;
+    chatNameRef.current = knownChat;
+    setSelected(drone);
+    setChats(knownChats);
+    setChatName(knownChat);
+    setChatModel('');
+    setChatReasoning('');
+    setChatModelProvider('drone');
+    setChatAgentId(null);
+    setChatAgentPermissionMode('full-access');
+    setChatApprovalPolicy('ask');
+    setChatModels([]);
+    setTurns([]);
+    setNativeMessages(null);
+    setNativeChatId('');
+    setNativeThread(null);
+    setPendingApprovals([]);
+    setAccessOpen(false);
+    setAccessDirty(false);
+    setPendingPrompts([]);
+    // Starting clones publish a chat change when their copied chats are ready. Reading now
+    // returns a transient conflict and replaces the useful starting state with an error.
+    if (options.deferChatLoad) return;
+    const result = await requestDroneControl(destinationId, 'chats.list', {
+      droneId: drone.id,
     });
+    if (targetIdRef.current !== destinationId || openDroneVersion.current !== requestVersion) return;
+    const listedChats: string[] = Array.isArray(result?.chats)
+      ? result.chats
+          .map((chat: unknown) => String(chat ?? '').trim())
+          .filter((chat: string) => Boolean(chat))
+      : [];
+    const nextChats = listedChats.length > 0 ? [...new Set(listedChats)] : drone.chats;
+    const nextChat =
+      requestedChat && nextChats.includes(requestedChat) ? requestedChat : (nextChats[0] ?? '');
+    setChats(nextChats);
+    chatNameRef.current = nextChat;
+    setChatName(nextChat);
+    if (nextChat) await readChat(drone.id, nextChat);
+  };
+
+  const openDrone = (drone: MobileDroneSummary, requestedChat?: string) =>
+    run('chats', () => activateDrone(drone, requestedChat));
 
   const readChat = (droneId: string, nextChat: string): Promise<void> => {
     const destinationId = targetId;
@@ -1476,7 +1490,7 @@ export function DronesScreen({
       if (drone?.phase === 'error' || drone?.statusOk === false) {
         throw new Error(drone.statusError || 'The drone failed while starting.');
       }
-      if (drone && !['starting', 'creating', 'seeding'].includes(drone.phase)) return;
+      if (drone && !isMobileDroneStarting(drone)) return;
       await wait(NEW_DRONE_ATTACHMENT_READY_POLL_MS);
     }
     throw new Error('Timed out waiting for the drone to accept image attachments.');
@@ -2309,28 +2323,11 @@ export function DronesScreen({
         clonedDrone,
         ...current.filter((drone) => drone.id !== clonedDrone.id),
       ]);
-      selectedRef.current = clonedDrone;
-      setSelected(clonedDrone);
       const nextChats = clonedDrone.chats.length > 0 ? clonedDrone.chats : ['default'];
       const nextChat = nextChats.includes('default') ? 'default' : nextChats[0]!;
-      chatNameRef.current = nextChat;
-      setChats(nextChats);
-      setChatName(nextChat);
-      setChatModel('');
-      setChatReasoning('');
-      setChatModelProvider('drone');
-      setChatAgentId(null);
-      setChatAgentPermissionMode('full-access');
-      setChatApprovalPolicy('ask');
-      setChatModels([]);
-      setTurns([]);
-      setNativeMessages(null);
-      setNativeChatId('');
-      setNativeThread(null);
-      setAccessOpen(false);
-      setAccessDirty(false);
-      setPendingApprovals([]);
-      setPendingPrompts([]);
+      await activateDrone(clonedDrone, nextChat, {
+        deferChatLoad: isMobileDroneStarting(clonedDrone),
+      });
       await loadDrones(true);
     });
   };
@@ -2440,9 +2437,7 @@ export function DronesScreen({
                     busy.startsWith('clone-') ||
                     selected.runtime.trim().toLowerCase() === 'host' ||
                     selected.draft === true ||
-                    ['starting', 'creating', 'seeding'].includes(
-                      selected.phase.trim().toLowerCase(),
-                    ),
+                    isMobileDroneStarting(selected),
                 }
               : {}),
             onRename: () => openDroneRename(selected),
