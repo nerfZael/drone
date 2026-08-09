@@ -1,4 +1,5 @@
 import type { AgentPlan, AgentRunActivity } from '@drone/assistant-chat';
+import { codexPromptOwnsResponse } from './codex-prompt-run';
 import type { PendingPrompt } from './drone-pending-prompts';
 import { finalizeDroneRunFileChanges } from './run-file-changes';
 
@@ -303,9 +304,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       }
       if (jobState === 'queued' || jobState === 'running') {
         const ownsLiveOutput =
-          jobKind !== 'codex' ||
-          !job?.codexAppServer ||
-          job.codexAppServer.outputOwner !== false;
+          jobKind !== 'codex' || !job?.codexAppServer || codexPromptOwnsResponse(job, id);
         const liveState =
           jobState === 'running' && ownsLiveOutput ? parseLiveAgentState(jobKind, job) : {};
         const parsedBlip = jobKind === 'blip' && jobState === 'running' ? liveState : null;
@@ -429,7 +428,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         const startedAt = terminalStartedAt ?? promptAt;
         if (jobKind === 'codex') {
           const parsed = parseCodexJobTranscript(job);
-          if (job?.codexAppServer && job.codexAppServer.outputOwner === false) {
+          if (!codexPromptOwnsResponse(job, id)) {
             turns.push({
               at: promptAt,
               promptAt,
