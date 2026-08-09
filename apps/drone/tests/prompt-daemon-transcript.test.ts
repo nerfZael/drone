@@ -926,21 +926,30 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
         baseUrl,
         token,
         rootId,
-        (job) => job?.codexAppServer?.outputOwner === false,
+        (job) => job?.codexAppServer?.run?.responseMessageId === steerTwoId,
       ),
       waitForRunningPromptJob(
         baseUrl,
         token,
         steerOneId,
-        (job) => job?.codexAppServer?.outputOwner === false,
+        (job) => job?.codexAppServer?.run?.responseMessageId === steerTwoId,
       ),
       waitForRunningPromptJob(
         baseUrl,
         token,
         steerTwoId,
-        (job) => job?.codexAppServer?.outputOwner === true,
+        (job) => job?.codexAppServer?.run?.responseMessageId === steerTwoId,
       ),
     ]);
+    expect(liveRoot.codexAppServer.run).toMatchObject({
+      id: rootId,
+      messageIds: [rootId, steerOneId, steerTwoId],
+      responseMessageId: steerTwoId,
+    });
+    expect(liveSteerOne.codexAppServer.run.id).toBe(rootId);
+    expect(liveSteerTwo.codexAppServer.run.id).toBe(rootId);
+    expect(liveRoot.stdoutPath).toBe(liveSteerOne.stdoutPath);
+    expect(liveRoot.stdoutPath).toBe(liveSteerTwo.stdoutPath);
     expect(liveRoot.codexAppServer.outputOwner).toBe(false);
     expect(liveSteerOne.codexAppServer.outputOwner).toBe(false);
     expect(liveSteerTwo.codexAppServer.outputOwner).toBe(true);
@@ -950,14 +959,32 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
       waitForPromptJob(baseUrl, token, steerOneId),
       waitForPromptJob(baseUrl, token, steerTwoId),
     ]);
-    expect(root.codexAppServer.outputOwner).toBe(false);
-    expect(steerOne.codexAppServer.outputOwner).toBe(false);
-    expect(steerTwo.codexAppServer.outputOwner).toBe(true);
+    expect(root.codexAppServer.run.responseMessageId).toBe(steerTwoId);
+    expect(steerOne.codexAppServer.run.id).toBe(root.codexAppServer.run.id);
+    expect(steerTwo.codexAppServer.run.id).toBe(root.codexAppServer.run.id);
+    expect(root.stdoutPath).toBe(steerOne.stdoutPath);
+    expect(root.stdoutPath).toBe(steerTwo.stdoutPath);
     expect(steerTwo.transcript).toMatchObject({
       threadId: 'thread-steering',
       message: 'Combined steered answer.',
       terminalEvent: 'turn.completed',
     });
+    const persistedRun = JSON.parse(
+      fs.readFileSync(path.join(dataDir, 'prompts', 'runs', `${rootId}.json`), 'utf8'),
+    );
+    expect(persistedRun).toMatchObject({
+      id: rootId,
+      state: 'done',
+      messageIds: [rootId, steerOneId, steerTwoId],
+      responseMessageId: steerTwoId,
+    });
+    for (const messageId of [rootId, steerOneId, steerTwoId]) {
+      const persistedMessage = JSON.parse(
+        fs.readFileSync(path.join(dataDir, 'prompts', 'jobs', `${messageId}.json`), 'utf8'),
+      );
+      expect(persistedMessage.codexAppServer.runId).toBe(rootId);
+      expect(persistedMessage.codexAppServer).not.toHaveProperty('outputOwner');
+    }
 
     const requests = fs
       .readFileSync(requestsPath, 'utf8')
@@ -977,12 +1004,7 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
 
     const delayedId = `codex-delayed-start-${port}`;
     const delayedEnqueue = enqueue(delayedId, 'Delayed start cancellation', 'queue');
-    await waitForRunningPromptJob(
-      baseUrl,
-      token,
-      delayedId,
-      (job) => !job?.codexAppServer?.turnId,
-    );
+    await waitForRunningPromptJob(baseUrl, token, delayedId, (job) => !job?.codexAppServer?.turnId);
     const cancelResponse = await fetch(
       `${baseUrl}/v1/prompts/${encodeURIComponent(delayedId)}/cancel`,
       {
