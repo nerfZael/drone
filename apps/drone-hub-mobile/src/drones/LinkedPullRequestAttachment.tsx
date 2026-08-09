@@ -24,8 +24,10 @@ import { ConfirmDialog } from '../components/Ui';
 import type { MobileLinkedPullRequestContext } from './use-drone-linked-pull-requests';
 import {
   MOBILE_PULL_REQUEST_MERGE_METHOD_OPTIONS,
+  mobilePullRequestDiffStatsPresentation,
   mobilePullRequestMergeFailureMessage,
   mobilePullRequestMergePresentation,
+  type MobilePullRequestDiffStats,
   type MobilePullRequestMergeMethod,
 } from './linked-pull-request-model';
 
@@ -55,6 +57,23 @@ function TonePill({ label, tone }: { label: string; tone: StatusTone }) {
   );
 }
 
+function PullRequestDiffStats({ stats }: { stats: MobilePullRequestDiffStats }) {
+  const presentation = mobilePullRequestDiffStatsPresentation(stats);
+  return (
+    <View
+      accessible
+      accessibilityLabel={presentation.accessibilityLabel}
+      style={styles.diffStats}
+    >
+      <Text style={[styles.diffStatText, styles.diffFiles]}>({presentation.changed})</Text>
+      <Text style={[styles.diffStatText, styles.diffAdded]}>+{presentation.additions}</Text>
+      <Text style={[styles.diffStatText, styles.diffDeleted]}>-{presentation.deletions}</Text>
+      <Text style={styles.diffDivider}>|</Text>
+      <Text style={[styles.diffStatText, styles.diffNet]}>{presentation.netLabel}</Text>
+    </View>
+  );
+}
+
 function LinkedPullRequestRow({
   link,
   context,
@@ -73,6 +92,7 @@ function LinkedPullRequestRow({
       : null;
   const state = String(pullRequest?.state ?? '').trim().toLowerCase();
   const isOpen = state === 'open';
+  const isDraft = isOpen && Boolean(pullRequest?.draft);
   const blockedReason = pullRequest ? githubPullRequestMergeBlockedReason(pullRequest) : null;
   const forceReason = pullRequest ? githubPullRequestForceMergeReason(pullRequest) : null;
   const mergePresentation = mobilePullRequestMergePresentation({
@@ -91,7 +111,9 @@ function LinkedPullRequestRow({
   const anyActionBusy = context.busyAction != null;
   const showActions = isOpen && sameRepo && (context.canMerge || context.canClose);
   const statusLabel = pullRequest
-    ? state
+    ? isDraft
+      ? 'Draft'
+      : state
       ? `${state[0]?.toUpperCase()}${state.slice(1)}`
       : 'Unknown'
     : context.loading
@@ -173,7 +195,10 @@ function LinkedPullRequestRow({
               <ActivityIndicator color={colors.muted} size={11} />
             </View>
           ) : (
-            <TonePill label={statusLabel} tone={pullRequest ? statusTone(state) : 'muted'} />
+            <TonePill
+              label={statusLabel}
+              tone={pullRequest ? (isDraft ? 'muted' : statusTone(state)) : 'muted'}
+            />
           )}
         </View>
         <Pressable
@@ -197,6 +222,7 @@ function LinkedPullRequestRow({
       </Pressable>
       <View style={styles.metaRow}>
         <Text style={styles.repo}>{link.owner}/{link.repo}</Text>
+        {pullRequest?.diffStats ? <PullRequestDiffStats stats={pullRequest.diffStats} /> : null}
         {pullRequest?.headRefName || pullRequest?.baseRefName ? (
           <Text style={styles.branch}>
             {pullRequest.headRefName || '—'} → {pullRequest.baseRefName || '—'}
@@ -424,6 +450,27 @@ const styles = StyleSheet.create({
   title: { color: colors.link, fontSize: 13, lineHeight: 18, fontWeight: '700', marginTop: 3 },
   metaRow: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: 7, marginTop: 5 },
   repo: { color: colors.subtle, fontSize: 8, fontFamily: 'monospace' },
+  diffStats: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 5,
+  },
+  diffStatText: {
+    fontSize: 9,
+    lineHeight: 12,
+    fontFamily: 'monospace',
+    fontWeight: '700',
+  },
+  diffFiles: { color: colors.muted },
+  diffAdded: { color: colors.online },
+  diffDeleted: { color: colors.danger },
+  diffDivider: {
+    color: colors.border,
+    fontSize: 9,
+    lineHeight: 12,
+    fontFamily: 'monospace',
+  },
+  diffNet: { color: colors.accent },
   branch: { color: colors.muted, fontSize: 8, lineHeight: 12, fontFamily: 'monospace' },
   author: { color: colors.subtle, fontSize: 8 },
   mergeMethodSection: { gap: 5, marginTop: 9 },
