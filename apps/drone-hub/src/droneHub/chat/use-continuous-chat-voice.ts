@@ -252,10 +252,14 @@ export function useContinuousChatVoice({
 
   const stop = React.useCallback(async () => {
     if (session.status === 'idle') return;
+    if (session.status === 'starting') {
+      await cancel();
+      return;
+    }
     closeCapture(captureRef.current);
     captureRef.current = null;
     await session.finish();
-  }, [session]);
+  }, [cancel, session]);
 
   const previousResetKeyRef = React.useRef(resetKey);
   React.useEffect(() => {

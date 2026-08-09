@@ -137,6 +137,60 @@ describe('ContinuousVoiceSession', () => {
     expect(transcriptionSignal?.aborted).toBe(true);
   });
 
+  test('does not confirm a delivery that finishes after cancellation', async () => {
+    let finishDelivery: ((accepted: boolean) => void) | null = null;
+    let confirmationCount = 0;
+    const session = new ContinuousVoiceSession({
+      onChange: () => undefined,
+      onError: (message) => {
+        throw new Error(message);
+      },
+    });
+    session.start({
+      sessionId: 'cancel-delivery-session',
+      endpointConfig: { silenceMillis: 250, minimumSpeechMillis: 40 },
+      transcribe: async () => 'late delivery',
+      deliver: async () =>
+        await new Promise<boolean>((resolve) => {
+          finishDelivery = resolve;
+        }),
+      confirm: () => {
+        confirmationCount += 1;
+      },
+    });
+    session.listen();
+    session.push(thought());
+    await waitFor(() => finishDelivery !== null);
+    session.cancel();
+    finishDelivery!(true);
+    await Bun.sleep(0);
+
+    expect(session.status).toBe('idle');
+    expect(confirmationCount).toBe(0);
+  });
+
+  test('coalesces unchanged snapshots between duration updates', () => {
+    const snapshots: ContinuousVoiceSessionSnapshot[] = [];
+    const session = new ContinuousVoiceSession({
+      onChange: (snapshot) => snapshots.push(snapshot),
+      onError: () => undefined,
+    });
+    session.start({
+      sessionId: 'snapshot-session',
+      endpointConfig: {},
+      transcribe: async () => '',
+      deliver: async () => true,
+    });
+    session.listen();
+    const initialSnapshotCount = snapshots.length;
+    for (let index = 0; index < 20; index += 1) session.push(pcm(10, 10));
+    expect(snapshots).toHaveLength(initialSnapshotCount);
+
+    session.push(pcm(300, 10));
+    expect(snapshots).toHaveLength(initialSnapshotCount + 1);
+    expect(snapshots[snapshots.length - 1]?.durationMillis).toBe(500);
+  });
+
   test('bounds retained audio when transcription falls behind', async () => {
     const errors: string[] = [];
     let latestSnapshot: ContinuousVoiceSessionSnapshot | null = null;

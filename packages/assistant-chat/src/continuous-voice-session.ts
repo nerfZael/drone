@@ -46,6 +46,7 @@ type ContinuousVoiceSessionOptions = {
 
 const DEFAULT_MAXIMUM_PENDING_SEGMENTS = 8;
 const TRANSCRIPT_CONTEXT_CHARACTERS = 1_200;
+const DURATION_UPDATE_MILLIS = 500;
 
 /**
  * Owns the platform-neutral lifecycle of a continuous voice session. Browser
@@ -65,6 +66,7 @@ export class ContinuousVoiceSession {
   private sampleCount = 0;
   private paused = false;
   private finishing = false;
+  private lastSnapshot: ContinuousVoiceSessionSnapshot | null = null;
 
   constructor(options: ContinuousVoiceSessionOptions) {
     this.options = options;
@@ -237,6 +239,7 @@ export class ContinuousVoiceSession {
               cleanTranscript,
               `${callbacks.sessionId}.${segment.sequence}`,
             );
+            if (this.generation !== generation) return;
             if (!accepted) throw new Error('The chat did not accept the voice steering message.');
             this.transcriptContext = `${this.transcriptContext} ${cleanTranscript}`
               .trim()
@@ -276,16 +279,31 @@ export class ContinuousVoiceSession {
   }
 
   private setStatus(status: ContinuousVoiceSessionStatus): void {
+    if (this.currentStatus === status) return;
     this.currentStatus = status;
     this.emit();
   }
 
   private emit(): void {
-    this.options.onChange({
+    const snapshot: ContinuousVoiceSessionSnapshot = {
       status: this.currentStatus,
       pendingCount: this.queue.length,
       durationMillis: Math.round((this.sampleCount / 16_000) * 1_000),
-    });
+    };
+    const previous = this.lastSnapshot;
+    const sameDurationWindow =
+      previous &&
+      Math.floor(previous.durationMillis / DURATION_UPDATE_MILLIS) ===
+        Math.floor(snapshot.durationMillis / DURATION_UPDATE_MILLIS);
+    if (
+      previous?.status === snapshot.status &&
+      previous.pendingCount === snapshot.pendingCount &&
+      sameDurationWindow
+    ) {
+      return;
+    }
+    this.lastSnapshot = snapshot;
+    this.options.onChange(snapshot);
   }
 }
 

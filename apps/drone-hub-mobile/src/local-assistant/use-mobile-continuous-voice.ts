@@ -246,7 +246,10 @@ export function useMobileContinuousVoice({
       microphoneLeaseRef.current = microphoneLease;
       const generation = generationRef.current + 1;
       generationRef.current = generation;
-      if (!session.begin()) return false;
+      if (!session.begin()) {
+        await releaseMicrophone();
+        return false;
+      }
       onError('');
       try {
         if (!(await readGroqApiKey())) {
@@ -314,6 +317,7 @@ export function useMobileContinuousVoice({
       finishPlatformCleanup,
       microphoneCoordinator,
       onError,
+      releaseMicrophone,
       session,
       setBackgroundActivity,
       stopPendingStream,
