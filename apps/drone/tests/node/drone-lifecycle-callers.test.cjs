@@ -7,8 +7,11 @@ const { afterEach, test } = require('node:test');
 const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle-repository.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
+const { saveRegistry } = require('../../dist/host/registry.js');
 const {
+  listCanonicalDroneLifecycleForRead,
   patchCanonicalDroneLifecycle,
+  resolveCanonicalDroneOrPendingForReadRef,
   setDroneHubMetaByIdentity,
   upsertCanonicalDroneLifecycle,
   upsertCanonicalDroneLifecycleBatch,
@@ -33,6 +36,34 @@ afterEach(async () => {
   else process.env.DRONE_DATA_DIR = originalDataDir;
   resetDroneRootDirForTests();
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('targeted lifecycle reads perform the lightweight one-time legacy backfill', async () => {
+  useTempDataDir();
+  await saveRegistry({
+    version: 2,
+    drones: {
+      legacy: {
+        id: 'legacy',
+        name: 'legacy worker',
+        runtime: 'container',
+        containerName: 'drone-legacy',
+        chats: { default: { turns: [{ prompt: 'must not enter lifecycle storage' }] } },
+      },
+    },
+    pending: {},
+    archived: {},
+  });
+
+  const resolved = await resolveCanonicalDroneOrPendingForReadRef('legacy worker');
+  const listed = await listCanonicalDroneLifecycleForRead('real');
+  const repository = await getDroneLifecycleRepository();
+
+  assert.equal(resolved.kind, 'real');
+  assert.equal(resolved.id, 'legacy');
+  assert.deepEqual(listed.map((record) => record.id), ['legacy']);
+  assert.equal(repository.isLegacyBackfillComplete(), true);
+  assert.equal(Object.hasOwn(repository.get('legacy').lifecycle, 'chats'), false);
 });
 
 test('lifecycle callers commit canonical state and outbox before stale pruning', async () => {

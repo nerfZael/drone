@@ -9,7 +9,10 @@ const { afterEach, test } = require('node:test');
 const { resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const { createRegistryBackup } = require('../../dist/host/registry-backups.js');
-const { buildHubStateProjection } = require('../../dist/host/hub-state-projection.js');
+const {
+  buildHubStateProjection,
+  compactRegistryChatActivity,
+} = require('../../dist/host/hub-state-projection.js');
 const { getHubSettingsRepository } = require('../../dist/host/hub-settings-repository.js');
 const { getCatalogStore } = require('../../dist/host/catalog-store.js');
 const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle-repository.js');
@@ -17,7 +20,11 @@ const { getPromptQueueRepository } = require('../../dist/host/prompt-queue-repos
 const { CanonicalRegistryMutationError } = require('../../dist/host/legacy-residual-state.js');
 const { loadRegistry, saveRegistry, updateRegistry } = require('../../dist/host/registry.js');
 const { readRegistryJsonFromSqlite } = require('../../dist/host/sqlite-registry-store.js');
-const { deleteActiveChatFromStore } = require('../../dist/hub/transcript-store.js');
+const {
+  deleteActiveChatFromStore,
+  readChatFromStore,
+  upsertTranscriptTurnInStore,
+} = require('../../dist/hub/transcript-store.js');
 
 const originalDroneDataDir = process.env.DRONE_DATA_DIR;
 const roots = [];
@@ -67,6 +74,12 @@ function seedRegistry() {
               prompt: 'continue',
               ok: true,
               output: 'done',
+              activity: {
+                version: 1,
+                source: 'codex',
+                updatedAt: '2026-01-01T00:00:30.000Z',
+                messages: [{ id: 'activity-1', role: 'assistant', content: 'transient detail' }],
+              },
               agentMessageAutoContinue: { status: 'classified' },
               agentSuggestion: { usedDirectAt: '2026-01-01T00:01:00.000Z' },
             }],
@@ -89,6 +102,26 @@ function seedRegistry() {
       },
     },
   };
+}
+
+async function seedCanonicalActivityTurn() {
+  await upsertTranscriptTurnInStore({
+    droneId: 'alpha',
+    chatName: 'default',
+    turn: {
+      id: 'activity-turn',
+      at: '2026-01-01T00:02:00.000Z',
+      prompt: 'activity',
+      ok: true,
+      output: 'done',
+      activity: {
+        version: 1,
+        source: 'codex',
+        updatedAt: '2026-01-01T00:02:30.000Z',
+        messages: [{ id: 'activity-2', role: 'assistant', content: 'transient detail' }],
+      },
+    },
+  });
 }
 
 afterEach(async () => {
@@ -194,6 +227,7 @@ test('manual backup exports canonical projection state', async () => {
   const dataDir = useRoot('backup');
   await saveRegistry(seedRegistry());
   await buildHubStateProjection();
+  await seedCanonicalActivityTurn();
   const lifecycle = await getDroneLifecycleRepository();
   await lifecycle.patch('real', 'alpha', (entry) => ({ ...entry, name: 'Backup Canonical Alpha' }));
   const settings = await getHubSettingsRepository();
@@ -207,6 +241,76 @@ test('manual backup exports canonical projection state', async () => {
   const exported = JSON.parse(fs.readFileSync(exportPath, 'utf8'));
   assert.equal(exported.drones.alpha.name, 'Backup Canonical Alpha');
   assert.equal(exported.settings.openai.apiKey, 'canonical-key');
+  assert.deepEqual(exported.drones.alpha.chats.default.turns[1].activity, {
+    updatedAt: '2026-01-01T00:02:30.000Z',
+  });
+});
+
+test('scheduled-backup projection compacts transient chat activity', async () => {
+  useRoot('compact-backup');
+  await saveRegistry(seedRegistry());
+  await buildHubStateProjection();
+  await seedCanonicalActivityTurn();
+
+  const projected = await buildHubStateProjection(undefined, { compactChatActivity: true });
+
+  assert.deepEqual(projected.drones.alpha.chats.default.turns[1].activity, {
+    updatedAt: '2026-01-01T00:02:30.000Z',
+  });
+});
+
+test('compact first-run projection imports full-fidelity legacy activity before exporting', async () => {
+  useRoot('compact-first-run');
+  const legacy = seedRegistry();
+
+  const projected = await buildHubStateProjection(legacy, { compactChatActivity: true });
+  const stored = readChatFromStore({ droneId: 'alpha', chatName: 'default' }).chat;
+  const projectedLegacyTurn = projected.drones.alpha.chats.default.turns
+    .find((turn) => turn.id === 'legacy-follow-up-turn');
+  const storedLegacyTurn = stored.turns.find((turn) => turn.id === 'legacy-follow-up-turn');
+
+  assert.deepEqual(projectedLegacyTurn.activity, {
+    updatedAt: '2026-01-01T00:00:30.000Z',
+  });
+  assert.equal(storedLegacyTurn.activity.messages[0].content, 'transient detail');
+});
+
+test('registry activity compaction covers every lifecycle and chat bucket without mutating its input', () => {
+  const activity = {
+    updatedAt: '2026-01-01T00:02:30.000Z',
+    messages: [{ id: 'large-transient-message' }],
+  };
+  const registry = {
+    version: 2,
+    drones: {
+      real: {
+        chats: { default: { turns: [{ id: 'real-turn', activity }] } },
+        archivedChats: { old: { pendingPrompts: [{ id: 'real-prompt', activity }] } },
+      },
+    },
+    pending: {
+      pending: { chats: { default: { pendingPrompts: [{ id: 'pending-prompt', activity }] } } },
+    },
+    archived: {
+      archived: { chats: { default: { turns: [{ id: 'archived-turn', activity }] } } },
+    },
+  };
+
+  const compacted = compactRegistryChatActivity(registry);
+
+  assert.deepEqual(compacted.drones.real.chats.default.turns[0].activity, {
+    updatedAt: activity.updatedAt,
+  });
+  assert.deepEqual(compacted.drones.real.archivedChats.old.pendingPrompts[0].activity, {
+    updatedAt: activity.updatedAt,
+  });
+  assert.deepEqual(compacted.pending.pending.chats.default.pendingPrompts[0].activity, {
+    updatedAt: activity.updatedAt,
+  });
+  assert.deepEqual(compacted.archived.archived.chats.default.turns[0].activity, {
+    updatedAt: activity.updatedAt,
+  });
+  assert.equal(registry.drones.real.chats.default.turns[0].activity.messages.length, 1);
 });
 
 test('Node updateRegistry rejects canonical-owned mutations without changing canonical state', async () => {

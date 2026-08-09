@@ -5,9 +5,9 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { getHubSettingsRepository } from './hub-settings-repository';
-import { buildHubStateProjection } from './hub-state-projection';
+import { buildHubStateProjection, compactRegistryChatActivity } from './hub-state-projection';
 import { droneRootPath } from './paths';
-import { loadRegistry, type DroneRegistry } from './registry';
+import { loadRegistry, loadRegistryCompatibilityBase, type DroneRegistry } from './registry';
 import { hubSqlitePath, readRegistryJsonFromSqlitePath } from './sqlite-registry-store';
 
 type DatabaseConstructor = typeof import('better-sqlite3');
@@ -179,7 +179,11 @@ export async function resolveRegistryBackupSettings(): Promise<EffectiveRegistry
   const repository = await getHubSettingsRepository();
   let canonical = repository.get<RegistryBackupSettings | null>(REGISTRY_BACKUP_SETTING_KEY);
   if (!canonical) {
-    const reg = await loadRegistry();
+    // Only the legacy residual settings field is needed here. Calling
+    // loadRegistry() builds the full compatibility projection, including every
+    // chat transcript, which can consume multiple GiB for a large fleet during
+    // every Hub startup when no explicit backup settings have been stored.
+    const reg = await loadRegistryCompatibilityBase();
     const legacyRaw = (reg.settings as any)?.backups;
     if (legacyRaw !== undefined) {
       const legacy = normalizeBackupSettings(legacyRaw);
@@ -488,8 +492,15 @@ async function createRegistryBackupUnlocked(kind: 'hourly' | 'daily' | 'manual',
   // Export a compatibility snapshot assembled from canonical owners. Bun may
   // not be able to load Node's native SQLite binding, so retain the raw legacy
   // snapshot only as that runtime's migration fallback.
-  const reg = await buildHubStateProjection().catch((error) => {
-    if ((globalThis as any).Bun) return loadRegistry();
+  // Every backup already contains the complete SQLite database. Keep the
+  // compatibility JSON useful without copying large transient agent-activity
+  // histories into every turn and prompt; those histories remain intact in the
+  // SQLite backup. This also prevents a manual backup from recreating the Hub's
+  // former multi-GiB compatibility-projection spike.
+  const reg = await buildHubStateProjection(undefined, {
+    compactChatActivity: true,
+  }).catch((error) => {
+    if ((globalThis as any).Bun) return loadRegistry().then(compactRegistryChatActivity);
     throw error;
   });
   const counts = registryCounts(reg);

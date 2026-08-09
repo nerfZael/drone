@@ -974,10 +974,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   const daemonPromptEventMonitor = new DaemonPromptEventMonitor({
     normalizeDroneId: normalizeDroneIdentity,
     resolveClient: async (droneId) => {
-      const registry: any = await loadRegistry();
-      const drone = registry?.drones?.[droneId] ?? null;
-      if (!drone) return { exists: false, client: null };
-      const daemon = await resolveDroneDaemonClientForEntry(drone);
+      const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneId);
+      if (resolved?.kind !== 'real') return { exists: false, client: null };
+      const daemon = await resolveDroneDaemonClientForEntry(resolved.drone);
       return { exists: true, client: daemon?.client ?? null };
     },
     onTerminalPrompt: enqueueReconcileForDaemonPromptEvent,
@@ -993,6 +992,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     normalizeChatName,
     listChatNames: async (droneId) => {
       const stored = listChatsFromStore({ droneId });
+      if (stored.available && !(globalThis as any).Bun) return stored.chats;
       let registryChatNames: string[] = [];
       try {
         const registry = await loadRegistry();
@@ -1003,7 +1003,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       } catch {
         // Canonical chat and prompt state is enough to handle the wake-up.
       }
-      return [...(stored.available ? stored.chats : []), ...registryChatNames];
+      return [...stored.chats, ...registryChatNames];
     },
     readPendingPrompts: async (droneId, chatName) => {
       const stored = readChatFromStore({ droneId, chatName });

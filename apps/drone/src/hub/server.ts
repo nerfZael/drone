@@ -135,6 +135,7 @@ import {
   markChatUnreadInStore,
   patchChatMetadataInStore,
   readChatFromStore,
+  readDroneChatCleanupProjectionFromStore,
   readChatReadStateFromStore,
   readChatRowsFromStore,
   readChatVersionFromStore,
@@ -476,7 +477,7 @@ import {
 import {
   deleteCanonicalDroneLifecycleBatch,
   deleteCanonicalDroneLifecycle,
-  listCanonicalDroneLifecycle,
+  listCanonicalDroneLifecycleForRead,
   resolveDroneContainerNameByIdentity,
   resolveDroneFromRegistryRef,
   resolveDroneNameByIdentity,
@@ -3650,7 +3651,8 @@ const {
   hubLog,
   importArchivedChatsFromRegistry,
   importDroneChatsFromRegistry,
-  listCanonicalDroneLifecycle,
+  listArchivedChatsFromStore,
+  listCanonicalDroneLifecycleForRead,
   listChatsFromStore,
   loadRegistry,
   looksLikeContainerAlreadyRunningError,
@@ -3666,6 +3668,7 @@ const {
     ),
   permanentlyDeleteCanonicalDrone,
   readChatFromStore,
+  readDroneChatCleanupProjectionFromStore,
   removeDockerSnapshotImagesBestEffort,
   removeDroneRuntimeArtifacts,
   restoreArchivedChatInStore,
@@ -4122,7 +4125,10 @@ export async function startDroneHubApiServer(opts: {
   // Best-effort: resume any pending provisioning after hub restarts.
   // (Pending entries are persisted in the registry, but the in-memory queue is not.)
   try {
-    const regAny: any = await loadRegistry();
+    // Ensure a legacy-only installation has completed its lightweight
+    // lifecycle import before the synchronous canonical read model is used.
+    await listCanonicalDroneLifecycleForRead('real');
+    const regAny: any = readCanonicalActiveDroneModel() ?? (await loadRegistry());
     enqueueProvisioningForAllPending(regAny);
     // Best-effort: resume only unfinished durable prompts after hub restarts.
     // Daemons for idle drones are recovered lazily when their next prompt is delivered.
@@ -4558,10 +4564,25 @@ export async function startDroneHubApiServer(opts: {
 
   async function auditStartupRegistryPresence(): Promise<void> {
     try {
-      const regAny: any = await loadRegistry();
-      const drones = Object.keys(regAny?.drones ?? {}).length;
-      const pending = Object.keys(regAny?.pending ?? {}).length;
-      const archived = Object.keys(regAny?.archived ?? {}).length;
+      // The first call may perform the one-time migration. Keep it ordered so
+      // concurrent readers do not each parse and attempt the same legacy seed.
+      const real = await listCanonicalDroneLifecycleForRead('real');
+      const remaining = await Promise.all([
+        listCanonicalDroneLifecycleForRead('pending'),
+        listCanonicalDroneLifecycleForRead('archived'),
+      ]);
+      const canonical = [real, ...remaining];
+      let drones: number;
+      let pending: number;
+      let archived: number;
+      if (canonical.every((records) => records != null)) {
+        [drones, pending, archived] = canonical.map((records) => records?.length ?? 0);
+      } else {
+        const regAny: any = await loadRegistry();
+        drones = Object.keys(regAny?.drones ?? {}).length;
+        pending = Object.keys(regAny?.pending ?? {}).length;
+        archived = Object.keys(regAny?.archived ?? {}).length;
+      }
       if (drones + pending + archived > 0) return;
 
       let containerNames: string[] = [];
@@ -5577,6 +5598,8 @@ export async function startDroneHubApiServer(opts: {
     hubLog,
     isDraftDroneEntry,
     isUngroupedGroupName,
+    listArchivedChatsFromStore,
+    listCanonicalDroneLifecycleForRead,
     loadRegistry,
     looksLikeContainerNotRunningError,
     looksLikeMissingContainerError,
@@ -5589,10 +5612,12 @@ export async function startDroneHubApiServer(opts: {
     normalizeEnvVarMap,
     nowIso,
     parseIsoToMs,
+    readDroneChatCleanupProjectionFromStore,
     removeArchivedDroneById,
     removeDroneTreeById,
     renameDrone: renameDroneCommand,
     resolveArchiveDeleteAtIso,
+    resolveCanonicalDroneOrPendingForReadRef,
     resolveDroneCliPath,
     resolveDroneOrPendingForReadRef,
     resolveDroneOrRespond,
@@ -5847,9 +5872,9 @@ export async function startDroneHubApiServer(opts: {
     renameNativeChatSession: (input: { id: string; droneId: string; chatName: string }) =>
       nativeChatLifecycle.rename(input),
     renameChatInStore,
+    resolveCanonicalDroneOrPendingForReadRef,
     resolveChatTmuxCommand,
     resolveDroneDaemonClientForEntry,
-    resolveDroneFromRegistryRef,
     resolveDroneOrPendingForReadRef,
     resolveDroneOrRespond,
     resolveEffectiveDeleteActionSettings,

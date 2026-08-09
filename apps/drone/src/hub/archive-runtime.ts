@@ -18,7 +18,8 @@ type ArchiveRuntimeDependencyName =
   | 'hubLog'
   | 'importArchivedChatsFromRegistry'
   | 'importDroneChatsFromRegistry'
-  | 'listCanonicalDroneLifecycle'
+  | 'listArchivedChatsFromStore'
+  | 'listCanonicalDroneLifecycleForRead'
   | 'listChatsFromStore'
   | 'loadRegistry'
   | 'looksLikeContainerAlreadyRunningError'
@@ -30,6 +31,7 @@ type ArchiveRuntimeDependencyName =
   | 'pauseResourceSubscriptionsForDrone'
   | 'permanentlyDeleteCanonicalDrone'
   | 'readChatFromStore'
+  | 'readDroneChatCleanupProjectionFromStore'
   | 'removeDockerSnapshotImagesBestEffort'
   | 'removeDroneRuntimeArtifacts'
   | 'restoreArchivedChatInStore'
@@ -62,7 +64,8 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     hubLog,
     importArchivedChatsFromRegistry,
     importDroneChatsFromRegistry,
-    listCanonicalDroneLifecycle,
+    listArchivedChatsFromStore,
+    listCanonicalDroneLifecycleForRead,
     listChatsFromStore,
     loadRegistry,
     looksLikeContainerAlreadyRunningError,
@@ -74,6 +77,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     pauseResourceSubscriptionsForDrone,
     permanentlyDeleteCanonicalDrone,
     readChatFromStore,
+    readDroneChatCleanupProjectionFromStore,
     removeDockerSnapshotImagesBestEffort,
     removeDroneRuntimeArtifacts,
     restoreArchivedChatInStore,
@@ -126,6 +130,67 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     return allocateUntitledDisplayName(regAny);
   }
 
+  function lifecycleEntryFromRecord(record: any): any {
+    const entry = {
+      ...(record?.lifecycle && typeof record.lifecycle === 'object' ? record.lifecycle : {}),
+      id: record.id,
+      name: record.name,
+      runtime: record.runtimeKind,
+    };
+    if (record.containerName) entry.containerName = record.containerName;
+    else delete entry.containerName;
+    if (record.phase) entry.phase = record.phase;
+    else delete entry.phase;
+    if (record.state === 'archived') {
+      entry.archivedAt = record.archivedAt;
+      entry.deleteAt = record.deleteAt;
+      entry.archiveRetention = record.archiveRetention;
+      if (record.archiveRuntimePolicy) entry.archiveRuntimePolicy = record.archiveRuntimePolicy;
+      else delete entry.archiveRuntimePolicy;
+    }
+    return entry;
+  }
+
+  function storedChatBuckets(droneId: string): { chats: Record<string, any>; archivedChats: Record<string, any> } | null {
+    const projected = readDroneChatCleanupProjectionFromStore({ droneId });
+    return projected.available
+      ? { chats: projected.chats, archivedChats: projected.archivedChats }
+      : null;
+  }
+
+  async function resolveLifecycleEntry(
+    state: 'real' | 'pending' | 'archived',
+    droneId: string,
+    opts: { includeChats?: boolean } = {},
+  ): Promise<any | null> {
+    const records = await listCanonicalDroneLifecycleForRead(state);
+    if (records) {
+      const record = records.find((candidate: any) => candidate.id === droneId) ?? null;
+      if (!record) return null;
+      const entry = lifecycleEntryFromRecord(record);
+      if (opts.includeChats !== false) {
+        const buckets = storedChatBuckets(droneId);
+        if (!buckets) {
+          // A lifecycle database can exist before the transcript schema is
+          // available during recovery. Preserve correctness with the legacy
+          // projection in that exceptional state instead of silently dropping
+          // chat/session references from archive cleanup.
+          const registry: any = await loadRegistry();
+          const bucket = state === 'real' ? registry?.drones : state === 'pending' ? registry?.pending : registry?.archived;
+          return bucket?.[droneId] ?? entry;
+        }
+        if (Object.keys(buckets.chats).length > 0) entry.chats = buckets.chats;
+        else delete entry.chats;
+        if (Object.keys(buckets.archivedChats).length > 0) entry.archivedChats = buckets.archivedChats;
+        else delete entry.archivedChats;
+      }
+      return entry;
+    }
+    const registry: any = await loadRegistry();
+    const bucket = state === 'real' ? registry?.drones : state === 'pending' ? registry?.pending : registry?.archived;
+    return bucket?.[droneId] ?? null;
+  }
+
   async function archiveChatById(opts: {
     droneId: string;
     chatName: string;
@@ -158,8 +223,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
       };
     }
 
-    const registry: any = await loadRegistry();
-    const droneEntry = registry?.drones?.[droneId] ?? null;
+    const droneEntry = await resolveLifecycleEntry('real', droneId, { includeChats: false });
     if (!droneEntry) {
       return {
         hadDrone: false,
@@ -173,8 +237,10 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
         chats: [] as string[],
       };
     }
-    await importDroneChatsFromRegistry({ droneId, chats: droneEntry.chats });
-    await importArchivedChatsFromRegistry({ droneId, archivedChats: droneEntry.archivedChats });
+    if ((globalThis as any).Bun) {
+      await importDroneChatsFromRegistry({ droneId, chats: droneEntry.chats });
+      await importArchivedChatsFromRegistry({ droneId, archivedChats: droneEntry.archivedChats });
+    }
     if (!readChatFromStore({ droneId, chatName }).chat) {
       return {
         hadDrone: true,
@@ -261,8 +327,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
       };
     }
 
-    const registry: any = await loadRegistry();
-    const droneEntry = registry?.drones?.[droneId] ?? null;
+    const droneEntry = await resolveLifecycleEntry('real', droneId, { includeChats: false });
     if (!droneEntry) {
       return {
         hadDrone: false,
@@ -274,8 +339,10 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
         chats: [] as string[],
       };
     }
-    await importDroneChatsFromRegistry({ droneId, chats: droneEntry.chats });
-    await importArchivedChatsFromRegistry({ droneId, archivedChats: droneEntry.archivedChats });
+    if ((globalThis as any).Bun) {
+      await importDroneChatsFromRegistry({ droneId, chats: droneEntry.chats });
+      await importArchivedChatsFromRegistry({ droneId, archivedChats: droneEntry.archivedChats });
+    }
     const stored = await restoreArchivedChatInStore({
       droneId,
       archivedChatName,
@@ -329,9 +396,22 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
       };
     }
 
-    const registry: any = await loadRegistry();
-    const droneEntry = registry?.drones?.[droneId] ?? null;
-    if (!droneEntry) {
+    const canonicalReal = await listCanonicalDroneLifecycleForRead('real');
+    let hadDrone: boolean;
+    if (canonicalReal) {
+      hadDrone = canonicalReal.some((record: any) => record.id === droneId);
+    } else {
+      const registry: any = await loadRegistry();
+      const droneEntry = registry?.drones?.[droneId] ?? null;
+      hadDrone = Boolean(droneEntry);
+      if (droneEntry) {
+        await importArchivedChatsFromRegistry({
+          droneId,
+          archivedChats: droneEntry.archivedChats,
+        });
+      }
+    }
+    if (!hadDrone) {
       return {
         hadDrone: false,
         hadChat: false,
@@ -340,7 +420,6 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
         chatName: archivedChatName,
       };
     }
-    await importArchivedChatsFromRegistry({ droneId, archivedChats: droneEntry.archivedChats });
     const stored = await deleteArchivedChatFromStore({ droneId, archivedChatName });
     if (stored.deleted && (globalThis as any).Bun) {
       await updateRegistry((regAny: any) => {
@@ -375,22 +454,44 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
   }
 
   async function cleanupExpiredArchivedChats(opts?: { reason?: string }): Promise<void> {
-    const regSnapshot: any = await loadRegistry();
     const nowMs = Date.now();
-    const expired = (Object.entries(regSnapshot?.drones ?? {}) as Array<[string, any]>).flatMap(
-      ([droneIdRaw, droneEntry]) => {
-        const droneId = normalizeDroneIdentity(droneIdRaw);
-        if (!droneId) return [];
-        return (Object.entries(droneEntry?.archivedChats ?? {}) as Array<[string, any]>)
-          .map(([chatNameRaw, entry]) => {
-            const chatName = normalizeChatName(chatNameRaw);
-            const deleteAtMs = parseIsoToMs(resolveArchiveDeleteAtIso(entry));
-            if (!chatName || deleteAtMs == null || deleteAtMs > nowMs) return null;
-            return { droneId, chatName };
-          })
-          .filter((item): item is { droneId: string; chatName: string } => Boolean(item));
-      },
-    );
+    const canonicalReal = await listCanonicalDroneLifecycleForRead('real');
+    let expired: Array<{ droneId: string; chatName: string }> | null = null;
+    if (canonicalReal) {
+      const canonicalExpired: Array<{ droneId: string; chatName: string }> = [];
+      let canonicalAvailable = true;
+      for (const record of canonicalReal) {
+        const listed = listArchivedChatsFromStore({ droneId: record.id });
+        if (!listed.available) {
+          canonicalAvailable = false;
+          break;
+        }
+        for (const archivedChat of listed.archivedChats) {
+          const deleteAtMs = parseIsoToMs(resolveArchiveDeleteAtIso(archivedChat));
+          if (deleteAtMs != null && deleteAtMs <= nowMs) {
+            canonicalExpired.push({ droneId: record.id, chatName: archivedChat.chatName });
+          }
+        }
+      }
+      if (canonicalAvailable) expired = canonicalExpired;
+    }
+    if (!expired) {
+      const regSnapshot: any = await loadRegistry();
+      expired = (Object.entries(regSnapshot?.drones ?? {}) as Array<[string, any]>).flatMap(
+        ([droneIdRaw, droneEntry]) => {
+          const droneId = normalizeDroneIdentity(droneIdRaw);
+          if (!droneId) return [];
+          return (Object.entries(droneEntry?.archivedChats ?? {}) as Array<[string, any]>)
+            .map(([chatNameRaw, entry]) => {
+              const chatName = normalizeChatName(chatNameRaw);
+              const deleteAtMs = parseIsoToMs(resolveArchiveDeleteAtIso(entry));
+              if (!chatName || deleteAtMs == null || deleteAtMs > nowMs) return null;
+              return { droneId, chatName };
+            })
+            .filter((item): item is { droneId: string; chatName: string } => Boolean(item));
+        },
+      );
+    }
 
     for (const item of expired) {
       try {
@@ -441,8 +542,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     }
     const retention = normalizeArchiveRetention(opts.archiveRetention);
     const runtimePolicy = normalizeArchiveRuntimePolicy(opts.archiveRuntimePolicy);
-    const registry: any = await loadRegistry();
-    const droneEntry = registry?.drones?.[droneId];
+    const droneEntry = await resolveLifecycleEntry('real', droneId);
     if (!droneEntry) {
       return {
         hadEntry: false,
@@ -504,8 +604,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
       };
     }
 
-    const regSnapshot: any = await loadRegistry();
-    const archivedEntry = regSnapshot?.archived?.[droneId] ?? null;
+    const archivedEntry = await resolveLifecycleEntry('archived', droneId);
     if (!archivedEntry) {
       return {
         hadEntry: false,
@@ -555,7 +654,15 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     }
 
     const previousName = String(archivedEntry?.name ?? '').trim() || droneId;
-    const restoredName = allocateRestoredDroneName(regSnapshot, previousName);
+    const canonicalReal = await listCanonicalDroneLifecycleForRead('real');
+    const canonicalPending = await listCanonicalDroneLifecycleForRead('pending');
+    const namingRegistry = canonicalReal && canonicalPending
+      ? {
+          drones: Object.fromEntries(canonicalReal.map((record: any) => [record.id, lifecycleEntryFromRecord(record)])),
+          pending: Object.fromEntries(canonicalPending.map((record: any) => [record.id, lifecycleEntryFromRecord(record)])),
+        }
+      : await loadRegistry();
+    const restoredName = allocateRestoredDroneName(namingRegistry, previousName);
     const restoredEntry: any = {
       ...archivedEntry,
       id: droneId,
@@ -596,8 +703,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
       };
     }
 
-    const regSnapshot: any = await loadRegistry();
-    const archivedEntry = regSnapshot?.archived?.[droneId] ?? null;
+    const archivedEntry = await resolveLifecycleEntry('archived', droneId);
     const hadEntry = Boolean(archivedEntry);
     const name = String(archivedEntry?.name ?? '').trim() || droneId;
     if (!archivedEntry) {
@@ -664,12 +770,15 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
         : ARCHIVE_CLEANUP_MAX_DELETES_PER_RUN;
 
     ARCHIVE_CLEANUP_TASK = (async () => {
-      const regAny: any = await loadRegistry();
-      const canonicalArchived = await listCanonicalDroneLifecycle('archived');
+      const canonicalArchived = await listCanonicalDroneLifecycleForRead('archived');
       const nowMs = Date.now();
-      const archiveEntries: Array<[string, any]> = canonicalArchived
-        ? canonicalArchived.map((record: any) => [record.id, record.lifecycle])
-        : (Object.entries(regAny?.archived ?? {}) as Array<[string, any]>);
+      let archiveEntries: Array<[string, any]>;
+      if (canonicalArchived) {
+        archiveEntries = canonicalArchived.map((record: any) => [record.id, lifecycleEntryFromRecord(record)]);
+      } else {
+        const regAny: any = await loadRegistry();
+        archiveEntries = Object.entries(regAny?.archived ?? {}) as Array<[string, any]>;
+      }
       const expiredIds = archiveEntries
         .map(([id, entry]) => {
           const parsedId = normalizeDroneIdentity(id);

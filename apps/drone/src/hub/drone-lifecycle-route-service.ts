@@ -36,6 +36,8 @@ function createDroneLifecycleServiceHandler(
     hubLog,
     isDraftDroneEntry,
     isUngroupedGroupName,
+    listArchivedChatsFromStore,
+    listCanonicalDroneLifecycleForRead,
     loadRegistry,
     looksLikeContainerNotRunningError,
     looksLikeMissingContainerError,
@@ -48,10 +50,12 @@ function createDroneLifecycleServiceHandler(
     normalizeEnvVarMap,
     nowIso,
     parseIsoToMs,
+    readDroneChatCleanupProjectionFromStore,
     removeArchivedDroneById,
     removeDroneTreeById,
     renameDrone,
     resolveArchiveDeleteAtIso,
+    resolveCanonicalDroneOrPendingForReadRef,
     resolveDroneCliPath,
     resolveDroneOrPendingForReadRef,
     resolveDroneOrRespond,
@@ -67,6 +71,38 @@ function createDroneLifecycleServiceHandler(
     validateGroupNameOrThrow,
     withLockedDroneContainer,
   } = deps;
+
+  function lifecycleEntryFromRecord(record: any): any {
+    const entry = {
+      ...(record?.lifecycle && typeof record.lifecycle === 'object' ? record.lifecycle : {}),
+      id: record.id,
+      name: record.name,
+      runtime: record.runtimeKind,
+    };
+    if (record.containerName) entry.containerName = record.containerName;
+    else delete entry.containerName;
+    if (record.phase) entry.phase = record.phase;
+    else delete entry.phase;
+    if (record.state === 'archived') {
+      entry.archivedAt = record.archivedAt;
+      entry.deleteAt = record.deleteAt;
+      entry.archiveRetention = record.archiveRetention;
+      if (record.archiveRuntimePolicy) entry.archiveRuntimePolicy = record.archiveRuntimePolicy;
+      else delete entry.archiveRuntimePolicy;
+    }
+    return entry;
+  }
+
+  function activeEntryWithStoredChats(droneId: string, entry: any): any | null {
+    const projected = readDroneChatCleanupProjectionFromStore({ droneId });
+    if (!projected.available) return null;
+    return {
+      ...entry,
+      chats: projected.chats,
+      archivedChats: projected.archivedChats,
+    };
+  }
+
   return async ({ req, res, url: u, method, parts }) => {
     const handled = await (async (): Promise<false | void> => {
       // POST /api/drones/group-set
@@ -516,31 +552,29 @@ function createDroneLifecycleServiceHandler(
         parts[3] === 'archive'
       ) {
         const droneRef = decodeURIComponent(parts[2]);
-        const regAnySnapshot: any = await loadRegistry();
-        const found = findDroneIdByRef(regAnySnapshot, droneRef);
-        if (!found) {
+        const resolvedTarget = await resolveCanonicalDroneOrPendingForReadRef(droneRef);
+        if (!resolvedTarget) {
           json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
           return;
         }
-        const droneId = normalizeDroneIdentity(found.id) || found.id;
-        const snapshotDrone =
-          found.kind === 'pending' && !regAnySnapshot?.drones?.[droneId]
-            ? regAnySnapshot?.pending?.[droneId]
-            : regAnySnapshot?.drones?.[droneId];
+        const droneId = normalizeDroneIdentity(resolvedTarget.id) || resolvedTarget.id;
+        let snapshotDrone = resolvedTarget.kind === 'real' ? resolvedTarget.drone : resolvedTarget.pending;
+        if (resolvedTarget.kind === 'real' && !(globalThis as any).Bun) {
+          const storedEntry = activeEntryWithStoredChats(droneId, snapshotDrone);
+          snapshotDrone = storedEntry ?? (await loadRegistry())?.drones?.[droneId] ?? snapshotDrone;
+        }
         const droneName = String(snapshotDrone?.name ?? droneRef).trim() || droneRef;
         const deleteSettings = await resolveEffectiveDeleteActionSettings();
         const archiveRetention = deleteSettings.archiveRetention;
         const archiveRuntimePolicy = deleteSettings.archiveRuntimePolicy;
 
-        const pendingResult = regAnySnapshot?.drones?.[droneId]
+        const pendingResult = resolvedTarget.kind === 'real'
           ? { kind: 'real' as const }
-          : regAnySnapshot?.pending?.[droneId]
-            ? {
-                kind: (await deleteCanonicalDroneLifecycle(droneId, 'pending'))
-                  ? ('pending' as const)
-                  : ('none' as const),
-              }
-            : { kind: 'none' as const };
+          : {
+              kind: (await deleteCanonicalDroneLifecycle(droneId, 'pending'))
+                ? ('pending' as const)
+                : ('none' as const),
+            };
         if (pendingResult.kind === 'pending') {
           dequeueProvisioning(droneId);
           json(res, 200, {
@@ -615,9 +649,12 @@ function createDroneLifecycleServiceHandler(
         parts[2] === 'drones'
       ) {
         triggerArchiveCleanup('api:archive-drones');
-        const regAny: any = await loadRegistry();
         const nowMs = Date.now();
-        const archived = (Object.entries(regAny?.archived ?? {}) as Array<[string, any]>)
+        const canonicalArchived = await listCanonicalDroneLifecycleForRead('archived');
+        const archiveEntries: Array<[string, any]> = canonicalArchived
+          ? canonicalArchived.map((record: any) => [record.id, lifecycleEntryFromRecord(record)])
+          : Object.entries((await loadRegistry())?.archived ?? {}) as Array<[string, any]>;
+        const archived = archiveEntries
           .map(([id, entry]) => {
             const droneId = normalizeDroneIdentity(id);
             if (!droneId) return null;
@@ -670,9 +707,39 @@ function createDroneLifecycleServiceHandler(
         parts[2] === 'chats'
       ) {
         await cleanupExpiredArchivedChats({ reason: 'api:archive-chats' });
-        const regAny: any = await loadRegistry();
         const nowMs = Date.now();
-        const archived = (Object.entries(regAny?.drones ?? {}) as Array<[string, any]>)
+        const canonicalReal = await listCanonicalDroneLifecycleForRead('real');
+        let droneEntries: Array<[string, any]> | null = null;
+        if (canonicalReal) {
+          const targetedEntries: Array<[string, any]> = [];
+          let storesAvailable = true;
+          for (const record of canonicalReal) {
+            const listed = listArchivedChatsFromStore({ droneId: record.id });
+            if (!listed.available) {
+              storesAvailable = false;
+              break;
+            }
+            targetedEntries.push([
+              record.id,
+              {
+                ...lifecycleEntryFromRecord(record),
+                archivedChats: Object.fromEntries(listed.archivedChats.map((chat: any) => [
+                  chat.chatName,
+                  {
+                    archivedAt: chat.archivedAt,
+                    deleteAt: chat.deleteAt,
+                    archiveRetention: chat.archiveRetention,
+                  },
+                ])),
+              },
+            ]);
+          }
+          if (storesAvailable) droneEntries = targetedEntries;
+        }
+        if (!droneEntries) {
+          droneEntries = Object.entries((await loadRegistry())?.drones ?? {}) as Array<[string, any]>;
+        }
+        const archived = droneEntries
           .flatMap(([droneIdRaw, droneEntry]) => {
             const droneId = normalizeDroneIdentity(droneIdRaw);
             if (!droneId) return [];

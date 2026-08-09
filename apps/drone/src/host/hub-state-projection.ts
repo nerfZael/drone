@@ -115,22 +115,85 @@ function lifecycleProjection(record: CanonicalDroneLifecycleRecord): Record<stri
   return projected;
 }
 
-function chatsForDrone(droneId: string): Record<string, any> {
+function compactActivity(value: any): any {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !('activity' in value)) return value;
+  return {
+    ...value,
+    activity: {
+      updatedAt: typeof value.activity?.updatedAt === 'string' ? value.activity.updatedAt : null,
+    },
+  };
+}
+
+function compactChatActivity(chat: any): any {
+  if (!chat || typeof chat !== 'object' || Array.isArray(chat)) return chat;
+  return {
+    ...chat,
+    ...(Array.isArray(chat.turns) ? { turns: chat.turns.map(compactActivity) } : {}),
+    ...(Array.isArray(chat.pendingPrompts)
+      ? { pendingPrompts: chat.pendingPrompts.map(compactActivity) }
+      : {}),
+  };
+}
+
+function compactChatMap(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([chatName, chat]) => [
+      chatName,
+      compactChatActivity(chat),
+    ]),
+  );
+}
+
+/** Removes transient agent activity detail from every registry-shaped chat bucket. */
+export function compactRegistryChatActivity(registryRaw: DroneRegistry): DroneRegistry {
+  const registry: any = registryRaw && typeof registryRaw === 'object' ? registryRaw : {};
+  const compactBucket = (bucket: unknown) => {
+    if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)) return bucket;
+    return Object.fromEntries(
+      Object.entries(bucket as Record<string, any>).map(([droneId, entry]) => [
+        droneId,
+        entry && typeof entry === 'object' && !Array.isArray(entry)
+          ? {
+              ...entry,
+              ...('chats' in entry ? { chats: compactChatMap(entry.chats) } : {}),
+              ...('archivedChats' in entry
+                ? { archivedChats: compactChatMap(entry.archivedChats) }
+                : {}),
+            }
+          : entry,
+      ]),
+    );
+  };
+  return {
+    ...registry,
+    drones: compactBucket(registry.drones) ?? {},
+    pending: compactBucket(registry.pending) ?? {},
+    archived: compactBucket(registry.archived) ?? {},
+  } as DroneRegistry;
+}
+
+function chatsForDrone(droneId: string, opts?: { compactActivity?: boolean }): Record<string, any> {
   const listed = listChatsFromStore({ droneId });
   if (!listed.available) return {};
   const out: Record<string, any> = {};
   for (const chatName of listed.chats) {
     const read = readChatFromStore({ droneId, chatName });
-    if (read.available && read.chat) out[chatName] = read.chat;
+    if (read.available && read.chat) {
+      out[chatName] = opts?.compactActivity ? compactChatActivity(read.chat) : read.chat;
+    }
   }
   return out;
 }
 
-function archivedChatsForDrone(droneId: string): Record<string, any> {
+function archivedChatsForDrone(droneId: string, opts?: { compactActivity?: boolean }): Record<string, any> {
   const listed = listArchivedChatsFromStore({ droneId });
   if (!listed.available) return {};
   return Object.fromEntries(listed.archivedChats.map((record) => [record.chatName, {
-    ...(record.chat && typeof record.chat === 'object' ? record.chat : {}),
+    ...(record.chat && typeof record.chat === 'object'
+      ? opts?.compactActivity ? compactChatActivity(record.chat) : record.chat
+      : {}),
     archivedAt: record.archivedAt,
     deleteAt: record.deleteAt,
     archiveRetention: record.archiveRetention,
@@ -164,22 +227,32 @@ async function backfillLegacyChatState(registry: any): Promise<void> {
 }
 
 /** Builds the registry-shaped compatibility read model without rewriting canonical state. */
-export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Promise<DroneRegistry> {
-  const base = clone(baseRegistry ?? (await loadRegistryCompatibilityBase())) as any;
-
-  // Insert-only migration must happen before canonical collections replace the seed.
+export async function buildHubStateProjection(
+  baseRegistry?: DroneRegistry,
+  opts?: { compactChatActivity?: boolean },
+): Promise<DroneRegistry> {
+  const source = baseRegistry ?? (await loadRegistryCompatibilityBase());
   const lifecycle = await getDroneLifecycleRepository();
   if (lifecycle) {
-    await backfillLegacyChatState(base);
-    await lifecycle.backfillLegacyInsertOnly(base);
+    // Import from the full-fidelity source before producing a compact export.
+    // Otherwise a backup that happens to trigger first-run migration would
+    // make its intentionally stripped activity payloads canonical.
+    await backfillLegacyChatState(source);
+    await lifecycle.backfillLegacyInsertOnly(source);
+  }
+
+  const base = clone(opts?.compactChatActivity ? compactRegistryChatActivity(source) : source) as any;
+
+  // Canonical collections replace the migration seed after insert-only import.
+  if (lifecycle) {
     base.drones = mapBy(lifecycle.list('real').map((record) => ({
       ...lifecycleProjection(record),
-      chats: chatsForDrone(record.id),
-      archivedChats: archivedChatsForDrone(record.id),
+      chats: chatsForDrone(record.id, { compactActivity: opts?.compactChatActivity }),
+      archivedChats: archivedChatsForDrone(record.id, { compactActivity: opts?.compactChatActivity }),
     })), (record: any) => record.id);
     base.pending = mapBy(lifecycle.list('pending').map((record) => {
-      const chats = chatsForDrone(record.id);
-      const archivedChats = archivedChatsForDrone(record.id);
+      const chats = chatsForDrone(record.id, { compactActivity: opts?.compactChatActivity });
+      const archivedChats = archivedChatsForDrone(record.id, { compactActivity: opts?.compactChatActivity });
       return {
         ...lifecycleProjection(record),
         ...(Object.keys(chats).length > 0 ? { chats } : {}),
@@ -187,8 +260,8 @@ export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Pro
       };
     }), (record: any) => record.id);
     base.archived = mapBy(lifecycle.list('archived').map((record) => {
-      const chats = chatsForDrone(record.id);
-      const archivedChats = archivedChatsForDrone(record.id);
+      const chats = chatsForDrone(record.id, { compactActivity: opts?.compactChatActivity });
+      const archivedChats = archivedChatsForDrone(record.id, { compactActivity: opts?.compactChatActivity });
       return {
         ...lifecycleProjection(record),
         ...(Object.keys(chats).length > 0 ? { chats } : {}),

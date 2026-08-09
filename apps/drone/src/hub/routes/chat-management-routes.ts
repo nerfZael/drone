@@ -62,10 +62,9 @@ type ChatManagementRouteDependencyName =
   | 'removeDockerSnapshotImagesBestEffort'
   | 'renameNativeChatSession'
   | 'renameChatInStore'
+  | 'resolveCanonicalDroneOrPendingForReadRef'
   | 'resolveChatTmuxCommand'
   | 'resolveDroneDaemonClientForEntry'
-  | 'resolveDroneFromRegistryRef'
-  | 'resolveDroneOrPendingForReadRef'
   | 'resolveDroneOrRespond'
   | 'resolveEffectiveDeleteActionSettings'
   | 'setChatAgentConfig'
@@ -147,10 +146,9 @@ export function createChatManagementRouteHandler(
     removeDockerSnapshotImagesBestEffort,
     renameNativeChatSession,
     renameChatInStore,
+    resolveCanonicalDroneOrPendingForReadRef,
     resolveChatTmuxCommand,
     resolveDroneDaemonClientForEntry,
-    resolveDroneFromRegistryRef,
-    resolveDroneOrPendingForReadRef,
     resolveDroneOrRespond,
     resolveEffectiveDeleteActionSettings,
     setChatAgentConfig,
@@ -586,7 +584,7 @@ export function createChatManagementRouteHandler(
         const droneRef = decodeURIComponent(parts[2]);
         const timer = createRequestTimer();
         try {
-          const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+          const resolved = await resolveCanonicalDroneOrPendingForReadRef(droneRef);
           timer.mark('resolve');
           if (!resolved) {
             timer.setHeader(res);
@@ -621,9 +619,16 @@ export function createChatManagementRouteHandler(
             return;
           }
           const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-          const importedChats = await importResolvedDroneChatsToStore(droneId, resolved.drone);
+          let storeChats = listChatsFromStore({ droneId });
+          let importedChats: string[] = [];
+          // Bun's compatibility store is in-memory and reports itself available
+          // before legacy registry chats have been imported. Node's SQLite store
+          // is canonical and must not re-import stale lifecycle chat snapshots.
+          if ((globalThis as any).Bun || !storeChats.available) {
+            importedChats = await importResolvedDroneChatsToStore(droneId, resolved.drone);
+            storeChats = listChatsFromStore({ droneId });
+          }
           timer.mark('import');
-          const storeChats = listChatsFromStore({ droneId });
           timer.mark('store');
           const allChats = storeChats.available ? storeChats.chats : importedChats;
           const storedChats = new Map<string, ReturnType<typeof readChatFromStore>>();
@@ -632,14 +637,13 @@ export function createChatManagementRouteHandler(
             storedChats.set(chatName, stored);
             return !isWorkflowChatEntry(stored?.chat);
           });
-          const registryChats = (resolved.drone as any)?.chats ?? {};
           const readStates = listChatReadStatesFromStore({ droneId });
           const chatDetails = chats.map((chatName: string) => {
             const stored = storedChats.get(chatName);
             return {
               chat: chatName,
               chatId: String((stored?.chat as any)?.id ?? '').trim() || null,
-              draft: isDraftChatEntry(registryChats?.[chatName]),
+              draft: isDraftChatEntry(stored?.chat),
               unread: readStates[chatName]?.unread === true,
               latestAgentTurnId: readStates[chatName]?.latestAgentTurnId ?? null,
               latestAgentRevision: readStates[chatName]?.latestAgentRevision ?? 0,
@@ -768,42 +772,39 @@ export function createChatManagementRouteHandler(
         const chatName = decodeURIComponent(parts[4]);
         const timer = createRequestTimer();
         try {
-          let rejectStatus = 404;
-          let rejectError = `unknown drone: ${droneRef}`;
-          const resolved = await resolveDroneFromRegistryRef(droneRef, {
-            onStillStarting: () => {
-              rejectStatus = 409;
-              rejectError = `drone "${droneRef}" is still starting`;
-            },
-            onUnknown: () => {
-              rejectStatus = 404;
-              rejectError = `unknown drone: ${droneRef}`;
-            },
-          });
+          const resolvedTarget = await resolveCanonicalDroneOrPendingForReadRef(droneRef);
           timer.mark('resolve');
-          if (!resolved) {
+          if (!resolvedTarget || resolvedTarget.kind === 'pending') {
+            const rejectStatus = resolvedTarget?.kind === 'pending' ? 409 : 404;
+            const rejectError =
+              resolvedTarget?.kind === 'pending'
+                ? `drone "${droneRef}" is still starting`
+                : `unknown drone: ${droneRef}`;
             timer.setHeader(res);
             logSlowHubRequest('chat metadata', timer, { droneRef, chatName, status: rejectStatus });
             json(res, rejectStatus, { ok: false, error: rejectError });
             return;
           }
-          const droneId = resolved.id;
-          const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-          const c = (resolved.drone as any)?.chats?.[chatName];
+          const droneId = resolvedTarget.id;
+          const drone = resolvedTarget.drone;
+          const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
+          const storedChat = readChatFromStore({ droneId, chatName });
+          const c = storedChat.chat ?? (drone as any)?.chats?.[chatName];
           if (!c) {
             timer.setHeader(res);
             logSlowHubRequest('chat metadata', timer, { droneId, chatName, status: 404 });
             json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
             return;
           }
-          const chatEntry = (await importResolvedChatToStore(droneId, chatName, c)) ?? c;
+          const chatEntry =
+            storedChat.chat ?? (await importResolvedChatToStore(droneId, chatName, c)) ?? c;
           const durableChatId =
             String((c as any)?.id ?? '').trim() || String((chatEntry as any)?.id ?? '').trim();
           const subscriptions = durableChatId
             ? listResourceSubscriptionsForChatId(durableChatId)
             : [];
           timer.mark('import');
-          const agent = inferChatAgent(chatEntry as any, resolved.drone);
+          const agent = inferChatAgent(chatEntry as any, drone);
           const agentLocked = await chatHasAgentLockingHistory(chatEntry, agent);
           const readState = readChatReadStateFromStore({ droneId, chatName });
           timer.mark('format');
@@ -832,7 +833,7 @@ export function createChatManagementRouteHandler(
             ),
             approvalPolicy: normalizeAgentApprovalPolicy((chatEntry as any).approvalPolicy),
             dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(
-              resolved.drone,
+              drone,
               chatEntry,
             ),
             turns: (chatEntry as any).turns ?? [],

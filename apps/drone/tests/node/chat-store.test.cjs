@@ -24,6 +24,7 @@ const {
   markChatUnreadInStore,
   patchChatMetadataInStore,
   readChatFromStore,
+  readDroneChatCleanupProjectionFromStore,
   readChatReadStateFromStore,
   readTranscriptTurnsFromStore,
   renameChatInStore,
@@ -164,6 +165,57 @@ describe('canonical chat and transcript repository', () => {
     const archived = listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats[0].chat;
     assert.equal(archived.pendingPrompts[0].automation, undefined);
     assert.equal(archived.pendingPrompts[0].blockedByAutomation, undefined);
+  });
+
+  test('cleanup projection keeps chat identities and snapshots without deserializing activity detail', async () => {
+    tempDataDir('cleanup-projection');
+    const activity = {
+      version: 1,
+      source: 'codex',
+      updatedAt: '2026-01-01T00:02:00.000Z',
+      messages: [{ id: 'large-activity-sentinel', role: 'assistant', content: 'transient detail' }],
+    };
+    await importDroneChatsFromRegistry({
+      droneId: 'drone-1',
+      chats: {
+        default: legacyChat('active', [{
+          id: 'active-turn',
+          at: '2026-01-01T00:01:00.000Z',
+          prompt: 'active',
+          ok: true,
+          output: 'done',
+          activity,
+          dockerSnapshot: { imageRef: 'snapshot:active' },
+        }]),
+      },
+    });
+    await importArchivedChatsFromRegistry({
+      droneId: 'drone-1',
+      archivedChats: {
+        old: {
+          ...legacyChat('archived', [{
+            id: 'archived-turn',
+            at: '2026-01-01T00:01:00.000Z',
+            prompt: 'archived',
+            ok: true,
+            output: 'done',
+            activity,
+            dockerSnapshot: { imageRef: 'snapshot:archived' },
+          }]),
+          archivedAt: '2026-01-01T00:00:00.000Z',
+          deleteAt: '2026-01-02T00:00:00.000Z',
+          archiveRetention: '1d',
+        },
+      },
+    });
+
+    const projected = readDroneChatCleanupProjectionFromStore({ droneId: 'drone-1' });
+
+    assert.equal(projected.chats.default.title, 'active');
+    assert.equal(projected.archivedChats.old.title, 'archived');
+    assert.equal(projected.chats.default.turns[0].dockerSnapshot.imageRef, 'snapshot:active');
+    assert.equal(projected.archivedChats.old.turns[0].dockerSnapshot.imageRef, 'snapshot:archived');
+    assert.equal(JSON.stringify(projected).includes('large-activity-sentinel'), false);
   });
 
   test('shares monotonic unread cursors without letting stale devices clear newer replies', async () => {

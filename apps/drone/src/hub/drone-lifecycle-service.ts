@@ -1,4 +1,8 @@
-import { loadRegistry, updateRegistry } from '../host/registry';
+import {
+  loadRegistry,
+  loadRegistryCompatibilityBase,
+  updateRegistry,
+} from '../host/registry';
 import {
   getDroneLifecycleRepository,
   type CanonicalDroneLifecycleRecord,
@@ -21,8 +25,31 @@ async function canonicalRepositoryWithLegacyBackfill(): Promise<DroneLifecycleRe
     if ((globalThis as any).Bun) return null;
     throw new Error('canonical drone lifecycle repository is unavailable');
   }
-  const registry = await loadRegistry();
-  await repository.backfillLegacyInsertOnly(registry);
+  if (!repository.isLegacyBackfillComplete()) {
+    // Lifecycle migration only needs the raw legacy buckets. Loading the full
+    // compatibility projection here recursively hydrates every canonical chat
+    // before every lifecycle operation.
+    const registry = await loadRegistryCompatibilityBase();
+    await repository.backfillLegacyInsertOnly(registry);
+  }
+  return repository;
+}
+
+async function canonicalRepositoryForRead(): Promise<DroneLifecycleRepository | null> {
+  const repository = await getDroneLifecycleRepository();
+  if (!repository) {
+    if ((globalThis as any).Bun) return null;
+    throw new Error('canonical drone lifecycle repository is unavailable');
+  }
+  if (
+    !repository.isLegacyBackfillComplete() &&
+    repository.list('real').length === 0 &&
+    repository.list('pending').length === 0 &&
+    repository.list('archived').length === 0
+  ) {
+    const registry = await loadRegistryCompatibilityBase();
+    await repository.backfillLegacyInsertOnly(registry);
+  }
   return repository;
 }
 
@@ -303,6 +330,14 @@ export async function listCanonicalDroneLifecycle(
   return repository ? repository.list(state) : null;
 }
 
+/** Lifecycle list for hot paths; avoids the full projection after a lightweight one-time migration. */
+export async function listCanonicalDroneLifecycleForRead(
+  state: CanonicalDroneLifecycleState,
+): Promise<CanonicalDroneLifecycleRecord[] | null> {
+  const repository = await canonicalRepositoryForRead();
+  return repository ? repository.list(state) : null;
+}
+
 export async function resolveDroneFromRegistryRef(
   droneRef: string,
   handlers: {
@@ -357,13 +392,14 @@ export async function resolveDroneOrPendingForReadRef(droneRef: string): Promise
 /** Read-only resolver for latency-sensitive canonical endpoints.
  *
  * Unlike the compatibility resolver, this never loads the global registry
- * projection and never attempts a legacy backfill. Bun intentionally retains
- * the registry fallback until it has a supported SQLite adapter.
+ * projection. It may perform the one-time lifecycle migration from the raw
+ * legacy snapshot. Bun intentionally retains the registry fallback until it
+ * has a supported SQLite adapter.
  */
 export async function resolveCanonicalDroneOrPendingForReadRef(droneRef: string): Promise<ResolvedOrPendingDrone | null> {
   const ref = String(droneRef ?? '').trim();
   if (!ref) return null;
-  const repository = await getDroneLifecycleRepository();
+  const repository = await canonicalRepositoryForRead();
   if (!repository) {
     if ((globalThis as any).Bun) return await resolveDroneOrPendingForReadRef(ref);
     throw new Error('canonical drone lifecycle repository is unavailable');

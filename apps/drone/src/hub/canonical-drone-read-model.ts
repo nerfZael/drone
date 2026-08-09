@@ -40,6 +40,26 @@ export type CanonicalActiveDroneReadModel = {
 
 const RECENT_TURNS_PER_CHAT = 60;
 
+/**
+ * Sidebar and event-stream readers only use activity.updatedAt to detect live
+ * changes. Agent activity can contain up to 512 KiB of message/tool history and
+ * is duplicated in both prompt and turn payloads, so carrying the full value in
+ * this frequently rebuilt read model creates hundreds of MiB of short-lived JS
+ * objects. Preserve every other payload field while projecting activity down to
+ * the one value these callers consume.
+ */
+function compactActivityJson(column: string): string {
+  return `CASE
+    WHEN json_valid(${column}) = 0 THEN ${column}
+    WHEN json_type(${column}, '$.activity') IS NULL THEN ${column}
+    ELSE json_set(
+      json_remove(${column}, '$.activity'),
+      '$.activity',
+      json_object('updatedAt', json_extract(${column}, '$.activity.updatedAt'))
+    )
+  END`;
+}
+
 function parseObject(raw: string): Record<string, any> {
   try {
     const value = JSON.parse(raw);
@@ -135,7 +155,8 @@ export function readCanonicalActiveDroneModel(): CanonicalActiveDroneReadModel |
           SELECT drone_id,chat_name,turn_id
           FROM ranked WHERE recent_rank <= ?
         )
-        SELECT turns.drone_id,turns.chat_name,turns.turn_json
+        SELECT turns.drone_id,turns.chat_name,
+          ${compactActivityJson('turns.turn_json')} AS turn_json
         FROM selected_ids
         JOIN canonical_chat_turns AS turns
           ON turns.drone_id = selected_ids.drone_id
@@ -152,11 +173,24 @@ export function readCanonicalActiveDroneModel(): CanonicalActiveDroneReadModel |
 
     if (hasTable(connection, 'prompts')) {
       const promptRows = connection.prepare(`WITH ranked AS (
-          SELECT drone_id,chat_name,prompt_id,created_at,updated_at,state,prompt,payload_json,last_error,
-            ROW_NUMBER() OVER (PARTITION BY drone_id,chat_name ORDER BY sequence DESC) AS rank
-          FROM prompts WHERE state != 'cancelled'
+          SELECT prompts.drone_id,prompts.chat_name,prompts.prompt_id,prompts.created_at,
+            prompts.updated_at,prompts.state,prompts.prompt,prompts.payload_json,
+            prompts.last_error,
+            ROW_NUMBER() OVER (
+              PARTITION BY prompts.drone_id,prompts.chat_name ORDER BY prompts.sequence DESC
+            ) AS rank
+          FROM prompts
+          WHERE prompts.state != 'cancelled'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM canonical_chat_turns AS turns
+              WHERE turns.drone_id = prompts.drone_id
+                AND turns.chat_name = prompts.chat_name
+                AND turns.turn_id = prompts.prompt_id
+            )
         )
-        SELECT drone_id,chat_name,prompt_id,created_at,updated_at,state,prompt,payload_json,last_error
+        SELECT drone_id,chat_name,prompt_id,created_at,updated_at,state,prompt,
+          ${compactActivityJson('payload_json')} AS payload_json,last_error
         FROM ranked WHERE rank <= 60
         ORDER BY drone_id,chat_name,created_at,prompt_id`).all() as PromptRow[];
       for (const row of promptRows) {

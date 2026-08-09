@@ -10,7 +10,11 @@ import {
   HubSettingVersionConflictError,
   type HubSettingRecord,
 } from '../host/hub-settings-repository';
-import { loadRegistry, updateRegistry, type DroneRegistry } from '../host/registry';
+import {
+  loadRegistryCompatibilityBase,
+  updateRegistry,
+  type DroneRegistry,
+} from '../host/registry';
 import { createCodexLoginManager } from './codex-login-manager';
 import { GROQ_SPEECH_VOICES, type GroqSpeechVoice } from './groq-speech';
 
@@ -325,6 +329,28 @@ function normalizeOrderedStringList(value: unknown): string[] {
   return out;
 }
 
+export function resolvePinnedDronePreferenceIds(
+  currentRaw: unknown,
+  requestedRaw: unknown,
+  pinned: boolean,
+): string[] {
+  const current = normalizeOrderedStringList(currentRaw);
+  const requested = normalizeOrderedStringList(requestedRaw);
+  if (!pinned) {
+    const removed = new Set(requested);
+    return current.filter((droneId) => !removed.has(droneId));
+  }
+  const seen = new Set(current);
+  return [
+    ...current,
+    ...requested.filter((droneId) => {
+      if (seen.has(droneId)) return false;
+      seen.add(droneId);
+      return true;
+    }),
+  ];
+}
+
 function normalizeOrderedStringMap(value: unknown): Record<string, string[]> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const out: Record<string, string[]> = {};
@@ -428,7 +454,10 @@ async function getCanonicalSetting<T>(
   const repository = await getHubSettingsRepository();
   const canonical = repository.get<T | null>(key);
   if (canonical) return canonical;
-  const candidate = legacy(await loadRegistry());
+  // Legacy settings live in residual state. Building the full compatibility
+  // projection here also hydrates every drone transcript, even though callers
+  // only inspect one settings field.
+  const candidate = legacy(await loadRegistryCompatibilityBase());
   if (candidate) {
     return await repository.backfillIfAbsent<T | null>(key, candidate.value, candidate.updatedAt);
   }
@@ -1136,7 +1165,7 @@ async function getStoredUiPreferencesSettings(): Promise<StoredUiPreferencesSett
   const canonical = repository.get<unknown>(UI_PREFERENCES_SETTING_KEY);
   if (canonical) return storedUiPreferencesFromRecord(canonical);
 
-  const reg = await loadRegistry();
+  const reg = await loadRegistryCompatibilityBase();
   const legacyRaw = reg.settings?.uiPreferences;
   if (legacyRaw !== undefined) {
     const updatedAtRaw = legacyRaw?.updatedAt;

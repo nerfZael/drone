@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { HubRouter } from '../src/hub/hub-router';
 import { createEditorRouteHandler } from '../src/hub/routes/editor-routes';
+import { createDroneLifecycleRouteHandler } from '../src/hub/routes/drone-lifecycle-routes';
 import { registerFleetRoutes } from '../src/hub/routes/fleet-routes';
 import { registerOperationalRoutes } from '../src/hub/routes/operational-routes';
 import { registerSettingsRoutes } from '../src/hub/routes/settings-routes';
@@ -21,6 +22,100 @@ function routeHarness(body: unknown = null) {
 }
 
 describe('extracted Hub route modules', () => {
+  test('lists archived drones from canonical lifecycle state without loading the full registry', async () => {
+    const responses: Array<{ status: number; body: any }> = [];
+    const response = {
+      writableEnded: false,
+      statusCode: 0,
+      setHeader: () => {},
+      end(data: string) {
+        responses.push({ status: this.statusCode, body: JSON.parse(data) });
+        this.writableEnded = true;
+      },
+    };
+    let fullRegistryLoads = 0;
+    const handler = createDroneLifecycleRouteHandler({
+      triggerArchiveCleanup: () => {},
+      listCanonicalDroneLifecycleForRead: async () => [{
+        state: 'archived', id: 'archived-a', name: 'Archived A', containerName: null,
+        runtimeKind: 'host', phase: null, archivedAt: '2026-08-08T00:00:00.000Z',
+        deleteAt: '2026-08-10T00:00:00.000Z', archiveRetention: '1d',
+        archiveRuntimePolicy: 'keep-running', lifecycle: { repoPath: '/repo' },
+      }],
+      loadRegistry: async () => {
+        fullRegistryLoads += 1;
+        return { archived: {} };
+      },
+      normalizeDroneIdentity: (value: unknown) => String(value ?? '').trim(),
+      nowIso: () => '2026-08-09T00:00:00.000Z',
+      parseIsoToMs: (value: unknown) => Date.parse(String(value)),
+      resolveArchiveDeleteAtIso: (entry: any) => entry.deleteAt,
+      normalizeArchiveRetention: (value: unknown) => value,
+      normalizeArchiveRuntimePolicy: (value: unknown) => value,
+      archiveRetentionMs: () => 86_400_000,
+    } as any);
+
+    expect(await handler({
+      req: { headers: {} } as any,
+      res: response as any,
+      url: new URL('http://hub.test/api/archive/drones'),
+      method: 'GET',
+      parts: ['api', 'archive', 'drones'],
+    })).toBe(true);
+    expect(fullRegistryLoads).toBe(0);
+    expect(responses[0]).toMatchObject({
+      status: 200,
+      body: { ok: true, total: 1, archived: [{ id: 'archived-a', name: 'Archived A' }] },
+    });
+  });
+
+  test('archives one drone through targeted lifecycle state without loading every transcript', async () => {
+    const responses: Array<{ status: number; body: any }> = [];
+    const response = {
+      writableEnded: false,
+      statusCode: 0,
+      setHeader: () => {},
+      end(data: string) {
+        responses.push({ status: this.statusCode, body: JSON.parse(data) });
+        this.writableEnded = true;
+      },
+    };
+    let fullRegistryLoads = 0;
+    let stoppedDroneId = '';
+    const handler = createDroneLifecycleRouteHandler({
+      resolveCanonicalDroneOrPendingForReadRef: async () => ({
+        kind: 'real', id: 'drone-a', drone: { id: 'drone-a', name: 'Alpha', runtime: 'host', chats: {} },
+      }),
+      loadRegistry: async () => {
+        fullRegistryLoads += 1;
+        return { drones: {} };
+      },
+      normalizeDroneIdentity: (value: unknown) => String(value ?? '').trim(),
+      resolveEffectiveDeleteActionSettings: async () => ({
+        archiveRetention: '1d', archiveRuntimePolicy: 'keep-running',
+      }),
+      stopAllDroneChatActivity: async ({ droneId }: any) => { stoppedDroneId = droneId; },
+      droneRuntime: (entry: any) => entry.runtime,
+      archiveDroneById: async () => ({
+        hadEntry: true, archived: true, id: 'drone-a', name: 'Alpha',
+        archiveRetention: '1d', archiveRuntimePolicy: 'keep-running',
+        archivedAt: '2026-08-09T00:00:00.000Z', deleteAt: '2026-08-10T00:00:00.000Z',
+      }),
+      revokeMcpAccessTokensForDrone: async () => {},
+    } as any);
+
+    expect(await handler({
+      req: { headers: {} } as any,
+      res: response as any,
+      url: new URL('http://hub.test/api/drones/drone-a/archive'),
+      method: 'POST',
+      parts: ['api', 'drones', 'drone-a', 'archive'],
+    })).toBe(true);
+    expect(fullRegistryLoads).toBe(0);
+    expect(stoppedDroneId).toBe('drone-a');
+    expect(responses[0]).toMatchObject({ status: 200, body: { ok: true, archived: true } });
+  });
+
   test('delegates terminal routes and rejects invalid session names', async () => {
     const responses: Array<{ status: number; body: any }> = [];
     const response = {

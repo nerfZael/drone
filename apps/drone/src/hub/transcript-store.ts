@@ -111,6 +111,11 @@ export type ArchivedChatRecord = {
   archiveRetention: string;
 };
 export type ArchivedChatStoreListResult = { available: boolean; archivedChats: ArchivedChatRecord[] };
+export type DroneChatCleanupProjection = {
+  available: boolean;
+  chats: Record<string, any>;
+  archivedChats: Record<string, any>;
+};
 export type ArchiveChatStoreResult = {
   available: boolean;
   archived: boolean;
@@ -1704,6 +1709,56 @@ export class ChatTranscriptRepository {
     });
   }
 
+  readDroneCleanupProjection(opts: { droneId: string }): DroneChatCleanupProjection {
+    return this.database.read((connection) => {
+      const chats: Record<string, any> = {};
+      const activeRows = connection.prepare(`SELECT chat_name, metadata_json
+        FROM canonical_chats WHERE drone_id = ? ORDER BY chat_name`)
+        .all(opts.droneId) as Array<{ chat_name: string; metadata_json: string }>;
+      for (const row of activeRows) {
+        chats[row.chat_name] = { ...metadata(parseJson(row.metadata_json)), turns: [] };
+      }
+      const activeSnapshots = connection.prepare(`SELECT chat_name,
+          CASE WHEN json_valid(turn_json) THEN json_extract(turn_json, '$.dockerSnapshot') END AS snapshot_json
+        FROM canonical_chat_turns WHERE drone_id = ?`)
+        .all(opts.droneId) as Array<{ chat_name: string; snapshot_json: string | null }>;
+      for (const row of activeSnapshots) {
+        const dockerSnapshot = parseJson(String(row.snapshot_json ?? ''));
+        if (dockerSnapshot && chats[row.chat_name]) chats[row.chat_name].turns.push({ dockerSnapshot });
+      }
+
+      const archivedChats: Record<string, any> = {};
+      const archivedRows = connection.prepare(`SELECT chat_name,
+          CASE WHEN json_valid(chat_json)
+            THEN json_remove(chat_json, '$.turns', '$.pendingPrompts')
+            ELSE '{}'
+          END AS metadata_json
+        FROM canonical_archived_chats WHERE drone_id = ? ORDER BY chat_name`)
+        .all(opts.droneId) as Array<{ chat_name: string; metadata_json: string }>;
+      for (const row of archivedRows) {
+        archivedChats[row.chat_name] = { ...metadata(parseJson(row.metadata_json)), turns: [] };
+      }
+      const archivedSnapshots = connection.prepare(`SELECT archived.chat_name,
+          CASE WHEN json_valid(turn.value)
+            THEN json_extract(turn.value, '$.dockerSnapshot')
+          END AS snapshot_json
+        FROM canonical_archived_chats AS archived,
+          json_each(
+            CASE WHEN json_valid(archived.chat_json) THEN archived.chat_json ELSE '{}' END,
+            '$.turns'
+          ) AS turn
+        WHERE archived.drone_id = ?`)
+        .all(opts.droneId) as Array<{ chat_name: string; snapshot_json: string | null }>;
+      for (const row of archivedSnapshots) {
+        const dockerSnapshot = parseJson(String(row.snapshot_json ?? ''));
+        if (dockerSnapshot && archivedChats[row.chat_name]) {
+          archivedChats[row.chat_name].turns.push({ dockerSnapshot });
+        }
+      }
+      return { available: true, chats, archivedChats };
+    });
+  }
+
   read(opts: { droneId: string; chatName: string; indexes: number[] }): TranscriptStoreReadResult {
     return this.database.read((connection) => {
       const row = this.chatRow(connection, opts.droneId, opts.chatName);
@@ -2772,6 +2827,37 @@ export async function markChatUnreadInStore(opts: {
 export function readChatFromStore(opts: { droneId: string; chatName: string }): ChatStoreReadResult {
   const store = repository();
   return store ? store.readChat(opts) : memoryReadChat(opts.droneId, opts.chatName);
+}
+
+export function readDroneChatCleanupProjectionFromStore(
+  opts: { droneId: string },
+): DroneChatCleanupProjection {
+  const store = repository();
+  if (store) return store.readDroneCleanupProjection(opts);
+  const project = (chat: any) => ({
+    ...metadata(chat),
+    turns: (Array.isArray(chat?.turns) ? chat.turns : []).flatMap((turn: any) =>
+      turn?.dockerSnapshot && typeof turn.dockerSnapshot === 'object'
+        ? [{ dockerSnapshot: turn.dockerSnapshot }]
+        : []),
+  });
+  const chats: Record<string, any> = {};
+  const prefix = `${opts.droneId}\u0000`;
+  for (const [storedKey, row] of memoryChats) {
+    if (!storedKey.startsWith(prefix)) continue;
+    const chatName = storedKey.slice(prefix.length);
+    chats[chatName] = {
+      ...row.metadata,
+      turns: [...memoryTurnMap(opts.droneId, chatName).values()].flatMap((turn) =>
+        turn?.dockerSnapshot ? [{ dockerSnapshot: turn.dockerSnapshot }] : []),
+    };
+  }
+  const archivedChats: Record<string, any> = {};
+  for (const [storedKey, record] of memoryArchivedChats) {
+    if (!storedKey.startsWith(prefix)) continue;
+    archivedChats[storedKey.slice(prefix.length)] = project(record.chat);
+  }
+  return { available: true, chats, archivedChats };
 }
 
 export function readChatVersionFromStore(opts: { droneId: string; chatName: string; includePending: boolean }): ChatReadVersion {

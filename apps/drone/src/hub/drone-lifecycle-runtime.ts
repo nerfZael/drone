@@ -120,12 +120,19 @@ export function createDroneLifecycleRuntime(dependencies: DroneLifecycleRuntimeD
         opts.droneEntry?.containerName ?? opts.droneEntry?.name ?? `drone-${droneId}`,
       ).trim() || `drone-${droneId}`;
 
-    await stopAllDroneChatActivity({
-      droneId,
-      droneEntry: opts.droneEntry,
-      reason: 'delete',
-      updateLiveRegistry: opts.updateLiveRegistry,
-    });
+    try {
+      await stopAllDroneChatActivity({
+        droneId,
+        droneEntry: opts.droneEntry,
+        reason: 'delete',
+        updateLiveRegistry: opts.updateLiveRegistry,
+      });
+    } catch (error) {
+      // Archived drones were already stopped when they entered the archive and
+      // can legitimately have no reachable daemon at TTL cleanup time. Do not
+      // let that best-effort shutdown strand an otherwise deletable archive.
+      if (opts.updateLiveRegistry !== false) throw error;
+    }
 
     if (droneRuntime(opts.droneEntry) === 'host') {
       return { containerGone: true, removeErr: null };
