@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   extractGithubPullRequestLinksFromMessages,
+  githubPullRequestDiffStatsPresentation,
   githubPullRequestForceMergeReason,
   githubPullRequestMatchesRepo,
   githubPullRequestMergeBlockedReason,
@@ -31,6 +32,22 @@ const pullRequest: GithubPullRequestSummary = {
 };
 
 describe('shared GitHub pull request model', () => {
+  test('presents pull request diff stats consistently across clients', () => {
+    expect(
+      githubPullRequestDiffStatsPresentation({
+        changed: 13,
+        additions: 655,
+        deletions: 14,
+      }),
+    ).toEqual({
+      changed: 13,
+      additions: 655,
+      deletions: 14,
+      netLabel: '+641',
+      accessibilityLabel: '13 files changed, 655 additions, 14 deletions, +641 net lines',
+    });
+  });
+
   test('extracts and deduplicates links from assistant messages only', () => {
     expect(
       extractGithubPullRequestLinksFromMessages([

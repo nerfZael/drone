@@ -11,6 +11,7 @@ import {
 import ExternalLink from 'lucide-react-native/icons/external-link';
 import {
   extractGithubPullRequestLinks,
+  githubPullRequestDiffStatsPresentation,
   githubPullRequestForceMergeReason,
   githubPullRequestMatchesRepo,
   githubPullRequestMergeBlockedReason,
@@ -18,20 +19,20 @@ import {
   pullRequestCloseConfirmation,
   pullRequestMergeConfirmation,
   type GithubPullRequestLink,
+  type GithubPullRequestSummary,
 } from '@drone/assistant-chat';
 import { colors, radii } from '../theme';
 import { ConfirmDialog } from '../components/Ui';
 import type { MobileLinkedPullRequestContext } from './use-drone-linked-pull-requests';
 import {
   MOBILE_PULL_REQUEST_MERGE_METHOD_OPTIONS,
-  mobilePullRequestDiffStatsPresentation,
   mobilePullRequestMergeFailureMessage,
   mobilePullRequestMergePresentation,
-  type MobilePullRequestDiffStats,
   type MobilePullRequestMergeMethod,
 } from './linked-pull-request-model';
 
 type StatusTone = 'accent' | 'danger' | 'muted' | 'success' | 'warning';
+type PullRequestDiffStatsData = NonNullable<GithubPullRequestSummary['diffStats']>;
 type PullRequestConfirmation =
   | { action: 'merge'; method: MobilePullRequestMergeMethod }
   | { action: 'close' }
@@ -57,8 +58,8 @@ function TonePill({ label, tone }: { label: string; tone: StatusTone }) {
   );
 }
 
-function PullRequestDiffStats({ stats }: { stats: MobilePullRequestDiffStats }) {
-  const presentation = mobilePullRequestDiffStatsPresentation(stats);
+function PullRequestDiffStats({ stats }: { stats: PullRequestDiffStatsData }) {
+  const presentation = githubPullRequestDiffStatsPresentation(stats);
   return (
     <View
       accessible
