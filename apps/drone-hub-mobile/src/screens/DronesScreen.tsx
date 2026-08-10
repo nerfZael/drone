@@ -492,6 +492,25 @@ export function DronesScreen({
     setAccessDirty(false);
   }, []);
 
+  const transitionToChat = React.useCallback(
+    (nextChat: string) => {
+      chatNameRef.current = nextChat;
+      setChatName(nextChat);
+      resetActiveChatState();
+    },
+    [resetActiveChatState],
+  );
+
+  const transitionToDroneChat = React.useCallback(
+    (nextDrone: MobileDroneSummary | null, nextChat = nextDrone?.chats[0] ?? 'default') => {
+      selectedRef.current = nextDrone;
+      setSelected(nextDrone);
+      setChats(nextDrone?.chats ?? []);
+      transitionToChat(nextChat);
+    },
+    [transitionToChat],
+  );
+
   React.useEffect(() => {
     setChatHistoryPage(EMPTY_CHAT_HISTORY_PAGE);
     setOlderHistoryBusy(false);
@@ -565,22 +584,20 @@ export function DronesScreen({
         const nextSelected = currentSelected
           ? (nextDrones.find((drone) => drone.id === currentSelected.id) ?? null)
           : null;
-        selectedRef.current = nextSelected;
-        setSelected(nextSelected);
-        if (nextSelected) {
+        if (!nextSelected) {
+          if (currentSelected) transitionToDroneChat(null);
+        } else {
+          selectedRef.current = nextSelected;
+          setSelected(nextSelected);
           const nextChats = nextSelected.chats;
           setChats(nextChats);
           if (nextChats.length === 0) {
-            chatNameRef.current = '';
-            setChatName('');
-            resetActiveChatState();
+            transitionToChat('');
           }
           if (!nextChats.includes(chatNameRef.current)) {
             const fallbackChat = nextChats[0];
             if (fallbackChat) {
-              chatNameRef.current = fallbackChat;
-              setChatName(fallbackChat);
-              resetActiveChatState();
+              transitionToChat(fallbackChat);
               void readChatRef.current(nextSelected.id, fallbackChat).catch(() => undefined);
             }
           }
@@ -654,9 +671,10 @@ export function DronesScreen({
     [
       commitDroneListSnapshot,
       requestDroneControl,
-      resetActiveChatState,
       targetId,
       targetSupportsDrones,
+      transitionToChat,
+      transitionToDroneChat,
     ],
   );
   loadDronesRef.current = loadDrones;
@@ -815,16 +833,11 @@ export function DronesScreen({
   React.useEffect(() => {
     const createDefaultsVersion = ++createDefaultsRequestVersion.current;
     pendingSidebarGroupOverridesRef.current.clear();
-    selectedRef.current = null;
-    chatNameRef.current = 'default';
     commitDroneListSnapshot({
       ...EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
       targetId,
     });
-    setSelected(null);
-    setChats([]);
-    setChatName('default');
-    resetActiveChatState();
+    transitionToDroneChat(null);
     setConfirmAccessDiscard(false);
     setApprovalBusyId('');
     setCancellingPromptId('');
@@ -876,7 +889,7 @@ export function DronesScreen({
         setNewDroneScreenVersion((value) => value + 1);
       });
     }
-  }, [commitDroneListSnapshot, resetActiveChatState, targetId, targetSupportsDrones]);
+  }, [commitDroneListSnapshot, targetId, targetSupportsDrones, transitionToDroneChat]);
   React.useEffect(() => {
     if (targetReachable && targetSupportsDrones) {
       // Callback identities change while the local assistant and mesh hydrate. Refresh only when
@@ -897,12 +910,7 @@ export function DronesScreen({
     const knownChats = drone.chats;
     const knownChat =
       requestedChat && knownChats.includes(requestedChat) ? requestedChat : (knownChats[0] ?? '');
-    selectedRef.current = drone;
-    chatNameRef.current = knownChat;
-    setSelected(drone);
-    setChats(knownChats);
-    setChatName(knownChat);
-    resetActiveChatState();
+    transitionToDroneChat(drone, knownChat);
     // Starting clones publish a chat change when their copied chats are ready. Reading now
     // returns a transient conflict and replaces the useful starting state with an error.
     if (options.deferChatLoad) return;
@@ -1250,9 +1258,7 @@ export function DronesScreen({
   const selectChat = (nextChat: string) =>
     selected &&
     run('chat', async () => {
-      chatNameRef.current = nextChat;
-      setChatName(nextChat);
-      resetActiveChatState();
+      transitionToChat(nextChat);
       await readChat(selected.id, nextChat);
     });
 
@@ -1846,13 +1852,8 @@ export function DronesScreen({
         const currentDrone = selectedRef.current!;
         const nextChats = [...new Set([...currentDrone.chats, targetChatName])];
         const updatedDrone = { ...currentDrone, chats: nextChats };
-        selectedRef.current = updatedDrone;
-        chatNameRef.current = targetChatName;
-        setSelected(updatedDrone);
         setDrones((current) => current.map((item) => (item.id === droneId ? updatedDrone : item)));
-        setChats(nextChats);
-        setChatName(targetChatName);
-        resetActiveChatState();
+        transitionToDroneChat(updatedDrone, targetChatName);
         await readChat(droneId, targetChatName);
         await loadDrones(true);
       })
@@ -1912,14 +1913,9 @@ export function DronesScreen({
     });
     setNewDroneDefaults(defaults);
     setNewDroneScreenVersion((value) => value + 1);
-    selectedRef.current = null;
-    chatNameRef.current = 'default';
     chatReadVersion.current += 1;
     openDroneVersion.current += 1;
-    setSelected(null);
-    setChats([]);
-    setChatName('default');
-    resetActiveChatState();
+    transitionToDroneChat(null);
     setCancellingPromptId('');
     setPrompt('');
     setModelOpen(false);
@@ -2017,9 +2013,7 @@ export function DronesScreen({
     await loadDrones(true);
     if (selectedRef.current?.id === droneId && chatNameRef.current === chatToDelete) {
       const fallbackChat = nextChats[0] ?? '';
-      chatNameRef.current = fallbackChat;
-      setChatName(fallbackChat);
-      resetActiveChatState();
+      transitionToChat(fallbackChat);
       if (fallbackChat) await readChat(droneId, fallbackChat);
     }
     return targetIdRef.current === destinationId;
@@ -2057,12 +2051,7 @@ export function DronesScreen({
       setDrones((current) =>
         current.map((item) => (item.id === updatedDrone.id ? updatedDrone : item)),
       );
-      selectedRef.current = updatedDrone;
-      chatNameRef.current = createdChat;
-      setSelected(updatedDrone);
-      setChats(nextChats);
-      setChatName(createdChat);
-      resetActiveChatState();
+      transitionToDroneChat(updatedDrone, createdChat);
       setPrompt('');
       setPromptAttachments([]);
       setComposerFocusKey(`${drone.id}:${createdChat}:${Date.now()}`);
@@ -2263,15 +2252,13 @@ export function DronesScreen({
         draft: false,
       });
       if (!clonedDrone) throw new Error('The Drone Hub returned an invalid cloned drone.');
-      const activeClone =
-        clonedDrone.chats.length > 0 ? clonedDrone : { ...clonedDrone, chats: ['default'] };
       setDrones((current) => [
-        activeClone,
-        ...current.filter((drone) => drone.id !== activeClone.id),
+        clonedDrone,
+        ...current.filter((drone) => drone.id !== clonedDrone.id),
       ]);
-      const nextChat = activeClone.chats.includes('default') ? 'default' : activeClone.chats[0]!;
-      await activateDrone(activeClone, nextChat, {
-        deferChatLoad: isMobileDroneStarting(activeClone),
+      const nextChat = clonedDrone.chats.includes('default') ? 'default' : clonedDrone.chats[0]!;
+      await activateDrone(clonedDrone, nextChat, {
+        deferChatLoad: isMobileDroneStarting(clonedDrone),
       });
       await loadDrones(true);
     });
@@ -2731,7 +2718,6 @@ export function DronesScreen({
         }
         onSelectDevice={(deviceId) => {
           void saveNewDroneDraftBeforeNavigation().then(() => {
-            selectedRef.current = null;
             chatReadVersion.current += 1;
             openDroneVersion.current += 1;
             setDronesLoaded(false);
@@ -2741,7 +2727,7 @@ export function DronesScreen({
               ...EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
               targetId: deviceId,
             });
-            setSelected(null);
+            transitionToDroneChat(null);
           });
         }}
         onSelectDroneChat={(droneId, nextChat) => {
@@ -3195,12 +3181,9 @@ export function DronesScreen({
               if (targetIdRef.current !== destinationId) return;
               setDrones((current) => current.filter((drone) => drone.id !== droneId));
               if (selectedRef.current?.id === droneId) {
-                selectedRef.current = null;
                 chatReadVersion.current += 1;
                 openDroneVersion.current += 1;
-                setSelected(null);
-                setChats([]);
-                resetActiveChatState();
+                transitionToDroneChat(null);
               }
               await loadDrones(true);
             })
