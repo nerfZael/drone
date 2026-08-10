@@ -2834,6 +2834,17 @@ select:disabled optgroup {
   height: 7px;
 }
 
+/*
+ * Monaco's pointer-style control tooltips are informational and should not
+ * take the pointer away from their trigger. In a narrow editor, the tooltip
+ * can overlap the control (notably the Find widget's Close button), causing
+ * an enter/leave loop that makes the tooltip blink and the control unclickable.
+ */
+.workbench-hover-container:has(> .workbench-hover-pointer),
+.workbench-hover-container:has(> .workbench-hover-pointer) .monaco-hover {
+  pointer-events: none;
+}
+
 .dh-changes-dock {
   background: var(--chat-background);
   border-left: 1px solid var(--border);

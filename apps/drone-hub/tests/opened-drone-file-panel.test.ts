@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { DroneOpenedFileState } from '../src/droneHub/files/opened-file-types';
@@ -100,6 +101,14 @@ describe('OpenedDroneFilePanel', () => {
 
     expect(html).toContain('Plain text editor');
     expect(monacoImportCount).toBe(1);
+  });
+
+  test('keeps Monaco pointer tooltips from blocking narrow editor controls', () => {
+    const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+    const pointerTooltipRule =
+      /\.workbench-hover-container:has\(> \.workbench-hover-pointer\)[^{]*\{([^}]*)\}/.exec(styles)?.[1];
+
+    expect(pointerTooltipRule).toContain('pointer-events: none');
   });
 
   test('uses the tab strip as the only file header', () => {
