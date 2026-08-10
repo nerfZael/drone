@@ -42,7 +42,7 @@ export async function pollGithubRepository(
   resourceIdRaw: string,
   cursorRaw: Record<string, unknown> | null,
   now = new Date(),
-  options?: { token: string | null },
+  options?: { token: string | null; signal?: AbortSignal },
 ): Promise<GithubRepositoryPollResult> {
   const resourceId = normalizeGithubRepositoryId(resourceIdRaw);
   const [owner, repo] = resourceId.split('/');
@@ -55,21 +55,23 @@ export async function pollGithubRepository(
       path: (page) =>
         `${repositoryPath}/pulls?state=all&sort=updated&direction=desc&per_page=100&page=${page}`,
       token,
+      signal: options?.signal,
       pageComplete: (page) =>
         page.some(
-          (pull) =>
-            Date.parse(validIso(pull.updated_at, '')) <= Date.parse(cursor.lastPollAt),
+          (pull) => Date.parse(validIso(pull.updated_at, '')) <= Date.parse(cursor.lastPollAt),
         ),
     }),
     githubApiPages<GithubComment>({
       path: (page) =>
         `${repositoryPath}/issues/comments?sort=updated&direction=asc&since=${since}&per_page=100&page=${page}`,
       token,
+      signal: options?.signal,
     }),
     githubApiPages<GithubComment>({
       path: (page) =>
         `${repositoryPath}/pulls/comments?sort=updated&direction=asc&since=${since}&per_page=100&page=${page}`,
       token,
+      signal: options?.signal,
     }),
   ]);
 
@@ -174,11 +176,16 @@ export async function pollGithubRepository(
 async function githubApiPages<T>(input: {
   path: (page: number) => string;
   token: string | null;
+  signal?: AbortSignal;
   pageComplete?: (items: T[]) => boolean;
 }): Promise<T[]> {
   const items: T[] = [];
   for (let page = 1; ; page += 1) {
-    const result = await githubApiRequest<T[]>({ path: input.path(page), token: input.token });
+    const result = await githubApiRequest<T[]>({
+      path: input.path(page),
+      token: input.token,
+      signal: input.signal,
+    });
     const pageItems = Array.isArray(result) ? result : [];
     items.push(...pageItems);
     if (pageItems.length < 100 || input.pageComplete?.(pageItems)) return items;

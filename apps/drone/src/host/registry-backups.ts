@@ -4,6 +4,7 @@ import fsp from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
+import { ManagedLoop } from '../background/managed-loop';
 import { getHubSettingsRepository } from './hub-settings-repository';
 import { buildHubStateProjection, compactRegistryChatActivity } from './hub-state-projection';
 import { droneRootPath } from './paths';
@@ -89,7 +90,7 @@ const SUSPICIOUS_EMPTY_MIN_PREVIOUS = 10;
 const BACKUP_SCHEDULER_CHECK_MS = 5 * 60 * 1000;
 const REGISTRY_BACKUP_SETTING_KEY = 'registry-backups';
 
-let backupSchedulerTimer: ReturnType<typeof setInterval> | null = null;
+let backupScheduler: ManagedLoop | null = null;
 let backupSchedulerNextCheckAt: string | null = null;
 let backupInFlight: Promise<unknown> | null = null;
 let backupOperationInFlight: Promise<unknown> | null = null;
@@ -554,25 +555,36 @@ export async function runDueRegistryBackups(): Promise<void> {
 }
 
 export function startRegistryBackupScheduler(): void {
-  if (backupSchedulerTimer) return;
-  const scheduleNext = () => {
-    backupSchedulerNextCheckAt = new Date(Date.now() + BACKUP_SCHEDULER_CHECK_MS).toISOString();
-  };
-  void runDueRegistryBackups().catch((error: any) => {
-    void appendBackupLog('error', 'registry backup scheduler failed', { error: error?.message ?? String(error) });
+  if (backupScheduler) return;
+  backupScheduler = new ManagedLoop({
+    intervalMs: BACKUP_SCHEDULER_CHECK_MS,
+    run: async () => {
+      try {
+        await runDueRegistryBackups();
+      } finally {
+        backupSchedulerNextCheckAt = new Date(
+          Date.now() + BACKUP_SCHEDULER_CHECK_MS,
+        ).toISOString();
+      }
+    },
+    onError: (error) => {
+      void appendBackupLog('error', 'registry backup scheduler failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    },
   });
-  scheduleNext();
-  backupSchedulerTimer = setInterval(() => {
-    scheduleNext();
-    void runDueRegistryBackups().catch((error: any) => {
-      void appendBackupLog('error', 'registry backup scheduler failed', { error: error?.message ?? String(error) });
-    });
-  }, BACKUP_SCHEDULER_CHECK_MS);
-  try {
-    (backupSchedulerTimer as any).unref?.();
-  } catch {
-    // ignore
-  }
+  backupSchedulerNextCheckAt = new Date(
+    Date.now() + BACKUP_SCHEDULER_CHECK_MS,
+  ).toISOString();
+  backupScheduler.start();
+}
+
+export async function stopRegistryBackupScheduler(): Promise<void> {
+  const scheduler = backupScheduler;
+  backupScheduler = null;
+  backupSchedulerNextCheckAt = null;
+  await scheduler?.stop();
+  await backupOperationInFlight?.catch(() => {});
 }
 
 export async function resolveRegistryBackupStatusResponse(): Promise<RegistryBackupStatusResponse> {

@@ -352,7 +352,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     script: string;
     prompt?: string;
     deliveryMode?: 'queue' | 'asap';
+    signal?: AbortSignal;
   }) {
+    throwIfBackgroundPromptAborted(opts.signal);
     const d = opts.drone;
     const runtime = droneRuntime(d);
     const droneId = normalizeDroneIdentity(d?.id) || String(d?.name ?? '');
@@ -386,6 +388,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       token,
       readyTimeoutMs: daemonReadyTimeoutMs,
     });
+    throwIfBackgroundPromptAborted(opts.signal);
     if (recovery.recovered) {
       hubLog('info', 'recovered drone daemon on demand', {
         droneId,
@@ -395,28 +398,36 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       });
     }
     try {
-      await dronePromptEnqueue(client, {
-        id: String(opts.id ?? ''),
-        kind: opts.kind,
-        cmd: 'bash',
-        args: ['-lc', opts.script],
-        ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
-        ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
-      });
-      ensureDaemonPromptEventSubscription(droneId);
-    } catch (e: any) {
-      const msg = e?.message ?? String(e);
-      if (isNotFoundErrorMessage(msg)) {
-        await upgradeDroneDaemonInContainer({ containerName, containerPort: d.containerPort });
-        await waitForDroneDaemonReady(client, daemonReadyAfterUpgradeTimeoutMs);
-        await dronePromptEnqueue(client, {
+      await dronePromptEnqueue(
+        client,
+        {
           id: String(opts.id ?? ''),
           kind: opts.kind,
           cmd: 'bash',
           args: ['-lc', opts.script],
           ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
           ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
-        });
+        },
+        { signal: opts.signal },
+      );
+      ensureDaemonPromptEventSubscription(droneId);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      if (isNotFoundErrorMessage(msg)) {
+        await upgradeDroneDaemonInContainer({ containerName, containerPort: d.containerPort });
+        await waitForDroneDaemonReady(client, daemonReadyAfterUpgradeTimeoutMs, opts.signal);
+        await dronePromptEnqueue(
+          client,
+          {
+            id: String(opts.id ?? ''),
+            kind: opts.kind,
+            cmd: 'bash',
+            args: ['-lc', opts.script],
+            ...(typeof opts.prompt === 'string' ? { prompt: opts.prompt } : {}),
+            ...(opts.deliveryMode ? { deliveryMode: opts.deliveryMode } : {}),
+          },
+          { signal: opts.signal },
+        );
         ensureDaemonPromptEventSubscription(droneId);
         return;
       }
@@ -439,7 +450,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     sandbox: 'read-only' | 'workspace-write' | 'danger-full-access';
     model?: string;
     effort?: string;
+    signal?: AbortSignal;
   }) {
+    throwIfBackgroundPromptAborted(opts.signal);
     const d = opts.drone;
     const runtime = droneRuntime(d);
     const droneId = normalizeDroneIdentity(d?.id) || String(d?.name ?? '');
@@ -471,6 +484,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       token,
       readyTimeoutMs: daemonReadyTimeoutMs,
     });
+    throwIfBackgroundPromptAborted(opts.signal);
     if (recovery.recovered) {
       hubLog('info', 'recovered drone daemon on demand', {
         droneId,
@@ -500,6 +514,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       }
       const pid = Math.floor(oldPid);
       const command = await commandForPid(pid);
+      throwIfBackgroundPromptAborted(opts.signal);
       if (!command || !isDroneDaemonCommandForPort(command, hostPort)) {
         throw new Error(
           'host drone daemon is outdated, but its recorded process id no longer identifies the expected daemon',
@@ -542,20 +557,20 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       });
     };
     try {
-      await droneCodexPromptEnqueue(client, payload);
+      await droneCodexPromptEnqueue(client, payload, { signal: opts.signal });
       ensureDaemonPromptEventSubscription(droneId);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       if (runtime === 'container' && isNotFoundErrorMessage(msg)) {
         await upgradeDroneDaemonInContainer({ containerName, containerPort: d.containerPort });
-        await waitForDroneDaemonReady(client, daemonReadyAfterUpgradeTimeoutMs);
-        await droneCodexPromptEnqueue(client, payload);
+        await waitForDroneDaemonReady(client, daemonReadyAfterUpgradeTimeoutMs, opts.signal);
+        await droneCodexPromptEnqueue(client, payload, { signal: opts.signal });
         ensureDaemonPromptEventSubscription(droneId);
         return;
       }
       if (runtime === 'host' && isNotFoundErrorMessage(msg)) {
         await upgradeHostDaemon();
-        await droneCodexPromptEnqueue(client, payload);
+        await droneCodexPromptEnqueue(client, payload, { signal: opts.signal });
         ensureDaemonPromptEventSubscription(droneId);
         return;
       }
@@ -575,7 +590,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     skipManagedRepoSync?: boolean;
     deliveryMode?: 'queue' | 'asap';
     mark?: (name: string) => void;
+    signal?: AbortSignal;
   }) {
+    throwIfBackgroundPromptAborted(opts.signal);
     const droneId = normalizeDroneIdentity(opts.droneId);
     if (!droneId) throw new Error('missing droneId');
 
@@ -605,10 +622,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         }
       }
     }
+    throwIfBackgroundPromptAborted(opts.signal);
 
     const lockKey = `drone:${droneId}`;
 
     return await withDroneOpLock(lockKey, async () => {
+      throwIfBackgroundPromptAborted(opts.signal);
       const regLatest: any = await loadRegistry();
       if (regLatest?.pending?.[droneId] && !regLatest?.drones?.[droneId]) {
         throw new Error(`drone "${droneId}" is still starting`);
@@ -684,6 +703,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           agentPermissionMode,
           approvalPolicy,
         });
+        throwIfBackgroundPromptAborted(opts.signal);
         return {
           ok: true as const,
           agent,
@@ -744,6 +764,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           script,
           prompt: effectivePrompt,
           deliveryMode: opts.deliveryMode,
+          signal: opts.signal,
         });
         return {
           ok: true as const,
@@ -796,6 +817,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           sandbox: sandboxArg,
           ...(chatModel ? { model: chatModel } : {}),
           ...(chatReasoning ? { effort: chatReasoning } : {}),
+          signal: opts.signal,
         });
         return {
           ok: true as const,
@@ -830,6 +852,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           script,
           prompt: effectivePrompt,
           deliveryMode: opts.deliveryMode,
+          signal: opts.signal,
         });
         return {
           ok: true as const,
@@ -866,6 +889,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           script,
           prompt: effectivePrompt,
           deliveryMode: opts.deliveryMode,
+          signal: opts.signal,
         });
         return {
           ok: true as const,
@@ -898,6 +922,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           script,
           prompt: effectivePrompt,
           deliveryMode: opts.deliveryMode,
+          signal: opts.signal,
         });
         return {
           ok: true as const,
@@ -938,6 +963,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           kind: 'blip',
           script,
           deliveryMode: opts.deliveryMode,
+          signal: opts.signal,
         });
         return {
           ok: true as const,
@@ -1150,6 +1176,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     readPendingPromptDispatchWindow,
     readPendingPrompts,
     readPendingStartupPrompts,
+    releasePendingPromptClaim,
     resumePendingPromptChats,
     retryPendingPrompt,
     transcriptTurnIdsFromEntry,
@@ -1910,6 +1937,15 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       : 'Prompt delivery was interrupted; retrying when the drone daemon is available.';
   }
 
+  function throwIfBackgroundPromptAborted(signal?: AbortSignal): void {
+    if (!signal?.aborted) return;
+    throw signal.reason instanceof Error ? signal.reason : new Error('Prompt delivery aborted');
+  }
+
+  function backgroundPromptWasAborted(signal: AbortSignal): boolean {
+    return signal.aborted;
+  }
+
   async function capturePendingPromptFileChangesBaseline(input: {
     droneId: string;
     chatName: string;
@@ -1942,6 +1978,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   async function pumpQueuedPendingPromptsForChat(opts: {
     droneId: string;
     chatName: string;
+    signal: AbortSignal;
   }): Promise<void> {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const chatName = String(opts.chatName ?? '').trim() || 'default';
@@ -1949,6 +1986,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
     // Avoid unbounded loops if state keeps changing due to concurrent requests.
     for (let attempts = 0; attempts < 50; attempts++) {
+      throwIfBackgroundPromptAborted(opts.signal);
       const { d, chat } = await getChatEntry({ droneId, chatName });
       if (isDraftChatEntry(chat)) return;
       const agent = inferChatAgent(chat, d);
@@ -2054,12 +2092,23 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         const claimedPending = readPendingPrompt({ droneId, chatName, id });
         if (!claimedPending) continue;
         try {
+          throwIfBackgroundPromptAborted(opts.signal);
           await sendInNewChatActionRuntime.executeClaimed({
             droneId,
             sourceChatName: chatName,
             pending: claimedPending,
           });
+          throwIfBackgroundPromptAborted(opts.signal);
         } catch (error) {
+          if (backgroundPromptWasAborted(opts.signal)) {
+            await releasePendingPromptClaim({
+              droneId,
+              chatName,
+              id,
+              error: 'Prompt action paused during DroneHub shutdown; retrying after restart.',
+            });
+            return;
+          }
           await sendInNewChatActionRuntime.failOrRetry({
             droneId,
             sourceChatName: chatName,
@@ -2085,8 +2134,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             cwd,
             waitForDaemonMs: undefined,
             deliveryMode: p?.deliveryMode === 'asap' ? 'asap' : 'queue',
+            signal: opts.signal,
           });
         } catch (e: any) {
+          if (backgroundPromptWasAborted(opts.signal)) return;
           const errorText = e?.message ?? String(e);
           hubLog('warn', 'queued native prompt enqueue failed', {
             droneId,
@@ -2134,6 +2185,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             cwd,
             waitForDaemonMs: undefined,
             deliveryMode: p?.deliveryMode === 'asap' ? 'asap' : 'queue',
+            signal: opts.signal,
           }),
           enqueueTimeoutMs,
           `queued prompt enqueue failed for ${droneId}/${chatName}`,
@@ -2158,6 +2210,15 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           }
         }
       } catch (e: any) {
+        if (backgroundPromptWasAborted(opts.signal)) {
+          await releasePendingPromptClaim({
+            droneId,
+            chatName,
+            id,
+            error: 'Prompt delivery paused during DroneHub shutdown; retrying after restart.',
+          });
+          return;
+        }
         const errorText = e?.message ?? String(e);
         const diagnostics =
           looksLikeTransientPromptEnqueueError(errorText) ||
@@ -2207,7 +2268,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     normalizeChatName,
     concurrencyLimit: pendingPromptPumpConcurrencyLimit,
     defaultRetryDelayMs: defaultPendingPromptEnqueueRetryDelayMs,
-    run: pumpQueuedPendingPromptsForChat,
+    run: async (target, signal) =>
+      await pumpQueuedPendingPromptsForChat({ ...target, signal }),
   });
 
   async function resetPromptRuntimeStateForTests(): Promise<void> {
@@ -2953,34 +3015,55 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     return { kind: 'error', status: 404, error: `unknown drone: ${droneId}` };
   }
 
-  const { dequeueProvisioning, enqueueProvisioning, enqueueProvisioningForAllPending } =
-    createDroneProvisioningController({
-      NON_REPO_HOME_CWD,
-      applyPendingDisplayNameToProvisionedDrone,
-      cloneChatEntryForDroneClone,
-      defaultDaemonReadyTimeoutMs,
-      defaultRepoSeedTimeoutMs,
-      ensureChatEntry,
-      enqueuePrompt,
-      enqueuePendingPromptPump,
-      hubLog,
-      inferChatAgent,
-      isSafePromptId,
-      normalizeChatModel,
-      normalizeChatReasoning,
-      normalizeChatName,
-      normalizePendingStartupPrompts,
-      nowIso,
-      parseSeedAgent,
-      resolveDroneCliPath,
-      resolvePendingDroneDisplayName,
-      runNodeCli,
-      setChatAgentConfig,
-      syncMcpServersForDrone,
-      syncRepoAgentsInstructionsForDrone,
-      syncSkillLibraryForDrone,
-      syncSharedPathsToDrone: (opts: any) => syncSetService.applyAllSyncSetsToDrone(opts),
-    });
+  const {
+    dequeueProvisioning,
+    enqueueProvisioning,
+    enqueueProvisioningForAllPending,
+    startProvisioning,
+    stopProvisioning,
+  } = createDroneProvisioningController({
+    NON_REPO_HOME_CWD,
+    applyPendingDisplayNameToProvisionedDrone,
+    cloneChatEntryForDroneClone,
+    defaultDaemonReadyTimeoutMs,
+    defaultRepoSeedTimeoutMs,
+    ensureChatEntry,
+    enqueuePrompt,
+    enqueuePendingPromptPump,
+    hubLog,
+    inferChatAgent,
+    isSafePromptId,
+    normalizeChatModel,
+    normalizeChatReasoning,
+    normalizeChatName,
+    normalizePendingStartupPrompts,
+    nowIso,
+    parseSeedAgent,
+    resolveDroneCliPath,
+    resolvePendingDroneDisplayName,
+    runNodeCli,
+    setChatAgentConfig,
+    syncMcpServersForDrone,
+    syncRepoAgentsInstructionsForDrone,
+    syncSkillLibraryForDrone,
+    syncSharedPathsToDrone: (opts: any) => syncSetService.applyAllSyncSetsToDrone(opts),
+  });
+
+  async function stopPromptRuntimeBackgroundWork(): Promise<void> {
+    await Promise.all([
+      daemonPromptEventMonitor.close(),
+      stopProvisioning(),
+      pendingPromptPump.stop(),
+      chatReconciliationQueue.stop(),
+    ]);
+  }
+
+  function startPromptRuntimeBackgroundWork(): void {
+    daemonPromptEventMonitor.start();
+    startProvisioning();
+    pendingPromptPump.start();
+    chatReconciliationQueue.start();
+  }
 
   return {
     attachmentOnlyPromptLabel,
@@ -3020,6 +3103,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     runDroneLifecycleAction,
     stopAllDroneChatActivity,
     stopChatResponse,
+    startPromptRuntimeBackgroundWork,
+    stopPromptRuntimeBackgroundWork,
     stopSingleDroneChatActivity,
     stopTranscriptPendingPrompts,
     transcriptTurnIdsFromEntry,

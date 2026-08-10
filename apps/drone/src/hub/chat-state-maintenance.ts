@@ -9,6 +9,7 @@ export class ChatStateMaintenanceScheduler {
   private readonly lastRun = new Map<string, number>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly latest = new Map<string, ChatStateMaintenanceInput>();
+  private stopped = false;
 
   constructor(
     private readonly deps: {
@@ -20,7 +21,12 @@ export class ChatStateMaintenanceScheduler {
     },
   ) {}
 
+  start(): void {
+    this.stopped = false;
+  }
+
   schedule(input: ChatStateMaintenanceInput): void {
+    if (this.stopped) return;
     const droneId = this.deps.normalizeDroneId(input.droneId);
     const chatName = this.deps.normalizeChatName(input.chatName);
     if (!droneId || !chatName) return;
@@ -50,6 +56,7 @@ export class ChatStateMaintenanceScheduler {
   }
 
   close(): void {
+    this.stopped = true;
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
     this.latest.clear();

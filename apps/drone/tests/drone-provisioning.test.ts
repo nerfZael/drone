@@ -144,6 +144,93 @@ function createControllerHarness(opts?: {
 }
 
 describe('drone provisioning controller', () => {
+  test('leaves pre-create work recoverable when shutdown stops intake', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-pre-create': {
+            id: 'drone-pre-create',
+            name: 'pre-create',
+            runtime: 'host',
+            repoPath: '',
+            build: false,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+          },
+        };
+      });
+
+      const harness = createControllerHarness();
+      harness.controller.enqueueProvisioning('drone-pre-create');
+      await harness.controller.stopProvisioning();
+
+      let registry: any = await loadRegistry();
+      expect(harness.runNodeCliCalls).toHaveLength(0);
+      expect(registry?.pending?.['drone-pre-create']?.phase).toBe('starting');
+
+      harness.controller.startProvisioning();
+      harness.controller.enqueueProvisioning('drone-pre-create');
+      await waitFor(async () => {
+        registry = await loadRegistry();
+        return Boolean(registry?.drones?.['drone-pre-create']);
+      });
+      expect(harness.runNodeCliCalls).toHaveLength(1);
+      await harness.controller.stopProvisioning();
+    });
+  });
+
+  test('drains critical creation instead of interrupting it during shutdown', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-shutdown': {
+            id: 'drone-shutdown',
+            name: 'shutdown-safe',
+            runtime: 'host',
+            repoPath: '',
+            build: false,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+          },
+        };
+      });
+
+      let markCreateStarted!: () => void;
+      let releaseCreate!: () => void;
+      const createStarted = new Promise<void>((resolve) => {
+        markCreateStarted = resolve;
+      });
+      const createRelease = new Promise<void>((resolve) => {
+        releaseCreate = resolve;
+      });
+      const harness = createControllerHarness({
+        duringRunNodeCli: async () => {
+          markCreateStarted();
+          await createRelease;
+        },
+      });
+      harness.controller.enqueueProvisioning('drone-shutdown');
+      await createStarted;
+
+      let stopped = false;
+      const stopping = harness.controller.stopProvisioning().then(() => {
+        stopped = true;
+      });
+      await sleep(20);
+      expect(stopped).toBe(false);
+
+      releaseCreate();
+      await stopping;
+      const registry: any = await loadRegistry();
+      expect(registry?.pending?.['drone-shutdown']).toBeUndefined();
+      expect(registry?.drones?.['drone-shutdown']).toBeDefined();
+    });
+  });
+
   test('promotes a pending drone and reapplies the latest pending display name', async () => {
     await withTempDroneDataDir('drone-provisioning-', async () => {
       await updateRegistry((reg: any) => {

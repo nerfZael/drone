@@ -656,6 +656,34 @@ export function createDronePendingPromptStore(deps: {
     return { disposition: 'retry', nextAttemptAt: deps.nowIso() };
   }
 
+  async function releasePendingPromptClaim(opts: {
+    droneId: string;
+    chatName: string;
+    id: string;
+    error: string;
+  }): Promise<void> {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const chatName = opts.chatName || 'default';
+    const queue = promptQueueForActiveDrone();
+    if (queue && droneId) {
+      const released = await queue.releaseClaim({
+        droneId,
+        chatName,
+        promptId: opts.id,
+        error: opts.error,
+        leaseOwner: `hub:${process.pid}`,
+      });
+      if (released) notifyPendingPromptChanged(droneId, chatName);
+      return;
+    }
+    await updatePendingPrompt({
+      droneId: opts.droneId,
+      chatName,
+      id: opts.id,
+      patch: { state: 'queued', error: opts.error },
+    });
+  }
+
   async function resumePendingPromptChats(): Promise<
     Array<{ droneId: string; chatName: string; nextAttemptAt: string }>
   > {
@@ -851,6 +879,7 @@ export function createDronePendingPromptStore(deps: {
     readPendingPrompt,
     readPendingPromptDispatchWindow,
     readPendingStartupPrompts,
+    releasePendingPromptClaim,
     resumePendingPromptChats,
     retryPendingPrompt,
     transcriptTurnIdsFromEntry,
