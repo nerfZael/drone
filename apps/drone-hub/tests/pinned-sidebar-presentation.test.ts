@@ -126,7 +126,7 @@ describe('desktop pinned drone presentation', () => {
     expect(sidebarSource).toContain(
       'onDelete={sidebarCapabilities.actions ? () => onDeleteDrone(droneId) : undefined}',
     );
-    expect(cardSource).toContain("pinned ? 'Unpin from top' : 'Pin to top'");
+    expect(cardSource).toContain("pinned ? 'Unpin' : 'Pin'");
     expect(cardSource).toContain("data-sidebar-status-hint={pinned ? 'pinned-repository' : 'status'}");
     expect(cardSource).toContain(
       "'max-w-[4.75rem] rounded-[2px] border-[var(--border)] bg-[var(--surface-inset)] px-0.5 py-px text-[.4375rem] font-[var(--weight-medium)] tracking-[0.01em] text-[var(--fg-secondary)]'",

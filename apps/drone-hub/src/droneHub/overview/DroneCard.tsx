@@ -705,7 +705,7 @@ export const DroneCard = React.memo(function DroneCard({
   if (canTogglePinned) {
     actionMenuItems.push({
       id: 'pin',
-      label: pinned ? 'Unpin from top' : 'Pin to top',
+      label: pinned ? 'Unpin' : 'Pin',
       shortcut: shortcutBindings.toggleSelectedDronePinned
         ? formatShortcutBinding(shortcutBindings.toggleSelectedDronePinned)
         : undefined,
