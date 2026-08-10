@@ -43,6 +43,23 @@ export type GithubPullRequestStatusBadge = {
   tone: 'danger' | 'success' | 'warning';
 };
 
+export function githubPullRequestDiffStatsPresentation(
+  stats: NonNullable<GithubPullRequestSummary['diffStats']>,
+) {
+  const changed = Math.max(0, Math.floor(Number(stats.changed) || 0));
+  const additions = Math.max(0, Math.floor(Number(stats.additions) || 0));
+  const deletions = Math.max(0, Math.floor(Number(stats.deletions) || 0));
+  const net = additions - deletions;
+  const netLabel = net === 0 ? '±0' : `${net > 0 ? '+' : ''}${net}`;
+  return {
+    changed,
+    additions,
+    deletions,
+    netLabel,
+    accessibilityLabel: `${changed} files changed, ${additions} additions, ${deletions} deletions, ${netLabel} net lines`,
+  };
+}
+
 export function parseGithubPullRequestHref(hrefRaw: string): GithubPullRequestLink | null {
   const href = String(hrefRaw ?? '').trim();
   if (!href) return null;
