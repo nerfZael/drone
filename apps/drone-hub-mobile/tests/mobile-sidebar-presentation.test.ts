@@ -431,7 +431,7 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('selectionWashInset={drawerTreeRowPaddingLeft(depth) + 8}');
     expect(source).toContain('hasActiveChildChat && styles.droneChatRailVisible');
     expect(source).toContain("borderLeftColor: 'transparent'");
-    expect(source).toContain('gap: 4,\n    paddingLeft: 18,\n    paddingRight: 6,');
+    expect(source).toContain('gap: 4,\n    paddingLeft: 8,\n    paddingRight: 6,');
     expect(source).toContain('styles.droneChatSelectionWash, { left: -selectionWashInset }');
     expect(source).toContain('<DrawerDroneChatRow');
     expect(source).toContain('drone.draftChats?.[chatName] === true');
@@ -464,8 +464,9 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain('repoNavigationHead: {\n    minHeight: 48,\n    marginBottom: 8,');
     expect(source).not.toContain('showChats={false}');
     expect(source).toContain('color: colors.sidebarSubitemFg,');
-    expect(source).toContain('droneChildren: {\n    marginLeft: 4,');
-    expect(source).toContain('paddingLeft: 6,\n    borderLeftWidth: StyleSheet.hairlineWidth,');
+    expect(source).toContain('droneChildren: {\n    position: \'relative\',');
+    expect(source).toContain('style={[styles.groupChildrenGuide, { left: drawerTreeRowPaddingLeft(depth) + 8 }]}');
+    expect(source).toContain('node={child}\n              depth={depth + 1}');
     expect(modelSource).toContain('sidebarChatOrderByDrone: Record<string, string[]>;');
     expect(modelSource).toContain(
       'sidebarChatOrderByDrone: stringListMap(sidebar.sidebarChatOrderByDrone)',

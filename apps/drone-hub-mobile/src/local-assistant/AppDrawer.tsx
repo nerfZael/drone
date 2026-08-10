@@ -1149,11 +1149,15 @@ function DrawerDroneNode({
       ) : null}
       {node.children.length > 0 ? (
         <View style={styles.droneChildren}>
+          <View
+            pointerEvents="none"
+            style={[styles.groupChildrenGuide, { left: drawerTreeRowPaddingLeft(depth) + 8 }]}
+          />
           {node.children.map((child) => (
             <DrawerDroneNode
               key={child.drone.id}
               node={child}
-              depth={depth}
+              depth={depth + 1}
               parentId={sidebarDroneNodeId(drone.id)}
               siblingNodeIds={node.children.map((entry) => sidebarDroneNodeId(entry.drone.id))}
               treeScope={treeScope}
@@ -2879,7 +2883,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingLeft: 18,
+    paddingLeft: 8,
     paddingRight: 6,
     position: 'relative',
   },
@@ -2913,11 +2917,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   droneChildren: {
-    marginLeft: 4,
-    marginRight: 4,
-    paddingLeft: 6,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: colors.borderSubtle,
+    position: 'relative',
   },
   groupRow: {
     minHeight: 36,
