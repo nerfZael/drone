@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import type {
   GithubPullRequestChecksState,
+  GithubPullRequestFileChange,
+  GithubPullRequestFileStatus,
   GithubPullRequestReviewState,
   GithubPullRequestState,
   GithubPullRequestSummaryPayload,
@@ -10,6 +12,7 @@ export type GithubPullRequestListState = 'open' | 'closed' | 'all';
 export type GithubPullRequestMergeMethod = 'merge' | 'squash' | 'rebase';
 export type {
   GithubPullRequestChecksState,
+  GithubPullRequestFileChange,
   GithubPullRequestReviewState,
   GithubPullRequestState,
 };
@@ -38,21 +41,6 @@ export type GithubAuthStatus = {
 
 export type GithubPullRequestSummary = GithubPullRequestSummaryPayload & {
   state: GithubPullRequestState;
-};
-
-type GithubPullRequestFileStatusType = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type-changed' | 'unmerged' | 'unknown';
-
-export type GithubPullRequestFileChange = {
-  path: string;
-  originalPath: string | null;
-  statusChar: string;
-  statusType: GithubPullRequestFileStatusType;
-  additions: number;
-  deletions: number;
-  changes: number;
-  patch: string | null;
-  truncated: boolean;
-  isBinary: boolean;
 };
 
 export type GithubPullRequestChanges = {
@@ -85,18 +73,7 @@ export type GithubCommitSummary = {
   isMerge: boolean;
 };
 
-export type GithubCommitChangeEntry = {
-  path: string;
-  originalPath: string | null;
-  statusChar: string;
-  statusType: GithubPullRequestFileStatusType;
-  additions: number;
-  deletions: number;
-  changes: number;
-  patch: string | null;
-  truncated: boolean;
-  isBinary: boolean;
-};
+export type GithubCommitChangeEntry = GithubPullRequestFileChange;
 
 export type GithubCommitChanges = {
   repo: GithubRepoRef;
@@ -629,7 +606,7 @@ function mapGithubPullRequestFromGraphql(raw: any, owner: string): GithubPullReq
   };
 }
 
-function mapGithubFileStatus(raw: unknown): { statusChar: string; statusType: GithubPullRequestFileStatusType } {
+function mapGithubFileStatus(raw: unknown): { statusChar: string; statusType: GithubPullRequestFileStatus } {
   const status = String(raw ?? '').trim().toLowerCase();
   switch (status) {
     case 'added':

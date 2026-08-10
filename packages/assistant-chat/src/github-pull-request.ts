@@ -22,6 +22,29 @@ export type GithubPullRequestDiffStats = {
   deletions: number;
 };
 
+export type GithubPullRequestFileStatus =
+  | 'added'
+  | 'modified'
+  | 'deleted'
+  | 'renamed'
+  | 'copied'
+  | 'type-changed'
+  | 'unmerged'
+  | 'unknown';
+
+export type GithubPullRequestFileChange = {
+  path: string;
+  originalPath: string | null;
+  statusChar: string;
+  statusType: GithubPullRequestFileStatus;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch: string | null;
+  truncated: boolean;
+  isBinary: boolean;
+};
+
 export type GithubPullRequestSummary = {
   number: number;
   title: string;

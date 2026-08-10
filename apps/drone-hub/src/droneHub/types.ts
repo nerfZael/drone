@@ -4,6 +4,7 @@ import type {
   AgentPlan,
   AgentRunActivity,
   ChatQueueAction,
+  GithubPullRequestFileChange,
   GithubPullRequestSummaryPayload,
   PendingPromptState,
 } from '@drone/assistant-chat';
@@ -419,17 +420,7 @@ export type RepoCommitDiffPayload =
     }
   | { ok: false; error: string; code?: string };
 
-export type RepoPullRequestChangeEntry = {
-  path: string;
-  originalPath: string | null;
-  statusChar: string;
-  statusType: RepoChangeType;
-  additions: number;
-  deletions: number;
-  changes: number;
-  patch: string | null;
-  truncated: boolean;
-  isBinary: boolean;
+export type RepoPullRequestChangeEntry = GithubPullRequestFileChange & {
   reviewKey?: string;
   reviewToken?: string;
 };
