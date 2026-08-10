@@ -668,6 +668,73 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('resolves chunked seed attachments before creating a remote drone', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestBody: any = null;
+    const attachmentCalls: any[] = [];
+    const removeCalls: string[][] = [];
+    globalThis.fetch = (async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body ?? '{}'));
+      return new Response(JSON.stringify({ ok: true, id: 'created' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability(
+        {
+          baseUrl: () => 'http://127.0.0.1:7777',
+          apiToken: 'test',
+        },
+        {
+          attachments: async (...args: any[]) => {
+            attachmentCalls.push(args);
+            return [
+              {
+                id: 'upload-1',
+                name: 'screen.png',
+                mime: 'image/png',
+                size: 3,
+                dataBase64: 'YWJj',
+              },
+            ];
+          },
+          remove: async (ids: readonly string[]) => {
+            removeCalls.push([...ids]);
+          },
+        } as any,
+      );
+
+      await capability.invoke(
+        'drone.create.container',
+        {
+          seedPrompt: 'Review the image',
+          seedAttachmentIds: ['upload-1'],
+          seedAttachmentUploadKey: 'new-drone-upload',
+        },
+        { sourceDevice: { id: 'phone-1' } } as never,
+      );
+
+      expect(attachmentCalls).toEqual([
+        ['phone-1', 'new-drone-upload', 'default', ['upload-1']],
+      ]);
+      expect(requestBody).toMatchObject({
+        seedPrompt: 'Review the image',
+        seedAttachments: [
+          {
+            name: 'screen.png',
+            mime: 'image/png',
+            size: 3,
+            dataBase64: 'YWJj',
+          },
+        ],
+      });
+      expect(removeCalls).toEqual([['upload-1']]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('uses the in-process rename command for mobile drone renames', async () => {
     const originalFetch = globalThis.fetch;
     const renames: any[] = [];

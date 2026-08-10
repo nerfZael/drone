@@ -26,6 +26,7 @@ export type PendingPromptProjection = {
   id: string;
   at: string;
   prompt: string;
+  attachments?: ChatImageAttachment[];
   messageId?: string;
   cwd?: string | null;
   deliveryMode?: 'queue' | 'asap';
@@ -134,6 +135,7 @@ export function createPendingDroneStateHelpers(deps: {
       id: prompt.id,
       at: prompt.at,
       prompt: prompt.prompt,
+      ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}),
       ...(prompt.messageId ? { messageId: prompt.messageId } : {}),
       ...(typeof prompt.cwd === 'string' || prompt.cwd === null ? { cwd: prompt.cwd } : {}),
       ...(prompt.deliveryMode ? { deliveryMode: prompt.deliveryMode } : {}),
