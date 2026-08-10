@@ -452,7 +452,7 @@ function NativeMarkdownBlocks({
   onOpenFileReference?: (reference: MobileFileReference) => void;
 }) {
   return (
-    <View style={styles.markdown}>
+    <View style={styles.markdownStack}>
       {blocks.map((block, index) => {
         if (block.type === 'heading') {
           return (
@@ -629,7 +629,7 @@ function DocumentSection({
   );
 
   return (
-    <View style={styles.documentSection}>
+    <View style={styles.markdownStack}>
       {canToggle ? (
         <Pressable
           accessibilityRole="button"
@@ -650,7 +650,7 @@ function DocumentSection({
         />
       ) : null}
       {section.children.length > 0 && (expanded || keepChildrenVisible) ? (
-        <View style={styles.documentChildren}>
+        <View style={styles.markdownStack}>
           {section.children.map((child) => (
             <DocumentSection
               key={child.id}
@@ -733,7 +733,7 @@ export function NativeMarkdown({
       : null;
 
   return (
-    <View style={styles.documentMarkdown}>
+    <View style={styles.markdownStack}>
       {outline.preamble.length > 0 ? (
         <NativeMarkdownBlocks
           blocks={outline.preamble}
@@ -756,10 +756,7 @@ export function NativeMarkdown({
 }
 
 const styles = StyleSheet.create({
-  markdown: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: 10 },
-  documentMarkdown: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: 10 },
-  documentSection: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: 10 },
-  documentChildren: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: 10 },
+  markdownStack: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: 10 },
   documentHeading: {
     width: '100%',
     minWidth: 0,
