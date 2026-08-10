@@ -291,6 +291,13 @@ describe('sidebar presentation', () => {
     );
   });
 
+  test('uses a thin temporary outline for sidebar context-menu targets', () => {
+    const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+
+    expect(stylesSource).toContain('.dh-sidebar-row-context-target {');
+    expect(stylesSource).toContain('box-shadow: inset 0 0 0 1px var(--border);');
+  });
+
   test('uses the same full-bleed navigation states for repository rows', () => {
     const sidebarSource = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),

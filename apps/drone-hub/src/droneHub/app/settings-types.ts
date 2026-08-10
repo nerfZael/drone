@@ -212,6 +212,8 @@ export type UiPreferencesSettingsResponse = {
   uiPreferences: {
     sidebarGroupingMode: SidebarGroupingMode;
     sidebarDensityMode: SidebarDensityMode;
+    collapsedGroups: Record<string, boolean>;
+    collapsedDroneSections: Record<string, boolean>;
     sidebarGroupOrder: string[];
     sidebarDroneOrderByGroup: Record<string, string[]>;
     sidebarNodeOrderByParent: Record<string, string[]>;

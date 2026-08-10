@@ -114,7 +114,6 @@ type GroupedSidebarTreeProps = {
   onSelectFolder: (path: string, opts?: SidebarFolderSelectionOptions) => void;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
   onSelectDroneContainer: (droneId: string) => void;
-  onFocusDroneChat: (droneId: string, chatName: string) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
   onRenameGroup: (group: string, nextName?: string, opts?: { skipNodeOrderUpdate?: boolean }) => Promise<boolean> | boolean;
@@ -466,7 +465,6 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     activeChatName,
     selectedSidebarNodeId,
     setSelectedSidebarNodeId,
-    onFocusDroneChat,
     onSelectDroneChat,
     dragOverChat,
     chatEditor,
@@ -588,10 +586,9 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
             if (!actionsEnabled) return;
             event.preventDefault();
             event.stopPropagation();
-            onFocusDroneChat(drone.id, chatName);
             setContextMenuPosition({ x: event.clientX, y: event.clientY });
           }}
-          className={`relative flex flex-1 items-center gap-1 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })} ${isDragging ? 'opacity-35' : ''} ${!sidebarDndEnabled || !chatDragData || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
+          className={`relative flex flex-1 items-center gap-1 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })} ${contextMenuPosition ? 'dh-sidebar-row-context-target' : ''} ${isDragging ? 'opacity-35' : ''} ${!sidebarDndEnabled || !chatDragData || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
           aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
           aria-current={active ? 'page' : undefined}
         >
@@ -1902,7 +1899,6 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onRenameDroneChat,
       props.onRenameGroup,
       props.onReparentDronesToParent,
-      props.onFocusDroneChat,
       props.onSelectDroneCard,
       props.onSelectDroneContainer,
       props.onSelectDroneChat,

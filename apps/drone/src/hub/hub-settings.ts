@@ -137,6 +137,8 @@ export type VoiceInputSettings = {
 export type UiPreferencesSettings = {
   sidebarGroupingMode: SidebarGroupingMode;
   sidebarDensityMode: 'compact' | 'default' | 'comfortable';
+  collapsedGroups: Record<string, boolean>;
+  collapsedDroneSections: Record<string, boolean>;
   sidebarGroupOrder: string[];
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
@@ -399,11 +401,24 @@ function sanitizeUiSpawnContextByRepoKey(value: unknown): Record<string, UiSpawn
   return out;
 }
 
+function normalizeBooleanRecord(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, boolean> = {};
+  for (const [keyRaw, itemRaw] of Object.entries(value as Record<string, unknown>)) {
+    const key = String(keyRaw ?? '').trim();
+    if (!key) continue;
+    out[key] = itemRaw === true;
+  }
+  return out;
+}
+
 function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
   return {
     sidebarGroupingMode: parseSidebarGroupingMode(raw.sidebarGroupingMode) ?? DEFAULT_SIDEBAR_GROUPING_MODE,
     sidebarDensityMode: parseSidebarDensityMode(raw.sidebarDensityMode) ?? DEFAULT_SIDEBAR_DENSITY_MODE,
+    collapsedGroups: normalizeBooleanRecord(raw.collapsedGroups),
+    collapsedDroneSections: normalizeBooleanRecord(raw.collapsedDroneSections),
     sidebarGroupOrder: normalizeOrderedStringList(raw.sidebarGroupOrder),
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(raw.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarNodeOrderByParent),

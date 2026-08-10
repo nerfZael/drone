@@ -738,6 +738,8 @@ describe('Drone Hub assistant MCP transport', () => {
       ];
       let uiPreferences: any = {
         sidebarGroupingMode: 'groups',
+        collapsedGroups: { review: true },
+        collapsedDroneSections: { 'chats:b-1': true },
         sidebarGroupOrder: ['group-id:grp_repo_a', 'group-id:grp_repo_b'],
         sidebarDroneOrderByGroup: {
           'group-id:grp_repo_a': ['a-1'],
@@ -890,6 +892,8 @@ describe('Drone Hub assistant MCP transport', () => {
           'drone:b-3',
           'drone:a-1',
         ]);
+        expect(uiPreferences.collapsedGroups).toEqual({ review: true });
+        expect(uiPreferences.collapsedDroneSections).toEqual({ 'chats:b-1': true });
       } finally {
         await client?.close();
         globalThis.fetch = previousFetch;

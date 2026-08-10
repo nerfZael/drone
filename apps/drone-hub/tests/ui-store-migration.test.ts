@@ -56,6 +56,8 @@ describe('drone hub ui store migration', () => {
       {
         sidebarGroupingMode: 'repos',
         sidebarDockSide: 'right',
+        collapsedGroups: { 'repo:/work/repo': true },
+        collapsedDroneSections: { 'chats:drone-a': true },
         viewMode: 'flat',
         assistantThreadSidebarDockSide: 'right',
         autoDelete: true,
@@ -73,6 +75,8 @@ describe('drone hub ui store migration', () => {
     expect(migrated).toMatchObject({
       sidebarGroupingMode: 'repos',
       sidebarDockSide: 'right',
+      collapsedGroups: { 'repo:/work/repo': true },
+      collapsedDroneSections: { 'chats:drone-a': true },
       showCanvasLastMessagePreviews: true,
       seenModelIds: ['gpt-5.4', 'o3'],
     });
@@ -554,6 +558,50 @@ describe('drone hub ui store migration', () => {
     expect(snapshot.sidebarGroupingMode).toBe('repos');
     expect(snapshot.sidebarNodeOrderByParent).toEqual({});
     expect(snapshot.pinnedDroneIds).toEqual([]);
+  });
+
+  test('seeds newly server-backed collapse state from browser persistence once', () => {
+    const snapshot = reconcileUiPreferencesReload({
+      backend: {
+        sidebarGroupingMode: 'repos',
+        collapsedGroups: {},
+        collapsedDroneSections: {},
+      },
+      backendUpdatedAt: '2026-08-06T10:00:00.000Z',
+      current: {
+        collapsedGroups: { 'repo:/work/repo': true },
+        collapsedDroneSections: { 'chats:drone-a': true },
+      },
+      previousBackend: null,
+      wasReady: false,
+      storageRaw: null,
+    });
+
+    expect(snapshot.collapsedGroups).toEqual({ 'repo:/work/repo': true });
+    expect(snapshot.collapsedDroneSections).toEqual({ 'chats:drone-a': true });
+  });
+
+  test('rebases unsaved collapse changes per sidebar entry', () => {
+    const merged = mergeUiPreferencesChanges(
+      {
+        collapsedGroups: { alpha: false, beta: false },
+        collapsedDroneSections: { 'chats:a': false },
+      },
+      {
+        collapsedGroups: { alpha: true, beta: false },
+        collapsedDroneSections: { 'chats:a': true },
+      },
+      {
+        collapsedGroups: { alpha: false, beta: true },
+        collapsedDroneSections: { 'chats:a': false, 'chats:b': true },
+      },
+    );
+
+    expect(merged.collapsedGroups).toEqual({ alpha: true, beta: true });
+    expect(merged.collapsedDroneSections).toEqual({
+      'chats:a': true,
+      'chats:b': true,
+    });
   });
 
   test('keeps unsaved local changes during a cross-client refresh', () => {

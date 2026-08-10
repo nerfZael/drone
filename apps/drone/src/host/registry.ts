@@ -135,6 +135,8 @@ type DroneRegistryV1 = {
     uiPreferences?: {
       sidebarGroupingMode?: 'groups' | 'repos';
       sidebarDensityMode?: 'compact' | 'default' | 'comfortable';
+      collapsedGroups?: Record<string, boolean>;
+      collapsedDroneSections?: Record<string, boolean>;
       sidebarGroupOrder?: string[];
       sidebarDroneOrderByGroup?: Record<string, string[]>;
       sidebarNodeOrderByParent?: Record<string, string[]>;

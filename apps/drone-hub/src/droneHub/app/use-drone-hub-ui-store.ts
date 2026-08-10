@@ -87,6 +87,7 @@ type DroneHubUiState = {
   pinnedSidebarCollapsed: boolean;
   appView: AppView;
   collapsedGroups: Record<string, boolean>;
+  collapsedDroneSections: Record<string, boolean>;
   sidebarGroupOrder: string[];
   sidebarRepoScopedGroupByPath: Record<string, string>;
   sidebarDroneOrderByGroup: Record<string, string[]>;
@@ -150,6 +151,7 @@ type DroneHubUiState = {
   setPinnedSidebarCollapsed: (next: Updater<boolean>) => void;
   setAppView: (next: Updater<AppView>) => void;
   setCollapsedGroups: (next: Updater<Record<string, boolean>>) => void;
+  setCollapsedDroneSections: (next: Updater<Record<string, boolean>>) => void;
   setSidebarGroupOrder: (next: Updater<string[]>) => void;
   setSidebarRepoScopedGroupByPath: (next: Updater<Record<string, string>>) => void;
   setSidebarDroneOrderByGroup: (next: Updater<Record<string, string[]>>) => void;
@@ -311,6 +313,7 @@ type DroneHubUiPersistedState = Pick<
   | 'pinnedSidebarCollapsed'
   | 'appView'
   | 'collapsedGroups'
+  | 'collapsedDroneSections'
   | 'sidebarGroupOrder'
   | 'sidebarRepoScopedGroupByPath'
   | 'sidebarDroneOrderByGroup'
@@ -863,6 +866,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       pinnedSidebarCollapsed: false,
       appView: 'workspace',
       collapsedGroups: {},
+      collapsedDroneSections: {},
       sidebarGroupOrder: [],
       sidebarRepoScopedGroupByPath: {},
       sidebarDroneOrderByGroup: {},
@@ -957,6 +961,12 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setAppView: (next) => set((s) => ({ appView: resolveNext(s.appView, next) })),
       setCollapsedGroups: (next) =>
         set((s) => ({ collapsedGroups: resolveNext(s.collapsedGroups, next) })),
+      setCollapsedDroneSections: (next) =>
+        set((s) => ({
+          collapsedDroneSections: normalizeCollapsedGroups(
+            resolveNext(s.collapsedDroneSections, next),
+          ),
+        })),
       setSidebarGroupOrder: (next) =>
         set((s) => {
           const value = normalizeSidebarGroupOrder(resolveNext(s.sidebarGroupOrder, next));
@@ -1311,7 +1321,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: profileStorageKey('droneHub.ui'),
-      version: 17,
+      version: 18,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState, version) =>
         migrateDroneHubUiPersistedState(persistedState, version),
@@ -1330,6 +1340,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         pinnedSidebarCollapsed: state.pinnedSidebarCollapsed,
         appView: state.appView,
         collapsedGroups: state.collapsedGroups,
+        collapsedDroneSections: state.collapsedDroneSections,
         sidebarGroupOrder: state.sidebarGroupOrder,
         sidebarRepoScopedGroupByPath: state.sidebarRepoScopedGroupByPath,
         sidebarDroneOrderByGroup: state.sidebarDroneOrderByGroup,
@@ -1408,6 +1419,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ),
           collapsedGroups: normalizeCollapsedGroups(
             persisted.collapsedGroups ?? currentState.collapsedGroups,
+          ),
+          collapsedDroneSections: normalizeCollapsedGroups(
+            persisted.collapsedDroneSections ?? currentState.collapsedDroneSections,
           ),
           sidebarGroupOrder: normalizeSidebarGroupOrder(
             persisted.sidebarGroupOrder ?? currentState.sidebarGroupOrder,

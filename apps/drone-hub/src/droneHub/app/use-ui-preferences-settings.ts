@@ -94,12 +94,25 @@ function normalizeOrderedStringMap(value: unknown): Record<string, string[]> {
   return out;
 }
 
+function normalizeBooleanRecord(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, boolean> = {};
+  for (const [keyRaw, itemRaw] of Object.entries(value as Record<string, unknown>)) {
+    const key = String(keyRaw ?? '').trim();
+    if (!key) continue;
+    out[key] = itemRaw === true;
+  }
+  return out;
+}
+
 function normalizeUiPreferencesSnapshot(
   value: Partial<UiPreferencesSnapshot> | null | undefined,
 ): UiPreferencesSnapshot {
   return {
     sidebarGroupingMode: normalizeSidebarGroupingMode(value?.sidebarGroupingMode),
     sidebarDensityMode: normalizeSidebarDensityMode(value?.sidebarDensityMode),
+    collapsedGroups: normalizeBooleanRecord(value?.collapsedGroups),
+    collapsedDroneSections: normalizeBooleanRecord(value?.collapsedDroneSections),
     sidebarGroupOrder: normalizeOrderedStringList(value?.sidebarGroupOrder),
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(value?.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(value?.sidebarNodeOrderByParent),
@@ -195,6 +208,16 @@ export function mergeUiPreferencesChanges(
   return normalizeUiPreferencesSnapshot({
     sidebarGroupingMode: localValue('sidebarGroupingMode'),
     sidebarDensityMode: localValue('sidebarDensityMode'),
+    collapsedGroups: mergeRecordChanges(
+      base.collapsedGroups,
+      local.collapsedGroups,
+      remote.collapsedGroups,
+    ),
+    collapsedDroneSections: mergeRecordChanges(
+      base.collapsedDroneSections,
+      local.collapsedDroneSections,
+      remote.collapsedDroneSections,
+    ),
     sidebarGroupOrder: localValue('sidebarGroupOrder'),
     sidebarDroneOrderByGroup: mergeOrderedStringMapChanges(
       base.sidebarDroneOrderByGroup,
@@ -232,6 +255,8 @@ function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boole
   return (
     value.sidebarGroupingMode === 'groups' ||
     value.sidebarDensityMode !== 'default' ||
+    Object.keys(value.collapsedGroups).length > 0 ||
+    Object.keys(value.collapsedDroneSections).length > 0 ||
     value.sidebarGroupOrder.length > 0 ||
     Object.keys(value.sidebarDroneOrderByGroup).length > 0 ||
     Object.keys(value.sidebarNodeOrderByParent).length > 0 ||
@@ -258,6 +283,14 @@ function mergeUiPreferencesForRecovery(
       base.sidebarGroupingMode === 'repos' ? rescue.sidebarGroupingMode : base.sidebarGroupingMode,
     sidebarDensityMode:
       base.sidebarDensityMode === 'default' ? rescue.sidebarDensityMode : base.sidebarDensityMode,
+    collapsedGroups:
+      Object.keys(base.collapsedGroups).length > 0
+        ? base.collapsedGroups
+        : rescue.collapsedGroups,
+    collapsedDroneSections:
+      Object.keys(base.collapsedDroneSections).length > 0
+        ? base.collapsedDroneSections
+        : rescue.collapsedDroneSections,
     sidebarGroupOrder:
       base.sidebarGroupOrder.length > 0 ? base.sidebarGroupOrder : rescue.sidebarGroupOrder,
     sidebarDroneOrderByGroup:
@@ -349,7 +382,17 @@ export function reconcileUiPreferencesReload({
   if (hasLocalChanges && previousBackendSnapshot) {
     return mergeUiPreferencesChanges(previousBackendSnapshot, currentSnapshot, backendSnapshot);
   }
-  if (backendUpdatedAt) return backendSnapshot;
+  if (backendUpdatedAt) {
+    if (!wasReady) {
+      if (Object.keys(backendSnapshot.collapsedGroups).length === 0) {
+        backendSnapshot.collapsedGroups = currentSnapshot.collapsedGroups;
+      }
+      if (Object.keys(backendSnapshot.collapsedDroneSections).length === 0) {
+        backendSnapshot.collapsedDroneSections = currentSnapshot.collapsedDroneSections;
+      }
+    }
+    return backendSnapshot;
+  }
   return restoreUiPreferencesFromPersistedStorage(backendSnapshot, storageRaw).snapshot;
 }
 
@@ -359,6 +402,8 @@ export function useUiPreferencesSettings({
   const {
     sidebarGroupingMode,
     sidebarDensityMode,
+    collapsedGroups,
+    collapsedDroneSections,
     sidebarGroupOrder,
     sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent,
@@ -375,6 +420,8 @@ export function useUiPreferencesSettings({
     repoCreateRemoteBranch,
     setSidebarGroupingMode,
     setSidebarDensityMode,
+    setCollapsedGroups,
+    setCollapsedDroneSections,
     setSidebarGroupOrder,
     setSidebarDroneOrderByGroup,
     setSidebarNodeOrderByParent,
@@ -392,6 +439,8 @@ export function useUiPreferencesSettings({
     useShallow((s) => ({
       sidebarGroupingMode: s.sidebarGroupingMode,
       sidebarDensityMode: s.sidebarDensityMode,
+      collapsedGroups: s.collapsedGroups,
+      collapsedDroneSections: s.collapsedDroneSections,
       sidebarGroupOrder: s.sidebarGroupOrder,
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent: s.sidebarNodeOrderByParent,
@@ -408,6 +457,8 @@ export function useUiPreferencesSettings({
       repoCreateRemoteBranch: s.repoCreateRemoteBranch,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
+      setCollapsedGroups: s.setCollapsedGroups,
+      setCollapsedDroneSections: s.setCollapsedDroneSections,
       setSidebarGroupOrder: s.setSidebarGroupOrder,
       setSidebarDroneOrderByGroup: s.setSidebarDroneOrderByGroup,
       setSidebarNodeOrderByParent: s.setSidebarNodeOrderByParent,
@@ -441,6 +492,8 @@ export function useUiPreferencesSettings({
       const normalized = normalizeUiPreferencesSnapshot(value);
       setSidebarGroupingMode(normalized.sidebarGroupingMode);
       setSidebarDensityMode(normalized.sidebarDensityMode);
+      setCollapsedGroups(normalized.collapsedGroups);
+      setCollapsedDroneSections(normalized.collapsedDroneSections);
       setSidebarGroupOrder(normalized.sidebarGroupOrder);
       setSidebarDroneOrderByGroup(normalized.sidebarDroneOrderByGroup);
       setSidebarNodeOrderByParent(normalized.sidebarNodeOrderByParent);
@@ -470,6 +523,8 @@ export function useUiPreferencesSettings({
     },
     [
       setSidebarDensityMode,
+      setCollapsedGroups,
+      setCollapsedDroneSections,
       setHiddenSidebarGroups,
       setSidebarChatOrderByDrone,
       setPinnedDroneIds,
@@ -500,6 +555,8 @@ export function useUiPreferencesSettings({
       normalizeUiPreferencesSnapshot({
         sidebarGroupingMode,
         sidebarDensityMode,
+        collapsedGroups,
+        collapsedDroneSections,
         sidebarGroupOrder,
         sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent,
@@ -517,6 +574,8 @@ export function useUiPreferencesSettings({
       }),
     [
       hiddenSidebarGroups,
+      collapsedGroups,
+      collapsedDroneSections,
       repoBranchSource,
       repoCreateRemoteBranch,
       sidebarDensityMode,

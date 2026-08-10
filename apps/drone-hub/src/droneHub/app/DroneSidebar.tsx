@@ -1369,7 +1369,6 @@ export function DroneSidebar({
     handleGroupedSelectDroneCard,
     handleGroupedSelectDroneContainer,
     handleGroupedSelectDroneChat,
-    handleGroupedFocusDroneChat,
     handleGroupedSelectFolder,
     moveFolderIntoGroup,
     openDroneChatCreate,
@@ -1439,13 +1438,6 @@ export function DroneSidebar({
       handleGroupedSelectDroneContainer(droneId);
     },
     [handleGroupedSelectDroneContainer],
-  );
-  const focusGroupedDroneChat = React.useCallback(
-    (droneId: string, chatName: string) => {
-      handleGroupedFocusDroneChat(droneId, chatName);
-      onSetDroneSelectionFromFolder([]);
-    },
-    [handleGroupedFocusDroneChat, onSetDroneSelectionFromFolder],
   );
   const handleGroupedPrepareDroneDragStart = React.useCallback(
     (droneId: string, draggedDroneIds?: readonly string[]) => {
@@ -2998,7 +2990,6 @@ export function DroneSidebar({
                       onSelectFolder={handleGroupedSelectFolderWithDrones}
                       onSelectDroneCard={handleGroupedSelectDroneCard}
                       onSelectDroneContainer={selectGroupedDroneContainer}
-                      onFocusDroneChat={focusGroupedDroneChat}
                       onSelectDroneChat={handleGroupedSelectDroneChat}
                       onMoveDronesToGroup={runOptimisticMoveDronesToGroup}
                       onRenameGroup={runOptimisticRenameGroup}

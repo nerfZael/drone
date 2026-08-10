@@ -1,7 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { observeSidebarSelectionForExpansion } from '../src/droneHub/app/sidebar-inline-sections';
 
 describe('multi-chat drone disclosure', () => {
+  test('preserves restored collapse state until the user navigates to another chat', () => {
+    const tracker = { initialized: false, key: '' };
+
+    expect(observeSidebarSelectionForExpansion(tracker, 'drone-a', 'review', false)).toBe(false);
+    expect(observeSidebarSelectionForExpansion(tracker, 'drone-a', 'review', true)).toBe(false);
+    expect(observeSidebarSelectionForExpansion(tracker, 'drone-a', 'review', true)).toBe(false);
+    expect(observeSidebarSelectionForExpansion(tracker, 'drone-a', 'planning', true)).toBe(true);
+  });
+
   test('makes grouped multi-chat drone rows toggle chats without selecting a chat', () => {
     const source = readFileSync(
       new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
@@ -32,6 +42,10 @@ describe('multi-chat drone disclosure', () => {
     expect(chatRows).toContain('(drone.unreadChats ?? []).includes(chatName)');
     expect(chatRows).toContain('showReadyAnchor');
     expect(chatRows).toContain('onContextMenu={(event) => {');
+    expect(chatRows).toContain(
+      "contextMenuPosition ? 'dh-sidebar-row-context-target' : ''",
+    );
+    expect(chatRows).not.toContain('onFocusDroneChat(drone.id, chatName)');
     expect(chatRows).toContain("label: 'Create chat'");
     expect(chatRows).toContain("label: 'Rename chat'");
     expect(chatRows).toContain("shortcut: 'F2'");
@@ -85,7 +99,7 @@ describe('multi-chat drone disclosure', () => {
     expect(source).toContain('{hasChatSection && chatSectionExpanded ? (');
     const containerSelectionStart = source.indexOf('const selectGroupedDroneContainer');
     const containerSelectionEnd = source.indexOf(
-      'const focusGroupedDroneChat',
+      'const handleGroupedPrepareDroneDragStart',
       containerSelectionStart,
     );
     const containerSelectionSource = source.slice(

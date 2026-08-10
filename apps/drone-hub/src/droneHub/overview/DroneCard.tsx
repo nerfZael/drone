@@ -870,7 +870,7 @@ export const DroneCard = React.memo(function DroneCard({
             : 'border-transparent'
       } ${draggable ? 'cursor-grab touch-none active:cursor-grabbing' : ''} ${
         dragging ? 'opacity-35' : ''
-      } ${disabled ? 'cursor-not-allowed opacity-60' : ''} ${
+      } ${disabled ? 'cursor-not-allowed opacity-60' : ''} ${actionMenuPosition ? 'dh-sidebar-row-context-target' : ''} ${
         highlighted ? 'shadow-[var(--glow-yellow)]' : ''
       } focus:outline-none`}
     >

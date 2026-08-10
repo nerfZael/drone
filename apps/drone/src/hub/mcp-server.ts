@@ -597,11 +597,24 @@ function normalizeOrderedStringMap(value: unknown): Record<string, string[]> {
   return out;
 }
 
+function normalizeBooleanRecord(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, boolean> = {};
+  for (const [keyRaw, itemRaw] of Object.entries(value)) {
+    const key = cleanString(keyRaw);
+    if (!key) continue;
+    out[key] = itemRaw === true;
+  }
+  return out;
+}
+
 function normalizeUiPreferences(value: unknown) {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as any : {};
   return {
     sidebarGroupingMode: raw.sidebarGroupingMode === 'repos' ? 'repos' : 'groups',
     sidebarDensityMode: raw.sidebarDensityMode === 'compact' || raw.sidebarDensityMode === 'comfortable' ? raw.sidebarDensityMode : 'default',
+    collapsedGroups: normalizeBooleanRecord(raw.collapsedGroups),
+    collapsedDroneSections: normalizeBooleanRecord(raw.collapsedDroneSections),
     sidebarGroupOrder: normalizeOrderedStringList(raw.sidebarGroupOrder),
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(raw.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarNodeOrderByParent),
