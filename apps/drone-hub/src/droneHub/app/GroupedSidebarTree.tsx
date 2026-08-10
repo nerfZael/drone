@@ -19,7 +19,10 @@ import { IconChevron, IconColumns, IconEye, IconEyeOff, IconPencil, IconPlus, Ic
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
-import type { SidebarFolderSelectionOptions } from './sidebar-folder-selection';
+import {
+  isSidebarFolderRowSelected,
+  type SidebarFolderSelectionOptions,
+} from './sidebar-folder-selection';
 import { buildSidebarDroneTree, type SidebarDroneTree } from './sidebar-drone-tree';
 import { buildSidebarNodeTree, type SidebarNodeTreeModel, type SidebarTreeDroneNode, type SidebarTreeFolderNode } from './sidebar-node-tree';
 import {
@@ -1321,7 +1324,12 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     unreadAgentMessageByChatNodeId,
   ]);
   const folderDroneSelected = folderDroneIds.length > 0 && folderDroneIds.every((droneId) => selectedDroneSet.has(droneId));
-  const isSelected = selectedSidebarNodeId === node.id || selectedFolderPath === folderPath || folderDroneSelected;
+  const isSelected = isSidebarFolderRowSelected({
+    folderNodeId: node.id,
+    folderPath,
+    selectedSidebarNodeId,
+    selectedFolderPath,
+  });
   const isHiddenGroup = hiddenSidebarGroupTokenSet.has(groupToken);
   const showEditorInline = folderEditor?.targetPath === folderPath && folderEditor.mode === 'rename';
   const showCreateInline = (folderEditor?.anchorPath ?? folderEditor?.parentPath) === folderPath && folderEditor?.mode === 'create';
@@ -1571,7 +1579,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
         <GroupedSidebarFolderBodyDropZone
           nodeId={node.id}
           disabled={!sidebarDndEnabled || isVirtualGroup}
-          className={`${densityClasses.folderBody} dh-sidebar-folder-body ${intoState ? 'bg-[var(--accent-subtle)]' : ''}`}
+          className={`${densityClasses.folderBody} dh-sidebar-folder-body [--sidebar-selection-edge-offset:-1px] ${intoState ? 'bg-[var(--accent-subtle)]' : ''}`}
           selectedDirectChild={hasSelectedDirectChild}
           dropActive={intoState}
         >

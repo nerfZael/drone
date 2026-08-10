@@ -1039,6 +1039,7 @@ code, pre {
 }
 
 .dh-sidebar-selection-edge {
+  z-index: 1;
   left: var(--sidebar-selection-edge-offset, 0px);
 }
 
