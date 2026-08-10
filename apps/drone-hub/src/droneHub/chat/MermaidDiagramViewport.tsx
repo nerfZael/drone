@@ -109,6 +109,12 @@ function zoomFromWheel(currentZoom: number, deltaY: number): number {
   return clampMermaidZoom(currentZoom * Math.exp(-deltaY * WHEEL_ZOOM_SENSITIVITY));
 }
 
+export function isMermaidZoomWheelGesture(
+  event: Pick<WheelEvent, 'ctrlKey' | 'metaKey'>,
+): boolean {
+  return event.ctrlKey || event.metaKey;
+}
+
 export function MermaidDiagramViewport({
   dimensions,
   fitRequest,
@@ -211,6 +217,7 @@ export function MermaidDiagramViewport({
     const viewport = viewportRef.current;
     if (!viewport) return;
     const onWheel = (event: WheelEvent) => {
+      if (!isMermaidZoomWheelGesture(event)) return;
       event.preventDefault();
       setFitMode(false);
       updateZoom(zoomFromWheel(zoom, event.deltaY), {
