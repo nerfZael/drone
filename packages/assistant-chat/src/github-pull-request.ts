@@ -13,6 +13,11 @@ export type GithubPullRequestSummary = {
   title: string;
   state: string;
   draft: boolean;
+  diffStats?: {
+    changed: number;
+    additions: number;
+    deletions: number;
+  } | null;
   htmlUrl: string;
   createdAt: string;
   updatedAt: string;

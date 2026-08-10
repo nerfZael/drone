@@ -7,9 +7,8 @@ export interface FleetRouteDependencies {
   resolveDroneOrRespond: ServiceFunction;
   loadRegistry: ServiceFunction;
   fleetActorPayload: ServiceFunction;
+  setDroneParent: ServiceFunction;
   findDroneIdByRef: ServiceFunction;
-  resolveStableDroneOrPendingIdFromRef: ServiceFunction;
-  fleetDescendantIdsForActor: ServiceFunction;
   updateDroneFleetMetadata: ServiceFunction;
   fleetActorConfig: ServiceFunction;
   fleetError: ServiceFunction;
@@ -20,9 +19,8 @@ export function registerFleetRoutes(apiRouter: HubRouter, deps: FleetRouteDepend
     resolveDroneOrRespond,
     loadRegistry,
     fleetActorPayload,
+    setDroneParent,
     findDroneIdByRef,
-    resolveStableDroneOrPendingIdFromRef,
-    fleetDescendantIdsForActor,
     updateDroneFleetMetadata,
     fleetActorConfig,
     fleetError,
@@ -39,9 +37,7 @@ export function registerFleetRoutes(apiRouter: HubRouter, deps: FleetRouteDepend
     }
   });
 
-  apiRouter.post('/api/fleet/actors/:droneRef/parent', async ({ res, params, readJson, json }) => {
-    const resolved = await resolveDroneOrRespond(res, params.droneRef);
-    if (!resolved) return;
+  apiRouter.post('/api/fleet/actors/:droneRef/parent', async ({ params, readJson, json }) => {
     const body = await readJson<any>();
     const parentRef =
       body?.parent == null
@@ -49,29 +45,10 @@ export function registerFleetRoutes(apiRouter: HubRouter, deps: FleetRouteDepend
         : typeof body?.parent === 'string'
           ? body.parent.trim()
           : String(body.parent ?? '').trim();
-    try {
-      let nextParentId: string | null = null;
-      const registry = await loadRegistry();
-      if (parentRef) {
-        const parentFound = findDroneIdByRef(registry, parentRef);
-        if (!parentFound) throw fleetError(`unknown drone: ${parentRef}`, 404);
-        nextParentId = resolveStableDroneOrPendingIdFromRef(registry, parentRef);
-        if (!nextParentId) throw fleetError(`unknown drone: ${parentRef}`, 404);
-        if (nextParentId === resolved.id) {
-          throw fleetError('cannot make a drone its own parent', 400);
-        }
-        if (fleetDescendantIdsForActor(registry, resolved.id).includes(nextParentId)) {
-          throw fleetError('cannot reparent a drone beneath one of its descendants', 400);
-        }
-      }
-      await updateDroneFleetMetadata({
-        droneId: resolved.id,
-        transform: (fleet: any) => ({ ...fleet, createdBy: nextParentId }),
-      });
-      json(200, { ok: true, id: resolved.id, parentId: nextParentId });
-    } catch (error: any) {
-      json(Number(error?.status ?? 500), { ok: false, error: errorMessage(error) });
-    }
+    json(
+      200,
+      await setDroneParent({ droneRef: params.droneRef, parentRef: parentRef || null }),
+    );
   });
 
   apiRouter.post(

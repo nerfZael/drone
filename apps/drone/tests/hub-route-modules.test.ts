@@ -451,9 +451,8 @@ describe('extracted Hub route modules', () => {
       resolveDroneOrRespond: async () => ({ id: 'owner-id' }),
       loadRegistry: async () => ({ drones: {} }),
       fleetActorPayload: (_registry: unknown, id: string) => ({ ok: true, id }),
+      setDroneParent: async () => ({ ok: true, id: 'owner-id', parentId: null }),
       findDroneIdByRef: () => null,
-      resolveStableDroneOrPendingIdFromRef: () => null,
-      fleetDescendantIdsForActor: () => [],
       updateDroneFleetMetadata: async () => {},
       fleetActorConfig: () => ({ assigned: [] }),
       fleetError: (message: string, status: number) =>
@@ -507,18 +506,19 @@ describe('extracted Hub route modules', () => {
     const writes: Array<{ preferences: unknown; expectedVersion: unknown }> = [];
     let notificationCount = 0;
     registerSettingsRoutes(router, {
-      upsertStoredUiPreferencesSettings: async (preferences: unknown, expectedVersion: unknown) => {
-        writes.push({ preferences, expectedVersion });
-      },
-      notifyUiPreferencesChanged: async () => {
+      updateUiPreferencesSettings: async (input: any) => {
+        writes.push({
+          preferences: input.uiPreferences,
+          expectedVersion: input.expectedVersion,
+        });
         notificationCount += 1;
+        return {
+          ok: true,
+          ...requestBody,
+          updatedAt: '2026-08-06T08:24:17.707Z',
+          version: 13,
+        };
       },
-      resolveUiPreferencesSettingsResponse: async () => ({
-        ok: true,
-        ...requestBody,
-        updatedAt: '2026-08-06T08:24:17.707Z',
-        version: 13,
-      }),
     } as any);
 
     expect(await request('POST', '/api/settings/ui-preferences')).toBe(true);
@@ -540,19 +540,16 @@ describe('extracted Hub route modules', () => {
     let generalNotifications = 0;
     let snapshotNotifications = 0;
     registerSettingsRoutes(router, {
-      upsertStoredUiPreferencesSettings: async () => undefined,
-      notifyUiPreferencesChanged: async () => {
-        generalNotifications += 1;
+      updateUiPreferencesSettings: async (input: any) => {
+        if (input.notificationMode === 'sidebar-snapshot') snapshotNotifications += 1;
+        else generalNotifications += 1;
+        return {
+          ok: true,
+          uiPreferences: requestBody.uiPreferences,
+          updatedAt: '2026-08-06T10:00:00.000Z',
+          version: 14,
+        };
       },
-      notifyUiPreferencesSnapshotChanged: async () => {
-        snapshotNotifications += 1;
-      },
-      resolveUiPreferencesSettingsResponse: async () => ({
-        ok: true,
-        uiPreferences: requestBody.uiPreferences,
-        updatedAt: '2026-08-06T10:00:00.000Z',
-        version: 14,
-      }),
     } as any);
 
     expect(await request('POST', '/api/settings/ui-preferences')).toBe(true);

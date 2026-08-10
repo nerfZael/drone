@@ -6,7 +6,7 @@ type ServiceFunction = (...args: any[]) => any;
 
 export interface RepositoryRouteDependencies {
   loadRegistry: ServiceFunction;
-  listCanonicalRepositories: ServiceFunction;
+  listRepositories: ServiceFunction;
   gitListRemoteBranches: ServiceFunction;
   removeCanonicalRepository: ServiceFunction;
   withCanonicalRepositories: ServiceFunction;
@@ -27,7 +27,7 @@ export function registerRepositoryRoutes(
 ): void {
   const {
     loadRegistry,
-    listCanonicalRepositories,
+    listRepositories,
     gitListRemoteBranches,
     removeCanonicalRepository,
     withCanonicalRepositories,
@@ -43,13 +43,7 @@ export function registerRepositoryRoutes(
   } = deps;
 
   router.get('/api/repos', async ({ json }) => {
-    const repos = (await listCanonicalRepositories()).map((repo: any) => ({
-      path: repo.path,
-      addedAt: repo.addedAt ?? null,
-      remoteUrl: repo.remoteUrl ?? null,
-      github: repo.github ?? null,
-    }));
-    json(200, { ok: true, repos, count: repos.length });
+    json(200, await listRepositories());
   });
 
   router.get('/api/repos/branches', async ({ url, fail, json }) => {

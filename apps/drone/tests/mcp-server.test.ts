@@ -234,6 +234,116 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
+  test('uses the Hub application for in-process group mutations', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-group-', async () => {
+      const previousFetch = globalThis.fetch;
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const moves: any[] = [];
+      globalThis.fetch = (async (input) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
+        );
+        if (url.pathname === '/api/drones/summary') {
+          return Response.json({
+            ok: true,
+            drones: [{ id: 'drone-a', name: 'Drone A', repoPath: '/repo' }],
+          });
+        }
+        throw new Error(`unexpected loopback request: ${url.pathname}`);
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'assistant-test-token';
+      let groupCreated = false;
+      const group = {
+        id: 'group-a',
+        repoPath: '/repo',
+        name: 'Review',
+        label: 'Review',
+        parentId: null,
+        createdAt: null,
+        updatedAt: null,
+        droneCount: 0,
+        pendingCount: 0,
+        totalCount: 0,
+      };
+      const client = await createInProcessDroneHubMcpClient({
+        correlationId: 'thread-group',
+        allowedDroneRefs: ['drone-a'],
+        allowedWriteDroneRefs: ['drone-a'],
+        allowedDroneIds: ['drone-a'],
+        hubApplication: {
+          listRepositories: async () => ({
+            ok: true,
+            repos: [{ path: '/repo', addedAt: null, remoteUrl: null, github: null }],
+            count: 1,
+          }),
+          listGroups: async () => ({
+            ok: true,
+            groups: groupCreated ? [group] : [],
+            total: groupCreated ? 1 : 0,
+          }),
+          createGroup: async () => {
+            groupCreated = true;
+            return { ok: true, ...group };
+          },
+          setDroneGroup: async (input: any) => {
+            moves.push(input);
+            return {
+              ok: true,
+              group: 'Review',
+              moved: [{ id: 'drone-a', groupId: 'group-a' }],
+              rejected: [],
+              total: 1,
+            };
+          },
+          uiPreferences: {
+            read: async () => ({ ok: true, uiPreferences: {}, version: null }),
+            update: async ({ uiPreferences }: any) => ({
+              ok: true,
+              uiPreferences,
+              version: 1,
+            }),
+          },
+        } as any,
+      });
+      try {
+        const repos = await client.callTool({ name: 'list_repos', arguments: {} });
+        expect(repos.structuredContent).toMatchObject({
+          ok: true,
+          count: 1,
+          repos: [{ path: '/repo' }],
+        });
+        const created = await client.callTool({
+          name: 'create_group',
+          arguments: { name: 'Review', repoPath: '/repo' },
+        });
+        expect(created.structuredContent).toMatchObject({
+          ok: true,
+          id: 'group-a',
+          group: 'Review',
+        });
+        const result = await client.callTool({
+          name: 'set_drone_group',
+          arguments: { drone: 'drone-a', groupId: 'group-a' },
+        });
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          group: 'Review',
+          total: 1,
+        });
+        expect(moves).toEqual([{ droneIds: ['drone-a'], groupId: 'group-a' }]);
+      } finally {
+        await client.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
+    });
+  });
+
   test('hides speak from new Built-in MCP catalogs when speech is disabled globally', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-speech-disabled-', async () => {
       await upsertStoredSpeechSettings({ enabled: false });

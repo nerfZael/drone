@@ -22,6 +22,7 @@ import { placeMcpRepoScopedGroupNodeAtTop } from './mcp-sidebar-group-order';
 import { registerWorkflowMcpTools } from './workflows/workflow-mcp-tools';
 import { isWorkflowChildDroneEntry } from './workflows/workflow-child-drone-metadata';
 import type { RenameDroneCommand } from './drone-rename-command';
+import type { HubApplication } from './application/create-hub-application';
 import {
   WORKFLOW_DRONE_DEFAULTED_TOOL_NAMES,
   WORKFLOW_MCP_TOOL_NAMES,
@@ -393,8 +394,10 @@ function normalizeRepoSummary(repo: any) {
   };
 }
 
-async function requestRepoSummaries() {
-  const response = await requestJson('/api/repos', { method: 'GET' });
+async function requestRepoSummaries(application?: HubApplication) {
+  const response = application
+    ? await application.listRepositories()
+    : await requestJson('/api/repos', { method: 'GET' });
   const repos = Array.isArray(response?.repos) ? response.repos.map(normalizeRepoSummary).filter(Boolean) : [];
   repos.sort((a: any, b: any) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }) || a.path.localeCompare(b.path));
   return repos;
@@ -534,12 +537,12 @@ async function emitUiAction(uiAction: Record<string, unknown>) {
   });
 }
 
-async function resolveRegisteredRepo(args: any = {}) {
+async function resolveRegisteredRepo(args: any = {}, application?: HubApplication) {
   const repoRef = cleanString(args.repoRef);
   const repoLabel = cleanString(args.repoLabel);
   const repoPath = cleanString(args.repoPath);
   if (!repoRef && !repoLabel && !repoPath) return null;
-  const repos = await requestRepoSummaries();
+  const repos = await requestRepoSummaries(application);
   if (repos.length === 0) throw new Error('No repos are registered in Drone Hub.');
   const resolved: any[] = [];
   if (repoRef) {
@@ -763,8 +766,10 @@ function insertGroupTokenAtParentTop(
   return normalizeOrderedStringList([...tokensToInsert, ...visibleOrder, ...hiddenTokens]);
 }
 
-async function readUiPreferences() {
-  const response = await requestJson('/api/settings/ui-preferences', { method: 'GET' });
+async function readUiPreferences(application?: HubApplication) {
+  const response = application
+    ? await application.uiPreferences.read()
+    : await requestJson('/api/settings/ui-preferences', { method: 'GET' });
   return {
     uiPreferences: normalizeUiPreferences(response?.uiPreferences),
     version:
@@ -776,34 +781,52 @@ async function readUiPreferences() {
   };
 }
 
-async function writeUiPreferences(uiPreferences: unknown, expectedVersion?: number | null) {
-  const response = await requestJson('/api/settings/ui-preferences', {
-    method: 'POST',
-    body: JSON.stringify({
-      uiPreferences: normalizeUiPreferences(uiPreferences),
-      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
-    }),
-  });
+async function writeUiPreferences(
+  uiPreferences: unknown,
+  expectedVersion?: number | null,
+  application?: HubApplication,
+) {
+  const normalized = normalizeUiPreferences(uiPreferences);
+  const response = application
+    ? await application.uiPreferences.update({
+        uiPreferences: normalized,
+        expectedVersion,
+      })
+    : await requestJson('/api/settings/ui-preferences', {
+        method: 'POST',
+        body: JSON.stringify({
+          uiPreferences: normalized,
+          ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+        }),
+      });
   return normalizeUiPreferences(response?.uiPreferences);
 }
 
 async function updateUiPreferences(
   update: (current: ReturnType<typeof normalizeUiPreferences>) => ReturnType<typeof normalizeUiPreferences>,
+  application?: HubApplication,
 ) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    const current = await readUiPreferences();
+    const current = await readUiPreferences(application);
     try {
-      return await writeUiPreferences(update(current.uiPreferences), current.version);
+      return await writeUiPreferences(update(current.uiPreferences), current.version, application);
     } catch (error: any) {
-      if (error?.status !== 409 || attempt === 3) throw error;
+      if ((error?.status !== 409 && error?.statusCode !== 409) || attempt === 3) throw error;
     }
   }
   throw new Error('Failed to update UI preferences');
 }
 
-async function listGroups(repoPath?: string): Promise<McpGroupSummary[]> {
-  const query = repoPath === undefined ? '' : `?${new URLSearchParams({ repoPath }).toString()}`;
-  const response = await requestJson(`/api/groups${query}`, { method: 'GET' });
+async function listGroups(
+  repoPath?: string,
+  application?: HubApplication,
+): Promise<McpGroupSummary[]> {
+  const response = application
+    ? await application.listGroups(repoPath)
+    : await requestJson(
+        `/api/groups${repoPath === undefined ? '' : `?${new URLSearchParams({ repoPath }).toString()}`}`,
+        { method: 'GET' },
+      );
   return Array.isArray(response?.groups)
     ? response.groups
         .map((group: any) => normalizeGroupSummary(group))
@@ -815,6 +838,7 @@ async function insertNewGroupsAtParentTop(
   targetGroups: McpGroupSummary[],
   beforeGroups: McpGroupSummary[],
   afterGroups: McpGroupSummary[],
+  application?: HubApplication,
 ) {
   const beforeIds = new Set(beforeGroups.map((group) => group.id).filter(Boolean));
   const beforeScopesAndNames = new Set(beforeGroups.map((group) => `${group.repoPath}\0${group.name}`));
@@ -847,11 +871,11 @@ async function insertNewGroupsAtParentTop(
       sidebarGroupOrder,
       sidebarNodeOrderByParent,
     };
-  });
+  }, application);
   return { updated: true, groups: targetGroups, sidebarGroupOrder: saved.sidebarGroupOrder };
 }
 
-async function reorderDronesInUiPreferences(args: any) {
+async function reorderDronesInUiPreferences(args: any, application?: HubApplication) {
   const refs = normalizeOrderedStringList(args?.drones);
   if (refs.length === 0) throw new Error('drones is required');
   if (cleanString(args?.beforeDrone) && cleanString(args?.afterDrone)) throw new Error('use either beforeDrone or afterDrone, not both');
@@ -877,7 +901,9 @@ async function reorderDronesInUiPreferences(args: any) {
   if (requestedRepoPath !== inferredRepoPath) throw new Error('repoPath does not match the reordered drones');
   const targetGroup = normalizeGroupForOrder(args?.group);
   const requestedGroupId = cleanString(args?.groupId);
-  const groups = requestedGroupId || targetGroup !== 'Ungrouped' ? await listGroups() : [];
+  const groups = requestedGroupId || targetGroup !== 'Ungrouped'
+    ? await listGroups(undefined, application)
+    : [];
   const groupRecord = requestedGroupId
     ? groups.find((group) => group.id === requestedGroupId)
     : groups.find((group) => group.repoPath === requestedRepoPath && group.name === targetGroup);
@@ -939,7 +965,7 @@ async function reorderDronesInUiPreferences(args: any) {
         ),
       },
     };
-  });
+  }, application);
   return {
     ok: true,
     group: effectiveGroupName,
@@ -1245,6 +1271,7 @@ type McpToolRegistrationContext = {
   speechEnabled?: boolean;
   onSpeechToolRegistered?: (tool: RegisteredTool) => void;
   renameDrone?: RenameDroneCommand;
+  hubApplication?: HubApplication;
 };
 
 function chatPrincipal(
@@ -1501,7 +1528,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     description: 'List repos registered in Drone Hub.',
     inputSchema: {},
   }, async () => {
-    const repos = await requestRepoSummaries();
+    const repos = await requestRepoSummaries(context.hubApplication);
     return toolResult({ ok: true, count: repos.length, repos });
   });
 
@@ -1511,7 +1538,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     inputSchema: { repoPath: z.string().optional() },
   }, async (args) => {
     const repoPath = args.repoPath === undefined ? undefined : cleanString(args.repoPath);
-    const groups = await listGroups(repoPath);
+    const groups = await listGroups(repoPath, context.hubApplication);
     return toolResult({ ok: true, groups, total: groups.length });
   });
 
@@ -1523,16 +1550,23 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     const group = cleanString(args.group || args.name);
     if (!group) throw new Error('group is required');
     const repoPath = cleanString(args.repoPath);
-    const beforeGroups = await listGroups(repoPath);
-    const response = await requestJson('/api/groups', {
-      method: 'POST',
-      body: JSON.stringify({ name: group, repoPath }),
-    });
+    const beforeGroups = await listGroups(repoPath, context.hubApplication);
+    const response = context.hubApplication
+      ? await context.hubApplication.createGroup({ name: group, repoPath })
+      : await requestJson('/api/groups', {
+          method: 'POST',
+          body: JSON.stringify({ name: group, repoPath }),
+        });
     const created = normalizeGroupSummary(response);
     if (!created) throw new Error('Drone Hub returned an invalid group after creation');
-    const afterGroups = await listGroups(repoPath);
+    const afterGroups = await listGroups(repoPath, context.hubApplication);
     const canonical = afterGroups.find((candidate) => candidate.id === created.id) ?? created;
-    const groupOrder = await insertNewGroupsAtParentTop([canonical], beforeGroups, afterGroups);
+    const groupOrder = await insertNewGroupsAtParentTop(
+      [canonical],
+      beforeGroups,
+      afterGroups,
+      context.hubApplication,
+    );
     return toolResult({ ok: true, ...canonical, group: canonical.name, groupOrder });
   });
 
@@ -1554,7 +1588,9 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     if (args.clearGroup === true && (groupId || cleanString(args.group))) throw new Error('clearGroup cannot be combined with group or groupId');
     if (groupId && group) throw new Error('use either group or groupId, not both');
     if (!groupId && group == null && args.clearGroup !== true) throw new Error('group or groupId is required unless clearGroup is true');
-    const beforeGroups = groupId || group ? await listGroups() : [];
+    const beforeGroups = groupId || group
+      ? await listGroups(undefined, context.hubApplication)
+      : [];
     const resolved = await resolveDroneRefs(drones);
     const unknown = resolved.filter((item) => !item.found).map((item) => item.ref);
     if (unknown.length > 0) throw new Error(`unknown drone${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}`);
@@ -1564,18 +1600,27 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       throw new Error('group belongs to a different repository than one or more selected drones');
     }
     const droneIds = resolved.map((item) => item.id);
-    const response = await requestJson('/api/drones/group-set', {
-      method: 'POST',
-      body: JSON.stringify(groupId ? { droneIds, groupId } : { droneIds, group }),
-    });
+    const response = context.hubApplication
+      ? await context.hubApplication.setDroneGroup(
+          groupId ? { droneIds, groupId } : { droneIds, group },
+        )
+      : await requestJson('/api/drones/group-set', {
+          method: 'POST',
+          body: JSON.stringify(groupId ? { droneIds, groupId } : { droneIds, group }),
+        });
     let groupOrder: any = { updated: false, groups: [] };
     if ((groupId || group) && Array.isArray(response?.moved) && response.moved.length > 0) {
-      const afterGroups = await listGroups();
+      const afterGroups = await listGroups(undefined, context.hubApplication);
       const targetRepoPaths = new Set(resolved.filter((item) => item.found).map((item) => item.repoPath));
       const targetGroups = groupId
         ? afterGroups.filter((candidate) => candidate.id === groupId)
         : afterGroups.filter((candidate) => targetRepoPaths.has(candidate.repoPath) && candidate.name === group);
-      groupOrder = await insertNewGroupsAtParentTop(targetGroups, beforeGroups, afterGroups);
+      groupOrder = await insertNewGroupsAtParentTop(
+        targetGroups,
+        beforeGroups,
+        afterGroups,
+        context.hubApplication,
+      );
     }
     return toolResult({ ok: true, ...response, groupOrder });
   });
@@ -1642,7 +1687,8 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       beforeDrone: z.string().optional(),
       afterDrone: z.string().optional(),
     },
-  }, async (args) => toolResult(await reorderDronesInUiPreferences(args)));
+  }, async (args) =>
+    toolResult(await reorderDronesInUiPreferences(args, context.hubApplication)));
 
   const openDroneChat = async (args: any) => {
     const droneRef = cleanString(args.droneId);
@@ -1876,7 +1922,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       chatPrincipal(context)?.droneId,
       'create child drones',
     );
-    const resolvedRepo = await resolveRegisteredRepo(args);
+    const resolvedRepo = await resolveRegisteredRepo(args, context.hubApplication);
     const repoPath = cleanString(resolvedRepo?.path);
     const defaults = await createDronePreferences(repoPath);
     const seedAgent = args.agent == null ? agentFromPreferenceKey(defaults.spawnAgentKey) : normalizeAgent(args.agent);
@@ -2540,6 +2586,7 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
     ...(input?.allowedWriteDroneRefs ? { allowedWriteDroneRefs: input.allowedWriteDroneRefs } : {}),
     ...(input?.allowedDroneIds ? { allowedDroneIds: input.allowedDroneIds } : {}),
     ...(input?.renameDrone ? { renameDrone: input.renameDrone } : {}),
+    ...(input?.hubApplication ? { hubApplication: input.hubApplication } : {}),
     speechEnabled: input?.speechEnabled !== false,
     onSpeechToolRegistered: (tool) => {
       speechTool = tool;

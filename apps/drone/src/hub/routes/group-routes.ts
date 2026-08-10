@@ -15,18 +15,17 @@ type GroupTarget = { id: string; name: string; group: string; repoPath: string }
 
 export type GroupRouteDependencies = {
   loadRegistry: () => Promise<any>;
+  listGroups: (repoPath?: string) => Promise<unknown>;
   listCanonicalGroups: (repoPath?: string) => Promise<GroupRecord[]>;
-  normalizeGroupName: (value: unknown) => string;
   isUngroupedGroupName: (value: string) => boolean;
-  validateGroupNameOrThrow: (value: unknown, field: string) => string;
   nowIso: () => string;
-  ensureCanonicalGroup: (name: string, repoPath: string, at: string) => Promise<GroupRecord>;
-  renameCanonicalGroupOrchestration: (
-    repoPath: string,
-    oldName: string,
-    newName: string,
-    at: string,
-  ) => Promise<any>;
+  createGroup: (input: { name: unknown; repoPath?: unknown; at?: string }) => Promise<unknown>;
+  renameGroup: (input: {
+    groupRef: string;
+    repoPath?: string;
+    newName: unknown;
+    at?: string;
+  }) => Promise<unknown>;
   isSameOrDescendantGroupPath: (candidate: string, group: string) => boolean;
   normalizeDroneIdentity: (value: unknown) => string;
   deleteCanonicalGroupArtifacts: (repoPath: string, group: string) => Promise<unknown>;
@@ -45,13 +44,12 @@ export type GroupRouteDependencies = {
 export function registerGroupRoutes(router: HubRouter, deps: GroupRouteDependencies): void {
   const {
     loadRegistry,
+    listGroups,
     listCanonicalGroups,
-    normalizeGroupName,
     isUngroupedGroupName,
-    validateGroupNameOrThrow,
     nowIso,
-    ensureCanonicalGroup,
-    renameCanonicalGroupOrchestration,
+    createGroup,
+    renameGroup,
     isSameOrDescendantGroupPath,
     normalizeDroneIdentity,
     deleteCanonicalGroupArtifacts,
@@ -61,120 +59,48 @@ export function registerGroupRoutes(router: HubRouter, deps: GroupRouteDependenc
   } = deps;
 
   router.get('/api/groups', async ({ url, json }) => {
-    const registry = await loadRegistry();
     const requestedRepoPath = url.searchParams.has('repoPath')
       ? String(url.searchParams.get('repoPath') ?? '').trim()
       : undefined;
-    const canonical = await listCanonicalGroups(requestedRepoPath);
-    const canonicalById = new Map(canonical.map((group) => [group.id, group]));
-    const canonicalByScopeAndName = new Map(
-      canonical.map((group) => [`${group.repoPath}\0${group.name}`, group]),
+    json(200, await listGroups(requestedRepoPath));
+  });
+
+  router.post('/api/groups', async ({ readJson, json }) => {
+    const body = await readJson<any>();
+    json(
+      201,
+      await createGroup({
+        name: body?.name ?? body?.group ?? body?.groupName ?? '',
+        repoPath: body?.repoPath,
+        at: nowIso(),
+      }),
     );
-    const counts = new Map<string, { drones: number; pending: number }>();
-
-    const count = (entries: any, kind: 'drones' | 'pending') => {
-      for (const drone of Object.values(entries ?? {}) as any[]) {
-        if (isWorkflowChildDroneEntry(drone)) continue;
-        const group = normalizeGroupName(drone?.group);
-        if (!group || isUngroupedGroupName(group)) continue;
-        const repoPath = String(drone?.repoPath ?? '').trim();
-        if (requestedRepoPath !== undefined && repoPath !== requestedRepoPath) continue;
-        const groupId = String(drone?.groupId ?? '').trim();
-        const referenced = canonicalById.get(groupId);
-        const canonicalGroup = referenced?.repoPath === repoPath
-          ? referenced
-          : canonicalByScopeAndName.get(`${repoPath}\0${group}`);
-        if (!canonicalGroup) continue;
-        const current = counts.get(canonicalGroup.id) ?? { drones: 0, pending: 0 };
-        current[kind] += 1;
-        counts.set(canonicalGroup.id, current);
-      }
-    };
-    count(registry.drones, 'drones');
-    count(registry.pending, 'pending');
-
-    const groups = canonical.map((entry) => {
-      const totals = counts.get(entry.id) ?? { drones: 0, pending: 0 };
-      return {
-        id: entry.id,
-        repoPath: entry.repoPath,
-        name: entry.name,
-        label: entry.label ?? entry.name.slice(entry.name.lastIndexOf('/') + 1),
-        parentId: entry.parentId ?? null,
-        createdAt: typeof entry.createdAt === 'string' ? entry.createdAt : null,
-        updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : null,
-        droneCount: totals.drones,
-        pendingCount: totals.pending,
-        totalCount: totals.drones + totals.pending,
-      };
-    });
-    json(200, { ok: true, groups, total: groups.length });
   });
 
-  router.post('/api/groups', async ({ readJson, fail, json }) => {
+  router.post('/api/groups/:groupName/rename', async ({ params, readJson, json }) => {
     const body = await readJson<any>();
-    const repoPath = String(body?.repoPath ?? '').trim();
-    let name = '';
-    try {
-      name = validateGroupNameOrThrow(
-        body?.name ?? body?.group ?? body?.groupName ?? '',
-        'group name',
-      );
-    } catch (error: any) {
-      return fail(400, error?.message ?? String(error));
-    }
-    const at = nowIso();
-    if ((await listCanonicalGroups(repoPath)).some((group) => group.name === name)) {
-      return fail(409, `group already exists: ${name}`);
-    }
-    const group = await ensureCanonicalGroup(name, repoPath, at);
-    json(201, { ok: true, id: group.id, repoPath: group.repoPath, name: group.name,
-      label: group.label, parentId: group.parentId, createdAt: group.createdAt });
-  });
-
-  router.post('/api/groups/:groupName/rename', async ({ params, readJson, fail, json }) => {
-    const groupRef = normalizeGroupName(params.groupName);
-    const body = await readJson<any>();
-    const requestedRepoPath = String(body?.repoPath ?? '').trim();
-    const allGroups = await listCanonicalGroups();
-    const existing = allGroups.find((group) => group.id === groupRef) ??
-      allGroups.find((group) => group.repoPath === requestedRepoPath && group.name === groupRef);
-    if (!existing) return fail(404, `unknown group: ${groupRef}`);
-    const oldName = existing?.name ?? groupRef;
-    if (!oldName) return fail(400, 'invalid group name');
-    if (isUngroupedGroupName(oldName)) return fail(400, 'cannot rename Ungrouped');
-
-    let newName = '';
-    try {
-      newName = validateGroupNameOrThrow(body?.newName ?? body?.name ?? '', 'newName');
-    } catch (error: any) {
-      return fail(400, error?.message ?? String(error));
-    }
-    if (oldName === newName) {
-      json(200, { ok: true, oldName, newName, renamed: false, reason: 'same-name' });
-      return;
-    }
-    const result = await renameCanonicalGroupOrchestration(existing.repoPath, oldName, newName, nowIso());
-    if (!result.ok) return fail(result.status ?? 500, result.error ?? 'failed to rename group');
-    json(200, {
-      ok: true,
-      id: existing?.id ?? null,
-      repoPath: existing.repoPath,
-      oldName,
-      newName,
-      renamed: true,
-      movedDrones: result.movedDrones,
-      movedPending: result.movedPending,
-    });
+    json(
+      200,
+      await renameGroup({
+        groupRef: params.groupName,
+        repoPath: String(body?.repoPath ?? '').trim(),
+        newName: body?.newName ?? body?.name ?? '',
+        at: nowIso(),
+      }),
+    );
   });
 
   router.delete('/api/groups/:groupName', async ({ params, url, fail, json }) => {
     const groupRef = params.groupName.trim();
     const canonicalGroups = await listCanonicalGroups();
     const requestedRepoPath = String(url.searchParams.get('repoPath') ?? '').trim();
-    const referencedGroup = canonicalGroups.find((entry) => entry.id === groupRef) ??
-      canonicalGroups.find((entry) => entry.repoPath === requestedRepoPath && entry.name === groupRef);
-    if (!referencedGroup && !isUngroupedGroupName(groupRef)) return fail(404, `unknown group: ${groupRef}`);
+    const referencedGroup =
+      canonicalGroups.find((entry) => entry.id === groupRef) ??
+      canonicalGroups.find(
+        (entry) => entry.repoPath === requestedRepoPath && entry.name === groupRef,
+      );
+    if (!referencedGroup && !isUngroupedGroupName(groupRef))
+      return fail(404, `unknown group: ${groupRef}`);
     const group = referencedGroup?.name ?? groupRef;
     if (!group) return fail(400, 'invalid group name');
 
@@ -185,8 +111,10 @@ export function registerGroupRoutes(router: HubRouter, deps: GroupRouteDependenc
     const registry = await loadRegistry();
     const groupExists =
       !wantsUngrouped &&
-      canonicalGroups.some((entry) => entry.repoPath === scopedRepoPath &&
-        isSameOrDescendantGroupPath(entry.name, group));
+      canonicalGroups.some(
+        (entry) =>
+          entry.repoPath === scopedRepoPath && isSameOrDescendantGroupPath(entry.name, group),
+      );
 
     const targetsFrom = (entries: any): GroupTarget[] =>
       (Object.entries(entries ?? {}) as Array<[string, any]>)
@@ -222,8 +150,14 @@ export function registerGroupRoutes(router: HubRouter, deps: GroupRouteDependenc
       if (!wantsUngrouped) {
         await deleteCanonicalGroupArtifacts(scopedRepoPath, group).catch(() => undefined);
       }
-      json(200, { ok: true, group, repoPath: scopedRepoPath,
-        removed: [], total: 0, deletedGroup: !wantsUngrouped });
+      json(200, {
+        ok: true,
+        group,
+        repoPath: scopedRepoPath,
+        removed: [],
+        total: 0,
+        deletedGroup: !wantsUngrouped,
+      });
       return;
     }
 

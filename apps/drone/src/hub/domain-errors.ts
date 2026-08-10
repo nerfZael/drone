@@ -66,8 +66,14 @@ export function describeHubError(error: unknown, fallbackStatus = 500): HubHttpE
     };
   }
 
-  const candidate = error as { message?: unknown; statusCode?: unknown; code?: unknown } | null;
-  const explicitStatus = Number(candidate?.statusCode ?? 0);
+  const candidate = error as {
+    message?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+    code?: unknown;
+  } | null;
+  const upstreamStatus = /^HUB_(\d{3})$/.exec(String(candidate?.code ?? ''))?.[1];
+  const explicitStatus = Number(candidate?.statusCode ?? candidate?.status ?? upstreamStatus ?? 0);
   const statusCode =
     Number.isFinite(explicitStatus) && explicitStatus >= 400
       ? Math.floor(explicitStatus)

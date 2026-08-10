@@ -54,6 +54,7 @@ export function NativeMermaidDiagram({ source }: { source: string }) {
         horizontal
         nestedScrollEnabled
         showsHorizontalScrollIndicator
+        style={styles.scrollFrame}
         contentContainerStyle={styles.scrollContent}
       >
         <SvgXml
@@ -73,6 +74,14 @@ const styles = StyleSheet.create({
     width: '100%',
     minWidth: 0,
     backgroundColor: colors.mantle,
+  },
+  scrollFrame: {
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
+    flexGrow: 0,
+    flexShrink: 1,
   },
   scrollContent: {
     padding: DIAGRAM_PADDING,
