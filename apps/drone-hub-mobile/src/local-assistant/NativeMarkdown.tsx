@@ -67,9 +67,9 @@ function NativeCodeBlock({ code, language }: { code: string; language: string })
   }, [code]);
 
   return (
-    <View style={styles.codeBlock}>
-      <View style={styles.codeToolbar}>
-        <Text numberOfLines={1} style={styles.codeLanguage}>
+    <View style={styles.blockCard}>
+      <View style={[styles.blockToolbar, styles.codeToolbarSpacing]}>
+        <Text numberOfLines={1} style={[styles.blockLabel, styles.codeLabelSpacing]}>
           {languageLabel}
         </Text>
         <View style={styles.codeActions}>
@@ -141,9 +141,9 @@ function NativeMermaidBlock({ source }: { source: string }) {
   const [showSource, setShowSource] = React.useState(false);
 
   return (
-    <View style={styles.mermaidBlock}>
-      <View style={styles.mermaidToolbar}>
-        <Text style={styles.mermaidLabel}>Diagram</Text>
+    <View style={styles.blockCard}>
+      <View style={[styles.blockToolbar, styles.mermaidToolbarSpacing]}>
+        <Text style={[styles.blockLabel, styles.mermaidLabelSpacing]}>Diagram</Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={showSource ? 'Show rendered diagram' : 'Show Mermaid source'}
@@ -852,7 +852,7 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     borderRadius: 4,
   },
-  mermaidBlock: {
+  blockCard: {
     width: '100%',
     maxWidth: '100%',
     minWidth: 0,
@@ -864,25 +864,26 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: colors.mantle,
   },
-  mermaidToolbar: {
+  blockToolbar: {
     minHeight: 36,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingLeft: 12,
-    paddingRight: 7,
-    paddingVertical: 5,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
     backgroundColor: colors.whiteWash,
   },
-  mermaidLabel: {
+  codeToolbarSpacing: { paddingRight: 5, paddingVertical: 4 },
+  mermaidToolbarSpacing: { paddingRight: 7, paddingVertical: 5 },
+  blockLabel: {
     color: colors.textSecondary,
     fontSize: 10,
     fontWeight: '900',
-    letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
+  codeLabelSpacing: { flexShrink: 1, letterSpacing: 0.6 },
+  mermaidLabelSpacing: { letterSpacing: 0.8 },
   mermaidSourceButton: {
     minHeight: 26,
     justifyContent: 'center',
@@ -902,38 +903,6 @@ const styles = StyleSheet.create({
   },
   mermaidSource: {
     padding: 8,
-  },
-  codeBlock: {
-    width: '100%',
-    maxWidth: '100%',
-    minWidth: 0,
-    alignSelf: 'stretch',
-    flexShrink: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    backgroundColor: colors.mantle,
-    overflow: 'hidden',
-  },
-  codeToolbar: {
-    minHeight: 36,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingLeft: 12,
-    paddingRight: 5,
-    paddingVertical: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
-    backgroundColor: colors.whiteWash,
-  },
-  codeLanguage: {
-    flexShrink: 1,
-    color: colors.textSecondary,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
   },
   codeActions: {
     flexDirection: 'row',
