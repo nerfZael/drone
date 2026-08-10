@@ -303,6 +303,55 @@ describeSocketSuite('create runtime api', () => {
     }
   });
 
+  test('batch creation includes attached seed content in startup prompts', async () => {
+    const attachment = {
+      name: 'batch-screen.png',
+      mime: 'image/png',
+      size: 3,
+      dataBase64: 'YWJj',
+    };
+    const resp = await apiFetch('/api/drones/batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        pullHostBranchBeforeCreate: true,
+        drones: [
+          {
+            name: 'attached-batch-draft-state',
+            runtime: 'container',
+            draft: true,
+            seedAttachments: [attachment],
+            seedSubmittedAt: '2026-06-21T12:04:00.000Z',
+          },
+        ],
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+    expect(resp.data?.accepted).toHaveLength(1);
+    const accepted = resp.data?.accepted?.[0];
+    const droneId = String(accepted?.id ?? '').trim();
+    const promptId = String(accepted?.initialMessage?.promptId ?? '').trim();
+    expect(droneId).not.toBe('');
+    expect(promptId).not.toBe('');
+
+    const regAny: any = await loadRegistry();
+    expect(regAny?.pending?.[droneId]?.startupQueuedPrompts).toEqual([
+      expect.objectContaining({
+        id: promptId,
+        chatName: 'default',
+        prompt: 'Attached 1 attachment',
+        attachments: [expect.objectContaining(attachment)],
+        deliveryMode: 'asap',
+        state: 'queued',
+      }),
+    ]);
+
+    const queue = getPromptQueueRepository();
+    if (queue) {
+      expect(queue.get({ droneId, chatName: 'default', promptId })).toBeNull();
+    }
+  });
+
   test('single create persists supported read-only seed agent permission mode', async () => {
     const resp = await apiFetch('/api/drones', {
       method: 'POST',
