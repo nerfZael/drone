@@ -203,16 +203,20 @@ describe('Drone Hub assistant MCP transport', () => {
         allowedDroneRefs: ['drone-a'],
         allowedWriteDroneRefs: ['drone-a'],
         allowedDroneIds: ['drone-a'],
-        renameDrone: async (input) => {
-          renames.push(input);
-          return {
-            ok: true,
-            id: 'drone-a',
-            oldName: 'Untitled 1',
-            newName: input.newName,
-            renamed: true,
-          };
-        },
+        hubServices: {
+          drones: {
+            rename: async (input: any) => {
+              renames.push(input);
+              return {
+                ok: true,
+                id: 'drone-a',
+                oldName: 'Untitled 1',
+                newName: input.newName,
+                renamed: true,
+              };
+            },
+          },
+        } as any,
       });
       try {
         const result = await client.callTool({
@@ -272,38 +276,44 @@ describe('Drone Hub assistant MCP transport', () => {
         allowedDroneRefs: ['drone-a'],
         allowedWriteDroneRefs: ['drone-a'],
         allowedDroneIds: ['drone-a'],
-        hubApplication: {
-          listRepositories: async () => ({
-            ok: true,
-            repos: [{ path: '/repo', addedAt: null, remoteUrl: null, github: null }],
-            count: 1,
-          }),
-          listGroups: async () => ({
-            ok: true,
-            groups: groupCreated ? [group] : [],
-            total: groupCreated ? 1 : 0,
-          }),
-          createGroup: async () => {
-            groupCreated = true;
-            return { ok: true, ...group };
-          },
-          setDroneGroup: async (input: any) => {
-            moves.push(input);
-            return {
+        hubServices: {
+          repositories: {
+            list: async () => ({
               ok: true,
-              group: 'Review',
-              moved: [{ id: 'drone-a', groupId: 'group-a' }],
-              rejected: [],
-              total: 1,
-            };
-          },
-          uiPreferences: {
-            read: async () => ({ ok: true, uiPreferences: {}, version: null }),
-            update: async ({ uiPreferences }: any) => ({
-              ok: true,
-              uiPreferences,
-              version: 1,
+              repos: [{ path: '/repo', addedAt: null, remoteUrl: null, github: null }],
+              count: 1,
             }),
+          },
+          groups: {
+            list: async () => ({
+              ok: true,
+              groups: groupCreated ? [group] : [],
+              total: groupCreated ? 1 : 0,
+            }),
+            create: async () => {
+              groupCreated = true;
+              return { ok: true, ...group };
+            },
+            setDroneGroup: async (input: any) => {
+              moves.push(input);
+              return {
+                ok: true,
+                group: 'Review',
+                moved: [{ id: 'drone-a', groupId: 'group-a' }],
+                rejected: [],
+                total: 1,
+              };
+            },
+          },
+          settings: {
+            uiPreferences: {
+              read: async () => ({ ok: true, uiPreferences: {}, version: null }),
+              update: async ({ uiPreferences }: any) => ({
+                ok: true,
+                uiPreferences,
+                version: 1,
+              }),
+            },
           },
         } as any,
       });

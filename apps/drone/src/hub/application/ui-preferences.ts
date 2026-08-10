@@ -8,7 +8,9 @@ import { DomainConflictError, InvalidRequestError } from '../domain-errors';
 import type { HubApplicationEvents } from './hub-application-events';
 
 export type UiPreferencesSnapshot = {
+  ok?: true;
   uiPreferences: Record<string, unknown>;
+  updatedAt?: string | null;
   version: number | null;
 } & Record<string, unknown>;
 

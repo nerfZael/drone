@@ -10,7 +10,7 @@ import {
   sidebarMoveDroneIds,
   sidebarMoveDestination,
 } from '@drone/hub-model';
-import type { HubApplication } from './application/create-hub-application';
+import type { HubServices } from './application/hub-services';
 
 type SidebarCommandResult = SidebarMoveCommandResult & Record<string, unknown>;
 type SidebarSettingsSnapshot = {
@@ -33,16 +33,17 @@ export type SidebarCommandOperations = {
   }): Promise<SidebarSettingsSnapshot>;
 };
 
-export function createSidebarCommandService(application: HubApplication): SidebarCommandService {
+export function createSidebarCommandService(application: HubServices): SidebarCommandService {
   return new SidebarCommandService({
     setDroneParent: async (droneId, parentId) =>
-      await application.setDroneParent({ droneRef: droneId, parentRef: parentId }),
-    setDroneGroup: async (droneIds, group) => await application.setDroneGroup({ droneIds, group }),
+      await application.fleet.setDroneParent({ droneRef: droneId, parentRef: parentId }),
+    setDroneGroup: async (droneIds, group) =>
+      await application.groups.setDroneGroup({ droneIds, group }),
     renameGroup: async ({ repoPath, oldName, newName }) =>
-      await application.renameGroup({ groupRef: oldName, repoPath, newName }),
-    readUiPreferences: async () => await application.uiPreferences.read(),
+      await application.groups.rename({ groupRef: oldName, repoPath, newName }),
+    readUiPreferences: async () => await application.settings.uiPreferences.read(),
     writeUiPreferences: async ({ uiPreferences, expectedVersion }) =>
-      await application.uiPreferences.update({
+      await application.settings.uiPreferences.update({
         uiPreferences,
         expectedVersion,
         notificationMode: 'sidebar-snapshot',

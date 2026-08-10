@@ -6,8 +6,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { readJsonBody, sendJson } from './hub-http';
 import { createDroneHubMcpServer } from './mcp-server';
-import type { RenameDroneCommand } from './drone-rename-command';
-import type { HubApplication } from './application/create-hub-application';
+import type { HubServices } from './application/hub-services';
 import {
   authenticateMcpBearerToken,
   bearerTokenFromAuthorizationHeader,
@@ -28,8 +27,7 @@ export class DroneHubMcpHttpTransport {
       signingSecret: string;
       log: (level: 'warn', message: string, details?: Record<string, unknown>) => void;
       speechEnabled?: boolean;
-      renameDrone?: RenameDroneCommand;
-      hubApplication?: HubApplication;
+      hubServices: HubServices;
     },
   ) {}
 
@@ -116,8 +114,7 @@ export class DroneHubMcpHttpTransport {
         const server = createDroneHubMcpServer({
           principal: identity,
           speechEnabled: this.opts.speechEnabled !== false,
-          renameDrone: this.opts.renameDrone,
-          hubApplication: this.opts.hubApplication,
+          hubServices: this.opts.hubServices,
         });
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => crypto.randomUUID(),

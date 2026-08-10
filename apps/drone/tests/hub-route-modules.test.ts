@@ -4,6 +4,7 @@ import { HubRouter } from '../src/hub/hub-router';
 import { createEditorRouteHandler } from '../src/hub/routes/editor-routes';
 import { createDroneLifecycleRouteHandler } from '../src/hub/routes/drone-lifecycle-routes';
 import { registerFleetRoutes } from '../src/hub/routes/fleet-routes';
+import { registerGroupRoutes } from '../src/hub/routes/group-routes';
 import { registerOperationalRoutes } from '../src/hub/routes/operational-routes';
 import { registerSettingsRoutes } from '../src/hub/routes/settings-routes';
 import { registerSidebarRoutes } from '../src/hub/routes/sidebar-routes';
@@ -448,19 +449,61 @@ describe('extracted Hub route modules', () => {
   test('serves fleet actor reads from the fleet router', async () => {
     const { router, request, responses } = routeHarness();
     registerFleetRoutes(router, {
-      resolveDroneOrRespond: async () => ({ id: 'owner-id' }),
-      loadRegistry: async () => ({ drones: {} }),
-      fleetActorPayload: (_registry: unknown, id: string) => ({ ok: true, id }),
-      setDroneParent: async () => ({ ok: true, id: 'owner-id', parentId: null }),
-      findDroneIdByRef: () => null,
-      updateDroneFleetMetadata: async () => {},
-      fleetActorConfig: () => ({ assigned: [] }),
-      fleetError: (message: string, status: number) =>
-        Object.assign(new Error(message), { status }),
-    });
+      fleet: {
+        get: async (droneRef: string) => ({ ok: true, id: droneRef }),
+        setDroneParent: async () => ({ ok: true, id: 'owner-id', parentId: null }),
+      },
+    } as any);
 
     expect(await request('GET', '/api/fleet/actors/owner-id')).toBe(true);
     expect(responses).toEqual([{ status: 200, body: { ok: true, id: 'owner-id' } }]);
+  });
+
+  test('keeps group deletion transport details in the route adapter', async () => {
+    const { router, request, responses } = routeHarness();
+    const deletions: unknown[] = [];
+    registerGroupRoutes(router, {
+      nowIso: () => 'now',
+      groups: {
+        delete: async (input: unknown) => {
+          deletions.push(input);
+          return {
+            ok: true,
+            group: 'Review',
+            repoPath: '/repo',
+            removed: [],
+            total: 0,
+          };
+        },
+      },
+    } as any);
+
+    expect(
+      await request(
+        'DELETE',
+        '/api/groups/group-id?repoPath=%2Frepo&keepVolume=1&forget=false',
+      ),
+    ).toBe(true);
+    expect(deletions).toEqual([
+      {
+        groupRef: 'group-id',
+        repoPath: '/repo',
+        keepVolume: true,
+        forget: false,
+      },
+    ]);
+    expect(responses).toEqual([
+      {
+        status: 200,
+        body: {
+          ok: true,
+          group: 'Review',
+          repoPath: '/repo',
+          removed: [],
+          total: 0,
+        },
+      },
+    ]);
   });
 
   test('exposes the automatic Codex connection lifecycle', async () => {
@@ -506,18 +549,22 @@ describe('extracted Hub route modules', () => {
     const writes: Array<{ preferences: unknown; expectedVersion: unknown }> = [];
     let notificationCount = 0;
     registerSettingsRoutes(router, {
-      updateUiPreferencesSettings: async (input: any) => {
-        writes.push({
-          preferences: input.uiPreferences,
-          expectedVersion: input.expectedVersion,
-        });
-        notificationCount += 1;
-        return {
-          ok: true,
-          ...requestBody,
-          updatedAt: '2026-08-06T08:24:17.707Z',
-          version: 13,
-        };
+      hubSettings: {
+        uiPreferences: {
+          update: async (input: any) => {
+            writes.push({
+              preferences: input.uiPreferences,
+              expectedVersion: input.expectedVersion,
+            });
+            notificationCount += 1;
+            return {
+              ok: true,
+              ...requestBody,
+              updatedAt: '2026-08-06T08:24:17.707Z',
+              version: 13,
+            };
+          },
+        },
       },
     } as any);
 
@@ -540,15 +587,19 @@ describe('extracted Hub route modules', () => {
     let generalNotifications = 0;
     let snapshotNotifications = 0;
     registerSettingsRoutes(router, {
-      updateUiPreferencesSettings: async (input: any) => {
-        if (input.notificationMode === 'sidebar-snapshot') snapshotNotifications += 1;
-        else generalNotifications += 1;
-        return {
-          ok: true,
-          uiPreferences: requestBody.uiPreferences,
-          updatedAt: '2026-08-06T10:00:00.000Z',
-          version: 14,
-        };
+      hubSettings: {
+        uiPreferences: {
+          update: async (input: any) => {
+            if (input.notificationMode === 'sidebar-snapshot') snapshotNotifications += 1;
+            else generalNotifications += 1;
+            return {
+              ok: true,
+              uiPreferences: requestBody.uiPreferences,
+              updatedAt: '2026-08-06T10:00:00.000Z',
+              version: 14,
+            };
+          },
+        },
       },
     } as any);
 
