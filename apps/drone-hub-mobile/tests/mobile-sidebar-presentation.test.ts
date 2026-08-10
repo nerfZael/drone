@@ -20,7 +20,6 @@ describe('mobile sidebar presentation', () => {
     expect(shellSource).toContain("label: 'Clone drone'");
     expect(screenSource).toContain('cloneFrom: source.id');
     expect(screenSource).toContain('cloneChats: true');
-    expect(screenSource).toContain('deferChatLoad: isMobileDroneStarting(clonedDrone)');
     expect(screenSource).toContain("source.runtime.trim().toLowerCase() === 'host'");
     expect(screenSource).toContain("selected.runtime.trim().toLowerCase() === 'host'");
   });

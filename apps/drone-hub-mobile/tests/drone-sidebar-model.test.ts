@@ -4,9 +4,10 @@ import {
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   buildMobileDroneRepoGroups,
   mobileDroneTurnsToAssistantMessages,
-  normalizeMobileDroneListPayload,
-  normalizeMobileDroneCreateModelCatalog,
+  normalizeMobileDrone,
   normalizeMobileDroneChatModelCatalog,
+  normalizeMobileDroneCreateModelCatalog,
+  normalizeMobileDroneListPayload,
   normalizeMobileNativeChatHistory,
   normalizeMobileDroneTurns,
   normalizeMobileDrones,
@@ -90,6 +91,10 @@ describe('mobile drone sidebar model', () => {
         { name: 'Review-copy-2' },
       ]),
     ).toBe('Review-copy-3');
+  });
+
+  test('gives a cloned drone a default chat when its source has none', () => {
+    expect(normalizeMobileDrone({ id: 'clone', chats: [] })?.chats).toEqual(['default']);
   });
 
   test('groups drones by repo and preserves fleet and chat hierarchy', () => {

@@ -101,6 +101,7 @@ import {
   optimisticMobilePendingPrompt,
 } from '../drones/mobile-pending-prompts';
 import { MobileChatReadCoordinator } from '../drones/mobile-chat-read-coordinator';
+import { isMobileDroneStarting } from '../drones/isMobileDroneStarting';
 import { useDroneLinkedPullRequests } from '../drones/use-drone-linked-pull-requests';
 import { useLocalDroneControl } from '../drones/local-drone-control';
 import { mobileDeviceConnectionState } from '../drones/mobile-device-reachability';
@@ -128,7 +129,6 @@ import {
 const APP_HEADER_HEIGHT = 58;
 const NEW_DRONE_ATTACHMENT_READY_TIMEOUT_MS = 2 * 60_000;
 const NEW_DRONE_ATTACHMENT_READY_POLL_MS = 750;
-const MOBILE_DRONE_STARTING_PHASES = new Set(['starting', 'creating', 'seeding']);
 const EMPTY_CHAT_HISTORY_PAGE: MobileChatHistoryPage = {
   beforeCursor: null,
   hasOlder: false,
@@ -146,10 +146,6 @@ function inlinePromptAttachments(attachments: readonly MobileChatAttachment[]) {
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isMobileDroneStarting(drone: Pick<MobileDroneSummary, 'phase'>): boolean {
-  return MOBILE_DRONE_STARTING_PHASES.has(drone.phase.trim().toLowerCase());
 }
 
 function normalizedChatMutationList(raw: unknown, fallback: readonly string[]): string[] {
@@ -478,6 +474,24 @@ export function DronesScreen({
   selectedRef.current = selected;
   chatNameRef.current = chatName;
 
+  const resetActiveChatState = React.useCallback(() => {
+    setChatModel('');
+    setChatReasoning('');
+    setChatModelProvider('drone');
+    setChatAgentId(null);
+    setChatAgentPermissionMode('full-access');
+    setChatApprovalPolicy('ask');
+    setChatModels([]);
+    setTurns([]);
+    setNativeMessages(null);
+    setNativeChatId('');
+    setNativeThread(null);
+    setPendingApprovals([]);
+    setPendingPrompts([]);
+    setAccessOpen(false);
+    setAccessDirty(false);
+  }, []);
+
   React.useEffect(() => {
     setChatHistoryPage(EMPTY_CHAT_HISTORY_PAGE);
     setOlderHistoryBusy(false);
@@ -559,25 +573,14 @@ export function DronesScreen({
           if (nextChats.length === 0) {
             chatNameRef.current = '';
             setChatName('');
-            setChatModel('');
-            setChatReasoning('');
-            setChatModels([]);
-            setTurns([]);
-            setNativeMessages(null);
-            setNativeChatId('');
-            setNativeThread(null);
-            setPendingApprovals([]);
-            setPendingPrompts([]);
+            resetActiveChatState();
           }
           if (!nextChats.includes(chatNameRef.current)) {
             const fallbackChat = nextChats[0];
             if (fallbackChat) {
               chatNameRef.current = fallbackChat;
               setChatName(fallbackChat);
-              setChatModel('');
-              setChatReasoning('');
-              setChatModels([]);
-              setTurns([]);
+              resetActiveChatState();
               void readChatRef.current(nextSelected.id, fallbackChat).catch(() => undefined);
             }
           }
@@ -648,7 +651,13 @@ export function DronesScreen({
           setBusy('');
       }
     },
-    [commitDroneListSnapshot, requestDroneControl, targetId, targetSupportsDrones],
+    [
+      commitDroneListSnapshot,
+      requestDroneControl,
+      resetActiveChatState,
+      targetId,
+      targetSupportsDrones,
+    ],
   );
   loadDronesRef.current = loadDrones;
 
@@ -815,23 +824,9 @@ export function DronesScreen({
     setSelected(null);
     setChats([]);
     setChatName('default');
-    setChatModel('');
-    setChatReasoning('');
-    setChatModelProvider('drone');
-    setChatAgentId(null);
-    setChatAgentPermissionMode('full-access');
-    setChatApprovalPolicy('ask');
-    setChatModels([]);
-    setTurns([]);
-    setNativeMessages(null);
-    setNativeChatId('');
-    setNativeThread(null);
-    setAccessOpen(false);
-    setAccessDirty(false);
+    resetActiveChatState();
     setConfirmAccessDiscard(false);
-    setPendingApprovals([]);
     setApprovalBusyId('');
-    setPendingPrompts([]);
     setCancellingPromptId('');
     setPrompt('');
     setPromptAttachments([]);
@@ -881,7 +876,7 @@ export function DronesScreen({
         setNewDroneScreenVersion((value) => value + 1);
       });
     }
-  }, [commitDroneListSnapshot, targetId, targetSupportsDrones]);
+  }, [commitDroneListSnapshot, resetActiveChatState, targetId, targetSupportsDrones]);
   React.useEffect(() => {
     if (targetReachable && targetSupportsDrones) {
       // Callback identities change while the local assistant and mesh hydrate. Refresh only when
@@ -907,21 +902,7 @@ export function DronesScreen({
     setSelected(drone);
     setChats(knownChats);
     setChatName(knownChat);
-    setChatModel('');
-    setChatReasoning('');
-    setChatModelProvider('drone');
-    setChatAgentId(null);
-    setChatAgentPermissionMode('full-access');
-    setChatApprovalPolicy('ask');
-    setChatModels([]);
-    setTurns([]);
-    setNativeMessages(null);
-    setNativeChatId('');
-    setNativeThread(null);
-    setPendingApprovals([]);
-    setAccessOpen(false);
-    setAccessDirty(false);
-    setPendingPrompts([]);
+    resetActiveChatState();
     // Starting clones publish a chat change when their copied chats are ready. Reading now
     // returns a transient conflict and replaces the useful starting state with an error.
     if (options.deferChatLoad) return;
@@ -1271,17 +1252,7 @@ export function DronesScreen({
     run('chat', async () => {
       chatNameRef.current = nextChat;
       setChatName(nextChat);
-      setChatModel('');
-      setChatReasoning('');
-      setChatModels([]);
-      setTurns([]);
-      setNativeMessages(null);
-      setNativeChatId('');
-      setNativeThread(null);
-      setPendingApprovals([]);
-      setAccessOpen(false);
-      setAccessDirty(false);
-      setPendingPrompts([]);
+      resetActiveChatState();
       await readChat(selected.id, nextChat);
     });
 
@@ -1881,12 +1852,7 @@ export function DronesScreen({
         setDrones((current) => current.map((item) => (item.id === droneId ? updatedDrone : item)));
         setChats(nextChats);
         setChatName(targetChatName);
-        setTurns([]);
-        setNativeMessages(null);
-        setNativeChatId('');
-        setNativeThread(null);
-        setPendingApprovals([]);
-        setPendingPrompts([]);
+        resetActiveChatState();
         await readChat(droneId, targetChatName);
         await loadDrones(true);
       })
@@ -1953,21 +1919,7 @@ export function DronesScreen({
     setSelected(null);
     setChats([]);
     setChatName('default');
-    setChatModel('');
-    setChatReasoning('');
-    setChatModelProvider('drone');
-    setChatAgentId(null);
-    setChatAgentPermissionMode('full-access');
-    setChatApprovalPolicy('ask');
-    setChatModels([]);
-    setTurns([]);
-    setNativeMessages(null);
-    setNativeChatId('');
-    setNativeThread(null);
-    setAccessOpen(false);
-    setAccessDirty(false);
-    setPendingApprovals([]);
-    setPendingPrompts([]);
+    resetActiveChatState();
     setCancellingPromptId('');
     setPrompt('');
     setModelOpen(false);
@@ -2067,8 +2019,7 @@ export function DronesScreen({
       const fallbackChat = nextChats[0] ?? '';
       chatNameRef.current = fallbackChat;
       setChatName(fallbackChat);
-      setTurns([]);
-      setNativeMessages(null);
+      resetActiveChatState();
       if (fallbackChat) await readChat(droneId, fallbackChat);
     }
     return targetIdRef.current === destinationId;
@@ -2111,14 +2062,7 @@ export function DronesScreen({
       setSelected(updatedDrone);
       setChats(nextChats);
       setChatName(createdChat);
-      setTurns([]);
-      setNativeMessages(null);
-      setNativeChatId('');
-      setNativeThread(null);
-      setPendingApprovals([]);
-      setAccessOpen(false);
-      setAccessDirty(false);
-      setPendingPrompts([]);
+      resetActiveChatState();
       setPrompt('');
       setPromptAttachments([]);
       setComposerFocusKey(`${drone.id}:${createdChat}:${Date.now()}`);
@@ -2319,14 +2263,15 @@ export function DronesScreen({
         draft: false,
       });
       if (!clonedDrone) throw new Error('The Drone Hub returned an invalid cloned drone.');
+      const activeClone =
+        clonedDrone.chats.length > 0 ? clonedDrone : { ...clonedDrone, chats: ['default'] };
       setDrones((current) => [
-        clonedDrone,
-        ...current.filter((drone) => drone.id !== clonedDrone.id),
+        activeClone,
+        ...current.filter((drone) => drone.id !== activeClone.id),
       ]);
-      const nextChats = clonedDrone.chats.length > 0 ? clonedDrone.chats : ['default'];
-      const nextChat = nextChats.includes('default') ? 'default' : nextChats[0]!;
-      await activateDrone(clonedDrone, nextChat, {
-        deferChatLoad: isMobileDroneStarting(clonedDrone),
+      const nextChat = activeClone.chats.includes('default') ? 'default' : activeClone.chats[0]!;
+      await activateDrone(activeClone, nextChat, {
+        deferChatLoad: isMobileDroneStarting(activeClone),
       });
       await loadDrones(true);
     });
@@ -3255,9 +3200,7 @@ export function DronesScreen({
                 openDroneVersion.current += 1;
                 setSelected(null);
                 setChats([]);
-                setTurns([]);
-                setNativeMessages(null);
-                setPendingPrompts([]);
+                resetActiveChatState();
               }
               await loadDrones(true);
             })
