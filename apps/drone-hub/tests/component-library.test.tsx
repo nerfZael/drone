@@ -221,7 +221,12 @@ describe('drone hub component library', () => {
             <UiToolbarInput aria-label="Filter files" />
             <UiToolbarButton pressed>Viewed</UiToolbarButton>
             <UiToolbarButton pressed={false}>Unviewed</UiToolbarButton>
-            <UiToolbarIconButton label="Refresh changes" icon={<span>↻</span>} />
+            <UiToolbarIconButton
+              label="Refresh changes"
+              icon={<svg data-testid="refresh-icon" />}
+              size="xsmall"
+              className="!h-5 !w-5"
+            />
             <UiToolbarLink href="/pull/42" tone="accent">Open pull request</UiToolbarLink>
           </UiPanelToolbar>
           <UiPanelBody>
@@ -265,6 +270,8 @@ describe('drone hub component library', () => {
     expect(html).toContain('aria-checked="true"');
     expect(html).toContain('aria-pressed="true"');
     expect(html).toContain('aria-pressed="false"');
+    expect(html).toContain('!px-0');
+    expect(html).toContain('data-testid="refresh-icon"');
     expect(html).toContain('role="menu"');
     expect(html).toContain('role="menuitemradio"');
     expect(html).toContain('role="separator"');

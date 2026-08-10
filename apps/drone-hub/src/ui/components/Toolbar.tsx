@@ -116,7 +116,7 @@ export const UiToolbarIconButton = React.forwardRef<
       size={size}
       aria-label={label}
       title={title ?? label}
-      className={cn('px-0', className)}
+      className={cn('!px-0', className)}
       {...props}
     >
       <span
