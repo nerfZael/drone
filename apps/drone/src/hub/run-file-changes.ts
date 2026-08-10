@@ -682,12 +682,22 @@ export async function finalizeDroneRunFileChanges(input: {
         });
         return workspace ? combineAgentRunFileChanges([workspace]) : null;
       }
-      const startingBaseInHead = await mergeBase(
+      // A seeded checkout can already be behind the configured base. Replay only
+      // its changes since their common ancestor so missing upstream commits are
+      // not mistaken for pre-run deletions.
+      const startingCommonBase = await mergeBase(
         target.runGit,
         input.baseline.headCommitOid,
         input.baseline.baseCommitOid,
       );
-      if (startingBaseInHead !== input.baseline.baseCommitOid) {
+      if (!startingCommonBase) {
+        return combineAgentRunFileChanges([unavailableWorkspace(input.baseline)]);
+      }
+      const startingBaseTreeOid =
+        startingCommonBase === input.baseline.baseCommitOid
+          ? input.baseline.baseTreeOid
+          : await resolveCommitTree(target.runGit, startingCommonBase);
+      if (!startingBaseTreeOid) {
         return combineAgentRunFileChanges([unavailableWorkspace(input.baseline)]);
       }
       const adoptedBaseTreeOid = await resolveCommitTree(target.runGit, currentCommonBase);
@@ -696,7 +706,7 @@ export async function finalizeDroneRunFileChanges(input: {
       }
       const normalizedTreeOid = await normalizeBaselineTree({
         runGit: target.runGit,
-        baselineBaseTreeOid: input.baseline.baseTreeOid,
+        baselineBaseTreeOid: startingBaseTreeOid,
         baselineTreeOid: input.baseline.treeOid,
         currentBaseTreeOid: adoptedBaseTreeOid,
       });
@@ -706,7 +716,7 @@ export async function finalizeDroneRunFileChanges(input: {
         // the close event of a concurrently running bounded git diff under Bun.
         const baselinePatchId = await baseRelativePatchId(
           target.runGit,
-          input.baseline.baseTreeOid,
+          startingBaseTreeOid,
           input.baseline.treeOid,
         );
         const currentPatchId = await baseRelativePatchId(

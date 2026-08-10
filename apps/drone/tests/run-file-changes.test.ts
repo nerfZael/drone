@@ -285,6 +285,53 @@ describe('agent run file changes', () => {
     });
   });
 
+  test('normalizes when the starting checkout is behind the configured base', async () => {
+    const repoPath = createRepository();
+    git(repoPath, 'switch', '--quiet', '-c', 'dvm/work');
+    git(repoPath, 'switch', '--quiet', '-c', 'merged-main', 'refs/remotes/origin/main');
+    fs.writeFileSync(path.join(repoPath, 'merged-before-run.txt'), 'already on main\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'merged before run');
+    git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(repoPath, 'switch', '--quiet', 'dvm/work');
+    const drone = {
+      runtime: 'host',
+      repoAttached: true,
+      repoPath,
+      name: 'Host drone',
+      repo: { baseRef: 'main' },
+    };
+    const baseline = await captureDroneRunFileChangesBaseline({ droneId: 'host-1', drone });
+
+    git(repoPath, 'switch', '--quiet', '-c', 'refactor/work', 'refs/remotes/origin/main');
+    fs.writeFileSync(path.join(repoPath, 'run.txt'), 'added by run\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'run change');
+
+    git(repoPath, 'switch', '--quiet', 'merged-main');
+    fs.writeFileSync(path.join(repoPath, 'later-upstream.txt'), 'arrived during the run\n');
+    git(repoPath, 'add', '-A');
+    git(repoPath, 'commit', '--quiet', '-m', 'later upstream');
+    git(repoPath, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git(repoPath, 'switch', '--quiet', 'refactor/work');
+    git(repoPath, 'rebase', '--quiet', 'refs/remotes/origin/main');
+
+    const summary = await finalizeDroneRunFileChanges({ baseline: baseline!, drone });
+
+    expect(summary).toMatchObject({
+      attribution: 'base-normalized',
+      baseMoved: true,
+      counts: { changed: 1, additions: 1, deletions: 0, modified: 0 },
+      workspaces: [
+        {
+          attribution: 'base-normalized',
+          baseMoved: true,
+          previewEntries: [expect.objectContaining({ path: 'run.txt' })],
+        },
+      ],
+    });
+  });
+
   test('uses the exact run diff when the remote base moves but is not adopted', async () => {
     const repoPath = createRepository();
     git(repoPath, 'switch', '--quiet', '-c', 'dvm/work');
