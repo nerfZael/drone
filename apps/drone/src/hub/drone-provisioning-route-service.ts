@@ -238,13 +238,6 @@ function createDroneProvisioningServiceHandler(
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
         }
-        if (seedAttachments.length > 0 && !createAsDraft) {
-          json(res, 400, {
-            ok: false,
-            error: 'seedAttachments are only supported when creating a draft drone',
-          });
-          return;
-        }
         if (!seedPrompt && seedAttachments.length > 0) {
           seedPrompt = `Attached ${seedAttachments.length} attachment${seedAttachments.length === 1 ? '' : 's'}`;
         }
@@ -483,8 +476,9 @@ function createDroneProvisioningServiceHandler(
           return;
         }
         const at = nowIso();
+        const queueSeedPrompt = createAsDraft || seedAttachments.length > 0;
         const startupQueuedPrompts =
-          createAsDraft && seedPrompt
+          queueSeedPrompt && seedPrompt
             ? [
                 {
                   id: seedPromptId || crypto.randomBytes(9).toString('hex'),
@@ -492,6 +486,9 @@ function createDroneProvisioningServiceHandler(
                   at: seedSubmittedAt,
                   prompt: seedPrompt,
                   ...(seedAttachments.length > 0 ? { attachments: seedAttachments } : {}),
+                  // Attached prompts cannot reserve a canonical queue row until their files are
+                  // staged. Keep the seed ahead of messages submitted while the drone starts.
+                  ...(seedAttachments.length > 0 ? { deliveryMode: 'asap' as const } : {}),
                   ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
                   state: 'queued' as const,
                   updatedAt: seedSubmittedAt,
@@ -556,9 +553,9 @@ function createDroneProvisioningServiceHandler(
                     ...(seedApprovalPolicy !== 'ask'
                       ? { approvalPolicy: seedApprovalPolicy }
                       : {}),
-                    ...(!createAsDraft && seedPromptId ? { promptId: seedPromptId } : {}),
-                    ...(!createAsDraft && seedPrompt ? { prompt: seedPrompt } : {}),
-                    ...(!createAsDraft && seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
+                    ...(!queueSeedPrompt && seedPromptId ? { promptId: seedPromptId } : {}),
+                    ...(!queueSeedPrompt && seedPrompt ? { prompt: seedPrompt } : {}),
+                    ...(!queueSeedPrompt && seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
                     ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
                     ...(seedAgent ? { agent: seedAgent } : {}),
                   },

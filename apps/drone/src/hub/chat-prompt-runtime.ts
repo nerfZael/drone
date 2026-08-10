@@ -159,6 +159,23 @@ export type ChatPromptRuntimeDependencies = {
   [Key in ChatPromptRuntimeDependencyName]: any;
 };
 
+export type EnqueuePromptOptions = {
+  id?: string;
+  droneId: string;
+  chatName: string;
+  prompt: string;
+  attachments?: ChatImageAttachment[];
+  attachmentRefs?: ChatImageAttachmentRef[];
+  messageId?: string;
+  cwd?: string | null;
+  submittedAt?: string | null;
+  waitForDaemonMs?: number;
+  deliveryMode?: 'background' | 'immediate';
+  priority?: 'queue' | 'asap';
+  schedulePump?: boolean;
+  mark?: (name: string) => void;
+};
+
 export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   const {
     NON_REPO_HOME_CWD,
@@ -2353,20 +2370,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     throw new Error('Timed out waiting for the Built-in agent to finish');
   }
 
-  async function enqueuePrompt(opts: {
-    id?: string;
-    droneId: string;
-    chatName: string;
-    prompt: string;
-    attachments?: ChatImageAttachment[];
-    attachmentRefs?: ChatImageAttachmentRef[];
-    cwd?: string | null;
-    submittedAt?: string | null;
-    waitForDaemonMs?: number;
-    deliveryMode?: 'background' | 'immediate';
-    priority?: 'queue' | 'asap';
-    mark?: (name: string) => void;
-  }): Promise<{ id: string; pendingState: PendingPromptState }> {
+  async function enqueuePrompt(
+    opts: EnqueuePromptOptions,
+  ): Promise<{ id: string; pendingState: PendingPromptState }> {
     const preferredIdRaw = typeof opts.id === 'string' ? opts.id.trim() : '';
     if (preferredIdRaw && !isSafePromptId(preferredIdRaw)) {
       throw new Error('invalid promptId');
@@ -2413,6 +2419,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         id,
         at,
         prompt: opts.prompt,
+        ...(opts.messageId ? { messageId: opts.messageId } : {}),
         ...(configuredModel ? { model: configuredModel } : {}),
         cwd: opts.cwd ?? null,
         ...(attachmentsForPending.length > 0 ? { attachments: attachmentsForPending } : {}),
@@ -2463,8 +2470,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         }
       }
       // Persisted as queued; the background pump will claim it when the chat is deliverable.
-      enqueuePendingPromptPump(droneId, chatName);
-      opts.mark?.('queuePump');
+      if (opts.schedulePump !== false) {
+        enqueuePendingPromptPump(droneId, chatName);
+        opts.mark?.('queuePump');
+      }
       return { id, pendingState: 'queued' };
     }
 
@@ -2873,7 +2882,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       resolvePendingDroneDisplayName,
       runNodeCli,
       setChatAgentConfig,
-      startupPromptToPendingPrompt,
       syncMcpServersForDrone,
       syncRepoAgentsInstructionsForDrone,
       syncSkillLibraryForDrone,

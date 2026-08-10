@@ -127,8 +127,6 @@ import {
 } from '../local-assistant/AssistantApprovalCard';
 
 const APP_HEADER_HEIGHT = 58;
-const NEW_DRONE_ATTACHMENT_READY_TIMEOUT_MS = 2 * 60_000;
-const NEW_DRONE_ATTACHMENT_READY_POLL_MS = 750;
 const EMPTY_CHAT_HISTORY_PAGE: MobileChatHistoryPage = {
   beforeCursor: null,
   hasOlder: false,
@@ -140,12 +138,9 @@ function inlinePromptAttachments(attachments: readonly MobileChatAttachment[]) {
   return attachments.map((attachment) => ({
     name: attachment.name,
     mime: attachment.mime,
+    size: attachment.bytes.byteLength,
     dataBase64: fromByteArray(attachment.bytes),
   }));
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizedChatMutationList(raw: unknown, fallback: readonly string[]): string[] {
@@ -1294,6 +1289,47 @@ export function DronesScreen({
     ]);
   };
 
+  const abortRemoteChatAttachments = async (
+    input: { destinationId: string; droneId: string; chatName: string },
+    attachmentIds: readonly string[],
+  ): Promise<void> => {
+    await Promise.all(
+      attachmentIds.map((uploadId) =>
+        requestDroneControl(input.destinationId, 'chat.prompt', {
+          droneId: input.droneId,
+          chatName: input.chatName,
+          attachmentTransfer: { action: 'abort', uploadId },
+        }).catch(() => undefined),
+      ),
+    );
+  };
+
+  const uploadRemoteChatAttachments = async (input: {
+    destinationId: string;
+    droneId: string;
+    chatName: string;
+    attachments: readonly MobileChatAttachment[];
+  }): Promise<string[]> => {
+    const attachmentIds: string[] = [];
+    try {
+      for (const item of input.attachments) {
+        const attachment = await mesh.uploadChatAttachment({
+          targetDeviceId: input.destinationId,
+          droneId: input.droneId,
+          chatName: input.chatName,
+          name: item.name,
+          mime: item.mime,
+          bytes: item.bytes,
+        });
+        attachmentIds.push(attachment.attachmentId);
+      }
+      return attachmentIds;
+    } catch (error) {
+      await abortRemoteChatAttachments(input, attachmentIds);
+      throw error;
+    }
+  };
+
   const sendChatPromptWithAttachments = async (input: {
     destinationId: string;
     droneId: string;
@@ -1318,19 +1354,8 @@ export function DronesScreen({
       });
     }
 
-    const attachmentIds: string[] = [];
+    const attachmentIds = await uploadRemoteChatAttachments(input);
     try {
-      for (const item of input.attachments) {
-        const attachment = await mesh.uploadChatAttachment({
-          targetDeviceId: input.destinationId,
-          droneId: input.droneId,
-          chatName: input.chatName,
-          name: item.name,
-          mime: item.mime,
-          bytes: item.bytes,
-        });
-        attachmentIds.push(attachment.attachmentId);
-      }
       return await requestDroneControl(input.destinationId, 'chat.prompt', {
         droneId: input.droneId,
         chatName: input.chatName,
@@ -1341,15 +1366,7 @@ export function DronesScreen({
         ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
       });
     } catch (error) {
-      await Promise.all(
-        attachmentIds.map((uploadId) =>
-          requestDroneControl(input.destinationId, 'chat.prompt', {
-            droneId: input.droneId,
-            chatName: input.chatName,
-            attachmentTransfer: { action: 'abort', uploadId },
-          }).catch(() => undefined),
-        ),
-      );
+      await abortRemoteChatAttachments(input, attachmentIds);
       throw error;
     }
   };
@@ -1452,27 +1469,6 @@ export function DronesScreen({
     return accepted;
   };
 
-  const waitForCreatedDrone = async (destinationId: string, droneId: string): Promise<void> => {
-    const deadline = Date.now() + NEW_DRONE_ATTACHMENT_READY_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      if (targetIdRef.current !== destinationId) {
-        throw new Error('The selected Drone Hub changed while the drone was starting.');
-      }
-      const result = await requestDroneControl(destinationId, 'drones.list', {
-        includeCreateOptions: false,
-      });
-      const drone = normalizeMobileDroneListPayload(result).drones.find(
-        (candidate) => candidate.id === droneId,
-      );
-      if (drone?.phase === 'error' || drone?.statusOk === false) {
-        throw new Error(drone.statusError || 'The drone failed while starting.');
-      }
-      if (drone && !isMobileDroneStarting(drone)) return;
-      await wait(NEW_DRONE_ATTACHMENT_READY_POLL_MS);
-    }
-    throw new Error('Timed out waiting for the drone to accept image attachments.');
-  };
-
   const createDrone = async (
     payload: MobileDroneCreatePayload,
     preferences?: MobileDroneCreatePreferences,
@@ -1484,31 +1480,42 @@ export function DronesScreen({
     await run(`create-${payload.runtime}`, async () => {
       const destinationId = targetId;
       const localTarget = destinationId === mesh.identity?.id;
-      const createPayload =
-        initialImages.length === 0 || localTarget || payload.draft === true
+      const attachmentUploadKey = `new-drone-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const attachmentIds =
+        initialImages.length > 0 && !localTarget
+          ? await uploadRemoteChatAttachments({
+              destinationId,
+              droneId: attachmentUploadKey,
+              chatName: 'default',
+              attachments: initialImages,
+            })
+          : [];
+      const createPayload = {
+        ...payload,
+        ...(initialImages.length > 0 && localTarget
+          ? { seedAttachments: inlinePromptAttachments(initialImages) }
+          : {}),
+        ...(attachmentIds.length > 0
           ? {
-              ...payload,
-              ...(initialImages.length > 0
-                ? { seedAttachments: inlinePromptAttachments(initialImages) }
-                : {}),
+              seedAttachmentIds: attachmentIds,
+              seedAttachmentUploadKey: attachmentUploadKey,
             }
-          : {
-              ...Object.fromEntries(
-                Object.entries(payload).filter(
-                  ([key]) => key !== 'seedPrompt' && key !== 'seedSubmittedAt',
-                ),
-              ),
-              // The chat prompt is sent after remote attachment upload. Keep one copy only for
-              // automatic naming while the new drone starts.
-              ...(payload.autoRename && payload.seedPrompt
-                ? { autoRenamePrompt: payload.seedPrompt }
-                : {}),
-            };
-      const result = await requestDroneControl(
-        destinationId,
-        `drone.create.${payload.runtime}`,
-        createPayload,
-      );
+          : {}),
+      };
+      let result: any;
+      try {
+        result = await requestDroneControl(
+          destinationId,
+          `drone.create.${payload.runtime}`,
+          createPayload,
+        );
+      } catch (error) {
+        await abortRemoteChatAttachments(
+          { destinationId, droneId: attachmentUploadKey, chatName: 'default' },
+          attachmentIds,
+        );
+        throw error;
+      }
       created = true;
       const createdDroneId = String(
         result?.id ?? result?.droneId ?? result?.drone?.id ?? '',
@@ -1519,7 +1526,6 @@ export function DronesScreen({
         (initialImages.length > 0
           ? `Attached ${initialImages.length} image${initialImages.length === 1 ? '' : 's'}`
           : '');
-      let optimisticPromptId = '';
       if (targetIdRef.current === destinationId && createdDroneId && startsWithChat) {
         const optimisticDrone = normalizeMobileDrone(
           {
@@ -1547,7 +1553,7 @@ export function DronesScreen({
             ...current.filter((drone) => drone.id !== optimisticDrone.id),
           ]);
           if (selectCreatedDrone) {
-            optimisticPromptId =
+            const optimisticPromptId =
               String(result?.initialMessage?.promptId ?? '').trim() ||
               `mobile-create-${createdDroneId}-${Date.now()}`;
             selectedRef.current = optimisticDrone;
@@ -1597,56 +1603,7 @@ export function DronesScreen({
         preferences ?? mobileDroneCreatePreferencesFromPayload(payload),
       ).catch(() => undefined);
       if (targetIdRef.current !== destinationId) return;
-      try {
-        if (initialImages.length > 0 && !localTarget && payload.draft !== true) {
-          const droneId = String(result?.id ?? result?.droneId ?? '').trim();
-          if (!droneId) throw new Error('The Drone Hub did not return the new drone id.');
-          await waitForCreatedDrone(destinationId, droneId);
-          const promptResult = await sendChatPromptWithAttachments({
-            destinationId,
-            droneId,
-            chatName: 'default',
-            prompt: String(payload.seedPrompt ?? ''),
-            attachments: initialImages,
-          });
-          const acceptedPromptId = String(
-            promptResult?.promptId ?? promptResult?.queuedPrompt?.id ?? '',
-          ).trim();
-          const acceptedPromptState = confirmedMobilePendingPromptState({
-            pendingState: promptResult?.pendingState,
-            queuedPromptId: promptResult?.queuedPrompt?.id,
-            optimisticState: 'sending',
-          });
-          if (acceptedPromptId && optimisticPromptId) {
-            setPendingPrompts((current) =>
-              confirmOptimisticMobilePendingPrompt(current, {
-                optimisticId: optimisticPromptId,
-                confirmedId: acceptedPromptId,
-                state: acceptedPromptState,
-              }),
-            );
-          }
-        }
-      } catch (nextError: any) {
-        if (targetIdRef.current === destinationId && optimisticPromptId) {
-          setPendingPrompts((current) =>
-            current.map((item) =>
-              item?.id === optimisticPromptId
-                ? {
-                    ...item,
-                    state: 'failed',
-                    error: nextError?.message ?? String(nextError),
-                  }
-                : item,
-            ),
-          );
-        }
-        throw new Error(
-          `Drone created, but its first message could not be sent: ${nextError?.message ?? String(nextError)}`,
-        );
-      } finally {
-        await loadDrones();
-      }
+      await loadDrones();
     });
     if (created && payload.draft !== true) newDroneDraftContentRef.current = null;
     return created;

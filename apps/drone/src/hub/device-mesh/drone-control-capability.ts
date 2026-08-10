@@ -657,6 +657,30 @@ export function createDroneControlCapability(
           payload.autoRename === true
             ? (optionalText(payload.autoRenamePrompt) ?? optionalText(payload.seedPrompt))
             : undefined;
+        const seedAttachmentIds = Array.isArray(payload.seedAttachmentIds)
+          ? payload.seedAttachmentIds.map((value) => String(value ?? '').trim()).filter(Boolean)
+          : [];
+        let uploadedSeedAttachments: Awaited<
+          ReturnType<MeshChatAttachmentStore['attachments']>
+        > = [];
+        if (seedAttachmentIds.length > 0) {
+          if (!chatAttachments)
+            throw Object.assign(new Error('mesh attachment uploads are unavailable'), {
+              code: 'UNAVAILABLE',
+            });
+          uploadedSeedAttachments = await chatAttachments.attachments(
+            requiredText(context?.sourceDevice?.id, 'sourceDeviceId'),
+            requiredText(payload.seedAttachmentUploadKey, 'seedAttachmentUploadKey'),
+            'default',
+            seedAttachmentIds,
+          );
+        }
+        const seedAttachments =
+          uploadedSeedAttachments.length > 0
+            ? uploadedSeedAttachments
+            : Array.isArray(payload.seedAttachments)
+              ? payload.seedAttachments
+              : [];
         const repoBranchSource = payload.repoBranchSource === 'remote' ? 'remote' : 'host';
         const createPayload = {
           name: requestedName,
@@ -701,31 +725,33 @@ export function createDroneControlCapability(
                 seedSubmittedAt: optionalText(payload.seedSubmittedAt) ?? new Date().toISOString(),
               }
             : {}),
-          ...(Array.isArray(payload.seedAttachments) && payload.seedAttachments.length > 0
-            ? { seedAttachments: payload.seedAttachments }
-            : {}),
+          ...(seedAttachments.length > 0 ? { seedAttachments } : {}),
         };
-        const created = await localHubRequest(access, '/api/drones', {
-          method: 'POST',
-          body: JSON.stringify(createPayload),
-        });
-        const createdDroneId = firstText(created?.id, created?.droneId, created?.drone?.id);
-        if (
-          !requestedName &&
-          autoRenamePrompt &&
-          createdDroneId &&
-          options?.createdDroneAutoRename
-        ) {
-          const createdDroneName = firstText(created?.name, created?.drone?.name);
-          scheduleCreatedDroneAutoRename(
-            options.createdDroneAutoRename,
-            createdDroneId,
-            autoRenamePrompt,
-            createdDroneName,
-          );
-          return { ...created, autoRenameScheduled: true };
+        try {
+          const created = await localHubRequest(access, '/api/drones', {
+            method: 'POST',
+            body: JSON.stringify(createPayload),
+          });
+          const createdDroneId = firstText(created?.id, created?.droneId, created?.drone?.id);
+          if (
+            !requestedName &&
+            autoRenamePrompt &&
+            createdDroneId &&
+            options?.createdDroneAutoRename
+          ) {
+            const createdDroneName = firstText(created?.name, created?.drone?.name);
+            scheduleCreatedDroneAutoRename(
+              options.createdDroneAutoRename,
+              createdDroneId,
+              autoRenamePrompt,
+              createdDroneName,
+            );
+            return { ...created, autoRenameScheduled: true };
+          }
+          return created;
+        } finally {
+          await chatAttachments?.remove(seedAttachmentIds);
         }
-        return created;
       }
 
       if (operation === 'sidebar.move') {

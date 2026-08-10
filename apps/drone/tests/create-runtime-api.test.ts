@@ -144,6 +144,58 @@ describeSocketSuite('create runtime api', () => {
     });
   });
 
+  test('single create accepts attached initial messages for immediate and draft drones', async () => {
+    const attachment = {
+      name: 'screen.png',
+      mime: 'image/png',
+      size: 3,
+      dataBase64: 'YWJj',
+    };
+    const immediate = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'attached-immediate-state',
+        runtime: 'container',
+        seedPrompt: 'Review this image now',
+        seedAttachments: [attachment],
+        seedSubmittedAt: '2026-06-21T12:00:30.000Z',
+      }),
+    });
+    expect(immediate.r.status).toBe(202);
+    expect(immediate.data?.initialMessage?.promptId).toBeTruthy();
+
+    const draft = await apiFetch('/api/drones', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'attached-draft-state',
+        runtime: 'container',
+        draft: true,
+        seedPrompt: 'Review this image later',
+        seedAttachments: [attachment],
+        seedSubmittedAt: '2026-06-21T12:00:45.000Z',
+      }),
+    });
+    expect(draft.r.status).toBe(201);
+
+    const registry: any = await loadRegistry();
+    const draftPrompt = registry?.pending?.[draft.data?.id]?.startupQueuedPrompts?.[0];
+    expect(draftPrompt).toMatchObject({
+      id: draft.data?.initialMessage?.promptId,
+      prompt: 'Review this image later',
+      at: '2026-06-21T12:00:45.000Z',
+      attachments: [
+        expect.objectContaining({
+          name: 'screen.png',
+          mime: 'image/png',
+          size: 3,
+          dataBase64: 'YWJj',
+        }),
+      ],
+    });
+  });
+
   test('single draft keeps one stable initial prompt identity for publication', async () => {
     const resp = await apiFetch('/api/drones', {
       method: 'POST',

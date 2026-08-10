@@ -19,10 +19,10 @@ import {
 } from './drone-lifecycle-service';
 import { commitDroneMetadataPatch } from './drone-metadata-commands';
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
-import type { ChatImageAttachment } from './chat-attachments';
-import type { PendingPhase, PendingPromptProjection, PendingStartupPrompt } from './drone-pending-state';
+import type { PendingPhase, PendingStartupPrompt } from './drone-pending-state';
 import { deleteHostRefBestEffort, gitCurrentBranchOrSha, gitResolveRemoteBranchForCreate, gitTopLevel, importBundleHeadToHostRef } from './repoOps';
 import { upsertChatInStore } from './transcript-store';
+import type { EnqueuePromptOptions } from './chat-prompt-runtime';
 
 type PendingDronePatch = Partial<{
   phase: PendingPhase;
@@ -39,17 +39,7 @@ type DroneProvisioningControllerDeps = {
   defaultDaemonReadyTimeoutMs: () => number;
   defaultRepoSeedTimeoutMs: () => number;
   ensureChatEntry: (opts: { droneId: string; chatName: string }) => Promise<void>;
-  enqueuePrompt: (opts: {
-    id?: string;
-    droneId: string;
-    chatName: string;
-    prompt: string;
-    attachments?: ChatImageAttachment[];
-    cwd?: string | null;
-    waitForDaemonMs?: number;
-    deliveryMode?: 'background' | 'immediate';
-    priority?: 'queue' | 'asap';
-  }) => Promise<any>;
+  enqueuePrompt: (opts: EnqueuePromptOptions) => Promise<any>;
   enqueuePendingPromptPump: (droneIdRaw: string, chatName: string) => void;
   hubLog: (level: 'error' | 'info' | 'warn', message: string, meta?: Record<string, unknown>) => void;
   inferChatAgent: (entry: any, droneEntry?: any) => any;
@@ -76,7 +66,6 @@ type DroneProvisioningControllerDeps = {
     setApprovalPolicy?: boolean;
     approvalPolicy?: 'ask' | 'agent-decides' | 'never';
   }) => Promise<void>;
-  startupPromptToPendingPrompt: (prompt: PendingStartupPrompt) => PendingPromptProjection;
   syncMcpServersForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncRepoAgentsInstructionsForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncSkillLibraryForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
@@ -600,100 +589,31 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       }
     }
 
-    const queuedPromptsWithAttachments = queuedPromptsForMaterialization.filter(
-      (queued) => (queued.attachments?.length ?? 0) > 0,
-    );
-    const queuedPromptsWithoutAttachments = queuedPromptsForMaterialization.filter(
-      (queued) => (queued.attachments?.length ?? 0) === 0,
-    );
-    let startupQueuedPromptChats: string[] = [];
-    if (queuedPromptsWithoutAttachments.length > 0) {
-      if ((globalThis as any).Bun) startupQueuedPromptChats = await updateRegistry((reg4Any: any) => {
-        const found = findDroneEntryByIdentity(reg4Any, pendingDroneId);
-        if (!found) return [] as string[];
-        const d: any = found.entry;
-        d.chats = d.chats ?? {};
-        const touched = new Set<string>();
-        for (const queued of queuedPromptsWithoutAttachments) {
-          const chatName = deps.normalizeChatName(queued.chatName);
-          const entry = d.chats[chatName] ?? { createdAt: deps.nowIso() };
-          if (chatName === seedChatName && (seedAgent || Object.prototype.hasOwnProperty.call(seed ?? {}, 'model'))) {
-            if (seedAgent) entry.agent = seedAgent;
-            if (seedAgent?.kind === 'native' && seedProvider) entry.nativeProvider = seedProvider;
-            else delete entry.nativeProvider;
-            if (seedModel) entry.model = seedModel;
-            else delete entry.model;
-          }
-          if (chatName === seedChatName && Object.prototype.hasOwnProperty.call(seed ?? {}, 'reasoning')) {
-            if (seedReasoning) entry.reasoning = seedReasoning;
-            else delete entry.reasoning;
-          }
-          if (chatName === seedChatName && seedAgentPermissionMode) {
-            entry.agentPermissionMode = seedAgentPermissionMode;
-          }
-          if (chatName === seedChatName && seedApprovalPolicy) {
-            entry.approvalPolicy = seedApprovalPolicy;
-          }
-          entry.pendingPrompts = Array.isArray(entry.pendingPrompts) ? entry.pendingPrompts : [];
-          const row = deps.startupPromptToPendingPrompt(queued);
-          const existingIdx = entry.pendingPrompts.findIndex((p: any) => String(p?.id ?? '').trim() === row.id);
-          if (existingIdx === -1) {
-            entry.pendingPrompts.push(row);
-          } else {
-            const cur = entry.pendingPrompts[existingIdx] ?? {};
-            entry.pendingPrompts[existingIdx] = { ...cur, ...row, updatedAt: row.updatedAt ?? deps.nowIso() };
-          }
-          entry.pendingPrompts = entry.pendingPrompts.slice(-60);
-          d.chats[chatName] = entry;
-          touched.add(chatName);
-        }
-        reg4Any.drones = reg4Any.drones ?? {};
-        reg4Any.drones[found.key] = d;
-        return Array.from(touched.values());
-      });
-      else {
-        const queue = getPromptQueueRepository();
-        if (!queue) throw new Error('canonical prompt queue is unavailable');
-        const touched = new Set<string>();
-        for (const queued of queuedPromptsWithoutAttachments) {
-          const chatName = deps.normalizeChatName(queued.chatName);
-          const row = deps.startupPromptToPendingPrompt(queued);
-          await deps.ensureChatEntry({ droneId: pendingDroneId, chatName });
-          await queue.enqueue({ droneId: pendingDroneId, chatName, prompt: row });
-          touched.add(chatName);
-        }
-        startupQueuedPromptChats = [...touched];
-      }
-    }
-
-    if (
-      seed &&
-      (seedAgent ||
+    const startupQueuedPromptChats: string[] = [];
+    const hasSeedConfiguration = Boolean(
+      seedAgent ||
         seedModel ||
         hasSeedReasoning ||
         seedAgentPermissionMode ||
-        seedApprovalPolicy ||
-        seedPrompt)
-    ) {
+        seedApprovalPolicy,
+    );
+    if (hasSeedConfiguration || seedPrompt || queuedPromptsForMaterialization.length > 0) {
       const chatName = seedChatName;
-      const prompt = seedPrompt;
+      const initialPromptId = seedPromptId ?? queuedPromptsForMaterialization[0]?.id;
 
       await setDroneHubMetaByIdentity({
         droneId: pendingDroneId,
         hub: {
           phase: 'seeding',
-          message: prompt ? 'Seeding initial message…' : 'Configuring agent…',
-          ...(seedPromptId ? { promptId: seedPromptId } : {}),
+          message:
+            seedPrompt || queuedPromptsForMaterialization.length > 0
+              ? 'Seeding initial message…'
+              : 'Configuring agent…',
+          ...(initialPromptId ? { promptId: initialPromptId } : {}),
         },
       });
       try {
-        if (
-          seedAgent ||
-          seedModel ||
-          hasSeedReasoning ||
-          seedAgentPermissionMode ||
-          seedApprovalPolicy
-        ) {
+        if (hasSeedConfiguration) {
           await deps.ensureChatEntry({ droneId: pendingDroneId, chatName });
           await deps.setChatAgentConfig({
             droneId: pendingDroneId,
@@ -717,18 +637,31 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       }
     }
 
-    for (const queued of queuedPromptsWithAttachments) {
+    for (const queued of queuedPromptsForMaterialization) {
       const chatName = deps.normalizeChatName(queued.chatName);
-      await deps.enqueuePrompt({
-        id: queued.id,
-        droneId: pendingDroneId,
-        chatName,
-        prompt: queued.prompt,
-        attachments: queued.attachments,
-        cwd: queued.cwd,
-        deliveryMode: 'background',
-        priority: queued.deliveryMode === 'asap' ? 'asap' : 'queue',
-      });
+      try {
+        await deps.enqueuePrompt({
+          id: queued.id,
+          droneId: pendingDroneId,
+          chatName,
+          prompt: queued.prompt,
+          attachments: queued.attachments,
+          messageId: queued.messageId,
+          cwd: queued.cwd,
+          submittedAt: queued.at,
+          deliveryMode: 'background',
+          priority: queued.deliveryMode === 'asap' ? 'asap' : 'queue',
+          schedulePump: false,
+        });
+      } catch (error: any) {
+        if (!queued.attachments?.length) throw error;
+        deps.hubLog('warn', 'initial prompt attachments could not be staged', {
+          droneId: pendingDroneId,
+          chatName,
+          promptId: queued.id,
+          error: String(error?.message ?? error),
+        });
+      }
       startupQueuedPromptChats.push(chatName);
     }
 
