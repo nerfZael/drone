@@ -96,7 +96,6 @@ type DroneHubUiState = {
   toDoDroneIds: string[];
   hiddenSidebarGroups: string[];
   showHiddenSidebarGroups: boolean;
-  autoDelete: boolean;
   terminalEmulator: string;
   homeOpen: boolean;
   selectedDrone: string | null;
@@ -160,7 +159,6 @@ type DroneHubUiState = {
   setToDoDroneIds: (next: Updater<string[]>) => void;
   setHiddenSidebarGroups: (next: Updater<string[]>) => void;
   setShowHiddenSidebarGroups: (next: Updater<boolean>) => void;
-  setAutoDelete: (next: Updater<boolean>) => void;
   setTerminalEmulator: (next: Updater<string>) => void;
   setHomeOpen: (next: Updater<boolean>) => void;
   setSelectedDrone: (next: Updater<string | null>) => void;
@@ -321,7 +319,6 @@ type DroneHubUiPersistedState = Pick<
   | 'pinnedDroneIds'
   | 'toDoDroneIds'
   | 'hiddenSidebarGroups'
-  | 'autoDelete'
   | 'terminalEmulator'
   | 'selectedDrone'
   | 'selectedDroneIds'
@@ -481,6 +478,7 @@ export function migrateDroneHubUiPersistedState(
   delete (migrated as any).playbookRunsSelectionInitialized;
   delete (migrated as any).playbookRunsSelectedPlaybookId;
   delete (migrated as any).playbookRunsSelectedRepoPath;
+  delete (migrated as any).autoDelete;
   if (Object.prototype.hasOwnProperty.call(migrated, 'sidebarDockSide')) {
     migrated.sidebarDockSide = normalizeSidebarDockSide(migrated.sidebarDockSide);
   }
@@ -874,7 +872,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       toDoDroneIds: [],
       hiddenSidebarGroups: [],
       showHiddenSidebarGroups: false,
-      autoDelete: false,
       terminalEmulator: 'auto',
       homeOpen: false,
       selectedDrone: null,
@@ -1013,7 +1010,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         }),
       setShowHiddenSidebarGroups: (next) =>
         set((s) => ({ showHiddenSidebarGroups: resolveNext(s.showHiddenSidebarGroups, next) })),
-      setAutoDelete: (next) => set((s) => ({ autoDelete: resolveNext(s.autoDelete, next) })),
       setTerminalEmulator: (next) =>
         set((s) => ({ terminalEmulator: resolveNext(s.terminalEmulator, next) })),
       setHomeOpen: (next) => set((s) => ({ homeOpen: resolveNext(s.homeOpen, next) })),
@@ -1341,7 +1337,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         sidebarChatOrderByDrone: state.sidebarChatOrderByDrone,
         pinnedDroneIds: state.pinnedDroneIds,
         hiddenSidebarGroups: state.hiddenSidebarGroups,
-        autoDelete: state.autoDelete,
         terminalEmulator: state.terminalEmulator,
         selectedDrone: state.selectedDrone,
         selectedDroneIds: state.selectedDroneIds,
@@ -1496,7 +1491,6 @@ export function useDroneHubAppModelUiState() {
       pinnedDroneIds: s.pinnedDroneIds,
       hiddenSidebarGroups: s.hiddenSidebarGroups,
       showHiddenSidebarGroups: s.showHiddenSidebarGroups,
-      autoDelete: s.autoDelete,
       terminalEmulator: s.terminalEmulator,
       homeOpen: s.homeOpen,
       selectedDrone: s.selectedDrone,
@@ -1614,7 +1608,6 @@ export function useDroneSidebarUiState() {
       pinnedDroneIds: s.pinnedDroneIds,
       hiddenSidebarGroups: s.hiddenSidebarGroups,
       showHiddenSidebarGroups: s.showHiddenSidebarGroups,
-      autoDelete: s.autoDelete,
       setSettingsActiveTab: s.setSettingsActiveTab,
       setAppView: s.setAppView,
       setSidebarReposCollapsed: s.setSidebarReposCollapsed,
@@ -1640,7 +1633,6 @@ export function useDroneSidebarUiState() {
       setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
       setDraftChat: s.setDraftChat,
       setActiveRepoPath: s.setActiveRepoPath,
-      setAutoDelete: s.setAutoDelete,
       setHomeOpen: s.setHomeOpen,
       setSidebarCollapsed: s.setSidebarCollapsed,
     })),

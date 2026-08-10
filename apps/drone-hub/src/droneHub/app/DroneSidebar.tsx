@@ -958,7 +958,6 @@ export function DroneSidebar({
     sidebarReposCollapsed,
     sidebarAutoMinimize,
     showRecentDronesOnly,
-    autoDelete,
     sidebarDockSide,
     sidebarGroupOrder,
     sidebarRepoScopedGroupByPath,
@@ -991,7 +990,6 @@ export function DroneSidebar({
     setSidebarAutoMinimize,
     setShowRecentDronesOnly,
     setActiveRepoPath,
-    setAutoDelete,
     setSidebarCollapsed,
     setSettingsActiveTab,
   } = useDroneSidebarUiState();
@@ -2214,12 +2212,6 @@ export function DroneSidebar({
       selectionRole: 'checkbox',
       checked: showHiddenSidebarGroups,
     });
-    sidebarOptionsEntries.push({
-      id: 'delete-confirm',
-      label: 'Confirm before deleting',
-      selectionRole: 'checkbox',
-      checked: !autoDelete,
-    });
   }
   if (sidebarCapabilities.collapseControl) {
     sidebarOptionsEntries.push({
@@ -3127,7 +3119,6 @@ export function DroneSidebar({
                   if (id === 'dock-side') toggleSidebarDockSide();
                   else if (id === 'recent') setShowRecentDronesOnly((prev) => !prev);
                   else if (id === 'hidden') setShowHiddenSidebarGroups((prev) => !prev);
-                  else if (id === 'delete-confirm') setAutoDelete((prev) => !prev);
                   else if (id === 'auto-minimize') setSidebarAutoMinimize((prev) => !prev);
                 }}
                 panelClassName="w-[240px]"

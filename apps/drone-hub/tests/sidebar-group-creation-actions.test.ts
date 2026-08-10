@@ -65,20 +65,28 @@ describe('sidebar group creation actions', () => {
   });
 
   test('deletes a selected group with the Delete key without requiring pointer hover', () => {
-    const source = readFileSync(
+    const sidebarSource = readFileSync(
       new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
       'utf8',
     );
+    const treeSource = readFileSync(
+      new URL('../src/droneHub/app/GroupedSidebarTree.tsx', import.meta.url),
+      'utf8',
+    );
 
-    const deleteShortcutIndex = source.indexOf("event.key === 'Delete'");
-    const hoverGuardIndex = source.indexOf(
+    const deleteShortcutIndex = sidebarSource.indexOf("event.key === 'Delete'");
+    const hoverGuardIndex = sidebarSource.indexOf(
       "document.querySelector('[data-drone-sidebar-root=\"true\"]:hover')",
       deleteShortcutIndex,
     );
     expect(deleteShortcutIndex).toBeGreaterThan(-1);
     expect(hoverGuardIndex).toBeGreaterThan(deleteShortcutIndex);
-    expect(source).toContain('handleDeleteGroup(folderPath, selectedFolder.totalDroneCount');
-    expect(source).not.toContain('<IconTrash className="opacity-90" />');
+    expect(sidebarSource).toContain('handleDeleteGroup(folderPath, selectedFolder.totalDroneCount');
+    expect(treeSource).toContain("event.key !== 'Delete'");
+    expect(treeSource).toContain('handleFolderDelete();');
+    expect(treeSource).toContain("isSelected ? 'focus-visible:outline-none' : ''");
+    expect(treeSource).not.toContain('node.totalDroneCount > 0');
+    expect(sidebarSource).not.toContain('<IconTrash className="opacity-90" />');
   });
 
   test('does not offer folder creation as a drone drop target', () => {

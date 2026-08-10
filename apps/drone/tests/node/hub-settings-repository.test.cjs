@@ -263,7 +263,7 @@ describe('canonical UI preferences settings', () => {
     assert.equal(resolved.version, null);
     assert.equal(resolved.uiPreferences.sidebarGroupingMode, 'groups');
     assert.deepEqual(resolved.uiPreferences.sidebarGroupOrder, []);
-    assert.equal(resolved.uiPreferences.autoDelete, false);
+    assert.equal(resolved.uiPreferences.autoDelete, undefined);
     assert.equal(resolved.uiPreferences.spawnAgentKey, 'builtin:cursor');
     assert.equal(resolved.uiPreferences.spawnModel, '');
     assert.equal(resolved.uiPreferences.spawnReasoning, '');
@@ -285,7 +285,7 @@ describe('canonical UI preferences settings', () => {
     } });
 
     const backfilled = await resolveUiPreferencesSettingsResponse();
-    assert.equal(backfilled.uiPreferences.autoDelete, true);
+    assert.equal(backfilled.uiPreferences.autoDelete, undefined);
     assert.equal(backfilled.uiPreferences.spawnAgentKey, 'builtin:codex');
     assert.equal(backfilled.updatedAt, '2026-01-02T03:04:05.000Z');
     assert.equal(backfilled.version, 1);
@@ -302,7 +302,7 @@ describe('canonical UI preferences settings', () => {
     );
 
     const canonical = await resolveUiPreferencesSettingsResponse();
-    assert.equal(canonical.uiPreferences.autoDelete, true);
+    assert.equal(canonical.uiPreferences.autoDelete, undefined);
     assert.equal(canonical.uiPreferences.spawnAgentKey, 'builtin:codex');
     assert.equal(canonical.updatedAt, '2026-01-02T03:04:05.000Z');
     assert.equal(canonical.version, 1);
@@ -358,7 +358,7 @@ describe('canonical UI preferences settings', () => {
     });
     assert.deepEqual(resolved.uiPreferences.pinnedDroneIds, ['drone-b', 'drone-a']);
     assert.deepEqual(resolved.uiPreferences.hiddenSidebarGroups, ['archive']);
-    assert.equal(resolved.uiPreferences.autoDelete, true);
+    assert.equal(resolved.uiPreferences.autoDelete, undefined);
     assert.equal(resolved.uiPreferences.spawnAgentKey, 'builtin:codex');
     assert.equal(resolved.uiPreferences.spawnModel, 'gpt-5.5');
     assert.equal(resolved.uiPreferences.spawnReasoning, 'high');
@@ -380,30 +380,30 @@ describe('canonical UI preferences settings', () => {
 
   test('offers additive version-based conflict handling while preserving unconditional writes', async () => {
     useTempDroneDataDir('ui-conflict');
-    await upsertStoredUiPreferencesSettings({ autoDelete: false });
+    await upsertStoredUiPreferencesSettings({ sidebarGroupingMode: 'groups' });
     const first = await resolveUiPreferencesSettingsResponse();
-    await upsertStoredUiPreferencesSettings({ autoDelete: true }, first.version);
+    await upsertStoredUiPreferencesSettings({ sidebarGroupingMode: 'repos' }, first.version);
     const second = await resolveUiPreferencesSettingsResponse();
     assert.equal(second.version, 2);
-    assert.equal(second.uiPreferences.autoDelete, true);
+    assert.equal(second.uiPreferences.sidebarGroupingMode, 'repos');
 
     await assert.rejects(
-      upsertStoredUiPreferencesSettings({ autoDelete: false }, first.version),
+      upsertStoredUiPreferencesSettings({ sidebarGroupingMode: 'groups' }, first.version),
       (error) => {
         assert.ok(error instanceof UiPreferencesSettingsConflictError);
         assert.equal(error.version, 2);
-        assert.equal(error.uiPreferences.autoDelete, true);
+        assert.equal(error.uiPreferences.sidebarGroupingMode, 'repos');
         return true;
       },
     );
 
-    await upsertStoredUiPreferencesSettings({ autoDelete: false });
+    await upsertStoredUiPreferencesSettings({ sidebarGroupingMode: 'groups' });
     const unconditional = await resolveUiPreferencesSettingsResponse();
     assert.equal(unconditional.version, 3);
-    assert.equal(unconditional.uiPreferences.autoDelete, false);
+    assert.equal(unconditional.uiPreferences.sidebarGroupingMode, 'groups');
 
     await assert.rejects(
-      upsertStoredUiPreferencesSettings({ autoDelete: true }, 0),
+      upsertStoredUiPreferencesSettings({ sidebarGroupingMode: 'repos' }, 0),
       UiPreferencesSettingsValidationError,
     );
   });

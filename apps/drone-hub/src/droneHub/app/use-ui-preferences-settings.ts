@@ -106,7 +106,6 @@ function normalizeUiPreferencesSnapshot(
     sidebarChatOrderByDrone: normalizeOrderedStringMap(value?.sidebarChatOrderByDrone),
     pinnedDroneIds: normalizeOrderedStringList(value?.pinnedDroneIds),
     hiddenSidebarGroups: normalizeOrderedStringList(value?.hiddenSidebarGroups),
-    autoDelete: value?.autoDelete === true,
     spawnAgentKey: normalizeTrimmedText(value?.spawnAgentKey, 200) || 'builtin:cursor',
     spawnModel: normalizeTrimmedText(value?.spawnModel, 200),
     spawnReasoning: normalizeTrimmedText(value?.spawnReasoning, 200),
@@ -214,7 +213,6 @@ export function mergeUiPreferencesChanges(
     ),
     pinnedDroneIds: localValue('pinnedDroneIds'),
     hiddenSidebarGroups: localValue('hiddenSidebarGroups'),
-    autoDelete: localValue('autoDelete'),
     spawnAgentKey: localValue('spawnAgentKey'),
     spawnModel: localValue('spawnModel'),
     spawnReasoning: localValue('spawnReasoning'),
@@ -240,7 +238,6 @@ function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boole
     Object.keys(value.sidebarChatOrderByDrone).length > 0 ||
     value.pinnedDroneIds.length > 0 ||
     value.hiddenSidebarGroups.length > 0 ||
-    value.autoDelete ||
     value.spawnAgentKey !== 'builtin:cursor' ||
     value.spawnModel.length > 0 ||
     value.spawnReasoning.length > 0 ||
@@ -278,7 +275,6 @@ function mergeUiPreferencesForRecovery(
     pinnedDroneIds: base.pinnedDroneIds.length > 0 ? base.pinnedDroneIds : rescue.pinnedDroneIds,
     hiddenSidebarGroups:
       base.hiddenSidebarGroups.length > 0 ? base.hiddenSidebarGroups : rescue.hiddenSidebarGroups,
-    autoDelete: base.autoDelete || rescue.autoDelete,
     spawnAgentKey:
       base.spawnAgentKey !== 'builtin:cursor' ? base.spawnAgentKey : rescue.spawnAgentKey,
     spawnModel: base.spawnModel || rescue.spawnModel,
@@ -369,7 +365,6 @@ export function useUiPreferencesSettings({
     sidebarChatOrderByDrone,
     pinnedDroneIds,
     hiddenSidebarGroups,
-    autoDelete,
     spawnAgentKey,
     spawnModel,
     spawnReasoning,
@@ -386,7 +381,6 @@ export function useUiPreferencesSettings({
     setSidebarChatOrderByDrone,
     setPinnedDroneIds,
     setHiddenSidebarGroups,
-    setAutoDelete,
     setSpawnAgentKey,
     setSpawnModel,
     setSpawnReasoning,
@@ -404,7 +398,6 @@ export function useUiPreferencesSettings({
       sidebarChatOrderByDrone: s.sidebarChatOrderByDrone,
       pinnedDroneIds: s.pinnedDroneIds,
       hiddenSidebarGroups: s.hiddenSidebarGroups,
-      autoDelete: s.autoDelete,
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
       spawnReasoning: s.spawnReasoning,
@@ -421,7 +414,6 @@ export function useUiPreferencesSettings({
       setSidebarChatOrderByDrone: s.setSidebarChatOrderByDrone,
       setPinnedDroneIds: s.setPinnedDroneIds,
       setHiddenSidebarGroups: s.setHiddenSidebarGroups,
-      setAutoDelete: s.setAutoDelete,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
       setSpawnReasoning: s.setSpawnReasoning,
@@ -455,7 +447,6 @@ export function useUiPreferencesSettings({
       setSidebarChatOrderByDrone(normalized.sidebarChatOrderByDrone);
       setPinnedDroneIds(normalized.pinnedDroneIds);
       setHiddenSidebarGroups(normalized.hiddenSidebarGroups);
-      setAutoDelete(normalized.autoDelete);
       if (Object.keys(normalized.spawnContextByRepoKey).length > 0) {
         const current = useDroneHubUiStore.getState();
         const resolved = resolveSpawnContextPreferencesForRepo(
@@ -478,7 +469,6 @@ export function useUiPreferencesSettings({
       return normalized;
     },
     [
-      setAutoDelete,
       setSidebarDensityMode,
       setHiddenSidebarGroups,
       setSidebarChatOrderByDrone,
@@ -516,7 +506,6 @@ export function useUiPreferencesSettings({
         sidebarChatOrderByDrone,
         pinnedDroneIds,
         hiddenSidebarGroups,
-        autoDelete,
         spawnAgentKey,
         spawnModel,
         spawnReasoning,
@@ -527,7 +516,6 @@ export function useUiPreferencesSettings({
         spawnContextByRepoKey,
       }),
     [
-      autoDelete,
       hiddenSidebarGroups,
       repoBranchSource,
       repoCreateRemoteBranch,

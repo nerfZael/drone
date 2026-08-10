@@ -608,7 +608,6 @@ function normalizeUiPreferences(value: unknown) {
     sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
     pinnedDroneIds: normalizeOrderedStringList(raw.pinnedDroneIds),
     hiddenSidebarGroups: normalizeOrderedStringList(raw.hiddenSidebarGroups),
-    autoDelete: raw.autoDelete === true,
     spawnAgentKey: cleanString(raw.spawnAgentKey, 'builtin:cursor'),
     spawnModel: cleanString(raw.spawnModel),
     spawnReasoning: cleanString(raw.spawnReasoning),

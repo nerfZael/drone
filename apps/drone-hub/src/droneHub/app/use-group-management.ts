@@ -23,7 +23,6 @@ import {
 } from './sidebar-collapsed-groups';
 
 type UseGroupManagementArgs = {
-  autoDelete: boolean;
   activeRepoPath: string;
   groupIdByName: Record<string, string>;
   drones: DroneSummary[];
@@ -52,7 +51,6 @@ type DeleteGroupOptions = {
 };
 
 export function useGroupManagement({
-  autoDelete,
   activeRepoPath,
   groupIdByName,
   drones,
@@ -73,8 +71,6 @@ export function useGroupManagement({
   const [deletingGroups, setDeletingGroups] = React.useState<Record<string, boolean>>({});
   const [renamingGroups, setRenamingGroups] = React.useState<Record<string, boolean>>({});
   const confirmDelete = useAppConfirmDialog();
-
-  const shouldConfirmDelete = React.useCallback(() => !autoDelete, [autoDelete]);
 
   const renameGroup = React.useCallback(
     async (groupRaw: string, nextNameRaw?: string): Promise<boolean> => {
@@ -178,15 +174,13 @@ export function useGroupManagement({
         targetKind === 'group'
           ? String(opts?.repoPath ?? activeRepoPath ?? '').trim()
           : '';
-      if (shouldConfirmDelete()) {
-        const ok = await confirmDelete(buildSidebarGroupDeleteConfirmation({
-          kind: targetKind,
-          label: groupLabel,
-          countHint,
-          repoPath: targetKind === 'repo' ? targetRepoPath : scopedRepoPath,
-        }));
-        if (!ok) return false;
-      }
+      const ok = await confirmDelete(buildSidebarGroupDeleteConfirmation({
+        kind: targetKind,
+        label: groupLabel,
+        countHint,
+        repoPath: targetKind === 'repo' ? targetRepoPath : scopedRepoPath,
+      }));
+      if (!ok) return false;
       const wantsUngroupedGroup = targetKind === 'group' && isUngroupedGroupName(group);
       const targetNames = Array.from(
         new Set(
@@ -333,7 +327,6 @@ export function useGroupManagement({
       setSidebarGroupOrder,
       setHiddenSidebarGroups,
       confirmDelete,
-      shouldConfirmDelete,
     ],
   );
 

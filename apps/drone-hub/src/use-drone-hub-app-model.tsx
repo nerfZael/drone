@@ -252,7 +252,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     pinnedDroneIds,
     hiddenSidebarGroups,
     showHiddenSidebarGroups,
-    autoDelete,
     terminalEmulator,
     homeOpen,
     selectedDrone,
@@ -504,7 +503,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     moveDronesToGroup,
     createGroupAndMove,
   } = useGroupManagement({
-    autoDelete,
     activeRepoPath,
     groupIdByName: registryGroupIdByName,
     drones,
@@ -1058,7 +1056,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     suggestAndRenameDraftDrone,
   } = useDroneMutationActions({
     drones,
-    autoDelete,
     deleteMode: deleteActionSettingsState.deleteSettings?.deleteAction.mode ?? 'permanent',
     requestJson,
     optimisticallyDeletedDrones,
@@ -1304,20 +1301,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         return false;
       }
       setDroneDeleteConfirmError(null);
-      if (autoDelete) {
-        void runConfirmedDroneDelete(rows);
-        return true;
-      }
       setDroneDeleteConfirm({ drones: rows });
       return true;
     },
     [
-      autoDelete,
       deletingDrones,
       droneById,
       droneDeleteOperationModeById,
       resolveDeleteDroneRows,
-      runConfirmedDroneDelete,
       setDroneDeleteConfirm,
       showShortcutToast,
       selectedDrone,
@@ -2148,7 +2139,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     applyRepoLocalCheckout,
     reseedRepo,
   } = useWorkspaceActions({
-    autoDelete,
     currentDrone,
     drones,
     selectedChat,
@@ -3911,30 +3901,22 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         return { ok: false, error: `Chat "${chatName}" is unavailable.` };
 
       if (chats.length <= 1) {
-        if (!autoDelete) {
-          const opened = requestDeleteDrones([droneId]);
-          return opened
-            ? { ok: false, deletedDrone: false, error: '' }
-            : { ok: false, deletedDrone: false, error: 'Failed to open delete confirmation.' };
-        }
-        const deletedDrone = await deleteDrone(droneId, { confirmed: true });
-        return deletedDrone
-          ? { ok: true, deletedDrone: true, error: null }
-          : { ok: false, deletedDrone: false, error: autoDelete ? 'Failed to delete drone.' : '' };
+        const opened = requestDeleteDrones([droneId]);
+        return opened
+          ? { ok: false, deletedDrone: false, error: '' }
+          : { ok: false, deletedDrone: false, error: 'Failed to open delete confirmation.' };
       }
       if (chatName === 'default') {
         return { ok: false, error: 'Default chat cannot be deleted while other chats exist.' };
       }
 
-      if (!autoDelete) {
-        const droneLabel = drone ? uiDroneName(drone.name) : droneId;
-        const confirmed = window.confirm(
-          deleteMode === 'archive'
-            ? `Archive chat "${chatName}" from "${droneLabel}"?\n\nYou can restore it from Settings > Archive before it auto-deletes.`
-            : `Delete chat "${chatName}" from "${droneLabel}"?`,
-        );
-        if (!confirmed) return { ok: false, error: '' };
-      }
+      const droneLabel = drone ? uiDroneName(drone.name) : droneId;
+      const confirmed = window.confirm(
+        deleteMode === 'archive'
+          ? `Archive chat "${chatName}" from "${droneLabel}"?\n\nYou can restore it from Settings > Archive before it auto-deletes.`
+          : `Delete chat "${chatName}" from "${droneLabel}"?`,
+      );
+      if (!confirmed) return { ok: false, error: '' };
 
       try {
         await requestJson<{ ok: true; deletedChat: string }>(
@@ -3966,9 +3948,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
     },
     [
-      autoDelete,
       deleteActionSettingsState.deleteSettings,
-      deleteDrone,
       drones,
       requestDeleteDrones,
       requestJson,

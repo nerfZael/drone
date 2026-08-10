@@ -141,7 +141,6 @@ type DroneRegistryV1 = {
       sidebarChatOrderByDrone?: Record<string, string[]>;
       pinnedDroneIds?: string[];
       hiddenSidebarGroups?: string[];
-      autoDelete?: boolean;
       spawnAgentKey?: string;
       spawnModel?: string;
       repoBranchSource?: 'host' | 'remote';

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent, type DragStartEvent } from '@dnd-kit/core';
+import { isUngroupedGroupName } from '../../domain';
 import {
   DroneCard,
   SidebarApprovalStatusIndicator,
@@ -1394,6 +1395,16 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
       onToggleGroupCollapsed(folderPath);
     }
   }, [folderPath, node.id, onSelectFolder, onToggleGroupCollapsed, setSelectedSidebarNodeId, shouldSuppressClick]);
+  const handleFolderDelete = React.useCallback(() => {
+    void onDeleteGroup(folderPath, node.totalDroneCount, {
+      kind: node.groupKind,
+      label: node.label,
+      repoPath:
+        isVirtualGroup && node.path.startsWith('repo:') && node.path !== 'repo:ungrouped'
+          ? node.path.slice('repo:'.length)
+          : null,
+    });
+  }, [folderPath, isVirtualGroup, node.groupKind, node.label, node.path, node.totalDroneCount, onDeleteGroup]);
   const contextMenuItems: SidebarContextMenuItem[] = [
     {
       id: 'new-group',
@@ -1460,16 +1471,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
       ),
       disabled: Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath]),
       tone: 'danger',
-      onSelect: () => {
-        void onDeleteGroup(folderPath, node.totalDroneCount, {
-          kind: node.groupKind,
-          label: node.label,
-          repoPath:
-            isVirtualGroup && node.path.startsWith('repo:') && node.path !== 'repo:ungrouped'
-              ? node.path.slice('repo:'.length)
-              : null,
-        });
-      },
+      onSelect: handleFolderDelete,
     },
   ];
 
@@ -1538,9 +1540,13 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           ) : (
             <button
               type="button"
-              className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX}`}
+              className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX} ${
+                isSelected ? 'focus-visible:outline-none' : ''
+              }`}
               aria-expanded={!collapsed}
               aria-selected={isSelected}
+              {...(folderDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
+              {...(folderDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
               onClick={(event) => {
                 const toggle = event.metaKey || event.ctrlKey;
                 handleFolderClick({
@@ -1548,8 +1554,23 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                   toggle,
                 });
               }}
-              {...(folderDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
-              {...(folderDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
+              onKeyDown={(event) => {
+                if (
+                  event.key !== 'Delete' ||
+                  event.repeat ||
+                  !actionsEnabled ||
+                  !isSelected ||
+                  deletingGroups[folderPath] ||
+                  renamingGroups[folderPath] ||
+                  (node.groupKind === 'group' && isUngroupedGroupName(node.groupPath ?? folderPath))
+                ) {
+                  if (!folderDndDisabled) listeners?.onKeyDown?.(event);
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                handleFolderDelete();
+              }}
             >
               <div className="flex min-w-0 items-center gap-1.5">
                 <IconChevron

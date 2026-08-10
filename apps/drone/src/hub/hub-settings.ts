@@ -143,7 +143,6 @@ export type UiPreferencesSettings = {
   sidebarChatOrderByDrone: Record<string, string[]>;
   pinnedDroneIds: string[];
   hiddenSidebarGroups: string[];
-  autoDelete: boolean;
   spawnAgentKey: string;
   spawnModel: string;
   spawnReasoning: string;
@@ -411,7 +410,6 @@ function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
     sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
     pinnedDroneIds: normalizeOrderedStringList(raw.pinnedDroneIds),
     hiddenSidebarGroups: normalizeOrderedStringList(raw.hiddenSidebarGroups),
-    autoDelete: raw.autoDelete === true,
     spawnAgentKey: normalizeUiPreferenceText(raw.spawnAgentKey, 200) || DEFAULT_SPAWN_AGENT_KEY,
     spawnModel: normalizeUiPreferenceText(raw.spawnModel, 200),
     spawnReasoning: normalizeUiPreferenceText(raw.spawnReasoning, 200),

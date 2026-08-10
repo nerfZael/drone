@@ -73,10 +73,10 @@ describe('drone hub ui store migration', () => {
     expect(migrated).toMatchObject({
       sidebarGroupingMode: 'repos',
       sidebarDockSide: 'right',
-      autoDelete: true,
       showCanvasLastMessagePreviews: true,
       seenModelIds: ['gpt-5.4', 'o3'],
     });
+    expect((migrated as any).autoDelete).toBeUndefined();
     expect((migrated as any).viewMode).toBeUndefined();
     expect((migrated as any).assistantThreadSidebarDockSide).toBeUndefined();
     expect((migrated as any).transcriptInlineImages).toBeUndefined();
@@ -447,7 +447,6 @@ describe('drone hub ui store migration', () => {
         sidebarChatOrderByDrone: {},
         pinnedDroneIds: [],
         hiddenSidebarGroups: [],
-        autoDelete: false,
         spawnAgentKey: 'builtin:cursor',
         spawnModel: '',
         repoBranchSource: 'host',
@@ -467,7 +466,7 @@ describe('drone hub ui store migration', () => {
     );
 
     expect(restored.restored).toBe(true);
-    expect(restored.snapshot.autoDelete).toBe(true);
+    expect((restored.snapshot as any).autoDelete).toBeUndefined();
     expect(restored.snapshot.spawnAgentKey).toBe('builtin:codex');
     expect(restored.snapshot.spawnModel).toBe('gpt-5.5');
     expect(restored.snapshot.repoBranchSource).toBe('remote');
