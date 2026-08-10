@@ -403,7 +403,6 @@ import {
   resolveLlmSettingsResponse,
   resolveSpeechSettingsResponse,
   resolveVoiceInputSettingsResponse,
-  resolveUiPreferencesSettingsResponse,
   resolveUserContextSettingsResponse,
   startCodexLogin,
   upsertStoredDeleteActionSettings,
@@ -4005,14 +4004,6 @@ export async function startDroneHubApiServer(opts: {
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
   if (mcpToken) await revokeLegacyProjectedDroneMcpTokens();
-  const hubApplication = createHubApplication();
-  const pendingHubApplicationEvents: HubApplicationEvent[] = [];
-  let handleHubApplicationEvent = (event: HubApplicationEvent) => {
-    pendingHubApplicationEvents.push(event);
-  };
-  const unsubscribeHubApplicationEvents = hubApplication.events.subscribe((event) => {
-    handleHubApplicationEvent(event);
-  });
   const renameDroneCommand = createRenameDroneCommand({
     displayNameMaxLength: DRONE_DISPLAY_NAME_MAX_LEN,
     findDroneIdByRef,
@@ -4023,16 +4014,40 @@ export async function startDroneHubApiServer(opts: {
     notifyRegistryWrite: () => notifyDroneRegistryWrite?.(),
     persistDisplayName: renameDroneDisplayName,
   });
+  const hubApplication = createHubApplication({
+    renameDrone: renameDroneCommand,
+    deleteGroupDependencies: {
+      listCanonicalGroups,
+      loadRegistry,
+      normalizeDroneIdentity,
+      deleteCanonicalGroupArtifacts,
+      dequeueProvisioning,
+      removeDroneById,
+      deleteCanonicalDroneLifecycleBatch,
+    },
+    fleetActorDependencies: {
+      resolveDrone: async (ref) =>
+        (globalThis as any).Bun
+          ? await resolveDroneOrPendingForReadRef(ref)
+          : await resolveCanonicalDroneOrPendingForReadRef(ref),
+    },
+  });
+  const pendingHubApplicationEvents: HubApplicationEvent[] = [];
+  let handleHubApplicationEvent = (event: HubApplicationEvent) => {
+    pendingHubApplicationEvents.push(event);
+  };
+  const unsubscribeHubApplicationEvents = hubApplication.events.subscribe((event) => {
+    handleHubApplicationEvent(event);
+  });
   const sidebarCommands = createSidebarCommandService(hubApplication);
   let actualPort = opts.port;
   const deviceMesh = await createDeviceMeshService({
     rootDir: droneRootPath('device-mesh'),
     apiToken,
     sidebarCommands,
-    hubApplication,
+    hubServices: hubApplication,
     localHubBaseUrl: () => `http://127.0.0.1:${actualPort}`,
     ingressPort: opts.deviceMeshIngressPort,
-    renameDrone: renameDroneCommand,
     createdDroneAutoRename: {
       suggestName: suggestCreatedDroneNameDirect,
       renameDrone: async ({ droneId, ...input }) => {
@@ -4196,8 +4211,7 @@ export async function startDroneHubApiServer(opts: {
     deviceMesh,
     normalizeDroneIdentity,
     nowIso,
-    renameDrone: renameDroneCommand,
-    hubApplication,
+    hubServices: hubApplication,
     onNativePromptQueueChanged: ({ droneId, chatName }) => {
       notifyDroneChatWrite?.(droneId, chatName);
       promptRuntime.enqueuePendingPromptPump(droneId, chatName);
@@ -5090,7 +5104,7 @@ export async function startDroneHubApiServer(opts: {
     const [regAny, canonicalGroups, preferences] = await Promise.all([
       loadPreparedDroneRegistryForSummary(source),
       listCanonicalGroups(),
-      resolveUiPreferencesSettingsResponse(),
+      hubApplication.settings.uiPreferences.read(),
     ]);
     const groupIdByScopeAndName = new Map(
       canonicalGroups.map((group) => [`${group.repoPath}\0${group.name}`, group.id]),
@@ -5243,8 +5257,7 @@ export async function startDroneHubApiServer(opts: {
     signingSecret: mcpToken,
     log: hubLog,
     speechEnabled: initialSpeechSettings.enabled,
-    renameDrone: renameDroneCommand,
-    hubApplication,
+    hubServices: hubApplication,
   });
   const handleDroneHubMcpRequest = (
     req: http.IncomingMessage,
@@ -5342,7 +5355,7 @@ export async function startDroneHubApiServer(opts: {
     parseLlmProvider,
     upsertStoredLlmProvider,
     resolveGithubSettingsResponse,
-    resolveDeleteActionSettingsResponse,
+    hubSettings: hubApplication.settings,
     readManagedHubStateAtRootOrFallback,
     parseDroneDeleteMode,
     parseArchiveRetentionId,
@@ -5394,8 +5407,6 @@ export async function startDroneHubApiServer(opts: {
     profileSettingsErrorStatus,
     apiToken,
     droneRootPath,
-    resolveUiPreferencesSettingsResponse: () => hubApplication.uiPreferences.read(),
-    updateUiPreferencesSettings: (input: any) => hubApplication.uiPreferences.update(input),
     resolveUserContextSettingsResponse,
     clampIntParam,
     readHubLogTail,
@@ -5503,7 +5514,7 @@ export async function startDroneHubApiServer(opts: {
 
   registerRepositoryRoutes(apiRouter, {
     loadRegistry,
-    listRepositories: hubApplication.listRepositories,
+    repositories: hubApplication.repositories,
     gitListRemoteBranches,
     removeCanonicalRepository,
     withCanonicalRepositories,
@@ -5519,19 +5530,8 @@ export async function startDroneHubApiServer(opts: {
   });
 
   registerGroupRoutes(apiRouter, {
-    loadRegistry,
-    listGroups: hubApplication.listGroups,
-    listCanonicalGroups,
-    isUngroupedGroupName,
+    groups: hubApplication.groups,
     nowIso,
-    createGroup: hubApplication.createGroup,
-    renameGroup: hubApplication.renameGroup,
-    isSameOrDescendantGroupPath,
-    normalizeDroneIdentity,
-    deleteCanonicalGroupArtifacts,
-    dequeueProvisioning,
-    removeDroneById,
-    deleteCanonicalDroneLifecycleBatch,
   });
 
   registerOperationalRoutes(apiRouter, {
@@ -5548,14 +5548,7 @@ export async function startDroneHubApiServer(opts: {
   registerResourceSubscriptionRoutes(apiRouter, resourceSubscriptionService);
 
   registerFleetRoutes(apiRouter, {
-    resolveDroneOrRespond,
-    loadRegistry,
-    fleetActorPayload,
-    setDroneParent: hubApplication.setDroneParent,
-    findDroneIdByRef,
-    updateDroneFleetMetadata,
-    fleetActorConfig,
-    fleetError,
+    fleet: hubApplication.fleet,
   });
 
   const handleDroneLifecycleRoute = createDroneLifecycleRouteHandler({
@@ -5605,7 +5598,7 @@ export async function startDroneHubApiServer(opts: {
     revokeMcpAccessTokensForDrone,
     runDroneLifecycleAction,
     setDroneEnvironmentMetadata,
-    setDroneGroup: hubApplication.setDroneGroup,
+    setDroneGroup: hubApplication.groups.setDroneGroup,
     stopAllDroneChatActivity,
     triggerArchiveCleanup,
     withLockedDroneContainer,

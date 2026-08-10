@@ -1,12 +1,13 @@
 import path from 'node:path';
 
 import type { HubRouter } from '../hub-router';
+import type { HubServices } from '../application/hub-services';
 
 type ServiceFunction = (...args: any[]) => any;
 
 export interface RepositoryRouteDependencies {
   loadRegistry: ServiceFunction;
-  listRepositories: ServiceFunction;
+  repositories: HubServices['repositories'];
   gitListRemoteBranches: ServiceFunction;
   removeCanonicalRepository: ServiceFunction;
   withCanonicalRepositories: ServiceFunction;
@@ -27,7 +28,7 @@ export function registerRepositoryRoutes(
 ): void {
   const {
     loadRegistry,
-    listRepositories,
+    repositories,
     gitListRemoteBranches,
     removeCanonicalRepository,
     withCanonicalRepositories,
@@ -43,7 +44,7 @@ export function registerRepositoryRoutes(
   } = deps;
 
   router.get('/api/repos', async ({ json }) => {
-    json(200, await listRepositories());
+    json(200, await repositories.list());
   });
 
   router.get('/api/repos/branches', async ({ url, fail, json }) => {

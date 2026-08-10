@@ -192,43 +192,49 @@ describe('device mesh drone summaries', () => {
         },
         undefined,
         {
-          hubApplication: {
-            listRepositories: async () => ({
-              ok: true,
-              repos: [{ path: '/work/one' }, { path: '/work/empty' }],
-              count: 2,
-            }),
-            listGroups: async () => ({
-              ok: true,
-              groups: [
-                {
-                  id: 'group-review',
-                  name: 'Review',
-                  repoPath: '/work/one',
-                  parentId: null,
-                  createdAt: '2026-07-13T10:00:00.000Z',
-                },
-              ],
-              total: 1,
-            }),
-            uiPreferences: {
-              read: async () => ({
+          hubServices: {
+            repositories: {
+              list: async () => ({
                 ok: true,
-                version: 12,
-                updatedAt: '2026-07-14T11:00:00.000Z',
-                uiPreferences: {
-                  sidebarGroupOrder: ['repo:repo:/work/one'],
-                  sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
-                  sidebarNodeOrderByParent: { root: ['drone:one'] },
-                  sidebarChatOrderByDrone: { one: ['review', 'default'] },
-                  pinnedDroneIds: ['one'],
-                },
+                repos: [{ path: '/work/one' }, { path: '/work/empty' }],
+                count: 2,
               }),
             },
-            readDeleteActionSettings: async () => ({
-              ok: true,
-              deleteAction: { mode: 'permanent' },
-            }),
+            groups: {
+              list: async () => ({
+                ok: true,
+                groups: [
+                  {
+                    id: 'group-review',
+                    name: 'Review',
+                    repoPath: '/work/one',
+                    parentId: null,
+                    createdAt: '2026-07-13T10:00:00.000Z',
+                  },
+                ],
+                total: 1,
+              }),
+            },
+            settings: {
+              uiPreferences: {
+                read: async () => ({
+                  ok: true,
+                  version: 12,
+                  updatedAt: '2026-07-14T11:00:00.000Z',
+                  uiPreferences: {
+                    sidebarGroupOrder: ['repo:repo:/work/one'],
+                    sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
+                    sidebarNodeOrderByParent: { root: ['drone:one'] },
+                    sidebarChatOrderByDrone: { one: ['review', 'default'] },
+                    pinnedDroneIds: ['one'],
+                  },
+                }),
+              },
+              readDeleteAction: async () => ({
+                ok: true,
+                deleteAction: { mode: 'permanent' },
+              }),
+            },
           } as any,
         },
       );
@@ -676,16 +682,20 @@ describe('device mesh drone summaries', () => {
         },
         undefined,
         {
-          renameDrone: async (input) => {
-            renames.push(input);
-            return {
-              ok: true,
-              id: input.droneRef,
-              oldName: 'Untitled 1',
-              newName: input.newName,
-              renamed: true,
-            };
-          },
+          hubServices: {
+            drones: {
+              rename: async (input: any) => {
+                renames.push(input);
+                return {
+                  ok: true,
+                  id: input.droneRef,
+                  oldName: 'Untitled 1',
+                  newName: input.newName,
+                  renamed: true,
+                };
+              },
+            },
+          } as any,
         },
       );
       await expect(
