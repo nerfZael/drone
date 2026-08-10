@@ -1,10 +1,18 @@
 import { spawn } from 'node:child_process';
+import type {
+  GithubPullRequestChecksState,
+  GithubPullRequestReviewState,
+  GithubPullRequestState,
+  GithubPullRequestSummaryPayload,
+} from '@drone/assistant-chat';
 
 export type GithubPullRequestListState = 'open' | 'closed' | 'all';
 export type GithubPullRequestMergeMethod = 'merge' | 'squash' | 'rebase';
-export type GithubPullRequestChecksState = 'success' | 'failing' | 'pending' | 'unknown';
-export type GithubPullRequestReviewState = 'approved' | 'changes_requested' | 'review_required' | 'unknown';
-export type GithubPullRequestState = 'open' | 'merged' | 'closed';
+export type {
+  GithubPullRequestChecksState,
+  GithubPullRequestReviewState,
+  GithubPullRequestState,
+};
 
 export type GithubRepoRef = {
   owner: string;
@@ -28,28 +36,8 @@ export type GithubAuthStatus = {
   ghCliAuthenticated: boolean;
 };
 
-export type GithubPullRequestSummary = {
-  number: number;
-  title: string;
+export type GithubPullRequestSummary = GithubPullRequestSummaryPayload & {
   state: GithubPullRequestState;
-  draft: boolean;
-  diffStats: {
-    changed: number;
-    additions: number;
-    deletions: number;
-  } | null;
-  htmlUrl: string;
-  createdAt: string;
-  updatedAt: string;
-  authorLogin: string | null;
-  authorAvatarUrl: string | null;
-  headRefName: string;
-  headLabel: string;
-  baseRefName: string;
-  isCrossRepository: boolean;
-  checksState: GithubPullRequestChecksState;
-  reviewState: GithubPullRequestReviewState;
-  hasMergeConflicts: boolean;
 };
 
 type GithubPullRequestFileStatusType = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'type-changed' | 'unmerged' | 'unknown';
