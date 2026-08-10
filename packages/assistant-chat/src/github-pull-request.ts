@@ -8,16 +8,49 @@ export type GithubPullRequestLink = {
   href: string;
 };
 
+export type GithubPullRequestState = 'open' | 'merged' | 'closed';
+export type GithubPullRequestChecksState = 'success' | 'failing' | 'pending' | 'unknown';
+export type GithubPullRequestReviewState =
+  | 'approved'
+  | 'changes_requested'
+  | 'review_required'
+  | 'unknown';
+
+export type GithubPullRequestDiffStats = {
+  changed: number;
+  additions: number;
+  deletions: number;
+};
+
+export type GithubPullRequestFileStatus =
+  | 'added'
+  | 'modified'
+  | 'deleted'
+  | 'renamed'
+  | 'copied'
+  | 'type-changed'
+  | 'unmerged'
+  | 'unknown';
+
+export type GithubPullRequestFileChange = {
+  path: string;
+  originalPath: string | null;
+  statusChar: string;
+  statusType: GithubPullRequestFileStatus;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch: string | null;
+  truncated: boolean;
+  isBinary: boolean;
+};
+
 export type GithubPullRequestSummary = {
   number: number;
   title: string;
   state: string;
   draft: boolean;
-  diffStats?: {
-    changed: number;
-    additions: number;
-    deletions: number;
-  } | null;
+  diffStats?: GithubPullRequestDiffStats | null;
   htmlUrl: string;
   createdAt: string;
   updatedAt: string;
@@ -27,9 +60,13 @@ export type GithubPullRequestSummary = {
   headLabel: string;
   baseRefName: string;
   isCrossRepository: boolean;
-  checksState: 'success' | 'failing' | 'pending' | 'unknown';
-  reviewState: 'approved' | 'changes_requested' | 'review_required' | 'unknown';
+  checksState: GithubPullRequestChecksState;
+  reviewState: GithubPullRequestReviewState;
   hasMergeConflicts: boolean;
+};
+
+export type GithubPullRequestSummaryPayload = Omit<GithubPullRequestSummary, 'diffStats'> & {
+  diffStats: GithubPullRequestDiffStats | null;
 };
 
 export type GithubPullRequestsResult = {
@@ -44,7 +81,7 @@ export type GithubPullRequestStatusBadge = {
 };
 
 export function githubPullRequestDiffStatsPresentation(
-  stats: NonNullable<GithubPullRequestSummary['diffStats']>,
+  stats: GithubPullRequestDiffStats,
 ) {
   const changed = Math.max(0, Math.floor(Number(stats.changed) || 0));
   const additions = Math.max(0, Math.floor(Number(stats.additions) || 0));

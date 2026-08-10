@@ -3,6 +3,7 @@ import type {
   AgentPermissionMode,
   ChatAgentConfig,
 } from '../../domain';
+import type { ChatImageAttachmentPayload } from '../chat';
 import type { UiMenuSelectEntry } from '../../ui/components';
 
 export type CreateRuntime = 'container' | 'host';
@@ -127,6 +128,9 @@ type BuildDraftDroneCreatePayloadArgs = {
   agentsMd?: string;
   seedApprovalPolicy?: AgentApprovalPolicy;
   prompt?: string | null;
+  seedAttachments?: ChatImageAttachmentPayload[];
+  submittedAt?: string | null;
+  draft?: boolean;
   deliveryMode?: 'queue' | 'asap';
 };
 
@@ -146,6 +150,9 @@ export function buildDraftDroneCreatePayload({
   agentsMd,
   seedApprovalPolicy,
   prompt,
+  seedAttachments = [],
+  submittedAt,
+  draft = false,
   deliveryMode,
 }: BuildDraftDroneCreatePayloadArgs) {
   const trimmedName = String(name ?? '').trim();
@@ -158,7 +165,8 @@ export function buildDraftDroneCreatePayload({
   const trimmedReasoning = String(seedReasoning ?? '').trim();
   const repoBranchSource = repoBranchSelection.repoBranchSource;
   const remoteBranch = String(repoBranchSelection.remoteBranch ?? '').trim();
-  const hasChatSeed = Boolean(seedAgent || trimmedModel || trimmedReasoning || trimmedPrompt);
+  const hasInitialPrompt = Boolean(trimmedPrompt || seedAttachments.length > 0);
+  const hasChatSeed = Boolean(seedAgent || trimmedModel || trimmedReasoning || hasInitialPrompt);
   return {
     ...(trimmedName ? { name: trimmedName } : {}),
     ...(trimmedGroup ? { group: trimmedGroup } : {}),
@@ -180,6 +188,10 @@ export function buildDraftDroneCreatePayload({
     ...(seedApprovalPolicy && seedApprovalPolicy !== 'ask' ? { seedApprovalPolicy } : {}),
     ...(trimmedPrompt && deliveryMode ? { deliveryMode } : {}),
     ...(trimmedPrompt ? { seedPrompt: trimmedPrompt } : {}),
-    ...(trimmedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),
+    ...(seedAttachments.length > 0 ? { seedAttachments } : {}),
+    ...(hasInitialPrompt
+      ? { seedSubmittedAt: String(submittedAt ?? '').trim() || new Date().toISOString() }
+      : {}),
+    ...(draft ? { draft: true } : {}),
   };
 }

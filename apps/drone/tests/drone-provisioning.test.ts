@@ -22,6 +22,7 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs = 1500): Promise
 function createControllerHarness(opts?: {
   duringRunNodeCli?: (context: { droneId: string; displayName: string }) => Promise<void>;
   duringPostCreateSync?: (context: { droneId: string; stage: string }) => Promise<void>;
+  failAttachedPromptStaging?: boolean;
   runNodeCliResult?: { code: number; stdout: string; stderr: string };
 }) {
   const pendingStateHelpers = createPendingDroneStateHelpers({
@@ -41,6 +42,7 @@ function createControllerHarness(opts?: {
   const runNodeCliCalls: string[][] = [];
   const pendingPromptPumpCalls: any[] = [];
   const cancelPendingPromptsCalls: any[] = [];
+  const hubLogCalls: any[] = [];
   const events: string[] = [];
 
   const controller = createDroneProvisioningController({
@@ -56,15 +58,20 @@ function createControllerHarness(opts?: {
     ensureChatEntry: async (opts) => {
       ensureChatEntryCalls.push(opts);
     },
-    enqueuePrompt: async (opts) => {
-      enqueuePromptCalls.push(opts);
-      return { id: String(opts.id ?? 'generated'), pendingState: 'queued' };
+    enqueuePrompt: async (enqueueOpts) => {
+      enqueuePromptCalls.push(enqueueOpts);
+      if (enqueueOpts.attachments?.length && opts?.failAttachedPromptStaging) {
+        throw new Error('attachment staging failed');
+      }
+      return { id: String(enqueueOpts.id ?? 'generated'), pendingState: 'queued' };
     },
     enqueuePendingPromptPump: (droneId, chatName) => {
       pendingPromptPumpCalls.push({ droneId, chatName });
       events.push(`pump:${droneId}:${chatName}`);
     },
-    hubLog: () => {},
+    hubLog: (...args) => {
+      hubLogCalls.push(args);
+    },
     inferChatAgent: (entry: any) => entry?.agent ?? { kind: 'builtin', id: 'cursor' },
     isSafePromptId: (raw: string) => /^[A-Za-z0-9._-]+$/.test(String(raw ?? '').trim()),
     normalizeChatModel: (raw: any) => {
@@ -97,7 +104,6 @@ function createControllerHarness(opts?: {
     setChatAgentConfig: async (opts) => {
       setChatAgentConfigCalls.push(opts);
     },
-    startupPromptToPendingPrompt: pendingStateHelpers.startupPromptToPendingPrompt,
     syncRepoAgentsInstructionsForDrone: async (syncOpts) => {
       syncRepoAgentsCalls.push(syncOpts);
       await opts?.duringPostCreateSync?.({ droneId: syncOpts.droneId, stage: 'repo-agents' });
@@ -132,6 +138,7 @@ function createControllerHarness(opts?: {
     runNodeCliCalls,
     pendingPromptPumpCalls,
     cancelPendingPromptsCalls,
+    hubLogCalls,
     events,
   };
 }
@@ -328,7 +335,8 @@ describe('drone provisioning controller', () => {
         const reg: any = await loadRegistry();
         return (
           !reg?.pending?.['drone-2'] &&
-          Boolean(reg?.drones?.['drone-2']?.chats?.ops) &&
+          Boolean(reg?.drones?.['drone-2']) &&
+          harness.enqueuePromptCalls.length === 1 &&
           harness.pendingPromptPumpCalls.length > 0
         );
       });
@@ -336,20 +344,6 @@ describe('drone provisioning controller', () => {
       const reg: any = await loadRegistry();
       expect(reg?.pending?.['drone-err']).toBeDefined();
       expect(reg?.drones?.['drone-err']).toBeUndefined();
-      expect(reg?.drones?.['drone-2']?.chats?.ops).toMatchObject({
-        agent: { kind: 'builtin', id: 'codex' },
-        model: 'gpt-5.4',
-        reasoning: 'high',
-      });
-      expect(reg?.drones?.['drone-2']?.chats?.ops?.pendingPrompts).toEqual([
-        {
-          id: 'startup-1',
-          at: '2026-03-26T11:01:00.000Z',
-          prompt: 'boot sequence',
-          state: 'queued',
-          updatedAt: '2026-03-26T12:00:00.000Z',
-        },
-      ]);
       expect(harness.ensureChatEntryCalls).toEqual([{ droneId: 'drone-2', chatName: 'ops' }]);
       expect(harness.setChatAgentConfigCalls).toEqual([
         {
@@ -362,7 +356,17 @@ describe('drone provisioning controller', () => {
           reasoning: 'high',
         },
       ]);
-      expect(harness.enqueuePromptCalls).toHaveLength(0);
+      expect(harness.enqueuePromptCalls).toEqual([
+        expect.objectContaining({
+          id: 'startup-1',
+          droneId: 'drone-2',
+          chatName: 'ops',
+          prompt: 'boot sequence',
+          submittedAt: '2026-03-26T11:01:00.000Z',
+          deliveryMode: 'background',
+          priority: 'queue',
+        }),
+      ]);
       expect(harness.pendingPromptPumpCalls).toEqual([{ droneId: 'drone-2', chatName: 'ops' }]);
       expect(harness.events.indexOf('sync:repo-agents')).toBeGreaterThan(-1);
       expect(harness.events.indexOf('pump:drone-2:ops')).toBeGreaterThan(harness.events.indexOf('sync:repo-agents'));
@@ -416,43 +420,35 @@ describe('drone provisioning controller', () => {
         const reg: any = await loadRegistry();
         return (
           !reg?.pending?.['drone-seed-order'] &&
-          Array.isArray(reg?.drones?.['drone-seed-order']?.chats?.default?.pendingPrompts) &&
-          reg.drones['drone-seed-order'].chats.default.pendingPrompts.length === 3 &&
+          Boolean(reg?.drones?.['drone-seed-order']) &&
+          harness.enqueuePromptCalls.length === 3 &&
           harness.pendingPromptPumpCalls.length > 0
         );
       });
 
-      const reg: any = await loadRegistry();
-      expect(reg?.drones?.['drone-seed-order']?.chats?.default?.pendingPrompts).toEqual([
-        {
+      expect(harness.enqueuePromptCalls).toEqual([
+        expect.objectContaining({
           id: 'startup-earlier',
-          at: '2026-03-26T11:02:00.000Z',
           prompt: 'queued while starting',
-          state: 'queued',
-          updatedAt: '2026-03-26T12:00:00.000Z',
-        },
-        {
+          submittedAt: '2026-03-26T11:02:00.000Z',
+        }),
+        expect.objectContaining({
           id: expect.any(String),
-          at: '2026-03-26T11:03:00.000Z',
           prompt: 'seed prompt',
-          state: 'queued',
-          updatedAt: '2026-03-26T11:03:00.000Z',
-        },
-        {
+          submittedAt: '2026-03-26T11:03:00.000Z',
+        }),
+        expect.objectContaining({
           id: 'startup-later',
-          at: '2026-03-26T11:04:00.000Z',
           prompt: 'queued after seed',
-          state: 'queued',
-          updatedAt: '2026-03-26T12:00:00.000Z',
-        },
+          submittedAt: '2026-03-26T11:04:00.000Z',
+        }),
       ]);
-      expect(harness.enqueuePromptCalls).toHaveLength(0);
       expect(harness.pendingPromptPumpCalls).toEqual([{ droneId: 'drone-seed-order', chatName: 'default' }]);
       expect(harness.events.indexOf('pump:drone-seed-order:default')).toBeGreaterThan(harness.events.indexOf('sync:repo-agents'));
     });
   });
 
-  test('stages draft image attachments when their drone is published', async () => {
+  test('stages attached startup prompts once with their original timestamp', async () => {
     await withTempDroneDataDir('drone-provisioning-', async () => {
       const attachment = {
         name: 'screen.png',
@@ -463,9 +459,9 @@ describe('drone provisioning controller', () => {
       };
       await updateRegistry((reg: any) => {
         reg.pending = {
-          'drone-draft-image': {
-            id: 'drone-draft-image',
-            name: 'draft-image',
+          'drone-attached-seed': {
+            id: 'drone-attached-seed',
+            name: 'attached-seed',
             runtime: 'host',
             repoPath: '',
             build: false,
@@ -475,11 +471,12 @@ describe('drone provisioning controller', () => {
             message: 'Starting...',
             startupQueuedPrompts: [
               {
-                id: 'draft-image-prompt',
+                id: 'attached-prompt',
                 chatName: 'default',
                 at: '2026-03-26T11:01:00.000Z',
                 prompt: 'Review this image',
                 attachments: [attachment],
+                deliveryMode: 'asap',
                 state: 'queued',
               },
             ],
@@ -488,24 +485,81 @@ describe('drone provisioning controller', () => {
       });
 
       const harness = createControllerHarness();
-      harness.controller.enqueueProvisioning('drone-draft-image');
+      harness.controller.enqueueProvisioning('drone-attached-seed');
 
       await waitFor(async () => harness.pendingPromptPumpCalls.length > 0);
 
       expect(harness.enqueuePromptCalls).toEqual([
-        {
-          id: 'draft-image-prompt',
-          droneId: 'drone-draft-image',
+        expect.objectContaining({
+          id: 'attached-prompt',
+          droneId: 'drone-attached-seed',
           chatName: 'default',
           prompt: 'Review this image',
           attachments: [attachment],
-          cwd: undefined,
+          submittedAt: '2026-03-26T11:01:00.000Z',
           deliveryMode: 'background',
-          priority: 'queue',
-        },
+          priority: 'asap',
+        }),
       ]);
       expect(harness.pendingPromptPumpCalls).toEqual([
-        { droneId: 'drone-draft-image', chatName: 'default' },
+        { droneId: 'drone-attached-seed', chatName: 'default' },
+      ]);
+    });
+  });
+
+  test('keeps the drone usable when attached seed staging fails', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-failed-attachment': {
+            id: 'drone-failed-attachment',
+            name: 'failed-attachment',
+            runtime: 'host',
+            repoPath: '',
+            build: false,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+            startupQueuedPrompts: [
+              {
+                id: 'failed-attachment-prompt',
+                chatName: 'default',
+                at: '2026-03-26T11:01:00.000Z',
+                prompt: 'Review this image',
+                attachments: [
+                  {
+                    name: 'screen.png',
+                    mime: 'image/png',
+                    size: 3,
+                    dataBase64: 'YWJj',
+                    fileName: 'screen.png',
+                  },
+                ],
+                state: 'queued',
+              },
+            ],
+          },
+        };
+      });
+
+      const harness = createControllerHarness({ failAttachedPromptStaging: true });
+      harness.controller.enqueueProvisioning('drone-failed-attachment');
+
+      await waitFor(async () => {
+        const registry: any = await loadRegistry();
+        return (
+          Boolean(registry?.drones?.['drone-failed-attachment']) &&
+          harness.pendingPromptPumpCalls.length > 0
+        );
+      });
+
+      const registry: any = await loadRegistry();
+      expect(registry?.drones?.['drone-failed-attachment']).toBeDefined();
+      expect(harness.hubLogCalls).toContainEqual([
+        'warn',
+        'initial prompt attachments could not be staged',
+        expect.objectContaining({ promptId: 'failed-attachment-prompt' }),
       ]);
     });
   });

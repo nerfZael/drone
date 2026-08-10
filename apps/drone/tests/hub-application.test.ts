@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createGroup } from '../src/hub/application/create-group';
+import { createDeleteGroupCommand } from '../src/hub/application/delete-group';
+import { createFleetActorService } from '../src/hub/application/fleet-actors';
 import { HubApplicationEvents } from '../src/hub/application/hub-application-events';
 import { renameGroup } from '../src/hub/application/rename-group';
 import { setDroneGroup } from '../src/hub/application/set-drone-group';
@@ -54,6 +56,52 @@ describe('Hub application services', () => {
     expect(result).toMatchObject({ ok: true, id: 'group-id', name: 'Review' });
   });
 
+  test('deletes a group and its pending drones through one command', async () => {
+    const dequeued: string[] = [];
+    const lifecycleDeletes: unknown[] = [];
+    const deletedGroups: unknown[] = [];
+    const command = createDeleteGroupCommand({
+      listCanonicalGroups: async () => [
+        { id: 'group-id', repoPath: '/repo', name: 'Review' },
+      ],
+      loadRegistry: async () => ({
+        drones: {},
+        pending: {
+          pending: { name: 'Pending', repoPath: '/repo', group: 'Review' },
+        },
+      }),
+      normalizeDroneIdentity: (value) => String(value ?? '').trim(),
+      deleteCanonicalGroupArtifacts: async (...args) => {
+        deletedGroups.push(args);
+      },
+      dequeueProvisioning: (droneId) => dequeued.push(droneId),
+      removeDroneById: async () => ({ removedRegistry: true }),
+      deleteCanonicalDroneLifecycleBatch: async (...args) => {
+        lifecycleDeletes.push(args);
+      },
+    });
+
+    const result = await command({
+      groupRef: 'group-id',
+      repoPath: '/ignored',
+      keepVolume: false,
+      forget: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      group: 'Review',
+      repoPath: '/repo',
+      removed: [{ id: 'pending', name: 'Pending' }],
+      deletedGroup: true,
+    });
+    expect(dequeued).toEqual(['pending']);
+    expect(lifecycleDeletes).toEqual([
+      [[{ state: 'pending', droneId: 'pending' }], { ignoreMissing: true }],
+    ]);
+    expect(deletedGroups).toEqual([['/repo', 'Review']]);
+  });
+
   test('sets a fleet parent through one canonical command', async () => {
     let persisted: any = null;
     const result = await setDroneParent(
@@ -78,6 +126,43 @@ describe('Hub application services', () => {
     expect(persisted).toEqual({
       droneId: 'child-id',
       fleet: { assigned: ['worker'], createdBy: 'parent-id' },
+    });
+  });
+
+  test('assigns fleet actors through one canonical service', async () => {
+    let fleet = { assigned: ['existing'] };
+    const service = createFleetActorService({
+      resolveDrone: async (ref) =>
+        ref === 'owner' ? { id: 'owner-id', kind: 'real' as const } : null,
+      loadRegistry: async () => ({ drones: {} }),
+      findDroneIdByRef: (_registry, ref) => (ref === 'target' ? { id: 'target-id' } : null),
+      updateDroneFleetMetadata: async (input) => {
+        fleet = input.transform(fleet) as typeof fleet;
+      },
+      fleetActorConfig: (entry) => entry.fleet,
+      fleetActorPayload: (_registry, actorId) => ({ ok: true, id: actorId, fleet }),
+    });
+
+    await expect(service.assign({ droneRef: 'owner', targetRef: 'target' })).resolves.toEqual({
+      ok: true,
+      id: 'owner-id',
+      fleet: { assigned: ['existing', 'target-id'] },
+    });
+  });
+
+  test('rejects pending fleet actors with a conflict', async () => {
+    const service = createFleetActorService({
+      resolveDrone: async () => ({ id: 'pending-id', kind: 'pending' }),
+      loadRegistry: async () => ({ pending: {} }),
+      findDroneIdByRef: () => null,
+      updateDroneFleetMetadata: async () => undefined,
+      fleetActorConfig: () => ({ assigned: [] }),
+      fleetActorPayload: () => ({}),
+    });
+
+    await expect(service.get('pending')).rejects.toMatchObject({
+      statusCode: 409,
+      message: 'drone "pending" is still starting',
     });
   });
 

@@ -4,6 +4,8 @@ import type {
   AgentPlan,
   AgentRunActivity,
   ChatQueueAction,
+  GithubPullRequestFileChange,
+  GithubPullRequestSummaryPayload,
   PendingPromptState,
 } from '@drone/assistant-chat';
 
@@ -418,17 +420,7 @@ export type RepoCommitDiffPayload =
     }
   | { ok: false; error: string; code?: string };
 
-export type RepoPullRequestChangeEntry = {
-  path: string;
-  originalPath: string | null;
-  statusChar: string;
-  statusType: RepoChangeType;
-  additions: number;
-  deletions: number;
-  changes: number;
-  patch: string | null;
-  truncated: boolean;
-  isBinary: boolean;
+export type RepoPullRequestChangeEntry = GithubPullRequestFileChange & {
   reviewKey?: string;
   reviewToken?: string;
 };
@@ -497,29 +489,7 @@ export type RepoPullRequestCommitChangesPayload =
 export type RepoPullRequestState = 'open' | 'merged' | 'closed' | string;
 export type RepoPullRequestMergeMethod = 'merge' | 'squash' | 'rebase';
 
-export type RepoPullRequestSummary = {
-  number: number;
-  title: string;
-  state: RepoPullRequestState;
-  draft: boolean;
-  diffStats: {
-    changed: number;
-    additions: number;
-    deletions: number;
-  } | null;
-  htmlUrl: string;
-  createdAt: string;
-  updatedAt: string;
-  authorLogin: string | null;
-  authorAvatarUrl: string | null;
-  headRefName: string;
-  headLabel: string;
-  baseRefName: string;
-  isCrossRepository: boolean;
-  checksState: 'success' | 'failing' | 'pending' | 'unknown';
-  reviewState: 'approved' | 'changes_requested' | 'review_required' | 'unknown';
-  hasMergeConflicts: boolean;
-};
+export type RepoPullRequestSummary = GithubPullRequestSummaryPayload;
 
 export type RepoPullRequestsPayload =
   | {

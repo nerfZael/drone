@@ -17,7 +17,6 @@ import {
 } from './drone-chat-page';
 import { trimJsonArrayToBytes } from '../builtin-agent-activity';
 import { isLikelyImagePath, isLikelyVideoPath } from '../filesystem-media';
-import type { RenameDroneCommand } from '../drone-rename-command';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
 import { meshJsonContentChunk } from './mesh-content-chunk';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
@@ -25,7 +24,10 @@ import { fitMeshChatPayload } from './fit-mesh-chat-payload';
 import { compactNativeChatReadResponse } from './native-chat-response';
 import { submitNativeChatPrompt } from './native-chat-prompt';
 import type { SidebarCommandService } from '../sidebar-command-service';
-import type { HubApplication } from '../application/create-hub-application';
+import {
+  createHttpHubServices,
+  type HubServices,
+} from '../application/hub-services';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -399,9 +401,8 @@ export function createDroneControlCapability(
   chatAttachments?: MeshChatAttachmentStore,
   options?: {
     sidebarCommands?: SidebarCommandService;
-    hubApplication?: HubApplication;
+    hubServices?: HubServices;
     createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
-    renameDrone?: RenameDroneCommand;
     broadcastFileChange?: (
       payload: Record<string, any>,
       targetDeviceIds: string[],
@@ -409,7 +410,13 @@ export function createDroneControlCapability(
   },
 ): CapabilityHandler {
   const sidebarCommands = options?.sidebarCommands;
-  const hubApplication = options?.hubApplication;
+  // Production injects the in-process services. The HTTP adapter keeps direct capability
+  // consumers and older standalone integrations compatible without branching per operation.
+  const hubServices =
+    options?.hubServices ??
+    createHttpHubServices(async (pathname, init) =>
+      await localHubRequest(access, pathname, init),
+    );
   type FileWatch = {
     droneId: string;
     path: string;
@@ -566,9 +573,7 @@ export function createDroneControlCapability(
         }
         const createRepoPath = optionalText(payload.createRepoPath);
         if (createRepoPath) {
-          const reposResult = hubApplication
-            ? await hubApplication.listRepositories()
-            : await localHubRequest(access, '/api/repos');
+          const reposResult = await hubServices.repositories.list();
           const registeredRepoPaths = textList(
             Array.isArray(reposResult.repos)
               ? reposResult.repos.map((repo: unknown) => object(repo).path)
@@ -646,25 +651,25 @@ export function createDroneControlCapability(
           deleteSettingsRequest,
         ] = await Promise.allSettled([
           localHubRequest(access, '/api/drones'),
-          hubApplication
-            ? hubApplication.listRepositories()
-            : localHubRequest(access, '/api/repos'),
-          hubApplication ? hubApplication.listGroups() : localHubRequest(access, '/api/groups'),
-          hubApplication
-            ? hubApplication.uiPreferences.read()
-            : localHubRequest(access, '/api/settings/ui-preferences'),
-          hubApplication
-            ? hubApplication.readDeleteActionSettings()
-            : localHubRequest(access, '/api/settings/delete-action'),
+          hubServices.repositories.list(),
+          hubServices.groups.list(),
+          hubServices.settings.uiPreferences.read(),
+          hubServices.settings.readDeleteAction(),
         ]);
         if (dronesRequest.status === 'rejected') throw dronesRequest.reason;
         const result = dronesRequest.value;
-        const reposResult = reposRequest.status === 'fulfilled' ? reposRequest.value : {};
-        const groupsResult = groupsRequest.status === 'fulfilled' ? groupsRequest.value : {};
-        const preferencesResult =
-          preferencesRequest.status === 'fulfilled' ? preferencesRequest.value : {};
-        const deleteSettingsResult =
-          deleteSettingsRequest.status === 'fulfilled' ? deleteSettingsRequest.value : {};
+        const reposResult = object(
+          reposRequest.status === 'fulfilled' ? reposRequest.value : {},
+        );
+        const groupsResult = object(
+          groupsRequest.status === 'fulfilled' ? groupsRequest.value : {},
+        );
+        const preferencesResult = object(
+          preferencesRequest.status === 'fulfilled' ? preferencesRequest.value : {},
+        );
+        const deleteSettingsResult = object(
+          deleteSettingsRequest.status === 'fulfilled' ? deleteSettingsRequest.value : {},
+        );
         const sidebarSnapshotComplete =
           reposRequest.status === 'fulfilled' &&
           groupsRequest.status === 'fulfilled' &&
@@ -760,6 +765,30 @@ export function createDroneControlCapability(
           payload.autoRename === true
             ? (optionalText(payload.autoRenamePrompt) ?? optionalText(payload.seedPrompt))
             : undefined;
+        const seedAttachmentIds = Array.isArray(payload.seedAttachmentIds)
+          ? payload.seedAttachmentIds.map((value) => String(value ?? '').trim()).filter(Boolean)
+          : [];
+        let uploadedSeedAttachments: Awaited<
+          ReturnType<MeshChatAttachmentStore['attachments']>
+        > = [];
+        if (seedAttachmentIds.length > 0) {
+          if (!chatAttachments)
+            throw Object.assign(new Error('mesh attachment uploads are unavailable'), {
+              code: 'UNAVAILABLE',
+            });
+          uploadedSeedAttachments = await chatAttachments.attachments(
+            requiredText(context?.sourceDevice?.id, 'sourceDeviceId'),
+            requiredText(payload.seedAttachmentUploadKey, 'seedAttachmentUploadKey'),
+            'default',
+            seedAttachmentIds,
+          );
+        }
+        const seedAttachments =
+          uploadedSeedAttachments.length > 0
+            ? uploadedSeedAttachments
+            : Array.isArray(payload.seedAttachments)
+              ? payload.seedAttachments
+              : [];
         const repoBranchSource = payload.repoBranchSource === 'remote' ? 'remote' : 'host';
         const createPayload = {
           name: requestedName,
@@ -804,31 +833,33 @@ export function createDroneControlCapability(
                 seedSubmittedAt: optionalText(payload.seedSubmittedAt) ?? new Date().toISOString(),
               }
             : {}),
-          ...(Array.isArray(payload.seedAttachments) && payload.seedAttachments.length > 0
-            ? { seedAttachments: payload.seedAttachments }
-            : {}),
+          ...(seedAttachments.length > 0 ? { seedAttachments } : {}),
         };
-        const created = await localHubRequest(access, '/api/drones', {
-          method: 'POST',
-          body: JSON.stringify(createPayload),
-        });
-        const createdDroneId = firstText(created?.id, created?.droneId, created?.drone?.id);
-        if (
-          !requestedName &&
-          autoRenamePrompt &&
-          createdDroneId &&
-          options?.createdDroneAutoRename
-        ) {
-          const createdDroneName = firstText(created?.name, created?.drone?.name);
-          scheduleCreatedDroneAutoRename(
-            options.createdDroneAutoRename,
-            createdDroneId,
-            autoRenamePrompt,
-            createdDroneName,
-          );
-          return { ...created, autoRenameScheduled: true };
+        try {
+          const created = await localHubRequest(access, '/api/drones', {
+            method: 'POST',
+            body: JSON.stringify(createPayload),
+          });
+          const createdDroneId = firstText(created?.id, created?.droneId, created?.drone?.id);
+          if (
+            !requestedName &&
+            autoRenamePrompt &&
+            createdDroneId &&
+            options?.createdDroneAutoRename
+          ) {
+            const createdDroneName = firstText(created?.name, created?.drone?.name);
+            scheduleCreatedDroneAutoRename(
+              options.createdDroneAutoRename,
+              createdDroneId,
+              autoRenamePrompt,
+              createdDroneName,
+            );
+            return { ...created, autoRenameScheduled: true };
+          }
+          return created;
+        } finally {
+          await chatAttachments?.remove(seedAttachmentIds);
         }
-        return created;
       }
 
       if (operation === 'sidebar.move') {
@@ -844,24 +875,16 @@ export function createDroneControlCapability(
       const encodedDrone = encodeURIComponent(droneId);
       if (operation === 'drone.rename') {
         const newName = requiredText(payload.newName, 'newName');
-        if (options?.renameDrone) {
-          return await options.renameDrone({
-            droneRef: droneId,
-            newName,
-            source: 'drone-hub-mobile',
-          });
-        }
-        return await localHubRequest(access, `/api/drones/${encodedDrone}/rename`, {
-          method: 'POST',
-          body: JSON.stringify({ newName, source: 'drone-hub-mobile' }),
+        return await hubServices.drones.rename({
+          droneRef: droneId,
+          newName,
+          source: 'drone-hub-mobile',
         });
       }
       if (operation === 'drone.delete') {
         // Do not guess for a destructive operation. Falling back to permanent deletion when the
         // settings request fails can bypass an explicitly configured archive policy.
-        const settings = hubApplication
-          ? await hubApplication.readDeleteActionSettings()
-          : await localHubRequest(access, '/api/settings/delete-action');
+        const settings = await hubServices.settings.readDeleteAction();
         const deleteMode =
           object(settings.deleteAction).mode === 'archive' ? 'archive' : 'permanent';
         await localHubRequest(

@@ -7,20 +7,52 @@ import { listGroups } from './list-groups';
 import { listRepositories } from './list-repositories';
 import { resolveDeleteActionSettingsResponse } from '../hub-settings';
 import { UiPreferencesService } from './ui-preferences';
+import type { HubServices } from './hub-services';
+import type { RenameDroneCommand } from '../drone-rename-command';
+import {
+  createDeleteGroupCommand,
+  type DeleteGroupDependencies,
+} from './delete-group';
+import {
+  createFleetActorService,
+  type FleetActorDependencies,
+} from './fleet-actors';
 
 export type HubApplication = ReturnType<typeof createHubApplication>;
 
-export function createHubApplication(events = new HubApplicationEvents()) {
+export function createHubApplication(input: {
+  renameDrone: RenameDroneCommand;
+  deleteGroupDependencies: DeleteGroupDependencies;
+  fleetActorDependencies?: Partial<FleetActorDependencies>;
+  events?: HubApplicationEvents;
+}) {
+  const events = input.events ?? new HubApplicationEvents();
   const uiPreferences = new UiPreferencesService(events);
+  const services: HubServices = {
+    repositories: {
+      list: listRepositories,
+    },
+    groups: {
+      list: listGroups,
+      create: createGroup,
+      delete: createDeleteGroupCommand(input.deleteGroupDependencies),
+      rename: renameGroup,
+      setDroneGroup,
+    },
+    fleet: {
+      setDroneParent,
+      ...createFleetActorService(input.fleetActorDependencies),
+    },
+    drones: {
+      rename: input.renameDrone,
+    },
+    settings: {
+      uiPreferences,
+      readDeleteAction: resolveDeleteActionSettingsResponse,
+    },
+  };
   return {
     events,
-    uiPreferences,
-    listGroups,
-    listRepositories,
-    readDeleteActionSettings: resolveDeleteActionSettingsResponse,
-    createGroup,
-    setDroneParent,
-    setDroneGroup,
-    renameGroup,
+    ...services,
   };
 }

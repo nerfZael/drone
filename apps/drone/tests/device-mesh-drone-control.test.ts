@@ -192,43 +192,49 @@ describe('device mesh drone summaries', () => {
         },
         undefined,
         {
-          hubApplication: {
-            listRepositories: async () => ({
-              ok: true,
-              repos: [{ path: '/work/one' }, { path: '/work/empty' }],
-              count: 2,
-            }),
-            listGroups: async () => ({
-              ok: true,
-              groups: [
-                {
-                  id: 'group-review',
-                  name: 'Review',
-                  repoPath: '/work/one',
-                  parentId: null,
-                  createdAt: '2026-07-13T10:00:00.000Z',
-                },
-              ],
-              total: 1,
-            }),
-            uiPreferences: {
-              read: async () => ({
+          hubServices: {
+            repositories: {
+              list: async () => ({
                 ok: true,
-                version: 12,
-                updatedAt: '2026-07-14T11:00:00.000Z',
-                uiPreferences: {
-                  sidebarGroupOrder: ['repo:repo:/work/one'],
-                  sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
-                  sidebarNodeOrderByParent: { root: ['drone:one'] },
-                  sidebarChatOrderByDrone: { one: ['review', 'default'] },
-                  pinnedDroneIds: ['one'],
-                },
+                repos: [{ path: '/work/one' }, { path: '/work/empty' }],
+                count: 2,
               }),
             },
-            readDeleteActionSettings: async () => ({
-              ok: true,
-              deleteAction: { mode: 'permanent' },
-            }),
+            groups: {
+              list: async () => ({
+                ok: true,
+                groups: [
+                  {
+                    id: 'group-review',
+                    name: 'Review',
+                    repoPath: '/work/one',
+                    parentId: null,
+                    createdAt: '2026-07-13T10:00:00.000Z',
+                  },
+                ],
+                total: 1,
+              }),
+            },
+            settings: {
+              uiPreferences: {
+                read: async () => ({
+                  ok: true,
+                  version: 12,
+                  updatedAt: '2026-07-14T11:00:00.000Z',
+                  uiPreferences: {
+                    sidebarGroupOrder: ['repo:repo:/work/one'],
+                    sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
+                    sidebarNodeOrderByParent: { root: ['drone:one'] },
+                    sidebarChatOrderByDrone: { one: ['review', 'default'] },
+                    pinnedDroneIds: ['one'],
+                  },
+                }),
+              },
+              readDeleteAction: async () => ({
+                ok: true,
+                deleteAction: { mode: 'permanent' },
+              }),
+            },
           } as any,
         },
       );
@@ -662,6 +668,73 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('resolves chunked seed attachments before creating a remote drone', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestBody: any = null;
+    const attachmentCalls: any[] = [];
+    const removeCalls: string[][] = [];
+    globalThis.fetch = (async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body ?? '{}'));
+      return new Response(JSON.stringify({ ok: true, id: 'created' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability(
+        {
+          baseUrl: () => 'http://127.0.0.1:7777',
+          apiToken: 'test',
+        },
+        {
+          attachments: async (...args: any[]) => {
+            attachmentCalls.push(args);
+            return [
+              {
+                id: 'upload-1',
+                name: 'screen.png',
+                mime: 'image/png',
+                size: 3,
+                dataBase64: 'YWJj',
+              },
+            ];
+          },
+          remove: async (ids: readonly string[]) => {
+            removeCalls.push([...ids]);
+          },
+        } as any,
+      );
+
+      await capability.invoke(
+        'drone.create.container',
+        {
+          seedPrompt: 'Review the image',
+          seedAttachmentIds: ['upload-1'],
+          seedAttachmentUploadKey: 'new-drone-upload',
+        },
+        { sourceDevice: { id: 'phone-1' } } as never,
+      );
+
+      expect(attachmentCalls).toEqual([
+        ['phone-1', 'new-drone-upload', 'default', ['upload-1']],
+      ]);
+      expect(requestBody).toMatchObject({
+        seedPrompt: 'Review the image',
+        seedAttachments: [
+          {
+            name: 'screen.png',
+            mime: 'image/png',
+            size: 3,
+            dataBase64: 'YWJj',
+          },
+        ],
+      });
+      expect(removeCalls).toEqual([['upload-1']]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('uses the in-process rename command for mobile drone renames', async () => {
     const originalFetch = globalThis.fetch;
     const renames: any[] = [];
@@ -676,16 +749,20 @@ describe('device mesh drone summaries', () => {
         },
         undefined,
         {
-          renameDrone: async (input) => {
-            renames.push(input);
-            return {
-              ok: true,
-              id: input.droneRef,
-              oldName: 'Untitled 1',
-              newName: input.newName,
-              renamed: true,
-            };
-          },
+          hubServices: {
+            drones: {
+              rename: async (input: any) => {
+                renames.push(input);
+                return {
+                  ok: true,
+                  id: input.droneRef,
+                  oldName: 'Untitled 1',
+                  newName: input.newName,
+                  renamed: true,
+                };
+              },
+            },
+          } as any,
         },
       );
       await expect(

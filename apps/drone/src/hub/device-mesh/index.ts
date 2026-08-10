@@ -16,14 +16,13 @@ import { DeviceRouteManager } from './device-route-manager';
 import { DesktopDroneControlHttp } from './desktop-drone-control-http';
 import { createDroneControlCapability } from './drone-control-capability';
 import type { CreatedDroneAutoRenameOperations } from './auto-rename-created-drone';
-import type { RenameDroneCommand } from '../drone-rename-command';
 import { CrossDeviceAssistantPolicyHttp } from './features/cross-device-assistant/policy-http';
 import { CrossDeviceAssistantPolicyStore } from './features/cross-device-assistant/policy-store';
 import { RemoteWorkspaceTarget } from './features/cross-device-assistant/remote-workspace-target';
 import { createWorkspaceCapability } from './features/cross-device-assistant/workspace-capability';
 import { createProviderCredentialsCapability } from './features/provider-credentials/provider-credentials-capability';
 import type { SidebarCommandService } from '../sidebar-command-service';
-import type { HubApplication } from '../application/create-hub-application';
+import type { HubServices } from '../application/hub-services';
 import { ProviderCredentialsHttp } from './features/provider-credentials/provider-credentials-http';
 
 export async function createDeviceMeshService(options: {
@@ -33,8 +32,7 @@ export async function createDeviceMeshService(options: {
   ingressPort?: number;
   createdDroneAutoRename?: CreatedDroneAutoRenameOperations;
   sidebarCommands: SidebarCommandService;
-  hubApplication?: HubApplication;
-  renameDrone?: RenameDroneCommand;
+  hubServices?: HubServices;
 }) {
   const identity = await loadOrCreateDeviceIdentity(options.rootDir);
   const store = new DeviceMeshStore(path.join(options.rootDir, 'state.json'), identity);
@@ -57,9 +55,8 @@ export async function createDeviceMeshService(options: {
       chatAttachments,
       {
         sidebarCommands: options.sidebarCommands,
-        hubApplication: options.hubApplication,
+        hubServices: options.hubServices,
         createdDroneAutoRename: options.createdDroneAutoRename,
-        renameDrone: options.renameDrone,
         broadcastFileChange: (payload, targetDeviceIds) =>
           router.broadcastCapabilityEvent(
             'drone-control',

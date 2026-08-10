@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 
 import type { HubRouter } from '../hub-router';
+import type { HubServices } from '../application/hub-services';
 import {
   type LlmProviderId,
   type StoredApiKeyProviderId,
@@ -34,7 +35,7 @@ export interface SettingsRouteDependencies {
   parseLlmProvider: ServiceFunction;
   upsertStoredLlmProvider: ServiceFunction;
   resolveGithubSettingsResponse: ServiceFunction;
-  resolveDeleteActionSettingsResponse: ServiceFunction;
+  hubSettings: HubServices['settings'];
   readManagedHubStateAtRootOrFallback: ServiceFunction;
   parseDroneDeleteMode: ServiceFunction;
   parseArchiveRetentionId: ServiceFunction;
@@ -76,8 +77,6 @@ export interface SettingsRouteDependencies {
   profileSettingsErrorStatus: (error: unknown) => number;
   apiToken: string;
   droneRootPath: (...parts: string[]) => string;
-  resolveUiPreferencesSettingsResponse: ServiceFunction;
-  updateUiPreferencesSettings: ServiceFunction;
   resolveUserContextSettingsResponse: ServiceFunction;
   clampIntParam: (value: string | null, fallback: number, min: number, max: number) => number;
   readHubLogTail: ServiceFunction;
@@ -107,7 +106,7 @@ export function registerSettingsRoutes(
     parseLlmProvider,
     upsertStoredLlmProvider,
     resolveGithubSettingsResponse,
-    resolveDeleteActionSettingsResponse,
+    hubSettings,
     readManagedHubStateAtRootOrFallback,
     parseDroneDeleteMode,
     parseArchiveRetentionId,
@@ -149,8 +148,6 @@ export function registerSettingsRoutes(
     profileSettingsErrorStatus,
     apiToken,
     droneRootPath,
-    resolveUiPreferencesSettingsResponse,
-    updateUiPreferencesSettings,
     resolveUserContextSettingsResponse,
     clampIntParam,
     readHubLogTail,
@@ -285,7 +282,7 @@ export function registerSettingsRoutes(
   });
 
   apiRouter.get('/api/settings/delete-action', async ({ json: respond }) => {
-    respond(200, await resolveDeleteActionSettingsResponse());
+    respond(200, await hubSettings.readDeleteAction());
   });
 
   apiRouter.post('/api/settings/delete-action', async ({ readJson, fail, json: respond }) => {
@@ -305,7 +302,7 @@ export function registerSettingsRoutes(
       archiveRetention: archiveRetention ?? undefined,
       archiveRuntimePolicy: archiveRuntimePolicy ?? undefined,
     });
-    respond(200, await resolveDeleteActionSettingsResponse());
+    respond(200, await hubSettings.readDeleteAction());
   });
 
   apiRouter.get('/api/settings/filesystem', async ({ json: respond }) => {
@@ -670,7 +667,7 @@ export function registerSettingsRoutes(
   });
 
   apiRouter.get('/api/settings/ui-preferences', async ({ json: respond }) => {
-    respond(200, await resolveUiPreferencesSettingsResponse());
+    respond(200, await hubSettings.uiPreferences.read());
   });
 
   apiRouter.get('/api/settings/user-context', async ({ json: respond }) => {
@@ -681,7 +678,7 @@ export function registerSettingsRoutes(
     const body = await readJson<any>();
     respond(
       200,
-      await updateUiPreferencesSettings({
+      await hubSettings.uiPreferences.update({
         uiPreferences: body?.uiPreferences,
         expectedVersion: body?.expectedVersion,
         notificationMode:

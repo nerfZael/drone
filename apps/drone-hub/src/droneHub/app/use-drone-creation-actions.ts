@@ -370,7 +370,7 @@ export function useDroneCreationActions({
       const hasDraftAttachments = draftAttachments.length > 0;
       const queuedPromptsToHandoff = Array.isArray(latestDraftChat?.queuedPrompts) ? latestDraftChat.queuedPrompts : [];
       const shouldSeedPromptViaCreate =
-        !createWithoutChat && prompt.length > 0 && (!hasDraftAttachments || effectiveCreateAsDraft);
+        !createWithoutChat && (prompt.length > 0 || hasDraftAttachments);
       const nameRaw = String(opts?.name ?? draftCreateName ?? '');
       const name = nameRaw.trim();
       const autoRename = shouldAutoRenameDraftDrone({
@@ -505,12 +505,16 @@ export function useDroneCreationActions({
             agentsMd: agentsMdOverride,
             seedApprovalPolicy,
             prompt: shouldSeedPromptViaCreate ? prompt : '',
+            seedAttachments: shouldSeedPromptViaCreate ? draftAttachments : [],
+            submittedAt: opts?.submittedAt ?? pending?.at,
+            draft: effectiveCreateAsDraft,
           });
-          if (effectiveCreateAsDraft) {
-            (body as any).draft = true;
-            if (hasDraftAttachments) (body as any).seedAttachments = draftAttachments;
-          }
-          const data = await requestJson<{ ok: true; id: string; name: string; phase: 'draft' | 'starting' }>(
+          const data = await requestJson<{
+            ok: true;
+            id: string;
+            name: string;
+            phase: 'draft' | 'starting';
+          }>(
             `/api/drones`,
             {
               method: 'POST',
@@ -592,9 +596,6 @@ export function useDroneCreationActions({
             });
           }
 
-          if (hasDraftAttachments && !effectiveCreateAsDraft) {
-            enqueueQueuedPrompt(droneId, 'default', prompt, draftAttachments);
-          }
           for (const queuedPrompt of queuedPromptsToHandoff) {
             enqueueQueuedPrompt(droneId, 'default', queuedPrompt.prompt, queuedPrompt.attachmentPayloads);
           }

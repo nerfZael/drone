@@ -59,6 +59,32 @@ describe('draft drone create runtime support', () => {
     });
   });
 
+  test('includes attached seed content in the create request', () => {
+    const attachment = {
+      name: 'screen.png',
+      mime: 'image/png',
+      size: 3,
+      dataBase64: 'YWJj',
+    };
+    const payload = buildDraftDroneCreatePayload({
+      name: 'attached-drone',
+      runtime: 'container',
+      repoBranchSelection: { repoBranchSource: 'host' },
+      seedAgent: { kind: 'builtin', id: 'codex' },
+      prompt: 'Review this image',
+      seedAttachments: [attachment],
+      submittedAt: '2026-08-07T12:00:00.000Z',
+      draft: true,
+    });
+
+    expect(payload).toMatchObject({
+      seedPrompt: 'Review this image',
+      seedAttachments: [attachment],
+      seedSubmittedAt: '2026-08-07T12:00:00.000Z',
+      draft: true,
+    });
+  });
+
   test('omits chat seed fields when creating an empty drone', () => {
     const payload = buildDraftDroneCreatePayload({
       name: 'empty-drone',
