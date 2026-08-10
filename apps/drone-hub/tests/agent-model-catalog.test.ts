@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildDetectedModelMenuEntries,
+  cacheAgentModelCatalog,
   normalizeAgentModelCatalog,
 } from '../src/droneHub/app/use-agent-model-catalog';
 
@@ -42,5 +43,42 @@ describe('agent model catalog', () => {
       reasoningLevels: ['high'],
       defaultReasoningLevel: 'high',
     }]);
+  });
+
+  test('caches one catalog per agent without a runtime namespace', () => {
+    const storage = new Map<string, string>();
+    const previousLocalStorage = (globalThis as any).localStorage;
+    (globalThis as any).localStorage = {
+      get length() {
+        return storage.size;
+      },
+      key(index: number) {
+        return Array.from(storage.keys())[index] ?? null;
+      },
+      getItem(key: string) {
+        return storage.get(key) ?? null;
+      },
+      setItem(key: string, value: string) {
+        storage.set(key, value);
+      },
+      removeItem(key: string) {
+        storage.delete(key);
+      },
+      clear() {
+        storage.clear();
+      },
+    };
+    try {
+      cacheAgentModelCatalog('codex', {
+        models: [{ id: 'gpt-shared', label: 'GPT Shared' }],
+      });
+
+      const cached = JSON.parse(Array.from(storage.values())[0] ?? '{}');
+      expect(Object.keys(cached)).toEqual(['codex']);
+      expect(cached.codex[0]?.id).toBe('gpt-shared');
+    } finally {
+      if (previousLocalStorage === undefined) delete (globalThis as any).localStorage;
+      else (globalThis as any).localStorage = previousLocalStorage;
+    }
   });
 });

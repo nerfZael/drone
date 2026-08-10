@@ -17,7 +17,6 @@ export type AgentModelCatalogResult = {
 
 export type AgentModelCatalogTarget = {
   runtime: DroneRuntime;
-  installationKey?: string;
   containerName?: string;
   containerPort?: number;
 };

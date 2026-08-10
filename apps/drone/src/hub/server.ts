@@ -2803,7 +2803,6 @@ function sharedAgentCatalogTarget(opts: {
   const runtime = opts.runtime ?? 'container';
   return {
     runtime,
-    installationKey: `shared:${runtime}`,
     ...(opts.containerName ? { containerName: opts.containerName } : {}),
     ...(opts.containerPort ? { containerPort: opts.containerPort } : {}),
   };

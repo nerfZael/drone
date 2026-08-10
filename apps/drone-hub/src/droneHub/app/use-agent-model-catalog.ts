@@ -9,7 +9,7 @@ import { profileStorageKey } from '../../profile-storage';
 
 export type AgentModelCatalogOption = ExternalAgentModelCatalogModel;
 
-const STORAGE_KEY = profileStorageKey('droneHub.agentModelCatalog.v3');
+const STORAGE_KEY = profileStorageKey('droneHub.agentModelCatalog.v4');
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const CATALOG_UPDATED_EVENT = 'drone-hub:agent-model-catalog-updated';
 
@@ -45,7 +45,6 @@ function writeCache(key: string, models: AgentModelCatalogOption[]) {
 }
 
 export function cacheAgentModelCatalog(
-  runtime: 'container' | 'host',
   agentId: string,
   value: unknown,
 ): void {
@@ -53,7 +52,7 @@ export function cacheAgentModelCatalog(
   if (!cleanAgentId) return;
   const models = normalizeAgentModelCatalog(value);
   if (models.length === 0) return;
-  const key = `${runtime}:${cleanAgentId}`;
+  const key = cleanAgentId;
   writeCache(key, models);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(CATALOG_UPDATED_EVENT, { detail: { key } }));
@@ -86,7 +85,7 @@ export function useAgentModelCatalog(opts: {
   runtime: 'container' | 'host';
   enabled: boolean;
 }) {
-  const key = `${opts.runtime}:${opts.agentId}`;
+  const key = opts.agentId;
   const [models, setModels] = React.useState<AgentModelCatalogOption[]>(() => readCache()[key] ?? []);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);

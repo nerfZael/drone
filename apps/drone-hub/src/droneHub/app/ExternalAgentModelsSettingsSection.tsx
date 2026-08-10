@@ -51,7 +51,7 @@ export function ExternalAgentModelsSettingsSection({
       setResult(response);
       for (const catalog of response.catalogs) {
         if (!catalog.installed || catalog.models.length === 0) continue;
-        cacheAgentModelCatalog('host', catalog.agent, { models: catalog.models });
+        cacheAgentModelCatalog(catalog.agent, { models: catalog.models });
       }
     } catch (nextError: any) {
       setError(String(nextError?.message ?? nextError ?? 'Model refresh failed.'));
