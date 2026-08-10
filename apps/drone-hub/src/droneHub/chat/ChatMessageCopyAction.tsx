@@ -39,7 +39,7 @@ export function ChatMessageCopyAction({
         <div
           role="status"
           aria-live="polite"
-          className={`pointer-events-none absolute rounded border border-[var(--user-border)] bg-[var(--scrim-soft)] px-2 py-1 text-[var(--text-9)] uppercase tracking-wide text-[var(--fg-secondary)] ${
+          className={`pointer-events-none absolute whitespace-nowrap rounded border border-[var(--user-border)] bg-[var(--scrim-soft)] px-2 py-1 text-[var(--text-9)] uppercase tracking-wide text-[var(--fg-secondary)] ${
             position === 'hover-rail' ? 'bottom-full right-0 mb-1' : 'right-8 top-0'
           }`}
           style={{ fontFamily: 'var(--display)' }}

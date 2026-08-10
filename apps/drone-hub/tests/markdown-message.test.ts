@@ -257,10 +257,17 @@ describe('MarkdownMessage', () => {
 
   test('renders fenced code as a highlighted, copyable, horizontally scrollable card', () => {
     const html = renderMarkdown('```ts\nconst answer = 42;\n```');
+    const copyActionSource = readFileSync(
+      new URL('../src/droneHub/chat/ChatMessageCopyAction.tsx', import.meta.url),
+      'utf8',
+    );
     expect(html).toContain('class="dh-code-card group/code-block"');
     expect(html).toContain('class="dh-code-card__scroll"');
     expect(html).not.toContain('<pre><section');
     expect(html).toContain('title="Copy code"');
+    expect(copyActionSource).toContain(
+      'pointer-events-none absolute whitespace-nowrap rounded',
+    );
     expect(html).not.toContain('dh-code-card__language');
     expect(html).not.toContain('&lt;/&gt;');
     expect(html).toContain('class="token keyword"');
