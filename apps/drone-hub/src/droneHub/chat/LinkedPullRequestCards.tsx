@@ -4,6 +4,7 @@ import {
   githubPullRequestMatchesRepo,
   pullRequestCloseConfirmation,
   pullRequestMergeConfirmation,
+  type GithubPullRequestDiffStats,
 } from '@drone/assistant-chat';
 import { invalidateHeaderRepoPullRequestSummaryCache } from '../app/HeaderPullRequestShortcuts';
 import { requestJson } from '../http';
@@ -73,11 +74,7 @@ function MergedPullRequestIcon() {
   );
 }
 
-function PullRequestDiffStats({
-  stats,
-}: {
-  stats: NonNullable<RepoPullRequestSummary['diffStats']>;
-}) {
+function PullRequestDiffStats({ stats }: { stats: GithubPullRequestDiffStats }) {
   const presentation = githubPullRequestDiffStatsPresentation(stats);
   return (
     <span

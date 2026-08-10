@@ -18,8 +18,8 @@ import {
   githubPullRequestStatusBadges,
   pullRequestCloseConfirmation,
   pullRequestMergeConfirmation,
+  type GithubPullRequestDiffStats,
   type GithubPullRequestLink,
-  type GithubPullRequestSummary,
 } from '@drone/assistant-chat';
 import { colors, radii } from '../theme';
 import { ConfirmDialog } from '../components/Ui';
@@ -32,7 +32,6 @@ import {
 } from './linked-pull-request-model';
 
 type StatusTone = 'accent' | 'danger' | 'muted' | 'success' | 'warning';
-type PullRequestDiffStatsData = NonNullable<GithubPullRequestSummary['diffStats']>;
 type PullRequestConfirmation =
   | { action: 'merge'; method: MobilePullRequestMergeMethod }
   | { action: 'close' }
@@ -58,7 +57,7 @@ function TonePill({ label, tone }: { label: string; tone: StatusTone }) {
   );
 }
 
-function PullRequestDiffStats({ stats }: { stats: PullRequestDiffStatsData }) {
+function PullRequestDiffStats({ stats }: { stats: GithubPullRequestDiffStats }) {
   const presentation = githubPullRequestDiffStatsPresentation(stats);
   return (
     <View
