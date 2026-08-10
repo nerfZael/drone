@@ -7,6 +7,7 @@ import { readJsonBody, sendJson as json } from './hub-http';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 import type { DroneRuntime } from '../host/runtime';
 import type { ChatImageAttachment } from './chat-attachments';
+import type { PendingStartupPrompt } from './drone-pending-state';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './routes/legacy-route';
 
 type RepoBranchSourceMode = 'host' | 'remote';
@@ -35,6 +36,105 @@ type InitialPromptQueueReservation = {
   prompt: string;
   cwd?: string | null;
 };
+
+type InitialSeedPromptPlan = {
+  seedPrompt: string;
+  seedPromptId: string;
+  queueSeedPrompt: boolean;
+  startupQueuedPrompts: PendingStartupPrompt[];
+  shouldReserveQueuePosition: boolean;
+};
+
+function attachedPromptFallback(attachments: readonly ChatImageAttachment[]): string {
+  return `Attached ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`;
+}
+
+function buildInitialSeedPromptPlan(opts: {
+  seedPromptRaw: string;
+  seedAttachments: ChatImageAttachment[];
+  seedPromptIdRaw?: string;
+  seedChatName: string;
+  seedSubmittedAt: string;
+  seedCwdRaw?: string | null;
+  createAsDraft: boolean;
+}): InitialSeedPromptPlan {
+  const seedPrompt =
+    opts.seedPromptRaw.trim() ||
+    (opts.seedAttachments.length > 0 ? attachedPromptFallback(opts.seedAttachments) : '');
+  const seedPromptId = seedPrompt
+    ? String(opts.seedPromptIdRaw ?? '').trim() || crypto.randomBytes(9).toString('hex')
+    : '';
+  const queueSeedPrompt = opts.createAsDraft || opts.seedAttachments.length > 0;
+  const startupQueuedPrompts =
+    queueSeedPrompt && seedPrompt
+      ? [
+          {
+            id: seedPromptId,
+            chatName: opts.seedChatName,
+            at: opts.seedSubmittedAt,
+            prompt: seedPrompt,
+            ...(opts.seedAttachments.length > 0 ? { attachments: opts.seedAttachments } : {}),
+            ...(opts.seedAttachments.length > 0 ? { deliveryMode: 'asap' as const } : {}),
+            ...(opts.seedCwdRaw ? { cwd: String(opts.seedCwdRaw) } : {}),
+            state: 'queued' as const,
+            updatedAt: opts.seedSubmittedAt,
+          },
+        ]
+      : [];
+  return {
+    seedPrompt,
+    seedPromptId,
+    queueSeedPrompt,
+    startupQueuedPrompts,
+    shouldReserveQueuePosition: Boolean(
+      seedPrompt && seedPromptId && opts.seedAttachments.length === 0,
+    ),
+  };
+}
+
+function buildInitialSeedConfig(opts: {
+  seedPrompt: string;
+  seedPromptId: string;
+  queueSeedPrompt: boolean;
+  seedChatName: string;
+  seedSubmittedAt: string;
+  seedProvider: string;
+  seedModel: string | null;
+  seedReasoning: string | null;
+  seedAgentPermissionMode: AgentPermissionMode;
+  seedApprovalPolicy: AgentApprovalPolicy;
+  seedCwdRaw?: string | null;
+  seedAgent: any;
+}) {
+  if (
+    !(
+      opts.seedPrompt ||
+      opts.seedAgent ||
+      opts.seedProvider ||
+      opts.seedModel ||
+      opts.seedReasoning ||
+      opts.seedAgentPermissionMode !== 'full-access' ||
+      opts.seedApprovalPolicy !== 'ask'
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    chatName: opts.seedChatName,
+    ...(opts.seedProvider ? { provider: opts.seedProvider } : {}),
+    ...(opts.seedModel ? { model: opts.seedModel } : {}),
+    ...(opts.seedReasoning ? { reasoning: opts.seedReasoning } : {}),
+    ...(opts.seedAgentPermissionMode !== 'full-access'
+      ? { agentPermissionMode: opts.seedAgentPermissionMode }
+      : {}),
+    ...(opts.seedApprovalPolicy !== 'ask' ? { approvalPolicy: opts.seedApprovalPolicy } : {}),
+    ...(!opts.queueSeedPrompt && opts.seedPromptId ? { promptId: opts.seedPromptId } : {}),
+    ...(!opts.queueSeedPrompt && opts.seedPrompt ? { prompt: opts.seedPrompt } : {}),
+    ...(!opts.queueSeedPrompt && opts.seedPrompt ? { submittedAt: opts.seedSubmittedAt } : {}),
+    ...(opts.seedCwdRaw ? { cwd: String(opts.seedCwdRaw) } : {}),
+    ...(opts.seedAgent ? { agent: opts.seedAgent } : {}),
+  };
+}
 
 export async function reserveInitialPromptQueuePosition(
   opts: InitialPromptQueueReservation,
@@ -226,7 +326,7 @@ function createDroneProvisioningServiceHandler(
           return;
         }
 
-        let seedPrompt = String(
+        const seedPromptRaw = String(
           body?.seedPrompt ?? body?.initialMessage ?? body?.seed?.prompt ?? '',
         ).trim();
         let seedAttachments: ChatImageAttachment[] = [];
@@ -237,9 +337,6 @@ function createDroneProvisioningServiceHandler(
         } catch (e: any) {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
-        }
-        if (!seedPrompt && seedAttachments.length > 0) {
-          seedPrompt = `Attached ${seedAttachments.length} attachment${seedAttachments.length === 1 ? '' : 's'}`;
         }
         const seedChatName = normalizeChatName(
           body?.seedChat ?? body?.seed?.chatName ?? body?.seed?.chat ?? 'default',
@@ -283,13 +380,13 @@ function createDroneProvisioningServiceHandler(
             : typeof body?.seed?.promptId === 'string'
               ? body.seed.promptId.trim()
               : '';
-        if (seedPrompt && seedPromptIdRaw && !isSafePromptId(seedPromptIdRaw)) {
+        const seedPromptForIdValidation =
+          seedPromptRaw ||
+          (seedAttachments.length > 0 ? attachedPromptFallback(seedAttachments) : '');
+        if (seedPromptForIdValidation && seedPromptIdRaw && !isSafePromptId(seedPromptIdRaw)) {
           json(res, 400, { ok: false, error: 'invalid seedPromptId' });
           return;
         }
-        const seedPromptId = seedPrompt
-          ? seedPromptIdRaw || crypto.randomBytes(9).toString('hex')
-          : '';
         let seedModel: string | null = null;
         try {
           seedModel = parseChatModelForUpdate(body?.seedModel ?? body?.seed?.model);
@@ -476,25 +573,30 @@ function createDroneProvisioningServiceHandler(
           return;
         }
         const at = nowIso();
-        const queueSeedPrompt = createAsDraft || seedAttachments.length > 0;
-        const startupQueuedPrompts =
-          queueSeedPrompt && seedPrompt
-            ? [
-                {
-                  id: seedPromptId || crypto.randomBytes(9).toString('hex'),
-                  chatName: seedChatName,
-                  at: seedSubmittedAt,
-                  prompt: seedPrompt,
-                  ...(seedAttachments.length > 0 ? { attachments: seedAttachments } : {}),
-                  // Attached prompts cannot reserve a canonical queue row until their files are
-                  // staged. Keep the seed ahead of messages submitted while the drone starts.
-                  ...(seedAttachments.length > 0 ? { deliveryMode: 'asap' as const } : {}),
-                  ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
-                  state: 'queued' as const,
-                  updatedAt: seedSubmittedAt,
-                },
-              ]
-            : [];
+        const initialPrompt = buildInitialSeedPromptPlan({
+          seedPromptRaw,
+          seedAttachments,
+          seedPromptIdRaw,
+          seedChatName,
+          seedSubmittedAt,
+          seedCwdRaw,
+          createAsDraft,
+        });
+        const { queueSeedPrompt, seedPrompt, seedPromptId, startupQueuedPrompts } = initialPrompt;
+        const seedConfig = buildInitialSeedConfig({
+          seedPrompt,
+          seedPromptId,
+          queueSeedPrompt,
+          seedChatName,
+          seedSubmittedAt,
+          seedProvider,
+          seedModel,
+          seedReasoning,
+          seedAgentPermissionMode,
+          seedApprovalPolicy,
+          seedCwdRaw,
+          seedAgent,
+        });
         try {
           await upsertCanonicalDroneLifecycle('pending', droneId, {
             id: droneId,
@@ -534,33 +636,7 @@ function createDroneProvisioningServiceHandler(
                   ).fleet,
                 }
               : {}),
-            ...(seedPrompt ||
-            seedAgent ||
-            seedProvider ||
-            seedModel ||
-            seedReasoning ||
-            seedAgentPermissionMode !== 'full-access' ||
-            seedApprovalPolicy !== 'ask'
-              ? {
-                  seed: {
-                    chatName: seedChatName,
-                    ...(seedProvider ? { provider: seedProvider } : {}),
-                    ...(seedModel ? { model: seedModel } : {}),
-                    ...(seedReasoning ? { reasoning: seedReasoning } : {}),
-                    ...(seedAgentPermissionMode !== 'full-access'
-                      ? { agentPermissionMode: seedAgentPermissionMode }
-                      : {}),
-                    ...(seedApprovalPolicy !== 'ask'
-                      ? { approvalPolicy: seedApprovalPolicy }
-                      : {}),
-                    ...(!queueSeedPrompt && seedPromptId ? { promptId: seedPromptId } : {}),
-                    ...(!queueSeedPrompt && seedPrompt ? { prompt: seedPrompt } : {}),
-                    ...(!queueSeedPrompt && seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
-                    ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
-                    ...(seedAgent ? { agent: seedAgent } : {}),
-                  },
-                }
-              : {}),
+            ...(seedConfig ? { seed: seedConfig } : {}),
           });
         } catch (error: any) {
           if (/display name already exists/i.test(String(error?.message ?? ''))) {
@@ -569,7 +645,7 @@ function createDroneProvisioningServiceHandler(
           }
           throw error;
         }
-        if (seedPrompt && seedPromptId && seedAttachments.length === 0) {
+        if (initialPrompt.shouldReserveQueuePosition) {
           await reserveInitialPromptQueuePosition({
             droneId,
             chatName: seedChatName,
@@ -890,9 +966,18 @@ function createDroneProvisioningServiceHandler(
                 continue;
               }
 
-              const seedPrompt = String(
+              const seedPromptRaw = String(
                 raw?.seedPrompt ?? raw?.initialMessage ?? raw?.seed?.prompt ?? '',
               ).trim();
+              let seedAttachments: ChatImageAttachment[] = [];
+              try {
+                seedAttachments = normalizeChatImageAttachments(
+                  raw?.seedAttachments ?? raw?.seed?.attachments,
+                );
+              } catch (e: any) {
+                rejected.push({ name, error: e?.message ?? String(e), status: 400 });
+                continue;
+              }
               const seedChatName = normalizeChatName(
                 raw?.seedChat ?? raw?.seed?.chatName ?? raw?.seed?.chat ?? 'default',
               );
@@ -1097,26 +1182,33 @@ function createDroneProvisioningServiceHandler(
 
               const id = makeDroneIdentity();
               const at = nowIso();
-              const seedPromptId = seedPrompt
-                ? crypto.randomBytes(9).toString('hex')
-                : '';
+              const initialPrompt = buildInitialSeedPromptPlan({
+                seedPromptRaw,
+                seedAttachments,
+                seedChatName,
+                seedSubmittedAt,
+                seedCwdRaw,
+                createAsDraft,
+              });
+              const { queueSeedPrompt, seedPrompt, seedPromptId, startupQueuedPrompts } =
+                initialPrompt;
+              const seedConfig = buildInitialSeedConfig({
+                seedPrompt,
+                seedPromptId,
+                queueSeedPrompt,
+                seedChatName,
+                seedSubmittedAt,
+                seedProvider,
+                seedModel,
+                seedReasoning,
+                seedAgentPermissionMode,
+                seedApprovalPolicy,
+                seedCwdRaw,
+                seedAgent,
+              });
               if (group && !referencedGroup) {
                 groupsToEnsure.set(`${repoPath}\0${group}`, { group, repoPath });
               }
-              const startupQueuedPrompts =
-                createAsDraft && seedPrompt
-                  ? [
-                      {
-                        id: seedPromptId,
-                        chatName: seedChatName,
-                        at: seedSubmittedAt,
-                        prompt: seedPrompt,
-                        ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
-                        state: 'queued' as const,
-                        updatedAt: seedSubmittedAt,
-                      },
-                    ]
-                  : [];
               const pendingEntry = {
                 id,
                 name,
@@ -1154,37 +1246,11 @@ function createDroneProvisioningServiceHandler(
                       ).fleet,
                     }
                   : {}),
-                ...(seedPrompt ||
-                seedAgent ||
-                seedProvider ||
-                seedModel ||
-                seedReasoning ||
-                seedAgentPermissionMode !== 'full-access' ||
-                seedApprovalPolicy !== 'ask'
-                  ? {
-                      seed: {
-                        chatName: seedChatName,
-                        ...(seedProvider ? { provider: seedProvider } : {}),
-                        ...(seedModel ? { model: seedModel } : {}),
-                        ...(seedReasoning ? { reasoning: seedReasoning } : {}),
-                        ...(seedAgentPermissionMode !== 'full-access'
-                          ? { agentPermissionMode: seedAgentPermissionMode }
-                          : {}),
-                        ...(seedApprovalPolicy !== 'ask'
-                          ? { approvalPolicy: seedApprovalPolicy }
-                          : {}),
-                        ...(!createAsDraft && seedPromptId ? { promptId: seedPromptId } : {}),
-                        ...(!createAsDraft && seedPrompt ? { prompt: seedPrompt } : {}),
-                        ...(!createAsDraft && seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
-                        ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
-                        ...(seedAgent ? { agent: seedAgent } : {}),
-                      },
-                    }
-                  : {}),
+                ...(seedConfig ? { seed: seedConfig } : {}),
               };
               regAny.pending[id] = pendingEntry;
               pendingEntries.push({ state: 'pending', droneId: id, entry: pendingEntry });
-              if (seedPrompt && seedPromptId) {
+              if (initialPrompt.shouldReserveQueuePosition) {
                 initialPromptReservations.push({
                   droneId: id,
                   chatName: seedChatName,
