@@ -1910,6 +1910,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     resolveChatTmuxCommand,
     setChatAgentConfig,
     shouldAutoRenameChatOnPrompt,
+    start: () => chatStateMaintenanceScheduler.start(),
     updateTranscriptTurnById,
   };
 }

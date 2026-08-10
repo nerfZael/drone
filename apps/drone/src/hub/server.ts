@@ -12,6 +12,7 @@ import { WebSocket } from 'ws';
 import { BaseConfigManager } from 'dvm';
 import { normalizeAgentPlan, sameAgentPlan } from '@drone/assistant-chat';
 
+import { ManagedLoop } from '../background/managed-loop';
 import { ensureContainerDroneDaemonSession } from '../host/container-daemon';
 import {
   HubOutboxDispatcher,
@@ -36,6 +37,7 @@ import {
   createRegistryBackup,
   resolveRegistryBackupStatusResponse,
   startRegistryBackupScheduler,
+  stopRegistryBackupScheduler,
   upsertStoredRegistryBackupSettings,
 } from '../host/registry-backups';
 import {
@@ -2266,8 +2268,22 @@ function isSafeTmuxSessionName(raw: string): boolean {
   return /^[A-Za-z0-9._-]+$/.test(s);
 }
 
-async function sleepMs(ms: number) {
-  await new Promise((r) => setTimeout(r, ms));
+async function sleepMs(ms: number, signal?: AbortSignal) {
+  if (signal?.aborted) throw signal.reason;
+  await new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    const abort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    timer.unref?.();
+  });
 }
 
 async function dvmContainerExists(name: string): Promise<boolean> {
@@ -2282,18 +2298,23 @@ async function dvmContainerExists(name: string): Promise<boolean> {
   }
 }
 
-async function waitForDroneDaemonReady(client: ReturnType<typeof makeClient>, timeoutMs: number) {
+async function waitForDroneDaemonReady(
+  client: ReturnType<typeof makeClient>,
+  timeoutMs: number,
+  signal?: AbortSignal,
+) {
   const start = Date.now();
   // Keep retrying briefly; daemon may not be ready immediately after container start.
   // NOTE: droneStatus already has its own per-request timeout.
   while (Date.now() - start < timeoutMs) {
     try {
       // eslint-disable-next-line no-await-in-loop
-      await droneStatus(client);
+      await droneStatus(client, { signal });
       return;
     } catch {
+      if (signal?.aborted) throw signal.reason;
       // eslint-disable-next-line no-await-in-loop
-      await sleepMs(250);
+      await sleepMs(250, signal);
     }
   }
   throw new Error(`drone daemon not ready after ${timeoutMs}ms`);
@@ -3255,6 +3276,8 @@ const {
   runDroneLifecycleAction,
   stopAllDroneChatActivity,
   stopChatResponse,
+  startPromptRuntimeBackgroundWork,
+  stopPromptRuntimeBackgroundWork,
   stopSingleDroneChatActivity,
   stopTranscriptPendingPrompts,
   transcriptTurnIdsFromEntry,
@@ -3984,7 +4007,7 @@ function normalizeContainerMcpUrl(raw: unknown): string {
   return parsed.toString().replace(/\/+$/, '');
 }
 
-export async function startDroneHubApiServer(opts: {
+type DroneHubApiServerOptions = {
   port: number;
   host?: string;
   containerMcpHost?: string;
@@ -3994,7 +4017,87 @@ export async function startDroneHubApiServer(opts: {
   deviceMeshIngressPort?: number;
   mcpToken?: string;
   allowedOrigins?: string[];
-}) {
+};
+
+type BackgroundLifecycle = {
+  register: (name: string, stop: () => Promise<void>) => void;
+  setStartupServer: (server: http.Server) => void;
+  stop: () => Promise<void>;
+};
+
+export async function startDroneHubApiServer(opts: DroneHubApiServerOptions) {
+  const backgroundResources: Array<{ name: string; stop: () => Promise<void> }> = [];
+  let backgroundResourcesStop: Promise<void> | null = null;
+  let startupServer: http.Server | null = null;
+  const registerBackgroundResource = (
+    name: string,
+    stop: () => Promise<void>,
+  ): void => {
+    backgroundResources.push({ name, stop });
+  };
+  const stopBackgroundResources = async (): Promise<void> => {
+    if (!backgroundResourcesStop) {
+      backgroundResourcesStop = (async () => {
+        for (const resource of [...backgroundResources].reverse()) {
+          try {
+            await resource.stop();
+          } catch (error) {
+            hubLog('warn', 'background resource stop failed', {
+              resource: resource.name,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      })();
+    }
+    await backgroundResourcesStop;
+  };
+  const stopFailedStartupServer = async (): Promise<void> => {
+    const server = startupServer;
+    if (!server?.listening) return;
+    const closing = new Promise<void>((resolve) => server.close(() => resolve()));
+    try {
+      (server as any).closeAllConnections?.();
+    } catch {
+      // ignore
+    }
+    await Promise.race([
+      closing,
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 3_000);
+        timer.unref?.();
+      }),
+    ]);
+  };
+
+  try {
+    return await startDroneHubApiServerWithLifecycle(opts, {
+      register: registerBackgroundResource,
+      setStartupServer: (server) => {
+        startupServer = server;
+      },
+      stop: stopBackgroundResources,
+    });
+  } catch (error) {
+    await stopFailedStartupServer();
+    await stopBackgroundResources();
+    throw error;
+  }
+}
+
+async function startDroneHubApiServerWithLifecycle(
+  opts: DroneHubApiServerOptions,
+  lifecycle: BackgroundLifecycle,
+) {
+  const {
+    register: registerBackgroundResource,
+    setStartupServer,
+    stop: stopBackgroundResources,
+  } = lifecycle;
+  startPromptRuntimeBackgroundWork();
+  registerBackgroundResource('prompt runtime', stopPromptRuntimeBackgroundWork);
+  chatSessionRuntime.start();
+  registerBackgroundResource('chat state maintenance', async () => chatSessionRuntime.close());
   chatReconciliationQueue.clearRetries();
   loadHubEnv();
   await logHubLlmStartupSnapshot();
@@ -4161,7 +4264,9 @@ export async function startDroneHubApiServer(opts: {
   }
 
   startArchiveCleanupScheduler();
+  registerBackgroundResource('archive cleanup', stopArchiveCleanupScheduler);
   startRegistryBackupScheduler();
+  registerBackgroundResource('registry backups', stopRegistryBackupScheduler);
 
   const wss = createTerminalWebSocketServer({
     isStaleSessionError: isStaleDockerExecErrorMessage,
@@ -4346,11 +4451,11 @@ export async function startDroneHubApiServer(opts: {
   let droneSummaryRegistryCacheLoad: Promise<any> | null = null;
   let droneSummaryRegistryCacheEpoch = 0;
   let droneSummaryMaintenanceTimeout: ReturnType<typeof setTimeout> | null = null;
-  let droneSummaryMaintenanceBusy = false;
+  let droneSummaryMaintenanceTask: Promise<void> | null = null;
   let droneSummaryMaintenanceLastStartedAt = 0;
-  let droneStatusRefreshTimer: ReturnType<typeof setInterval> | null = null;
-  let droneStatusRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
-  let droneStatusRefreshBusy = false;
+  let droneSummaryMaintenanceStopped = false;
+  let droneStatusRefreshLoop: ManagedLoop | null = null;
+  let droneStatusRefreshSource = 'interval';
   let canonicalActiveModelCache: { loadedAtMs: number; model: any } | null = null;
 
   async function loadCanonicalActiveModel(): Promise<any> {
@@ -4490,8 +4595,6 @@ export async function startDroneHubApiServer(opts: {
   }
 
   async function refreshDroneStatusCache(source: string): Promise<void> {
-    if (droneStatusRefreshBusy) return;
-    droneStatusRefreshBusy = true;
     try {
       const regAny: any = await loadCanonicalActiveModel();
       const realDrones = Object.values(regAny?.drones ?? {}) as any[];
@@ -4505,8 +4608,6 @@ export async function startDroneHubApiServer(opts: {
       }
     } catch (e: any) {
       hubLog('warn', 'drone status refresh failed', { source, error: e?.message ?? String(e) });
-    } finally {
-      droneStatusRefreshBusy = false;
     }
   }
 
@@ -4543,24 +4644,22 @@ export async function startDroneHubApiServer(opts: {
   }
 
   function scheduleDroneStatusRefresh(source: string, delayMs = 0): void {
-    if (droneStatusRefreshTimeout) return;
-    droneStatusRefreshTimeout = setTimeout(
-      () => {
-        droneStatusRefreshTimeout = null;
-        void refreshDroneStatusCache(source);
-      },
-      Math.max(0, delayMs),
-    );
-    (droneStatusRefreshTimeout as any).unref?.();
+    droneStatusRefreshSource = source;
+    droneStatusRefreshLoop?.wake(delayMs);
   }
 
   function startDroneStatusRefresher(): void {
-    scheduleDroneStatusRefresh('startup', 0);
-    if (droneStatusRefreshTimer) return;
-    droneStatusRefreshTimer = setInterval(() => {
-      scheduleDroneStatusRefresh('interval', 0);
-    }, DRONE_STATUS_REFRESH_INTERVAL_MS);
-    (droneStatusRefreshTimer as any).unref?.();
+    if (droneStatusRefreshLoop) return;
+    droneStatusRefreshSource = 'startup';
+    droneStatusRefreshLoop = new ManagedLoop({
+      intervalMs: DRONE_STATUS_REFRESH_INTERVAL_MS,
+      run: async () => {
+        const source = droneStatusRefreshSource;
+        droneStatusRefreshSource = 'interval';
+        await refreshDroneStatusCache(source);
+      },
+    });
+    droneStatusRefreshLoop.start();
   }
 
   async function auditStartupRegistryPresence(): Promise<void> {
@@ -4826,23 +4925,28 @@ export async function startDroneHubApiServer(opts: {
     }
   }
 
-  async function runDroneSummaryMaintenance(source: string): Promise<void> {
-    if (droneSummaryMaintenanceBusy) return;
-    droneSummaryMaintenanceBusy = true;
+  function runDroneSummaryMaintenance(source: string): Promise<void> {
+    if (droneSummaryMaintenanceTask) return droneSummaryMaintenanceTask;
     droneSummaryMaintenanceLastStartedAt = Date.now();
-    try {
-      const regAny: any = await loadCanonicalActiveModel();
-      enqueueDroneRegistryReconcilers(regAny);
-      await reconcileSeedingPromptCompletion(regAny);
-      await autoClearStaleRepoConflictHubErrors(regAny);
-    } catch (e: any) {
-      hubLog('warn', 'drone summary maintenance failed', {
-        source,
-        error: e?.message ?? String(e),
-      });
-    } finally {
-      droneSummaryMaintenanceBusy = false;
-    }
+    const task = (async () => {
+      try {
+        const regAny: any = await loadCanonicalActiveModel();
+        enqueueDroneRegistryReconcilers(regAny);
+        await reconcileSeedingPromptCompletion(regAny);
+        await autoClearStaleRepoConflictHubErrors(regAny);
+      } catch (e: any) {
+        hubLog('warn', 'drone summary maintenance failed', {
+          source,
+          error: e?.message ?? String(e),
+        });
+      }
+    })().finally(() => {
+      if (droneSummaryMaintenanceTask === task) {
+        droneSummaryMaintenanceTask = null;
+      }
+    });
+    droneSummaryMaintenanceTask = task;
+    return task;
   }
 
   function registryNeedsDroneSummaryMaintenance(regAny: any): boolean {
@@ -4871,6 +4975,7 @@ export async function startDroneHubApiServer(opts: {
   }
 
   function scheduleDroneSummaryMaintenance(source: string, delayMs = 0): void {
+    if (droneSummaryMaintenanceStopped) return;
     if (droneSummaryMaintenanceTimeout) return;
     const sinceLastStartMs = Date.now() - droneSummaryMaintenanceLastStartedAt;
     const throttleMs = Math.max(0, DRONE_SUMMARY_MAINTENANCE_MIN_INTERVAL_MS - sinceLastStartMs);
@@ -5470,7 +5575,7 @@ export async function startDroneHubApiServer(opts: {
     subscribeWhiteboardChanges,
     emitWhiteboardChange,
   });
-  await registerWorkflowFeature(apiRouter, {
+  const stopWorkflowFeature = await registerWorkflowFeature(apiRouter, {
     nowIso,
     resolveDrone: resolveDroneOrPendingForReadRef,
     importDroneChats: importDroneChatsFromRegistry,
@@ -5494,6 +5599,7 @@ export async function startDroneHubApiServer(opts: {
     },
     writeSseEvent: writeHubSseEvent,
   });
+  registerBackgroundResource('workflows', async () => await stopWorkflowFeature?.());
 
   registerAgentModelCatalogRoutes(apiRouter, {
     normalizeBuiltinAgentId,
@@ -6039,6 +6145,7 @@ export async function startDroneHubApiServer(opts: {
       handleHubRequestFailure({ req, res, error, log: hubLog, respond: json });
     }
   });
+  setStartupServer(server);
   const httpSockets = new Set<any>();
   server.on('connection', (socket) => {
     httpSockets.add(socket);
@@ -6063,7 +6170,13 @@ export async function startDroneHubApiServer(opts: {
     }),
   );
 
-  await new Promise<void>((resolve) => server.listen(opts.port, host, () => resolve()));
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(opts.port, host, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
   const outboxDatabase = getHubDatabase();
   const hubOutboxDispatchLoop = outboxDatabase
     ? new HubOutboxDispatchLoop(
@@ -6083,12 +6196,28 @@ export async function startDroneHubApiServer(opts: {
       )
     : null;
   hubOutboxDispatchLoop?.start();
+  registerBackgroundResource('hub outbox', async () => await hubOutboxDispatchLoop?.stop());
   await resourceSubscriptionService?.start();
+  registerBackgroundResource(
+    'resource subscriptions',
+    async () => await resourceSubscriptionService?.stop(),
+  );
   void auditStartupRegistryPresence();
   startDroneStatusRefresher();
+  droneSummaryMaintenanceStopped = false;
   scheduleDroneSummaryMaintenance('startup', 0);
+  registerBackgroundResource('drone status refresh', async () => {
+    droneSummaryMaintenanceStopped = true;
+    const loop = droneStatusRefreshLoop;
+    droneStatusRefreshLoop = null;
+    await loop?.stop();
+    if (droneSummaryMaintenanceTimeout) clearTimeout(droneSummaryMaintenanceTimeout);
+    droneSummaryMaintenanceTimeout = null;
+    await droneSummaryMaintenanceTask?.catch(() => {});
+  });
   const address = server.address();
   actualPort = typeof address === 'object' && address ? address.port : opts.port;
+  registerBackgroundResource('device mesh', async () => await deviceMesh.close());
   await deviceMesh.start();
   if (mcpToken && containerMcpHost && containerMcpActualPort > 0) {
     const mcpOnlyServer = http.createServer(async (req, res) => {
@@ -6115,16 +6244,10 @@ export async function startDroneHubApiServer(opts: {
         containerMcpSockets.delete(socket);
       });
     });
-    try {
-      await new Promise<void>((resolve, reject) => {
-        mcpOnlyServer.once('error', reject);
-        mcpOnlyServer.listen(containerMcpActualPort, containerMcpHost, () => resolve());
-      });
-    } catch (error) {
-      await deviceMesh.close();
-      await new Promise<void>((resolve) => server.close(() => resolve())).catch(() => {});
-      throw error;
-    }
+    await new Promise<void>((resolve, reject) => {
+      mcpOnlyServer.once('error', reject);
+      mcpOnlyServer.listen(containerMcpActualPort, containerMcpHost, () => resolve());
+    });
     containerMcpServer = mcpOnlyServer;
     const mcpAddress = mcpOnlyServer.address();
     containerMcpActualPort =
@@ -6156,11 +6279,21 @@ export async function startDroneHubApiServer(opts: {
         : null,
     close: async () => {
       cancelCodexLogin();
-      resourceSubscriptionService?.stop();
       unsubscribeDeviceMeshAssistantChanges();
       unsubscribeHubApplicationEvents();
-      await deviceMesh.close();
-      await hubOutboxDispatchLoop?.stop();
+      const waitWithTimeout = async (p: Promise<void>, timeoutMs: number): Promise<void> => {
+        await Promise.race([
+          p,
+          new Promise<void>((resolve) => {
+            setTimeout(() => resolve(), Math.max(1, Math.floor(timeoutMs)));
+          }),
+        ]);
+      };
+      const serverClose = new Promise<void>((resolve) => server.close(() => resolve()));
+      const containerMcpServerClose = containerMcpServer
+        ? new Promise<void>((resolve) => containerMcpServer?.close(() => resolve()))
+        : Promise.resolve();
+      await stopBackgroundResources();
       if (notifyDroneChatWrite === notifyCanonicalPromptQueueChatWrite) {
         notifyDroneChatWrite = null;
       }
@@ -6173,14 +6306,6 @@ export async function startDroneHubApiServer(opts: {
       if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
         activeDroneHubMcpProjectionConfig = null;
       }
-      const waitWithTimeout = async (p: Promise<void>, timeoutMs: number): Promise<void> => {
-        await Promise.race([
-          p,
-          new Promise<void>((resolve) => {
-            setTimeout(() => resolve(), Math.max(1, Math.floor(timeoutMs)));
-          }),
-        ]);
-      };
       try {
         wss.clients.forEach((c: WebSocket) => {
           try {
@@ -6208,10 +6333,6 @@ export async function startDroneHubApiServer(opts: {
         1_000,
       );
       await mcpHttpTransport.close();
-      const serverClose = new Promise<void>((resolve) => server.close(() => resolve()));
-      const containerMcpServerClose = containerMcpServer
-        ? new Promise<void>((resolve) => containerMcpServer?.close(() => resolve()))
-        : Promise.resolve();
       try {
         (server as any).closeIdleConnections?.();
       } catch {
@@ -6238,35 +6359,6 @@ export async function startDroneHubApiServer(opts: {
       }
       await waitWithTimeout(serverClose, 3_000);
       await waitWithTimeout(containerMcpServerClose, 3_000);
-      stopArchiveCleanupScheduler();
-      if (droneStatusRefreshTimer) {
-        try {
-          clearInterval(droneStatusRefreshTimer);
-        } catch {
-          // ignore
-        }
-        droneStatusRefreshTimer = null;
-      }
-      if (droneStatusRefreshTimeout) {
-        try {
-          clearTimeout(droneStatusRefreshTimeout);
-        } catch {
-          // ignore
-        }
-        droneStatusRefreshTimeout = null;
-      }
-      if (droneSummaryMaintenanceTimeout) {
-        try {
-          clearTimeout(droneSummaryMaintenanceTimeout);
-        } catch {
-          // ignore
-        }
-        droneSummaryMaintenanceTimeout = null;
-      }
-      droneStatusRefreshBusy = false;
-      chatReconciliationQueue.clearRetries();
-      daemonPromptEventMonitor.close();
-      chatSessionRuntime.close();
     },
   };
 }

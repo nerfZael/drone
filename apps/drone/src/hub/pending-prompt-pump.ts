@@ -1,3 +1,5 @@
+import { KeyedWorkQueue } from '../background/keyed-work-queue';
+
 export interface PendingPromptPumpTarget {
   droneId: string;
   chatName: string;
@@ -30,7 +32,7 @@ export interface PendingPromptPumpDependencies {
   normalizeChatName(raw: string): string;
   concurrencyLimit(): number;
   defaultRetryDelayMs(): number;
-  run(target: PendingPromptPumpTarget): Promise<void>;
+  run(target: PendingPromptPumpTarget, signal: AbortSignal): Promise<void>;
 }
 
 type PendingPromptRetryTimer = {
@@ -39,30 +41,32 @@ type PendingPromptRetryTimer = {
 };
 
 export class PendingPromptPump {
-  readonly #tasks = new Map<string, Promise<void>>();
-  readonly #queue: PendingPromptPumpTarget[] = [];
-  readonly #queued = new Set<string>();
-  readonly #retryAfterActive = new Set<string>();
+  readonly #workQueue: KeyedWorkQueue<PendingPromptPumpTarget>;
   readonly #retryTimers = new Map<string, PendingPromptRetryTimer[]>();
-  #active = 0;
-  #pumping = false;
+  #abortController = new AbortController();
 
-  constructor(private readonly deps: PendingPromptPumpDependencies) {}
+  constructor(private readonly deps: PendingPromptPumpDependencies) {
+    this.#workQueue = new KeyedWorkQueue({
+      key: (target) => this.#key(target.droneId, target.chatName),
+      concurrency: () => this.deps.concurrencyLimit(),
+      run: async (target) => await this.deps.run(target, this.#abortController.signal),
+    });
+  }
+
+  start(): void {
+    if (this.#abortController.signal.aborted) this.#abortController = new AbortController();
+    this.#workQueue.start();
+  }
 
   enqueue(droneIdRaw: string, chatNameRaw: string): void {
     const droneId = this.deps.normalizeDroneId(droneIdRaw);
     const chatName = this.deps.normalizeChatName(chatNameRaw);
     if (!droneId) return;
-    const key = this.#key(droneId, chatName);
-    if (this.#tasks.has(key)) {
+    this.#workQueue.enqueue(
+      { droneId, chatName },
       // Preserve edge-trigger requests that arrive while a task is active.
-      this.#retryAfterActive.add(key);
-      return;
-    }
-    if (this.#queued.has(key)) return;
-    this.#queued.add(key);
-    this.#queue.push({ droneId, chatName });
-    this.#pump();
+      { rerunIfActive: true },
+    );
   }
 
   scheduleRetry(droneIdRaw: string, chatNameRaw: string, delayMs?: number): void {
@@ -97,13 +101,8 @@ export class PendingPromptPump {
     const chatName = this.deps.normalizeChatName(chatNameRaw);
     if (!droneId) return;
     const key = this.#key(droneId, chatName);
-    this.#queued.delete(key);
-    this.#retryAfterActive.delete(key);
+    this.#workQueue.remove(key);
     this.#clearRetry(key);
-    for (let index = this.#queue.length - 1; index >= 0; index -= 1) {
-      const item = this.#queue[index];
-      if (this.#key(item.droneId, item.chatName) === key) this.#queue.splice(index, 1);
-    }
   }
 
   migrate(droneIdRaw: string, fromChatNameRaw: string, toChatNameRaw: string): void {
@@ -115,7 +114,7 @@ export class PendingPromptPump {
     const toKey = this.#key(droneId, toChatName);
     if (fromKey === toKey) return;
 
-    if (this.#queued.delete(fromKey)) this.#queued.add(toKey);
+    this.#workQueue.move(fromKey, { droneId, chatName: toChatName });
     const retryDeadlines = (this.#retryTimers.get(fromKey) ?? []).map((entry) => entry.dueAt);
     if (retryDeadlines.length > 0) {
       this.#clearRetry(fromKey);
@@ -123,58 +122,24 @@ export class PendingPromptPump {
         this.scheduleRetry(droneId, toChatName, Math.max(1_000, dueAt - Date.now()));
       }
     }
-    for (const item of this.#queue) {
-      if (this.#key(item.droneId, item.chatName) === fromKey) item.chatName = toChatName;
-    }
   }
 
   async reset(): Promise<void> {
-    this.#queue.length = 0;
-    this.#queued.clear();
-    this.#retryAfterActive.clear();
     for (const entries of this.#retryTimers.values()) {
       for (const entry of entries) clearTimeout(entry.timer);
     }
     this.#retryTimers.clear();
-    await Promise.allSettled(Array.from(this.#tasks.values()).map((task) => task.catch(() => {})));
-    this.#tasks.clear();
-    this.#active = 0;
-    this.#pumping = false;
+    await this.#workQueue.reset();
+    if (this.#abortController.signal.aborted) this.#abortController = new AbortController();
   }
 
-  #pump(): void {
-    if (this.#pumping) return;
-    this.#pumping = true;
-    try {
-      const limit = this.deps.concurrencyLimit();
-      while (this.#active < limit && this.#queue.length > 0) {
-        const next = this.#queue.shift();
-        if (!next) break;
-        const droneId = this.deps.normalizeDroneId(next.droneId);
-        const chatName = this.deps.normalizeChatName(next.chatName);
-        if (!droneId) continue;
-        const key = this.#key(droneId, chatName);
-        this.#queued.delete(key);
-        if (this.#tasks.has(key)) continue;
-
-        this.#active += 1;
-        const task = this.deps
-          .run({ droneId, chatName })
-          .catch(() => {
-            // Best-effort scheduler; the delivery operation persists its own errors.
-          })
-          .finally(() => {
-            this.#active -= 1;
-            this.#tasks.delete(key);
-            if (this.#retryAfterActive.delete(key)) this.enqueue(droneId, chatName);
-            this.#pump();
-          });
-        this.#tasks.set(key, task);
-        void task;
-      }
-    } finally {
-      this.#pumping = false;
+  async stop(): Promise<void> {
+    for (const entries of this.#retryTimers.values()) {
+      for (const entry of entries) clearTimeout(entry.timer);
     }
+    this.#retryTimers.clear();
+    this.#abortController.abort(new Error('DroneHub is shutting down'));
+    await this.#workQueue.stop();
   }
 
   #clearRetry(key: string): void {
