@@ -116,7 +116,6 @@ describe('chat model runtime', () => {
       hasChats: true,
       modelControlEnabled: true,
       currentAgentKey: 'builtin:codex',
-      agentLabel: 'Codex',
       models: [{
         id: 'gpt-5.2',
         label: 'GPT-5.2',
@@ -155,7 +154,6 @@ describe('chat model runtime', () => {
       hasChats: true,
       modelControlEnabled: true,
       currentAgentKey: 'builtin:codex',
-      agentLabel: 'Codex',
       models: [{ id: 'gpt-unknown', label: 'GPT Unknown' }],
       currentModel: null,
       currentReasoning: null,

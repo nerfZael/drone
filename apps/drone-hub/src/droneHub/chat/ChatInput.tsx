@@ -161,6 +161,8 @@ export type ChatInputProps = {
   attachmentsEnabled?: boolean;
   attachmentMode?: 'images' | 'files';
   composerContext?: ChatComposerContextConfig;
+  composerLeadingControls?: React.ReactNode;
+  composerTrailingControls?: React.ReactNode;
   composerControls?: ChatComposerControlsConfig;
   composerTopAction?: React.ReactNode;
   composerStatus?: React.ReactNode;
@@ -192,6 +194,8 @@ export function ChatInput({
   attachmentsEnabled,
   attachmentMode = 'images',
   composerContext,
+  composerLeadingControls,
+  composerTrailingControls,
   composerControls,
   composerTopAction,
   composerStatus,
@@ -1371,9 +1375,17 @@ export function ChatInput({
                 </button>
               ) : null}
 
+              {!voiceRecordingActive && !continuousVoiceActive
+                ? composerLeadingControls
+                : null}
+
               <div className="min-w-2 flex-1" />
 
               {!voiceRecordingActive && !continuousVoiceActive ? composerStatus : null}
+
+              {!voiceRecordingActive && !continuousVoiceActive
+                ? composerTrailingControls
+                : null}
 
               {!voiceRecordingActive && !continuousVoiceActive ? <ChatComposerControls config={composerControls} /> : null}
 

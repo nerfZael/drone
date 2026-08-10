@@ -4,6 +4,7 @@ import {
   normalizeCodexAppServerItem,
   translateCodexAppServerNotification,
 } from '../src/codex-app-server';
+import { codexApprovalResponse } from '../src/codex-prompt-run-manager';
 
 describe('Codex App Server event compatibility', () => {
   test('translates App Server items into the durable Codex transcript stream', () => {
@@ -97,5 +98,49 @@ describe('Codex App Server event compatibility', () => {
         },
       }),
     ).toEqual([{ type: 'error', message: 'provider failed' }]);
+  });
+
+  test('uses the App Server approval response shape for current and legacy requests', () => {
+    expect(
+      codexApprovalResponse(
+        'item/commandExecution/requestApproval',
+        {},
+        'acceptForSession',
+      ),
+    ).toEqual({ decision: 'acceptForSession' });
+    expect(
+      codexApprovalResponse(
+        'item/permissions/requestApproval',
+        { permissions: { network: { enabled: true }, ignored: true } },
+        'acceptForSession',
+      ),
+    ).toEqual({ permissions: { network: { enabled: true } }, scope: 'session' });
+    expect(codexApprovalResponse('execCommandApproval', {}, 'decline')).toEqual({
+      decision: { denied: { rejection: 'Declined by user.' } },
+    });
+    expect(codexApprovalResponse('applyPatchApproval', {}, 'cancel')).toEqual({
+      decision: 'abort',
+    });
+  });
+
+  test('classifies sandbox and policy failures without conflating them with user denial', () => {
+    expect(
+      translateCodexAppServerNotification({
+        method: 'turn/completed',
+        params: {
+          turn: {
+            id: 'turn-sandbox',
+            status: 'failed',
+            error: { message: 'write blocked', codexErrorInfo: 'sandboxError' },
+          },
+        },
+      }),
+    ).toEqual([{ type: 'error', message: 'write blocked', denial_code: 'sandbox_denied' }]);
+    expect(
+      translateCodexAppServerNotification({
+        method: 'error',
+        params: { error: { message: 'blocked by policy', codexErrorInfo: 'cyberPolicy' } },
+      }),
+    ).toEqual([{ type: 'error', message: 'blocked by policy', denial_code: 'policy_denied' }]);
   });
 });

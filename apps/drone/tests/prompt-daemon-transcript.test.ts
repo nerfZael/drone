@@ -811,6 +811,130 @@ setTimeout(() => {}, 30000);
     expect(Math.abs(Date.parse(terminal.finishedAt) - Date.parse(heartbeatAt))).toBeLessThan(1_000);
   }, 25_000);
 
+  test('keeps Codex App Server approvals pending until the Hub resolves them', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-codex-approval-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const messagesPath = path.join(tempRoot, `codex-approval-messages-${port}.jsonl`);
+    const fakeServerPath = path.join(tempRoot, `fake-codex-approval-server-${port}.js`);
+    fs.writeFileSync(
+      fakeServerPath,
+      `
+const fs = require('node:fs');
+const readline = require('node:readline');
+const messagesPath = process.argv[2];
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+const record = (message) => fs.appendFileSync(messagesPath, JSON.stringify(message) + '\\n');
+readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', (line) => {
+  const message = JSON.parse(line);
+  record(message);
+  if (message.method === 'initialize') {
+    send({ id: message.id, result: { userAgent: 'fake-codex-approval' } });
+    return;
+  }
+  if (message.method === 'initialized') return;
+  if (message.method === 'thread/start') {
+    send({ id: message.id, result: { thread: { id: 'thread-approval', turns: [] } } });
+    send({ method: 'thread/started', params: { thread: { id: 'thread-approval' } } });
+    return;
+  }
+  if (message.method === 'turn/start') {
+    send({ id: message.id, result: { turn: { id: 'turn-approval', status: 'inProgress', items: [] } } });
+    send({ method: 'turn/started', params: { threadId: 'thread-approval', turn: { id: 'turn-approval', status: 'inProgress', items: [] } } });
+    send({ method: 'item/started', params: { threadId: 'thread-approval', turnId: 'turn-approval', item: { id: 'command-approval', type: 'commandExecution', command: 'bun test', cwd: '/workspace', status: 'inProgress' } } });
+    send({ id: 'approval-request-1', method: 'item/commandExecution/requestApproval', params: { threadId: 'thread-approval', turnId: 'turn-approval', itemId: 'command-approval', command: 'bun test', cwd: '/workspace', reason: 'Run the focused tests' } });
+    return;
+  }
+  if (message.id === 'approval-request-1') {
+    send({ method: 'item/completed', params: { threadId: 'thread-approval', turnId: 'turn-approval', item: { id: 'command-approval', type: 'commandExecution', command: 'bun test', cwd: '/workspace', status: 'completed', exitCode: 0, aggregatedOutput: 'pass' } } });
+    send({ method: 'item/completed', params: { threadId: 'thread-approval', turnId: 'turn-approval', item: { id: 'answer-approval', type: 'agentMessage', text: 'Approved and completed.' } } });
+    send({ method: 'turn/completed', params: { threadId: 'thread-approval', turn: { id: 'turn-approval', status: 'completed', items: [] } } });
+  }
+});
+`,
+      'utf8',
+    );
+
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      { cwd: process.cwd(), stdout: 'ignore', stderr: 'pipe' },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
+
+    const id = `codex-approval-${port}`;
+    const enqueueResponse = await fetch(`${baseUrl}/v1/codex/enqueue`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        id,
+        sessionKey: `approval-session-${port}`,
+        launchScript: `exec ${process.execPath} ${fakeServerPath} ${messagesPath}`,
+        prompt: 'Run the tests.',
+        approvalPolicy: 'untrusted',
+        approvalsReviewer: 'user',
+        sandbox: 'workspace-write',
+      }),
+    });
+    expect(enqueueResponse.status).toBe(202);
+
+    const pending = await waitForRunningPromptJob(
+      baseUrl,
+      token,
+      id,
+      (job) => job?.codexAppServer?.run?.pendingApprovals?.length === 1,
+    );
+    const approval = pending.codexAppServer.run.pendingApprovals[0];
+    expect(approval).toMatchObject({
+      promptId: id,
+      method: 'item/commandExecution/requestApproval',
+      kind: 'command_execution',
+      command: 'bun test',
+      cwd: '/workspace',
+      reason: 'Run the focused tests',
+      status: 'pending',
+    });
+
+    const approvalResponse = await fetch(
+      `${baseUrl}/v1/prompts/${encodeURIComponent(id)}/approvals/${encodeURIComponent(approval.id)}/acceptForSession`,
+      { method: 'POST', headers: { authorization: `Bearer ${token}` } },
+    );
+    expect(approvalResponse.status).toBe(200);
+    expect(await approvalResponse.json()).toMatchObject({
+      ok: true,
+      decision: 'acceptForSession',
+      job: { codexAppServer: { run: { pendingApprovals: [] } } },
+    });
+
+    const completed = await waitForPromptJob(baseUrl, token, id);
+    expect(completed.transcript).toMatchObject({ message: 'Approved and completed.' });
+    const messages = fs
+      .readFileSync(messagesPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(messages).toContainEqual({
+      id: 'approval-request-1',
+      result: { decision: 'acceptForSession' },
+    });
+  }, 25_000);
+
   test('delivers every Codex ASAP prompt through same-turn App Server steering', async () => {
     const port = await allocatePort();
     const dataDir = path.join(tempRoot, `daemon-codex-steering-${port}`);

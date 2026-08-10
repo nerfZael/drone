@@ -868,9 +868,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     (spawnAgentConfig.kind === 'builtin' &&
       (spawnAgentConfig.id === 'codex' || spawnAgentConfig.id === 'blip'));
   const spawnAgentApprovalSupported =
-    spawnAgentPermissionMode === 'full-access' &&
-    (spawnAgentConfig.kind === 'native' ||
-      (spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex'));
+    spawnAgentConfig.kind === 'native' ||
+    (spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex');
   React.useEffect(() => {
     if (!spawnAgentReadOnlySupported && spawnAgentPermissionMode !== 'full-access') {
       setSpawnAgentPermissionMode('full-access');
@@ -878,8 +877,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   }, [spawnAgentPermissionMode, spawnAgentReadOnlySupported]);
   React.useEffect(() => {
     if (!spawnAgentApprovalSupported) setSpawnApprovalPolicy('ask');
-    else if (spawnAgentIsCodex && spawnApprovalPolicy === 'ask')
-      setSpawnApprovalPolicy('agent-decides');
     else if (!spawnAgentIsCodex && spawnApprovalPolicy === 'agent-decides')
       setSpawnApprovalPolicy('ask');
   }, [spawnAgentApprovalSupported, spawnAgentIsCodex, spawnApprovalPolicy]);
@@ -3326,10 +3323,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const seedAgentPermissionMode: AgentPermissionMode = seedAgent
         ? spawnAgentPermissionMode
         : 'full-access';
-      const seedApprovalPolicy: AgentApprovalPolicy =
-        seedAgent.kind === 'builtin' && seedAgent.id === 'codex' && spawnApprovalPolicy === 'ask'
-          ? 'agent-decides'
-          : spawnApprovalPolicy;
+      const seedApprovalPolicy: AgentApprovalPolicy = spawnApprovalPolicy;
       if (
         seedAgentPermissionMode !== 'full-access' &&
         !(

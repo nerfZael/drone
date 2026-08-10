@@ -172,7 +172,7 @@ export function NewDroneScreen({
   const selectedRepo = repos.find((repo) => repo.path === repoPath) ?? null;
   const readOnlySupported = agent === 'native' || agent === 'codex' || agent === 'blip';
   const approvalAgentSupported = agent === 'native' || agent === 'codex';
-  const approvalSupported = agentPermissionMode === 'full-access' && approvalAgentSupported;
+  const approvalSupported = approvalAgentSupported;
   const selectedModel =
     models.find(
       (option) => option.id === model && (!modelProvider || option.provider === modelProvider),
@@ -305,7 +305,6 @@ export function NewDroneScreen({
   }, [agentPermissionMode, readOnlySupported]);
   React.useEffect(() => {
     if (!approvalSupported) setApprovalPolicy('ask');
-    else if (agent === 'codex' && approvalPolicy === 'ask') setApprovalPolicy('agent-decides');
     else if (agent !== 'codex' && approvalPolicy === 'agent-decides') setApprovalPolicy('ask');
   }, [agent, approvalPolicy, approvalSupported]);
 
@@ -389,10 +388,7 @@ export function NewDroneScreen({
     (promptRaw: string, asDraft: boolean) => {
       const prompt = String(promptRaw ?? '').trim();
       const effectiveBranchSource = runtime === 'host' ? 'host' : branchSource;
-      const effectiveApprovalPolicy: MobileDroneApprovalPolicy =
-        agent === 'codex' && agentPermissionMode === 'full-access' && approvalPolicy === 'ask'
-          ? 'agent-decides'
-          : approvalPolicy;
+      const effectiveApprovalPolicy: MobileDroneApprovalPolicy = approvalPolicy;
       const payload: MobileDroneCreatePayload = {
         runtime,
         ...(name.trim() ? { name: name.trim() } : {}),

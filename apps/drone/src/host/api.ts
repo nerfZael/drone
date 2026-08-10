@@ -379,6 +379,21 @@ export async function promptCancel(client: DroneClient, id: string) {
   return await req(client, 'POST', `/v1/prompts/${encodeURIComponent(id)}/cancel`);
 }
 
+export async function codexPromptApprovalResolve(
+  client: DroneClient,
+  input: {
+    promptId: string;
+    approvalId: string;
+    decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel';
+  },
+) {
+  return await req(
+    client,
+    'POST',
+    `/v1/prompts/${encodeURIComponent(input.promptId)}/approvals/${encodeURIComponent(input.approvalId)}/${input.decision}`,
+  );
+}
+
 export async function terminalInput(client: DroneClient, payload: { session: string; data: string }) {
   return await req(client, 'POST', '/v1/terminal/input', payload);
 }

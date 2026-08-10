@@ -80,6 +80,112 @@ function serializedBytes(value: unknown): number {
 }
 
 const MOBILE_PENDING_PROMPTS_MAX_BYTES = 48 * 1024;
+const MOBILE_APPROVAL_DETAILS_MAX_BYTES = 2 * 1024;
+
+const CODEX_APPROVAL_METHODS = new Set([
+  'item/commandExecution/requestApproval',
+  'item/fileChange/requestApproval',
+  'item/permissions/requestApproval',
+  'execCommandApproval',
+  'applyPatchApproval',
+]);
+const CODEX_APPROVAL_KINDS = new Set(['command_execution', 'file_change', 'permissions']);
+const CODEX_APPROVAL_DECISIONS = new Set([
+  'accept',
+  'acceptForSession',
+  'decline',
+  'cancel',
+]);
+
+function compactApprovalDetails(value: unknown): { value?: unknown; truncated: boolean } {
+  if (value == null) return { truncated: false };
+  try {
+    if (serializedBytes(value) <= MOBILE_APPROVAL_DETAILS_MAX_BYTES) {
+      return { value, truncated: false };
+    }
+  } catch {
+    // Invalid or circular values are omitted from the mobile projection.
+  }
+  return { truncated: true };
+}
+
+function compactCodexApprovals(value: unknown): any[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const approvals = value.slice(-4).flatMap((approval: any) => {
+    const id = optionalText(approval?.id);
+    const promptId = optionalText(approval?.promptId);
+    const threadId = optionalText(approval?.threadId);
+    const turnId = optionalText(approval?.turnId);
+    const itemId = optionalText(approval?.itemId);
+    const method = optionalText(approval?.method);
+    const kind = optionalText(approval?.kind);
+    if (
+      !id ||
+      id.length > 200 ||
+      !promptId ||
+      promptId.length > 200 ||
+      !threadId ||
+      threadId.length > 200 ||
+      !turnId ||
+      turnId.length > 200 ||
+      !itemId ||
+      itemId.length > 200 ||
+      !method ||
+      !CODEX_APPROVAL_METHODS.has(method) ||
+      !kind ||
+      !CODEX_APPROVAL_KINDS.has(kind) ||
+      approval?.status !== 'pending'
+    ) {
+      return [];
+    }
+
+    const availableDecisions = Array.isArray(approval?.availableDecisions)
+      ? [...new Set(approval.availableDecisions.filter((decision: unknown) =>
+          CODEX_APPROVAL_DECISIONS.has(String(decision)),
+        ))]
+      : [];
+    const item = compactApprovalDetails(approval?.item);
+    const permissions = compactApprovalDetails(approval?.permissions);
+    const reason = truncateUtf8(approval?.reason, 512);
+    const command = truncateUtf8(approval?.command, 2_048);
+    const cwd = truncateUtf8(approval?.cwd, 512);
+    const grantRoot = truncateUtf8(approval?.grantRoot, 512);
+    const detailsTruncated =
+      Boolean(approval?.detailsTruncated) ||
+      item.truncated ||
+      permissions.truncated ||
+      reason !== String(approval?.reason ?? '') ||
+      command !== String(approval?.command ?? '') ||
+      cwd !== String(approval?.cwd ?? '') ||
+      grantRoot !== String(approval?.grantRoot ?? '');
+
+    return [
+      {
+        id,
+        promptId,
+        threadId,
+        turnId,
+        itemId,
+        method,
+        kind,
+        ...(reason ? { reason } : {}),
+        ...(command ? { command } : {}),
+        ...(cwd ? { cwd } : {}),
+        ...(grantRoot ? { grantRoot } : {}),
+        ...(item.value !== undefined ? { item: item.value } : {}),
+        ...(permissions.value !== undefined ? { permissions: permissions.value } : {}),
+        availableDecisions:
+          availableDecisions.length > 0
+            ? availableDecisions
+            : ['accept', 'acceptForSession', 'decline', 'cancel'],
+        createdAt: truncateUtf8(approval?.createdAt, 128),
+        status: 'pending',
+        ...(detailsTruncated ? { detailsTruncated: true } : {}),
+      },
+    ];
+  });
+  return approvals.length > 0 ? approvals : [];
+}
 
 function compactPendingPrompts(value: unknown): any[] {
   const prompts = Array.isArray(value) ? value.slice(-50) : [];
@@ -91,6 +197,7 @@ function compactPendingPrompts(value: unknown): any[] {
     const compactedActivity = compactAgentRunActivityForMesh(prompt?.activity);
     const agentPlan = compactAgentPlanForMesh(prompt?.agentPlan);
     const fileChanges = compactAgentRunFileChangesForMesh(prompt?.fileChanges);
+    const approvals = compactCodexApprovals(prompt?.approvals);
     return {
       id: String(prompt?.id ?? '').slice(0, 160),
       at: truncateUtf8(prompt?.at, 128),
@@ -107,6 +214,7 @@ function compactPendingPrompts(value: unknown): any[] {
       ...(fileChanges ? { fileChanges } : {}),
       ...(compactedActivity.activity ? { activity: compactedActivity.activity } : {}),
       ...(compactedActivity.truncated ? { activityMeshTruncated: true } : {}),
+      ...(approvals !== undefined ? { approvals } : {}),
       updatedAt: truncateUtf8(prompt?.updatedAt, 128),
     };
   });
@@ -1369,6 +1477,21 @@ export function createDroneControlCapability(
         });
       }
       if (operation === 'chat.approval.resolve') {
+        if (payload.promptId) {
+          const droneId = requiredText(payload.droneId, 'droneId');
+          const chatName = requiredText(payload.chatName, 'chatName');
+          const promptId = requiredText(payload.promptId, 'promptId');
+          const approvalId = requiredText(payload.approvalId, 'approvalId');
+          const decision = requiredText(payload.decision, 'decision');
+          if (!['accept', 'acceptForSession', 'decline', 'cancel'].includes(decision)) {
+            throw new Error(`unsupported Codex approval decision: ${decision}`);
+          }
+          return await localHubRequest(
+            access,
+            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/approvals/${encodeURIComponent(promptId)}/${encodeURIComponent(approvalId)}/${encodeURIComponent(decision)}`,
+            { method: 'POST', body: '{}' },
+          );
+        }
         const { nativeChatId } = await resolveNativeChat(
           requiredText(payload.nativeChatId, 'nativeChatId'),
         );

@@ -58,6 +58,7 @@ export type StoredPendingPrompt = {
   blipClones?: unknown;
   activity?: AgentRunActivity;
   agentPlan?: AgentPlan;
+  approvals?: unknown;
   fileChangesBaseline?: AgentRunFileChangesBaseline;
   fileChanges?: AgentRunFileChanges;
   startedAt?: string;

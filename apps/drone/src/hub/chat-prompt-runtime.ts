@@ -55,6 +55,7 @@ type ChatPromptRuntimeDependencyName =
   | 'defaultPendingPromptEnqueueRetryDelayMs'
   | 'defaultPromptEnqueueTimeoutMs'
   | 'defaultRepoSeedTimeoutMs'
+  | 'droneCodexPromptApprovalResolve'
   | 'dronePromptCancel'
   | 'droneCodexPromptEnqueue'
   | 'dronePromptEnqueue'
@@ -190,6 +191,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     defaultPendingPromptEnqueueRetryDelayMs,
     defaultPromptEnqueueTimeoutMs,
     defaultRepoSeedTimeoutMs,
+    droneCodexPromptApprovalResolve,
     dronePromptCancel,
     droneCodexPromptEnqueue,
     dronePromptEnqueue,
@@ -1316,6 +1318,77 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     };
   }
 
+  async function resolveCodexPromptApproval(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    approvalId: string;
+    decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel';
+  }) {
+    const promptId = String(opts.promptId ?? '').trim();
+    const approvalId = String(opts.approvalId ?? '').trim();
+    if (!promptId || !isSafePromptId(promptId)) throw new Error('invalid prompt id');
+    if (!approvalId) throw new Error('missing Codex approval id');
+    const { d, chat, droneId } = await getChatEntry({
+      droneId: opts.droneId,
+      chatName: normalizeChatName(opts.chatName),
+    });
+    const agent = inferChatAgent(chat, d);
+    if (agent.kind !== 'builtin' || agent.id !== 'codex') {
+      throw new Error('chat does not use Codex');
+    }
+    const pending = readPendingPrompt({
+      droneId,
+      chatName: normalizeChatName(opts.chatName),
+      id: promptId,
+    });
+    const approval = Array.isArray((pending as any)?.approvals)
+      ? (pending as any).approvals.find(
+          (candidate: any) => String(candidate?.id ?? '').trim() === approvalId,
+        )
+      : null;
+    if (!approval) throw new Error(`unknown Codex approval: ${approvalId}`);
+
+    const token = typeof d?.token === 'string' ? String(d.token).trim() : '';
+    const containerName = String(d?.containerName ?? d?.name ?? droneId).trim() || droneId;
+    const hostPort =
+      typeof d?.hostPort === 'number' && Number.isFinite(d.hostPort)
+        ? d.hostPort
+        : await resolveHostPort(containerName, d?.containerPort);
+    if (!token || !hostPort) {
+      throw new Error('drone daemon not reachable (missing hostPort/token)');
+    }
+
+    const result = await droneCodexPromptApprovalResolve(makeClient(hostPort, token), {
+      promptId,
+      approvalId,
+      decision: opts.decision,
+    });
+    try {
+      await updatePendingPrompt({
+        droneId,
+        chatName: normalizeChatName(opts.chatName),
+        id: promptId,
+        patch: {
+          approvals: (pending as any).approvals.filter(
+            (candidate: any) => String(candidate?.id ?? '').trim() !== approvalId,
+          ),
+          updatedAt: nowIso(),
+        },
+      });
+    } catch (error: any) {
+      hubLog('warn', 'Codex approval resolved but its pending projection did not update', {
+        droneId,
+        chatName: normalizeChatName(opts.chatName),
+        promptId,
+        approvalId,
+        error: compactDiagnosticError(error),
+      });
+    }
+    enqueueReconcile(droneId, normalizeChatName(opts.chatName));
+    return result;
+  }
+
   type DroneChatStopReason = 'archive' | 'delete' | 'stop' | 'restart';
   type DroneChatStopPlan = {
     chatNames: string[];
@@ -2189,6 +2262,27 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     return false;
   }
 
+  function chatRequiresCodexApprovalForSummary(opts: {
+    droneId: string;
+    chatName: string;
+    entry: any;
+  }): boolean {
+    const stored = readChatFromStore({
+      droneId: normalizeDroneIdentity(opts.droneId),
+      chatName: normalizeChatName(opts.chatName),
+    });
+    const pending = Array.isArray(stored?.chat?.pendingPrompts)
+      ? stored.chat.pendingPrompts
+      : Array.isArray(opts.entry?.pendingPrompts)
+        ? opts.entry.pendingPrompts
+        : [];
+    return pending.some(
+      (prompt: any) =>
+        Array.isArray(prompt?.approvals) &&
+        prompt.approvals.some((approval: any) => approval?.status === 'pending'),
+    );
+  }
+
   type BusyChatDebugEntry = {
     chatName: string;
     reasons: string[];
@@ -2886,6 +2980,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     cancelQueuedPendingPrompt,
     chatHasActivePendingPromptsForSummary,
     chatHasReconcilablePendingPrompts,
+    chatRequiresCodexApprovalForSummary,
     chatReconciliationQueue,
     createOrEnqueuePromptUnified,
     createOrEnqueueNewChatAction,
@@ -2912,6 +3007,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     readPendingPrompts,
     readPendingStartupPrompts,
     resetPromptRuntimeStateForTests,
+    resolveCodexPromptApproval,
     resumePendingPromptChats,
     runDroneLifecycleAction,
     stopAllDroneChatActivity,

@@ -19,7 +19,6 @@ export function buildExternalAgentComposerControls(opts: {
   hasChats: boolean;
   modelControlEnabled: boolean;
   currentAgentKey: string;
-  agentLabel: string;
   models: ChatModelOption[];
   currentModel: string | null;
   currentReasoning: string | null;
@@ -98,12 +97,6 @@ export function buildExternalAgentComposerControls(opts: {
   return {
     onboardingId: 'chat.composer.model',
     controls: [
-      {
-        kind: 'label',
-        id: 'external-agent',
-        value: opts.agentLabel,
-        title: `Agent: ${opts.agentLabel}`,
-      },
       {
         kind: 'model-picker',
         id: 'external-model',

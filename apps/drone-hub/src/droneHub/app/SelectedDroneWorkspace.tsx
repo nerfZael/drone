@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
+import type { CodexApprovalDecision, CodexPendingApproval } from '@drone/assistant-chat';
 import {
   AgentChatTranscript,
   ChatSurface,
@@ -93,6 +94,7 @@ import { parseGithubPullRequestHref } from '../chat/github-pull-request-links';
 import { useHeaderRepoPullRequestSummary } from './HeaderPullRequestShortcuts';
 import { useFleetAssignmentDropState } from './use-fleet-assignment-drop-state';
 import { AssistantDock } from '../assistant/AssistantDock';
+import { CodexApprovalCard } from '../assistant/CodexApprovalCard';
 import {
   buildTranscriptExportFilename,
   formatTranscriptJson,
@@ -107,6 +109,8 @@ import { DroneHubPermissionsView } from './DroneHubPermissionsView';
 import type { LocalAutoUpdates, LocalCheckoutView } from './use-local-checkout';
 import { WorkspaceToolIcon } from './WorkspaceToolIcon';
 import { DroneChatComposerMetadata } from './ChatComposerMetadata';
+import { AgentComposerPicker } from './AgentComposerPicker';
+import { NewDroneAccessPicker } from './NewDroneAccessPicker';
 
 type LaunchHint = {
   context: 'terminal' | 'code' | 'cursor';
@@ -386,58 +390,6 @@ function LocalAutoUpdatesControl({
   );
 }
 
-function HeaderMenuChoiceGroup<T extends string>({
-  label,
-  value,
-  options,
-  disabled = false,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: Array<{ value: T; label: string; disabled?: boolean; title?: string }>;
-  disabled?: boolean;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div role="radiogroup" aria-label={label}>
-      <div className="px-3 pb-1 pt-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
-        {label}
-      </div>
-      {options.map((option) => {
-        const selected = option.value === value;
-        const optionDisabled = disabled || option.disabled;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="menuitemradio"
-            aria-checked={selected}
-            disabled={optionDisabled}
-            title={option.title}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              dropdownMenuItemBaseClass,
-              'flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
-            )}
-          >
-            <span>{option.label}</span>
-            <span
-              aria-hidden="true"
-              className={cn(
-                'h-2 w-2 rounded-full border',
-                selected
-                  ? 'border-[var(--accent)] bg-[var(--accent)]'
-                  : 'border-[var(--border)] bg-transparent',
-              )}
-            />
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 type SelectedDroneWorkspaceProps = {
   currentDrone: DroneSummary;
   deleteMode: DroneDeleteMode;
@@ -588,6 +540,10 @@ export function SelectedDroneWorkspace({
   openDroneErrorModal,
   launchHint,
   currentAgentKey,
+  pickAgentValue,
+  toolbarAgentMenuEntries,
+  agentLocked,
+  agentDisabled,
   agentLabel,
   chatRuntimeMetadataAvailable,
   chatId,
@@ -737,6 +693,42 @@ export function SelectedDroneWorkspace({
     });
   }, [outputScrollRef, transcriptScrollRef, updatePinned, updateTranscriptPinned]);
   const currentDroneHomePath = React.useMemo(() => droneHomePath(currentDrone), [currentDrone]);
+  const [codexApprovalBusyId, setCodexApprovalBusyId] = React.useState('');
+  const [codexApprovalErrors, setCodexApprovalErrors] = React.useState<Record<string, string>>({});
+  const [resolvedCodexApprovalIds, setResolvedCodexApprovalIds] = React.useState<Set<string>>(
+    () => new Set(),
+  );
+  React.useEffect(() => {
+    setCodexApprovalBusyId('');
+    setCodexApprovalErrors({});
+    setResolvedCodexApprovalIds(new Set());
+  }, [activeChatName, currentDrone.id]);
+  const resolveCodexApproval = React.useCallback(
+    async (approval: CodexPendingApproval, decision: CodexApprovalDecision) => {
+      if (codexApprovalBusyId) return;
+      setCodexApprovalBusyId(approval.id);
+      setCodexApprovalErrors((current) => {
+        const next = { ...current };
+        delete next[approval.id];
+        return next;
+      });
+      try {
+        await requestJson(
+          `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(activeChatName)}/approvals/${encodeURIComponent(approval.promptId)}/${encodeURIComponent(approval.id)}/${decision}`,
+          { method: 'POST' },
+        );
+        setResolvedCodexApprovalIds((current) => new Set(current).add(approval.id));
+      } catch (error: any) {
+        setCodexApprovalErrors((current) => ({
+          ...current,
+          [approval.id]: error?.message ?? String(error),
+        }));
+      } finally {
+        setCodexApprovalBusyId((current) => (current === approval.id ? '' : current));
+      }
+    },
+    [activeChatName, codexApprovalBusyId, currentDrone.id],
+  );
   const spawnCurrentDroneHubTask = React.useCallback(
     (mode: DroneHubTaskSpawnMode, task: DroneHubTask) =>
       spawnDroneHubTaskFromAgentMessage({
@@ -766,8 +758,7 @@ export function SelectedDroneWorkspace({
     currentAgentKey === 'builtin:codex' ||
     currentAgentKey === 'builtin:blip';
   const approvalPolicySupported =
-    agentPermissionMode === 'full-access' &&
-    (currentAgentKey === 'native' || currentAgentKey === 'builtin:codex');
+    currentAgentKey === 'native' || currentAgentKey === 'builtin:codex';
   const [dockerSizeState, setDockerSizeState] = React.useState<{
     droneId: string;
     loading: boolean;
@@ -903,6 +894,7 @@ export function SelectedDroneWorkspace({
     !nativeChatActive &&
     !chatConfigFailed &&
     (currentChatIsDraft || !hasChats || chatRuntimeMetadataAvailable);
+  const chatComposerControlsAvailable = genericChatActive || nativeChatActive;
   const selectedChatDockerSnapshotBusy = React.useMemo(
     () =>
       (transcripts ?? []).some((item) => {
@@ -1243,7 +1235,6 @@ export function SelectedDroneWorkspace({
     hasChats,
     modelControlEnabled,
     currentAgentKey,
-    agentLabel,
     models: availableChatModels,
     currentModel,
     currentReasoning,
@@ -1275,6 +1266,35 @@ export function SelectedDroneWorkspace({
       ...externalComposerMenuActions,
     ],
   };
+  const externalLeadingComposerControls = chatComposerControlsAvailable ? (
+    <AgentComposerPicker
+      value={currentAgentKey}
+      label={agentLabel}
+      entries={toolbarAgentMenuEntries}
+      onChange={pickAgentValue}
+      disabled={agentLocked || agentDisabled || chatInputWaiting}
+    />
+  ) : null;
+  const externalTrailingComposerControls = chatComposerControlsAvailable ? (
+    <NewDroneAccessPicker
+      permissionMode={agentPermissionMode}
+      onPermissionModeChange={(nextMode) => {
+        void setChatAgentPermissionMode(nextMode).catch((err: any) =>
+          setChatInfoError(err?.message ?? String(err)),
+        );
+      }}
+      approvalPolicy={approvalPolicy}
+      onApprovalPolicyChange={(nextPolicy) => {
+        void setChatApprovalPolicy(nextPolicy).catch((err: any) =>
+          setChatInfoError(err?.message ?? String(err)),
+        );
+      }}
+      readOnlySupported={readOnlySupported}
+      approvalsSupported={approvalPolicySupported}
+      agentIsCodex={currentAgentKey === 'builtin:codex'}
+      disabled={loadingChatInfo || chatInputWaiting}
+    />
+  ) : null;
 
   let latestFileChangesTimelineIndex = -1;
   for (let index = externalTimelineItems.length - 1; index >= 0; index -= 1) {
@@ -1313,6 +1333,21 @@ export function SelectedDroneWorkspace({
           />
         ),
       });
+      for (const approval of prompt.approvals ?? []) {
+        if (resolvedCodexApprovalIds.has(approval.id)) continue;
+        externalTranscriptItems.push({
+          key: `approval:${approval.id}`,
+          kind: 'message',
+          content: () => (
+            <CodexApprovalCard
+              approval={approval}
+              busy={codexApprovalBusyId === approval.id}
+              error={codexApprovalErrors[approval.id] ?? null}
+              onDecision={(decision) => void resolveCodexApproval(approval, decision)}
+            />
+          ),
+        });
+      }
       continue;
     }
     const turn = entry.item;
@@ -1947,62 +1982,6 @@ export function SelectedDroneWorkspace({
                         role="group"
                         aria-label="Drone controls"
                       >
-                        {hasChats && chatUiMode === 'transcript' ? (
-                          <>
-                            {readOnlySupported ? (
-                              <HeaderMenuChoiceGroup<AgentPermissionMode>
-                                label="Access"
-                                value={agentPermissionMode}
-                                disabled={loadingChatInfo || chatInputWaiting}
-                                options={[
-                                  { value: 'read-only', label: 'Read' },
-                                  { value: 'workspace-write', label: 'Write' },
-                                  { value: 'full-access', label: 'Execute' },
-                                ]}
-                                onChange={(nextMode) => {
-                                  void setChatAgentPermissionMode(nextMode).catch((err: any) =>
-                                    setChatInfoError(err?.message ?? String(err)),
-                                  );
-                                }}
-                              />
-                            ) : null}
-                            {approvalPolicySupported ? (
-                              <HeaderMenuChoiceGroup<AgentApprovalPolicy>
-                                label="Approvals"
-                                value={approvalPolicy}
-                                disabled={loadingChatInfo || chatInputWaiting}
-                                options={[
-                                  {
-                                    value: 'ask',
-                                    label:
-                                      currentAgentKey === 'builtin:codex'
-                                        ? 'Ask · unavailable'
-                                        : 'Ask',
-                                    disabled: currentAgentKey === 'builtin:codex',
-                                    title:
-                                      currentAgentKey === 'builtin:codex'
-                                        ? 'Ask requires an interactive Codex integration.'
-                                        : undefined,
-                                  },
-                                  ...(currentAgentKey === 'builtin:codex'
-                                    ? [
-                                        {
-                                          value: 'agent-decides' as const,
-                                          label: 'Decide for me',
-                                        },
-                                      ]
-                                    : []),
-                                  { value: 'never', label: 'Always Allow' },
-                                ]}
-                                onChange={(nextPolicy) => {
-                                  void setChatApprovalPolicy(nextPolicy).catch((err: any) =>
-                                    setChatInfoError(err?.message ?? String(err)),
-                                  );
-                                }}
-                              />
-                            ) : null}
-                          </>
-                        ) : null}
                         {!hostRuntime ? (
                           <div
                             className="flex items-center justify-between gap-4 px-3 py-1.5 text-[var(--text-11)] text-[var(--muted)]"
@@ -2280,6 +2259,8 @@ export function SelectedDroneWorkspace({
                         branch={currentDrone.repoBranch}
                       />
                     }
+                    composerLeadingControls={externalLeadingComposerControls}
+                    composerTrailingControls={externalTrailingComposerControls}
                     messageFeatures={{
                       onSpawnTask: spawnCurrentDroneHubTask,
                       linkedPullRequestContext,
@@ -2396,6 +2377,8 @@ export function SelectedDroneWorkspace({
                       branch={currentDrone.repoBranch}
                     />
                   }
+                  composerLeadingControls={externalLeadingComposerControls}
+                  composerTrailingControls={externalTrailingComposerControls}
                   composerControls={externalComposerControls}
                   autoFocus={shouldAutoFocusInput}
                   onStop={

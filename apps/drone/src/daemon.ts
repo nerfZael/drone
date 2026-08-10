@@ -1942,6 +1942,42 @@ async function main() {
       }
 
       const promptCancelMatch = pathname.match(/^\/v1\/prompts\/([^/]+)\/cancel$/);
+      const promptApprovalMatch = pathname.match(
+        /^\/v1\/prompts\/([^/]+)\/approvals\/([^/]+)\/(accept|acceptForSession|decline|cancel)$/,
+      );
+      if (method === 'POST' && promptApprovalMatch) {
+        const promptId = decodeURIComponent(promptApprovalMatch[1] ?? '');
+        const approvalId = decodeURIComponent(promptApprovalMatch[2] ?? '');
+        const decision = promptApprovalMatch[3] as
+          | 'accept'
+          | 'acceptForSession'
+          | 'decline'
+          | 'cancel';
+        const current = await loadPromptJob(promptsDir, promptId);
+        if (!current?.codexAppServer) {
+          json(res, 404, { error: 'Codex prompt not found' });
+          return;
+        }
+        try {
+          const approval = await codexPromptRuns.resolveApproval(
+            current as CodexPromptJob,
+            approvalId,
+            decision,
+          );
+          const latest = (await loadPromptJob(promptsDir, promptId)) ?? current;
+          const projected = latest.codexAppServer
+            ? await projectCodexPromptJob(promptsDir, latest as CodexPromptJob)
+            : latest;
+          json(res, 200, { ok: true, approval, decision, job: projected });
+        } catch (error: any) {
+          const message = String(error?.message ?? error);
+          json(res, /unknown Codex approval|no longer active/i.test(message) ? 404 : 409, {
+            error: message,
+          });
+        }
+        return;
+      }
+
       if (method === 'POST' && promptCancelMatch) {
         const id = decodeURIComponent(promptCancelMatch[1] ?? '');
         const current = await withPromptMutationLock(() => loadPromptJob(promptsDir, id));

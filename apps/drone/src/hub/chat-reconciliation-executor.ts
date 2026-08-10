@@ -310,6 +310,12 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         const parsedBlip = jobKind === 'blip' && jobState === 'running' ? liveState : null;
         const nextAgentPlan = jobState === 'running' ? liveState.agentPlan : (p as any).agentPlan;
         const nextActivity = jobState === 'running' ? liveState.activity : (p as any).activity;
+        const nextApprovals =
+          jobKind === 'codex' && job?.codexAppServer
+            ? Array.isArray(job.codexAppServer?.run?.pendingApprovals)
+              ? job.codexAppServer.run.pendingApprovals
+              : []
+            : (p as any).approvals;
         if (
           parsedBlip?.sessionId &&
           String(parsedBlip.sessionId).trim() &&
@@ -320,6 +326,8 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         }
         const agentPlanChanged = !sameAgentPlan((p as any).agentPlan, nextAgentPlan);
         const activityChanged = !sameLiveAgentActivity((p as any).activity, nextActivity);
+        const approvalsChanged =
+          JSON.stringify((p as any).approvals ?? []) !== JSON.stringify(nextApprovals ?? []);
         const observabilityChanged = Boolean((p as any).observability);
         const priorStartedAt = validRunStartedAt((p as any).startedAt);
         const nextStartedAt =
@@ -331,6 +339,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           state !== 'sent' ||
           agentPlanChanged ||
           activityChanged ||
+          approvalsChanged ||
           observabilityChanged ||
           startedAtChanged
         ) {
@@ -340,6 +349,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             observability: undefined,
             agentPlan: nextAgentPlan,
             activity: nextActivity,
+            approvals: nextApprovals,
             ...(nextStartedAt ? { startedAt: nextStartedAt } : {}),
             updatedAt: nowIso(),
           };
@@ -1018,6 +1028,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             observability: pending.observability,
             blipClones: pending.blipClones,
             agentPlan: pending.agentPlan,
+            approvals: (pending as any).approvals,
             fileChangesBaseline: pending.fileChangesBaseline,
             fileChanges: pending.fileChanges,
             activity: pending.activity,

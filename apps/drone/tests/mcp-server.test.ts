@@ -972,8 +972,28 @@ describe('Drone Hub assistant MCP transport', () => {
           seedAgent: { kind: 'builtin', id: 'codex' },
           seedModel: 'gpt-5.6-codex',
           seedReasoning: 'high',
-          seedApprovalPolicy: 'agent-decides',
+          seedAgentPermissionMode: 'workspace-write',
+          seedApprovalPolicy: 'never',
         });
+        const rejected = await client.callTool({
+          name: 'create_drone',
+          arguments: {
+            name: 'Invalid Cursor draft',
+            draft: true,
+            repoPath,
+            agent: 'cursor',
+            approvalPolicy: 'never',
+          },
+        });
+        expect(rejected.isError).toBe(true);
+        expect(JSON.stringify(rejected.content)).toContain(
+          'approvalPolicy is only available for Codex drones',
+        );
+        expect(
+          requests.filter(
+            (request) => request.pathname === '/api/drones' && request.method === 'POST',
+          ),
+        ).toHaveLength(1);
       } finally {
         await client?.close();
         globalThis.fetch = previousFetch;

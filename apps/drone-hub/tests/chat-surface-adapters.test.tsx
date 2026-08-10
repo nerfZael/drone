@@ -390,6 +390,8 @@ describe('agent chat surface adapters', () => {
           promptError={null}
           waiting={false}
           alwaysExpanded
+          composerLeadingControls={<span>Agent picker</span>}
+          composerTrailingControls={<span>Access picker</span>}
           composerControls={{
             controls: [
               {
@@ -409,6 +411,11 @@ describe('agent chat surface adapters', () => {
     );
 
     expect(html).toContain('data-chat-composer-expanded="true"');
+    expect(html.indexOf('aria-label="Attach images"')).toBeLessThan(
+      html.indexOf('Agent picker'),
+    );
+    expect(html.indexOf('Agent picker')).toBeLessThan(html.indexOf('Access picker'));
+    expect(html.indexOf('Access picker')).toBeLessThan(html.indexOf('Model A'));
     expect(html).toContain('Model A');
     expect(html).toContain('aria-label="Send"');
     expect(html).not.toContain('data-chat-composer-collapsed-action="true"');

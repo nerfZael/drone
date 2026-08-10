@@ -15,7 +15,7 @@ export function mobileAccessLabel(value: MobileDroneAgentPermissionMode): string
 export function mobileApprovalLabel(value: MobileDroneApprovalPolicy): string {
   if (value === 'ask') return 'Ask';
   if (value === 'agent-decides') return 'Decide';
-  return 'Allow';
+  return 'Never ask';
 }
 
 export function NewDroneAccessPicker({
@@ -74,11 +74,11 @@ export function NewDroneAccessPicker({
     label: string;
     disabled?: boolean;
   }> = [
-    { value: 'ask', label: 'Ask', disabled: !approvalsSupported || agentIsCodex },
+    { value: 'ask', label: 'Ask', disabled: !approvalsSupported },
     ...(agentIsCodex
       ? [{ value: 'agent-decides' as const, label: 'Decide for me', disabled: !approvalsSupported }]
       : []),
-    { value: 'never', label: 'Always allow', disabled: !approvalsSupported },
+    { value: 'never', label: 'Never ask', disabled: !approvalsSupported },
   ];
   const triggerLabel = `${mobileAccessLabel(permissionMode)} · ${mobileApprovalLabel(approvalPolicy)}`;
 

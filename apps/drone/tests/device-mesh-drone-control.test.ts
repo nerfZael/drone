@@ -955,6 +955,41 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('forwards Codex approval decisions without treating them as native approvals', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      requests.push({
+        url: String(input),
+        method: String(init?.method ?? 'GET'),
+        body: String(init?.body ?? ''),
+      });
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await capability.invoke('chat.approval.resolve', {
+        droneId: 'drone one',
+        chatName: 'review chat',
+        promptId: 'prompt-1',
+        approvalId: 'approval-1',
+        decision: 'acceptForSession',
+      });
+      expect(requests).toEqual([
+        {
+          url: 'http://127.0.0.1:7777/api/drones/drone%20one/chats/review%20chat/approvals/prompt-1/approval-1/acceptForSession',
+          method: 'POST',
+          body: '{}',
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('rejects native thread ids that do not belong to the selected chat', async () => {
     const originalFetch = globalThis.fetch;
     const requestedPaths: string[] = [];
@@ -1079,6 +1114,21 @@ describe('device mesh drone summaries', () => {
                 startedAt: '2026-07-15T12:05:00.000Z',
                 prompt: 'Make a PR',
                 state: 'sent',
+                approvals: [
+                  {
+                    id: 'approval-1',
+                    promptId: 'prompt-2',
+                    threadId: 'thread-1',
+                    turnId: 'turn-1',
+                    itemId: 'item-1',
+                    method: 'item/commandExecution/requestApproval',
+                    kind: 'command_execution',
+                    command: 'bun test',
+                    availableDecisions: ['accept', 'decline'],
+                    createdAt: '2026-07-15T12:05:30.000Z',
+                    status: 'pending',
+                  },
+                ],
               },
             ],
             transcripts: [
@@ -1129,6 +1179,15 @@ describe('device mesh drone summaries', () => {
             prompt: 'Make a PR',
             state: 'sent',
             startedAt: '2026-07-15T12:05:00.000Z',
+            approvals: [
+              {
+                id: 'approval-1',
+                promptId: 'prompt-2',
+                command: 'bun test',
+                availableDecisions: ['accept', 'decline'],
+                status: 'pending',
+              },
+            ],
           },
         ],
         readState: {

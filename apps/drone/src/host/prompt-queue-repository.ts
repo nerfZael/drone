@@ -20,6 +20,7 @@ export type PromptQueueItem = {
   blipClones?: unknown;
   activity?: AgentRunActivity;
   agentPlan?: unknown;
+  approvals?: unknown;
   fileChangesBaseline?: unknown;
   fileChanges?: unknown;
   startedAt?: string;
@@ -681,6 +682,7 @@ export class PromptQueueRepository {
         | 'blipClones'
         | 'activity'
         | 'agentPlan'
+        | 'approvals'
         | 'fileChangesBaseline'
         | 'fileChanges'
         | 'action'

@@ -30,7 +30,7 @@ export function newDroneAccessLabel(value: AgentPermissionMode): string {
 export function newDroneApprovalLabel(value: AgentApprovalPolicy): string {
   if (value === 'ask') return 'Ask';
   if (value === 'agent-decides') return 'Decide for me';
-  return 'Always allow';
+  return 'Never ask';
 }
 
 function CheckIcon() {
@@ -91,10 +91,8 @@ export function NewDroneAccessPicker({
     {
       value: 'ask',
       label: 'Ask',
-      description: agentIsCodex
-        ? 'Ask requires an interactive Codex integration.'
-        : 'Ask before approval-gated commands.',
-      disabled: !approvalsSupported || agentIsCodex,
+      description: 'Ask before approval-gated commands.',
+      disabled: !approvalsSupported,
     },
     ...(agentIsCodex
       ? [
@@ -108,8 +106,8 @@ export function NewDroneAccessPicker({
       : []),
     {
       value: 'never',
-      label: 'Always allow',
-      description: 'Run commands without waiting for confirmation.',
+      label: 'Never ask',
+      description: 'Run within the selected sandbox without waiting for confirmation.',
       disabled: !approvalsSupported,
     },
   ];

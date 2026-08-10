@@ -1,7 +1,13 @@
+import crypto from 'node:crypto';
+
+import type { CodexApprovalDecision, CodexPendingApproval } from '@drone/assistant-chat';
+
 import {
+  CODEX_APP_SERVER_REQUEST_RESOLVED,
   CodexAppServerConnection,
   translateCodexAppServerNotification,
   type CodexAppServerNotification,
+  type CodexAppServerRequest,
 } from './codex-app-server';
 
 export type CodexPromptState = 'queued' | 'running' | 'done' | 'failed' | 'canceled';
@@ -56,6 +62,7 @@ export type CodexPromptRun = {
   stderrBytes?: number;
   stdoutTruncated?: boolean;
   stderrTruncated?: boolean;
+  pendingApprovals?: CodexPendingApproval[];
   error?: string;
 };
 
@@ -71,8 +78,20 @@ export type CodexPromptRunSummary = Pick<
   | 'finishedAt'
   | 'threadId'
   | 'turnId'
+  | 'pendingApprovals'
   | 'error'
 >;
+
+type PendingApprovalCallback = {
+  approval: CodexPendingApproval;
+  requestId: number | string;
+  resolve: (response: any) => void;
+};
+
+type ApprovalResolution = {
+  decision: CodexApprovalDecision;
+  resolvedAt: string;
+};
 
 type CodexPromptRunManagerOptions<TMessage extends CodexPromptMessage> = {
   loadMessage(id: string): Promise<TMessage | null>;
@@ -96,6 +115,9 @@ type CodexRunSession = {
   startingRun: CodexPromptRun | null;
   queuedMessageIds: string[];
   cancelRequestedMessageIds: Set<string>;
+  activeItems: Map<string, any>;
+  pendingApprovalCallbacks: Map<string, PendingApprovalCallback>;
+  approvalResolutions: Map<string, ApprovalResolution>;
   lastUsedAt: number;
   operationTail: Promise<void>;
 };
@@ -185,6 +207,39 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     return runId ? await this.options.loadRun(runId) : null;
   }
 
+  async resolveApproval(
+    message: TMessage,
+    approvalId: string,
+    decision: CodexApprovalDecision,
+  ): Promise<CodexPendingApproval> {
+    const session = this.sessions.get(message.codexAppServer.sessionKey);
+    if (!session) throw new Error('Codex approval is no longer active');
+    const normalizedApprovalId = String(approvalId ?? '').trim();
+    if (!normalizedApprovalId) throw new Error('missing Codex approval id');
+
+    return await this.serialize(session, async () => {
+      const pending = session.pendingApprovalCallbacks.get(normalizedApprovalId);
+      if (!pending) throw new Error(`unknown Codex approval: ${normalizedApprovalId}`);
+      const run = session.activeRun ?? session.startingRun;
+      const runId = String(message.codexAppServer.runId ?? '').trim();
+      if (!run || (runId && run.id !== runId)) {
+        throw new Error('Codex approval does not belong to this prompt');
+      }
+      if (!pending.approval.availableDecisions.includes(decision)) {
+        throw new Error(`Codex approval does not allow decision: ${decision}`);
+      }
+
+      session.pendingApprovalCallbacks.delete(normalizedApprovalId);
+      session.approvalResolutions.set(pending.approval.itemId, {
+        decision,
+        resolvedAt: this.now(),
+      });
+      await this.persistPendingApprovals(session);
+      pending.resolve(codexApprovalResponse(pending.approval.method, pending.approval, decision));
+      return pending.approval;
+    });
+  }
+
   ownsMessage(message: TMessage): boolean {
     const session = this.sessions.get(message.codexAppServer.sessionKey);
     if (!session) return false;
@@ -199,7 +254,14 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     const run = await this.runForMessage(message);
     if (run) {
       if (isTerminal(run.state)) {
-        const save = () => this.saveTerminalRunMessages(run);
+        const terminalRun =
+          run.pendingApprovals && run.pendingApprovals.length > 0
+            ? { ...run, pendingApprovals: [], updatedAt: this.now() }
+            : run;
+        const save = async () => {
+          if (terminalRun !== run) await this.options.saveRun(terminalRun);
+          await this.saveTerminalRunMessages(terminalRun);
+        };
         await (alreadyMutating ? save() : this.options.mutate(save));
         return;
       }
@@ -238,7 +300,13 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   stop(): void {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
-    for (const session of this.sessions.values()) session.connection.stop();
+    for (const session of this.sessions.values()) {
+      for (const pending of session.pendingApprovalCallbacks.values()) {
+        pending.resolve(codexApprovalResponse(pending.approval.method, pending.approval, 'cancel'));
+      }
+      session.pendingApprovalCallbacks.clear();
+      session.connection.stop();
+    }
     this.sessions.clear();
   }
 
@@ -259,6 +327,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     let session!: CodexRunSession;
     const connection = new CodexAppServerConnection({
       launchScript: spec.launchScript,
+      onRequest: (request) => this.handleServerRequest(session, request),
       onNotification: (notification) => this.handleNotification(session, notification),
       onStderr: async (text) => {
         const run = session.activeRun ?? session.startingRun;
@@ -280,11 +349,122 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
       startingRun: null,
       queuedMessageIds: [],
       cancelRequestedMessageIds: new Set(),
+      activeItems: new Map(),
+      pendingApprovalCallbacks: new Map(),
+      approvalResolutions: new Map(),
       lastUsedAt: Date.now(),
       operationTail: Promise.resolve(),
     };
     this.sessions.set(session.key, session);
     return session;
+  }
+
+  private async handleServerRequest(
+    session: CodexRunSession,
+    request: CodexAppServerRequest,
+  ): Promise<any> {
+    if (request.method === 'currentTime/read') {
+      return { currentTimeAt: Math.floor(Date.now() / 1_000) };
+    }
+    if (!isApprovalRequestMethod(request.method)) {
+      throw new Error(`unsupported Codex App Server request: ${request.method}`);
+    }
+    const method = request.method;
+
+    let resolveResponse!: (response: any) => void;
+    const response = new Promise<any>((resolve) => {
+      resolveResponse = resolve;
+    });
+    await this.serialize(session, async () => {
+      const run = session.activeRun ?? session.startingRun;
+      if (!run) throw new Error('Codex approval arrived without an active prompt');
+      const params = request.params ?? {};
+      const itemId = String(
+        params.itemId ?? params.callId ?? params.approvalId ?? request.id,
+      ).trim();
+      const startedAtMs = Number(params.startedAtMs);
+      const approval: CodexPendingApproval = {
+        id: crypto.randomUUID(),
+        promptId: run.responseMessageId,
+        method,
+        kind: approvalKind(method),
+        threadId: String(params.threadId ?? params.conversationId ?? session.threadId ?? '').trim(),
+        turnId: String(params.turnId ?? session.activeTurnId ?? '').trim(),
+        itemId,
+        ...(String(params.reason ?? '').trim() ? { reason: String(params.reason).trim() } : {}),
+        ...(approvalCommand(params) ? { command: approvalCommand(params) } : {}),
+        ...(String(params.cwd ?? '').trim() ? { cwd: String(params.cwd).trim() } : {}),
+        ...(String(params.grantRoot ?? '').trim()
+          ? { grantRoot: String(params.grantRoot).trim() }
+          : {}),
+        ...(params.permissions && typeof params.permissions === 'object'
+          ? { permissions: params.permissions }
+          : params.additionalPermissions && typeof params.additionalPermissions === 'object'
+            ? { permissions: params.additionalPermissions }
+            : {}),
+        ...(session.activeItems.get(itemId)
+          ? { item: session.activeItems.get(itemId) }
+          : method === 'applyPatchApproval' && params.fileChanges
+            ? { item: { id: itemId, type: 'fileChange', changes: params.fileChanges } }
+            : {}),
+        availableDecisions: approvalDecisions(method, params.availableDecisions),
+        createdAt: Number.isFinite(startedAtMs) && startedAtMs >= 0 && startedAtMs <= 8.64e15
+          ? new Date(startedAtMs).toISOString()
+          : this.now(),
+        status: 'pending',
+      };
+      session.pendingApprovalCallbacks.set(approval.id, {
+        approval,
+        requestId: request.id,
+        resolve: resolveResponse,
+      });
+      await this.persistPendingApprovals(session);
+    });
+    return await response;
+  }
+
+  private async persistPendingApprovals(session: CodexRunSession): Promise<void> {
+    const run = session.activeRun ?? session.startingRun;
+    if (!run) return;
+    const updatedAt = this.now();
+    const updated: CodexPromptRun = {
+      ...run,
+      updatedAt,
+      pendingApprovals: Array.from(session.pendingApprovalCallbacks.values()).map(
+        ({ approval }) => approval,
+      ),
+    };
+    await this.options.mutate(async () => {
+      await this.options.saveRun(updated);
+      const responseMessage = await this.options.loadMessage(updated.responseMessageId);
+      if (responseMessage) {
+        await this.options.saveMessage({ ...responseMessage, updatedAt });
+      }
+    });
+    if (session.activeRun?.id === updated.id) session.activeRun = updated;
+    if (session.startingRun?.id === updated.id) session.startingRun = updated;
+  }
+
+  private async clearPendingApprovals(
+    session: CodexRunSession,
+    matches: (pending: PendingApprovalCallback) => boolean,
+    respond = true,
+  ): Promise<void> {
+    const cleared: PendingApprovalCallback[] = [];
+    for (const [id, pending] of session.pendingApprovalCallbacks) {
+      if (!matches(pending)) continue;
+      session.pendingApprovalCallbacks.delete(id);
+      cleared.push(pending);
+    }
+    if (cleared.length === 0) return;
+    await this.persistPendingApprovals(session);
+    for (const pending of cleared) {
+      pending.resolve(
+        respond
+          ? codexApprovalResponse(pending.approval.method, pending.approval, 'cancel')
+          : CODEX_APP_SERVER_REQUEST_RESOLVED,
+      );
+    }
   }
 
   private async handleNotification(
@@ -301,8 +481,57 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         notification.params?.turnId ?? notification.params?.turn?.id ?? '',
       ).trim();
       if (notification.method === 'turn/started' && turnId) session.activeTurnId = turnId;
+      const itemId = String(notification.params?.item?.id ?? '').trim();
+      let translatedNotification = notification;
+      if (notification.method === 'item/started' && itemId) {
+        session.activeItems.set(itemId, notification.params.item);
+      } else if (notification.method === 'item/completed' && itemId) {
+        session.activeItems.delete(itemId);
+        const resolution = session.approvalResolutions.get(itemId);
+        const item = notification.params?.item;
+        if (item && typeof item === 'object') {
+          const itemStatus = String(item.status ?? '');
+          const denied = itemStatus === 'declined' || resolution?.decision === 'decline';
+          const canceled = itemStatus === 'canceled' || resolution?.decision === 'cancel';
+          if (denied || canceled || resolution) {
+            translatedNotification = {
+              ...notification,
+              params: {
+                ...notification.params,
+                item: {
+                  ...item,
+                  ...(resolution ? { approval_decision: resolution.decision } : {}),
+                  ...(denied || canceled
+                    ? {
+                        denial: {
+                          code:
+                            resolution?.decision === 'cancel'
+                              ? 'canceled_by_user'
+                              : resolution
+                                ? 'declined_by_user'
+                                : 'policy_denied',
+                          ...(resolution ? { resolved_at: resolution.resolvedAt } : {}),
+                        },
+                      }
+                    : {}),
+                },
+              },
+            };
+          }
+        }
+        session.approvalResolutions.delete(itemId);
+      }
+      if (notification.method === 'serverRequest/resolved') {
+        const requestId = notification.params?.requestId;
+        await this.clearPendingApprovals(
+          session,
+          (pending) =>
+            requestId != null && String(pending.requestId) === String(requestId),
+          false,
+        );
+      }
       const currentRun = session.activeRun ?? session.startingRun;
-      const events = translateCodexAppServerNotification(notification);
+      const events = translateCodexAppServerNotification(translatedNotification);
       if (currentRun && events.length > 0) {
         const updated = await this.options.mutate(() =>
           this.options.appendRunEvents(currentRun, events),
@@ -311,6 +540,10 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         if (session.startingRun?.id === updated.id) session.startingRun = updated;
       }
       if (notification.method === 'turn/completed') {
+        await this.clearPendingApprovals(
+          session,
+          (pending) => !turnId || pending.approval.turnId === turnId,
+        );
         await this.completeTurn(session, notification);
       }
     });
@@ -495,6 +728,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     });
     session.activeRun = null;
     session.activeTurnId = null;
+    session.approvalResolutions.clear();
     session.lastUsedAt = Date.now();
     await this.startNextRun(session);
   }
@@ -543,6 +777,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
   }
 
   private async failSession(session: CodexRunSession, error: Error): Promise<void> {
+    await this.clearPendingApprovals(session, () => true);
     const runs = [session.activeRun, session.startingRun].filter((run): run is CodexPromptRun =>
       Boolean(run),
     );
@@ -578,6 +813,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     const failedRun: CodexPromptRun = {
       ...run,
       state: 'failed',
+      pendingApprovals: [],
       finishedAt,
       updatedAt: finishedAt,
       error: error.message,
@@ -613,8 +849,99 @@ export function codexPromptRunSummary(run: CodexPromptRun): CodexPromptRunSummar
     ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}),
     ...(run.threadId ? { threadId: run.threadId } : {}),
     ...(run.turnId ? { turnId: run.turnId } : {}),
+    ...(run.pendingApprovals ? { pendingApprovals: run.pendingApprovals } : {}),
     ...(run.error ? { error: run.error } : {}),
   };
+}
+
+const APPROVAL_REQUEST_METHODS = [
+  'item/commandExecution/requestApproval',
+  'item/fileChange/requestApproval',
+  'item/permissions/requestApproval',
+  'execCommandApproval',
+  'applyPatchApproval',
+] as const;
+
+export type ApprovalRequestMethod = (typeof APPROVAL_REQUEST_METHODS)[number];
+
+function isApprovalRequestMethod(method: string): method is ApprovalRequestMethod {
+  return (APPROVAL_REQUEST_METHODS as readonly string[]).includes(method);
+}
+
+function approvalKind(method: ApprovalRequestMethod): CodexPendingApproval['kind'] {
+  if (method === 'item/permissions/requestApproval') return 'permissions';
+  if (method === 'item/fileChange/requestApproval' || method === 'applyPatchApproval') {
+    return 'file_change';
+  }
+  return 'command_execution';
+}
+
+function approvalCommand(params: any): string {
+  if (typeof params?.command === 'string') return params.command.trim();
+  if (Array.isArray(params?.command)) return params.command.map(String).join(' ').trim();
+  return '';
+}
+
+function approvalDecisions(
+  method: ApprovalRequestMethod,
+  raw: unknown,
+): CodexApprovalDecision[] {
+  const allowed = new Set<CodexApprovalDecision>();
+  if (Array.isArray(raw)) {
+    for (const value of raw) {
+      if (
+        value === 'accept' ||
+        value === 'acceptForSession' ||
+        value === 'decline' ||
+        value === 'cancel'
+      ) {
+        allowed.add(value);
+      }
+    }
+  }
+  if (allowed.size > 0) return [...allowed];
+  if (method === 'item/permissions/requestApproval') {
+    return ['accept', 'acceptForSession', 'decline', 'cancel'];
+  }
+  return ['accept', 'acceptForSession', 'decline', 'cancel'];
+}
+
+function grantedPermissions(raw: unknown): any {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const permissions = raw as any;
+  return {
+    ...(permissions.network ? { network: permissions.network } : {}),
+    ...(permissions.fileSystem ? { fileSystem: permissions.fileSystem } : {}),
+  };
+}
+
+export function codexApprovalResponse(
+  method: ApprovalRequestMethod,
+  approval: Pick<CodexPendingApproval, 'permissions'>,
+  decision: CodexApprovalDecision,
+): any {
+  if (method === 'item/permissions/requestApproval') {
+    const accepted = decision === 'accept' || decision === 'acceptForSession';
+    return {
+      permissions: accepted ? grantedPermissions(approval.permissions) : {},
+      scope: decision === 'acceptForSession' ? 'session' : 'turn',
+    };
+  }
+  if (
+    method === 'item/commandExecution/requestApproval' ||
+    method === 'item/fileChange/requestApproval'
+  ) {
+    return { decision };
+  }
+  const legacyDecision =
+    decision === 'accept'
+      ? 'approved'
+      : decision === 'acceptForSession'
+        ? 'approved_for_session'
+        : decision === 'cancel'
+          ? 'abort'
+          : { denied: { rejection: 'Declined by user.' } };
+  return { decision: legacyDecision };
 }
 
 function promptInput(spec: CodexPromptSpec) {

@@ -124,6 +124,8 @@ import {
   AssistantApprovalCard,
   type MobileAssistantApproval,
 } from '../local-assistant/AssistantApprovalCard';
+import { CodexApprovalCard } from '../drones/CodexApprovalCard';
+import type { CodexApprovalDecision, CodexPendingApproval } from '@drone/assistant-chat';
 
 const APP_HEADER_HEIGHT = 58;
 const NEW_DRONE_ATTACHMENT_READY_TIMEOUT_MS = 2 * 60_000;
@@ -411,6 +413,9 @@ export function DronesScreen({
   const [confirmAccessDiscard, setConfirmAccessDiscard] = React.useState(false);
   const [pendingApprovals, setPendingApprovals] = React.useState<MobileAssistantApproval[]>([]);
   const [approvalBusyId, setApprovalBusyId] = React.useState('');
+  const [resolvedCodexApprovalIds, setResolvedCodexApprovalIds] = React.useState<Set<string>>(
+    () => new Set(),
+  );
   const [pendingPrompts, setPendingPrompts] = React.useState<any[]>([]);
   const [cancellingPromptId, setCancellingPromptId] = React.useState('');
   const [creatingQueuedChatId, setCreatingQueuedChatId] = React.useState('');
@@ -831,6 +836,7 @@ export function DronesScreen({
     setConfirmAccessDiscard(false);
     setPendingApprovals([]);
     setApprovalBusyId('');
+    setResolvedCodexApprovalIds(new Set());
     setPendingPrompts([]);
     setCancellingPromptId('');
     setPrompt('');
@@ -2134,6 +2140,19 @@ export function DronesScreen({
     () => mobileDronePendingPrompts(pendingPrompts, turns, transcriptMessages),
     [pendingPrompts, transcriptMessages, turns],
   );
+  const codexPendingApprovals = React.useMemo(
+    () =>
+      pendingPrompts.flatMap((pending: any) =>
+        Array.isArray(pending?.approvals)
+          ? pending.approvals.filter(
+              (approval: any): approval is CodexPendingApproval =>
+                approval?.status === 'pending' &&
+                !resolvedCodexApprovalIds.has(String(approval?.id ?? '')),
+            )
+          : [],
+      ),
+    [pendingPrompts, resolvedCodexApprovalIds],
+  );
   const linkedPullRequests = useDroneLinkedPullRequests({
     targetDeviceId: targetId,
     droneId: selected?.id ?? '',
@@ -2243,8 +2262,10 @@ export function DronesScreen({
     serverChatBusy: Boolean(selected?.busyChats.some((chat) => chat === chatName)),
   });
   const awaitingApproval =
-    pendingApprovals.length > 0 || nativeThread?.status === 'waiting_for_approval';
-  const approvalStartedAt = pendingApprovals
+    pendingApprovals.length > 0 ||
+    codexPendingApprovals.length > 0 ||
+    nativeThread?.status === 'waiting_for_approval';
+  const approvalStartedAt = [...pendingApprovals, ...codexPendingApprovals]
     .map((approval) => Date.parse(String(approval.createdAt ?? '')))
     .filter((timestamp) => Number.isFinite(timestamp))
     .sort((left, right) => left - right)[0];
@@ -2260,13 +2281,16 @@ export function DronesScreen({
         if (drone.id !== selected?.id) return drone;
         return withMobileApprovalRequired(
           withOptimisticMobileBusyChat(drone, chatName, selectedChatOptimisticallyBusy),
-          pendingApprovals.length > 0 || nativeThread?.status === 'waiting_for_approval',
+          pendingApprovals.length > 0 ||
+            codexPendingApprovals.length > 0 ||
+            nativeThread?.status === 'waiting_for_approval',
         );
       }),
     [
       chatName,
       drones,
       nativeThread?.status,
+      codexPendingApprovals.length,
       pendingApprovals.length,
       selected?.id,
       selectedChatOptimisticallyBusy,
@@ -2491,15 +2515,13 @@ export function DronesScreen({
                   })),
                 }
               : {}),
-            ...(chatAgentPermissionMode === 'full-access' &&
-            (nativeMessages !== null || chatAgentId === 'codex')
+            ...(nativeMessages !== null || chatAgentId === 'codex'
               ? {
                   approvalPolicyOptions: (
                     [
                       {
                         policy: 'ask',
-                        label: chatAgentId === 'codex' ? 'Ask · unavailable' : 'Ask',
-                        disabled: chatAgentId === 'codex',
+                        label: 'Ask',
                       },
                       ...(chatAgentId === 'codex'
                         ? [
@@ -2509,7 +2531,7 @@ export function DronesScreen({
                             },
                           ]
                         : []),
-                      { policy: 'never', label: 'Always Allow' },
+                      { policy: 'never', label: 'Never ask' },
                     ] as Array<{
                       policy: MobileDroneApprovalPolicy;
                       label: string;
@@ -2701,7 +2723,61 @@ export function DronesScreen({
         )
           setError(nextError?.message ?? String(nextError));
       })
-      .finally(() => setApprovalBusyId(''));
+      .finally(() =>
+        setApprovalBusyId((current) => (current === approval.id ? '' : current)),
+      );
+  };
+
+  const resolveCodexApproval = (
+    approval: CodexPendingApproval,
+    decision: CodexApprovalDecision,
+  ) => {
+    if (!selected || approvalBusyId) return;
+    const destinationId = targetId;
+    const droneId = selected.id;
+    const activeChat = chatName;
+    setApprovalBusyId(approval.id);
+    setError(null);
+    void requestDroneControl(destinationId, 'chat.approval.resolve', {
+      droneId,
+      chatName: activeChat,
+      promptId: approval.promptId,
+      approvalId: approval.id,
+      decision,
+    })
+      .then(async () => {
+        if (
+          targetIdRef.current !== destinationId ||
+          selectedRef.current?.id !== droneId ||
+          chatNameRef.current !== activeChat
+        )
+          return;
+        setPendingPrompts((current) =>
+          current.map((pending) =>
+            String(pending?.id ?? '') === approval.promptId
+              ? {
+                  ...pending,
+                  approvals: Array.isArray(pending?.approvals)
+                    ? pending.approvals.filter((item: any) => item?.id !== approval.id)
+                    : [],
+                }
+              : pending,
+          ),
+        );
+        setResolvedCodexApprovalIds((current) => new Set(current).add(approval.id));
+        await readChat(droneId, activeChat);
+      })
+      .catch((nextError: any) => {
+        if (
+          targetIdRef.current === destinationId &&
+          selectedRef.current?.id === droneId &&
+          chatNameRef.current === activeChat
+        )
+          setError(nextError?.message ?? String(nextError));
+      })
+      .finally(() =>
+        setApprovalBusyId((current) => (current === approval.id ? '' : current)),
+      );
   };
 
   const confirmDroneRename = async () => {
@@ -3065,6 +3141,15 @@ export function DronesScreen({
                           busy={approvalBusyId === approval.id}
                           disabled={!targetReachable}
                           onResolve={(approved) => resolveNativeApproval(approval, approved)}
+                        />
+                      ))}
+                      {codexPendingApprovals.map((approval) => (
+                        <CodexApprovalCard
+                          key={approval.id}
+                          approval={approval}
+                          busy={approvalBusyId === approval.id}
+                          disabled={!targetReachable}
+                          onResolve={(decision) => resolveCodexApproval(approval, decision)}
                         />
                       ))}
                     </ScrollView>

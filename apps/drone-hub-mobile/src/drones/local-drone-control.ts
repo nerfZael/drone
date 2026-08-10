@@ -798,6 +798,9 @@ function useLocalDroneControlValue() {
         return { ok: true };
       }
       if (operation === 'chat.approval.resolve') {
+        if (payload.promptId) {
+          throw new Error('Codex approvals are unavailable for phone-local drones');
+        }
         const { thread } = getThread();
         assistant.resolveApproval(
           thread.id,

@@ -14,9 +14,16 @@ export type CodexAppServerNotification = {
   params: any;
 };
 
+export type CodexAppServerRequest = CodexAppServerNotification & {
+  id: JsonRpcId;
+};
+
+export const CODEX_APP_SERVER_REQUEST_RESOLVED = Symbol('codex-app-server-request-resolved');
+
 export type CodexAppServerConnectionOptions = {
   launchScript: string;
   cwd?: string;
+  onRequest?: (request: CodexAppServerRequest) => any | Promise<any>;
   onNotification?: (notification: CodexAppServerNotification) => void | Promise<void>;
   onStderr?: (text: string) => void | Promise<void>;
   onExit?: (error: Error) => void | Promise<void>;
@@ -31,23 +38,9 @@ function errorMessage(raw: any): string {
   }
 }
 
-function serverRequestResponse(method: string): any {
+function builtInServerRequestResponse(method: string): any {
   if (method === 'currentTime/read') {
     return { currentTimeAt: Math.floor(Date.now() / 1_000) };
-  }
-  if (
-    method === 'item/commandExecution/requestApproval' ||
-    method === 'item/fileChange/requestApproval'
-  ) {
-    return { decision: 'decline' };
-  }
-  if (method === 'execCommandApproval' || method === 'applyPatchApproval') {
-    return {
-      decision: { denied: { rejection: 'Approval UI is not available for this Codex session.' } },
-    };
-  }
-  if (method === 'item/permissions/requestApproval') {
-    return { permissions: {}, scope: 'turn' };
   }
   throw new Error(`unsupported Codex App Server request: ${method}`);
 }
@@ -165,14 +158,26 @@ export class CodexAppServerConnection {
     const method = typeof message.method === 'string' ? message.method : '';
     if (!method) return;
     if (Object.prototype.hasOwnProperty.call(message, 'id')) {
-      try {
-        this.write({ id: message.id, result: serverRequestResponse(method) });
-      } catch (error: any) {
-        this.write({
-          id: message.id,
-          error: { code: -32601, message: error?.message ?? String(error) },
-        });
-      }
+      this.runCallback(async () => {
+        try {
+          const result = this.options.onRequest
+            ? await this.options.onRequest({ id: message.id, method, params: message.params })
+            : builtInServerRequestResponse(method);
+          if (result === CODEX_APP_SERVER_REQUEST_RESOLVED) return;
+          this.write({ id: message.id, result });
+        } catch (error: any) {
+          const errorText = error?.message ?? String(error);
+          this.write({
+            id: message.id,
+            error: {
+              code: /unsupported Codex App Server request/i.test(String(errorText))
+                ? -32601
+                : -32603,
+              message: errorText,
+            },
+          });
+        }
+      });
       return;
     }
     this.runCallback(() =>
@@ -315,9 +320,14 @@ export function translateCodexAppServerNotification(
         }))
       : [];
     if (status === 'failed') {
+      const denialCode = codexDenialCode(turn?.error);
       return [
         ...completedItems,
-        { type: 'error', message: errorMessage(turn?.error ?? 'Codex turn failed') },
+        {
+          type: 'error',
+          message: errorMessage(turn?.error ?? 'Codex turn failed'),
+          ...(denialCode ? { denial_code: denialCode } : {}),
+        },
       ];
     }
     return [
@@ -331,7 +341,26 @@ export function translateCodexAppServerNotification(
     ];
   }
   if (method === 'error') {
-    return [{ type: 'error', message: errorMessage(params?.error ?? params) }];
+    const error = params?.error ?? params;
+    const denialCode = codexDenialCode(error);
+    return [
+      {
+        type: 'error',
+        message: errorMessage(error),
+        ...(denialCode ? { denial_code: denialCode } : {}),
+      },
+    ];
   }
   return [];
+}
+
+function codexDenialCode(raw: any): 'sandbox_denied' | 'policy_denied' | 'approval_unavailable' | null {
+  const info = raw?.codexErrorInfo;
+  if (info === 'sandboxError') return 'sandbox_denied';
+  if (info === 'cyberPolicy') return 'policy_denied';
+  const message = errorMessage(raw);
+  if (/approval.*(?:unavailable|not available|unsupported)|no approval handler/i.test(message)) {
+    return 'approval_unavailable';
+  }
+  return null;
 }

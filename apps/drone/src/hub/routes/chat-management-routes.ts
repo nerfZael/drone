@@ -64,6 +64,7 @@ type ChatManagementRouteDependencyName =
   | 'renameChatInStore'
   | 'resolveCanonicalDroneOrPendingForReadRef'
   | 'resolveChatTmuxCommand'
+  | 'resolveCodexPromptApproval'
   | 'resolveDroneDaemonClientForEntry'
   | 'resolveDroneOrRespond'
   | 'resolveEffectiveDeleteActionSettings'
@@ -148,6 +149,7 @@ export function createChatManagementRouteHandler(
     renameChatInStore,
     resolveCanonicalDroneOrPendingForReadRef,
     resolveChatTmuxCommand,
+    resolveCodexPromptApproval,
     resolveDroneDaemonClientForEntry,
     resolveDroneOrRespond,
     resolveEffectiveDeleteActionSettings,
@@ -203,6 +205,48 @@ export function createChatManagementRouteHandler(
 
   return async ({ req, res, url: u, method, parts }) => {
     const handled = await (async (): Promise<false | void> => {
+      // POST /api/drones/:id/chats/:chat/approvals/:promptId/:approvalId/:decision
+      if (
+        method === 'POST' &&
+        parts.length === 9 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'approvals'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        const promptId = decodeURIComponent(parts[6]);
+        const approvalId = decodeURIComponent(parts[7]);
+        const decision = decodeURIComponent(parts[8]);
+        if (
+          decision !== 'accept' &&
+          decision !== 'acceptForSession' &&
+          decision !== 'decline' &&
+          decision !== 'cancel'
+        ) {
+          json(res, 400, { ok: false, error: 'invalid Codex approval decision' });
+          return;
+        }
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        try {
+          const result = await resolveCodexPromptApproval({
+            droneId: resolved.id,
+            chatName,
+            promptId,
+            approvalId,
+            decision,
+          });
+          json(res, 200, { ok: true, approvalId, decision, result });
+        } catch (error: any) {
+          const message = String(error?.message ?? error);
+          const status = /unknown Codex approval|not found/i.test(message) ? 404 : 409;
+          json(res, status, { ok: false, error: message });
+        }
+        return;
+      }
+
       // POST /api/drones/:id/chats
       // Create a new chat entry on a drone.
       if (

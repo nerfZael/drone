@@ -5,20 +5,11 @@ import { describe, expect, test } from 'bun:test';
 import { NewDroneSetupPanel } from '../src/droneHub/app/NewDroneSetupPanel';
 import { NewDroneTargetControls } from '../src/droneHub/app/NewDroneTargetControls';
 import { DroneRuntimeIndicator } from '../src/droneHub/app/DroneRuntimeIndicator';
+import { AgentComposerPicker } from '../src/droneHub/app/AgentComposerPicker';
+import { NewDroneAccessPicker } from '../src/droneHub/app/NewDroneAccessPicker';
 
 const baseProps: React.ComponentProps<typeof NewDroneSetupPanel> = {
   createRuntime: 'container',
-  spawnAgentPermissionMode: 'full-access',
-  onSpawnAgentPermissionModeChange: () => {},
-  spawnApprovalPolicy: 'ask',
-  onSpawnApprovalPolicyChange: () => {},
-  spawnAgentApprovalSupported: true,
-  spawnAgentReadOnlySupported: true,
-  spawnAgentConfig: { kind: 'native' },
-  spawnAgentKey: 'native',
-  agentLabel: 'Built-in',
-  spawnAgentMenuEntries: [{ value: 'native', label: 'Built-in' }],
-  onSpawnAgentKeyChange: () => {},
   createRepoMenuEntries: [],
   draftCreateRepoPath: '/work/repo',
   agentsMdLibraryFiles: [
@@ -57,13 +48,11 @@ const targetProps: React.ComponentProps<typeof NewDroneTargetControls> = {
 };
 
 describe('new drone setup panel', () => {
-  test('renders agent, access, repository, and advanced controls in the footer row', () => {
+  test('keeps repository and advanced controls in the footer row', () => {
     const html = renderToStaticMarkup(<NewDroneSetupPanel {...baseProps} />);
 
-    expect(html).toContain('Choose agent');
-    expect(html).toContain('Built-in');
-    expect(html).toContain('Choose chat access and approvals');
-    expect(html).toContain('Execute · Ask');
+    expect(html).not.toContain('Choose agent');
+    expect(html).not.toContain('Choose chat access and approvals');
     expect(html).toContain('No repository');
     expect(html).toContain('Advanced');
     expect(html).not.toContain('Execution target: Container');
@@ -73,6 +62,33 @@ describe('new drone setup panel', () => {
     expect(html).not.toContain('Save as draft');
     expect(html).not.toContain('role="group" aria-label="Chat access"');
     expect(html).not.toContain('role="group" aria-label="Approvals"');
+  });
+
+  test('renders agent and access controls for the composer control rows', () => {
+    const html = renderToStaticMarkup(
+      <>
+        <AgentComposerPicker
+          value="builtin:codex"
+          label="Codex"
+          entries={[{ value: 'builtin:codex', label: 'Codex' }]}
+          onChange={() => {}}
+        />
+        <NewDroneAccessPicker
+          permissionMode="workspace-write"
+          onPermissionModeChange={() => {}}
+          approvalPolicy="agent-decides"
+          onApprovalPolicyChange={() => {}}
+          readOnlySupported
+          approvalsSupported
+          agentIsCodex
+        />
+      </>,
+    );
+
+    expect(html).toContain('Choose agent');
+    expect(html).toContain('Codex');
+    expect(html).toContain('Choose chat access and approvals');
+    expect(html).toContain('Write · Decide for me');
   });
 
   test('renders runtime and branch in the upper target row', () => {

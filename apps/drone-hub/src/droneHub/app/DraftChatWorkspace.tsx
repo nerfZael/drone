@@ -26,6 +26,8 @@ import {
 } from './drone-create-runtime';
 import { visibleDraftQueuedPrompts as resolveVisibleDraftQueuedPrompts } from './draft-chat-queue';
 import { NewDroneSetupPanel } from './NewDroneSetupPanel';
+import { AgentComposerPicker } from './AgentComposerPicker';
+import { NewDroneAccessPicker } from './NewDroneAccessPicker';
 import { NewDroneTargetControls } from './NewDroneTargetControls';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { useAgentModelCatalog } from './use-agent-model-catalog';
@@ -265,17 +267,6 @@ export function DraftChatWorkspace({
   const idleSetupPanel = (
     <NewDroneSetupPanel
       createRuntime={createRuntime}
-      spawnAgentPermissionMode={spawnAgentPermissionMode}
-      onSpawnAgentPermissionModeChange={onSpawnAgentPermissionModeChange}
-      spawnApprovalPolicy={spawnApprovalPolicy}
-      onSpawnApprovalPolicyChange={onSpawnApprovalPolicyChange}
-      spawnAgentApprovalSupported={spawnAgentApprovalSupported}
-      spawnAgentReadOnlySupported={spawnAgentReadOnlySupported}
-      spawnAgentConfig={spawnAgentConfig}
-      spawnAgentKey={spawnAgentKey}
-      agentLabel={agentLabel}
-      spawnAgentMenuEntries={filteredAgentMenuEntries}
-      onSpawnAgentKeyChange={setSpawnAgentKey}
       createRepoMenuEntries={createRepoMenuEntries}
       draftCreateRepoPath={draftCreateRepoPath}
       agentsMdLibraryFiles={agentsMdLibraryFiles}
@@ -390,6 +381,29 @@ export function DraftChatWorkspace({
         continuousVoiceEnabled={false}
         alwaysExpanded
         onDraftContentChange={onDraftContentChange}
+        composerLeadingControls={
+          <AgentComposerPicker
+            value={spawnAgentKey}
+            label={agentLabel}
+            entries={filteredAgentMenuEntries}
+            onChange={setSpawnAgentKey}
+            disabled={controlsLocked}
+          />
+        }
+        composerTrailingControls={
+          <NewDroneAccessPicker
+            permissionMode={spawnAgentPermissionMode}
+            onPermissionModeChange={onSpawnAgentPermissionModeChange}
+            approvalPolicy={spawnApprovalPolicy}
+            onApprovalPolicyChange={onSpawnApprovalPolicyChange}
+            readOnlySupported={spawnAgentReadOnlySupported}
+            approvalsSupported={spawnAgentApprovalSupported}
+            agentIsCodex={
+              spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex'
+            }
+            disabled={controlsLocked}
+          />
+        }
         composerControls={newDroneComposerControls}
         composerTopAction={
           !draftChat.prompt ? (

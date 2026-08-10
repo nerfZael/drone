@@ -1892,13 +1892,15 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
 
   server.registerTool('create_drone', {
     title: 'Create drone',
-    description: 'Create a new Drone Hub container drone. Drafts return immediately; other drones return when ready unless completion is accepted. For repo-attached drones, agentsMd overrides the AGENTS.md content inherited from Drone Hub settings.',
+    description: 'Create a new Drone Hub container drone. Drafts return immediately; other drones return when ready unless completion is accepted. Unattended Codex drones default to workspace-write with no interactive approvals; pass agentPermissionMode and approvalPolicy to override that behavior. For repo-attached drones, agentsMd overrides the AGENTS.md content inherited from Drone Hub settings.',
     inputSchema: {
       name: z.string(),
       group: z.string().optional(),
       groupId: z.string().optional(),
       agent: z.enum(['cursor', 'codex', 'claude', 'opencode', 'pi', 'blip']).optional(),
       model: z.string().optional(),
+      agentPermissionMode: z.enum(['read-only', 'workspace-write', 'full-access']).optional(),
+      approvalPolicy: z.enum(['ask', 'agent-decides', 'never']).optional(),
       cwd: z.string().optional(),
       repoRef: z.string().optional(),
       repoLabel: z.string().optional(),
@@ -1929,15 +1931,21 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     const seedModel = args.model == null ? defaults.spawnModel : cleanString(args.model);
     const seedAgentIsCodex = seedAgent?.kind === 'builtin' && seedAgent.id === 'codex';
     const seedAgentSupportsAccess = seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip');
-    const seedAgentPermissionMode = seedAgentSupportsAccess ? defaults.spawnAgentPermissionMode : 'full-access';
-    const seedAgentSupportsApproval = seedAgentPermissionMode === 'full-access' && seedAgentIsCodex;
+    if (args.agentPermissionMode != null && !seedAgentSupportsAccess) {
+      throw new Error('agentPermissionMode is only available for Codex and Blip drones');
+    }
+    if (args.approvalPolicy != null && !seedAgentIsCodex) {
+      throw new Error('approvalPolicy is only available for Codex drones');
+    }
+    const requestedPermissionMode = args.agentPermissionMode
+      ?? (seedAgentIsCodex ? 'workspace-write' : defaults.spawnAgentPermissionMode);
+    const seedAgentPermissionMode = seedAgentSupportsAccess ? requestedPermissionMode : 'full-access';
+    const seedAgentSupportsApproval = seedAgentIsCodex;
+    const requestedApprovalPolicy = args.approvalPolicy
+      ?? (seedAgentIsCodex ? 'never' : defaults.spawnApprovalPolicy);
     const seedApprovalPolicy = !seedAgentSupportsApproval
       ? 'ask'
-      : seedAgentIsCodex && defaults.spawnApprovalPolicy === 'ask'
-        ? 'agent-decides'
-        : !seedAgentIsCodex && defaults.spawnApprovalPolicy === 'agent-decides'
-          ? 'ask'
-          : defaults.spawnApprovalPolicy;
+      : requestedApprovalPolicy;
     const seedReasoning = seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip')
       ? defaults.spawnReasoning
       : '';

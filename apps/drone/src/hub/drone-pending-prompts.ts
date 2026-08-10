@@ -6,6 +6,8 @@ import {
   type AgentPlan,
   type AgentRunActivity,
   type ChatQueueAction,
+  type CodexApprovalDecision,
+  type CodexPendingApproval,
 } from '@drone/assistant-chat';
 import { loadRegistry, updateRegistry } from '../host/registry';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
@@ -48,6 +50,7 @@ export type PendingPrompt = {
   blipClones?: unknown;
   activity?: AgentRunActivity;
   agentPlan?: AgentPlan;
+  approvals?: CodexPendingApproval[];
   fileChangesBaseline?: AgentRunFileChangesBaseline;
   fileChanges?: AgentRunFileChanges;
   startedAt?: string;
@@ -170,6 +173,7 @@ export function createDronePendingPromptStore(deps: {
           observability: normalizeObservability((p as any)?.observability),
           activity: normalizeAgentRunActivity((p as any)?.activity),
           agentPlan: normalizePendingAgentPlan((p as any)?.agentPlan),
+          approvals: normalizeCodexApprovals((p as any)?.approvals),
           ...((p as any)?.fileChangesBaseline && typeof (p as any).fileChangesBaseline === 'object'
             ? { fileChangesBaseline: (p as any).fileChangesBaseline as AgentRunFileChangesBaseline }
             : {}),
@@ -212,6 +216,86 @@ export function createDronePendingPromptStore(deps: {
     if (source !== 'cursor' && source !== 'codex' && source !== 'claude' && source !== 'opencode')
       return undefined;
     return normalizeAgentPlan(raw, source, String((raw as any).updatedAt ?? ''));
+  }
+
+  function normalizeCodexApprovals(raw: unknown): CodexPendingApproval[] | undefined {
+    if (!Array.isArray(raw)) return undefined;
+    const validMethods = new Set<CodexPendingApproval['method']>([
+      'item/commandExecution/requestApproval',
+      'item/fileChange/requestApproval',
+      'item/permissions/requestApproval',
+      'execCommandApproval',
+      'applyPatchApproval',
+    ]);
+    const validKinds = new Set<CodexPendingApproval['kind']>([
+      'command_execution',
+      'file_change',
+      'permissions',
+    ]);
+    const validDecisions = new Set<CodexApprovalDecision>([
+      'accept',
+      'acceptForSession',
+      'decline',
+      'cancel',
+    ]);
+    const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+    const approvals = raw.flatMap((approval: any): CodexPendingApproval[] => {
+      if (!approval || typeof approval !== 'object' || approval.status !== 'pending') return [];
+      const id = text(approval.id);
+      const promptId = text(approval.promptId);
+      const threadId = text(approval.threadId);
+      const turnId = text(approval.turnId);
+      const itemId = text(approval.itemId);
+      const method = text(approval.method) as CodexPendingApproval['method'];
+      const kind = text(approval.kind) as CodexPendingApproval['kind'];
+      if (
+        !id ||
+        !promptId ||
+        !threadId ||
+        !turnId ||
+        !itemId ||
+        !validMethods.has(method) ||
+        !validKinds.has(kind)
+      ) {
+        return [];
+      }
+      const availableDecisions = Array.isArray(approval.availableDecisions)
+        ? [...new Set(approval.availableDecisions)].filter(
+            (decision): decision is CodexApprovalDecision => validDecisions.has(decision as any),
+          )
+        : [];
+      const optional = (value: unknown) => {
+        const normalized = text(value);
+        return normalized || undefined;
+      };
+      return [
+        {
+          id,
+          promptId,
+          threadId,
+          turnId,
+          itemId,
+          method,
+          kind,
+          ...(optional(approval.reason) ? { reason: optional(approval.reason) } : {}),
+          ...(optional(approval.command) ? { command: optional(approval.command) } : {}),
+          ...(optional(approval.cwd) ? { cwd: optional(approval.cwd) } : {}),
+          ...(optional(approval.grantRoot) ? { grantRoot: optional(approval.grantRoot) } : {}),
+          ...(approval.permissions !== undefined ? { permissions: approval.permissions } : {}),
+          ...(approval.item !== undefined ? { item: approval.item } : {}),
+          ...(approval.detailsTruncated === true ? { detailsTruncated: true } : {}),
+          availableDecisions:
+            availableDecisions.length > 0
+              ? availableDecisions
+              : ['accept', 'acceptForSession', 'decline', 'cancel'],
+          createdAt: Number.isFinite(Date.parse(text(approval.createdAt)))
+            ? text(approval.createdAt)
+            : deps.nowIso(),
+          status: 'pending',
+        },
+      ];
+    });
+    return approvals.length > 0 ? approvals : [];
   }
 
   function isSafePromptId(raw: string): boolean {
@@ -492,6 +576,7 @@ export function createDronePendingPromptStore(deps: {
         | 'blipClones'
         | 'activity'
         | 'agentPlan'
+        | 'approvals'
         | 'fileChangesBaseline'
         | 'fileChanges'
         | 'action'

@@ -78,6 +78,7 @@ import {
 import {
   procStart,
   procStop,
+  codexPromptApprovalResolve as droneCodexPromptApprovalResolve,
   codexPromptEnqueue as droneCodexPromptEnqueue,
   promptEnqueue as dronePromptEnqueue,
   promptCancel as dronePromptCancel,
@@ -3117,6 +3118,7 @@ promptRuntime = createChatPromptRuntime({
   defaultPendingPromptEnqueueRetryDelayMs,
   defaultPromptEnqueueTimeoutMs,
   defaultRepoSeedTimeoutMs,
+  droneCodexPromptApprovalResolve,
   dronePromptCancel,
   dronePromptEnqueue,
   droneCodexPromptEnqueue,
@@ -3226,6 +3228,7 @@ const {
   cancelQueuedPendingPrompt,
   chatHasActivePendingPromptsForSummary,
   chatHasReconcilablePendingPrompts,
+  chatRequiresCodexApprovalForSummary,
   chatReconciliationQueue,
   createOrEnqueueNewChatAction,
   createOrEnqueuePromptUnified,
@@ -5017,9 +5020,19 @@ export async function startDroneHubApiServer(opts: {
     });
     const approvalChats = chats.flatMap((chatName) => {
       const chatEntry = d.chats?.[chatName];
-      if (inferChatAgent(chatEntry, d).kind !== 'native') return [];
-      const threadId = String(chatEntry?.id ?? '').trim();
-      return threadId && assistantService.threadRequiresApproval(threadId) ? [chatName] : [];
+      const agent = inferChatAgent(chatEntry, d);
+      if (agent.kind === 'native') {
+        const threadId = String(chatEntry?.id ?? '').trim();
+        return threadId && assistantService.threadRequiresApproval(threadId) ? [chatName] : [];
+      }
+      if (
+        agent.kind === 'builtin' &&
+        agent.id === 'codex' &&
+        chatRequiresCodexApprovalForSummary({ droneId, chatName, entry: chatEntry })
+      ) {
+        return [chatName];
+      }
+      return [];
     });
     const chatReadStates = Object.fromEntries(
       chats.map((chatName) => {
@@ -5851,6 +5864,8 @@ export async function startDroneHubApiServer(opts: {
     renameChatInStore,
     resolveCanonicalDroneOrPendingForReadRef,
     resolveChatTmuxCommand,
+    resolveCodexPromptApproval: (...args: any[]) =>
+      promptRuntime.resolveCodexPromptApproval(...args),
     resolveDroneDaemonClientForEntry,
     resolveDroneOrPendingForReadRef,
     resolveDroneOrRespond,

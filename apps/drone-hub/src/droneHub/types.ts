@@ -630,6 +630,7 @@ export type PendingPrompt = {
   };
   activity?: AgentRunActivity;
   agentPlan?: AgentPlan;
+  approvals?: import('@drone/assistant-chat').CodexPendingApproval[];
   fileChanges?: AgentRunFileChanges;
   startedAt?: string;
   updatedAt?: string;

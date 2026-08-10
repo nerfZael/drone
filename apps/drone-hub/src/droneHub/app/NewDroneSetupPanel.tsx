@@ -1,9 +1,7 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import type { AgentApprovalPolicy, AgentPermissionMode, ChatAgentConfig } from '../../domain';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/components';
 import type { CreateRuntime } from './drone-create-runtime';
-import { NewDroneAccessPicker } from './NewDroneAccessPicker';
 import { AgentsMdCreateSelector } from './AgentsMdCreateSelector';
 import { repoPathLabel } from './repo-path-label';
 import type { AgentsMdFileSummary } from './settings-types';
@@ -11,17 +9,6 @@ import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 type NewDroneSetupPanelProps = {
   createRuntime: CreateRuntime;
-  spawnAgentPermissionMode: AgentPermissionMode;
-  onSpawnAgentPermissionModeChange: (value: AgentPermissionMode) => void;
-  spawnApprovalPolicy: AgentApprovalPolicy;
-  onSpawnApprovalPolicyChange: (value: AgentApprovalPolicy) => void;
-  spawnAgentApprovalSupported: boolean;
-  spawnAgentReadOnlySupported: boolean;
-  spawnAgentConfig: ChatAgentConfig;
-  spawnAgentKey: string;
-  agentLabel: string;
-  spawnAgentMenuEntries: UiMenuSelectEntry[];
-  onSpawnAgentKeyChange: (value: string) => void;
   createRepoMenuEntries: UiMenuSelectEntry[];
   draftCreateRepoPath: string;
   agentsMdLibraryFiles: AgentsMdFileSummary[];
@@ -60,17 +47,6 @@ function ChevronIcon({ open }: { open: boolean }) {
 
 export function NewDroneSetupPanel({
   createRuntime,
-  spawnAgentPermissionMode,
-  onSpawnAgentPermissionModeChange,
-  spawnApprovalPolicy,
-  onSpawnApprovalPolicyChange,
-  spawnAgentApprovalSupported,
-  spawnAgentReadOnlySupported,
-  spawnAgentConfig,
-  spawnAgentKey,
-  agentLabel,
-  spawnAgentMenuEntries,
-  onSpawnAgentKeyChange,
   createRepoMenuEntries,
   draftCreateRepoPath,
   agentsMdLibraryFiles,
@@ -95,38 +71,9 @@ export function NewDroneSetupPanel({
   );
   const advancedPanelId = React.useId();
   const repositoryLabel = chatHeaderRepoPath ? repoPathLabel(chatHeaderRepoPath) : '';
-  const spawnAgentIsCodex = spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex';
-
   return (
     <div className="px-1 pb-1">
       <div className="flex flex-wrap items-center gap-x-[.4375rem] gap-y-1.5">
-        <UiMenuSelect
-          variant="toolbar"
-          value={spawnAgentKey}
-          onValueChange={onSpawnAgentKeyChange}
-          entries={spawnAgentMenuEntries}
-          disabled={controlsLocked}
-          searchable
-          searchPlaceholder="Search agents"
-          title="Choose agent"
-          triggerLabel={agentLabel}
-          triggerClassName={`${INLINE_TRIGGER_CLASS} min-w-[7rem] max-w-[11.25rem]`}
-          panelClassName="bottom-full !mt-0 mb-1.5 w-[16.25rem]"
-          menuClassName="max-h-[15rem] overflow-y-auto"
-          header="Choose agent"
-        />
-
-        <NewDroneAccessPicker
-          permissionMode={spawnAgentPermissionMode}
-          onPermissionModeChange={onSpawnAgentPermissionModeChange}
-          approvalPolicy={spawnApprovalPolicy}
-          onApprovalPolicyChange={onSpawnApprovalPolicyChange}
-          readOnlySupported={spawnAgentReadOnlySupported}
-          approvalsSupported={spawnAgentApprovalSupported}
-          agentIsCodex={spawnAgentIsCodex}
-          disabled={controlsLocked}
-        />
-
         <div className="ml-auto flex min-w-0 items-center gap-1.5">
           <UiMenuSelect
             variant="toolbar"

@@ -292,6 +292,8 @@ export function AssistantDock({
   promotingNewChatActionById = {},
   promoteNewChatActionErrorById = {},
   composerTopAction,
+  composerLeadingControls,
+  composerTrailingControls,
 }: {
   nativeChat: NativeChatBinding;
   messageFeatures: AssistantMessageFeatures;
@@ -305,6 +307,8 @@ export function AssistantDock({
   promotingNewChatActionById?: Record<string, true>;
   promoteNewChatActionErrorById?: Record<string, string>;
   composerTopAction?: React.ReactNode;
+  composerLeadingControls?: React.ReactNode;
+  composerTrailingControls?: React.ReactNode;
 }) {
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
   const nativeDroneId = nativeChat.droneId;
@@ -1447,7 +1451,7 @@ export function AssistantDock({
       } catch (err: any) {
         if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
       } finally {
-        setApprovalBusyId(null);
+        setApprovalBusyId((current) => (current === approval.id ? null : current));
       }
     },
     [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent],
@@ -2409,6 +2413,8 @@ export function AssistantDock({
               composerTopAction={composerTopAction}
               composerContext={nativeComposerContext}
               composerControls={nativeComposerControls}
+              composerLeadingControls={composerLeadingControls}
+              composerTrailingControls={composerTrailingControls}
               composerStatus={
                 blipSession.contextUsage ? (
                   <AssistantContextUsageIndicator usage={blipSession.contextUsage} />
