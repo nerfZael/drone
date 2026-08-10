@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  githubPullRequestDiffStatsPresentation,
   githubPullRequestMatchesRepo,
   pullRequestCloseConfirmation,
   pullRequestMergeConfirmation,
@@ -77,27 +78,26 @@ function PullRequestDiffStats({
 }: {
   stats: NonNullable<RepoPullRequestSummary['diffStats']>;
 }) {
-  const net = stats.additions - stats.deletions;
-  const netLabel = net === 0 ? '±0' : `${net > 0 ? '+' : ''}${net}`;
+  const presentation = githubPullRequestDiffStatsPresentation(stats);
   return (
     <span
-      aria-label={`${stats.changed} files changed, ${stats.additions} additions, ${stats.deletions} deletions, ${netLabel} net lines`}
+      aria-label={presentation.accessibilityLabel}
       className="inline-flex shrink-0 items-center gap-1.5 font-mono text-[var(--text-10)] tabular-nums"
     >
       <span className="text-[var(--muted-dim)]" title="Files changed">
-        ({stats.changed})
+        ({presentation.changed})
       </span>
       <span className="text-[var(--green)]" title="Lines added">
-        +{stats.additions}
+        +{presentation.additions}
       </span>
       <span className="text-[var(--red)]" title="Lines deleted">
-        -{stats.deletions}
+        -{presentation.deletions}
       </span>
       <span aria-hidden="true" className="text-[var(--border)]">
         │
       </span>
       <span className="text-[var(--accent)]" title="Net line change">
-        {netLabel}
+        {presentation.netLabel}
       </span>
     </span>
   );
