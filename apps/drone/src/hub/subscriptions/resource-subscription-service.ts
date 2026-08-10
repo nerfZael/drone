@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { renderEventNotificationPrompt } from '@drone/assistant-chat';
 
+import { ManagedLoop } from '../../background/managed-loop';
 import { getPromptQueueRepository } from '../../host/prompt-queue-repository';
 import { resolveGithubToken } from '../github-pull-requests';
 import {
@@ -55,33 +56,68 @@ export type ResourceSubscriptionServiceDependencies = {
     subscriber: ChatResourceLocation,
   ) => Promise<boolean>;
   wakePromptQueue: (droneId: string, chatName: string) => void;
+  pollGithubRepository?: typeof pollGithubRepository;
+  readSettings?: () => Promise<ResourceSubscriptionSettings>;
   log: (level: 'info' | 'warn', message: string, details?: Record<string, unknown>) => void;
 };
 
 export class ResourceSubscriptionService {
-  private timer: NodeJS.Timeout | null = null;
-  private running = false;
+  private readonly localLoop: ManagedLoop;
+  private readonly githubLoop: ManagedLoop;
+  private started = false;
+  private githubAbortController = new AbortController();
   private lastGithubPollAt = 0;
   private lastOrphanCleanupAt = 0;
   private lastCleanupAt = 0;
   private settingsCache: { value: ResourceSubscriptionSettings; expiresAt: number } | null = null;
+  private localTickInFlight: Promise<void> | null = null;
+  private githubTickInFlight: Promise<void> | null = null;
 
-  constructor(private readonly deps: ResourceSubscriptionServiceDependencies) {}
-
-  async start(): Promise<void> {
-    if (this.timer) return;
-    if (!getPromptQueueRepository()) {
-      throw new Error('resource subscriptions require the prompt queue');
-    }
-    await this.deps.repository.recoverInterruptedBatches();
-    this.timer = setInterval(() => void this.tick(), 1_000);
-    this.timer.unref?.();
-    void this.tick();
+  constructor(private readonly deps: ResourceSubscriptionServiceDependencies) {
+    this.localLoop = new ManagedLoop({
+      intervalMs: 1_000,
+      run: async () => await this.runLocalTick(),
+      onError: (error) => this.logTickError('local', error),
+    });
+    this.githubLoop = new ManagedLoop({
+      intervalMs: 1_000,
+      run: async () => await this.runGithubTick(),
+      onError: (error) => {
+        if (!this.githubAbortController.signal.aborted) this.logTickError('GitHub', error);
+      },
+    });
   }
 
-  stop(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+  async start(): Promise<void> {
+    if (this.started) return;
+    this.started = true;
+    if (!getPromptQueueRepository()) {
+      this.started = false;
+      throw new Error('resource subscriptions require the prompt queue');
+    }
+    try {
+      await this.deps.repository.recoverInterruptedBatches();
+    } catch (error) {
+      this.started = false;
+      throw error;
+    }
+    if (this.githubAbortController.signal.aborted) {
+      this.githubAbortController = new AbortController();
+    }
+    this.localLoop.start();
+    this.githubLoop.start();
+  }
+
+  async stop(): Promise<void> {
+    this.started = false;
+    this.githubAbortController.abort(new Error('DroneHub is shutting down'));
+    this.lastGithubPollAt = 0;
+    await Promise.all([this.localLoop.stop(), this.githubLoop.stop()]);
+    await Promise.allSettled(
+      [this.localTickInFlight, this.githubTickInFlight].filter(
+        (tick): tick is Promise<void> => tick != null,
+      ),
+    );
   }
 
   list(subscriberChatId: string, includeInactive = false): ResourceSubscription[] {
@@ -269,44 +305,75 @@ export class ResourceSubscriptionService {
   }
 
   async tick(): Promise<void> {
-    if (this.running) return;
-    this.running = true;
     try {
-      const settings = await this.settings();
-      if (!settings.enabled) return;
-      if (Date.now() - this.lastOrphanCleanupAt >= 60_000) {
-        this.lastOrphanCleanupAt = Date.now();
-        await cancelOrphanedResourceSubscriptions(this.deps.repository, this.deps.log);
-      }
-      await this.pollChats();
-      await this.pollCron(new Date());
-      if (Date.now() - this.lastGithubPollAt >= settings.githubPollingIntervalMs) {
-        this.lastGithubPollAt = Date.now();
-        await this.pollGithub();
-      }
-      for (let index = 0; index < 10; index += 1) {
-        const batch = await this.deps.repository.claimBatch(settings);
-        if (!batch) break;
-        await this.deliver(batch, settings);
-      }
-      if (Date.now() - this.lastCleanupAt >= 24 * 60 * 60 * 1000) {
-        this.lastCleanupAt = Date.now();
-        await this.deps.repository.cleanup(settings);
-      }
+      await Promise.all([this.runLocalTick(), this.runGithubTick()]);
     } catch (error) {
-      this.deps.log('warn', 'resource subscription tick failed', {
-        error: errorMessage(error),
-      });
-    } finally {
-      this.running = false;
+      if (!this.githubAbortController.signal.aborted) this.logTickError('manual', error);
     }
+  }
+
+  private runLocalTick(): Promise<void> {
+    if (this.localTickInFlight) return this.localTickInFlight;
+    const tick = Promise.resolve()
+      .then(() => this.tickLocal())
+      .finally(() => {
+        if (this.localTickInFlight === tick) this.localTickInFlight = null;
+      });
+    this.localTickInFlight = tick;
+    return tick;
+  }
+
+  private runGithubTick(): Promise<void> {
+    if (this.githubTickInFlight) return this.githubTickInFlight;
+    const signal = this.githubAbortController.signal;
+    const tick = Promise.resolve()
+      .then(() => this.tickGithub(signal))
+      .finally(() => {
+        if (this.githubTickInFlight === tick) this.githubTickInFlight = null;
+      });
+    this.githubTickInFlight = tick;
+    return tick;
+  }
+
+  private async tickLocal(): Promise<void> {
+    const settings = await this.settings();
+    if (!settings.enabled) return;
+    if (Date.now() - this.lastOrphanCleanupAt >= 60_000) {
+      this.lastOrphanCleanupAt = Date.now();
+      await cancelOrphanedResourceSubscriptions(this.deps.repository, this.deps.log);
+    }
+    await this.pollChats();
+    await this.pollCron(new Date());
+    for (let index = 0; index < 10; index += 1) {
+      const batch = await this.deps.repository.claimBatch(settings);
+      if (!batch) break;
+      await this.deliver(batch, settings);
+    }
+    if (Date.now() - this.lastCleanupAt >= 24 * 60 * 60 * 1000) {
+      this.lastCleanupAt = Date.now();
+      await this.deps.repository.cleanup(settings);
+    }
+  }
+
+  private async tickGithub(signal: AbortSignal): Promise<void> {
+    const settings = await this.settings();
+    if (!settings.enabled) return;
+    if (Date.now() - this.lastGithubPollAt < settings.githubPollingIntervalMs) return;
+    this.lastGithubPollAt = Date.now();
+    await this.pollGithub(signal);
+  }
+
+  private logTickError(lane: string, error: unknown): void {
+    this.deps.log('warn', `resource subscription ${lane} tick failed`, {
+      error: errorMessage(error),
+    });
   }
 
   private async settings(): Promise<ResourceSubscriptionSettings> {
     if (this.settingsCache && this.settingsCache.expiresAt > Date.now()) {
       return this.settingsCache.value;
     }
-    const value = await readResourceSubscriptionSettings();
+    const value = await (this.deps.readSettings ?? readResourceSubscriptionSettings)();
     this.settingsCache = { value, expiresAt: Date.now() + 5_000 };
     return value;
   }
@@ -418,7 +485,7 @@ export class ResourceSubscriptionService {
     }
   }
 
-  private async pollGithub(): Promise<void> {
+  private async pollGithub(signal: AbortSignal): Promise<void> {
     const subscriptions = this.deps.repository.listActive('github');
     const repositoryIds = new Set(
       subscriptions.map((subscription) =>
@@ -428,11 +495,16 @@ export class ResourceSubscriptionService {
       ),
     );
     if (repositoryIds.size === 0) return;
-    const token = await resolveGithubToken();
+    const token = this.deps.pollGithubRepository ? null : await resolveGithubToken();
     for (const resourceId of repositoryIds) {
       const cursor = this.deps.repository.pollCursor('github', 'repository', resourceId);
       try {
-        const result = await pollGithubRepository(resourceId, cursor, new Date(), { token });
+        const result = await (this.deps.pollGithubRepository ?? pollGithubRepository)(
+          resourceId,
+          cursor,
+          new Date(),
+          { token, signal },
+        );
         for (const event of result.events) await this.deps.repository.appendEvent(event);
         await this.deps.repository.setPollCursor({
           provider: 'github',
@@ -441,6 +513,7 @@ export class ResourceSubscriptionService {
           cursor: result.cursor,
         });
       } catch (error) {
+        if (signal.aborted) throw signal.reason;
         await this.deps.repository.setPollCursor({
           provider: 'github',
           resourceType: 'repository',

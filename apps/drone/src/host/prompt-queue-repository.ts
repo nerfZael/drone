@@ -801,6 +801,40 @@ export class PromptQueueRepository {
     });
   }
 
+  async releaseClaim(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    error: string;
+    leaseOwner?: string;
+    now?: string;
+  }): Promise<boolean> {
+    const now = normalizeIso(opts.now, new Date().toISOString());
+    return await this.database.writeTransaction('release prompt claim', (connection) => {
+      const current = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
+      if (
+        !current ||
+        current.state !== 'sending' ||
+        (opts.leaseOwner && current.leaseOwner !== opts.leaseOwner)
+      ) {
+        return false;
+      }
+      const info = connection
+        .prepare(
+          `
+          UPDATE prompts
+          SET state = 'queued', updated_at = ?, next_attempt_at = ?, last_error = ?,
+              attempt_count = MAX(0, attempt_count - 1),
+              lease_owner = NULL, lease_expires_at = NULL,
+              payload_json = json_set(payload_json, '$.state', 'queued', '$.error', ?, '$.updatedAt', ?)
+          WHERE drone_id = ? AND chat_name = ? AND prompt_id = ? AND state = 'sending'
+        `,
+        )
+        .run(now, now, opts.error, opts.error, now, opts.droneId, opts.chatName, opts.promptId);
+      return Number(info.changes ?? 0) === 1;
+    });
+  }
+
   async recoverExpiredLeases(opts?: { now?: string; error?: string }): Promise<number> {
     const now = normalizeIso(opts?.now, new Date().toISOString());
     const error = String(opts?.error ?? 'Prompt delivery lease expired; retrying.');

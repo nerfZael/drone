@@ -123,3 +123,49 @@ describe('pending prompt retry scheduling', () => {
     }
   });
 });
+
+describe('pending prompt shutdown', () => {
+  test('aborts active delivery and uses a fresh signal after restart', async () => {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let runCount = 0;
+    let firstRunAborted = false;
+    const pump = new PendingPromptPump({
+      normalizeDroneId: (value) => value,
+      normalizeChatName: (value) => value || 'default',
+      concurrencyLimit: () => 1,
+      defaultRetryDelayMs: () => 1_000,
+      run: async (_target, signal) => {
+        runCount += 1;
+        if (runCount > 1) {
+          expect(signal.aborted).toBe(false);
+          return;
+        }
+        markStarted();
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              firstRunAborted = true;
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        });
+      },
+    });
+
+    pump.enqueue('drone-1', 'default');
+    await started;
+    await pump.stop();
+    expect(firstRunAborted).toBe(true);
+
+    pump.start();
+    pump.enqueue('drone-1', 'default');
+    await Bun.sleep(20);
+    expect(runCount).toBe(2);
+    await pump.stop();
+  });
+});

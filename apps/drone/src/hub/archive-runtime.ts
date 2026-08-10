@@ -1,3 +1,4 @@
+import { ManagedLoop } from '../background/managed-loop';
 import type { ArchiveRetentionId, ArchiveRuntimePolicy } from './hub-settings';
 
 type ArchiveRuntimeDependencyName =
@@ -745,9 +746,17 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
   let ARCHIVE_CLEANUP_TASK: Promise<void> | null = null;
   const ARCHIVE_CLEANUP_INTERVAL_MS = 5 * 60_000;
   const ARCHIVE_CLEANUP_MAX_DELETES_PER_RUN = 25;
-  let ARCHIVE_CLEANUP_INTERVAL: ReturnType<typeof setInterval> | null = null;
+  let archiveCleanupLoop: ManagedLoop | null = null;
+  let archiveCleanupReason = 'interval';
+  let archiveCleanupStopped = false;
 
   function triggerArchiveCleanup(reason: string) {
+    if (archiveCleanupStopped) return;
+    archiveCleanupReason = reason;
+    if (archiveCleanupLoop) {
+      archiveCleanupLoop.wake();
+      return;
+    }
     void cleanupExpiredArchivedDrones({ reason }).catch((e: any) => {
       hubLog('warn', 'archive cleanup failed', {
         reason,
@@ -823,27 +832,31 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
   }
 
   function startArchiveCleanupScheduler(): void {
-    if (!ARCHIVE_CLEANUP_INTERVAL) {
-      ARCHIVE_CLEANUP_INTERVAL = setInterval(() => {
-        triggerArchiveCleanup('interval');
-      }, ARCHIVE_CLEANUP_INTERVAL_MS);
-      try {
-        (ARCHIVE_CLEANUP_INTERVAL as any).unref?.();
-      } catch {
-        // ignore
-      }
-    }
-    triggerArchiveCleanup('startup');
+    if (archiveCleanupLoop) return;
+    archiveCleanupStopped = false;
+    archiveCleanupReason = 'startup';
+    archiveCleanupLoop = new ManagedLoop({
+      intervalMs: ARCHIVE_CLEANUP_INTERVAL_MS,
+      run: async () => {
+        const reason = archiveCleanupReason;
+        archiveCleanupReason = 'interval';
+        await cleanupExpiredArchivedDrones({ reason }).catch((error) => {
+          hubLog('warn', 'archive cleanup failed', {
+            reason,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      },
+    });
+    archiveCleanupLoop.start();
   }
 
-  function stopArchiveCleanupScheduler(): void {
-    if (!ARCHIVE_CLEANUP_INTERVAL) return;
-    try {
-      clearInterval(ARCHIVE_CLEANUP_INTERVAL);
-    } catch {
-      // ignore
-    }
-    ARCHIVE_CLEANUP_INTERVAL = null;
+  async function stopArchiveCleanupScheduler(): Promise<void> {
+    archiveCleanupStopped = true;
+    const loop = archiveCleanupLoop;
+    archiveCleanupLoop = null;
+    await loop?.stop();
+    await ARCHIVE_CLEANUP_TASK?.catch(() => {});
   }
 
   return {

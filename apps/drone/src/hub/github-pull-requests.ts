@@ -296,6 +296,7 @@ export async function githubApiRequest<T>(opts: {
   path: string;
   token?: string | null;
   body?: unknown;
+  signal?: AbortSignal;
 }): Promise<T> {
   const method = opts.method ?? 'GET';
   const token = String(opts.token ?? '').trim();
@@ -313,8 +314,14 @@ export async function githubApiRequest<T>(opts: {
       method,
       headers,
       body: opts.body != null ? JSON.stringify(opts.body) : undefined,
+      signal: opts.signal,
     });
   } catch (error: any) {
+    if (opts.signal?.aborted) {
+      throw opts.signal.reason instanceof Error
+        ? opts.signal.reason
+        : new Error('GitHub request aborted');
+    }
     throw new GithubPullRequestError(`Failed reaching GitHub API: ${error?.message ?? String(error)}`, {
       statusCode: 502,
       code: 'github_request_failed',

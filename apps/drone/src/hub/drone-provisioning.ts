@@ -7,6 +7,7 @@ import { droneRootPath } from '../host/paths';
 import { dvmRepoExport, dvmRepoSeed } from '../host/dvm';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 import { normalizeDroneRuntime } from '../host/runtime';
+import { KeyedWorkQueue } from '../background/keyed-work-queue';
 import { normalizeDisabledRepoKeys, normalizeEnvVarMap } from './environment-config';
 import {
   fleetActorConfig,
@@ -30,6 +31,13 @@ type PendingDronePatch = Partial<{
   error: string;
   updatedAt: string;
 }>;
+
+class ProvisioningShutdownError extends Error {
+  constructor() {
+    super('Drone provisioning paused during DroneHub shutdown');
+    this.name = 'ProvisioningShutdownError';
+  }
+}
 
 type DroneProvisioningControllerDeps = {
   NON_REPO_HOME_CWD: string;
@@ -80,13 +88,11 @@ function normalizeIsoTimestamp(raw: unknown, fallback: string): string {
 }
 
 export function createDroneProvisioningController(deps: DroneProvisioningControllerDeps) {
-  const PROVISIONING_TASKS = new Map<string, Promise<void>>();
-  const PROVISION_QUEUE: string[] = [];
-  const PROVISION_QUEUED = new Set<string>();
-  let PROVISION_ACTIVE = 0;
-  let PROVISION_PUMPING = false;
-  let PROVISION_PUMP_SCHEDULED = false;
+  let abortController = new AbortController();
 
+  function throwIfProvisioningAborted(signal: AbortSignal): void {
+    if (signal.aborted) throw new ProvisioningShutdownError();
+  }
   const normalizeChatReasoning = (raw: any): string | null => {
     if (deps.normalizeChatReasoning) return deps.normalizeChatReasoning(raw);
     const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
@@ -146,17 +152,6 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     return 3;
   }
 
-  function removeFromArrayInPlace<T>(arr: T[], pred: (v: T) => boolean): number {
-    let removed = 0;
-    for (let i = arr.length - 1; i >= 0; i -= 1) {
-      if (pred(arr[i]!)) {
-        arr.splice(i, 1);
-        removed += 1;
-      }
-    }
-    return removed;
-  }
-
   function materializeSeedChatConfigOnDroneEntry(droneEntry: any, seedRaw: any) {
     if (!droneEntry || typeof droneEntry !== 'object' || !seedRaw || typeof seedRaw !== 'object') return;
     const seedAgent = deps.parseSeedAgent(seedRaw?.agent);
@@ -213,9 +208,11 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     droneEntry.chats[chatName] = entry;
   }
 
-  async function provisionDroneFromPending(name: string) {
+  async function provisionDroneFromPending(name: string, signal: AbortSignal) {
+    throwIfProvisioningAborted(signal);
     const regAny: any = await loadRegistry();
     const canonical = await getCanonicalDroneLifecycle(name);
+    throwIfProvisioningAborted(signal);
     if (canonical?.state === 'real') return;
     const pending = canonical?.state === 'pending' ? canonical.lifecycle : regAny?.pending?.[name];
     if (!pending) return;
@@ -248,6 +245,8 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       return;
     }
 
+    throwIfProvisioningAborted(signal);
+
     await updatePendingDrone(name, {
       phase: 'creating',
       message: runtime === 'host' ? 'Starting host runtime…' : 'Creating container…',
@@ -256,6 +255,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     const droneCli = deps.resolveDroneCliPath();
     const repoArg = repoPath ? repoPath : '-';
     const latestCanonicalPending = await getCanonicalDroneLifecycle(pendingDroneId);
+    throwIfProvisioningAborted(signal);
     const latestPendingForCreate: any = latestCanonicalPending?.state === 'pending' ? latestCanonicalPending.lifecycle : pending;
     const displayName = deps.resolvePendingDroneDisplayName(latestPendingForCreate, String(pending?.name ?? '').trim() || name);
     const args: string[] = [droneCli, 'create', displayName, '--runtime', runtime, '--repo', repoArg, '--drone-id', pendingDroneId];
@@ -694,43 +694,21 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     }
   }
 
-  function pumpProvisionQueue() {
-    PROVISION_PUMP_SCHEDULED = false;
-    if (PROVISION_PUMPING) return;
-    PROVISION_PUMPING = true;
-    try {
-      const limit = provisionConcurrencyLimit();
-      while (PROVISION_ACTIVE < limit && PROVISION_QUEUE.length > 0) {
-        const name = PROVISION_QUEUE.shift();
-        if (!name) break;
-        PROVISION_QUEUED.delete(name);
-        if (PROVISIONING_TASKS.has(name)) continue;
-        PROVISION_ACTIVE += 1;
-        const task = provisionDroneFromPending(name)
-          .catch(async (e: any) => {
-            const msg = e?.message ?? String(e);
-            await failPendingDrone(name, msg);
-          })
-          .finally(() => {
-            PROVISION_ACTIVE -= 1;
-            PROVISIONING_TASKS.delete(name);
-            pumpProvisionQueue();
-          });
-        PROVISIONING_TASKS.set(name, task);
-        void task;
+  const provisionQueue = new KeyedWorkQueue<string>({
+    key: (name) => name,
+    concurrency: provisionConcurrencyLimit,
+    run: async (name) => await provisionDroneFromPending(name, abortController.signal),
+    onError: async (error, name) => {
+      if (error instanceof ProvisioningShutdownError) {
+        await updatePendingDrone(name, {
+          message: 'Provisioning paused during shutdown; it will resume when DroneHub starts.',
+        });
+        return;
       }
-    } finally {
-      PROVISION_PUMPING = false;
-    }
-  }
-
-  function scheduleProvisionQueuePump() {
-    if (PROVISION_PUMP_SCHEDULED) return;
-    PROVISION_PUMP_SCHEDULED = true;
-    setTimeout(() => {
-      pumpProvisionQueue();
-    }, 0);
-  }
+      const message = error instanceof Error ? error.message : String(error);
+      await failPendingDrone(name, message);
+    },
+  });
 
   function enqueueProvisioningForAllPending(regAny: any) {
     try {
@@ -750,25 +728,30 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
   function enqueueProvisioning(name: string) {
     const normalized = String(name ?? '').trim();
     if (!normalized) return;
-    if (PROVISIONING_TASKS.has(normalized)) return;
-    if (PROVISION_QUEUED.has(normalized)) return;
-    PROVISION_QUEUED.add(normalized);
-    PROVISION_QUEUE.push(normalized);
-    scheduleProvisionQueuePump();
+    provisionQueue.enqueue(normalized);
   }
 
   function dequeueProvisioning(name: string) {
     const normalized = String(name ?? '').trim();
     if (!normalized) return;
-    if (PROVISION_QUEUED.has(normalized)) {
-      PROVISION_QUEUED.delete(normalized);
-      removeFromArrayInPlace(PROVISION_QUEUE, (entry) => String(entry) === normalized);
-    }
+    provisionQueue.remove(normalized);
+  }
+
+  async function stopProvisioning(): Promise<void> {
+    abortController.abort(new ProvisioningShutdownError());
+    await provisionQueue.stop();
+  }
+
+  function startProvisioning(): void {
+    if (abortController.signal.aborted) abortController = new AbortController();
+    provisionQueue.start();
   }
 
   return {
     dequeueProvisioning,
     enqueueProvisioning,
     enqueueProvisioningForAllPending,
+    startProvisioning,
+    stopProvisioning,
   };
 }

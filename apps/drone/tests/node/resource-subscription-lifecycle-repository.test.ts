@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import type { HubDatabase } from '../../src/host/hub-database';
 import { normalizeCronSubscription } from '../../src/hub/subscriptions/cron-subscription';
 import { ResourceSubscriptionRepository } from '../../src/hub/subscriptions/resource-subscription-repository';
 import {
@@ -9,6 +10,170 @@ import {
 } from '../../src/hub/subscriptions/resource-subscription-service';
 import { DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS } from '../../src/hub/subscriptions/resource-subscription-types';
 import { memoryHubDatabase } from './helpers/memory-hub-database';
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function addCanonicalChatFixtures(database: HubDatabase): Promise<void> {
+  await database.writeTransaction('add canonical chat fixtures', (connection) => {
+    connection.exec(`
+      CREATE TABLE canonical_chats (
+        drone_id TEXT NOT NULL,
+        chat_name TEXT NOT NULL,
+        metadata_json TEXT NOT NULL
+      )
+    `);
+    const insert = connection.prepare(
+      `INSERT INTO canonical_chats (drone_id, chat_name, metadata_json) VALUES (?, ?, ?)`,
+    );
+    insert.run('subscriber-drone', 'default', JSON.stringify({ id: 'subscriber-chat' }));
+    insert.run('watched-drone', 'default', JSON.stringify({ id: 'watched-chat' }));
+  });
+}
+
+test('slow GitHub polling does not block local subscription observation', async () => {
+  const { database, close } = memoryHubDatabase();
+  const githubGate = deferred();
+  const githubStarted = deferred();
+  let githubAborted = false;
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    await addCanonicalChatFixtures(database);
+    await repository.upsert({
+      subscriber: {
+        chatId: 'subscriber-chat',
+        droneId: 'subscriber-drone',
+        chatName: 'default',
+      },
+      provider: 'drone-hub',
+      resourceType: 'chat',
+      resourceId: 'watched-chat',
+      events: ['chat.idle'],
+      intent: '',
+      cursor: {},
+      maxActive: 50,
+    });
+    await repository.upsert({
+      subscriber: {
+        chatId: 'subscriber-chat',
+        droneId: 'subscriber-drone',
+        chatName: 'default',
+      },
+      provider: 'github',
+      resourceType: 'repository',
+      resourceId: 'example/repository',
+      events: ['pull_request.opened'],
+      intent: '',
+      maxActive: 50,
+    });
+
+    let localObserved = false;
+    const service = new ResourceSubscriptionService({
+      repository,
+      readChatStatus: async () => {
+        localObserved = true;
+        return { idle: true, reason: 'idle', latest: null };
+      },
+      wakePromptQueue: () => {},
+      pollGithubRepository: async (_resourceId, _cursor, _now, options) => {
+        githubStarted.resolve();
+        await Promise.race([
+          githubGate.promise,
+          new Promise<void>((_resolve, reject) => {
+            options?.signal?.addEventListener(
+              'abort',
+              () => {
+                githubAborted = true;
+                reject(options.signal?.reason);
+              },
+              { once: true },
+            );
+          }),
+        ]);
+        return {
+          cursor: {
+            initialized: true,
+            lastPollAt: new Date().toISOString(),
+            pulls: {},
+            seenCommentIds: [],
+          },
+          events: [],
+        };
+      },
+      readSettings: async () => DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS,
+      log: () => {},
+    });
+
+    const ticking = service.tick();
+    await githubStarted.promise;
+    for (let index = 0; index < 20 && !localObserved; index += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert.equal(localObserved, true);
+    await service.stop();
+    await ticking;
+    assert.equal(githubAborted, true);
+  } finally {
+    githubGate.resolve();
+    close();
+  }
+});
+
+test('manual subscription ticks coalesce with active local work', async () => {
+  const { database, close } = memoryHubDatabase();
+  const localStarted = deferred();
+  const localGate = deferred();
+  try {
+    const repository = new ResourceSubscriptionRepository(database);
+    await addCanonicalChatFixtures(database);
+    await repository.upsert({
+      subscriber: {
+        chatId: 'subscriber-chat',
+        droneId: 'subscriber-drone',
+        chatName: 'default',
+      },
+      provider: 'drone-hub',
+      resourceType: 'chat',
+      resourceId: 'watched-chat',
+      events: ['chat.idle'],
+      intent: '',
+      cursor: {},
+      maxActive: 50,
+    });
+
+    let localRuns = 0;
+    const service = new ResourceSubscriptionService({
+      repository,
+      readChatStatus: async () => {
+        localRuns += 1;
+        localStarted.resolve();
+        await localGate.promise;
+        return { idle: true, reason: 'idle', latest: null };
+      },
+      wakePromptQueue: () => {},
+      readSettings: async () => DEFAULT_RESOURCE_SUBSCRIPTION_SETTINGS,
+      log: () => {},
+    });
+
+    const first = service.tick();
+    await localStarted.promise;
+    const second = service.tick();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(localRuns, 1);
+
+    localGate.resolve();
+    await Promise.all([first, second]);
+    await service.stop();
+  } finally {
+    localGate.resolve();
+    close();
+  }
+});
 
 test('completes a paused pull request subscription without delivering its terminal event', async () => {
   const { database, close } = memoryHubDatabase();
