@@ -86,16 +86,25 @@ export class ChangeRequestMirrorBranchManager {
       if (remoteSha !== mirror.headSha) {
         return `Mirror branch ${mirror.headBranch} was not deleted because its remote head changed outside DroneHub.`;
       }
-      await this.deleteRemote(record.repoRoot, mirror.headBranch);
+      await this.deleteRemote(record.repoRoot, mirror.headBranch, mirror.headSha);
       return null;
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }
   }
 
-  async deleteRemote(repoRoot: string, branch: string): Promise<void> {
+  async deleteRemote(repoRoot: string, branch: string, expectedSha: string): Promise<void> {
+    if (!FULL_SHA_PATTERN.test(expectedSha)) {
+      throw new ChangeRequestError('The mirror branch has no safe lease SHA.', 409);
+    }
     if (!(await this.remoteBranchSha(repoRoot, branch))) return;
-    await this.git(repoRoot, ['push', 'origin', '--delete', branch]);
+    await this.git(repoRoot, [
+      'push',
+      `--force-with-lease=refs/heads/${branch}:${expectedSha}`,
+      'origin',
+      '--delete',
+      branch,
+    ]);
   }
 
   private async remoteBranchSha(repoRoot: string, branch: string): Promise<string | null> {

@@ -1041,6 +1041,7 @@ function agentFromPreferenceKey(value: string) {
 
 type McpToolRegistrationContext = {
   principal: McpTokenIdentity;
+  allowedWriteDroneRefs?: string[];
   nativeThreadId?: string;
   speechEnabled?: boolean;
   onSpeechToolRegistered?: (tool: RegisteredTool) => void;

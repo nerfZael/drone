@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 
 import { ASSISTANT_TOOL_SUMMARIES } from '../src/hub/assistant/assistant-config';
 import { createInProcessDroneHubMcpClient } from '../src/hub/assistant/in-process-drone-hub-mcp';
-import { changeRequestBelongsToChat } from '../src/hub/change-requests/change-request-mcp-tools';
+import {
+  changeRequestBelongsToChat,
+  changeRequestIsWithinWriteScope,
+} from '../src/hub/change-requests/change-request-mcp-tools';
 import { normalizeMcpChatAccessScope } from '../src/hub/mcp-chat-access';
 import { authorizeDroneHubMcpTool, imageToolResult } from '../src/hub/mcp-server';
 import { droneStatusSummary } from '../src/hub/mcp-summaries';
@@ -182,6 +185,15 @@ describe('Drone Hub MCP principal authorization', () => {
       { droneId: 'drone-a', chatName: 'renamed' },
       principal,
     )).toBe(true);
+  });
+
+  test('limits host-assistant change requests to its write scope', () => {
+    const request = { droneId: 'drone-a', droneName: 'Allowed drone' };
+    expect(changeRequestIsWithinWriteScope(request)).toBe(true);
+    expect(changeRequestIsWithinWriteScope(request, ['drone-a'])).toBe(true);
+    expect(changeRequestIsWithinWriteScope(request, ['Allowed drone'])).toBe(true);
+    expect(changeRequestIsWithinWriteScope(request, [])).toBe(false);
+    expect(changeRequestIsWithinWriteScope(request, ['drone-b'])).toBe(false);
   });
 
   test('enforces assistant read and write scopes for host principals', () => {

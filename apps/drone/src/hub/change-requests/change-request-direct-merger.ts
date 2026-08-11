@@ -103,13 +103,17 @@ export class ChangeRequestDirectMerger {
       );
       return mergeCommitSha;
     } finally {
-      await this.deps.runHostCommand(
-        'git',
-        ['-C', record.repoRoot, 'worktree', 'remove', '--force', worktreePath],
-        { timeoutMs: 30_000 },
-      );
+      await this.deps
+        .runHostCommand(
+          'git',
+          ['-C', record.repoRoot, 'worktree', 'remove', '--force', worktreePath],
+          { timeoutMs: 30_000 },
+        )
+        .catch(() => null);
       await fs.rm(worktreePath, { recursive: true, force: true }).catch(() => {});
-      await this.deps.runHostCommand('git', ['-C', record.repoRoot, 'worktree', 'prune']);
+      await this.deps
+        .runHostCommand('git', ['-C', record.repoRoot, 'worktree', 'prune'])
+        .catch(() => null);
     }
   }
 

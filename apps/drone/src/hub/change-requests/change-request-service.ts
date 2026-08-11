@@ -33,6 +33,8 @@ import type {
   ChangeRequestView,
 } from './change-request-types';
 
+export { ChangeRequestError } from './change-request-error';
+
 export type ChangeRequestServiceDependencies = ChangeRequestSnapshotDependencies &
   ChangeRequestDirectMergerDependencies & {
     repository: ChangeRequestRepository;

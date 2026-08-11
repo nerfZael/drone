@@ -116,7 +116,9 @@ export class ChangeRequestGithubMirrorService {
           baseBranch: record.destinationBranch,
         });
       } catch (error) {
-        await this.branches.deleteRemote(record.repoRoot, headBranch).catch(() => {});
+        await this.branches
+          .deleteRemote(record.repoRoot, headBranch, record.snapshotSha)
+          .catch(() => {});
         throw githubError(error);
       }
       this.deps.onGithubChanged?.(record.repoRoot);
@@ -526,12 +528,16 @@ export class ChangeRequestGithubMirrorService {
     } else {
       cleanupErrors.push('could not safely identify the pull request to close');
     }
-    try {
-      await this.branches.deleteRemote(record.repoRoot, headBranch);
-    } catch (error) {
-      cleanupErrors.push(
-        `could not delete mirror branch ${headBranch}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    if (!record.snapshotSha) {
+      cleanupErrors.push(`could not safely delete mirror branch ${headBranch}: snapshot SHA missing`);
+    } else {
+      try {
+        await this.branches.deleteRemote(record.repoRoot, headBranch, record.snapshotSha);
+      } catch (error) {
+        cleanupErrors.push(
+          `could not delete mirror branch ${headBranch}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
     const primary = githubError(cause);
     if (cleanupErrors.length === 0) return primary;

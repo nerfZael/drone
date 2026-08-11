@@ -5,6 +5,7 @@ import type { McpTokenIdentity } from '../mcp-tokens';
 
 type ChangeRequestMcpContext = {
   principal: McpTokenIdentity;
+  allowedWriteDroneRefs?: string[];
 };
 
 type ChangeRequestMcpDependencies = {
@@ -172,9 +173,11 @@ async function requireOwnedChangeRequest(
   const request = response?.request;
   if (!request) throw new Error(`unknown change request: ${requestId}`);
   const principal = chatPrincipal(context);
-  if (!principal) return;
-  if (!changeRequestBelongsToChat(request, principal)) {
+  if (principal && !changeRequestBelongsToChat(request, principal)) {
     throw new Error('This chat can only manage change requests that it created.');
+  }
+  if (!principal && !changeRequestIsWithinWriteScope(request, context.allowedWriteDroneRefs)) {
+    throw new Error('This assistant can only manage change requests in its write scope.');
   }
 }
 
@@ -187,6 +190,15 @@ export function changeRequestBelongsToChat(
   return requestChatId
     ? requestChatId === principal.chatId
     : cleanString(request.chatName) === principal.chatName;
+}
+
+export function changeRequestIsWithinWriteScope(
+  request: { droneId?: unknown; droneName?: unknown },
+  allowedWriteDroneRefs?: string[],
+): boolean {
+  if (allowedWriteDroneRefs === undefined) return true;
+  const allowed = new Set(allowedWriteDroneRefs.map(cleanString).filter(Boolean));
+  return allowed.has(cleanString(request.droneId)) || allowed.has(cleanString(request.droneName));
 }
 
 function cleanString(value: unknown): string {

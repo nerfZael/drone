@@ -544,5 +544,10 @@ describe('ChangeRequestGithubMirrorService', () => {
     expect(gitCalls.some((args) => args.includes('--delete') && args.includes(headBranch))).toBe(
       true,
     );
+    expect(
+      gitCalls.some((args) =>
+        args.includes(`--force-with-lease=refs/heads/${headBranch}:${snapshotSha}`),
+      ),
+    ).toBe(true);
   });
 });

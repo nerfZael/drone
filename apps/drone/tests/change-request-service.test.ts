@@ -33,6 +33,7 @@ describe('ChangeRequestService', () => {
       await git(repoRoot, ['commit', '-m', 'container-authored change']);
 
       const repository = new MemoryChangeRequestRepository();
+      let failedWorktreeRemove = false;
       const service = new ChangeRequestService({
         repository,
         resolveDrone: async () => ({
@@ -81,7 +82,16 @@ describe('ChangeRequestService', () => {
         runGitInDrone: async () => {
           throw new Error('container git was not expected');
         },
-        runHostCommand: run,
+        runHostCommand: async (command, args, options) => {
+          if (args.includes('worktree') && args.includes('remove')) {
+            failedWorktreeRemove = true;
+            throw new Error('simulated worktree cleanup failure');
+          }
+          return await run(command, args, {
+            cwd: options?.cwd,
+            timeoutMs: options?.timeoutMs,
+          });
+        },
         storagePath: (...segments) => path.join(storageRoot, ...segments),
         now: () => new Date().toISOString(),
       });
@@ -153,6 +163,8 @@ describe('ChangeRequestService', () => {
       expect(merged.status).toBe('merged');
       expect(merged.snapshotSha).toBe(updated.snapshotSha);
       expect(merged.mergeCommitSha).toMatch(/^[0-9a-f]{40}$/);
+      expect(failedWorktreeRemove).toBe(true);
+      expect(await fs.readdir(path.join(storageRoot, 'change-request-worktrees'))).toEqual([]);
       expect(await git(repoRoot, ['branch', '--show-current'])).toBe(sourceBranchBeforeMerge);
       expect(await git(repoRoot, ['status', '--porcelain'])).toBe('');
       expect(await git(origin, ['show', 'refs/heads/integration/42:feature.txt'])).toBe(
