@@ -16,16 +16,16 @@ describe('optimistic startup seed state', () => {
       runtime: 'container' as const,
       agent: { kind: 'builtin' as const, id: 'codex' as const },
       model: 'gpt-test',
-      agentPermissionMode: 'workspace-write' as const,
-      approvalPolicy: 'agent-decides' as const,
+      agentPermissionMode: 'write' as const,
+      approvalPolicy: 'auto' as const,
       prompt: 'Review this',
       chatName: 'default',
     };
 
     const optimistic = addOptimisticStartupSeeds(setState, ['review-drone'], options);
     expect(state[optimistic[0]!.id]).toMatchObject({
-      agentPermissionMode: 'workspace-write',
-      approvalPolicy: 'agent-decides',
+      agentPermissionMode: 'write',
+      approvalPolicy: 'auto',
     });
 
     replaceOptimisticStartupSeeds(
@@ -36,8 +36,8 @@ describe('optimistic startup seed state', () => {
     );
     expect(state[optimistic[0]!.id]).toBeUndefined();
     expect(state['drone-accepted']).toMatchObject({
-      agentPermissionMode: 'workspace-write',
-      approvalPolicy: 'agent-decides',
+      agentPermissionMode: 'write',
+      approvalPolicy: 'auto',
     });
   });
 });

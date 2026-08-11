@@ -140,31 +140,31 @@ function normalizeCreateSeedAgent(raw: unknown): SeedAgentBody | undefined {
 
 function normalizeCreateAgentPermissionMode(
   raw: unknown,
-): 'read-only' | 'workspace-write' | 'full-access' | undefined {
+): 'read' | 'write' | 'execute' | undefined {
   const value = String(raw ?? '').trim();
   if (!value) return undefined;
-  if (value === 'full-access' || value === 'workspace-write' || value === 'read-only') return value;
+  if (value === 'execute' || value === 'write' || value === 'read') return value;
   throw new ValidationError(
-    'agentPermissionMode must be "full-access", "workspace-write", or "read-only"',
+    'agentPermissionMode must be "read", "write", or "execute"',
   );
 }
 
 function normalizeCreateApprovalPolicy(
   raw: unknown,
-): 'ask' | 'agent-decides' | 'never' | undefined {
+): 'ask' | 'auto' | 'none' | undefined {
   const value = String(raw ?? '').trim();
   if (!value) return undefined;
-  if (value === 'ask' || value === 'agent-decides' || value === 'never') return value;
+  if (value === 'ask' || value === 'auto' || value === 'none') return value;
   throw new ValidationError(
-    'approvalPolicy must be "ask", "agent-decides", or "never"',
+    'approvalPolicy must be "ask", "auto", or "none"',
   );
 }
 
 function resolveCreateSeedFields(input: CreateDroneBatchItem): {
   seedAgent?: SeedAgentBody;
   seedModel?: string;
-  seedAgentPermissionMode?: 'read-only' | 'workspace-write' | 'full-access';
-  seedApprovalPolicy?: 'ask' | 'agent-decides' | 'never';
+  seedAgentPermissionMode?: 'read' | 'write' | 'execute';
+  seedApprovalPolicy?: 'ask' | 'auto' | 'none';
 } {
   const seedAgent = normalizeCreateSeedAgent(input.agent);
   const seedModel = String(input.model ?? '').trim() || undefined;

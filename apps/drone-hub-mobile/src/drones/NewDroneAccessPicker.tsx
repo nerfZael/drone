@@ -7,15 +7,15 @@ import { AnchoredPickerPopover } from './AnchoredPickerPopover';
 import type { MobileDroneAgentPermissionMode, MobileDroneApprovalPolicy } from './NewDroneScreen';
 
 export function mobileAccessLabel(value: MobileDroneAgentPermissionMode): string {
-  if (value === 'read-only') return 'Read';
-  if (value === 'workspace-write') return 'Write';
+  if (value === 'read') return 'Read';
+  if (value === 'write') return 'Write';
   return 'Execute';
 }
 
 export function mobileApprovalLabel(value: MobileDroneApprovalPolicy): string {
   if (value === 'ask') return 'Ask';
-  if (value === 'agent-decides') return 'Decide';
-  return 'Never ask';
+  if (value === 'auto') return 'Automatic';
+  return 'None';
 }
 
 export function NewDroneAccessPicker({
@@ -56,18 +56,18 @@ export function NewDroneAccessPicker({
     disabled?: boolean;
   }> = [
     {
-      value: 'read-only',
+      value: 'read',
       label: 'Read',
       detail: 'Inspect files in a read-only sandbox.',
       disabled: !readOnlySupported,
     },
     {
-      value: 'workspace-write',
+      value: 'write',
       label: 'Write',
       detail: 'Write inside the workspace sandbox.',
       disabled: !readOnlySupported,
     },
-    { value: 'full-access', label: 'Execute', detail: 'Run with full command access.' },
+    { value: 'execute', label: 'Execute', detail: 'Run with full command access.' },
   ];
   const approvalOptions: Array<{
     value: MobileDroneApprovalPolicy;
@@ -76,9 +76,9 @@ export function NewDroneAccessPicker({
   }> = [
     { value: 'ask', label: 'Ask', disabled: !approvalsSupported },
     ...(agentIsCodex
-      ? [{ value: 'agent-decides' as const, label: 'Decide for me', disabled: !approvalsSupported }]
+      ? [{ value: 'auto' as const, label: 'Automatic', disabled: !approvalsSupported }]
       : []),
-    { value: 'never', label: 'Never ask', disabled: !approvalsSupported },
+    { value: 'none', label: 'None', disabled: !approvalsSupported },
   ];
   const triggerLabel = `${mobileAccessLabel(permissionMode)} · ${mobileApprovalLabel(approvalPolicy)}`;
 

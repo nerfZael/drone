@@ -583,10 +583,10 @@ function normalizeUiPreferences(value: unknown) {
     spawnAgentKey: cleanString(raw.spawnAgentKey, 'builtin:cursor'),
     spawnModel: cleanString(raw.spawnModel),
     spawnReasoning: cleanString(raw.spawnReasoning),
-    spawnAgentPermissionMode: raw.spawnAgentPermissionMode === 'read-only' || raw.spawnAgentPermissionMode === 'workspace-write'
+    spawnAgentPermissionMode: raw.spawnAgentPermissionMode === 'read' || raw.spawnAgentPermissionMode === 'write'
       ? raw.spawnAgentPermissionMode
-      : 'full-access',
-    spawnApprovalPolicy: raw.spawnApprovalPolicy === 'agent-decides' || raw.spawnApprovalPolicy === 'never'
+      : 'execute',
+    spawnApprovalPolicy: raw.spawnApprovalPolicy === 'auto' || raw.spawnApprovalPolicy === 'none'
       ? raw.spawnApprovalPolicy
       : 'ask',
     repoBranchSource: normalizeRepoBranchSource(raw.repoBranchSource, 'host'),
@@ -991,10 +991,10 @@ async function createDronePreferences(services: HubServices, repoPath = '') {
       spawnAgentKey: cleanString(merged.spawnAgentKey, 'builtin:cursor'),
       spawnModel: cleanString(merged.spawnModel),
       spawnReasoning: cleanString(merged.spawnReasoning),
-      spawnAgentPermissionMode: merged.spawnAgentPermissionMode === 'read-only' || merged.spawnAgentPermissionMode === 'workspace-write'
+      spawnAgentPermissionMode: merged.spawnAgentPermissionMode === 'read' || merged.spawnAgentPermissionMode === 'write'
         ? merged.spawnAgentPermissionMode
-        : 'full-access' as const,
-      spawnApprovalPolicy: merged.spawnApprovalPolicy === 'agent-decides' || merged.spawnApprovalPolicy === 'never'
+        : 'execute' as const,
+      spawnApprovalPolicy: merged.spawnApprovalPolicy === 'auto' || merged.spawnApprovalPolicy === 'none'
         ? merged.spawnApprovalPolicy
         : 'ask' as const,
       repoBranchSource: normalizeRepoBranchSource(merged.repoBranchSource, 'host'),
@@ -1007,7 +1007,7 @@ async function createDronePreferences(services: HubServices, repoPath = '') {
       spawnAgentKey: 'builtin:cursor',
       spawnModel: '',
       spawnReasoning: '',
-      spawnAgentPermissionMode: 'full-access' as const,
+      spawnAgentPermissionMode: 'execute' as const,
       spawnApprovalPolicy: 'ask' as const,
       repoBranchSource: 'host' as const,
       repoCreateRemoteBranch: '',
@@ -1578,15 +1578,15 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
 
   server.registerTool('create_drone', {
     title: 'Create drone',
-    description: 'Create a new Drone Hub container drone. Drafts return immediately; other drones return when ready unless completion is accepted. Unattended Codex drones default to workspace-write with no interactive approvals; pass agentPermissionMode and approvalPolicy to override that behavior. For repo-attached drones, agentsMd overrides the AGENTS.md content inherited from Drone Hub settings.',
+    description: 'Create a new Drone Hub container drone. Drafts return immediately; other drones return when ready unless completion is accepted. Unattended Codex drones default to execute access with no interactive approvals; pass agentPermissionMode and approvalPolicy to override that behavior. For repo-attached drones, agentsMd overrides the AGENTS.md content inherited from Drone Hub settings.',
     inputSchema: {
       name: z.string(),
       group: z.string().optional(),
       groupId: z.string().optional(),
       agent: z.enum(['cursor', 'codex', 'claude', 'opencode', 'pi', 'blip']).optional(),
       model: z.string().optional(),
-      agentPermissionMode: z.enum(['read-only', 'workspace-write', 'full-access']).optional(),
-      approvalPolicy: z.enum(['ask', 'agent-decides', 'never']).optional(),
+      agentPermissionMode: z.enum(['read', 'write', 'execute']).optional(),
+      approvalPolicy: z.enum(['ask', 'auto', 'none']).optional(),
       cwd: z.string().optional(),
       repoRef: z.string().optional(),
       repoLabel: z.string().optional(),
@@ -1617,18 +1617,21 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     const seedModel = args.model == null ? defaults.spawnModel : cleanString(args.model);
     const seedAgentIsCodex = seedAgent?.kind === 'builtin' && seedAgent.id === 'codex';
     const seedAgentSupportsAccess = seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip');
-    if (args.agentPermissionMode != null && !seedAgentSupportsAccess) {
+    if (
+      args.agentPermissionMode != null &&
+      args.agentPermissionMode !== 'execute' &&
+      !seedAgentSupportsAccess
+    ) {
       throw new Error('agentPermissionMode is only available for Codex and Blip drones');
     }
     if (args.approvalPolicy != null && !seedAgentIsCodex) {
       throw new Error('approvalPolicy is only available for Codex drones');
     }
-    const requestedPermissionMode = args.agentPermissionMode
-      ?? (seedAgentIsCodex ? 'workspace-write' : defaults.spawnAgentPermissionMode);
-    const seedAgentPermissionMode = seedAgentSupportsAccess ? requestedPermissionMode : 'full-access';
+    const requestedPermissionMode = args.agentPermissionMode ?? 'execute';
+    const seedAgentPermissionMode = seedAgentSupportsAccess ? requestedPermissionMode : 'execute';
     const seedAgentSupportsApproval = seedAgentIsCodex;
     const requestedApprovalPolicy = args.approvalPolicy
-      ?? (seedAgentIsCodex ? 'never' : defaults.spawnApprovalPolicy);
+      ?? (seedAgentIsCodex ? 'none' : defaults.spawnApprovalPolicy);
     const seedApprovalPolicy = !seedAgentSupportsApproval
       ? 'ask'
       : requestedApprovalPolicy;
@@ -1652,7 +1655,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       ...(seedAgent ? { seedAgent } : {}),
       ...(seedModel ? { seedModel } : {}),
       ...(seedReasoning ? { seedReasoning } : {}),
-      ...(seedAgentPermissionMode !== 'full-access' ? { seedAgentPermissionMode } : {}),
+      ...(seedAgentPermissionMode !== 'execute' ? { seedAgentPermissionMode } : {}),
       ...(seedApprovalPolicy !== 'ask' ? { seedApprovalPolicy } : {}),
       ...(cleanString(args.cwd) ? { cwd: cleanString(args.cwd) } : {}),
       ...(repoPath ? { repoPath, repoBranchSource } : {}),

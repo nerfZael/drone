@@ -346,14 +346,14 @@ describe('drone-sdk core', () => {
     await transport.createDrone({
       name: 'alpha',
       agent: 'codex',
-      agentPermissionMode: 'workspace-write',
-      approvalPolicy: 'agent-decides',
+      agentPermissionMode: 'write',
+      approvalPolicy: 'auto',
     });
     await transport.createDrones([
       {
         name: 'beta',
         agent: 'blip',
-        agentPermissionMode: 'read-only',
+        agentPermissionMode: 'read',
       },
     ]);
 
@@ -364,8 +364,8 @@ describe('drone-sdk core', () => {
           name: 'alpha',
           runtime: 'container',
           seedAgent: { kind: 'builtin', id: 'codex' },
-          seedAgentPermissionMode: 'workspace-write',
-          seedApprovalPolicy: 'agent-decides',
+          seedAgentPermissionMode: 'write',
+          seedApprovalPolicy: 'auto',
         },
       },
       {
@@ -374,7 +374,7 @@ describe('drone-sdk core', () => {
           drones: [
             {
               seedAgent: { kind: 'builtin', id: 'blip' },
-              seedAgentPermissionMode: 'read-only',
+              seedAgentPermissionMode: 'read',
               name: 'beta',
               runtime: 'container',
             },

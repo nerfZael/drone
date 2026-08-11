@@ -182,7 +182,7 @@ export function buildDraftDroneCreatePayload({
     ...(seedAgent ? { seedAgent } : {}),
     ...(trimmedModel ? { seedModel: trimmedModel } : {}),
     ...(trimmedReasoning ? { seedReasoning: trimmedReasoning } : {}),
-    ...(seedAgentPermissionMode && seedAgentPermissionMode !== 'full-access'
+    ...(seedAgentPermissionMode && seedAgentPermissionMode !== 'execute'
       ? { seedAgentPermissionMode }
       : {}),
     ...(seedApprovalPolicy && seedApprovalPolicy !== 'ask' ? { seedApprovalPolicy } : {}),

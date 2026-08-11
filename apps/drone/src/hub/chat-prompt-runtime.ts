@@ -648,7 +648,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       const chatReasoning = normalizeChatReasoning((chat as any)?.reasoning);
       const agentPermissionMode = normalizeAgentPermissionMode((chat as any)?.agentPermissionMode);
       const approvalPolicy = normalizeAgentApprovalPolicy((chat as any)?.approvalPolicy);
-      if (agentPermissionMode !== 'full-access') assertReadOnlySupportedForAgent(agent);
+      if (agentPermissionMode !== 'execute') assertReadOnlySupportedForAgent(agent);
       const managedEnv = resolveDroneEnvironmentConfig(regLatest, d).resolvedVars;
       const managedEnvLines = buildEnvExportLines(managedEnv);
       const managedChatMcpEnv = await resolveManagedChatMcpEnv({
@@ -777,15 +777,15 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
       if (agent.kind === 'builtin' && agent.id === 'codex') {
         const sandboxArg =
-          agentPermissionMode === 'read-only'
+          agentPermissionMode === 'read'
             ? 'read-only'
-            : agentPermissionMode === 'workspace-write'
+            : agentPermissionMode === 'write'
               ? 'workspace-write'
               : 'danger-full-access';
         const approvalArg =
-          approvalPolicy === 'agent-decides'
+          approvalPolicy === 'auto'
             ? 'on-request'
-            : approvalPolicy === 'never'
+            : approvalPolicy === 'none'
               ? 'never'
               : 'untrusted';
         const existingThreadId = readBuiltinTranscriptSessionId(chat, 'codex');
@@ -813,7 +813,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ...(existingThreadId ? { existingThreadId } : {}),
           deliveryMode: opts.deliveryMode,
           approvalPolicy: approvalArg,
-          approvalsReviewer: approvalPolicy === 'agent-decides' ? 'auto_review' : 'user',
+          approvalsReviewer: approvalPolicy === 'auto' ? 'auto_review' : 'user',
           sandbox: sandboxArg,
           ...(chatModel ? { model: chatModel } : {}),
           ...(chatReasoning ? { effort: chatReasoning } : {}),
@@ -939,9 +939,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         const reasoningArg = chatReasoning ? ` --reasoning ${bashQuote(chatReasoning)}` : '';
         const permissionArgs =
           workflowBlipPermissionArgs(chat) ??
-          (agentPermissionMode === 'read-only'
+          (agentPermissionMode === 'read'
             ? '--permission read-only --profile read-only'
-            : agentPermissionMode === 'workspace-write'
+            : agentPermissionMode === 'write'
               ? '--permission workspace-write --profile no-shell-workspace-write'
               : '--permission full-access --profile local-trusted-write');
         const blipSessionId = readBuiltinTranscriptSessionId(chat, 'blip');

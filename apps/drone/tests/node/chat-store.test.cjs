@@ -453,12 +453,12 @@ describe('canonical chat and transcript repository', () => {
       }),
       updateChatInStore({
         droneId: 'drone-1', chatName: 'review',
-        update: (chat) => ({ ...chat, agentPermissionMode: 'read-only' }),
+        update: (chat) => ({ ...chat, agentPermissionMode: 'read' }),
       }),
     ]);
     const updated = readChatFromStore({ droneId: 'drone-1', chatName: 'review' }).chat;
     assert.equal(updated.model, 'model-a');
-    assert.equal(updated.agentPermissionMode, 'read-only');
+    assert.equal(updated.agentPermissionMode, 'read');
 
     const circular = {}; circular.self = circular;
     await assert.rejects(

@@ -223,8 +223,8 @@ export type UiPreferencesSettingsResponse = {
     spawnAgentKey: string;
     spawnModel: string;
     spawnReasoning: string;
-    spawnAgentPermissionMode: 'read-only' | 'workspace-write' | 'full-access';
-    spawnApprovalPolicy: 'ask' | 'agent-decides' | 'never';
+    spawnAgentPermissionMode: 'read' | 'write' | 'execute';
+    spawnApprovalPolicy: 'ask' | 'auto' | 'none';
     repoBranchSource: 'host' | 'remote';
     repoCreateRemoteBranch: string;
     spawnContextByRepoKey: Record<
@@ -233,8 +233,8 @@ export type UiPreferencesSettingsResponse = {
         spawnAgentKey: string;
         spawnModel: string;
         spawnReasoning: string;
-        spawnAgentPermissionMode: 'read-only' | 'workspace-write' | 'full-access';
-        spawnApprovalPolicy: 'ask' | 'agent-decides' | 'never';
+        spawnAgentPermissionMode: 'read' | 'write' | 'execute';
+        spawnApprovalPolicy: 'ask' | 'auto' | 'none';
         repoBranchSource: 'host' | 'remote';
         repoCreateRemoteBranch: string;
       }

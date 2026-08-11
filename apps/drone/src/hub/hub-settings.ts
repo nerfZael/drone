@@ -148,8 +148,8 @@ export type UiPreferencesSettings = {
   spawnAgentKey: string;
   spawnModel: string;
   spawnReasoning: string;
-  spawnAgentPermissionMode: 'read-only' | 'workspace-write' | 'full-access';
-  spawnApprovalPolicy: 'ask' | 'agent-decides' | 'never';
+  spawnAgentPermissionMode: 'read' | 'write' | 'execute';
+  spawnApprovalPolicy: 'ask' | 'auto' | 'none';
   repoBranchSource: 'host' | 'remote';
   repoCreateRemoteBranch: string;
   spawnContextByRepoKey: Record<string, UiSpawnContextPreferences>;
@@ -370,11 +370,11 @@ function normalizeUiPreferenceText(value: unknown, maxChars: number): string {
 }
 
 function parseSpawnAgentPermissionMode(value: unknown): UiPreferencesSettings['spawnAgentPermissionMode'] {
-  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+  return value === 'read' || value === 'write' ? value : 'execute';
 }
 
 function parseSpawnApprovalPolicy(value: unknown): UiPreferencesSettings['spawnApprovalPolicy'] {
-  return value === 'agent-decides' || value === 'never' ? value : 'ask';
+  return value === 'auto' || value === 'none' ? value : 'ask';
 }
 
 function sanitizeUiSpawnContextPreferences(value: unknown): UiSpawnContextPreferences {

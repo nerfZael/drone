@@ -326,12 +326,25 @@ function normalizeAssistantAutoApprove(raw: unknown): boolean {
 
 function normalizeAssistantAgentPermissionMode(raw: unknown): AgentPermissionMode {
   const value = String(raw ?? '').trim();
-  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+  return value === 'read' || value === 'write' ? value : 'execute';
 }
 
 function normalizeAssistantApprovalPolicy(raw: unknown): AgentApprovalPolicy {
   const value = String(raw ?? '').trim();
-  return value === 'never' ? 'never' : 'ask';
+  return value === 'none' ? 'none' : 'ask';
+}
+
+function parseAssistantAgentPermissionMode(raw: unknown): AgentPermissionMode {
+  const value = String(raw ?? '').trim();
+  if (value === 'read' || value === 'write' || value === 'execute') return value;
+  throw new Error('agentPermissionMode must be read, write, or execute');
+}
+
+function parseAssistantApprovalPolicy(raw: unknown): AgentApprovalPolicy {
+  const value = String(raw ?? '').trim();
+  if (value === 'ask' || value === 'none') return value;
+  if (value === 'auto') throw new Error('auto approval policy is only available for Codex chats');
+  throw new Error('approvalPolicy must be ask or none for native chats');
 }
 
 function makeAssistantUserMessage(
@@ -999,7 +1012,7 @@ function normalizeThread(
   const updatedAt = String(raw.updatedAt ?? '').trim() || createdAt;
   const thinkingLevel = allowedThinkingLevelForModel(provider, model, raw.thinkingLevel);
   const approvalPolicy = normalizeAssistantApprovalPolicy(
-    raw.approvalPolicy ?? (normalizeAssistantAutoApprove(raw.autoApprove) ? 'never' : 'ask'),
+    raw.approvalPolicy ?? (normalizeAssistantAutoApprove(raw.autoApprove) ? 'none' : 'ask'),
   );
   return {
     id,
@@ -1036,7 +1049,7 @@ function normalizeThread(
     accessScope: makeAssistantAccessScope(raw.accessScope),
     agentPermissionMode: normalizeAssistantAgentPermissionMode(raw.agentPermissionMode),
     approvalPolicy,
-    autoApprove: approvalPolicy === 'never',
+    autoApprove: approvalPolicy === 'none',
     promptDeliveryMode: normalizeAssistantPromptDeliveryMode(raw.promptDeliveryMode),
     status: raw.status === 'error' ? 'error' : 'idle',
     error: typeof raw.error === 'string' && raw.error.trim() ? raw.error : null,
@@ -1327,8 +1340,8 @@ export class HubAssistantService {
   ): Set<string> | null {
     if (!threadId) throw new Error('native chat id is required');
     const thread = this.getThread(threadId);
-    if (kind === 'write' && thread.agentPermissionMode === 'read-only') return new Set();
-    if (kind === 'execute' && thread.agentPermissionMode !== 'full-access') return new Set();
+    if (kind === 'write' && thread.agentPermissionMode === 'read') return new Set();
+    if (kind === 'execute' && thread.agentPermissionMode !== 'execute') return new Set();
     const accessScope = thread.accessScope;
     const mode =
       kind === 'write'
@@ -1631,7 +1644,7 @@ export class HubAssistantService {
         const requestedApprovalPolicy = normalizeAssistantApprovalPolicy(input.approvalPolicy);
         if (existing.approvalPolicy !== requestedApprovalPolicy) {
           existing.approvalPolicy = requestedApprovalPolicy;
-          existing.autoApprove = requestedApprovalPolicy === 'never';
+          existing.autoApprove = requestedApprovalPolicy === 'none';
           if (existing.autoApprove) this.resolvePendingApprovalsForThread(existing.id, true);
           metadataChanged = true;
         }
@@ -1906,6 +1919,12 @@ export class HubAssistantService {
   ): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
+    const requestedAgentPermissionMode =
+      patch.agentPermissionMode != null
+        ? parseAssistantAgentPermissionMode(patch.agentPermissionMode)
+        : null;
+    const requestedApprovalPolicy =
+      patch.approvalPolicy != null ? parseAssistantApprovalPolicy(patch.approvalPolicy) : null;
     const title = typeof patch.title === 'string' ? patch.title.trim() : '';
     if (title) thread.title = title.slice(0, 80);
     if (patch.provider != null) thread.provider = normalizeProvider(patch.provider);
@@ -1920,18 +1939,15 @@ export class HubAssistantService {
     }
     if (patch.autoApprove != null) {
       thread.autoApprove = normalizeAssistantAutoApprove(patch.autoApprove);
-      thread.approvalPolicy = thread.autoApprove ? 'never' : 'ask';
+      thread.approvalPolicy = thread.autoApprove ? 'none' : 'ask';
       if (thread.autoApprove) this.resolvePendingApprovalsForThread(thread.id, true);
     }
-    if (patch.agentPermissionMode != null) {
-      thread.agentPermissionMode = normalizeAssistantAgentPermissionMode(patch.agentPermissionMode);
+    if (requestedAgentPermissionMode != null) {
+      thread.agentPermissionMode = requestedAgentPermissionMode;
     }
-    if (patch.approvalPolicy != null) {
-      if (String(patch.approvalPolicy).trim() === 'agent-decides')
-        throw new Error('agent-decides approval policy is only available for Codex chats');
-      const approvalPolicy = normalizeAssistantApprovalPolicy(patch.approvalPolicy);
-      thread.approvalPolicy = approvalPolicy;
-      thread.autoApprove = approvalPolicy === 'never';
+    if (requestedApprovalPolicy != null) {
+      thread.approvalPolicy = requestedApprovalPolicy;
+      thread.autoApprove = requestedApprovalPolicy === 'none';
       if (thread.autoApprove) this.resolvePendingApprovalsForThread(thread.id, true);
     }
     if (patch.promptDeliveryMode != null)
@@ -2070,10 +2086,10 @@ export class HubAssistantService {
     return (await this.tools.listDrones()).flatMap((drone) => {
       const canRead = readScope === null || readScope.has(drone.id);
       const canWrite =
-        thread.agentPermissionMode !== 'read-only' &&
+        thread.agentPermissionMode !== 'read' &&
         (writeScope === null || writeScope.has(drone.id));
       const canExecute =
-        thread.agentPermissionMode === 'full-access' &&
+        thread.agentPermissionMode === 'execute' &&
         (executeScope === null || executeScope.has(drone.id));
       return canRead || canWrite || canExecute ? [{ ...drone, canRead, canWrite, canExecute }] : [];
     });
@@ -2111,7 +2127,7 @@ export class HubAssistantService {
         description: 'Private files for this chat',
         capabilities: [
           'read',
-          ...(thread.agentPermissionMode === 'read-only' ? [] : (['write'] as const)),
+          ...(thread.agentPermissionMode === 'read' ? [] : (['write'] as const)),
         ] as Array<'read' | 'write'>,
       },
     ];
@@ -2828,7 +2844,7 @@ export class HubAssistantService {
       ...(Array.isArray(input?.enabledWorkspaceIds)
         ? { enabledWorkspaceIds: normalizeAssistantWorkspaceIds(input.enabledWorkspaceIds) ?? [] }
         : {}),
-      autoApprove: normalizeAssistantApprovalPolicy(input?.approvalPolicy) === 'never',
+      autoApprove: normalizeAssistantApprovalPolicy(input?.approvalPolicy) === 'none',
       promptDeliveryMode: 'queue',
       status: 'idle',
       error: null,
@@ -2906,13 +2922,13 @@ export class HubAssistantService {
       .trim()
       .replace(/^drone_hub__/, '');
     const permissionMode = this.getThread(threadId).agentPermissionMode;
-    if (permissionMode === 'read-only' && ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES.has(toolName)) {
+    if (permissionMode === 'read' && ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES.has(toolName)) {
       return {
         status: 'deny',
         reason: `${toolName} is unavailable while this chat is read only.`,
       };
     }
-    if (permissionMode !== 'full-access' && toolName === 'bash') {
+    if (permissionMode !== 'execute' && toolName === 'bash') {
       return {
         status: 'deny',
         reason: 'Command execution is unavailable for this chat.',
@@ -3222,11 +3238,11 @@ export class HubAssistantService {
     const accessScope = this.activeAccessScope(threadId);
     const readScope = describeAssistantAccessMode(accessScope.readMode, accessScope.droneIds);
     const writeScope =
-      thread?.agentPermissionMode === 'read-only'
+      thread?.agentPermissionMode === 'read'
         ? 'none (chat is read only)'
         : describeAssistantAccessMode(accessScope.writeMode, accessScope.droneIds);
     const executeScope =
-      thread?.agentPermissionMode === 'full-access'
+      thread?.agentPermissionMode === 'execute'
         ? describeAssistantAccessMode(accessScope.executeMode, accessScope.droneIds)
         : 'none (command execution is disabled)';
     const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}; execute=${executeScope}. Do not claim access to existing drones outside those scopes. create_drone creates a container child of this chat's owner and automatically grants this chat access; clone_drone also requires read access to its source. Neither operation is available when this chat's owner runs directly on the host. create_group creates an independent group in the supplied repository scope; omit repoPath only for drones without a repository.`;

@@ -20,9 +20,9 @@ function assertSeedApprovalPolicySupported(
 ): void {
   if (policy === 'ask') return;
   if (!agent) throw new Error('approval policy requires a native or Codex seed agent');
-  if (policy === 'agent-decides') {
+  if (policy === 'auto') {
     if (agent.kind === 'builtin' && agent.id === 'codex') return;
-    throw new Error('agent-decides approval policy is only available for Codex seed agents');
+    throw new Error('auto approval policy is only available for Codex seed agents');
   }
   if (agent.kind === 'native' || (agent.kind === 'builtin' && agent.id === 'codex')) return;
   throw new Error('approval policies are available for native and Codex seed agents only');
@@ -113,7 +113,7 @@ function buildInitialSeedConfig(opts: {
       opts.seedProvider ||
       opts.seedModel ||
       opts.seedReasoning ||
-      opts.seedAgentPermissionMode !== 'full-access' ||
+      opts.seedAgentPermissionMode !== 'execute' ||
       opts.seedApprovalPolicy !== 'ask'
     )
   ) {
@@ -124,7 +124,7 @@ function buildInitialSeedConfig(opts: {
     ...(opts.seedProvider ? { provider: opts.seedProvider } : {}),
     ...(opts.seedModel ? { model: opts.seedModel } : {}),
     ...(opts.seedReasoning ? { reasoning: opts.seedReasoning } : {}),
-    ...(opts.seedAgentPermissionMode !== 'full-access'
+    ...(opts.seedAgentPermissionMode !== 'execute'
       ? { agentPermissionMode: opts.seedAgentPermissionMode }
       : {}),
     ...(opts.seedApprovalPolicy !== 'ask' ? { approvalPolicy: opts.seedApprovalPolicy } : {}),
@@ -342,7 +342,7 @@ function createDroneProvisioningServiceHandler(
           body?.seedChat ?? body?.seed?.chatName ?? body?.seed?.chat ?? 'default',
         );
         const seedAgent = parseSeedAgent(body?.seedAgent ?? body?.agent ?? body?.seed?.agent);
-        let seedAgentPermissionMode: AgentPermissionMode = 'full-access';
+        let seedAgentPermissionMode: AgentPermissionMode = 'execute';
         let seedApprovalPolicy: AgentApprovalPolicy = 'ask';
         try {
           const seedPermissionRaw =
@@ -351,7 +351,7 @@ function createDroneProvisioningServiceHandler(
             body?.seed?.agentPermissionMode;
           seedAgentPermissionMode =
             seedPermissionRaw == null || String(seedPermissionRaw).trim() === ''
-              ? 'full-access'
+              ? 'execute'
               : parseAgentPermissionModeForUpdate(seedPermissionRaw);
         } catch (e: any) {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
@@ -432,7 +432,7 @@ function createDroneProvisioningServiceHandler(
           });
           return;
         }
-        if (seedAgentPermissionMode !== 'full-access') {
+        if (seedAgentPermissionMode !== 'execute') {
           try {
             if (!seedAgent)
               throw new Error('agent access controls require a native, Codex, or Blip seed agent');
@@ -1006,7 +1006,7 @@ function createDroneProvisioningServiceHandler(
               if (!seedProvider && seedAgent?.kind === 'native') {
                 seedProvider = assumedNativeProvider;
               }
-              let seedAgentPermissionMode: AgentPermissionMode = 'full-access';
+              let seedAgentPermissionMode: AgentPermissionMode = 'execute';
               let seedApprovalPolicy: AgentApprovalPolicy = 'ask';
               try {
                 const seedPermissionRaw =
@@ -1015,7 +1015,7 @@ function createDroneProvisioningServiceHandler(
                   raw?.seed?.agentPermissionMode;
                 seedAgentPermissionMode =
                   seedPermissionRaw == null || String(seedPermissionRaw).trim() === ''
-                    ? 'full-access'
+                    ? 'execute'
                     : parseAgentPermissionModeForUpdate(seedPermissionRaw);
               } catch (e: any) {
                 rejected.push({ name, error: e?.message ?? String(e), status: 400 });
@@ -1064,7 +1064,7 @@ function createDroneProvisioningServiceHandler(
                 });
                 continue;
               }
-              if (seedAgentPermissionMode !== 'full-access') {
+              if (seedAgentPermissionMode !== 'execute') {
                 try {
                   if (!seedAgent)
                     throw new Error(

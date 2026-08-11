@@ -70,9 +70,9 @@ type DroneProvisioningControllerDeps = {
     setReasoning?: boolean;
     reasoning?: string | null;
     setAgentPermissionMode?: boolean;
-    agentPermissionMode?: 'read-only' | 'workspace-write' | 'full-access';
+    agentPermissionMode?: 'read' | 'write' | 'execute';
     setApprovalPolicy?: boolean;
-    approvalPolicy?: 'ask' | 'agent-decides' | 'never';
+    approvalPolicy?: 'ask' | 'auto' | 'none';
   }) => Promise<void>;
   syncMcpServersForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncRepoAgentsInstructionsForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
@@ -156,12 +156,12 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     if (!droneEntry || typeof droneEntry !== 'object' || !seedRaw || typeof seedRaw !== 'object') return;
     const seedAgent = deps.parseSeedAgent(seedRaw?.agent);
     const seedAgentPermissionMode =
-      seedRaw?.agentPermissionMode === 'read-only' ||
-      seedRaw?.agentPermissionMode === 'workspace-write'
+      seedRaw?.agentPermissionMode === 'read' ||
+      seedRaw?.agentPermissionMode === 'write'
         ? seedRaw.agentPermissionMode
         : null;
     const seedApprovalPolicy =
-      seedRaw?.approvalPolicy === 'agent-decides' || seedRaw?.approvalPolicy === 'never'
+      seedRaw?.approvalPolicy === 'auto' || seedRaw?.approvalPolicy === 'none'
         ? seedRaw.approvalPolicy
         : null;
     const hasSeedModel = Object.prototype.hasOwnProperty.call(seedRaw, 'model');
@@ -503,12 +503,12 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     const hasSeedReasoning = Object.prototype.hasOwnProperty.call(seed ?? {}, 'reasoning');
     const seedReasoning = normalizeChatReasoning(seed?.reasoning);
     const seedAgentPermissionMode =
-      seed?.agentPermissionMode === 'read-only' ||
-      seed?.agentPermissionMode === 'workspace-write'
+      seed?.agentPermissionMode === 'read' ||
+      seed?.agentPermissionMode === 'write'
         ? seed.agentPermissionMode
         : null;
     const seedApprovalPolicy =
-      seed?.approvalPolicy === 'agent-decides' || seed?.approvalPolicy === 'never'
+      seed?.approvalPolicy === 'auto' || seed?.approvalPolicy === 'none'
         ? seed.approvalPolicy
         : null;
     const seedPrompt = String(seed?.prompt ?? '').trim();

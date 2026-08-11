@@ -3,8 +3,8 @@ export type ChatAgentConfig =
   | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip' }
   | { kind: 'custom'; id: string; label: string; command: string };
 
-export type AgentPermissionMode = 'read-only' | 'workspace-write' | 'full-access';
-export type AgentApprovalPolicy = 'ask' | 'agent-decides' | 'never';
+export type AgentPermissionMode = 'read' | 'write' | 'execute';
+export type AgentApprovalPolicy = 'ask' | 'auto' | 'none';
 
 export type ChatResourceSubscriptionInfo = {
   id: string;
@@ -133,11 +133,11 @@ function normalizeChatInfoPayloadBase(
   const sessionName = String(data?.sessionName ?? '').trim() || `drone-hub-chat-${chat}`;
   const createdAt = String(data?.createdAt ?? '').trim() || new Date().toISOString();
   const agentPermissionMode: AgentPermissionMode =
-    data?.agentPermissionMode === 'read-only' || data?.agentPermissionMode === 'workspace-write'
+    data?.agentPermissionMode === 'read' || data?.agentPermissionMode === 'write'
       ? data.agentPermissionMode
-      : 'full-access';
+      : 'execute';
   const approvalPolicy: AgentApprovalPolicy =
-    data?.approvalPolicy === 'agent-decides' || data?.approvalPolicy === 'never'
+    data?.approvalPolicy === 'auto' || data?.approvalPolicy === 'none'
       ? data.approvalPolicy
       : 'ask';
   const dockerSnapshotAfterAgentMessageEnabled =

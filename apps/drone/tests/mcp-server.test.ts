@@ -766,8 +766,8 @@ describe('Drone Hub assistant MCP transport', () => {
                   spawnAgentKey: 'builtin:codex',
                   spawnModel: 'gpt-5.6-codex',
                   spawnReasoning: 'high',
-                  spawnAgentPermissionMode: 'full-access',
-                  spawnApprovalPolicy: 'agent-decides',
+                  spawnAgentPermissionMode: 'execute',
+                  spawnApprovalPolicy: 'auto',
                   repoBranchSource: 'host',
                   repoCreateRemoteBranch: '',
                 },
@@ -825,8 +825,7 @@ describe('Drone Hub assistant MCP transport', () => {
           seedAgent: { kind: 'builtin', id: 'codex' },
           seedModel: 'gpt-5.6-codex',
           seedReasoning: 'high',
-          seedAgentPermissionMode: 'workspace-write',
-          seedApprovalPolicy: 'never',
+          seedApprovalPolicy: 'none',
         });
         const rejected = await client.callTool({
           name: 'create_drone',
@@ -835,18 +834,49 @@ describe('Drone Hub assistant MCP transport', () => {
             draft: true,
             repoPath,
             agent: 'cursor',
-            approvalPolicy: 'never',
+            approvalPolicy: 'none',
           },
         });
         expect(rejected.isError).toBe(true);
         expect(JSON.stringify(rejected.content)).toContain(
           'approvalPolicy is only available for Codex drones',
         );
+        const rejectedPermissionMode = await client.callTool({
+          name: 'create_drone',
+          arguments: {
+            name: 'Invalid Cursor access draft',
+            draft: true,
+            repoPath,
+            agent: 'cursor',
+            agentPermissionMode: 'read',
+          },
+        });
+        expect(rejectedPermissionMode.isError).toBe(true);
+        expect(JSON.stringify(rejectedPermissionMode.content)).toContain(
+          'agentPermissionMode is only available for Codex and Blip drones',
+        );
+        const acceptedExecuteMode = await client.callTool({
+          name: 'create_drone',
+          arguments: {
+            name: 'Cursor execute draft',
+            draft: true,
+            repoPath,
+            agent: 'cursor',
+            agentPermissionMode: 'execute',
+          },
+        });
+        expect(acceptedExecuteMode.isError).not.toBe(true);
+        const createRequests = requests.filter(
+          (request) => request.pathname === '/api/drones' && request.method === 'POST',
+        );
+        expect(createRequests[1]?.body).toMatchObject({
+          name: 'Cursor execute draft',
+          seedAgent: { kind: 'builtin', id: 'cursor' },
+        });
+        expect(createRequests[1]?.body.seedAgentPermissionMode).toBeUndefined();
         expect(
-          requests.filter(
-            (request) => request.pathname === '/api/drones' && request.method === 'POST',
-          ),
-        ).toHaveLength(1);
+          createRequests,
+        ).toHaveLength(2);
       } finally {
         await client?.close();
         globalThis.fetch = previousFetch;

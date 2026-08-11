@@ -30,12 +30,12 @@ export type StartupSeedMutationOptions = {
 
 function normalizeStartupSeedOptions(opts: StartupSeedMutationOptions) {
   const agentPermissionMode: AgentPermissionMode =
-    opts.agentPermissionMode === 'read-only' ||
-    opts.agentPermissionMode === 'workspace-write'
+    opts.agentPermissionMode === 'read' ||
+    opts.agentPermissionMode === 'write'
       ? opts.agentPermissionMode
-      : 'full-access';
+      : 'execute';
   const approvalPolicy: AgentApprovalPolicy =
-    opts.approvalPolicy === 'agent-decides' || opts.approvalPolicy === 'never'
+    opts.approvalPolicy === 'auto' || opts.approvalPolicy === 'none'
       ? opts.approvalPolicy
       : 'ask';
   return {

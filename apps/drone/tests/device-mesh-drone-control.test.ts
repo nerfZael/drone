@@ -592,7 +592,7 @@ describe('device mesh drone summaries', () => {
         seedAgent: { kind: 'builtin', id: 'codex' },
         seedModel: 'gpt-5.2-codex',
         seedReasoning: 'high',
-        seedAgentPermissionMode: 'read-only',
+        seedAgentPermissionMode: 'read',
         seedPrompt: 'Review the app',
         seedAttachments: [
           { name: 'screen.png', mime: 'image/png', size: 3, dataBase64: 'YWJj' },
@@ -614,7 +614,7 @@ describe('device mesh drone summaries', () => {
           seedChat: 'default',
           seedModel: 'gpt-5.2-codex',
           seedReasoning: 'high',
-          seedAgentPermissionMode: 'read-only',
+          seedAgentPermissionMode: 'read',
           seedPrompt: 'Review the app',
           seedAttachments: [
             { name: 'screen.png', mime: 'image/png', size: 3, dataBase64: 'YWJj' },

@@ -819,12 +819,12 @@ export function createDroneControlCapability(
           ...(optionalText(payload.seedReasoning)
             ? { seedReasoning: optionalText(payload.seedReasoning) }
             : {}),
-          ...(payload.seedAgentPermissionMode === 'read-only' ||
-          payload.seedAgentPermissionMode === 'workspace-write'
+          ...(payload.seedAgentPermissionMode === 'read' ||
+          payload.seedAgentPermissionMode === 'write'
             ? { seedAgentPermissionMode: payload.seedAgentPermissionMode }
             : {}),
-          ...(payload.seedApprovalPolicy === 'agent-decides' ||
-          payload.seedApprovalPolicy === 'never'
+          ...(payload.seedApprovalPolicy === 'auto' ||
+          payload.seedApprovalPolicy === 'none'
             ? { seedApprovalPolicy: payload.seedApprovalPolicy }
             : {}),
           ...(optionalText(payload.seedPrompt)
@@ -1314,15 +1314,15 @@ export function createDroneControlCapability(
               readState: marked?.readState ?? result?.readState ?? null,
               agentPermissionMode:
                 nativeThread != null
-                  ? nativeThread.agentPermissionMode === 'read-only' ||
-                    nativeThread.agentPermissionMode === 'workspace-write'
+                  ? nativeThread.agentPermissionMode === 'read' ||
+                    nativeThread.agentPermissionMode === 'write'
                     ? nativeThread.agentPermissionMode
-                    : 'full-access'
-                  : (result.agentPermissionMode ?? 'full-access'),
+                    : 'execute'
+                  : (result.agentPermissionMode ?? 'execute'),
               approvalPolicy:
                 nativeThread != null
-                  ? nativeThread.approvalPolicy === 'never'
-                    ? 'never'
+                  ? nativeThread.approvalPolicy === 'none'
+                    ? 'none'
                     : 'ask'
                   : (result.approvalPolicy ?? 'ask'),
               ...(subscriptions ? { subscriptions } : {}),
@@ -1380,12 +1380,12 @@ export function createDroneControlCapability(
           pending,
           readState: marked?.readState ?? result?.readState ?? null,
           agentPermissionMode:
-            result.agentPermissionMode === 'read-only' ||
-            result.agentPermissionMode === 'workspace-write'
+            result.agentPermissionMode === 'read' ||
+            result.agentPermissionMode === 'write'
               ? result.agentPermissionMode
-              : 'full-access',
+              : 'execute',
           approvalPolicy:
-            result.approvalPolicy === 'agent-decides' || result.approvalPolicy === 'never'
+            result.approvalPolicy === 'auto' || result.approvalPolicy === 'none'
               ? result.approvalPolicy
               : 'ask',
           ...(subscriptions ? { subscriptions } : {}),

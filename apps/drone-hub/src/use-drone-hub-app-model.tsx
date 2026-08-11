@@ -869,13 +869,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     spawnAgentConfig.kind === 'native' ||
     (spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex');
   React.useEffect(() => {
-    if (!spawnAgentReadOnlySupported && spawnAgentPermissionMode !== 'full-access') {
-      setSpawnAgentPermissionMode('full-access');
+    if (!spawnAgentReadOnlySupported && spawnAgentPermissionMode !== 'execute') {
+      setSpawnAgentPermissionMode('execute');
     }
   }, [spawnAgentPermissionMode, spawnAgentReadOnlySupported]);
   React.useEffect(() => {
     if (!spawnAgentApprovalSupported) setSpawnApprovalPolicy('ask');
-    else if (!spawnAgentIsCodex && spawnApprovalPolicy === 'agent-decides')
+    else if (!spawnAgentIsCodex && spawnApprovalPolicy === 'auto')
       setSpawnApprovalPolicy('ask');
   }, [spawnAgentApprovalSupported, spawnAgentIsCodex, spawnApprovalPolicy]);
 
@@ -913,11 +913,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           .trim()
           .toLowerCase() || null;
       const agentPermissionMode: AgentPermissionMode =
-        opts.agentPermissionMode === 'read-only' || opts.agentPermissionMode === 'workspace-write'
+        opts.agentPermissionMode === 'read' || opts.agentPermissionMode === 'write'
           ? opts.agentPermissionMode
-          : 'full-access';
+          : 'execute';
       const approvalPolicy: AgentApprovalPolicy =
-        opts.approvalPolicy === 'agent-decides' || opts.approvalPolicy === 'never'
+        opts.approvalPolicy === 'auto' || opts.approvalPolicy === 'none'
           ? opts.approvalPolicy
           : 'ask';
       const group = String(opts.group ?? '').trim() || null;
@@ -926,7 +926,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         !prompt &&
         !opts.agent &&
         !model &&
-        agentPermissionMode === 'full-access' &&
+        agentPermissionMode === 'execute' &&
         approvalPolicy === 'ask'
       )
         return;
@@ -2502,7 +2502,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           agentLocked: false,
           model: startupSeedForCurrentDrone.model ?? null,
           reasoning: startupSeedForCurrentDrone.reasoning ?? null,
-          agentPermissionMode: startupSeedForCurrentDrone.agentPermissionMode ?? 'full-access',
+          agentPermissionMode: startupSeedForCurrentDrone.agentPermissionMode ?? 'execute',
           approvalPolicy: startupSeedForCurrentDrone.approvalPolicy ?? 'ask',
           dockerSnapshotAfterAgentMessageEnabled: false,
           sessionName: `drone-hub-chat-${startupSeedForCurrentDrone.chatName || selectedChat || 'default'}`,
@@ -2832,7 +2832,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     updateSpawnContextForRepo(currentDroneRepoAttached ? currentDroneRepoPath : '', {
       spawnAgentKey: nextAgentKey,
       spawnModel: nextModel,
-      spawnAgentPermissionMode: effectiveChatInfo.agentPermissionMode ?? 'full-access',
+      spawnAgentPermissionMode: effectiveChatInfo.agentPermissionMode ?? 'execute',
     });
     lastSyncedCanvasAgentModelContextRef.current = contextKey;
   }, [
@@ -3312,10 +3312,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           : null;
       const seedAgentPermissionMode: AgentPermissionMode = seedAgent
         ? spawnAgentPermissionMode
-        : 'full-access';
+        : 'execute';
       const seedApprovalPolicy: AgentApprovalPolicy = spawnApprovalPolicy;
       if (
-        seedAgentPermissionMode !== 'full-access' &&
+        seedAgentPermissionMode !== 'execute' &&
         !(
           seedAgent.kind === 'native' ||
           (seedAgent.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
@@ -3340,7 +3340,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           seedChat: 'default',
           ...(seedAgent ? { seedAgent } : {}),
           ...(seedModel ? { seedModel } : {}),
-          ...(seedAgentPermissionMode !== 'full-access' ? { seedAgentPermissionMode } : {}),
+          ...(seedAgentPermissionMode !== 'execute' ? { seedAgentPermissionMode } : {}),
           ...(seedApprovalPolicy !== 'ask' ? { seedApprovalPolicy } : {}),
           seedPrompt: prompt,
           seedSubmittedAt,
@@ -4586,7 +4586,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     currentModel,
     currentReasoning,
     setChatModelSettings,
-    agentPermissionMode: effectiveChatInfo?.agentPermissionMode ?? 'full-access',
+    agentPermissionMode: effectiveChatInfo?.agentPermissionMode ?? 'execute',
     setChatAgentPermissionMode,
     approvalPolicy: effectiveChatInfo?.approvalPolicy ?? 'ask',
     setChatApprovalPolicy,

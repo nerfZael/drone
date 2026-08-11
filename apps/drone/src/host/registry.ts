@@ -32,8 +32,8 @@ type DroneRegistryChatEntry = {
   chatId?: string;
   model?: string;
   agent?: DroneRegistryChatAgentConfig;
-  agentPermissionMode?: 'read-only' | 'workspace-write' | 'full-access';
-  approvalPolicy?: 'ask' | 'agent-decides' | 'never';
+  agentPermissionMode?: 'read' | 'write' | 'execute';
+  approvalPolicy?: 'ask' | 'auto' | 'none';
   codexThreadId?: string;
   claudeSessionId?: string;
   openCodeSessionId?: string;

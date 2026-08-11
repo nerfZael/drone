@@ -66,7 +66,7 @@ const DEFAULT_SPAWN_CONTEXT_PREFERENCES: SpawnContextPreferences = {
   spawnAgentKey: 'builtin:cursor',
   spawnModel: '',
   spawnReasoning: '',
-  spawnAgentPermissionMode: 'full-access',
+  spawnAgentPermissionMode: 'execute',
   spawnApprovalPolicy: 'ask',
   repoBranchSource: 'host',
   repoCreateRemoteBranch: '',
@@ -219,11 +219,11 @@ function normalizeRepoBranchSourceMode(value: unknown): RepoBranchSourceMode {
 }
 
 function normalizeSpawnAgentPermissionMode(value: unknown): AgentPermissionMode {
-  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+  return value === 'read' || value === 'write' ? value : 'execute';
 }
 
 function normalizeSpawnApprovalPolicy(value: unknown): AgentApprovalPolicy {
-  return value === 'agent-decides' || value === 'never' ? value : 'ask';
+  return value === 'auto' || value === 'none' ? value : 'ask';
 }
 
 function normalizeSpawnContextRepoPath(value: unknown): string {

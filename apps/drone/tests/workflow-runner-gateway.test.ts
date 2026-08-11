@@ -10,13 +10,21 @@ function origin() {
   };
 }
 
-function agent(runnerKind: 'drone-chat' | 'drone', agentId: 'blip' | 'codex') {
+function agent(
+  runnerKind: 'drone-chat' | 'drone',
+  agentId: 'blip' | 'codex',
+  permissions: readonly ('workspace:read' | 'workspace:write' | 'process:execute')[] = [
+    'workspace:read',
+    'workspace:write',
+    'process:execute',
+  ],
+) {
   return {
     runner: {
       kind: runnerKind,
       agent: { kind: 'builtin' as const, id: agentId },
     },
-    permissions: ['workspace:read', 'workspace:write', 'process:execute'] as const,
+    permissions,
     instructions: 'Do the work.',
   };
 }
@@ -110,6 +118,21 @@ describe('workflow runner gateway', () => {
     const chat = fixture.state.chats.get(`owner-drone:${target.chatName}`);
     expect(chat.agent).toEqual({ kind: 'builtin', id: 'codex' });
     expect(chat.visibility).toBe('workflow');
+    expect(chat.agentPermissionMode).toBeUndefined();
+  });
+
+  test('persists the write tier for a workflow chat without process execution', async () => {
+    const fixture = dependencies();
+    const gateway = createDroneWorkflowRunnerGateway(fixture.input);
+    const target = await gateway.createTarget({
+      ownerDroneId: 'owner-drone',
+      origin: origin(),
+      agent: agent('drone-chat', 'blip', ['workspace:read', 'workspace:write']) as any,
+      signal: new AbortController().signal,
+    });
+
+    const chat = fixture.state.chats.get(`owner-drone:${target.chatName}`);
+    expect(chat.agentPermissionMode).toBe('write');
   });
 
   test('creates, tags, opens, and deletes a hidden child drone target', async () => {
@@ -151,6 +174,23 @@ describe('workflow runner gateway', () => {
     expect(fixture.state.apiCalls.at(-1)).toMatchObject({
       method: 'DELETE',
       pathname: '/api/drones/child-drone?keepVolume=0&forget=1',
+    });
+  });
+
+  test('persists the write tier for a workflow child drone without process execution', async () => {
+    const fixture = dependencies();
+    const gateway = createDroneWorkflowRunnerGateway(fixture.input);
+    await gateway.createTarget({
+      ownerDroneId: 'owner-drone',
+      origin: origin(),
+      agent: agent('drone', 'blip', ['workspace:read', 'workspace:write']) as any,
+      signal: new AbortController().signal,
+    });
+
+    expect(fixture.state.apiCalls[0]).toMatchObject({
+      method: 'POST',
+      pathname: '/api/drones',
+      body: { seedAgentPermissionMode: 'write' },
     });
   });
 });

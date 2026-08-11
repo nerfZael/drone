@@ -266,7 +266,7 @@ describe('assistant drone workspace target execution', () => {
       const created = await ensureTestNativeChat(service, { chatName: 'agent access' });
       const threadId = created.chatId;
 
-      await service.updateThread(threadId, { agentPermissionMode: 'read-only' });
+      await service.updateThread(threadId, { agentPermissionMode: 'read' });
       await expect(
         service.preflightBlipTool(
           threadId,
@@ -285,13 +285,23 @@ describe('assistant drone workspace target execution', () => {
         }),
       ).resolves.toMatchObject({ status: 'deny' });
 
-      await service.updateThread(threadId, { agentPermissionMode: 'workspace-write' });
+      await service.updateThread(threadId, { agentPermissionMode: 'write' });
       await expect(
         service.preflightBlipTool(threadId, 'bash', 'call-write-bash', {
           command: 'pwd',
           workspaceTarget: { id: 'remote:test', label: 'Test' },
         }),
       ).resolves.toMatchObject({ status: 'deny' });
+      await expect(
+        service.updateThread(threadId, { agentPermissionMode: 'full-access' }),
+      ).rejects.toThrow('agentPermissionMode must be read, write, or execute');
+      await expect(
+        service.updateThread(threadId, { approvalPolicy: 'never' }),
+      ).rejects.toThrow('approvalPolicy must be ask or none for native chats');
+
+      const snapshot = await service.threadSnapshot(threadId);
+      expect(snapshot.threads[0]?.agentPermissionMode).toBe('write');
+      expect(snapshot.threads[0]?.approvalPolicy).toBe('ask');
     });
   });
 

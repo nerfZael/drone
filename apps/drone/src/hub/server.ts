@@ -2396,24 +2396,24 @@ function isValidDroneNameDashCase(raw: string): boolean {
 
 function normalizeAgentPermissionMode(raw: unknown): AgentPermissionMode {
   const value = String(raw ?? '').trim();
-  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+  return value === 'read' || value === 'write' ? value : 'execute';
 }
 
 function parseAgentPermissionModeForUpdate(raw: unknown): AgentPermissionMode {
   const value = String(raw ?? '').trim();
-  if (value === 'full-access' || value === 'workspace-write' || value === 'read-only') return value;
-  throw new Error('agentPermissionMode must be full-access, workspace-write, or read-only');
+  if (value === 'execute' || value === 'write' || value === 'read') return value;
+  throw new Error('agentPermissionMode must be read, write, or execute');
 }
 
 function normalizeAgentApprovalPolicy(raw: unknown): AgentApprovalPolicy {
   const value = String(raw ?? '').trim();
-  return value === 'agent-decides' || value === 'never' ? value : 'ask';
+  return value === 'auto' || value === 'none' ? value : 'ask';
 }
 
 function parseAgentApprovalPolicyForUpdate(raw: unknown): AgentApprovalPolicy {
   const value = String(raw ?? '').trim();
-  if (value === 'ask' || value === 'agent-decides' || value === 'never') return value;
-  throw new Error('approvalPolicy must be ask, agent-decides, or never');
+  if (value === 'ask' || value === 'auto' || value === 'none') return value;
+  throw new Error('approvalPolicy must be ask, auto, or none');
 }
 
 type TranscriptTurn = {

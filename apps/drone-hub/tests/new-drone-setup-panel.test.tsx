@@ -74,9 +74,9 @@ describe('new drone setup panel', () => {
           onChange={() => {}}
         />
         <NewDroneAccessPicker
-          permissionMode="workspace-write"
+          permissionMode="write"
           onPermissionModeChange={() => {}}
-          approvalPolicy="agent-decides"
+          approvalPolicy="auto"
           onApprovalPolicyChange={() => {}}
           readOnlySupported
           approvalsSupported
@@ -88,7 +88,7 @@ describe('new drone setup panel', () => {
     expect(html).toContain('Choose agent');
     expect(html).toContain('Codex');
     expect(html).toContain('Choose chat access and approvals');
-    expect(html).toContain('Write · Decide for me');
+    expect(html).toContain('Write · Automatic');
   });
 
   test('renders runtime and branch in the upper target row', () => {

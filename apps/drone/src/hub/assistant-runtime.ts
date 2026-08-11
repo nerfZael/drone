@@ -578,13 +578,13 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           if (!enabledTools.has(tool.name)) return false;
           const capability = blipTools.capabilityForWorkspaceTool(tool.name);
           if (
-            thread.agentPermissionMode === 'read-only' &&
+            thread.agentPermissionMode === 'read' &&
             capability &&
             !readableWorkspaceCapabilities.includes(capability as any)
           )
             return false;
           if (
-            thread.agentPermissionMode !== 'full-access' &&
+            thread.agentPermissionMode !== 'execute' &&
             capability === 'shell.execute'
           )
             return false;
@@ -597,7 +597,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         .createWorkspaceTransferTools(targetCatalog)
         .filter(
           (tool: any) =>
-            thread.agentPermissionMode !== 'read-only' && enabledTools.has(tool.name),
+            thread.agentPermissionMode !== 'read' && enabledTools.has(tool.name),
         );
       const tools = [
         {
@@ -736,7 +736,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             return (
               enabledTools.has(unqualified) &&
               !(
-                thread.agentPermissionMode === 'read-only' &&
+                thread.agentPermissionMode === 'read' &&
                 ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES.has(unqualified)
               )
             );

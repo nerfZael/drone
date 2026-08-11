@@ -283,7 +283,7 @@ describe('drone hub ui store migration', () => {
         spawnAgentKey: 'builtin:codex',
         spawnModel: 'gpt-5.4',
         spawnReasoning: '',
-        spawnAgentPermissionMode: 'full-access',
+        spawnAgentPermissionMode: 'execute',
         spawnApprovalPolicy: 'ask',
         repoBranchSource: 'remote',
         repoCreateRemoteBranch: 'origin/feature-x',
@@ -302,8 +302,8 @@ describe('drone hub ui store migration', () => {
       '/tmp/repo-a': {
         spawnAgentKey: 'builtin:codex',
         spawnModel: 'gpt-5.4',
-        spawnAgentPermissionMode: 'workspace-write',
-        spawnApprovalPolicy: 'never',
+        spawnAgentPermissionMode: 'write',
+        spawnApprovalPolicy: 'none',
         repoBranchSource: 'remote',
         repoCreateRemoteBranch: 'origin/feature-a',
       },
@@ -312,8 +312,8 @@ describe('drone hub ui store migration', () => {
     expect(resolveSpawnContextPreferencesForRepo(byRepo, '/tmp/repo-a')).toMatchObject({
       spawnAgentKey: 'builtin:codex',
       spawnModel: 'gpt-5.4',
-      spawnAgentPermissionMode: 'workspace-write',
-      spawnApprovalPolicy: 'never',
+      spawnAgentPermissionMode: 'write',
+      spawnApprovalPolicy: 'none',
       repoBranchSource: 'remote',
       repoCreateRemoteBranch: 'origin/feature-a',
     });
@@ -339,13 +339,13 @@ describe('drone hub ui store migration', () => {
       const byRepo = normalizeSpawnContextByRepoKey({
         '/tmp/repo-a': {
           spawnAgentKey: 'builtin:codex',
-          spawnAgentPermissionMode: 'full-access',
-          spawnApprovalPolicy: 'agent-decides',
+          spawnAgentPermissionMode: 'execute',
+          spawnApprovalPolicy: 'auto',
         },
         '/tmp/repo-b': {
           spawnAgentKey: 'builtin:codex',
-          spawnAgentPermissionMode: 'full-access',
-          spawnApprovalPolicy: 'agent-decides',
+          spawnAgentPermissionMode: 'execute',
+          spawnApprovalPolicy: 'auto',
         },
       });
       useDroneHubUiStore.setState({
@@ -355,16 +355,16 @@ describe('drone hub ui store migration', () => {
       });
 
       useDroneHubUiStore.getState().updateSpawnContextForRepo('/tmp/repo-b', {
-        spawnAgentPermissionMode: 'workspace-write',
+        spawnAgentPermissionMode: 'write',
         spawnApprovalPolicy: 'ask',
       });
 
       const state = useDroneHubUiStore.getState();
       expect(state.spawnContextRepoPath).toBe('/tmp/repo-a');
-      expect(state.spawnAgentPermissionMode).toBe('full-access');
-      expect(state.spawnApprovalPolicy).toBe('agent-decides');
+      expect(state.spawnAgentPermissionMode).toBe('execute');
+      expect(state.spawnApprovalPolicy).toBe('auto');
       expect(state.spawnContextByRepoKey['/tmp/repo-b']).toMatchObject({
-        spawnAgentPermissionMode: 'workspace-write',
+        spawnAgentPermissionMode: 'write',
         spawnApprovalPolicy: 'ask',
       });
     } finally {
@@ -405,8 +405,8 @@ describe('drone hub ui store migration', () => {
         spawnAgentKey: 'builtin:codex',
         spawnModel: 'gpt-5.5',
         spawnReasoning: 'high',
-        spawnAgentPermissionMode: 'full-access',
-        spawnApprovalPolicy: 'agent-decides',
+        spawnAgentPermissionMode: 'execute',
+        spawnApprovalPolicy: 'auto',
       },
       current: {
         spawnContextByRepoKey: normalizeSpawnContextByRepoKey({
@@ -415,15 +415,15 @@ describe('drone hub ui store migration', () => {
           },
           '/tmp/repo-a': {
             spawnAgentKey: 'builtin:codex',
-            spawnAgentPermissionMode: 'full-access',
-            spawnApprovalPolicy: 'agent-decides',
+            spawnAgentPermissionMode: 'execute',
+            spawnApprovalPolicy: 'auto',
           },
         }),
       },
       remembered: {
         '/tmp/repo-a': {
           spawnAgentKey: 'builtin:codex',
-          spawnAgentPermissionMode: 'workspace-write',
+          spawnAgentPermissionMode: 'write',
           spawnApprovalPolicy: 'ask',
         },
       },
@@ -434,10 +434,10 @@ describe('drone hub ui store migration', () => {
       spawnAgentKey: 'builtin:codex',
       spawnModel: 'gpt-5.5',
       spawnReasoning: 'high',
-      spawnApprovalPolicy: 'agent-decides',
+      spawnApprovalPolicy: 'auto',
     });
     expect(recovered['/tmp/repo-a']).toMatchObject({
-      spawnAgentPermissionMode: 'workspace-write',
+      spawnAgentPermissionMode: 'write',
       spawnApprovalPolicy: 'ask',
     });
   });

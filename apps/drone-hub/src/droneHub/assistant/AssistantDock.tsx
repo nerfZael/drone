@@ -1877,7 +1877,7 @@ export function AssistantDock({
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({
-                approvalPolicy: nextAutoApprove ? 'never' : 'ask',
+                approvalPolicy: nextAutoApprove ? 'none' : 'ask',
               }),
             },
           );

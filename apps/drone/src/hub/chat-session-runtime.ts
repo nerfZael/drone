@@ -242,13 +242,23 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const agent = opts.sourceChatEntry
       ? inferChatAgent(opts.sourceChatEntry, opts.droneEntry)
       : defaultChatAgentConfigForDrone(opts.droneEntry);
+    const sourceAgentPermissionMode = opts.sourceChatEntry
+      ? normalizeAgentPermissionMode(opts.sourceChatEntry.agentPermissionMode)
+      : 'execute';
+    const sourceApprovalPolicy: AgentApprovalPolicy =
+      opts.sourceChatEntry?.approvalPolicy === 'auto' ||
+      opts.sourceChatEntry?.approvalPolicy === 'none'
+        ? opts.sourceChatEntry.approvalPolicy
+        : 'ask';
     const entry: any = {
       id: crypto.randomUUID(),
       createdAt: opts.createdAt,
       agent,
-      ...(opts.sourceChatEntry &&
-      normalizeAgentPermissionMode(opts.sourceChatEntry?.agentPermissionMode) === 'read-only'
-        ? { agentPermissionMode: 'read-only' }
+      ...(opts.sourceChatEntry && sourceAgentPermissionMode !== 'execute'
+        ? { agentPermissionMode: sourceAgentPermissionMode }
+        : {}),
+      ...(opts.sourceChatEntry && sourceApprovalPolicy !== 'ask'
+        ? { approvalPolicy: sourceApprovalPolicy }
         : {}),
       ...(opts.sourceChatEntry && normalizeChatModel(opts.sourceChatEntry?.model)
         ? { model: normalizeChatModel(opts.sourceChatEntry?.model) }
@@ -538,9 +548,9 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       error.statusCode = 400;
       throw error;
     }
-    if (policy === 'agent-decides' && !(agent.kind === 'builtin' && agent.id === 'codex')) {
+    if (policy === 'auto' && !(agent.kind === 'builtin' && agent.id === 'codex')) {
       const error: Error & { statusCode?: number } = new Error(
-        'agent-decides approval policy is only available for Codex chats',
+        'auto approval policy is only available for Codex chats',
       );
       error.statusCode = 400;
       throw error;
@@ -870,7 +880,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
 
   function chatSnapshotConfig(chat: any) {
     const approvalPolicy =
-      chat?.approvalPolicy === 'agent-decides' || chat?.approvalPolicy === 'never'
+      chat?.approvalPolicy === 'auto' || chat?.approvalPolicy === 'none'
         ? chat.approvalPolicy
         : 'ask';
     return {
@@ -1461,7 +1471,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         if (opts.agent) {
           assertChatAgentSupportedForDrone(d, opts.agent);
           cur.agent = opts.agent as any;
-          if (normalizeAgentPermissionMode(cur.agentPermissionMode) !== 'full-access') {
+          if (normalizeAgentPermissionMode(cur.agentPermissionMode) !== 'execute') {
             try {
               assertReadOnlySupportedForAgent(opts.agent);
             } catch {
@@ -1469,12 +1479,12 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
             }
           }
           const storedApprovalPolicy: AgentApprovalPolicy =
-            cur.approvalPolicy === 'agent-decides' || cur.approvalPolicy === 'never'
+            cur.approvalPolicy === 'auto' || cur.approvalPolicy === 'none'
               ? cur.approvalPolicy
               : 'ask';
           if (
             !supportsApprovalPolicy(opts.agent) ||
-            (storedApprovalPolicy === 'agent-decides' &&
+            (storedApprovalPolicy === 'auto' &&
               !(opts.agent.kind === 'builtin' && opts.agent.id === 'codex'))
           ) {
             delete cur.approvalPolicy;
@@ -1505,13 +1515,13 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         }
         if (opts.setAgentPermissionMode) {
           const mode = normalizeAgentPermissionMode(opts.agentPermissionMode);
-          if (mode !== 'full-access') assertReadOnlySupportedForAgent(effectiveAgent);
-          if (mode !== 'full-access') cur.agentPermissionMode = mode;
+          if (mode !== 'execute') assertReadOnlySupportedForAgent(effectiveAgent);
+          if (mode !== 'execute') cur.agentPermissionMode = mode;
           else delete cur.agentPermissionMode;
         }
         if (opts.setApprovalPolicy) {
           const policy =
-            opts.approvalPolicy === 'agent-decides' || opts.approvalPolicy === 'never'
+            opts.approvalPolicy === 'auto' || opts.approvalPolicy === 'none'
               ? opts.approvalPolicy
               : 'ask';
           assertApprovalPolicySupportedForAgent(policy, effectiveAgent);

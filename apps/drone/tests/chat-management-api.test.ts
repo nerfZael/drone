@@ -583,7 +583,7 @@ describeSocketSuite('chat management api', () => {
 
     const initial = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
     expect(initial.r.status).toBe(200);
-    expect(initial.data?.agentPermissionMode).toBe('full-access');
+    expect(initial.data?.agentPermissionMode).toBe('execute');
 
     const updated = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
@@ -592,30 +592,30 @@ describeSocketSuite('chat management api', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           agent: { kind: 'builtin', id: 'codex' },
-          agentPermissionMode: 'read-only',
+          agentPermissionMode: 'read',
         }),
       },
     );
     expect(updated.r.status).toBe(200);
-    expect(updated.data?.agentPermissionMode).toBe('read-only');
+    expect(updated.data?.agentPermissionMode).toBe('read');
 
     const chatInfo = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
     expect(chatInfo.r.status).toBe(200);
-    expect(chatInfo.data?.agentPermissionMode).toBe('read-only');
+    expect(chatInfo.data?.agentPermissionMode).toBe('read');
 
     let regAny: any = await loadRegistry();
-    expect(regAny?.drones?.[droneId]?.chats?.default?.agentPermissionMode).toBe('read-only');
+    expect(regAny?.drones?.[droneId]?.chats?.default?.agentPermissionMode).toBe('read');
 
     const disabled = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ agentPermissionMode: 'full-access' }),
+        body: JSON.stringify({ agentPermissionMode: 'execute' }),
       },
     );
     expect(disabled.r.status).toBe(200);
-    expect(disabled.data?.agentPermissionMode).toBe('full-access');
+    expect(disabled.data?.agentPermissionMode).toBe('execute');
 
     regAny = await loadRegistry();
     expect(regAny?.drones?.[droneId]?.chats?.default?.agentPermissionMode).toBeUndefined();
@@ -823,7 +823,11 @@ describeSocketSuite('chat management api', () => {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ agent: { kind: 'native' } }),
+        body: JSON.stringify({
+          agent: { kind: 'native' },
+          agentPermissionMode: 'write',
+          approvalPolicy: 'none',
+        }),
       },
     );
     expect(configured.r.status).toBe(200);
@@ -834,6 +838,12 @@ describeSocketSuite('chat management api', () => {
       body: JSON.stringify({ name: 'review', copyFrom: 'default' }),
     });
     expect(cloned.r.status).toBe(201);
+
+    const clonedInfo = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/review`,
+    );
+    expect(clonedInfo.data?.agentPermissionMode).toBe('write');
+    expect(clonedInfo.data?.approvalPolicy).toBe('none');
 
     const identity = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/chats/review/native`,
@@ -868,7 +878,7 @@ describeSocketSuite('chat management api', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           agent: { kind: 'builtin', id: 'codex' },
-          agentPermissionMode: 'read-only',
+          agentPermissionMode: 'read',
         }),
       },
     );
@@ -887,7 +897,7 @@ describeSocketSuite('chat management api', () => {
     const chatInfo = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
     expect(chatInfo.r.status).toBe(200);
     expect(chatInfo.data?.agent).toEqual({ kind: 'builtin', id: 'cursor' });
-    expect(chatInfo.data?.agentPermissionMode).toBe('full-access');
+    expect(chatInfo.data?.agentPermissionMode).toBe('execute');
 
     const regAny: any = await loadRegistry();
     expect(regAny?.drones?.[droneId]?.chats?.default?.agentPermissionMode).toBeUndefined();
@@ -902,7 +912,7 @@ describeSocketSuite('chat management api', () => {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ agentPermissionMode: 'read-only' }),
+        body: JSON.stringify({ agentPermissionMode: 'read' }),
       },
     );
     expect(updated.r.status).toBe(400);
@@ -920,18 +930,18 @@ describeSocketSuite('chat management api', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           agent: { kind: 'builtin', id: 'codex' },
-          agentPermissionMode: 'workspace-write',
-          approvalPolicy: 'agent-decides',
+          agentPermissionMode: 'write',
+          approvalPolicy: 'auto',
         }),
       },
     );
     expect(codex.r.status).toBe(200);
-    expect(codex.data?.agentPermissionMode).toBe('workspace-write');
-    expect(codex.data?.approvalPolicy).toBe('agent-decides');
+    expect(codex.data?.agentPermissionMode).toBe('write');
+    expect(codex.data?.approvalPolicy).toBe('auto');
 
     const chatInfo = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
-    expect(chatInfo.data?.agentPermissionMode).toBe('workspace-write');
-    expect(chatInfo.data?.approvalPolicy).toBe('agent-decides');
+    expect(chatInfo.data?.agentPermissionMode).toBe('write');
+    expect(chatInfo.data?.approvalPolicy).toBe('auto');
 
     const native = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
@@ -951,7 +961,7 @@ describeSocketSuite('chat management api', () => {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ approvalPolicy: 'agent-decides' }),
+        body: JSON.stringify({ approvalPolicy: 'auto' }),
       },
     );
     expect(invalidNative.r.status).toBe(400);
@@ -962,11 +972,37 @@ describeSocketSuite('chat management api', () => {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ approvalPolicy: 'never' }),
+        body: JSON.stringify({ approvalPolicy: 'none' }),
       },
     );
     expect(nativeAllowAll.r.status).toBe(200);
-    expect(nativeAllowAll.data?.approvalPolicy).toBe('never');
+    expect(nativeAllowAll.data?.approvalPolicy).toBe('none');
+
+    const legacyPermissionMode = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agentPermissionMode: 'full-access' }),
+      },
+    );
+    expect(legacyPermissionMode.r.status).toBe(400);
+    expect(String(legacyPermissionMode.data?.error ?? '')).toContain(
+      'agentPermissionMode must be read, write, or execute',
+    );
+
+    const legacyApprovalPolicy = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ approvalPolicy: 'never' }),
+      },
+    );
+    expect(legacyApprovalPolicy.r.status).toBe(400);
+    expect(String(legacyApprovalPolicy.data?.error ?? '')).toContain(
+      'approvalPolicy must be ask, auto, or none',
+    );
   });
 
   test('returns conditional transcript reads as 304 when unchanged', async () => {
@@ -1270,8 +1306,8 @@ describeSocketSuite('chat management api', () => {
       if (!entry) throw new Error('missing seeded chat entry');
       entry.model = 'configured-model';
       entry.reasoning = 'high';
-      entry.agentPermissionMode = 'workspace-write';
-      entry.approvalPolicy = 'never';
+      entry.agentPermissionMode = 'write';
+      entry.approvalPolicy = 'none';
       entry.turns = Array.from({ length: 5 }, (_, index) => ({
         id: `prompt-${index + 1}`,
         at: new Date(Date.now() + index * 1_000).toISOString(),
@@ -1290,8 +1326,8 @@ describeSocketSuite('chat management api', () => {
     expect(state.data).toMatchObject({
       model: 'configured-model',
       reasoning: 'high',
-      agentPermissionMode: 'workspace-write',
-      approvalPolicy: 'never',
+      agentPermissionMode: 'write',
+      approvalPolicy: 'none',
       readState: { droneId, chatName: 'default' },
     });
     expect(state.data?.transcript).toBeUndefined();

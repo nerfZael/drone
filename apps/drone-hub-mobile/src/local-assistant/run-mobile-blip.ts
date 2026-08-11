@@ -174,28 +174,28 @@ export async function runMobileBlip(input: {
     'apply_patch',
     'transfer_files',
   ]);
-  const agentPermissionMode = input.thread.agentPermissionMode ?? 'full-access';
+  const agentPermissionMode = input.thread.agentPermissionMode ?? 'execute';
   const handle = await createBlipSession({
     workspaceRoot: 'mobile-mesh',
     model,
     permissionMode:
-      agentPermissionMode === 'read-only'
+      agentPermissionMode === 'read'
         ? 'read-only'
-        : agentPermissionMode === 'full-access'
+        : agentPermissionMode === 'execute'
           ? 'full-access'
           : 'workspace-write',
     toolProfile:
-      agentPermissionMode === 'read-only'
+      agentPermissionMode === 'read'
         ? 'read-only'
-        : agentPermissionMode === 'full-access'
+        : agentPermissionMode === 'execute'
           ? 'local-trusted-write'
           : 'no-shell-workspace-write',
     sessionRepository: repository,
     sessionId: repository.state.id,
     reasoning: input.thread.thinkingLevel,
     tools: workspaceAgentTools(input.workspaceRuntime).filter((tool) => {
-      if (agentPermissionMode !== 'full-access' && tool.name === 'bash') return false;
-      if (agentPermissionMode !== 'read-only') return true;
+      if (agentPermissionMode !== 'execute' && tool.name === 'bash') return false;
+      if (agentPermissionMode !== 'read') return true;
       return !readOnlyDeniedTools.has(tool.name);
     }),
     permissionPreflight: async (request) => {

@@ -426,19 +426,13 @@ export function useDroneCreationActions({
       }
 
       const seedAgent = createWithoutChat ? null : resolveAgentKeyToConfig(spawnAgentKey);
-      const seedAgentPermissionMode: AgentPermissionMode = seedAgent ? spawnAgentPermissionMode : 'full-access';
-      const seedApprovalPolicy: AgentApprovalPolicy = seedAgent
-        ? seedAgent.kind === 'builtin' &&
-          seedAgent.id === 'codex' &&
-          spawnApprovalPolicy === 'ask'
-          ? 'agent-decides'
-          : spawnApprovalPolicy
-        : 'ask';
+      const seedAgentPermissionMode: AgentPermissionMode = seedAgent ? spawnAgentPermissionMode : 'execute';
+      const seedApprovalPolicy: AgentApprovalPolicy = seedAgent ? spawnApprovalPolicy : 'ask';
       if (!runtimeSupportsCustomAgents(runtime) && seedAgent?.kind === 'custom') {
         return rejectCreate('Host runtime currently supports builtin agents only.');
       }
       if (
-        seedAgentPermissionMode !== 'full-access' &&
+        seedAgentPermissionMode !== 'execute' &&
         !(
           seedAgent?.kind === 'native' ||
           (seedAgent?.kind === 'builtin' &&

@@ -63,7 +63,7 @@ describe('local assistant storage', () => {
     expect(threads?.[0]).toMatchObject({
       id: 'legacy-thread',
       title: 'Existing conversation',
-      agentPermissionMode: 'full-access',
+      agentPermissionMode: 'execute',
       approvalPolicy: 'ask',
       autoApprove: false,
       messages: [{ id: 'message-1', content: 'Do not lose this' }],

@@ -54,12 +54,12 @@ function normalizeRepoBranchSource(value: unknown): 'host' | 'remote' {
   return value === 'remote' ? 'remote' : 'host';
 }
 
-function normalizeSpawnAgentPermissionMode(value: unknown): 'read-only' | 'workspace-write' | 'full-access' {
-  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+function normalizeSpawnAgentPermissionMode(value: unknown): 'read' | 'write' | 'execute' {
+  return value === 'read' || value === 'write' ? value : 'execute';
 }
 
-function normalizeSpawnApprovalPolicy(value: unknown): 'ask' | 'agent-decides' | 'never' {
-  return value === 'agent-decides' || value === 'never' ? value : 'ask';
+function normalizeSpawnApprovalPolicy(value: unknown): 'ask' | 'auto' | 'none' {
+  return value === 'auto' || value === 'none' ? value : 'ask';
 }
 
 function normalizeTrimmedText(value: unknown, maxChars: number): string {
@@ -266,7 +266,7 @@ function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boole
     value.spawnAgentKey !== 'builtin:cursor' ||
     value.spawnModel.length > 0 ||
     value.spawnReasoning.length > 0 ||
-    value.spawnAgentPermissionMode !== 'full-access' ||
+    value.spawnAgentPermissionMode !== 'execute' ||
     value.spawnApprovalPolicy !== 'ask' ||
     value.repoBranchSource !== 'host' ||
     value.repoCreateRemoteBranch.length > 0 ||
@@ -312,7 +312,7 @@ function mergeUiPreferencesForRecovery(
       base.spawnAgentKey !== 'builtin:cursor' ? base.spawnAgentKey : rescue.spawnAgentKey,
     spawnModel: base.spawnModel || rescue.spawnModel,
     spawnReasoning: base.spawnReasoning || rescue.spawnReasoning,
-    spawnAgentPermissionMode: base.spawnAgentPermissionMode !== 'full-access'
+    spawnAgentPermissionMode: base.spawnAgentPermissionMode !== 'execute'
       ? base.spawnAgentPermissionMode
       : rescue.spawnAgentPermissionMode,
     spawnApprovalPolicy: base.spawnApprovalPolicy !== 'ask'
