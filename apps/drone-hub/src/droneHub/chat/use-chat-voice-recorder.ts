@@ -1,4 +1,9 @@
 import React from 'react';
+import {
+  browserMicrophoneCoordinator,
+  browserMicrophoneOwnerLabel,
+  type BrowserMicrophoneLease,
+} from './browser-microphone-coordinator';
 
 const CHAT_VOICE_SAMPLE_RATE_HZ = 16_000;
 const CHAT_VOICE_CHANNELS = 1;
@@ -156,6 +161,12 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
   const stopPromiseRef = React.useRef<Promise<string> | null>(null);
   const lastDurationUpdateAtRef = React.useRef(0);
   const mountedRef = React.useRef(false);
+  const microphoneLeaseRef = React.useRef<BrowserMicrophoneLease | null>(null);
+
+  const releaseMicrophone = React.useCallback((lease = microphoneLeaseRef.current) => {
+    lease?.release();
+    if (microphoneLeaseRef.current === lease) microphoneLeaseRef.current = null;
+  }, []);
 
   const setStatusValue = React.useCallback((next: ChatVoiceRecordingStatus) => {
     statusRef.current = next;
@@ -190,17 +201,19 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
       startIdRef.current += 1;
       stopCapture(captureRef.current);
       captureRef.current = null;
+      releaseMicrophone();
     };
-  }, [stopCapture]);
+  }, [releaseMicrophone, stopCapture]);
 
   const discardRecording = React.useCallback(async () => {
     startIdRef.current += 1;
     stopPromiseRef.current = null;
     stopCapture(captureRef.current);
     captureRef.current = null;
+    releaseMicrophone();
     setDurationMillis(0);
     setStatusValue('idle');
-  }, [setStatusValue, stopCapture]);
+  }, [releaseMicrophone, setStatusValue, stopCapture]);
 
   const startRecording = React.useCallback(async () => {
     if (statusRef.current !== 'idle') return false;
@@ -214,6 +227,17 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
       onError('Browser microphone recording is not available here.');
       return false;
     }
+    const microphoneLease = browserMicrophoneCoordinator.acquire('voice-message');
+    if (!microphoneLease) {
+      const owner = browserMicrophoneCoordinator.getSnapshot();
+      onError(
+        owner
+          ? `${browserMicrophoneOwnerLabel(owner)} is already using the microphone.`
+          : 'The microphone is still finishing another recording.',
+      );
+      return false;
+    }
+    microphoneLeaseRef.current = microphoneLease;
 
     const startId = startIdRef.current + 1;
     startIdRef.current = startId;
@@ -257,6 +281,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
       };
       if (startIdRef.current !== startId) {
         stopCapture(capture);
+        releaseMicrophone(microphoneLease);
         return false;
       }
       source.connect(processor);
@@ -270,15 +295,14 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
     } catch (err: any) {
       if (pendingStream) pendingStream.getTracks().forEach((track) => track.stop());
       if (pendingContext) void pendingContext.close().catch(() => undefined);
-      stopCapture(captureRef.current);
-      captureRef.current = null;
+      releaseMicrophone(microphoneLease);
       if (startIdRef.current === startId) {
         setStatusValue('idle');
         onError(voiceStartFailureMessage(err));
       }
       return false;
     }
-  }, [onError, setStatusValue, stopCapture]);
+  }, [onError, releaseMicrophone, setStatusValue, stopCapture]);
 
   const toggleRecordingPause = React.useCallback(() => {
     if (statusRef.current === 'recording') {
@@ -292,7 +316,8 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
 
   const transcribeRecording = React.useCallback(async (): Promise<string> => {
     const capture = captureRef.current;
-    startIdRef.current += 1;
+    const transcriptionId = startIdRef.current + 1;
+    startIdRef.current = transcriptionId;
     if (!capture) {
       setStatusValue('idle');
       return '';
@@ -301,6 +326,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
     captureRef.current = null;
     setDurationMillis((capture.totalBytes / CHAT_VOICE_BYTES_PER_SECOND) * 1000);
     stopCapture(capture);
+    releaseMicrophone();
     setStatusValue('transcribing');
     onError('');
     try {
@@ -309,12 +335,14 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
       const wav = pcm16ToWav(pcm, CHAT_VOICE_SAMPLE_RATE_HZ, CHAT_VOICE_CHANNELS);
       return await transcribeChatVoiceWav(wav);
     } catch (err: any) {
-      onError(err?.message ?? String(err));
+      if (startIdRef.current === transcriptionId) {
+        onError(err?.message ?? String(err));
+      }
       return '';
     } finally {
-      setStatusValue('idle');
+      if (startIdRef.current === transcriptionId) setStatusValue('idle');
     }
-  }, [onError, setStatusValue, stopCapture]);
+  }, [onError, releaseMicrophone, setStatusValue, stopCapture]);
 
   const stopRecordingForTranscript = React.useCallback(async (): Promise<string> => {
     if (stopPromiseRef.current) return stopPromiseRef.current;

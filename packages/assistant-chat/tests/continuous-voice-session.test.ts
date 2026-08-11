@@ -169,6 +169,51 @@ describe('ContinuousVoiceSession', () => {
     expect(confirmationCount).toBe(0);
   });
 
+  test('discards an old route while keeping the session listening', async () => {
+    let route = 'chat-a';
+    let finishFirstTranscription: ((text: string) => void) | null = null;
+    let transcriptionCount = 0;
+    const deliveries: Array<{ text: string; route: string | null }> = [];
+    const session = new ContinuousVoiceSession({
+      onChange: () => undefined,
+      onError: (message) => {
+        throw new Error(message);
+      },
+    });
+    session.start({
+      sessionId: 'retarget-session',
+      endpointConfig: { silenceMillis: 250, minimumSpeechMillis: 40 },
+      route: () => route,
+      transcribe: async () => {
+        transcriptionCount += 1;
+        if (transcriptionCount === 1) {
+          return await new Promise<string>((resolve) => {
+            finishFirstTranscription = resolve;
+          });
+        }
+        return 'new target thought';
+      },
+      deliver: async (text, _deliveryId, targetRoute) => {
+        deliveries.push({ text, route: targetRoute });
+        return true;
+      },
+    });
+    session.listen();
+    session.push(thought());
+    await waitFor(() => finishFirstTranscription !== null);
+
+    route = 'chat-b';
+    session.discardPending();
+    finishFirstTranscription!('old target thought');
+    await Bun.sleep(0);
+    expect(session.status).toBe('listening');
+    expect(deliveries).toEqual([]);
+
+    session.push(thought());
+    await waitFor(() => deliveries.length === 1);
+    expect(deliveries).toEqual([{ text: 'new target thought', route: 'chat-b' }]);
+  });
+
   test('coalesces unchanged snapshots between duration updates', () => {
     const snapshots: ContinuousVoiceSessionSnapshot[] = [];
     const session = new ContinuousVoiceSession({

@@ -5,6 +5,11 @@ import {
   type ContinuousVoiceSessionStatus,
 } from '@drone/assistant-chat';
 import React from 'react';
+import {
+  browserMicrophoneCoordinator,
+  browserMicrophoneOwnerLabel,
+  type BrowserMicrophoneLease,
+} from './browser-microphone-coordinator';
 import { floatToPcm16, transcribeChatVoiceWav } from './use-chat-voice-recorder';
 
 export type ContinuousChatVoiceStatus = ContinuousVoiceSessionStatus;
@@ -23,6 +28,7 @@ type Capture = {
   source: MediaStreamAudioSourceNode;
   processor: ScriptProcessorNode;
   output: GainNode;
+  onTrackEnded: () => void;
 };
 
 const DEFAULT_SETTINGS: VoiceInputSettings = {
@@ -56,6 +62,9 @@ async function loadVoiceInputSettings(): Promise<VoiceInputSettings> {
 function closeCapture(capture: Capture | null): void {
   if (!capture) return;
   capture.processor.onaudioprocess = null;
+  for (const track of capture.stream.getTracks()) {
+    track.removeEventListener('ended', capture.onTrackEnded);
+  }
   for (const node of [capture.processor, capture.source, capture.output]) {
     try {
       node.disconnect();
@@ -110,10 +119,16 @@ export function useContinuousChatVoice({
   resetKey,
   onTranscript,
   onError,
+  routeKey,
+  shouldCapture,
+  microphoneOwner = 'continuous-steering',
 }: {
   resetKey: string;
-  onTranscript: (text: string, deliveryId: string) => Promise<boolean>;
+  onTranscript: (text: string, deliveryId: string, route: string | null) => Promise<boolean>;
   onError: (message: string) => void;
+  routeKey?: () => string | null;
+  shouldCapture?: () => boolean;
+  microphoneOwner?: 'continuous-steering' | 'continuous-dictation';
 }) {
   const [status, setStatus] = React.useState<ContinuousChatVoiceStatus>('idle');
   const [pendingCount, setPendingCount] = React.useState(0);
@@ -121,8 +136,13 @@ export function useContinuousChatVoice({
   const mountedRef = React.useRef(false);
   const startAttemptRef = React.useRef(0);
   const captureRef = React.useRef<Capture | null>(null);
+  const microphoneLeaseRef = React.useRef<BrowserMicrophoneLease | null>(null);
   const onErrorRef = React.useRef(onError);
   onErrorRef.current = onError;
+  const routeKeyRef = React.useRef(routeKey);
+  routeKeyRef.current = routeKey;
+  const shouldCaptureRef = React.useRef(shouldCapture);
+  shouldCaptureRef.current = shouldCapture;
   const sessionRef = React.useRef<ContinuousVoiceSession | null>(null);
   if (!sessionRef.current) {
     sessionRef.current = new ContinuousVoiceSession({
@@ -137,12 +157,18 @@ export function useContinuousChatVoice({
   }
   const session = sessionRef.current;
 
+  const releaseMicrophone = React.useCallback((lease = microphoneLeaseRef.current) => {
+    lease?.release();
+    if (microphoneLeaseRef.current === lease) microphoneLeaseRef.current = null;
+  }, []);
+
   const cancel = React.useCallback(async () => {
     startAttemptRef.current += 1;
     closeCapture(captureRef.current);
     captureRef.current = null;
+    releaseMicrophone();
     session.cancel();
-  }, [session]);
+  }, [releaseMicrophone, session]);
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -151,9 +177,10 @@ export function useContinuousChatVoice({
       startAttemptRef.current += 1;
       closeCapture(captureRef.current);
       captureRef.current = null;
+      releaseMicrophone();
       session.cancel();
     };
-  }, [session]);
+  }, [releaseMicrophone, session]);
 
   const start = React.useCallback(async () => {
     if (session.status !== 'idle') return false;
@@ -168,15 +195,32 @@ export function useContinuousChatVoice({
       onError('Browser microphone recording is not available here.');
       return false;
     }
+    const microphoneLease = browserMicrophoneCoordinator.acquire(microphoneOwner);
+    if (!microphoneLease) {
+      const owner = browserMicrophoneCoordinator.getSnapshot();
+      onError(
+        owner
+          ? `${browserMicrophoneOwnerLabel(owner)} is already using the microphone.`
+          : 'The microphone is still finishing another recording.',
+      );
+      return false;
+    }
+    microphoneLeaseRef.current = microphoneLease;
     let stream: MediaStream | null = null;
     let context: AudioContext | null = null;
     const attempt = startAttemptRef.current + 1;
     startAttemptRef.current = attempt;
-    if (!session.begin()) return false;
+    if (!session.begin()) {
+      releaseMicrophone(microphoneLease);
+      return false;
+    }
     onError('');
     try {
       const settings = await loadVoiceInputSettings().catch(() => DEFAULT_SETTINGS);
-      if (startAttemptRef.current !== attempt) return false;
+      if (startAttemptRef.current !== attempt) {
+        releaseMicrophone(microphoneLease);
+        return false;
+      }
       session.configure({
         sessionId: `voice-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
         endpointConfig: {
@@ -192,6 +236,7 @@ export function useContinuousChatVoice({
             signal,
           });
         },
+        route: () => routeKeyRef.current?.() ?? null,
         deliver: onTranscript,
         ...(settings.confirmationFeedback ? { confirm: playConfirmation } : {}),
       });
@@ -206,6 +251,7 @@ export function useContinuousChatVoice({
       });
       if (startAttemptRef.current !== attempt) {
         stream.getTracks().forEach((track) => track.stop());
+        releaseMicrophone(microphoneLease);
         return false;
       }
       context = new AudioContextCtor({ sampleRate: 16_000 });
@@ -213,14 +259,34 @@ export function useContinuousChatVoice({
       if (startAttemptRef.current !== attempt) {
         stream.getTracks().forEach((track) => track.stop());
         void context.close().catch(() => undefined);
+        releaseMicrophone(microphoneLease);
         return false;
       }
       const source = context.createMediaStreamSource(stream);
       const processor = context.createScriptProcessor(2048, 1, 1);
       const output = context.createGain();
       output.gain.value = 0;
-      const capture: Capture = { stream, context, source, processor, output };
+      const capture: Capture = {
+        stream,
+        context,
+        source,
+        processor,
+        output,
+        onTrackEnded: () => {
+          if (captureRef.current !== capture) return;
+          startAttemptRef.current += 1;
+          captureRef.current = null;
+          closeCapture(capture);
+          releaseMicrophone();
+          session.cancel();
+          onErrorRef.current('The microphone stopped unexpectedly. Start voice input again.');
+        },
+      };
+      for (const track of stream.getTracks()) {
+        track.addEventListener('ended', capture.onTrackEnded);
+      }
       processor.onaudioprocess = (event) => {
+        if (shouldCaptureRef.current && !shouldCaptureRef.current()) return;
         const raw = floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
         session.push(new Int16Array(raw));
       };
@@ -233,13 +299,14 @@ export function useContinuousChatVoice({
     } catch (error: any) {
       stream?.getTracks().forEach((track) => track.stop());
       if (context) void context.close().catch(() => undefined);
+      releaseMicrophone(microphoneLease);
       if (startAttemptRef.current === attempt) {
         session.cancel();
         onError(error?.message ?? String(error));
       }
       return false;
     }
-  }, [onError, onTranscript, session]);
+  }, [microphoneOwner, onError, onTranscript, releaseMicrophone, session]);
 
   const togglePause = React.useCallback(async () => {
     if (session.status === 'paused' || session.status === 'error') {
@@ -258,8 +325,13 @@ export function useContinuousChatVoice({
     }
     closeCapture(captureRef.current);
     captureRef.current = null;
+    releaseMicrophone();
     await session.finish();
-  }, [cancel, session]);
+  }, [cancel, releaseMicrophone, session]);
+
+  const discardPending = React.useCallback(() => {
+    session.discardPending();
+  }, [session]);
 
   const previousResetKeyRef = React.useRef(resetKey);
   React.useEffect(() => {
@@ -268,5 +340,14 @@ export function useContinuousChatVoice({
     if (previous !== resetKey && session.status !== 'idle') void stop();
   }, [resetKey, session, stop]);
 
-  return { status, pendingCount, durationMillis, start, stop, cancel, togglePause };
+  return {
+    status,
+    pendingCount,
+    durationMillis,
+    start,
+    stop,
+    cancel,
+    togglePause,
+    discardPending,
+  };
 }

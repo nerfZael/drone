@@ -33,6 +33,7 @@ type ChatComposerEditorProps = {
   initialSelection: ChatComposerSelection;
   onChange: (next: string) => void;
   onSelectionChange: (selection: ChatComposerSelection) => void;
+  onFocus?: () => void;
   onSendQueued: () => void;
   ariaLabel: string;
 };
@@ -56,6 +57,7 @@ export const ChatComposerEditor = React.forwardRef<
     initialSelection,
     onChange,
     onSelectionChange,
+    onFocus,
     onSendQueued,
     ariaLabel,
   },
@@ -69,6 +71,8 @@ export const ChatComposerEditor = React.forwardRef<
   const focusWhenEditorMountsRef = React.useRef(Boolean(autoFocus));
   const onSendQueuedRef = React.useRef(onSendQueued);
   onSendQueuedRef.current = onSendQueued;
+  const onFocusRef = React.useRef(onFocus);
+  onFocusRef.current = onFocus;
 
   const focusEditor = React.useCallback(() => {
     const editor = editorRef.current;
@@ -163,6 +167,7 @@ export const ChatComposerEditor = React.forwardRef<
       });
       editor.onDidPaste(() => editor.getModel()?.detectIndentation(true, 2));
       editor.onDidChangeCursorSelection(() => onSelectionChange(readSelection()));
+      editor.onDidFocusEditorText(() => onFocusRef.current?.());
       applySelection(selectionRef.current);
       if (focusWhenEditorMountsRef.current) editor.focus();
       focusWhenEditorMountsRef.current = false;
@@ -214,6 +219,7 @@ export const ChatComposerEditor = React.forwardRef<
       aria-keyshortcuts="Control+Enter Meta+Enter"
       onFocus={() => {
         focusWhenEditorMountsRef.current = true;
+        onFocusRef.current?.();
       }}
       onBlur={() => {
         focusWhenEditorMountsRef.current = false;
