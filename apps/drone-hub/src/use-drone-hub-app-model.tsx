@@ -82,6 +82,7 @@ import {
 } from './droneHub/app/use-sidebar-view-model';
 import { useChatConfigState } from './droneHub/app/use-chat-config-state';
 import {
+  hasSpawnContextPreferencesForRepo,
   resolveSpawnContextPreferencesForRepo,
   useDroneHubAppModelUiState,
   useDroneHubUiStore,
@@ -2565,22 +2566,28 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const applyRememberedNewDronePreferences = React.useCallback(
     (repoPathRaw: string) => {
       const repoPath = normalizeCreateRepoPath(repoPathRaw);
-      const preferences =
-        loadDesktopNewDronePreferences(repoPath) ?? normalizeDesktopNewDronePreferences({});
+      const rememberedPreferences = loadDesktopNewDronePreferences(repoPath);
+      const preferences = rememberedPreferences ?? normalizeDesktopNewDronePreferences({});
       if (!preferences) return;
       setDraftCreateMode(preferences.mode);
       setCreateRuntime(preferences.runtime);
       setCreatePersistVolume(preferences.persistVolume);
       setSpawnContextRepoPath(repoPath);
-      updateSpawnContextForRepo(repoPath, {
-        spawnAgentKey: preferences.spawnAgentKey,
-        spawnModel: preferences.spawnModel,
-        spawnReasoning: preferences.spawnReasoning,
-        spawnAgentPermissionMode: preferences.spawnAgentPermissionMode,
-        spawnApprovalPolicy: preferences.spawnApprovalPolicy,
-        repoBranchSource: preferences.repoBranchSource,
-        repoCreateRemoteBranch: preferences.repoCreateRemoteBranch,
-      });
+      const syncedSpawnContexts = useDroneHubUiStore.getState().spawnContextByRepoKey;
+      if (
+        rememberedPreferences &&
+        !hasSpawnContextPreferencesForRepo(syncedSpawnContexts, repoPath)
+      ) {
+        updateSpawnContextForRepo(repoPath, {
+          spawnAgentKey: rememberedPreferences.spawnAgentKey,
+          spawnModel: rememberedPreferences.spawnModel,
+          spawnReasoning: rememberedPreferences.spawnReasoning,
+          spawnAgentPermissionMode: rememberedPreferences.spawnAgentPermissionMode,
+          spawnApprovalPolicy: rememberedPreferences.spawnApprovalPolicy,
+          repoBranchSource: rememberedPreferences.repoBranchSource,
+          repoCreateRemoteBranch: rememberedPreferences.repoCreateRemoteBranch,
+        });
+      }
     },
     [
       normalizeCreateRepoPath,

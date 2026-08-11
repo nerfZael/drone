@@ -271,6 +271,19 @@ export function resolveSpawnContextPreferencesForRepo(
   return map[repoKey] ?? map[NO_REPO_SPAWN_CONTEXT_KEY] ?? DEFAULT_SPAWN_CONTEXT_PREFERENCES;
 }
 
+export function hasSpawnContextPreferencesForRepo(
+  byRepoKey: Record<string, SpawnContextPreferences> | null | undefined,
+  repoPathRaw: unknown,
+): boolean {
+  const map = byRepoKey ?? {};
+  const repoKey = spawnContextRepoKeyForPath(repoPathRaw);
+  return (
+    Object.prototype.hasOwnProperty.call(map, repoKey) ||
+    (repoKey !== NO_REPO_SPAWN_CONTEXT_KEY &&
+      Object.prototype.hasOwnProperty.call(map, NO_REPO_SPAWN_CONTEXT_KEY))
+  );
+}
+
 function buildUpdatedSpawnContextByRepoKey(
   prev: Record<string, SpawnContextPreferences>,
   repoPathRaw: unknown,

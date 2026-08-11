@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  hasSpawnContextPreferencesForRepo,
   migrateDroneHubUiPersistedState,
   normalizeChatInputEditorModes,
   normalizeLastChatSelectionByRepoPath,
@@ -329,6 +330,20 @@ describe('drone hub ui store migration', () => {
       repoBranchSource: 'host',
       repoCreateRemoteBranch: '',
     });
+  });
+
+  test('recognizes synchronized repo and global spawn defaults', () => {
+    const repoDefaults = normalizeSpawnContextByRepoKey({
+      '/tmp/repo-a': { spawnApprovalPolicy: 'none' },
+    });
+    expect(hasSpawnContextPreferencesForRepo(repoDefaults, '/tmp/repo-a')).toBe(true);
+    expect(hasSpawnContextPreferencesForRepo(repoDefaults, '/tmp/repo-b')).toBe(false);
+
+    const globalDefaults = normalizeSpawnContextByRepoKey({
+      __no_repo__: { spawnApprovalPolicy: 'none' },
+    });
+    expect(hasSpawnContextPreferencesForRepo(globalDefaults, '/tmp/repo-a')).toBe(true);
+    expect(hasSpawnContextPreferencesForRepo(globalDefaults, '')).toBe(true);
   });
 
   test('updates access defaults for an explicit repo without changing the active repo', () => {
