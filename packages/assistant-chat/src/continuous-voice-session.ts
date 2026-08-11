@@ -32,7 +32,8 @@ export type ContinuousVoiceSessionStart = {
   sessionId: string;
   endpointConfig: Partial<ContinuousVoiceEndpointConfig>;
   transcribe(input: ContinuousVoiceTranscriptionInput): Promise<string>;
-  deliver(text: string, deliveryId: string): Promise<boolean>;
+  route?(): string | null;
+  deliver(text: string, deliveryId: string, route: string | null): Promise<boolean>;
   confirm?(): void;
 };
 
@@ -48,6 +49,11 @@ const DEFAULT_MAXIMUM_PENDING_SEGMENTS = 8;
 const TRANSCRIPT_CONTEXT_CHARACTERS = 1_200;
 const DURATION_UPDATE_MILLIS = 500;
 
+type QueuedContinuousVoiceSegment = {
+  segment: ContinuousVoiceSegment;
+  route: string | null;
+};
+
 /**
  * Owns the platform-neutral lifecycle of a continuous voice session. Browser
  * and native callers only provide PCM capture, transcription, and feedback.
@@ -58,7 +64,7 @@ export class ContinuousVoiceSession {
   private generation = 0;
   private currentStatus: ContinuousVoiceSessionStatus = 'idle';
   private segmenter: ContinuousVoiceSegmenter | null = null;
-  private queue: ContinuousVoiceSegment[] = [];
+  private queue: QueuedContinuousVoiceSegment[] = [];
   private drainPromise: Promise<void> | null = null;
   private abortController: AbortController | null = null;
   private callbacks: ContinuousVoiceSessionStart | null = null;
@@ -197,12 +203,32 @@ export class ContinuousVoiceSession {
     this.resetToIdle();
   }
 
+  discardPending(): void {
+    if (
+      this.currentStatus === 'idle' ||
+      this.currentStatus === 'starting' ||
+      this.currentStatus === 'stopping'
+    ) {
+      return;
+    }
+    this.generation += 1;
+    this.abortController?.abort();
+    this.abortController = null;
+    this.segmenter?.discard();
+    this.queue = [];
+    this.drainPromise = null;
+    this.transcriptContext = '';
+    if (!this.paused && this.currentStatus !== 'recovering') this.setStatus('listening');
+    this.emit();
+  }
+
   private enqueue(segments: ContinuousVoiceSegment[]): void {
     if (segments.length === 0) return;
     const maximumRetained = this.maximumPendingSegments + 1;
     const available = Math.max(0, maximumRetained - this.queue.length);
     const retained = segments.slice(0, available);
-    this.queue.push(...retained);
+    const route = this.callbacks?.route?.() ?? null;
+    this.queue.push(...retained.map((segment) => ({ segment, route })));
     this.emit();
     if (retained.length < segments.length) {
       this.fail('Continuous voice stopped accepting audio because its retained backlog is full.');
@@ -222,7 +248,8 @@ export class ContinuousVoiceSession {
     const work = (async () => {
       while (this.generation === generation && this.queue.length > 0) {
         const callbacks = this.callbacks;
-        const segment = this.queue[0]!;
+        const queued = this.queue[0]!;
+        const segment = queued.segment;
         const controller = new AbortController();
         this.abortController = controller;
         try {
@@ -238,9 +265,10 @@ export class ContinuousVoiceSession {
             const accepted = await callbacks.deliver(
               cleanTranscript,
               `${callbacks.sessionId}.${segment.sequence}`,
+              queued.route,
             );
             if (this.generation !== generation) return;
-            if (!accepted) throw new Error('The chat did not accept the voice steering message.');
+            if (!accepted) throw new Error('The voice input target did not accept the transcription.');
             this.transcriptContext = `${this.transcriptContext} ${cleanTranscript}`
               .trim()
               .slice(-TRANSCRIPT_CONTEXT_CHARACTERS);

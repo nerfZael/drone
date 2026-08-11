@@ -44,11 +44,21 @@ import {
   takeChatComposerDraftSnapshot,
   type ChatComposerDraftSnapshot,
 } from './chat-composer-draft';
+import {
+  useContinuousDictation,
+  type ContinuousDictationShadowSnapshot,
+} from './ContinuousDictationContext';
+import { mergeDraftWithContinuousDictation } from './continuous-dictation-draft';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { preloadMonacoEditor } from '../files/monaco-editor-loader';
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
+
+type ChatSubmissionSnapshot = ChatComposerDraftSnapshot<DraftChatAttachment> & {
+  regularPrompt: string;
+  dictationShadow: ContinuousDictationShadowSnapshot | null;
+};
 
 function CodeEditorIcon() {
   return (
@@ -218,6 +228,7 @@ export function ChatInput({
   const [composerFocused, setComposerFocused] = React.useState(false);
   const [compactVoiceRecording, setCompactVoiceRecording] = React.useState(false);
   const [uncontrolledEditorMode, setUncontrolledEditorMode] = React.useState(false);
+  const composerRootRef = React.useRef<HTMLDivElement | null>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const editorRef = React.useRef<ChatComposerEditorHandle | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -256,7 +267,44 @@ export function ChatInput({
   const attachmentsRef = React.useRef(attachments);
   const draftRevisionRef = React.useRef(0);
   const composerLocked = Boolean(disabled);
+  const composerLockedRef = React.useRef(composerLocked);
+  composerLockedRef.current = composerLocked;
   const attachmentControlsLocked = composerLocked;
+  const continuousDictation = useContinuousDictation();
+  const continuousDictationInstanceId = React.useId();
+  const continuousDictationComposerId = `${continuousDictationInstanceId}:${resetKey}`;
+  const registerContinuousDictationComposer = continuousDictation?.registerComposer;
+  const continuousDictationEligible = React.useCallback(() => {
+    const root = composerRootRef.current;
+    return Boolean(
+      root &&
+      root.isConnected &&
+      root.offsetParent !== null &&
+      !root.closest('[aria-hidden="true"]') &&
+      !composerLockedRef.current,
+    );
+  }, []);
+  React.useEffect(() => {
+    if (!registerContinuousDictationComposer) return;
+    return registerContinuousDictationComposer({
+      id: continuousDictationComposerId,
+      isEligible: continuousDictationEligible,
+    });
+  }, [
+    continuousDictationComposerId,
+    continuousDictationEligible,
+    composerLocked,
+    registerContinuousDictationComposer,
+  ]);
+  const continuousDictationOwnsComposer =
+    continuousDictation?.activeComposerId === continuousDictationComposerId;
+  const continuousDictationShadow = continuousDictationOwnsComposer
+    ? continuousDictation.shadowText
+    : '';
+  const continuousDictationTargeted = Boolean(
+    continuousDictationOwnsComposer &&
+    (continuousDictation?.status !== 'idle' || continuousDictationShadow.trim()),
+  );
 
   const attachmentsOn = attachmentsEnabled !== false;
   const imageAttachmentCount = React.useMemo(
@@ -406,21 +454,36 @@ export function ChatInput({
   const hasModeHint = modeHint.trim().length > 0;
   const voiceRecordingCanPauseOrStop =
     voiceRecordingStatus === 'recording' || voiceRecordingStatus === 'paused';
-  const voiceRecordButtonDisabled = composerLocked || voiceActionInFlight || continuousVoiceActive;
+  const microphoneOwnedElsewhere = Boolean(
+    continuousDictation?.microphoneOwner &&
+    !voiceRecordingActive &&
+    !continuousVoiceActive,
+  );
+  const voiceRecordButtonDisabled =
+    composerLocked || voiceActionInFlight || continuousVoiceActive || microphoneOwnedElsewhere;
   const continuousVoiceButtonDisabled =
-    !continuousVoiceEnabled || composerLocked || voiceActionInFlight || voiceRecordingActive;
+    !continuousVoiceEnabled ||
+    composerLocked ||
+    voiceActionInFlight ||
+    voiceRecordingActive ||
+    microphoneOwnedElsewhere;
   const voicePauseButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const voiceStopButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const trimmed = draft.trim();
+  const hasContinuousDictationShadow = continuousDictationShadow.trim().length > 0;
   const sendDisabled =
     composerLocked ||
     voiceActionInFlight ||
-    (trimmed.length === 0 && attachments.length === 0 && !voiceRecordingActive);
+    (trimmed.length === 0 &&
+      attachments.length === 0 &&
+      !voiceRecordingActive &&
+      !hasContinuousDictationShadow);
   const composerExpanded =
     editorMode ||
     alwaysExpanded ||
     composerFocused ||
     trimmed.length > 0 ||
+    hasContinuousDictationShadow ||
     attachments.length > 0 ||
     Boolean(composerContext) ||
     Boolean(promptError || attachmentError) ||
@@ -510,6 +573,25 @@ export function ChatInput({
       composerSelectionRef.current.start,
       composerSelectionRef.current.end,
     );
+  }
+
+  function activateContinuousDictationComposer() {
+    if (!continuousDictation) return;
+    focusContinuousDictationComposer();
+    const transcript = continuousDictation.consumeShadow(continuousDictationComposerId);
+    if (!transcript) return;
+    const next = mergeDraftWithContinuousDictation(draftRef.current, transcript);
+    setDraft(next);
+    rememberComposerSelection({ start: next.length, end: next.length });
+  }
+
+  function focusContinuousDictationComposer() {
+    continuousDictation?.focusComposer(continuousDictationComposerId);
+  }
+
+  function materializeContinuousDictationAndFocus() {
+    activateContinuousDictationComposer();
+    window.requestAnimationFrame(() => focusComposerAtSelection());
   }
 
   function preserveEditorFocus(event: React.MouseEvent<HTMLButtonElement>) {
@@ -698,7 +780,7 @@ export function ChatInput({
   }
 
   async function submitPromptSnapshot(
-    snapshot: ChatComposerDraftSnapshot<DraftChatAttachment>,
+    snapshot: ChatSubmissionSnapshot,
     context: ChatSendContext,
     submit: ChatInputProps['onSend'] = onSend,
   ) {
@@ -751,28 +833,47 @@ export function ChatInput({
     }
   }
 
-  function takeSubmissionSnapshot(): ChatComposerDraftSnapshot<DraftChatAttachment> | null {
-    const snapshot = takeChatComposerDraftSnapshot<DraftChatAttachment>({
+  function takeSubmissionSnapshot(): ChatSubmissionSnapshot | null {
+    const dictationShadow =
+      continuousDictation?.takeShadowSnapshot(continuousDictationComposerId) ?? null;
+    const regularSnapshot = takeChatComposerDraftSnapshot<DraftChatAttachment>({
       draft: draftRef,
       attachments: attachmentsRef,
       revision: draftRevisionRef,
     });
-    if (!snapshot) return null;
-    setDraft('', false);
-    setComposerAttachments([], false);
-    return snapshot;
+    if (!regularSnapshot && !dictationShadow) return null;
+    if (regularSnapshot) {
+      setDraft('', false);
+      setComposerAttachments([], false);
+    }
+    const regularPrompt = regularSnapshot?.prompt ?? '';
+    const shadowText = dictationShadow?.lines.map((line) => line.text).join('\n') ?? '';
+    return {
+      prompt: mergeDraftWithContinuousDictation(regularPrompt, shadowText),
+      regularPrompt,
+      attachments: regularSnapshot?.attachments ?? [],
+      revision: regularSnapshot?.revision ?? draftRevisionRef.current,
+      dictationShadow,
+    };
   }
 
-  function restoreSubmissionSnapshot(snapshot: ChatComposerDraftSnapshot<DraftChatAttachment>) {
+  function restoreSubmissionSnapshot(snapshot: ChatSubmissionSnapshot) {
     const restored = restoreChatComposerDraftSnapshot<DraftChatAttachment>({
       draft: draftRef,
       attachments: attachmentsRef,
       revision: draftRevisionRef,
-      snapshot,
+      snapshot: {
+        prompt: snapshot.regularPrompt,
+        attachments: snapshot.attachments,
+        revision: snapshot.revision,
+      },
     });
-    if (restored.draftRestored) setDraft(snapshot.prompt, false);
+    if (restored.draftRestored) setDraft(snapshot.regularPrompt, false);
     if (restored.attachmentsRestored) setComposerAttachments(snapshot.attachments, false);
     else revokeDraftImagePreviewUrls(snapshot.attachments);
+    if (snapshot.dictationShadow) {
+      continuousDictation?.restoreShadowSnapshot(snapshot.dictationShadow);
+    }
     return restored;
   }
 
@@ -835,6 +936,7 @@ export function ChatInput({
   ) => {
     if (composerLocked) return;
     void (async () => {
+      const transcribingVoiceRecording = voiceRecordingActive;
       if (voiceRecordingActive) {
         const actionToken = beginVoiceAction();
         if (actionToken == null) return;
@@ -844,13 +946,14 @@ export function ChatInput({
         } finally {
           endVoiceAction(actionToken);
         }
-        if (!draftRef.current.trim() && attachmentsRef.current.length === 0) {
-          setAttachmentError((current) => current || 'No speech detected.');
-          return;
-        }
       }
       const snapshot = takeSubmissionSnapshot();
-      if (!snapshot) return;
+      if (!snapshot) {
+        if (transcribingVoiceRecording) {
+          setAttachmentError((current) => current || 'No speech detected.');
+        }
+        return;
+      }
       await submitPromptSnapshot(snapshot, context, submit);
     })();
   };
@@ -870,7 +973,9 @@ export function ChatInput({
 
   return (
     <div
+      ref={composerRootRef}
       data-onboarding-id="chat.input"
+      data-continuous-dictation-target={continuousDictationTargeted ? 'true' : undefined}
       className="flex-shrink-0 bg-[var(--chat-background)] px-[.5625rem] pb-[.75rem] pt-[.375rem] [font-family:var(--chat-composer-font)]"
       onDragEnter={(e) => {
         if (!attachmentsOn) return;
@@ -908,6 +1013,7 @@ export function ChatInput({
         <div
           data-chat-composer-expanded={composerExpanded ? 'true' : 'false'}
           onFocusCapture={(event) => {
+            focusContinuousDictationComposer();
             const target = event.target;
             if (
               target instanceof Element &&
@@ -922,7 +1028,11 @@ export function ChatInput({
           }}
           className={`relative min-h-[3.25rem] overflow-visible rounded-[var(--chat-composer-radius)] border bg-[var(--chat-composer-surface)] shadow-[var(--chat-composer-shadow)] transition-colors ${
             dragActive ? 'border-[var(--accent)]' : 'border-[var(--chat-composer-border)]'
-          } ${composerExpanded ? 'border-[var(--chat-composer-focus-border)]' : ''}`}
+          } ${composerExpanded ? 'border-[var(--chat-composer-focus-border)]' : ''} ${
+            continuousDictationTargeted
+              ? 'ring-1 ring-[var(--accent-muted)] ring-offset-1 ring-offset-[var(--chat-background)]'
+              : ''
+          }`}
         >
           <ChatComposerContext config={composerContext} />
           {attachmentsOn && attachments.length > 0 && (
@@ -986,6 +1096,26 @@ export function ChatInput({
               }}
               disabled={attachmentControlsLocked}
             />
+          ) : null}
+
+          {hasContinuousDictationShadow ? (
+            <button
+              type="button"
+              onClick={materializeContinuousDictationAndFocus}
+              className="mx-3 mt-2 block rounded border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-left transition-colors hover:border-[var(--accent)]"
+              style={{ width: 'calc(100% - 1.5rem)' }}
+              title="Click to edit this dictated text"
+            >
+              <span className="block text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
+                Dictation · click to edit
+              </span>
+              <span
+                className="mt-1 block whitespace-pre-wrap text-[var(--chat-text-size)] leading-5 text-[var(--fg-secondary)] opacity-80"
+                aria-live="polite"
+              >
+                {continuousDictationShadow}
+              </span>
+            </button>
           ) : null}
 
           <div className={`relative flex ${editorMode ? 'items-stretch' : 'items-center'} ${composerExpanded ? (editorMode ? '' : 'px-4') : 'min-h-[3.125rem] px-[.5625rem]'}`}>
@@ -1131,6 +1261,7 @@ export function ChatInput({
                   initialSelection={composerSelectionRef.current}
                   onChange={setDraft}
                   onSelectionChange={rememberComposerSelection}
+                  onFocus={activateContinuousDictationComposer}
                   onSendQueued={() =>
                     sendNow({ trigger: 'keyboard', deliveryMode: 'queue' })
                   }
@@ -1142,6 +1273,7 @@ export function ChatInput({
               ref={textareaRef}
               data-chat-input-focus-id={focusTargetId || undefined}
               value={draft}
+              onFocus={activateContinuousDictationComposer}
               onChange={(event) => {
                 setDraft(event.target.value);
                 rememberComposerSelection({
@@ -1177,7 +1309,8 @@ export function ChatInput({
                   hasContent:
                     Boolean(draftRef.current.trim()) ||
                     attachmentsRef.current.length > 0 ||
-                    voiceRecordingActive,
+                    voiceRecordingActive ||
+                    hasContinuousDictationShadow,
                 });
                 if (!shortcutAction) return;
                 if (shortcutAction === 'new-chat' && !onSendInNewChat) return;

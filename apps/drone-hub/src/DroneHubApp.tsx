@@ -13,6 +13,7 @@ import { AppConfirmDialogProvider } from './ui/AppConfirmDialog';
 import { DesktopDeviceProvider, useDesktopDevice } from './droneHub/app/DesktopDeviceProvider';
 import { RemoteDeviceWorkspace } from './droneHub/app/RemoteDeviceWorkspace';
 import { useIdleMonacoEditorPreload } from './droneHub/files/monaco-editor-loader';
+import { ContinuousDictationProvider } from './droneHub/chat/ContinuousDictationContext';
 
 function LocalDroneHubAppContent() {
   const { sidebarProps, overlaysProps, workspaceContentProps } = useDroneHubAppModel();
@@ -76,7 +77,9 @@ export default function DroneHubApp() {
   return (
     <DesktopDeviceProvider>
       <AppConfirmDialogProvider>
-        <DroneHubAppContent />
+        <ContinuousDictationProvider>
+          <DroneHubAppContent />
+        </ContinuousDictationProvider>
       </AppConfirmDialogProvider>
     </DesktopDeviceProvider>
   );
