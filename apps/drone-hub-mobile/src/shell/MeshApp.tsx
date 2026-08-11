@@ -359,8 +359,8 @@ function Shell() {
                 {
                   id: 'auto-approve',
                   label: dronesHeader.autoApprove
-                    ? 'Disable auto-approve requests'
-                    : 'Auto-approve requests',
+                    ? 'Ask for approvals'
+                    : 'Never ask for approvals',
                   icon: Check,
                   onPress: dronesHeader.onToggleAutoApprove,
                 },

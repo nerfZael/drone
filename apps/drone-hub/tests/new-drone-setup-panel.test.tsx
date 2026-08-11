@@ -88,7 +88,7 @@ describe('new drone setup panel', () => {
     expect(html).toContain('Choose agent');
     expect(html).toContain('Codex');
     expect(html).toContain('Choose chat access and approvals');
-    expect(html).toContain('Write · Automatic');
+    expect(html).toContain('Write · Auto');
   });
 
   test('renders runtime and branch in the upper target row', () => {
@@ -96,6 +96,25 @@ describe('new drone setup panel', () => {
 
     expect(html).toContain('Execution target: Container');
     expect(html).toContain('Branch: main');
+  });
+
+  test('labels access changes as applying next turn while an agent is running', () => {
+    const html = renderToStaticMarkup(
+      <NewDroneAccessPicker
+        permissionMode="write"
+        onPermissionModeChange={() => {}}
+        approvalPolicy="none"
+        onApprovalPolicyChange={() => {}}
+        readOnlySupported
+        approvalsSupported
+        agentIsCodex
+        changesApplyNextTurn
+      />,
+    );
+
+    expect(html).toContain('Write · Never ask · Next turn');
+    expect(html).toContain('Changes apply next turn.');
+    expect(html).not.toContain('disabled=""');
   });
 
   test('renders an existing drone runtime as a read-only indicator', () => {

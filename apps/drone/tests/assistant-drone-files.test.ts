@@ -377,4 +377,38 @@ describe('assistant drone workspace target execution', () => {
       expect((await service.threadSnapshot(threadId)).pendingApprovals).toEqual([]);
     });
   });
+
+  test('keeps an existing approval pending when the approval policy changes to none', async () => {
+    await withTempDroneDataDir('assistant-pending-approval-policy-', async () => {
+      const service = new HubAssistantService({ listDrones: async () => [] });
+      const created = await ensureTestNativeChat(service, { chatName: 'change approval policy' });
+      const threadId = created.chatId;
+      const decisions: Array<{ threadId: string; approvalId: string; approved: boolean }> = [];
+      service.setApprovalDecisionDelegate(async (resolvedThreadId, approvalId, approved) => {
+        decisions.push({ threadId: resolvedThreadId, approvalId, approved });
+      });
+      await service.notifyRuntimeEvent(threadId, {
+        type: 'tool_call_suspended',
+        suspensionId: 'suspension-before-policy-change',
+        callId: 'call-before-policy-change',
+        tool: 'bash',
+        reason: 'Approval required for Execute Bash command.',
+        timestamp: '2026-08-11T00:00:00.000Z',
+      });
+
+      await service.ensureNativeThread({
+        id: threadId,
+        droneId: 'native-test-drone',
+        chatName: 'change approval policy',
+        approvalPolicy: 'none',
+      });
+
+      const snapshot = await service.threadSnapshot(threadId);
+      expect(snapshot.threads[0]?.approvalPolicy).toBe('none');
+      expect(snapshot.pendingApprovals.map((approval) => approval.id)).toEqual([
+        'suspension-before-policy-change',
+      ]);
+      expect(decisions).toEqual([]);
+    });
+  });
 });

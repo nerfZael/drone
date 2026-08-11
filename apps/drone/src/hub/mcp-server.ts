@@ -1586,7 +1586,12 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       agent: z.enum(['cursor', 'codex', 'claude', 'opencode', 'pi', 'blip']).optional(),
       model: z.string().optional(),
       agentPermissionMode: z.enum(['read', 'write', 'execute']).optional(),
-      approvalPolicy: z.enum(['ask', 'auto', 'none']).optional(),
+      approvalPolicy: z
+        .enum(['ask', 'auto', 'none'])
+        .describe(
+          'Approval behavior for Codex: "ask" sends approval-gated requests to the user, "auto" has Codex review them automatically, and "none" never asks. Existing pending approvals are not resolved by changing this setting.',
+        )
+        .optional(),
       cwd: z.string().optional(),
       repoRef: z.string().optional(),
       repoLabel: z.string().optional(),

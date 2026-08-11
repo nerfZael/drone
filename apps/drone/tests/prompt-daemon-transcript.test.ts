@@ -1126,6 +1126,10 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
       .split('\n')
       .map((line) => JSON.parse(line));
     expect(requests.filter((request) => request.method === 'turn/start')).toHaveLength(1);
+    expect(requests.find((request) => request.method === 'turn/start')?.params).toMatchObject({
+      approvalPolicy: 'never',
+      sandboxPolicy: { type: 'workspaceWrite' },
+    });
     const steering = requests.filter((request) => request.method === 'turn/steer');
     expect(steering).toHaveLength(2);
     expect(steering.map((request) => request.params.clientUserMessageId)).toEqual([

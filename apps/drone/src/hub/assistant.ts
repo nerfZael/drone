@@ -1645,7 +1645,6 @@ export class HubAssistantService {
         if (existing.approvalPolicy !== requestedApprovalPolicy) {
           existing.approvalPolicy = requestedApprovalPolicy;
           existing.autoApprove = requestedApprovalPolicy === 'none';
-          if (existing.autoApprove) this.resolvePendingApprovalsForThread(existing.id, true);
           metadataChanged = true;
         }
       }
@@ -1940,7 +1939,6 @@ export class HubAssistantService {
     if (patch.autoApprove != null) {
       thread.autoApprove = normalizeAssistantAutoApprove(patch.autoApprove);
       thread.approvalPolicy = thread.autoApprove ? 'none' : 'ask';
-      if (thread.autoApprove) this.resolvePendingApprovalsForThread(thread.id, true);
     }
     if (requestedAgentPermissionMode != null) {
       thread.agentPermissionMode = requestedAgentPermissionMode;
@@ -1948,7 +1946,6 @@ export class HubAssistantService {
     if (requestedApprovalPolicy != null) {
       thread.approvalPolicy = requestedApprovalPolicy;
       thread.autoApprove = requestedApprovalPolicy === 'none';
-      if (thread.autoApprove) this.resolvePendingApprovalsForThread(thread.id, true);
     }
     if (patch.promptDeliveryMode != null)
       thread.promptDeliveryMode = normalizeAssistantPromptDeliveryMode(patch.promptDeliveryMode);
@@ -2564,13 +2561,6 @@ export class HubAssistantService {
     thread.updatedAt = nowIso();
     this.emitChange('approval_resolved', approval.threadId);
     return await this.threadSnapshot(approval.threadId);
-  }
-
-  private resolvePendingApprovalsForThread(threadId: string, approved: boolean): void {
-    for (const [id, approval] of [...this.approvals]) {
-      if (approval.threadId !== threadId || approval.status !== 'pending') continue;
-      void this.approvalDecisionDelegate?.(threadId, id, approved).catch(() => undefined);
-    }
   }
 
   async enqueueThreadPrompt(

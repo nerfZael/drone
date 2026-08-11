@@ -1862,7 +1862,7 @@ export function AssistantDock({
     },
     {
       id: 'auto-approve',
-      label: 'Auto-approve requests',
+      label: 'Never ask for approvals',
       icon: <IconShieldCheck className="h-4 w-4" />,
       disabled: !activeThread,
       active: autoApprove,

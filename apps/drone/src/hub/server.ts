@@ -4372,16 +4372,19 @@ async function startDroneHubApiServerWithLifecycle(
     attachments?: ChatImageAttachment[];
   }) => {
     if (!chatId) throw new Error('native chat has no stable identity');
-    await nativeChatLifecycle.ensure({
-      id: chatId,
-      droneId,
-      chatName,
-      provider,
-      model,
-      thinkingLevel,
-      agentPermissionMode,
-      approvalPolicy,
-    });
+    const activeNativeTurn = blipAssistantHost.isThreadRunning(chatId);
+    if (!activeNativeTurn) {
+      await nativeChatLifecycle.ensureForPrompt({
+        id: chatId,
+        droneId,
+        chatName,
+        provider,
+        model,
+        thinkingLevel,
+        agentPermissionMode,
+        approvalPolicy,
+      });
+    }
     const nativeAttachments = Array.isArray(attachments) ? attachments : [];
     const promptImages = validateAssistantPromptImages(
       nativeAttachments

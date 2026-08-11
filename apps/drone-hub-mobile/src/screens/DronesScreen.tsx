@@ -2416,11 +2416,11 @@ export function DronesScreen({
                         ? [
                             {
                               policy: 'auto' as const,
-                              label: 'Automatic',
+                              label: 'Auto',
                             },
                           ]
                         : []),
-                      { policy: 'none', label: 'None' },
+                      { policy: 'none', label: 'Never ask' },
                     ] as Array<{
                       policy: MobileDroneApprovalPolicy;
                       label: string;
