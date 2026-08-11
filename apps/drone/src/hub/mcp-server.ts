@@ -13,6 +13,14 @@ import {
   type McpChatAccessKind,
 } from './mcp-chat-access';
 import type { McpTokenIdentity } from './mcp-tokens';
+import { registerChangeRequestMcpTools } from './change-requests/change-request-mcp-tools';
+import {
+  CHANGE_REQUEST_CHAT_EXECUTE_TOOL_NAMES,
+  CHANGE_REQUEST_CHAT_WRITE_TOOL_NAMES,
+  CHANGE_REQUEST_MANAGE_TOOL_NAMES,
+  CHANGE_REQUEST_MERGE_TOOL_NAME,
+  CHANGE_REQUEST_WRITE_SCOPED_TOOL_NAMES,
+} from './change-requests/change-request-tool-names';
 
 import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameSync } from '../host/profiles';
 import { GROQ_SPEECH_MAX_CHARS, GROQ_SPEECH_VOICES } from './groq-speech';
@@ -1033,6 +1041,7 @@ function agentFromPreferenceKey(value: string) {
 
 type McpToolRegistrationContext = {
   principal: McpTokenIdentity;
+  allowedWriteDroneRefs?: string[];
   nativeThreadId?: string;
   speechEnabled?: boolean;
   onSpeechToolRegistered?: (tool: RegisteredTool) => void;
@@ -1238,6 +1247,8 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     const repos = await requestRepoSummaries(context.hubServices);
     return toolResult({ ok: true, count: repos.length, repos });
   });
+
+  registerChangeRequestMcpTools(server, { context, requestJson, toolResult });
 
   server.registerTool('list_groups', {
     title: 'List drone groups',
@@ -2040,6 +2051,7 @@ const WRITE_SCOPED_TOOLS = new Set([
   'reorder_drones',
   'create_chat',
   'send_message',
+  ...CHANGE_REQUEST_WRITE_SCOPED_TOOL_NAMES,
   ...WORKFLOW_WRITE_SCOPED_TOOL_NAMES,
 ]);
 
@@ -2051,6 +2063,7 @@ const CHAT_EXECUTE_SCOPED_TOOLS = new Set([
   'open_whiteboard',
   'close_whiteboard',
   'send_message',
+  ...CHANGE_REQUEST_CHAT_EXECUTE_TOOL_NAMES,
 ]);
 
 const CHAT_WRITE_SCOPED_TOOLS = new Set([
@@ -2060,6 +2073,7 @@ const CHAT_WRITE_SCOPED_TOOLS = new Set([
   'create_whiteboard',
   'update_whiteboard',
   'create_chat',
+  ...CHANGE_REQUEST_CHAT_WRITE_TOOL_NAMES,
 ]);
 
 function chatAccessKindForTool(tool: string): McpChatAccessKind {
@@ -2113,6 +2127,15 @@ export function authorizeDroneHubMcpTool(context: DroneHubMcpServerContext, tool
   }
   if (principal.kind === 'legacy' || principal.kind === 'host') return;
   if (principal.kind === 'chat') {
+    if (
+      CHANGE_REQUEST_MANAGE_TOOL_NAMES.some((name) => name === tool) &&
+      principal.accessScope.changeRequestCreate === false
+    ) {
+      throw new Error(`MCP principal ${principal.name} is not allowed to manage change requests`);
+    }
+    if (tool === CHANGE_REQUEST_MERGE_TOOL_NAME && principal.accessScope.changeRequestMerge !== true) {
+      throw new Error(`MCP principal ${principal.name} is not allowed to merge change requests`);
+    }
     const refs = assertedDroneRefs(args);
     const kind = chatAccessKindForTool(tool);
     if (

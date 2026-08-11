@@ -31,6 +31,8 @@ import { isDroneStartingOrSeeding } from './helpers';
 
 const loadDroneCanvasDock = async () => (await import('../canvas/DroneCanvasDock')).DroneCanvasDock;
 const loadDroneChangesDock = async () => (await import('../changes/DroneChangesDock')).DroneChangesDock;
+const loadDroneChangeRequestsDock = async () =>
+  (await import('../changeRequests/DroneChangeRequestsDock')).DroneChangeRequestsDock;
 const loadDroneEnvDock = async () => (await import('../env/DroneEnvDock')).DroneEnvDock;
 const loadDroneLinksDock = async () => (await import('../overview/DroneLinksDock')).DroneLinksDock;
 const loadDronePreviewDock = async () => (await import('../overview/DronePreviewDock')).DronePreviewDock;
@@ -554,6 +556,22 @@ export function RightPanelTabContent({
               hubMessage={drone.hubMessage}
               onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
               onOpenFileInEditor={onOpenChangesFileInEditor}
+            />
+          )}
+        </PaneModule>
+      );
+
+    case 'requests':
+      return (
+        <PaneModule tab={tab} load={loadDroneChangeRequestsDock}>
+          {(DroneChangeRequestsDock) => (
+            <DroneChangeRequestsDock
+              key={`${paneKey}-${drone.id}-requests`}
+              droneId={drone.id}
+              droneName={drone.name}
+              chatName={chatName}
+              repoAttached={repoFeaturesEnabled}
+              disabled={disabled}
             />
           )}
         </PaneModule>

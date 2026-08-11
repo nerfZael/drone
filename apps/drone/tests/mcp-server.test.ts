@@ -2,6 +2,10 @@ import { describe, expect, test } from 'bun:test';
 
 import { ASSISTANT_TOOL_SUMMARIES } from '../src/hub/assistant/assistant-config';
 import { createInProcessDroneHubMcpClient } from '../src/hub/assistant/in-process-drone-hub-mcp';
+import {
+  changeRequestBelongsToChat,
+  changeRequestIsWithinWriteScope,
+} from '../src/hub/change-requests/change-request-mcp-tools';
 import { normalizeMcpChatAccessScope } from '../src/hub/mcp-chat-access';
 import { authorizeDroneHubMcpTool, imageToolResult } from '../src/hub/mcp-server';
 import { droneStatusSummary } from '../src/hub/mcp-summaries';
@@ -108,6 +112,8 @@ describe('Drone Hub MCP principal authorization', () => {
       readMode: 'all',
       writeMode: 'selected',
       executeMode: 'selected',
+      changeRequestCreate: true,
+      changeRequestMerge: false,
       droneIds: ['drone-a'],
     });
     expect(
@@ -121,6 +127,73 @@ describe('Drone Hub MCP principal authorization', () => {
         'drone-a',
       ).droneIds,
     ).toEqual([]);
+  });
+
+  test('keeps change-request creation and merge as separate chat permissions', () => {
+    const principal = {
+      kind: 'chat' as const,
+      tokenId: 'chat:drone-a:default',
+      name: 'Drone A / default',
+      droneId: 'drone-a',
+      chatName: 'default',
+      chatId: 'chat-a',
+      accessScope: normalizeMcpChatAccessScope({}, 'drone-a'),
+      selectedDroneRefs: ['drone-a'],
+    };
+    expect(() => authorizeDroneHubMcpTool(
+      { principal },
+      'create_change_request',
+      {},
+    )).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(
+      { principal },
+      'merge_change_request',
+      { requestId: 'cr-1' },
+    )).toThrow('not allowed to merge change requests');
+    expect(() => authorizeDroneHubMcpTool(
+      {
+        principal: {
+          ...principal,
+          accessScope: { ...principal.accessScope, changeRequestMerge: true },
+        },
+      },
+      'merge_change_request',
+      { requestId: 'cr-1' },
+    )).not.toThrow();
+  });
+
+  test('uses the stable chat id for change-request ownership', () => {
+    const principal = {
+      kind: 'chat' as const,
+      tokenId: 'chat:drone-a:renamed',
+      name: 'Drone A / renamed',
+      droneId: 'drone-a',
+      chatName: 'renamed',
+      chatId: 'chat-a',
+      accessScope: normalizeMcpChatAccessScope({}, 'drone-a'),
+      selectedDroneRefs: ['drone-a'],
+    };
+    expect(changeRequestBelongsToChat(
+      { droneId: 'drone-a', chatId: 'chat-a', chatName: 'old-name' },
+      principal,
+    )).toBe(true);
+    expect(changeRequestBelongsToChat(
+      { droneId: 'drone-a', chatId: 'different-chat', chatName: 'renamed' },
+      principal,
+    )).toBe(false);
+    expect(changeRequestBelongsToChat(
+      { droneId: 'drone-a', chatName: 'renamed' },
+      principal,
+    )).toBe(true);
+  });
+
+  test('limits host-assistant change requests to its write scope', () => {
+    const request = { droneId: 'drone-a', droneName: 'Allowed drone' };
+    expect(changeRequestIsWithinWriteScope(request)).toBe(true);
+    expect(changeRequestIsWithinWriteScope(request, ['drone-a'])).toBe(true);
+    expect(changeRequestIsWithinWriteScope(request, ['Allowed drone'])).toBe(true);
+    expect(changeRequestIsWithinWriteScope(request, [])).toBe(false);
+    expect(changeRequestIsWithinWriteScope(request, ['drone-b'])).toBe(false);
   });
 
   test('enforces assistant read and write scopes for host principals', () => {

@@ -1,4 +1,7 @@
-import type { NativeChatAccessScope } from '@drone/assistant-chat';
+import {
+  normalizeChangeRequestPermissions,
+  type NativeChatAccessScope,
+} from '@drone/assistant-chat';
 
 export type McpChatAccessScope = NativeChatAccessScope;
 export type McpChatAccessKind = 'read' | 'write' | 'execute';
@@ -37,6 +40,7 @@ export function normalizeMcpChatAccessScope(
     readMode,
     writeMode,
     executeMode,
+    ...normalizeChangeRequestPermissions(input),
     droneIds: hasSelectedScope ? droneIds : [],
     updatedAt:
       typeof input.updatedAt === 'string' && input.updatedAt.trim()
