@@ -1,4 +1,5 @@
 import React from 'react';
+import { createSidebarCommandQueue } from '@drone/hub-model/sidebar';
 import {
   type AgentApprovalPolicy,
   type AgentPermissionMode,
@@ -210,6 +211,9 @@ function droneHubBusyDebugEnabled(): boolean {
 }
 
 export function useDroneHubAppModel(): DroneHubAppModel {
+  const sidebarCommandQueueRef = React.useRef<ReturnType<typeof createSidebarCommandQueue> | null>(null);
+  if (!sidebarCommandQueueRef.current) sidebarCommandQueueRef.current = createSidebarCommandQueue();
+  const sidebarCommandQueue = sidebarCommandQueueRef.current;
   const {
     optimisticallyDeletedDrones,
     startupSeedByDrone,
@@ -504,6 +508,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     moveDronesToGroup,
     createGroupAndMove,
   } = useGroupManagement({
+    sidebarCommandQueue,
     activeRepoPath,
     groupIdByName: registryGroupIdByName,
     drones,
@@ -748,7 +753,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDronePinned,
     setDronesPinned,
     moveSidebar,
-  } = useUiPreferencesSettings({ requestJson });
+  } = useUiPreferencesSettings({ requestJson, sidebarCommandQueue });
   const selectedDronePinShortcutBusyRef = React.useRef(false);
   const renderedSidebarNodeTreeRef = React.useRef<SidebarNodeTreeModel | null>(null);
   const setRenderedSidebarNodeTree = React.useCallback((nodeTree: SidebarNodeTreeModel | null) => {
@@ -4389,6 +4394,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDroneBaseImage,
     setDronePinned,
     moveSidebar,
+    sidebarCommandQueue,
     uiPreferencesReady,
     deleteDrone: requestDeleteDrone,
     reparentDronesToParent,

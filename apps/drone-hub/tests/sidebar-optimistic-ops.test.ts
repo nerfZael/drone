@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   applySidebarOptimisticOpsToDrones,
+  applySidebarOptimisticOpsToGroups,
   pruneSatisfiedSidebarOptimisticOps,
   sidebarOptimisticOpForMoveIntent,
   type SidebarOptimisticOp,
@@ -190,5 +191,31 @@ describe('sidebar optimistic ops', () => {
     ).toEqual([
       drone({ id: 'child', name: 'child', group: 'alpha', fleetParentId: null }),
     ]);
+  });
+
+  test('composes rapid moves using the newest pending destination', () => {
+    const base = [drone({ id: 'moving', name: 'moving', group: 'alpha' })];
+    const ops: SidebarOptimisticOp[] = [
+      { id: 'to-bravo', kind: 'move_drones', droneIds: ['moving'], targetGroup: 'bravo' },
+      { id: 'to-charlie', kind: 'move_drones', droneIds: ['moving'], targetGroup: 'charlie' },
+      { id: 'ungroup', kind: 'move_drones', droneIds: ['moving'], targetGroup: null },
+    ];
+    expect(applySidebarOptimisticOpsToDrones(base, ops)[0]?.group).toBeNull();
+    expect(applySidebarOptimisticOpsToDrones(base, ops.slice(1))[0]?.group).toBeNull();
+  });
+
+  test('can create, rename, and populate a group before registry confirmation', () => {
+    const baseDrones = [drone({ id: 'moving', name: 'moving', group: null })];
+    const baseGroups = [{ group: 'Ungrouped', label: 'Ungrouped', kind: 'group' as const, items: baseDrones }];
+    const ops: SidebarOptimisticOp[] = [
+      { id: 'create', kind: 'create_group', group: 'alpha' },
+      { id: 'rename', kind: 'rename_group', sourceGroup: 'alpha', targetGroup: 'bravo' },
+      { id: 'move', kind: 'move_drones', droneIds: ['moving'], targetGroup: 'bravo' },
+    ];
+    const optimisticDrones = applySidebarOptimisticOpsToDrones(baseDrones, ops);
+    const optimisticGroups = applySidebarOptimisticOpsToGroups(baseGroups, optimisticDrones, ops);
+    expect(optimisticDrones[0]?.group).toBe('bravo');
+    expect(optimisticGroups.map((group) => group.group).sort()).toEqual(['Ungrouped', 'bravo']);
+    expect(optimisticGroups.find((group) => group.group === 'bravo')?.items.map((item) => item.id)).toEqual(['moving']);
   });
 });

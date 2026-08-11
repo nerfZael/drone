@@ -17,10 +17,18 @@ import {
   type UiPreferencesSnapshotEventDetail,
 } from './ui-preferences-sync-event';
 import {
+  appendSidebarOptimisticCommand,
   applySidebarMove,
+  createSidebarOptimisticJournal,
   normalizeSidebarLayout,
+  replaceSidebarConfirmedState,
+  settleSidebarOptimisticCommand,
   sidebarLayoutPatch,
+  sidebarOptimisticJournalValue,
+  type SidebarLayoutState,
+  type SidebarCommandQueue,
   type SidebarMoveIntent,
+  type SidebarOptimisticJournal,
 } from '@drone/hub-model/sidebar';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
@@ -29,6 +37,7 @@ type UiPreferencesSnapshot = UiPreferencesSettingsResponse['uiPreferences'];
 
 type UseUiPreferencesSettingsArgs = {
   requestJson: RequestJson;
+  sidebarCommandQueue: SidebarCommandQueue;
 };
 
 export type UseUiPreferencesSettingsResult = {
@@ -398,6 +407,7 @@ export function reconcileUiPreferencesReload({
 
 export function useUiPreferencesSettings({
   requestJson,
+  sidebarCommandQueue,
 }: UseUiPreferencesSettingsArgs): UseUiPreferencesSettingsResult {
   const {
     sidebarGroupingMode,
@@ -479,9 +489,11 @@ export function useUiPreferencesSettings({
   const lastSavedSerializedRef = React.useRef('');
   const lastSavedSnapshotRef = React.useRef<UiPreferencesSnapshot | null>(null);
   const lastSavedVersionRef = React.useRef<number | null>(null);
-  const sidebarCommandQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   const pendingSidebarCommandsRef = React.useRef(0);
   const sidebarCommandSeqRef = React.useRef(0);
+  const sidebarJournalRef = React.useRef<SidebarOptimisticJournal<SidebarLayoutState, SidebarMoveIntent>>(
+    createSidebarOptimisticJournal(normalizeSidebarLayout(null)),
+  );
   const [sidebarCommandRevision, setSidebarCommandRevision] = React.useState(0);
   const [uiPreferencesReady, setUiPreferencesReady] = React.useState(false);
   const saveSeqRef = React.useRef(0);
@@ -549,6 +561,22 @@ export function useUiPreferencesSettings({
     }
     saveSeqRef.current += 1;
   }, []);
+
+  const rebasePendingSidebarCommands = React.useCallback(
+    (snapshotRaw: UiPreferencesSnapshot): UiPreferencesSnapshot => {
+      const snapshot = normalizeUiPreferencesSnapshot(snapshotRaw);
+      sidebarJournalRef.current = replaceSidebarConfirmedState(
+        sidebarJournalRef.current,
+        normalizeSidebarLayout(snapshot),
+      );
+      const visibleLayout = sidebarOptimisticJournalValue(
+        sidebarJournalRef.current,
+        applySidebarMove,
+      );
+      return normalizeUiPreferencesSnapshot({ ...snapshot, ...visibleLayout });
+    },
+    [],
+  );
 
   const snapshot = React.useMemo(
     () =>
@@ -627,9 +655,9 @@ export function useUiPreferencesSettings({
       lastSavedSerializedRef.current = backendSerialized;
       lastSavedVersionRef.current = detail.version;
       readyRef.current = true;
-      applyUiPreferences(nextSnapshot);
+      applyUiPreferences(rebasePendingSidebarCommands(nextSnapshot));
     },
-    [applyUiPreferences, cancelPendingSave],
+    [applyUiPreferences, cancelPendingSave, rebasePendingSidebarCommands],
   );
 
   React.useEffect(() => {
@@ -682,14 +710,14 @@ export function useUiPreferencesSettings({
       lastSavedSnapshotRef.current = backendSnapshot;
       lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(backendSnapshot);
       lastSavedVersionRef.current = data.version;
-      applyUiPreferences(nextSnapshot);
+      applyUiPreferences(rebasePendingSidebarCommands(nextSnapshot));
     } catch {
       // Keep the local snapshot when the backend copy is unavailable.
     } finally {
       readyRef.current = true;
       setUiPreferencesReady(true);
     }
-  }, [applyUiPreferences, cancelPendingSave, requestJson]);
+  }, [applyUiPreferences, cancelPendingSave, rebasePendingSidebarCommands, requestJson]);
 
   React.useEffect(() => {
     void reloadUiPreferences();
@@ -733,18 +761,23 @@ export function useUiPreferencesSettings({
 
   const moveSidebar = React.useCallback(
     (intent: SidebarMoveIntent): Promise<boolean> => {
+      const commandSeq = sidebarCommandSeqRef.current + 1;
+      sidebarCommandSeqRef.current = commandSeq;
+      const commandId = `desktop:${Date.now()}:${commandSeq}`;
+      const before = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
+      sidebarJournalRef.current = appendSidebarOptimisticCommand(
+        sidebarJournalRef.current,
+        { id: commandId, command: intent },
+      );
+      pendingSidebarCommandsRef.current += 1;
+      cancelPendingSave();
+      const optimisticLayout = applySidebarMove(normalizeSidebarLayout(before), intent);
+      applyUiPreferences({
+        ...before,
+        ...sidebarLayoutPatch(optimisticLayout, intent),
+      });
+
       const write = async (): Promise<boolean> => {
-        const before = normalizeUiPreferencesSnapshot(useDroneHubUiStore.getState());
-        const optimisticLayout = applySidebarMove(normalizeSidebarLayout(before), intent);
-        const optimistic = normalizeUiPreferencesSnapshot({
-          ...before,
-          ...sidebarLayoutPatch(optimisticLayout, intent),
-        });
-        pendingSidebarCommandsRef.current += 1;
-        const commandSeq = sidebarCommandSeqRef.current + 1;
-        sidebarCommandSeqRef.current = commandSeq;
-        cancelPendingSave();
-        applyUiPreferences(optimistic);
         try {
           const data = await requestJson<UiPreferencesSettingsResponse & { mutationId: string }>(
             '/api/sidebar/move',
@@ -752,7 +785,7 @@ export function useUiPreferencesSettings({
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({
-                mutationId: `desktop:${Date.now()}:${commandSeq}`,
+                mutationId: commandId,
                 intent,
               }),
             },
@@ -766,12 +799,21 @@ export function useUiPreferencesSettings({
             reconciled,
             sidebarLayoutPatch(normalizeSidebarLayout(backend), intent),
           );
+          sidebarJournalRef.current = settleSidebarOptimisticCommand(
+            sidebarJournalRef.current,
+            commandId,
+            normalizeSidebarLayout(reconciled),
+          );
           lastSavedSnapshotRef.current = backend;
           lastSavedSerializedRef.current = serializeUiPreferencesSnapshot(backend);
           lastSavedVersionRef.current = data.version;
-          applyUiPreferences(reconciled);
+          applyUiPreferences(rebasePendingSidebarCommands(reconciled));
           return true;
         } catch {
+          sidebarJournalRef.current = settleSidebarOptimisticCommand(
+            sidebarJournalRef.current,
+            commandId,
+          );
           await reloadUiPreferences({ discardSidebarIntent: intent });
           return false;
         } finally {
@@ -784,14 +826,16 @@ export function useUiPreferencesSettings({
           }
         }
       };
-      const queued = sidebarCommandQueueRef.current.then(write, write);
-      sidebarCommandQueueRef.current = queued.then(
-        () => undefined,
-        () => undefined,
-      );
-      return queued;
+      return sidebarCommandQueue.enqueue(write);
     },
-    [applyUiPreferences, cancelPendingSave, reloadUiPreferences, requestJson],
+    [
+      applyUiPreferences,
+      cancelPendingSave,
+      rebasePendingSidebarCommands,
+      reloadUiPreferences,
+      requestJson,
+      sidebarCommandQueue,
+    ],
   );
 
   const setDronesPinned = React.useCallback(

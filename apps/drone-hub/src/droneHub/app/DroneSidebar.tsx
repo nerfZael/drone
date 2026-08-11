@@ -5,6 +5,7 @@ import {
   buildRepoSidebarModel,
   resolvePinnedSidebarDrones,
   type SidebarMoveIntent,
+  type SidebarCommandQueue,
 } from '@drone/hub-model/sidebar';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, RepoSummary } from '../types';
@@ -825,6 +826,7 @@ export type DroneSidebarProps = {
   onSetDroneBaseImage: (droneId: string) => void;
   onSetDronePinned: (droneId: string, pinned: boolean) => Promise<boolean>;
   onMoveSidebar: (intent: SidebarMoveIntent) => Promise<boolean>;
+  sidebarCommandQueue: SidebarCommandQueue;
   uiPreferencesReady: boolean;
   onDeleteDrone: (droneId: string) => void;
   onOpenDroneErrorModal: (drone: DroneSummary, message: string) => void;
@@ -908,6 +910,7 @@ export function DroneSidebar({
   onSetDroneBaseImage,
   onSetDronePinned,
   onMoveSidebar,
+  sidebarCommandQueue,
   uiPreferencesReady,
   onDeleteDrone,
   onOpenDroneErrorModal,
@@ -1211,23 +1214,17 @@ export function DroneSidebar({
     isRepoGroupingMode,
     sidebarGroups,
     sidebarDronesFilteredByRepo,
-    collapsedGroups,
+    deletingGroups,
     sidebarGroupOrder,
-    hiddenSidebarGroups,
-    sidebarDroneOrderByGroup,
-    sidebarNodeOrderByParent,
-    visibleNodeOrderByParent: visibleFolderNodeOrderByParent,
-    setCollapsedGroups,
     setSidebarGroupOrder,
-    setHiddenSidebarGroups,
-    setSidebarDroneOrderByGroup,
-    setSidebarNodeOrderByParent,
     onCreateGroup,
     onCreateGroupAndMove,
     onRenameGroup: handleRenameGroup,
     onMoveDronesToGroup,
     onReparentDronesToParent,
     onMoveSidebar,
+    sidebarCommandQueue,
+    onSidebarMutationError: setPinError,
   });
   const activeChatName = String(selectedChat ?? '').trim() || 'default';
   const pinnedDensityClasses = sidebarDensityClasses(sidebarDensityMode);

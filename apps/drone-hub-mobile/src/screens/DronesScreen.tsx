@@ -80,12 +80,21 @@ import {
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
 import {
-  applyMobileSidebarMoveIntoFolder,
-  applyMobileSidebarReorder,
   applyOptimisticMobileSidebarMove,
   mobileSidebarMoveDestination,
   type MobileSidebarMutationRequest,
 } from '../drones/mobile-sidebar-reorder';
+import {
+  appendSidebarOptimisticCommand,
+  applySidebarMove,
+  createSidebarCommandQueue,
+  createSidebarOptimisticJournal,
+  replaceSidebarConfirmedState,
+  settleSidebarOptimisticCommand,
+  sidebarOptimisticJournalValue,
+  type SidebarOptimisticJournal,
+  type SidebarMoveIntent,
+} from '@drone/hub-model/sidebar';
 import {
   withMobileApprovalRequired,
   withOptimisticMobileBusyChat,
@@ -135,6 +144,24 @@ const EMPTY_CHAT_HISTORY_PAGE: MobileChatHistoryPage = {
   responseTruncated: false,
   contentTruncated: false,
 };
+
+type MobileSidebarJournalState = {
+  drones: MobileDroneSummary[];
+  sidebar: MobileDroneSidebarOrder;
+};
+
+function applyMobileSidebarJournalCommand(
+  state: MobileSidebarJournalState,
+  request: SidebarMoveIntent,
+): MobileSidebarJournalState {
+  return {
+    drones:
+      request.kind === 'move-into-folder'
+        ? applyOptimisticMobileSidebarMove(state.drones, request)
+        : state.drones,
+    sidebar: applySidebarMove(state.sidebar, request),
+  };
+}
 
 function inlinePromptAttachments(attachments: readonly MobileChatAttachment[]) {
   return attachments.map((attachment) => ({
@@ -356,23 +383,15 @@ export function DronesScreen({
     },
     [commitDroneListSnapshot, targetId],
   );
-  const setDroneSidebarOrder = React.useCallback(
-    (sidebar: MobileDroneSidebarOrder, preferenceVersion?: number | null) => {
-      const current = droneListSnapshotRef.current;
-      if (current.targetId !== targetId) return;
-      commitDroneListSnapshot({
-        ...current,
-        sidebar,
-        ...(preferenceVersion !== undefined ? { sidebarPreferenceVersion: preferenceVersion } : {}),
-      });
-    },
-    [commitDroneListSnapshot, targetId],
-  );
-  const pendingPinWriteCountRef = React.useRef(0);
-  const sidebarWriteQueueRef = React.useRef<Promise<void>>(Promise.resolve());
-  const pendingSidebarWriteCountRef = React.useRef(0);
-  const pendingSidebarGroupOverridesRef = React.useRef(
-    new Map<string, { generation: number; group: string | null }>(),
+  const sidebarWriteQueueRef = React.useRef<ReturnType<typeof createSidebarCommandQueue> | null>(null);
+  if (!sidebarWriteQueueRef.current) sidebarWriteQueueRef.current = createSidebarCommandQueue();
+  const sidebarJournalRef = React.useRef<
+    SidebarOptimisticJournal<MobileSidebarJournalState, SidebarMoveIntent>
+  >(
+    createSidebarOptimisticJournal({
+      drones: [],
+      sidebar: EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+    }),
   );
   const sidebarWriteGenerationRef = React.useRef(0);
   const [selected, setSelected] = React.useState<MobileDroneSummary | null>(null);
@@ -549,15 +568,24 @@ export function DronesScreen({
           throw new Error('The selected Drone Hub returned an invalid drone list');
         }
         const normalized = normalizeMobileDroneListPayload(result);
-        const optimisticGroups = pendingSidebarGroupOverridesRef.current;
-        const nextDrones =
-          optimisticGroups.size > 0
-            ? normalized.drones.map((drone) =>
-                optimisticGroups.has(drone.id)
-                  ? { ...drone, group: optimisticGroups.get(drone.id)!.group }
-                  : drone,
-              )
-            : normalized.drones;
+        const confirmedSnapshot = resolveMobileDroneListSnapshot({
+          current: droneListSnapshotRef.current,
+          targetId,
+          payload: normalized,
+          keepCurrentSidebar: false,
+        });
+        sidebarJournalRef.current = replaceSidebarConfirmedState(
+          sidebarJournalRef.current,
+          {
+            drones: confirmedSnapshot.drones,
+            sidebar: confirmedSnapshot.sidebar,
+          },
+        );
+        const visibleSidebar = sidebarOptimisticJournalValue(
+          sidebarJournalRef.current,
+          applyMobileSidebarJournalCommand,
+        );
+        const nextDrones = visibleSidebar.drones;
         setDeleteMode(normalized.deleteMode);
         if (normalized.createRepos.length > 0) {
           setCreateRepos((current) => {
@@ -571,15 +599,11 @@ export function DronesScreen({
           });
         }
         loadedDronesTargetIdRef.current = targetId;
-        commitDroneListSnapshot(
-          resolveMobileDroneListSnapshot({
-            current: droneListSnapshotRef.current,
-            targetId,
-            payload: { ...normalized, drones: nextDrones },
-            keepCurrentSidebar:
-              pendingPinWriteCountRef.current > 0 || pendingSidebarWriteCountRef.current > 0,
-          }),
-        );
+        commitDroneListSnapshot({
+          ...confirmedSnapshot,
+          drones: nextDrones,
+          sidebar: visibleSidebar.sidebar,
+        });
         const currentSelected = selectedRef.current;
         const nextSelected = currentSelected
           ? (nextDrones.find((drone) => drone.id === currentSelected.id) ?? null)
@@ -682,157 +706,69 @@ export function DronesScreen({
   const reorderSidebar = React.useCallback(
     (request: MobileSidebarMutationRequest) => {
       const destinationId = targetId;
-      if (request.kind === 'move-into-folder') {
-        const destination = mobileSidebarMoveDestination(request);
-        const current = droneListSnapshotRef.current;
-        if (!destination || current.targetId !== destinationId) return;
-        const nextOrder = applyMobileSidebarMoveIntoFolder(current.sidebar, request);
-        const nextDrones = applyOptimisticMobileSidebarMove(current.drones, request);
-        const generation = sidebarWriteGenerationRef.current + 1;
-        sidebarWriteGenerationRef.current = generation;
-        const currentGroupByDroneId = new Map(
-          current.drones.map((drone) => [drone.id, drone.group] as const),
-        );
-        for (const nextDrone of nextDrones) {
-          if (currentGroupByDroneId.get(nextDrone.id) === nextDrone.group) continue;
-          pendingSidebarGroupOverridesRef.current.set(nextDrone.id, {
-            generation,
-            group: nextDrone.group,
-          });
-        }
-        droneSidebarOrderRef.current = nextOrder;
-        commitDroneListSnapshot({ ...current, drones: nextDrones, sidebar: nextOrder });
-        pendingSidebarWriteCountRef.current += 1;
-
-        const writeMove = async () => {
-          try {
-            if (targetIdRef.current !== destinationId) return;
-            const mutationId = `sidebar:${destinationId}:${Date.now()}:${generation}`;
-            const result = await requestDroneControl(destinationId, 'sidebar.move', {
-              mutationId,
-              intent: request,
-            });
-            if (targetIdRef.current !== destinationId) return;
-            const savedVersion =
-              Number.isSafeInteger(result?.version) && Number(result.version) >= 0
-                ? Number(result.version)
-                : sidebarPreferenceVersionRef.current;
-            sidebarPreferenceVersionRef.current = savedVersion;
-            if (
-              targetIdRef.current === destinationId &&
-              sidebarWriteGenerationRef.current === generation
-            ) {
-              const savedPayload = normalizeMobileDroneListPayload({
-                drones: [],
-                sidebar: result?.uiPreferences ?? {},
-              });
-              const savedOrder: MobileDroneSidebarOrder = {
-                ...nextOrder,
-                sidebarNodeOrderByParent: savedPayload.sidebar.sidebarNodeOrderByParent,
-                sidebarChatOrderByDrone: savedPayload.sidebar.sidebarChatOrderByDrone,
-                pinnedDroneIds: savedPayload.sidebar.pinnedDroneIds,
-              };
-              droneSidebarOrderRef.current = savedOrder;
-              setDroneSidebarOrder(savedOrder, savedVersion);
-            }
-          } catch (nextError: any) {
-            if (
-              targetIdRef.current === destinationId &&
-              sidebarWriteGenerationRef.current === generation
-            ) {
-              setError(nextError?.message ?? String(nextError));
-            }
-          } finally {
-            pendingSidebarWriteCountRef.current = Math.max(
-              0,
-              pendingSidebarWriteCountRef.current - 1,
-            );
-            for (const [droneId, override] of pendingSidebarGroupOverridesRef.current) {
-              if (override.generation === generation) {
-                pendingSidebarGroupOverridesRef.current.delete(droneId);
-              }
-            }
-          }
-          if (targetIdRef.current === destinationId) await loadDronesRef.current(true);
-        };
-        const queuedMove = sidebarWriteQueueRef.current.then(writeMove, writeMove);
-        sidebarWriteQueueRef.current = queuedMove.then(
-          () => undefined,
-          () => undefined,
-        );
-        return;
-      }
-      const previousOrder = droneSidebarOrderRef.current;
-      const nextOrder = applyMobileSidebarReorder(previousOrder, request);
+      const current = droneListSnapshotRef.current;
+      if (current.targetId !== destinationId) return;
+      if (request.kind === 'move-into-folder' && !mobileSidebarMoveDestination(request)) return;
       const generation = sidebarWriteGenerationRef.current + 1;
       sidebarWriteGenerationRef.current = generation;
-      droneSidebarOrderRef.current = nextOrder;
-      setDroneSidebarOrder(nextOrder);
-      pendingSidebarWriteCountRef.current += 1;
+      const commandId = `sidebar:${destinationId}:${Date.now()}:${generation}`;
+      if (sidebarJournalRef.current.pending.length === 0) {
+        sidebarJournalRef.current = replaceSidebarConfirmedState(
+          sidebarJournalRef.current,
+          { drones: current.drones, sidebar: current.sidebar },
+        );
+      }
+      sidebarJournalRef.current = appendSidebarOptimisticCommand(
+        sidebarJournalRef.current,
+        { id: commandId, command: request },
+      );
+      const visible = sidebarOptimisticJournalValue(
+        sidebarJournalRef.current,
+        applyMobileSidebarJournalCommand,
+      );
+      droneSidebarOrderRef.current = visible.sidebar;
+      commitDroneListSnapshot({ ...current, ...visible });
 
       const write = async () => {
-        let reloadSidebar = false;
         try {
           if (targetIdRef.current !== destinationId) return;
           const result = await requestDroneControl(destinationId, 'sidebar.move', {
-            mutationId: `sidebar:${destinationId}:${Date.now()}:${generation}`,
+            mutationId: commandId,
             intent: request,
           });
           if (targetIdRef.current !== destinationId) return;
           const savedVersion =
             Number.isSafeInteger(result?.version) && Number(result.version) >= 0
-              ? Number(result.version)
-              : sidebarPreferenceVersionRef.current;
+                ? Number(result.version)
+                : sidebarPreferenceVersionRef.current;
           sidebarPreferenceVersionRef.current = savedVersion;
-          if (sidebarWriteGenerationRef.current !== generation) {
-            setDroneSidebarOrder(droneSidebarOrderRef.current, savedVersion);
-            return;
-          }
-          const savedPayload = normalizeMobileDroneListPayload({
-            drones: [],
-            sidebar: result?.uiPreferences ?? {},
-          });
-          const savedOrder: MobileDroneSidebarOrder = {
-            ...nextOrder,
-            sidebarNodeOrderByParent: savedPayload.sidebar.sidebarNodeOrderByParent,
-            sidebarChatOrderByDrone: savedPayload.sidebar.sidebarChatOrderByDrone,
-            pinnedDroneIds: savedPayload.sidebar.pinnedDroneIds,
-          };
-          droneSidebarOrderRef.current = savedOrder;
-          setDroneSidebarOrder(savedOrder, savedVersion);
         } catch (nextError: any) {
-          if (
-            targetIdRef.current === destinationId &&
-            sidebarWriteGenerationRef.current === generation
-          ) {
+          if (targetIdRef.current === destinationId) {
             setError(nextError?.message ?? String(nextError));
-            reloadSidebar = true;
           }
         } finally {
-          pendingSidebarWriteCountRef.current = Math.max(
-            0,
-            pendingSidebarWriteCountRef.current - 1,
+          sidebarJournalRef.current = settleSidebarOptimisticCommand(
+            sidebarJournalRef.current,
+            commandId,
           );
         }
-        if (reloadSidebar) await loadDronesRef.current(true);
+        if (targetIdRef.current === destinationId) await loadDronesRef.current(true);
       };
-      const queued = sidebarWriteQueueRef.current.then(write, write);
-      sidebarWriteQueueRef.current = queued.then(
-        () => undefined,
-        () => undefined,
-      );
+      void sidebarWriteQueueRef.current!.enqueue(write);
     },
     [
       commitDroneListSnapshot,
       requestDroneControl,
-      setDroneSidebarOrder,
       targetId,
     ],
   );
 
   React.useEffect(() => {
     const createDefaultsVersion = ++createDefaultsRequestVersion.current;
-    pendingSidebarGroupOverridesRef.current.clear();
+    sidebarJournalRef.current = createSidebarOptimisticJournal({
+      drones: [],
+      sidebar: EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+    });
     commitDroneListSnapshot({
       ...EMPTY_MOBILE_DRONE_LIST_SNAPSHOT,
       targetId,
@@ -2247,36 +2183,38 @@ export function DronesScreen({
   const setDronePinned = React.useCallback(
     (droneId: string, pinned: boolean): Promise<void> => {
       const destinationId = targetId;
+      const current = droneListSnapshotRef.current;
+      if (current.targetId !== destinationId) return Promise.resolve();
+      const generation = sidebarWriteGenerationRef.current + 1;
+      sidebarWriteGenerationRef.current = generation;
+      const commandId = `sidebar-pin:${destinationId}:${Date.now()}:${generation}`;
+      const intent = { kind: 'set-pinned' as const, droneIds: [droneId], pinned };
+      if (sidebarJournalRef.current.pending.length === 0) {
+        sidebarJournalRef.current = replaceSidebarConfirmedState(
+          sidebarJournalRef.current,
+          { drones: current.drones, sidebar: current.sidebar },
+        );
+      }
+      sidebarJournalRef.current = appendSidebarOptimisticCommand(
+        sidebarJournalRef.current,
+        { id: commandId, command: intent },
+      );
+      const visible = sidebarOptimisticJournalValue(
+        sidebarJournalRef.current,
+        applyMobileSidebarJournalCommand,
+      );
+      droneSidebarOrderRef.current = visible.sidebar;
+      commitDroneListSnapshot({ ...current, ...visible });
+      setPinningDroneIds((currentIds) => new Set(currentIds).add(droneId));
+
       const write = async () => {
-        if (targetIdRef.current !== destinationId) return;
-        pendingPinWriteCountRef.current += 1;
-        const previousIds = droneSidebarOrderRef.current.pinnedDroneIds;
-        const nextIds = pinned
-          ? previousIds.includes(droneId)
-            ? previousIds
-            : [...previousIds, droneId]
-          : previousIds.filter((id) => id !== droneId);
-        const optimisticOrder = { ...droneSidebarOrderRef.current, pinnedDroneIds: nextIds };
-        droneSidebarOrderRef.current = optimisticOrder;
-        setPinningDroneIds((current) => new Set(current).add(droneId));
-        setDroneSidebarOrder(optimisticOrder);
         try {
+          if (targetIdRef.current !== destinationId) return;
           const result = await requestDroneControl(destinationId, 'sidebar.move', {
-            mutationId: `sidebar-pin:${destinationId}:${Date.now()}:${droneId}`,
-            intent: { kind: 'set-pinned', droneIds: [droneId], pinned },
+            mutationId: commandId,
+            intent,
           });
-          const savedIds: string[] = Array.isArray(result?.uiPreferences?.pinnedDroneIds)
-            ? [
-                ...new Set<string>(
-                  result.uiPreferences.pinnedDroneIds
-                    .map((id: unknown) => String(id ?? '').trim())
-                    .filter(Boolean),
-                ),
-              ]
-            : nextIds;
           if (targetIdRef.current === destinationId) {
-            const savedOrder = { ...droneSidebarOrderRef.current, pinnedDroneIds: savedIds };
-            droneSidebarOrderRef.current = savedOrder;
             const savedPreferenceVersion =
               Number.isSafeInteger(result?.version) && Number(result.version) >= 0
                 ? Number(result.version)
@@ -2284,35 +2222,27 @@ export function DronesScreen({
             if (savedPreferenceVersion !== undefined) {
               sidebarPreferenceVersionRef.current = savedPreferenceVersion;
             }
-            setDroneSidebarOrder(savedOrder, savedPreferenceVersion);
           }
         } catch (nextError: any) {
           if (targetIdRef.current === destinationId) {
-            const restoredOrder = {
-              ...droneSidebarOrderRef.current,
-              pinnedDroneIds: previousIds,
-            };
-            droneSidebarOrderRef.current = restoredOrder;
-            setDroneSidebarOrder(restoredOrder);
             setError(nextError?.message ?? String(nextError));
           }
         } finally {
-          pendingPinWriteCountRef.current = Math.max(0, pendingPinWriteCountRef.current - 1);
-          setPinningDroneIds((current) => {
-            const next = new Set(current);
+          sidebarJournalRef.current = settleSidebarOptimisticCommand(
+            sidebarJournalRef.current,
+            commandId,
+          );
+          setPinningDroneIds((currentIds) => {
+            const next = new Set(currentIds);
             next.delete(droneId);
             return next;
           });
         }
+        if (targetIdRef.current === destinationId) await loadDronesRef.current(true);
       };
-      const queued = sidebarWriteQueueRef.current.then(write, write);
-      sidebarWriteQueueRef.current = queued.then(
-        () => undefined,
-        () => undefined,
-      );
-      return queued;
+      return sidebarWriteQueueRef.current!.enqueue(write);
     },
-    [requestDroneControl, targetId],
+    [commitDroneListSnapshot, requestDroneControl, targetId],
   );
   React.useEffect(() => {
     const frame = requestAnimationFrame(() =>

@@ -1,4 +1,5 @@
 import React from 'react';
+import type { SidebarCommandQueue } from '@drone/hub-model/sidebar';
 import { requestJson } from '../http';
 import type { DroneSummary } from '../types';
 import { isUngroupedGroupName } from '../../domain';
@@ -23,6 +24,7 @@ import {
 } from './sidebar-collapsed-groups';
 
 type UseGroupManagementArgs = {
+  sidebarCommandQueue: SidebarCommandQueue;
   activeRepoPath: string;
   groupIdByName: Record<string, string>;
   drones: DroneSummary[];
@@ -51,6 +53,7 @@ type DeleteGroupOptions = {
 };
 
 export function useGroupManagement({
+  sidebarCommandQueue,
   activeRepoPath,
   groupIdByName,
   drones,
@@ -218,7 +221,8 @@ export function useGroupManagement({
         });
       }
       setDeletingGroups((prev) => ({ ...prev, [group]: true }));
-      try {
+      return await sidebarCommandQueue.enqueue(async () => {
+        try {
         if (targetKind === 'repo') {
           const failed: string[] = [];
           for (const id of targetNames) {
@@ -288,7 +292,7 @@ export function useGroupManagement({
           setSelectedGroupMultiChat(null);
         }
         return true;
-      } catch (e: any) {
+        } catch (e: any) {
         console.error('[DroneHub] delete group failed', { group, error: e });
         if (addedByThisDelete.length > 0) {
           setOptimisticallyDeletedDrones((prev) => {
@@ -303,14 +307,15 @@ export function useGroupManagement({
           });
         }
         return false;
-      } finally {
+        } finally {
         setDeletingGroups((prev) => {
           if (!prev[group]) return prev;
           const nextMap = { ...prev };
           delete nextMap[group];
           return nextMap;
         });
-      }
+        }
+      });
     },
     [
       deletingGroups,
@@ -327,6 +332,7 @@ export function useGroupManagement({
       setSidebarGroupOrder,
       setHiddenSidebarGroups,
       confirmDelete,
+      sidebarCommandQueue,
     ],
   );
 

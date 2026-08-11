@@ -8,3 +8,5 @@ export * from './node-tree';
 export * from './model';
 export * from './pinned-drones';
 export * from './mutations';
+export * from './optimistic-journal';
+export * from './command-queue';
