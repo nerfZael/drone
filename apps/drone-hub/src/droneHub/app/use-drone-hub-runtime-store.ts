@@ -8,6 +8,8 @@ import { profileStorageKey } from '../../profile-storage';
 
 type Updater<T> = T | ((prev: T) => T);
 
+export const LOCAL_CHAT_BUSY_HANDOFF_MS = 2_000;
+
 type DroneHubRuntimePersistedState = Pick<DroneHubRuntimeState, 'lastAgentSnippetByChatNodeId'>;
 
 export type RepoApplyProgress = {
@@ -188,9 +190,13 @@ export function useChatApprovalRequired(chatNodeId: string): boolean {
   );
 }
 
-export function beginLocalChatBusy(chatNodeIdRaw: string): () => void {
+export function beginLocalChatBusy(
+  chatNodeIdRaw: string,
+  options?: { releaseDelayMs?: number },
+): () => void {
   const chatNodeId = chatNodeIdRaw.trim();
   if (!chatNodeId) return () => {};
+  const releaseDelayMs = Math.max(0, Math.floor(options?.releaseDelayMs ?? 0));
   const setLocalBusyChatCountByNodeId =
     useDroneHubRuntimeStore.getState().setLocalBusyChatCountByNodeId;
   setLocalBusyChatCountByNodeId((current) => ({
@@ -201,14 +207,22 @@ export function beginLocalChatBusy(chatNodeIdRaw: string): () => void {
   return () => {
     if (!active) return;
     active = false;
-    setLocalBusyChatCountByNodeId((current) => {
-      const currentCount = current[chatNodeId] ?? 0;
-      if (currentCount <= 0) return current;
-      const next = { ...current };
-      if (currentCount === 1) delete next[chatNodeId];
-      else next[chatNodeId] = currentCount - 1;
-      return next;
-    });
+    const release = () => {
+      setLocalBusyChatCountByNodeId((current) => {
+        const currentCount = current[chatNodeId] ?? 0;
+        if (currentCount <= 0) return current;
+        const next = { ...current };
+        if (currentCount === 1) delete next[chatNodeId];
+        else next[chatNodeId] = currentCount - 1;
+        return next;
+      });
+    };
+    if (releaseDelayMs > 0) {
+      const timeoutId = globalThis.setTimeout(release, releaseDelayMs);
+      (timeoutId as any)?.unref?.();
+      return;
+    }
+    release();
   };
 }
 
@@ -216,7 +230,13 @@ export function useLocalChatBusy(chatNodeIdRaw: string, busy: boolean): void {
   const chatNodeId = chatNodeIdRaw.trim();
   React.useEffect(() => {
     if (!chatNodeId || !busy) return;
-    return beginLocalChatBusy(chatNodeId);
+    // The selected chat surface is a faster source of run state than the
+    // registry summary. Keep its report alive briefly when the surface
+    // unmounts so switching chats does not expose an unread marker before the
+    // authoritative busyChats projection arrives.
+    return beginLocalChatBusy(chatNodeId, {
+      releaseDelayMs: LOCAL_CHAT_BUSY_HANDOFF_MS,
+    });
   }, [busy, chatNodeId]);
 }
 

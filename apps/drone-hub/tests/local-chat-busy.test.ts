@@ -41,4 +41,34 @@ describe('local chat busy state', () => {
     beginLocalChatBusy('   ')();
     expect(useDroneHubRuntimeStore.getState().localBusyChatCountByNodeId).toEqual({});
   });
+
+  test('keeps a surface busy during the registry handoff window', async () => {
+    const finishSurfaceReport = beginLocalChatBusy('drone:default', {
+      releaseDelayMs: 25,
+    });
+
+    finishSurfaceReport();
+    expect(useDroneHubRuntimeStore.getState().localBusyChatCountByNodeId).toEqual({
+      'drone:default': 1,
+    });
+
+    await Bun.sleep(40);
+    expect(useDroneHubRuntimeStore.getState().localBusyChatCountByNodeId).toEqual({});
+  });
+
+  test('does not clear a replacement reporter when a handoff lease expires', async () => {
+    const finishOldSurface = beginLocalChatBusy('drone:default', {
+      releaseDelayMs: 25,
+    });
+    finishOldSurface();
+    const finishReplacementSurface = beginLocalChatBusy('drone:default');
+
+    await Bun.sleep(40);
+    expect(useDroneHubRuntimeStore.getState().localBusyChatCountByNodeId).toEqual({
+      'drone:default': 1,
+    });
+
+    finishReplacementSurface();
+    expect(useDroneHubRuntimeStore.getState().localBusyChatCountByNodeId).toEqual({});
+  });
 });

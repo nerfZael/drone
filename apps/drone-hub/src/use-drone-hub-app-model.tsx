@@ -88,7 +88,10 @@ import {
   useDroneHubAppModelUiState,
   useDroneHubUiStore,
 } from './droneHub/app/use-drone-hub-ui-store';
-import { useDroneHubRuntimeState } from './droneHub/app/use-drone-hub-runtime-store';
+import {
+  useDroneHubRuntimeState,
+  useLocalChatBusy,
+} from './droneHub/app/use-drone-hub-runtime-store';
 import { useDroneHubLifecycleEffects } from './droneHub/app/use-drone-hub-lifecycle-effects';
 import { useDroneHubRegistryData } from './droneHub/app/use-drone-hub-registry-data';
 import { useDroneHubToolbarMenuState } from './droneHub/app/use-drone-hub-toolbar-menu-state';
@@ -2873,21 +2876,22 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           selectedIsResponding,
         })
       : false;
+  const selectedChatNodeId = createCanvasChatNodeId(
+    String(selectedDrone ?? '').trim(),
+    String(selectedChat ?? '').trim() || 'default',
+  );
+  useLocalChatBusy(selectedChatNodeId, selectedIsResponding);
   const busyChatNodeIdSet = React.useMemo(() => {
     const out = new Set<string>();
     for (const drone of drones) {
       for (const nodeId of busyChatNodeIdsForDrone(drone)) out.add(nodeId);
     }
-    const selectedNodeId = createCanvasChatNodeId(
-      String(selectedDrone ?? '').trim(),
-      String(selectedChat ?? '').trim() || 'default',
-    );
-    if (selectedNodeId && selectedIsResponding) out.add(selectedNodeId);
+    if (selectedChatNodeId && selectedIsResponding) out.add(selectedChatNodeId);
     for (const [nodeId, count] of Object.entries(localBusyChatCountByNodeId)) {
       if (count > 0) out.add(nodeId);
     }
     return out;
-  }, [drones, localBusyChatCountByNodeId, selectedChat, selectedDrone, selectedIsResponding]);
+  }, [drones, localBusyChatCountByNodeId, selectedChatNodeId, selectedIsResponding]);
   const busyDebugLastSidebarSignatureRef = React.useRef('');
   React.useEffect(() => {
     if (!droneHubBusyDebugEnabled()) return;
