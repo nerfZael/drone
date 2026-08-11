@@ -41,11 +41,6 @@ import {
   CHAT_MESSAGE_DEFAULT_LIMIT,
   CHAT_MESSAGE_MAX_LIMIT,
   CHAT_MESSAGE_RESPONSE_MAX_BYTES,
-  CHAT_IDLE_DEFAULT_TIMEOUT_MS,
-  CHAT_IDLE_MAX_TIMEOUT_MS,
-  CHAT_IDLE_DEFAULT_POLL_INTERVAL_MS,
-  CHAT_IDLE_DEFAULT_IDLE_FOR_MS,
-  CHAT_IDLE_MAX_TARGETS,
   DRONE_READY_DEFAULT_TIMEOUT_MS,
   DRONE_READY_POLL_INTERVAL_MS,
   ASSISTANT_BASH_DEFAULT_TIMEOUT_MS,
@@ -57,8 +52,6 @@ import {
   DEFAULT_CODEX_MODEL,
   DEFAULT_THREAD_TITLE,
   ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX,
-  ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY,
-  ASSISTANT_CHAT_IDLE_PROMPT_LINE,
   ASSISTANT_MULTI_TARGET_PROMPT_LINE,
   ASSISTANT_SINGLE_TARGET_PROMPT_LINE,
   ASSISTANT_NO_TARGET_PROMPT_LINE,
@@ -90,8 +83,6 @@ import type {
   AssistantChangeEvent,
   AssistantChatIdleStatus,
   AssistantChatIdleTarget,
-  AssistantChatIdleWaitMode,
-  AssistantChatIdleWaitResult,
   AssistantCreateChatResult,
   AssistantCreateDroneResult,
   AssistantCreateGroupResult,
@@ -112,7 +103,6 @@ export type {
   AssistantChangeEvent,
   AssistantChatIdleStatus,
   AssistantChatIdleTarget,
-  AssistantChatIdleWaitResult,
   AssistantCreateChatResult,
   AssistantCreateDroneResult,
   AssistantCreateGroupResult,
@@ -663,14 +653,6 @@ function normalizeAssistantSystemPrompt(raw: unknown): string {
     : text;
 }
 
-function migrateAssistantSystemPrompt(raw: unknown): string {
-  const prompt = normalizeAssistantSystemPrompt(raw);
-  if (!prompt.includes(ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY)) return prompt;
-  return normalizeAssistantSystemPrompt(
-    prompt.replace(ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY, ASSISTANT_CHAT_IDLE_PROMPT_LINE),
-  );
-}
-
 function normalizeAssistantEnabledTools(
   raw: unknown,
   fallback: string[] = ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES,
@@ -682,29 +664,21 @@ function normalizeAssistantEnabledTools(
   for (const item of raw) {
     const rawName = String(item ?? '').trim();
     const names =
-      rawName === 'subscribe_to_chats_idle' ||
-      rawName === 'subscribe_to_any_chat_idle' ||
-      rawName === 'subscribe_to_all_chats_idle'
-        ? ['subscribe_to_resource_events']
-        : rawName === 'list_chat_idle_subscriptions'
-          ? ['list_resource_subscriptions']
-          : rawName === 'cancel_chat_idle_subscription'
-            ? ['cancel_resource_subscription']
-            : rawName === 'assistant_files'
-              ? ['list_targets', 'set_target']
-              : rawName === 'list_changed_files'
-                ? ['get_working_tree_status']
-                : rawName === 'message_drone'
-                  ? ['send_message']
-                  : rawName === 'read_chat_messages'
-                    ? ['list_chats', 'read_chat']
-                    : rawName === 'get_chat_overview'
-                      ? ['list_chats']
-                      : rawName === 'inspect_drone'
-                        ? ['list_drones']
-                        : rawName === 'set_drone_groups'
-                          ? ['set_drone_group']
-                          : [rawName];
+      rawName === 'assistant_files'
+        ? ['list_targets', 'set_target']
+        : rawName === 'list_changed_files'
+          ? ['get_working_tree_status']
+          : rawName === 'message_drone'
+            ? ['send_message']
+            : rawName === 'read_chat_messages'
+              ? ['list_chats', 'read_chat']
+              : rawName === 'get_chat_overview'
+                ? ['list_chats']
+                : rawName === 'inspect_drone'
+                  ? ['list_drones']
+                  : rawName === 'set_drone_groups'
+                    ? ['set_drone_group']
+                    : [rawName];
     for (const name of names) {
       if (!allowed.has(name) || seen.has(name)) continue;
       seen.add(name);
@@ -712,52 +686,6 @@ function normalizeAssistantEnabledTools(
     }
   }
   return tools;
-}
-
-function normalizeAssistantChatIdleWaitMode(
-  raw: unknown,
-  fallback: AssistantChatIdleWaitMode = 'all',
-): AssistantChatIdleWaitMode {
-  const value = String(raw ?? '')
-    .trim()
-    .toLowerCase();
-  if (value === 'any') return 'any';
-  if (value === 'all') return 'all';
-  return fallback;
-}
-
-function chatIdleStatusesMatchMode(
-  statuses: AssistantChatIdleStatus[],
-  mode: AssistantChatIdleWaitMode,
-): boolean {
-  return mode === 'any'
-    ? statuses.some((status) => status.idle)
-    : statuses.every((status) => status.idle);
-}
-
-function chatIdleModeLabel(mode: AssistantChatIdleWaitMode): string {
-  return mode === 'any' ? 'any subscribed chat is idle' : 'all subscribed chats are idle';
-}
-
-function chatIdleModeActionText(mode: AssistantChatIdleWaitMode): string {
-  return mode === 'any' ? 'any chat becoming idle' : 'all chats becoming idle';
-}
-
-function makeSubscribeToChatsIdleParameters(Type: any) {
-  return Type.Object({
-    targets: Type.Array(
-      Type.Object({
-        droneId: Type.String({ description: 'Drone id or visible name.' }),
-        chatName: Type.Optional(Type.String({ description: 'Chat name. Defaults to default.' })),
-      }),
-      { minItems: 1, maxItems: CHAT_IDLE_MAX_TARGETS },
-    ),
-    idleForMs: Type.Optional(
-      Type.Number({
-        description: `Require the idle condition to remain true for this long before returning. Defaults to ${CHAT_IDLE_DEFAULT_IDLE_FOR_MS}.`,
-      }),
-    ),
-  });
 }
 
 function sameToolSet(rawNames: Set<string>, names: string[]): boolean {
@@ -792,24 +720,6 @@ function applyAssistantSystemPromptPatches(prompt: string, rawPatches: unknown):
     next = replaceTextOnce(next, patch.oldText, patch.newText, 'thread system prompt');
   }
   return normalizeAssistantSystemPrompt(next);
-}
-
-function clampChatIdleTimeoutMs(raw: unknown): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return CHAT_IDLE_DEFAULT_TIMEOUT_MS;
-  return Math.max(1000, Math.min(CHAT_IDLE_MAX_TIMEOUT_MS, Math.floor(value)));
-}
-
-function clampChatIdlePollIntervalMs(raw: unknown): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return CHAT_IDLE_DEFAULT_POLL_INTERVAL_MS;
-  return Math.max(250, Math.min(5000, Math.floor(value)));
-}
-
-function clampChatIdleForMs(raw: unknown): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return CHAT_IDLE_DEFAULT_IDLE_FOR_MS;
-  return Math.max(0, Math.min(10_000, Math.floor(value)));
 }
 
 function buildChatTimelineMessages(
@@ -1058,7 +968,7 @@ function sanitizeThread(thread: AssistantThread): AssistantThread {
   return {
     ...thread,
     systemPrompt:
-      migrateAssistantSystemPrompt(thread.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
+      normalizeAssistantSystemPrompt(thread.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(thread.systemPromptUpdatedAt) || null,
     enabledTools: normalizeAssistantEnabledTools(thread.enabledTools),
     ...(Array.isArray(thread.enabledWorkspaceIds)
@@ -1106,7 +1016,7 @@ function normalizeThread(
     provider,
     thinkingLevel,
     systemPrompt:
-      migrateAssistantSystemPrompt(raw.systemPrompt) ||
+      normalizeAssistantSystemPrompt(raw.systemPrompt) ||
       fallback.systemPrompt ||
       ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(raw.systemPromptUpdatedAt) || null,
@@ -2816,7 +2726,7 @@ export class HubAssistantService {
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
     const stored = (await loadAssistantState()) ?? undefined;
-    const storedSystemPrompt = migrateAssistantSystemPrompt(stored?.systemPrompt);
+    const storedSystemPrompt = normalizeAssistantSystemPrompt(stored?.systemPrompt);
     this.defaultSystemPrompt = storedSystemPrompt || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
     this.defaultSystemPromptUpdatedAt =
       storedSystemPrompt &&

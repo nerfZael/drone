@@ -11,13 +11,6 @@ export const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
 export const CHAT_MESSAGE_DEFAULT_LIMIT = 10;
 export const CHAT_MESSAGE_MAX_LIMIT = 50;
 export const CHAT_MESSAGE_RESPONSE_MAX_BYTES = 500_000;
-export const CHAT_IDLE_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
-export const CHAT_IDLE_MAX_TIMEOUT_MS = 30 * 60 * 1000;
-export const CHAT_IDLE_DEFAULT_POLL_INTERVAL_MS = 1000;
-export const CHAT_IDLE_DEFAULT_IDLE_FOR_MS = 1000;
-export const CHAT_IDLE_SUBSCRIPTION_EXPIRES_AFTER_MS = 24 * 60 * 60 * 1000;
-export const CHAT_IDLE_MAX_SUBSCRIPTIONS = 200;
-export const CHAT_IDLE_MAX_TARGETS = 20;
 export const DRONE_READY_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 export const DRONE_READY_POLL_INTERVAL_MS = 250;
 export const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30 * 60_000;
@@ -30,8 +23,6 @@ export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_THREAD_TITLE = 'New thread';
 export const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
   'Current existing-drone access scope is appended at run time. It limits operations that target existing drones; enabled global creation tools are governed separately.';
-export const ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY =
-  'When you send a drone chat message and need the result later, call subscribe_to_chats_idle on the target chat. This returns immediately so you can continue other work. If there is nothing else to do, end your turn; the system will resume this thread when the subscribed chats become idle.';
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
   'When you start asynchronous work and need the result later, use subscribe_to_resource_events for chat idle, failure, or GitHub pull-request events. Use subscribe_to_cron for recurring time-based work. These tools return immediately; end your turn when there is nothing else to do, and the system will resume this conversation when subscribed events arrive.';
 export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
@@ -469,28 +460,10 @@ export const ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES = [
   'open_whiteboard',
   'close_whiteboard',
 ];
-export const ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'create_chat');
-export const ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.filter(
-    (name) => name !== 'subscribe_to_any_chat_idle' && name !== 'subscribe_to_all_chats_idle',
-  ).concat('subscribe_to_chats_idle');
 export const ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES =
   ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'fetch_content');
-export const ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'create_chat');
-export const ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.filter(
-    (name) => name !== 'subscribe_to_any_chat_idle' && name !== 'subscribe_to_all_chats_idle',
-  ).concat('subscribe_to_chats_idle');
 export const ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES =
   ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'web_search');
-export const ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'create_chat');
-export const ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.filter(
-    (name) => name !== 'subscribe_to_any_chat_idle' && name !== 'subscribe_to_all_chats_idle',
-  ).concat('subscribe_to_chats_idle');
 type AssistantModelOptionDefinition = {
   provider: LlmProviderId;
   id: string;

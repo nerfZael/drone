@@ -105,6 +105,7 @@ describe('assistant system prompt settings', () => {
       'message_drone',
       'read_chat_messages',
       'get_current_context',
+      'subscribe_to_chats_idle',
       'subscribe_to_any_chat_idle',
       'subscribe_to_all_chats_idle',
       'list_chat_idle_subscriptions',
@@ -333,7 +334,7 @@ describe('assistant system prompt settings', () => {
     });
   });
 
-  test('migrates legacy artifact, changed-file, MCP, and idle subscription aliases', async () => {
+  test('drops removed idle tools while normalizing unrelated tool aliases', async () => {
     await withTempDroneDataDir('assistant-legacy-tool-settings-', async () => {
       const service = makeAssistantService();
       const created = await ensureTestNativeChat(service, { chatName: 'legacy tools' });
@@ -343,6 +344,7 @@ describe('assistant system prompt settings', () => {
           'list_changed_files',
           'message_drone',
           'read_chat_messages',
+          'subscribe_to_chats_idle',
           'subscribe_to_all_chats_idle',
           'subscribe_to_any_chat_idle',
           'list_chat_idle_subscriptions',
@@ -357,9 +359,6 @@ describe('assistant system prompt settings', () => {
         'send_message',
         'list_chats',
         'read_chat',
-        'subscribe_to_resource_events',
-        'list_resource_subscriptions',
-        'cancel_resource_subscription',
       ]);
     });
   });

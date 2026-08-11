@@ -173,9 +173,6 @@ const TOOL_LABELS: Record<string, string> = {
   set_drone_group: 'Set drone group',
   set_target: 'Set workspace target',
   transfer_files: 'Transfer files',
-  subscribe_to_any_chat_idle: 'Subscribe to any chat idle',
-  subscribe_to_all_chats_idle: 'Subscribe to all chats idle',
-  subscribe_to_chats_idle: 'Subscribe to all chats idle',
   wait_for_agent_chats_idle: 'Wait for chats idle',
   list_files: 'List files',
   read_file: 'Read file',
@@ -213,9 +210,6 @@ function canGroupToolItem(item: AssistantToolRenderItem): boolean {
   return (
     Boolean(name) &&
     name !== 'message_drone' &&
-    name !== 'subscribe_to_any_chat_idle' &&
-    name !== 'subscribe_to_all_chats_idle' &&
-    name !== 'subscribe_to_chats_idle' &&
     name !== 'wait_for_agent_chats_idle'
   );
 }

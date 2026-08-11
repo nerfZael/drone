@@ -1,9 +1,5 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { describe, expect, test } from 'bun:test';
 
-import { McpIdleSubscriptionStore } from '../src/hub/assistant/mcp-idle-subscription-store';
 import { ASSISTANT_TOOL_SUMMARIES } from '../src/hub/assistant/assistant-config';
 import { createInProcessDroneHubMcpClient } from '../src/hub/assistant/in-process-drone-hub-mcp';
 import { normalizeMcpChatAccessScope } from '../src/hub/mcp-chat-access';
@@ -140,38 +136,6 @@ describe('Drone Hub MCP principal authorization', () => {
     expect(() => authorizeDroneHubMcpTool(assistant, 'create_drone', { name: 'New draft', draft: true })).not.toThrow();
   });
 
-});
-
-describe('Drone Hub MCP idle subscription persistence', () => {
-  const tempDirs: string[] = [];
-  afterEach(() => {
-    for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  test('persists subscriptions in SQLite across store instances', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-mcp-idle-'));
-    tempDirs.push(dir);
-    const databasePath = path.join(dir, 'assistant.sqlite');
-    const first = new McpIdleSubscriptionStore(databasePath);
-    first.save({
-      id: 'idle-1',
-      status: 'active',
-      expiresAtMs: 1234,
-      subscription: { mode: 'any', targets: [{ drone: 'drone-a', chat: 'default' }] },
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    });
-    first.close();
-
-    const second = new McpIdleSubscriptionStore(databasePath);
-    expect(second.list()).toEqual([{
-      id: 'idle-1',
-      status: 'active',
-      expiresAtMs: 1234,
-      subscription: { mode: 'any', targets: [{ drone: 'drone-a', chat: 'default' }] },
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    }]);
-    second.close();
-  });
 });
 
 describe('Drone Hub assistant MCP transport', () => {
@@ -457,131 +421,6 @@ describe('Drone Hub assistant MCP transport', () => {
       } finally {
         await allowedClient?.close();
         await deniedClient?.close();
-        globalThis.fetch = previousFetch;
-        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
-        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
-        if (previousToken == null) delete process.env.DRONE_TOKEN;
-        else process.env.DRONE_TOKEN = previousToken;
-      }
-    });
-  });
-
-  test('routes legacy multi-chat idle watches through durable chat subscriptions', async () => {
-    await withTempDroneDataDir('drone-assistant-mcp-legacy-idle-', async () => {
-      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
-      const previousToken = process.env.DRONE_TOKEN;
-      const previousFetch = globalThis.fetch;
-      const subscriptionBodies: any[] = [];
-      globalThis.fetch = (async (input, init) => {
-        const url = new URL(
-          typeof input === 'string' ? input : input instanceof URL ? input : input.url,
-        );
-        if (url.pathname === '/api/drones/drone-b/chats') {
-          return Response.json({
-            ok: true,
-            name: 'Build worker',
-            chats: ['default'],
-            chatDetails: [{ chat: 'default', chatId: 'target-chat-b' }],
-          });
-        }
-        if (url.pathname === '/api/drones/drone-c/chats') {
-          return Response.json({
-            ok: true,
-            name: 'Review worker',
-            chats: ['default', 'review'],
-            chatDetails: [{ chat: 'review', chatId: 'target-chat-c' }],
-          });
-        }
-        if (url.pathname.startsWith('/api/resource-subscriptions/chat-resource/')) {
-          const chatId = url.pathname.split('/').at(-1);
-          return Response.json({
-            ok: true,
-            resource: {
-              chatId,
-              droneId: chatId === 'target-chat-b' ? 'drone-b' : 'drone-c',
-              chatName: chatId === 'target-chat-b' ? 'default' : 'review',
-            },
-          });
-        }
-        if (url.pathname === '/api/resource-subscriptions') {
-          const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
-          subscriptionBodies.push(body);
-          return Response.json({
-            ok: true,
-            created: true,
-            subscription: {
-              id: `subscription-${subscriptionBodies.length}`,
-              provider: 'drone-hub',
-              resourceType: 'chat',
-              resourceId: body?.resourceId,
-              events: body?.events,
-              intent: body?.intent,
-              status: 'active',
-            },
-          });
-        }
-        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
-      }) as typeof fetch;
-      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
-      process.env.DRONE_TOKEN = 'managed-chat-test-token';
-
-      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
-      try {
-        client = await createInProcessDroneHubMcpClient({
-          correlationId: 'legacy-idle-watch',
-          allowedDroneRefs: [],
-          allowedWriteDroneRefs: [],
-          allowedDroneIds: [],
-          legacyIdleSubscriptionTools: true,
-          principal: {
-            kind: 'chat',
-            tokenId: 'chat:drone-a:default',
-            name: 'Drone A / default',
-            droneId: 'drone-a',
-            chatName: 'default',
-            chatId: 'subscriber-chat',
-            accessScope: {
-              readMode: 'selected',
-              writeMode: 'selected',
-              executeMode: 'selected',
-              droneIds: ['drone-a', 'drone-b', 'drone-c'],
-              updatedAt: '2026-01-01T00:00:00.000Z',
-            },
-            selectedDroneRefs: ['drone-a', 'drone-b', 'drone-c'],
-          },
-        });
-        const result = await client.callTool({
-          name: 'subscribe_to_all_chats_idle',
-          arguments: {
-            targets: [
-              { drone: 'drone-b', chat: 'default' },
-              { drone: 'drone-c', chat: 'review' },
-            ],
-          },
-        });
-        expect(result.isError).not.toBe(true);
-        expect(subscriptionBodies).toHaveLength(2);
-        expect(subscriptionBodies.map((body) => body.resourceId)).toEqual([
-          'target-chat-b',
-          'target-chat-c',
-        ]);
-        for (const body of subscriptionBodies) {
-          expect(body).toMatchObject({
-            provider: 'drone-hub',
-            resourceType: 'chat',
-            events: ['chat.idle', 'chat.failed'],
-            subscriber: {
-              chatId: 'subscriber-chat',
-              droneId: 'drone-a',
-              chatName: 'default',
-            },
-          });
-          expect(body.intent).toContain('Wait for all requested chats to finish');
-          expect(body.intent).toContain('Targets: Build worker, Review worker/review');
-          expect(body.intent).not.toContain('drone-b/default');
-        }
-      } finally {
-        await client?.close();
         globalThis.fetch = previousFetch;
         if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
         else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;

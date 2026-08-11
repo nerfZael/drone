@@ -15,7 +15,6 @@ import {
 import type { McpTokenIdentity } from './mcp-tokens';
 
 import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameSync } from '../host/profiles';
-import { McpIdleSubscriptionStore } from './assistant/mcp-idle-subscription-store';
 import { GROQ_SPEECH_MAX_CHARS, GROQ_SPEECH_VOICES } from './groq-speech';
 import { droneSummary } from './mcp-summaries';
 import { placeMcpRepoScopedGroupNodeAtTop } from './mcp-sidebar-group-order';
@@ -33,14 +32,7 @@ import {
 
 const DEFAULT_HUB_BASE_URL = 'http://127.0.0.1:5174';
 const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_IDLE_FOR_MS = 1000;
-const DEFAULT_IDLE_POLL_INTERVAL_MS = 1000;
-const DEFAULT_IDLE_EXPIRES_IN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_HIGHLIGHT_DURATION_MS = 10_000;
-const MAX_IDLE_FOR_MS = 60_000;
-const MAX_IDLE_POLL_INTERVAL_MS = 30_000;
-const MAX_IDLE_EXPIRES_IN_MS = 24 * 60 * 60 * 1000;
-const MAX_IDLE_TARGETS = 20;
 const MAX_HIGHLIGHT_DURATION_MS = 60_000;
 
 const whiteboardShapeSchema = z.object({
@@ -76,39 +68,6 @@ type HubConnection = {
   token: string;
   source: string;
 };
-
-type IdleTarget = {
-  drone: string;
-  chat: string;
-};
-
-type IdleSubscription = {
-  id: string;
-  mode: 'any' | 'all';
-  targets: IdleTarget[];
-  clientMeta: Record<string, unknown>;
-  status: 'active' | 'fired' | 'expired' | 'stopped';
-  createdAt: string;
-  expiresAt: string;
-  expiresAtMs: number;
-  idleForMs: number;
-  pollIntervalMs: number;
-  idleSince: number | null;
-  inFlight: boolean;
-  timer: NodeJS.Timeout | null;
-  lastStatus: unknown;
-  lastError: string | null;
-};
-
-const idleSubscriptions = new Map<string, IdleSubscription>();
-let idleSubscriptionSequence = 0;
-let idleSubscriptionsRestored = false;
-let idleSubscriptionStore: McpIdleSubscriptionStore | null = null;
-
-function subscriptionStore(): McpIdleSubscriptionStore {
-  idleSubscriptionStore ??= new McpIdleSubscriptionStore();
-  return idleSubscriptionStore;
-}
 
 function cleanString(value: unknown, fallback = ''): string {
   const text = String(value ?? '').trim();
@@ -994,201 +953,6 @@ function normalizeRenameRequests(args: any = {}) {
   });
 }
 
-function normalizeIdleTargets(args: any): IdleTarget[] {
-  const rawTargets = Array.isArray(args?.targets) ? args.targets : [];
-  const fallbackDrone = cleanString(args?.drone || args?.droneId);
-  const targets = rawTargets.length > 0 ? rawTargets : fallbackDrone ? [{ drone: fallbackDrone, chat: args?.chat || args?.chatName }] : [];
-  const result: IdleTarget[] = [];
-  const seen = new Set<string>();
-  for (const rawTarget of targets.slice(0, MAX_IDLE_TARGETS)) {
-    const drone = cleanString(rawTarget?.drone || rawTarget?.droneId || rawTarget?.id);
-    const chat = chatName(rawTarget?.chat || rawTarget?.chatName);
-    if (!drone) continue;
-    const key = `${drone}\u0000${chat}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push({ drone, chat });
-  }
-  return result;
-}
-
-function makeIdleSubscriptionId(): string {
-  idleSubscriptionSequence += 1;
-  return `drone_hub_idle_${Date.now().toString(36)}_${idleSubscriptionSequence.toString(36)}`;
-}
-
-async function idleStatus(mode: 'any' | 'all', targets: IdleTarget[]) {
-  return requestJson('/api/chats/idle/status', { method: 'POST', body: JSON.stringify({ mode, targets }) });
-}
-
-function publicSubscription(subscription: IdleSubscription) {
-  return {
-    id: subscription.id,
-    mode: subscription.mode,
-    targets: subscription.targets,
-    status: subscription.status,
-    createdAt: subscription.createdAt,
-    expiresAt: subscription.expiresAt,
-    idleForMs: subscription.idleForMs,
-    pollIntervalMs: subscription.pollIntervalMs,
-    lastStatus: subscription.lastStatus,
-    lastError: subscription.lastError,
-  };
-}
-
-function persistIdleSubscription(subscription: IdleSubscription) {
-  subscriptionStore().save({
-    id: subscription.id,
-    status: subscription.status,
-    expiresAtMs: subscription.expiresAtMs,
-    updatedAt: new Date().toISOString(),
-    subscription: {
-      ...publicSubscription(subscription),
-      clientMeta: subscription.clientMeta,
-      idleSince: subscription.idleSince,
-    },
-  });
-}
-
-function restoredIdleSubscription(record: ReturnType<McpIdleSubscriptionStore['list']>[number]): IdleSubscription | null {
-  const value = record.subscription as any;
-  const mode = value?.mode === 'all' ? 'all' : value?.mode === 'any' ? 'any' : null;
-  const targets = normalizeIdleTargets({ targets: value?.targets });
-  if (!mode || targets.length === 0) return null;
-  return {
-    id: record.id,
-    mode,
-    targets,
-    clientMeta: normalizeClientMeta(value?.clientMeta),
-    status: record.status,
-    createdAt: cleanIsoTimestamp(value?.createdAt) ?? record.updatedAt,
-    expiresAt: cleanIsoTimestamp(value?.expiresAt) ?? new Date(record.expiresAtMs).toISOString(),
-    expiresAtMs: record.expiresAtMs,
-    idleForMs: cleanPositiveInt(value?.idleForMs, DEFAULT_IDLE_FOR_MS, MAX_IDLE_FOR_MS),
-    pollIntervalMs: cleanPositiveInt(value?.pollIntervalMs, DEFAULT_IDLE_POLL_INTERVAL_MS, MAX_IDLE_POLL_INTERVAL_MS),
-    idleSince: Number.isFinite(Number(value?.idleSince)) ? Number(value.idleSince) : null,
-    inFlight: false,
-    timer: null,
-    lastStatus: value?.lastStatus ?? null,
-    lastError: typeof value?.lastError === 'string' ? value.lastError : null,
-  };
-}
-
-async function sendIdleSubscriptionFiredNotification(server: McpServer, subscription: IdleSubscription) {
-  try {
-    await server.sendLoggingMessage({
-      level: 'info',
-      logger: 'drone-hub',
-      data: {
-        kind: 'drone_hub.chat_idle',
-        subscription: publicSubscription(subscription),
-        mode: subscription.mode,
-        targets: subscription.targets,
-        status: subscription.lastStatus,
-        clientMeta: subscription.clientMeta,
-      },
-    });
-  } catch {
-    // Notifications are best effort. The subscription still fired successfully.
-  }
-}
-
-function stopIdleSubscription(subscription: IdleSubscription, status: IdleSubscription['status']) {
-  if (subscription.timer) clearInterval(subscription.timer);
-  subscription.timer = null;
-  subscription.status = status;
-  persistIdleSubscription(subscription);
-}
-
-async function runIdleSubscriptionTick(server: McpServer, subscription: IdleSubscription) {
-  if (subscription.inFlight || subscription.status !== 'active') return;
-  const now = Date.now();
-  if (now >= subscription.expiresAtMs) {
-    stopIdleSubscription(subscription, 'expired');
-    return;
-  }
-  subscription.inFlight = true;
-  try {
-    const result = await idleStatus(subscription.mode, subscription.targets);
-    if (subscription.status !== 'active') return;
-    subscription.lastStatus = result;
-    subscription.lastError = null;
-    if (result?.matched) {
-      subscription.idleSince ??= now;
-      if (now - subscription.idleSince >= subscription.idleForMs) {
-        stopIdleSubscription(subscription, 'fired');
-        idleSubscriptions.set(subscription.id, subscription);
-        await sendIdleSubscriptionFiredNotification(server, subscription);
-      }
-    } else {
-      subscription.idleSince = null;
-    }
-  } catch (error: any) {
-    subscription.lastError = error?.message || String(error);
-  } finally {
-    subscription.inFlight = false;
-    persistIdleSubscription(subscription);
-  }
-}
-
-function normalizeClientMeta(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .map(([key, item]) => [cleanString(key), item])
-      .filter(([key]) => key),
-  );
-}
-
-function startIdleSubscription(server: McpServer, mode: 'any' | 'all', args: any, extra: any) {
-  const targets = normalizeIdleTargets(args);
-  if (targets.length === 0) throw new Error('targets are required');
-  const now = Date.now();
-  const expiresInMs = cleanPositiveInt(args?.expiresInMs, DEFAULT_IDLE_EXPIRES_IN_MS, MAX_IDLE_EXPIRES_IN_MS);
-  const subscription: IdleSubscription = {
-    id: makeIdleSubscriptionId(),
-    mode,
-    targets,
-    clientMeta: normalizeClientMeta(extra?._meta),
-    status: 'active',
-    createdAt: new Date(now).toISOString(),
-    expiresAt: new Date(now + expiresInMs).toISOString(),
-    expiresAtMs: now + expiresInMs,
-    idleForMs: cleanPositiveInt(args?.idleForMs, DEFAULT_IDLE_FOR_MS, MAX_IDLE_FOR_MS),
-    pollIntervalMs: cleanPositiveInt(args?.pollIntervalMs, DEFAULT_IDLE_POLL_INTERVAL_MS, MAX_IDLE_POLL_INTERVAL_MS),
-    idleSince: null,
-    inFlight: false,
-    timer: null,
-    lastStatus: null,
-    lastError: null,
-  };
-  subscription.timer = setInterval(() => void runIdleSubscriptionTick(server, subscription), subscription.pollIntervalMs);
-  subscription.timer.unref?.();
-  idleSubscriptions.set(subscription.id, subscription);
-  persistIdleSubscription(subscription);
-  void runIdleSubscriptionTick(server, subscription);
-  return { ok: true, subscription: publicSubscription(subscription) };
-}
-
-function restoreIdleSubscriptions(server: McpServer): void {
-  if (idleSubscriptionsRestored) return;
-  idleSubscriptionsRestored = true;
-  const now = Date.now();
-  for (const record of subscriptionStore().list()) {
-    const subscription = restoredIdleSubscription(record);
-    if (!subscription) continue;
-    if (subscription.status === 'active' && subscription.expiresAtMs <= now) {
-      subscription.status = 'expired';
-      persistIdleSubscription(subscription);
-    }
-    idleSubscriptions.set(subscription.id, subscription);
-    if (subscription.status !== 'active') continue;
-    subscription.timer = setInterval(() => void runIdleSubscriptionTick(server, subscription), subscription.pollIntervalMs);
-    subscription.timer.unref?.();
-    void runIdleSubscriptionTick(server, subscription);
-  }
-}
-
 function boundedTranscriptTurn(turn: any, maxCharsPerField: number) {
   const result = { ...turn };
   for (const key of ['prompt', 'output', 'error']) {
@@ -1270,7 +1034,6 @@ function agentFromPreferenceKey(value: string) {
 type McpToolRegistrationContext = {
   principal: McpTokenIdentity;
   nativeThreadId?: string;
-  legacyIdleSubscriptionTools?: boolean;
   speechEnabled?: boolean;
   onSpeechToolRegistered?: (tool: RegisteredTool) => void;
   hubServices: HubServices;
@@ -1292,64 +1055,6 @@ function subscriptionSubscriber(context: McpToolRegistrationContext) {
     droneId: principal.droneId,
     chatName: principal.chatName,
   };
-}
-
-async function subscribeChatPrincipalToIdleTargets(
-  context: McpToolRegistrationContext,
-  mode: 'any' | 'all',
-  args: any,
-) {
-  const targets = normalizeIdleTargets(args);
-  if (targets.length === 0) throw new Error('targets are required');
-  const subscriber = subscriptionSubscriber(context);
-  const resources = await Promise.all(
-    targets.map(async (target) => {
-      const response = await requestJson(
-        `/api/drones/${encodeURIComponent(target.drone)}/chats`,
-        { method: 'GET' },
-      );
-      const chat = (Array.isArray(response?.chatDetails) ? response.chatDetails : []).find(
-        (item: any) => cleanString(item?.chat ?? item?.name) === target.chat,
-      );
-      const resourceId = cleanString(chat?.chatId);
-      if (!resourceId) throw new Error(`unknown chat: ${target.drone}/${target.chat}`);
-      await authorizeChatSubscriptionResource(context, resourceId);
-      const droneName = cleanString(response?.name, target.drone);
-      const chatCount = Array.isArray(response?.chats) ? response.chats.length : 0;
-      const targetLabel =
-        target.chat === 'default' && chatCount === 1
-          ? droneName
-          : `${droneName}/${target.chat}`;
-      return { ...target, resourceId, targetLabel };
-    }),
-  );
-  const targetLabels = resources.map((target) => target.targetLabel).join(', ');
-  const intent = (
-    mode === 'all'
-      ? `Wait for all requested chats to finish before completing the follow-up. Inspect every target after each event and continue waiting while any target is still running. Targets: ${targetLabels}`
-      : `Resume the requested follow-up when any target finishes. Targets: ${targetLabels}`
-  ).slice(0, 2_000);
-  const subscriptions = await Promise.all(
-    resources.map(async (target) => {
-      const response = await requestJson('/api/resource-subscriptions', {
-        method: 'POST',
-        body: JSON.stringify({
-          provider: 'drone-hub',
-          resourceType: 'chat',
-          resourceId: target.resourceId,
-          events: ['chat.idle', 'chat.failed'],
-          intent,
-          subscriber,
-        }),
-      });
-      return {
-        target: { drone: target.drone, chat: target.chat },
-        created: response?.created === true,
-        subscription: mcpSubscription(response?.subscription),
-      };
-    }),
-  );
-  return { ok: true, mode, subscriptions };
 }
 
 function mcpSubscription(value: any): any {
@@ -1453,7 +1158,7 @@ async function grantCreatedDroneAccessToManagedChat(
     ...new Set([...latestPrincipal.accessScope.droneIds, ...persistedDroneIds]),
   ];
   const accessScope = {
-    // Additive grants must not replace the active MCP session's access modes.
+    // Additive grants must not replace the current principal's access modes.
     // A delayed response may contain an older, broader policy snapshot.
     ...latestPrincipal.accessScope,
     droneIds: confirmedDroneIds,
@@ -2282,97 +1987,6 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     return toolResult({ ok: true, subscription: mcpSubscription(response?.subscription) });
   });
 
-  const idleTargetSchema = z.object({
-    drone: z.string().optional(),
-    droneId: z.string().optional(),
-    id: z.string().optional(),
-    chat: z.string().optional(),
-    chatName: z.string().optional(),
-  });
-  const idleInputSchema = {
-    targets: z.array(idleTargetSchema).optional(),
-    drone: z.string().optional(),
-    droneId: z.string().optional(),
-    chat: z.string().optional(),
-    chatName: z.string().optional(),
-    idleForMs: z.number().optional(),
-    pollIntervalMs: z.number().optional(),
-    expiresInMs: z.number().optional(),
-  };
-  if (context.legacyIdleSubscriptionTools !== false) {
-    server.registerTool('subscribe_to_any_chat_idle', {
-      title: 'Subscribe to any chat idle',
-      description: 'Subscribe to any target chat finishing. Managed DroneHub chats receive durable conversation wake-ups.',
-      inputSchema: idleInputSchema,
-    }, async (args, extra) => toolResult(
-      chatPrincipal(context)
-        ? await subscribeChatPrincipalToIdleTargets(context, 'any', args)
-        : startIdleSubscription(server, 'any', args, extra),
-    ));
-
-    server.registerTool('subscribe_to_all_chats_idle', {
-      title: 'Subscribe to all chats idle',
-      description: 'Subscribe to all target chats finishing. Managed DroneHub chats receive durable conversation wake-ups.',
-      inputSchema: idleInputSchema,
-    }, async (args, extra) => toolResult(
-      chatPrincipal(context)
-        ? await subscribeChatPrincipalToIdleTargets(context, 'all', args)
-        : startIdleSubscription(server, 'all', args, extra),
-    ));
-
-    server.registerTool('list_chat_idle_subscriptions', {
-      title: 'List chat idle subscriptions',
-      description: 'List durable Drone Hub chat-idle subscriptions and their latest state.',
-      inputSchema: {},
-    }, async () => {
-      const principal = chatPrincipal(context);
-      if (!principal) {
-        return toolResult({
-          ok: true,
-          subscriptions: [...idleSubscriptions.values()].map(publicSubscription),
-        });
-      }
-      const response = await requestJson(
-        `/api/resource-subscriptions?subscriberChatId=${encodeURIComponent(principal.chatId)}&includeInactive=false`,
-        { method: 'GET' },
-      );
-      return toolResult({
-        ok: true,
-        subscriptions: (Array.isArray(response?.subscriptions) ? response.subscriptions : [])
-          .filter(
-            (subscription: any) =>
-              subscription?.provider === 'drone-hub' &&
-              subscription?.resourceType === 'chat' &&
-              (subscription?.events?.includes('chat.idle') ||
-                subscription?.events?.includes('chat.failed')),
-          )
-          .map(mcpSubscription),
-      });
-    });
-
-    server.registerTool('cancel_chat_idle_subscription', {
-      title: 'Cancel chat idle subscription',
-      description: 'Stop a durable Drone Hub chat-idle subscription.',
-      inputSchema: { subscriptionId: z.string() },
-    }, async (args) => {
-      const principal = chatPrincipal(context);
-      if (principal && !idleSubscriptions.has(cleanString(args.subscriptionId))) {
-        const response = await requestJson(
-          `/api/resource-subscriptions/${encodeURIComponent(args.subscriptionId)}?subscriberChatId=${encodeURIComponent(principal.chatId)}`,
-          { method: 'DELETE' },
-        );
-        return toolResult({
-          ok: true,
-          subscription: mcpSubscription(response?.subscription),
-        });
-      }
-      const subscription = idleSubscriptions.get(cleanString(args.subscriptionId));
-      if (!subscription) throw new Error(`unknown chat-idle subscription: ${args.subscriptionId}`);
-      if (subscription.status === 'active') stopIdleSubscription(subscription, 'stopped');
-      return toolResult({ ok: true, subscription: publicSubscription(subscription) });
-    });
-  }
-
   server.registerTool('read_chat', {
     title: 'Read drone chat',
     description: 'Read recent transcript turns for a Drone Hub drone chat.',
@@ -2431,9 +2045,6 @@ const CHAT_EXECUTE_SCOPED_TOOLS = new Set([
   'open_whiteboard',
   'close_whiteboard',
   'send_message',
-  'subscribe_to_any_chat_idle',
-  'subscribe_to_all_chats_idle',
-  'cancel_chat_idle_subscription',
 ]);
 
 const CHAT_WRITE_SCOPED_TOOLS = new Set([
@@ -2467,8 +2078,6 @@ const DRONE_PRINCIPAL_TOOLS = new Set([
   'list_chats',
   'create_chat',
   'send_message',
-  'subscribe_to_any_chat_idle',
-  'subscribe_to_all_chats_idle',
   'read_chat',
   ...WORKFLOW_MCP_TOOL_NAMES,
 ]);
@@ -2570,7 +2179,6 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
     principal: input?.principal ?? { kind: 'legacy', tokenId: 'legacy', name: 'Legacy Drone Hub MCP token' },
     ...(input?.correlationId ? { correlationId: input.correlationId } : {}),
     ...(input?.nativeThreadId ? { nativeThreadId: input.nativeThreadId } : {}),
-    legacyIdleSubscriptionTools: input?.legacyIdleSubscriptionTools !== false,
     ...(input?.allowedDroneRefs ? { allowedDroneRefs: input.allowedDroneRefs } : {}),
     ...(input?.allowedWriteDroneRefs ? { allowedWriteDroneRefs: input.allowedWriteDroneRefs } : {}),
     ...(input?.allowedDroneIds ? { allowedDroneIds: input.allowedDroneIds } : {}),
@@ -2594,7 +2202,6 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
     else speechTool?.disable();
   };
   registerAuthorizedTools(server, context);
-  if (context.legacyIdleSubscriptionTools !== false) restoreIdleSubscriptions(server);
   return server;
 }
 

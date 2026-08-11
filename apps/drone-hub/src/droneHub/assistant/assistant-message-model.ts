@@ -257,12 +257,7 @@ export function assistantUserPromptIsVisible(
   });
 }
 export function isChatIdleToolName(name: string | undefined): boolean {
-  return (
-    name === 'subscribe_to_any_chat_idle' ||
-    name === 'subscribe_to_all_chats_idle' ||
-    name === 'subscribe_to_chats_idle' ||
-    name === 'wait_for_agent_chats_idle'
-  );
+  return name === 'wait_for_agent_chats_idle';
 }
 
 export function normalizeAssistantWaitTargets(
