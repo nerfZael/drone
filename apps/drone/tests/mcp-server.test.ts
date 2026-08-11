@@ -90,12 +90,15 @@ describe('Drone Hub MCP principal authorization', () => {
     expect(() => authorizeDroneHubMcpTool(scoped, 'send_message', { drone: 'drone-b' })).toThrow('execute scope');
     expect(() => authorizeDroneHubMcpTool(scoped, 'send_message', { drone: 'Drone A' })).not.toThrow();
     expect(() => authorizeDroneHubMcpTool(scoped, 'create_drone', { name: 'Child' })).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(scoped, 'create_drone', { name: 'Child', parent: 'drone-b' })).not.toThrow();
     const cloneScoped = {
       principal: {
         ...chatPrincipal,
         accessScope: { ...chatPrincipal.accessScope, readMode: 'selected' as const },
       },
     };
+    expect(() => authorizeDroneHubMcpTool(cloneScoped, 'create_drone', { name: 'Child', parent: 'drone-b' })).toThrow('read scope');
+    expect(() => authorizeDroneHubMcpTool(cloneScoped, 'create_drone', { name: 'Child', parent: 'drone-a' })).not.toThrow();
     expect(() => authorizeDroneHubMcpTool(cloneScoped, 'clone_drone', { source: 'drone-b', name: 'Child' })).toThrow('read scope');
     expect(() => authorizeDroneHubMcpTool(cloneScoped, 'clone_drone', { source: 'drone-a', name: 'Child' })).not.toThrow();
   });
@@ -991,7 +994,7 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
-  test('parents managed-chat creations and immediately grants all selected access kinds', async () => {
+  test('uses only explicit managed-chat parents and immediately grants all selected access kinds', async () => {
     await withTempDroneDataDir('drone-managed-chat-child-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
       const previousToken = process.env.DRONE_TOKEN;
@@ -1079,7 +1082,7 @@ describe('Drone Hub assistant MCP transport', () => {
         });
         const created = await client.callTool({
           name: 'create_drone',
-          arguments: { name: 'Child', draft: true },
+          arguments: { name: 'Child', parent: 'owner', draft: true },
         });
         expect(created.structuredContent).toMatchObject({
           ok: true,
@@ -1132,8 +1135,8 @@ describe('Drone Hub assistant MCP transport', () => {
           name: 'Clone',
           runtime: 'container',
           cloneFrom: 'owner',
-          fleetParentId: 'owner',
         });
+        expect(cloneRequest?.body.fleetParentId).toBeUndefined();
 
         const read = await client.callTool({
           name: 'list_chats',
@@ -1161,7 +1164,7 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
-  test('preserves every selected-scope grant across parallel child creation', async () => {
+  test('preserves every selected-scope grant across parallel drone creation', async () => {
     await withTempDroneDataDir('drone-managed-chat-parallel-children-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
       const previousToken = process.env.DRONE_TOKEN;
@@ -1395,7 +1398,7 @@ describe('Drone Hub assistant MCP transport', () => {
           requests.find(
             (request) => request.pathname === '/api/drones' && request.method === 'POST',
           )?.body,
-        ).toMatchObject({ fleetParentId: 'owner' });
+        ).not.toHaveProperty('fleetParentId');
         expect(
           requests.find(
             (request) =>
@@ -1520,17 +1523,45 @@ describe('Drone Hub assistant MCP transport', () => {
     });
   });
 
-  test('prevents managed chats on host-runtime drones from creating children or chats', async () => {
+  test('allows host-owned managed chats to create independent drones but not host chats', async () => {
     await withTempDroneDataDir('drone-managed-host-chat-', async () => {
       const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
       const previousToken = process.env.DRONE_TOKEN;
       const previousFetch = globalThis.fetch;
-      globalThis.fetch = (async (input) => {
+      let createBody: any = null;
+      globalThis.fetch = (async (input, init) => {
         const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+        const method = String(init?.method ?? 'GET').toUpperCase();
         if (url.pathname === '/api/drones/summary') {
           return Response.json({
             ok: true,
             drones: [{ id: 'host-owner', name: 'Host owner', runtime: 'host' }],
+          });
+        }
+        if (url.pathname === '/api/settings/ui-preferences') {
+          return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+        }
+        if (url.pathname === '/api/drones' && method === 'POST') {
+          createBody = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+          return Response.json(
+            { ok: true, id: 'independent', name: 'Independent', runtime: 'container', draft: true },
+            { status: 201 },
+          );
+        }
+        if (
+          url.pathname === '/api/drones/host-owner/chats/default/mcp-access' &&
+          method === 'PUT'
+        ) {
+          return Response.json({
+            ok: true,
+            available: true,
+            accessScope: {
+              readMode: 'selected',
+              writeMode: 'selected',
+              executeMode: 'selected',
+              droneIds: ['host-owner', 'independent'],
+              updatedAt: '2026-01-02T00:00:00.000Z',
+            },
           });
         }
         return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
@@ -1561,14 +1592,13 @@ describe('Drone Hub assistant MCP transport', () => {
             selectedDroneRefs: ['host-owner', 'Host owner'],
           },
         });
-        const childResult = await client.callTool({
+        const createResult = await client.callTool({
           name: 'create_drone',
-          arguments: { name: 'Blocked child', draft: true },
+          arguments: { name: 'Independent', draft: true },
         });
-        expect(childResult.isError).toBe(true);
-        expect(JSON.stringify(childResult.content)).toContain(
-          'cannot create child drones on host-runtime drone Host owner',
-        );
+        expect(createResult.isError).not.toBe(true);
+        expect(createBody).toMatchObject({ name: 'Independent', runtime: 'container' });
+        expect(createBody).not.toHaveProperty('fleetParentId');
 
         const chatResult = await client.callTool({
           name: 'create_chat',

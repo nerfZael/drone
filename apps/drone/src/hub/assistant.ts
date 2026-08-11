@@ -3235,7 +3235,7 @@ export class HubAssistantService {
       thread?.agentPermissionMode === 'execute'
         ? describeAssistantAccessMode(accessScope.executeMode, accessScope.droneIds)
         : 'none (command execution is disabled)';
-    const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}; execute=${executeScope}. Do not claim access to existing drones outside those scopes. create_drone creates a container child of this chat's owner and automatically grants this chat access; clone_drone also requires read access to its source. Neither operation is available when this chat's owner runs directly on the host. create_group creates an independent group in the supplied repository scope; omit repoPath only for drones without a repository.`;
+    const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}; execute=${executeScope}. Do not claim access to existing drones outside those scopes. create_drone and clone_drone create independent container drones by default and automatically grant this chat access. Pass parent only when the user explicitly wants a child drone; the parent must be in read scope. clone_drone also requires read access to its source. create_group creates an independent group in the supplied repository scope; omit repoPath only for drones without a repository.`;
     const basePrompt =
       normalizeAssistantSystemPrompt(thread?.systemPrompt) ||
       (thread ? this.defaultSystemPromptForThread(thread) : this.defaultSystemPrompt);

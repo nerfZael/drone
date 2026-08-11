@@ -1578,9 +1578,13 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
 
   server.registerTool('create_drone', {
     title: 'Create drone',
-    description: 'Create a new Drone Hub container drone. Drafts return immediately; other drones return when ready unless completion is accepted. Unattended Codex drones default to execute access with no interactive approvals; pass agentPermissionMode and approvalPolicy to override that behavior. For repo-attached drones, agentsMd overrides the AGENTS.md content inherited from Drone Hub settings.',
+    description: 'Create a new Drone Hub container drone. The drone is independent unless parent is explicitly supplied. Drafts return immediately; other drones return when ready unless completion is accepted. Unattended Codex drones default to execute access with no interactive approvals; pass agentPermissionMode and approvalPolicy to override that behavior. For repo-attached drones, agentsMd overrides the AGENTS.md content inherited from Drone Hub settings.',
     inputSchema: {
       name: z.string(),
+      parent: z
+        .string()
+        .describe('Optional existing drone id or name to make the new drone a child of.')
+        .optional(),
       group: z.string().optional(),
       groupId: z.string().optional(),
       agent: z.enum(['cursor', 'codex', 'claude', 'opencode', 'pi', 'blip']).optional(),
@@ -1610,11 +1614,6 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     },
   }, async (args) => {
     if (cleanString(args.group) && cleanString(args.groupId)) throw new Error('use either group or groupId, not both');
-    const fleetParentId = await requireContainerDroneForManagedChat(
-      context,
-      chatPrincipal(context)?.droneId,
-      'create child drones',
-    );
     const resolvedRepo = await resolveRegisteredRepo(args, context.hubServices);
     const repoPath = cleanString(resolvedRepo?.path);
     const defaults = await createDronePreferences(context.hubServices, repoPath);
@@ -1667,7 +1666,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       ...(repoPath && repoBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
       ...(args.agentsMd !== undefined ? { agentsMd: args.agentsMd } : {}),
       ...(cleanString(args.initialMessage) ? { seedPrompt: cleanString(args.initialMessage), seedSubmittedAt: new Date().toISOString() } : {}),
-      ...(fleetParentId ? { fleetParentId } : {}),
+      ...(cleanString(args.parent) ? { fleetParentId: cleanString(args.parent) } : {}),
     };
     const response = await requestJson('/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
     const { accessScope, accessGrantError } =
@@ -1700,10 +1699,14 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
 
   server.registerTool('clone_drone', {
     title: 'Clone drone',
-    description: 'Create a new drone cloned from an existing Drone Hub drone.',
+    description: 'Create an independent new drone cloned from an existing Drone Hub drone. Supply parent only when the clone should be a child of an existing drone.',
     inputSchema: {
       source: z.string(),
       name: z.string(),
+      parent: z
+        .string()
+        .describe('Optional existing drone id or name to make the cloned drone a child of.')
+        .optional(),
       group: z.string().optional(),
       groupId: z.string().optional(),
       cloneChats: z.boolean().optional(),
@@ -1711,11 +1714,6 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
     },
   }, async (args) => {
     if (cleanString(args.group) && cleanString(args.groupId)) throw new Error('use either group or groupId, not both');
-    const fleetParentId = await requireContainerDroneForManagedChat(
-      context,
-      chatPrincipal(context)?.droneId,
-      'clone child drones',
-    );
     const body = {
       name: cleanString(args.name),
       runtime: 'container',
@@ -1726,7 +1724,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         : cleanString(args.group)
           ? { group: cleanString(args.group) }
           : {}),
-      ...(fleetParentId ? { fleetParentId } : {}),
+      ...(cleanString(args.parent) ? { fleetParentId: cleanString(args.parent) } : {}),
     };
     const response = await requestJson('/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
     const { accessScope, accessGrantError } =
@@ -2093,7 +2091,7 @@ const DRONE_PRINCIPAL_TOOLS = new Set([
 const DRONE_DEFAULTED_TOOLS = new Set<string>(WORKFLOW_DRONE_DEFAULTED_TOOL_NAMES);
 
 function assertedDroneRefs(args: any): string[] {
-  const direct = [args?.drone, args?.droneId, args?.targetDroneId, args?.id, args?.beforeDrone, args?.afterDrone, args?.source]
+  const direct = [args?.drone, args?.droneId, args?.targetDroneId, args?.id, args?.beforeDrone, args?.afterDrone, args?.source, args?.parent]
     .map((value) => cleanString(value))
     .filter(Boolean);
   const arrays = [args?.drones, args?.droneIds, args?.targets, args?.renames]
