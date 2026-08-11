@@ -1,14 +1,27 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type { RunResult } from '../../host/dvm';
 import {
-  ChangeRequestLifecycle,
-  normalizeChangeRequestActor,
-} from './change-request-lifecycle';
+  ChangeRequestDirectMerger,
+  type ChangeRequestDirectMergerDependencies,
+} from './change-request-direct-merger';
+import { ChangeRequestError } from './change-request-error';
+import {
+  changeRequestConflictFiles,
+  normalizeChangeRequestBranch,
+  resolveChangeRequestBranch,
+  resolveChangeRequestCommit,
+  runChangeRequestGit,
+  type RunHostCommand,
+} from './change-request-git';
+import { ChangeRequestLifecycle, normalizeChangeRequestActor } from './change-request-lifecycle';
 import type { ChangeRequestRepository } from './change-request-repository';
 import { ChangeRequestOperationLock } from './change-request-operation-lock';
+import {
+  ChangeRequestSnapshotService,
+  type ChangeRequestSnapshotDependencies,
+} from './change-request-snapshot-service';
 import type {
   ChangeRequestActor,
   ChangeRequestChanges,
@@ -20,101 +33,24 @@ import type {
   ChangeRequestView,
 } from './change-request-types';
 
-type ResolvedDrone =
-  | { kind: 'real'; id: string; drone: any }
-  | { kind: 'pending'; id: string; pending: any }
-  | null;
-
-type LockedDroneContext = {
-  containerName: string;
-  droneEntry: any;
-};
-
-export type ChangeRequestServiceDependencies = {
-  repository: ChangeRequestRepository;
-  resolveDrone: (ref: string) => Promise<ResolvedDrone>;
-  withLockedDroneContainer: <T>(
-    input: { requestedDroneName: string; droneEntry: any },
-    operation: (context: LockedDroneContext) => Promise<T>,
-  ) => Promise<T>;
-  exportFullHeadBundleFromDrone: (input: {
-    containerName: string;
-    repoPathInContainer: string;
-    outDir: string;
-    label?: string;
-  }) => Promise<{ exportedPath: string }>;
-  importBundleHeadToHostRef: (input: {
-    repoRoot: string;
-    bundlePath: string;
-    refName: string;
-  }) => Promise<string>;
-  createHostAuthoredMirrorCommit: (input: {
-    repoRoot: string;
-    sourceRef: string;
-    parentRef: string;
-    message?: string;
-  }) => Promise<string>;
-  updateHostRef: (input: { repoRoot: string; refName: string; target: string }) => Promise<void>;
-  deleteHostRefBestEffort: (input: { repoRoot: string; refName: string }) => Promise<void>;
-  gitTopLevel: (repoPath: string) => Promise<string>;
-  droneRepoBaseSha: (input: {
-    container: string;
-    repoPathInContainer: string;
-  }) => Promise<string | null>;
-  dvmRepoHeadSha: (input: { container: string; repoPathInContainer?: string }) => Promise<string>;
-  runGitInDrone: (input: {
-    container: string;
-    repoPathInContainer: string;
-    args: string[];
-  }) => Promise<RunResult>;
-  runHostCommand: (
-    command: string,
-    args: string[],
-    options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
-  ) => Promise<RunResult>;
-  storagePath: (...segments: string[]) => string;
-  now: () => string;
-  operationLock?: ChangeRequestOperationLock;
-  lifecycle?: ChangeRequestLifecycle;
-  githubMirrorLifecycle?: {
-    syncAfterNativeUpdate: (record: ChangeRequestRecord) => Promise<void>;
-    closeAfterNativeCompletion: (record: ChangeRequestRecord) => Promise<void>;
-    refreshAfterNativeAssessment: (record: ChangeRequestRecord) => Promise<void>;
+export type ChangeRequestServiceDependencies = ChangeRequestSnapshotDependencies &
+  ChangeRequestDirectMergerDependencies & {
+    repository: ChangeRequestRepository;
+    runHostCommand: RunHostCommand;
+    now: () => string;
+    operationLock?: ChangeRequestOperationLock;
+    lifecycle?: ChangeRequestLifecycle;
+    githubMirrorLifecycle?: {
+      syncAfterNativeUpdate: (record: ChangeRequestRecord) => Promise<void>;
+      closeAfterNativeCompletion: (record: ChangeRequestRecord) => Promise<void>;
+      refreshAfterNativeAssessment: (record: ChangeRequestRecord) => Promise<void>;
+    };
   };
-};
-
-type SnapshotSource = {
-  droneId: string;
-  droneName: string;
-  chatId: string | null;
-  chatName: string;
-  drone: any;
-  repoRoot: string;
-  baseBranch: string;
-  baseSha: string;
-  sourceHeadSha: string;
-};
-
-type SnapshotResult = SnapshotSource & {
-  snapshotRef: string;
-  snapshotSha: string;
-};
-
-export class ChangeRequestError extends Error {
-  constructor(
-    message: string,
-    readonly statusCode = 400,
-    readonly code: string | null = null,
-    readonly details: Record<string, unknown> = {},
-  ) {
-    super(message);
-    this.name = 'ChangeRequestError';
-  }
-}
 
 const MAX_TITLE_LENGTH = 240;
 const MAX_DESCRIPTION_LENGTH = 20_000;
 const MERGE_TIMEOUT_MS = 120_000;
+const ASSESSMENT_CONCURRENCY = 4;
 
 function requiredText(value: unknown, label: string, maxLength: number): string {
   const text = String(value ?? '').trim();
@@ -129,14 +65,6 @@ function optionalText(value: unknown, maxLength: number): string {
   return text;
 }
 
-function normalizeBaseBranch(value: unknown): string {
-  return String(value ?? '')
-    .trim()
-    .replace(/^refs\/heads\//, '')
-    .replace(/^refs\/remotes\/origin\//, '')
-    .replace(/^origin\//, '');
-}
-
 function statusType(statusCharRaw: string): ChangeRequestFileChange['statusType'] {
   const statusChar = statusCharRaw.slice(0, 1).toUpperCase();
   if (statusChar === 'A') return 'added';
@@ -148,45 +76,16 @@ function statusType(statusCharRaw: string): ChangeRequestFileChange['statusType'
   return 'unknown';
 }
 
-function safeRefSegment(value: string): string {
-  return (
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9_.-]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'request'
-  );
-}
-
-function snapshotRef(id: string, revision: number): string {
-  return `refs/drone/change-requests/${safeRefSegment(id)}/snapshots/${revision}`;
-}
-
-function temporaryImportRef(id: string): string {
-  return `refs/drone/change-requests/${safeRefSegment(id)}/import-${crypto.randomBytes(5).toString('hex')}`;
-}
-
-function conflictFiles(text: string): string[] {
-  const files = new Set<string>();
-  const patterns = [
-    /CONFLICT\s+\([^)]+\):\s+.*\s+in\s+(.+)$/gim,
-    /CONFLICT\s+\([^)]+\):\s+(.+)$/gim,
-  ];
-  for (const pattern of patterns) {
-    let match: RegExpExecArray | null = null;
-    while ((match = pattern.exec(text))) {
-      const file = String(match[1] ?? '').trim();
-      if (file) files.add(file);
-    }
-  }
-  return [...files].sort((left, right) => left.localeCompare(right));
-}
-
 export class ChangeRequestService {
   private readonly operationLock: ChangeRequestOperationLock;
   private readonly lifecycle: ChangeRequestLifecycle;
+  private readonly snapshotService: ChangeRequestSnapshotService;
+  private readonly directMerger: ChangeRequestDirectMerger;
 
   constructor(private readonly deps: ChangeRequestServiceDependencies) {
     this.operationLock = deps.operationLock ?? new ChangeRequestOperationLock();
+    this.snapshotService = new ChangeRequestSnapshotService(deps);
+    this.directMerger = new ChangeRequestDirectMerger(deps);
     this.lifecycle =
       deps.lifecycle ??
       new ChangeRequestLifecycle({
@@ -200,12 +99,12 @@ export class ChangeRequestService {
     const id = crypto.randomUUID();
     const title = requiredText(input.title, 'title', MAX_TITLE_LENGTH);
     const description = optionalText(input.description, MAX_DESCRIPTION_LENGTH);
-    const source = await this.captureSnapshotSource(input.droneRef, input.chatName);
+    const source = await this.snapshotService.captureSource(input.droneRef, input.chatName);
     const destinationBranch = await this.validBranch(
       source.repoRoot,
       input.destinationBranch || source.baseBranch,
     );
-    const snapshot = await this.captureSnapshot(id, 1, source);
+    const snapshot = await this.snapshotService.capture(id, 1, source);
     const now = this.deps.now();
     let created: ChangeRequestRecord;
     try {
@@ -257,7 +156,11 @@ export class ChangeRequestService {
       status?: ChangeRequestStatus;
     } = {},
   ): Promise<ChangeRequestView[]> {
-    return await Promise.all(this.deps.repository.list(filters).map((record) => this.view(record)));
+    return await mapWithConcurrency(
+      this.deps.repository.list(filters),
+      ASSESSMENT_CONCURRENCY,
+      (record) => this.view(record),
+    );
   }
 
   async refreshAssessment(idRaw: string): Promise<ChangeRequestView> {
@@ -281,8 +184,12 @@ export class ChangeRequestService {
         : current.destinationBranch;
       let snapshotPatch: Partial<ChangeRequestRecord> = {};
       if (input.refreshSnapshot !== false) {
-        const source = await this.captureSnapshotSource(current.droneId, current.chatName, current);
-        const snapshot = await this.captureSnapshot(id, current.revision + 1, source);
+        const source = await this.snapshotService.captureSource(
+          current.droneId,
+          current.chatName,
+          current,
+        );
+        const snapshot = await this.snapshotService.capture(id, current.revision + 1, source);
         snapshotPatch = {
           snapshotRef: snapshot.snapshotRef,
           snapshotSha: snapshot.snapshotSha,
@@ -354,7 +261,7 @@ export class ChangeRequestService {
         );
       }
       try {
-        const mergeCommitSha = await this.directSquashMerge(
+        const mergeCommitSha = await this.directMerger.merge(
           current,
           String(input.commitMessage ?? '').trim() || current.title,
         );
@@ -496,7 +403,7 @@ export class ChangeRequestService {
   }
 
   private async validBranch(repoRoot: string, value: unknown): Promise<string> {
-    const branch = normalizeBaseBranch(value);
+    const branch = normalizeChangeRequestBranch(value);
     if (!branch) throw new ChangeRequestError('destination branch is required');
     const result = await this.deps.runHostCommand('git', [
       '-C',
@@ -507,222 +414,6 @@ export class ChangeRequestService {
     ]);
     if (result.code !== 0) throw new ChangeRequestError(`Invalid destination branch: ${branch}`);
     return branch;
-  }
-
-  private async captureSnapshotSource(
-    droneRefRaw: string,
-    chatNameRaw?: string,
-    existing?: ChangeRequestRecord,
-  ): Promise<SnapshotSource> {
-    const droneRef = String(droneRefRaw ?? '').trim();
-    const resolved = await this.deps.resolveDrone(droneRef);
-    if (!resolved)
-      throw new ChangeRequestError(`unknown drone: ${droneRef}`, 404, 'drone_not_found');
-    if (resolved.kind !== 'real') {
-      throw new ChangeRequestError(`drone is still starting: ${droneRef}`, 409, 'drone_starting');
-    }
-    const drone = resolved.drone;
-    const repoPath = String(drone?.repoPath ?? '').trim();
-    if (!repoPath) throw new ChangeRequestError('drone has no attached repository');
-    const repoRoot = await this.deps.gitTopLevel(repoPath);
-    if (existing && path.resolve(existing.repoRoot) !== path.resolve(repoRoot)) {
-      throw new ChangeRequestError(
-        'The drone repository no longer matches this change request.',
-        409,
-        'repo_changed',
-      );
-    }
-    const chatName = String(chatNameRaw ?? '').trim() || 'default';
-    const chat = drone?.chats?.[chatName] ?? null;
-    const droneName = String(drone?.name ?? resolved.id).trim() || resolved.id;
-    const baseBranch = existing?.baseBranch || normalizeBaseBranch(drone?.repo?.baseRef);
-    if (!baseBranch) {
-      throw new ChangeRequestError(
-        'The drone does not have a base branch. Reseed it before creating a change request.',
-        409,
-        'base_branch_missing',
-      );
-    }
-    const runtime = String(drone?.runtime ?? 'container')
-      .trim()
-      .toLowerCase();
-    if (runtime === 'host') {
-      const status = await this.git(repoRoot, ['status', '--porcelain']);
-      if (status.stdout.trim()) {
-        throw new ChangeRequestError(
-          'Commit the host working tree before creating or updating a change request.',
-          409,
-          'source_dirty',
-        );
-      }
-      const sourceHeadSha = (await this.git(repoRoot, ['rev-parse', 'HEAD'])).stdout
-        .trim()
-        .toLowerCase();
-      const baseRef = await this.resolveBranchRef(repoRoot, baseBranch);
-      if (!baseRef)
-        throw new ChangeRequestError(
-          `Base branch is unavailable: ${baseBranch}`,
-          409,
-          'base_branch_missing',
-        );
-      const baseSha =
-        existing?.baseSha ||
-        (await this.git(repoRoot, ['merge-base', baseRef, sourceHeadSha])).stdout
-          .trim()
-          .toLowerCase();
-      return {
-        droneId: resolved.id,
-        droneName,
-        chatId: typeof chat?.id === 'string' ? chat.id : null,
-        chatName,
-        drone,
-        repoRoot,
-        baseBranch,
-        baseSha,
-        sourceHeadSha,
-      };
-    }
-    const repoPathInContainer = String(drone?.repo?.dest ?? '/work/repo').trim() || '/work/repo';
-    return await this.deps.withLockedDroneContainer(
-      { requestedDroneName: droneName, droneEntry: drone },
-      async ({ containerName }) => {
-        const status = await this.deps.runGitInDrone({
-          container: containerName,
-          repoPathInContainer,
-          args: ['status', '--porcelain'],
-        });
-        if (status.code !== 0)
-          throw new ChangeRequestError(status.stderr || 'Unable to inspect drone repository.', 500);
-        if (status.stdout.trim()) {
-          throw new ChangeRequestError(
-            'Commit the drone working tree before creating or updating a change request.',
-            409,
-            'source_dirty',
-          );
-        }
-        const sourceHeadSha = await this.deps.dvmRepoHeadSha({
-          container: containerName,
-          repoPathInContainer,
-        });
-        const configuredBaseSha = await this.deps.droneRepoBaseSha({
-          container: containerName,
-          repoPathInContainer,
-        });
-        const baseSha = existing?.baseSha || configuredBaseSha;
-        if (!baseSha) {
-          throw new ChangeRequestError(
-            'The drone does not have a base commit. Reseed it before creating a change request.',
-            409,
-            'base_commit_missing',
-          );
-        }
-        return {
-          droneId: resolved.id,
-          droneName,
-          chatId: typeof chat?.id === 'string' ? chat.id : null,
-          chatName,
-          drone,
-          repoRoot,
-          baseBranch,
-          baseSha,
-          sourceHeadSha,
-        };
-      },
-    );
-  }
-
-  private async captureSnapshot(
-    id: string,
-    revision: number,
-    source: SnapshotSource,
-  ): Promise<SnapshotResult> {
-    const permanentRef = snapshotRef(id, revision);
-    const importRef = temporaryImportRef(id);
-    const runtime = String(source.drone?.runtime ?? 'container')
-      .trim()
-      .toLowerCase();
-    if (runtime === 'host') {
-      const snapshotSha = await this.deps.createHostAuthoredMirrorCommit({
-        repoRoot: source.repoRoot,
-        sourceRef: source.sourceHeadSha,
-        parentRef: source.baseSha,
-        message: `chore(drone): snapshot change request ${id}`,
-      });
-      await this.assertSnapshotHasChanges(source.repoRoot, source.baseSha, snapshotSha);
-      await this.deps.updateHostRef({
-        repoRoot: source.repoRoot,
-        refName: permanentRef,
-        target: snapshotSha,
-      });
-      return { ...source, snapshotRef: permanentRef, snapshotSha };
-    }
-    const repoPathInContainer =
-      String(source.drone?.repo?.dest ?? '/work/repo').trim() || '/work/repo';
-    const exportRoot = this.deps.storagePath('change-request-exports');
-    let bundlePath = '';
-    try {
-      const exported = await this.deps.withLockedDroneContainer(
-        { requestedDroneName: source.droneName, droneEntry: source.drone },
-        ({ containerName }) =>
-          this.deps.exportFullHeadBundleFromDrone({
-            containerName,
-            repoPathInContainer,
-            outDir: exportRoot,
-            label: source.droneName,
-          }),
-      );
-      bundlePath = exported.exportedPath;
-      const importedHead = await this.deps.importBundleHeadToHostRef({
-        repoRoot: source.repoRoot,
-        bundlePath,
-        refName: importRef,
-      });
-      if (importedHead.trim().toLowerCase() !== source.sourceHeadSha.trim().toLowerCase()) {
-        throw new ChangeRequestError(
-          'The drone repository changed while its snapshot was being captured. Try again.',
-          409,
-          'source_changed',
-        );
-      }
-      const snapshotSha = await this.deps.createHostAuthoredMirrorCommit({
-        repoRoot: source.repoRoot,
-        sourceRef: importRef,
-        parentRef: source.baseSha,
-        message: `chore(drone): snapshot change request ${id}`,
-      });
-      await this.assertSnapshotHasChanges(source.repoRoot, source.baseSha, snapshotSha);
-      await this.deps.updateHostRef({
-        repoRoot: source.repoRoot,
-        refName: permanentRef,
-        target: snapshotSha,
-      });
-      return { ...source, snapshotRef: permanentRef, snapshotSha };
-    } finally {
-      await this.deps.deleteHostRefBestEffort({ repoRoot: source.repoRoot, refName: importRef });
-      if (bundlePath) await fs.rm(bundlePath, { force: true }).catch(() => {});
-    }
-  }
-
-  private async assertSnapshotHasChanges(
-    repoRoot: string,
-    baseSha: string,
-    snapshotSha: string,
-  ): Promise<void> {
-    const result = await this.deps.runHostCommand('git', [
-      '-C',
-      repoRoot,
-      'diff',
-      '--quiet',
-      baseSha,
-      snapshotSha,
-    ]);
-    if (result.code === 0)
-      throw new ChangeRequestError('There are no committed changes to request.', 409, 'no_changes');
-    if (result.code !== 1)
-      throw new ChangeRequestError(
-        result.stderr || 'Unable to compare the change request snapshot.',
-        500,
-      );
   }
 
   private async view(record: ChangeRequestRecord): Promise<ChangeRequestView> {
@@ -738,7 +429,11 @@ export class ChangeRequestService {
         conflictFiles: [],
       };
     }
-    const snapshot = await this.resolveCommit(record.repoRoot, record.snapshotRef);
+    const snapshot = await resolveChangeRequestCommit(
+      this.deps.runHostCommand,
+      record.repoRoot,
+      record.snapshotRef,
+    );
     if (!snapshot || snapshot !== record.snapshotSha) {
       return {
         ...record,
@@ -751,10 +446,20 @@ export class ChangeRequestService {
         lastError: 'Change request snapshot is unavailable.',
       };
     }
-    const destinationRef = await this.resolveBranchRef(record.repoRoot, record.destinationBranch);
-    const baseRef = await this.resolveBranchRef(record.repoRoot, record.baseBranch);
+    const destinationRef = await resolveChangeRequestBranch(
+      this.deps.runHostCommand,
+      record.repoRoot,
+      record.destinationBranch,
+    );
+    const baseRef = await resolveChangeRequestBranch(
+      this.deps.runHostCommand,
+      record.repoRoot,
+      record.baseBranch,
+    );
     const targetRef = destinationRef ?? baseRef;
-    const destinationSha = targetRef ? await this.resolveCommit(record.repoRoot, targetRef) : null;
+    const destinationSha = targetRef
+      ? await resolveChangeRequestCommit(this.deps.runHostCommand, record.repoRoot, targetRef)
+      : null;
     if (!destinationSha) {
       return {
         ...record,
@@ -788,13 +493,11 @@ export class ChangeRequestService {
       conflicted: mergeTree.code !== 0,
       destinationExists: Boolean(destinationRef),
       destinationSha,
-      conflictFiles: mergeTree.code === 0 ? [] : conflictFiles(combined),
+      conflictFiles: mergeTree.code === 0 ? [] : changeRequestConflictFiles(combined),
     };
   }
 
-  private githubMirrorView(
-    record: ChangeRequestRecord,
-  ): ChangeRequestView['githubMirror'] {
+  private githubMirrorView(record: ChangeRequestRecord): ChangeRequestView['githubMirror'] {
     return record.githubMirror
       ? {
           ...record.githubMirror,
@@ -805,126 +508,28 @@ export class ChangeRequestService {
       : null;
   }
 
-  private async directSquashMerge(
-    record: ChangeRequestRecord,
-    commitMessage: string,
-  ): Promise<string> {
-    await this.git(record.repoRoot, ['fetch', 'origin', '--prune'], MERGE_TIMEOUT_MS);
-    const destinationRef = await this.resolveBranchRef(record.repoRoot, record.destinationBranch);
-    const baseRef = await this.resolveBranchRef(record.repoRoot, record.baseBranch);
-    const targetRef = destinationRef ?? baseRef;
-    if (!targetRef) {
-      throw new ChangeRequestError(
-        `Base branch is unavailable: ${record.baseBranch}`,
-        409,
-        'base_branch_missing',
-      );
-    }
-    const targetSha = await this.resolveCommit(record.repoRoot, targetRef);
-    if (!targetSha)
-      throw new ChangeRequestError(
-        'Unable to resolve merge destination.',
-        409,
-        'destination_missing',
-      );
-    const runId = `${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`;
-    const worktreePath = this.deps.storagePath(
-      'change-request-worktrees',
-      `${safeRefSegment(record.id)}-${runId}`,
-    );
-    await fs.mkdir(path.dirname(worktreePath), { recursive: true });
-    try {
-      await this.git(
-        record.repoRoot,
-        ['worktree', 'add', '--detach', worktreePath, targetSha],
-        MERGE_TIMEOUT_MS,
-      );
-      const merged = await this.deps.runHostCommand(
-        'git',
-        ['-C', worktreePath, 'merge', '--squash', '--no-commit', record.snapshotRef!],
-        { timeoutMs: MERGE_TIMEOUT_MS },
-      );
-      if (merged.code !== 0) {
-        const combined = `${merged.stdout}\n${merged.stderr}`.trim();
-        throw new ChangeRequestError(
-          'The change request conflicts with its destination.',
-          409,
-          'merge_conflict',
-          { conflictFiles: conflictFiles(combined) },
-        );
-      }
-      const staged = await this.deps.runHostCommand('git', [
-        '-C',
-        worktreePath,
-        'diff',
-        '--cached',
-        '--quiet',
-      ]);
-      let mergeCommitSha = targetSha;
-      if (staged.code === 1) {
-        await this.git(
-          worktreePath,
-          ['commit', '-m', requiredText(commitMessage, 'commit message', 10_000)],
-          MERGE_TIMEOUT_MS,
-        );
-        mergeCommitSha = (await this.git(worktreePath, ['rev-parse', 'HEAD'])).stdout
-          .trim()
-          .toLowerCase();
-      } else if (staged.code !== 0) {
-        throw new ChangeRequestError(staged.stderr || 'Unable to inspect the prepared merge.', 500);
-      }
-      await this.git(
-        worktreePath,
-        ['push', 'origin', `HEAD:refs/heads/${record.destinationBranch}`],
-        MERGE_TIMEOUT_MS,
-      );
-      return mergeCommitSha;
-    } finally {
-      await this.deps.runHostCommand(
-        'git',
-        ['-C', record.repoRoot, 'worktree', 'remove', '--force', worktreePath],
-        {
-          timeoutMs: 30_000,
-        },
-      );
-      await fs.rm(worktreePath, { recursive: true, force: true }).catch(() => {});
-      await this.deps.runHostCommand('git', ['-C', record.repoRoot, 'worktree', 'prune']);
-    }
-  }
-
-  private async resolveBranchRef(repoRoot: string, branch: string): Promise<string | null> {
-    for (const candidate of [`refs/remotes/origin/${branch}`, `refs/heads/${branch}`]) {
-      if (await this.resolveCommit(repoRoot, candidate)) return candidate;
-    }
-    return null;
-  }
-
-  private async resolveCommit(repoRoot: string, ref: string): Promise<string | null> {
-    const result = await this.deps.runHostCommand('git', [
-      '-C',
-      repoRoot,
-      'rev-parse',
-      '--verify',
-      `${ref}^{commit}`,
-    ]);
-    if (result.code !== 0) return null;
-    const sha = result.stdout.trim().toLowerCase();
-    return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
-  }
-
   private async git(repoRoot: string, args: string[], timeoutMs = 30_000): Promise<RunResult> {
-    const result = await this.deps.runHostCommand('git', ['-C', repoRoot, ...args], { timeoutMs });
-    if (result.code !== 0) {
-      throw new ChangeRequestError(
-        String(result.stderr || result.stdout || `git ${args[0] ?? 'operation'} failed`).trim(),
-        409,
-        'git_failed',
-      );
-    }
-    return result;
+    return await runChangeRequestGit(this.deps.runHostCommand, repoRoot, args, timeoutMs);
   }
 
   private async withLock<T>(id: string, operation: () => Promise<T>): Promise<T> {
     return await this.operationLock.withLock(id, operation);
   }
+}
+
+async function mapWithConcurrency<T, Result>(
+  items: T[],
+  limit: number,
+  operation: (item: T) => Promise<Result>,
+): Promise<Result[]> {
+  const results = new Array<Result>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await operation(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }

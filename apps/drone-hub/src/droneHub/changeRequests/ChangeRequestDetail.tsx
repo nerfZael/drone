@@ -1,19 +1,23 @@
 import React from 'react';
-import type {
-  ChangeRequestChanges,
-  ChangeRequestView,
-} from '@drone/hub-model/change-requests';
+import type { ChangeRequestChanges, ChangeRequestView } from '@drone/hub-model/change-requests';
 
 import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { cn } from '../../ui/cn';
 import { DiffBlock } from '../changes/DiffBlock';
 import type { DiffState } from '../changes/types';
-import { requestJson } from '../http';
 import {
   readPullRequestMergeMethod,
   writePullRequestMergeMethod,
 } from '../pullRequests/pull-request-preferences';
 import { ChangeRequestGithubMirrorPanel } from './ChangeRequestGithubMirrorPanel';
+import {
+  closeChangeRequest,
+  loadChangeRequestChanges,
+  loadChangeRequestDiff,
+  mergeChangeRequest,
+  refreshChangeRequestAssessment,
+  updateChangeRequest,
+} from './change-request-api';
 import {
   changeRequestStatusClasses,
   changeRequestStatusLabel,
@@ -21,8 +25,6 @@ import {
 } from './change-request-presentation';
 
 type ChangesPayload = Pick<ChangeRequestChanges, 'counts' | 'entries'> & { ok: true };
-type RequestMutationPayload = { ok: true; request: ChangeRequestView };
-
 export function ChangeRequestDetail({
   request,
   disabled,
@@ -69,9 +71,7 @@ export function ChangeRequestDetail({
     }
     let cancelled = false;
     setChangesLoading(true);
-    requestJson<ChangesPayload>(
-      `/api/change-requests/${encodeURIComponent(request.id)}/changes`,
-    )
+    loadChangeRequestChanges(request.id)
       .then((data) => {
         if (!cancelled) setChanges(data);
       })
@@ -93,12 +93,9 @@ export function ChangeRequestDetail({
     }
     let cancelled = false;
     setAssessmentLoading(true);
-    requestJson<RequestMutationPayload>(
-      `/api/change-requests/${encodeURIComponent(request.id)}/refresh-assessment`,
-      { method: 'POST' },
-    )
-      .then((data) => {
-        if (!cancelled) onChange(data.request);
+    refreshChangeRequestAssessment(request.id)
+      .then((updated) => {
+        if (!cancelled) onChange(updated);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(errorMessage(cause));
@@ -114,20 +111,14 @@ export function ChangeRequestDetail({
   const mutate = React.useCallback(
     async (
       action: string,
-      pathname: string,
-      method: 'PATCH' | 'POST',
-      body: Record<string, unknown> = {},
+      operation: () => Promise<ChangeRequestView>,
     ): Promise<ChangeRequestView | null> => {
       setBusy(action);
       setError(null);
       try {
-        const data = await requestJson<RequestMutationPayload>(pathname, {
-          method,
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        onChange(data.request);
-        return data.request;
+        const updated = await operation();
+        onChange(updated);
+        return updated;
       } catch (cause: unknown) {
         setError(errorMessage(cause));
         return null;
@@ -146,9 +137,7 @@ export function ChangeRequestDetail({
       setDiffTruncated(false);
       setError(null);
       try {
-        const data = await requestJson<{ ok: true; diff: string; truncated: boolean }>(
-          `/api/change-requests/${encodeURIComponent(request.id)}/diff?path=${encodeURIComponent(filePath)}&contextLines=5`,
-        );
+        const data = await loadChangeRequestDiff(request.id, filePath);
         setDiff(data.diff);
         setDiffTruncated(data.truncated);
       } catch (cause: unknown) {
@@ -286,16 +275,13 @@ export function ChangeRequestDetail({
                   type="button"
                   disabled={actionDisabled || !draftTitle.trim() || !draftDestination.trim()}
                   onClick={() =>
-                    void mutate(
-                      'save',
-                      `/api/change-requests/${encodeURIComponent(request.id)}`,
-                      'PATCH',
-                      {
+                    void mutate('save', () =>
+                      updateChangeRequest(request.id, {
                         title: draftTitle,
                         description: draftDescription,
                         destinationBranch: draftDestination,
                         refreshSnapshot: false,
-                      },
+                      }),
                     )
                   }
                   className="rounded border border-[var(--border)] px-3 py-1.5 text-[var(--text-11)] text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40"
@@ -306,11 +292,8 @@ export function ChangeRequestDetail({
                   type="button"
                   disabled={actionDisabled}
                   onClick={() =>
-                    void mutate(
-                      'refresh',
-                      `/api/change-requests/${encodeURIComponent(request.id)}`,
-                      'PATCH',
-                      { refreshSnapshot: true },
+                    void mutate('refresh', () =>
+                      updateChangeRequest(request.id, { refreshSnapshot: true }),
                     )
                   }
                   className="rounded border border-[var(--border)] px-3 py-1.5 text-[var(--text-11)] text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40"
@@ -328,14 +311,8 @@ export function ChangeRequestDetail({
                         confirmLabel: 'Merge directly',
                       })
                     ) {
-                      void mutate(
-                        'merge',
-                        `/api/change-requests/${encodeURIComponent(request.id)}/merge`,
-                        'POST',
-                        {
-                          actor: { kind: 'user', id: null, label: 'DroneHub user' },
-                          commitMessage: mergeCommitMessage.trim() || undefined,
-                        },
+                      void mutate('merge', () =>
+                        mergeChangeRequest(request.id, mergeCommitMessage.trim() || undefined),
                       );
                     }
                   }}
@@ -355,11 +332,7 @@ export function ChangeRequestDetail({
                         destructive: true,
                       })
                     ) {
-                      void mutate(
-                        'close',
-                        `/api/change-requests/${encodeURIComponent(request.id)}/close`,
-                        'POST',
-                      );
+                      void mutate('close', () => closeChangeRequest(request.id));
                     }
                   }}
                   className="rounded border border-[var(--red-border)] px-3 py-1.5 text-[var(--text-11)] text-[var(--red)] disabled:opacity-40"

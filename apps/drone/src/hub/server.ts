@@ -286,7 +286,6 @@ import { createTerminalWebSocketServer } from './terminal-websocket-server';
 import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgrade';
 import { registerAssistantRoutes } from './routes/assistant-routes';
 import { registerAgentRunDiffRoutes } from './routes/agent-run-diff-routes';
-import { registerChangeRequestRoutes } from './routes/change-request-routes';
 import { NativeChatLifecycle } from './assistant/native-chat-lifecycle';
 import { buildNativeModelCatalog } from './assistant/native-model-catalog';
 import { registerNativeChatRoutes } from './routes/native-chat-routes';
@@ -313,8 +312,7 @@ import { LocalCheckoutService } from './local-checkout-service';
 import { createResourceSubscriptionDeliveryAuthorizer } from './subscriptions/create-resource-subscription-delivery-authorizer';
 import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 import { ResourceSubscriptionService } from './subscriptions/resource-subscription-service';
-import { getChangeRequestRepository } from './change-requests/change-request-repository';
-import { createChangeRequestFeature } from './change-requests/create-change-request-feature';
+import { registerChangeRequestFeature } from './change-requests/register-change-request-feature';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
 import {
   isWorkflowChildDroneEntry,
@@ -5327,32 +5325,6 @@ async function startDroneHubApiServerWithLifecycle(
     });
   }
 
-  const changeRequestRepository = resourceSubscriptionDatabase
-    ? getChangeRequestRepository()
-    : null;
-  const changeRequestFeature = changeRequestRepository
-    ? createChangeRequestFeature({
-        repository: changeRequestRepository,
-        resolveDrone: resolveDroneOrPendingForReadRef,
-        withLockedDroneContainer,
-        exportFullHeadBundleFromDrone,
-        importBundleHeadToHostRef,
-        createHostAuthoredMirrorCommit,
-        updateHostRef,
-        gitTopLevel,
-        droneRepoBaseSha,
-        dvmRepoHeadSha,
-        runGitInDrone,
-        runHostCommand,
-        deleteHostRefBestEffort,
-        storagePath: droneRootPath,
-        now: nowIso,
-        onGithubChanged: clearGithubPullRequestListCache,
-      })
-    : null;
-  const changeRequestService = changeRequestFeature?.service ?? null;
-  const changeRequestGithubMirrorService = changeRequestFeature?.githubMirrorService ?? null;
-
   const apiRouter = new HubRouter(json, readJsonBody);
 
   registerSystemRoutes(apiRouter, {
@@ -5470,9 +5442,22 @@ async function startDroneHubApiServerWithLifecycle(
     updateStoredUserTimeZone,
   });
   registerAgentRunDiffRoutes(apiRouter);
-  registerChangeRequestRoutes(apiRouter, {
-    service: changeRequestService,
-    githubMirrorService: changeRequestGithubMirrorService,
+  registerChangeRequestFeature(apiRouter, {
+    resolveDrone: resolveDroneOrPendingForReadRef,
+    withLockedDroneContainer,
+    exportFullHeadBundleFromDrone,
+    importBundleHeadToHostRef,
+    createHostAuthoredMirrorCommit,
+    updateHostRef,
+    gitTopLevel,
+    droneRepoBaseSha,
+    dvmRepoHeadSha,
+    runGitInDrone,
+    runHostCommand,
+    deleteHostRefBestEffort,
+    storagePath: droneRootPath,
+    now: nowIso,
+    onGithubChanged: clearGithubPullRequestListCache,
   });
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,

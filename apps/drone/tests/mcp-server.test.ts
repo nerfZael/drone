@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { ASSISTANT_TOOL_SUMMARIES } from '../src/hub/assistant/assistant-config';
 import { createInProcessDroneHubMcpClient } from '../src/hub/assistant/in-process-drone-hub-mcp';
+import { changeRequestBelongsToChat } from '../src/hub/change-requests/change-request-mcp-tools';
 import { normalizeMcpChatAccessScope } from '../src/hub/mcp-chat-access';
 import { authorizeDroneHubMcpTool, imageToolResult } from '../src/hub/mcp-server';
 import { droneStatusSummary } from '../src/hub/mcp-summaries';
@@ -156,6 +157,31 @@ describe('Drone Hub MCP principal authorization', () => {
       'merge_change_request',
       { requestId: 'cr-1' },
     )).not.toThrow();
+  });
+
+  test('uses the stable chat id for change-request ownership', () => {
+    const principal = {
+      kind: 'chat' as const,
+      tokenId: 'chat:drone-a:renamed',
+      name: 'Drone A / renamed',
+      droneId: 'drone-a',
+      chatName: 'renamed',
+      chatId: 'chat-a',
+      accessScope: normalizeMcpChatAccessScope({}, 'drone-a'),
+      selectedDroneRefs: ['drone-a'],
+    };
+    expect(changeRequestBelongsToChat(
+      { droneId: 'drone-a', chatId: 'chat-a', chatName: 'old-name' },
+      principal,
+    )).toBe(true);
+    expect(changeRequestBelongsToChat(
+      { droneId: 'drone-a', chatId: 'different-chat', chatName: 'renamed' },
+      principal,
+    )).toBe(false);
+    expect(changeRequestBelongsToChat(
+      { droneId: 'drone-a', chatName: 'renamed' },
+      principal,
+    )).toBe(true);
   });
 
   test('enforces assistant read and write scopes for host principals', () => {

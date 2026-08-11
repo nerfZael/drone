@@ -1,4 +1,4 @@
-import type { NativeChatAccessScope } from '@drone/assistant-chat';
+import { normalizeChangeRequestPermissions, type NativeChatAccessScope } from '@drone/assistant-chat';
 import React from 'react';
 
 import { requestJson } from '../http';
@@ -24,8 +24,7 @@ function defaultAccessScope(droneId: string): NativeChatAccessScope {
     readMode: 'all',
     writeMode: 'selected',
     executeMode: 'selected',
-    changeRequestCreate: true,
-    changeRequestMerge: false,
+    ...normalizeChangeRequestPermissions(),
     droneIds: droneId ? [droneId] : [],
     updatedAt: '',
   };

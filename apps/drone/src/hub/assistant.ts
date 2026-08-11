@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   completedTurnIds as createCompletedTurnIds,
   isSendInNewChatQueueAction,
+  normalizeChangeRequestPermissions,
   normalizePendingPromptState,
 } from '@drone/assistant-chat';
 import type {
@@ -929,8 +930,7 @@ function makeAssistantAccessScope(input?: {
     readMode,
     writeMode,
     executeMode,
-    changeRequestCreate: input?.changeRequestCreate !== false,
-    changeRequestMerge: input?.changeRequestMerge === true,
+    ...normalizeChangeRequestPermissions(input),
     droneIds:
       readMode === 'selected' || writeMode === 'selected' || executeMode === 'selected'
         ? droneIds

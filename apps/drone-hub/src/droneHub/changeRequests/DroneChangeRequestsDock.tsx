@@ -2,15 +2,13 @@ import React from 'react';
 import type { ChangeRequestView } from '@drone/hub-model/change-requests';
 
 import { cn } from '../../ui/cn';
-import { requestJson } from '../http';
 import { ChangeRequestDetail } from './ChangeRequestDetail';
+import { createChangeRequest, listChangeRequests } from './change-request-api';
 import {
   changeRequestStatusClasses,
   changeRequestStatusLabel,
   relativeChangeRequestTime,
 } from './change-request-presentation';
-
-type RequestMutationPayload = { ok: true; request: ChangeRequestView };
 
 export function DroneChangeRequestsDock({
   droneId,
@@ -41,16 +39,10 @@ export function DroneChangeRequestsDock({
       setLoading(true);
       setError(null);
       try {
-        const data = await requestJson<{ ok: true; requests: ChangeRequestView[] }>(
-          `/api/change-requests?droneId=${encodeURIComponent(droneId)}`,
-        );
-        setRequests(data.requests);
+        const loaded = await listChangeRequests(droneId);
+        setRequests(loaded);
         setSelectedId((current) => {
-          if (
-            preserveSelection &&
-            current &&
-            data.requests.some((request) => request.id === current)
-          ) {
+          if (preserveSelection && current && loaded.some((request) => request.id === current)) {
             return current;
           }
           return null;
@@ -81,20 +73,15 @@ export function DroneChangeRequestsDock({
     setCreating(true);
     setError(null);
     try {
-      const data = await requestJson<RequestMutationPayload>('/api/change-requests', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          droneRef: droneId,
-          chatName,
-          title: createTitle,
-          description: createDescription,
-          destinationBranch: createDestination || undefined,
-          actor: { kind: 'user', id: null, label: 'DroneHub user' },
-        }),
+      const request = await createChangeRequest({
+        droneRef: droneId,
+        chatName,
+        title: createTitle,
+        description: createDescription,
+        destinationBranch: createDestination || undefined,
       });
-      setRequests((current) => [data.request, ...current]);
-      setSelectedId(data.request.id);
+      setRequests((current) => [request, ...current]);
+      setSelectedId(request.id);
       setCreateTitle('');
       setCreateDescription('');
       setCreateDestination('');

@@ -20,6 +20,27 @@ export type NativeChatAccessScope = {
   updatedAt: string;
 };
 
+export const DEFAULT_CHANGE_REQUEST_PERMISSIONS = {
+  create: true,
+  merge: false,
+} as const;
+
+export function normalizeChangeRequestPermissions(input?: {
+  changeRequestCreate?: unknown;
+  changeRequestMerge?: unknown;
+}): { changeRequestCreate: boolean; changeRequestMerge: boolean } {
+  return {
+    changeRequestCreate:
+      input?.changeRequestCreate === undefined
+        ? DEFAULT_CHANGE_REQUEST_PERMISSIONS.create
+        : input.changeRequestCreate !== false,
+    changeRequestMerge:
+      input?.changeRequestMerge === undefined
+        ? DEFAULT_CHANGE_REQUEST_PERMISSIONS.merge
+        : input.changeRequestMerge === true,
+  };
+}
+
 export type NativeAgentWorkspaceSummary = {
   id: string;
   label: string;

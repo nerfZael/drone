@@ -1,6 +1,3 @@
-import crypto from 'node:crypto';
-
-import type { RunResult } from '../../host/dvm';
 import {
   closeGithubPullRequestForRepoRoot,
   createGithubPullRequestForRepoRoot,
@@ -14,11 +11,10 @@ import {
 import { ChangeRequestLifecycle } from './change-request-lifecycle';
 import type { ChangeRequestRepository } from './change-request-repository';
 import { ChangeRequestOperationLock } from './change-request-operation-lock';
-import { ChangeRequestError } from './change-request-service';
-import type {
-  ChangeRequestGithubMirrorRecord,
-  ChangeRequestRecord,
-} from './change-request-types';
+import { ChangeRequestError } from './change-request-error';
+import { type RunHostCommand } from './change-request-git';
+import { ChangeRequestMirrorBranchManager } from './change-request-mirror-branch-manager';
+import type { ChangeRequestGithubMirrorRecord, ChangeRequestRecord } from './change-request-types';
 
 type GithubMirrorClient = {
   createPullRequest: typeof createGithubPullRequestForRepoRoot;
@@ -30,11 +26,7 @@ type GithubMirrorClient = {
 
 export type ChangeRequestGithubMirrorServiceDependencies = {
   repository: ChangeRequestRepository;
-  runHostCommand: (
-    command: string,
-    args: string[],
-    options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
-  ) => Promise<RunResult>;
+  runHostCommand: RunHostCommand;
   deleteHostRefBestEffort: (input: { repoRoot: string; refName: string }) => Promise<void>;
   now: () => string;
   operationLock?: ChangeRequestOperationLock;
@@ -42,10 +34,6 @@ export type ChangeRequestGithubMirrorServiceDependencies = {
   github?: GithubMirrorClient;
   onGithubChanged?: (repoRoot: string) => void;
 };
-
-const GIT_TIMEOUT_MS = 120_000;
-const MANAGED_BRANCH_SUFFIX_PATTERN = /^[0-9a-f]{6}$/;
-const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
 function mirrorBody(record: ChangeRequestRecord): string {
   const footer = `Mirrored from DroneHub change request #${record.number}.`;
@@ -68,9 +56,11 @@ export class ChangeRequestGithubMirrorService {
   private readonly operationLock: ChangeRequestOperationLock;
   private readonly lifecycle: ChangeRequestLifecycle;
   private readonly github: GithubMirrorClient;
+  private readonly branches: ChangeRequestMirrorBranchManager;
 
   constructor(private readonly deps: ChangeRequestGithubMirrorServiceDependencies) {
     this.operationLock = deps.operationLock ?? new ChangeRequestOperationLock();
+    this.branches = new ChangeRequestMirrorBranchManager(deps);
     this.lifecycle =
       deps.lifecycle ??
       new ChangeRequestLifecycle({
@@ -111,10 +101,10 @@ export class ChangeRequestGithubMirrorService {
         );
       }
 
-      await this.fetch(record.repoRoot);
-      await this.ensureDestination(record);
-      const headBranch = this.newHeadBranch(record);
-      await this.pushNewMirrorBranch(record, headBranch);
+      await this.branches.fetch(record.repoRoot);
+      await this.branches.ensureDestination(record);
+      const headBranch = this.branches.newHeadBranch(record);
+      await this.branches.pushNew(record, headBranch);
 
       let details: GithubPullRequestDetails;
       try {
@@ -126,7 +116,7 @@ export class ChangeRequestGithubMirrorService {
           baseBranch: record.destinationBranch,
         });
       } catch (error) {
-        await this.deleteRemoteBranch(record.repoRoot, headBranch).catch(() => {});
+        await this.branches.deleteRemote(record.repoRoot, headBranch).catch(() => {});
         throw githubError(error);
       }
       this.deps.onGithubChanged?.(record.repoRoot);
@@ -204,7 +194,10 @@ export class ChangeRequestGithubMirrorService {
 
   async close(idRaw: string): Promise<ChangeRequestRecord> {
     const id = String(idRaw ?? '').trim();
-    return await this.withLock(id, async () => await this.closeMirror(this.requiredRecord(id), true));
+    return await this.withLock(
+      id,
+      async () => await this.closeMirror(this.requiredRecord(id), true),
+    );
   }
 
   async refresh(recordOrId: ChangeRequestRecord | string): Promise<void> {
@@ -297,9 +290,9 @@ export class ChangeRequestGithubMirrorService {
     }
     let pushedHeadSha = mirror.headSha;
     try {
-      await this.fetch(record.repoRoot);
-      await this.ensureDestination(record);
-      await this.pushUpdatedMirrorBranch(record, mirror);
+      await this.branches.fetch(record.repoRoot);
+      await this.branches.ensureDestination(record);
+      await this.branches.pushUpdated(record, mirror);
       pushedHeadSha = record.snapshotSha;
       const details = await this.github.updatePullRequest({
         repoRoot: record.repoRoot,
@@ -415,7 +408,7 @@ export class ChangeRequestGithubMirrorService {
       mirror = this.requiredMirror(current);
     }
 
-    const cleanupError = await this.deleteOwnedBranch(current, mirror);
+    const cleanupError = await this.branches.deleteOwned(current, mirror);
     await this.deps.repository.update(id, {
       githubMirror: {
         ...mirror,
@@ -453,109 +446,6 @@ export class ChangeRequestGithubMirrorService {
       });
     }
     return await this.reconcileTerminalMirror(record.id);
-  }
-
-  private async ensureDestination(record: ChangeRequestRecord): Promise<void> {
-    if (await this.remoteBranchSha(record.repoRoot, record.destinationBranch)) return;
-    const baseSha = await this.remoteBranchSha(record.repoRoot, record.baseBranch);
-    if (!baseSha) {
-      throw new ChangeRequestError(
-        `Base branch is unavailable on the remote: ${record.baseBranch}`,
-        409,
-        'base_branch_missing',
-      );
-    }
-    await this.git(record.repoRoot, [
-      'push',
-      'origin',
-      `${baseSha}:refs/heads/${record.destinationBranch}`,
-    ]);
-  }
-
-  private async pushNewMirrorBranch(record: ChangeRequestRecord, branch: string): Promise<void> {
-    if (await this.remoteBranchSha(record.repoRoot, branch)) {
-      throw new ChangeRequestError(`Remote branch already exists: ${branch}`, 409);
-    }
-    await this.git(record.repoRoot, [
-      'push',
-      'origin',
-      `${record.snapshotRef}:refs/heads/${branch}`,
-    ]);
-  }
-
-  private async pushUpdatedMirrorBranch(
-    record: ChangeRequestRecord,
-    mirror: ChangeRequestGithubMirrorRecord,
-  ): Promise<void> {
-    if (!mirror.branchOwnedByDroneHub || !this.isManagedBranch(record, mirror.headBranch)) {
-      throw new ChangeRequestError('DroneHub does not own the linked pull request branch.', 409);
-    }
-    if (!FULL_SHA_PATTERN.test(mirror.headSha)) {
-      throw new ChangeRequestError('The linked pull request branch has no safe lease SHA.', 409);
-    }
-    await this.git(record.repoRoot, [
-      'push',
-      `--force-with-lease=refs/heads/${mirror.headBranch}:${mirror.headSha}`,
-      'origin',
-      `${record.snapshotRef}:refs/heads/${mirror.headBranch}`,
-    ]);
-  }
-
-  private async deleteOwnedBranch(
-    record: ChangeRequestRecord,
-    mirror: ChangeRequestGithubMirrorRecord,
-  ): Promise<string | null> {
-    if (!mirror.branchOwnedByDroneHub) return null;
-    if (!this.isManagedBranch(record, mirror.headBranch)) {
-      return `Mirror branch ${mirror.headBranch || '(missing)'} was not deleted because it is not a DroneHub-managed mirror branch.`;
-    }
-    if (!FULL_SHA_PATTERN.test(mirror.headSha)) {
-      return `Mirror branch ${mirror.headBranch} was not deleted because its expected remote head is unavailable.`;
-    }
-    try {
-      const remoteSha = await this.remoteBranchSha(record.repoRoot, mirror.headBranch);
-      if (!remoteSha) return null;
-      if (mirror.headSha && remoteSha !== mirror.headSha) {
-        return `Mirror branch ${mirror.headBranch} was not deleted because its remote head changed outside DroneHub.`;
-      }
-      await this.deleteRemoteBranch(record.repoRoot, mirror.headBranch);
-      return null;
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
-    }
-  }
-
-  private async deleteRemoteBranch(repoRoot: string, branch: string): Promise<void> {
-    if (!(await this.remoteBranchSha(repoRoot, branch))) return;
-    await this.git(repoRoot, ['push', 'origin', '--delete', branch]);
-  }
-
-  private async remoteBranchSha(repoRoot: string, branch: string): Promise<string | null> {
-    const result = await this.deps.runHostCommand(
-      'git',
-      ['-C', repoRoot, 'ls-remote', '--heads', 'origin', `refs/heads/${branch}`],
-      { timeoutMs: GIT_TIMEOUT_MS },
-    );
-    if (result.code !== 0)
-      throw new ChangeRequestError(result.stderr || 'Unable to read remote branches.');
-    const sha = result.stdout.trim().split(/\s+/)[0] ?? '';
-    return /^[0-9a-f]{40}$/i.test(sha) ? sha.toLowerCase() : null;
-  }
-
-  private newHeadBranch(record: ChangeRequestRecord): string {
-    const idHash = this.recordIdHash(record);
-    return `drone/change-requests/${record.number}-${idHash}-${crypto.randomBytes(3).toString('hex')}`;
-  }
-
-  private isManagedBranch(record: ChangeRequestRecord, branch: string): boolean {
-    const idHash = this.recordIdHash(record);
-    const prefix = `drone/change-requests/${record.number}-${idHash}-`;
-    return (
-      branch.startsWith(prefix) &&
-      MANAGED_BRANCH_SUFFIX_PATTERN.test(branch.slice(prefix.length)) &&
-      branch !== record.baseBranch &&
-      branch !== record.destinationBranch
-    );
   }
 
   private assertPublishedPullRequest(
@@ -637,7 +527,7 @@ export class ChangeRequestGithubMirrorService {
       cleanupErrors.push('could not safely identify the pull request to close');
     }
     try {
-      await this.deleteRemoteBranch(record.repoRoot, headBranch);
+      await this.branches.deleteRemote(record.repoRoot, headBranch);
     } catch (error) {
       cleanupErrors.push(
         `could not delete mirror branch ${headBranch}: ${error instanceof Error ? error.message : String(error)}`,
@@ -650,28 +540,6 @@ export class ChangeRequestGithubMirrorService {
       primary.statusCode,
       primary.code,
     );
-  }
-
-  private recordIdHash(record: ChangeRequestRecord): string {
-    return crypto.createHash('sha256').update(record.id).digest('hex').slice(0, 8);
-  }
-
-  private async fetch(repoRoot: string): Promise<void> {
-    await this.git(repoRoot, ['fetch', 'origin', '--prune']);
-  }
-
-  private async git(repoRoot: string, args: string[]): Promise<RunResult> {
-    const result = await this.deps.runHostCommand('git', ['-C', repoRoot, ...args], {
-      timeoutMs: GIT_TIMEOUT_MS,
-    });
-    if (result.code !== 0) {
-      throw new ChangeRequestError(
-        String(result.stderr || result.stdout || `git ${args[0] ?? 'operation'} failed`).trim(),
-        409,
-        'git_failed',
-      );
-    }
-    return result;
   }
 
   private requiredRecord(id: string): ChangeRequestRecord {

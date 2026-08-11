@@ -1,5 +1,6 @@
 import React from 'react';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
+import { normalizeChangeRequestPermissions } from '@drone/assistant-chat';
 import { requestJson } from '../http';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
@@ -940,8 +941,9 @@ export function AssistantDock({
     setScopeReadMode(readMode);
     setScopeWriteMode(writeMode);
     setScopeExecuteMode(executeMode);
-    setScopeChangeRequestCreate(scope.changeRequestCreate !== false);
-    setScopeChangeRequestMerge(scope.changeRequestMerge === true);
+    const changeRequestPermissions = normalizeChangeRequestPermissions(scope);
+    setScopeChangeRequestCreate(changeRequestPermissions.changeRequestCreate);
+    setScopeChangeRequestMerge(changeRequestPermissions.changeRequestMerge);
     const incomingDraft: AssistantScopeDraft = {
       readMode,
       writeMode,
@@ -1214,8 +1216,9 @@ export function AssistantDock({
         });
         if (activeThreadIdRef.current !== threadId) return;
         if (!data.accessScope) throw new Error('DroneHub did not return the saved permissions.');
-        setScopeChangeRequestCreate(data.accessScope.changeRequestCreate !== false);
-        setScopeChangeRequestMerge(data.accessScope.changeRequestMerge === true);
+        const changeRequestPermissions = normalizeChangeRequestPermissions(data.accessScope);
+        setScopeChangeRequestCreate(changeRequestPermissions.changeRequestCreate);
+        setScopeChangeRequestMerge(changeRequestPermissions.changeRequestMerge);
         void refresh();
       } catch (err: any) {
         if (activeThreadIdRef.current !== threadId) return;
