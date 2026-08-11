@@ -4,6 +4,15 @@ import { requestJson } from '../http';
 import { cn } from '../../ui/cn';
 import { DiffBlock } from '../changes/DiffBlock';
 import type { DiffState } from '../changes/types';
+import {
+  readPullRequestMergeMethod,
+  writePullRequestMergeMethod,
+} from '../pullRequests/pull-request-preferences';
+import {
+  ChangeRequestGithubMirrorPanel,
+  type ChangeRequestGithubMirrorView,
+  type GithubMirrorMergeMethod,
+} from './ChangeRequestGithubMirrorPanel';
 
 type ChangeRequestStatus = 'open' | 'merged' | 'closed';
 
@@ -30,6 +39,7 @@ type ChangeRequest = {
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
+  githubMirror: ChangeRequestGithubMirrorView | null;
 };
 
 type ChangeEntry = {
@@ -109,6 +119,9 @@ export function DroneChangeRequestsDock({
   const [draftDestination, setDraftDestination] = React.useState('');
   const [mergeCommitMessage, setMergeCommitMessage] = React.useState('');
   const [assessmentLoading, setAssessmentLoading] = React.useState(false);
+  const [githubMergeMethod, setGithubMergeMethod] = React.useState<GithubMirrorMergeMethod>(() =>
+    readPullRequestMergeMethod(),
+  );
   const [changes, setChanges] = React.useState<ChangesPayload | null>(null);
   const [changesLoading, setChangesLoading] = React.useState(false);
   const [selectedPath, setSelectedPath] = React.useState<string | null>(null);
@@ -512,6 +525,20 @@ export function DroneChangeRequestsDock({
               </>
             ) : null}
           </div>
+
+          <ChangeRequestGithubMirrorPanel
+            requestId={selected.id}
+            nativeStatus={selected.status}
+            mirror={selected.githubMirror}
+            disabled={actionDisabled}
+            busy={busy}
+            mergeMethod={githubMergeMethod}
+            onMergeMethodChange={(method) => {
+              setGithubMergeMethod(method);
+              writePullRequestMergeMethod(method);
+            }}
+            mutate={mutate}
+          />
 
           {isOpen ? (
             <div className="mt-3 grid min-h-72 gap-3 lg:grid-cols-[minmax(14rem,0.38fr)_minmax(0,1fr)]">

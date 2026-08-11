@@ -314,6 +314,7 @@ import { ResourceSubscriptionRepository } from './subscriptions/resource-subscri
 import { ResourceSubscriptionService } from './subscriptions/resource-subscription-service';
 import { getChangeRequestRepository } from './change-requests/change-request-repository';
 import { ChangeRequestService } from './change-requests/change-request-service';
+import { ChangeRequestGithubMirrorService } from './change-requests/change-request-github-mirror-service';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
 import {
   isWorkflowChildDroneEntry,
@@ -5343,9 +5344,21 @@ export async function startDroneHubApiServer(opts: {
     };
   }
 
-  const changeRequestService = resourceSubscriptionDatabase
+  const changeRequestRepository = resourceSubscriptionDatabase
+    ? getChangeRequestRepository()
+    : null;
+  const changeRequestGithubMirrorService = changeRequestRepository
+    ? new ChangeRequestGithubMirrorService({
+        repository: changeRequestRepository,
+        runHostCommand,
+        deleteHostRefBestEffort,
+        now: nowIso,
+        onGithubChanged: clearGithubPullRequestListCache,
+      })
+    : null;
+  const changeRequestService = changeRequestRepository
     ? new ChangeRequestService({
-        repository: getChangeRequestRepository(),
+        repository: changeRequestRepository,
         resolveDrone: resolveDroneOrPendingForReadRef,
         withLockedDroneContainer,
         exportFullHeadBundleFromDrone,
@@ -5360,6 +5373,7 @@ export async function startDroneHubApiServer(opts: {
         runHostCommand,
         storagePath: droneRootPath,
         now: nowIso,
+        githubMirrorLifecycle: changeRequestGithubMirrorService ?? undefined,
       })
     : null;
 
@@ -5480,7 +5494,10 @@ export async function startDroneHubApiServer(opts: {
     updateStoredUserTimeZone,
   });
   registerAgentRunDiffRoutes(apiRouter);
-  registerChangeRequestRoutes(apiRouter, { service: changeRequestService });
+  registerChangeRequestRoutes(apiRouter, {
+    service: changeRequestService,
+    githubMirrorService: changeRequestGithubMirrorService,
+  });
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,
     nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),

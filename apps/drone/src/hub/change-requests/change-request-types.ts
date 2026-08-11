@@ -6,6 +6,31 @@ export type ChangeRequestActor = {
   label: string;
 };
 
+export type ChangeRequestGithubMirrorState = 'open' | 'closed' | 'merged';
+
+export type ChangeRequestGithubMirrorRecord = {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  htmlUrl: string;
+  headBranch: string;
+  headSha: string;
+  baseBranch: string;
+  state: ChangeRequestGithubMirrorState;
+  autoUpdate: boolean;
+  branchOwnedByDroneHub: boolean;
+  syncedRevision: number;
+  syncedNativeUpdatedAt: string;
+  mergeCommitSha: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ChangeRequestGithubMirrorView = ChangeRequestGithubMirrorRecord & {
+  outOfDate: boolean;
+};
+
 export type ChangeRequestRecord = {
   id: string;
   number: number;
@@ -32,6 +57,7 @@ export type ChangeRequestRecord = {
   updatedAt: string;
   mergedAt: string | null;
   closedAt: string | null;
+  githubMirror: ChangeRequestGithubMirrorRecord | null;
 };
 
 export type ChangeRequestAssessment = {
@@ -42,7 +68,10 @@ export type ChangeRequestAssessment = {
   conflictFiles: string[];
 };
 
-export type ChangeRequestView = ChangeRequestRecord & ChangeRequestAssessment;
+export type ChangeRequestView = Omit<ChangeRequestRecord, 'githubMirror'> &
+  ChangeRequestAssessment & {
+    githubMirror: ChangeRequestGithubMirrorView | null;
+  };
 
 export type ChangeRequestFileChange = {
   path: string;

@@ -6,6 +6,7 @@ import {
 } from '../../host/hub-database';
 import type {
   ChangeRequestActor,
+  ChangeRequestGithubMirrorRecord,
   ChangeRequestRecord,
   ChangeRequestStatus,
 } from './change-request-types';
@@ -36,6 +37,7 @@ type ChangeRequestRow = {
   updated_at: string;
   merged_at: string | null;
   closed_at: string | null;
+  github_mirror_json: string | null;
 };
 
 export type ChangeRequestInsert = Omit<ChangeRequestRecord, 'number'>;
@@ -57,6 +59,7 @@ export type ChangeRequestPatch = Partial<
     | 'updatedAt'
     | 'mergedAt'
     | 'closedAt'
+    | 'githubMirror'
   >
 >;
 
@@ -112,6 +115,13 @@ const CHANGE_REQUEST_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: 'github pull request mirrors',
+    migrate(connection) {
+      connection.exec('ALTER TABLE change_requests ADD COLUMN github_mirror_json TEXT;');
+    },
+  },
 ];
 
 function parseActor(raw: string | null): ChangeRequestActor | null {
@@ -122,6 +132,35 @@ function parseActor(raw: string | null): ChangeRequestActor | null {
     id: typeof parsed.id === 'string' && parsed.id.trim() ? parsed.id.trim() : null,
     label: String(parsed.label ?? '').trim() || 'Unknown actor',
   };
+}
+
+function parseGithubMirror(raw: string | null): ChangeRequestGithubMirrorRecord | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<ChangeRequestGithubMirrorRecord>;
+    const pullNumber = Math.floor(Number(value.pullNumber));
+    if (!value.owner || !value.repo || !Number.isFinite(pullNumber) || pullNumber <= 0) return null;
+    return {
+      owner: String(value.owner),
+      repo: String(value.repo),
+      pullNumber,
+      htmlUrl: String(value.htmlUrl ?? ''),
+      headBranch: String(value.headBranch ?? ''),
+      headSha: String(value.headSha ?? ''),
+      baseBranch: String(value.baseBranch ?? ''),
+      state: value.state === 'merged' ? 'merged' : value.state === 'closed' ? 'closed' : 'open',
+      autoUpdate: value.autoUpdate !== false,
+      branchOwnedByDroneHub: value.branchOwnedByDroneHub === true,
+      syncedRevision: Math.max(0, Math.floor(Number(value.syncedRevision) || 0)),
+      syncedNativeUpdatedAt: String(value.syncedNativeUpdatedAt ?? ''),
+      mergeCommitSha: value.mergeCommitSha ? String(value.mergeCommitSha) : null,
+      lastError: value.lastError ? String(value.lastError) : null,
+      createdAt: String(value.createdAt ?? ''),
+      updatedAt: String(value.updatedAt ?? ''),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function record(row: ChangeRequestRow): ChangeRequestRecord {
@@ -155,6 +194,7 @@ function record(row: ChangeRequestRow): ChangeRequestRecord {
     updatedAt: row.updated_at,
     mergedAt: row.merged_at,
     closedAt: row.closed_at,
+    githubMirror: parseGithubMirror(row.github_mirror_json),
   };
 }
 
@@ -175,9 +215,9 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
             base_branch, base_sha, destination_branch, snapshot_ref, snapshot_sha,
             source_head_sha, revision, title, description, created_by_json,
             merged_by_json, merge_commit_sha, last_error, created_at, updated_at,
-            merged_at, closed_at
+            merged_at, closed_at, github_mirror_json
           ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
         `,
         )
@@ -206,6 +246,7 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
           input.updatedAt,
           input.mergedAt,
           input.closedAt,
+          input.githubMirror ? JSON.stringify(input.githubMirror) : null,
         );
       const row = connection
         .prepare('SELECT * FROM change_requests WHERE id = ?')
@@ -268,7 +309,7 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
             status = ?, destination_branch = ?, snapshot_ref = ?, snapshot_sha = ?,
             source_head_sha = ?, revision = ?, title = ?, description = ?,
             merged_by_json = ?, merge_commit_sha = ?, last_error = ?, updated_at = ?,
-            merged_at = ?, closed_at = ?
+            merged_at = ?, closed_at = ?, github_mirror_json = ?
           WHERE id = ?
         `,
         )
@@ -287,6 +328,7 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
           next.updatedAt,
           next.mergedAt,
           next.closedAt,
+          next.githubMirror ? JSON.stringify(next.githubMirror) : null,
           id,
         );
       const row = connection

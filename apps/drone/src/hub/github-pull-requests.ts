@@ -43,6 +43,19 @@ export type GithubPullRequestSummary = GithubPullRequestSummaryPayload & {
   state: GithubPullRequestState;
 };
 
+export type GithubPullRequestDetails = {
+  repo: GithubRepoRef;
+  number: number;
+  title: string;
+  body: string;
+  state: GithubPullRequestState;
+  htmlUrl: string;
+  baseRefName: string;
+  headRefName: string;
+  headSha: string;
+  mergeCommitSha: string | null;
+};
+
 export type GithubPullRequestChanges = {
   repo: GithubRepoRef;
   pullRequest: {
@@ -942,6 +955,96 @@ export async function getGithubPullRequestCommitForRepoRoot(opts: {
     token,
   });
   return mapGithubCommitChanges(raw, repo);
+}
+
+function githubPullRequestDetails(repo: GithubRepoRef, raw: any): GithubPullRequestDetails {
+  const number = Math.max(1, Math.floor(Number(raw?.number) || 0));
+  return {
+    repo,
+    number,
+    title: String(raw?.title ?? '').trim() || `PR #${number}`,
+    body: String(raw?.body ?? ''),
+    state: normalizeGithubPullRequestState(raw?.state, {
+      merged: raw?.merged,
+      mergedAt: raw?.merged_at,
+    }),
+    htmlUrl: String(raw?.html_url ?? '').trim(),
+    baseRefName: String(raw?.base?.ref ?? '').trim(),
+    headRefName: String(raw?.head?.ref ?? '').trim(),
+    headSha: String(raw?.head?.sha ?? '').trim().toLowerCase(),
+    mergeCommitSha: raw?.merge_commit_sha
+      ? String(raw.merge_commit_sha).trim().toLowerCase()
+      : null,
+  };
+}
+
+export async function getGithubPullRequestForRepoRoot(opts: {
+  repoRoot: string;
+  pullNumber: number;
+}): Promise<GithubPullRequestDetails> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  if (!repoRoot) throw new GithubPullRequestError('missing repo root', { statusCode: 400 });
+  const pullNumber = assertValidPullNumber(opts.pullNumber);
+  const repo = await resolveGithubRepoForRepoRoot(repoRoot);
+  const token = await resolveGithubToken();
+  const pull = await githubApiRequest<any>({
+    method: 'GET',
+    path: `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${pullNumber}`,
+    token,
+  });
+  return githubPullRequestDetails(repo, pull);
+}
+
+export async function createGithubPullRequestForRepoRoot(opts: {
+  repoRoot: string;
+  title: string;
+  body: string;
+  headBranch: string;
+  baseBranch: string;
+}): Promise<GithubPullRequestDetails> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  if (!repoRoot) throw new GithubPullRequestError('missing repo root', { statusCode: 400 });
+  const repo = await resolveGithubRepoForRepoRoot(repoRoot);
+  const token = await resolveGithubToken();
+  if (!token) throw githubAuthRequiredError();
+  const pull = await githubApiRequest<any>({
+    method: 'POST',
+    path: `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls`,
+    token,
+    body: {
+      title: String(opts.title ?? '').trim(),
+      body: String(opts.body ?? ''),
+      head: String(opts.headBranch ?? '').trim(),
+      base: String(opts.baseBranch ?? '').trim(),
+    },
+  });
+  return githubPullRequestDetails(repo, pull);
+}
+
+export async function updateGithubPullRequestForRepoRoot(opts: {
+  repoRoot: string;
+  pullNumber: number;
+  title: string;
+  body: string;
+  baseBranch: string;
+}): Promise<GithubPullRequestDetails> {
+  const repoRoot = String(opts.repoRoot ?? '').trim();
+  if (!repoRoot) throw new GithubPullRequestError('missing repo root', { statusCode: 400 });
+  const pullNumber = assertValidPullNumber(opts.pullNumber);
+  const repo = await resolveGithubRepoForRepoRoot(repoRoot);
+  const token = await resolveGithubToken();
+  if (!token) throw githubAuthRequiredError();
+  const pull = await githubApiRequest<any>({
+    method: 'PATCH',
+    path: `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${pullNumber}`,
+    token,
+    body: {
+      title: String(opts.title ?? '').trim(),
+      body: String(opts.body ?? ''),
+      base: String(opts.baseBranch ?? '').trim(),
+    },
+  });
+  return githubPullRequestDetails(repo, pull);
 }
 
 export async function mergeGithubPullRequestForRepoRoot(opts: {

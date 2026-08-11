@@ -2,6 +2,7 @@ import type {
   ChangeRequestActor,
   ChangeRequestStatus,
 } from '../change-requests/change-request-types';
+import type { ChangeRequestGithubMirrorService } from '../change-requests/change-request-github-mirror-service';
 import {
   ChangeRequestError,
   type ChangeRequestService,
@@ -10,6 +11,7 @@ import type { HubRouter } from '../hub-router';
 
 type ChangeRequestRouteDependencies = {
   service: ChangeRequestService | null;
+  githubMirrorService: ChangeRequestGithubMirrorService | null;
 };
 
 function requestActor(value: unknown): ChangeRequestActor {
@@ -52,6 +54,16 @@ export function registerChangeRequestRoutes(
       );
     }
     return deps.service;
+  };
+
+  const githubMirrorService = (): ChangeRequestGithubMirrorService => {
+    if (!deps.githubMirrorService) {
+      throw new ChangeRequestError(
+        'GitHub mirroring is unavailable because the Hub database is unavailable.',
+        503,
+      );
+    }
+    return deps.githubMirrorService;
   };
 
   apiRouter.get('/api/change-requests', async ({ url, json }) => {
@@ -141,6 +153,90 @@ export function registerChangeRequestRoutes(
         commitMessage: typeof body.commitMessage === 'string' ? body.commitMessage : undefined,
       });
       json(200, { ok: true, request });
+    } catch (error) {
+      const response = errorResponse(error);
+      json(response.status, response.body);
+    }
+  });
+
+  apiRouter.post(
+    '/api/change-requests/:requestId/github/publish',
+    async ({ params, readJson, json }) => {
+      try {
+        const body = await readJson<Record<string, unknown>>();
+        await githubMirrorService().publish(params.requestId, {
+          merge: body.merge === true,
+          mergeMethod:
+            body.mergeMethod === 'merge' ||
+            body.mergeMethod === 'rebase' ||
+            body.mergeMethod === 'squash'
+              ? body.mergeMethod
+              : 'squash',
+        });
+        json(201, { ok: true, request: await service().get(params.requestId) });
+      } catch (error) {
+        const response = errorResponse(error);
+        json(response.status, response.body);
+      }
+    },
+  );
+
+  apiRouter.post('/api/change-requests/:requestId/github/sync', async ({ params, json }) => {
+    try {
+      await githubMirrorService().sync(params.requestId);
+      json(200, { ok: true, request: await service().get(params.requestId) });
+    } catch (error) {
+      const response = errorResponse(error);
+      json(response.status, response.body);
+    }
+  });
+
+  apiRouter.post('/api/change-requests/:requestId/github/refresh', async ({ params, json }) => {
+    try {
+      await githubMirrorService().refresh(params.requestId);
+      json(200, { ok: true, request: await service().get(params.requestId) });
+    } catch (error) {
+      const response = errorResponse(error);
+      json(response.status, response.body);
+    }
+  });
+
+  apiRouter.patch('/api/change-requests/:requestId/github', async ({ params, readJson, json }) => {
+    try {
+      const body = await readJson<Record<string, unknown>>();
+      if (typeof body.autoUpdate !== 'boolean') {
+        throw new ChangeRequestError('autoUpdate must be a boolean');
+      }
+      await githubMirrorService().setAutoUpdate(params.requestId, body.autoUpdate);
+      json(200, { ok: true, request: await service().get(params.requestId) });
+    } catch (error) {
+      const response = errorResponse(error);
+      json(response.status, response.body);
+    }
+  });
+
+  apiRouter.post(
+    '/api/change-requests/:requestId/github/merge',
+    async ({ params, readJson, json }) => {
+      try {
+        const body = await readJson<Record<string, unknown>>();
+        const method =
+          body.method === 'merge' || body.method === 'rebase' || body.method === 'squash'
+            ? body.method
+            : 'squash';
+        await githubMirrorService().merge(params.requestId, method);
+        json(200, { ok: true, request: await service().get(params.requestId) });
+      } catch (error) {
+        const response = errorResponse(error);
+        json(response.status, response.body);
+      }
+    },
+  );
+
+  apiRouter.post('/api/change-requests/:requestId/github/close', async ({ params, json }) => {
+    try {
+      await githubMirrorService().close(params.requestId);
+      json(200, { ok: true, request: await service().get(params.requestId) });
     } catch (error) {
       const response = errorResponse(error);
       json(response.status, response.body);

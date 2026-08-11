@@ -4,7 +4,7 @@
 
 DroneHub should have its own change requests. They should feel similar to pull requests, but live inside DroneHub and do not require GitHub.
 
-A chat can commit some work, open a change request, and either wait for the user to merge it or merge it itself when it has permission. GitHub pull requests remain an optional future publishing choice, not a requirement.
+A chat can commit some work, open a change request, and either wait for the user to merge it or merge it itself when it has permission. A user may optionally mirror an individual request to GitHub, but GitHub remains a publishing choice rather than a requirement.
 
 ## Initial implementation scope
 
@@ -17,7 +17,8 @@ The first version intentionally stays small:
 - separate per-chat permissions for creating/managing and merging requests;
 - user controls and file/diff review inside DroneHub;
 - fixed cleanup behavior with no retention settings;
-- no GitHub mirror, bulk actions, approval history, normal merge, or repository/branch-specific policy editor yet.
+- optional user-only GitHub mirroring for one request at a time;
+- no bulk actions, agent mirror access, approval history, normal native merge, or repository/branch-specific policy editor.
 
 ## Core behavior
 
@@ -48,6 +49,7 @@ Creating/managing and merging are separate per-chat permissions:
 - Host credentials are used inside DroneHub and are never handed to the chat or container.
 - Background “merge automatically when checks pass” behavior is not included.
 - Repository-specific and destination-branch-specific permission rules can be added later if needed.
+- GitHub mirror actions are not MCP tools and have no agent permissions. They are user-only UI actions.
 
 ## Destinations and branches
 
@@ -92,15 +94,16 @@ A managed chat can only update, close, or merge a request belonging to that same
 - Temporary bundles, import refs, and merge worktrees are removed after each operation.
 - An open request retains one Git snapshot ref, not another repository or permanent worktree.
 - Closing or merging immediately removes the stored snapshot ref while keeping the small metadata record.
+- DroneHub deletes a remote mirror branch after its linked pull request is closed or merged only when the stored mirror record proves that DroneHub created and owns that branch.
 - Deleting the source drone does not delete an open request in the first version because its snapshot is already independent.
 - Missing or damaged snapshots are reported clearly.
 - Configurable retention, storage reporting, startup recovery cleanup, and manual storage cleanup are future improvements.
 
-## Future: optional GitHub pull-request mirror
+## Optional GitHub pull-request mirror
 
-A later version may mirror a native change request to GitHub while keeping the DroneHub request as the primary record.
+A user can mirror a native change request to GitHub while keeping the DroneHub request as the primary record. Mirror actions are available only in the request UI; they are not exposed through MCP and are not available to agents.
 
-Possible user-facing actions include:
+User-facing actions include:
 
 - Open as pull request
 - Open and merge as pull request
@@ -108,10 +111,14 @@ Possible user-facing actions include:
 - Close the linked pull request
 - Manually update an out-of-date linked pull request
 
-The mirror should update automatically by default when the native request changes, with an option to disable automatic updates and show an out-of-date state. Only remote mirror branches proven to have been created and owned by DroneHub may be deleted. DroneHub must never delete `main`, `dev`, a destination branch, or another user-created branch.
+The mirror updates automatically by default when the native request changes. The user can disable automatic updates, see when the mirror is out of date, and update it manually. Updates use a force-with-lease against the last known mirror head, so an unexpected external branch change is not overwritten.
 
-GitHub mirror actions are user-only initially when this future work is added. Agent permissions for publishing, updating, closing, and merging GitHub PRs must remain separate from native change-request permissions.
+DroneHub generates and records a unique mirror head branch. Only a branch proven by that record to have been created and owned by DroneHub, and whose remote head still matches DroneHub's last known head, may be deleted. DroneHub never deletes `main`, `dev`, a destination branch, an externally changed mirror branch, or another user-created branch. If the selected destination does not exist, it is created from the latest remote head of the request's base branch and is not treated as a disposable mirror branch.
+
+Opening and immediately merging a pull request, or merging an existing linked pull request, uses the merge method selected by the user. A successful GitHub merge marks the native request merged, records the GitHub merge commit, and cleans up the native snapshot and owned mirror branch. Closing a linked pull request leaves the native request open so it can still be updated or directly merged.
+
+If a native request is closed or directly merged while its GitHub mirror is open, DroneHub closes the linked pull request and cleans up its owned mirror branch on a best-effort basis. Any failure remains visible on the mirror record so the user can retry cleanup.
 
 ## Future: bulk actions
 
-Bulk GitHub publishing or merging is not part of the first version. If added later, it should provide per-request results, avoid duplicates, skip requests already in the requested state, and process requests targeting the same branch in a stable order while rechecking the destination between merges.
+Bulk GitHub publishing or merging is not included. If added later, it should provide per-request results, avoid duplicates, skip requests already in the requested state, and process requests targeting the same branch in a stable order while rechecking the destination between merges.

@@ -69,6 +69,11 @@ export type ChangeRequestServiceDependencies = {
   ) => Promise<RunResult>;
   storagePath: (...segments: string[]) => string;
   now: () => string;
+  githubMirrorLifecycle?: {
+    syncAfterNativeUpdate: (record: ChangeRequestRecord) => Promise<void>;
+    closeAfterNativeCompletion: (record: ChangeRequestRecord) => Promise<void>;
+    refresh: (record: ChangeRequestRecord) => Promise<void>;
+  };
 };
 
 type SnapshotSource = {
@@ -220,6 +225,7 @@ export class ChangeRequestService {
         updatedAt: now,
         mergedAt: null,
         closedAt: null,
+        githubMirror: null,
       });
     } catch (error) {
       await this.deps.deleteHostRefBestEffort({
@@ -252,6 +258,7 @@ export class ChangeRequestService {
       if (current.status === 'open') {
         await this.git(current.repoRoot, ['fetch', 'origin', '--prune'], MERGE_TIMEOUT_MS);
       }
+      await this.deps.githubMirrorLifecycle?.refresh(this.requiredRecord(id));
       return await this.view(this.requiredRecord(id));
     });
   }
@@ -298,6 +305,8 @@ export class ChangeRequestService {
         }
         throw error;
       }
+      await this.deps.githubMirrorLifecycle?.syncAfterNativeUpdate(updated);
+      updated = this.requiredRecord(id);
       return await this.view(updated);
     });
   }
@@ -320,7 +329,8 @@ export class ChangeRequestService {
           refName: current.snapshotRef,
         });
       }
-      return await this.view(closed);
+      await this.deps.githubMirrorLifecycle?.closeAfterNativeCompletion(closed);
+      return await this.view(this.requiredRecord(id));
     });
   }
 
@@ -357,7 +367,8 @@ export class ChangeRequestService {
           repoRoot: current.repoRoot,
           refName: current.snapshotRef,
         });
-        return await this.view(merged);
+        await this.deps.githubMirrorLifecycle?.closeAfterNativeCompletion(merged);
+        return await this.view(this.requiredRecord(id));
       } catch (error: any) {
         await this.deps.repository.update(id, {
           lastError: error?.message ?? String(error),
@@ -716,9 +727,18 @@ export class ChangeRequestService {
   }
 
   private async view(record: ChangeRequestRecord): Promise<ChangeRequestView> {
+    const githubMirror = record.githubMirror
+      ? {
+          ...record.githubMirror,
+          outOfDate:
+            record.githubMirror.syncedRevision !== record.revision ||
+            record.githubMirror.syncedNativeUpdatedAt !== record.updatedAt,
+        }
+      : null;
     if (record.status !== 'open' || !record.snapshotRef || !record.snapshotSha) {
       return {
         ...record,
+        githubMirror,
         stale: false,
         conflicted: false,
         destinationExists: record.status === 'merged',
@@ -730,6 +750,7 @@ export class ChangeRequestService {
     if (!snapshot || snapshot !== record.snapshotSha) {
       return {
         ...record,
+        githubMirror,
         stale: false,
         conflicted: false,
         destinationExists: false,
@@ -745,6 +766,7 @@ export class ChangeRequestService {
     if (!destinationSha) {
       return {
         ...record,
+        githubMirror,
         stale: false,
         conflicted: false,
         destinationExists: Boolean(destinationRef),
@@ -769,6 +791,7 @@ export class ChangeRequestService {
     const combined = `${mergeTree.stdout}\n${mergeTree.stderr}`.trim();
     return {
       ...record,
+      githubMirror,
       stale: destinationSha !== record.baseSha,
       conflicted: mergeTree.code !== 0,
       destinationExists: Boolean(destinationRef),
