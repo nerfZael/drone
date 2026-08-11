@@ -132,6 +132,11 @@ import {
   resolveSidebarDroneDraftLocation,
   resolveSidebarGroupDraftLocation,
 } from './sidebar-group-draft-location';
+import {
+  continuousDictationStatusLabel,
+  useContinuousDictation,
+} from '../chat/ContinuousDictationContext';
+import { browserMicrophoneOwnerLabel } from '../chat/browser-microphone-coordinator';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 308;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -140,6 +145,31 @@ const AUTO_MINIMIZE_EXPAND_DELAY_MS = 120;
 const AUTO_MINIMIZE_REOPEN_GUARD_MS = 220;
 const SIDEBAR_DND_IDLE_DISABLE_DELAY_MS = 1500;
 const SIDEBAR_DENSITY_MODE_ORDER: SidebarDensityMode[] = ['compact', 'default', 'comfortable'];
+
+function ContinuousDictationIcon({ active }: { active: boolean }) {
+  return (
+    <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden="true">
+      {active ? (
+        <span className="absolute inset-0 rounded-full bg-[var(--red)] opacity-20 animate-pulse" />
+      ) : null}
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      >
+        <path d="M4 12h2" />
+        <path d="M8 8v8" />
+        <path d="M12 5v14" />
+        <path d="M16 8v8" />
+        <path d="M20 12h0" />
+      </svg>
+    </span>
+  );
+}
 
 function PinnedSidebarPlacementSlot({
   placement,
@@ -934,6 +964,7 @@ export function DroneSidebar({
   readOnlyDisabledDroneReasonById = {},
   readOnlyDroneStatusHintById = {},
 }: DroneSidebarProps) {
+  const continuousDictation = useContinuousDictation();
   const [pinnedSidebarTopTarget, setPinnedSidebarTopTarget] =
     React.useState<HTMLDivElement | null>(null);
   const [pinnedSidebarBottomTarget, setPinnedSidebarBottomTarget] =
@@ -945,6 +976,28 @@ export function DroneSidebar({
     () => resolveDroneSidebarCapabilities(capabilities),
     [capabilities],
   );
+  const continuousDictationActive = Boolean(
+    continuousDictation && continuousDictation.status !== 'idle',
+  );
+  const continuousDictationBlocked = Boolean(
+    continuousDictation &&
+    !continuousDictationActive &&
+    continuousDictation.microphoneOwner !== null,
+  );
+  const continuousDictationActionDisabled = Boolean(
+    continuousDictationBlocked || continuousDictation?.status === 'stopping',
+  );
+  const continuousDictationLabel = continuousDictation
+    ? continuousDictation.error ||
+      (continuousDictationBlocked && continuousDictation.microphoneOwner
+        ? `${browserMicrophoneOwnerLabel(continuousDictation.microphoneOwner)} is using the microphone.`
+        : continuousDictationActive && !continuousDictation.activeComposerId
+          ? 'Continuous dictation is listening · open a chat to receive text.'
+          : continuousDictationStatusLabel(
+              continuousDictation.status,
+              continuousDictation.pendingCount,
+            ))
+    : '';
   const {
     sidebarCollapsed,
     selectedDroneIds,
@@ -3081,7 +3134,14 @@ export function DroneSidebar({
           />
         ) : null}
 
-        {sidebarCapabilities.repoFooter ||
+        {continuousDictation?.error ? (
+          <UiPanelStatusStrip tone="danger" className="mx-2 mb-2 rounded border">
+            {continuousDictation.error}
+          </UiPanelStatusStrip>
+        ) : null}
+
+        {continuousDictation ||
+        sidebarCapabilities.repoFooter ||
         sidebarCapabilities.sidebarOptions ||
         sidebarCapabilities.collapseControl ? (
           <UiPanelToolbar
@@ -3098,6 +3158,17 @@ export function DroneSidebar({
               >
                 Repositories {repositoryNavigationItems.length || ''}
               </UiToolbarButton>
+            ) : null}
+            {continuousDictation ? (
+              <UiToolbarIconButton
+                onClick={() => void continuousDictation.toggle()}
+                label={continuousDictationLabel}
+                title={continuousDictationLabel}
+                icon={<ContinuousDictationIcon active={continuousDictationActive} />}
+                tone={continuousDictationActive ? 'danger' : 'accent'}
+                pressed={continuousDictationActive}
+                disabled={continuousDictationActionDisabled}
+              />
             ) : null}
             {sidebarCapabilities.sidebarOptions ? (
               <UiActionMenu
@@ -3167,6 +3238,18 @@ export function DroneSidebar({
           disabled={!collapsedRailInteractive}
           tabIndex={collapsedRailInteractive ? 0 : -1}
         />
+        {continuousDictation ? (
+          <UiToolbarIconButton
+            onClick={() => void continuousDictation.toggle()}
+            label={continuousDictationLabel}
+            title={continuousDictationLabel}
+            icon={<ContinuousDictationIcon active={continuousDictationActive} />}
+            tone={continuousDictationActive ? 'danger' : 'accent'}
+            pressed={continuousDictationActive}
+            disabled={!collapsedRailInteractive || continuousDictationActionDisabled}
+            tabIndex={collapsedRailInteractive ? 0 : -1}
+          />
+        ) : null}
         {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.createDrones ? (
           <UiToolbarIconButton
             onClick={() => {

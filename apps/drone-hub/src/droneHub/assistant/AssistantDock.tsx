@@ -1,5 +1,6 @@
 import React from 'react';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
+import { normalizeChangeRequestPermissions } from '@drone/assistant-chat';
 import { requestJson } from '../http';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
@@ -337,6 +338,8 @@ export function AssistantDock({
   const [scopeReadMode, setScopeReadMode] = React.useState<AssistantScopeMode>('all');
   const [scopeWriteMode, setScopeWriteMode] = React.useState<AssistantScopeMode>('all');
   const [scopeExecuteMode, setScopeExecuteMode] = React.useState<AssistantScopeMode>('all');
+  const [scopeChangeRequestCreate, setScopeChangeRequestCreate] = React.useState(true);
+  const [scopeChangeRequestMerge, setScopeChangeRequestMerge] = React.useState(false);
   const [scopeDrones, setScopeDrones] = React.useState<AssistantScopeDrone[]>([]);
   const [scopeSyncBusy, setScopeSyncBusy] = React.useState(false);
   const [scopeSyncError, setScopeSyncError] = React.useState<string | null>(null);
@@ -442,6 +445,8 @@ export function AssistantDock({
     setScopeReadMode('all');
     setScopeWriteMode('all');
     setScopeExecuteMode('all');
+    setScopeChangeRequestCreate(true);
+    setScopeChangeRequestMerge(false);
     setScopeDrones([]);
     setScopeSyncBusy(false);
     setScopeSyncError(null);
@@ -946,6 +951,9 @@ export function AssistantDock({
     setScopeReadMode(readMode);
     setScopeWriteMode(writeMode);
     setScopeExecuteMode(executeMode);
+    const changeRequestPermissions = normalizeChangeRequestPermissions(scope);
+    setScopeChangeRequestCreate(changeRequestPermissions.changeRequestCreate);
+    setScopeChangeRequestMerge(changeRequestPermissions.changeRequestMerge);
     const incomingDraft: AssistantScopeDraft = {
       readMode,
       writeMode,
@@ -979,6 +987,8 @@ export function AssistantDock({
     activeAccessScope?.readMode,
     activeAccessScope?.writeMode,
     activeAccessScope?.executeMode,
+    activeAccessScope?.changeRequestCreate,
+    activeAccessScope?.changeRequestMerge,
     activeAccessScope?.updatedAt,
     activeAccessScopeDroneIdsKey,
     resolveScopeDroneNames,
@@ -1195,6 +1205,41 @@ export function AssistantDock({
       void saveScopeDraft({ ...currentScopeDraftRef.current, executeMode: mode });
     },
     [saveScopeDraft],
+  );
+
+  const updateScopeChangeRequestPermission = React.useCallback(
+    async (kind: 'create' | 'merge', allowed: boolean) => {
+      const threadId = activeThreadIdRef.current;
+      if (!threadId) return;
+      if (kind === 'create') setScopeChangeRequestCreate(allowed);
+      else setScopeChangeRequestMerge(allowed);
+      setScopeSyncBusy(true);
+      setScopeSyncError(null);
+      try {
+        const data = await requestJson<AssistantScopeUpdateResult>('/api/assistant/scope', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            threadId,
+            [kind === 'create' ? 'changeRequestCreate' : 'changeRequestMerge']: allowed,
+          }),
+        });
+        if (activeThreadIdRef.current !== threadId) return;
+        if (!data.accessScope) throw new Error('DroneHub did not return the saved permissions.');
+        const changeRequestPermissions = normalizeChangeRequestPermissions(data.accessScope);
+        setScopeChangeRequestCreate(changeRequestPermissions.changeRequestCreate);
+        setScopeChangeRequestMerge(changeRequestPermissions.changeRequestMerge);
+        void refresh();
+      } catch (err: any) {
+        if (activeThreadIdRef.current !== threadId) return;
+        if (kind === 'create') setScopeChangeRequestCreate(!allowed);
+        else setScopeChangeRequestMerge(!allowed);
+        setScopeSyncError(err?.message ?? String(err));
+      } finally {
+        if (activeThreadIdRef.current === threadId) setScopeSyncBusy(false);
+      }
+    },
+    [refresh],
   );
 
   useDndMonitor({
@@ -2254,6 +2299,8 @@ export function AssistantDock({
               readMode={scopeReadMode}
               writeMode={scopeWriteMode}
               executeMode={scopeExecuteMode}
+              changeRequestCreate={scopeChangeRequestCreate}
+              changeRequestMerge={scopeChangeRequestMerge}
               selectedDrones={scopeDrones.map((drone) => ({
                 id: drone.id,
                 label: drone.name || drone.id,
@@ -2266,6 +2313,9 @@ export function AssistantDock({
                 else if (kind === 'write') updateScopeWriteMode(mode);
                 else updateScopeExecuteMode(mode);
               }}
+              onChangeRequestPermissionChange={(kind, allowed) =>
+                void updateScopeChangeRequestPermission(kind, allowed)
+              }
               onRemoveDrone={removeScopeDrone}
               onBack={() => setDroneHubPermissionsOpen(false)}
             />

@@ -312,6 +312,7 @@ import { LocalCheckoutService } from './local-checkout-service';
 import { createResourceSubscriptionDeliveryAuthorizer } from './subscriptions/create-resource-subscription-delivery-authorizer';
 import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 import { ResourceSubscriptionService } from './subscriptions/resource-subscription-service';
+import { registerChangeRequestFeature } from './change-requests/register-change-request-feature';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
 import {
   isWorkflowChildDroneEntry,
@@ -5446,6 +5447,23 @@ async function startDroneHubApiServerWithLifecycle(
     updateStoredUserTimeZone,
   });
   registerAgentRunDiffRoutes(apiRouter);
+  registerChangeRequestFeature(apiRouter, {
+    resolveDrone: resolveDroneOrPendingForReadRef,
+    withLockedDroneContainer,
+    exportFullHeadBundleFromDrone,
+    importBundleHeadToHostRef,
+    createHostAuthoredMirrorCommit,
+    updateHostRef,
+    gitTopLevel,
+    droneRepoBaseSha,
+    dvmRepoHeadSha,
+    runGitInDrone,
+    runHostCommand,
+    deleteHostRefBestEffort,
+    storagePath: droneRootPath,
+    now: nowIso,
+    onGithubChanged: clearGithubPullRequestListCache,
+  });
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,
     nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),

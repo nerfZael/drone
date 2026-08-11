@@ -527,7 +527,7 @@ export function GeneralSettingsTab({
         <div>
           <div className="dh-type-heading">Voice input</div>
           <div className="mt-1 dh-type-supporting">
-            Configure how continuous voice steering decides that a spoken thought is complete and transcribes it.
+            Configure how continuous voice steering and continuous dictation detect and transcribe a completed thought.
           </div>
         </div>
         {voiceInput.error ? (
@@ -639,8 +639,8 @@ export function GeneralSettingsTab({
             onCheckedChange={(value) =>
               voiceInput.setDraft((current) => ({ ...current, confirmationFeedback: value }))
             }
-            label="Send confirmation sound"
-            description="Play a short confirmation after a continuous voice thought is accepted."
+            label="Transcription confirmation sound"
+            description="Play a short confirmation after a continuous voice transcription is accepted."
           />
         </div>
         <div className="flex items-center gap-2">

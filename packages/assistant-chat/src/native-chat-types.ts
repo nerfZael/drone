@@ -13,9 +13,34 @@ export type NativeChatAccessScope = {
   readMode: 'all' | 'selected';
   writeMode: 'all' | 'selected';
   executeMode: 'all' | 'selected';
+  /** Legacy scopes omit this; omission means enabled. */
+  changeRequestCreate?: boolean;
+  /** Legacy scopes omit this; omission means disabled. */
+  changeRequestMerge?: boolean;
   droneIds: string[];
   updatedAt: string;
 };
+
+export const DEFAULT_CHANGE_REQUEST_PERMISSIONS = {
+  create: true,
+  merge: false,
+} as const;
+
+export function normalizeChangeRequestPermissions(input?: {
+  changeRequestCreate?: unknown;
+  changeRequestMerge?: unknown;
+}): { changeRequestCreate: boolean; changeRequestMerge: boolean } {
+  return {
+    changeRequestCreate:
+      input?.changeRequestCreate === undefined
+        ? DEFAULT_CHANGE_REQUEST_PERMISSIONS.create
+        : input.changeRequestCreate !== false,
+    changeRequestMerge:
+      input?.changeRequestMerge === undefined
+        ? DEFAULT_CHANGE_REQUEST_PERMISSIONS.merge
+        : input.changeRequestMerge === true,
+  };
+}
 
 export type NativeAgentWorkspaceSummary = {
   id: string;
