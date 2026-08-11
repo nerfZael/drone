@@ -2,17 +2,30 @@ import type { DroneClient } from '../host/api';
 
 const IDLE_TIMEOUT_MS = 70_000;
 
+export function daemonPromptEventWakeKind(job: any): 'terminal' | 'approval-pending' | null {
+  const state = String(job?.state ?? '').trim();
+  if (state === 'done' || state === 'failed' || state === 'canceled') return 'terminal';
+  return Number(job?.pendingApprovalCount ?? 0) > 0 ? 'approval-pending' : null;
+}
+
 export class DaemonPromptEventMonitor {
   private readonly monitors = new Map<string, { abort: AbortController; task: Promise<void> }>();
+  private readonly wakeTasks = new Set<Promise<void>>();
+  private stopped = false;
 
   constructor(
     private readonly deps: {
       normalizeDroneId: (value: string) => string;
       resolveClient: (droneId: string) => Promise<{ exists: boolean; client: DroneClient | null }>;
       onTerminalPrompt: (droneId: string, promptId: string) => Promise<void>;
-      sleep: (milliseconds: number) => Promise<void>;
+      onApprovalPending?: (droneId: string, promptId: string) => Promise<void>;
+      sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
     },
   ) {}
+
+  start(): void {
+    this.stopped = false;
+  }
 
   private handleEvent(droneId: string, eventName: string, dataText: string): void {
     let data: any = null;
@@ -28,10 +41,19 @@ export class DaemonPromptEventMonitor {
           ? [data.job]
           : [];
     for (const job of jobs) {
-      const state = String(job?.state ?? '').trim();
-      if (state !== 'done' && state !== 'failed' && state !== 'canceled') continue;
       const promptId = String(job?.id ?? '').trim();
-      if (promptId) void this.deps.onTerminalPrompt(droneId, promptId).catch(() => {});
+      if (!promptId) continue;
+      const wakeKind = daemonPromptEventWakeKind(job);
+      const handler =
+        wakeKind === 'terminal'
+          ? this.deps.onTerminalPrompt
+          : wakeKind === 'approval-pending'
+            ? this.deps.onApprovalPending
+            : null;
+      if (!handler) continue;
+      const task = handler(droneId, promptId).catch(() => {});
+      this.wakeTasks.add(task);
+      void task.finally(() => this.wakeTasks.delete(task));
     }
   }
 
@@ -101,7 +123,7 @@ export class DaemonPromptEventMonitor {
 
   ensure(droneIdRaw: string): void {
     const droneId = this.deps.normalizeDroneId(droneIdRaw);
-    if (!droneId || this.monitors.has(droneId)) return;
+    if (this.stopped || !droneId || this.monitors.has(droneId)) return;
     const abort = new AbortController();
     const task = (async () => {
       let attempt = 0;
@@ -115,7 +137,7 @@ export class DaemonPromptEventMonitor {
         } catch {
           if (abort.signal.aborted) break;
           attempt = Math.min(8, attempt + 1);
-          await this.deps.sleep(Math.min(30_000, 500 * 2 ** attempt));
+          await this.deps.sleep(Math.min(30_000, 500 * 2 ** attempt), abort.signal).catch(() => {});
         }
       }
     })().finally(() => {
@@ -126,8 +148,12 @@ export class DaemonPromptEventMonitor {
     void task;
   }
 
-  close(): void {
-    for (const monitor of this.monitors.values()) monitor.abort.abort();
+  async close(): Promise<void> {
+    this.stopped = true;
+    const monitors = [...this.monitors.values()];
+    for (const monitor of monitors) monitor.abort.abort();
     this.monitors.clear();
+    await Promise.allSettled(monitors.map((monitor) => monitor.task));
+    await Promise.allSettled(this.wakeTasks);
   }
 }

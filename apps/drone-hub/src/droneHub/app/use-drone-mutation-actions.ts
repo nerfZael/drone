@@ -11,7 +11,6 @@ type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 type UseDroneMutationActionsArgs = {
   drones: DroneSummary[];
-  autoDelete: boolean;
   deleteMode: DroneDeleteMode;
   requestJson: RequestJsonFn;
   optimisticallyDeletedDrones: Record<string, boolean>;
@@ -29,7 +28,6 @@ type UseDroneMutationActionsArgs = {
 
 export function useDroneMutationActions({
   drones,
-  autoDelete,
   deleteMode,
   requestJson,
   optimisticallyDeletedDrones,
@@ -55,8 +53,6 @@ export function useDroneMutationActions({
   React.useEffect(() => {
     dronesRef.current = drones;
   }, [drones]);
-
-  const shouldConfirmDelete = React.useCallback((): boolean => !autoDelete, [autoDelete]);
 
   const renameDroneTo = React.useCallback(
     async (
@@ -182,7 +178,7 @@ export function useDroneMutationActions({
         });
         return false;
       }
-      if (shouldConfirmDelete() && opts?.confirmed !== true) {
+      if (opts?.confirmed !== true) {
         const ok = window.confirm(deleteMode === 'archive'
           ? `Archive drone "${droneName}"?\n\nThis removes it from the active list now. You can restore it from Settings > Archive before it auto-deletes.`
           : `Are you sure you want to delete drone "${droneName}"?\n\nThis will remove the container and remove it from your registry.`);
@@ -238,7 +234,6 @@ export function useDroneMutationActions({
       settingBaseImages,
       requestJson,
       setOptimisticallyDeletedDrones,
-      shouldConfirmDelete,
       deleteMode,
     ],
   );

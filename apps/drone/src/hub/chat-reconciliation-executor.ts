@@ -40,6 +40,7 @@ export type ChatReconciliationExecutorDependencies = {
   recoverStalePromptJobSession: any;
   resolveCanonicalDroneOrPendingForReadRef: any;
   resolveCodexTurnRuntime: any;
+  resolvePendingCodexApprovalsForNeverAsk: any;
   resolveHostPort: any;
   resolveTranscriptPromptAt: any;
   sameAgentPlan: any;
@@ -89,6 +90,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     recoverStalePromptJobSession,
     resolveCanonicalDroneOrPendingForReadRef,
     resolveCodexTurnRuntime,
+    resolvePendingCodexApprovalsForNeverAsk,
     resolveHostPort,
     resolveTranscriptPromptAt,
     sameAgentPlan,
@@ -1037,6 +1039,10 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           },
         });
       }
+    }
+
+    if (agent.id === 'codex' && String((entry as any)?.approvalPolicy ?? '').trim() === 'none') {
+      await resolvePendingCodexApprovalsForNeverAsk({ droneId, chatName });
     }
 
     for (const promptId of completedTurnIdsForSnapshot) {

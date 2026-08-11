@@ -303,6 +303,55 @@ describeSocketSuite('create runtime api', () => {
     }
   });
 
+  test('batch creation includes attached seed content in startup prompts', async () => {
+    const attachment = {
+      name: 'batch-screen.png',
+      mime: 'image/png',
+      size: 3,
+      dataBase64: 'YWJj',
+    };
+    const resp = await apiFetch('/api/drones/batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        pullHostBranchBeforeCreate: true,
+        drones: [
+          {
+            name: 'attached-batch-draft-state',
+            runtime: 'container',
+            draft: true,
+            seedAttachments: [attachment],
+            seedSubmittedAt: '2026-06-21T12:04:00.000Z',
+          },
+        ],
+      }),
+    });
+    expect(resp.r.status).toBe(202);
+    expect(resp.data?.accepted).toHaveLength(1);
+    const accepted = resp.data?.accepted?.[0];
+    const droneId = String(accepted?.id ?? '').trim();
+    const promptId = String(accepted?.initialMessage?.promptId ?? '').trim();
+    expect(droneId).not.toBe('');
+    expect(promptId).not.toBe('');
+
+    const regAny: any = await loadRegistry();
+    expect(regAny?.pending?.[droneId]?.startupQueuedPrompts).toEqual([
+      expect.objectContaining({
+        id: promptId,
+        chatName: 'default',
+        prompt: 'Attached 1 attachment',
+        attachments: [expect.objectContaining(attachment)],
+        deliveryMode: 'asap',
+        state: 'queued',
+      }),
+    ]);
+
+    const queue = getPromptQueueRepository();
+    if (queue) {
+      expect(queue.get({ droneId, chatName: 'default', promptId })).toBeNull();
+    }
+  });
+
   test('single create persists supported read-only seed agent permission mode', async () => {
     const resp = await apiFetch('/api/drones', {
       method: 'POST',
@@ -311,7 +360,7 @@ describeSocketSuite('create runtime api', () => {
         name: 'seeded-read-only-agent',
         runtime: 'container',
         seedAgent: { kind: 'builtin', id: 'codex' },
-        seedAgentPermissionMode: 'read-only',
+        seedAgentPermissionMode: 'read',
       }),
     });
     expect(resp.r.status).toBe(202);
@@ -322,7 +371,7 @@ describeSocketSuite('create runtime api', () => {
     expect(regAny?.pending?.[droneId]?.seed).toMatchObject({
       chatName: 'default',
       agent: { kind: 'builtin', id: 'codex' },
-      agentPermissionMode: 'read-only',
+      agentPermissionMode: 'read',
     });
   });
 
@@ -408,7 +457,7 @@ describeSocketSuite('create runtime api', () => {
       body: JSON.stringify({
         name: 'seeded-read-only-agent-invalid',
         runtime: 'container',
-        seedAgentPermissionMode: 'read-only',
+        seedAgentPermissionMode: 'read',
       }),
     });
     expect(resp.r.status).toBe(400);
@@ -427,13 +476,13 @@ describeSocketSuite('create runtime api', () => {
             name: 'batch-read-only-agent',
             runtime: 'container',
             seedAgent: { kind: 'builtin', id: 'blip' },
-            seedAgentPermissionMode: 'read-only',
+            seedAgentPermissionMode: 'read',
           },
           {
             name: 'batch-read-only-agent-invalid',
             runtime: 'container',
             seedAgent: { kind: 'builtin', id: 'cursor' },
-            seedAgentPermissionMode: 'read-only',
+            seedAgentPermissionMode: 'read',
           },
         ],
       }),
@@ -451,7 +500,7 @@ describeSocketSuite('create runtime api', () => {
     expect(regAny?.pending?.[droneId]?.seed).toMatchObject({
       chatName: 'default',
       agent: { kind: 'builtin', id: 'blip' },
-      agentPermissionMode: 'read-only',
+      agentPermissionMode: 'read',
     });
   });
 
@@ -463,8 +512,8 @@ describeSocketSuite('create runtime api', () => {
         name: 'seeded-codex-auto-review',
         runtime: 'container',
         seedAgent: { kind: 'builtin', id: 'codex' },
-        seedAgentPermissionMode: 'workspace-write',
-        seedApprovalPolicy: 'agent-decides',
+        seedAgentPermissionMode: 'write',
+        seedApprovalPolicy: 'auto',
       }),
     });
     expect(resp.r.status).toBe(202);
@@ -474,8 +523,8 @@ describeSocketSuite('create runtime api', () => {
     expect(regAny?.pending?.[droneId]?.seed).toMatchObject({
       chatName: 'default',
       agent: { kind: 'builtin', id: 'codex' },
-      agentPermissionMode: 'workspace-write',
-      approvalPolicy: 'agent-decides',
+      agentPermissionMode: 'write',
+      approvalPolicy: 'auto',
     });
   });
 
@@ -487,7 +536,7 @@ describeSocketSuite('create runtime api', () => {
         name: 'seeded-native-auto-review-invalid',
         runtime: 'container',
         seedAgent: { kind: 'native' },
-        seedApprovalPolicy: 'agent-decides',
+        seedApprovalPolicy: 'auto',
       }),
     });
     expect(nativeAutoReview.r.status).toBe(400);
@@ -500,7 +549,7 @@ describeSocketSuite('create runtime api', () => {
         name: 'seeded-cursor-allow-all-invalid',
         runtime: 'container',
         seedAgent: { kind: 'builtin', id: 'cursor' },
-        seedApprovalPolicy: 'never',
+        seedApprovalPolicy: 'none',
       }),
     });
     expect(cursorAllowAll.r.status).toBe(400);

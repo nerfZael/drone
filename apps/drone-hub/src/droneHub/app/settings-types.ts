@@ -212,18 +212,19 @@ export type UiPreferencesSettingsResponse = {
   uiPreferences: {
     sidebarGroupingMode: SidebarGroupingMode;
     sidebarDensityMode: SidebarDensityMode;
+    collapsedGroups: Record<string, boolean>;
+    collapsedDroneSections: Record<string, boolean>;
     sidebarGroupOrder: string[];
     sidebarDroneOrderByGroup: Record<string, string[]>;
     sidebarNodeOrderByParent: Record<string, string[]>;
     sidebarChatOrderByDrone: Record<string, string[]>;
     pinnedDroneIds: string[];
     hiddenSidebarGroups: string[];
-    autoDelete: boolean;
     spawnAgentKey: string;
     spawnModel: string;
     spawnReasoning: string;
-    spawnAgentPermissionMode: 'read-only' | 'workspace-write' | 'full-access';
-    spawnApprovalPolicy: 'ask' | 'agent-decides' | 'never';
+    spawnAgentPermissionMode: 'read' | 'write' | 'execute';
+    spawnApprovalPolicy: 'ask' | 'auto' | 'none';
     repoBranchSource: 'host' | 'remote';
     repoCreateRemoteBranch: string;
     spawnContextByRepoKey: Record<
@@ -232,8 +233,8 @@ export type UiPreferencesSettingsResponse = {
         spawnAgentKey: string;
         spawnModel: string;
         spawnReasoning: string;
-        spawnAgentPermissionMode: 'read-only' | 'workspace-write' | 'full-access';
-        spawnApprovalPolicy: 'ask' | 'agent-decides' | 'never';
+        spawnAgentPermissionMode: 'read' | 'write' | 'execute';
+        spawnApprovalPolicy: 'ask' | 'auto' | 'none';
         repoBranchSource: 'host' | 'remote';
         repoCreateRemoteBranch: string;
       }

@@ -43,11 +43,20 @@ function abortError(signal: AbortSignal): Error {
     : new Error(String(signal.reason || 'workflow cancelled'));
 }
 
+function hubAgentPermissionMode(
+  permissionMode: 'read-only' | 'workspace-write' | 'full-access',
+): 'read' | 'write' | 'execute' {
+  if (permissionMode === 'read-only') return 'read';
+  if (permissionMode === 'workspace-write') return 'write';
+  return 'execute';
+}
+
 function workflowChatConfiguration(
   origin: WorkflowChatOrigin,
   agent: WorkflowAgent,
 ): Record<string, unknown> {
   const mapping = mapWorkflowPermissionsToBlip(agent.permissions);
+  const agentPermissionMode = hubAgentPermissionMode(mapping.permissionMode);
   return {
     agent: { kind: 'builtin', id: agent.runner.agent.id },
     ...buildWorkflowChatMetadata({
@@ -55,7 +64,7 @@ function workflowChatConfiguration(
       permissions: agent.permissions,
       toolProfile: mapping.toolProfile,
     }),
-    ...(mapping.permissionMode === 'read-only' ? { agentPermissionMode: 'read-only' } : {}),
+    ...(agentPermissionMode !== 'execute' ? { agentPermissionMode } : {}),
     ...(agent.model && agent.model !== 'inherit' ? { model: agent.model } : {}),
   };
 }
@@ -70,6 +79,7 @@ function childDroneCreateBody(input: {
   const runtime = String(input.owner?.runtime?.kind ?? input.owner?.runtime ?? 'container');
   const repoPath = String(input.owner?.repoPath ?? '').trim();
   const mapping = mapWorkflowPermissionsToBlip(input.agent.permissions);
+  const seedAgentPermissionMode = hubAgentPermissionMode(mapping.permissionMode);
   return {
     name: `workflow-${input.origin.runId.slice(-8)}-${suffix}`,
     runtime: 'container',
@@ -84,7 +94,7 @@ function childDroneCreateBody(input: {
     ...(input.agent.model && input.agent.model !== 'inherit'
       ? { seedModel: input.agent.model }
       : {}),
-    ...(mapping.permissionMode === 'read-only' ? { seedAgentPermissionMode: 'read-only' } : {}),
+    ...(seedAgentPermissionMode !== 'execute' ? { seedAgentPermissionMode } : {}),
   };
 }
 

@@ -49,8 +49,8 @@ export type LocalAssistantThread = {
   status: 'idle' | 'running' | 'error';
   error: string | null;
   autoApprove?: boolean;
-  agentPermissionMode?: 'read-only' | 'workspace-write' | 'full-access';
-  approvalPolicy?: 'ask' | 'never';
+  agentPermissionMode?: 'read' | 'write' | 'execute';
+  approvalPolicy?: 'ask' | 'none';
   artifactWorkspace?: boolean;
   workspaceTargets: LocalWorkspaceTarget[];
   messages: LocalAssistantMessage[];

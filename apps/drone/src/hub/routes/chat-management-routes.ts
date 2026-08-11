@@ -1041,7 +1041,7 @@ export function createChatManagementRouteHandler(
         );
         let model: string | null = null;
         let reasoning: string | null = null;
-        let agentPermissionMode: AgentPermissionMode = 'full-access';
+        let agentPermissionMode: AgentPermissionMode = 'execute';
         let approvalPolicy: AgentApprovalPolicy = 'ask';
         let dockerSnapshotAfterAgentMessageEnabled = false;
         if (hasModelField) {

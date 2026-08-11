@@ -5,6 +5,7 @@ import {
   getMermaidCanvasDimensions,
   getMermaidSvgDimensions,
   getMermaidZoomScrollPosition,
+  isMermaidZoomWheelGesture,
 } from '../src/droneHub/chat/MermaidDiagramViewport';
 import {
   getCachedMermaidRender,
@@ -31,6 +32,12 @@ describe('desktop Mermaid diagrams', () => {
       width: 1_648,
       height: 848,
     });
+  });
+
+  test('only zooms diagrams for Ctrl or Command wheel gestures', () => {
+    expect(isMermaidZoomWheelGesture({ ctrlKey: false, metaKey: false })).toBe(false);
+    expect(isMermaidZoomWheelGesture({ ctrlKey: true, metaKey: false })).toBe(true);
+    expect(isMermaidZoomWheelGesture({ ctrlKey: false, metaKey: true })).toBe(true);
   });
 
   test('keeps the cursor anchored while a centered diagram grows during zoom', () => {

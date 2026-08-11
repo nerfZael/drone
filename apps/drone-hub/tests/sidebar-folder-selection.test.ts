@@ -1,8 +1,31 @@
 import { describe, expect, test } from 'bun:test';
 
-import { resolveSidebarFolderDroneSelection } from '../src/droneHub/app/sidebar-folder-selection';
+import {
+  isSidebarFolderRowSelected,
+  resolveSidebarFolderDroneSelection,
+} from '../src/droneHub/app/sidebar-folder-selection';
 
 describe('sidebar folder drone selection', () => {
+  test('only marks a folder row selected when the folder itself is selected', () => {
+    expect(
+      isSidebarFolderRowSelected({
+        folderNodeId: 'folder:group-a',
+        folderPath: 'Group A',
+        selectedSidebarNodeId: 'drone:one',
+        selectedFolderPath: null,
+      }),
+    ).toBe(false);
+
+    expect(
+      isSidebarFolderRowSelected({
+        folderNodeId: 'folder:group-a',
+        folderPath: 'Group A',
+        selectedSidebarNodeId: 'folder:group-a',
+        selectedFolderPath: 'Group A',
+      }),
+    ).toBe(true);
+  });
+
   test('plain click clears drone selection without selecting the folder contents', () => {
     expect(
       resolveSidebarFolderDroneSelection({

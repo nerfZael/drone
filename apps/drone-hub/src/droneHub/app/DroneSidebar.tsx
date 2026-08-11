@@ -958,7 +958,6 @@ export function DroneSidebar({
     sidebarReposCollapsed,
     sidebarAutoMinimize,
     showRecentDronesOnly,
-    autoDelete,
     sidebarDockSide,
     sidebarGroupOrder,
     sidebarRepoScopedGroupByPath,
@@ -991,7 +990,6 @@ export function DroneSidebar({
     setSidebarAutoMinimize,
     setShowRecentDronesOnly,
     setActiveRepoPath,
-    setAutoDelete,
     setSidebarCollapsed,
     setSettingsActiveTab,
   } = useDroneSidebarUiState();
@@ -1207,6 +1205,7 @@ export function DroneSidebar({
     runOptimisticCreateGroupAndMove,
     runOptimisticRenameGroup,
     runOptimisticMoveDronesToGroup,
+    runOptimisticMoveSidebar,
     runOptimisticReparentDronesToParent,
   } = useSidebarOptimisticGroups({
     isRepoGroupingMode,
@@ -1228,6 +1227,7 @@ export function DroneSidebar({
     onRenameGroup: handleRenameGroup,
     onMoveDronesToGroup,
     onReparentDronesToParent,
+    onMoveSidebar,
   });
   const activeChatName = String(selectedChat ?? '').trim() || 'default';
   const pinnedDensityClasses = sidebarDensityClasses(sidebarDensityMode);
@@ -1371,7 +1371,6 @@ export function DroneSidebar({
     handleGroupedSelectDroneCard,
     handleGroupedSelectDroneContainer,
     handleGroupedSelectDroneChat,
-    handleGroupedFocusDroneChat,
     handleGroupedSelectFolder,
     moveFolderIntoGroup,
     openDroneChatCreate,
@@ -1441,13 +1440,6 @@ export function DroneSidebar({
       handleGroupedSelectDroneContainer(droneId);
     },
     [handleGroupedSelectDroneContainer],
-  );
-  const focusGroupedDroneChat = React.useCallback(
-    (droneId: string, chatName: string) => {
-      handleGroupedFocusDroneChat(droneId, chatName);
-      onSetDroneSelectionFromFolder([]);
-    },
-    [handleGroupedFocusDroneChat, onSetDroneSelectionFromFolder],
   );
   const handleGroupedPrepareDroneDragStart = React.useCallback(
     (droneId: string, draggedDroneIds?: readonly string[]) => {
@@ -2213,12 +2205,6 @@ export function DroneSidebar({
       }`,
       selectionRole: 'checkbox',
       checked: showHiddenSidebarGroups,
-    });
-    sidebarOptionsEntries.push({
-      id: 'delete-confirm',
-      label: 'Confirm before deleting',
-      selectionRole: 'checkbox',
-      checked: !autoDelete,
     });
   }
   if (sidebarCapabilities.collapseControl) {
@@ -2993,7 +2979,7 @@ export function DroneSidebar({
                       sidebarDroneOrderByGroup={sidebarDroneOrderByGroup}
                       sidebarNodeOrderByParent={sidebarNodeOrderByParent}
                       sidebarChatOrderByDrone={sidebarChatOrderByDrone}
-                      onMoveSidebar={onMoveSidebar}
+                      onMoveSidebar={runOptimisticMoveSidebar}
                       droneById={sidebarDroneById}
                       selectedDroneIds={selectedDroneIds}
                       selectedDroneSet={selectedDroneSet}
@@ -3006,7 +2992,6 @@ export function DroneSidebar({
                       onSelectFolder={handleGroupedSelectFolderWithDrones}
                       onSelectDroneCard={handleGroupedSelectDroneCard}
                       onSelectDroneContainer={selectGroupedDroneContainer}
-                      onFocusDroneChat={focusGroupedDroneChat}
                       onSelectDroneChat={handleGroupedSelectDroneChat}
                       onMoveDronesToGroup={runOptimisticMoveDronesToGroup}
                       onRenameGroup={runOptimisticRenameGroup}
@@ -3127,7 +3112,6 @@ export function DroneSidebar({
                   if (id === 'dock-side') toggleSidebarDockSide();
                   else if (id === 'recent') setShowRecentDronesOnly((prev) => !prev);
                   else if (id === 'hidden') setShowHiddenSidebarGroups((prev) => !prev);
-                  else if (id === 'delete-confirm') setAutoDelete((prev) => !prev);
                   else if (id === 'auto-minimize') setSidebarAutoMinimize((prev) => !prev);
                 }}
                 panelClassName="w-[240px]"

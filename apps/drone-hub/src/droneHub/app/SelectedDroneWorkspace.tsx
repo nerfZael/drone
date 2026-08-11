@@ -1292,7 +1292,7 @@ export function SelectedDroneWorkspace({
       readOnlySupported={readOnlySupported}
       approvalsSupported={approvalPolicySupported}
       agentIsCodex={currentAgentKey === 'builtin:codex'}
-      disabled={loadingChatInfo || chatInputWaiting}
+      disabled={loadingChatInfo}
     />
   ) : null;
 

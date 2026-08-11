@@ -3,6 +3,18 @@ export type SidebarFolderSelectionOptions = {
   toggle?: boolean;
 };
 
+export function isSidebarFolderRowSelected(args: {
+  folderNodeId: string;
+  folderPath: string;
+  selectedSidebarNodeId: string | null;
+  selectedFolderPath: string | null;
+}): boolean {
+  return (
+    args.selectedSidebarNodeId === args.folderNodeId ||
+    args.selectedFolderPath === args.folderPath
+  );
+}
+
 function normalizeDroneIds(ids: readonly string[]): string[] {
   const out: string[] = [];
   const seen = new Set<string>();

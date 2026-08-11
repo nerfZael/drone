@@ -1,5 +1,6 @@
 import React from 'react';
 import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent, type DragStartEvent } from '@dnd-kit/core';
+import { isUngroupedGroupName } from '../../domain';
 import {
   DroneCard,
   SidebarApprovalStatusIndicator,
@@ -19,7 +20,10 @@ import { IconChevron, IconColumns, IconEye, IconEyeOff, IconPencil, IconPlus, Ic
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
-import type { SidebarFolderSelectionOptions } from './sidebar-folder-selection';
+import {
+  isSidebarFolderRowSelected,
+  type SidebarFolderSelectionOptions,
+} from './sidebar-folder-selection';
 import { buildSidebarDroneTree, type SidebarDroneTree } from './sidebar-drone-tree';
 import { buildSidebarNodeTree, type SidebarNodeTreeModel, type SidebarTreeDroneNode, type SidebarTreeFolderNode } from './sidebar-node-tree';
 import {
@@ -110,7 +114,6 @@ type GroupedSidebarTreeProps = {
   onSelectFolder: (path: string, opts?: SidebarFolderSelectionOptions) => void;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
   onSelectDroneContainer: (droneId: string) => void;
-  onFocusDroneChat: (droneId: string, chatName: string) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
   onRenameGroup: (group: string, nextName?: string, opts?: { skipNodeOrderUpdate?: boolean }) => Promise<boolean> | boolean;
@@ -462,7 +465,6 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     activeChatName,
     selectedSidebarNodeId,
     setSelectedSidebarNodeId,
-    onFocusDroneChat,
     onSelectDroneChat,
     dragOverChat,
     chatEditor,
@@ -584,10 +586,9 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
             if (!actionsEnabled) return;
             event.preventDefault();
             event.stopPropagation();
-            onFocusDroneChat(drone.id, chatName);
             setContextMenuPosition({ x: event.clientX, y: event.clientY });
           }}
-          className={`relative flex flex-1 items-center gap-1 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })} ${isDragging ? 'opacity-35' : ''} ${!sidebarDndEnabled || !chatDragData || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
+          className={`relative flex flex-1 items-center gap-1 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ selected, active })} ${contextMenuPosition ? 'dh-sidebar-row-context-target' : ''} ${isDragging ? 'opacity-35' : ''} ${!sidebarDndEnabled || !chatDragData || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
           aria-label={`${uiDroneName(drone.name)} / ${chatName}`}
           aria-current={active ? 'page' : undefined}
         >
@@ -1321,7 +1322,12 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     unreadAgentMessageByChatNodeId,
   ]);
   const folderDroneSelected = folderDroneIds.length > 0 && folderDroneIds.every((droneId) => selectedDroneSet.has(droneId));
-  const isSelected = selectedSidebarNodeId === node.id || selectedFolderPath === folderPath || folderDroneSelected;
+  const isSelected = isSidebarFolderRowSelected({
+    folderNodeId: node.id,
+    folderPath,
+    selectedSidebarNodeId,
+    selectedFolderPath,
+  });
   const isHiddenGroup = hiddenSidebarGroupTokenSet.has(groupToken);
   const showEditorInline = folderEditor?.targetPath === folderPath && folderEditor.mode === 'rename';
   const showCreateInline = (folderEditor?.anchorPath ?? folderEditor?.parentPath) === folderPath && folderEditor?.mode === 'create';
@@ -1386,6 +1392,16 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
       onToggleGroupCollapsed(folderPath);
     }
   }, [folderPath, node.id, onSelectFolder, onToggleGroupCollapsed, setSelectedSidebarNodeId, shouldSuppressClick]);
+  const handleFolderDelete = React.useCallback(() => {
+    void onDeleteGroup(folderPath, node.totalDroneCount, {
+      kind: node.groupKind,
+      label: node.label,
+      repoPath:
+        isVirtualGroup && node.path.startsWith('repo:') && node.path !== 'repo:ungrouped'
+          ? node.path.slice('repo:'.length)
+          : null,
+    });
+  }, [folderPath, isVirtualGroup, node.groupKind, node.label, node.path, node.totalDroneCount, onDeleteGroup]);
   const contextMenuItems: SidebarContextMenuItem[] = [
     {
       id: 'new-group',
@@ -1452,16 +1468,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
       ),
       disabled: Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath]),
       tone: 'danger',
-      onSelect: () => {
-        void onDeleteGroup(folderPath, node.totalDroneCount, {
-          kind: node.groupKind,
-          label: node.label,
-          repoPath:
-            isVirtualGroup && node.path.startsWith('repo:') && node.path !== 'repo:ungrouped'
-              ? node.path.slice('repo:'.length)
-              : null,
-        });
-      },
+      onSelect: handleFolderDelete,
     },
   ];
 
@@ -1530,9 +1537,13 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           ) : (
             <button
               type="button"
-              className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX}`}
+              className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX} ${
+                isSelected ? 'focus-visible:outline-none' : ''
+              }`}
               aria-expanded={!collapsed}
               aria-selected={isSelected}
+              {...(folderDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
+              {...(folderDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
               onClick={(event) => {
                 const toggle = event.metaKey || event.ctrlKey;
                 handleFolderClick({
@@ -1540,8 +1551,23 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                   toggle,
                 });
               }}
-              {...(folderDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
-              {...(folderDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
+              onKeyDown={(event) => {
+                if (
+                  event.key !== 'Delete' ||
+                  event.repeat ||
+                  !actionsEnabled ||
+                  !isSelected ||
+                  deletingGroups[folderPath] ||
+                  renamingGroups[folderPath] ||
+                  (node.groupKind === 'group' && isUngroupedGroupName(node.groupPath ?? folderPath))
+                ) {
+                  if (!folderDndDisabled) listeners?.onKeyDown?.(event);
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                handleFolderDelete();
+              }}
             >
               <div className="flex min-w-0 items-center gap-1.5">
                 <IconChevron
@@ -1571,7 +1597,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
         <GroupedSidebarFolderBodyDropZone
           nodeId={node.id}
           disabled={!sidebarDndEnabled || isVirtualGroup}
-          className={`${densityClasses.folderBody} dh-sidebar-folder-body ${intoState ? 'bg-[var(--accent-subtle)]' : ''}`}
+          className={`${densityClasses.folderBody} dh-sidebar-folder-body [--sidebar-selection-edge-offset:-1px] ${intoState ? 'bg-[var(--accent-subtle)]' : ''}`}
           selectedDirectChild={hasSelectedDirectChild}
           dropActive={intoState}
         >
@@ -1873,7 +1899,6 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onRenameDroneChat,
       props.onRenameGroup,
       props.onReparentDronesToParent,
-      props.onFocusDroneChat,
       props.onSelectDroneCard,
       props.onSelectDroneContainer,
       props.onSelectDroneChat,

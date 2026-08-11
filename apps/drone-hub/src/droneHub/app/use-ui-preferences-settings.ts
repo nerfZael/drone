@@ -54,12 +54,12 @@ function normalizeRepoBranchSource(value: unknown): 'host' | 'remote' {
   return value === 'remote' ? 'remote' : 'host';
 }
 
-function normalizeSpawnAgentPermissionMode(value: unknown): 'read-only' | 'workspace-write' | 'full-access' {
-  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+function normalizeSpawnAgentPermissionMode(value: unknown): 'read' | 'write' | 'execute' {
+  return value === 'read' || value === 'write' ? value : 'execute';
 }
 
-function normalizeSpawnApprovalPolicy(value: unknown): 'ask' | 'agent-decides' | 'never' {
-  return value === 'agent-decides' || value === 'never' ? value : 'ask';
+function normalizeSpawnApprovalPolicy(value: unknown): 'ask' | 'auto' | 'none' {
+  return value === 'auto' || value === 'none' ? value : 'ask';
 }
 
 function normalizeTrimmedText(value: unknown, maxChars: number): string {
@@ -94,19 +94,31 @@ function normalizeOrderedStringMap(value: unknown): Record<string, string[]> {
   return out;
 }
 
+function normalizeBooleanRecord(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, boolean> = {};
+  for (const [keyRaw, itemRaw] of Object.entries(value as Record<string, unknown>)) {
+    const key = String(keyRaw ?? '').trim();
+    if (!key) continue;
+    out[key] = itemRaw === true;
+  }
+  return out;
+}
+
 function normalizeUiPreferencesSnapshot(
   value: Partial<UiPreferencesSnapshot> | null | undefined,
 ): UiPreferencesSnapshot {
   return {
     sidebarGroupingMode: normalizeSidebarGroupingMode(value?.sidebarGroupingMode),
     sidebarDensityMode: normalizeSidebarDensityMode(value?.sidebarDensityMode),
+    collapsedGroups: normalizeBooleanRecord(value?.collapsedGroups),
+    collapsedDroneSections: normalizeBooleanRecord(value?.collapsedDroneSections),
     sidebarGroupOrder: normalizeOrderedStringList(value?.sidebarGroupOrder),
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(value?.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(value?.sidebarNodeOrderByParent),
     sidebarChatOrderByDrone: normalizeOrderedStringMap(value?.sidebarChatOrderByDrone),
     pinnedDroneIds: normalizeOrderedStringList(value?.pinnedDroneIds),
     hiddenSidebarGroups: normalizeOrderedStringList(value?.hiddenSidebarGroups),
-    autoDelete: value?.autoDelete === true,
     spawnAgentKey: normalizeTrimmedText(value?.spawnAgentKey, 200) || 'builtin:cursor',
     spawnModel: normalizeTrimmedText(value?.spawnModel, 200),
     spawnReasoning: normalizeTrimmedText(value?.spawnReasoning, 200),
@@ -196,6 +208,16 @@ export function mergeUiPreferencesChanges(
   return normalizeUiPreferencesSnapshot({
     sidebarGroupingMode: localValue('sidebarGroupingMode'),
     sidebarDensityMode: localValue('sidebarDensityMode'),
+    collapsedGroups: mergeRecordChanges(
+      base.collapsedGroups,
+      local.collapsedGroups,
+      remote.collapsedGroups,
+    ),
+    collapsedDroneSections: mergeRecordChanges(
+      base.collapsedDroneSections,
+      local.collapsedDroneSections,
+      remote.collapsedDroneSections,
+    ),
     sidebarGroupOrder: localValue('sidebarGroupOrder'),
     sidebarDroneOrderByGroup: mergeOrderedStringMapChanges(
       base.sidebarDroneOrderByGroup,
@@ -214,7 +236,6 @@ export function mergeUiPreferencesChanges(
     ),
     pinnedDroneIds: localValue('pinnedDroneIds'),
     hiddenSidebarGroups: localValue('hiddenSidebarGroups'),
-    autoDelete: localValue('autoDelete'),
     spawnAgentKey: localValue('spawnAgentKey'),
     spawnModel: localValue('spawnModel'),
     spawnReasoning: localValue('spawnReasoning'),
@@ -234,17 +255,18 @@ function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boole
   return (
     value.sidebarGroupingMode === 'groups' ||
     value.sidebarDensityMode !== 'default' ||
+    Object.keys(value.collapsedGroups).length > 0 ||
+    Object.keys(value.collapsedDroneSections).length > 0 ||
     value.sidebarGroupOrder.length > 0 ||
     Object.keys(value.sidebarDroneOrderByGroup).length > 0 ||
     Object.keys(value.sidebarNodeOrderByParent).length > 0 ||
     Object.keys(value.sidebarChatOrderByDrone).length > 0 ||
     value.pinnedDroneIds.length > 0 ||
     value.hiddenSidebarGroups.length > 0 ||
-    value.autoDelete ||
     value.spawnAgentKey !== 'builtin:cursor' ||
     value.spawnModel.length > 0 ||
     value.spawnReasoning.length > 0 ||
-    value.spawnAgentPermissionMode !== 'full-access' ||
+    value.spawnAgentPermissionMode !== 'execute' ||
     value.spawnApprovalPolicy !== 'ask' ||
     value.repoBranchSource !== 'host' ||
     value.repoCreateRemoteBranch.length > 0 ||
@@ -261,6 +283,14 @@ function mergeUiPreferencesForRecovery(
       base.sidebarGroupingMode === 'repos' ? rescue.sidebarGroupingMode : base.sidebarGroupingMode,
     sidebarDensityMode:
       base.sidebarDensityMode === 'default' ? rescue.sidebarDensityMode : base.sidebarDensityMode,
+    collapsedGroups:
+      Object.keys(base.collapsedGroups).length > 0
+        ? base.collapsedGroups
+        : rescue.collapsedGroups,
+    collapsedDroneSections:
+      Object.keys(base.collapsedDroneSections).length > 0
+        ? base.collapsedDroneSections
+        : rescue.collapsedDroneSections,
     sidebarGroupOrder:
       base.sidebarGroupOrder.length > 0 ? base.sidebarGroupOrder : rescue.sidebarGroupOrder,
     sidebarDroneOrderByGroup:
@@ -278,12 +308,11 @@ function mergeUiPreferencesForRecovery(
     pinnedDroneIds: base.pinnedDroneIds.length > 0 ? base.pinnedDroneIds : rescue.pinnedDroneIds,
     hiddenSidebarGroups:
       base.hiddenSidebarGroups.length > 0 ? base.hiddenSidebarGroups : rescue.hiddenSidebarGroups,
-    autoDelete: base.autoDelete || rescue.autoDelete,
     spawnAgentKey:
       base.spawnAgentKey !== 'builtin:cursor' ? base.spawnAgentKey : rescue.spawnAgentKey,
     spawnModel: base.spawnModel || rescue.spawnModel,
     spawnReasoning: base.spawnReasoning || rescue.spawnReasoning,
-    spawnAgentPermissionMode: base.spawnAgentPermissionMode !== 'full-access'
+    spawnAgentPermissionMode: base.spawnAgentPermissionMode !== 'execute'
       ? base.spawnAgentPermissionMode
       : rescue.spawnAgentPermissionMode,
     spawnApprovalPolicy: base.spawnApprovalPolicy !== 'ask'
@@ -353,7 +382,17 @@ export function reconcileUiPreferencesReload({
   if (hasLocalChanges && previousBackendSnapshot) {
     return mergeUiPreferencesChanges(previousBackendSnapshot, currentSnapshot, backendSnapshot);
   }
-  if (backendUpdatedAt) return backendSnapshot;
+  if (backendUpdatedAt) {
+    if (!wasReady) {
+      if (Object.keys(backendSnapshot.collapsedGroups).length === 0) {
+        backendSnapshot.collapsedGroups = currentSnapshot.collapsedGroups;
+      }
+      if (Object.keys(backendSnapshot.collapsedDroneSections).length === 0) {
+        backendSnapshot.collapsedDroneSections = currentSnapshot.collapsedDroneSections;
+      }
+    }
+    return backendSnapshot;
+  }
   return restoreUiPreferencesFromPersistedStorage(backendSnapshot, storageRaw).snapshot;
 }
 
@@ -363,13 +402,14 @@ export function useUiPreferencesSettings({
   const {
     sidebarGroupingMode,
     sidebarDensityMode,
+    collapsedGroups,
+    collapsedDroneSections,
     sidebarGroupOrder,
     sidebarDroneOrderByGroup,
     sidebarNodeOrderByParent,
     sidebarChatOrderByDrone,
     pinnedDroneIds,
     hiddenSidebarGroups,
-    autoDelete,
     spawnAgentKey,
     spawnModel,
     spawnReasoning,
@@ -380,13 +420,14 @@ export function useUiPreferencesSettings({
     repoCreateRemoteBranch,
     setSidebarGroupingMode,
     setSidebarDensityMode,
+    setCollapsedGroups,
+    setCollapsedDroneSections,
     setSidebarGroupOrder,
     setSidebarDroneOrderByGroup,
     setSidebarNodeOrderByParent,
     setSidebarChatOrderByDrone,
     setPinnedDroneIds,
     setHiddenSidebarGroups,
-    setAutoDelete,
     setSpawnAgentKey,
     setSpawnModel,
     setSpawnReasoning,
@@ -398,13 +439,14 @@ export function useUiPreferencesSettings({
     useShallow((s) => ({
       sidebarGroupingMode: s.sidebarGroupingMode,
       sidebarDensityMode: s.sidebarDensityMode,
+      collapsedGroups: s.collapsedGroups,
+      collapsedDroneSections: s.collapsedDroneSections,
       sidebarGroupOrder: s.sidebarGroupOrder,
       sidebarDroneOrderByGroup: s.sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent: s.sidebarNodeOrderByParent,
       sidebarChatOrderByDrone: s.sidebarChatOrderByDrone,
       pinnedDroneIds: s.pinnedDroneIds,
       hiddenSidebarGroups: s.hiddenSidebarGroups,
-      autoDelete: s.autoDelete,
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
       spawnReasoning: s.spawnReasoning,
@@ -415,13 +457,14 @@ export function useUiPreferencesSettings({
       repoCreateRemoteBranch: s.repoCreateRemoteBranch,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
       setSidebarDensityMode: s.setSidebarDensityMode,
+      setCollapsedGroups: s.setCollapsedGroups,
+      setCollapsedDroneSections: s.setCollapsedDroneSections,
       setSidebarGroupOrder: s.setSidebarGroupOrder,
       setSidebarDroneOrderByGroup: s.setSidebarDroneOrderByGroup,
       setSidebarNodeOrderByParent: s.setSidebarNodeOrderByParent,
       setSidebarChatOrderByDrone: s.setSidebarChatOrderByDrone,
       setPinnedDroneIds: s.setPinnedDroneIds,
       setHiddenSidebarGroups: s.setHiddenSidebarGroups,
-      setAutoDelete: s.setAutoDelete,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
       setSpawnReasoning: s.setSpawnReasoning,
@@ -449,13 +492,14 @@ export function useUiPreferencesSettings({
       const normalized = normalizeUiPreferencesSnapshot(value);
       setSidebarGroupingMode(normalized.sidebarGroupingMode);
       setSidebarDensityMode(normalized.sidebarDensityMode);
+      setCollapsedGroups(normalized.collapsedGroups);
+      setCollapsedDroneSections(normalized.collapsedDroneSections);
       setSidebarGroupOrder(normalized.sidebarGroupOrder);
       setSidebarDroneOrderByGroup(normalized.sidebarDroneOrderByGroup);
       setSidebarNodeOrderByParent(normalized.sidebarNodeOrderByParent);
       setSidebarChatOrderByDrone(normalized.sidebarChatOrderByDrone);
       setPinnedDroneIds(normalized.pinnedDroneIds);
       setHiddenSidebarGroups(normalized.hiddenSidebarGroups);
-      setAutoDelete(normalized.autoDelete);
       if (Object.keys(normalized.spawnContextByRepoKey).length > 0) {
         const current = useDroneHubUiStore.getState();
         const resolved = resolveSpawnContextPreferencesForRepo(
@@ -478,8 +522,9 @@ export function useUiPreferencesSettings({
       return normalized;
     },
     [
-      setAutoDelete,
       setSidebarDensityMode,
+      setCollapsedGroups,
+      setCollapsedDroneSections,
       setHiddenSidebarGroups,
       setSidebarChatOrderByDrone,
       setPinnedDroneIds,
@@ -510,13 +555,14 @@ export function useUiPreferencesSettings({
       normalizeUiPreferencesSnapshot({
         sidebarGroupingMode,
         sidebarDensityMode,
+        collapsedGroups,
+        collapsedDroneSections,
         sidebarGroupOrder,
         sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent,
         sidebarChatOrderByDrone,
         pinnedDroneIds,
         hiddenSidebarGroups,
-        autoDelete,
         spawnAgentKey,
         spawnModel,
         spawnReasoning,
@@ -527,8 +573,9 @@ export function useUiPreferencesSettings({
         spawnContextByRepoKey,
       }),
     [
-      autoDelete,
       hiddenSidebarGroups,
+      collapsedGroups,
+      collapsedDroneSections,
       repoBranchSource,
       repoCreateRemoteBranch,
       sidebarDensityMode,

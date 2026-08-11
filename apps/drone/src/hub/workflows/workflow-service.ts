@@ -97,9 +97,11 @@ export class WorkflowService {
   readonly events = new WorkflowEventBus();
   private readonly executor: WorkflowExecutor;
   private readonly activeRuns = new Map<string, AbortController>();
+  private readonly activeRunTasks = new Map<string, Promise<void>>();
   private readonly defaultTimeoutMinutes: number;
   private readonly executorCapacity: number;
   private readonly droneExists: (droneId: string) => Promise<boolean>;
+  private stopped = false;
 
   constructor(
     readonly store: WorkflowStore,
@@ -209,6 +211,7 @@ export class WorkflowService {
     rawInput: unknown,
     actor: WorkflowActor,
   ): Promise<WorkflowRun> {
+    this.assertAcceptingRuns();
     const workflow = this.getWorkflow(droneId, workflowId);
     const parsedInput = workflowJsonValueSchema.safeParse(rawInput === undefined ? {} : rawInput);
     if (!parsedInput.success) throw errorWithStatus('workflow input must be valid JSON', 400);
@@ -251,6 +254,7 @@ export class WorkflowService {
   }
 
   async approveRun(droneId: string, runId: string, actor: WorkflowActor): Promise<WorkflowRun> {
+    this.assertAcceptingRuns();
     const current = this.getRun(droneId, runId);
     if (current.status !== 'pending_approval') {
       throw errorWithStatus('only a pending workflow run can be approved', 409);
@@ -265,7 +269,19 @@ export class WorkflowService {
       }),
     );
     this.publishRun(run);
-    void this.startRun(run);
+    if (this.stopped) {
+      const cancelled = requireUpdatedRun(
+        await this.store.patchRun(droneId, runId, {
+          expectedStatuses: ['queued'],
+          status: 'cancelled',
+          error: 'DroneHub is shutting down',
+          finishedAt: new Date().toISOString(),
+        }),
+      );
+      this.publishRun(cancelled);
+      this.assertAcceptingRuns();
+    }
+    this.launchRun(run);
     return run;
   }
 
@@ -345,6 +361,26 @@ export class WorkflowService {
       }),
     );
     return page;
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+    for (const controller of this.activeRuns.values()) {
+      controller.abort(new Error('DroneHub is shutting down'));
+    }
+    await Promise.allSettled(this.activeRunTasks.values());
+  }
+
+  private assertAcceptingRuns(): void {
+    if (this.stopped) throw errorWithStatus('workflow service is shutting down', 503);
+  }
+
+  private launchRun(run: WorkflowRun): void {
+    const task = this.startRun(run).finally(() => {
+      if (this.activeRunTasks.get(run.id) === task) this.activeRunTasks.delete(run.id);
+    });
+    this.activeRunTasks.set(run.id, task);
+    void task;
   }
 
   private async startRun(run: WorkflowRun): Promise<void> {

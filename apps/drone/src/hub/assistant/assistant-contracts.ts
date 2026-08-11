@@ -113,7 +113,6 @@ export type AssistantChangeEvent = {
   at: string;
 };
 
-export type AssistantChatIdleWaitMode = 'all' | 'any';
 export type AssistantChatIdleTarget = { droneId: string; chatName: string };
 export type AssistantChatIdleStatus = {
   droneId: string;
@@ -136,16 +135,6 @@ export type AssistantChatIdleStatus = {
     text: string;
     turnId?: string;
   };
-};
-
-export type AssistantChatIdleWaitResult = {
-  ok: boolean;
-  timedOut: boolean;
-  mode: AssistantChatIdleWaitMode;
-  elapsedMs: number;
-  timeoutMs: number;
-  idleForMs: number;
-  targets: AssistantChatIdleStatus[];
 };
 
 export type AssistantModelOption = NativeAgentModelOption;

@@ -50,12 +50,12 @@ export function normalizeMobileDroneCreatePreferences(
     persistVolume: candidate.persistVolume === true,
     agent,
     agentPermissionMode:
-      candidate.agentPermissionMode === 'read-only' ||
-      candidate.agentPermissionMode === 'workspace-write'
+      candidate.agentPermissionMode === 'read' ||
+      candidate.agentPermissionMode === 'write'
         ? candidate.agentPermissionMode
-        : 'full-access',
+        : 'execute',
     approvalPolicy:
-      candidate.approvalPolicy === 'agent-decides' || candidate.approvalPolicy === 'never'
+      candidate.approvalPolicy === 'auto' || candidate.approvalPolicy === 'none'
         ? candidate.approvalPolicy
         : 'ask',
     model: trimmed(candidate.model),
@@ -78,12 +78,12 @@ export function mobileDroneCreatePreferencesFromPayload(
     persistVolume: payload.runtime === 'container' && payload.persistVolume === true,
     agent,
     agentPermissionMode:
-      payload.seedAgentPermissionMode === 'read-only' ||
-      payload.seedAgentPermissionMode === 'workspace-write'
+      payload.seedAgentPermissionMode === 'read' ||
+      payload.seedAgentPermissionMode === 'write'
         ? payload.seedAgentPermissionMode
-        : 'full-access',
+        : 'execute',
     approvalPolicy:
-      payload.seedApprovalPolicy === 'agent-decides' || payload.seedApprovalPolicy === 'never'
+      payload.seedApprovalPolicy === 'auto' || payload.seedApprovalPolicy === 'none'
         ? payload.seedApprovalPolicy
         : 'ask',
     model: trimmed(payload.seedModel),

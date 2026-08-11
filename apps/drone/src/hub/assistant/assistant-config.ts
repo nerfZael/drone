@@ -11,13 +11,6 @@ export const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
 export const CHAT_MESSAGE_DEFAULT_LIMIT = 10;
 export const CHAT_MESSAGE_MAX_LIMIT = 50;
 export const CHAT_MESSAGE_RESPONSE_MAX_BYTES = 500_000;
-export const CHAT_IDLE_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
-export const CHAT_IDLE_MAX_TIMEOUT_MS = 30 * 60 * 1000;
-export const CHAT_IDLE_DEFAULT_POLL_INTERVAL_MS = 1000;
-export const CHAT_IDLE_DEFAULT_IDLE_FOR_MS = 1000;
-export const CHAT_IDLE_SUBSCRIPTION_EXPIRES_AFTER_MS = 24 * 60 * 60 * 1000;
-export const CHAT_IDLE_MAX_SUBSCRIPTIONS = 200;
-export const CHAT_IDLE_MAX_TARGETS = 20;
 export const DRONE_READY_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 export const DRONE_READY_POLL_INTERVAL_MS = 250;
 export const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30 * 60_000;
@@ -30,8 +23,6 @@ export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_THREAD_TITLE = 'New thread';
 export const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
   'Current existing-drone access scope is appended at run time. It limits operations that target existing drones; enabled global creation tools are governed separately.';
-export const ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY =
-  'When you send a drone chat message and need the result later, call subscribe_to_chats_idle on the target chat. This returns immediately so you can continue other work. If there is nothing else to do, end your turn; the system will resume this thread when the subscribed chats become idle.';
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
   'When you start asynchronous work and need the result later, use subscribe_to_resource_events for chat idle, failure, or GitHub pull-request events. Use subscribe_to_cron for recurring time-based work. These tools return immediately; end your turn when there is nothing else to do, and the system will resume this conversation when subscribed events arrive.';
 export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
@@ -62,10 +53,10 @@ export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
   ASSISTANT_CHAT_IDLE_PROMPT_LINE,
   'Do not load more chat pages than needed. Start with the latest page.',
-  'Creating or cloning drones, creating chats, creating repository-scoped groups, opening chats, highlighting drones, and reordering the sidebar do not require approval. create_group requires the owning repoPath, except for the empty repoPath scope used by drones without a repository. create_drone creates a container child of this chat owner and automatically grants this chat read, write, and execute access; clone_drone does the same but also requires read access to its source. Those child operations are unavailable when this chat owner runs directly on the host. Creating a chat requires write access to its target and is unavailable on host-runtime targets. Renaming drones, changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
+  'Creating or cloning drones, creating chats, creating repository-scoped groups, opening chats, highlighting drones, and reordering the sidebar do not require approval. create_group requires the owning repoPath, except for the empty repoPath scope used by drones without a repository. create_drone and clone_drone create independent container drones by default and automatically grant this chat read, write, and execute access. Pass parent only when the user explicitly wants a child drone; the parent must be in read scope. clone_drone also requires read access to its source. Creating a chat requires write access to its target and is unavailable on host-runtime targets. Renaming drones, changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
   'File write tools require write access to the target drone and should be used carefully for concrete code or content edits.',
   'If an approval-gated write tool returns successfully, the user already approved that action. Do not ask for the same approval again.',
-  'When creating a drone, omit fields you want inherited from the current open drone. Runtime is always container. Only set repoBranchSource=remote when the user asked for a remote branch and you have a remoteBranch value.',
+  'When creating a drone, omit fields you want inherited from the current open drone. Omit parent unless the user explicitly asks for a child relationship. Runtime is always container. Only set repoBranchSource=remote when the user asked for a remote branch and you have a remoteBranch value.',
   'Use clone_drone when the user asks for a copy of an existing ready container drone. Create and clone return after the new drone is ready; if you provided an initial message, subscribe to the new drone default chat when you need to resume after the drone responds.',
   'Do not claim a drone completed work unless the drone transcript or user says so.',
   'Keep responses practical and short.',
@@ -502,28 +493,10 @@ export const ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES = [
   'open_whiteboard',
   'close_whiteboard',
 ];
-export const ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'create_chat');
-export const ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.filter(
-    (name) => name !== 'subscribe_to_any_chat_idle' && name !== 'subscribe_to_all_chats_idle',
-  ).concat('subscribe_to_chats_idle');
 export const ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES =
   ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'fetch_content');
-export const ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'create_chat');
-export const ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.filter(
-    (name) => name !== 'subscribe_to_any_chat_idle' && name !== 'subscribe_to_all_chats_idle',
-  ).concat('subscribe_to_chats_idle');
 export const ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES =
   ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'web_search');
-export const ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'create_chat');
-export const ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES =
-  ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.filter(
-    (name) => name !== 'subscribe_to_any_chat_idle' && name !== 'subscribe_to_all_chats_idle',
-  ).concat('subscribe_to_chats_idle');
 type AssistantModelOptionDefinition = {
   provider: LlmProviderId;
   id: string;

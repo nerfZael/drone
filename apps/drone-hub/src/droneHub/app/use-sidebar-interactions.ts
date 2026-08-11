@@ -2,7 +2,11 @@ import React from 'react';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary } from '../types';
 import { joinSidebarGroupPath, isSameOrDescendantSidebarGroupPath, sidebarGroupBaseName, sidebarGroupParentPath } from './sidebar-group-paths';
-import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
+import {
+  observeSidebarSelectionForExpansion,
+  sidebarInlineSectionKey,
+  type SidebarInlineSectionKind,
+} from './sidebar-inline-sections';
 import {
   placeCreatedSidebarFolderBeforeNode,
   sidebarChatSidebarNodeId,
@@ -13,6 +17,7 @@ import type { SidebarNodeTreeModel } from './sidebar-node-tree';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { isSidebarGroupCollapsed } from './is-sidebar-group-collapsed';
 import { normalizedDroneChats } from './chat-node-helpers';
+import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 export type FolderEditorState = {
   mode: 'create' | 'rename';
@@ -100,7 +105,11 @@ export function useSidebarInteractions({
   const [selectedFolderPath, setSelectedFolderPath] = React.useState<string | null>(null);
   const [folderEditor, setFolderEditor] = React.useState<FolderEditorState | null>(null);
   const [chatEditor, setChatEditor] = React.useState<ChatEditorState | null>(null);
-  const [collapsedDroneSections, setCollapsedDroneSections] = React.useState<Record<string, boolean>>({});
+  const collapsedDroneSections = useDroneHubUiStore((state) => state.collapsedDroneSections);
+  const setCollapsedDroneSections = useDroneHubUiStore(
+    (state) => state.setCollapsedDroneSections,
+  );
+  const selectionExpansionRef = React.useRef({ initialized: false, key: '' });
   const folderEditorInputRef = React.useRef<HTMLInputElement>(null);
   const chatEditorInputRef = React.useRef<HTMLInputElement>(null);
   const selectedDroneChatCount = normalizedDroneChats(
@@ -440,14 +449,6 @@ export function useSidebarInteractions({
     setSelectedSidebarNodeId(sidebarDroneNodeId(droneId));
   }, []);
 
-  const handleGroupedFocusDroneChat = React.useCallback((droneIdRaw: string, chatNameRaw: string) => {
-    const droneId = String(droneIdRaw ?? '').trim();
-    const chatName = String(chatNameRaw ?? '').trim() || 'default';
-    if (!droneId) return;
-    setSelectedFolderPath(null);
-    setSelectedSidebarNodeId(sidebarChatSidebarNodeId(droneId, chatName));
-  }, []);
-
   const handleGroupedSelectDroneChat = React.useCallback(
     (droneId: string, chatName: string) => {
       setSelectedFolderPath(null);
@@ -508,7 +509,16 @@ export function useSidebarInteractions({
   React.useEffect(() => {
     const selectedDroneId = String(selectedDrone ?? '').trim();
     const selectedChatName = String(activeChatName ?? '').trim() || 'default';
-    if (!selectedDroneId) return;
+    if (
+      !observeSidebarSelectionForExpansion(
+        selectionExpansionRef.current,
+        selectedDroneId,
+        selectedChatName,
+        Boolean(sidebarDroneById[selectedDroneId]),
+      )
+    ) {
+      return;
+    }
     setCollapsedDroneSections((prev: Record<string, boolean>) => {
       const next = { ...prev };
       let changed = false;
@@ -553,7 +563,6 @@ export function useSidebarInteractions({
     handleGroupedSelectDroneCard,
     handleGroupedSelectDroneContainer,
     handleGroupedSelectDroneChat,
-    handleGroupedFocusDroneChat,
     handleGroupedSelectFolder,
     moveFolderIntoGroup,
     openDroneChatCreate,

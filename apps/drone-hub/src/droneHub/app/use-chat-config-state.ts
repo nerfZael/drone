@@ -218,12 +218,12 @@ export function useChatConfigState({
         model: prev?.model ?? null,
         reasoning: prev?.reasoning ?? null,
         agentPermissionMode: readOnlySupported
-          ? (prev?.agentPermissionMode ?? 'full-access')
-          : 'full-access',
+          ? (prev?.agentPermissionMode ?? 'execute')
+          : 'execute',
         approvalPolicy:
           approvalSupported &&
           !(
-            prev?.approvalPolicy === 'agent-decides' &&
+            prev?.approvalPolicy === 'auto' &&
             !(agent.kind === 'builtin' && agent.id === 'codex')
           )
             ? (prev?.approvalPolicy ?? 'ask')
@@ -270,7 +270,7 @@ export function useChatConfigState({
         agentLocked: prev?.agentLocked ?? false,
         model: hasModel ? model : (prev?.model ?? null),
         reasoning: hasReasoning ? reasoning : (prev?.reasoning ?? null),
-        agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
+        agentPermissionMode: prev?.agentPermissionMode ?? 'execute',
         approvalPolicy: prev?.approvalPolicy ?? 'ask',
         dockerSnapshotAfterAgentMessageEnabled:
           prev?.dockerSnapshotAfterAgentMessageEnabled === true,
@@ -336,7 +336,7 @@ export function useChatConfigState({
         agentLocked: prev?.agentLocked ?? false,
         model: prev?.model ?? null,
         reasoning: prev?.reasoning ?? null,
-        agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
+        agentPermissionMode: prev?.agentPermissionMode ?? 'execute',
         approvalPolicy,
         dockerSnapshotAfterAgentMessageEnabled:
           prev?.dockerSnapshotAfterAgentMessageEnabled === true,
@@ -369,7 +369,7 @@ export function useChatConfigState({
         agentLocked: prev?.agentLocked ?? false,
         model: prev?.model ?? null,
         reasoning: prev?.reasoning ?? null,
-        agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
+        agentPermissionMode: prev?.agentPermissionMode ?? 'execute',
         approvalPolicy: prev?.approvalPolicy ?? 'ask',
         dockerSnapshotAfterAgentMessageEnabled: enabled,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,

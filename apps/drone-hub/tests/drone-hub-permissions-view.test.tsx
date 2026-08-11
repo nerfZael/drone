@@ -40,10 +40,11 @@ describe('DroneHub permissions view', () => {
     expect(html).toContain('2 selected');
     expect(html).toContain('Changes are saved automatically for this chat.');
     expect(html).toContain('Creating drones and chats');
-    expect(html).toContain('makes it a child of this chat');
+    expect(html).toContain('makes it independent by default');
     expect(html).toContain('automatically grants');
+    expect(html).toContain('parent can be chosen explicitly');
     expect(html).toContain('Cloning also requires Read access');
-    expect(html).toContain('cannot create child drones');
+    expect(html).toContain('cannot create new chats');
   });
 
   test('explains when DroneHub access is unavailable', () => {

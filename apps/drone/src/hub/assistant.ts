@@ -41,11 +41,6 @@ import {
   CHAT_MESSAGE_DEFAULT_LIMIT,
   CHAT_MESSAGE_MAX_LIMIT,
   CHAT_MESSAGE_RESPONSE_MAX_BYTES,
-  CHAT_IDLE_DEFAULT_TIMEOUT_MS,
-  CHAT_IDLE_MAX_TIMEOUT_MS,
-  CHAT_IDLE_DEFAULT_POLL_INTERVAL_MS,
-  CHAT_IDLE_DEFAULT_IDLE_FOR_MS,
-  CHAT_IDLE_MAX_TARGETS,
   DRONE_READY_DEFAULT_TIMEOUT_MS,
   DRONE_READY_POLL_INTERVAL_MS,
   ASSISTANT_BASH_DEFAULT_TIMEOUT_MS,
@@ -57,8 +52,6 @@ import {
   DEFAULT_CODEX_MODEL,
   DEFAULT_THREAD_TITLE,
   ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX,
-  ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY,
-  ASSISTANT_CHAT_IDLE_PROMPT_LINE,
   ASSISTANT_MULTI_TARGET_PROMPT_LINE,
   ASSISTANT_SINGLE_TARGET_PROMPT_LINE,
   ASSISTANT_NO_TARGET_PROMPT_LINE,
@@ -90,8 +83,6 @@ import type {
   AssistantChangeEvent,
   AssistantChatIdleStatus,
   AssistantChatIdleTarget,
-  AssistantChatIdleWaitMode,
-  AssistantChatIdleWaitResult,
   AssistantCreateChatResult,
   AssistantCreateDroneResult,
   AssistantCreateGroupResult,
@@ -112,7 +103,6 @@ export type {
   AssistantChangeEvent,
   AssistantChatIdleStatus,
   AssistantChatIdleTarget,
-  AssistantChatIdleWaitResult,
   AssistantCreateChatResult,
   AssistantCreateDroneResult,
   AssistantCreateGroupResult,
@@ -336,12 +326,25 @@ function normalizeAssistantAutoApprove(raw: unknown): boolean {
 
 function normalizeAssistantAgentPermissionMode(raw: unknown): AgentPermissionMode {
   const value = String(raw ?? '').trim();
-  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+  return value === 'read' || value === 'write' ? value : 'execute';
 }
 
 function normalizeAssistantApprovalPolicy(raw: unknown): AgentApprovalPolicy {
   const value = String(raw ?? '').trim();
-  return value === 'never' ? 'never' : 'ask';
+  return value === 'none' ? 'none' : 'ask';
+}
+
+function parseAssistantAgentPermissionMode(raw: unknown): AgentPermissionMode {
+  const value = String(raw ?? '').trim();
+  if (value === 'read' || value === 'write' || value === 'execute') return value;
+  throw new Error('agentPermissionMode must be read, write, or execute');
+}
+
+function parseAssistantApprovalPolicy(raw: unknown): AgentApprovalPolicy {
+  const value = String(raw ?? '').trim();
+  if (value === 'ask' || value === 'none') return value;
+  if (value === 'auto') throw new Error('auto approval policy is only available for Codex chats');
+  throw new Error('approvalPolicy must be ask or none for native chats');
 }
 
 function makeAssistantUserMessage(
@@ -663,14 +666,6 @@ function normalizeAssistantSystemPrompt(raw: unknown): string {
     : text;
 }
 
-function migrateAssistantSystemPrompt(raw: unknown): string {
-  const prompt = normalizeAssistantSystemPrompt(raw);
-  if (!prompt.includes(ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY)) return prompt;
-  return normalizeAssistantSystemPrompt(
-    prompt.replace(ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY, ASSISTANT_CHAT_IDLE_PROMPT_LINE),
-  );
-}
-
 function normalizeAssistantEnabledTools(
   raw: unknown,
   fallback: string[] = ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES,
@@ -682,29 +677,21 @@ function normalizeAssistantEnabledTools(
   for (const item of raw) {
     const rawName = String(item ?? '').trim();
     const names =
-      rawName === 'subscribe_to_chats_idle' ||
-      rawName === 'subscribe_to_any_chat_idle' ||
-      rawName === 'subscribe_to_all_chats_idle'
-        ? ['subscribe_to_resource_events']
-        : rawName === 'list_chat_idle_subscriptions'
-          ? ['list_resource_subscriptions']
-          : rawName === 'cancel_chat_idle_subscription'
-            ? ['cancel_resource_subscription']
-            : rawName === 'assistant_files'
-              ? ['list_targets', 'set_target']
-              : rawName === 'list_changed_files'
-                ? ['get_working_tree_status']
-                : rawName === 'message_drone'
-                  ? ['send_message']
-                  : rawName === 'read_chat_messages'
-                    ? ['list_chats', 'read_chat']
-                    : rawName === 'get_chat_overview'
-                      ? ['list_chats']
-                      : rawName === 'inspect_drone'
-                        ? ['list_drones']
-                        : rawName === 'set_drone_groups'
-                          ? ['set_drone_group']
-                          : [rawName];
+      rawName === 'assistant_files'
+        ? ['list_targets', 'set_target']
+        : rawName === 'list_changed_files'
+          ? ['get_working_tree_status']
+          : rawName === 'message_drone'
+            ? ['send_message']
+            : rawName === 'read_chat_messages'
+              ? ['list_chats', 'read_chat']
+              : rawName === 'get_chat_overview'
+                ? ['list_chats']
+                : rawName === 'inspect_drone'
+                  ? ['list_drones']
+                  : rawName === 'set_drone_groups'
+                    ? ['set_drone_group']
+                    : [rawName];
     for (const name of names) {
       if (!allowed.has(name) || seen.has(name)) continue;
       seen.add(name);
@@ -712,52 +699,6 @@ function normalizeAssistantEnabledTools(
     }
   }
   return tools;
-}
-
-function normalizeAssistantChatIdleWaitMode(
-  raw: unknown,
-  fallback: AssistantChatIdleWaitMode = 'all',
-): AssistantChatIdleWaitMode {
-  const value = String(raw ?? '')
-    .trim()
-    .toLowerCase();
-  if (value === 'any') return 'any';
-  if (value === 'all') return 'all';
-  return fallback;
-}
-
-function chatIdleStatusesMatchMode(
-  statuses: AssistantChatIdleStatus[],
-  mode: AssistantChatIdleWaitMode,
-): boolean {
-  return mode === 'any'
-    ? statuses.some((status) => status.idle)
-    : statuses.every((status) => status.idle);
-}
-
-function chatIdleModeLabel(mode: AssistantChatIdleWaitMode): string {
-  return mode === 'any' ? 'any subscribed chat is idle' : 'all subscribed chats are idle';
-}
-
-function chatIdleModeActionText(mode: AssistantChatIdleWaitMode): string {
-  return mode === 'any' ? 'any chat becoming idle' : 'all chats becoming idle';
-}
-
-function makeSubscribeToChatsIdleParameters(Type: any) {
-  return Type.Object({
-    targets: Type.Array(
-      Type.Object({
-        droneId: Type.String({ description: 'Drone id or visible name.' }),
-        chatName: Type.Optional(Type.String({ description: 'Chat name. Defaults to default.' })),
-      }),
-      { minItems: 1, maxItems: CHAT_IDLE_MAX_TARGETS },
-    ),
-    idleForMs: Type.Optional(
-      Type.Number({
-        description: `Require the idle condition to remain true for this long before returning. Defaults to ${CHAT_IDLE_DEFAULT_IDLE_FOR_MS}.`,
-      }),
-    ),
-  });
 }
 
 function sameToolSet(rawNames: Set<string>, names: string[]): boolean {
@@ -792,24 +733,6 @@ function applyAssistantSystemPromptPatches(prompt: string, rawPatches: unknown):
     next = replaceTextOnce(next, patch.oldText, patch.newText, 'thread system prompt');
   }
   return normalizeAssistantSystemPrompt(next);
-}
-
-function clampChatIdleTimeoutMs(raw: unknown): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return CHAT_IDLE_DEFAULT_TIMEOUT_MS;
-  return Math.max(1000, Math.min(CHAT_IDLE_MAX_TIMEOUT_MS, Math.floor(value)));
-}
-
-function clampChatIdlePollIntervalMs(raw: unknown): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return CHAT_IDLE_DEFAULT_POLL_INTERVAL_MS;
-  return Math.max(250, Math.min(5000, Math.floor(value)));
-}
-
-function clampChatIdleForMs(raw: unknown): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return CHAT_IDLE_DEFAULT_IDLE_FOR_MS;
-  return Math.max(0, Math.min(10_000, Math.floor(value)));
 }
 
 function buildChatTimelineMessages(
@@ -1062,7 +985,7 @@ function sanitizeThread(thread: AssistantThread): AssistantThread {
   return {
     ...thread,
     systemPrompt:
-      migrateAssistantSystemPrompt(thread.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
+      normalizeAssistantSystemPrompt(thread.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(thread.systemPromptUpdatedAt) || null,
     enabledTools: normalizeAssistantEnabledTools(thread.enabledTools),
     ...(Array.isArray(thread.enabledWorkspaceIds)
@@ -1093,7 +1016,7 @@ function normalizeThread(
   const updatedAt = String(raw.updatedAt ?? '').trim() || createdAt;
   const thinkingLevel = allowedThinkingLevelForModel(provider, model, raw.thinkingLevel);
   const approvalPolicy = normalizeAssistantApprovalPolicy(
-    raw.approvalPolicy ?? (normalizeAssistantAutoApprove(raw.autoApprove) ? 'never' : 'ask'),
+    raw.approvalPolicy ?? (normalizeAssistantAutoApprove(raw.autoApprove) ? 'none' : 'ask'),
   );
   return {
     id,
@@ -1110,7 +1033,7 @@ function normalizeThread(
     provider,
     thinkingLevel,
     systemPrompt:
-      migrateAssistantSystemPrompt(raw.systemPrompt) ||
+      normalizeAssistantSystemPrompt(raw.systemPrompt) ||
       fallback.systemPrompt ||
       ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(raw.systemPromptUpdatedAt) || null,
@@ -1130,7 +1053,7 @@ function normalizeThread(
     accessScope: makeAssistantAccessScope(raw.accessScope),
     agentPermissionMode: normalizeAssistantAgentPermissionMode(raw.agentPermissionMode),
     approvalPolicy,
-    autoApprove: approvalPolicy === 'never',
+    autoApprove: approvalPolicy === 'none',
     promptDeliveryMode: normalizeAssistantPromptDeliveryMode(raw.promptDeliveryMode),
     status: raw.status === 'error' ? 'error' : 'idle',
     error: typeof raw.error === 'string' && raw.error.trim() ? raw.error : null,
@@ -1423,8 +1346,8 @@ export class HubAssistantService {
   ): Set<string> | null {
     if (!threadId) throw new Error('native chat id is required');
     const thread = this.getThread(threadId);
-    if (kind === 'write' && thread.agentPermissionMode === 'read-only') return new Set();
-    if (kind === 'execute' && thread.agentPermissionMode !== 'full-access') return new Set();
+    if (kind === 'write' && thread.agentPermissionMode === 'read') return new Set();
+    if (kind === 'execute' && thread.agentPermissionMode !== 'execute') return new Set();
     const accessScope = thread.accessScope;
     const mode =
       kind === 'write'
@@ -1727,8 +1650,7 @@ export class HubAssistantService {
         const requestedApprovalPolicy = normalizeAssistantApprovalPolicy(input.approvalPolicy);
         if (existing.approvalPolicy !== requestedApprovalPolicy) {
           existing.approvalPolicy = requestedApprovalPolicy;
-          existing.autoApprove = requestedApprovalPolicy === 'never';
-          if (existing.autoApprove) this.resolvePendingApprovalsForThread(existing.id, true);
+          existing.autoApprove = requestedApprovalPolicy === 'none';
           metadataChanged = true;
         }
       }
@@ -2002,6 +1924,12 @@ export class HubAssistantService {
   ): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
+    const requestedAgentPermissionMode =
+      patch.agentPermissionMode != null
+        ? parseAssistantAgentPermissionMode(patch.agentPermissionMode)
+        : null;
+    const requestedApprovalPolicy =
+      patch.approvalPolicy != null ? parseAssistantApprovalPolicy(patch.approvalPolicy) : null;
     const title = typeof patch.title === 'string' ? patch.title.trim() : '';
     if (title) thread.title = title.slice(0, 80);
     if (patch.provider != null) thread.provider = normalizeProvider(patch.provider);
@@ -2016,19 +1944,14 @@ export class HubAssistantService {
     }
     if (patch.autoApprove != null) {
       thread.autoApprove = normalizeAssistantAutoApprove(patch.autoApprove);
-      thread.approvalPolicy = thread.autoApprove ? 'never' : 'ask';
-      if (thread.autoApprove) this.resolvePendingApprovalsForThread(thread.id, true);
+      thread.approvalPolicy = thread.autoApprove ? 'none' : 'ask';
     }
-    if (patch.agentPermissionMode != null) {
-      thread.agentPermissionMode = normalizeAssistantAgentPermissionMode(patch.agentPermissionMode);
+    if (requestedAgentPermissionMode != null) {
+      thread.agentPermissionMode = requestedAgentPermissionMode;
     }
-    if (patch.approvalPolicy != null) {
-      if (String(patch.approvalPolicy).trim() === 'agent-decides')
-        throw new Error('agent-decides approval policy is only available for Codex chats');
-      const approvalPolicy = normalizeAssistantApprovalPolicy(patch.approvalPolicy);
-      thread.approvalPolicy = approvalPolicy;
-      thread.autoApprove = approvalPolicy === 'never';
-      if (thread.autoApprove) this.resolvePendingApprovalsForThread(thread.id, true);
+    if (requestedApprovalPolicy != null) {
+      thread.approvalPolicy = requestedApprovalPolicy;
+      thread.autoApprove = requestedApprovalPolicy === 'none';
     }
     if (patch.promptDeliveryMode != null)
       thread.promptDeliveryMode = normalizeAssistantPromptDeliveryMode(patch.promptDeliveryMode);
@@ -2166,10 +2089,10 @@ export class HubAssistantService {
     return (await this.tools.listDrones()).flatMap((drone) => {
       const canRead = readScope === null || readScope.has(drone.id);
       const canWrite =
-        thread.agentPermissionMode !== 'read-only' &&
+        thread.agentPermissionMode !== 'read' &&
         (writeScope === null || writeScope.has(drone.id));
       const canExecute =
-        thread.agentPermissionMode === 'full-access' &&
+        thread.agentPermissionMode === 'execute' &&
         (executeScope === null || executeScope.has(drone.id));
       return canRead || canWrite || canExecute ? [{ ...drone, canRead, canWrite, canExecute }] : [];
     });
@@ -2207,7 +2130,7 @@ export class HubAssistantService {
         description: 'Private files for this chat',
         capabilities: [
           'read',
-          ...(thread.agentPermissionMode === 'read-only' ? [] : (['write'] as const)),
+          ...(thread.agentPermissionMode === 'read' ? [] : (['write'] as const)),
         ] as Array<'read' | 'write'>,
       },
     ];
@@ -2646,13 +2569,6 @@ export class HubAssistantService {
     return await this.threadSnapshot(approval.threadId);
   }
 
-  private resolvePendingApprovalsForThread(threadId: string, approved: boolean): void {
-    for (const [id, approval] of [...this.approvals]) {
-      if (approval.threadId !== threadId || approval.status !== 'pending') continue;
-      void this.approvalDecisionDelegate?.(threadId, id, approved).catch(() => undefined);
-    }
-  }
-
   async enqueueThreadPrompt(
     threadId: string,
     input: {
@@ -2822,7 +2738,7 @@ export class HubAssistantService {
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
     const stored = (await loadAssistantState()) ?? undefined;
-    const storedSystemPrompt = migrateAssistantSystemPrompt(stored?.systemPrompt);
+    const storedSystemPrompt = normalizeAssistantSystemPrompt(stored?.systemPrompt);
     this.defaultSystemPrompt = storedSystemPrompt || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
     this.defaultSystemPromptUpdatedAt =
       storedSystemPrompt &&
@@ -2924,7 +2840,7 @@ export class HubAssistantService {
       ...(Array.isArray(input?.enabledWorkspaceIds)
         ? { enabledWorkspaceIds: normalizeAssistantWorkspaceIds(input.enabledWorkspaceIds) ?? [] }
         : {}),
-      autoApprove: normalizeAssistantApprovalPolicy(input?.approvalPolicy) === 'never',
+      autoApprove: normalizeAssistantApprovalPolicy(input?.approvalPolicy) === 'none',
       promptDeliveryMode: 'queue',
       status: 'idle',
       error: null,
@@ -3002,13 +2918,13 @@ export class HubAssistantService {
       .trim()
       .replace(/^drone_hub__/, '');
     const permissionMode = this.getThread(threadId).agentPermissionMode;
-    if (permissionMode === 'read-only' && ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES.has(toolName)) {
+    if (permissionMode === 'read' && ASSISTANT_READ_ONLY_DENIED_TOOL_NAMES.has(toolName)) {
       return {
         status: 'deny',
         reason: `${toolName} is unavailable while this chat is read only.`,
       };
     }
-    if (permissionMode !== 'full-access' && toolName === 'bash') {
+    if (permissionMode !== 'execute' && toolName === 'bash') {
       return {
         status: 'deny',
         reason: 'Command execution is unavailable for this chat.',
@@ -3318,14 +3234,14 @@ export class HubAssistantService {
     const accessScope = this.activeAccessScope(threadId);
     const readScope = describeAssistantAccessMode(accessScope.readMode, accessScope.droneIds);
     const writeScope =
-      thread?.agentPermissionMode === 'read-only'
+      thread?.agentPermissionMode === 'read'
         ? 'none (chat is read only)'
         : describeAssistantAccessMode(accessScope.writeMode, accessScope.droneIds);
     const executeScope =
-      thread?.agentPermissionMode === 'full-access'
+      thread?.agentPermissionMode === 'execute'
         ? describeAssistantAccessMode(accessScope.executeMode, accessScope.droneIds)
         : 'none (command execution is disabled)';
-    const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}; execute=${executeScope}. Do not claim access to existing drones outside those scopes. create_drone creates a container child of this chat's owner and automatically grants this chat access; clone_drone also requires read access to its source. Neither operation is available when this chat's owner runs directly on the host. create_group creates an independent group in the supplied repository scope; omit repoPath only for drones without a repository.`;
+    const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}; execute=${executeScope}. Do not claim access to existing drones outside those scopes. create_drone and clone_drone create independent container drones by default and automatically grant this chat access. Pass parent only when the user explicitly wants a child drone; the parent must be in read scope. clone_drone also requires read access to its source. create_group creates an independent group in the supplied repository scope; omit repoPath only for drones without a repository.`;
     const basePrompt =
       normalizeAssistantSystemPrompt(thread?.systemPrompt) ||
       (thread ? this.defaultSystemPromptForThread(thread) : this.defaultSystemPrompt);

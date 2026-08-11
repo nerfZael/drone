@@ -78,7 +78,7 @@ describe('assistant system prompt settings', () => {
     });
   });
 
-  test('explains child-drone creation and clone access policy', async () => {
+  test('explains independent drone creation and explicit parent access policy', async () => {
     await withTempDroneDataDir('assistant-global-create-scope-', async () => {
       const service = makeAssistantService();
       const snapshot = await ensureTestNativeChat(service, { chatName: 'create scope' });
@@ -90,8 +90,9 @@ describe('assistant system prompt settings', () => {
       });
       const prompt = service.resolvedSystemPrompt(snapshot.chatId);
       expect(prompt).toContain('Current existing-drone access scope: read=all drones; write=selected drones (native-test-drone); execute=selected drones (native-test-drone).');
-      expect(prompt).toContain("create_drone creates a container child of this chat's owner and automatically grants this chat access; clone_drone also requires read access to its source.");
-      expect(prompt).toContain("Neither operation is available when this chat's owner runs directly on the host.");
+      expect(prompt).toContain('create_drone and clone_drone create independent container drones by default and automatically grant this chat access.');
+      expect(prompt).toContain('Pass parent only when the user explicitly wants a child drone; the parent must be in read scope.');
+      expect(prompt).toContain('clone_drone also requires read access to its source.');
     });
   });
 
@@ -105,6 +106,7 @@ describe('assistant system prompt settings', () => {
       'message_drone',
       'read_chat_messages',
       'get_current_context',
+      'subscribe_to_chats_idle',
       'subscribe_to_any_chat_idle',
       'subscribe_to_all_chats_idle',
       'list_chat_idle_subscriptions',
@@ -333,7 +335,7 @@ describe('assistant system prompt settings', () => {
     });
   });
 
-  test('migrates legacy artifact, changed-file, MCP, and idle subscription aliases', async () => {
+  test('drops removed idle tools while normalizing unrelated tool aliases', async () => {
     await withTempDroneDataDir('assistant-legacy-tool-settings-', async () => {
       const service = makeAssistantService();
       const created = await ensureTestNativeChat(service, { chatName: 'legacy tools' });
@@ -343,6 +345,7 @@ describe('assistant system prompt settings', () => {
           'list_changed_files',
           'message_drone',
           'read_chat_messages',
+          'subscribe_to_chats_idle',
           'subscribe_to_all_chats_idle',
           'subscribe_to_any_chat_idle',
           'list_chat_idle_subscriptions',
@@ -357,9 +360,6 @@ describe('assistant system prompt settings', () => {
         'send_message',
         'list_chats',
         'read_chat',
-        'subscribe_to_resource_events',
-        'list_resource_subscriptions',
-        'cancel_resource_subscription',
       ]);
     });
   });

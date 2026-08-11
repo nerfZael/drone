@@ -32,8 +32,8 @@ type DroneRegistryChatEntry = {
   chatId?: string;
   model?: string;
   agent?: DroneRegistryChatAgentConfig;
-  agentPermissionMode?: 'read-only' | 'workspace-write' | 'full-access';
-  approvalPolicy?: 'ask' | 'agent-decides' | 'never';
+  agentPermissionMode?: 'read' | 'write' | 'execute';
+  approvalPolicy?: 'ask' | 'auto' | 'none';
   codexThreadId?: string;
   claudeSessionId?: string;
   openCodeSessionId?: string;
@@ -135,13 +135,14 @@ type DroneRegistryV1 = {
     uiPreferences?: {
       sidebarGroupingMode?: 'groups' | 'repos';
       sidebarDensityMode?: 'compact' | 'default' | 'comfortable';
+      collapsedGroups?: Record<string, boolean>;
+      collapsedDroneSections?: Record<string, boolean>;
       sidebarGroupOrder?: string[];
       sidebarDroneOrderByGroup?: Record<string, string[]>;
       sidebarNodeOrderByParent?: Record<string, string[]>;
       sidebarChatOrderByDrone?: Record<string, string[]>;
       pinnedDroneIds?: string[];
       hiddenSidebarGroups?: string[];
-      autoDelete?: boolean;
       spawnAgentKey?: string;
       spawnModel?: string;
       repoBranchSource?: 'host' | 'remote';

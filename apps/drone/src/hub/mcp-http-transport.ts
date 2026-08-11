@@ -1,8 +1,6 @@
-import crypto from 'node:crypto';
 import type http from 'node:http';
 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { readJsonBody, sendJson } from './hub-http';
 import { createDroneHubMcpServer } from './mcp-server';
@@ -10,17 +8,12 @@ import type { HubServices } from './application/hub-services';
 import {
   authenticateMcpBearerToken,
   bearerTokenFromAuthorizationHeader,
-  type McpTokenIdentity,
 } from './mcp-tokens';
 
-type McpSession = {
-  transport: StreamableHTTPServerTransport;
-  server: ReturnType<typeof createDroneHubMcpServer>;
-  tokenId: string;
-};
-
 export class DroneHubMcpHttpTransport {
-  private readonly sessions = new Map<string, McpSession>();
+  // This tracks only currently executing POST requests so Hub shutdown can close them.
+  // It is never keyed by, or retained for, an MCP client session.
+  private readonly activeServers = new Set<ReturnType<typeof createDroneHubMcpServer>>();
 
   constructor(
     private readonly opts: {
@@ -33,38 +26,13 @@ export class DroneHubMcpHttpTransport {
 
   setSpeechEnabled(enabled: boolean): void {
     this.opts.speechEnabled = enabled;
-    for (const session of this.sessions.values()) {
-      session.server.setSpeechEnabled(enabled);
-    }
-  }
-
-  private async closeSession(sessionId: string | undefined): Promise<void> {
-    if (!sessionId) return;
-    const entry = this.sessions.get(sessionId);
-    if (!entry) return;
-    this.sessions.delete(sessionId);
-    await Promise.resolve(entry.server.close()).catch(() => {});
-  }
-
-  private refreshSessionIdentity(
-    session: McpSession,
-    identity: McpTokenIdentity,
-    res: http.ServerResponse,
-  ): boolean {
-    if (session.tokenId !== identity.tokenId) {
-      sendJson(res, 403, { ok: false, error: 'MCP session belongs to another token' });
-      return false;
-    }
-    session.server.setPrincipal(identity);
-    return true;
+    for (const server of this.activeServers) server.setSpeechEnabled(enabled);
   }
 
   async close(): Promise<void> {
-    await Promise.all(
-      Array.from(this.sessions.keys()).map(async (sessionId) => {
-        await this.closeSession(sessionId);
-      }),
-    ).catch(() => {});
+    const servers = [...this.activeServers];
+    this.activeServers.clear();
+    await Promise.allSettled(servers.map(async (server) => await server.close()));
   }
 
   async handle(req: http.IncomingMessage, res: http.ServerResponse, method: string): Promise<void> {
@@ -88,59 +56,27 @@ export class DroneHubMcpHttpTransport {
       return;
     }
 
-    const sessionIdHeader = req.headers['mcp-session-id'];
-    const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
+    if (method !== 'POST') {
+      res.setHeader('allow', 'POST');
+      sendJson(res, 405, { ok: false, error: 'method not allowed' });
+      return;
+    }
+
+    let server: ReturnType<typeof createDroneHubMcpServer> | null = null;
 
     try {
-      if (method === 'POST') {
-        const existing = sessionId ? this.sessions.get(sessionId) : null;
-        if (existing) {
-          if (!this.refreshSessionIdentity(existing, identity, res)) return;
-          await existing.transport.handleRequest(req, res);
-          return;
-        }
-        if (sessionId) {
-          sendJson(res, 404, { ok: false, error: 'unknown MCP session' });
-          return;
-        }
-
-        const body = await readJsonBody(req);
-        if (!isInitializeRequest(body)) {
-          sendJson(res, 400, { ok: false, error: 'MCP session must start with initialize' });
-          return;
-        }
-
-        let transport: StreamableHTTPServerTransport;
-        const server = createDroneHubMcpServer({
-          principal: identity,
-          speechEnabled: this.opts.speechEnabled !== false,
-          hubServices: this.opts.hubServices,
-        });
-        transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => crypto.randomUUID(),
-          onsessioninitialized: (nextSessionId) => {
-            this.sessions.set(nextSessionId, { transport, server, tokenId: identity.tokenId });
-          },
-        });
-        transport.onclose = () => void this.closeSession(transport.sessionId);
-        await server.connect(transport);
-        await transport.handleRequest(req, res, body);
-        return;
-      }
-
-      if (method === 'GET' || method === 'DELETE') {
-        const existing = sessionId ? this.sessions.get(sessionId) : null;
-        if (!existing) {
-          sendJson(res, 400, { ok: false, error: 'invalid or missing MCP session' });
-          return;
-        }
-        if (!this.refreshSessionIdentity(existing, identity, res)) return;
-        await existing.transport.handleRequest(req, res);
-        return;
-      }
-
-      res.setHeader('allow', 'GET, POST, DELETE');
-      sendJson(res, 405, { ok: false, error: 'method not allowed' });
+      const body = await readJsonBody(req);
+      server = createDroneHubMcpServer({
+        principal: identity,
+        speechEnabled: this.opts.speechEnabled !== false,
+        hubServices: this.opts.hubServices,
+      });
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      });
+      this.activeServers.add(server);
+      await server.connect(transport);
+      await transport.handleRequest(req, res, body);
     } catch (error: any) {
       this.opts.log('warn', 'mcp request failed', {
         method,
@@ -148,6 +84,10 @@ export class DroneHubMcpHttpTransport {
       });
       if (!res.headersSent && !res.writableEnded) {
         sendJson(res, 500, { ok: false, error: error?.message ?? String(error) });
+      }
+    } finally {
+      if (server && this.activeServers.delete(server)) {
+        await Promise.resolve(server.close()).catch(() => {});
       }
     }
   }

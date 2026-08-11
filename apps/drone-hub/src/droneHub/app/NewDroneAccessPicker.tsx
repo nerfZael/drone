@@ -22,14 +22,14 @@ type PickerOption<T extends string> = {
 };
 
 export function newDroneAccessLabel(value: AgentPermissionMode): string {
-  if (value === 'read-only') return 'Read';
-  if (value === 'workspace-write') return 'Write';
+  if (value === 'read') return 'Read';
+  if (value === 'write') return 'Write';
   return 'Execute';
 }
 
 export function newDroneApprovalLabel(value: AgentApprovalPolicy): string {
   if (value === 'ask') return 'Ask';
-  if (value === 'agent-decides') return 'Decide for me';
+  if (value === 'auto') return 'Auto';
   return 'Never ask';
 }
 
@@ -70,19 +70,19 @@ export function NewDroneAccessPicker({
 
   const accessOptions: PickerOption<AgentPermissionMode>[] = [
     {
-      value: 'read-only',
+      value: 'read',
       label: 'Read',
       description: 'Inspect files in a read-only sandbox.',
       disabled: !readOnlySupported,
     },
     {
-      value: 'workspace-write',
+      value: 'write',
       label: 'Write',
       description: 'Write inside the workspace sandbox.',
       disabled: !readOnlySupported,
     },
     {
-      value: 'full-access',
+      value: 'execute',
       label: 'Execute',
       description: 'Run with full command access.',
     },
@@ -97,15 +97,15 @@ export function NewDroneAccessPicker({
     ...(agentIsCodex
       ? [
           {
-            value: 'agent-decides' as const,
-            label: 'Decide for me',
+            value: 'auto' as const,
+            label: 'Auto',
             description: 'Codex decides when confirmation is needed.',
             disabled: !approvalsSupported,
           },
         ]
       : []),
     {
-      value: 'never',
+      value: 'none',
       label: 'Never ask',
       description: 'Run within the selected sandbox without waiting for confirmation.',
       disabled: !approvalsSupported,

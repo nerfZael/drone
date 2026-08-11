@@ -82,6 +82,7 @@ import {
 } from './droneHub/app/use-sidebar-view-model';
 import { useChatConfigState } from './droneHub/app/use-chat-config-state';
 import {
+  hasSpawnContextPreferencesForRepo,
   resolveSpawnContextPreferencesForRepo,
   useDroneHubAppModelUiState,
   useDroneHubUiStore,
@@ -252,7 +253,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     pinnedDroneIds,
     hiddenSidebarGroups,
     showHiddenSidebarGroups,
-    autoDelete,
     terminalEmulator,
     homeOpen,
     selectedDrone,
@@ -504,7 +504,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     moveDronesToGroup,
     createGroupAndMove,
   } = useGroupManagement({
-    autoDelete,
     activeRepoPath,
     groupIdByName: registryGroupIdByName,
     drones,
@@ -871,13 +870,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     spawnAgentConfig.kind === 'native' ||
     (spawnAgentConfig.kind === 'builtin' && spawnAgentConfig.id === 'codex');
   React.useEffect(() => {
-    if (!spawnAgentReadOnlySupported && spawnAgentPermissionMode !== 'full-access') {
-      setSpawnAgentPermissionMode('full-access');
+    if (!spawnAgentReadOnlySupported && spawnAgentPermissionMode !== 'execute') {
+      setSpawnAgentPermissionMode('execute');
     }
   }, [spawnAgentPermissionMode, spawnAgentReadOnlySupported]);
   React.useEffect(() => {
     if (!spawnAgentApprovalSupported) setSpawnApprovalPolicy('ask');
-    else if (!spawnAgentIsCodex && spawnApprovalPolicy === 'agent-decides')
+    else if (!spawnAgentIsCodex && spawnApprovalPolicy === 'auto')
       setSpawnApprovalPolicy('ask');
   }, [spawnAgentApprovalSupported, spawnAgentIsCodex, spawnApprovalPolicy]);
 
@@ -915,11 +914,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           .trim()
           .toLowerCase() || null;
       const agentPermissionMode: AgentPermissionMode =
-        opts.agentPermissionMode === 'read-only' || opts.agentPermissionMode === 'workspace-write'
+        opts.agentPermissionMode === 'read' || opts.agentPermissionMode === 'write'
           ? opts.agentPermissionMode
-          : 'full-access';
+          : 'execute';
       const approvalPolicy: AgentApprovalPolicy =
-        opts.approvalPolicy === 'agent-decides' || opts.approvalPolicy === 'never'
+        opts.approvalPolicy === 'auto' || opts.approvalPolicy === 'none'
           ? opts.approvalPolicy
           : 'ask';
       const group = String(opts.group ?? '').trim() || null;
@@ -928,7 +927,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         !prompt &&
         !opts.agent &&
         !model &&
-        agentPermissionMode === 'full-access' &&
+        agentPermissionMode === 'execute' &&
         approvalPolicy === 'ask'
       )
         return;
@@ -1058,7 +1057,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     suggestAndRenameDraftDrone,
   } = useDroneMutationActions({
     drones,
-    autoDelete,
     deleteMode: deleteActionSettingsState.deleteSettings?.deleteAction.mode ?? 'permanent',
     requestJson,
     optimisticallyDeletedDrones,
@@ -1304,20 +1302,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         return false;
       }
       setDroneDeleteConfirmError(null);
-      if (autoDelete) {
-        void runConfirmedDroneDelete(rows);
-        return true;
-      }
       setDroneDeleteConfirm({ drones: rows });
       return true;
     },
     [
-      autoDelete,
       deletingDrones,
       droneById,
       droneDeleteOperationModeById,
       resolveDeleteDroneRows,
-      runConfirmedDroneDelete,
       setDroneDeleteConfirm,
       showShortcutToast,
       selectedDrone,
@@ -2148,7 +2140,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     applyRepoLocalCheckout,
     reseedRepo,
   } = useWorkspaceActions({
-    autoDelete,
     currentDrone,
     drones,
     selectedChat,
@@ -2512,7 +2503,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           agentLocked: false,
           model: startupSeedForCurrentDrone.model ?? null,
           reasoning: startupSeedForCurrentDrone.reasoning ?? null,
-          agentPermissionMode: startupSeedForCurrentDrone.agentPermissionMode ?? 'full-access',
+          agentPermissionMode: startupSeedForCurrentDrone.agentPermissionMode ?? 'execute',
           approvalPolicy: startupSeedForCurrentDrone.approvalPolicy ?? 'ask',
           dockerSnapshotAfterAgentMessageEnabled: false,
           sessionName: `drone-hub-chat-${startupSeedForCurrentDrone.chatName || selectedChat || 'default'}`,
@@ -2575,22 +2566,28 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const applyRememberedNewDronePreferences = React.useCallback(
     (repoPathRaw: string) => {
       const repoPath = normalizeCreateRepoPath(repoPathRaw);
-      const preferences =
-        loadDesktopNewDronePreferences(repoPath) ?? normalizeDesktopNewDronePreferences({});
+      const rememberedPreferences = loadDesktopNewDronePreferences(repoPath);
+      const preferences = rememberedPreferences ?? normalizeDesktopNewDronePreferences({});
       if (!preferences) return;
       setDraftCreateMode(preferences.mode);
       setCreateRuntime(preferences.runtime);
       setCreatePersistVolume(preferences.persistVolume);
       setSpawnContextRepoPath(repoPath);
-      updateSpawnContextForRepo(repoPath, {
-        spawnAgentKey: preferences.spawnAgentKey,
-        spawnModel: preferences.spawnModel,
-        spawnReasoning: preferences.spawnReasoning,
-        spawnAgentPermissionMode: preferences.spawnAgentPermissionMode,
-        spawnApprovalPolicy: preferences.spawnApprovalPolicy,
-        repoBranchSource: preferences.repoBranchSource,
-        repoCreateRemoteBranch: preferences.repoCreateRemoteBranch,
-      });
+      const syncedSpawnContexts = useDroneHubUiStore.getState().spawnContextByRepoKey;
+      if (
+        rememberedPreferences &&
+        !hasSpawnContextPreferencesForRepo(syncedSpawnContexts, repoPath)
+      ) {
+        updateSpawnContextForRepo(repoPath, {
+          spawnAgentKey: rememberedPreferences.spawnAgentKey,
+          spawnModel: rememberedPreferences.spawnModel,
+          spawnReasoning: rememberedPreferences.spawnReasoning,
+          spawnAgentPermissionMode: rememberedPreferences.spawnAgentPermissionMode,
+          spawnApprovalPolicy: rememberedPreferences.spawnApprovalPolicy,
+          repoBranchSource: rememberedPreferences.repoBranchSource,
+          repoCreateRemoteBranch: rememberedPreferences.repoCreateRemoteBranch,
+        });
+      }
     },
     [
       normalizeCreateRepoPath,
@@ -2842,7 +2839,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     updateSpawnContextForRepo(currentDroneRepoAttached ? currentDroneRepoPath : '', {
       spawnAgentKey: nextAgentKey,
       spawnModel: nextModel,
-      spawnAgentPermissionMode: effectiveChatInfo.agentPermissionMode ?? 'full-access',
+      spawnAgentPermissionMode: effectiveChatInfo.agentPermissionMode ?? 'execute',
     });
     lastSyncedCanvasAgentModelContextRef.current = contextKey;
   }, [
@@ -3322,10 +3319,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           : null;
       const seedAgentPermissionMode: AgentPermissionMode = seedAgent
         ? spawnAgentPermissionMode
-        : 'full-access';
+        : 'execute';
       const seedApprovalPolicy: AgentApprovalPolicy = spawnApprovalPolicy;
       if (
-        seedAgentPermissionMode !== 'full-access' &&
+        seedAgentPermissionMode !== 'execute' &&
         !(
           seedAgent.kind === 'native' ||
           (seedAgent.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
@@ -3350,7 +3347,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           seedChat: 'default',
           ...(seedAgent ? { seedAgent } : {}),
           ...(seedModel ? { seedModel } : {}),
-          ...(seedAgentPermissionMode !== 'full-access' ? { seedAgentPermissionMode } : {}),
+          ...(seedAgentPermissionMode !== 'execute' ? { seedAgentPermissionMode } : {}),
           ...(seedApprovalPolicy !== 'ask' ? { seedApprovalPolicy } : {}),
           seedPrompt: prompt,
           seedSubmittedAt,
@@ -3911,30 +3908,22 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         return { ok: false, error: `Chat "${chatName}" is unavailable.` };
 
       if (chats.length <= 1) {
-        if (!autoDelete) {
-          const opened = requestDeleteDrones([droneId]);
-          return opened
-            ? { ok: false, deletedDrone: false, error: '' }
-            : { ok: false, deletedDrone: false, error: 'Failed to open delete confirmation.' };
-        }
-        const deletedDrone = await deleteDrone(droneId, { confirmed: true });
-        return deletedDrone
-          ? { ok: true, deletedDrone: true, error: null }
-          : { ok: false, deletedDrone: false, error: autoDelete ? 'Failed to delete drone.' : '' };
+        const opened = requestDeleteDrones([droneId]);
+        return opened
+          ? { ok: false, deletedDrone: false, error: '' }
+          : { ok: false, deletedDrone: false, error: 'Failed to open delete confirmation.' };
       }
       if (chatName === 'default') {
         return { ok: false, error: 'Default chat cannot be deleted while other chats exist.' };
       }
 
-      if (!autoDelete) {
-        const droneLabel = drone ? uiDroneName(drone.name) : droneId;
-        const confirmed = window.confirm(
-          deleteMode === 'archive'
-            ? `Archive chat "${chatName}" from "${droneLabel}"?\n\nYou can restore it from Settings > Archive before it auto-deletes.`
-            : `Delete chat "${chatName}" from "${droneLabel}"?`,
-        );
-        if (!confirmed) return { ok: false, error: '' };
-      }
+      const droneLabel = drone ? uiDroneName(drone.name) : droneId;
+      const confirmed = window.confirm(
+        deleteMode === 'archive'
+          ? `Archive chat "${chatName}" from "${droneLabel}"?\n\nYou can restore it from Settings > Archive before it auto-deletes.`
+          : `Delete chat "${chatName}" from "${droneLabel}"?`,
+      );
+      if (!confirmed) return { ok: false, error: '' };
 
       try {
         await requestJson<{ ok: true; deletedChat: string }>(
@@ -3966,9 +3955,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
     },
     [
-      autoDelete,
       deleteActionSettingsState.deleteSettings,
-      deleteDrone,
       drones,
       requestDeleteDrones,
       requestJson,
@@ -4606,7 +4593,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     currentModel,
     currentReasoning,
     setChatModelSettings,
-    agentPermissionMode: effectiveChatInfo?.agentPermissionMode ?? 'full-access',
+    agentPermissionMode: effectiveChatInfo?.agentPermissionMode ?? 'execute',
     setChatAgentPermissionMode,
     approvalPolicy: effectiveChatInfo?.approvalPolicy ?? 'ask',
     setChatApprovalPolicy,

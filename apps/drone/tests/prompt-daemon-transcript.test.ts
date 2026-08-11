@@ -131,6 +131,64 @@ async function waitForRunningPromptJob(
   throw new Error(`timed out waiting for running prompt job ${id}: ${JSON.stringify(lastJob)}`);
 }
 
+async function readPromptEventJob(
+  baseUrl: string,
+  token: string,
+  id: string,
+  predicate: (job: any) => boolean,
+): Promise<any> {
+  const abort = new AbortController();
+  const timeout = setTimeout(() => abort.abort(new Error('timed out reading prompt events')), 5_000);
+  timeout.unref?.();
+  try {
+    const response = await fetch(`${baseUrl}/v1/prompts/events`, {
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: 'text/event-stream',
+      },
+      signal: abort.signal,
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`prompt event stream failed: ${response.status} ${response.statusText}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (!abort.signal.aborted) {
+        // eslint-disable-next-line no-await-in-loop
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        let separatorIndex = buffer.indexOf('\n\n');
+        while (separatorIndex !== -1) {
+          const frame = buffer.slice(0, separatorIndex);
+          buffer = buffer.slice(separatorIndex + 2);
+          const dataText = frame
+            .split('\n')
+            .filter((line) => line.startsWith('data:'))
+            .map((line) => line.slice('data:'.length).trimStart())
+            .join('\n');
+          if (dataText) {
+            const data = JSON.parse(dataText);
+            const jobs = Array.isArray(data?.jobs) ? data.jobs : data?.job ? [data.job] : [];
+            const job = jobs.find(
+              (candidate: any) => String(candidate?.id ?? '') === id && predicate(candidate),
+            );
+            if (job) return job;
+          }
+          separatorIndex = buffer.indexOf('\n\n');
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+    throw new Error(`prompt event stream ended before reporting ${id}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function waitForTerminalPromptJob(
   baseUrl: string,
   token: string,
@@ -910,6 +968,14 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
       reason: 'Run the focused tests',
       status: 'pending',
     });
+    expect(
+      await readPromptEventJob(
+        baseUrl,
+        token,
+        id,
+        (job) => job?.state === 'running' && job?.pendingApprovalCount === 1,
+      ),
+    ).toMatchObject({ id, state: 'running', pendingApprovalCount: 1 });
 
     const approvalResponse = await fetch(
       `${baseUrl}/v1/prompts/${encodeURIComponent(id)}/approvals/${encodeURIComponent(approval.id)}/acceptForSession`,
@@ -1126,6 +1192,10 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
       .split('\n')
       .map((line) => JSON.parse(line));
     expect(requests.filter((request) => request.method === 'turn/start')).toHaveLength(1);
+    expect(requests.find((request) => request.method === 'turn/start')?.params).toMatchObject({
+      approvalPolicy: 'never',
+      sandboxPolicy: { type: 'workspaceWrite' },
+    });
     const steering = requests.filter((request) => request.method === 'turn/steer');
     expect(steering).toHaveLength(2);
     expect(steering.map((request) => request.params.clientUserMessageId)).toEqual([

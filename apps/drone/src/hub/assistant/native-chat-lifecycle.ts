@@ -25,6 +25,24 @@ export class NativeChatLifecycle {
     });
   }
 
+  async ensureForPrompt(input: NativeChatIdentity) {
+    const before = await this.assistantService
+      .threadSnapshot(input.id)
+      .then((snapshot) => snapshot.threads.find((thread) => thread.id === input.id) ?? null)
+      .catch(() => null);
+    const snapshot = await this.ensure(input);
+    const after = snapshot.threads.find((thread) => thread.id === input.id) ?? null;
+    if (
+      before &&
+      after &&
+      (before.agentPermissionMode !== after.agentPermissionMode ||
+        before.approvalPolicy !== after.approvalPolicy)
+    ) {
+      this.blipAssistantHost.invalidateThread(input.id);
+    }
+    return snapshot;
+  }
+
   async clone(input: NativeChatIdentity & {
     sourceId: string;
     sourceChatName: string;

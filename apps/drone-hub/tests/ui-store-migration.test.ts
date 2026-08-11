@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  hasSpawnContextPreferencesForRepo,
   migrateDroneHubUiPersistedState,
   normalizeChatInputEditorModes,
   normalizeLastChatSelectionByRepoPath,
@@ -56,6 +57,8 @@ describe('drone hub ui store migration', () => {
       {
         sidebarGroupingMode: 'repos',
         sidebarDockSide: 'right',
+        collapsedGroups: { 'repo:/work/repo': true },
+        collapsedDroneSections: { 'chats:drone-a': true },
         viewMode: 'flat',
         assistantThreadSidebarDockSide: 'right',
         autoDelete: true,
@@ -73,10 +76,12 @@ describe('drone hub ui store migration', () => {
     expect(migrated).toMatchObject({
       sidebarGroupingMode: 'repos',
       sidebarDockSide: 'right',
-      autoDelete: true,
+      collapsedGroups: { 'repo:/work/repo': true },
+      collapsedDroneSections: { 'chats:drone-a': true },
       showCanvasLastMessagePreviews: true,
       seenModelIds: ['gpt-5.4', 'o3'],
     });
+    expect((migrated as any).autoDelete).toBeUndefined();
     expect((migrated as any).viewMode).toBeUndefined();
     expect((migrated as any).assistantThreadSidebarDockSide).toBeUndefined();
     expect((migrated as any).transcriptInlineImages).toBeUndefined();
@@ -279,7 +284,7 @@ describe('drone hub ui store migration', () => {
         spawnAgentKey: 'builtin:codex',
         spawnModel: 'gpt-5.4',
         spawnReasoning: '',
-        spawnAgentPermissionMode: 'full-access',
+        spawnAgentPermissionMode: 'execute',
         spawnApprovalPolicy: 'ask',
         repoBranchSource: 'remote',
         repoCreateRemoteBranch: 'origin/feature-x',
@@ -298,8 +303,8 @@ describe('drone hub ui store migration', () => {
       '/tmp/repo-a': {
         spawnAgentKey: 'builtin:codex',
         spawnModel: 'gpt-5.4',
-        spawnAgentPermissionMode: 'workspace-write',
-        spawnApprovalPolicy: 'never',
+        spawnAgentPermissionMode: 'write',
+        spawnApprovalPolicy: 'none',
         repoBranchSource: 'remote',
         repoCreateRemoteBranch: 'origin/feature-a',
       },
@@ -308,8 +313,8 @@ describe('drone hub ui store migration', () => {
     expect(resolveSpawnContextPreferencesForRepo(byRepo, '/tmp/repo-a')).toMatchObject({
       spawnAgentKey: 'builtin:codex',
       spawnModel: 'gpt-5.4',
-      spawnAgentPermissionMode: 'workspace-write',
-      spawnApprovalPolicy: 'never',
+      spawnAgentPermissionMode: 'write',
+      spawnApprovalPolicy: 'none',
       repoBranchSource: 'remote',
       repoCreateRemoteBranch: 'origin/feature-a',
     });
@@ -327,6 +332,20 @@ describe('drone hub ui store migration', () => {
     });
   });
 
+  test('recognizes synchronized repo and global spawn defaults', () => {
+    const repoDefaults = normalizeSpawnContextByRepoKey({
+      '/tmp/repo-a': { spawnApprovalPolicy: 'none' },
+    });
+    expect(hasSpawnContextPreferencesForRepo(repoDefaults, '/tmp/repo-a')).toBe(true);
+    expect(hasSpawnContextPreferencesForRepo(repoDefaults, '/tmp/repo-b')).toBe(false);
+
+    const globalDefaults = normalizeSpawnContextByRepoKey({
+      __no_repo__: { spawnApprovalPolicy: 'none' },
+    });
+    expect(hasSpawnContextPreferencesForRepo(globalDefaults, '/tmp/repo-a')).toBe(true);
+    expect(hasSpawnContextPreferencesForRepo(globalDefaults, '')).toBe(true);
+  });
+
   test('updates access defaults for an explicit repo without changing the active repo', () => {
     const previous = useDroneHubUiStore.getState();
     const previousWarn = console.warn;
@@ -335,13 +354,13 @@ describe('drone hub ui store migration', () => {
       const byRepo = normalizeSpawnContextByRepoKey({
         '/tmp/repo-a': {
           spawnAgentKey: 'builtin:codex',
-          spawnAgentPermissionMode: 'full-access',
-          spawnApprovalPolicy: 'agent-decides',
+          spawnAgentPermissionMode: 'execute',
+          spawnApprovalPolicy: 'auto',
         },
         '/tmp/repo-b': {
           spawnAgentKey: 'builtin:codex',
-          spawnAgentPermissionMode: 'full-access',
-          spawnApprovalPolicy: 'agent-decides',
+          spawnAgentPermissionMode: 'execute',
+          spawnApprovalPolicy: 'auto',
         },
       });
       useDroneHubUiStore.setState({
@@ -351,16 +370,16 @@ describe('drone hub ui store migration', () => {
       });
 
       useDroneHubUiStore.getState().updateSpawnContextForRepo('/tmp/repo-b', {
-        spawnAgentPermissionMode: 'workspace-write',
+        spawnAgentPermissionMode: 'write',
         spawnApprovalPolicy: 'ask',
       });
 
       const state = useDroneHubUiStore.getState();
       expect(state.spawnContextRepoPath).toBe('/tmp/repo-a');
-      expect(state.spawnAgentPermissionMode).toBe('full-access');
-      expect(state.spawnApprovalPolicy).toBe('agent-decides');
+      expect(state.spawnAgentPermissionMode).toBe('execute');
+      expect(state.spawnApprovalPolicy).toBe('auto');
       expect(state.spawnContextByRepoKey['/tmp/repo-b']).toMatchObject({
-        spawnAgentPermissionMode: 'workspace-write',
+        spawnAgentPermissionMode: 'write',
         spawnApprovalPolicy: 'ask',
       });
     } finally {
@@ -401,8 +420,8 @@ describe('drone hub ui store migration', () => {
         spawnAgentKey: 'builtin:codex',
         spawnModel: 'gpt-5.5',
         spawnReasoning: 'high',
-        spawnAgentPermissionMode: 'full-access',
-        spawnApprovalPolicy: 'agent-decides',
+        spawnAgentPermissionMode: 'execute',
+        spawnApprovalPolicy: 'auto',
       },
       current: {
         spawnContextByRepoKey: normalizeSpawnContextByRepoKey({
@@ -411,15 +430,15 @@ describe('drone hub ui store migration', () => {
           },
           '/tmp/repo-a': {
             spawnAgentKey: 'builtin:codex',
-            spawnAgentPermissionMode: 'full-access',
-            spawnApprovalPolicy: 'agent-decides',
+            spawnAgentPermissionMode: 'execute',
+            spawnApprovalPolicy: 'auto',
           },
         }),
       },
       remembered: {
         '/tmp/repo-a': {
           spawnAgentKey: 'builtin:codex',
-          spawnAgentPermissionMode: 'workspace-write',
+          spawnAgentPermissionMode: 'write',
           spawnApprovalPolicy: 'ask',
         },
       },
@@ -430,10 +449,10 @@ describe('drone hub ui store migration', () => {
       spawnAgentKey: 'builtin:codex',
       spawnModel: 'gpt-5.5',
       spawnReasoning: 'high',
-      spawnApprovalPolicy: 'agent-decides',
+      spawnApprovalPolicy: 'auto',
     });
     expect(recovered['/tmp/repo-a']).toMatchObject({
-      spawnAgentPermissionMode: 'workspace-write',
+      spawnAgentPermissionMode: 'write',
       spawnApprovalPolicy: 'ask',
     });
   });
@@ -447,7 +466,6 @@ describe('drone hub ui store migration', () => {
         sidebarChatOrderByDrone: {},
         pinnedDroneIds: [],
         hiddenSidebarGroups: [],
-        autoDelete: false,
         spawnAgentKey: 'builtin:cursor',
         spawnModel: '',
         repoBranchSource: 'host',
@@ -467,7 +485,7 @@ describe('drone hub ui store migration', () => {
     );
 
     expect(restored.restored).toBe(true);
-    expect(restored.snapshot.autoDelete).toBe(true);
+    expect((restored.snapshot as any).autoDelete).toBeUndefined();
     expect(restored.snapshot.spawnAgentKey).toBe('builtin:codex');
     expect(restored.snapshot.spawnModel).toBe('gpt-5.5');
     expect(restored.snapshot.repoBranchSource).toBe('remote');
@@ -555,6 +573,50 @@ describe('drone hub ui store migration', () => {
     expect(snapshot.sidebarGroupingMode).toBe('repos');
     expect(snapshot.sidebarNodeOrderByParent).toEqual({});
     expect(snapshot.pinnedDroneIds).toEqual([]);
+  });
+
+  test('seeds newly server-backed collapse state from browser persistence once', () => {
+    const snapshot = reconcileUiPreferencesReload({
+      backend: {
+        sidebarGroupingMode: 'repos',
+        collapsedGroups: {},
+        collapsedDroneSections: {},
+      },
+      backendUpdatedAt: '2026-08-06T10:00:00.000Z',
+      current: {
+        collapsedGroups: { 'repo:/work/repo': true },
+        collapsedDroneSections: { 'chats:drone-a': true },
+      },
+      previousBackend: null,
+      wasReady: false,
+      storageRaw: null,
+    });
+
+    expect(snapshot.collapsedGroups).toEqual({ 'repo:/work/repo': true });
+    expect(snapshot.collapsedDroneSections).toEqual({ 'chats:drone-a': true });
+  });
+
+  test('rebases unsaved collapse changes per sidebar entry', () => {
+    const merged = mergeUiPreferencesChanges(
+      {
+        collapsedGroups: { alpha: false, beta: false },
+        collapsedDroneSections: { 'chats:a': false },
+      },
+      {
+        collapsedGroups: { alpha: true, beta: false },
+        collapsedDroneSections: { 'chats:a': true },
+      },
+      {
+        collapsedGroups: { alpha: false, beta: true },
+        collapsedDroneSections: { 'chats:a': false, 'chats:b': true },
+      },
+    );
+
+    expect(merged.collapsedGroups).toEqual({ alpha: true, beta: true });
+    expect(merged.collapsedDroneSections).toEqual({
+      'chats:a': true,
+      'chats:b': true,
+    });
   });
 
   test('keeps unsaved local changes during a cross-client refresh', () => {

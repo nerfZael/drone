@@ -26,8 +26,8 @@ import { NewDroneRuntimePicker } from './NewDroneRuntimePicker';
 export type MobileDroneCreateMode = 'with-chat' | 'without-chat';
 export type MobileDroneCreateRuntime = 'container' | 'host';
 export type MobileDroneCreateBranchSource = 'host' | 'remote';
-export type MobileDroneAgentPermissionMode = 'read-only' | 'workspace-write' | 'full-access';
-export type MobileDroneApprovalPolicy = 'ask' | 'agent-decides' | 'never';
+export type MobileDroneAgentPermissionMode = 'read' | 'write' | 'execute';
+export type MobileDroneApprovalPolicy = 'ask' | 'auto' | 'none';
 export type MobileDroneAgentId =
   | 'native'
   | 'cursor'
@@ -137,7 +137,7 @@ export function NewDroneScreen({
   const [accessPickerOpen, setAccessPickerOpen] = React.useState(false);
   const [agentPermissionMode, setAgentPermissionMode] =
     React.useState<MobileDroneAgentPermissionMode>(
-      initialValues?.agentPermissionMode ?? 'full-access',
+      initialValues?.agentPermissionMode ?? 'execute',
     );
   const [approvalPolicy, setApprovalPolicy] = React.useState<MobileDroneApprovalPolicy>(
     initialValues?.approvalPolicy ?? 'ask',
@@ -299,13 +299,13 @@ export function NewDroneScreen({
   }, [reasoning, selectedModel]);
 
   React.useEffect(() => {
-    if (!readOnlySupported && agentPermissionMode !== 'full-access') {
-      setAgentPermissionMode('full-access');
+    if (!readOnlySupported && agentPermissionMode !== 'execute') {
+      setAgentPermissionMode('execute');
     }
   }, [agentPermissionMode, readOnlySupported]);
   React.useEffect(() => {
     if (!approvalSupported) setApprovalPolicy('ask');
-    else if (agent !== 'codex' && approvalPolicy === 'agent-decides') setApprovalPolicy('ask');
+    else if (agent !== 'codex' && approvalPolicy === 'auto') setApprovalPolicy('ask');
   }, [agent, approvalPolicy, approvalSupported]);
 
   React.useEffect(() => {
@@ -326,7 +326,7 @@ export function NewDroneScreen({
     setAgentPickerOpen(false);
     setAccessPickerOpen(false);
     setRuntimePickerOpen(false);
-    setAgentPermissionMode('full-access');
+    setAgentPermissionMode('execute');
     setApprovalPolicy('ask');
     setModels([]);
     setModel('');
@@ -407,7 +407,7 @@ export function NewDroneScreen({
           : {}),
         ...(model.trim() ? { seedModel: model.trim() } : {}),
         ...(reasoning.trim() ? { seedReasoning: reasoning.trim() } : {}),
-        ...(agentPermissionMode !== 'full-access'
+        ...(agentPermissionMode !== 'execute'
           ? { seedAgentPermissionMode: agentPermissionMode }
           : {}),
         ...(effectiveApprovalPolicy !== 'ask'

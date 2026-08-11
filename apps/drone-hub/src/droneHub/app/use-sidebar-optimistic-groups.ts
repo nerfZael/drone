@@ -1,4 +1,5 @@
 import React from 'react';
+import type { SidebarMoveIntent } from '@drone/hub-model/sidebar';
 import type { DroneSummary } from '../types';
 import type { SidebarGroup } from './use-sidebar-view-model';
 import type { MoveDronesToGroupResult } from './use-group-management';
@@ -21,6 +22,7 @@ import {
   applySidebarOptimisticOpsToDrones,
   applySidebarOptimisticOpsToGroups,
   pruneSatisfiedSidebarOptimisticOps,
+  sidebarOptimisticOpForMoveIntent,
   type SidebarOptimisticOp,
 } from './sidebar-optimistic-ops';
 import { isUngroupedGroupName } from '../../domain';
@@ -64,6 +66,7 @@ type UseSidebarOptimisticGroupsArgs = {
   onRenameGroup: (group: string, nextName?: string) => MaybePromise<boolean>;
   onMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
   onReparentDronesToParent: (parentDroneId: string | null, droneIds: string[]) => Promise<ReparentDronesResult>;
+  onMoveSidebar: (intent: SidebarMoveIntent) => Promise<boolean>;
 };
 
 export function useSidebarOptimisticGroups({
@@ -86,6 +89,7 @@ export function useSidebarOptimisticGroups({
   onRenameGroup,
   onMoveDronesToGroup,
   onReparentDronesToParent,
+  onMoveSidebar,
 }: UseSidebarOptimisticGroupsArgs) {
   const [pendingSidebarOps, setPendingSidebarOps] = React.useState<SidebarOptimisticOp[]>([]);
   const optimisticSidebarOpIdRef = React.useRef(0);
@@ -233,6 +237,29 @@ export function useSidebarOptimisticGroups({
     [createOptimisticSidebarOpId, onMoveDronesToGroup],
   );
 
+  const runOptimisticMoveSidebar = React.useCallback(
+    async (intent: SidebarMoveIntent): Promise<boolean> => {
+      const op = sidebarOptimisticOpForMoveIntent(
+        intent,
+        createOptimisticSidebarOpId(),
+      );
+      if (op) setPendingSidebarOps((prev) => [...prev, op]);
+      try {
+        const ok = await onMoveSidebar(intent);
+        if (!ok && op) {
+          setPendingSidebarOps((prev) => prev.filter((pending) => pending.id !== op.id));
+        }
+        return ok;
+      } catch (error) {
+        if (op) {
+          setPendingSidebarOps((prev) => prev.filter((pending) => pending.id !== op.id));
+        }
+        throw error;
+      }
+    },
+    [createOptimisticSidebarOpId, onMoveSidebar],
+  );
+
   const runOptimisticReparentDronesToParent = React.useCallback(
     async (parentDroneIdRaw: string | null, droneIdsRaw: string[], opts?: OptimisticReparentOptions) => {
       const droneIds = Array.from(new Set(droneIdsRaw.map((droneId) => String(droneId ?? '').trim()).filter(Boolean)));
@@ -334,6 +361,7 @@ export function useSidebarOptimisticGroups({
     runOptimisticCreateGroupAndMove,
     runOptimisticRenameGroup,
     runOptimisticMoveDronesToGroup,
+    runOptimisticMoveSidebar,
     runOptimisticReparentDronesToParent,
   };
 }

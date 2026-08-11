@@ -560,7 +560,6 @@ apps/drone/src/hub/assistant/
   hub-assistant-state-store.ts
   blip-runtime-loader.ts
   in-process-drone-hub-mcp.ts
-  mcp-idle-subscription-store.ts
   targets/
     workspace-targets.ts
     assistant-artifacts-target.ts

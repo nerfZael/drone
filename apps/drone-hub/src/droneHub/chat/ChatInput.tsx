@@ -1233,25 +1233,6 @@ export function ChatInput({
                     <path d="M12 18v3" />
                   </svg>
                 </button>
-                <button
-                  type="button"
-                  data-chat-composer-collapsed-action="true"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => void continuousVoice.start()}
-                  disabled={continuousVoiceButtonDisabled}
-                  className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--accent)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="Start continuous voice steering"
-                  aria-label="Start continuous voice steering"
-                  aria-pressed="false"
-                >
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M4 12h2" />
-                    <path d="M8 8v8" />
-                    <path d="M12 5v14" />
-                    <path d="M16 8v8" />
-                    <path d="M20 12h0" />
-                  </svg>
-                </button>
                 {showStopAction ? (
                   <button
                     type="button"
@@ -1325,11 +1306,6 @@ export function ChatInput({
                 editorMode ? 'pt-[.4375rem]' : ''
               }`}
             >
-              <ChatComposerEditorToggle
-                expanded
-                enabled={editorMode}
-                onToggle={toggleEditorMode}
-              />
               {voiceRecordingActive ? (
                 <button
                   type="button"
@@ -1374,6 +1350,12 @@ export function ChatInput({
                   </svg>
                 </button>
               ) : null}
+
+              <ChatComposerEditorToggle
+                expanded
+                enabled={editorMode}
+                onToggle={toggleEditorMode}
+              />
 
               {!voiceRecordingActive && !continuousVoiceActive
                 ? composerLeadingControls
@@ -1488,24 +1470,6 @@ export function ChatInput({
                 <button
                   type="button"
                   onMouseDown={preserveEditorFocus}
-                  onClick={() => {
-                    textareaRef.current?.blur();
-                    void beginVoiceRecordingFromComposer(false);
-                  }}
-                  disabled={voiceRecordButtonDisabled}
-                  className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="Record voice message"
-                  aria-label="Record voice message"
-                >
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
-                    <path d="M5 11a7 7 0 0 0 14 0" />
-                    <path d="M12 18v3" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onMouseDown={preserveEditorFocus}
                   onClick={() => void continuousVoice.start()}
                   disabled={continuousVoiceButtonDisabled}
                   className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1519,6 +1483,24 @@ export function ChatInput({
                     <path d="M12 5v14" />
                     <path d="M16 8v8" />
                     <path d="M20 12h0" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={preserveEditorFocus}
+                  onClick={() => {
+                    textareaRef.current?.blur();
+                    void beginVoiceRecordingFromComposer(false);
+                  }}
+                  disabled={voiceRecordButtonDisabled}
+                  className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Record voice message"
+                  aria-label="Record voice message"
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+                    <path d="M5 11a7 7 0 0 0 14 0" />
+                    <path d="M12 18v3" />
                   </svg>
                 </button>
                 </>

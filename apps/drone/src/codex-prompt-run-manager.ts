@@ -93,6 +93,19 @@ type ApprovalResolution = {
   resolvedAt: string;
 };
 
+function sandboxPolicyForMode(
+  sandbox: CodexPromptSpec['sandbox'],
+):
+  | { type: 'readOnly' }
+  | { type: 'workspaceWrite' }
+  | { type: 'dangerFullAccess' }
+  | undefined {
+  if (sandbox === 'read-only') return { type: 'readOnly' };
+  if (sandbox === 'workspace-write') return { type: 'workspaceWrite' };
+  if (sandbox === 'danger-full-access') return { type: 'dangerFullAccess' };
+  return undefined;
+}
+
 type CodexPromptRunManagerOptions<TMessage extends CodexPromptMessage> = {
   loadMessage(id: string): Promise<TMessage | null>;
   saveMessage(message: TMessage): Promise<void>;
@@ -606,6 +619,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
     session.startingRun = run;
     try {
       const threadId = await this.ensureThread(session, message.codexAppServer);
+      const sandboxPolicy = sandboxPolicyForMode(message.codexAppServer.sandbox);
       run = await this.options.mutate(() =>
         this.options.appendRunEvents(run, [{ type: 'thread.started', thread_id: threadId }]),
       );
@@ -621,6 +635,7 @@ export class CodexPromptRunManager<TMessage extends CodexPromptMessage> {
         ...(message.codexAppServer.approvalsReviewer
           ? { approvalsReviewer: message.codexAppServer.approvalsReviewer }
           : {}),
+        ...(sandboxPolicy ? { sandboxPolicy } : {}),
       });
       const turnId = String(response?.turn?.id ?? session.activeTurnId ?? '').trim();
       if (!turnId) throw new Error('Codex App Server did not return a turn id');

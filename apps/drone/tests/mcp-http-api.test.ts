@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import { resetDroneRootDirForTests } from '../src/host/paths';
 import { updateRegistry } from '../src/host/registry';
@@ -71,7 +73,34 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
     });
 
     expect(init.status).toBe(200);
-    expect(init.headers.get('mcp-session-id')).toBeTruthy();
+    expect(init.headers.get('mcp-session-id')).toBeNull();
+
+    const staleSessionRequest = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${mcpToken}`,
+        accept: 'application/json, text/event-stream',
+        'content-type': 'application/json',
+        'mcp-session-id': 'session-from-before-hub-restart',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/list',
+        params: {},
+      }),
+    });
+    expect(staleSessionRequest.status).toBe(200);
+    expect(await staleSessionRequest.text()).toContain('list_drones');
+
+    for (const method of ['GET', 'DELETE']) {
+      const response = await fetch(`${baseUrl}/mcp`, {
+        method,
+        headers: { authorization: `Bearer ${mcpToken}` },
+      });
+      expect(response.status).toBe(405);
+      expect(response.headers.get('allow')).toBe('POST');
+    }
   });
 
   test('upserts a Drone Hub HTTP MCP server preset with a named host token', async () => {
@@ -214,7 +243,7 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
     expect(rejected).toBeNull();
   });
 
-  test('refreshes chat scope within a session and rejects mismatched or replaced chats', async () => {
+  test('authenticates every stateless request and refreshes chat scope', async () => {
     const firstChatId = 'session-chat-a';
     const secondChatId = 'session-chat-b';
     await updateRegistry((registry: any) => {
@@ -265,11 +294,11 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
       chatId: secondChatId,
       signingSecret: mcpToken,
     });
-    const requestHeaders = (token: string, sessionId?: string) => ({
+    const requestHeaders = (token: string, staleSessionId?: string) => ({
       authorization: `Bearer ${token}`,
       accept: 'application/json, text/event-stream',
       'content-type': 'application/json',
-      ...(sessionId ? { 'mcp-session-id': sessionId } : {}),
+      ...(staleSessionId ? { 'mcp-session-id': staleSessionId } : {}),
     });
     const init = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',
@@ -286,13 +315,12 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
       }),
     });
     expect(init.status).toBe(200);
-    const sessionId = init.headers.get('mcp-session-id');
-    expect(sessionId).toBeTruthy();
+    expect(init.headers.get('mcp-session-id')).toBeNull();
 
     const callReadOtherChat = async (token: string) => {
       const response = await fetch(`${baseUrl}/mcp`, {
         method: 'POST',
-        headers: requestHeaders(token, sessionId ?? undefined),
+        headers: requestHeaders(token, 'stale-session-id'),
         body: JSON.stringify({
           jsonrpc: '2.0',
           id: 21,
@@ -324,8 +352,9 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
     expect(deniedAfter.body).toContain('read scope does not include the requested drone');
 
     const wrongToken = await callReadOtherChat(secondToken);
-    expect(wrongToken.response.status).toBe(403);
-    expect(wrongToken.body).toContain('MCP session belongs to another token');
+    expect(wrongToken.response.status).toBe(200);
+    expect(wrongToken.body).not.toContain('MCP session belongs to another token');
+    expect(wrongToken.body).not.toContain('read scope does not include the requested drone');
 
     await updateRegistry((registry: any) => {
       const chat = registry.drones['session-drone-a'].chats.default;
@@ -340,5 +369,28 @@ describeSocketSuite('Drone Hub MCP HTTP endpoint', () => {
       registry.drones['session-drone-a'].chats.renamed.id = 'replacement-chat-id';
     });
     expect(await authenticateMcpBearerToken(firstToken, mcpToken)).toBeNull();
+  });
+
+  test('keeps an MCP client usable across a single-Hub restart', async () => {
+    if (!server) throw new Error('test Hub is not running');
+    const client = new Client({ name: 'hub-restart-test', version: '0.1.0' });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
+        requestInit: { headers: { Authorization: `Bearer ${mcpToken}` } },
+        sessionId: 'session-issued-before-stateless-refactor',
+      }),
+    );
+
+    try {
+      expect((await client.listTools()).tools.some((tool) => tool.name === 'list_drones')).toBe(true);
+      const port = server.port;
+      await server.close();
+      server = null;
+      server = await startDroneHubApiServer({ port, apiToken, mcpToken });
+      baseUrl = `http://${server.host}:${server.port}`;
+      expect((await client.listTools()).tools.some((tool) => tool.name === 'list_drones')).toBe(true);
+    } finally {
+      await client.close();
+    }
   });
 });

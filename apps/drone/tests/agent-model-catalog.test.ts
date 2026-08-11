@@ -151,7 +151,6 @@ describe('agent model catalog', () => {
       agentId: 'codex' as const,
       target: {
         runtime: 'container' as const,
-        installationKey: 'shared:container',
         containerName: 'drone-a',
       },
     };
@@ -166,6 +165,56 @@ describe('agent model catalog', () => {
     expect(second.models).toEqual(first.models);
     expect(fromAnotherDrone.source).toBe('cache');
     expect(modelListCalls).toBe(1);
+  });
+
+  test('shares one catalog across host and container discovery', async () => {
+    let hostModelListCalls = 0;
+    let containerCalls = 0;
+    const runtime: AgentModelCatalogRuntime = {
+      async runContainer() {
+        containerCalls += 1;
+        return { code: 1 };
+      },
+      async runHost(command) {
+        if (command.startsWith('command -v')) return { code: 0 };
+        if (command.endsWith('--help')) return { code: 0, stdout: '--list-models' };
+        if (command.endsWith('--version')) return { code: 0, stdout: 'codex 1.2.3' };
+        if (command.endsWith('--list-models')) {
+          hostModelListCalls += 1;
+          return {
+            code: 0,
+            stdout: JSON.stringify({ models: [{ id: 'gpt-shared' }] }),
+          };
+        }
+        return { code: 1 };
+      },
+      async readHostFile() {
+        throw new Error('not found');
+      },
+      hostHomeDirectory: () => '/tmp',
+      hostModelListCommand: () => null,
+      timeoutMs: () => 1_000,
+    };
+    const service = new AgentModelCatalogService(runtime);
+
+    const host = await service.get({
+      agentId: 'codex',
+      target: { runtime: 'host' },
+      forceRefresh: true,
+    });
+    const container = await service.get({
+      agentId: 'codex',
+      target: {
+        runtime: 'container',
+        containerName: 'drone-a',
+      },
+    });
+
+    expect(host.models[0]?.id).toBe('gpt-shared');
+    expect(container.models).toEqual(host.models);
+    expect(container.source).toBe('cache');
+    expect(hostModelListCalls).toBe(1);
+    expect(containerCalls).toBe(0);
   });
 
   test('keeps the last good catalog when a refresh fails', async () => {
@@ -201,7 +250,6 @@ describe('agent model catalog', () => {
       agentId: 'pi' as const,
       target: {
         runtime: 'container' as const,
-        installationKey: 'shared:container',
         containerName: 'drone-a',
       },
     };
@@ -287,7 +335,6 @@ describe('agent model catalog', () => {
       agentId: 'pi',
       target: {
         runtime: 'container',
-        installationKey: 'shared:container',
         containerName: 'drone-a',
       },
     });
@@ -322,7 +369,7 @@ describe('agent model catalog', () => {
 
     const result = await new AgentModelCatalogService(runtime).get({
       agentId: 'opencode',
-      target: { runtime: 'host', installationKey: 'shared:host' },
+      target: { runtime: 'host' },
       forceRefresh: true,
     });
 

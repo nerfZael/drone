@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { resolvePinnedDronePreferenceIds } from '../src/hub/hub-settings';
+import {
+  resolvePinnedDronePreferenceIds,
+  resolveUiPreferencesSettingsResponse,
+  upsertStoredUiPreferencesSettings,
+} from '../src/hub/hub-settings';
+import { withTempDroneDataDir } from './test-helpers';
 
 describe('pinned drone settings batch', () => {
   test('preserves existing order and appends newly pinned drones in request order', () => {
@@ -21,5 +26,24 @@ describe('pinned drone settings batch', () => {
         false,
       ),
     ).toEqual(['two']);
+  });
+
+  test('persists sidebar collapse state in UI preferences', async () => {
+    await withTempDroneDataDir('drone-ui-collapse-settings-', async () => {
+      await upsertStoredUiPreferencesSettings({
+        collapsedGroups: { 'repo:/work/repo': true, open: false },
+        collapsedDroneSections: { 'chats:drone-a': true, 'children:drone-b': false },
+      });
+
+      const response = await resolveUiPreferencesSettingsResponse();
+      expect(response.uiPreferences.collapsedGroups).toEqual({
+        'repo:/work/repo': true,
+        open: false,
+      });
+      expect(response.uiPreferences.collapsedDroneSections).toEqual({
+        'chats:drone-a': true,
+        'children:drone-b': false,
+      });
+    });
   });
 });

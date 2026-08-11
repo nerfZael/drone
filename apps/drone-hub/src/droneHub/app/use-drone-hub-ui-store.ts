@@ -66,7 +66,7 @@ const DEFAULT_SPAWN_CONTEXT_PREFERENCES: SpawnContextPreferences = {
   spawnAgentKey: 'builtin:cursor',
   spawnModel: '',
   spawnReasoning: '',
-  spawnAgentPermissionMode: 'full-access',
+  spawnAgentPermissionMode: 'execute',
   spawnApprovalPolicy: 'ask',
   repoBranchSource: 'host',
   repoCreateRemoteBranch: '',
@@ -87,6 +87,7 @@ type DroneHubUiState = {
   pinnedSidebarCollapsed: boolean;
   appView: AppView;
   collapsedGroups: Record<string, boolean>;
+  collapsedDroneSections: Record<string, boolean>;
   sidebarGroupOrder: string[];
   sidebarRepoScopedGroupByPath: Record<string, string>;
   sidebarDroneOrderByGroup: Record<string, string[]>;
@@ -96,7 +97,6 @@ type DroneHubUiState = {
   toDoDroneIds: string[];
   hiddenSidebarGroups: string[];
   showHiddenSidebarGroups: boolean;
-  autoDelete: boolean;
   terminalEmulator: string;
   homeOpen: boolean;
   selectedDrone: string | null;
@@ -151,6 +151,7 @@ type DroneHubUiState = {
   setPinnedSidebarCollapsed: (next: Updater<boolean>) => void;
   setAppView: (next: Updater<AppView>) => void;
   setCollapsedGroups: (next: Updater<Record<string, boolean>>) => void;
+  setCollapsedDroneSections: (next: Updater<Record<string, boolean>>) => void;
   setSidebarGroupOrder: (next: Updater<string[]>) => void;
   setSidebarRepoScopedGroupByPath: (next: Updater<Record<string, string>>) => void;
   setSidebarDroneOrderByGroup: (next: Updater<Record<string, string[]>>) => void;
@@ -160,7 +161,6 @@ type DroneHubUiState = {
   setToDoDroneIds: (next: Updater<string[]>) => void;
   setHiddenSidebarGroups: (next: Updater<string[]>) => void;
   setShowHiddenSidebarGroups: (next: Updater<boolean>) => void;
-  setAutoDelete: (next: Updater<boolean>) => void;
   setTerminalEmulator: (next: Updater<string>) => void;
   setHomeOpen: (next: Updater<boolean>) => void;
   setSelectedDrone: (next: Updater<string | null>) => void;
@@ -219,11 +219,11 @@ function normalizeRepoBranchSourceMode(value: unknown): RepoBranchSourceMode {
 }
 
 function normalizeSpawnAgentPermissionMode(value: unknown): AgentPermissionMode {
-  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+  return value === 'read' || value === 'write' ? value : 'execute';
 }
 
 function normalizeSpawnApprovalPolicy(value: unknown): AgentApprovalPolicy {
-  return value === 'agent-decides' || value === 'never' ? value : 'ask';
+  return value === 'auto' || value === 'none' ? value : 'ask';
 }
 
 function normalizeSpawnContextRepoPath(value: unknown): string {
@@ -271,6 +271,19 @@ export function resolveSpawnContextPreferencesForRepo(
   return map[repoKey] ?? map[NO_REPO_SPAWN_CONTEXT_KEY] ?? DEFAULT_SPAWN_CONTEXT_PREFERENCES;
 }
 
+export function hasSpawnContextPreferencesForRepo(
+  byRepoKey: Record<string, SpawnContextPreferences> | null | undefined,
+  repoPathRaw: unknown,
+): boolean {
+  const map = byRepoKey ?? {};
+  const repoKey = spawnContextRepoKeyForPath(repoPathRaw);
+  return (
+    Object.prototype.hasOwnProperty.call(map, repoKey) ||
+    (repoKey !== NO_REPO_SPAWN_CONTEXT_KEY &&
+      Object.prototype.hasOwnProperty.call(map, NO_REPO_SPAWN_CONTEXT_KEY))
+  );
+}
+
 function buildUpdatedSpawnContextByRepoKey(
   prev: Record<string, SpawnContextPreferences>,
   repoPathRaw: unknown,
@@ -313,6 +326,7 @@ type DroneHubUiPersistedState = Pick<
   | 'pinnedSidebarCollapsed'
   | 'appView'
   | 'collapsedGroups'
+  | 'collapsedDroneSections'
   | 'sidebarGroupOrder'
   | 'sidebarRepoScopedGroupByPath'
   | 'sidebarDroneOrderByGroup'
@@ -321,7 +335,6 @@ type DroneHubUiPersistedState = Pick<
   | 'pinnedDroneIds'
   | 'toDoDroneIds'
   | 'hiddenSidebarGroups'
-  | 'autoDelete'
   | 'terminalEmulator'
   | 'selectedDrone'
   | 'selectedDroneIds'
@@ -481,6 +494,7 @@ export function migrateDroneHubUiPersistedState(
   delete (migrated as any).playbookRunsSelectionInitialized;
   delete (migrated as any).playbookRunsSelectedPlaybookId;
   delete (migrated as any).playbookRunsSelectedRepoPath;
+  delete (migrated as any).autoDelete;
   if (Object.prototype.hasOwnProperty.call(migrated, 'sidebarDockSide')) {
     migrated.sidebarDockSide = normalizeSidebarDockSide(migrated.sidebarDockSide);
   }
@@ -865,6 +879,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       pinnedSidebarCollapsed: false,
       appView: 'workspace',
       collapsedGroups: {},
+      collapsedDroneSections: {},
       sidebarGroupOrder: [],
       sidebarRepoScopedGroupByPath: {},
       sidebarDroneOrderByGroup: {},
@@ -874,7 +889,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       toDoDroneIds: [],
       hiddenSidebarGroups: [],
       showHiddenSidebarGroups: false,
-      autoDelete: false,
       terminalEmulator: 'auto',
       homeOpen: false,
       selectedDrone: null,
@@ -960,6 +974,12 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setAppView: (next) => set((s) => ({ appView: resolveNext(s.appView, next) })),
       setCollapsedGroups: (next) =>
         set((s) => ({ collapsedGroups: resolveNext(s.collapsedGroups, next) })),
+      setCollapsedDroneSections: (next) =>
+        set((s) => ({
+          collapsedDroneSections: normalizeCollapsedGroups(
+            resolveNext(s.collapsedDroneSections, next),
+          ),
+        })),
       setSidebarGroupOrder: (next) =>
         set((s) => {
           const value = normalizeSidebarGroupOrder(resolveNext(s.sidebarGroupOrder, next));
@@ -1013,7 +1033,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         }),
       setShowHiddenSidebarGroups: (next) =>
         set((s) => ({ showHiddenSidebarGroups: resolveNext(s.showHiddenSidebarGroups, next) })),
-      setAutoDelete: (next) => set((s) => ({ autoDelete: resolveNext(s.autoDelete, next) })),
       setTerminalEmulator: (next) =>
         set((s) => ({ terminalEmulator: resolveNext(s.terminalEmulator, next) })),
       setHomeOpen: (next) => set((s) => ({ homeOpen: resolveNext(s.homeOpen, next) })),
@@ -1315,7 +1334,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: profileStorageKey('droneHub.ui'),
-      version: 17,
+      version: 18,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState, version) =>
         migrateDroneHubUiPersistedState(persistedState, version),
@@ -1334,6 +1353,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         pinnedSidebarCollapsed: state.pinnedSidebarCollapsed,
         appView: state.appView,
         collapsedGroups: state.collapsedGroups,
+        collapsedDroneSections: state.collapsedDroneSections,
         sidebarGroupOrder: state.sidebarGroupOrder,
         sidebarRepoScopedGroupByPath: state.sidebarRepoScopedGroupByPath,
         sidebarDroneOrderByGroup: state.sidebarDroneOrderByGroup,
@@ -1341,7 +1361,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         sidebarChatOrderByDrone: state.sidebarChatOrderByDrone,
         pinnedDroneIds: state.pinnedDroneIds,
         hiddenSidebarGroups: state.hiddenSidebarGroups,
-        autoDelete: state.autoDelete,
         terminalEmulator: state.terminalEmulator,
         selectedDrone: state.selectedDrone,
         selectedDroneIds: state.selectedDroneIds,
@@ -1413,6 +1432,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           ),
           collapsedGroups: normalizeCollapsedGroups(
             persisted.collapsedGroups ?? currentState.collapsedGroups,
+          ),
+          collapsedDroneSections: normalizeCollapsedGroups(
+            persisted.collapsedDroneSections ?? currentState.collapsedDroneSections,
           ),
           sidebarGroupOrder: normalizeSidebarGroupOrder(
             persisted.sidebarGroupOrder ?? currentState.sidebarGroupOrder,
@@ -1496,7 +1518,6 @@ export function useDroneHubAppModelUiState() {
       pinnedDroneIds: s.pinnedDroneIds,
       hiddenSidebarGroups: s.hiddenSidebarGroups,
       showHiddenSidebarGroups: s.showHiddenSidebarGroups,
-      autoDelete: s.autoDelete,
       terminalEmulator: s.terminalEmulator,
       homeOpen: s.homeOpen,
       selectedDrone: s.selectedDrone,
@@ -1614,7 +1635,6 @@ export function useDroneSidebarUiState() {
       pinnedDroneIds: s.pinnedDroneIds,
       hiddenSidebarGroups: s.hiddenSidebarGroups,
       showHiddenSidebarGroups: s.showHiddenSidebarGroups,
-      autoDelete: s.autoDelete,
       setSettingsActiveTab: s.setSettingsActiveTab,
       setAppView: s.setAppView,
       setSidebarReposCollapsed: s.setSidebarReposCollapsed,
@@ -1640,7 +1660,6 @@ export function useDroneSidebarUiState() {
       setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
       setDraftChat: s.setDraftChat,
       setActiveRepoPath: s.setActiveRepoPath,
-      setAutoDelete: s.setAutoDelete,
       setHomeOpen: s.setHomeOpen,
       setSidebarCollapsed: s.setSidebarCollapsed,
     })),

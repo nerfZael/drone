@@ -8,6 +8,7 @@ import {
   type TextFileViewMode,
 } from '../code-languages';
 import { formatBytes } from '../app/selected-drone-workspace-utils';
+import { copyText } from '../app/clipboard';
 import { requestJson } from '../http';
 import { resolveMarkdownPreviewLinkTarget } from './markdown-preview-link-utils';
 import type { DroneFsTextChunkPayload } from '../types';
@@ -34,6 +35,7 @@ import {
 import { IsolatedHtmlPreview } from './IsolatedHtmlPreview';
 import { configureMonacoTypeScriptDiagnostics } from './editor-monaco-configuration';
 import { AppShortcutBoundary } from '../app/AppShortcutBoundary';
+import { IconCopy } from '../icons';
 import {
   defineDroneHubMonacoThemes,
   MonacoEditor,
@@ -279,6 +281,8 @@ export function OpenedDroneFilePanel({
   );
   const [markdownOutlineExpansionCommand, setMarkdownOutlineExpansionCommand] =
     React.useState<MarkdownOutlineExpansionCommand | null>(null);
+  const [previewContentsCopied, setPreviewContentsCopied] = React.useState(false);
+  const previewCopyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorRef = React.useRef<MonacoEditorInstance | null>(null);
   const languageActionsRef = React.useRef<{
     goToDefinition: () => void;
@@ -313,6 +317,17 @@ export function OpenedDroneFilePanel({
     setOpenedTextMode(defaultTextFileViewModeForFile(activeFilePath, fileMime));
     setMarkdownOutlineExpansionCommand(null);
   }, [activeFilePath, fileMime, fileNavigationSeq, openedEditorIsText]);
+
+  React.useEffect(() => {
+    setPreviewContentsCopied(false);
+    if (previewCopyTimerRef.current != null) {
+      clearTimeout(previewCopyTimerRef.current);
+      previewCopyTimerRef.current = null;
+    }
+    return () => {
+      if (previewCopyTimerRef.current != null) clearTimeout(previewCopyTimerRef.current);
+    };
+  }, [activeFilePath, fileContent]);
 
   React.useEffect(() => {
     if ((fileKind ?? 'text') !== 'image' || !activeFilePath) {
@@ -498,6 +513,17 @@ export function OpenedDroneFilePanel({
     [activeFilePath, onOpenResolvedFile],
   );
 
+  const copyPreviewContents = React.useCallback(async () => {
+    const didCopy = await copyText(fileContent ?? '');
+    if (!didCopy) return;
+    setPreviewContentsCopied(true);
+    if (previewCopyTimerRef.current != null) clearTimeout(previewCopyTimerRef.current);
+    previewCopyTimerRef.current = setTimeout(() => {
+      setPreviewContentsCopied(false);
+      previewCopyTimerRef.current = null;
+    }, 1200);
+  }, [fileContent]);
+
   const languageCommandsDisabled =
     !openedFileEditorVisible ||
     Boolean(fileLoading) ||
@@ -608,6 +634,30 @@ export function OpenedDroneFilePanel({
           trailingActions={
             openedFileIsMarkdown || openedFileIsHtml ? (
               <div className="flex items-center gap-1.5">
+                {openedFileShowsPreview ? (
+                  <div className="relative">
+                    {previewContentsCopied ? (
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        className="pointer-events-none absolute right-0 top-full z-20 mt-1 whitespace-nowrap rounded border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-[var(--text-9)] uppercase tracking-wide text-[var(--fg-secondary)] shadow-[0_6px_14px_var(--shadow-color)]"
+                        style={{ fontFamily: 'var(--display)' }}
+                      >
+                        Copied
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void copyPreviewContents()}
+                      disabled={Boolean(fileLoading)}
+                      className={headingActionClassName(Boolean(fileLoading))}
+                      title={previewContentsCopied ? 'Copied file contents' : 'Copy file contents'}
+                      aria-label="Copy file contents"
+                    >
+                      <IconCopy className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : null}
                 {openedFileShowsMarkdownPreview ? (
                   <div
                     className="flex h-6 items-center gap-0.5 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] p-0.5"

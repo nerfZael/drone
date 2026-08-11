@@ -18,13 +18,13 @@ export type WorkflowFeatureDependencies = DroneWorkflowRunnerGatewayDependencies
 export async function registerWorkflowFeature(
   router: HubRouter,
   dependencies: WorkflowFeatureDependencies,
-): Promise<void> {
+): Promise<(() => Promise<void>) | null> {
   const database = getHubDatabase();
   // Bun cannot currently load better-sqlite3. Keep the Hub's Bun-based API
   // tests usable, matching the compatibility behavior of other SQLite-backed
   // Hub features. Production runs on Node and still fails fast if SQLite is
   // unavailable.
-  if (!database && (globalThis as { Bun?: unknown }).Bun) return;
+  if (!database && (globalThis as { Bun?: unknown }).Bun) return null;
 
   const workflowRunnerGateway = createDroneWorkflowRunnerGateway(dependencies);
   const workflowService = new WorkflowService(
@@ -40,4 +40,5 @@ export async function registerWorkflowFeature(
     writeSseEvent: dependencies.writeSseEvent,
     nowIso: dependencies.nowIso,
   });
+  return async () => await workflowService.stop();
 }

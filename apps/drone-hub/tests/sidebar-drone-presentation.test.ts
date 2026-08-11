@@ -372,6 +372,9 @@ describe('desktop sidebar drone presentation', () => {
     expect(cardSource).toContain(
       'setActionMenuPosition({ x: event.clientX, y: event.clientY });',
     );
+    expect(cardSource).toContain(
+      "actionMenuPosition ? 'dh-sidebar-row-context-target' : ''",
+    );
     expect(cardSource).toContain("label: 'Delete drone'");
     expect(cardSource).toContain("tone: 'danger'");
     expect(cardSource).not.toContain('<IconMore');

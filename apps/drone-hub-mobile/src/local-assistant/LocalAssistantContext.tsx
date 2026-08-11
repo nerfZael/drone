@@ -49,8 +49,8 @@ export type LocalAssistantContextValue = {
       thinkingLevel?: LocalAssistantThinkingLevel;
       workspaceTargets?: LocalWorkspaceTarget[];
       autoApprove?: boolean;
-      agentPermissionMode?: 'read-only' | 'workspace-write' | 'full-access';
-      approvalPolicy?: 'ask' | 'never';
+      agentPermissionMode?: 'read' | 'write' | 'execute';
+      approvalPolicy?: 'ask' | 'none';
       artifactWorkspace?: boolean;
     },
   ): Promise<void>;
@@ -198,7 +198,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         error: null,
         workspaceTargets: [],
         autoApprove: false,
-        agentPermissionMode: 'full-access',
+        agentPermissionMode: 'execute',
         approvalPolicy: 'ask',
         messages: [],
         queuedPrompts: [],
@@ -282,8 +282,8 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         thinkingLevel?: LocalAssistantThinkingLevel;
         workspaceTargets?: LocalWorkspaceTarget[];
         autoApprove?: boolean;
-        agentPermissionMode?: 'read-only' | 'workspace-write' | 'full-access';
-        approvalPolicy?: 'ask' | 'never';
+        agentPermissionMode?: 'read' | 'write' | 'execute';
+        approvalPolicy?: 'ask' | 'none';
         artifactWorkspace?: boolean;
       },
     ) => {
@@ -300,7 +300,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         ...(patch.autoApprove !== undefined
           ? {
               autoApprove: patch.autoApprove === true,
-              approvalPolicy: patch.autoApprove === true ? 'never' : 'ask',
+              approvalPolicy: patch.autoApprove === true ? 'none' : 'ask',
             }
           : {}),
         ...(patch.agentPermissionMode !== undefined
@@ -309,7 +309,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         ...(patch.approvalPolicy !== undefined
           ? {
               approvalPolicy: patch.approvalPolicy,
-              autoApprove: patch.approvalPolicy === 'never',
+              autoApprove: patch.approvalPolicy === 'none',
             }
           : {}),
         ...(patch.artifactWorkspace !== undefined
@@ -317,7 +317,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
           : {}),
         updatedAt: new Date().toISOString(),
       });
-      if (patch.autoApprove === true || patch.approvalPolicy === 'never') {
+      if (patch.autoApprove === true || patch.approvalPolicy === 'none') {
         // Resolve from the authoritative map rather than the rendered approval list. Header
         // actions can retain an older callback while an approval is being added, and using the
         // state snapshot here would leave that already-pending tool call blocked indefinitely.

@@ -380,7 +380,7 @@ function useLocalDroneControlValue() {
             ...(payload.seedAgentPermissionMode
               ? { agentPermissionMode: payload.seedAgentPermissionMode }
               : {}),
-            ...(payload.seedApprovalPolicy === 'never' ? { approvalPolicy: 'never' as const } : {}),
+            ...(payload.seedApprovalPolicy === 'none' ? { approvalPolicy: 'none' as const } : {}),
           });
         }
         const drone: LocalDroneRecord = {
@@ -708,8 +708,8 @@ function useLocalDroneControlValue() {
           provider: settings.provider,
           model: thread.model,
           reasoning: thread.thinkingLevel,
-          agentPermissionMode: thread.agentPermissionMode ?? 'full-access',
-          approvalPolicy: thread.approvalPolicy ?? (thread.autoApprove ? 'never' : 'ask'),
+          agentPermissionMode: thread.agentPermissionMode ?? 'execute',
+          approvalPolicy: thread.approvalPolicy ?? (thread.autoApprove ? 'none' : 'ask'),
           subscriptions: [],
           readState: { unread: false },
         };
@@ -791,7 +791,7 @@ function useLocalDroneControlValue() {
           ...(payload.agentPermissionMode
             ? { agentPermissionMode: payload.agentPermissionMode }
             : {}),
-          ...(payload.approvalPolicy === 'never' || payload.approvalPolicy === 'ask'
+          ...(payload.approvalPolicy === 'none' || payload.approvalPolicy === 'ask'
             ? { approvalPolicy: payload.approvalPolicy }
             : {}),
         });

@@ -5,5 +5,5 @@ export type ChatAgentConfig =
   | { kind: 'builtin'; id: BuiltinAgentId }
   | { kind: 'custom'; id: string; label: string; command: string };
 
-export type AgentPermissionMode = 'read-only' | 'workspace-write' | 'full-access';
-export type AgentApprovalPolicy = 'ask' | 'agent-decides' | 'never';
+export type AgentPermissionMode = 'read' | 'write' | 'execute';
+export type AgentApprovalPolicy = 'ask' | 'auto' | 'none';

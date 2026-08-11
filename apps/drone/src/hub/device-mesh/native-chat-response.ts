@@ -48,10 +48,10 @@ function compactThread(thread: any) {
     model: String(thread.model ?? ''),
     thinkingLevel: String(thread.thinkingLevel ?? ''),
     agentPermissionMode:
-      thread.agentPermissionMode === 'read-only' || thread.agentPermissionMode === 'workspace-write'
+      thread.agentPermissionMode === 'read' || thread.agentPermissionMode === 'write'
         ? thread.agentPermissionMode
-        : 'full-access',
-    approvalPolicy: thread.approvalPolicy === 'never' ? 'never' : 'ask',
+        : 'execute',
+    approvalPolicy: thread.approvalPolicy === 'none' ? 'none' : 'ask',
     autoApprove: thread.autoApprove === true,
     promptDeliveryMode: thread.promptDeliveryMode === 'asap' ? 'asap' : 'queue',
     queuedPrompts,

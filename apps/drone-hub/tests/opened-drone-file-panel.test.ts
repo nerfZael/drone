@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { DroneOpenedFileState } from '../src/droneHub/files/opened-file-types';
@@ -102,6 +103,14 @@ describe('OpenedDroneFilePanel', () => {
     expect(monacoImportCount).toBe(1);
   });
 
+  test('keeps Monaco pointer tooltips from blocking narrow editor controls', () => {
+    const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+    const pointerTooltipRule =
+      /\.workbench-hover-container:has\(> \.workbench-hover-pointer\)[^{]*\{([^}]*)\}/.exec(styles)?.[1];
+
+    expect(pointerTooltipRule).toContain('pointer-events: none');
+  });
+
   test('uses the tab strip as the only file header', () => {
     const html = renderPanel(makeFile({ dirty: true }), true);
 
@@ -128,6 +137,7 @@ describe('OpenedDroneFilePanel', () => {
     );
 
     expect(html).toContain('aria-label="Open files"');
+    expect(html).toContain('aria-label="Copy file contents"');
     expect(html).toContain('aria-label="Heading expansion"');
     expect(html).toContain('aria-label="Collapse all Markdown headings"');
     expect(html).toContain('aria-label="Expand all Markdown headings"');
@@ -160,8 +170,15 @@ describe('OpenedDroneFilePanel', () => {
     expect(html).toContain('Content-Security-Policy');
     expect(html).toContain('connect-src');
     expect(html).toContain('window.previewRan');
+    expect(html).toContain('aria-label="Copy file contents"');
     expect(html).toContain('>Edit</button>');
     expect(html).not.toContain('Plain text editor');
+  });
+
+  test('does not show the copy action while a text file is in edit mode', () => {
+    const html = renderPanel(makeFile({ path: '/work/repo/src/index.ts', name: 'index.ts' }), true);
+
+    expect(html).not.toContain('aria-label="Copy file contents"');
   });
 
   test('renders oversized text files in the large-file viewer', () => {

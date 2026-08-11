@@ -137,18 +137,19 @@ export type VoiceInputSettings = {
 export type UiPreferencesSettings = {
   sidebarGroupingMode: SidebarGroupingMode;
   sidebarDensityMode: 'compact' | 'default' | 'comfortable';
+  collapsedGroups: Record<string, boolean>;
+  collapsedDroneSections: Record<string, boolean>;
   sidebarGroupOrder: string[];
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
   sidebarChatOrderByDrone: Record<string, string[]>;
   pinnedDroneIds: string[];
   hiddenSidebarGroups: string[];
-  autoDelete: boolean;
   spawnAgentKey: string;
   spawnModel: string;
   spawnReasoning: string;
-  spawnAgentPermissionMode: 'read-only' | 'workspace-write' | 'full-access';
-  spawnApprovalPolicy: 'ask' | 'agent-decides' | 'never';
+  spawnAgentPermissionMode: 'read' | 'write' | 'execute';
+  spawnApprovalPolicy: 'ask' | 'auto' | 'none';
   repoBranchSource: 'host' | 'remote';
   repoCreateRemoteBranch: string;
   spawnContextByRepoKey: Record<string, UiSpawnContextPreferences>;
@@ -369,11 +370,11 @@ function normalizeUiPreferenceText(value: unknown, maxChars: number): string {
 }
 
 function parseSpawnAgentPermissionMode(value: unknown): UiPreferencesSettings['spawnAgentPermissionMode'] {
-  return value === 'read-only' || value === 'workspace-write' ? value : 'full-access';
+  return value === 'read' || value === 'write' ? value : 'execute';
 }
 
 function parseSpawnApprovalPolicy(value: unknown): UiPreferencesSettings['spawnApprovalPolicy'] {
-  return value === 'agent-decides' || value === 'never' ? value : 'ask';
+  return value === 'auto' || value === 'none' ? value : 'ask';
 }
 
 function sanitizeUiSpawnContextPreferences(value: unknown): UiSpawnContextPreferences {
@@ -400,18 +401,30 @@ function sanitizeUiSpawnContextByRepoKey(value: unknown): Record<string, UiSpawn
   return out;
 }
 
+function normalizeBooleanRecord(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out: Record<string, boolean> = {};
+  for (const [keyRaw, itemRaw] of Object.entries(value as Record<string, unknown>)) {
+    const key = String(keyRaw ?? '').trim();
+    if (!key) continue;
+    out[key] = itemRaw === true;
+  }
+  return out;
+}
+
 function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
   return {
     sidebarGroupingMode: parseSidebarGroupingMode(raw.sidebarGroupingMode) ?? DEFAULT_SIDEBAR_GROUPING_MODE,
     sidebarDensityMode: parseSidebarDensityMode(raw.sidebarDensityMode) ?? DEFAULT_SIDEBAR_DENSITY_MODE,
+    collapsedGroups: normalizeBooleanRecord(raw.collapsedGroups),
+    collapsedDroneSections: normalizeBooleanRecord(raw.collapsedDroneSections),
     sidebarGroupOrder: normalizeOrderedStringList(raw.sidebarGroupOrder),
     sidebarDroneOrderByGroup: normalizeOrderedStringMap(raw.sidebarDroneOrderByGroup),
     sidebarNodeOrderByParent: normalizeOrderedStringMap(raw.sidebarNodeOrderByParent),
     sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
     pinnedDroneIds: normalizeOrderedStringList(raw.pinnedDroneIds),
     hiddenSidebarGroups: normalizeOrderedStringList(raw.hiddenSidebarGroups),
-    autoDelete: raw.autoDelete === true,
     spawnAgentKey: normalizeUiPreferenceText(raw.spawnAgentKey, 200) || DEFAULT_SPAWN_AGENT_KEY,
     spawnModel: normalizeUiPreferenceText(raw.spawnModel, 200),
     spawnReasoning: normalizeUiPreferenceText(raw.spawnReasoning, 200),

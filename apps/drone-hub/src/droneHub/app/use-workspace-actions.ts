@@ -37,7 +37,6 @@ export type RepoTransferActionResult = {
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 type UseWorkspaceActionsArgs = {
-  autoDelete: boolean;
   currentDrone: DroneSummary | null;
   drones: DroneSummary[];
   selectedChat: string;
@@ -162,7 +161,6 @@ function formatPeerRepoTransferSuccessMessage(data: any): { title: string; messa
 }
 
 export function useWorkspaceActions({
-  autoDelete,
   currentDrone,
   drones,
   selectedChat,
@@ -180,8 +178,6 @@ export function useWorkspaceActions({
   const [repoOpError, setRepoOpError] = React.useState<string | null>(null);
   const [repoOpErrorMeta, setRepoOpErrorMeta] = React.useState<RepoOpErrorMeta | null>(null);
   const [dirtyDroneApplyModal, setDirtyDroneApplyModal] = React.useState<DirtyDroneApplyModalState | null>(null);
-  const shouldConfirmDelete = React.useCallback((): boolean => !autoDelete, [autoDelete]);
-
   const githubUrlForRepo = React.useCallback((repo: RepoSummary): string | null => {
     if (repo.github && repo.github.owner && repo.github.repo) {
       return `https://github.com/${repo.github.owner}/${repo.github.repo}`;
@@ -216,10 +212,8 @@ export function useWorkspaceActions({
     async (repoPath: string) => {
       const path = String(repoPath ?? '').trim();
       if (!path) return;
-      if (shouldConfirmDelete()) {
-        const ok = window.confirm(`Remove repo "${path}" from the registry?`);
-        if (!ok) return;
-      }
+      const ok = window.confirm(`Remove repo "${path}" from the registry?`);
+      if (!ok) return;
       setDeletingRepos((prev) => ({ ...prev, [path]: true }));
       try {
         await requestJson(`/api/repos?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
@@ -235,7 +229,7 @@ export function useWorkspaceActions({
         });
       }
     },
-    [activeRepoPath, requestJson, setActiveRepoPath, shouldConfirmDelete],
+    [activeRepoPath, requestJson, setActiveRepoPath],
   );
 
   const openDroneTerminal = React.useCallback(

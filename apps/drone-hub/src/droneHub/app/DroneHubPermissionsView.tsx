@@ -512,10 +512,10 @@ export function DroneHubPermissionsView({
             Creating drones and chats
           </div>
           <div className="mt-1 text-[var(--text-11)] leading-5 text-[var(--muted)]">
-            Creating a drone makes it a child of this chat&apos;s drone and automatically grants
-            this chat read, write, and execute access. Cloning also requires Read access to the
-            source drone. Managed chats cannot create child drones, clone drones, or create new
-            chats when their owner runs directly on the host.
+            Creating or cloning a drone makes it independent by default and automatically grants
+            this chat read, write, and execute access. A parent can be chosen explicitly and must
+            be in Read scope. Cloning also requires Read access to the source drone. Managed chats
+            cannot create new chats in a drone that runs directly on the host.
           </div>
         </div>
 

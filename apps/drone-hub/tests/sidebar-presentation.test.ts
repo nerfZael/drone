@@ -260,12 +260,16 @@ describe('sidebar presentation', () => {
     expect(groupedTreeSource).toContain('data-sidebar-folder-node={node.id}');
     expect(groupedTreeSource).toContain('data-sidebar-guide-selected={selectedDirectChild');
     expect(groupedTreeSource).toContain('selectedDirectChild={hasSelectedDirectChild}');
+    expect(groupedTreeSource).toContain(
+      'className={`${densityClasses.folderBody} dh-sidebar-folder-body [--sidebar-selection-edge-offset:-1px]',
+    );
     expect(groupedTreeSource).toContain('selectedSidebarNodeId === childId');
     expect(stylesSource).toContain('[data-sidebar-folder-node]:hover > .dh-sidebar-folder-body');
     expect(stylesSource).toContain(".dh-sidebar-folder-body[data-sidebar-guide-selected='true']");
     expect(stylesSource).toContain('[data-sidebar-drone-unit]:hover > .dh-sidebar-drone-chat-body');
     expect(stylesSource).toContain(".dh-sidebar-drone-chat-body[data-sidebar-guide-selected='true']");
     expect(stylesSource).toContain('border-left-color: transparent;');
+    expect(stylesSource).toContain('.dh-sidebar-selection-edge {\n  z-index: 1;');
   });
 
   test('distinguishes the selected chat from an open chat without an extra marker', () => {
@@ -285,6 +289,13 @@ describe('sidebar presentation', () => {
     expect(groupedTreeSource).not.toContain(
       'title={`${uiDroneName(drone.name)} / ${chatName}`}',
     );
+  });
+
+  test('uses a thin temporary outline for sidebar context-menu targets', () => {
+    const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+
+    expect(stylesSource).toContain('.dh-sidebar-row-context-target {');
+    expect(stylesSource).toContain('box-shadow: inset 0 0 0 1px var(--border);');
   });
 
   test('uses the same full-bleed navigation states for repository rows', () => {

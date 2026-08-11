@@ -47,17 +47,39 @@ type ResponseHandle = {
   release: () => void;
 };
 
+type RequestOptions = {
+  body?: BodyInit;
+  contentType?: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+};
+
 async function openResponse(
   client: DroneClient,
   method: string,
   pathname: string,
-  options?: { body?: BodyInit; contentType?: string; timeoutMs?: number },
+  options?: RequestOptions,
 ): Promise<ResponseHandle> {
+  if (options?.signal?.aborted) {
+    throw options.signal.reason instanceof Error
+      ? options.signal.reason
+      : new Error('request aborted');
+  }
   const url = new URL(pathname, client.baseUrl).toString();
   const timeoutMs = options?.timeoutMs ?? resolveTimeoutMs();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   timeout.unref?.();
+  const abortFromCaller = () => controller.abort(options?.signal?.reason);
+  options?.signal?.addEventListener('abort', abortFromCaller, { once: true });
+  const release = () => {
+    clearTimeout(timeout);
+    options?.signal?.removeEventListener('abort', abortFromCaller);
+  };
   try {
     const response = await fetch(url, {
       method,
@@ -81,10 +103,15 @@ async function openResponse(
         parsed?.error ?? text ?? `${method} ${pathname} failed`,
       );
     }
-    return { response, release: () => clearTimeout(timeout) };
+    return { response, release };
   } catch (err: any) {
-    clearTimeout(timeout);
-    if (err?.name === 'AbortError') {
+    release();
+    if (options?.signal?.aborted) {
+      throw options.signal.reason instanceof Error
+        ? options.signal.reason
+        : new Error('request aborted');
+    }
+    if (timedOut || err?.name === 'AbortError') {
       throw new Error(`request timeout after ${timeoutMs}ms: ${method} ${pathname}`);
     }
     throw err;
@@ -95,13 +122,18 @@ async function consumeResponse<T>(
   client: DroneClient,
   method: string,
   pathname: string,
-  options: { body?: BodyInit; contentType?: string; timeoutMs?: number } | undefined,
+  options: RequestOptions | undefined,
   consume: (response: Response) => Promise<T>,
 ): Promise<T> {
   const handle = await openResponse(client, method, pathname, options);
   try {
     return await consume(handle.response);
   } catch (error: any) {
+    if (options?.signal?.aborted) {
+      throw options.signal.reason instanceof Error
+        ? options.signal.reason
+        : new Error('request aborted');
+    }
     if (error?.name === 'AbortError') {
       const timeoutMs = options?.timeoutMs ?? resolveTimeoutMs();
       throw new Error(`request timeout after ${timeoutMs}ms: ${method} ${pathname}`);
@@ -117,6 +149,7 @@ async function req(
   method: string,
   pathname: string,
   body?: any,
+  options?: { signal?: AbortSignal },
 ): Promise<any> {
   return await consumeResponse(
     client,
@@ -125,6 +158,7 @@ async function req(
     {
       ...(body == null ? {} : { body: JSON.stringify(body) }),
       contentType: 'application/json',
+      signal: options?.signal,
     },
     async (response) => {
       const text = await response.text();
@@ -300,7 +334,10 @@ export async function health(client: DroneClient) {
   return await req(client, 'GET', '/v1/health');
 }
 
-export async function status(client: DroneClient, options?: { timeoutMs?: number }) {
+export async function status(
+  client: DroneClient,
+  options?: { timeoutMs?: number; signal?: AbortSignal },
+) {
   return await consumeResponse(
     client,
     'GET',
@@ -346,9 +383,10 @@ export async function promptEnqueue(
     env?: Record<string, string>;
     prompt?: string;
     deliveryMode?: 'queue' | 'asap';
-  }
+  },
+  options?: { signal?: AbortSignal },
 ) {
-  return await req(client, 'POST', '/v1/prompts/enqueue', payload);
+  return await req(client, 'POST', '/v1/prompts/enqueue', payload, options);
 }
 
 export async function codexPromptEnqueue(
@@ -367,8 +405,9 @@ export async function codexPromptEnqueue(
     model?: string;
     effort?: string;
   },
+  options?: { signal?: AbortSignal },
 ) {
-  return await req(client, 'POST', '/v1/codex/enqueue', payload);
+  return await req(client, 'POST', '/v1/codex/enqueue', payload, options);
 }
 
 export async function promptGet(client: DroneClient, id: string) {
