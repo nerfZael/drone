@@ -1593,7 +1593,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
       approvalPolicy: z
         .enum(['ask', 'auto', 'none'])
         .describe(
-          'Approval behavior for Codex: "ask" sends approval-gated requests to the user, "auto" has Codex review them automatically, and "none" never asks. Existing pending approvals are not resolved by changing this setting.',
+          'Approval behavior for Codex: "ask" sends approval-gated requests to the user, "auto" has Codex review them automatically, and "none" never asks.',
         )
         .optional(),
       cwd: z.string().optional(),

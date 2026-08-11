@@ -9,6 +9,7 @@ import type { ChatImageAttachment, ChatImageAttachmentRef } from './chat-attachm
 import type { AgentPermissionMode, BuiltinAgentId, ChatAgentConfig } from './chat-types';
 import { ChatReconciliationQueue } from './chat-reconciliation-queue';
 import { createChatReconciliationExecutor } from './chat-reconciliation-executor';
+import { pendingCodexApprovalsForNeverAsk } from './codex-never-ask';
 import { createSendInNewChatActionRuntime } from './chat-queue-action-runtime';
 import { DaemonPromptEventMonitor } from './daemon-prompt-event-monitor';
 import { DroneDaemonRecovery } from './drone-daemon-recovery';
@@ -1025,6 +1026,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       return { exists: true, client: daemon?.client ?? null };
     },
     onTerminalPrompt: enqueueReconcileForDaemonPromptEvent,
+    onApprovalPending: enqueueReconcileForDaemonPromptEvent,
     sleep: sleepMs,
   });
 
@@ -1431,6 +1433,72 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     }
     enqueueReconcile(droneId, normalizeChatName(opts.chatName));
     return result;
+  }
+
+  async function resolvePendingCodexApprovalsForNeverAsk(opts: {
+    droneId: string;
+    chatName: string;
+  }): Promise<{ attempted: number; resolved: number }> {
+    const chatName = normalizeChatName(opts.chatName);
+    let droneId = normalizeDroneIdentity(opts.droneId);
+    let refs: ReturnType<typeof pendingCodexApprovalsForNeverAsk> = [];
+    try {
+      const current = await getChatEntry({ droneId: opts.droneId, chatName });
+      droneId = current.droneId;
+      refs = pendingCodexApprovalsForNeverAsk({
+        agent: inferChatAgent(current.chat, current.d),
+        approvalPolicy: normalizeAgentApprovalPolicy(current.chat?.approvalPolicy),
+        pendingPrompts: await readPendingPrompts({ droneId, chatName }),
+      });
+    } catch (error: any) {
+      hubLog('warn', 'failed reading pending Codex approvals for never-ask chat', {
+        droneId,
+        chatName,
+        error: compactDiagnosticError(error),
+      });
+      return { attempted: 0, resolved: 0 };
+    }
+    let attempted = 0;
+    let resolved = 0;
+    for (const ref of refs) {
+      try {
+        // A user can switch back to Ask while a batch is being released. Re-read
+        // the durable policy before every decision so the newer setting wins.
+        // eslint-disable-next-line no-await-in-loop
+        const latest = await getChatEntry({ droneId, chatName });
+        const latestAgent = inferChatAgent(latest.chat, latest.d);
+        if (
+          normalizeAgentApprovalPolicy(latest.chat?.approvalPolicy) !== 'none' ||
+          latestAgent.kind !== 'builtin' ||
+          latestAgent.id !== 'codex'
+        ) {
+          break;
+        }
+        // Resolve once here. DroneHub remains the source of the persistent policy and
+        // repeats this for any later approval emitted by the already-running turn.
+        // eslint-disable-next-line no-await-in-loop
+        attempted += 1;
+        await resolveCodexPromptApproval({
+          droneId,
+          chatName,
+          promptId: ref.promptId,
+          approvalId: ref.approvalId,
+          decision: ref.decision,
+        });
+        resolved += 1;
+      } catch (error: any) {
+        const message = String(error?.message ?? error ?? '');
+        if (/unknown Codex approval|no longer active/i.test(message)) continue;
+        hubLog('warn', 'failed auto-approving Codex request for never-ask chat', {
+          droneId,
+          chatName,
+          promptId: ref.promptId,
+          approvalId: ref.approvalId,
+          error: compactDiagnosticError(error),
+        });
+      }
+    }
+    return { attempted, resolved };
   }
 
   type DroneChatStopReason = 'archive' | 'delete' | 'stop' | 'restart';
@@ -2498,6 +2566,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     recoverStalePromptJobSession,
     resolveCanonicalDroneOrPendingForReadRef,
     resolveCodexTurnRuntime,
+    resolvePendingCodexApprovalsForNeverAsk,
     resolveHostPort,
     resolveTranscriptPromptAt,
     sameAgentPlan,
@@ -3099,6 +3168,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     readPendingStartupPrompts,
     resetPromptRuntimeStateForTests,
     resolveCodexPromptApproval,
+    resolvePendingCodexApprovalsForNeverAsk,
     resumePendingPromptChats,
     runDroneLifecycleAction,
     stopAllDroneChatActivity,

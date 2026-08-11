@@ -943,6 +943,27 @@ describeSocketSuite('chat management api', () => {
     expect(chatInfo.data?.agentPermissionMode).toBe('write');
     expect(chatInfo.data?.approvalPolicy).toBe('auto');
 
+    const codexNeverAsk = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ approvalPolicy: 'none' }),
+      },
+    );
+    expect(codexNeverAsk.r.status).toBe(200);
+    expect(codexNeverAsk.data?.approvalPolicy).toBe('none');
+
+    const codexAutoAgain = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ approvalPolicy: 'auto' }),
+      },
+    );
+    expect(codexAutoAgain.r.status).toBe(200);
+
     const native = await apiFetch(
       `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
       {

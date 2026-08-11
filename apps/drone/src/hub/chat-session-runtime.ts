@@ -116,6 +116,7 @@ export type ChatSessionRuntimeDependencies = {
   resolveDroneOrPendingForReadRef: any;
   resolveHubAgentCommand: any;
   resolveNameSuggestionLlmSettings: any;
+  resolvePendingCodexApprovalsForNeverAsk: any;
   runHostCommand: any;
   sanitizeTmuxSessionName: any;
   stableResponseFingerprint: any;
@@ -184,6 +185,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     resolveDroneOrPendingForReadRef,
     resolveHubAgentCommand,
     resolveNameSuggestionLlmSettings,
+    resolvePendingCodexApprovalsForNeverAsk,
     runHostCommand,
     sanitizeTmuxSessionName,
     stableResponseFingerprint,
@@ -1570,6 +1572,22 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       },
     });
     await projectCanonicalChatToRegistry(droneId, opts.chatName);
+    const updatedChat = readChatFromStore({ droneId, chatName: opts.chatName }).chat;
+    const updatedAgent = inferChatAgent(updatedChat, d);
+    if (
+      opts.setApprovalPolicy &&
+      opts.approvalPolicy === 'none' &&
+      updatedChat?.approvalPolicy === 'none' &&
+      updatedAgent.kind === 'builtin' &&
+      updatedAgent.id === 'codex'
+    ) {
+      // The next turn will launch Codex with approvalPolicy=never. Also release
+      // approvals from the current turn, which was launched with its old policy.
+      await resolvePendingCodexApprovalsForNeverAsk({ droneId, chatName: opts.chatName });
+      // Catch an approval that exists in the daemon but has not reached the Hub's
+      // pending projection yet. Reconciliation applies the same never-ask rule.
+      enqueueReconcile(droneId, opts.chatName);
+    }
   }
 
   async function resolveChatTmuxCommand(opts: {

@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 
 import { KeyedWorkQueue } from '../src/background/keyed-work-queue';
 import { ManagedLoop } from '../src/background/managed-loop';
-import { DaemonPromptEventMonitor } from '../src/hub/daemon-prompt-event-monitor';
+import {
+  DaemonPromptEventMonitor,
+  daemonPromptEventWakeKind,
+} from '../src/hub/daemon-prompt-event-monitor';
 import { ChatStateMaintenanceScheduler } from '../src/hub/chat-state-maintenance';
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -146,6 +149,18 @@ describe('KeyedWorkQueue', () => {
 });
 
 describe('DaemonPromptEventMonitor', () => {
+  test('wakes reconciliation for pending approvals in a running prompt', () => {
+    expect(
+      daemonPromptEventWakeKind({
+        id: 'prompt-1',
+        state: 'running',
+        pendingApprovalCount: 1,
+      }),
+    ).toBe('approval-pending');
+    expect(daemonPromptEventWakeKind({ id: 'prompt-1', state: 'running' })).toBeNull();
+    expect(daemonPromptEventWakeKind({ id: 'prompt-1', state: 'done' })).toBe('terminal');
+  });
+
   test('aborts retry waits and settles monitor tasks on close', async () => {
     const sleepStarted = deferred();
     let sleepAborted = false;

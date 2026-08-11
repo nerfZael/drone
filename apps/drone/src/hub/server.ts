@@ -2953,6 +2953,8 @@ function createHubRuntimeGraph(
     resolveDroneOrPendingForReadRef,
     resolveHubAgentCommand,
     resolveNameSuggestionLlmSettings,
+    resolvePendingCodexApprovalsForNeverAsk: (...args: any[]) =>
+      promptRuntime.resolvePendingCodexApprovalsForNeverAsk(...args),
     runHostCommand,
     sanitizeTmuxSessionName,
     stableResponseFingerprint,

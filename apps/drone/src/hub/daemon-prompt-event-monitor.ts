@@ -2,9 +2,15 @@ import type { DroneClient } from '../host/api';
 
 const IDLE_TIMEOUT_MS = 70_000;
 
+export function daemonPromptEventWakeKind(job: any): 'terminal' | 'approval-pending' | null {
+  const state = String(job?.state ?? '').trim();
+  if (state === 'done' || state === 'failed' || state === 'canceled') return 'terminal';
+  return Number(job?.pendingApprovalCount ?? 0) > 0 ? 'approval-pending' : null;
+}
+
 export class DaemonPromptEventMonitor {
   private readonly monitors = new Map<string, { abort: AbortController; task: Promise<void> }>();
-  private readonly terminalTasks = new Set<Promise<void>>();
+  private readonly wakeTasks = new Set<Promise<void>>();
   private stopped = false;
 
   constructor(
@@ -12,6 +18,7 @@ export class DaemonPromptEventMonitor {
       normalizeDroneId: (value: string) => string;
       resolveClient: (droneId: string) => Promise<{ exists: boolean; client: DroneClient | null }>;
       onTerminalPrompt: (droneId: string, promptId: string) => Promise<void>;
+      onApprovalPending?: (droneId: string, promptId: string) => Promise<void>;
       sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
     },
   ) {}
@@ -34,13 +41,19 @@ export class DaemonPromptEventMonitor {
           ? [data.job]
           : [];
     for (const job of jobs) {
-      const state = String(job?.state ?? '').trim();
-      if (state !== 'done' && state !== 'failed' && state !== 'canceled') continue;
       const promptId = String(job?.id ?? '').trim();
       if (!promptId) continue;
-      const task = this.deps.onTerminalPrompt(droneId, promptId).catch(() => {});
-      this.terminalTasks.add(task);
-      void task.finally(() => this.terminalTasks.delete(task));
+      const wakeKind = daemonPromptEventWakeKind(job);
+      const handler =
+        wakeKind === 'terminal'
+          ? this.deps.onTerminalPrompt
+          : wakeKind === 'approval-pending'
+            ? this.deps.onApprovalPending
+            : null;
+      if (!handler) continue;
+      const task = handler(droneId, promptId).catch(() => {});
+      this.wakeTasks.add(task);
+      void task.finally(() => this.wakeTasks.delete(task));
     }
   }
 
@@ -141,6 +154,6 @@ export class DaemonPromptEventMonitor {
     for (const monitor of monitors) monitor.abort.abort();
     this.monitors.clear();
     await Promise.allSettled(monitors.map((monitor) => monitor.task));
-    await Promise.allSettled(this.terminalTasks);
+    await Promise.allSettled(this.wakeTasks);
   }
 }

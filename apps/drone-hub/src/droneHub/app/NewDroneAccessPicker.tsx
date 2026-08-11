@@ -114,8 +114,11 @@ export function NewDroneAccessPicker({
     },
   ];
   const triggerLabel = `${newDroneAccessLabel(permissionMode)} · ${newDroneApprovalLabel(approvalPolicy)}`;
+  const neverAskAppliesImmediately = agentIsCodex && approvalPolicy === 'none';
   const visibleTriggerLabel = changesApplyNextTurn
-    ? `${triggerLabel} · Next turn`
+    ? neverAskAppliesImmediately
+      ? `${newDroneAccessLabel(permissionMode)} next turn · Never ask now`
+      : `${triggerLabel} · Next turn`
     : triggerLabel;
 
   return (
@@ -127,7 +130,7 @@ export function NewDroneAccessPicker({
         aria-label="Choose chat access and approvals"
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={`Chat access and approvals: ${triggerLabel}${changesApplyNextTurn ? '. Changes apply next turn.' : ''}`}
+        title={`Chat access and approvals: ${triggerLabel}${changesApplyNextTurn ? '. Access and approval changes normally apply next turn; Codex Never ask applies to approval requests immediately.' : ''}`}
         className="inline-flex h-8 max-w-[14rem] items-center gap-1 px-2 text-[.6875rem] font-medium normal-case tracking-normal text-[var(--chat-composer-model-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <span className="min-w-0 truncate">{visibleTriggerLabel}</span>
@@ -148,7 +151,8 @@ export function NewDroneAccessPicker({
 
           {changesApplyNextTurn ? (
             <div className="mx-2 mb-2 rounded-[.5rem] border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-2.5 py-2 text-[.6875rem] text-[var(--accent-muted)]">
-              Changes apply next turn.
+              Access and approval changes normally apply next turn. For Codex, switching to Never
+              ask also approves requests in the current turn.
             </div>
           ) : null}
 

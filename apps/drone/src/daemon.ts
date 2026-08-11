@@ -240,7 +240,7 @@ async function savePromptIndex(promptsDir: string, idx: PromptIndex): Promise<vo
   await writeJsonFileAtomic(path.join(promptsDir, 'queue.json'), idx);
 }
 
-function promptJobEventSummary(job: PromptJob) {
+function promptJobEventSummary(job: PromptJob, pendingApprovalCount = 0) {
   return {
     id: job.id,
     kind: job.kind,
@@ -252,6 +252,7 @@ function promptJobEventSummary(job: PromptJob) {
     ...(typeof job.exitCode === 'number' ? { exitCode: job.exitCode } : {}),
     ...(job.diagnostics ? { diagnostics: job.diagnostics } : {}),
     ...(job.error ? { error: job.error } : {}),
+    ...(pendingApprovalCount > 0 ? { pendingApprovalCount } : {}),
   };
 }
 
@@ -259,10 +260,25 @@ async function buildPromptJobEventSnapshot(promptsDir: string): Promise<Map<stri
   const idx = await loadPromptIndex(promptsDir);
   const order = Array.isArray(idx.order) ? idx.order.map(String).filter(Boolean) : [];
   const next = new Map<string, string>();
+  const pendingApprovalCountByRunId = new Map<string, number>();
   for (const id of order) {
     const job = await loadPromptJob(promptsDir, id);
     if (!job) continue;
-    next.set(id, JSON.stringify(promptJobEventSummary(job)));
+    const runId = job.state === 'running' ? String(job.codexAppServer?.runId ?? '').trim() : '';
+    let pendingApprovalCount = 0;
+    if (runId) {
+      const cached = pendingApprovalCountByRunId.get(runId);
+      if (cached !== undefined) {
+        pendingApprovalCount = cached;
+      } else {
+        const run = await loadCodexPromptRun(promptsDir, runId);
+        pendingApprovalCount = Array.isArray(run?.pendingApprovals)
+          ? run.pendingApprovals.length
+          : 0;
+        pendingApprovalCountByRunId.set(runId, pendingApprovalCount);
+      }
+    }
+    next.set(id, JSON.stringify(promptJobEventSummary(job, pendingApprovalCount)));
   }
   return next;
 }
