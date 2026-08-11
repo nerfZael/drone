@@ -313,9 +313,7 @@ import { createResourceSubscriptionDeliveryAuthorizer } from './subscriptions/cr
 import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 import { ResourceSubscriptionService } from './subscriptions/resource-subscription-service';
 import { getChangeRequestRepository } from './change-requests/change-request-repository';
-import { ChangeRequestService } from './change-requests/change-request-service';
-import { ChangeRequestGithubMirrorService } from './change-requests/change-request-github-mirror-service';
-import { ChangeRequestOperationLock } from './change-requests/change-request-operation-lock';
+import { createChangeRequestFeature } from './change-requests/create-change-request-feature';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
 import {
   isWorkflowChildDroneEntry,
@@ -5348,19 +5346,8 @@ export async function startDroneHubApiServer(opts: {
   const changeRequestRepository = resourceSubscriptionDatabase
     ? getChangeRequestRepository()
     : null;
-  const changeRequestOperationLock = new ChangeRequestOperationLock();
-  const changeRequestGithubMirrorService = changeRequestRepository
-    ? new ChangeRequestGithubMirrorService({
-        repository: changeRequestRepository,
-        runHostCommand,
-        deleteHostRefBestEffort,
-        now: nowIso,
-        operationLock: changeRequestOperationLock,
-        onGithubChanged: clearGithubPullRequestListCache,
-      })
-    : null;
-  const changeRequestService = changeRequestRepository
-    ? new ChangeRequestService({
+  const changeRequestFeature = changeRequestRepository
+    ? createChangeRequestFeature({
         repository: changeRequestRepository,
         resolveDrone: resolveDroneOrPendingForReadRef,
         withLockedDroneContainer,
@@ -5368,18 +5355,19 @@ export async function startDroneHubApiServer(opts: {
         importBundleHeadToHostRef,
         createHostAuthoredMirrorCommit,
         updateHostRef,
-        deleteHostRefBestEffort,
         gitTopLevel,
         droneRepoBaseSha,
         dvmRepoHeadSha,
         runGitInDrone,
         runHostCommand,
+        deleteHostRefBestEffort,
         storagePath: droneRootPath,
         now: nowIso,
-        operationLock: changeRequestOperationLock,
-        githubMirrorLifecycle: changeRequestGithubMirrorService ?? undefined,
+        onGithubChanged: clearGithubPullRequestListCache,
       })
     : null;
+  const changeRequestService = changeRequestFeature?.service ?? null;
+  const changeRequestGithubMirrorService = changeRequestFeature?.githubMirrorService ?? null;
 
   const apiRouter = new HubRouter(json, readJsonBody);
 

@@ -12,6 +12,12 @@
       "require": "./dist/cjs/index.js",
       "default": "./src/index.ts"
     },
+    "./change-requests": {
+      "types": "./src/change-requests/index.ts",
+      "import": "./src/change-requests/index.ts",
+      "require": "./dist/cjs/change-requests/index.js",
+      "default": "./src/change-requests/index.ts"
+    },
     "./sidebar": {
       "types": "./src/sidebar/index.ts",
       "import": "./src/sidebar/index.ts",

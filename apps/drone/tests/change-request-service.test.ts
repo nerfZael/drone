@@ -15,6 +15,7 @@ import type { RunResult } from '../src/host/dvm';
 class MemoryChangeRequestRepository implements ChangeRequestRepository {
   private sequence = 0;
   private readonly records = new Map<string, ChangeRequestRecord>();
+  failNextUpdateMessage: string | null = null;
 
   async insert(input: Omit<ChangeRequestRecord, 'number'>): Promise<ChangeRequestRecord> {
     const record = { ...input, number: ++this.sequence };
@@ -32,6 +33,11 @@ class MemoryChangeRequestRepository implements ChangeRequestRepository {
   }
 
   async update(id: string, patch: ChangeRequestPatch): Promise<ChangeRequestRecord> {
+    if (this.failNextUpdateMessage) {
+      const message = this.failNextUpdateMessage;
+      this.failNextUpdateMessage = null;
+      throw new Error(message);
+    }
     const current = this.records.get(id);
     if (!current) throw new Error(`unknown change request: ${id}`);
     const updated = { ...current, ...patch };
@@ -157,6 +163,37 @@ describe('ChangeRequestService', () => {
         'feature.txt',
       ]);
 
+      await fs.writeFile(path.join(repoRoot, 'follow-up.txt'), 'second revision\n');
+      await git(repoRoot, ['add', 'follow-up.txt']);
+      await git(repoRoot, ['commit', '-m', 'second container-authored change']);
+      repository.failNextUpdateMessage = 'database unavailable';
+      await expect(service.update(created.id, {})).rejects.toThrow('database unavailable');
+      expect(repository.get(created.id)?.revision).toBe(1);
+      expect(
+        (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', created.snapshotRef!])).code,
+      ).toBe(0);
+      expect(
+        (
+          await run('git', [
+            '-C',
+            repoRoot,
+            'rev-parse',
+            '--verify',
+            `refs/drone/change-requests/${created.id}/snapshots/2`,
+          ])
+        ).code,
+      ).not.toBe(0);
+
+      const updated = await service.update(created.id, {});
+      expect(updated.snapshotRef).not.toBe(created.snapshotRef);
+      expect(updated.revision).toBe(2);
+      expect(
+        (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', created.snapshotRef!])).code,
+      ).not.toBe(0);
+      expect(
+        (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', updated.snapshotRef!])).code,
+      ).toBe(0);
+
       await run('git', ['clone', '-b', 'main', origin, upstreamRepo]);
       await git(upstreamRepo, ['config', 'user.name', 'Upstream User']);
       await git(upstreamRepo, ['config', 'user.email', 'upstream@example.test']);
@@ -176,7 +213,7 @@ describe('ChangeRequestService', () => {
       });
 
       expect(merged.status).toBe('merged');
-      expect(merged.snapshotSha).toBe(created.snapshotSha);
+      expect(merged.snapshotSha).toBe(updated.snapshotSha);
       expect(merged.mergeCommitSha).toMatch(/^[0-9a-f]{40}$/);
       expect(await git(repoRoot, ['branch', '--show-current'])).toBe(sourceBranchBeforeMerge);
       expect(await git(repoRoot, ['status', '--porcelain'])).toBe('');
@@ -189,9 +226,8 @@ describe('ChangeRequestService', () => {
       expect(await git(origin, ['show', '-s', '--format=%s', 'refs/heads/integration/42'])).toBe(
         'Custom squash message',
       );
-      const snapshotRef = `refs/drone/change-requests/${created.id}/snapshot`;
       expect(
-        (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', snapshotRef])).code,
+        (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', updated.snapshotRef!])).code,
       ).not.toBe(0);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
@@ -302,7 +338,7 @@ describe('ChangeRequestService', () => {
             repoRoot,
             'rev-parse',
             '--verify',
-            `refs/drone/change-requests/${created.id}/snapshot`,
+            created.snapshotRef!,
           ])
         ).code,
       ).not.toBe(0);

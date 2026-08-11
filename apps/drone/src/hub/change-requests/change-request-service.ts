@@ -3,6 +3,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type { RunResult } from '../../host/dvm';
+import {
+  ChangeRequestLifecycle,
+  normalizeChangeRequestActor,
+} from './change-request-lifecycle';
 import type { ChangeRequestRepository } from './change-request-repository';
 import { ChangeRequestOperationLock } from './change-request-operation-lock';
 import type {
@@ -71,6 +75,7 @@ export type ChangeRequestServiceDependencies = {
   storagePath: (...segments: string[]) => string;
   now: () => string;
   operationLock?: ChangeRequestOperationLock;
+  lifecycle?: ChangeRequestLifecycle;
   githubMirrorLifecycle?: {
     syncAfterNativeUpdate: (record: ChangeRequestRecord) => Promise<void>;
     closeAfterNativeCompletion: (record: ChangeRequestRecord) => Promise<void>;
@@ -152,8 +157,8 @@ function safeRefSegment(value: string): string {
   );
 }
 
-function snapshotRef(id: string): string {
-  return `refs/drone/change-requests/${safeRefSegment(id)}/snapshot`;
+function snapshotRef(id: string, revision: number): string {
+  return `refs/drone/change-requests/${safeRefSegment(id)}/snapshots/${revision}`;
 }
 
 function temporaryImportRef(id: string): string {
@@ -176,19 +181,19 @@ function conflictFiles(text: string): string[] {
   return [...files].sort((left, right) => left.localeCompare(right));
 }
 
-function actor(value: ChangeRequestActor): ChangeRequestActor {
-  return {
-    kind: value.kind === 'chat' || value.kind === 'system' ? value.kind : 'user',
-    id: typeof value.id === 'string' && value.id.trim() ? value.id.trim() : null,
-    label: String(value.label ?? '').trim() || 'Unknown actor',
-  };
-}
-
 export class ChangeRequestService {
   private readonly operationLock: ChangeRequestOperationLock;
+  private readonly lifecycle: ChangeRequestLifecycle;
 
   constructor(private readonly deps: ChangeRequestServiceDependencies) {
     this.operationLock = deps.operationLock ?? new ChangeRequestOperationLock();
+    this.lifecycle =
+      deps.lifecycle ??
+      new ChangeRequestLifecycle({
+        repository: deps.repository,
+        deleteHostRefBestEffort: deps.deleteHostRefBestEffort,
+        now: deps.now,
+      });
   }
 
   async create(input: ChangeRequestCreateInput): Promise<ChangeRequestView> {
@@ -200,7 +205,7 @@ export class ChangeRequestService {
       source.repoRoot,
       input.destinationBranch || source.baseBranch,
     );
-    const snapshot = await this.captureSnapshot(id, source);
+    const snapshot = await this.captureSnapshot(id, 1, source);
     const now = this.deps.now();
     let created: ChangeRequestRecord;
     try {
@@ -221,7 +226,7 @@ export class ChangeRequestService {
         revision: 1,
         title,
         description,
-        createdBy: actor(input.actor),
+        createdBy: normalizeChangeRequestActor(input.actor),
         mergedBy: null,
         mergeCommitSha: null,
         lastError: null,
@@ -277,7 +282,7 @@ export class ChangeRequestService {
       let snapshotPatch: Partial<ChangeRequestRecord> = {};
       if (input.refreshSnapshot !== false) {
         const source = await this.captureSnapshotSource(current.droneId, current.chatName, current);
-        const snapshot = await this.captureSnapshot(id, source);
+        const snapshot = await this.captureSnapshot(id, current.revision + 1, source);
         snapshotPatch = {
           snapshotRef: snapshot.snapshotRef,
           snapshotSha: snapshot.snapshotSha,
@@ -300,14 +305,23 @@ export class ChangeRequestService {
           updatedAt: this.deps.now(),
         });
       } catch (error) {
-        if (snapshotPatch.snapshotSha && current.snapshotRef && current.snapshotSha) {
-          await this.deps.updateHostRef({
+        if (snapshotPatch.snapshotRef) {
+          await this.deps.deleteHostRefBestEffort({
             repoRoot: current.repoRoot,
-            refName: current.snapshotRef,
-            target: current.snapshotSha,
+            refName: snapshotPatch.snapshotRef,
           });
         }
         throw error;
+      }
+      if (
+        snapshotPatch.snapshotRef &&
+        current.snapshotRef &&
+        current.snapshotRef !== snapshotPatch.snapshotRef
+      ) {
+        await this.deps.deleteHostRefBestEffort({
+          repoRoot: current.repoRoot,
+          refName: current.snapshotRef,
+        });
       }
       await this.deps.githubMirrorLifecycle?.syncAfterNativeUpdate(updated);
       updated = this.requiredRecord(id);
@@ -319,20 +333,7 @@ export class ChangeRequestService {
     const id = String(idRaw ?? '').trim();
     return await this.withLock(id, async () => {
       const current = this.requiredOpenRecord(id);
-      const now = this.deps.now();
-      const closed = await this.deps.repository.update(id, {
-        status: 'closed',
-        snapshotRef: null,
-        lastError: null,
-        updatedAt: now,
-        closedAt: now,
-      });
-      if (current.snapshotRef) {
-        await this.deps.deleteHostRefBestEffort({
-          repoRoot: current.repoRoot,
-          refName: current.snapshotRef,
-        });
-      }
+      const closed = await this.lifecycle.completeClose(current);
       await this.deps.githubMirrorLifecycle?.closeAfterNativeCompletion(closed);
       return await this.view(this.requiredRecord(id));
     });
@@ -357,19 +358,9 @@ export class ChangeRequestService {
           current,
           String(input.commitMessage ?? '').trim() || current.title,
         );
-        const now = this.deps.now();
-        const merged = await this.deps.repository.update(id, {
-          status: 'merged',
-          snapshotRef: null,
-          mergedBy: actor(input.actor),
+        const merged = await this.lifecycle.completeMerge(current, {
+          actor: input.actor,
           mergeCommitSha,
-          lastError: null,
-          updatedAt: now,
-          mergedAt: now,
-        });
-        await this.deps.deleteHostRefBestEffort({
-          repoRoot: current.repoRoot,
-          refName: current.snapshotRef,
         });
         await this.deps.githubMirrorLifecycle?.closeAfterNativeCompletion(merged);
         return await this.view(this.requiredRecord(id));
@@ -640,8 +631,12 @@ export class ChangeRequestService {
     );
   }
 
-  private async captureSnapshot(id: string, source: SnapshotSource): Promise<SnapshotResult> {
-    const permanentRef = snapshotRef(id);
+  private async captureSnapshot(
+    id: string,
+    revision: number,
+    source: SnapshotSource,
+  ): Promise<SnapshotResult> {
+    const permanentRef = snapshotRef(id, revision);
     const importRef = temporaryImportRef(id);
     const runtime = String(source.drone?.runtime ?? 'container')
       .trim()
@@ -731,14 +726,7 @@ export class ChangeRequestService {
   }
 
   private async view(record: ChangeRequestRecord): Promise<ChangeRequestView> {
-    const githubMirror = record.githubMirror
-      ? {
-          ...record.githubMirror,
-          outOfDate:
-            record.githubMirror.syncedRevision !== record.revision ||
-            record.githubMirror.syncedNativeUpdatedAt !== record.updatedAt,
-        }
-      : null;
+    const githubMirror = this.githubMirrorView(record);
     if (record.status !== 'open' || !record.snapshotRef || !record.snapshotSha) {
       return {
         ...record,
@@ -802,6 +790,19 @@ export class ChangeRequestService {
       destinationSha,
       conflictFiles: mergeTree.code === 0 ? [] : conflictFiles(combined),
     };
+  }
+
+  private githubMirrorView(
+    record: ChangeRequestRecord,
+  ): ChangeRequestView['githubMirror'] {
+    return record.githubMirror
+      ? {
+          ...record.githubMirror,
+          outOfDate:
+            record.githubMirror.syncedRevision !== record.revision ||
+            record.githubMirror.syncedNativeUpdatedAt !== record.updatedAt,
+        }
+      : null;
   }
 
   private async directSquashMerge(

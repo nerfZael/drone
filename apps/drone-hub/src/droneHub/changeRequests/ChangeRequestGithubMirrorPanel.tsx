@@ -1,23 +1,9 @@
 import React from 'react';
+import type { ChangeRequestGithubMirrorView } from '@drone/hub-model/change-requests';
+
+import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 
 export type GithubMirrorMergeMethod = 'merge' | 'squash' | 'rebase';
-
-export type ChangeRequestGithubMirrorView = {
-  owner: string;
-  repo: string;
-  pullNumber: number;
-  htmlUrl: string;
-  headBranch: string;
-  headSha: string;
-  baseBranch: string;
-  state: 'open' | 'closed' | 'merged';
-  autoUpdate: boolean;
-  branchOwnedByDroneHub: boolean;
-  syncedRevision: number;
-  mergeCommitSha: string | null;
-  lastError: string | null;
-  outOfDate: boolean;
-};
 
 export function ChangeRequestGithubMirrorPanel({
   requestId,
@@ -43,6 +29,7 @@ export function ChangeRequestGithubMirrorPanel({
     body?: Record<string, unknown>,
   ) => Promise<unknown>;
 }) {
+  const confirm = useAppConfirmDialog();
   const basePath = `/api/change-requests/${encodeURIComponent(requestId)}/github`;
   const isOpen = nativeStatus === 'open';
 
@@ -88,11 +75,13 @@ export function ChangeRequestGithubMirrorPanel({
             <button
               type="button"
               disabled={disabled}
-              onClick={() => {
+              onClick={async () => {
                 if (
-                  window.confirm(
-                    `Open a GitHub pull request and immediately try to ${mergeMethod}-merge it?`,
-                  )
+                  await confirm({
+                    title: 'Open and merge GitHub pull request?',
+                    message: `Open a GitHub pull request and immediately try to ${mergeMethod}-merge it?`,
+                    confirmLabel: 'Open and merge',
+                  })
                 ) {
                   void mutate('github-publish-merge', `${basePath}/publish`, 'POST', {
                     merge: true,
@@ -187,11 +176,13 @@ export function ChangeRequestGithubMirrorPanel({
                 <button
                   type="button"
                   disabled={disabled}
-                  onClick={() => {
+                  onClick={async () => {
                     if (
-                      window.confirm(
-                        `${mergeMethod === 'squash' ? 'Squash-merge' : mergeMethod === 'rebase' ? 'Rebase-merge' : 'Merge'} GitHub PR #${mirror.pullNumber}?`,
-                      )
+                      await confirm({
+                        title: 'Merge GitHub pull request?',
+                        message: `${mergeMethod === 'squash' ? 'Squash-merge' : mergeMethod === 'rebase' ? 'Rebase-merge' : 'Merge'} GitHub PR #${mirror.pullNumber}?`,
+                        confirmLabel: 'Merge pull request',
+                      })
                     ) {
                       void mutate('github-merge', `${basePath}/merge`, 'POST', {
                         method: mergeMethod,
@@ -208,8 +199,15 @@ export function ChangeRequestGithubMirrorPanel({
               <button
                 type="button"
                 disabled={disabled}
-                onClick={() => {
-                  if (window.confirm(`Close GitHub PR #${mirror.pullNumber} without merging it?`)) {
+                onClick={async () => {
+                  if (
+                    await confirm({
+                      title: 'Close GitHub pull request?',
+                      message: `Close GitHub PR #${mirror.pullNumber} without merging it?`,
+                      confirmLabel: 'Close pull request',
+                      destructive: true,
+                    })
+                  ) {
                     void mutate('github-close', `${basePath}/close`, 'POST');
                   }
                 }}
