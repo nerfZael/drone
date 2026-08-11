@@ -92,6 +92,13 @@ export function WorkspaceToolIcon({
           <path d="M6 7v10M13 5h2a3 3 0 0 1 3 3v9M13 2l-3 3 3 3" />
         </ActivityIcon>
       );
+    case 'requests':
+      return (
+        <ActivityIcon tab={tab} className={className}>
+          <path d="M6 3h9l3 3v15H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+          <path d="M15 3v4h4M8 11h6M8 15h8" />
+        </ActivityIcon>
+      );
     case 'canvas':
       return (
         <ActivityIcon tab={tab} className={className}>

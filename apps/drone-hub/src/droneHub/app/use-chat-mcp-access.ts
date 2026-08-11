@@ -24,6 +24,8 @@ function defaultAccessScope(droneId: string): NativeChatAccessScope {
     readMode: 'all',
     writeMode: 'selected',
     executeMode: 'selected',
+    changeRequestCreate: true,
+    changeRequestMerge: false,
     droneIds: droneId ? [droneId] : [],
     updatedAt: '',
   };
@@ -250,6 +252,15 @@ export function useChatMcpAccess(droneIdRaw: string, chatNameRaw: string, enable
     [updateAccessScope],
   );
 
+  const setChangeRequestPermission = React.useCallback(
+    (kind: 'create' | 'merge', allowed: boolean) =>
+      updateAccessScope({
+        ...optimisticAccessScopeRef.current,
+        [kind === 'create' ? 'changeRequestCreate' : 'changeRequestMerge']: allowed,
+      }),
+    [updateAccessScope],
+  );
+
   const currentState =
     enabled && state.identity === identity
       ? { ...state, loading: state.loading || !state.loaded }
@@ -260,5 +271,6 @@ export function useChatMcpAccess(droneIdRaw: string, chatNameRaw: string, enable
     updateAccessScope,
     addSelectedDrones,
     removeSelectedDrone,
+    setChangeRequestPermission,
   };
 }

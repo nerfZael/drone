@@ -109,6 +109,8 @@ describe('Drone Hub MCP principal authorization', () => {
       readMode: 'all',
       writeMode: 'selected',
       executeMode: 'selected',
+      changeRequestCreate: true,
+      changeRequestMerge: false,
       droneIds: ['drone-a'],
     });
     expect(
@@ -122,6 +124,39 @@ describe('Drone Hub MCP principal authorization', () => {
         'drone-a',
       ).droneIds,
     ).toEqual([]);
+  });
+
+  test('keeps change-request creation and merge as separate chat permissions', () => {
+    const principal = {
+      kind: 'chat' as const,
+      tokenId: 'chat:drone-a:default',
+      name: 'Drone A / default',
+      droneId: 'drone-a',
+      chatName: 'default',
+      chatId: 'chat-a',
+      accessScope: normalizeMcpChatAccessScope({}, 'drone-a'),
+      selectedDroneRefs: ['drone-a'],
+    };
+    expect(() => authorizeDroneHubMcpTool(
+      { principal },
+      'create_change_request',
+      {},
+    )).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(
+      { principal },
+      'merge_change_request',
+      { requestId: 'cr-1' },
+    )).toThrow('not allowed to merge change requests');
+    expect(() => authorizeDroneHubMcpTool(
+      {
+        principal: {
+          ...principal,
+          accessScope: { ...principal.accessScope, changeRequestMerge: true },
+        },
+      },
+      'merge_change_request',
+      { requestId: 'cr-1' },
+    )).not.toThrow();
   });
 
   test('enforces assistant read and write scopes for host principals', () => {

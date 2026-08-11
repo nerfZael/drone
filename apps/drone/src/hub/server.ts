@@ -285,6 +285,7 @@ import { createTerminalWebSocketServer } from './terminal-websocket-server';
 import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgrade';
 import { registerAssistantRoutes } from './routes/assistant-routes';
 import { registerAgentRunDiffRoutes } from './routes/agent-run-diff-routes';
+import { registerChangeRequestRoutes } from './routes/change-request-routes';
 import { NativeChatLifecycle } from './assistant/native-chat-lifecycle';
 import { buildNativeModelCatalog } from './assistant/native-model-catalog';
 import { registerNativeChatRoutes } from './routes/native-chat-routes';
@@ -311,6 +312,8 @@ import { LocalCheckoutService } from './local-checkout-service';
 import { createResourceSubscriptionDeliveryAuthorizer } from './subscriptions/create-resource-subscription-delivery-authorizer';
 import { ResourceSubscriptionRepository } from './subscriptions/resource-subscription-repository';
 import { ResourceSubscriptionService } from './subscriptions/resource-subscription-service';
+import { getChangeRequestRepository } from './change-requests/change-request-repository';
+import { ChangeRequestService } from './change-requests/change-request-service';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
 import {
   isWorkflowChildDroneEntry,
@@ -5340,6 +5343,26 @@ export async function startDroneHubApiServer(opts: {
     };
   }
 
+  const changeRequestService = resourceSubscriptionDatabase
+    ? new ChangeRequestService({
+        repository: getChangeRequestRepository(),
+        resolveDrone: resolveDroneOrPendingForReadRef,
+        withLockedDroneContainer,
+        exportFullHeadBundleFromDrone,
+        importBundleHeadToHostRef,
+        createHostAuthoredMirrorCommit,
+        updateHostRef,
+        deleteHostRefBestEffort,
+        gitTopLevel,
+        droneRepoBaseSha,
+        dvmRepoHeadSha,
+        runGitInDrone,
+        runHostCommand,
+        storagePath: droneRootPath,
+        now: nowIso,
+      })
+    : null;
+
   const apiRouter = new HubRouter(json, readJsonBody);
 
   registerSystemRoutes(apiRouter, {
@@ -5457,6 +5480,7 @@ export async function startDroneHubApiServer(opts: {
     updateStoredUserTimeZone,
   });
   registerAgentRunDiffRoutes(apiRouter);
+  registerChangeRequestRoutes(apiRouter, { service: changeRequestService });
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,
     nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),

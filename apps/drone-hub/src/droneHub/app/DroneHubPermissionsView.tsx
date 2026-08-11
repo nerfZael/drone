@@ -120,6 +120,53 @@ function AccessModeRow({
   );
 }
 
+function FeaturePermissionRow({
+  label,
+  description,
+  allowed,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  allowed: boolean;
+  disabled: boolean;
+  onChange: (allowed: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center gap-4 px-4 py-4">
+      <div className="min-w-0 flex-1">
+        <div className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]">
+          {label}
+        </div>
+        <div className="mt-1 text-[var(--text-11)] leading-5 text-[var(--muted)]">
+          {description}
+        </div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={allowed}
+        disabled={disabled}
+        onClick={() => onChange(!allowed)}
+        className={cn(
+          'relative h-6 w-11 flex-shrink-0 rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+          allowed
+            ? 'border-[var(--accent)] bg-[var(--accent)]'
+            : 'border-[var(--border)] bg-[var(--surface-inset)]',
+        )}
+      >
+        <span
+          className={cn(
+            'absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform',
+            allowed ? 'translate-x-5' : 'translate-x-0',
+          )}
+        />
+      </button>
+    </div>
+  );
+}
+
 export function DroneHubPermissionsView({
   chatLabel,
   available,
@@ -130,10 +177,13 @@ export function DroneHubPermissionsView({
   readMode,
   writeMode,
   executeMode,
+  changeRequestCreate,
+  changeRequestMerge,
   selectedDrones,
   dropActive,
   dropTargetRef,
   onModeChange,
+  onChangeRequestPermissionChange,
   onRemoveDrone,
   onBack,
 }: {
@@ -146,10 +196,13 @@ export function DroneHubPermissionsView({
   readMode: AccessMode;
   writeMode: AccessMode;
   executeMode: AccessMode;
+  changeRequestCreate: boolean;
+  changeRequestMerge: boolean;
   selectedDrones: SelectedDrone[];
   dropActive: boolean;
   dropTargetRef?: (node: HTMLDivElement | null) => void;
   onModeChange: (kind: AccessKind, mode: AccessMode) => void;
+  onChangeRequestPermissionChange: (kind: 'create' | 'merge', allowed: boolean) => void;
   onRemoveDrone: (droneId: string) => void;
   onBack: () => void;
 }) {
@@ -340,6 +393,28 @@ export function DroneHubPermissionsView({
                 />
               );
             })}
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <div className="mb-2 px-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]">
+            Change requests
+          </div>
+          <div className="divide-y divide-[var(--border-subtle)] overflow-hidden rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
+            <FeaturePermissionRow
+              label="Create and update change requests"
+              description="Lets this chat capture, refresh, retarget, and close its own native change requests. Enabled by default."
+              allowed={changeRequestCreate}
+              disabled={disabled}
+              onChange={(allowed) => onChangeRequestPermissionChange('create', allowed)}
+            />
+            <FeaturePermissionRow
+              label="Merge change requests"
+              description="Lets this chat directly squash-merge its own change requests using the host Git identity and credentials. Disabled by default."
+              allowed={changeRequestMerge}
+              disabled={disabled}
+              onChange={(allowed) => onChangeRequestPermissionChange('merge', allowed)}
+            />
           </div>
         </div>
 

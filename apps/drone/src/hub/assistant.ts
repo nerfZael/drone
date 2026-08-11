@@ -975,6 +975,8 @@ function makeAssistantAccessScope(input?: {
   readMode?: unknown;
   writeMode?: unknown;
   executeMode?: unknown;
+  changeRequestCreate?: unknown;
+  changeRequestMerge?: unknown;
   droneIds?: unknown;
   updatedAt?: unknown;
 }): AssistantAccessScope {
@@ -1004,6 +1006,8 @@ function makeAssistantAccessScope(input?: {
     readMode,
     writeMode,
     executeMode,
+    changeRequestCreate: input?.changeRequestCreate !== false,
+    changeRequestMerge: input?.changeRequestMerge === true,
     droneIds:
       readMode === 'selected' || writeMode === 'selected' || executeMode === 'selected'
         ? droneIds
@@ -1365,6 +1369,8 @@ export class HubAssistantService {
     readMode?: unknown;
     writeMode?: unknown;
     executeMode?: unknown;
+    changeRequestCreate?: unknown;
+    changeRequestMerge?: unknown;
     droneIds?: unknown;
     addDroneIds?: unknown;
   }): Promise<AssistantAccessScope> {
@@ -1373,27 +1379,27 @@ export class HubAssistantService {
     if (!threadId) throw new Error('native chat id is required');
     const thread = this.threads.find((item) => item.id === threadId);
     if (!thread) throw new Error(`unknown assistant thread: ${threadId}`);
-    const isAdditiveUpdate = Array.isArray(input.addDroneIds) && input.addDroneIds.length > 0;
     const requestedDroneIds = Array.isArray(input.droneIds)
       ? input.droneIds
-      : isAdditiveUpdate
-        ? thread.accessScope.droneIds
-        : [];
+      : thread.accessScope.droneIds;
     const addedDroneIds = Array.isArray(input.addDroneIds) ? input.addDroneIds : [];
     thread.accessScope = makeAssistantAccessScope({
       readMode:
         (input as any).readMode ??
         input.mode ??
-        (isAdditiveUpdate ? thread.accessScope.readMode : undefined),
+        thread.accessScope.readMode,
       writeMode:
         (input as any).writeMode ??
         input.mode ??
-        (isAdditiveUpdate ? thread.accessScope.writeMode : undefined),
+        thread.accessScope.writeMode,
       executeMode:
         (input as any).executeMode ??
         (input as any).writeMode ??
         input.mode ??
-        (isAdditiveUpdate ? thread.accessScope.executeMode : undefined),
+        thread.accessScope.executeMode,
+      changeRequestCreate:
+        input.changeRequestCreate ?? thread.accessScope.changeRequestCreate,
+      changeRequestMerge: input.changeRequestMerge ?? thread.accessScope.changeRequestMerge,
       droneIds: thread.ownerDroneId
         ? [thread.ownerDroneId, ...requestedDroneIds, ...addedDroneIds]
         : [...requestedDroneIds, ...addedDroneIds],

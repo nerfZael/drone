@@ -12,6 +12,10 @@ export type NativeChatAccessScope = {
   readMode: 'all' | 'selected';
   writeMode: 'all' | 'selected';
   executeMode: 'all' | 'selected';
+  /** Legacy scopes omit this; omission means enabled. */
+  changeRequestCreate?: boolean;
+  /** Legacy scopes omit this; omission means disabled. */
+  changeRequestMerge?: boolean;
   droneIds: string[];
   updatedAt: string;
 };

@@ -1270,6 +1270,44 @@ function chatPrincipal(
   return context.principal.kind === 'chat' ? context.principal : null;
 }
 
+function changeRequestActor(context: McpToolRegistrationContext) {
+  const principal = chatPrincipal(context);
+  if (principal) {
+    return {
+      kind: 'chat' as const,
+      id: principal.chatId,
+      label: `${principal.droneId}/${principal.chatName}`,
+    };
+  }
+  return {
+    kind: 'user' as const,
+    id: context.principal.tokenId,
+    label: context.principal.name,
+  };
+}
+
+async function ownedChangeRequest(
+  context: McpToolRegistrationContext,
+  requestIdRaw: unknown,
+): Promise<any> {
+  const requestId = cleanString(requestIdRaw);
+  if (!requestId) throw new Error('requestId is required');
+  const response = await requestJson(`/api/change-requests/${encodeURIComponent(requestId)}`, {
+    method: 'GET',
+  });
+  const request = response?.request;
+  if (!request) throw new Error(`unknown change request: ${requestId}`);
+  const principal = chatPrincipal(context);
+  if (
+    principal &&
+    (cleanString(request.droneId) !== principal.droneId ||
+      cleanString(request.chatName, 'default') !== principal.chatName)
+  ) {
+    throw new Error('This chat can only manage change requests that it created.');
+  }
+  return request;
+}
+
 function subscriptionSubscriber(context: McpToolRegistrationContext) {
   const principal = chatPrincipal(context);
   if (!principal) {
@@ -1520,6 +1558,97 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
   }, async () => {
     const repos = await requestRepoSummaries(context.hubServices);
     return toolResult({ ok: true, count: repos.length, repos });
+  });
+
+  server.registerTool('create_change_request', {
+    title: 'Create change request',
+    description: 'Capture the current committed changes as a native DroneHub change request. This does not create a GitHub pull request.',
+    inputSchema: {
+      drone: z.string().optional(),
+      chat: z.string().optional(),
+      title: z.string(),
+      description: z.string().optional(),
+      destinationBranch: z.string().optional(),
+    },
+  }, async (args) => {
+    const principal = chatPrincipal(context);
+    const droneRef = principal?.droneId ?? cleanString(args.drone);
+    if (!droneRef) throw new Error('drone is required');
+    const response = await requestJson('/api/change-requests', {
+      method: 'POST',
+      body: JSON.stringify({
+        droneRef,
+        chatName: principal?.chatName ?? chatName(args.chat),
+        chatId: principal?.chatId ?? null,
+        title: args.title,
+        description: args.description,
+        destinationBranch: args.destinationBranch,
+        actor: changeRequestActor(context),
+      }),
+    }, 120_000);
+    return toolResult(response);
+  });
+
+  server.registerTool('update_change_request', {
+    title: 'Update change request',
+    description: 'Refresh a native DroneHub change request from the latest committed source and optionally change its title, description, or destination branch.',
+    inputSchema: {
+      requestId: z.string(),
+      title: z.string().optional(),
+      description: z.string().optional(),
+      destinationBranch: z.string().optional(),
+      refreshSnapshot: z.boolean().optional(),
+    },
+  }, async (args) => {
+    await ownedChangeRequest(context, args.requestId);
+    const response = await requestJson(
+      `/api/change-requests/${encodeURIComponent(args.requestId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: args.title,
+          description: args.description,
+          destinationBranch: args.destinationBranch,
+          refreshSnapshot: args.refreshSnapshot,
+        }),
+      },
+      120_000,
+    );
+    return toolResult(response);
+  });
+
+  server.registerTool('close_change_request', {
+    title: 'Close change request',
+    description: 'Close a native DroneHub change request without merging it.',
+    inputSchema: { requestId: z.string() },
+  }, async (args) => {
+    await ownedChangeRequest(context, args.requestId);
+    return toolResult(await requestJson(
+      `/api/change-requests/${encodeURIComponent(args.requestId)}/close`,
+      { method: 'POST' },
+    ));
+  });
+
+  server.registerTool('merge_change_request', {
+    title: 'Merge change request',
+    description: 'Directly squash-merge a native DroneHub change request to its destination branch using the host Git identity and credentials.',
+    inputSchema: {
+      requestId: z.string(),
+      commitMessage: z.string().optional(),
+    },
+  }, async (args) => {
+    await ownedChangeRequest(context, args.requestId);
+    return toolResult(await requestJson(
+      `/api/change-requests/${encodeURIComponent(args.requestId)}/merge`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          commitMessage: args.commitMessage,
+          actor: changeRequestActor(context),
+        }),
+      },
+      120_000,
+    ));
   });
 
   server.registerTool('list_groups', {
@@ -2408,6 +2537,10 @@ const WRITE_SCOPED_TOOLS = new Set([
   'reorder_drones',
   'create_chat',
   'send_message',
+  'create_change_request',
+  'update_change_request',
+  'close_change_request',
+  'merge_change_request',
   ...WORKFLOW_WRITE_SCOPED_TOOL_NAMES,
 ]);
 
@@ -2422,6 +2555,7 @@ const CHAT_EXECUTE_SCOPED_TOOLS = new Set([
   'subscribe_to_any_chat_idle',
   'subscribe_to_all_chats_idle',
   'cancel_chat_idle_subscription',
+  'merge_change_request',
 ]);
 
 const CHAT_WRITE_SCOPED_TOOLS = new Set([
@@ -2431,6 +2565,9 @@ const CHAT_WRITE_SCOPED_TOOLS = new Set([
   'create_whiteboard',
   'update_whiteboard',
   'create_chat',
+  'create_change_request',
+  'update_change_request',
+  'close_change_request',
 ]);
 
 function chatAccessKindForTool(tool: string): McpChatAccessKind {
@@ -2486,6 +2623,17 @@ export function authorizeDroneHubMcpTool(context: DroneHubMcpServerContext, tool
   }
   if (principal.kind === 'legacy' || principal.kind === 'host') return;
   if (principal.kind === 'chat') {
+    if (
+      (tool === 'create_change_request' ||
+        tool === 'update_change_request' ||
+        tool === 'close_change_request') &&
+      principal.accessScope.changeRequestCreate === false
+    ) {
+      throw new Error(`MCP principal ${principal.name} is not allowed to manage change requests`);
+    }
+    if (tool === 'merge_change_request' && principal.accessScope.changeRequestMerge !== true) {
+      throw new Error(`MCP principal ${principal.name} is not allowed to merge change requests`);
+    }
     const refs = assertedDroneRefs(args);
     const kind = chatAccessKindForTool(tool);
     if (

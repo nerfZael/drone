@@ -2187,6 +2187,8 @@ export function SelectedDroneWorkspace({
                     readMode={chatMcpAccess.accessScope.readMode}
                     writeMode={chatMcpAccess.accessScope.writeMode}
                     executeMode={chatMcpAccess.accessScope.executeMode}
+                    changeRequestCreate={chatMcpAccess.accessScope.changeRequestCreate !== false}
+                    changeRequestMerge={chatMcpAccess.accessScope.changeRequestMerge === true}
                     selectedDrones={chatMcpAccess.accessScope.droneIds.map((droneId) => ({
                       id: droneId,
                       label: droneId === currentDrone.id ? currentDroneLabel : droneId,
@@ -2195,6 +2197,9 @@ export function SelectedDroneWorkspace({
                     dropActive={chatMcpAccessDropActive}
                     dropTargetRef={setChatMcpAccessDropNodeRef}
                     onModeChange={(kind, mode) => void chatMcpAccess.setMode(kind, mode)}
+                    onChangeRequestPermissionChange={(kind, allowed) =>
+                      void chatMcpAccess.setChangeRequestPermission(kind, allowed)
+                    }
                     onRemoveDrone={(droneId) => void chatMcpAccess.removeSelectedDrone(droneId)}
                     onBack={() => setDroneHubPermissionsOpen(false)}
                   />

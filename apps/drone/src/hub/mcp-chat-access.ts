@@ -37,6 +37,8 @@ export function normalizeMcpChatAccessScope(
     readMode,
     writeMode,
     executeMode,
+    changeRequestCreate: input.changeRequestCreate !== false,
+    changeRequestMerge: input.changeRequestMerge === true,
     droneIds: hasSelectedScope ? droneIds : [],
     updatedAt:
       typeof input.updatedAt === 'string' && input.updatedAt.trim()
