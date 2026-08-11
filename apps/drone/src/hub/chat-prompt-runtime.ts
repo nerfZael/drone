@@ -7,6 +7,7 @@ import { DroneApiRequestError } from '../host/api';
 import { commandForPid } from '../host/process-inspection';
 import type { ChatImageAttachment, ChatImageAttachmentRef } from './chat-attachments';
 import type { AgentPermissionMode, BuiltinAgentId, ChatAgentConfig } from './chat-types';
+import type { PromptSubmissionSource } from '../host/prompt-queue-repository';
 import { ChatReconciliationQueue } from './chat-reconciliation-queue';
 import { createChatReconciliationExecutor } from './chat-reconciliation-executor';
 import { pendingCodexApprovalsForNeverAsk } from './codex-never-ask';
@@ -175,6 +176,7 @@ export type EnqueuePromptOptions = {
   deliveryMode?: 'background' | 'immediate';
   priority?: 'queue' | 'asap';
   schedulePump?: boolean;
+  submissionSource?: PromptSubmissionSource;
   mark?: (name: string) => void;
 };
 
@@ -703,6 +705,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           deliveryMode: opts.deliveryMode,
           agentPermissionMode,
           approvalPolicy,
+          submissionSource: 'system',
         });
         throwIfBackgroundPromptAborted(opts.signal);
         return {
@@ -1178,7 +1181,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     readPendingPromptDispatchWindow,
     readPendingPrompts,
     readPendingStartupPrompts,
+    reconcileCompletedInterruption,
     releasePendingPromptClaim,
+    resolveInterruptedPendingPrompt,
     resumePendingPromptChats,
     retryPendingPrompt,
     transcriptTurnIdsFromEntry,
@@ -2061,6 +2066,19 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       if (!agent || (agent.kind !== 'builtin' && agent.kind !== 'native')) return;
 
       const entry: any = chat;
+      const turns: any[] = Array.isArray(entry?.turns) ? entry.turns : [];
+      const transcriptDoneIds = new Set(
+        turns.map((turn: any) => String(turn?.id ?? '').trim()).filter(Boolean),
+      );
+      if (
+        await reconcileCompletedInterruption({
+          droneId,
+          chatName,
+          completedPromptIds: transcriptDoneIds,
+        })
+      ) {
+        continue;
+      }
       // Prompt rows are canonical in SQLite; the registry-backed chat projection
       // is compatibility metadata and can lag queue transitions.
       const dispatchWindow = readPendingPromptDispatchWindow({ droneId, chatName });
@@ -2071,11 +2089,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           !(String(pending?.state ?? '') === 'sent' && isSendInNewChatQueueAction(pending?.action)),
       );
       if (pendingList.length === 0) return;
-
-      const turns: any[] = Array.isArray(entry?.turns) ? entry.turns : [];
-      const transcriptDoneIds = new Set(
-        turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean),
-      );
 
       let queuedIndex = dispatchWindow?.candidateId
         ? pendingList.findIndex(
@@ -2336,8 +2349,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     normalizeChatName,
     concurrencyLimit: pendingPromptPumpConcurrencyLimit,
     defaultRetryDelayMs: defaultPendingPromptEnqueueRetryDelayMs,
-    run: async (target, signal) =>
-      await pumpQueuedPendingPromptsForChat({ ...target, signal }),
+    run: async (target, signal) => await pumpQueuedPendingPromptsForChat({ ...target, signal }),
   });
 
   async function resetPromptRuntimeStateForTests(): Promise<void> {
@@ -2637,9 +2649,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             storageRoot: attachmentsStorageRoot,
           });
 
-    await pushPendingPrompt({
+    const persistedPrompt = await pushPendingPrompt({
       droneId,
       chatName,
+      submissionSource: opts.submissionSource,
       pending: {
         id,
         at,
@@ -2654,8 +2667,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       },
     });
     opts.mark?.('persistPending');
+    const recoveringInterruptedPrompt = Boolean(persistedPrompt?.interruptedPromptId);
 
-    if (defer || opts.deliveryMode === 'background') {
+    if (defer || opts.deliveryMode === 'background' || recoveringInterruptedPrompt) {
       if (
         providedAttachmentRefs.length === 0 &&
         rawAttachments.length > 0 &&
@@ -2896,6 +2910,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     cwd?: string | null;
     submittedAt?: string | null;
     deliveryMode?: 'queue' | 'asap';
+    submissionSource?: PromptSubmissionSource;
     mark?: (name: string) => void;
   }): Promise<
     | {
@@ -2937,6 +2952,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         await pushPendingPrompt({
           droneId,
           chatName,
+          submissionSource: opts.submissionSource,
           pending: {
             id: fallbackId,
             at: submittedAt,
@@ -2999,6 +3015,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           prompt,
           attachments: nativeAttachments,
           deliveryMode: opts.deliveryMode,
+          submissionSource: opts.submissionSource,
         });
         return {
           kind: 'enqueued',
@@ -3018,6 +3035,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         submittedAt: opts.submittedAt ?? null,
         deliveryMode: acceptance.enqueueMode,
         priority: acceptance.priority,
+        submissionSource: opts.submissionSource,
         mark: opts.mark,
       });
       return {
@@ -3064,6 +3082,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           submittedAt: opts.submittedAt ?? null,
           deliveryMode: acceptance.enqueueMode,
           priority: acceptance.priority,
+          submissionSource: opts.submissionSource,
           mark: opts.mark,
         });
         return {
@@ -3168,6 +3187,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     readPendingStartupPrompts,
     resetPromptRuntimeStateForTests,
     resolveCodexPromptApproval,
+    resolveInterruptedPendingPrompt,
     resolvePendingCodexApprovalsForNeverAsk,
     resumePendingPromptChats,
     runDroneLifecycleAction,

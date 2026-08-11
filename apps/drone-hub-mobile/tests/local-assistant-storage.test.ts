@@ -93,6 +93,34 @@ describe('local assistant storage', () => {
     });
   });
 
+  test('preserves a blocked queue interruption across app restarts', () => {
+    const threads = parseLocalAssistantThreads(
+      JSON.stringify([
+        {
+          id: 'interrupted-thread',
+          title: 'Interrupted',
+          model: 'gpt-5',
+          thinkingLevel: 'medium',
+          messages: [],
+          queuedPrompts: [],
+          queueInterruption: {
+            state: 'blocked',
+            at: '2026-08-11T09:00:00.000Z',
+          },
+          interruptedPromptId: 'mobile_message_interrupted',
+        },
+      ]),
+    );
+
+    expect(threads?.[0]).toMatchObject({
+      queueInterruption: {
+        state: 'blocked',
+        at: '2026-08-11T09:00:00.000Z',
+      },
+      interruptedPromptId: 'mobile_message_interrupted',
+    });
+  });
+
   test('preserves transfer progress beyond the generic tool detail limit', () => {
     const details = transferDetails(100, 20);
     const messages = boundLocalAssistantMessages([
@@ -149,9 +177,7 @@ describe('local assistant storage', () => {
         },
       ]),
     );
-    expect(stored?.[0]?.messages[0]?.content).toEqual([
-      { type: 'text', text: 'Inspect this' },
-    ]);
+    expect(stored?.[0]?.messages[0]?.content).toEqual([{ type: 'text', text: 'Inspect this' }]);
     expect(stored?.[0]?.messages[0]?.details).toMatchObject({
       attachments: [{ mime: 'image/png' }],
     });
@@ -176,10 +202,7 @@ describe('local assistant storage', () => {
       },
     ]);
 
-    expect(messages.map((message) => message.id)).toEqual([
-      'image-message',
-      'assistant-message',
-    ]);
+    expect(messages.map((message) => message.id)).toEqual(['image-message', 'assistant-message']);
   });
 
   test('keeps an actionable bounded manifest for exceptionally large paths', () => {

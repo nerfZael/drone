@@ -118,42 +118,6 @@ export class BlipAssistantHost {
     await this.promptThread(threadId, prompt);
   }
 
-  async beginRetryThread(threadId: string): Promise<void> {
-    const handle = await this.handle(threadId);
-    if (handle.running) throw new Error('Native agent is already processing');
-    let settled = false;
-    let acceptRetry: () => void = () => {};
-    let rejectRetry: (error: unknown) => void = () => {};
-    const accepted = new Promise<void>((resolve, reject) => {
-      acceptRetry = () => {
-        settled = true;
-        resolve();
-      };
-      rejectRetry = (error) => {
-        settled = true;
-        reject(error);
-      };
-    });
-    const unsubscribe = this.subscribeEvents(threadId, (event) => {
-      if (event.type === 'turn_started') acceptRetry();
-    });
-    const running = handle.retry();
-    void running.then(
-      () => {
-        if (!settled) rejectRetry(new Error('Native agent retry ended before it started'));
-      },
-      (error) => {
-        if (!settled) rejectRetry(error);
-      },
-    );
-    try {
-      await accepted;
-    } finally {
-      unsubscribe();
-      void running.catch(() => undefined);
-    }
-  }
-
   abortThread(threadId: string): void {
     this.handles.get(threadId)?.abort();
   }

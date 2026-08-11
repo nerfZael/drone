@@ -191,6 +191,7 @@ test('permanent deletion atomically clears every chat aggregate and blocks stale
     'canonical_chat_tombstones',
     'canonical_archived_chat_tombstones',
     'prompts',
+    'prompt_queue_pauses',
   ]) assert.equal(countRows(table, droneId), 0, `${table} should be empty`);
   assert.equal(countRows('canonical_drone_chat_tombstones', droneId), 1);
   assert.equal(countRows('hub_drone_lifecycle_tombstones', droneId), 1);
@@ -215,6 +216,7 @@ test('permanent deletion atomically clears every chat aggregate and blocks stale
       { scope: 'prompts', version: 1 },
       { scope: 'prompts', version: 2 },
       { scope: 'prompts', version: 3 },
+      { scope: 'prompts', version: 4 },
     ],
   );
 

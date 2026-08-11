@@ -3216,6 +3216,7 @@ function createHubRuntimeGraph(
     normalizeChatImageAttachmentRefs,
     pendingPromptsFromChatEntry,
     promoteQueuedNewChatAction,
+    resolveInterruptedPendingPrompt,
     pruneCompletedPendingPrompts,
     pushPendingPrompt,
     pushPendingStartupPrompt,
@@ -4038,6 +4039,7 @@ async function startDroneHubApiServerWithLifecycle(
     looksLikeRepoUnavailableError,
     migrateInMemoryChatStateForRename,
     promoteQueuedNewChatAction,
+    resolveInterruptedPendingPrompt,
     pushPendingPrompt,
     pushPendingStartupPrompt,
     resumePendingPromptChats,
@@ -4357,6 +4359,7 @@ async function startDroneHubApiServerWithLifecycle(
     agentPermissionMode,
     approvalPolicy,
     deliveryMode,
+    submissionSource,
     prompt,
     attachments,
   }: {
@@ -4370,6 +4373,7 @@ async function startDroneHubApiServerWithLifecycle(
     agentPermissionMode?: AgentPermissionMode;
     approvalPolicy?: AgentApprovalPolicy;
     deliveryMode?: 'queue' | 'asap';
+    submissionSource?: import('../host/prompt-queue-repository').PromptSubmissionSource;
     prompt: string;
     attachments?: ChatImageAttachment[];
   }) => {
@@ -4415,6 +4419,7 @@ async function startDroneHubApiServerWithLifecycle(
       prompt: promptWithFiles,
       promptImages,
       deliveryMode,
+      submissionSource,
     });
   };
   const stopNativeChat = async (nativeChatId: string) => {
@@ -5836,6 +5841,7 @@ async function startDroneHubApiServerWithLifecycle(
     readChatFromStore,
     readChatReadStateFromStore,
     readChatSnapshot,
+    resolveInterruptedPendingPrompt,
     removeDockerSnapshotImagesBestEffort,
     renameNativeChatSession: (input: { id: string; droneId: string; chatName: string }) =>
       nativeChatLifecycle.rename(input),

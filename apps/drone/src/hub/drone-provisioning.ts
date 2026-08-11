@@ -652,6 +652,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
           deliveryMode: 'background',
           priority: queued.deliveryMode === 'asap' ? 'asap' : 'queue',
           schedulePump: false,
+          submissionSource: 'system',
         });
       } catch (error: any) {
         if (!queued.attachments?.length) throw error;

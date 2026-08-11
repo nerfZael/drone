@@ -46,6 +46,7 @@ import { createCanvasChatNodeId } from './app-config';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { beginRepoApplyProgress, useLocalChatBusy } from './use-drone-hub-runtime-store';
+import { usePendingPromptInterruption } from './use-pending-prompt-interruption';
 import {
   droneChatEventMatches,
   fetchDroneChatState,
@@ -134,6 +135,18 @@ export function GroupMultiChatColumn({
   const [cancelPendingPromptErrorById, setCancelPendingPromptErrorById] = React.useState<
     Record<string, string>
   >({});
+  const [chatEventsConnected, setChatEventsConnected] = React.useState(false);
+  const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
+  const {
+    busyById: resolvingInterruptionById,
+    errorById: interruptionResolutionErrorById,
+    resolve: resolvePendingPromptInterruption,
+  } = usePendingPromptInterruption({
+    droneId: drone.id,
+    chatName,
+    requestJson,
+    onResolved: () => setChatEventsNonce((value) => value + 1),
+  });
   const [localWaitingStartedAtMs, setLocalWaitingStartedAtMs] = React.useState<number | null>(null);
   const [optimisticPendingPrompts, setOptimisticPendingPrompts] = React.useState<PendingPrompt[]>(
     [],
@@ -142,8 +155,6 @@ export function GroupMultiChatColumn({
     key: string;
     pending: PendingPrompt[];
   } | null>(null);
-  const [chatEventsConnected, setChatEventsConnected] = React.useState(false);
-  const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
   const [quickActionBusy, setQuickActionBusy] = React.useState<null | 'ssh' | 'pull' | 'push'>(
     null,
   );
@@ -1106,6 +1117,9 @@ export function GroupMultiChatColumn({
                 onCancelQueued={cancelPendingPrompt}
                 cancelBusy={Boolean(cancellingPendingPromptById[item.id])}
                 cancelError={cancelPendingPromptErrorById[item.id] ?? null}
+                onResolveInterruption={resolvePendingPromptInterruption}
+                resolvingInterruption={Boolean(resolvingInterruptionById[item.id])}
+                interruptionError={interruptionResolutionErrorById[item.id] ?? null}
                 onCreateNewChatNow={(actionId) => onCreateQueuedNewChatNow(actionId, chatName)}
                 createNewChatBusy={Boolean(promotingNewChatActionById[item.id])}
                 createNewChatError={promoteNewChatActionErrorById[item.id] ?? null}

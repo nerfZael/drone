@@ -223,6 +223,283 @@ test('claims preserve FIFO within a chat while allowing another chat to proceed'
   );
 });
 
+test('an interrupted prompt blocks queued work until the next manual follow-up finishes', async () => {
+  const queue = repository('interruption-continuation');
+  const at = '2026-08-11T09:00:00.000Z';
+  await queue.enqueue({ droneId: 'alpha', chatName: 'default', prompt: prompt('interrupted', at) });
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: prompt('queued-follow-up', at),
+  });
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('steering-follow-up', at), deliveryMode: 'asap' },
+  });
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'interrupted',
+    patch: {
+      state: 'failed',
+      error: 'stream disconnected before completion',
+      queueInterruption: { state: 'blocked', at },
+      updatedAt: at,
+    },
+  });
+  await queue.pauseAfterInterruption({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'interrupted',
+    now: at,
+  });
+
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' }), null);
+  assert.equal(
+    await queue.claimForSteering({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'steering-follow-up',
+      leaseOwner: 'steering-worker',
+      now: at,
+    }),
+    null,
+  );
+  const automated = await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('automated-follow-up', at), prompt: 'Background workflow work' },
+    submissionSource: 'assistant-tool',
+    now: at,
+  });
+  assert.equal(automated.interruptedPromptId, undefined);
+  assert.equal(queue.getPause({ droneId: 'alpha', chatName: 'default' })?.status, 'blocked');
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' }), null);
+
+  const continued = await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('recovery', at), prompt: 'continue', state: 'sending' },
+    submissionSource: 'human',
+    now: at,
+  });
+  assert.equal(continued.interruptedPromptId, 'interrupted');
+  assert.equal(continued.prompt.prompt, 'continue');
+  assert.equal(continued.prompt.state, 'queued');
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id, 'recovery');
+  assert.equal(
+    await queue.pauseAfterInterruption({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'interrupted',
+      now: at,
+    }),
+    true,
+  );
+  assert.equal(
+    queue.getPause({ droneId: 'alpha', chatName: 'default' })?.recoveryPromptId,
+    'recovery',
+  );
+
+  assert.ok(
+    await queue.claim({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'recovery',
+      leaseOwner: 'recovery-worker',
+      now: at,
+    }),
+  );
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'recovery',
+    patch: { state: 'sent', updatedAt: at },
+  });
+  assert.deepEqual(queue.listQueuedChatWakeups(), [
+    { droneId: 'alpha', chatName: 'default', nextAttemptAt: at },
+  ]);
+  const duplicateContinue = await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('recovery', at), prompt: 'continue' },
+    submissionSource: 'human',
+    now: at,
+  });
+  assert.equal(duplicateContinue.inserted, false);
+  assert.equal(duplicateContinue.prompt.id, 'recovery');
+  assert.equal(duplicateContinue.interruptedPromptId, 'interrupted');
+
+  assert.equal(
+    queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'interrupted' })?.queueInterruption
+      ?.state,
+    'continuing',
+  );
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' }), null);
+  assert.equal(
+    await queue.completeRecovery({
+      droneId: 'alpha',
+      chatName: 'default',
+      recoveryPromptId: 'recovery',
+      now: at,
+    }),
+    true,
+  );
+  assert.equal(
+    queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'interrupted' })?.queueInterruption
+      ?.state,
+    'continued',
+  );
+  assert.equal(
+    queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id,
+    'steering-follow-up',
+  );
+});
+
+test('a manual recovery follow-up waits for an already-running steering prompt', async () => {
+  const queue = repository('interruption-inflight-steering');
+  const at = '2026-08-11T09:00:00.000Z';
+  await queue.enqueue({ droneId: 'alpha', chatName: 'default', prompt: prompt('interrupted', at) });
+  await queue.enqueue({ droneId: 'alpha', chatName: 'default', prompt: prompt('in-flight', at) });
+  assert.ok(
+    await queue.claimForSteering({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'in-flight',
+      leaseOwner: 'steering-worker',
+      now: at,
+    }),
+  );
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'interrupted',
+    patch: { state: 'failed', updatedAt: at },
+  });
+  await queue.pauseAfterInterruption({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'interrupted',
+    now: at,
+  });
+  await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: { ...prompt('recovery', at), prompt: 'continue' },
+    submissionSource: 'human',
+    now: at,
+  });
+  assert.equal(
+    await queue.claimForSteering({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'recovery',
+      leaseOwner: 'recovery-worker',
+      now: at,
+    }),
+    null,
+  );
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'in-flight',
+    patch: { state: 'sent', updatedAt: at },
+  });
+  assert.ok(
+    await queue.claim({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'recovery',
+      leaseOwner: 'recovery-worker',
+      now: at,
+    }),
+  );
+});
+
+test('skipping an interruption releases the queue', async () => {
+  const queue = repository('interruption-resolution');
+  const at = '2026-08-11T09:00:00.000Z';
+  await queue.enqueue({ droneId: 'alpha', chatName: 'skip', prompt: prompt('blocked', at) });
+  await queue.enqueue({ droneId: 'alpha', chatName: 'skip', prompt: prompt('later', at) });
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'skip',
+    promptId: 'blocked',
+    patch: {
+      state: 'failed',
+      updatedAt: at,
+    },
+  });
+  await queue.pauseAfterInterruption({
+    droneId: 'alpha',
+    chatName: 'skip',
+    promptId: 'blocked',
+    now: at,
+  });
+  assert.equal(
+    (
+      await queue.resolveInterruption({
+        droneId: 'alpha',
+        chatName: 'skip',
+        promptId: 'blocked',
+        now: at,
+      })
+    ).status,
+    'skipped',
+  );
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'skip' })?.id, 'later');
+});
+
+test('a chat pause remains authoritative beyond the prompt history window', async () => {
+  const queue = repository('interruption-window');
+  const at = '2026-08-11T09:00:00.000Z';
+  await queue.enqueue({ droneId: 'alpha', chatName: 'default', prompt: prompt('blocked', at) });
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'blocked',
+    patch: { state: 'failed', updatedAt: at },
+  });
+  for (let index = 0; index < 80; index += 1) {
+    await queue.enqueue({
+      droneId: 'alpha',
+      chatName: 'default',
+      prompt: prompt(`later-${index}`, at),
+    });
+  }
+  await queue.pauseAfterInterruption({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'blocked',
+    now: at,
+  });
+
+  assert.equal(
+    queue
+      .list({ droneId: 'alpha', chatName: 'default', limit: 60 })
+      .some((item) => item.id === 'blocked'),
+    false,
+  );
+  assert.equal(
+    queue.getPause({ droneId: 'alpha', chatName: 'default' })?.interruptedPromptId,
+    'blocked',
+  );
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' }), null);
+  assert.equal(
+    (
+      await queue.resolveInterruption({
+        droneId: 'alpha',
+        chatName: 'default',
+        promptId: 'blocked',
+        now: at,
+      })
+    ).status,
+    'skipped',
+  );
+  assert.equal(queue.nextQueued({ droneId: 'alpha', chatName: 'default' })?.id, 'later-0');
+});
+
 test('steering can claim a follow-up while the current built-in prompt is sending', async () => {
   const queue = repository('steering');
   const at = '2026-07-10T09:00:00.000Z';
@@ -578,7 +855,11 @@ test('cancels every unsent prompt when a drone fails to start', async () => {
   const at = '2026-07-10T09:00:00.000Z';
   await queue.enqueue({ droneId: 'failed-drone', chatName: 'default', prompt: prompt('one', at) });
   await queue.enqueue({ droneId: 'failed-drone', chatName: 'review', prompt: prompt('two', at) });
-  await queue.enqueue({ droneId: 'healthy-drone', chatName: 'default', prompt: prompt('other', at) });
+  await queue.enqueue({
+    droneId: 'healthy-drone',
+    chatName: 'default',
+    prompt: prompt('other', at),
+  });
 
   assert.equal(
     await queue.cancelPendingForDrone({
@@ -589,7 +870,10 @@ test('cancels every unsent prompt when a drone fails to start', async () => {
   );
   assert.deepEqual(queue.listPending({ droneId: 'failed-drone', chatName: 'default' }), []);
   assert.deepEqual(queue.listPending({ droneId: 'failed-drone', chatName: 'review' }), []);
-  assert.equal(queue.get({ droneId: 'healthy-drone', chatName: 'default', promptId: 'other' }).state, 'queued');
+  assert.equal(
+    queue.get({ droneId: 'healthy-drone', chatName: 'default', promptId: 'other' }).state,
+    'queued',
+  );
 });
 
 test('retry scheduling uses bounded backoff and becomes terminal at max attempts', async () => {

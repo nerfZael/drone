@@ -759,6 +759,16 @@ function useLocalDroneControlValue() {
         else assistant.stop(thread.id);
         return { ok: true };
       }
+      if (operation === 'chat.interruption.resolve') {
+        const { thread } = getThread();
+        if (payload.resolution !== 'skip') throw new Error('Unsupported interruption resolution');
+        const promptId = String(payload.promptId ?? '').trim();
+        if (!promptId || promptId !== String(thread.interruptedPromptId ?? '').trim()) {
+          throw new Error('Interrupted prompt was not found');
+        }
+        await assistant.skipInterruption(thread.id);
+        return { ok: true };
+      }
       if (operation === 'chat.models') {
         const { thread } = getThread();
         const settings = await loadLocalAssistantSettings();

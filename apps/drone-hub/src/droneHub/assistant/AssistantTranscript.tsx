@@ -1,6 +1,9 @@
 import React from 'react';
-import { resolveChatQueueActionPresentation } from '@drone/assistant-chat';
-import type { AssistantMessageDiagnosticError } from '@drone/assistant-chat';
+import {
+  nativeAgentFailurePresentation,
+  resolveChatQueueActionPresentation,
+  type PromptQueueInterruptionResolution,
+} from '@drone/assistant-chat';
 
 import {
   AgentMessageExtras,
@@ -15,6 +18,7 @@ import { CreateNewChatNowButton, QueuedNewChatLabel } from '../chat/QueuedNewCha
 import { ImageAttachmentChips, normalizeImageAttachmentRefs } from '../chat/ImageAttachmentChips';
 import { collectInlineAgentMedia } from '../chat/inline-agent-media';
 import { UserChatMessage } from '../chat/UserChatMessage';
+import { AgentRunFailureNotice } from '../chat/AgentRunFailureNotice';
 import {
   AgentRunSummaryLine,
   CreatingNewChatStatus,
@@ -60,96 +64,14 @@ function assistantVisibleText(message: AssistantMessage): string {
     .join('\n');
 }
 
-type NativeAgentFailurePresentation = {
-  recoverable: boolean;
-  title: string;
-  summary: string;
-  code?: string;
-  attempts?: number;
-  technicalMessage: string;
-};
-
-function diagnosticErrorValues(
-  error: AssistantMessageDiagnosticError | undefined,
-): Array<{ message: string; code?: string }> {
-  const values: Array<{ message: string; code?: string }> = [];
-  let current = error;
-  let depth = 0;
-  while (current && depth < 4) {
-    values.push({
-      message: String(current.message ?? ''),
-      ...(current.code != null ? { code: String(current.code) } : {}),
-    });
-    current = current.cause;
-    depth += 1;
-  }
-  return values;
-}
-
-export function nativeAgentFailurePresentation(
-  message: AssistantMessage,
-): NativeAgentFailurePresentation {
-  const diagnostics = message.diagnostics ?? [];
-  const diagnosticErrors = diagnostics.flatMap((diagnostic) =>
-    diagnosticErrorValues(diagnostic.error),
-  );
-  const technicalMessage =
-    String(message.errorMessage ?? '').trim() ||
-    diagnosticErrors.map((error) => error.message).find(Boolean) ||
-    'Unknown native agent failure';
-  const combined = [
-    technicalMessage,
-    ...diagnostics.map((diagnostic) => diagnostic.type),
-    ...diagnosticErrors.flatMap((error) => [error.code ?? '', error.message]),
-  ].join(' ');
-  const code = [...diagnosticErrors].reverse().find((error) => error.code)?.code;
-  const attempts = diagnostics
-    .map((diagnostic) => Number(diagnostic.details?.attempts))
-    .find((value) => Number.isFinite(value) && value > 0);
-  const timedOut =
-    /\b(etimedout|und_err_(?:connect_timeout|headers_timeout|body_timeout))\b/i.test(combined) ||
-    /\btimed? out|timeout\b/i.test(combined);
-  const connectionReset =
-    /\b(econnreset|und_err_socket)\b/i.test(combined) ||
-    /\bconnection reset|socket hang up\b/i.test(combined);
-  const temporaryConnection =
-    diagnostics.some((diagnostic) => diagnostic.type === 'provider_transport_failure') ||
-    /\b(fetch failed|enotfound|eai_again)\b/i.test(combined);
-  const hasPartialToolCall =
-    Array.isArray(message.content) && message.content.some((part) => part.type === 'toolCall');
-  const recoverable =
-    message.stopReason !== 'aborted' &&
-    !hasPartialToolCall &&
-    (timedOut || connectionReset || temporaryConnection);
-
-  return {
-    recoverable,
-    title: recoverable
-      ? timedOut
-        ? 'Native agent timed out'
-        : connectionReset
-          ? 'Native agent connection was reset'
-          : 'Native agent lost its connection'
-      : 'Native agent couldn’t finish the response',
-    summary: recoverable
-      ? 'The model request did not complete. You can continue from the last saved checkpoint.'
-      : technicalMessage,
-    ...(code ? { code } : {}),
-    ...(attempts ? { attempts } : {}),
-    technicalMessage,
-  };
-}
+export { nativeAgentFailurePresentation } from '@drone/assistant-chat';
 
 export function NativeAgentFailureCard({
   message,
   hasSavedToolResults,
-  retrying,
-  onRetry,
 }: {
   message: AssistantMessage;
   hasSavedToolResults: boolean;
-  retrying: boolean;
-  onRetry?: () => void;
 }) {
   const failure = nativeAgentFailurePresentation(message);
   const occurredAt = message.createdAt ?? message.timestamp;
@@ -161,31 +83,29 @@ export function NativeAgentFailureCard({
 
   return (
     <div
-      className="mx-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2.5 text-[var(--text-11)]"
+      className={`mx-3 rounded border px-3 py-2.5 text-[var(--text-11)] ${
+        failure.recoverable
+          ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)]'
+          : 'border-[var(--red-border)] bg-[var(--red-subtle)]'
+      }`}
       role="alert"
       data-native-agent-failure
     >
-      <div className="font-medium text-[var(--red)]">{failure.title}</div>
+      <div
+        className={
+          failure.recoverable ? 'font-medium text-[var(--yellow)]' : 'font-medium text-[var(--red)]'
+        }
+      >
+        {failure.title}
+      </div>
       <div className="mt-1 text-[var(--fg-secondary)]">
         {hasSavedToolResults
-          ? onRetry
-            ? 'Completed tool results were saved. Continue without rerunning them.'
-            : 'Completed tool results were saved.'
-          : failure.recoverable && !onRetry
-            ? 'The model request did not complete.'
+          ? 'Completed tool results were saved. Send a follow-up to continue from this checkpoint.'
+          : failure.recoverable
+            ? `${failure.summary} Send a follow-up to continue when you’re connected.`
             : failure.summary}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        {failure.recoverable && onRetry ? (
-          <button
-            type="button"
-            className="rounded border border-[var(--red-border)] bg-[var(--surface)] px-2.5 py-1 font-medium text-[var(--fg)] hover:bg-[var(--surface-strong)] disabled:cursor-wait disabled:opacity-60"
-            disabled={retrying}
-            onClick={onRetry}
-          >
-            {retrying ? 'Continuing…' : hasSavedToolResults ? 'Continue response' : 'Retry'}
-          </button>
-        ) : null}
         <details className="text-[var(--muted)]">
           <summary className="cursor-pointer select-none hover:text-[var(--fg-secondary)]">
             Technical details
@@ -233,6 +153,9 @@ export function AssistantQueuedPromptRow({
   autoFocusCreateNewChat = false,
   onCreateNewChatAutoFocusHandled,
   createNewChatError = null,
+  resolvingInterruption = false,
+  interruptionError = null,
+  onResolveInterruption,
 }: {
   prompt: AssistantQueuedPrompt;
   cancelling: boolean;
@@ -242,17 +165,24 @@ export function AssistantQueuedPromptRow({
   autoFocusCreateNewChat?: boolean;
   onCreateNewChatAutoFocusHandled?: (promptId: string) => void;
   createNewChatError?: string | null;
+  resolvingInterruption?: boolean;
+  interruptionError?: string | null;
+  onResolveInterruption?: (resolution: PromptQueueInterruptionResolution) => void;
 }) {
   const actionPresentation = resolveChatQueueActionPresentation(prompt.action, prompt.status);
   const failed = prompt.status === 'failed';
   const running = prompt.status === 'running';
   const showCreatingNewChat =
-    Boolean(actionPresentation) &&
-    (creatingNewChat || actionPresentation?.state === 'running');
+    Boolean(actionPresentation) && (creatingNewChat || actionPresentation?.state === 'running');
   const canRemovePrompt = actionPresentation ? actionPresentation.canCancel || failed : !running;
   const showPromptHeader = !actionPresentation || prompt.imageCount > 0 || canRemovePrompt;
-  const statusLabel =
-    failed ? 'Failed' : running ? 'Working' : prompt.deliveryMode === 'asap' ? 'ASAP' : 'Queued';
+  const statusLabel = failed
+    ? 'Failed'
+    : running
+      ? 'Working'
+      : prompt.deliveryMode === 'asap'
+        ? 'ASAP'
+        : 'Queued';
   return (
     <>
       <div className="mx-3 flex justify-end">
@@ -311,19 +241,24 @@ export function AssistantQueuedPromptRow({
                 {prompt.prompt}
               </div>
             ) : null}
-            {failed && prompt.error ? (
-              <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">
-                {prompt.error}
-              </div>
+            {failed && prompt.error && prompt.queueInterruption ? (
+              <AgentRunFailureNotice
+                error={prompt.error}
+                at={prompt.createdAt}
+                queueInterruptionState={prompt.queueInterruption.state}
+                resolvingInterruption={resolvingInterruption}
+                interruptionError={interruptionError}
+                onResolveInterruption={onResolveInterruption}
+              />
+            ) : failed && prompt.error ? (
+              <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">{prompt.error}</div>
             ) : null}
             {actionPresentation?.canExecuteNow && !creatingNewChat ? (
               <div className="mt-2 flex items-center gap-2 border-t border-[var(--border-subtle)] pt-2">
                 {onCreateNewChatNow ? (
                   <CreateNewChatNowButton
                     autoFocus={autoFocusCreateNewChat}
-                    onAutoFocusComplete={() =>
-                      onCreateNewChatAutoFocusHandled?.(prompt.id)
-                    }
+                    onAutoFocusComplete={() => onCreateNewChatAutoFocusHandled?.(prompt.id)}
                     onClick={onCreateNewChatNow}
                     disabled={creatingNewChat || cancelling}
                     busy={creatingNewChat}

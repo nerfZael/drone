@@ -16,6 +16,7 @@ export type AssistantRouteDependencies = {
     prompt: string;
     promptImages?: any[];
     deliveryMode?: 'queue' | 'asap';
+    submissionSource?: 'human' | 'system';
   }) => Promise<any>;
   validateAssistantPromptImages: (attachments: any[]) => any[];
   saveAssistantArtifactUploads: (threadId: string, attachments: any[]) => Promise<any[]>;
@@ -340,24 +341,6 @@ export function registerAssistantRoutes(
     }
   });
 
-  apiRouter.post('/api/assistant/threads/:threadId/retry', async ({ params, json: respond }) => {
-    try {
-      await assistantService.threadSnapshot(params.threadId);
-      await blipAssistantHost.beginRetryThread(params.threadId);
-      respond(202, { ok: true, threadId: params.threadId, status: 'running' });
-    } catch (error: any) {
-      const message = errorMessage(error);
-      const status = /already processing/i.test(message)
-        ? 409
-        : /not retryable|no safe response checkpoint/i.test(message)
-          ? 422
-          : /unknown assistant thread/i.test(message)
-            ? 404
-            : 400;
-      respond(status, { ok: false, error: message });
-    }
-  });
-
   apiRouter.get(
     '/api/assistant/threads/:threadId/system-prompt',
     async ({ params, json: respond }) => {
@@ -478,6 +461,7 @@ export function registerAssistantRoutes(
               : body?.deliveryMode === 'queue'
                 ? 'queue'
                 : undefined,
+          submissionSource: 'human',
         });
         writeEvent({ type: 'queued', threadId: params.threadId, prompt: queued });
         writeEvent({ type: 'done' });

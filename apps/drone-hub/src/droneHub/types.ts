@@ -7,6 +7,7 @@ import type {
   GithubPullRequestFileChange,
   GithubPullRequestSummaryPayload,
   PendingPromptState,
+  PromptQueueInterruption,
 } from '@drone/assistant-chat';
 
 export type { AgentPlan } from '@drone/assistant-chat';
@@ -588,6 +589,7 @@ export type PendingPrompt = {
     dataBase64: string;
   }>;
   deliveryMode?: 'queue' | 'asap';
+  queueInterruption?: PromptQueueInterruption;
   action?: ChatQueueAction;
   // `queued` is waiting for earlier work or for a provisioning drone to become ready.
   state: PendingPromptState;

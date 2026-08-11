@@ -103,10 +103,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         name: String((d as any)?.name ?? id).trim() || id,
         group: String((d as any)?.group ?? '').trim() || null,
         groupId: String((d as any)?.groupId ?? '').trim() || null,
-        fleetParentId: resolveStableDroneOrPendingIdFromRef(
-          regAny,
-          fleetActorConfig(d).createdBy,
-        ),
+        fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(d).createdBy),
         createdAt: String((d as any)?.createdAt ?? '').trim() || null,
         runtime: normalizeDroneRuntime((d as any)?.runtime),
         repoPath: String((d as any)?.repoPath ?? '').trim(),
@@ -128,10 +125,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         name: String((d as any)?.name ?? id).trim() || id,
         group: String((d as any)?.group ?? '').trim() || null,
         groupId: String((d as any)?.groupId ?? '').trim() || null,
-        fleetParentId: resolveStableDroneOrPendingIdFromRef(
-          regAny,
-          fleetActorConfig(d).createdBy,
-        ),
+        fleetParentId: resolveStableDroneOrPendingIdFromRef(regAny, fleetActorConfig(d).createdBy),
         createdAt: String((d as any)?.createdAt ?? '').trim() || null,
         runtime: normalizeDroneRuntime((d as any)?.runtime),
         repoPath: String((d as any)?.repoPath ?? '').trim(),
@@ -583,10 +577,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             !readableWorkspaceCapabilities.includes(capability as any)
           )
             return false;
-          if (
-            thread.agentPermissionMode !== 'execute' &&
-            capability === 'shell.execute'
-          )
+          if (thread.agentPermissionMode !== 'execute' && capability === 'shell.execute')
             return false;
           return !capability || supportedWorkspaceCapabilities.has(capability);
         });
@@ -596,8 +587,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       const transferTools = blipTools
         .createWorkspaceTransferTools(targetCatalog)
         .filter(
-          (tool: any) =>
-            thread.agentPermissionMode !== 'read' && enabledTools.has(tool.name),
+          (tool: any) => thread.agentPermissionMode !== 'read' && enabledTools.has(tool.name),
         );
       const tools = [
         {
@@ -989,6 +979,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     prompt: string;
     promptImages?: Array<{ type: 'image'; data: string; mimeType: string }>;
     deliveryMode?: 'queue' | 'asap';
+    submissionSource?: import('../host/prompt-queue-repository').PromptSubmissionSource;
   }) => {
     await assistantService.beginNativeThreadPrompt(input.threadId);
     const promptInput: AssistantPromptInput = input.promptImages?.length
@@ -1003,13 +994,14 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       prompt: input.prompt,
       promptImages: input.promptImages,
       deliveryMode,
+      submissionSource: input.submissionSource,
     });
     const queued = enqueueResult.prompt;
     await notifyNativePromptQueueChanged(input.threadId);
     // Prompt IDs are idempotency keys. A retry after an accepted request must
     // not claim or deliver the same durable queue row a second time.
     if (!enqueueResult.inserted) return queued;
-    if (steerImmediately) {
+    if (steerImmediately && !enqueueResult.interruptedPromptId) {
       const claimed = await assistantService.claimQueuedPrompt(input.threadId, queued.id, {
         allowConcurrent: true,
       });

@@ -1,8 +1,11 @@
 import React from 'react';
 import {
+  agentRunFailurePresentation,
   isStoppedRunError,
   normalizeAgentRunActivity,
+  normalizePromptQueueInterruption,
   resolveChatQueueActionPresentation,
+  type PromptQueueInterruptionResolution,
 } from '@drone/assistant-chat';
 import { stripAnsi } from '../../domain';
 import type { PendingPrompt } from '../types';
@@ -20,6 +23,7 @@ import { CreatingNewChatStatus, WorkingElapsedStatus } from './WorkingElapsedSta
 import { UserChatMessage } from './UserChatMessage';
 import { ChangedFilesCard } from './ChangedFilesCard';
 import { StoppedRunNotice } from './StoppedRunNotice';
+import { AgentRunFailureNotice } from './AgentRunFailureNotice';
 import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
 import { CreateNewChatNowButton, QueuedNewChatLabel } from './QueuedNewChatAction';
 import {
@@ -31,12 +35,15 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
   showRoleIcons = false,
   onCancelQueued,
+  onResolveInterruption,
   onOpenFileReference,
   onOpenLink,
   droneId,
   droneHomePath,
   cancelBusy = false,
   cancelError = null,
+  resolvingInterruption = false,
+  interruptionError = null,
   autoExpandPrompt = false,
   initiallyExpandFileChanges = false,
   onCreateNewChatNow,
@@ -48,12 +55,18 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item: PendingPrompt;
   showRoleIcons?: boolean;
   onCancelQueued?: (promptId: string) => Promise<void> | void;
+  onResolveInterruption?: (
+    promptId: string,
+    resolution: PromptQueueInterruptionResolution,
+  ) => Promise<void> | void;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
   droneId?: string;
   droneHomePath?: string;
   cancelBusy?: boolean;
   cancelError?: string | null;
+  resolvingInterruption?: boolean;
+  interruptionError?: string | null;
   autoExpandPrompt?: boolean;
   initiallyExpandFileChanges?: boolean;
   onCreateNewChatNow?: (promptId: string) => Promise<void> | void;
@@ -79,8 +92,11 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   const isStopped = isFailed && isStoppedRunError(item.error);
   const activity = normalizeAgentRunActivity(item.activity);
   const runStartedAt = item.startedAt ?? null;
-  const badgeLabel = isFailed && !isStopped ? 'Failed' : null;
   const actionPresentation = resolveChatQueueActionPresentation(item.action, item.state);
+  const failure = agentRunFailurePresentation(stripAnsi(item.error || ''));
+  const queueInterruption = normalizePromptQueueInterruption(item.queueInterruption);
+  const isInterrupted = isFailed && !isStopped && !actionPresentation && failure.recoverable;
+  const badgeLabel = isFailed && !isStopped ? (isInterrupted ? 'Interrupted' : 'Failed') : null;
   const creatingNewChat =
     Boolean(actionPresentation) &&
     (createNewChatBusy || actionPresentation?.state === 'running');
@@ -154,7 +170,11 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
     <QueuedNewChatLabel failed={actionPresentation.state === 'failed'} />
   ) : badgeLabel ? (
     <span
-      className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)]"
+      className={`rounded border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${
+        isInterrupted
+          ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+          : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
+      }`}
       style={{ fontFamily: 'var(--display)' }}
     >
       {badgeLabel}
@@ -163,7 +183,9 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   const pendingHeader = statusBadge;
 
   return (
-    <div className={`animate-fade-in ${isFailed && !isStopped ? 'opacity-90' : ''}`}>
+    <div
+      className={`animate-fade-in ${isFailed && !isStopped && !isInterrupted ? 'opacity-90' : ''}`}
+    >
       {isSubscriptionEvent ? (
         <SubscriptionEventMessage prompt={item.prompt} at={item.at} />
       ) : (
@@ -221,6 +243,26 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       {isStopped ? (
         <>
           <StoppedRunNotice reason={item.error} at={item.updatedAt ?? item.at} />
+          <ChangedFilesCard
+            fileChanges={item.fileChanges}
+            initiallyExpanded={initiallyExpandFileChanges}
+          />
+        </>
+      ) : isInterrupted ? (
+        <>
+          <AgentRunFailureNotice
+            error={item.error}
+            at={item.updatedAt ?? item.at}
+            hasSavedProgress={Boolean(activity?.messages.length || item.fileChanges)}
+            queueInterruptionState={queueInterruption?.state}
+            onResolveInterruption={
+              onResolveInterruption
+                ? (resolution) => onResolveInterruption(item.id, resolution)
+                : undefined
+            }
+            resolvingInterruption={resolvingInterruption}
+            interruptionError={interruptionError}
+          />
           <ChangedFilesCard
             fileChanges={item.fileChanges}
             initiallyExpanded={initiallyExpandFileChanges}

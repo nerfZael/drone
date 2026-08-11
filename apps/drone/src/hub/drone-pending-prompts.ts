@@ -1,16 +1,22 @@
 import {
   completedTurnIds,
+  isAgentTransportInterruption,
   isTerminalPendingPrompt,
   normalizeAgentPlan,
   normalizePendingPromptState as normalizeSharedPendingPromptState,
+  normalizePromptQueueInterruption,
   type AgentPlan,
   type AgentRunActivity,
   type ChatQueueAction,
   type CodexApprovalDecision,
   type CodexPendingApproval,
+  type PromptQueueInterruption,
 } from '@drone/assistant-chat';
 import { loadRegistry, updateRegistry } from '../host/registry';
-import { getPromptQueueRepository } from '../host/prompt-queue-repository';
+import {
+  getPromptQueueRepository,
+  type PromptSubmissionSource,
+} from '../host/prompt-queue-repository';
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
 import { commitDroneMetadataPatch } from './drone-metadata-commands';
 import type { PendingPromptState, PendingStartupPrompt } from './drone-pending-state';
@@ -38,6 +44,7 @@ export type PendingPrompt = {
   cwd?: string | null;
   attachments?: ChatImageAttachmentRef[];
   deliveryMode?: 'queue' | 'asap';
+  queueInterruption?: PromptQueueInterruption;
   action?: ChatQueueAction;
   state: PendingPromptState;
   error?: string;
@@ -165,6 +172,11 @@ export function createDronePendingPromptStore(deps: {
           cwd: typeof p?.cwd === 'string' ? String(p.cwd) : p?.cwd === null ? null : undefined,
           attachments: deps.normalizeChatImageAttachmentRefs(p?.attachments),
           deliveryMode: p?.deliveryMode === 'asap' ? 'asap' : 'queue',
+          ...(normalizePromptQueueInterruption((p as any)?.queueInterruption)
+            ? {
+                queueInterruption: normalizePromptQueueInterruption((p as any).queueInterruption),
+              }
+            : {}),
           ...(p?.action && typeof p.action === 'object'
             ? { action: p.action as ChatQueueAction }
             : {}),
@@ -378,9 +390,7 @@ export function createDronePendingPromptStore(deps: {
     if (!queue) {
       const stored = readChatFromStore({ droneId, chatName: opts.chatName || 'default' });
       const pending = Array.isArray(stored.chat?.pendingPrompts)
-        ? stored.chat.pendingPrompts.find(
-            (item: any) => String(item?.id ?? '').trim() === opts.id,
-          )
+        ? stored.chat.pendingPrompts.find((item: any) => String(item?.id ?? '').trim() === opts.id)
         : null;
       return (pending as PendingPrompt | null) ?? null;
     }
@@ -441,7 +451,8 @@ export function createDronePendingPromptStore(deps: {
     droneId: string;
     chatName: string;
     pending: PendingPrompt;
-  }): Promise<void> {
+    submissionSource?: PromptSubmissionSource;
+  }) {
     const droneIdForStore = normalizeDroneIdentity(opts.droneId);
     const chatNameForStore = opts.chatName || 'default';
     const queue = promptQueueForActiveDrone();
@@ -452,9 +463,10 @@ export function createDronePendingPromptStore(deps: {
         droneId: droneIdForStore,
         chatName: chatNameForStore,
         prompt: opts.pending,
+        submissionSource: opts.submissionSource,
       });
       if (result.inserted) notifyPendingPromptChanged(droneIdForStore, chatNameForStore);
-      return;
+      return result;
     }
     if (droneIdForStore) {
       upsertPendingPromptInStore({
@@ -580,21 +592,40 @@ export function createDronePendingPromptStore(deps: {
         | 'fileChangesBaseline'
         | 'fileChanges'
         | 'action'
+        | 'queueInterruption'
         | 'startedAt'
         | 'updatedAt'
       >
     >;
   }): Promise<void> {
+    const patch = opts.patch;
     const droneIdForStore = normalizeDroneIdentity(opts.droneId);
     const chatNameForStore = opts.chatName || 'default';
     const queue = promptQueueForActiveDrone();
     if (queue && droneIdForStore) {
+      const current = queue.get({
+        droneId: droneIdForStore,
+        chatName: chatNameForStore,
+        promptId: opts.id,
+      });
       const updated = await queue.update({
         droneId: droneIdForStore,
         chatName: chatNameForStore,
         promptId: opts.id,
-        patch: opts.patch,
+        patch,
       });
+      if (
+        updated &&
+        patch.state === 'failed' &&
+        !current?.action &&
+        isAgentTransportInterruption(patch.error)
+      ) {
+        await queue.pauseAfterInterruption({
+          droneId: droneIdForStore,
+          chatName: chatNameForStore,
+          promptId: opts.id,
+        });
+      }
       if (updated) notifyPendingPromptChanged(droneIdForStore, chatNameForStore);
       return;
     }
@@ -603,7 +634,7 @@ export function createDronePendingPromptStore(deps: {
         droneId: droneIdForStore,
         chatName: chatNameForStore,
         id: opts.id,
-        patch: opts.patch,
+        patch,
       });
     }
     await updateRegistry((regAny: any) => {
@@ -616,13 +647,58 @@ export function createDronePendingPromptStore(deps: {
       const idx = list.findIndex((item: any) => String(item?.id ?? '').trim() === opts.id);
       if (idx === -1) return;
       const current = list[idx] ?? {};
-      list[idx] = { ...current, ...opts.patch, updatedAt: opts.patch.updatedAt ?? deps.nowIso() };
+      list[idx] = { ...current, ...patch, updatedAt: patch.updatedAt ?? deps.nowIso() };
       entry.pendingPrompts = list;
       drone.chats = drone.chats ?? {};
       drone.chats[chatName] = entry;
       regAny.drones = regAny.drones ?? {};
       regAny.drones[droneId] = drone;
     });
+  }
+
+  async function resolveInterruptedPendingPrompt(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+  }): Promise<{
+    status: 'skipped' | 'not-found' | 'not-blocked';
+  }> {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const chatName = deps.normalizeChatName(opts.chatName);
+    const promptId = String(opts.promptId ?? '').trim();
+    if (!droneId || !chatName || !promptId) return { status: 'not-found' };
+    const queue = promptQueueForActiveDrone();
+    if (queue) {
+      const result = await queue.resolveInterruption({
+        droneId,
+        chatName,
+        promptId,
+      });
+      if (result.status === 'skipped') notifyPendingPromptChanged(droneId, chatName);
+      return result;
+    }
+    // The registry store is import-only compatibility state and cannot provide
+    // an atomic durable pause. Production hubs always use the SQLite queue.
+    return readPendingPrompt({ droneId, chatName, id: promptId })
+      ? { status: 'not-blocked' }
+      : { status: 'not-found' };
+  }
+
+  async function reconcileCompletedInterruption(opts: {
+    droneId: string;
+    chatName: string;
+    completedPromptIds: ReadonlySet<string>;
+  }): Promise<boolean> {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const chatName = deps.normalizeChatName(opts.chatName);
+    const queue = promptQueueForActiveDrone();
+    if (!queue || !droneId) return false;
+    const pause = queue.getPause({ droneId, chatName });
+    const recoveryPromptId = pause?.recoveryPromptId;
+    if (!recoveryPromptId || !opts.completedPromptIds.has(recoveryPromptId)) return false;
+    const completed = await queue.completeRecovery({ droneId, chatName, recoveryPromptId });
+    if (completed) notifyPendingPromptChanged(droneId, chatName);
+    return completed;
   }
 
   async function retryPendingPrompt(opts: {
@@ -643,6 +719,13 @@ export function createDronePendingPromptStore(deps: {
         error: opts.error,
         ...(current?.leaseOwner ? { leaseOwner: current.leaseOwner } : {}),
       });
+      if (
+        result.disposition === 'terminal' &&
+        !current?.action &&
+        isAgentTransportInterruption(opts.error)
+      ) {
+        await queue.pauseAfterInterruption({ droneId, chatName, promptId: opts.id });
+      }
       if (result.disposition !== 'not-claimed') notifyPendingPromptChanged(droneId, chatName);
       return result;
     }
@@ -880,6 +963,8 @@ export function createDronePendingPromptStore(deps: {
     readPendingPromptDispatchWindow,
     readPendingStartupPrompts,
     releasePendingPromptClaim,
+    reconcileCompletedInterruption,
+    resolveInterruptedPendingPrompt,
     resumePendingPromptChats,
     retryPendingPrompt,
     transcriptTurnIdsFromEntry,

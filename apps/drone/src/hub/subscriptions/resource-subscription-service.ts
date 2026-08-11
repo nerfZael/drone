@@ -653,6 +653,7 @@ export class ResourceSubscriptionService {
       await queue.enqueue({
         droneId: currentSubscriber.droneId,
         chatName: currentSubscriber.chatName,
+        submissionSource: 'subscription',
         idempotencyKey: `subscription-batch:${batch.id}`,
         prompt: {
           id: batch.promptId,

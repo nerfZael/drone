@@ -289,4 +289,51 @@ describe('completed external transcript presentation', () => {
     expect(html).toContain('I started inspecting the file.');
     expect(html).toContain('The provider disconnected.');
   });
+
+  test('keeps a completed reconnect failure compact and recoverable', () => {
+    const error = [
+      'Reconnecting... 1/5',
+      'Reconnecting... 5/5',
+      'stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses) (exit 1)',
+    ].join('\n');
+    const html = renderToStaticMarkup(
+      <TranscriptTurn
+        item={{
+          turn: 5,
+          at: '2026-07-20T10:00:10.000Z',
+          prompt: 'Finish the review.',
+          session: 'external-session',
+          logPath: '/tmp/external-session.log',
+          ok: false,
+          output: '',
+          error,
+          activity: {
+            version: 1,
+            source: 'codex',
+            updatedAt: '2026-07-20T10:00:10.000Z',
+            messages: [
+              {
+                role: 'assistant',
+                content: [
+                  { type: 'toolCall', id: 'review', name: 'read_file', arguments: {} },
+                ],
+              },
+              {
+                role: 'toolResult',
+                toolCallId: 'review',
+                content: 'Reviewed',
+              },
+            ],
+          },
+        }}
+        messageId="external-turn-5"
+      />,
+    );
+
+    expect(html).toContain('data-agent-run-failure="connection"');
+    expect(html).toContain('Connection interrupted');
+    expect(html).toContain('Completed steps and any file changes are preserved.');
+    expect(html).toContain('Technical details');
+    expect(html).not.toContain('dh-markdown--error');
+  });
 });

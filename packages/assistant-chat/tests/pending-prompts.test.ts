@@ -10,7 +10,10 @@ import {
   isTerminalPendingPromptState,
   mergeOptimisticPendingPrompts,
   normalizePendingPromptState,
+  normalizePromptQueueInterruption,
+  normalizePromptQueueInterruptionResolution,
   pendingPromptMatchesCompletedTurn,
+  promptQueueInterruptionBlocks,
   replaceOptimisticPendingPromptId,
 } from '../src/pending-prompts';
 
@@ -34,13 +37,36 @@ describe('pending prompt lifecycle', () => {
     expect(isTerminalPendingPrompt({ state: 'failed' })).toBe(true);
   });
 
+  test('normalizes durable interruption barriers and resolved states', () => {
+    expect(
+      normalizePromptQueueInterruption({
+        state: 'continuing',
+        at: '2026-08-11T09:00:00.000Z',
+        recoveryPromptId: ' recovery ',
+      }),
+    ).toEqual({
+      state: 'continuing',
+      at: '2026-08-11T09:00:00.000Z',
+      recoveryPromptId: 'recovery',
+    });
+    expect(promptQueueInterruptionBlocks({ state: 'blocked', at: '' })).toBe(true);
+    expect(promptQueueInterruptionBlocks({ state: 'continued', at: '' })).toBe(false);
+    expect(normalizePromptQueueInterruption({ state: 'unknown' })).toBeUndefined();
+    expect(normalizePromptQueueInterruptionResolution('continue')).toBeUndefined();
+    expect(normalizePromptQueueInterruptionResolution('skip')).toBe('skip');
+    expect(normalizePromptQueueInterruptionResolution('cancel-queued')).toBeUndefined();
+  });
+
   test('matches completed turns by normalized prompt id', () => {
     expect(pendingPromptMatchesCompletedTurn({ id: ' prompt-1 ' }, { id: 'prompt-1' })).toBe(true);
     expect(pendingPromptMatchesCompletedTurn({ id: 'prompt-1' }, { id: 'prompt-2' })).toBe(false);
     expect(completedTurnIds([{ id: ' turn-1 ' }, {}, null])).toEqual(new Set(['turn-1']));
     expect(
       hasActivePendingPrompt(
-        [{ id: 'done', state: 'sent' }, { id: 'queued', state: 'queued' }],
+        [
+          { id: 'done', state: 'sent' },
+          { id: 'queued', state: 'queued' },
+        ],
         [{ id: 'done' }],
       ),
     ).toBe(false);
@@ -54,11 +80,7 @@ describe('pending prompt lifecycle', () => {
       { id: 'stopped', state: 'failed', error: 'Stopped by user.' },
     ];
     expect(
-      filterCompletedPendingPrompts(prompts, [
-        { id: 'done' },
-        { id: 'failed' },
-        { id: 'stopped' },
-      ]),
+      filterCompletedPendingPrompts(prompts, [{ id: 'done' }, { id: 'failed' }, { id: 'stopped' }]),
     ).toEqual([prompts[1], prompts[2]]);
   });
 });
@@ -95,11 +117,7 @@ describe('optimistic pending prompt reconciliation', () => {
       nowMs: Date.parse('2026-07-29T10:00:05.000Z'),
     });
 
-    expect(next.map((prompt) => prompt.id)).toEqual([
-      'server-first',
-      'shared',
-      'local-last',
-    ]);
+    expect(next.map((prompt) => prompt.id)).toEqual(['server-first', 'shared', 'local-last']);
     expect(next[1]).toEqual({
       id: 'shared',
       state: 'sending',

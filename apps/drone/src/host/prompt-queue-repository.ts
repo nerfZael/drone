@@ -1,8 +1,21 @@
 import { applyHubDatabaseMigrations, getHubDatabase } from './hub-database';
 import type { HubDatabase, HubDatabaseConnection, HubDatabaseMigration } from './hub-database';
-import type { AgentRunActivity, ChatQueueAction } from '@drone/assistant-chat';
+import {
+  normalizePromptQueueInterruption,
+  type AgentRunActivity,
+  type ChatQueueAction,
+  type PromptQueueInterruption,
+} from '@drone/assistant-chat';
 
 export type PromptQueueState = 'queued' | 'sending' | 'sent' | 'failed' | 'cancelled';
+
+export type PromptSubmissionSource =
+  | 'human'
+  | 'workflow'
+  | 'subscription'
+  | 'assistant-tool'
+  | 'queue-action'
+  | 'system';
 
 export type PromptQueueItem = {
   id: string;
@@ -13,6 +26,7 @@ export type PromptQueueItem = {
   cwd?: string | null;
   attachments?: unknown;
   deliveryMode?: 'queue' | 'asap';
+  queueInterruption?: PromptQueueInterruption;
   action?: ChatQueueAction;
   state: PromptQueueState;
   error?: string;
@@ -35,6 +49,16 @@ export type PromptQueueRecord = PromptQueueItem & {
   leaseOwner?: string;
   leaseExpiresAt?: string;
   lastError?: string;
+};
+
+export type PromptQueuePause = {
+  droneId: string;
+  chatName: string;
+  interruptedPromptId: string;
+  status: 'blocked' | 'recovering';
+  recoveryPromptId?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export const PROMPT_QUEUE_MIGRATIONS: readonly HubDatabaseMigration[] = [
@@ -147,6 +171,24 @@ export const PROMPT_QUEUE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    name: 'durable chat prompt queue pauses',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE prompt_queue_pauses (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          interrupted_prompt_id TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('blocked', 'recovering')),
+          recovery_prompt_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (drone_id, chat_name)
+        );
+      `);
+    },
+  },
 ];
 
 type PromptRow = {
@@ -163,6 +205,16 @@ type PromptRow = {
   lease_owner: string | null;
   lease_expires_at: string | null;
   last_error: string | null;
+};
+
+type PromptPauseRow = {
+  drone_id: string;
+  chat_name: string;
+  interrupted_prompt_id: string;
+  status: 'blocked' | 'recovering';
+  recovery_prompt_id: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 function normalizeIso(raw: unknown, fallback: string): string {
@@ -255,6 +307,80 @@ function rowForPrompt(
   return recordFromRow(row);
 }
 
+function pauseFromRow(row: PromptPauseRow | undefined): PromptQueuePause | null {
+  if (!row) return null;
+  return {
+    droneId: row.drone_id,
+    chatName: row.chat_name,
+    interruptedPromptId: row.interrupted_prompt_id,
+    status: row.status,
+    ...(row.recovery_prompt_id ? { recoveryPromptId: row.recovery_prompt_id } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function rowForPause(
+  connection: HubDatabaseConnection,
+  droneId: string,
+  chatName: string,
+): PromptQueuePause | null {
+  return pauseFromRow(
+    connection
+      .prepare('SELECT * FROM prompt_queue_pauses WHERE drone_id = ? AND chat_name = ?')
+      .get(droneId, chatName) as PromptPauseRow | undefined,
+  );
+}
+
+const PAUSE_ALLOWS_PROMPT_SQL = `NOT EXISTS (
+  SELECT 1 FROM prompt_queue_pauses AS pause
+  WHERE pause.drone_id = prompts.drone_id
+    AND pause.chat_name = prompts.chat_name
+    AND COALESCE(pause.recovery_prompt_id, '') != prompts.prompt_id
+)`;
+
+const PROMPT_IS_RECOVERY_SQL = `EXISTS (
+  SELECT 1 FROM prompt_queue_pauses AS pause
+  WHERE pause.drone_id = prompts.drone_id
+    AND pause.chat_name = prompts.chat_name
+    AND pause.recovery_prompt_id = prompts.prompt_id
+)`;
+
+const CHAT_HAS_NO_SENDING_PROMPT_SQL = `NOT EXISTS (
+  SELECT 1 FROM prompts AS sending
+  WHERE sending.drone_id = prompts.drone_id
+    AND sending.chat_name = prompts.chat_name
+    AND sending.state = 'sending'
+)`;
+
+function writeInterruptionProjection(
+  connection: HubDatabaseConnection,
+  input: {
+    droneId: string;
+    chatName: string;
+    prompt: PromptQueueRecord;
+    interruption: PromptQueueInterruption;
+    now: string;
+  },
+): void {
+  connection
+    .prepare(
+      `UPDATE prompts SET payload_json = ?, updated_at = ?
+       WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?`,
+    )
+    .run(
+      JSON.stringify({
+        ...input.prompt,
+        queueInterruption: input.interruption,
+        updatedAt: input.now,
+      }),
+      input.now,
+      input.droneId,
+      input.chatName,
+      input.prompt.id,
+    );
+}
+
 export class PromptQueueRepository {
   constructor(private readonly database: HubDatabase) {
     // Migrations are synchronous and idempotent. Keeping them in their own
@@ -269,8 +395,13 @@ export class PromptQueueRepository {
     chatName: string;
     prompt: PromptQueueItem;
     idempotencyKey?: string;
+    submissionSource?: PromptSubmissionSource;
     now?: string;
-  }): Promise<{ inserted: boolean; prompt: PromptQueueRecord }> {
+  }): Promise<{
+    inserted: boolean;
+    prompt: PromptQueueRecord;
+    interruptedPromptId?: string;
+  }> {
     const now = normalizeIso(opts.now, new Date().toISOString());
     const prompt = normalizeItem(opts.prompt, now);
     const idempotencyKey = String(opts.idempotencyKey ?? prompt.id).trim();
@@ -284,6 +415,14 @@ export class PromptQueueRepository {
         .get(opts.droneId);
       if (deletedDrone)
         throw new Error(`cannot enqueue prompt for permanently deleted drone: ${opts.droneId}`);
+      const pause =
+        opts.submissionSource === 'human'
+          ? rowForPause(connection, opts.droneId, opts.chatName)
+          : null;
+      const recoversInterruption = pause?.status === 'blocked' && !prompt.action;
+      const promptToStore: PromptQueueItem = recoversInterruption
+        ? { ...prompt, state: 'queued' }
+        : prompt;
       const info = connection
         .prepare(
           `
@@ -299,13 +438,13 @@ export class PromptQueueRepository {
           opts.chatName,
           prompt.id,
           idempotencyKey,
-          prompt.at,
-          prompt.updatedAt ?? prompt.at,
-          prompt.state,
-          prompt.prompt,
-          JSON.stringify(prompt),
-          prompt.at,
-          prompt.error ?? null,
+          promptToStore.at,
+          promptToStore.updatedAt ?? promptToStore.at,
+          promptToStore.state,
+          promptToStore.prompt,
+          JSON.stringify(promptToStore),
+          promptToStore.at,
+          promptToStore.error ?? null,
         );
       const stored = connection
         .prepare(
@@ -320,7 +459,45 @@ export class PromptQueueRepository {
         .get(opts.droneId, opts.chatName, prompt.id, idempotencyKey) as PromptRow | undefined;
       const record = recordFromRow(stored);
       if (!record) throw new Error(`Failed to persist prompt ${prompt.id}`);
-      return { inserted: Number(info.changes ?? 0) === 1, prompt: record };
+      const inserted = Number(info.changes ?? 0) === 1;
+      if (inserted && recoversInterruption && pause) {
+        const interrupted = rowForPrompt(
+          connection,
+          opts.droneId,
+          opts.chatName,
+          pause.interruptedPromptId,
+        );
+        if (interrupted) {
+          const interruption = normalizePromptQueueInterruption(interrupted.queueInterruption);
+          writeInterruptionProjection(connection, {
+            droneId: opts.droneId,
+            chatName: opts.chatName,
+            prompt: interrupted,
+            interruption: {
+              state: 'continuing',
+              at: interruption?.at || interrupted.updatedAt || interrupted.at || now,
+              recoveryPromptId: record.id,
+            },
+            now,
+          });
+        }
+        connection
+          .prepare(
+            `UPDATE prompt_queue_pauses
+             SET status = 'recovering', recovery_prompt_id = ?, updated_at = ?
+             WHERE drone_id = ? AND chat_name = ?
+               AND interrupted_prompt_id = ? AND status = 'blocked'`,
+          )
+          .run(record.id, now, opts.droneId, opts.chatName, pause.interruptedPromptId);
+      }
+      const currentPause = rowForPause(connection, opts.droneId, opts.chatName);
+      return {
+        inserted,
+        prompt: record,
+        ...(currentPause?.recoveryPromptId === record.id
+          ? { interruptedPromptId: currentPause.interruptedPromptId }
+          : {}),
+      };
     });
   }
 
@@ -419,16 +596,20 @@ export class PromptQueueRepository {
           .prepare(
             `SELECT * FROM prompts
              WHERE drone_id = ? AND chat_name = ? AND state = 'queued'
-               AND sequence <= COALESCE(
-                 (
-                   SELECT MIN(barrier.sequence)
-                   FROM prompts AS barrier
-                   WHERE barrier.drone_id = prompts.drone_id
-                     AND barrier.chat_name = prompts.chat_name
-                     AND barrier.state = 'queued'
-                     AND json_extract(barrier.payload_json, '$.action.type') = 'send-in-new-chat'
-                 ),
-                 sequence
+               AND ${PAUSE_ALLOWS_PROMPT_SQL}
+               AND (
+                 ${PROMPT_IS_RECOVERY_SQL}
+                 OR sequence <= COALESCE(
+                   (
+                     SELECT MIN(barrier.sequence)
+                     FROM prompts AS barrier
+                     WHERE barrier.drone_id = prompts.drone_id
+                       AND barrier.chat_name = prompts.chat_name
+                       AND barrier.state = 'queued'
+                       AND json_extract(barrier.payload_json, '$.action.type') = 'send-in-new-chat'
+                   ),
+                   sequence
+                 )
                )
              ORDER BY
                CASE WHEN json_extract(payload_json, '$.deliveryMode') = 'asap' THEN 0 ELSE 1 END,
@@ -485,8 +666,16 @@ export class PromptQueueRepository {
   }): Promise<number> {
     return await this.database.writeTransaction('rename chat prompt queue', (connection) => {
       connection
+        .prepare('DELETE FROM prompt_queue_pauses WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.newChatName);
+      connection
         .prepare('DELETE FROM prompts WHERE drone_id = ? AND chat_name = ?')
         .run(opts.droneId, opts.newChatName);
+      connection
+        .prepare(
+          'UPDATE prompt_queue_pauses SET chat_name = ? WHERE drone_id = ? AND chat_name = ?',
+        )
+        .run(opts.newChatName, opts.droneId, opts.chatName);
       const info = connection
         .prepare('UPDATE prompts SET chat_name = ? WHERE drone_id = ? AND chat_name = ?')
         .run(opts.newChatName, opts.droneId, opts.chatName);
@@ -496,6 +685,9 @@ export class PromptQueueRepository {
 
   async deleteChat(opts: { droneId: string; chatName: string }): Promise<number> {
     return await this.database.writeTransaction('delete chat prompt queue', (connection) => {
+      connection
+        .prepare('DELETE FROM prompt_queue_pauses WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.chatName);
       const info = connection
         .prepare('DELETE FROM prompts WHERE drone_id = ? AND chat_name = ?')
         .run(opts.droneId, opts.chatName);
@@ -509,6 +701,10 @@ export class PromptQueueRepository {
     );
   }
 
+  getPause(opts: { droneId: string; chatName: string }): PromptQueuePause | null {
+    return this.database.read((connection) => rowForPause(connection, opts.droneId, opts.chatName));
+  }
+
   listQueuedChats(opts?: { now?: string }): Array<{ droneId: string; chatName: string }> {
     const now = normalizeIso(opts?.now, new Date().toISOString());
     return this.database.read((connection) =>
@@ -518,6 +714,7 @@ export class PromptQueueRepository {
             `SELECT drone_id, chat_name
              FROM prompts
              WHERE state = 'queued' AND next_attempt_at <= ?
+               AND ${PAUSE_ALLOWS_PROMPT_SQL}
              GROUP BY drone_id, chat_name
              ORDER BY MIN(sequence)`,
           )
@@ -536,10 +733,18 @@ export class PromptQueueRepository {
         connection
           .prepare(
             `SELECT drone_id, chat_name, MIN(next_attempt_at) AS next_attempt_at
-             FROM prompts
-             WHERE state = 'queued'
+             FROM (
+               SELECT prompts.drone_id, prompts.chat_name, prompts.next_attempt_at
+               FROM prompts
+               WHERE prompts.state = 'queued'
+                 AND ${PAUSE_ALLOWS_PROMPT_SQL}
+               UNION ALL
+               SELECT drone_id, chat_name, updated_at AS next_attempt_at
+               FROM prompt_queue_pauses
+               WHERE status = 'recovering'
+             ) AS wakeups
              GROUP BY drone_id, chat_name
-             ORDER BY MIN(sequence)`,
+             ORDER BY MIN(next_attempt_at)`,
           )
           .all() as Array<{
           drone_id: string;
@@ -583,47 +788,52 @@ export class PromptQueueRepository {
             WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?
               AND state = 'queued'
               AND next_attempt_at <= ?
-              AND NOT EXISTS (
-                SELECT 1 FROM prompts AS blocker
-                WHERE blocker.drone_id = prompts.drone_id
-                  AND blocker.chat_name = prompts.chat_name
-                  AND (
-                    blocker.state = 'sending'
-                    OR (
-                      blocker.state = 'queued'
-                      AND blocker.sequence < prompts.sequence
-                      AND json_extract(blocker.payload_json, '$.action.type') = 'send-in-new-chat'
-                    )
-                    OR (
-                      blocker.state = 'queued'
-                      AND blocker.sequence <= COALESCE(
-                        (
-                          SELECT MIN(barrier.sequence)
-                          FROM prompts AS barrier
-                          WHERE barrier.drone_id = prompts.drone_id
-                            AND barrier.chat_name = prompts.chat_name
-                            AND barrier.state = 'queued'
-                            AND json_extract(barrier.payload_json, '$.action.type') = 'send-in-new-chat'
-                        ),
-                        blocker.sequence
+              AND ${PAUSE_ALLOWS_PROMPT_SQL}
+              AND (NOT ${PROMPT_IS_RECOVERY_SQL} OR ${CHAT_HAS_NO_SENDING_PROMPT_SQL})
+              AND (
+                ${PROMPT_IS_RECOVERY_SQL}
+                OR NOT EXISTS (
+                  SELECT 1 FROM prompts AS blocker
+                  WHERE blocker.drone_id = prompts.drone_id
+                    AND blocker.chat_name = prompts.chat_name
+                    AND (
+                      blocker.state = 'sending'
+                      OR (
+                        blocker.state = 'queued'
+                        AND blocker.sequence < prompts.sequence
+                        AND json_extract(blocker.payload_json, '$.action.type') = 'send-in-new-chat'
                       )
-                      AND (
-                        CASE WHEN json_extract(blocker.payload_json, '$.deliveryMode') = 'asap'
-                          THEN 0 ELSE 1 END
-                        <
-                        CASE WHEN json_extract(prompts.payload_json, '$.deliveryMode') = 'asap'
-                          THEN 0 ELSE 1 END
-                        OR (
+                      OR (
+                        blocker.state = 'queued'
+                        AND blocker.sequence <= COALESCE(
+                          (
+                            SELECT MIN(barrier.sequence)
+                            FROM prompts AS barrier
+                            WHERE barrier.drone_id = prompts.drone_id
+                              AND barrier.chat_name = prompts.chat_name
+                              AND barrier.state = 'queued'
+                              AND json_extract(barrier.payload_json, '$.action.type') = 'send-in-new-chat'
+                          ),
+                          blocker.sequence
+                        )
+                        AND (
                           CASE WHEN json_extract(blocker.payload_json, '$.deliveryMode') = 'asap'
                             THEN 0 ELSE 1 END
-                          =
+                          <
                           CASE WHEN json_extract(prompts.payload_json, '$.deliveryMode') = 'asap'
                             THEN 0 ELSE 1 END
-                          AND blocker.sequence < prompts.sequence
+                          OR (
+                            CASE WHEN json_extract(blocker.payload_json, '$.deliveryMode') = 'asap'
+                              THEN 0 ELSE 1 END
+                            =
+                            CASE WHEN json_extract(prompts.payload_json, '$.deliveryMode') = 'asap'
+                              THEN 0 ELSE 1 END
+                            AND blocker.sequence < prompts.sequence
+                          )
                         )
                       )
                     )
-                  )
+                )
               )
             RETURNING *
           `,
@@ -660,6 +870,8 @@ export class PromptQueueRepository {
                  last_error = NULL
              WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?
                AND state = 'queued'
+               AND ${PAUSE_ALLOWS_PROMPT_SQL}
+               AND (NOT ${PROMPT_IS_RECOVERY_SQL} OR ${CHAT_HAS_NO_SENDING_PROMPT_SQL})
              RETURNING *`,
           )
           .get(now, leaseOwner, leaseExpiresAt, opts.droneId, opts.chatName, opts.promptId) as
@@ -686,6 +898,7 @@ export class PromptQueueRepository {
         | 'fileChangesBaseline'
         | 'fileChanges'
         | 'action'
+        | 'queueInterruption'
         | 'startedAt'
         | 'updatedAt'
       >
@@ -761,17 +974,30 @@ export class PromptQueueRepository {
         return { disposition: 'not-claimed' as const };
       }
       if (current.attemptCount >= maxAttempts) {
+        const terminalPayload = {
+          ...current,
+          state: 'failed' as const,
+          error: opts.error,
+          updatedAt: now,
+        };
         connection
           .prepare(
             `
             UPDATE prompts
             SET state = 'failed', updated_at = ?, last_error = ?,
                 lease_owner = NULL, lease_expires_at = NULL,
-                payload_json = json_set(payload_json, '$.state', 'failed', '$.error', ?, '$.updatedAt', ?)
+                payload_json = ?
             WHERE drone_id = ? AND chat_name = ? AND prompt_id = ? AND state = 'sending'
           `,
           )
-          .run(now, opts.error, opts.error, now, opts.droneId, opts.chatName, opts.promptId);
+          .run(
+            now,
+            opts.error,
+            JSON.stringify(terminalPayload),
+            opts.droneId,
+            opts.chatName,
+            opts.promptId,
+          );
         return { disposition: 'terminal' as const };
       }
       const exponent = Math.max(0, current.attemptCount - 1);
@@ -880,6 +1106,161 @@ export class PromptQueueRepository {
     );
   }
 
+  async pauseAfterInterruption(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    now?: string;
+  }): Promise<boolean> {
+    const now = normalizeIso(opts.now, new Date().toISOString());
+    return await this.database.writeTransaction('pause interrupted prompt queue', (connection) => {
+      const interrupted = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
+      if (!interrupted || interrupted.state !== 'failed' || interrupted.action) return false;
+
+      const previousPause = rowForPause(connection, opts.droneId, opts.chatName);
+      if (
+        previousPause?.interruptedPromptId === opts.promptId &&
+        previousPause.status === 'recovering'
+      ) {
+        return true;
+      }
+      if (
+        previousPause &&
+        previousPause.interruptedPromptId !== opts.promptId &&
+        previousPause.recoveryPromptId !== opts.promptId
+      ) {
+        return false;
+      }
+
+      if (
+        previousPause?.recoveryPromptId === opts.promptId &&
+        previousPause.interruptedPromptId !== opts.promptId
+      ) {
+        const origin = rowForPrompt(
+          connection,
+          opts.droneId,
+          opts.chatName,
+          previousPause.interruptedPromptId,
+        );
+        if (origin) {
+          const originInterruption = normalizePromptQueueInterruption(origin.queueInterruption);
+          writeInterruptionProjection(connection, {
+            droneId: opts.droneId,
+            chatName: opts.chatName,
+            prompt: origin,
+            interruption: {
+              state: 'continued',
+              at: originInterruption?.at || origin.updatedAt || origin.at || now,
+              resolvedAt: now,
+              recoveryPromptId: opts.promptId,
+            },
+            now,
+          });
+        }
+      }
+
+      const existingInterruption = normalizePromptQueueInterruption(interrupted.queueInterruption);
+      writeInterruptionProjection(connection, {
+        droneId: opts.droneId,
+        chatName: opts.chatName,
+        prompt: interrupted,
+        interruption: { state: 'blocked', at: existingInterruption?.at || now },
+        now,
+      });
+      connection
+        .prepare(
+          `INSERT INTO prompt_queue_pauses (
+             drone_id, chat_name, interrupted_prompt_id, status,
+             recovery_prompt_id, created_at, updated_at
+           ) VALUES (?, ?, ?, 'blocked', NULL, ?, ?)
+           ON CONFLICT (drone_id, chat_name) DO UPDATE SET
+             interrupted_prompt_id = excluded.interrupted_prompt_id,
+             status = 'blocked',
+             recovery_prompt_id = NULL,
+             updated_at = excluded.updated_at`,
+        )
+        .run(opts.droneId, opts.chatName, opts.promptId, previousPause?.createdAt || now, now);
+      return true;
+    });
+  }
+
+  async resolveInterruption(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    now?: string;
+  }): Promise<{
+    status: 'skipped' | 'not-found' | 'not-blocked';
+  }> {
+    const now = normalizeIso(opts.now, new Date().toISOString());
+    return await this.database.writeTransaction('resolve interrupted prompt', (connection) => {
+      const pause = rowForPause(connection, opts.droneId, opts.chatName);
+      if (!pause || pause.interruptedPromptId !== opts.promptId || pause.status !== 'blocked') {
+        const prompt = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
+        return { status: prompt ? ('not-blocked' as const) : ('not-found' as const) };
+      }
+      const interrupted = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
+      if (!interrupted || interrupted.state !== 'failed') return { status: 'not-found' as const };
+      const interruption = normalizePromptQueueInterruption(interrupted.queueInterruption);
+      writeInterruptionProjection(connection, {
+        droneId: opts.droneId,
+        chatName: opts.chatName,
+        prompt: interrupted,
+        interruption: {
+          state: 'skipped',
+          at: interruption?.at || interrupted.updatedAt || interrupted.at || now,
+          resolvedAt: now,
+        },
+        now,
+      });
+      connection
+        .prepare('DELETE FROM prompt_queue_pauses WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.chatName);
+      return { status: 'skipped' as const };
+    });
+  }
+
+  async completeRecovery(opts: {
+    droneId: string;
+    chatName: string;
+    recoveryPromptId: string;
+    now?: string;
+  }): Promise<boolean> {
+    const now = normalizeIso(opts.now, new Date().toISOString());
+    return await this.database.writeTransaction(
+      'complete interrupted prompt recovery',
+      (connection) => {
+        const pause = rowForPause(connection, opts.droneId, opts.chatName);
+        if (!pause || pause.recoveryPromptId !== opts.recoveryPromptId) return false;
+        const origin = rowForPrompt(
+          connection,
+          opts.droneId,
+          opts.chatName,
+          pause.interruptedPromptId,
+        );
+        if (origin) {
+          const interruption = normalizePromptQueueInterruption(origin.queueInterruption);
+          writeInterruptionProjection(connection, {
+            droneId: opts.droneId,
+            chatName: opts.chatName,
+            prompt: origin,
+            interruption: {
+              state: 'continued',
+              at: interruption?.at || origin.updatedAt || origin.at || now,
+              resolvedAt: now,
+              recoveryPromptId: opts.recoveryPromptId,
+            },
+            now,
+          });
+        }
+        connection
+          .prepare('DELETE FROM prompt_queue_pauses WHERE drone_id = ? AND chat_name = ?')
+          .run(opts.droneId, opts.chatName);
+        return true;
+      },
+    );
+  }
+
   async cancelQueued(opts: {
     droneId: string;
     chatName: string;
@@ -901,6 +1282,41 @@ export class PromptQueueRepository {
              AND state IN ('queued', 'failed')`,
         )
         .run(cancelledAt, cancelledAt, opts.droneId, opts.chatName, opts.promptId);
+      if (Number(info.changes ?? 0) === 1) {
+        const pause = rowForPause(connection, opts.droneId, opts.chatName);
+        if (pause?.interruptedPromptId === opts.promptId) {
+          connection
+            .prepare('DELETE FROM prompt_queue_pauses WHERE drone_id = ? AND chat_name = ?')
+            .run(opts.droneId, opts.chatName);
+        } else if (pause?.recoveryPromptId === opts.promptId) {
+          const origin = rowForPrompt(
+            connection,
+            opts.droneId,
+            opts.chatName,
+            pause.interruptedPromptId,
+          );
+          if (origin) {
+            const interruption = normalizePromptQueueInterruption(origin.queueInterruption);
+            writeInterruptionProjection(connection, {
+              droneId: opts.droneId,
+              chatName: opts.chatName,
+              prompt: origin,
+              interruption: {
+                state: 'blocked',
+                at: interruption?.at || origin.updatedAt || origin.at || cancelledAt,
+              },
+              now: cancelledAt,
+            });
+          }
+          connection
+            .prepare(
+              `UPDATE prompt_queue_pauses
+               SET status = 'blocked', recovery_prompt_id = NULL, updated_at = ?
+               WHERE drone_id = ? AND chat_name = ?`,
+            )
+            .run(cancelledAt, opts.droneId, opts.chatName);
+        }
+      }
       return {
         cancelled: Number(info.changes ?? 0) === 1,
         state: current.state,
@@ -911,10 +1327,13 @@ export class PromptQueueRepository {
   async cancelPendingForDrone(opts: { droneId: string; error?: string }): Promise<number> {
     const cancelledAt = new Date().toISOString();
     const error = String(opts.error ?? 'Drone failed to start.').trim() || 'Drone failed to start.';
-    return await this.database.writeTransaction('cancel failed drone prompt queue', (connection) => {
-      const info = connection
-        .prepare(
-          `UPDATE prompts
+    return await this.database.writeTransaction(
+      'cancel failed drone prompt queue',
+      (connection) => {
+        connection.prepare('DELETE FROM prompt_queue_pauses WHERE drone_id = ?').run(opts.droneId);
+        const info = connection
+          .prepare(
+            `UPDATE prompts
            SET state = 'cancelled', updated_at = ?, last_error = ?,
                lease_owner = NULL, lease_expires_at = NULL,
                payload_json = json_set(
@@ -924,10 +1343,11 @@ export class PromptQueueRepository {
                  '$.updatedAt', ?
                )
            WHERE drone_id = ? AND state IN ('queued', 'failed')`,
-        )
-        .run(cancelledAt, error, error, cancelledAt, opts.droneId);
-      return Number(info.changes ?? 0);
-    });
+          )
+          .run(cancelledAt, error, error, cancelledAt, opts.droneId);
+        return Number(info.changes ?? 0);
+      },
+    );
   }
 }
 

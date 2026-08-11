@@ -456,4 +456,42 @@ describe('mobile drone pending prompts', () => {
       },
     ]);
   });
+
+  test('retains an interrupted activity row so the queue can be explicitly resumed', () => {
+    const queueInterruption = {
+      state: 'blocked' as const,
+      at: '2026-08-11T09:00:00.000Z',
+    };
+    expect(
+      mobileDronePendingPrompts(
+        [
+          {
+            id: 'interrupted-with-activity',
+            prompt: 'Finish the implementation',
+            state: 'failed',
+            error: 'stream disconnected before completion',
+            queueInterruption,
+            activity: {
+              version: 1,
+              source: 'codex',
+              updatedAt: '2026-08-11T09:00:01.000Z',
+              messages: [],
+            },
+          },
+        ],
+        [],
+      ),
+    ).toEqual([
+      {
+        id: 'interrupted-with-activity',
+        prompt: 'Finish the implementation',
+        status: 'failed',
+        error: 'stream disconnected before completion',
+        imageCount: 0,
+        cancelable: false,
+        delivered: true,
+        queueInterruption,
+      },
+    ]);
+  });
 });

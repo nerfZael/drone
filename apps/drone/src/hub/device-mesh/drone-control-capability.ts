@@ -3,6 +3,8 @@ import {
   filterCompletedPendingPrompts,
   isSendInNewChatQueueAction,
   normalizePendingPromptState,
+  normalizePromptQueueInterruption,
+  normalizePromptQueueInterruptionResolution,
 } from '@drone/assistant-chat';
 import type { CapabilityHandler } from './device-mesh-types';
 import {
@@ -200,12 +202,14 @@ function compactPendingPrompts(value: unknown): any[] {
     const agentPlan = compactAgentPlanForMesh(prompt?.agentPlan);
     const fileChanges = compactAgentRunFileChangesForMesh(prompt?.fileChanges);
     const approvals = compactCodexApprovals(prompt?.approvals);
+    const queueInterruption = normalizePromptQueueInterruption(prompt?.queueInterruption);
     return {
       id: String(prompt?.id ?? '').slice(0, 160),
       at: truncateUtf8(prompt?.at, 128),
       ...(startedAt ? { startedAt: truncateUtf8(startedAt, 128) } : {}),
       prompt: truncateUtf8(prompt?.prompt, promptLimit),
       state: normalizePendingPromptState(prompt?.state, 'queued'),
+      ...(queueInterruption ? { queueInterruption } : {}),
       ...(isSendInNewChatQueueAction(prompt?.action) ? { action: prompt.action } : {}),
       ...(prompt?.error ? { error: truncateUtf8(prompt.error, errorLimit) } : {}),
       attachmentCount: attachments.length,
@@ -1524,6 +1528,23 @@ export function createDroneControlCapability(
           access,
           `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/approvals/${encodeURIComponent(approvalId)}/${decision}`,
           { method: 'POST', body: '{}' },
+        );
+      }
+      if (operation === 'chat.interruption.resolve') {
+        const droneId = requiredText(payload.droneId, 'droneId');
+        const chatName = requiredText(payload.chatName, 'chatName');
+        const promptId = requiredText(payload.promptId, 'promptId');
+        const resolution = normalizePromptQueueInterruptionResolution(payload.resolution);
+        if (!resolution) {
+          throw Object.assign(
+            new Error(`unsupported interruption resolution: ${String(payload.resolution ?? '')}`),
+            { code: 'INVALID_REQUEST' },
+          );
+        }
+        return await localHubRequest(
+          access,
+          `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/pending/${encodeURIComponent(promptId)}/interruption`,
+          { method: 'POST', body: JSON.stringify({ resolution }) },
         );
       }
       if (operation === 'chat.message.delete') {

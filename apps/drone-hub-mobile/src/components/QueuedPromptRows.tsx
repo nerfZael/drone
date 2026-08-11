@@ -4,10 +4,15 @@ import X from 'lucide-react-native/icons/x';
 import Square from 'lucide-react-native/icons/square';
 import MessageSquarePlus from 'lucide-react-native/icons/message-square-plus';
 import {
+  agentRunFailurePresentation,
+  normalizePromptQueueInterruption,
   parseEventNotificationPrompt,
   resolveChatQueueActionPresentation,
   stoppedRunDetail,
   type AgentPlan,
+  type AgentRunFailurePresentation,
+  type PromptQueueInterruption,
+  type PromptQueueInterruptionResolution,
   type SendInNewChatQueueAction,
 } from '@drone/assistant-chat';
 import { colors } from '../theme';
@@ -24,8 +29,81 @@ export type MobileQueuedPrompt = {
   startedAt?: string;
   agentPlan?: AgentPlan;
   delivered?: boolean;
+  queueInterruption?: PromptQueueInterruption;
   action?: SendInNewChatQueueAction;
 };
+
+export function MobileAgentFailureDetails({
+  error,
+  failure: providedFailure,
+  hasSavedProgress = false,
+  queueInterruption,
+  resolving = false,
+  onResolve,
+}: {
+  error?: string | null;
+  failure?: AgentRunFailurePresentation;
+  hasSavedProgress?: boolean;
+  queueInterruption?: PromptQueueInterruption;
+  resolving?: boolean;
+  onResolve?: (resolution: PromptQueueInterruptionResolution) => void;
+}) {
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const failure = providedFailure ?? agentRunFailurePresentation(error);
+  return (
+    <View style={styles.interruptedCopy}>
+      <Text style={styles.interruptedSummary}>
+        {failure.summary}{' '}
+        {queueInterruption?.state === 'blocked'
+          ? 'Queued and steering prompts are paused so they cannot run out of turn. Send a message when you are ready to continue.'
+          : queueInterruption?.state === 'continuing'
+            ? 'Your follow-up is queued. Later prompts remain paused until it finishes.'
+            : queueInterruption?.state === 'continued'
+              ? 'Your follow-up finished. Queued prompts can run normally.'
+              : queueInterruption?.state === 'skipped'
+                ? 'This response was skipped. Queued prompts can run normally.'
+                : hasSavedProgress
+                  ? 'Completed steps and any file changes are preserved. Send a follow-up to continue when you’re connected.'
+                  : 'Send a follow-up to try again when you’re connected.'}
+      </Text>
+      {queueInterruption?.state === 'blocked' && onResolve ? (
+        <View style={styles.interruptionActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Skip interrupted response and run queued prompts"
+            disabled={resolving}
+            onPress={() => onResolve('skip')}
+            style={({ pressed }) => [
+              styles.interruptionTextButton,
+              resolving && styles.disabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.interruptionText}>
+              {resolving ? 'Working…' : 'Skip and run queued'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={detailsOpen ? 'Hide technical details' : 'Show technical details'}
+        accessibilityState={{ expanded: detailsOpen }}
+        onPress={() => setDetailsOpen((value) => !value)}
+        style={({ pressed }) => pressed && styles.pressed}
+      >
+        <Text style={styles.technicalToggle}>
+          {detailsOpen ? 'Hide technical details' : 'Technical details'}
+        </Text>
+      </Pressable>
+      {detailsOpen ? (
+        <Text selectable style={styles.technicalError}>
+          {failure.technicalMessage}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
 
 export function QueuedPromptRows({
   prompts,
@@ -33,12 +111,16 @@ export function QueuedPromptRows({
   onCancel,
   creatingId = '',
   onCreateNow,
+  resolvingInterruptionId = '',
+  onResolveInterruption,
 }: {
   prompts: MobileQueuedPrompt[];
   cancellingId?: string;
   onCancel?: (promptId: string) => void;
   creatingId?: string;
   onCreateNow?: (promptId: string) => void;
+  resolvingInterruptionId?: string;
+  onResolveInterruption?: (promptId: string, resolution: PromptQueueInterruptionResolution) => void;
 }) {
   if (prompts.length === 0) return null;
   return (
@@ -46,9 +128,7 @@ export function QueuedPromptRows({
       {prompts.map((prompt) => {
         const eventNotification = parseEventNotificationPrompt(prompt.prompt);
         if (eventNotification) {
-          return (
-            <MobileEventNotification key={prompt.id} notification={eventNotification} />
-          );
+          return <MobileEventNotification key={prompt.id} notification={eventNotification} />;
         }
         const attachmentCount = Math.max(
           0,
@@ -60,7 +140,16 @@ export function QueuedPromptRows({
         const cancelling = cancellingId === prompt.id;
         const creating = creatingId === prompt.id;
         const actionPresentation = resolveChatQueueActionPresentation(prompt.action, prompt.status);
-        const label = failed ? 'Failed' : prompt.status === 'queued' ? 'Queued' : 'Pending';
+        const interrupted =
+          failed && !actionPresentation && agentRunFailurePresentation(prompt.error).recoverable;
+        const queueInterruption = normalizePromptQueueInterruption(prompt.queueInterruption);
+        const label = failed
+          ? interrupted
+            ? 'Interrupted'
+            : 'Failed'
+          : prompt.status === 'queued'
+            ? 'Queued'
+            : 'Pending';
         if (actionPresentation) {
           return (
             <View
@@ -176,22 +265,45 @@ export function QueuedPromptRows({
           );
         }
         return (
-          <View key={prompt.id} style={[styles.row, failed && styles.rowFailed]}>
+          <View
+            key={prompt.id}
+            style={[styles.row, failed && (interrupted ? styles.rowInterrupted : styles.rowFailed)]}
+          >
             <View style={styles.body}>
               <View style={styles.meta}>
-                <Text style={[styles.badge, failed && styles.badgeFailed]}>{label}</Text>
+                <Text
+                  style={[
+                    styles.badge,
+                    failed && (interrupted ? styles.badgeInterrupted : styles.badgeFailed),
+                  ]}
+                >
+                  {label}
+                </Text>
                 {attachmentCount ? (
                   <Text style={styles.imageCount}>
                     {attachmentCount} attachment{attachmentCount === 1 ? '' : 's'}
                   </Text>
                 ) : null}
               </View>
-              {prompt.prompt ? (
+              {prompt.prompt && !prompt.delivered ? (
                 <Text selectable style={styles.prompt}>
                   {prompt.prompt}
                 </Text>
               ) : null}
-              {failed && prompt.error ? <Text style={styles.error}>{prompt.error}</Text> : null}
+              {interrupted ? (
+                <MobileAgentFailureDetails
+                  error={prompt.error}
+                  queueInterruption={queueInterruption}
+                  resolving={resolvingInterruptionId === prompt.id}
+                  onResolve={
+                    onResolveInterruption
+                      ? (resolution) => onResolveInterruption(prompt.id, resolution)
+                      : undefined
+                  }
+                />
+              ) : failed && prompt.error ? (
+                <Text style={styles.error}>{prompt.error}</Text>
+              ) : null}
             </View>
             {prompt.cancelable && onCancel ? (
               <Pressable
@@ -207,7 +319,11 @@ export function QueuedPromptRows({
                   pressed && styles.pressed,
                 ]}
               >
-                <X color={failed ? colors.danger : colors.muted} size={15} strokeWidth={2.2} />
+                <X
+                  color={interrupted ? colors.warning : failed ? colors.danger : colors.muted}
+                  size={15}
+                  strokeWidth={2.2}
+                />
               </Pressable>
             ) : null}
           </View>
@@ -233,6 +349,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   rowFailed: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
+  rowInterrupted: { borderColor: colors.warningBorder, backgroundColor: colors.warningDark },
   actionRow: { borderColor: colors.accentBorder, backgroundColor: colors.surface1 },
   actionIcon: {
     width: 28,
@@ -319,9 +436,23 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   badgeFailed: { color: colors.danger },
+  badgeInterrupted: { color: colors.warning },
   imageCount: { color: colors.muted, fontSize: 10, fontWeight: '700' },
   prompt: { color: colors.text, fontSize: 14, lineHeight: 20 },
   error: { color: colors.danger, fontSize: 11, lineHeight: 16 },
+  interruptedCopy: { gap: 5 },
+  interruptedSummary: { color: colors.muted, fontSize: 11, lineHeight: 16 },
+  technicalToggle: { color: colors.warning, fontSize: 10, fontWeight: '700' },
+  technicalError: {
+    maxHeight: 120,
+    color: colors.mutedDim,
+    fontFamily: 'monospace',
+    fontSize: 9,
+    lineHeight: 14,
+  },
+  interruptionActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
+  interruptionTextButton: { paddingHorizontal: 6, paddingVertical: 7 },
+  interruptionText: { color: colors.muted, fontSize: 10, fontWeight: '700' },
   cancel: {
     width: 28,
     height: 28,

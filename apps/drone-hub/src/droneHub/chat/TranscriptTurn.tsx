@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  agentRunFailurePresentation,
   agentRunActivityHasResponse,
   isStoppedRunError,
   normalizeAgentRunActivity,
@@ -26,6 +27,8 @@ import { collectInlineAgentMedia } from './inline-agent-media';
 import { AgentRunSummaryLine } from './WorkingElapsedStatus';
 import { UserChatMessage } from './UserChatMessage';
 import { StoppedRunNotice } from './StoppedRunNotice';
+import { AgentRunFailureNotice } from './AgentRunFailureNotice';
+import { ChangedFilesCard } from './ChangedFilesCard';
 import { AgentRunActivityView } from '../assistant/AgentRunActivityView';
 import { isSubscriptionEventPrompt, SubscriptionEventMessage } from './SubscriptionEventBadge';
 
@@ -87,6 +90,8 @@ export const TranscriptTurn = React.memo(
     const isSilentCompletion = item.silentCompletion === true;
     const isUserOnly = item.userOnly === true;
     const isStopped = !item.ok && isStoppedRunError(item.error);
+    const failure = agentRunFailurePresentation(stripAnsi(item.error || ''));
+    const isInterrupted = !item.ok && !isStopped && failure.recoverable;
     const cleaned = isStopped
       ? stripAnsi(item.output || '')
       : item.ok
@@ -103,7 +108,7 @@ export const TranscriptTurn = React.memo(
     const activityToolCallCount =
       activity?.messages.reduce((count, message) => count + toolCalls(message).length, 0) ?? 0;
     const showFallbackResponse =
-      !isSilentCompletion && !isUserOnly && (!activityHasResponse || !item.ok);
+      !isSilentCompletion && !isUserOnly && !isInterrupted && (!activityHasResponse || !item.ok);
     const renderedInlineMediaHrefs = React.useMemo(
       () =>
         collectInlineAgentMedia(cleanedAgentMessage, droneId, droneHomePath)
@@ -183,7 +188,7 @@ export const TranscriptTurn = React.memo(
               droneHomePath,
               onOpenFileReference,
               onOpenLink,
-              fileChanges: item.fileChanges,
+              fileChanges: isInterrupted ? undefined : item.fileChanges,
               initiallyExpandFileChanges,
               initiallyExpandLinkedPullRequests: autoExpandAgentMessage,
               actionEnd:
@@ -329,6 +334,19 @@ export const TranscriptTurn = React.memo(
               }
             />
           </ChatMessageFrame>
+        ) : null}
+        {isInterrupted ? (
+          <>
+            <AgentRunFailureNotice
+              error={item.error}
+              at={agentIso}
+              hasSavedProgress={Boolean(activity?.messages.length || item.fileChanges)}
+            />
+            <ChangedFilesCard
+              fileChanges={item.fileChanges}
+              initiallyExpanded={initiallyExpandFileChanges}
+            />
+          </>
         ) : null}
         {isStopped ? <StoppedRunNotice reason={item.error} at={agentIso} /> : null}
       </div>

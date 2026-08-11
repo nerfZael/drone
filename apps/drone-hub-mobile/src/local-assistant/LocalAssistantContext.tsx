@@ -1,5 +1,6 @@
 import React from 'react';
 import * as Crypto from 'expo-crypto';
+import { isAgentTransportInterruption, promptQueueInterruptionBlocks } from '@drone/assistant-chat';
 import { useMesh } from '../mesh/MeshContext';
 import { readLocalAssistantApiKey, loadLocalAssistantSettings } from './local-assistant-settings';
 import {
@@ -61,25 +62,24 @@ export type LocalAssistantContextValue = {
     promptImages?: LocalAssistantPromptImage[],
   ): Promise<void>;
   cancelQueuedPrompt(threadId: string, promptId: string): Promise<void>;
+  skipInterruption(threadId: string): Promise<void>;
   stop(threadId: string): void;
 };
 
 const LocalAssistantContext = React.createContext<LocalAssistantContextValue | null>(null);
 
 function userMessage(
+  id: string,
   prompt: string,
   promptImages: LocalAssistantPromptImage[],
 ): LocalAssistantMessage {
   return {
-    id: Crypto.randomUUID(),
+    id,
     createdAt: new Date().toISOString(),
     role: 'user',
     content:
       promptImages.length > 0
-        ? [
-            ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
-            ...promptImages,
-          ]
+        ? [...(prompt ? [{ type: 'text' as const, text: prompt }] : []), ...promptImages]
         : prompt,
   };
 }
@@ -94,11 +94,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
   const threadsRef = React.useRef<LocalAssistantThread[]>([]);
   const abortRef = React.useRef<{ threadId: string; controller: AbortController } | null>(null);
   const sendPromptRef = React.useRef<
-    (
-      threadId: string,
-      prompt: string,
-      promptImages?: LocalAssistantPromptImage[],
-    ) => Promise<void>
+    (threadId: string, prompt: string, promptImages?: LocalAssistantPromptImage[]) => Promise<void>
   >(async () => {});
   const drainQueuedPromptsRef = React.useRef<() => void>(() => {});
   const drainingQueuedPromptRef = React.useRef(false);
@@ -196,6 +192,8 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         thinkingLevel: settings.thinkingLevel,
         status: 'idle',
         error: null,
+        queueInterruption: undefined,
+        interruptedPromptId: undefined,
         workspaceTargets: [],
         autoApprove: false,
         agentPermissionMode: 'execute',
@@ -257,6 +255,8 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         updatedAt: now,
         status: 'idle',
         error: null,
+        queueInterruption: undefined,
+        interruptedPromptId: undefined,
         workspaceTargets: source.workspaceTargets.map((target) => ({ ...target })),
         messages: source.messages.map((message) => ({ ...message })),
         queuedPrompts: [],
@@ -368,6 +368,8 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         });
         return;
       }
+      const recoveringInterruption = promptQueueInterruptionBlocks(current.queueInterruption);
+      const promptId = `mobile_message_${Crypto.randomUUID()}`;
       setError(null);
       const controller = new AbortController();
       abortRef.current = { threadId, controller };
@@ -397,7 +399,16 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
           model: latest.model || settings.model,
           status: 'running',
           error: null,
-          messages: [...latest.messages, userMessage(prompt, promptImages)],
+          messages: [...latest.messages, userMessage(promptId, prompt, promptImages)],
+          ...(recoveringInterruption
+            ? {
+                queueInterruption: {
+                  state: 'continuing' as const,
+                  at: current.queueInterruption?.at || new Date().toISOString(),
+                  recoveryPromptId: promptId,
+                },
+              }
+            : {}),
         });
         if (!running) throw new Error('Built-in chat was not found');
         const workspaceRuntime = createWorkspaceToolRuntime(running, mesh.request);
@@ -470,12 +481,25 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
           messages: boundLocalAssistantMessages(messages),
           status: 'idle',
           error: null,
+          queueInterruption: undefined,
+          interruptedPromptId: undefined,
         });
       } catch (nextError: any) {
         const stopped = controller.signal.aborted;
+        const transportInterrupted = !stopped && isAgentTransportInterruption(nextError);
+        const queueBlocked = recoveringInterruption || transportInterrupted;
+        const interruptionAt = current.queueInterruption?.at || new Date().toISOString();
         await persistRunning({
           status: stopped ? 'idle' : 'error',
           error: stopped ? null : (nextError?.message ?? String(nextError)),
+          ...(queueBlocked
+            ? {
+                queueInterruption: { state: 'blocked' as const, at: interruptionAt },
+                interruptedPromptId: recoveringInterruption
+                  ? current.interruptedPromptId || promptId
+                  : promptId,
+              }
+            : {}),
         });
         if (!stopped) throw nextError;
       } finally {
@@ -491,9 +515,11 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
   drainQueuedPromptsRef.current = () => {
     if (abortRef.current || drainingQueuedPromptRef.current) return;
     const candidates = threadsRef.current.flatMap((thread, threadIndex) =>
-      thread.queuedPrompts.flatMap((prompt, promptIndex) =>
-        prompt.status === 'queued' ? [{ thread, prompt, threadIndex, promptIndex }] : [],
-      ),
+      promptQueueInterruptionBlocks(thread.queueInterruption)
+        ? []
+        : thread.queuedPrompts.flatMap((prompt, promptIndex) =>
+            prompt.status === 'queued' ? [{ thread, prompt, threadIndex, promptIndex }] : [],
+          ),
     );
     candidates.sort((left, right) => {
       const leftMs = Date.parse(left.prompt.createdAt);
@@ -559,6 +585,23 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     [mutateThread],
   );
 
+  const skipInterruption = React.useCallback(
+    async (threadId: string) => {
+      const result = await mutateThread(threadId, (current) => {
+        if (!promptQueueInterruptionBlocks(current.queueInterruption)) return current;
+        return {
+          ...current,
+          queueInterruption: undefined,
+          interruptedPromptId: undefined,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+      if (!result) throw new Error('Built-in chat was not found');
+      queueMicrotask(() => drainQueuedPromptsRef.current());
+    },
+    [mutateThread],
+  );
+
   const stop = React.useCallback((threadId: string) => {
     if (abortRef.current?.threadId === threadId) abortRef.current.controller.abort();
   }, []);
@@ -578,6 +621,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     resolveApproval,
     sendPrompt,
     cancelQueuedPrompt,
+    skipInterruption,
     stop,
   };
   return <LocalAssistantContext.Provider value={value}>{children}</LocalAssistantContext.Provider>;

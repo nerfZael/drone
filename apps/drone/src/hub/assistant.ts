@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import {
   completedTurnIds as createCompletedTurnIds,
+  isAgentTransportInterruption,
   isSendInNewChatQueueAction,
   normalizePendingPromptState,
 } from '@drone/assistant-chat';
@@ -25,6 +26,7 @@ import {
   getPromptQueueRepository,
   type PromptQueueRepository,
   type PromptQueueRecord,
+  type PromptSubmissionSource,
 } from '../host/prompt-queue-repository';
 import { loadRegistry } from '../host/registry';
 import { hubLog, resolveEffectiveProviderApiKeySettings, type LlmProviderId } from './hub-settings';
@@ -2083,8 +2085,7 @@ export class HubAssistantService {
     return (await this.tools.listDrones()).flatMap((drone) => {
       const canRead = readScope === null || readScope.has(drone.id);
       const canWrite =
-        thread.agentPermissionMode !== 'read' &&
-        (writeScope === null || writeScope.has(drone.id));
+        thread.agentPermissionMode !== 'read' && (writeScope === null || writeScope.has(drone.id));
       const canExecute =
         thread.agentPermissionMode === 'execute' &&
         (executeScope === null || executeScope.has(drone.id));
@@ -2233,6 +2234,7 @@ export class HubAssistantService {
         status:
           record.state === 'failed' ? 'failed' : record.state === 'sending' ? 'running' : 'queued',
         error: cleanOptionalString(record.error ?? record.lastError) || null,
+        ...(record.queueInterruption ? { queueInterruption: record.queueInterruption } : {}),
         ...(isSendInNewChatQueueAction(record.action) ? { action: record.action } : {}),
       },
       includeImageData,
@@ -2570,6 +2572,7 @@ export class HubAssistantService {
       prompt?: unknown;
       promptImages?: unknown;
       deliveryMode?: unknown;
+      submissionSource?: PromptSubmissionSource;
     },
   ): Promise<AssistantQueuedPrompt> {
     return (await this.enqueueThreadPromptWithResult(threadId, input)).prompt;
@@ -2582,8 +2585,13 @@ export class HubAssistantService {
       prompt?: unknown;
       promptImages?: unknown;
       deliveryMode?: unknown;
+      submissionSource?: PromptSubmissionSource;
     },
-  ): Promise<{ inserted: boolean; prompt: AssistantQueuedPrompt }> {
+  ): Promise<{
+    inserted: boolean;
+    prompt: AssistantQueuedPrompt;
+    interruptedPromptId?: string;
+  }> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
     const prompt = String(input.prompt ?? '').trim();
@@ -2608,6 +2616,7 @@ export class HubAssistantService {
     }
     const queued = await this.requirePromptQueue().enqueue({
       ...identity,
+      submissionSource: input.submissionSource,
       prompt: {
         id,
         at: nowIso(),
@@ -2622,6 +2631,7 @@ export class HubAssistantService {
     return {
       inserted: queued.inserted,
       prompt: this.queuedPromptFromRecord(queued.prompt, false),
+      ...(queued.interruptedPromptId ? { interruptedPromptId: queued.interruptedPromptId } : {}),
     };
   }
 
@@ -2663,11 +2673,14 @@ export class HubAssistantService {
   async completeQueuedPrompt(threadId: string, promptId: string): Promise<void> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
-    await this.requirePromptQueue().update({
-      ...this.promptQueueIdentity(thread),
+    const queue = this.requirePromptQueue();
+    const identity = this.promptQueueIdentity(thread);
+    await queue.update({
+      ...identity,
       promptId,
       patch: { state: 'sent', error: undefined },
     });
+    await queue.completeRecovery({ ...identity, recoveryPromptId: promptId });
     thread.updatedAt = nowIso();
     await this.persist();
   }
@@ -2676,11 +2689,17 @@ export class HubAssistantService {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
     const message = String((error as any)?.message ?? error ?? 'Assistant prompt failed');
-    await this.requirePromptQueue().update({
-      ...this.promptQueueIdentity(thread),
+    const queue = this.requirePromptQueue();
+    const identity = this.promptQueueIdentity(thread);
+    const current = queue.get({ ...identity, promptId });
+    await queue.update({
+      ...identity,
       promptId,
       patch: { state: 'failed', error: message },
     });
+    if (!current?.action && isAgentTransportInterruption(message)) {
+      await queue.pauseAfterInterruption({ ...identity, promptId });
+    }
     thread.status = 'error';
     thread.error = message;
     thread.updatedAt = nowIso();

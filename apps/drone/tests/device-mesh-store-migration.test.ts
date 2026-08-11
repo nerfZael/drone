@@ -38,6 +38,30 @@ describe('device mesh grant migrations', () => {
     expect(migrateDeviceMeshGrants(grants)).toEqual(grants);
   });
 
+  test('adds explicit interruption recovery to devices already trusted to stop chats', () => {
+    expect(
+      migrateDeviceMeshGrants([
+        {
+          capability: 'drone-control',
+          version: 1,
+          operations: ['drones.list', 'chat.read', 'chat.prompt', 'chat.stop'],
+        },
+      ]),
+    ).toEqual([
+      {
+        capability: 'drone-control',
+        version: 1,
+        operations: [
+          'drones.list',
+          'chat.read',
+          'chat.prompt',
+          'chat.stop',
+          'chat.interruption.resolve',
+        ],
+      },
+    ]);
+  });
+
   test('keeps existing drone-management access compatible with narrower mutations', () => {
     expect(
       migrateDeviceMeshGrants([

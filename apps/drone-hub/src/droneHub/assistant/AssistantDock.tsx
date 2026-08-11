@@ -26,6 +26,7 @@ import { CodexConnectComposerNotice } from '../app/CodexConnectControl';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import { createCanvasChatNodeId } from '../app/app-config';
 import { chatInputDraftKeyForDroneChat } from '../app/helpers';
+import { usePendingPromptInterruption } from '../app/use-pending-prompt-interruption';
 import { clientTimeZone } from '../app/client-time-zone';
 import {
   beginLocalChatBusy,
@@ -343,7 +344,6 @@ export function AssistantDock({
   const [approvalBusyId, setApprovalBusyId] = React.useState<string | null>(null);
   const [queuedPromptBusyId, setQueuedPromptBusyId] = React.useState<string | null>(null);
   const [assistantStopBusy, setAssistantStopBusy] = React.useState(false);
-  const [assistantRetryBusy, setAssistantRetryBusy] = React.useState(false);
   const [defaultModelBusy, setDefaultModelBusy] = React.useState(false);
   const [toolsPanelOpen, setToolsPanelOpen] = React.useState(false);
   const [workspacesPanelOpen, setWorkspacesPanelOpen] = React.useState(false);
@@ -413,6 +413,16 @@ export function AssistantDock({
 
   const activeThread = snapshot?.threads[0] ?? null;
   const activeThreadId = activeThread?.id ?? '';
+  const {
+    busyById: resolvingInterruptionById,
+    errorById: interruptionResolutionErrorById,
+    resolve: resolvePendingPromptInterruption,
+  } = usePendingPromptInterruption({
+    droneId: activeThread?.ownerDroneId,
+    chatName: activeThread?.ownerChatName,
+    requestJson,
+    onResolved: () => nativeChangeRefreshRef.current(),
+  });
   activeThreadIdRef.current = activeThreadId;
   React.useEffect(() => {
     scopeSaveRequestIdRef.current += 1;
@@ -1385,36 +1395,6 @@ export function AssistantDock({
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
-  const continueResponse = React.useCallback(async () => {
-    if (!activeThread || assistantRetryBusy) return;
-    const requestSeq = beginSnapshotMutation();
-    const endLocalBusy = beginLocalChatBusy(nativeChatNodeId);
-    setAssistantRetryBusy(true);
-    setError(null);
-    scrollAssistantToBottom({ force: true });
-    try {
-      await requestJson<{ ok: true; threadId: string; status: 'running' }>(
-        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/retry`,
-        { method: 'POST' },
-      );
-      if (!snapshotMutationCurrent(requestSeq)) return;
-      await refresh({ silent: true });
-    } catch (err: any) {
-      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
-    } finally {
-      setAssistantRetryBusy(false);
-      endLocalBusy();
-    }
-  }, [
-    activeThread,
-    assistantRetryBusy,
-    beginSnapshotMutation,
-    nativeChatNodeId,
-    refresh,
-    scrollAssistantToBottom,
-    snapshotMutationCurrent,
-  ]);
-
   const cancelQueuedPrompt = React.useCallback(
     async (promptId: string) => {
       if (!activeThread) return;
@@ -2059,17 +2039,12 @@ export function AssistantDock({
             break;
           }
         }
-        let hasLaterConversation = false;
         let supersededLater = false;
         for (let nextIndex = itemIndex + 1; nextIndex < visibleItems.length; nextIndex += 1) {
           const next = visibleItems[nextIndex]!;
           if (next.type !== 'message') continue;
-          if (next.message.role === 'user') {
-            hasLaterConversation = true;
-            break;
-          }
+          if (next.message.role === 'user') break;
           if (next.message.role !== 'assistant') continue;
-          hasLaterConversation = true;
           if (next.message.errorMessage || messageVisibleText(next.message).trim()) {
             supersededLater = true;
             break;
@@ -2084,8 +2059,6 @@ export function AssistantDock({
             <NativeAgentFailureCard
               message={item.message}
               hasSavedToolResults={hasSavedToolResults}
-              retrying={assistantRetryBusy || (running && itemIndex > latestUserItemIndex)}
-              onRetry={hasLaterConversation ? undefined : () => void continueResponse()}
             />
           ),
         });
@@ -2240,6 +2213,11 @@ export function AssistantDock({
           autoFocusCreateNewChat={focusedNewChatActionId === prompt.id}
           onCreateNewChatAutoFocusHandled={onCreateNewChatAutoFocusHandled}
           createNewChatError={promoteNewChatActionErrorById[prompt.id] ?? null}
+          resolvingInterruption={Boolean(resolvingInterruptionById[prompt.id])}
+          interruptionError={interruptionResolutionErrorById[prompt.id] ?? null}
+          onResolveInterruption={(resolution) =>
+            void resolvePendingPromptInterruption(prompt.id, resolution)
+          }
         />
       ),
     });

@@ -1854,7 +1854,7 @@ function registerTools(server: McpServer, context: McpToolRegistrationContext) {
         if (error?.status !== 409) throw error;
       });
     }
-    const body = { prompt: args.message, ...(cleanString(args.idempotencyKey) ? { promptId: cleanString(args.idempotencyKey) } : {}) };
+    const body = { prompt: args.message, submissionSource: 'assistant-tool', ...(cleanString(args.idempotencyKey) ? { promptId: cleanString(args.idempotencyKey) } : {}) };
     const response = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats/${encodeURIComponent(chat)}/prompt`, {
       method: 'POST',
       body: JSON.stringify(body),

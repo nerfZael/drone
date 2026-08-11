@@ -299,4 +299,65 @@ describe('external pending transcript turn', () => {
     expect(html).not.toContain('>Stopped</span>');
     expect(html).not.toContain('text-[var(--red)]');
   });
+
+  test('presents an exhausted reconnect as an interruption with preserved progress', () => {
+    const error = [
+      'Reconnecting... 2/5',
+      'Reconnecting... 5/5',
+      'stream disconnected before completion: error sending request for url (https://chatgpt.com/backend-api/codex/responses) (exit 1)',
+    ].join('\n');
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          state: 'failed',
+          error,
+          updatedAt: new Date().toISOString(),
+          activity: {
+            version: 1,
+            source: 'codex',
+            updatedAt: new Date().toISOString(),
+            messages: [],
+          },
+          fileChanges: {
+            version: 2,
+            capturedAt: new Date().toISOString(),
+            counts: { changed: 1, additions: 3, deletions: 1 },
+            workspaces: [],
+          },
+        })}
+      />,
+    );
+
+    expect(html).toContain('>Interrupted</span>');
+    expect(html).toContain('data-agent-run-failure="connection"');
+    expect(html).toContain('Connection interrupted');
+    expect(html).toContain('The run stopped after 5 automatic reconnect attempts.');
+    expect(html).toContain('Completed steps and any file changes are preserved.');
+    expect(html).toContain('Technical details');
+    expect(html).toContain('Changed files');
+    expect(html).not.toContain('>Failed</span>');
+    expect(html).not.toContain('dh-markdown--error');
+  });
+
+  test('explains manual recovery and offers queue skipping for a blocked interruption', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          state: 'failed',
+          error: 'stream disconnected before completion',
+          queueInterruption: {
+            state: 'blocked',
+            at: '2026-08-11T09:00:00.000Z',
+          },
+        })}
+        onResolveInterruption={() => {}}
+      />,
+    );
+
+    expect(html).toContain('Queued and steering prompts are paused');
+    expect(html).toContain('Send a message when you’re ready to continue.');
+    expect(html).not.toContain('>Continue</button>');
+    expect(html).toContain('>Skip and run queued</button>');
+    expect(html).not.toContain('>Cancel queued</button>');
+  });
 });

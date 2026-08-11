@@ -278,6 +278,7 @@ export function createDroneWorkflowRunnerGateway(
         droneId: target.executionDroneId,
         chatName: initialChatName,
         prompt,
+        submissionSource: 'workflow',
       });
       if (enqueued?.kind !== 'enqueued') {
         throw new Error(enqueued?.error || 'workflow prompt could not be queued');

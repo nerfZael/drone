@@ -8,6 +8,51 @@ export type PendingPromptRecord = Record<string, unknown> & {
   at?: unknown;
 };
 
+export type PromptQueueInterruptionState =
+  | 'blocked'
+  | 'continuing'
+  | 'continued'
+  | 'skipped';
+
+export type PromptQueueInterruption = {
+  state: PromptQueueInterruptionState;
+  at: string;
+  resolvedAt?: string;
+  recoveryPromptId?: string;
+};
+
+export type PromptQueueInterruptionResolution = 'skip';
+
+export function normalizePromptQueueInterruptionResolution(
+  raw: unknown,
+): PromptQueueInterruptionResolution | undefined {
+  return raw === 'skip' ? raw : undefined;
+}
+
+export function normalizePromptQueueInterruption(
+  raw: unknown,
+): PromptQueueInterruption | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const state = String((raw as any).state ?? '') as PromptQueueInterruptionState;
+  if (!['blocked', 'continuing', 'continued', 'skipped'].includes(state)) {
+    return undefined;
+  }
+  const at = String((raw as any).at ?? '').trim();
+  const resolvedAt = String((raw as any).resolvedAt ?? '').trim();
+  const recoveryPromptId = String((raw as any).recoveryPromptId ?? '').trim();
+  return {
+    state,
+    at,
+    ...(resolvedAt ? { resolvedAt } : {}),
+    ...(recoveryPromptId ? { recoveryPromptId } : {}),
+  };
+}
+
+export function promptQueueInterruptionBlocks(raw: unknown): boolean {
+  const state = normalizePromptQueueInterruption(raw)?.state;
+  return state === 'blocked' || state === 'continuing';
+}
+
 export type CompletedTurnRecord = {
   id?: unknown;
 };

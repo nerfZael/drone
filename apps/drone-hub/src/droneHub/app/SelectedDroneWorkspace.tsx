@@ -1,7 +1,11 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
-import type { CodexApprovalDecision, CodexPendingApproval } from '@drone/assistant-chat';
+import type {
+  CodexApprovalDecision,
+  CodexPendingApproval,
+  PromptQueueInterruptionResolution,
+} from '@drone/assistant-chat';
 import {
   AgentChatTranscript,
   ChatSurface,
@@ -494,6 +498,12 @@ type SelectedDroneWorkspaceProps = {
   requestCancelPendingPrompt: (promptId: string) => Promise<void>;
   cancellingPendingPromptById: Record<string, true>;
   cancelPendingPromptErrorById: Record<string, string>;
+  requestResolvePendingPromptInterruption: (
+    promptId: string,
+    resolution: PromptQueueInterruptionResolution,
+  ) => Promise<void>;
+  resolvingInterruptionById: Record<string, true>;
+  interruptionResolutionErrorById: Record<string, string>;
   onCreateQueuedNewChatNow: (promptId: string) => Promise<void>;
   focusedNewChatActionId: string;
   onCreateNewChatAutoFocusHandled: (promptId: string) => void;
@@ -615,6 +625,9 @@ export function SelectedDroneWorkspace({
   requestCancelPendingPrompt,
   cancellingPendingPromptById,
   cancelPendingPromptErrorById,
+  requestResolvePendingPromptInterruption,
+  resolvingInterruptionById,
+  interruptionResolutionErrorById,
   onCreateQueuedNewChatNow,
   focusedNewChatActionId,
   onCreateNewChatAutoFocusHandled,
@@ -1321,6 +1334,9 @@ export function SelectedDroneWorkspace({
             droneHomePath={currentDroneHomePath}
             cancelBusy={Boolean(cancellingPendingPromptById[prompt.id])}
             cancelError={cancelPendingPromptErrorById[prompt.id] ?? null}
+            onResolveInterruption={requestResolvePendingPromptInterruption}
+            resolvingInterruption={Boolean(resolvingInterruptionById[prompt.id])}
+            interruptionError={interruptionResolutionErrorById[prompt.id] ?? null}
             onCreateNewChatNow={onCreateQueuedNewChatNow}
             createNewChatBusy={Boolean(promotingNewChatActionById[prompt.id])}
             createNewChatError={promoteNewChatActionErrorById[prompt.id] ?? null}

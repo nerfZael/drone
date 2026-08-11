@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { normalizePromptQueueInterruption } from '@drone/assistant-chat';
 import type {
   LocalAssistantMessage,
   LocalAssistantQueuedPrompt,
@@ -127,16 +128,11 @@ function boundedMessageCharacters(message: LocalAssistantMessage): number {
   if (!Array.isArray(message.content)) return JSON.stringify(message).length;
   return JSON.stringify({
     ...message,
-    content: message.content.map((part) =>
-      part?.type === 'image' ? { ...part, data: '' } : part,
-    ),
+    content: message.content.map((part) => (part?.type === 'image' ? { ...part, data: '' } : part)),
   }).length;
 }
 
-function boundMessages(
-  values: unknown[],
-  stripImageData: boolean,
-): LocalAssistantMessage[] {
+function boundMessages(values: unknown[], stripImageData: boolean): LocalAssistantMessage[] {
   const messages = values
     .slice(-MAX_MESSAGES_PER_THREAD)
     .map((message) => cleanMessage(message, stripImageData))
@@ -240,6 +236,10 @@ function cleanThread(value: any): LocalAssistantThread | null {
         : value.autoApprove === true
           ? 'none'
           : 'ask';
+  const queueInterruption = normalizePromptQueueInterruption(value.queueInterruption);
+  const interruptedPromptId = String(value.interruptedPromptId ?? '')
+    .trim()
+    .slice(0, 120);
   return {
     id: String(value.id).slice(0, 100),
     title: String(value.title ?? 'Phone assistant').slice(0, 160),
@@ -249,10 +249,11 @@ function cleanThread(value: any): LocalAssistantThread | null {
     thinkingLevel: normalizeLocalAssistantThinkingLevel(value.thinkingLevel),
     status: value.status === 'error' ? 'error' : 'idle',
     error: value.status === 'error' && value.error ? String(value.error).slice(0, 2_000) : null,
+    ...(queueInterruption ? { queueInterruption } : {}),
+    ...(interruptedPromptId ? { interruptedPromptId } : {}),
     autoApprove: approvalPolicy === 'none',
     agentPermissionMode:
-      value.agentPermissionMode === 'read' ||
-      value.agentPermissionMode === 'write'
+      value.agentPermissionMode === 'read' || value.agentPermissionMode === 'write'
         ? value.agentPermissionMode
         : 'execute',
     approvalPolicy,

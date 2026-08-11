@@ -7,10 +7,13 @@ import {
   mergeOptimisticPendingPrompts,
   normalizeAgentPlan,
   normalizeAgentRunActivity,
+  normalizePromptQueueInterruption,
+  promptQueueInterruptionBlocks,
   replaceOptimisticPendingPromptId,
   resolveChatQueueActionPresentation,
   type AgentPlan,
   type PendingPromptState,
+  type PromptQueueInterruption,
   type SendInNewChatQueueAction,
 } from '@drone/assistant-chat';
 
@@ -25,6 +28,7 @@ export type MobileDronePendingPrompt = {
   startedAt?: string;
   agentPlan?: AgentPlan;
   delivered?: boolean;
+  queueInterruption?: PromptQueueInterruption;
   action?: SendInNewChatQueueAction;
 };
 
@@ -180,12 +184,19 @@ export function mobileDronePendingPrompts(
     if (state !== 'failed' && completedIds.has(id)) return [];
     const activity = normalizeAgentRunActivity(item?.activity);
     const stopped = state === 'failed' && isStoppedRunError(item?.error);
-    if (activity && (state === 'sending' || state === 'sent' || (state === 'failed' && !stopped))) {
+    const queueInterruption = normalizePromptQueueInterruption(item?.queueInterruption);
+    const blockedByInterruption = promptQueueInterruptionBlocks(queueInterruption);
+    if (
+      activity &&
+      (state === 'sending' ||
+        state === 'sent' ||
+        (state === 'failed' && !stopped && !blockedByInterruption))
+    ) {
       return [];
     }
     const messageId = String(item?.messageId ?? '').trim();
     const delivered =
-      stopped &&
+      (stopped || blockedByInterruption) &&
       (Boolean(activity) ||
         completedIds.has(id) ||
         transcriptMessageIds.has(id) ||
@@ -220,6 +231,7 @@ export function mobileDronePendingPrompts(
         ...(startedAt ? { startedAt } : {}),
         ...(agentPlan ? { agentPlan } : {}),
         ...(delivered ? { delivered: true } : {}),
+        ...(queueInterruption ? { queueInterruption } : {}),
       } satisfies MobileDronePendingPrompt,
     ];
   });

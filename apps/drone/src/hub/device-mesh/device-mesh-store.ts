@@ -43,6 +43,12 @@ export function migrateDeviceMeshGrants(grants: readonly CapabilityGrant[]): Cap
       'sidebar.move',
     );
   }
+  // Queue recovery is the explicit, safer replacement for letting later chat
+  // prompts run after a failed turn. Devices already allowed to stop chat work
+  // may make the equivalent continue/skip/cancel decision after an interruption.
+  if (droneControl?.operations.includes('chat.stop')) {
+    operations.push('chat.interruption.resolve');
+  }
   if (
     grants.some(
       (grant) =>

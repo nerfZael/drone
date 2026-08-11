@@ -27,6 +27,7 @@ import { droneChatQueueKey, isDroneStartingOrSeeding, parseDroneChatQueueKey, sh
 import { fetchJson, isNotFoundError, resolvePollIntervalMs, usePoll } from './hooks';
 import { beginRecordBusyKey, removeRecordKey } from './keyed-record-state';
 import { beginLocalChatBusy } from './use-drone-hub-runtime-store';
+import { usePendingPromptInterruption } from './use-pending-prompt-interruption';
 import type { QueuedPrompt } from './use-queued-prompts-state';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
@@ -199,6 +200,15 @@ export function useChatRuntimeOrchestration({
   const [promptError, setPromptError] = React.useState<string | null>(null);
   const [cancellingPendingPromptById, setCancellingPendingPromptById] = React.useState<Record<string, true>>({});
   const [cancelPendingPromptErrorById, setCancelPendingPromptErrorById] = React.useState<Record<string, string>>({});
+  const {
+    busyById: resolvingInterruptionById,
+    errorById: interruptionResolutionErrorById,
+    resolve: requestResolvePendingPromptInterruption,
+  } = usePendingPromptInterruption({
+    droneId: selectedDrone,
+    chatName: selectedChat,
+    requestJson,
+  });
   const [stoppingResponse, setStoppingResponse] = React.useState(false);
   const [stopResponseError, setStopResponseError] = React.useState<string | null>(null);
   const [cliTypingChatKey, setCliTypingChatKey] = React.useState<string | null>(null);
@@ -341,9 +351,13 @@ export function useChatRuntimeOrchestration({
   React.useEffect(() => {
     // Reset output buffer on effective selection/chat change.
     // Use stable drone identity so in-place renames don't wipe the current chat/output pane.
-    const shouldPrimeTranscriptLoading = chatUiMode === 'transcript' && Boolean(selectedDrone && selectedChat);
-    const shouldPrimeSessionLoading = chatUiMode === 'cli' && Boolean(selectedDrone && selectedChat);
-    const cachedTranscript = shouldPrimeTranscriptLoading ? readFreshChatRuntimeCache(chatTranscriptCache, selectedChatCacheKey) : null;
+    const shouldPrimeTranscriptLoading =
+      chatUiMode === 'transcript' && Boolean(selectedDrone && selectedChat);
+    const shouldPrimeSessionLoading =
+      chatUiMode === 'cli' && Boolean(selectedDrone && selectedChat);
+    const cachedTranscript = shouldPrimeTranscriptLoading
+      ? readFreshChatRuntimeCache(chatTranscriptCache, selectedChatCacheKey)
+      : null;
     resetSessionOutputState();
     setLoadingTranscript(shouldPrimeTranscriptLoading && !cachedTranscript);
     transcriptsRef.current = cachedTranscript?.transcripts ?? null;
@@ -377,7 +391,9 @@ export function useChatRuntimeOrchestration({
       });
 
       const key = droneChatQueueKey(selectedDrone, chatName);
-      const localQueued = (queuedPromptsByDroneChat[key] ?? []).some((item) => item.id === id && item.state === 'queued');
+      const localQueued = (queuedPromptsByDroneChat[key] ?? []).some(
+        (item) => item.id === id && item.state === 'queued',
+      );
       if (localQueued) {
         removeQueuedPrompt(key, id);
         setOptimisticPendingPrompts((prev) => prev.filter((p) => p.id !== id));
@@ -395,9 +411,15 @@ export function useChatRuntimeOrchestration({
         if (data.cancelled) {
           setOptimisticPendingPrompts((prev) => prev.filter((p) => p.id !== id));
         } else if (data.alreadySubmitted) {
-          setCancelPendingPromptErrorById((prev) => ({ ...prev, [id]: 'Already submitted to agent.' }));
+          setCancelPendingPromptErrorById((prev) => ({
+            ...prev,
+            [id]: 'Already submitted to agent.',
+          }));
         } else {
-          setCancelPendingPromptErrorById((prev) => ({ ...prev, [id]: 'Unable to cancel pending prompt.' }));
+          setCancelPendingPromptErrorById((prev) => ({
+            ...prev,
+            [id]: 'Unable to cancel pending prompt.',
+          }));
         }
       } catch (e: any) {
         const status = Number((e as any)?.status ?? 0);
@@ -412,7 +434,14 @@ export function useChatRuntimeOrchestration({
         });
       }
     },
-    [queuedPromptsByDroneChat, removeQueuedPrompt, requestJson, selectedChat, selectedDrone, setOptimisticPendingPrompts],
+    [
+      queuedPromptsByDroneChat,
+      removeQueuedPrompt,
+      requestJson,
+      selectedChat,
+      selectedDrone,
+      setOptimisticPendingPrompts,
+    ],
   );
 
   React.useEffect(() => {
@@ -511,7 +540,13 @@ export function useChatRuntimeOrchestration({
       return { key, pending: Array.isArray(data?.pending) ? data.pending : [] };
     },
     1000,
-    [selectedDrone, selectedChat, selectedChatCacheKey, hasSelectedDroneSummary, selectedDroneHubPhase],
+    [
+      selectedDrone,
+      selectedChat,
+      selectedChatCacheKey,
+      hasSelectedDroneSummary,
+      selectedDroneHubPhase,
+    ],
     { enabled: pendingPollEnabled },
   );
 
@@ -524,7 +559,10 @@ export function useChatRuntimeOrchestration({
 
   const pendingPrompts: PendingPrompt[] = React.useMemo(() => {
     const cachedPending = readFreshChatRuntimeCache(chatPendingCache, selectedChatCacheKey);
-    const server = pendingRespForChat?.key === selectedChatCacheKey ? pendingRespForChat.pending : (cachedPending?.pending ?? []);
+    const server =
+      pendingRespForChat?.key === selectedChatCacheKey
+        ? pendingRespForChat.pending
+        : (cachedPending?.pending ?? []);
     const optimisticForSelectedChat =
       optimisticPendingPromptsChatKeyRef.current === selectedChatCacheKey
         ? optimisticPendingPrompts
@@ -714,7 +752,14 @@ export function useChatRuntimeOrchestration({
     if (!selectedDrone || !selectedChat) return false;
     if (chatUiMode === 'cli') return selectedIsResponding && !sendingPrompt;
     return canStopTranscriptResponse;
-  }, [canStopTranscriptResponse, chatUiMode, selectedChat, selectedDrone, selectedIsResponding, sendingPrompt]);
+  }, [
+    canStopTranscriptResponse,
+    chatUiMode,
+    selectedChat,
+    selectedDrone,
+    selectedIsResponding,
+    sendingPrompt,
+  ]);
 
   const requestStopResponse = React.useCallback(async (): Promise<void> => {
     if (!selectedDrone || !selectedChat || !canStopResponse) return;
@@ -728,14 +773,25 @@ export function useChatRuntimeOrchestration({
         stopped: boolean;
         stoppedPromptIds?: string[];
         clearedPromptIds?: string[];
-      }>(`/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/stop`, {
-        method: 'POST',
-      });
+      }>(
+        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/stop`,
+        {
+          method: 'POST',
+        },
+      );
       if (data.mode === 'cli') {
         setCliTypingChatKey((current) => (current === selectedChatCacheKey ? null : current));
       }
-      const stoppedSet = new Set((Array.isArray(data.stoppedPromptIds) ? data.stoppedPromptIds : []).map((id) => String(id).trim()).filter(Boolean));
-      const clearedSet = new Set((Array.isArray(data.clearedPromptIds) ? data.clearedPromptIds : []).map((id) => String(id).trim()).filter(Boolean));
+      const stoppedSet = new Set(
+        (Array.isArray(data.stoppedPromptIds) ? data.stoppedPromptIds : [])
+          .map((id) => String(id).trim())
+          .filter(Boolean),
+      );
+      const clearedSet = new Set(
+        (Array.isArray(data.clearedPromptIds) ? data.clearedPromptIds : [])
+          .map((id) => String(id).trim())
+          .filter(Boolean),
+      );
       if (stoppedSet.size > 0 || clearedSet.size > 0) {
         setOptimisticPendingPrompts((prev) =>
           prev.flatMap((item) => {
@@ -747,7 +803,8 @@ export function useChatRuntimeOrchestration({
               {
                 ...item,
                 state: nextState,
-                error: item.state === 'queued' ? STOPPED_BEFORE_SUBMISSION_ERROR : STOPPED_BY_USER_ERROR,
+                error:
+                  item.state === 'queued' ? STOPPED_BEFORE_SUBMISSION_ERROR : STOPPED_BY_USER_ERROR,
                 updatedAt: new Date().toISOString(),
               },
             ];
@@ -759,7 +816,15 @@ export function useChatRuntimeOrchestration({
     } finally {
       setStoppingResponse(false);
     }
-  }, [canStopResponse, requestJson, selectedChat, selectedChatCacheKey, selectedDrone, setOptimisticPendingPrompts, stoppingResponse]);
+  }, [
+    canStopResponse,
+    requestJson,
+    selectedChat,
+    selectedChatCacheKey,
+    selectedDrone,
+    setOptimisticPendingPrompts,
+    stoppingResponse,
+  ]);
 
   React.useEffect(() => {
     if (chatUiMode !== 'transcript') return;
@@ -800,7 +865,9 @@ export function useChatRuntimeOrchestration({
         });
         writeChatRuntimeCache(chatPendingCache, selectedChatCacheKey, { pending: data.pending });
         setPendingRespForChat({ key: selectedChatCacheKey, pending: data.pending });
-        setTranscripts((prev) => (sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts));
+        setTranscripts((prev) =>
+          sameTranscriptItems(prev, data.transcripts) ? prev : data.transcripts,
+        );
         setTranscriptError(null);
         consecutiveTransientFailures = 0;
       } catch (e: any) {
@@ -840,13 +907,16 @@ export function useChatRuntimeOrchestration({
             return;
           }
           clearTimer();
-          timer = setTimeout(() => {
-            void load();
-          }, retrySoon
-            ? resolvePollIntervalMs(1500, 5_000)
-            : eventsConnected
-              ? resolvePollIntervalMs(60_000, 60_000)
-              : resolvePollIntervalMs(2000, 10_000));
+          timer = setTimeout(
+            () => {
+              void load();
+            },
+            retrySoon
+              ? resolvePollIntervalMs(1500, 5_000)
+              : eventsConnected
+                ? resolvePollIntervalMs(60_000, 60_000)
+                : resolvePollIntervalMs(2000, 10_000),
+          );
         }
       }
     };
@@ -922,7 +992,8 @@ export function useChatRuntimeOrchestration({
         busy = false;
         return;
       }
-      const initial = outputView === 'log' ? sessionOffsetRef.current == null : !screenLoadedRef.current;
+      const initial =
+        outputView === 'log' ? sessionOffsetRef.current == null : !screenLoadedRef.current;
       if (initial && mounted) setLoadingSession(true);
       try {
         const qs = new URLSearchParams();
@@ -955,7 +1026,7 @@ export function useChatRuntimeOrchestration({
           const nextOffset =
             typeof data?.offsetBytes === 'number' && Number.isFinite(data.offsetBytes)
               ? data.offsetBytes
-              : sessionOffsetRef.current ?? 0;
+              : (sessionOffsetRef.current ?? 0);
           const chunk = typeof data?.text === 'string' ? data.text : '';
           const chunkPlain = chunk ? stripAnsi(chunk) : '';
           sessionOffsetRef.current = nextOffset;
@@ -986,9 +1057,12 @@ export function useChatRuntimeOrchestration({
         busy = false;
         if (mounted) {
           clearTimer();
-          timer = setTimeout(() => {
-            void load();
-          }, resolvePollIntervalMs(1000, 5_000));
+          timer = setTimeout(
+            () => {
+              void load();
+            },
+            resolvePollIntervalMs(1000, 5_000),
+          );
         }
       }
     };
@@ -1027,10 +1101,13 @@ export function useChatRuntimeOrchestration({
     chatUiMode,
     promptError,
     requestCancelPendingPrompt,
+    requestResolvePendingPromptInterruption,
     requestStopResponse,
     selectedIsResponding,
     sendPromptText,
     sendingPrompt,
+    resolvingInterruptionById,
+    interruptionResolutionErrorById,
     stopResponseError,
     stoppingResponse,
     visiblePendingPromptsWithStartup,

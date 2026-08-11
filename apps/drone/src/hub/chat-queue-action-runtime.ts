@@ -311,6 +311,7 @@ export function createSendInNewChatActionRuntime(deps: SendInNewChatActionRuntim
         attachmentRefs: deps.normalizeChatImageAttachmentRefs(input.pending.attachments),
         submittedAt: input.pending.at,
         deliveryMode: 'asap',
+        submissionSource: 'queue-action',
       });
       if (submitted.kind === 'error') throw new Error(submitted.error);
       if (submitted.pendingState === 'failed') {

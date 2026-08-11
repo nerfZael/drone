@@ -495,6 +495,32 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('>Queued<');
   });
 
+  test('native interrupted prompts expose manual recovery guidance and queue skipping', () => {
+    const html = renderToStaticMarkup(
+      <AssistantQueuedPromptRow
+        prompt={{
+          id: 'interrupted-prompt',
+          prompt: 'Finish the task',
+          promptImages: [],
+          imageCount: 0,
+          createdAt: '2026-08-11T00:00:00.000Z',
+          status: 'failed',
+          error: 'stream disconnected before completion',
+          queueInterruption: { state: 'blocked', at: '2026-08-11T00:00:00.000Z' },
+        }}
+        cancelling={false}
+        onCancel={() => {}}
+        onResolveInterruption={() => {}}
+      />,
+    );
+
+    expect(html).toContain('Connection interrupted');
+    expect(html).toContain('Queued and steering prompts are paused');
+    expect(html).toContain('Send a message when you’re ready to continue.');
+    expect(html).not.toContain('>Continue</button>');
+    expect(html).toContain('>Skip and run queued</button>');
+  });
+
   test('native queued new-chat actions expose the same Create now control', () => {
     const html = renderToStaticMarkup(
       <AssistantQueuedPromptRow
@@ -854,12 +880,7 @@ describe('agent chat surface adapters', () => {
       createdAt: '2026-07-27T22:21:17.451Z',
     };
     const html = renderToStaticMarkup(
-      <NativeAgentFailureCard
-        message={message}
-        hasSavedToolResults
-        retrying={false}
-        onRetry={() => {}}
-      />,
+      <NativeAgentFailureCard message={message} hasSavedToolResults />,
     );
 
     expect(nativeAgentFailurePresentation(message)).toMatchObject({
@@ -867,19 +888,15 @@ describe('agent chat surface adapters', () => {
       code: 'ECONNRESET',
       attempts: 4,
     });
-    expect(html).toContain('Native agent connection was reset');
+    expect(html).toContain('Connection interrupted');
     expect(html).toContain('Completed tool results were saved');
-    expect(html).toContain('Continue response');
+    expect(html).toContain('Send a follow-up to continue from this checkpoint.');
+    expect(html).not.toContain('Continue response');
     expect(html).toContain('Technical details');
     expect(html).toContain('ECONNRESET');
     expect(html).not.toContain('Couldn’t reach Codex');
     expect(assistantTranscriptHasErrorMessage([message], 'fetch failed')).toBe(true);
     expect(assistantTranscriptHasErrorMessage([message], 'different failure')).toBe(false);
-    const historicalHtml = renderToStaticMarkup(
-      <NativeAgentFailureCard message={message} hasSavedToolResults retrying={false} />,
-    );
-    expect(historicalHtml).toContain('Completed tool results were saved.');
-    expect(historicalHtml).not.toContain('Continue response');
     expect(
       assistantTranscriptHasErrorMessage(
         [message, { role: 'user', content: 'Try another request' }],

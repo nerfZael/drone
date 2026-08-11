@@ -1,5 +1,6 @@
 import type { AssistantMessage } from './assistant-message-types.js';
 import type { ChatQueueAction } from './chat-queue-actions.js';
+import type { PromptQueueInterruption } from './pending-prompts.js';
 
 export type NativeAgentProviderId = 'openai' | 'gemini' | 'codex';
 export type NativeAgentThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
@@ -33,6 +34,7 @@ export type NativeQueuedPrompt = {
   deliveryMode?: NativePromptDeliveryMode;
   status: 'queued' | 'running' | 'failed';
   error: string | null;
+  queueInterruption?: PromptQueueInterruption;
   action?: ChatQueueAction;
 };
 

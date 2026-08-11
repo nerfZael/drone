@@ -1067,6 +1067,40 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('forwards an explicit interruption resolution to the selected drone chat', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      requests.push({
+        url: String(input),
+        method: String(init?.method ?? 'GET'),
+        body: String(init?.body ?? ''),
+      });
+      return Response.json({ ok: true, status: 'skipped' });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await capability.invoke('chat.interruption.resolve', {
+        droneId: 'drone one',
+        chatName: 'review chat',
+        promptId: 'prompt-1',
+        resolution: 'skip',
+      });
+      expect(requests).toEqual([
+        {
+          url: 'http://127.0.0.1:7777/api/drones/drone%20one/chats/review%20chat/pending/prompt-1/interruption',
+          method: 'POST',
+          body: '{"resolution":"skip"}',
+        },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('rejects native thread ids that do not belong to the selected chat', async () => {
     const originalFetch = globalThis.fetch;
     const requestedPaths: string[] = [];

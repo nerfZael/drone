@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 
+import { normalizePromptQueueInterruptionResolution } from '@drone/assistant-chat';
 import type { ChatImageAttachment } from '../chat-attachments';
 import { chatPromptBodySchema } from '../chat-route-schemas';
 import { parseBoolParam } from '../hub-format';
@@ -48,6 +49,7 @@ type ChatPromptRouteDependencyName =
   | 'promoteQueuedNewChatAction'
   | 'readChatReadStateFromStore'
   | 'readChatSnapshot'
+  | 'resolveInterruptedPendingPrompt'
   | 'resolveChatTmuxCommand'
   | 'resolveDroneDaemonClientForEntry'
   | 'resolveDroneOrPendingForReadRef'
@@ -104,6 +106,7 @@ export function createChatPromptRouteHandler(
     promoteQueuedNewChatAction,
     readChatReadStateFromStore,
     readChatSnapshot,
+    resolveInterruptedPendingPrompt,
     resolveChatTmuxCommand,
     resolveDroneDaemonClientForEntry,
     resolveDroneOrPendingForReadRef,
@@ -187,6 +190,14 @@ export function createChatPromptRouteHandler(
             : body?.deliveryMode === 'queue'
               ? 'queue'
               : undefined;
+        const submissionSource =
+          body?.submissionSource === 'assistant-tool' ||
+          body?.submissionSource === 'workflow' ||
+          body?.submissionSource === 'subscription' ||
+          body?.submissionSource === 'queue-action' ||
+          body?.submissionSource === 'system'
+            ? body.submissionSource
+            : 'human';
 
         try {
           const resolved = await resolveDroneOrPendingForReadRef(droneRef);
@@ -272,6 +283,7 @@ export function createChatPromptRouteHandler(
                   cwd: typeof body?.cwd === 'string' ? body.cwd : null,
                   submittedAt,
                   deliveryMode,
+                  submissionSource,
                   mark: (name: string) => timer.mark(name),
                 });
               }
@@ -290,6 +302,7 @@ export function createChatPromptRouteHandler(
                 await pushPendingPrompt({
                   droneId,
                   chatName: chat,
+                  submissionSource,
                   pending: {
                     id: draftPromptId,
                     at: submittedAt,
@@ -316,6 +329,7 @@ export function createChatPromptRouteHandler(
                 cwd: typeof body?.cwd === 'string' ? body.cwd : null,
                 submittedAt,
                 deliveryMode,
+                submissionSource,
                 mark: (name: string) => timer.mark(name),
               });
             }
@@ -795,6 +809,72 @@ export function createChatPromptRouteHandler(
           const msg = e?.message ?? String(e);
           const code = /still starting/i.test(msg) ? 409 : /unknown drone/i.test(msg) ? 404 : 500;
           json(res, code, { ok: false, error: msg });
+          return;
+        }
+      }
+
+      // POST /api/drones/:id/chats/:chat/pending/:promptId/interruption
+      if (
+        method === 'POST' &&
+        parts.length === 8 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'pending' &&
+        parts[7] === 'interruption'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        const promptId = String(decodeURIComponent(parts[6] ?? '')).trim();
+        if (!isSafePromptId(promptId)) {
+          json(res, 400, { ok: false, error: 'invalid promptId' });
+          return;
+        }
+        try {
+          const body = await readJsonBody(req);
+          if (!normalizePromptQueueInterruptionResolution(body?.resolution)) {
+            json(res, 400, { ok: false, error: 'resolution must be skip' });
+            return;
+          }
+        } catch (error: any) {
+          json(res, 400, { ok: false, error: error?.message ?? 'invalid request body' });
+          return;
+        }
+        try {
+          const resolved = await resolveDroneOrRespond(res, droneRef);
+          if (!resolved) return;
+          const result = await resolveInterruptedPendingPrompt({
+            droneId: resolved.id,
+            chatName,
+            promptId,
+          });
+          if (result.status === 'not-found') {
+            json(res, 404, { ok: false, error: `unknown pending prompt: ${promptId}` });
+            return;
+          }
+          if (result.status === 'not-blocked') {
+            json(res, 409, { ok: false, error: 'prompt is not waiting for interruption recovery' });
+            return;
+          }
+          enqueuePendingPromptPump(resolved.id, chatName);
+          json(res, 200, {
+            ok: true,
+            id: resolved.id,
+            name: String(resolved.drone?.name ?? droneRef).trim() || droneRef,
+            chat: chatName,
+            promptId,
+            resolution: 'skip',
+            ...result,
+          });
+          return;
+        } catch (error: any) {
+          const message = error?.message ?? String(error);
+          const code = /still starting/i.test(message)
+            ? 409
+            : /unknown drone/i.test(message)
+              ? 404
+              : 500;
+          json(res, code, { ok: false, error: message });
           return;
         }
       }

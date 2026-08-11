@@ -23,6 +23,7 @@ export const DRONE_CONTROL_OPERATIONS = [
   'chat.update',
   'chat.prompt',
   'chat.stop',
+  'chat.interruption.resolve',
   'chat.approval.resolve',
   'chat.message.delete',
   'files.list',

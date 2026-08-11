@@ -27,18 +27,26 @@ import {
   agentRunWorkspacePreviewEntries,
   messageImageParts,
   messageText,
+  nativeAgentFailurePresentation,
   parseEventNotificationPrompt,
   renderItemsFromMessages,
   toolActivityIsSettled,
   toolLabel,
   type AgentPlan,
+  type AgentRunFailurePresentation,
   type AssistantMessage,
   type AssistantRenderItem,
   type AssistantToolRenderItem,
+  type PromptQueueInterruption,
+  type PromptQueueInterruptionResolution,
 } from '@drone/assistant-chat';
 import { colors } from '../theme';
 import { NativeFileTypeIcon } from '../components/FileTypeIcon';
-import { QueuedPromptRows, type MobileQueuedPrompt } from '../components/QueuedPromptRows';
+import {
+  MobileAgentFailureDetails,
+  QueuedPromptRows,
+  type MobileQueuedPrompt,
+} from '../components/QueuedPromptRows';
 import { ContextMenu } from '../components/Ui';
 import { NativeMarkdown } from './NativeMarkdown';
 import { MobileLoadingState } from './MobileLoadingState';
@@ -69,6 +77,59 @@ import {
 } from './mobile-transcript-runs';
 import { shouldToggleMessageTimestamp } from './message-touch-model';
 import { MobileEventNotification } from '../drones/MobileEventNotification';
+
+function MobileAgentFailureCard({
+  failure,
+  hasSavedProgress,
+  queueInterruption,
+  resolving,
+  onResolve,
+}: {
+  failure: AgentRunFailurePresentation;
+  hasSavedProgress: boolean;
+  queueInterruption?: PromptQueueInterruption;
+  resolving?: boolean;
+  onResolve?: (resolution: PromptQueueInterruptionResolution) => void;
+}) {
+  return (
+    <View style={styles.interruptedCard}>
+      <View
+        accessible
+        accessibilityRole="alert"
+        accessibilityLabel={`${failure.title}. ${failure.summary}`}
+        style={styles.interruptedHeader}
+      >
+        <View style={styles.interruptedIcon}>
+          <TriangleAlert color={colors.warning} size={14} strokeWidth={2.2} />
+        </View>
+        <View style={styles.interruptedBody}>
+          <Text style={styles.interruptedTitle}>{failure.title}</Text>
+          <MobileAgentFailureDetails
+            failure={failure}
+            hasSavedProgress={hasSavedProgress}
+            queueInterruption={queueInterruption}
+            resolving={resolving}
+            onResolve={onResolve}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function messageHasSavedRunProgress(
+  items: AssistantRenderItem[],
+  target: AssistantRenderItem,
+): boolean {
+  const targetIndex = items.indexOf(target);
+  for (let index = targetIndex - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    if (item.type === 'message' && item.message.role === 'user') break;
+    if (item.type === 'tool' || item.type === 'toolGroup' || item.type === 'runSummary')
+      return true;
+  }
+  return false;
+}
 
 function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
   const dots = React.useRef([
@@ -1417,6 +1478,10 @@ export function MobileAssistantTranscript({
   onCancelQueuedPrompt,
   creatingQueuedChatId = '',
   onCreateQueuedChatNow,
+  resolvingInterruptionId = '',
+  onResolveInterruption,
+  queueInterruption,
+  interruptedPromptId = '',
   loading = false,
   emptyTitle = 'The assistant lives here.',
   emptyBody = 'Ask a question, or attach a remote workspace and let this phone inspect and edit it.',
@@ -1440,6 +1505,13 @@ export function MobileAssistantTranscript({
   onCancelQueuedPrompt?: (promptId: string) => void;
   creatingQueuedChatId?: string;
   onCreateQueuedChatNow?: (promptId: string) => void;
+  resolvingInterruptionId?: string;
+  onResolveInterruption?: (
+    promptId: string,
+    resolution: import('@drone/assistant-chat').PromptQueueInterruptionResolution,
+  ) => void;
+  queueInterruption?: PromptQueueInterruption;
+  interruptedPromptId?: string;
   loading?: boolean;
   emptyTitle?: string;
   emptyBody?: string;
@@ -1465,6 +1537,19 @@ export function MobileAssistantTranscript({
   }>;
 }) {
   const items = React.useMemo(() => renderItemsFromMessages(messages), [messages]);
+  let latestRecoverableFailureKey = '';
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (
+      item?.type === 'message' &&
+      item.message.role === 'assistant' &&
+      item.message.errorMessage &&
+      nativeAgentFailurePresentation(item.message).recoverable
+    ) {
+      latestRecoverableFailureKey = item.key;
+      break;
+    }
+  }
   const [visibleMessageTimestamps, setVisibleMessageTimestamps] = React.useState<Set<string>>(
     () => new Set(),
   );
@@ -1580,6 +1665,8 @@ export function MobileAssistantTranscript({
       return null;
     const user = item.message.role === 'user';
     const assistant = item.message.role === 'assistant';
+    const failure =
+      assistant && item.message.errorMessage ? nativeAgentFailurePresentation(item.message) : null;
     const eventNotification = user ? parseEventNotificationPrompt(text) : null;
     const userCodeBlock = user && nativeMarkdownHasCodeBlock(text);
     const timestamp = messageTimestamp(item.message);
@@ -1599,6 +1686,25 @@ export function MobileAssistantTranscript({
           key={item.key}
           notification={eventNotification}
           onLongPress={openMessageActions}
+        />
+      );
+    }
+    if (failure?.recoverable) {
+      const interruption = item.key === latestRecoverableFailureKey ? queueInterruption : undefined;
+      return (
+        <MobileAgentFailureCard
+          key={item.key}
+          failure={failure}
+          hasSavedProgress={messageHasSavedRunProgress(items, item)}
+          queueInterruption={interruption}
+          resolving={Boolean(
+            interruptedPromptId && resolvingInterruptionId === interruptedPromptId,
+          )}
+          onResolve={
+            interruption && interruptedPromptId && onResolveInterruption
+              ? (resolution) => onResolveInterruption(interruptedPromptId, resolution)
+              : undefined
+          }
         />
       );
     }
@@ -1784,7 +1890,12 @@ export function MobileAssistantTranscript({
     <View style={styles.messages}>
       {historicalTimeline.map((entry) =>
         entry.kind === 'prompt' ? (
-          <QueuedPromptRows key={`prompt:${entry.prompt.id}`} prompts={[entry.prompt]} />
+          <QueuedPromptRows
+            key={`prompt:${entry.prompt.id}`}
+            prompts={[entry.prompt]}
+            resolvingInterruptionId={resolvingInterruptionId}
+            onResolveInterruption={onResolveInterruption}
+          />
         ) : entry.group.type === 'run' ? (
           <TranscriptRun
             key={entry.group.key}
@@ -1805,6 +1916,8 @@ export function MobileAssistantTranscript({
           onCancel={onCancelQueuedPrompt}
           creatingId={creatingQueuedChatId}
           onCreateNow={onCreateQueuedChatNow}
+          resolvingInterruptionId={resolvingInterruptionId}
+          onResolveInterruption={onResolveInterruption}
         />
       ) : null}
       {running && activePrompt ? (
@@ -1866,6 +1979,8 @@ export function MobileAssistantTranscript({
           onCancel={onCancelQueuedPrompt}
           creatingId={creatingQueuedChatId}
           onCreateNow={onCreateQueuedChatNow}
+          resolvingInterruptionId={resolvingInterruptionId}
+          onResolveInterruption={onResolveInterruption}
         />
       ) : null}
       <ContextMenu
@@ -1917,6 +2032,8 @@ export function LocalAssistantTranscript({
       messages={thread.messages}
       running={running}
       currentReasoning={currentReasoning}
+      queueInterruption={thread.queueInterruption}
+      interruptedPromptId={thread.interruptedPromptId}
       messageActionsDisabled={messageActionsDisabled}
       onDeleteMessageRequest={onDeleteMessageRequest}
     />
@@ -2218,6 +2335,35 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   messageError: { color: colors.danger, fontSize: 13, lineHeight: 19, marginTop: 5 },
+  interruptedCard: {
+    marginHorizontal: 10,
+    marginVertical: 7,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    borderRadius: 9,
+    backgroundColor: colors.warningDark,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+  },
+  interruptedHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  interruptedIcon: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    borderRadius: 13,
+    backgroundColor: colors.surface0,
+  },
+  interruptedBody: { flex: 1, minWidth: 0 },
+  interruptedTitle: {
+    color: colors.warning,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
   images: { gap: 8, marginTop: 9 },
   image: { width: '100%', height: 220, borderRadius: 12, backgroundColor: colors.panel },
   attachments: { gap: 6, marginTop: 9 },

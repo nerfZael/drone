@@ -1,4 +1,4 @@
-import type { AssistantMessage } from '@drone/assistant-chat';
+import type { AssistantMessage, PromptQueueInterruption } from '@drone/assistant-chat';
 import type { BlipSessionState, TranscriptEntry } from '@blip/core';
 import type { LocalAssistantThinkingLevel } from './local-assistant-model';
 export type { LocalAssistantThinkingLevel } from './local-assistant-model';
@@ -48,6 +48,8 @@ export type LocalAssistantThread = {
   thinkingLevel: LocalAssistantThinkingLevel;
   status: 'idle' | 'running' | 'error';
   error: string | null;
+  queueInterruption?: PromptQueueInterruption;
+  interruptedPromptId?: string;
   autoApprove?: boolean;
   agentPermissionMode?: 'read' | 'write' | 'execute';
   approvalPolicy?: 'ask' | 'none';
