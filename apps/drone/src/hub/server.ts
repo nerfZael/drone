@@ -8,11 +8,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { URL } from 'node:url';
 
-import { WebSocket } from 'ws';
 import { BaseConfigManager } from 'dvm';
 import { normalizeAgentPlan, sameAgentPlan } from '@drone/assistant-chat';
 
-import { ManagedLoop } from '../background/managed-loop';
 import { ensureContainerDroneDaemonSession } from '../host/container-daemon';
 import {
   HubOutboxDispatcher,
@@ -102,6 +100,7 @@ import type {
   ChatAgentConfig,
 } from './chat-types';
 import { createDeviceMeshService } from './device-mesh';
+import { createBackgroundLifecycle, type BackgroundLifecycle } from './background-lifecycle';
 import {
   canonicalRepositoriesMap,
   ensureCanonicalGroup,
@@ -507,6 +506,13 @@ import {
 import { createDronePendingPromptStore, type PendingPrompt } from './drone-pending-prompts';
 import { createDroneProvisioningController } from './drone-provisioning';
 import { createDockerSnapshotRuntime } from './docker-snapshot-runtime';
+import { createDroneStatusRuntime } from './drone-status-runtime';
+import { startHubHttpTransport } from './hub-http-transport';
+import { hubChangeEvents } from './hub-change-events';
+import {
+  createNativeChatRuntimePort,
+  createResourceSubscriptionRuntimePort,
+} from './hub-runtime-ports';
 import { createDroneLifecycleRuntime } from './drone-lifecycle-runtime';
 import { createFilesystemRuntime } from './filesystem-runtime';
 import {
@@ -522,16 +528,12 @@ const HUB_API_LOADED_AT = new Date().toISOString();
 const HUB_API_BUILD_ID = crypto.randomBytes(6).toString('hex');
 const requireForHub = createRequire(__filename);
 
-let notifyDroneRegistryWrite: (() => void) | null = null;
-let notifyDroneChatWrite: ((droneId: string, chatName: string) => void) | null = null;
-let notifyDroneSummaryChange: (() => void) | null = null;
-
 async function updateRegistry<T>(
   mutator: (reg: any) => T | Promise<T>,
   opts?: { timeoutMs?: number; staleAfterMs?: number },
 ): Promise<T> {
   const result = await updateHostRegistry(mutator as any, opts as any);
-  notifyDroneRegistryWrite?.();
+  hubChangeEvents.emitRegistryWrite();
   return result as T;
 }
 
@@ -539,6 +541,13 @@ const HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES = 600;
 const HUB_SETTINGS_LOG_MAX_TAIL_LINES = 5000;
 const HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES = 200_000;
 const HUB_SETTINGS_LOG_MAX_BYTES = 1_000_000;
+
+function clampInt(n: number, min: number, max: number): number {
+  if (!Number.isFinite(n)) return min;
+  if (n < min) return min;
+  if (n > max) return max;
+  return Math.floor(n);
+}
 
 function normalizeApiKey(raw: unknown): string {
   return typeof raw === 'string' ? raw.trim() : '';
@@ -1309,49 +1318,6 @@ async function resolveDroneOrRejectUpgrade(
   });
 }
 
-const PROMPT_SKILL_SYNC_WARNINGS = new Set<string>();
-let promptRuntime: any;
-let nativeChatPromptHandler: (input: {
-  droneId: string;
-  chatName: string;
-  chatId: string;
-  promptId?: string;
-  provider?: string;
-  model?: string;
-  thinkingLevel?: string;
-  agentPermissionMode?: AgentPermissionMode;
-  approvalPolicy?: AgentApprovalPolicy;
-  deliveryMode?: 'queue' | 'asap';
-  prompt: string;
-  attachments?: ChatImageAttachment[];
-}) => Promise<void> = async () => {
-  throw new Error('native chat runtime is not ready');
-};
-let nativeChatStopHandler: (nativeChatId: string) => Promise<void> = async () => {
-  throw new Error('native chat runtime is not ready');
-};
-let nativeChatIsBusyHandler: (nativeChatId: string) => Promise<boolean> = async () => false;
-let nativeChatErrorHandler: (nativeChatId: string) => Promise<string> = async () => '';
-let nativeChatLatestAssistantTextHandler: (nativeChatId: string) => Promise<string> = async () =>
-  '';
-let deleteNativeChatSessionsHandler: (droneEntry: any) => Promise<void> = async () => {};
-type ResourceSubscriptionLifecycleHandler = {
-  pauseForDrone: (droneId: string, chatIds: string[]) => Promise<void>;
-  resumeForChat: (chatId: string) => Promise<void>;
-  resumeForDrone: (droneId: string, chatIds: string[]) => Promise<void>;
-};
-let resourceSubscriptionLifecycleHandler: ResourceSubscriptionLifecycleHandler = {
-  pauseForDrone: async () => {},
-  resumeForChat: async () => {},
-  resumeForDrone: async () => {},
-};
-let cloneNativeChatSessionHandler: (input: any) => Promise<void> = async () => {
-  throw new Error('native chat runtime is not ready');
-};
-let copyNativeChatConfigurationHandler: (input: any) => Promise<void> = async () => {
-  throw new Error('native chat runtime is not ready');
-};
-
 function fleetError(message: string, status: number = 400): Error & { status?: number } {
   const error = new Error(message) as Error & { status?: number };
   error.status = status;
@@ -1847,12 +1813,6 @@ type ActiveDroneHubMcpProjectionConfig = {
   containerUrl: string;
 };
 
-let activeDroneHubMcpProjectionConfig: ActiveDroneHubMcpProjectionConfig | null = null;
-
-function setActiveDroneHubMcpProjectionConfig(config: ActiveDroneHubMcpProjectionConfig): void {
-  activeDroneHubMcpProjectionConfig = config;
-}
-
 async function revokeLegacyProjectedDroneMcpTokens(): Promise<void> {
   const activeDroneTokens = (await listMcpAccessTokens()).filter(
     (token) => token.kind === 'drone' && !token.revokedAt,
@@ -1864,97 +1824,124 @@ async function revokeLegacyProjectedDroneMcpTokens(): Promise<void> {
   });
 }
 
-async function isManagedChatMcpAvailable(): Promise<boolean> {
-  if (!activeDroneHubMcpProjectionConfig?.signingSecret) return false;
-  return (await listMcpServers()).some(
-    (server) => isDroneHubMcpServer(server) && server.enabled !== false,
-  );
-}
+function createMcpProjectionFeature() {
+  let config: ActiveDroneHubMcpProjectionConfig | null = null;
 
-async function mcpServersForProjection(opts: {
-  runtime: 'host' | 'container';
-  droneId?: string;
-  droneEntry?: any;
-}): Promise<McpServerRecord[]> {
-  const servers = await listMcpServers();
-  const config = activeDroneHubMcpProjectionConfig;
-  if (!config) return servers;
-  const out: McpServerRecord[] = [];
-  for (const server of servers) {
-    if (!isDroneHubMcpServer(server)) {
-      out.push(server);
-      continue;
-    }
-    out.push(
-      projectMcpServerForManagedChats({
-        server,
-        runtime: opts.runtime,
-        hostBridgePath: path.resolve(__dirname, '..', 'mcp-http-stdio-bridge.js'),
-      }),
+  function bindConfig(next: ActiveDroneHubMcpProjectionConfig): () => void {
+    if (config) throw new Error('MCP projection config is already bound');
+    config = next;
+    return () => {
+      if (config === next) config = null;
+    };
+  }
+
+  async function isManagedChatMcpAvailable(): Promise<boolean> {
+    if (!config?.signingSecret) return false;
+    return (await listMcpServers()).some(
+      (server) => isDroneHubMcpServer(server) && server.enabled !== false,
     );
   }
-  return out;
-}
 
-async function resolveManagedChatMcpEnv(input: {
-  runtime: DroneRuntime;
-  droneId: string;
-  chatName: string;
-  chat: any;
-}): Promise<Record<string, string>> {
-  const config = activeDroneHubMcpProjectionConfig;
-  if (!config || !(await isManagedChatMcpAvailable())) return {};
-  const chatId = String(input.chat?.id ?? '').trim();
-  if (!chatId) return {};
+  async function mcpServersForProjection(opts: {
+    runtime: 'host' | 'container';
+    droneId?: string;
+    droneEntry?: any;
+  }): Promise<McpServerRecord[]> {
+    const servers = await listMcpServers();
+    if (!config) return servers;
+    const out: McpServerRecord[] = [];
+    for (const server of servers) {
+      if (!isDroneHubMcpServer(server)) {
+        out.push(server);
+        continue;
+      }
+      out.push(
+        projectMcpServerForManagedChats({
+          server,
+          runtime: opts.runtime,
+          hostBridgePath: path.resolve(__dirname, '..', 'mcp-http-stdio-bridge.js'),
+        }),
+      );
+    }
+    return out;
+  }
+
+  async function resolveManagedChatMcpEnv(input: {
+    runtime: DroneRuntime;
+    droneId: string;
+    chatName: string;
+    chat: any;
+  }): Promise<Record<string, string>> {
+    if (!config || !(await isManagedChatMcpAvailable())) return {};
+    const chatId = String(input.chat?.id ?? '').trim();
+    if (!chatId) return {};
+    return {
+      DRONE_HUB_MCP_URL: input.runtime === 'container' ? config.containerUrl : config.hostUrl,
+      DRONE_HUB_MCP_TOKEN: createChatMcpAccessToken({
+        droneId: input.droneId,
+        chatName: input.chatName,
+        chatId,
+        signingSecret: config.signingSecret,
+      }),
+    };
+  }
+
+  async function syncSkillLibraryForDrone(opts: {
+    droneId: string;
+    droneEntry: any;
+  }): Promise<void> {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const droneEntry = opts.droneEntry;
+    if (!droneId || !droneEntry) return;
+    const runtime = droneRuntime(droneEntry);
+    if (runtime === 'host') {
+      await syncSkillLibraryToHostTargets({ targets: buildHostSkillProjectionTargets(droneEntry) });
+      return;
+    }
+    const requestedDroneName = String((droneEntry as any)?.name ?? droneId).trim() || droneId;
+    await withLockedDroneContainer(
+      { requestedDroneName, droneEntry },
+      async ({ containerName }) => {
+        await syncSkillLibraryToContainerTargets({
+          containerName,
+          targets: buildContainerSkillProjectionTargets(droneEntry),
+        });
+      },
+    );
+  }
+
+  async function syncMcpServersForDrone(opts: { droneId: string; droneEntry: any }): Promise<void> {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const droneEntry = opts.droneEntry;
+    if (!droneId || !droneEntry) return;
+    const runtime = droneRuntime(droneEntry);
+    if (runtime === 'host') {
+      await syncMcpServersToHostTargets({
+        targets: buildHostMcpProjectionTargets(droneEntry),
+        servers: await mcpServersForProjection({ runtime: 'host', droneId, droneEntry }),
+      });
+      return;
+    }
+    const requestedDroneName = String((droneEntry as any)?.name ?? droneId).trim() || droneId;
+    await withLockedDroneContainer(
+      { requestedDroneName, droneEntry },
+      async ({ containerName }) => {
+        await syncMcpServersToContainerTargets({
+          containerName,
+          targets: buildContainerMcpProjectionTargets(droneEntry),
+          servers: await mcpServersForProjection({ runtime: 'container', droneId, droneEntry }),
+        });
+      },
+    );
+  }
+
   return {
-    DRONE_HUB_MCP_URL: input.runtime === 'container' ? config.containerUrl : config.hostUrl,
-    DRONE_HUB_MCP_TOKEN: createChatMcpAccessToken({
-      droneId: input.droneId,
-      chatName: input.chatName,
-      chatId,
-      signingSecret: config.signingSecret,
-    }),
+    bindConfig,
+    isManagedChatMcpAvailable,
+    resolveManagedChatMcpEnv,
+    syncMcpServersForDrone,
+    syncSkillLibraryForDrone,
   };
-}
-
-async function syncSkillLibraryForDrone(opts: { droneId: string; droneEntry: any }): Promise<void> {
-  const droneId = normalizeDroneIdentity(opts.droneId);
-  const droneEntry = opts.droneEntry;
-  if (!droneId || !droneEntry) return;
-  const runtime = droneRuntime(droneEntry);
-  if (runtime === 'host') {
-    await syncSkillLibraryToHostTargets({ targets: buildHostSkillProjectionTargets(droneEntry) });
-    return;
-  }
-  const requestedDroneName = String((droneEntry as any)?.name ?? droneId).trim() || droneId;
-  await withLockedDroneContainer({ requestedDroneName, droneEntry }, async ({ containerName }) => {
-    await syncSkillLibraryToContainerTargets({
-      containerName,
-      targets: buildContainerSkillProjectionTargets(droneEntry),
-    });
-  });
-}
-
-async function syncMcpServersForDrone(opts: { droneId: string; droneEntry: any }): Promise<void> {
-  const droneId = normalizeDroneIdentity(opts.droneId);
-  const droneEntry = opts.droneEntry;
-  if (!droneId || !droneEntry) return;
-  const runtime = droneRuntime(droneEntry);
-  if (runtime === 'host') {
-    await syncMcpServersToHostTargets({
-      targets: buildHostMcpProjectionTargets(droneEntry),
-      servers: await mcpServersForProjection({ runtime: 'host', droneId, droneEntry }),
-    });
-    return;
-  }
-  const requestedDroneName = String((droneEntry as any)?.name ?? droneId).trim() || droneId;
-  await withLockedDroneContainer({ requestedDroneName, droneEntry }, async ({ containerName }) => {
-    await syncMcpServersToContainerTargets({
-      containerName,
-      targets: buildContainerMcpProjectionTargets(droneEntry),
-      servers: await mcpServersForProjection({ runtime: 'container', droneId, droneEntry }),
-    });
-  });
 }
 
 async function syncRepoAgentsInstructionsForDrone(opts: {
@@ -1995,18 +1982,6 @@ async function syncRepoAgentsInstructionsForDrone(opts: {
   });
 }
 
-const syncSetService = createSyncSetService({
-  loadRegistry,
-  updateRegistry,
-  normalizeDroneIdentity,
-  droneRuntime,
-  withLockedDroneContainer,
-  nowIso,
-  logWarn: (message, meta) => {
-    hubLog('warn', message, meta);
-  },
-});
-
 function buildDockerExecShellCommand(containerName: string, cwdRaw: string): string {
   const cwd = normalizeContainerPath(cwdRaw);
   const home = containerManagedHomeDir({ runtime: 'container', cwd });
@@ -2028,60 +2003,32 @@ function buildDockerExecShellCommand(containerName: string, cwdRaw: string): str
   return `docker exec -it ${bashQuote(containerName)} sh -c ${bashQuote(shellBody)}`;
 }
 
-const {
-  assistantFilesystemService,
-  handleFsUploadRoute,
-  normalizeFsPathForRuntime,
-  hostFsErrorStatus,
-  hostMimeType,
-  listHostFsDirectory,
-  parseFsSearchOutput,
-  buildFsSearchScript,
-  handleFsActionRoute,
-  assistantAbortDroneTransferFile,
-  assistantCommitDroneTransferFile,
-  assistantCreateDroneDirectory,
-  assistantCreateDroneTransferDirectory,
-  assistantDeleteDroneDirectory,
-  assistantDeleteDroneFile,
-  assistantFindDroneFiles,
-  assistantListDroneChangedFiles,
-  assistantListDroneFiles,
-  assistantMoveDroneFile,
-  assistantMoveDronePath,
-  assistantPrepareDroneTransferFile,
-  assistantReadDroneFile,
-  assistantReadDroneFileChunk,
-  assistantRunDroneBash,
-  assistantSearchDroneFiles,
-  assistantStatDronePath,
-  assistantWriteDroneFile,
-  assistantWriteDroneTransferChunk,
-  readHostFileBytes,
-} = createFilesystemRuntime({
-  NON_REPO_HOME_CWD,
-  bashQuote,
-  defaultDroneHomeCwd,
-  droneRepoPathInContainer,
-  droneRuntime,
-  dvmCopyToContainer,
-  dvmExec,
-  extensionLower,
-  isLikelyImagePath,
-  isLikelyVideoPath,
-  isRepoAttachedDrone,
-  json,
-  looksLikeMissingContainerError: (...args: any[]) =>
-    promptRuntime.looksLikeMissingContainerError(...args),
-  normalizeContainerPath,
-  normalizeDroneCwdForRuntime,
-  readJsonBody,
-  resolveEffectiveFilesystemSettings,
-  runHostCommand,
-  sortFsEntries,
-  withLockedDroneContainer,
-  withReadonlyDroneContainer,
-});
+function createHubFilesystemFeature(runtimeGraph: any) {
+  return createFilesystemRuntime({
+    NON_REPO_HOME_CWD,
+    bashQuote,
+    defaultDroneHomeCwd,
+    droneRepoPathInContainer,
+    droneRuntime,
+    dvmCopyToContainer,
+    dvmExec,
+    extensionLower,
+    isLikelyImagePath,
+    isLikelyVideoPath,
+    isRepoAttachedDrone,
+    json,
+    looksLikeMissingContainerError: (...args: any[]) =>
+      runtimeGraph.promptRuntime.looksLikeMissingContainerError(...args),
+    normalizeContainerPath,
+    normalizeDroneCwdForRuntime,
+    readJsonBody,
+    resolveEffectiveFilesystemSettings,
+    runHostCommand,
+    sortFsEntries,
+    withLockedDroneContainer,
+    withReadonlyDroneContainer,
+  });
+}
 
 function normalizeGroupName(raw: any): string {
   return String(raw ?? '').trim();
@@ -2788,11 +2735,8 @@ function stripAnsiFromCliOutput(text: string): string {
     .replace(/\r/g, '');
 }
 
-let agentModelCatalogService: AgentModelCatalogService | null = null;
-
-function getAgentModelCatalogService(): AgentModelCatalogService {
-  if (agentModelCatalogService) return agentModelCatalogService;
-  agentModelCatalogService = new AgentModelCatalogService(
+function createHubAgentModelCatalogService(): AgentModelCatalogService {
+  return new AgentModelCatalogService(
     {
       runContainer: async (containerName, command, timeoutMs) =>
         dvmExec(containerName, 'bash', ['-lc', command], { timeoutMs }),
@@ -2813,7 +2757,6 @@ function getAgentModelCatalogService(): AgentModelCatalogService {
     },
     createAgentModelCatalogStore(),
   );
-  return agentModelCatalogService;
 }
 
 function sharedAgentCatalogTarget(opts: {
@@ -2827,20 +2770,6 @@ function sharedAgentCatalogTarget(opts: {
     ...(opts.containerName ? { containerName: opts.containerName } : {}),
     ...(opts.containerPort ? { containerPort: opts.containerPort } : {}),
   };
-}
-
-async function discoverAndRememberModelsForBuiltinAgent(opts: {
-  containerName?: string;
-  containerPort?: number;
-  runtime?: DroneRuntime;
-  agentId: BuiltinAgentId;
-  forceRefresh?: boolean;
-}) {
-  return getAgentModelCatalogService().get({
-    agentId: opts.agentId,
-    target: sharedAgentCatalogTarget(opts),
-    forceRefresh: opts.forceRefresh,
-  });
 }
 
 async function isHostBuiltinAgentInstalled(agentId: BuiltinAgentId): Promise<boolean> {
@@ -2940,348 +2869,375 @@ async function cliSupportsModelFlag(opts: {
   return supported;
 }
 
-let dockerSnapshotRuntime: any;
+function createHubRuntimeGraph(
+  nativeChatRuntimePort: ReturnType<typeof createNativeChatRuntimePort>,
+  mcpProjectionFeature: ReturnType<typeof createMcpProjectionFeature>,
+) {
+  let promptRuntime: any;
+  let dockerSnapshotRuntime: any;
+  const promptSkillSyncWarnings = new Set<string>();
+  const syncSetService = createSyncSetService({
+    loadRegistry,
+    updateRegistry,
+    normalizeDroneIdentity,
+    droneRuntime,
+    withLockedDroneContainer,
+    nowIso,
+    logWarn: (message, meta) => {
+      hubLog('warn', message, meta);
+    },
+  });
+  const { resolveManagedChatMcpEnv, syncMcpServersForDrone, syncSkillLibraryForDrone } =
+    mcpProjectionFeature;
 
-const chatSessionRuntime = createChatSessionRuntime({
-  applyChatReconciliationInStore,
-  assertChatAgentSupportedForDrone,
-  bashQuote,
-  buildAutoRenamedChatCandidate,
-  buildContainerManagedEnvLines,
-  buildEnvExportLines,
-  chatHasActiveDockerSnapshot: (...args: any[]) =>
-    dockerSnapshotRuntime.chatHasActiveDockerSnapshot(...args),
-  chatHasReconcilablePendingPrompts: (...args: any[]) =>
-    promptRuntime.chatHasReconcilablePendingPrompts(...args),
-  countTranscriptTurnsFromStore,
-  defaultChatAgentConfigForDrone,
-  defaultSeedBootstrapTimeoutMs,
-  droneRuntime,
-  dvmExec,
-  dvmSessionStart,
-  enqueueReconcile: (...args: any[]) => promptRuntime.enqueueReconcile(...args),
-  ensureDaemonPromptEventSubscription: (...args: any[]) =>
-    promptRuntime.ensureDaemonPromptEventSubscription(...args),
-  failStaleDockerSnapshotsForChat: (...args: any[]) =>
-    dockerSnapshotRuntime.failStaleDockerSnapshotsForChat(...args),
-  hubChatSessionName,
-  hubLog,
-  importChatFromRegistry,
-  importDroneChatsFromRegistry,
-  importTranscriptTurnsFromRegistry,
-  isGeneratedChatName,
-  listChatsFromStore,
-  loadRegistry,
-  migrateInMemoryChatStateForRename: (...args: any[]) =>
-    promptRuntime.migrateInMemoryChatStateForRename(...args),
-  normalizeAgentPermissionMode,
-  normalizeAgentPlan,
-  normalizeBuiltinAgentId,
-  normalizeChatImageAttachmentRefs: (...args: any[]) =>
-    promptRuntime.normalizeChatImageAttachmentRefs(...args),
-  normalizeChatModel,
-  normalizeChatName,
-  normalizeChatReasoning,
-  normalizeContainerPath,
-  normalizeDockerSnapshot: (...args: any[]) =>
-    dockerSnapshotRuntime.normalizeDockerSnapshot(...args),
-  normalizeDroneIdentity,
-  normalizePendingStartupPrompts,
-  nowIso,
-  parseChatNameForMutation,
-  patchChatMetadataInStore,
-  pruneCompletedPendingPrompts: (...args: any[]) =>
-    promptRuntime.pruneCompletedPendingPrompts(...args),
-  readChatFromStore,
-  readChatRowsFromStore,
-  readChatVersionFromStore,
-  readPendingPrompts: (...args: any[]) => promptRuntime.readPendingPrompts(...args),
-  readPendingStartupPrompts: (...args: any[]) => promptRuntime.readPendingStartupPrompts(...args),
-  readTranscriptTurnsFromStore,
-  renameChatInStore,
-  resolveBuiltinTmuxCommand,
-  resolveCanonicalDroneOrPendingForReadRef,
-  resolveContainerTerminalShellCommand,
-  resolveDroneOrPendingForReadRef,
-  resolveHubAgentCommand,
-  resolveNameSuggestionLlmSettings,
-  runHostCommand,
-  sanitizeTmuxSessionName,
-  stableResponseFingerprint,
-  startupPromptToPendingPrompt,
-  suggestDroneNameFromMessage,
-  transcriptTurnsSourceHash,
-  updateChatInStore,
-  updateRegistry,
-  updateTranscriptTurnInStore,
-  upsertChatInStore,
-});
+  const chatSessionRuntime = createChatSessionRuntime({
+    applyChatReconciliationInStore,
+    assertChatAgentSupportedForDrone,
+    bashQuote,
+    buildAutoRenamedChatCandidate,
+    buildContainerManagedEnvLines,
+    buildEnvExportLines,
+    chatHasActiveDockerSnapshot: (...args: any[]) =>
+      dockerSnapshotRuntime.chatHasActiveDockerSnapshot(...args),
+    chatHasReconcilablePendingPrompts: (...args: any[]) =>
+      promptRuntime.chatHasReconcilablePendingPrompts(...args),
+    countTranscriptTurnsFromStore,
+    defaultChatAgentConfigForDrone,
+    defaultSeedBootstrapTimeoutMs,
+    droneRuntime,
+    dvmExec,
+    dvmSessionStart,
+    enqueueReconcile: (...args: any[]) => promptRuntime.enqueueReconcile(...args),
+    ensureDaemonPromptEventSubscription: (...args: any[]) =>
+      promptRuntime.ensureDaemonPromptEventSubscription(...args),
+    failStaleDockerSnapshotsForChat: (...args: any[]) =>
+      dockerSnapshotRuntime.failStaleDockerSnapshotsForChat(...args),
+    hubChatSessionName,
+    hubLog,
+    importChatFromRegistry,
+    importDroneChatsFromRegistry,
+    importTranscriptTurnsFromRegistry,
+    isGeneratedChatName,
+    listChatsFromStore,
+    loadRegistry,
+    migrateInMemoryChatStateForRename: (...args: any[]) =>
+      promptRuntime.migrateInMemoryChatStateForRename(...args),
+    normalizeAgentPermissionMode,
+    normalizeAgentPlan,
+    normalizeBuiltinAgentId,
+    normalizeChatImageAttachmentRefs: (...args: any[]) =>
+      promptRuntime.normalizeChatImageAttachmentRefs(...args),
+    normalizeChatModel,
+    normalizeChatName,
+    normalizeChatReasoning,
+    normalizeContainerPath,
+    normalizeDockerSnapshot: (...args: any[]) =>
+      dockerSnapshotRuntime.normalizeDockerSnapshot(...args),
+    normalizeDroneIdentity,
+    normalizePendingStartupPrompts,
+    nowIso,
+    parseChatNameForMutation,
+    patchChatMetadataInStore,
+    pruneCompletedPendingPrompts: (...args: any[]) =>
+      promptRuntime.pruneCompletedPendingPrompts(...args),
+    readChatFromStore,
+    readChatRowsFromStore,
+    readChatVersionFromStore,
+    readPendingPrompts: (...args: any[]) => promptRuntime.readPendingPrompts(...args),
+    readPendingStartupPrompts: (...args: any[]) => promptRuntime.readPendingStartupPrompts(...args),
+    readTranscriptTurnsFromStore,
+    renameChatInStore,
+    resolveBuiltinTmuxCommand,
+    resolveCanonicalDroneOrPendingForReadRef,
+    resolveContainerTerminalShellCommand,
+    resolveDroneOrPendingForReadRef,
+    resolveHubAgentCommand,
+    resolveNameSuggestionLlmSettings,
+    runHostCommand,
+    sanitizeTmuxSessionName,
+    stableResponseFingerprint,
+    startupPromptToPendingPrompt,
+    suggestDroneNameFromMessage,
+    transcriptTurnsSourceHash,
+    updateChatInStore,
+    updateRegistry,
+    updateTranscriptTurnInStore,
+    upsertChatInStore,
+  });
 
-const {
-  HUB_WEB_TERMINAL_DEFAULT_TAIL_LINES,
-  HUB_WEB_TERMINAL_MAX_BYTES,
-  HUB_WEB_TERMINAL_MAX_TAIL_LINES,
-  assertReadOnlySupportedForAgent,
-  autoRenameGeneratedChatFromFirstPrompt,
-  buildNewChatEntry,
-  chatSnapshotResponseBody,
-  claimChatAutoRenameFromFirstPrompt,
-  clampInt,
-  clampIntParam,
-  copyChatAttachmentsToHost,
-  ensureChatEntry,
-  ensureChatEntryCopiedFromChat,
-  ensureClaudeSessionId,
-  ensureCursorChatId,
-  ensureHubChatSessionRunning,
-  ensureHubSessionRunning,
-  ensureOpenCodeSessionId,
-  getChatEntry,
-  importResolvedChatToStore,
-  importResolvedDroneChatsToStore,
-  inferChatAgent,
-  openCodeSessionTitle,
-  parseOptionalNonNegativeInt,
-  projectCanonicalChatToRegistry,
-  projectCanonicalChatsToRegistry,
-  readChatSnapshot,
-  resolveChatTmuxCommand,
-  setChatAgentConfig,
-  shouldAutoRenameChatOnPrompt,
-  updateTranscriptTurnById,
-} = chatSessionRuntime;
+  const {
+    HUB_WEB_TERMINAL_DEFAULT_TAIL_LINES,
+    HUB_WEB_TERMINAL_MAX_BYTES,
+    HUB_WEB_TERMINAL_MAX_TAIL_LINES,
+    assertReadOnlySupportedForAgent,
+    autoRenameGeneratedChatFromFirstPrompt,
+    buildNewChatEntry,
+    chatSnapshotResponseBody,
+    claimChatAutoRenameFromFirstPrompt,
+    clampInt,
+    clampIntParam,
+    copyChatAttachmentsToHost,
+    ensureChatEntry,
+    ensureChatEntryCopiedFromChat,
+    ensureClaudeSessionId,
+    ensureCursorChatId,
+    ensureHubChatSessionRunning,
+    ensureHubSessionRunning,
+    ensureOpenCodeSessionId,
+    getChatEntry,
+    importResolvedChatToStore,
+    importResolvedDroneChatsToStore,
+    inferChatAgent,
+    openCodeSessionTitle,
+    parseOptionalNonNegativeInt,
+    projectCanonicalChatToRegistry,
+    projectCanonicalChatsToRegistry,
+    readChatSnapshot,
+    resolveChatTmuxCommand,
+    setChatAgentConfig,
+    shouldAutoRenameChatOnPrompt,
+    updateTranscriptTurnById,
+  } = chatSessionRuntime;
 
-const createDroneChat = createDroneChatCreator({
-  buildNewChatEntry,
-  cloneNativeChatSession: (input) => cloneNativeChatSessionHandler(input),
-  copyNativeChatConfiguration: (input) => copyNativeChatConfigurationHandler(input),
-  createChatInStore,
-  getChatEntry,
-  importDroneChatsFromRegistry,
-  inferChatAgent,
-  listChatsFromStore,
-  nowIso,
-  projectCanonicalChatsToRegistry,
-  readChatFromStore,
-});
+  const createDroneChat = createDroneChatCreator({
+    buildNewChatEntry,
+    cloneNativeChatSession: nativeChatRuntimePort.cloneSession,
+    copyNativeChatConfiguration: nativeChatRuntimePort.copyConfiguration,
+    createChatInStore,
+    getChatEntry,
+    importDroneChatsFromRegistry,
+    inferChatAgent,
+    listChatsFromStore,
+    nowIso,
+    projectCanonicalChatsToRegistry,
+    readChatFromStore,
+  });
 
-dockerSnapshotRuntime = createDockerSnapshotRuntime({
-  chatHasActivePendingPromptsForSummary: (...args: any[]) =>
-    promptRuntime.chatHasActivePendingPromptsForSummary(...args),
-  droneRuntime,
-  droneStatus,
-  enqueuePendingPromptPump: (...args: any[]) => promptRuntime.enqueuePendingPromptPump(...args),
-  hubLog,
-  inferChatAgent,
-  loadRegistry,
-  makeClient,
-  normalizeChatName,
-  normalizeDroneIdentity,
-  nowIso,
-  projectCanonicalChatToRegistry,
-  readChatFromStore,
-  resolveHostPort,
-  rollbackTranscriptToTurnInStore,
-  runHostCommand,
-  stopAllDroneChatActivity: (...args: any[]) => promptRuntime.stopAllDroneChatActivity(...args),
-  updateTranscriptTurnById,
-  updateTranscriptTurnInStore,
-  upsertTranscriptTurnInStore,
-});
+  dockerSnapshotRuntime = createDockerSnapshotRuntime({
+    chatHasActivePendingPromptsForSummary: (...args: any[]) =>
+      promptRuntime.chatHasActivePendingPromptsForSummary(...args),
+    droneRuntime,
+    droneStatus,
+    enqueuePendingPromptPump: (...args: any[]) => promptRuntime.enqueuePendingPromptPump(...args),
+    hubLog,
+    inferChatAgent,
+    loadRegistry,
+    makeClient,
+    normalizeChatName,
+    normalizeDroneIdentity,
+    nowIso,
+    projectCanonicalChatToRegistry,
+    readChatFromStore,
+    resolveHostPort,
+    rollbackTranscriptToTurnInStore,
+    runHostCommand,
+    stopAllDroneChatActivity: (...args: any[]) => promptRuntime.stopAllDroneChatActivity(...args),
+    updateTranscriptTurnById,
+    updateTranscriptTurnInStore,
+    upsertTranscriptTurnInStore,
+  });
 
-const {
-  chatHasActiveDockerSnapshot,
-  collectDockerSnapshotImageRefsFromChatEntry,
-  collectDockerSnapshotImageRefsFromDroneEntry,
-  collectDroneRuntimeDiagnostics,
-  compactDiagnosticError,
-  dockerContainerId,
-  dockerContainerSizeBytes,
-  dockerSnapshotAfterAgentMessageEnabledForChat,
-  dockerSnapshotTotalsForDroneEntry,
-  failStaleDockerSnapshotsForChat,
-  isStaleDockerExecErrorMessage,
-  maybeStartDockerSnapshotForTranscriptTurn,
-  normalizeDockerSnapshot,
-  removeDockerSnapshotImagesBestEffort,
-  restoreDockerSnapshotForTranscriptTurn,
-} = dockerSnapshotRuntime;
+  const {
+    chatHasActiveDockerSnapshot,
+    collectDockerSnapshotImageRefsFromChatEntry,
+    collectDockerSnapshotImageRefsFromDroneEntry,
+    collectDroneRuntimeDiagnostics,
+    compactDiagnosticError,
+    dockerContainerId,
+    dockerContainerSizeBytes,
+    dockerSnapshotAfterAgentMessageEnabledForChat,
+    dockerSnapshotTotalsForDroneEntry,
+    failStaleDockerSnapshotsForChat,
+    isStaleDockerExecErrorMessage,
+    maybeStartDockerSnapshotForTranscriptTurn,
+    normalizeDockerSnapshot,
+    removeDockerSnapshotImagesBestEffort,
+    restoreDockerSnapshotForTranscriptTurn,
+  } = dockerSnapshotRuntime;
 
-promptRuntime = createChatPromptRuntime({
-  NON_REPO_HOME_CWD,
-  PROMPT_SKILL_SYNC_WARNINGS,
-  UPGRADE_DAEMON_READY_TIMEOUT_MS,
-  applyChatReconciliationInStore,
-  applyPendingDisplayNameToProvisionedDrone,
-  autoRenameGeneratedChatFromFirstPrompt,
-  assertReadOnlySupportedForAgent,
-  bashQuote,
-  buildChatAttachmentsDirectory,
-  buildChatImageAttachmentRefs,
-  buildContainerManagedEnvLines,
-  buildEnvExportLines,
-  chatAttachmentsStorageRootForDrone,
-  chatHasActiveDockerSnapshot,
-  chatNameExists,
-  cliSupportsModelFlag,
-  cloneChatEntryForDroneClone,
-  collectDroneRuntimeDiagnostics,
-  compactDiagnosticError,
-  commitDroneMetadataPatch,
-  copyChatAttachmentsToContainer,
-  copyChatAttachmentsToHost,
-  createDronePendingPromptStore,
-  createDroneChat,
-  createDroneProvisioningController,
-  defaultDaemonReadyTimeoutMs,
-  defaultPendingPromptEnqueueRetryDelayMs,
-  defaultPromptEnqueueTimeoutMs,
-  defaultRepoSeedTimeoutMs,
-  droneCodexPromptApprovalResolve,
-  dronePromptCancel,
-  dronePromptEnqueue,
-  droneCodexPromptEnqueue,
-  dronePromptGet,
-  droneStatus,
-  droneRuntime,
-  dvmExec,
-  dvmSessionType,
-  dvmStart,
-  dvmStop,
-  ensureChatEntry,
-  ensureClaudeSessionId,
-  ensureContainerDroneDaemonSession,
-  ensureCursorChatId,
-  ensureHubChatSessionRunning,
-  ensureOpenCodeSessionId,
-  failStaleDockerSnapshotsForChat,
-  formatTranscriptJobFailure,
-  getChatEntry,
-  hasInFlightPriorPendingPrompt,
-  hasKnownBuiltinTranscriptSession,
-  hubChatSessionName,
-  hubLog,
-  importChatFromRegistry,
-  inferChatAgent,
-  isDraftChatEntry,
-  isNotFoundErrorMessage,
-  listChatsFromStore,
-  loadRegistry,
-  looksLikeTransientPromptEnqueueError,
-  launchHostDroneDaemon,
-  makeClient,
-  maybeBootstrapPromptFromTranscript,
-  maybeStartDockerSnapshotForTranscriptTurn,
-  normalizeAgentPermissionMode,
-  normalizeAgentApprovalPolicy,
-  normalizeBuiltinAgentId,
-  normalizeChatModel,
-  normalizeChatName,
-  normalizeChatReasoning,
-  normalizeContainerPath,
-  normalizeDroneCwdForRuntime,
-  normalizeDroneIdentity,
-  normalizePendingPromptState,
-  normalizePendingPromptText,
-  normalizePendingStartupPrompts,
-  normalizeSubmittedAtIso,
-  notifyDroneChatWrite: (droneId: string, chatName: string) =>
-    notifyDroneChatWrite?.(droneId, chatName),
-  nowIso,
-  openCodeSessionTitle,
-  parseBlipJobTranscript,
-  parseCodexJobTranscript,
-  parsePiJobTranscript,
-  parseSeedAgent,
-  parseStructuredAgentJobTranscript,
-  promptNativeChat: (input: any) => nativeChatPromptHandler(input),
-  stopNativeChat: (nativeChatId: string) => nativeChatStopHandler(nativeChatId),
-  nativeChatIsBusy: (nativeChatId: string) => nativeChatIsBusyHandler(nativeChatId),
-  nativeChatError: (nativeChatId: string) => nativeChatErrorHandler(nativeChatId),
-  nativeChatLatestAssistantText: (nativeChatId: string) =>
-    nativeChatLatestAssistantTextHandler(nativeChatId),
-  projectCanonicalChatToRegistry,
-  promptWithImageAttachments,
-  readBuiltinTranscriptSessionId,
-  readChatAttachmentsFromRefs,
-  readChatFromStore,
-  resetTranscriptStoreForTests,
-  resolveBlipPromptCommand,
-  resolveCanonicalDroneOrPendingForReadRef,
-  resolveChatTmuxCommand,
-  resolveCodexTurnRuntime,
-  resolveDroneCliPath,
-  resolveDroneDaemonClientForEntry,
-  resolveDroneEnvironmentConfig,
-  resolveEffectiveLlmProvider,
-  resolveEffectiveProviderApiKeySettings,
-  resolveHostPort,
-  resolveManagedChatMcpEnv,
-  resolvePendingDroneDisplayName,
-  resolveTranscriptPromptAt,
-  runNodeCli,
-  sameAgentPlan,
-  setChatAgentConfig,
-  setDroneHubMetaByIdentity,
-  shouldDeferQueuedPendingPrompt,
-  shouldRetryFailedPendingPrompt,
-  sleepMs,
-  stalePendingPromptState,
-  startupPromptToPendingPrompt,
-  syncMcpServersForDrone,
-  syncRepoAgentsInstructionsForDrone,
-  syncSetService,
-  syncSkillLibraryForDrone,
-  unsupportedHostCustomAgentError,
-  updateTranscriptTurnById,
-  upgradeDroneDaemonInContainer,
-  waitForDroneDaemonReady,
-  withDroneOpLock,
-  withLockedDroneContainer,
-  withTimeout,
-});
+  promptRuntime = createChatPromptRuntime({
+    NON_REPO_HOME_CWD,
+    PROMPT_SKILL_SYNC_WARNINGS: promptSkillSyncWarnings,
+    UPGRADE_DAEMON_READY_TIMEOUT_MS,
+    applyChatReconciliationInStore,
+    applyPendingDisplayNameToProvisionedDrone,
+    autoRenameGeneratedChatFromFirstPrompt,
+    assertReadOnlySupportedForAgent,
+    bashQuote,
+    buildChatAttachmentsDirectory,
+    buildChatImageAttachmentRefs,
+    buildContainerManagedEnvLines,
+    buildEnvExportLines,
+    chatAttachmentsStorageRootForDrone,
+    chatHasActiveDockerSnapshot,
+    chatNameExists,
+    cliSupportsModelFlag,
+    cloneChatEntryForDroneClone,
+    collectDroneRuntimeDiagnostics,
+    compactDiagnosticError,
+    commitDroneMetadataPatch,
+    copyChatAttachmentsToContainer,
+    copyChatAttachmentsToHost,
+    createDronePendingPromptStore,
+    createDroneChat,
+    createDroneProvisioningController,
+    defaultDaemonReadyTimeoutMs,
+    defaultPendingPromptEnqueueRetryDelayMs,
+    defaultPromptEnqueueTimeoutMs,
+    defaultRepoSeedTimeoutMs,
+    droneCodexPromptApprovalResolve,
+    dronePromptCancel,
+    dronePromptEnqueue,
+    droneCodexPromptEnqueue,
+    dronePromptGet,
+    droneStatus,
+    droneRuntime,
+    dvmExec,
+    dvmSessionType,
+    dvmStart,
+    dvmStop,
+    ensureChatEntry,
+    ensureClaudeSessionId,
+    ensureContainerDroneDaemonSession,
+    ensureCursorChatId,
+    ensureHubChatSessionRunning,
+    ensureOpenCodeSessionId,
+    failStaleDockerSnapshotsForChat,
+    formatTranscriptJobFailure,
+    getChatEntry,
+    hasInFlightPriorPendingPrompt,
+    hasKnownBuiltinTranscriptSession,
+    hubChatSessionName,
+    hubLog,
+    importChatFromRegistry,
+    inferChatAgent,
+    isDraftChatEntry,
+    isNotFoundErrorMessage,
+    listChatsFromStore,
+    loadRegistry,
+    looksLikeTransientPromptEnqueueError,
+    launchHostDroneDaemon,
+    makeClient,
+    maybeBootstrapPromptFromTranscript,
+    maybeStartDockerSnapshotForTranscriptTurn,
+    normalizeAgentPermissionMode,
+    normalizeAgentApprovalPolicy,
+    normalizeBuiltinAgentId,
+    normalizeChatModel,
+    normalizeChatName,
+    normalizeChatReasoning,
+    normalizeContainerPath,
+    normalizeDroneCwdForRuntime,
+    normalizeDroneIdentity,
+    normalizePendingPromptState,
+    normalizePendingPromptText,
+    normalizePendingStartupPrompts,
+    normalizeSubmittedAtIso,
+    notifyDroneChatWrite: (droneId: string, chatName: string) =>
+      hubChangeEvents.emitChatWrite(droneId, chatName),
+    nowIso,
+    openCodeSessionTitle,
+    parseBlipJobTranscript,
+    parseCodexJobTranscript,
+    parsePiJobTranscript,
+    parseSeedAgent,
+    parseStructuredAgentJobTranscript,
+    promptNativeChat: nativeChatRuntimePort.prompt,
+    stopNativeChat: nativeChatRuntimePort.stop,
+    nativeChatIsBusy: nativeChatRuntimePort.isBusy,
+    nativeChatError: nativeChatRuntimePort.error,
+    nativeChatLatestAssistantText: nativeChatRuntimePort.latestAssistantText,
+    projectCanonicalChatToRegistry,
+    promptWithImageAttachments,
+    readBuiltinTranscriptSessionId,
+    readChatAttachmentsFromRefs,
+    readChatFromStore,
+    resetTranscriptStoreForTests,
+    resolveBlipPromptCommand,
+    resolveCanonicalDroneOrPendingForReadRef,
+    resolveChatTmuxCommand,
+    resolveCodexTurnRuntime,
+    resolveDroneCliPath,
+    resolveDroneDaemonClientForEntry,
+    resolveDroneEnvironmentConfig,
+    resolveEffectiveLlmProvider,
+    resolveEffectiveProviderApiKeySettings,
+    resolveHostPort,
+    resolveManagedChatMcpEnv,
+    resolvePendingDroneDisplayName,
+    resolveTranscriptPromptAt,
+    runNodeCli,
+    sameAgentPlan,
+    setChatAgentConfig,
+    setDroneHubMetaByIdentity,
+    shouldDeferQueuedPendingPrompt,
+    shouldRetryFailedPendingPrompt,
+    sleepMs,
+    stalePendingPromptState,
+    startupPromptToPendingPrompt,
+    syncMcpServersForDrone,
+    syncRepoAgentsInstructionsForDrone,
+    syncSetService,
+    syncSkillLibraryForDrone,
+    unsupportedHostCustomAgentError,
+    updateTranscriptTurnById,
+    upgradeDroneDaemonInContainer,
+    waitForDroneDaemonReady,
+    withDroneOpLock,
+    withLockedDroneContainer,
+    withTimeout,
+  });
 
-const {
-  attachmentOnlyPromptLabel,
-  busyChatNamesForDrone,
-  cancelQueuedPendingPrompt,
-  chatHasActivePendingPromptsForSummary,
-  chatHasReconcilablePendingPrompts,
-  chatRequiresCodexApprovalForSummary,
-  chatReconciliationQueue,
-  createOrEnqueueNewChatAction,
-  createOrEnqueuePromptUnified,
-  daemonPromptEventMonitor,
-  dequeueProvisioning,
-  enqueuePendingPromptPump,
-  enqueueProvisioning,
-  enqueueProvisioningForAllPending,
-  enqueueReconcile,
-  ensureDaemonPromptEventSubscription,
-  isSafePromptId,
-  looksLikeContainerAlreadyRunningError,
-  looksLikeContainerNotRunningError,
-  looksLikeMissingContainerError,
-  looksLikeRepoUnavailableError,
-  migrateInMemoryChatStateForRename,
-  normalizeChatImageAttachmentRefs,
-  pendingPromptsFromChatEntry,
-  promoteQueuedNewChatAction,
-  pruneCompletedPendingPrompts,
-  pushPendingPrompt,
-  pushPendingStartupPrompt,
-  readPendingPrompts,
-  readPendingStartupPrompts,
-  resumePendingPromptChats,
-  runDroneLifecycleAction,
-  stopAllDroneChatActivity,
-  stopChatResponse,
-  startPromptRuntimeBackgroundWork,
-  stopPromptRuntimeBackgroundWork,
-  stopSingleDroneChatActivity,
-  stopTranscriptPendingPrompts,
-  transcriptTurnIdsFromEntry,
-} = promptRuntime;
+  const {
+    attachmentOnlyPromptLabel,
+    busyChatNamesForDrone,
+    cancelQueuedPendingPrompt,
+    chatHasActivePendingPromptsForSummary,
+    chatHasReconcilablePendingPrompts,
+    chatRequiresCodexApprovalForSummary,
+    chatReconciliationQueue,
+    createOrEnqueueNewChatAction,
+    createOrEnqueuePromptUnified,
+    daemonPromptEventMonitor,
+    dequeueProvisioning,
+    enqueuePendingPromptPump,
+    enqueueProvisioning,
+    enqueueProvisioningForAllPending,
+    enqueueReconcile,
+    ensureDaemonPromptEventSubscription,
+    isSafePromptId,
+    looksLikeContainerAlreadyRunningError,
+    looksLikeContainerNotRunningError,
+    looksLikeMissingContainerError,
+    looksLikeRepoUnavailableError,
+    migrateInMemoryChatStateForRename,
+    normalizeChatImageAttachmentRefs,
+    pendingPromptsFromChatEntry,
+    promoteQueuedNewChatAction,
+    pruneCompletedPendingPrompts,
+    pushPendingPrompt,
+    pushPendingStartupPrompt,
+    readPendingPrompts,
+    readPendingStartupPrompts,
+    resumePendingPromptChats,
+    runDroneLifecycleAction,
+    stopAllDroneChatActivity,
+    stopChatResponse,
+    startPromptRuntimeBackgroundWork,
+    stopPromptRuntimeBackgroundWork,
+    stopSingleDroneChatActivity,
+    stopTranscriptPendingPrompts,
+    transcriptTurnIdsFromEntry,
+  } = promptRuntime;
+
+  return {
+    chatSessionRuntime,
+    createDroneChat,
+    dockerSnapshotRuntime,
+    promptRuntime,
+    syncSetService,
+  };
+}
 
 function resolveDroneCliPath(): string {
   // Prefer built CLI when available. In source/dev mode, fall back to src/cli.ts.
@@ -3596,98 +3552,96 @@ async function spawnTerminalWithBash(
   };
 }
 
-const {
-  removeDroneRuntimeArtifacts,
-  removeDroneById,
-  removeDroneLifecycleEntryById,
-  removeDroneTreeById,
-} = createDroneLifecycleRuntime({
-  cleanupQuarantineWorktree,
-  collectDockerSnapshotImageRefsFromDroneEntry,
-  deleteCanonicalDroneLifecycle,
-  dequeueProvisioning,
-  droneRuntime,
-  dvmContainerExists,
-  dvmRemove,
-  fleetDescendantIdsForActor,
-  gitTopLevel,
-  loadRegistry,
-  looksLikeMissingContainerError,
-  normalizeDroneIdentity,
-  permanentlyDeleteCanonicalDrone,
-  quarantineWorktreePath,
-  removeDockerSnapshotImagesBestEffort,
-  revokeMcpAccessTokensForDrone,
-  sleepMs,
-  stopAllDroneChatActivity,
-});
+function createHubLifecycleFeatures(
+  runtimeGraph: any,
+  nativeChatRuntimePort: ReturnType<typeof createNativeChatRuntimePort>,
+  resourceSubscriptionRuntimePort: ReturnType<typeof createResourceSubscriptionRuntimePort>,
+) {
+  const droneLifecycleRuntime = createDroneLifecycleRuntime({
+    cleanupQuarantineWorktree,
+    collectDockerSnapshotImageRefsFromDroneEntry: (...args: any[]) =>
+      runtimeGraph.dockerSnapshotRuntime.collectDockerSnapshotImageRefsFromDroneEntry(...args),
+    deleteCanonicalDroneLifecycle,
+    dequeueProvisioning: (...args: any[]) =>
+      runtimeGraph.promptRuntime.dequeueProvisioning(...args),
+    droneRuntime,
+    dvmContainerExists,
+    dvmRemove,
+    fleetDescendantIdsForActor,
+    gitTopLevel,
+    loadRegistry,
+    looksLikeMissingContainerError: (...args: any[]) =>
+      runtimeGraph.promptRuntime.looksLikeMissingContainerError(...args),
+    normalizeDroneIdentity,
+    permanentlyDeleteCanonicalDrone,
+    quarantineWorktreePath,
+    removeDockerSnapshotImagesBestEffort: (...args: any[]) =>
+      runtimeGraph.dockerSnapshotRuntime.removeDockerSnapshotImagesBestEffort(...args),
+    revokeMcpAccessTokensForDrone,
+    sleepMs,
+    stopAllDroneChatActivity: (...args: any[]) =>
+      runtimeGraph.promptRuntime.stopAllDroneChatActivity(...args),
+  });
 
-const {
-  archiveChatById,
-  archiveDroneById,
-  cleanupExpiredArchivedChats,
-  deleteArchivedChatById,
-  normalizeArchiveRetention,
-  normalizeArchiveRuntimePolicy,
-  parseIsoToMs,
-  removeArchivedDroneById,
-  resolveArchiveDeleteAtIso,
-  restoreArchivedChatById,
-  restoreArchivedDroneById,
-  startArchiveCleanupScheduler,
-  stopArchiveCleanupScheduler,
-  triggerArchiveCleanup,
-} = createArchiveRuntime({
-  CHAT_NAME_MAX_LEN,
-  DRONE_DISPLAY_NAME_MAX_LEN,
-  allocateUntitledDisplayName,
-  archiveChatInStore,
-  archiveRetentionMs,
-  buildNewChatEntry,
-  collectDockerSnapshotImageRefsFromChatEntry,
-  collectDockerSnapshotImageRefsFromDroneEntry,
-  deleteArchivedChatFromStore,
-  deleteNativeChatSessionsForDrone: (droneEntry: any) =>
-    deleteNativeChatSessionsHandler(droneEntry),
-  droneDisplayNameExists,
-  droneRuntime,
-  dvmContainerExists,
-  dvmStart,
-  hubLog,
-  importArchivedChatsFromRegistry,
-  importDroneChatsFromRegistry,
-  listArchivedChatsFromStore,
-  listCanonicalDroneLifecycleForRead,
-  listChatsFromStore,
-  loadRegistry,
-  looksLikeContainerAlreadyRunningError,
-  normalizeChatName,
-  normalizeDroneIdentity,
-  nowIso,
-  parseArchiveRetentionId,
-  parseArchiveRuntimePolicy,
-  pauseResourceSubscriptionsForDrone: (droneId: string, droneEntry: any) =>
-    resourceSubscriptionLifecycleHandler.pauseForDrone(
-      droneId,
-      resourceSubscriptionChatIds(droneEntry),
-    ),
-  permanentlyDeleteCanonicalDrone,
-  readChatFromStore,
-  readDroneChatCleanupProjectionFromStore,
-  removeDockerSnapshotImagesBestEffort,
-  removeDroneRuntimeArtifacts,
-  restoreArchivedChatInStore,
-  resumeResourceSubscriptionsForChat: (chatId: string) =>
-    resourceSubscriptionLifecycleHandler.resumeForChat(chatId),
-  resumeResourceSubscriptionsForDrone: (droneId: string, droneEntry: any) =>
-    resourceSubscriptionLifecycleHandler.resumeForDrone(
-      droneId,
-      resourceSubscriptionChatIds(droneEntry),
-    ),
-  revokeMcpAccessTokensForDrone,
-  updateRegistry,
-  upsertCanonicalDroneLifecycle,
-});
+  const archiveRuntime = createArchiveRuntime({
+    CHAT_NAME_MAX_LEN,
+    DRONE_DISPLAY_NAME_MAX_LEN,
+    allocateUntitledDisplayName,
+    archiveChatInStore,
+    archiveRetentionMs,
+    buildNewChatEntry: (...args: any[]) =>
+      runtimeGraph.chatSessionRuntime.buildNewChatEntry(...args),
+    collectDockerSnapshotImageRefsFromChatEntry: (...args: any[]) =>
+      runtimeGraph.dockerSnapshotRuntime.collectDockerSnapshotImageRefsFromChatEntry(...args),
+    collectDockerSnapshotImageRefsFromDroneEntry: (...args: any[]) =>
+      runtimeGraph.dockerSnapshotRuntime.collectDockerSnapshotImageRefsFromDroneEntry(...args),
+    deleteArchivedChatFromStore,
+    deleteNativeChatSessionsForDrone: (droneEntry: any) =>
+      nativeChatRuntimePort.deleteSessions(droneEntry),
+    droneDisplayNameExists,
+    droneRuntime,
+    dvmContainerExists,
+    dvmStart,
+    hubLog,
+    importArchivedChatsFromRegistry,
+    importDroneChatsFromRegistry,
+    listArchivedChatsFromStore,
+    listCanonicalDroneLifecycleForRead,
+    listChatsFromStore,
+    loadRegistry,
+    looksLikeContainerAlreadyRunningError: (...args: any[]) =>
+      runtimeGraph.promptRuntime.looksLikeContainerAlreadyRunningError(...args),
+    normalizeChatName,
+    normalizeDroneIdentity,
+    nowIso,
+    parseArchiveRetentionId,
+    parseArchiveRuntimePolicy,
+    pauseResourceSubscriptionsForDrone: (droneId: string, droneEntry: any) =>
+      resourceSubscriptionRuntimePort.pauseForDrone(
+        droneId,
+        resourceSubscriptionChatIds(droneEntry),
+      ),
+    permanentlyDeleteCanonicalDrone,
+    readChatFromStore,
+    readDroneChatCleanupProjectionFromStore,
+    removeDockerSnapshotImagesBestEffort: (...args: any[]) =>
+      runtimeGraph.dockerSnapshotRuntime.removeDockerSnapshotImagesBestEffort(...args),
+    removeDroneRuntimeArtifacts: droneLifecycleRuntime.removeDroneRuntimeArtifacts,
+    restoreArchivedChatInStore,
+    resumeResourceSubscriptionsForChat: (chatId: string) =>
+      resourceSubscriptionRuntimePort.resumeForChat(chatId),
+    resumeResourceSubscriptionsForDrone: (droneId: string, droneEntry: any) =>
+      resourceSubscriptionRuntimePort.resumeForDrone(
+        droneId,
+        resourceSubscriptionChatIds(droneEntry),
+      ),
+    revokeMcpAccessTokensForDrone,
+    updateRegistry,
+    upsertCanonicalDroneLifecycle,
+  });
+
+  return { archiveRuntime, droneLifecycleRuntime };
+}
 
 async function resolveHostPort(container: string, containerPort: number): Promise<number | null> {
   try {
@@ -3701,74 +3655,6 @@ async function resolveHostPort(container: string, containerPort: number): Promis
 
 function makeClient(hostPort: number, token: string) {
   return { baseUrl: `http://127.0.0.1:${hostPort}`, token };
-}
-
-function looksLikeUnauthorizedDaemonError(raw: unknown): boolean {
-  const msg = String(raw ?? '')
-    .trim()
-    .toLowerCase();
-  if (!msg) return false;
-  return (
-    msg === 'unauthorized' ||
-    msg.includes(' 401') ||
-    msg.startsWith('401 ') ||
-    msg.includes('forbidden')
-  );
-}
-
-async function readDroneTokenFromContainer(containerName: string): Promise<string> {
-  const r = await dvmExec(containerName, 'bash', [
-    '-lc',
-    'cat /dvm-data/drone/token 2>/dev/null || true',
-  ]);
-  return String(r.stdout ?? '').trim();
-}
-
-async function refreshRegistryTokenFromContainer(opts: {
-  droneId: string;
-}): Promise<string | null> {
-  const droneId = normalizeDroneIdentity(opts.droneId);
-  if (!droneId) return null;
-  const lockKey = `drone:${droneId}`;
-
-  return await withDroneOpLock(lockKey, async () => {
-    const regAny: any = await loadRegistry();
-    const entry: any = regAny?.drones?.[droneId] ?? null;
-    if (!entry) return null;
-
-    let token = '';
-    try {
-      token = await readDroneTokenFromContainer(
-        String(entry?.containerName ?? entry?.name ?? `drone-${droneId}`),
-      );
-    } catch (e: any) {
-      const msg = e?.message ?? String(e);
-      if (looksLikeMissingContainerError(msg)) {
-        try {
-          const reg2: any = await loadRegistry();
-          const entry2: any = reg2?.drones?.[droneId] ?? null;
-          if (entry2) {
-            token = await readDroneTokenFromContainer(
-              String(entry2?.containerName ?? entry2?.name ?? `drone-${droneId}`),
-            );
-          }
-        } catch {
-          token = '';
-        }
-      }
-    }
-    token = String(token ?? '').trim();
-    if (!token) return null;
-
-    await commitDroneMetadataPatch({
-      droneId,
-      state: 'real',
-      eventType: 'drone.token.refreshed',
-      transform: (lifecycle) => ({ ...lifecycle, token }),
-    });
-
-    return token;
-  });
 }
 
 function resolveHubAgentCommand(): string {
@@ -4019,68 +3905,17 @@ type DroneHubApiServerOptions = {
   allowedOrigins?: string[];
 };
 
-type BackgroundLifecycle = {
-  register: (name: string, stop: () => Promise<void>) => void;
-  setStartupServer: (server: http.Server) => void;
-  stop: () => Promise<void>;
-};
-
 export async function startDroneHubApiServer(opts: DroneHubApiServerOptions) {
-  const backgroundResources: Array<{ name: string; stop: () => Promise<void> }> = [];
-  let backgroundResourcesStop: Promise<void> | null = null;
-  let startupServer: http.Server | null = null;
-  const registerBackgroundResource = (
-    name: string,
-    stop: () => Promise<void>,
-  ): void => {
-    backgroundResources.push({ name, stop });
-  };
-  const stopBackgroundResources = async (): Promise<void> => {
-    if (!backgroundResourcesStop) {
-      backgroundResourcesStop = (async () => {
-        for (const resource of [...backgroundResources].reverse()) {
-          try {
-            await resource.stop();
-          } catch (error) {
-            hubLog('warn', 'background resource stop failed', {
-              resource: resource.name,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-      })();
-    }
-    await backgroundResourcesStop;
-  };
-  const stopFailedStartupServer = async (): Promise<void> => {
-    const server = startupServer;
-    if (!server?.listening) return;
-    const closing = new Promise<void>((resolve) => server.close(() => resolve()));
-    try {
-      (server as any).closeAllConnections?.();
-    } catch {
-      // ignore
-    }
-    await Promise.race([
-      closing,
-      new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, 3_000);
-        timer.unref?.();
-      }),
-    ]);
-  };
-
-  try {
-    return await startDroneHubApiServerWithLifecycle(opts, {
-      register: registerBackgroundResource,
-      setStartupServer: (server) => {
-        startupServer = server;
-      },
-      stop: stopBackgroundResources,
+  const lifecycle = createBackgroundLifecycle((resource, error) => {
+    hubLog('warn', 'background resource stop failed', {
+      resource,
+      error: error instanceof Error ? error.message : String(error),
     });
+  });
+  try {
+    return await startDroneHubApiServerWithLifecycle(opts, lifecycle);
   } catch (error) {
-    await stopFailedStartupServer();
-    await stopBackgroundResources();
+    await lifecycle.stop();
     throw error;
   }
 }
@@ -4089,11 +3924,136 @@ async function startDroneHubApiServerWithLifecycle(
   opts: DroneHubApiServerOptions,
   lifecycle: BackgroundLifecycle,
 ) {
+  const { register: registerBackgroundResource, stop: stopBackgroundResources } = lifecycle;
+  const nativeChatRuntimePort = createNativeChatRuntimePort();
+  const resourceSubscriptionRuntimePort = createResourceSubscriptionRuntimePort();
+  const mcpProjectionFeature = createMcpProjectionFeature();
   const {
-    register: registerBackgroundResource,
-    setStartupServer,
-    stop: stopBackgroundResources,
-  } = lifecycle;
+    bindConfig: bindMcpProjectionConfig,
+    isManagedChatMcpAvailable,
+    syncMcpServersForDrone,
+    syncSkillLibraryForDrone,
+  } = mcpProjectionFeature;
+  const runtimeGraph = createHubRuntimeGraph(nativeChatRuntimePort, mcpProjectionFeature);
+  const {
+    chatSessionRuntime,
+    createDroneChat,
+    dockerSnapshotRuntime,
+    promptRuntime,
+    syncSetService,
+  } = runtimeGraph;
+  const { archiveRuntime, droneLifecycleRuntime } = createHubLifecycleFeatures(
+    runtimeGraph,
+    nativeChatRuntimePort,
+    resourceSubscriptionRuntimePort,
+  );
+  const filesystemRuntime = createHubFilesystemFeature(runtimeGraph);
+  const {
+    assistantFilesystemService,
+    buildFsSearchScript,
+    handleFsActionRoute,
+    handleFsUploadRoute,
+    hostFsErrorStatus,
+    hostMimeType,
+    listHostFsDirectory,
+    normalizeFsPathForRuntime,
+    parseFsSearchOutput,
+    readHostFileBytes,
+  } = filesystemRuntime;
+  const { removeDroneById, removeDroneTreeById } = droneLifecycleRuntime;
+  const {
+    archiveChatById,
+    archiveDroneById,
+    cleanupExpiredArchivedChats,
+    deleteArchivedChatById,
+    normalizeArchiveRetention,
+    normalizeArchiveRuntimePolicy,
+    parseIsoToMs,
+    removeArchivedDroneById,
+    resolveArchiveDeleteAtIso,
+    restoreArchivedChatById,
+    restoreArchivedDroneById,
+    startArchiveCleanupScheduler,
+    stopArchiveCleanupScheduler,
+    triggerArchiveCleanup,
+  } = archiveRuntime;
+  const {
+    HUB_WEB_TERMINAL_DEFAULT_TAIL_LINES,
+    HUB_WEB_TERMINAL_MAX_BYTES,
+    HUB_WEB_TERMINAL_MAX_TAIL_LINES,
+    assertReadOnlySupportedForAgent,
+    autoRenameGeneratedChatFromFirstPrompt,
+    buildNewChatEntry,
+    chatSnapshotResponseBody,
+    claimChatAutoRenameFromFirstPrompt,
+    clampIntParam,
+    ensureChatEntry,
+    ensureHubChatSessionRunning,
+    ensureHubSessionRunning,
+    getChatEntry,
+    importResolvedChatToStore,
+    importResolvedDroneChatsToStore,
+    inferChatAgent,
+    parseOptionalNonNegativeInt,
+    projectCanonicalChatToRegistry,
+    projectCanonicalChatsToRegistry,
+    readChatSnapshot,
+    resolveChatTmuxCommand,
+    setChatAgentConfig,
+    shouldAutoRenameChatOnPrompt,
+  } = chatSessionRuntime;
+  const {
+    chatHasActiveDockerSnapshot,
+    collectDockerSnapshotImageRefsFromChatEntry,
+    collectDockerSnapshotImageRefsFromDroneEntry,
+    collectDroneRuntimeDiagnostics,
+    dockerContainerId,
+    dockerContainerSizeBytes,
+    dockerSnapshotAfterAgentMessageEnabledForChat,
+    dockerSnapshotTotalsForDroneEntry,
+    isStaleDockerExecErrorMessage,
+    removeDockerSnapshotImagesBestEffort,
+    restoreDockerSnapshotForTranscriptTurn,
+  } = dockerSnapshotRuntime;
+  const {
+    attachmentOnlyPromptLabel,
+    busyChatNamesForDrone,
+    cancelQueuedPendingPrompt,
+    chatHasReconcilablePendingPrompts,
+    chatRequiresCodexApprovalForSummary,
+    chatReconciliationQueue,
+    createOrEnqueueNewChatAction,
+    createOrEnqueuePromptUnified,
+    dequeueProvisioning,
+    enqueuePendingPromptPump,
+    enqueueProvisioning,
+    enqueueProvisioningForAllPending,
+    enqueueReconcile,
+    ensureDaemonPromptEventSubscription,
+    isSafePromptId,
+    looksLikeContainerNotRunningError,
+    looksLikeMissingContainerError,
+    looksLikeRepoUnavailableError,
+    migrateInMemoryChatStateForRename,
+    promoteQueuedNewChatAction,
+    pushPendingPrompt,
+    pushPendingStartupPrompt,
+    resumePendingPromptChats,
+    runDroneLifecycleAction,
+    startPromptRuntimeBackgroundWork,
+    stopAllDroneChatActivity,
+    stopChatResponse,
+    stopPromptRuntimeBackgroundWork,
+    stopSingleDroneChatActivity,
+  } = promptRuntime;
+  let releaseMcpProjectionConfig = () => {};
+  let releaseNativeChatRuntimePort = () => {};
+  let releaseResourceSubscriptionRuntimePort = () => {};
+  registerBackgroundResource('runtime ports', async () => {
+    releaseMcpProjectionConfig();
+    releaseNativeChatRuntimePort();
+    releaseResourceSubscriptionRuntimePort();
+  });
   startPromptRuntimeBackgroundWork();
   registerBackgroundResource('prompt runtime', stopPromptRuntimeBackgroundWork);
   chatSessionRuntime.start();
@@ -4101,6 +4061,19 @@ async function startDroneHubApiServerWithLifecycle(
   chatReconciliationQueue.clearRetries();
   loadHubEnv();
   await logHubLlmStartupSnapshot();
+  const agentModelCatalogService = createHubAgentModelCatalogService();
+  const discoverAndRememberModelsForBuiltinAgent = (input: {
+    containerName?: string;
+    containerPort?: number;
+    runtime?: DroneRuntime;
+    agentId: BuiltinAgentId;
+    forceRefresh?: boolean;
+  }) =>
+    agentModelCatalogService.get({
+      agentId: input.agentId,
+      target: sharedAgentCatalogTarget(input),
+      forceRefresh: input.forceRefresh,
+    });
   const host = opts.host ?? '127.0.0.1';
   const containerMcpHost = String(opts.containerMcpHost ?? '').trim();
   const containerMcpPort = Number(opts.containerMcpPort ?? NaN);
@@ -4116,7 +4089,7 @@ async function startDroneHubApiServerWithLifecycle(
     log: hubLog,
     normalizeDisplayName: normalizeDroneDisplayName,
     normalizeDroneIdentity,
-    notifyRegistryWrite: () => notifyDroneRegistryWrite?.(),
+    notifyRegistryWrite: () => hubChangeEvents.emitRegistryWrite(),
     persistDisplayName: renameDroneDisplayName,
   });
   const hubApplication = createHubApplication({
@@ -4143,6 +4116,9 @@ async function startDroneHubApiServerWithLifecycle(
   };
   const unsubscribeHubApplicationEvents = hubApplication.events.subscribe((event) => {
     handleHubApplicationEvent(event);
+  });
+  registerBackgroundResource('Hub application events', async () => {
+    unsubscribeHubApplicationEvents();
   });
   const sidebarCommands = createSidebarCommandService(hubApplication);
   let actualPort = opts.port;
@@ -4171,8 +4147,7 @@ async function startDroneHubApiServerWithLifecycle(
     rootDir: string,
     req: http.IncomingMessage,
   ): ManagedHubState => {
-    const address = server.address();
-    const apiPort = typeof address === 'object' && address ? address.port : opts.port;
+    const apiPort = actualPort;
     let uiPort = 0;
     const candidateUrl =
       typeof req.headers.origin === 'string'
@@ -4320,18 +4295,21 @@ async function startDroneHubApiServerWithLifecycle(
     nowIso,
     hubServices: hubApplication,
     onNativePromptQueueChanged: ({ droneId, chatName }) => {
-      notifyDroneChatWrite?.(droneId, chatName);
+      hubChangeEvents.emitChatWrite(droneId, chatName);
       promptRuntime.enqueuePendingPromptPump(droneId, chatName);
     },
     onNativeThreadStateChanged: () => {
-      notifyDroneSummaryChange?.();
+      hubChangeEvents.emitSummaryChange();
     },
     summarizeDroneActivity,
   });
+  registerBackgroundResource('device mesh assistant changes', async () => {
+    unsubscribeDeviceMeshAssistantChanges();
+  });
   const nativeChatLifecycle = new NativeChatLifecycle(assistantService, blipAssistantHost);
-  cloneNativeChatSessionHandler = (input: any) =>
+  const cloneNativeChatSession = (input: any) =>
     nativeChatLifecycle.clone({ ...input, id: input.targetId });
-  copyNativeChatConfigurationHandler = async (input: any) => {
+  const copyNativeChatConfiguration = async (input: any) => {
     await nativeChatLifecycle.ensure({
       id: input.sourceId,
       droneId: input.droneId,
@@ -4347,15 +4325,15 @@ async function startDroneHubApiServerWithLifecycle(
       chatName: input.chatName,
     });
   };
-  nativeChatIsBusyHandler = async (nativeChatId: string) =>
+  const nativeChatIsBusy = async (nativeChatId: string) =>
     assistantPromptDrains.has(nativeChatId) ||
     blipAssistantHost.isThreadRunning(nativeChatId) ||
     (await assistantService.nativeThreadIsBusy(nativeChatId));
-  nativeChatErrorHandler = (nativeChatId: string) =>
+  const nativeChatError = (nativeChatId: string) =>
     assistantService.nativeThreadError(nativeChatId);
-  nativeChatLatestAssistantTextHandler = (nativeChatId: string) =>
+  const nativeChatLatestAssistantText = (nativeChatId: string) =>
     blipAssistantHost.latestAssistantText(nativeChatId);
-  deleteNativeChatSessionsHandler = async (droneEntry: any) => {
+  const deleteNativeChatSessions = async (droneEntry: any) => {
     const chatEntries = [
       ...Object.values<any>(droneEntry?.chats ?? {}),
       ...Object.values<any>(droneEntry?.archivedChats ?? {}),
@@ -4366,7 +4344,7 @@ async function startDroneHubApiServerWithLifecycle(
       .filter(Boolean);
     await nativeChatLifecycle.deleteMany(nativeChatIds);
   };
-  nativeChatPromptHandler = async ({
+  const promptNativeChat = async ({
     droneId,
     chatName,
     chatId,
@@ -4379,6 +4357,19 @@ async function startDroneHubApiServerWithLifecycle(
     deliveryMode,
     prompt,
     attachments,
+  }: {
+    droneId: string;
+    chatName: string;
+    chatId: string;
+    promptId?: string;
+    provider?: string;
+    model?: string;
+    thinkingLevel?: string;
+    agentPermissionMode?: AgentPermissionMode;
+    approvalPolicy?: AgentApprovalPolicy;
+    deliveryMode?: 'queue' | 'asap';
+    prompt: string;
+    attachments?: ChatImageAttachment[];
   }) => {
     if (!chatId) throw new Error('native chat has no stable identity');
     await nativeChatLifecycle.ensure({
@@ -4421,10 +4412,20 @@ async function startDroneHubApiServerWithLifecycle(
       deliveryMode,
     });
   };
-  nativeChatStopHandler = async (nativeChatId: string) => {
+  const stopNativeChat = async (nativeChatId: string) => {
     blipAssistantHost.stopThread(nativeChatId);
     await assistantService.stopThread(nativeChatId);
   };
+  releaseNativeChatRuntimePort = nativeChatRuntimePort.bind({
+    cloneSession: cloneNativeChatSession,
+    copyConfiguration: copyNativeChatConfiguration,
+    deleteSessions: deleteNativeChatSessions,
+    error: nativeChatError,
+    isBusy: nativeChatIsBusy,
+    latestAssistantText: nativeChatLatestAssistantText,
+    prompt: promptNativeChat,
+    stop: stopNativeChat,
+  });
 
   function writeHubSseEvent(res: http.ServerResponse, event: string, data: any): void {
     if (res.destroyed || res.writableEnded) return;
@@ -4432,21 +4433,10 @@ async function startDroneHubApiServerWithLifecycle(
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   }
 
-  type CachedDroneStatusSummary = {
-    hostPort: number | null;
-    statusOk: boolean;
-    status: any;
-    statusError: string | null;
-    statusChecking?: boolean;
-  };
-
   const DRONE_STATUS_SUMMARY_CONCURRENCY = 16;
-  const DRONE_STATUS_REFRESH_CONCURRENCY = 4;
-  const DRONE_STATUS_REFRESH_INTERVAL_MS = 15_000;
   const DRONE_SUMMARY_REGISTRY_CACHE_TTL_MS = 1_000;
   const CANONICAL_ACTIVE_MODEL_CACHE_TTL_MS = 250;
   const DRONE_SUMMARY_MAINTENANCE_MIN_INTERVAL_MS = 5_000;
-  const droneStatusSummaryCache = new Map<string, CachedDroneStatusSummary>();
   let droneSummaryRegistryCache: { loadedAtMs: number; registry: any } | null = null;
   let droneSummaryRegistryCacheLoad: Promise<any> | null = null;
   let droneSummaryRegistryCacheEpoch = 0;
@@ -4454,8 +4444,6 @@ async function startDroneHubApiServerWithLifecycle(
   let droneSummaryMaintenanceTask: Promise<void> | null = null;
   let droneSummaryMaintenanceLastStartedAt = 0;
   let droneSummaryMaintenanceStopped = false;
-  let droneStatusRefreshLoop: ManagedLoop | null = null;
-  let droneStatusRefreshSource = 'interval';
   let canonicalActiveModelCache: { loadedAtMs: number; model: any } | null = null;
 
   async function loadCanonicalActiveModel(): Promise<any> {
@@ -4490,126 +4478,17 @@ async function startDroneHubApiServerWithLifecycle(
     return results;
   }
 
-  function pruneDroneStatusSummaryCache(): void {
-    if (droneStatusSummaryCache.size <= 500) return;
-    while (droneStatusSummaryCache.size > 500) {
-      const oldestKey = droneStatusSummaryCache.keys().next().value;
-      if (!oldestKey) break;
-      droneStatusSummaryCache.delete(oldestKey);
-    }
-  }
-
-  function buildDroneStatusSummaryCacheKey(d: any): string {
-    const runtime = normalizeDroneRuntime(d?.runtime);
-    const droneId = normalizeDroneIdentity(d?.id) || '';
-    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
-    const hostPort =
-      typeof d?.hostPort === 'number' && Number.isFinite(d.hostPort) ? String(d.hostPort) : '';
-    const containerPort = String(Number(d?.containerPort ?? 7777) || 7777);
-    const token = typeof d?.token === 'string' ? d.token : '';
-    return [droneId, runtime, containerName, hostPort, containerPort, token].join('\0');
-  }
-
-  function checkingDroneStatusSummaryFromEntry(d: any): CachedDroneStatusSummary {
-    const hostPort =
-      typeof d?.hostPort === 'number' && Number.isFinite(d.hostPort) ? d.hostPort : null;
-    return {
-      hostPort,
-      statusOk: false,
-      status: null,
-      statusError: 'checking status',
-      statusChecking: true,
-    };
-  }
-
-  function cachedDroneStatusSummaryForEntry(d: any): CachedDroneStatusSummary {
-    pruneDroneStatusSummaryCache();
-    const cacheKey = buildDroneStatusSummaryCacheKey(d);
-    return droneStatusSummaryCache.get(cacheKey) ?? checkingDroneStatusSummaryFromEntry(d);
-  }
-
-  function sameDroneStatusSummaryForCache(
-    a: CachedDroneStatusSummary | undefined,
-    b: CachedDroneStatusSummary,
-  ): boolean {
-    if (!a) return false;
-    return (
-      a.hostPort === b.hostPort &&
-      a.statusOk === b.statusOk &&
-      (a.statusError ?? '') === (b.statusError ?? '') &&
-      Boolean(a.statusChecking) === Boolean(b.statusChecking)
-    );
-  }
-
-  async function probeDroneStatusSummary(d: any): Promise<CachedDroneStatusSummary> {
-    const runtime = normalizeDroneRuntime(d?.runtime);
-    const containerName = String(d?.containerName ?? d?.name ?? '').trim();
-    const hostPort =
-      typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
-        ? d.hostPort
-        : runtime === 'host'
-          ? null
-          : await resolveHostPort(containerName || String(d.name ?? ''), d.containerPort);
-
-    let statusOk = false;
-    let status: any = null;
-    let statusError: string | null = null;
-    const token = typeof d.token === 'string' ? d.token : '';
-    if (hostPort && token) {
-      try {
-        status = await droneStatus(makeClient(hostPort, token));
-        statusOk = true;
-      } catch (e: any) {
-        statusError = e?.message ?? String(e);
-      }
-    } else if (!hostPort) {
-      statusError =
-        runtime === 'host'
-          ? 'no host port mapped'
-          : 'no host port mapped (container likely stopped)';
-    } else {
-      statusError = 'missing token (still starting?)';
-    }
-
-    return { hostPort: hostPort ?? null, statusOk, status, statusError };
-  }
-
-  async function refreshDroneStatusCacheForEntry(d: any): Promise<boolean> {
-    const cacheKey = buildDroneStatusSummaryCacheKey(d);
-    const previous = droneStatusSummaryCache.get(cacheKey);
-    let next: CachedDroneStatusSummary;
-    try {
-      next = await probeDroneStatusSummary(d);
-    } catch (e: any) {
-      next = {
-        hostPort:
-          typeof d?.hostPort === 'number' && Number.isFinite(d.hostPort) ? d.hostPort : null,
-        statusOk: false,
-        status: null,
-        statusError: e?.message ?? String(e),
-      };
-    }
-    droneStatusSummaryCache.set(cacheKey, next);
-    pruneDroneStatusSummaryCache();
-    return !sameDroneStatusSummaryForCache(previous, next);
-  }
-
-  async function refreshDroneStatusCache(source: string): Promise<void> {
-    try {
-      const regAny: any = await loadCanonicalActiveModel();
-      const realDrones = Object.values(regAny?.drones ?? {}) as any[];
-      const changed = await mapDroneRegistrySummaryConcurrent(
-        realDrones,
-        DRONE_STATUS_REFRESH_CONCURRENCY,
-        async (d) => refreshDroneStatusCacheForEntry(d),
-      );
-      if (changed.some(Boolean)) {
-        scheduleDroneRegistryBroadcasterRefresh(source === 'startup' ? 0 : 50);
-      }
-    } catch (e: any) {
-      hubLog('warn', 'drone status refresh failed', { source, error: e?.message ?? String(e) });
-    }
-  }
+  const droneStatusRuntime = createDroneStatusRuntime({
+    loadModel: loadCanonicalActiveModel,
+    log: hubLog,
+    makeClient,
+    normalizeDroneId: normalizeDroneIdentity,
+    normalizeRuntime: normalizeDroneRuntime,
+    onChanged: (source) => scheduleDroneRegistryBroadcasterRefresh(source === 'startup' ? 0 : 50),
+    readStatus: droneStatus,
+    resolveHostPort,
+  });
+  const cachedDroneStatusSummaryForEntry = droneStatusRuntime.cachedForEntry;
 
   function invalidateDroneSummaryRegistryCache(): void {
     droneSummaryRegistryCacheEpoch += 1;
@@ -4643,24 +4522,7 @@ async function startDroneHubApiServerWithLifecycle(
     return await droneSummaryRegistryCacheLoad;
   }
 
-  function scheduleDroneStatusRefresh(source: string, delayMs = 0): void {
-    droneStatusRefreshSource = source;
-    droneStatusRefreshLoop?.wake(delayMs);
-  }
-
-  function startDroneStatusRefresher(): void {
-    if (droneStatusRefreshLoop) return;
-    droneStatusRefreshSource = 'startup';
-    droneStatusRefreshLoop = new ManagedLoop({
-      intervalMs: DRONE_STATUS_REFRESH_INTERVAL_MS,
-      run: async () => {
-        const source = droneStatusRefreshSource;
-        droneStatusRefreshSource = 'interval';
-        await refreshDroneStatusCache(source);
-      },
-    });
-    droneStatusRefreshLoop.start();
-  }
+  const scheduleDroneStatusRefresh = droneStatusRuntime.schedule;
 
   async function auditStartupRegistryPresence(): Promise<void> {
     try {
@@ -5304,6 +5166,10 @@ async function startDroneHubApiServerWithLifecycle(
     buildSnapshot: async () => await buildDroneRegistrySnapshot('api:drones-events'),
     writeSseEvent: writeHubSseEvent,
   });
+  registerBackgroundResource('drone projection broadcasters', async () => {
+    droneChatBroadcaster.stop();
+    droneRegistryBroadcaster.stop();
+  });
   const droneChatSseClients = droneChatBroadcaster.clients;
   const droneChatSseLastByKey = droneChatBroadcaster.lastByKey;
   const droneRegistrySseClients = droneRegistryBroadcaster.clients;
@@ -5329,13 +5195,17 @@ async function startDroneHubApiServerWithLifecycle(
     void deviceMesh.broadcastDroneListChange({ reason: 'registry_write', at: nowIso() });
     void deviceMesh.broadcastDroneChatChange({ reason: 'registry_write', at: nowIso() });
   };
-  notifyDroneRegistryWrite = notifyCanonicalDroneRegistryWrite;
+  const unsubscribeRegistryWrites = hubChangeEvents.onRegistryWrite(
+    notifyCanonicalDroneRegistryWrite,
+  );
   const notifyCanonicalDroneSummaryChange = () => {
     canonicalActiveModelCache = null;
     invalidateDroneSummaryRegistryCache();
     scheduleDroneRegistryBroadcasterRefresh();
   };
-  notifyDroneSummaryChange = notifyCanonicalDroneSummaryChange;
+  const unsubscribeSummaryChanges = hubChangeEvents.onSummaryChange(
+    notifyCanonicalDroneSummaryChange,
+  );
   const notifyHubApplicationEvent = (event: HubApplicationEvent) => {
     if (event.type !== 'ui-preferences.changed') return;
     const at = nowIso();
@@ -5362,12 +5232,14 @@ async function startDroneHubApiServerWithLifecycle(
       at: nowIso(),
     });
   };
-  notifyDroneChatWrite = notifyCanonicalPromptQueueChatWrite;
-  let containerMcpServer: http.Server | null = null;
-  let containerMcpActualPort =
-    Number.isFinite(containerMcpPort) && containerMcpPort > 0 ? Math.floor(containerMcpPort) : 0;
-  let containerMcpActualUrl = '';
-  const containerMcpSockets = new Set<any>();
+  const unsubscribeChatWrites = hubChangeEvents.onChatWrite(({ droneId, chatName }) =>
+    notifyCanonicalPromptQueueChatWrite(droneId, chatName),
+  );
+  registerBackgroundResource('Hub change subscriptions', async () => {
+    unsubscribeChatWrites();
+    unsubscribeRegistryWrites();
+    unsubscribeSummaryChanges();
+  });
   const initialSpeechSettings = await resolveEffectiveSpeechSettings();
   assistantService.setSpeechToolEnabled(initialSpeechSettings.enabled);
   const mcpHttpTransport = new DroneHubMcpHttpTransport({
@@ -5375,6 +5247,9 @@ async function startDroneHubApiServerWithLifecycle(
     log: hubLog,
     speechEnabled: initialSpeechSettings.enabled,
     hubServices: hubApplication,
+  });
+  registerBackgroundResource('MCP HTTP transport', async () => {
+    await mcpHttpTransport.close();
   });
   const handleDroneHubMcpRequest = (
     req: http.IncomingMessage,
@@ -5431,7 +5306,7 @@ async function startDroneHubApiServerWithLifecycle(
       })
     : null;
   if (resourceSubscriptionService) {
-    resourceSubscriptionLifecycleHandler = {
+    releaseResourceSubscriptionRuntimePort = resourceSubscriptionRuntimePort.bind({
       pauseForDrone: async (droneId, chatIds) => {
         await resourceSubscriptionService.pauseForDrone(droneId, chatIds);
       },
@@ -5441,7 +5316,7 @@ async function startDroneHubApiServerWithLifecycle(
       resumeForDrone: async (droneId, chatIds) => {
         await resourceSubscriptionService.resumeForDrone(droneId, chatIds);
       },
-    };
+    });
   }
 
   const apiRouter = new HubRouter(json, readJsonBody);
@@ -5676,7 +5551,7 @@ async function startDroneHubApiServerWithLifecycle(
     commitDroneMetadataPatch,
     deleteArchivedChatById,
     deleteCanonicalDroneLifecycle,
-    deleteNativeChatSessionsForDrone: deleteNativeChatSessionsHandler,
+    deleteNativeChatSessionsForDrone: nativeChatRuntimePort.deleteSessions,
     dequeueProvisioning,
     droneEnvironmentPayload,
     droneRuntime,
@@ -6095,7 +5970,7 @@ async function startDroneHubApiServerWithLifecycle(
     resolveDroneOrRespond,
   });
 
-  const server = http.createServer(async (req, res) => {
+  const handleHubHttpRequest: http.RequestListener = async (req, res) => {
     try {
       const method = (req.method ?? 'GET').toUpperCase();
       if (prepareHubHttpRequest(req, res, allowedOrigins, json)) return;
@@ -6144,38 +6019,63 @@ async function startDroneHubApiServerWithLifecycle(
     } catch (error) {
       handleHubRequestFailure({ req, res, error, log: hubLog, respond: json });
     }
-  });
-  setStartupServer(server);
-  const httpSockets = new Set<any>();
-  server.on('connection', (socket) => {
-    httpSockets.add(socket);
-    socket.on('close', () => {
-      httpSockets.delete(socket);
-    });
+  };
+  const handleHubUpgrade = createTerminalWebSocketUpgradeHandler({
+    apiToken,
+    allowedOrigins,
+    webSocketServer: wss,
+    handleDeviceMeshUpgrade: (req, socket, head) => deviceMesh.handleUpgrade(req, socket, head),
+    isSafeSessionName: isSafeTmuxSessionName,
+    parseSince: parseOptionalNonNegativeInt,
+    parseMaxBytes: (raw) =>
+      clampIntParam(raw, HUB_WEB_TERMINAL_MAX_BYTES, 1, HUB_WEB_TERMINAL_MAX_BYTES),
+    resolveDrone: resolveDroneOrRejectUpgrade,
+    resolveHostPort,
   });
 
-  server.on(
-    'upgrade',
-    createTerminalWebSocketUpgradeHandler({
-      apiToken,
-      allowedOrigins,
-      webSocketServer: wss,
-      handleDeviceMeshUpgrade: (req, socket, head) => deviceMesh.handleUpgrade(req, socket, head),
-      isSafeSessionName: isSafeTmuxSessionName,
-      parseSince: parseOptionalNonNegativeInt,
-      parseMaxBytes: (raw) =>
-        clampIntParam(raw, HUB_WEB_TERMINAL_MAX_BYTES, 1, HUB_WEB_TERMINAL_MAX_BYTES),
-      resolveDrone: resolveDroneOrRejectUpgrade,
-      resolveHostPort,
-    }),
-  );
+  const handleContainerMcpRequest: http.RequestListener = async (req, res) => {
+    try {
+      const method = (req.method ?? 'GET').toUpperCase();
+      const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+      if (url.pathname !== '/mcp') {
+        json(res, 404, { ok: false, error: 'not found' });
+        return;
+      }
+      await handleDroneHubMcpRequest(req, res, method);
+    } catch (error: any) {
+      hubLog('warn', 'container mcp request failed', {
+        error: String(error?.message ?? error ?? ''),
+      });
+      if (!res.headersSent && !res.writableEnded) {
+        json(res, 500, { ok: false, error: error?.message ?? String(error) });
+      }
+    }
+  };
 
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(opts.port, host, () => {
-      server.off('error', reject);
-      resolve();
-    });
+  const httpTransport = await startHubHttpTransport({
+    host,
+    port: opts.port,
+    requestListener: handleHubHttpRequest,
+    upgradeListener: handleHubUpgrade,
+    webSocketServer: wss,
+    ...(mcpToken && containerMcpHost && containerMcpPort > 0
+      ? {
+          containerMcp: {
+            host: containerMcpHost,
+            port: Math.floor(containerMcpPort),
+            requestedUrl: containerMcpRequestedUrl,
+            requestListener: handleContainerMcpRequest,
+          },
+        }
+      : {}),
+  });
+  actualPort = httpTransport.port;
+  registerBackgroundResource('HTTP transport', httpTransport.close);
+  releaseMcpProjectionConfig = bindMcpProjectionConfig({
+    signingSecret: mcpToken,
+    hostUrl: `http://127.0.0.1:${actualPort}/mcp`,
+    containerUrl:
+      httpTransport.containerMcp?.url || `http://host.docker.internal:${actualPort}/mcp`,
   });
   const outboxDatabase = getHubDatabase();
   const hubOutboxDispatchLoop = outboxDatabase
@@ -6183,7 +6083,7 @@ async function startDroneHubApiServerWithLifecycle(
         new HubOutboxDispatcher(new HubOutboxRepository(outboxDatabase), async () => {
           // Canonical transactions only enqueue. Projection/SSE effects happen here,
           // after claim commit, and are coalesced by the existing refresh scheduler.
-          notifyDroneRegistryWrite?.();
+          hubChangeEvents.emitRegistryWrite();
         }),
         {
           intervalMs: 500,
@@ -6203,162 +6103,34 @@ async function startDroneHubApiServerWithLifecycle(
     async () => await resourceSubscriptionService?.stop(),
   );
   void auditStartupRegistryPresence();
-  startDroneStatusRefresher();
+  droneStatusRuntime.start();
   droneSummaryMaintenanceStopped = false;
   scheduleDroneSummaryMaintenance('startup', 0);
   registerBackgroundResource('drone status refresh', async () => {
     droneSummaryMaintenanceStopped = true;
-    const loop = droneStatusRefreshLoop;
-    droneStatusRefreshLoop = null;
-    await loop?.stop();
+    await droneStatusRuntime.stop();
     if (droneSummaryMaintenanceTimeout) clearTimeout(droneSummaryMaintenanceTimeout);
     droneSummaryMaintenanceTimeout = null;
     await droneSummaryMaintenanceTask?.catch(() => {});
   });
-  const address = server.address();
-  actualPort = typeof address === 'object' && address ? address.port : opts.port;
   registerBackgroundResource('device mesh', async () => await deviceMesh.close());
   await deviceMesh.start();
-  if (mcpToken && containerMcpHost && containerMcpActualPort > 0) {
-    const mcpOnlyServer = http.createServer(async (req, res) => {
-      try {
-        const method = (req.method ?? 'GET').toUpperCase();
-        const u = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-        if (u.pathname !== '/mcp') {
-          json(res, 404, { ok: false, error: 'not found' });
-          return;
-        }
-        await handleDroneHubMcpRequest(req, res, method);
-      } catch (error: any) {
-        hubLog('warn', 'container mcp request failed', {
-          error: String(error?.message ?? error ?? ''),
-        });
-        if (!res.headersSent && !res.writableEnded) {
-          json(res, 500, { ok: false, error: error?.message ?? String(error) });
-        }
-      }
-    });
-    mcpOnlyServer.on('connection', (socket) => {
-      containerMcpSockets.add(socket);
-      socket.on('close', () => {
-        containerMcpSockets.delete(socket);
-      });
-    });
-    await new Promise<void>((resolve, reject) => {
-      mcpOnlyServer.once('error', reject);
-      mcpOnlyServer.listen(containerMcpActualPort, containerMcpHost, () => resolve());
-    });
-    containerMcpServer = mcpOnlyServer;
-    const mcpAddress = mcpOnlyServer.address();
-    containerMcpActualPort =
-      typeof mcpAddress === 'object' && mcpAddress ? mcpAddress.port : containerMcpActualPort;
-    containerMcpActualUrl =
-      containerMcpRequestedUrl || `http://host.docker.internal:${containerMcpActualPort}/mcp`;
+  registerBackgroundResource('HTTP ingress', async () => httpTransport.stopAccepting());
+  if (httpTransport.containerMcp) {
     hubLog('info', 'container mcp listener started', {
-      host: containerMcpHost,
-      port: containerMcpActualPort,
-      url: containerMcpActualUrl,
+      host: httpTransport.containerMcp.host,
+      port: httpTransport.containerMcp.port,
+      url: httpTransport.containerMcp.url,
     });
   }
-  setActiveDroneHubMcpProjectionConfig({
-    signingSecret: mcpToken,
-    hostUrl: `http://127.0.0.1:${actualPort}/mcp`,
-    containerUrl: containerMcpActualUrl || `http://host.docker.internal:${actualPort}/mcp`,
-  });
-
   return {
     host,
     port: actualPort,
-    containerMcp:
-      containerMcpServer && containerMcpActualUrl
-        ? {
-            host: containerMcpHost,
-            port: containerMcpActualPort,
-            url: containerMcpActualUrl,
-          }
-        : null,
+    containerMcp: httpTransport.containerMcp,
     close: async () => {
+      httpTransport.stopAccepting();
       cancelCodexLogin();
-      unsubscribeDeviceMeshAssistantChanges();
-      unsubscribeHubApplicationEvents();
-      const waitWithTimeout = async (p: Promise<void>, timeoutMs: number): Promise<void> => {
-        await Promise.race([
-          p,
-          new Promise<void>((resolve) => {
-            setTimeout(() => resolve(), Math.max(1, Math.floor(timeoutMs)));
-          }),
-        ]);
-      };
-      const serverClose = new Promise<void>((resolve) => server.close(() => resolve()));
-      const containerMcpServerClose = containerMcpServer
-        ? new Promise<void>((resolve) => containerMcpServer?.close(() => resolve()))
-        : Promise.resolve();
       await stopBackgroundResources();
-      if (notifyDroneChatWrite === notifyCanonicalPromptQueueChatWrite) {
-        notifyDroneChatWrite = null;
-      }
-      if (notifyDroneRegistryWrite === notifyCanonicalDroneRegistryWrite) {
-        notifyDroneRegistryWrite = null;
-      }
-      if (notifyDroneSummaryChange === notifyCanonicalDroneSummaryChange) {
-        notifyDroneSummaryChange = null;
-      }
-      if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
-        activeDroneHubMcpProjectionConfig = null;
-      }
-      try {
-        wss.clients.forEach((c: WebSocket) => {
-          try {
-            c.close();
-          } catch {
-            // ignore
-          }
-          try {
-            c.terminate();
-          } catch {
-            // ignore
-          }
-        });
-      } catch {
-        // ignore
-      }
-      await waitWithTimeout(
-        new Promise<void>((resolve) => {
-          try {
-            wss.close(() => resolve());
-          } catch {
-            resolve();
-          }
-        }),
-        1_000,
-      );
-      await mcpHttpTransport.close();
-      try {
-        (server as any).closeIdleConnections?.();
-      } catch {
-        // ignore
-      }
-      try {
-        (containerMcpServer as any)?.closeIdleConnections?.();
-      } catch {
-        // ignore
-      }
-      for (const socket of httpSockets) {
-        try {
-          socket.destroy();
-        } catch {
-          // ignore
-        }
-      }
-      for (const socket of containerMcpSockets) {
-        try {
-          socket.destroy();
-        } catch {
-          // ignore
-        }
-      }
-      await waitWithTimeout(serverClose, 3_000);
-      await waitWithTimeout(containerMcpServerClose, 3_000);
     },
   };
 }
