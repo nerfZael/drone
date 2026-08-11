@@ -376,7 +376,12 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('data-chat-composer-expanded="false"');
     expect(html).toContain('data-chat-composer-collapsed-action="true"');
     expect(html).toContain('aria-label="Attach images"');
+    expect(html).toContain('aria-label="Open editor mode"');
     expect(html).toContain('aria-label="Record voice message"');
+    expect(html).not.toContain('aria-label="Start continuous voice steering"');
+    expect(html.indexOf('aria-label="Attach images"')).toBeLessThan(
+      html.indexOf('aria-label="Open editor mode"'),
+    );
     expect(html).not.toContain('Model A');
     expect(html).not.toContain('aria-label="Send"');
   });
@@ -412,10 +417,16 @@ describe('agent chat surface adapters', () => {
 
     expect(html).toContain('data-chat-composer-expanded="true"');
     expect(html.indexOf('aria-label="Attach images"')).toBeLessThan(
+      html.indexOf('aria-label="Open editor mode"'),
+    );
+    expect(html.indexOf('aria-label="Open editor mode"')).toBeLessThan(
       html.indexOf('Agent picker'),
     );
     expect(html.indexOf('Agent picker')).toBeLessThan(html.indexOf('Access picker'));
     expect(html.indexOf('Access picker')).toBeLessThan(html.indexOf('Model A'));
+    expect(html.indexOf('aria-label="Start continuous voice steering"')).toBeLessThan(
+      html.indexOf('aria-label="Record voice message"'),
+    );
     expect(html).toContain('Model A');
     expect(html).toContain('aria-label="Send"');
     expect(html).not.toContain('data-chat-composer-collapsed-action="true"');

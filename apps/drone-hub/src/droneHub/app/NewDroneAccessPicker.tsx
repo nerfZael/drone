@@ -11,7 +11,6 @@ type NewDroneAccessPickerProps = {
   readOnlySupported: boolean;
   approvalsSupported: boolean;
   agentIsCodex: boolean;
-  changesApplyNextTurn?: boolean;
   disabled?: boolean;
 };
 
@@ -58,7 +57,6 @@ export function NewDroneAccessPicker({
   readOnlySupported,
   approvalsSupported,
   agentIsCodex,
-  changesApplyNextTurn = false,
   disabled = false,
 }: NewDroneAccessPickerProps) {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -114,12 +112,6 @@ export function NewDroneAccessPicker({
     },
   ];
   const triggerLabel = `${newDroneAccessLabel(permissionMode)} · ${newDroneApprovalLabel(approvalPolicy)}`;
-  const neverAskAppliesImmediately = agentIsCodex && approvalPolicy === 'none';
-  const visibleTriggerLabel = changesApplyNextTurn
-    ? neverAskAppliesImmediately
-      ? `${newDroneAccessLabel(permissionMode)} next turn · Never ask now`
-      : `${triggerLabel} · Next turn`
-    : triggerLabel;
 
   return (
     <div ref={rootRef} className="relative min-w-0 flex-shrink-0">
@@ -130,10 +122,10 @@ export function NewDroneAccessPicker({
         aria-label="Choose chat access and approvals"
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={`Chat access and approvals: ${triggerLabel}${changesApplyNextTurn ? '. Access and approval changes normally apply next turn; Codex Never ask applies to approval requests immediately.' : ''}`}
+        title={`Chat access and approvals: ${triggerLabel}`}
         className="inline-flex h-8 max-w-[14rem] items-center gap-1 px-2 text-[.6875rem] font-medium normal-case tracking-normal text-[var(--chat-composer-model-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        <span className="min-w-0 truncate">{visibleTriggerLabel}</span>
+        <span className="min-w-0 truncate">{triggerLabel}</span>
         <span className="text-[var(--accent)]"><ChevronIcon up={open} /></span>
       </button>
 
@@ -148,13 +140,6 @@ export function NewDroneAccessPicker({
               {accessOpen ? 'Chat access' : 'Approvals'}
             </div>
           </div>
-
-          {changesApplyNextTurn ? (
-            <div className="mx-2 mb-2 rounded-[.5rem] border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-2.5 py-2 text-[.6875rem] text-[var(--accent-muted)]">
-              Access and approval changes normally apply next turn. For Codex, switching to Never
-              ask also approves requests in the current turn.
-            </div>
-          ) : null}
 
           {!accessOpen ? (
             <div className="flex flex-wrap items-center gap-1 px-2 pb-2">

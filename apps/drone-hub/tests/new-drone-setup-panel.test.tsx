@@ -98,22 +98,22 @@ describe('new drone setup panel', () => {
     expect(html).toContain('Branch: main');
   });
 
-  test('labels Codex never-ask as immediate while other running-turn changes stay deferred', () => {
+  test('shows access and approval labels without timing qualifiers', () => {
     const html = renderToStaticMarkup(
       <NewDroneAccessPicker
-        permissionMode="write"
+        permissionMode="execute"
         onPermissionModeChange={() => {}}
         approvalPolicy="none"
         onApprovalPolicyChange={() => {}}
         readOnlySupported
         approvalsSupported
         agentIsCodex
-        changesApplyNextTurn
       />,
     );
 
-    expect(html).toContain('Write next turn · Never ask now');
-    expect(html).toContain('Codex Never ask applies to approval requests immediately.');
+    expect(html).toContain('Execute · Never ask');
+    expect(html).not.toContain('next turn');
+    expect(html).not.toContain('Never ask now');
     expect(html).not.toContain('disabled=""');
   });
 

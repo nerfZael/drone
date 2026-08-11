@@ -1205,6 +1205,7 @@ export function DroneSidebar({
     runOptimisticCreateGroupAndMove,
     runOptimisticRenameGroup,
     runOptimisticMoveDronesToGroup,
+    runOptimisticMoveSidebar,
     runOptimisticReparentDronesToParent,
   } = useSidebarOptimisticGroups({
     isRepoGroupingMode,
@@ -1226,6 +1227,7 @@ export function DroneSidebar({
     onRenameGroup: handleRenameGroup,
     onMoveDronesToGroup,
     onReparentDronesToParent,
+    onMoveSidebar,
   });
   const activeChatName = String(selectedChat ?? '').trim() || 'default';
   const pinnedDensityClasses = sidebarDensityClasses(sidebarDensityMode);
@@ -2977,7 +2979,7 @@ export function DroneSidebar({
                       sidebarDroneOrderByGroup={sidebarDroneOrderByGroup}
                       sidebarNodeOrderByParent={sidebarNodeOrderByParent}
                       sidebarChatOrderByDrone={sidebarChatOrderByDrone}
-                      onMoveSidebar={onMoveSidebar}
+                      onMoveSidebar={runOptimisticMoveSidebar}
                       droneById={sidebarDroneById}
                       selectedDroneIds={selectedDroneIds}
                       selectedDroneSet={selectedDroneSet}

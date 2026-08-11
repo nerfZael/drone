@@ -1,3 +1,8 @@
+import {
+  sidebarMoveDestination,
+  sidebarMoveDroneIds,
+  type SidebarMoveIntent,
+} from '@drone/hub-model/sidebar';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary } from '../types';
 import type { SidebarGroup } from './use-sidebar-view-model';
@@ -31,6 +36,42 @@ export type SidebarOptimisticOp =
       kind: 'create_group';
       group: string;
     };
+
+export function sidebarOptimisticOpForMoveIntent(
+  intent: SidebarMoveIntent,
+  id: string,
+): SidebarOptimisticOp | null {
+  if (intent.kind !== 'move-into-folder') return null;
+  const destination = sidebarMoveDestination(intent);
+  if (!destination) return null;
+
+  if (intent.itemKind === 'folder') {
+    return {
+      id,
+      kind: 'rename_group',
+      sourceGroup: intent.sourceGroup,
+      targetGroup: destination.nextGroup!,
+    };
+  }
+
+  const droneIds = sidebarMoveDroneIds(intent);
+  if (droneIds.length === 0) return null;
+  if (intent.targetParentDroneId !== undefined) {
+    return {
+      id,
+      kind: 'reparent_drones',
+      droneIds,
+      targetParentDroneId: intent.targetParentDroneId,
+      targetGroup: destination.targetGroup,
+    };
+  }
+  return {
+    id,
+    kind: 'move_drones',
+    droneIds,
+    targetGroup: destination.targetGroup,
+  };
+}
 
 function normalizeGroupPath(value: string | null | undefined): string | null {
   const group = String(value ?? '').trim();
