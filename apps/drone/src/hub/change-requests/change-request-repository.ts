@@ -66,6 +66,7 @@ export type ChangeRequestPatch = Partial<
 export interface ChangeRequestRepository {
   insert(input: ChangeRequestInsert): Promise<ChangeRequestRecord>;
   get(id: string): ChangeRequestRecord | null;
+  getByNumber(number: number): ChangeRequestRecord | null;
   list(filters?: {
     droneId?: string;
     chatName?: string;
@@ -260,6 +261,15 @@ export class SqliteChangeRequestRepository implements ChangeRequestRepository {
       const row = connection.prepare('SELECT * FROM change_requests WHERE id = ?').get(id) as
         | ChangeRequestRow
         | undefined;
+      return row ? record(row) : null;
+    });
+  }
+
+  getByNumber(number: number): ChangeRequestRecord | null {
+    return this.database.read((connection) => {
+      const row = connection
+        .prepare('SELECT * FROM change_requests WHERE sequence = ?')
+        .get(number) as ChangeRequestRow | undefined;
       return row ? record(row) : null;
     });
   }

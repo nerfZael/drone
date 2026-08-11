@@ -107,6 +107,10 @@ describe('ChangeRequestService', () => {
       expect(created.status).toBe('open');
       expect(created.destinationExists).toBe(false);
       expect(created.snapshotSha).toMatch(/^[0-9a-f]{40}$/);
+      expect((await service.getByNumber(created.number, 'drone-1')).id).toBe(created.id);
+      await expect(service.getByNumber(created.number, 'another-drone')).rejects.toThrow(
+        `unknown change request: #${created.number}`,
+      );
       expect((await service.changes(created.id)).entries.map((entry) => entry.path)).toEqual([
         'feature.txt',
       ]);

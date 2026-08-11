@@ -58,6 +58,8 @@ test('change request repository persists GitHub mirror metadata', async () => {
       githubMirror: null,
     });
     assert.equal(inserted.githubMirror, null);
+    assert.equal(repository.getByNumber(inserted.number).id, inserted.id);
+    assert.equal(repository.getByNumber(inserted.number + 1), null);
 
     await repository.update(inserted.id, {
       githubMirror: {

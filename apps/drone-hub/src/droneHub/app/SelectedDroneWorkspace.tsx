@@ -68,6 +68,10 @@ import {
 import type { RepoOpErrorMeta } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
 import { requestChangesPullRequest } from '../changes/navigation';
+import {
+  OPEN_CHANGE_REQUEST_EVENT,
+  type OpenChangeRequestDetail,
+} from '../changeRequests/change-request-navigation';
 import { copyText, downloadTextFile } from './clipboard';
 import {
   chatInputDraftKeyForDroneChat,
@@ -1006,6 +1010,15 @@ export function SelectedDroneWorkspace({
   const openPullRequestsTab = React.useCallback(() => {
     requestRightPanelTab('prs');
   }, [requestRightPanelTab]);
+  React.useEffect(() => {
+    const openChangeRequest = (event: Event) => {
+      const detail = (event as CustomEvent<OpenChangeRequestDetail>).detail;
+      if (!detail || detail.droneId !== currentDrone.id) return;
+      requestRightPanelTab('requests');
+    };
+    window.addEventListener(OPEN_CHANGE_REQUEST_EVENT, openChangeRequest);
+    return () => window.removeEventListener(OPEN_CHANGE_REQUEST_EVENT, openChangeRequest);
+  }, [currentDrone.id, requestRightPanelTab]);
   const quickOpenTabUrl = resolveDroneOpenTabUrl(currentDrone);
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
   const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(

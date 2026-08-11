@@ -11,6 +11,15 @@ export function listChangeRequests(droneId: string): Promise<ChangeRequestView[]
   ).then((payload) => payload.requests);
 }
 
+export function getChangeRequestByNumber(
+  droneId: string,
+  requestNumber: number,
+): Promise<ChangeRequestView> {
+  return requestJson<RequestPayload>(
+    `/api/change-requests/by-number/${encodeURIComponent(requestNumber)}?droneId=${encodeURIComponent(droneId)}`,
+  ).then((payload) => payload.request);
+}
+
 export function createChangeRequest(input: {
   droneRef: string;
   chatName: string;

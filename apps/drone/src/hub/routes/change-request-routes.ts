@@ -60,6 +60,14 @@ export function registerChangeRequestRoutes(
     json(201, { ok: true, request });
   });
 
+  route.get('/api/change-requests/by-number/:requestNumber', async ({ params, url, json }) => {
+    const request = await service().getByNumber(
+      params.requestNumber,
+      url.searchParams.get('droneId'),
+    );
+    json(200, { ok: true, request });
+  });
+
   route.get('/api/change-requests/:requestId', async ({ params, json }) => {
     json(200, { ok: true, request: await service().get(params.requestId) });
   });

@@ -30,6 +30,11 @@ export class MemoryChangeRequestRepository implements ChangeRequestRepository {
     return record ? structuredClone(record) : null;
   }
 
+  getByNumber(number: number): ChangeRequestRecord | null {
+    const record = [...this.records.values()].find((candidate) => candidate.number === number);
+    return record ? structuredClone(record) : null;
+  }
+
   list(): ChangeRequestRecord[] {
     return [...this.records.values()].map((record) => structuredClone(record));
   }

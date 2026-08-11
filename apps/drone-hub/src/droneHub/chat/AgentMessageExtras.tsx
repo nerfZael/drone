@@ -7,6 +7,7 @@ import { VideoPreview } from '../media/VideoPreview';
 import { AgentPlanList } from './AgentPlanList';
 import { DroneHubTaskList } from './DroneHubTaskList';
 import { LinkedPullRequestCards, type LinkedPullRequestContext } from './LinkedPullRequestCards';
+import { LinkedChangeRequestCards } from './LinkedChangeRequestCards';
 import type { MarkdownFileReference } from './MarkdownMessage';
 import type { DroneHubTask } from './drone-hub-task-parser';
 import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
@@ -212,6 +213,18 @@ export function AgentMessageExtras({
         text={text}
         context={linkedPullRequestContext}
         onOpenLink={onOpenLink}
+        initiallyExpanded={initiallyExpandLinkedPullRequests}
+      />
+      <LinkedChangeRequestCards
+        text={text}
+        droneId={droneId}
+        disabled={
+          !actionsEnabled ||
+          Boolean(
+            linkedPullRequestContext &&
+            (!linkedPullRequestContext.repoAttached || linkedPullRequestContext.disabled),
+          )
+        }
         initiallyExpanded={initiallyExpandLinkedPullRequests}
       />
       <AgentPlanList

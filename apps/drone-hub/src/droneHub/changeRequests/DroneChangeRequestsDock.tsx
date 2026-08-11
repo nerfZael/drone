@@ -5,6 +5,11 @@ import { cn } from '../../ui/cn';
 import { ChangeRequestDetail } from './ChangeRequestDetail';
 import { createChangeRequest, listChangeRequests } from './change-request-api';
 import {
+  consumeRequestedChangeRequest,
+  OPEN_CHANGE_REQUEST_EVENT,
+  type OpenChangeRequestDetail,
+} from './change-request-navigation';
+import {
   changeRequestStatusClasses,
   changeRequestStatusLabel,
   relativeChangeRequestTime,
@@ -32,6 +37,7 @@ export function DroneChangeRequestsDock({
   const [createTitle, setCreateTitle] = React.useState('');
   const [createDescription, setCreateDescription] = React.useState('');
   const [createDestination, setCreateDestination] = React.useState('');
+  const requestedNumberRef = React.useRef<number | null>(null);
   const selected = requests.find((request) => request.id === selectedId) ?? null;
 
   const loadRequests = React.useCallback(
@@ -41,6 +47,15 @@ export function DroneChangeRequestsDock({
       try {
         const loaded = await listChangeRequests(droneId);
         setRequests(loaded);
+        const queuedRequestNumber = consumeRequestedChangeRequest(droneId);
+        const requestedNumber = requestedNumberRef.current ?? queuedRequestNumber;
+        const requested = loaded.find((request) => request.number === requestedNumber);
+        if (requested) {
+          requestedNumberRef.current = null;
+          setSelectedId(requested.id);
+          return;
+        }
+        requestedNumberRef.current = null;
         setSelectedId((current) => {
           if (preserveSelection && current && loaded.some((request) => request.id === current)) {
             return current;
@@ -61,6 +76,17 @@ export function DroneChangeRequestsDock({
     setShowCreate(false);
     void loadRequests(false);
   }, [loadRequests]);
+
+  React.useEffect(() => {
+    const openRequest = (event: Event) => {
+      const detail = (event as CustomEvent<OpenChangeRequestDetail>).detail;
+      if (!detail || detail.droneId !== droneId) return;
+      requestedNumberRef.current = detail.requestNumber;
+      void loadRequests();
+    };
+    window.addEventListener(OPEN_CHANGE_REQUEST_EVENT, openRequest);
+    return () => window.removeEventListener(OPEN_CHANGE_REQUEST_EVENT, openRequest);
+  }, [droneId, loadRequests]);
 
   const replaceRequest = React.useCallback((request: ChangeRequestView) => {
     setRequests((current) =>

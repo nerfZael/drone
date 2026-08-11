@@ -151,6 +151,20 @@ export class ChangeRequestService {
     return await this.view(this.requiredRecord(idRaw));
   }
 
+  async getByNumber(numberRaw: unknown, droneIdRaw: unknown): Promise<ChangeRequestView> {
+    const number = Number(numberRaw);
+    if (!Number.isSafeInteger(number) || number <= 0) {
+      throw new ChangeRequestError('change request number must be a positive integer');
+    }
+    const droneId = String(droneIdRaw ?? '').trim();
+    if (!droneId) throw new ChangeRequestError('droneId is required');
+    const record = this.deps.repository.getByNumber(number);
+    if (!record || record.droneId !== droneId) {
+      throw new ChangeRequestError(`unknown change request: #${number}`, 404, 'not_found');
+    }
+    return await this.view(record);
+  }
+
   async list(
     filters: {
       droneId?: string;
