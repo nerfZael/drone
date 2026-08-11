@@ -163,9 +163,9 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
   const mountedRef = React.useRef(false);
   const microphoneLeaseRef = React.useRef<BrowserMicrophoneLease | null>(null);
 
-  const releaseMicrophone = React.useCallback(() => {
-    microphoneLeaseRef.current?.release();
-    microphoneLeaseRef.current = null;
+  const releaseMicrophone = React.useCallback((lease = microphoneLeaseRef.current) => {
+    lease?.release();
+    if (microphoneLeaseRef.current === lease) microphoneLeaseRef.current = null;
   }, []);
 
   const setStatusValue = React.useCallback((next: ChatVoiceRecordingStatus) => {
@@ -281,7 +281,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
       };
       if (startIdRef.current !== startId) {
         stopCapture(capture);
-        releaseMicrophone();
+        releaseMicrophone(microphoneLease);
         return false;
       }
       source.connect(processor);
@@ -295,9 +295,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
     } catch (err: any) {
       if (pendingStream) pendingStream.getTracks().forEach((track) => track.stop());
       if (pendingContext) void pendingContext.close().catch(() => undefined);
-      stopCapture(captureRef.current);
-      captureRef.current = null;
-      releaseMicrophone();
+      releaseMicrophone(microphoneLease);
       if (startIdRef.current === startId) {
         setStatusValue('idle');
         onError(voiceStartFailureMessage(err));
@@ -318,7 +316,8 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
 
   const transcribeRecording = React.useCallback(async (): Promise<string> => {
     const capture = captureRef.current;
-    startIdRef.current += 1;
+    const transcriptionId = startIdRef.current + 1;
+    startIdRef.current = transcriptionId;
     if (!capture) {
       setStatusValue('idle');
       return '';
@@ -336,10 +335,12 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
       const wav = pcm16ToWav(pcm, CHAT_VOICE_SAMPLE_RATE_HZ, CHAT_VOICE_CHANNELS);
       return await transcribeChatVoiceWav(wav);
     } catch (err: any) {
-      onError(err?.message ?? String(err));
+      if (startIdRef.current === transcriptionId) {
+        onError(err?.message ?? String(err));
+      }
       return '';
     } finally {
-      setStatusValue('idle');
+      if (startIdRef.current === transcriptionId) setStatusValue('idle');
     }
   }, [onError, releaseMicrophone, setStatusValue, stopCapture]);
 

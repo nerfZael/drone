@@ -157,9 +157,9 @@ export function useContinuousChatVoice({
   }
   const session = sessionRef.current;
 
-  const releaseMicrophone = React.useCallback(() => {
-    microphoneLeaseRef.current?.release();
-    microphoneLeaseRef.current = null;
+  const releaseMicrophone = React.useCallback((lease = microphoneLeaseRef.current) => {
+    lease?.release();
+    if (microphoneLeaseRef.current === lease) microphoneLeaseRef.current = null;
   }, []);
 
   const cancel = React.useCallback(async () => {
@@ -211,13 +211,16 @@ export function useContinuousChatVoice({
     const attempt = startAttemptRef.current + 1;
     startAttemptRef.current = attempt;
     if (!session.begin()) {
-      releaseMicrophone();
+      releaseMicrophone(microphoneLease);
       return false;
     }
     onError('');
     try {
       const settings = await loadVoiceInputSettings().catch(() => DEFAULT_SETTINGS);
-      if (startAttemptRef.current !== attempt) return false;
+      if (startAttemptRef.current !== attempt) {
+        releaseMicrophone(microphoneLease);
+        return false;
+      }
       session.configure({
         sessionId: `voice-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
         endpointConfig: {
@@ -248,6 +251,7 @@ export function useContinuousChatVoice({
       });
       if (startAttemptRef.current !== attempt) {
         stream.getTracks().forEach((track) => track.stop());
+        releaseMicrophone(microphoneLease);
         return false;
       }
       context = new AudioContextCtor({ sampleRate: 16_000 });
@@ -255,6 +259,7 @@ export function useContinuousChatVoice({
       if (startAttemptRef.current !== attempt) {
         stream.getTracks().forEach((track) => track.stop());
         void context.close().catch(() => undefined);
+        releaseMicrophone(microphoneLease);
         return false;
       }
       const source = context.createMediaStreamSource(stream);
@@ -294,7 +299,7 @@ export function useContinuousChatVoice({
     } catch (error: any) {
       stream?.getTracks().forEach((track) => track.stop());
       if (context) void context.close().catch(() => undefined);
-      releaseMicrophone();
+      releaseMicrophone(microphoneLease);
       if (startAttemptRef.current === attempt) {
         session.cancel();
         onError(error?.message ?? String(error));

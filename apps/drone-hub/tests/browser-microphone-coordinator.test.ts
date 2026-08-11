@@ -9,6 +9,8 @@ test('allows only one browser microphone owner at a time', () => {
   first?.release();
   const second = browserMicrophoneCoordinator.acquire('voice-message');
   expect(second?.owner).toBe('voice-message');
+  first?.release();
+  expect(browserMicrophoneCoordinator.getSnapshot()).toBe('voice-message');
   second?.release();
   expect(browserMicrophoneCoordinator.getSnapshot()).toBeNull();
 });

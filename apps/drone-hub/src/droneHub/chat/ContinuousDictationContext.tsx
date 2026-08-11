@@ -5,11 +5,11 @@ import {
   browserMicrophoneCoordinator,
   type BrowserMicrophoneOwner,
 } from './browser-microphone-coordinator';
-
-type ContinuousDictationLine = {
-  id: string;
-  text: string;
-};
+import {
+  continuousDictationLinesText,
+  restoreContinuousDictationLines,
+  type ContinuousDictationLine,
+} from './continuous-dictation-draft';
 
 export type ContinuousDictationShadowSnapshot = {
   targetId: string;
@@ -46,6 +46,7 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
   const composersRef = React.useRef(new Map<string, ContinuousDictationComposer>());
   const activeComposerIdRef = React.useRef<string | null>(null);
   const shadowLinesRef = React.useRef<ContinuousDictationLine[]>([]);
+  const nextLineOrderRef = React.useRef(0);
   const discardPendingRef = React.useRef<() => void>(() => undefined);
   const microphoneOwner = React.useSyncExternalStore(
     browserMicrophoneCoordinator.subscribe,
@@ -96,14 +97,25 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
       }
       const cleanText = text.trim();
       if (!cleanText) return true;
-      const next = [...shadowLinesRef.current, { id: deliveryId, text: cleanText }];
+      const next = [
+        ...shadowLinesRef.current,
+        { id: deliveryId, text: cleanText, order: nextLineOrderRef.current },
+      ];
+      nextLineOrderRef.current += 1;
       replaceShadowLines(next);
       return true;
     },
     [ensureTargetId, replaceShadowLines],
   );
 
-  const continuousVoice = useContinuousChatVoice({
+  const {
+    status,
+    pendingCount,
+    start,
+    stop,
+    cancel,
+    discardPending,
+  } = useContinuousChatVoice({
     resetKey: 'global-continuous-dictation',
     onTranscript,
     onError: setError,
@@ -111,12 +123,7 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
     shouldCapture: () => ensureTargetId() !== null,
     microphoneOwner: 'continuous-dictation',
   });
-  discardPendingRef.current = continuousVoice.discardPending;
-  const continuousStatus = continuousVoice.status;
-  const continuousPendingCount = continuousVoice.pendingCount;
-  const startContinuousVoice = continuousVoice.start;
-  const stopContinuousVoice = continuousVoice.stop;
-  const cancelContinuousVoice = continuousVoice.cancel;
+  discardPendingRef.current = discardPending;
 
   const registerComposer = React.useCallback(
     (composer: ContinuousDictationComposer) => {
@@ -142,7 +149,7 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
   const consumeShadow = React.useCallback(
     (id: string): string => {
       if (id !== activeComposerIdRef.current || shadowLinesRef.current.length === 0) return '';
-      const text = shadowLinesRef.current.map((line) => line.text).join('\n');
+      const text = continuousDictationLinesText(shadowLinesRef.current);
       replaceShadowLines([]);
       return text;
     },
@@ -164,41 +171,32 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
       if (snapshot.targetId !== activeComposerIdRef.current) return;
       const composer = composersRef.current.get(snapshot.targetId);
       if (!composer?.isEligible()) return;
-      const restoredIds = new Set(snapshot.lines.map((line) => line.id));
-      replaceShadowLines([
-        ...snapshot.lines,
-        ...shadowLinesRef.current.filter((line) => !restoredIds.has(line.id)),
-      ]);
+      replaceShadowLines(
+        restoreContinuousDictationLines(shadowLinesRef.current, snapshot.lines),
+      );
     },
     [replaceShadowLines],
   );
 
   const toggle = React.useCallback(async () => {
     setError('');
-    if (continuousStatus === 'idle') {
-      changeTarget(resolveTargetId());
-      await startContinuousVoice();
+    if (status === 'idle') {
+      ensureTargetId();
+      await start();
       return;
     }
-    if (continuousStatus === 'error') {
-      await cancelContinuousVoice();
+    if (status === 'error') {
+      await cancel();
       return;
     }
-    await stopContinuousVoice();
-  }, [
-    cancelContinuousVoice,
-    changeTarget,
-    continuousStatus,
-    resolveTargetId,
-    startContinuousVoice,
-    stopContinuousVoice,
-  ]);
+    await stop();
+  }, [cancel, ensureTargetId, start, status, stop]);
 
-  const shadowText = shadowLines.map((line) => line.text).join('\n');
+  const shadowText = continuousDictationLinesText(shadowLines);
   const value = React.useMemo<ContinuousDictationContextValue>(
     () => ({
-      status: continuousStatus,
-      pendingCount: continuousPendingCount,
+      status,
+      pendingCount,
       error,
       microphoneOwner,
       activeComposerId,
@@ -213,14 +211,14 @@ export function ContinuousDictationProvider({ children }: { children: React.Reac
     [
       activeComposerId,
       consumeShadow,
-      continuousPendingCount,
-      continuousStatus,
       error,
       focusComposer,
       microphoneOwner,
+      pendingCount,
       registerComposer,
       restoreShadowSnapshot,
       shadowText,
+      status,
       takeShadowSnapshot,
       toggle,
     ],

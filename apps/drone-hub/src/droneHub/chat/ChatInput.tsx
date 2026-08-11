@@ -48,7 +48,10 @@ import {
   useContinuousDictation,
   type ContinuousDictationShadowSnapshot,
 } from './ContinuousDictationContext';
-import { mergeDraftWithContinuousDictation } from './continuous-dictation-draft';
+import {
+  continuousDictationLinesText,
+  mergeDraftWithContinuousDictation,
+} from './continuous-dictation-draft';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { preloadMonacoEditor } from '../files/monaco-editor-loader';
 
@@ -847,7 +850,9 @@ export function ChatInput({
       setComposerAttachments([], false);
     }
     const regularPrompt = regularSnapshot?.prompt ?? '';
-    const shadowText = dictationShadow?.lines.map((line) => line.text).join('\n') ?? '';
+    const shadowText = dictationShadow
+      ? continuousDictationLinesText(dictationShadow.lines)
+      : '';
     return {
       prompt: mergeDraftWithContinuousDictation(regularPrompt, shadowText),
       regularPrompt,
