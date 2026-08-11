@@ -12,6 +12,7 @@ import {
   type GithubPullRequestMergeMethod,
 } from '../github-pull-requests';
 import type { ChangeRequestRepository } from './change-request-repository';
+import { ChangeRequestOperationLock } from './change-request-operation-lock';
 import { ChangeRequestError } from './change-request-service';
 import type {
   ChangeRequestActor,
@@ -36,11 +37,14 @@ export type ChangeRequestGithubMirrorServiceDependencies = {
   ) => Promise<RunResult>;
   deleteHostRefBestEffort: (input: { repoRoot: string; refName: string }) => Promise<void>;
   now: () => string;
+  operationLock?: ChangeRequestOperationLock;
   github?: GithubMirrorClient;
   onGithubChanged?: (repoRoot: string) => void;
 };
 
 const GIT_TIMEOUT_MS = 120_000;
+const MANAGED_BRANCH_SUFFIX_PATTERN = /^[0-9a-f]{6}$/;
+const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
 function mirrorBody(record: ChangeRequestRecord): string {
   const footer = `Mirrored from DroneHub change request #${record.number}.`;
@@ -60,10 +64,11 @@ function githubError(error: unknown): ChangeRequestError {
 }
 
 export class ChangeRequestGithubMirrorService {
-  private readonly operationLocks = new Map<string, Promise<void>>();
+  private readonly operationLock: ChangeRequestOperationLock;
   private readonly github: GithubMirrorClient;
 
   constructor(private readonly deps: ChangeRequestGithubMirrorServiceDependencies) {
+    this.operationLock = deps.operationLock ?? new ChangeRequestOperationLock();
     this.github =
       deps.github ??
       ({
@@ -117,6 +122,12 @@ export class ChangeRequestGithubMirrorService {
       }
       this.deps.onGithubChanged?.(record.repoRoot);
 
+      try {
+        this.assertPublishedPullRequest(record, headBranch, details);
+      } catch (error) {
+        throw await this.cleanupFailedPublish(record, headBranch, details, error);
+      }
+
       const now = this.deps.now();
       const mirror: ChangeRequestGithubMirrorRecord = {
         owner: details.repo.owner,
@@ -124,7 +135,7 @@ export class ChangeRequestGithubMirrorService {
         pullNumber: details.number,
         htmlUrl: details.htmlUrl,
         headBranch,
-        headSha: record.snapshotSha,
+        headSha: details.headSha,
         baseBranch: record.destinationBranch,
         state: details.state,
         autoUpdate: true,
@@ -136,7 +147,11 @@ export class ChangeRequestGithubMirrorService {
         createdAt: now,
         updatedAt: now,
       };
-      await this.deps.repository.update(id, { githubMirror: mirror });
+      try {
+        await this.deps.repository.update(id, { githubMirror: mirror });
+      } catch (error) {
+        throw await this.cleanupFailedPublish(record, headBranch, details, error);
+      }
 
       if (input.merge) {
         try {
@@ -211,95 +226,100 @@ export class ChangeRequestGithubMirrorService {
   async refresh(recordOrId: ChangeRequestRecord | string): Promise<void> {
     const id = typeof recordOrId === 'string' ? recordOrId : recordOrId.id;
     if (!id) return;
-    await this.withLock(id, async () => {
-      const current = this.requiredRecord(id);
-      const mirror = current.githubMirror;
-      if (!mirror) return;
-      try {
-        const details = await this.github.getPullRequest({
-          repoRoot: current.repoRoot,
-          pullNumber: mirror.pullNumber,
+    await this.withLock(id, async () => await this.refreshRecord(this.requiredRecord(id)));
+  }
+
+  async refreshAfterNativeAssessment(record: ChangeRequestRecord): Promise<void> {
+    await this.refreshRecord(record);
+  }
+
+  private async refreshRecord(record: ChangeRequestRecord): Promise<void> {
+    const id = record.id;
+    const current = this.requiredRecord(id);
+    const mirror = current.githubMirror;
+    if (!mirror) return;
+    try {
+      const details = await this.github.getPullRequest({
+        repoRoot: current.repoRoot,
+        pullNumber: mirror.pullNumber,
+      });
+      this.assertLinkedPullRequest(mirror, details);
+      const matchesNative =
+        current.status === 'open' &&
+        details.state === 'open' &&
+        details.headRefName === mirror.headBranch &&
+        details.headSha === current.snapshotSha &&
+        details.baseRefName === current.destinationBranch &&
+        details.title === current.title &&
+        details.body === mirrorBody(current);
+      const updatedMirror: ChangeRequestGithubMirrorRecord = {
+        ...mirror,
+        htmlUrl: details.htmlUrl,
+        headSha: details.headSha,
+        baseBranch: details.baseRefName,
+        state: details.state,
+        mergeCommitSha: details.mergeCommitSha,
+        syncedRevision: matchesNative ? current.revision : 0,
+        syncedNativeUpdatedAt: matchesNative ? current.updatedAt : '',
+        lastError: null,
+        updatedAt: this.deps.now(),
+      };
+      await this.deps.repository.update(id, { githubMirror: updatedMirror });
+      if (details.state === 'merged' && current.status === 'open') {
+        await this.finalizeNativeMerge(this.requiredRecord(id), details.mergeCommitSha);
+      } else if (details.state === 'closed') {
+        const latest = this.requiredRecord(id);
+        const latestMirror = this.requiredMirror(latest);
+        const cleanupError = await this.deleteOwnedBranch(latest, latestMirror);
+        await this.deps.repository.update(id, {
+          githubMirror: {
+            ...latestMirror,
+            lastError: cleanupError,
+            updatedAt: this.deps.now(),
+          },
         });
-        const matchesNative =
-          current.status === 'open' &&
-          details.state === 'open' &&
-          details.headSha === current.snapshotSha &&
-          details.baseRefName === current.destinationBranch &&
-          details.title === current.title &&
-          details.body === mirrorBody(current);
-        const updatedMirror: ChangeRequestGithubMirrorRecord = {
-          ...mirror,
-          htmlUrl: details.htmlUrl,
-          headSha: details.headSha,
-          baseBranch: details.baseRefName,
-          state: details.state,
-          mergeCommitSha: details.mergeCommitSha,
-          syncedRevision: matchesNative ? current.revision : 0,
-          syncedNativeUpdatedAt: matchesNative ? current.updatedAt : '',
-          lastError: null,
-          updatedAt: this.deps.now(),
-        };
-        await this.deps.repository.update(id, { githubMirror: updatedMirror });
-        if (details.state === 'merged' && current.status === 'open') {
-          await this.finalizeNativeMerge(this.requiredRecord(id), details.mergeCommitSha);
-        } else if (details.state === 'closed') {
-          const latest = this.requiredRecord(id);
-          const latestMirror = this.requiredMirror(latest);
-          const cleanupError = await this.deleteOwnedBranch(latest, latestMirror);
-          await this.deps.repository.update(id, {
-            githubMirror: {
-              ...latestMirror,
-              lastError: cleanupError,
-              updatedAt: this.deps.now(),
-            },
-          });
-        }
-      } catch (error) {
-        await this.storeMirrorError(this.requiredRecord(id), error);
       }
-    });
+    } catch (error) {
+      await this.storeMirrorError(this.requiredRecord(id), error);
+    }
   }
 
   async syncAfterNativeUpdate(record: ChangeRequestRecord): Promise<void> {
     const mirror = record.githubMirror;
     if (!mirror || !mirror.autoUpdate || mirror.state !== 'open' || record.status !== 'open')
       return;
-    await this.withLock(record.id, async () => {
-      const current = this.requiredRecord(record.id);
-      try {
-        await this.syncRecord(current);
-      } catch {
-        // The native update remains successful. The mirror stores the error and stays out of date.
-      }
-    });
+    const current = this.requiredRecord(record.id);
+    try {
+      await this.syncRecord(current);
+    } catch {
+      // The native update remains successful. The mirror stores the error and stays out of date.
+    }
   }
 
   async closeAfterNativeCompletion(record: ChangeRequestRecord): Promise<void> {
     const mirror = record.githubMirror;
     if (!mirror || mirror.state !== 'open') return;
-    await this.withLock(record.id, async () => {
-      const current = this.requiredRecord(record.id);
-      const currentMirror = current.githubMirror;
-      if (!currentMirror || currentMirror.state !== 'open') return;
-      try {
-        await this.github.closePullRequest({
-          repoRoot: current.repoRoot,
-          pullNumber: currentMirror.pullNumber,
-        });
-        this.deps.onGithubChanged?.(current.repoRoot);
-        const cleanupError = await this.deleteOwnedBranch(current, currentMirror);
-        await this.deps.repository.update(current.id, {
-          githubMirror: {
-            ...currentMirror,
-            state: 'closed',
-            lastError: cleanupError,
-            updatedAt: this.deps.now(),
-          },
-        });
-      } catch (error) {
-        await this.storeMirrorError(current, error);
-      }
-    });
+    const current = this.requiredRecord(record.id);
+    const currentMirror = current.githubMirror;
+    if (!currentMirror || currentMirror.state !== 'open') return;
+    try {
+      await this.github.closePullRequest({
+        repoRoot: current.repoRoot,
+        pullNumber: currentMirror.pullNumber,
+      });
+      this.deps.onGithubChanged?.(current.repoRoot);
+      const cleanupError = await this.deleteOwnedBranch(current, currentMirror);
+      await this.deps.repository.update(current.id, {
+        githubMirror: {
+          ...currentMirror,
+          state: 'closed',
+          lastError: cleanupError,
+          updatedAt: this.deps.now(),
+        },
+      });
+    } catch (error) {
+      await this.storeMirrorError(current, error);
+    }
   }
 
   private async syncRecord(record: ChangeRequestRecord): Promise<ChangeRequestRecord> {
@@ -322,6 +342,7 @@ export class ChangeRequestGithubMirrorService {
         repoRoot: record.repoRoot,
         pullNumber: mirror.pullNumber,
       });
+      this.assertLinkedPullRequest(mirror, remote);
       if (remote.state !== 'open') {
         await this.deps.repository.update(record.id, {
           githubMirror: {
@@ -370,26 +391,44 @@ export class ChangeRequestGithubMirrorService {
         body: mirrorBody(record),
         baseBranch: record.destinationBranch,
       });
+      this.assertSyncedPullRequest(record, mirror, details);
       this.deps.onGithubChanged?.(record.repoRoot);
       await this.deps.repository.update(record.id, {
         githubMirror: {
           ...mirror,
           htmlUrl: details.htmlUrl,
-          headSha: record.snapshotSha,
-          baseBranch: record.destinationBranch,
+          headSha: details.headSha,
+          baseBranch: details.baseRefName,
           state: details.state,
-          syncedRevision: record.revision,
-          syncedNativeUpdatedAt: record.updatedAt,
+          mergeCommitSha: details.mergeCommitSha,
+          syncedRevision: details.state === 'open' ? record.revision : 0,
+          syncedNativeUpdatedAt: details.state === 'open' ? record.updatedAt : '',
           lastError: null,
           updatedAt: this.deps.now(),
         },
       });
+      if (details.state === 'merged') {
+        await this.finalizeNativeMerge(this.requiredRecord(record.id), details.mergeCommitSha);
+      } else if (details.state === 'closed') {
+        const current = this.requiredRecord(record.id);
+        const currentMirror = this.requiredMirror(current);
+        const cleanupError = await this.deleteOwnedBranch(current, currentMirror);
+        await this.deps.repository.update(record.id, {
+          githubMirror: {
+            ...currentMirror,
+            lastError: cleanupError,
+            updatedAt: this.deps.now(),
+          },
+        });
+      }
       return this.requiredRecord(record.id);
     } catch (error) {
+      const latest = this.requiredRecord(record.id);
+      const latestMirror = this.requiredMirror(latest);
       await this.deps.repository.update(record.id, {
         githubMirror: {
-          ...mirror,
-          headSha: pushedHeadSha,
+          ...latestMirror,
+          headSha: latestMirror.state === 'open' ? pushedHeadSha : latestMirror.headSha,
           lastError: error instanceof Error ? error.message : String(error),
           updatedAt: this.deps.now(),
         },
@@ -407,13 +446,8 @@ export class ChangeRequestGithubMirrorService {
     if (mirror.state !== 'open') {
       throw new ChangeRequestError('The linked GitHub pull request is not open.', 409);
     }
-    if (
-      mirror.syncedRevision !== current.revision ||
-      mirror.syncedNativeUpdatedAt !== current.updatedAt
-    ) {
-      current = await this.syncRecord(current);
-      mirror = this.requiredMirror(current);
-    }
+    current = await this.syncRecord(current);
+    mirror = this.requiredMirror(current);
     if (current.status !== 'open' || mirror.state !== 'open') {
       if (current.status === 'merged' && mirror.state === 'merged') return current;
       throw new ChangeRequestError('The linked GitHub pull request is not open.', 409);
@@ -423,6 +457,7 @@ export class ChangeRequestGithubMirrorService {
         repoRoot: current.repoRoot,
         pullNumber: mirror.pullNumber,
         method,
+        expectedHeadSha: current.snapshotSha,
       });
       if (!merged.merged) {
         throw new ChangeRequestError(
@@ -512,8 +547,11 @@ export class ChangeRequestGithubMirrorService {
     record: ChangeRequestRecord,
     mirror: ChangeRequestGithubMirrorRecord,
   ): Promise<void> {
-    if (!mirror.branchOwnedByDroneHub) {
+    if (!mirror.branchOwnedByDroneHub || !this.isManagedBranch(record, mirror.headBranch)) {
       throw new ChangeRequestError('DroneHub does not own the linked pull request branch.', 409);
+    }
+    if (!FULL_SHA_PATTERN.test(mirror.headSha)) {
+      throw new ChangeRequestError('The linked pull request branch has no safe lease SHA.', 409);
     }
     await this.git(record.repoRoot, [
       'push',
@@ -527,7 +565,13 @@ export class ChangeRequestGithubMirrorService {
     record: ChangeRequestRecord,
     mirror: ChangeRequestGithubMirrorRecord,
   ): Promise<string | null> {
-    if (!mirror.branchOwnedByDroneHub || !mirror.headBranch) return null;
+    if (!mirror.branchOwnedByDroneHub) return null;
+    if (!this.isManagedBranch(record, mirror.headBranch)) {
+      return `Mirror branch ${mirror.headBranch || '(missing)'} was not deleted because it is not a DroneHub-managed mirror branch.`;
+    }
+    if (!FULL_SHA_PATTERN.test(mirror.headSha)) {
+      return `Mirror branch ${mirror.headBranch} was not deleted because its expected remote head is unavailable.`;
+    }
     try {
       const remoteSha = await this.remoteBranchSha(record.repoRoot, mirror.headBranch);
       if (!remoteSha) return null;
@@ -559,7 +603,117 @@ export class ChangeRequestGithubMirrorService {
   }
 
   private newHeadBranch(record: ChangeRequestRecord): string {
-    return `drone/change-requests/${record.number}-${record.id.slice(0, 8)}-${crypto.randomBytes(3).toString('hex')}`;
+    const idHash = this.recordIdHash(record);
+    return `drone/change-requests/${record.number}-${idHash}-${crypto.randomBytes(3).toString('hex')}`;
+  }
+
+  private isManagedBranch(record: ChangeRequestRecord, branch: string): boolean {
+    const idHash = this.recordIdHash(record);
+    const prefix = `drone/change-requests/${record.number}-${idHash}-`;
+    return (
+      branch.startsWith(prefix) &&
+      MANAGED_BRANCH_SUFFIX_PATTERN.test(branch.slice(prefix.length)) &&
+      branch !== record.baseBranch &&
+      branch !== record.destinationBranch
+    );
+  }
+
+  private assertPublishedPullRequest(
+    record: ChangeRequestRecord,
+    headBranch: string,
+    details: GithubPullRequestDetails,
+  ): void {
+    if (
+      !Number.isInteger(details.number) ||
+      details.number <= 0 ||
+      details.state !== 'open' ||
+      details.headRefName !== headBranch ||
+      details.baseRefName !== record.destinationBranch ||
+      details.headSha !== record.snapshotSha
+    ) {
+      throw new ChangeRequestError(
+        'GitHub returned pull request data that does not match the published change request.',
+        502,
+        'github_mirror_mismatch',
+      );
+    }
+  }
+
+  private assertLinkedPullRequest(
+    mirror: ChangeRequestGithubMirrorRecord,
+    details: GithubPullRequestDetails,
+  ): void {
+    if (details.number !== mirror.pullNumber || details.headRefName !== mirror.headBranch) {
+      throw new ChangeRequestError(
+        'The linked GitHub pull request no longer points to its DroneHub mirror branch.',
+        409,
+        'github_mirror_mismatch',
+      );
+    }
+  }
+
+  private assertSyncedPullRequest(
+    record: ChangeRequestRecord,
+    mirror: ChangeRequestGithubMirrorRecord,
+    details: GithubPullRequestDetails,
+  ): void {
+    this.assertLinkedPullRequest(mirror, details);
+    if (
+      details.headSha !== record.snapshotSha ||
+      details.baseRefName !== record.destinationBranch
+    ) {
+      throw new ChangeRequestError(
+        'GitHub returned pull request data that does not match the updated change request.',
+        502,
+        'github_mirror_mismatch',
+      );
+    }
+  }
+
+  private async cleanupFailedPublish(
+    record: ChangeRequestRecord,
+    headBranch: string,
+    details: GithubPullRequestDetails,
+    cause: unknown,
+  ): Promise<ChangeRequestError> {
+    const cleanupErrors: string[] = [];
+    if (
+      Number.isInteger(details.number) &&
+      details.number > 0 &&
+      details.headRefName === headBranch
+    ) {
+      try {
+        await this.github.closePullRequest({
+          repoRoot: record.repoRoot,
+          pullNumber: details.number,
+        });
+        this.deps.onGithubChanged?.(record.repoRoot);
+      } catch (error) {
+        cleanupErrors.push(
+          `could not close PR #${details.number}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    } else {
+      cleanupErrors.push('could not safely identify the pull request to close');
+    }
+    try {
+      await this.deleteRemoteBranch(record.repoRoot, headBranch);
+    } catch (error) {
+      cleanupErrors.push(
+        `could not delete mirror branch ${headBranch}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const primary = githubError(cause);
+    if (cleanupErrors.length === 0) return primary;
+    return new ChangeRequestError(
+      `${primary.message} Cleanup also failed: ${cleanupErrors.join('; ')}`,
+      primary.statusCode,
+      primary.code,
+    );
+  }
+
+  private recordIdHash(record: ChangeRequestRecord): string {
+    return crypto.createHash('sha256').update(record.id).digest('hex').slice(0, 8);
   }
 
   private async fetch(repoRoot: string): Promise<void> {
@@ -613,19 +767,6 @@ export class ChangeRequestGithubMirrorService {
   }
 
   private async withLock<T>(id: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.operationLocks.get(id) ?? Promise.resolve();
-    let release: () => void = () => {};
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const queued = previous.then(() => current);
-    this.operationLocks.set(id, queued);
-    await previous;
-    try {
-      return await operation();
-    } finally {
-      release();
-      if (this.operationLocks.get(id) === queued) this.operationLocks.delete(id);
-    }
+    return await this.operationLock.withLock(id, operation);
   }
 }

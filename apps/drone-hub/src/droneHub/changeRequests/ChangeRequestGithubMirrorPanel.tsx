@@ -113,22 +113,30 @@ export function ChangeRequestGithubMirrorPanel({
       ) : (
         <>
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[var(--text-11)]">
-            <a
-              href={mirror.htmlUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="font-[var(--weight-semibold)] text-[var(--accent)] hover:underline"
-            >
-              {mirror.owner}/{mirror.repo}#{mirror.pullNumber}
-            </a>
-            <span className="font-mono text-[var(--muted-dim)]">{mirror.headBranch}</span>
-            {mirror.outOfDate ? (
-              <span className="rounded border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-1.5 py-0.5 text-[var(--text-9)] text-[var(--yellow)]">
-                out of date
-              </span>
+            {mirror.htmlUrl ? (
+              <a
+                href={mirror.htmlUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="font-[var(--weight-semibold)] text-[var(--accent)] hover:underline"
+              >
+                {mirror.owner}/{mirror.repo}#{mirror.pullNumber}
+              </a>
             ) : (
-              <span className="text-[var(--green)]">up to date</span>
+              <span className="font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
+                {mirror.owner}/{mirror.repo}#{mirror.pullNumber}
+              </span>
             )}
+            <span className="font-mono text-[var(--muted-dim)]">{mirror.headBranch}</span>
+            {mirror.state === 'open' ? (
+              mirror.outOfDate ? (
+                <span className="rounded border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-1.5 py-0.5 text-[var(--text-9)] text-[var(--yellow)]">
+                  out of date
+                </span>
+              ) : (
+                <span className="text-[var(--green)]">up to date</span>
+              )
+            ) : null}
           </div>
 
           {mirror.lastError ? (

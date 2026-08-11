@@ -9,11 +9,17 @@ import type {
   ChangeRequestRepository,
 } from '../src/hub/change-requests/change-request-repository';
 import { ChangeRequestGithubMirrorService } from '../src/hub/change-requests/change-request-github-mirror-service';
+import { ChangeRequestOperationLock } from '../src/hub/change-requests/change-request-operation-lock';
 import type { ChangeRequestRecord } from '../src/hub/change-requests/change-request-types';
 import type { RunResult } from '../src/host/dvm';
 
 class MemoryChangeRequestRepository implements ChangeRequestRepository {
   private readonly records = new Map<string, ChangeRequestRecord>();
+  private failNextMirrorUpdateMessage: string | null = null;
+
+  failNextMirrorUpdate(message: string): void {
+    this.failNextMirrorUpdateMessage = message;
+  }
 
   async insert(input: Omit<ChangeRequestRecord, 'number'>): Promise<ChangeRequestRecord> {
     const record = { ...input, number: this.records.size + 1 };
@@ -31,6 +37,11 @@ class MemoryChangeRequestRepository implements ChangeRequestRepository {
   }
 
   async update(id: string, patch: ChangeRequestPatch): Promise<ChangeRequestRecord> {
+    if (patch.githubMirror && this.failNextMirrorUpdateMessage) {
+      const message = this.failNextMirrorUpdateMessage;
+      this.failNextMirrorUpdateMessage = null;
+      throw new Error(message);
+    }
     const current = this.records.get(id);
     if (!current) throw new Error(`unknown change request: ${id}`);
     const updated = { ...current, ...patch };
@@ -88,6 +99,30 @@ async function snapshotCommit(
 }
 
 describe('ChangeRequestGithubMirrorService', () => {
+  test('serializes native and GitHub operations that share a request lock', async () => {
+    const lock = new ChangeRequestOperationLock();
+    const events: string[] = [];
+    let releaseFirst: () => void = () => {};
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const first = lock.withLock('request-1', async () => {
+      events.push('first started');
+      await firstGate;
+      events.push('first finished');
+    });
+    await Promise.resolve();
+    const second = lock.withLock('request-1', async () => {
+      events.push('second started');
+    });
+
+    await Promise.resolve();
+    expect(events).toEqual(['first started']);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(events).toEqual(['first started', 'first finished', 'second started']);
+  });
+
   test('publishes, auto-updates, safely leases, merges, and cleans up its branch', async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-github-mirror-'));
     const origin = path.join(tempRoot, 'origin.git');
@@ -138,6 +173,8 @@ describe('ChangeRequestGithubMirrorService', () => {
       });
 
       let pullNumber = 40;
+      const closedPullNumbers: number[] = [];
+      const createdHeadBranches: string[] = [];
       const service = new ChangeRequestGithubMirrorService({
         repository,
         runHostCommand: run,
@@ -146,18 +183,21 @@ describe('ChangeRequestGithubMirrorService', () => {
         },
         now: () => '2026-01-02T00:00:00.000Z',
         github: {
-          createPullRequest: async (input) => ({
-            repo: { owner: 'example', repo: 'repo' },
-            number: ++pullNumber,
-            title: input.title,
-            body: input.body,
-            state: 'open',
-            htmlUrl: `https://github.com/example/repo/pull/${pullNumber}`,
-            baseRefName: input.baseBranch,
-            headRefName: input.headBranch,
-            headSha: await git(origin, ['rev-parse', `refs/heads/${input.headBranch}`]),
-            mergeCommitSha: null,
-          }),
+          createPullRequest: async (input) => {
+            createdHeadBranches.push(input.headBranch);
+            return {
+              repo: { owner: 'example', repo: 'repo' },
+              number: ++pullNumber,
+              title: input.title,
+              body: input.body,
+              state: 'open',
+              htmlUrl: `https://github.com/example/repo/pull/${pullNumber}`,
+              baseRefName: input.baseBranch,
+              headRefName: input.headBranch,
+              headSha: await git(origin, ['rev-parse', `refs/heads/${input.headBranch}`]),
+              mergeCommitSha: null,
+            };
+          },
           getPullRequest: async (input) => {
             const record = repository.get('request-1')!;
             const mirror = record.githubMirror!;
@@ -189,20 +229,26 @@ describe('ChangeRequestGithubMirrorService', () => {
               mergeCommitSha: null,
             };
           },
-          mergePullRequest: async (input) => ({
-            repo: { owner: 'example', repo: 'repo' },
-            number: input.pullNumber,
-            merged: true,
-            message: 'Merged',
-            sha: baseSha,
-          }),
-          closePullRequest: async (input) => ({
-            repo: { owner: 'example', repo: 'repo' },
-            number: input.pullNumber,
-            state: 'closed',
-            htmlUrl: `https://github.com/example/repo/pull/${input.pullNumber}`,
-            title: 'Closed',
-          }),
+          mergePullRequest: async (input) => {
+            expect(input.expectedHeadSha).toBe(repository.get('request-1')?.snapshotSha);
+            return {
+              repo: { owner: 'example', repo: 'repo' },
+              number: input.pullNumber,
+              merged: true,
+              message: 'Merged',
+              sha: baseSha,
+            };
+          },
+          closePullRequest: async (input) => {
+            closedPullNumbers.push(input.pullNumber);
+            return {
+              repo: { owner: 'example', repo: 'repo' },
+              number: input.pullNumber,
+              state: 'closed',
+              htmlUrl: `https://github.com/example/repo/pull/${input.pullNumber}`,
+              title: 'Closed',
+            };
+          },
         },
       });
 
@@ -214,6 +260,19 @@ describe('ChangeRequestGithubMirrorService', () => {
         firstSnapshot,
       );
       expect(await git(origin, ['rev-parse', 'refs/heads/integration/42'])).toBe(baseSha);
+
+      await repository.update('request-1', {
+        githubMirror: {
+          ...publishedMirror,
+          headBranch: 'main',
+          headSha: baseSha,
+        },
+      });
+      await expect(service.sync('request-1')).rejects.toThrow(
+        'DroneHub does not own the linked pull request branch',
+      );
+      expect(await git(origin, ['rev-parse', 'refs/heads/main'])).toBe(baseSha);
+      await repository.update('request-1', { githubMirror: publishedMirror });
 
       await service.setAutoUpdate('request-1', false);
       const secondSnapshot = await snapshotCommit(repoRoot, baseSha, 'feature.txt', 'second\n');
@@ -271,6 +330,52 @@ describe('ChangeRequestGithubMirrorService', () => {
       expect(
         (await run('git', ['-C', repoRoot, 'rev-parse', '--verify', snapshotRef])).code,
       ).not.toBe(0);
+
+      const rollbackSnapshot = await snapshotCommit(
+        repoRoot,
+        baseSha,
+        'rollback.txt',
+        'rollback\n',
+      );
+      const rollbackRef = 'refs/drone/change-requests/request-rollback/snapshot';
+      await git(repoRoot, ['update-ref', rollbackRef, rollbackSnapshot]);
+      await repository.insert({
+        id: 'request-rollback',
+        status: 'open',
+        droneId: 'drone-1',
+        droneName: 'Test drone',
+        chatId: null,
+        chatName: 'default',
+        repoRoot,
+        baseBranch: 'main',
+        baseSha,
+        destinationBranch: 'main',
+        snapshotRef: rollbackRef,
+        snapshotSha: rollbackSnapshot,
+        sourceHeadSha: rollbackSnapshot,
+        revision: 1,
+        title: 'Rollback failed persistence',
+        description: '',
+        createdBy: { kind: 'user', id: null, label: 'Test user' },
+        mergedBy: null,
+        mergeCommitSha: null,
+        lastError: null,
+        createdAt: '2026-01-05T00:00:00.000Z',
+        updatedAt: '2026-01-05T00:00:00.000Z',
+        mergedAt: null,
+        closedAt: null,
+        githubMirror: null,
+      });
+      repository.failNextMirrorUpdate('database unavailable');
+      await expect(service.publish('request-rollback')).rejects.toThrow('database unavailable');
+      expect(repository.get('request-rollback')?.githubMirror).toBeNull();
+      expect(closedPullNumbers).toContain(42);
+      const remoteBranches = await git(origin, [
+        'for-each-ref',
+        '--format=%(refname)',
+        'refs/heads',
+      ]);
+      expect(remoteBranches).not.toContain(createdHeadBranches[1]);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
@@ -384,10 +489,146 @@ describe('ChangeRequestGithubMirrorService', () => {
       await service.close('request-2');
       expect(await git(origin, ['rev-parse', 'refs/heads/user-branch'])).toBe(baseSha);
       expect(repository.get('request-2')?.githubMirror?.lastError).toContain(
-        'changed outside DroneHub',
+        'not a DroneHub-managed mirror branch',
+      );
+
+      const unsafeMirror = repository.get('request-2')!.githubMirror!;
+      await repository.update('request-2', {
+        githubMirror: {
+          ...unsafeMirror,
+          pullNumber: 52,
+          state: 'open',
+          headBranch: 'main',
+          headSha: baseSha,
+          lastError: null,
+        },
+      });
+      await service.close('request-2');
+      expect(await git(origin, ['rev-parse', 'refs/heads/main'])).toBe(baseSha);
+      expect(repository.get('request-2')?.githubMirror?.lastError).toContain(
+        'not a DroneHub-managed mirror branch',
       );
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  test('reconciles a pull request that merges while it is being updated', async () => {
+    const oldSha = 'a'.repeat(40);
+    const snapshotSha = 'b'.repeat(40);
+    const mergeSha = 'c'.repeat(40);
+    const headBranch = 'drone/change-requests/1-38e57862-123abc';
+    const snapshotRef = 'refs/drone/change-requests/request-race/snapshot';
+    const repository = new MemoryChangeRequestRepository();
+    await repository.insert({
+      id: 'request-race',
+      status: 'open',
+      droneId: 'drone-1',
+      droneName: 'Test drone',
+      chatId: null,
+      chatName: 'default',
+      repoRoot: '/repo',
+      baseBranch: 'main',
+      baseSha: oldSha,
+      destinationBranch: 'main',
+      snapshotRef,
+      snapshotSha,
+      sourceHeadSha: snapshotSha,
+      revision: 2,
+      title: 'Merged during update',
+      description: '',
+      createdBy: { kind: 'user', id: null, label: 'Test user' },
+      mergedBy: null,
+      mergeCommitSha: null,
+      lastError: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+      mergedAt: null,
+      closedAt: null,
+      githubMirror: {
+        owner: 'example',
+        repo: 'repo',
+        pullNumber: 60,
+        htmlUrl: 'https://github.com/example/repo/pull/60',
+        headBranch,
+        headSha: oldSha,
+        baseBranch: 'main',
+        state: 'open',
+        autoUpdate: true,
+        branchOwnedByDroneHub: true,
+        syncedRevision: 1,
+        syncedNativeUpdatedAt: '2026-01-01T00:00:00.000Z',
+        mergeCommitSha: null,
+        lastError: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
+
+    const gitCalls: string[][] = [];
+    const deletedRefs: string[] = [];
+    let mergeCalls = 0;
+    const service = new ChangeRequestGithubMirrorService({
+      repository,
+      runHostCommand: async (_command, args) => {
+        gitCalls.push(args);
+        if (args.includes('ls-remote')) {
+          const ref = args.at(-1) ?? '';
+          const sha = ref.endsWith(headBranch) ? snapshotSha : oldSha;
+          return { code: 0, stdout: `${sha}\t${ref}\n`, stderr: '' };
+        }
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      deleteHostRefBestEffort: async ({ refName }) => {
+        deletedRefs.push(refName);
+      },
+      now: () => '2026-01-03T00:00:00.000Z',
+      github: {
+        createPullRequest: async () => {
+          throw new Error('not expected');
+        },
+        getPullRequest: async () => ({
+          repo: { owner: 'example', repo: 'repo' },
+          number: 60,
+          title: 'Merged during update',
+          body: 'Mirrored from DroneHub change request #1.',
+          state: 'open',
+          htmlUrl: 'https://github.com/example/repo/pull/60',
+          baseRefName: 'main',
+          headRefName: headBranch,
+          headSha: oldSha,
+          mergeCommitSha: null,
+        }),
+        updatePullRequest: async () => ({
+          repo: { owner: 'example', repo: 'repo' },
+          number: 60,
+          title: 'Merged during update',
+          body: 'Mirrored from DroneHub change request #1.',
+          state: 'merged',
+          htmlUrl: 'https://github.com/example/repo/pull/60',
+          baseRefName: 'main',
+          headRefName: headBranch,
+          headSha: snapshotSha,
+          mergeCommitSha: mergeSha,
+        }),
+        mergePullRequest: async () => {
+          mergeCalls += 1;
+          throw new Error('not expected');
+        },
+        closePullRequest: async () => {
+          throw new Error('not expected');
+        },
+      },
+    });
+
+    const result = await service.merge('request-race', 'squash');
+    expect(result.status).toBe('merged');
+    expect(result.githubMirror?.state).toBe('merged');
+    expect(result.mergeCommitSha).toBe(mergeSha);
+    expect(mergeCalls).toBe(0);
+    expect(deletedRefs).toEqual([snapshotRef]);
+    expect(gitCalls.some((args) => args.includes('--delete') && args.includes(headBranch))).toBe(
+      true,
+    );
   });
 });

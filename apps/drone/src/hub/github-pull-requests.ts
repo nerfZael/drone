@@ -111,7 +111,9 @@ export class GithubPullRequestError extends Error {
   constructor(message: string, opts?: { statusCode?: number; code?: string | null }) {
     super(String(message ?? 'GitHub pull request operation failed'));
     this.name = 'GithubPullRequestError';
-    this.statusCode = Number.isFinite(opts?.statusCode) ? Math.max(400, Math.floor(opts?.statusCode ?? 500)) : 500;
+    this.statusCode = Number.isFinite(opts?.statusCode)
+      ? Math.max(400, Math.floor(opts?.statusCode ?? 500))
+      : 500;
     this.code = opts?.code ? String(opts.code) : null;
   }
 }
@@ -124,7 +126,9 @@ export function normalizeGithubPullRequestListState(
   raw: unknown,
   fallback: GithubPullRequestListState = 'open',
 ): GithubPullRequestListState {
-  const state = String(raw ?? '').trim().toLowerCase();
+  const state = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (state === 'closed') return 'closed';
   if (state === 'all') return 'all';
   if (state === 'open') return 'open';
@@ -135,7 +139,9 @@ export function normalizeGithubPullRequestMergeMethod(
   raw: unknown,
   fallback: GithubPullRequestMergeMethod = 'merge',
 ): GithubPullRequestMergeMethod {
-  const method = String(raw ?? '').trim().toLowerCase();
+  const method = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (method === 'squash') return 'squash';
   if (method === 'rebase') return 'rebase';
   if (method === 'merge') return 'merge';
@@ -148,7 +154,11 @@ type LocalCommandResult = {
   stderr: string;
 };
 
-async function runLocal(cmd: string, args: string[], opts?: { cwd?: string }): Promise<LocalCommandResult> {
+async function runLocal(
+  cmd: string,
+  args: string[],
+  opts?: { cwd?: string },
+): Promise<LocalCommandResult> {
   return await new Promise((resolve) => {
     const child = spawn(cmd, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -158,8 +168,12 @@ async function runLocal(cmd: string, args: string[], opts?: { cwd?: string }): P
     let stderr = '';
     child.stdout.on('data', (d) => (stdout += d.toString('utf8')));
     child.stderr.on('data', (d) => (stderr += d.toString('utf8')));
-    child.once('error', (err: any) => resolve({ code: 127, stdout, stderr: `${stderr}${err?.message ?? String(err)}` }));
-    child.once('close', (code) => resolve({ code: typeof code === 'number' ? code : 1, stdout, stderr }));
+    child.once('error', (err: any) =>
+      resolve({ code: 127, stdout, stderr: `${stderr}${err?.message ?? String(err)}` }),
+    );
+    child.once('close', (code) =>
+      resolve({ code: typeof code === 'number' ? code : 1, stdout, stderr }),
+    );
   });
 }
 
@@ -220,7 +234,9 @@ async function resolveGithubRepoForRepoRoot(repoRoot: string): Promise<GithubRep
   return github;
 }
 
-export async function inspectGithubRepoForRepoRoot(repoRootRaw: string): Promise<GithubRepoResolutionDebug> {
+export async function inspectGithubRepoForRepoRoot(
+  repoRootRaw: string,
+): Promise<GithubRepoResolutionDebug> {
   const repoRoot = String(repoRootRaw ?? '').trim();
   if (!repoRoot) return { remoteUrl: null, parsedRepo: null };
   const remoteUrl = await gitBestRemoteUrl(repoRoot);
@@ -245,16 +261,21 @@ export async function inspectGithubAuthStatus(): Promise<GithubAuthStatus> {
 
   const ghCliPath = await resolveLocalCommandPath('gh');
   const ghCliInstalled = Boolean(ghCliPath);
-  const ghVersionResult = ghCliInstalled ? await runLocal('gh', ['--version']) : { code: 127, stdout: '', stderr: '' };
+  const ghVersionResult = ghCliInstalled
+    ? await runLocal('gh', ['--version'])
+    : { code: 127, stdout: '', stderr: '' };
   const ghCliVersion =
     ghVersionResult.code === 0
-      ? String(ghVersionResult.stdout ?? '')
+      ? (String(ghVersionResult.stdout ?? '')
           .split('\n')
           .map((entry) => entry.trim())
-          .find(Boolean) ?? null
+          .find(Boolean) ?? null)
       : null;
-  const ghTokenResult = ghCliInstalled ? await runLocal('gh', ['auth', 'token']) : { code: 127, stdout: '', stderr: '' };
-  const ghCliAuthenticated = ghTokenResult.code === 0 && Boolean(String(ghTokenResult.stdout ?? '').trim());
+  const ghTokenResult = ghCliInstalled
+    ? await runLocal('gh', ['auth', 'token'])
+    : { code: 127, stdout: '', stderr: '' };
+  const ghCliAuthenticated =
+    ghTokenResult.code === 0 && Boolean(String(ghTokenResult.stdout ?? '').trim());
   if (!tokenSource && ghCliAuthenticated) tokenSource = 'gh';
 
   return {
@@ -293,14 +314,16 @@ function parseGithubApiErrorMessage(status: number, statusText: string, parsedBo
   const base = `${status} ${statusText || 'GitHub API error'}`.trim();
   const message = typeof parsedBody?.message === 'string' ? parsedBody.message.trim() : '';
   if (!message) return base;
-  const firstError = Array.isArray(parsedBody?.errors) && parsedBody.errors.length > 0 ? parsedBody.errors[0] : null;
+  const firstError =
+    Array.isArray(parsedBody?.errors) && parsedBody.errors.length > 0 ? parsedBody.errors[0] : null;
   const details =
     typeof firstError?.message === 'string'
       ? firstError.message.trim()
       : typeof firstError?.code === 'string'
         ? firstError.code.trim()
         : '';
-  if (details && !message.toLowerCase().includes(details.toLowerCase())) return `${message} (${details})`;
+  if (details && !message.toLowerCase().includes(details.toLowerCase()))
+    return `${message} (${details})`;
   return message;
 }
 
@@ -328,10 +351,13 @@ export async function githubApiRequest<T>(opts: {
       body: opts.body != null ? JSON.stringify(opts.body) : undefined,
     });
   } catch (error: any) {
-    throw new GithubPullRequestError(`Failed reaching GitHub API: ${error?.message ?? String(error)}`, {
-      statusCode: 502,
-      code: 'github_request_failed',
-    });
+    throw new GithubPullRequestError(
+      `Failed reaching GitHub API: ${error?.message ?? String(error)}`,
+      {
+        statusCode: 502,
+        code: 'github_request_failed',
+      },
+    );
   }
 
   const text = await response.text();
@@ -346,10 +372,13 @@ export async function githubApiRequest<T>(opts: {
     if (!token && (response.status === 401 || response.status === 403)) {
       throw githubAuthRequiredError();
     }
-    throw new GithubPullRequestError(parseGithubApiErrorMessage(response.status, response.statusText, parsed), {
-      statusCode: response.status,
-      code: 'github_api_error',
-    });
+    throw new GithubPullRequestError(
+      parseGithubApiErrorMessage(response.status, response.statusText, parsed),
+      {
+        statusCode: response.status,
+        code: 'github_api_error',
+      },
+    );
   }
 
   return parsed as T;
@@ -380,10 +409,13 @@ async function githubGraphqlRequest<T>(opts: {
       }),
     });
   } catch (error: any) {
-    throw new GithubPullRequestError(`Failed reaching GitHub GraphQL API: ${error?.message ?? String(error)}`, {
-      statusCode: 502,
-      code: 'github_request_failed',
-    });
+    throw new GithubPullRequestError(
+      `Failed reaching GitHub GraphQL API: ${error?.message ?? String(error)}`,
+      {
+        statusCode: 502,
+        code: 'github_request_failed',
+      },
+    );
   }
 
   const text = await response.text();
@@ -395,16 +427,21 @@ async function githubGraphqlRequest<T>(opts: {
   }
 
   if (!response.ok) {
-    if (!token && (response.status === 401 || response.status === 403)) throw githubAuthRequiredError();
-    throw new GithubPullRequestError(parseGithubApiErrorMessage(response.status, response.statusText, parsed), {
-      statusCode: response.status,
-      code: 'github_api_error',
-    });
+    if (!token && (response.status === 401 || response.status === 403))
+      throw githubAuthRequiredError();
+    throw new GithubPullRequestError(
+      parseGithubApiErrorMessage(response.status, response.statusText, parsed),
+      {
+        statusCode: response.status,
+        code: 'github_api_error',
+      },
+    );
   }
 
   if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
     const first = parsed.errors[0];
-    const msg = typeof first?.message === 'string' ? first.message.trim() : 'GitHub GraphQL query failed';
+    const msg =
+      typeof first?.message === 'string' ? first.message.trim() : 'GitHub GraphQL query failed';
     throw new GithubPullRequestError(msg || 'GitHub GraphQL query failed', {
       statusCode: 502,
       code: 'github_graphql_error',
@@ -415,19 +452,36 @@ async function githubGraphqlRequest<T>(opts: {
 }
 
 function checksStateFromRaw(raw: unknown): GithubPullRequestChecksState {
-  const value = String(raw ?? '').trim().toUpperCase();
+  const value = String(raw ?? '')
+    .trim()
+    .toUpperCase();
   if (value === 'SUCCESS') return 'success';
-  if (value === 'FAILURE' || value === 'ERROR' || value === 'STARTUP_FAILURE' || value === 'TIMED_OUT' || value === 'ACTION_REQUIRED') {
+  if (
+    value === 'FAILURE' ||
+    value === 'ERROR' ||
+    value === 'STARTUP_FAILURE' ||
+    value === 'TIMED_OUT' ||
+    value === 'ACTION_REQUIRED'
+  ) {
     return 'failing';
   }
-  if (value === 'PENDING' || value === 'EXPECTED' || value === 'IN_PROGRESS' || value === 'QUEUED' || value === 'WAITING' || value === 'REQUESTED') {
+  if (
+    value === 'PENDING' ||
+    value === 'EXPECTED' ||
+    value === 'IN_PROGRESS' ||
+    value === 'QUEUED' ||
+    value === 'WAITING' ||
+    value === 'REQUESTED'
+  ) {
     return 'pending';
   }
   return 'unknown';
 }
 
 function reviewStateFromRaw(raw: unknown): GithubPullRequestReviewState {
-  const value = String(raw ?? '').trim().toUpperCase();
+  const value = String(raw ?? '')
+    .trim()
+    .toUpperCase();
   if (value === 'APPROVED') return 'approved';
   if (value === 'CHANGES_REQUESTED') return 'changes_requested';
   if (value === 'REVIEW_REQUIRED') return 'review_required';
@@ -440,7 +494,9 @@ function normalizeGithubPullRequestState(
 ): GithubPullRequestState {
   if (Boolean(opts?.merged)) return 'merged';
   if (String(opts?.mergedAt ?? '').trim()) return 'merged';
-  const state = String(rawState ?? '').trim().toLowerCase();
+  const state = String(rawState ?? '')
+    .trim()
+    .toLowerCase();
   if (state === 'open') return 'open';
   if (state === 'closed') return 'closed';
   return 'open';
@@ -466,7 +522,10 @@ function mapGithubPullRequest(raw: any): GithubPullRequestSummary | null {
   const number = Number(raw?.number);
   if (!Number.isFinite(number) || number <= 0) return null;
   const title = String(raw?.title ?? '').trim() || `PR #${number}`;
-  const state = normalizeGithubPullRequestState(raw?.state, { merged: raw?.merged, mergedAt: raw?.merged_at });
+  const state = normalizeGithubPullRequestState(raw?.state, {
+    merged: raw?.merged,
+    mergedAt: raw?.merged_at,
+  });
   const htmlUrl = String(raw?.html_url ?? '').trim();
   const createdAt = String(raw?.created_at ?? '').trim();
   const updatedAt = String(raw?.updated_at ?? '').trim();
@@ -475,8 +534,12 @@ function mapGithubPullRequest(raw: any): GithubPullRequestSummary | null {
   const headRefName = String(raw?.head?.ref ?? '').trim();
   const headLabel = String(raw?.head?.label ?? '').trim();
   const baseRefName = String(raw?.base?.ref ?? '').trim();
-  const headRepoFull = String(raw?.head?.repo?.full_name ?? '').trim().toLowerCase();
-  const baseRepoFull = String(raw?.base?.repo?.full_name ?? '').trim().toLowerCase();
+  const headRepoFull = String(raw?.head?.repo?.full_name ?? '')
+    .trim()
+    .toLowerCase();
+  const baseRepoFull = String(raw?.base?.repo?.full_name ?? '')
+    .trim()
+    .toLowerCase();
 
   return {
     number: Math.floor(number),
@@ -509,11 +572,17 @@ function splitCommitMessage(raw: unknown): { subject: string; body: string } {
 }
 
 function mapGithubCommitSummary(raw: any): GithubCommitSummary | null {
-  const sha = String(raw?.sha ?? '').trim().toLowerCase();
+  const sha = String(raw?.sha ?? '')
+    .trim()
+    .toLowerCase();
   if (!/^[0-9a-f]{40}$/.test(sha)) return null;
   const parents = Array.isArray(raw?.parents)
     ? raw.parents
-        .map((parent: any) => String(parent?.sha ?? '').trim().toLowerCase())
+        .map((parent: any) =>
+          String(parent?.sha ?? '')
+            .trim()
+            .toLowerCase(),
+        )
         .filter((value: string) => /^[0-9a-f]{40}$/.test(value))
     : [];
   const commitBlock = raw?.commit ?? {};
@@ -532,7 +601,11 @@ function mapGithubCommitSummary(raw: any): GithubCommitSummary | null {
 
 function mapGithubCommitChanges(raw: any, repo: GithubRepoRef): GithubCommitChanges {
   const summary = mapGithubCommitSummary(raw);
-  if (!summary) throw new GithubPullRequestError('commit not found', { statusCode: 404, code: 'commit_not_found' });
+  if (!summary)
+    throw new GithubPullRequestError('commit not found', {
+      statusCode: 404,
+      code: 'commit_not_found',
+    });
   const commitBlock = raw?.commit ?? {};
   const committerBlock = commitBlock?.committer ?? {};
   const message = splitCommitMessage(commitBlock?.message);
@@ -590,13 +663,18 @@ function mapGithubPullRequestFromGraphql(raw: any, owner: string): GithubPullReq
   const headRefName = String(raw?.headRefName ?? '').trim();
   const baseRefName = String(raw?.baseRefName ?? '').trim();
   const headOwner = String(raw?.headRepositoryOwner?.login ?? '').trim();
-  const ownerLower = String(owner ?? '').trim().toLowerCase();
+  const ownerLower = String(owner ?? '')
+    .trim()
+    .toLowerCase();
   const headOwnerLower = headOwner.toLowerCase();
   const headLabel = headOwner ? `${headOwner}:${headRefName}` : headRefName;
   const rollupState = raw?.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state;
   const checksState = checksStateFromRaw(rollupState);
   const reviewState = reviewStateFromRaw(raw?.reviewDecision);
-  const hasMergeConflicts = String(raw?.mergeStateStatus ?? '').trim().toUpperCase() === 'DIRTY';
+  const hasMergeConflicts =
+    String(raw?.mergeStateStatus ?? '')
+      .trim()
+      .toUpperCase() === 'DIRTY';
 
   return {
     number: Math.floor(number),
@@ -619,8 +697,13 @@ function mapGithubPullRequestFromGraphql(raw: any, owner: string): GithubPullReq
   };
 }
 
-function mapGithubFileStatus(raw: unknown): { statusChar: string; statusType: GithubPullRequestFileStatus } {
-  const status = String(raw ?? '').trim().toLowerCase();
+function mapGithubFileStatus(raw: unknown): {
+  statusChar: string;
+  statusType: GithubPullRequestFileStatus;
+} {
+  const status = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   switch (status) {
     case 'added':
       return { statusChar: 'A', statusType: 'added' };
@@ -641,8 +724,14 @@ function mapGithubFileStatus(raw: unknown): { statusChar: string; statusType: Gi
   }
 }
 
-function buildGithubPullRequestUnifiedDiff(raw: any): { patch: string | null; truncated: boolean; isBinary: boolean } {
-  const status = String(raw?.status ?? '').trim().toLowerCase();
+function buildGithubPullRequestUnifiedDiff(raw: any): {
+  patch: string | null;
+  truncated: boolean;
+  isBinary: boolean;
+} {
+  const status = String(raw?.status ?? '')
+    .trim()
+    .toLowerCase();
   const filePath = String(raw?.filename ?? '').trim();
   const previousPath = String(raw?.previous_filename ?? '').trim();
   const patchBody = typeof raw?.patch === 'string' ? String(raw.patch) : '';
@@ -654,7 +743,11 @@ function buildGithubPullRequestUnifiedDiff(raw: any): { patch: string | null; tr
   const fromPath = previousPath || filePath;
   const oldLabel = status === 'added' ? '/dev/null' : `a/${fromPath}`;
   const newLabel = status === 'removed' ? '/dev/null' : `b/${filePath}`;
-  const header = [`diff --git a/${fromPath} b/${filePath}`, `--- ${oldLabel}`, `+++ ${newLabel}`].join('\n');
+  const header = [
+    `diff --git a/${fromPath} b/${filePath}`,
+    `--- ${oldLabel}`,
+    `+++ ${newLabel}`,
+  ].join('\n');
   const normalizedBody = patchBody.endsWith('\n') ? patchBody : `${patchBody}\n`;
   return {
     patch: `${header}\n${normalizedBody}`,
@@ -666,7 +759,10 @@ function buildGithubPullRequestUnifiedDiff(raw: any): { patch: string | null; tr
 function assertValidPullNumber(pullNumberRaw: number): number {
   const pullNumber = Number(pullNumberRaw);
   if (!Number.isFinite(pullNumber) || pullNumber <= 0 || Math.floor(pullNumber) !== pullNumber) {
-    throw new GithubPullRequestError('invalid pull request number', { statusCode: 400, code: 'invalid_pull_number' });
+    throw new GithubPullRequestError('invalid pull request number', {
+      statusCode: 400,
+      code: 'invalid_pull_number',
+    });
   }
   return pullNumber;
 }
@@ -741,7 +837,9 @@ async function listGithubPullRequestsViaGraphql(opts: {
     },
   });
 
-  const nodes = Array.isArray(graphql?.data?.repository?.pullRequests?.nodes) ? graphql.data?.repository?.pullRequests?.nodes : [];
+  const nodes = Array.isArray(graphql?.data?.repository?.pullRequests?.nodes)
+    ? graphql.data?.repository?.pullRequests?.nodes
+    : [];
   return nodes
     .map((row) => mapGithubPullRequestFromGraphql(row, opts.repo.owner))
     .filter((row): row is GithubPullRequestSummary => row != null)
@@ -789,7 +887,8 @@ export async function listGithubPullRequestsForRepoRoot(opts: {
           .sort((a, b) => {
             const aTime = Date.parse(a.updatedAt);
             const bTime = Date.parse(b.updatedAt);
-            if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) return bTime - aTime;
+            if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime)
+              return bTime - aTime;
             return b.number - a.number;
           })
       : [];
@@ -894,12 +993,19 @@ export async function listGithubPullRequestChangesForRepoRoot(opts: {
     pullRequest: {
       number: pullNumber,
       title: String(pull?.title ?? '').trim() || `PR #${pullNumber}`,
-      state: normalizeGithubPullRequestState(pull?.state, { merged: pull?.merged, mergedAt: pull?.merged_at }),
+      state: normalizeGithubPullRequestState(pull?.state, {
+        merged: pull?.merged,
+        mergedAt: pull?.merged_at,
+      }),
       htmlUrl: pull?.html_url ? String(pull.html_url).trim() : null,
       baseRefName: String(pull?.base?.ref ?? '').trim(),
       headRefName: String(pull?.head?.ref ?? '').trim(),
-      baseSha: String(pull?.base?.sha ?? '').trim().toLowerCase(),
-      headSha: String(pull?.head?.sha ?? '').trim().toLowerCase(),
+      baseSha: String(pull?.base?.sha ?? '')
+        .trim()
+        .toLowerCase(),
+      headSha: String(pull?.head?.sha ?? '')
+        .trim()
+        .toLowerCase(),
     },
     counts: {
       changed: entries.length,
@@ -937,17 +1043,31 @@ export async function getGithubPullRequestCommitForRepoRoot(opts: {
   const repoRoot = String(opts.repoRoot ?? '').trim();
   if (!repoRoot) throw new GithubPullRequestError('missing repo root', { statusCode: 400 });
   const pullNumber = assertValidPullNumber(opts.pullNumber);
-  const sha = String(opts.sha ?? '').trim().toLowerCase();
-  if (!/^[0-9a-f]{40}$/.test(sha)) throw new GithubPullRequestError('invalid commit sha', { statusCode: 400, code: 'invalid_commit_sha' });
+  const sha = String(opts.sha ?? '')
+    .trim()
+    .toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(sha))
+    throw new GithubPullRequestError('invalid commit sha', {
+      statusCode: 400,
+      code: 'invalid_commit_sha',
+    });
   const repo = await resolveGithubRepoForRepoRoot(repoRoot);
   const token = await resolveGithubToken();
   const commits = await listGithubPullRequestCommits({ repo, pullNumber, token });
-  const hasCommit = commits.some((row) => String(row?.sha ?? '').trim().toLowerCase() === sha);
+  const hasCommit = commits.some(
+    (row) =>
+      String(row?.sha ?? '')
+        .trim()
+        .toLowerCase() === sha,
+  );
   if (!hasCommit) {
-    throw new GithubPullRequestError(`Commit ${sha.slice(0, 12)} is not part of PR #${pullNumber}.`, {
-      statusCode: 404,
-      code: 'commit_not_found',
-    });
+    throw new GithubPullRequestError(
+      `Commit ${sha.slice(0, 12)} is not part of PR #${pullNumber}.`,
+      {
+        statusCode: 404,
+        code: 'commit_not_found',
+      },
+    );
   }
   const raw = await githubApiRequest<any>({
     path: `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/commits/${sha}`,
@@ -958,7 +1078,34 @@ export async function getGithubPullRequestCommitForRepoRoot(opts: {
 }
 
 function githubPullRequestDetails(repo: GithubRepoRef, raw: any): GithubPullRequestDetails {
-  const number = Math.max(1, Math.floor(Number(raw?.number) || 0));
+  const numberRaw = Number(raw?.number);
+  const number = Math.floor(numberRaw);
+  const baseRefName = String(raw?.base?.ref ?? '').trim();
+  const headRefName = String(raw?.head?.ref ?? '').trim();
+  const headSha = String(raw?.head?.sha ?? '')
+    .trim()
+    .toLowerCase();
+  const rawState = String(raw?.state ?? '')
+    .trim()
+    .toLowerCase();
+  const mergeCommitSha = raw?.merge_commit_sha
+    ? String(raw.merge_commit_sha).trim().toLowerCase()
+    : null;
+  const isMerged = Boolean(raw?.merged) || Boolean(String(raw?.merged_at ?? '').trim());
+  if (
+    !Number.isInteger(numberRaw) ||
+    number <= 0 ||
+    !baseRefName ||
+    !headRefName ||
+    !/^[0-9a-f]{40}$/.test(headSha) ||
+    (!isMerged && rawState !== 'open' && rawState !== 'closed') ||
+    (mergeCommitSha !== null && !/^[0-9a-f]{40}$/.test(mergeCommitSha))
+  ) {
+    throw new GithubPullRequestError('GitHub returned invalid pull request data.', {
+      statusCode: 502,
+      code: 'github_invalid_response',
+    });
+  }
   return {
     repo,
     number,
@@ -969,12 +1116,10 @@ function githubPullRequestDetails(repo: GithubRepoRef, raw: any): GithubPullRequ
       mergedAt: raw?.merged_at,
     }),
     htmlUrl: String(raw?.html_url ?? '').trim(),
-    baseRefName: String(raw?.base?.ref ?? '').trim(),
-    headRefName: String(raw?.head?.ref ?? '').trim(),
-    headSha: String(raw?.head?.sha ?? '').trim().toLowerCase(),
-    mergeCommitSha: raw?.merge_commit_sha
-      ? String(raw.merge_commit_sha).trim().toLowerCase()
-      : null,
+    baseRefName,
+    headRefName,
+    headSha,
+    mergeCommitSha,
   };
 }
 
@@ -1051,7 +1196,14 @@ export async function mergeGithubPullRequestForRepoRoot(opts: {
   repoRoot: string;
   pullNumber: number;
   method?: GithubPullRequestMergeMethod;
-}): Promise<{ repo: GithubRepoRef; number: number; merged: boolean; message: string; sha: string | null }> {
+  expectedHeadSha?: string | null;
+}): Promise<{
+  repo: GithubRepoRef;
+  number: number;
+  merged: boolean;
+  message: string;
+  sha: string | null;
+}> {
   const repoRoot = String(opts.repoRoot ?? '').trim();
   if (!repoRoot) throw new GithubPullRequestError('missing repo root', { statusCode: 400 });
   const pullNumber = assertValidPullNumber(opts.pullNumber);
@@ -1059,12 +1211,28 @@ export async function mergeGithubPullRequestForRepoRoot(opts: {
   const token = await resolveGithubToken();
   if (!token) throw githubAuthRequiredError();
   const method = normalizeGithubPullRequestMergeMethod(opts.method, 'merge');
+  const expectedHeadSha = String(opts.expectedHeadSha ?? '')
+    .trim()
+    .toLowerCase();
+  if (expectedHeadSha && !/^[0-9a-f]{40}$/.test(expectedHeadSha)) {
+    throw new GithubPullRequestError('invalid expected head sha', {
+      statusCode: 400,
+      code: 'invalid_commit_sha',
+    });
+  }
 
-  const merged = await githubApiRequest<{ merged?: boolean; message?: string; sha?: string | null }>({
+  const merged = await githubApiRequest<{
+    merged?: boolean;
+    message?: string;
+    sha?: string | null;
+  }>({
     method: 'PUT',
     path: `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/pulls/${pullNumber}/merge`,
     token,
-    body: { merge_method: method },
+    body: {
+      merge_method: method,
+      ...(expectedHeadSha ? { sha: expectedHeadSha } : {}),
+    },
   });
   return {
     repo,
@@ -1078,7 +1246,13 @@ export async function mergeGithubPullRequestForRepoRoot(opts: {
 export async function closeGithubPullRequestForRepoRoot(opts: {
   repoRoot: string;
   pullNumber: number;
-}): Promise<{ repo: GithubRepoRef; number: number; state: string; htmlUrl: string | null; title: string }> {
+}): Promise<{
+  repo: GithubRepoRef;
+  number: number;
+  state: string;
+  htmlUrl: string | null;
+  title: string;
+}> {
   const repoRoot = String(opts.repoRoot ?? '').trim();
   if (!repoRoot) throw new GithubPullRequestError('missing repo root', { statusCode: 400 });
   const pullNumber = assertValidPullNumber(opts.pullNumber);
@@ -1100,7 +1274,9 @@ export async function closeGithubPullRequestForRepoRoot(opts: {
 
   return {
     repo,
-    number: Number.isFinite(Number(closed?.number)) ? Math.max(1, Math.floor(Number(closed?.number))) : pullNumber,
+    number: Number.isFinite(Number(closed?.number))
+      ? Math.max(1, Math.floor(Number(closed?.number)))
+      : pullNumber,
     state: String(closed?.state ?? '').trim() || 'closed',
     htmlUrl: closed?.html_url ? String(closed.html_url).trim() : null,
     title: String(closed?.title ?? '').trim() || `PR #${pullNumber}`,

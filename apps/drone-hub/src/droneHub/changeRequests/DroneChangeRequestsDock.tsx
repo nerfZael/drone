@@ -370,6 +370,11 @@ export function DroneChangeRequestsDock({
           </span>
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-3">
+          {error ? (
+            <div className="mb-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
+              {error}
+            </div>
+          ) : null}
           <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3">
             <div className="grid gap-3 md:grid-cols-2">
               <label className="text-[var(--text-10)] text-[var(--muted)]">

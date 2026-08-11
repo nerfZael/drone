@@ -315,6 +315,7 @@ import { ResourceSubscriptionService } from './subscriptions/resource-subscripti
 import { getChangeRequestRepository } from './change-requests/change-request-repository';
 import { ChangeRequestService } from './change-requests/change-request-service';
 import { ChangeRequestGithubMirrorService } from './change-requests/change-request-github-mirror-service';
+import { ChangeRequestOperationLock } from './change-requests/change-request-operation-lock';
 import { partitionWorkflowChatEntries } from './workflows/workflow-chat-metadata';
 import {
   isWorkflowChildDroneEntry,
@@ -5347,12 +5348,14 @@ export async function startDroneHubApiServer(opts: {
   const changeRequestRepository = resourceSubscriptionDatabase
     ? getChangeRequestRepository()
     : null;
+  const changeRequestOperationLock = new ChangeRequestOperationLock();
   const changeRequestGithubMirrorService = changeRequestRepository
     ? new ChangeRequestGithubMirrorService({
         repository: changeRequestRepository,
         runHostCommand,
         deleteHostRefBestEffort,
         now: nowIso,
+        operationLock: changeRequestOperationLock,
         onGithubChanged: clearGithubPullRequestListCache,
       })
     : null;
@@ -5373,6 +5376,7 @@ export async function startDroneHubApiServer(opts: {
         runHostCommand,
         storagePath: droneRootPath,
         now: nowIso,
+        operationLock: changeRequestOperationLock,
         githubMirrorLifecycle: changeRequestGithubMirrorService ?? undefined,
       })
     : null;

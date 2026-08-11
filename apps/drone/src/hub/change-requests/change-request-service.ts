@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import type { RunResult } from '../../host/dvm';
 import type { ChangeRequestRepository } from './change-request-repository';
+import { ChangeRequestOperationLock } from './change-request-operation-lock';
 import type {
   ChangeRequestActor,
   ChangeRequestChanges,
@@ -69,10 +70,11 @@ export type ChangeRequestServiceDependencies = {
   ) => Promise<RunResult>;
   storagePath: (...segments: string[]) => string;
   now: () => string;
+  operationLock?: ChangeRequestOperationLock;
   githubMirrorLifecycle?: {
     syncAfterNativeUpdate: (record: ChangeRequestRecord) => Promise<void>;
     closeAfterNativeCompletion: (record: ChangeRequestRecord) => Promise<void>;
-    refresh: (record: ChangeRequestRecord) => Promise<void>;
+    refreshAfterNativeAssessment: (record: ChangeRequestRecord) => Promise<void>;
   };
 };
 
@@ -183,9 +185,11 @@ function actor(value: ChangeRequestActor): ChangeRequestActor {
 }
 
 export class ChangeRequestService {
-  private readonly operationLocks = new Map<string, Promise<void>>();
+  private readonly operationLock: ChangeRequestOperationLock;
 
-  constructor(private readonly deps: ChangeRequestServiceDependencies) {}
+  constructor(private readonly deps: ChangeRequestServiceDependencies) {
+    this.operationLock = deps.operationLock ?? new ChangeRequestOperationLock();
+  }
 
   async create(input: ChangeRequestCreateInput): Promise<ChangeRequestView> {
     const id = crypto.randomUUID();
@@ -258,7 +262,7 @@ export class ChangeRequestService {
       if (current.status === 'open') {
         await this.git(current.repoRoot, ['fetch', 'origin', '--prune'], MERGE_TIMEOUT_MS);
       }
-      await this.deps.githubMirrorLifecycle?.refresh(this.requiredRecord(id));
+      await this.deps.githubMirrorLifecycle?.refreshAfterNativeAssessment(this.requiredRecord(id));
       return await this.view(this.requiredRecord(id));
     });
   }
@@ -920,19 +924,6 @@ export class ChangeRequestService {
   }
 
   private async withLock<T>(id: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.operationLocks.get(id) ?? Promise.resolve();
-    let release: () => void = () => {};
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const queued = previous.then(() => current);
-    this.operationLocks.set(id, queued);
-    await previous;
-    try {
-      return await operation();
-    } finally {
-      release();
-      if (this.operationLocks.get(id) === queued) this.operationLocks.delete(id);
-    }
+    return await this.operationLock.withLock(id, operation);
   }
 }
