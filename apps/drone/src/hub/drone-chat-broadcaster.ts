@@ -162,10 +162,15 @@ export class DroneChatBroadcaster {
 
   stopIfIdle(): void {
     if (this.clients.size > 0) return;
+    this.stop();
+  }
+
+  stop(): void {
     if (this.refreshTimeout) clearTimeout(this.refreshTimeout);
     if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
     this.refreshTimeout = null;
     this.keepAliveTimer = null;
     this.busy = false;
+    this.clients.clear();
   }
 }

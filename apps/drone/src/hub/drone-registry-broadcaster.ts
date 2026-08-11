@@ -156,6 +156,10 @@ export class DroneRegistryBroadcaster {
 
   stopIfIdle(): void {
     if (this.clients.size > 0) return;
+    this.stop();
+  }
+
+  stop(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     if (this.refreshTimeout) clearTimeout(this.refreshTimeout);
     if (this.keepAliveTimer) clearInterval(this.keepAliveTimer);
@@ -165,5 +169,6 @@ export class DroneRegistryBroadcaster {
     this.busy = false;
     this.refreshPending = false;
     this.pendingBroadcastSnapshot = false;
+    this.clients.clear();
   }
 }
