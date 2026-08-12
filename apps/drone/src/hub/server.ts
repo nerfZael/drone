@@ -29,7 +29,11 @@ import {
   renameProfile as renameManagedProfile,
   useProfile as useManagedProfile,
 } from '../host/profile-manager';
-import { loadRegistry, updateRegistry as updateHostRegistry } from '../host/registry';
+import {
+  loadRegistry,
+  loadRegistryRawSnapshot,
+  updateRegistry as updateHostRegistry,
+} from '../host/registry';
 import { getCatalogStore } from '../host/catalog-store';
 import {
   createRegistryBackup,
@@ -76,6 +80,9 @@ import {
   dvmSessionType,
 } from '../host/dvm';
 import {
+  daemonClientForDrone,
+  health as droneHealth,
+  managedDroneSync,
   procStart,
   procStop,
   codexPromptApprovalResolve as droneCodexPromptApprovalResolve,
@@ -425,6 +432,7 @@ import {
   deleteSkillRecord,
   getSkillById,
   listSkills,
+  renderSkillProjectionPackages,
   syncSkillLibraryToContainerTargets,
   syncSkillLibraryToHostTargets,
   type SkillProjectionTarget,
@@ -435,12 +443,14 @@ import {
   deleteMcpServerRecord,
   getMcpServerById,
   listMcpServers,
+  renderMcpProjection,
   type McpServerRecord,
   syncMcpServersToContainerTargets,
   syncMcpServersToHostTargets,
   type McpProjectionTarget,
   updateMcpServerRecord,
 } from './mcp-servers';
+import { createManagedDroneStateSyncService } from './managed-drone-state-sync';
 import {
   createChatMcpAccessToken,
   createMcpAccessToken,
@@ -1947,12 +1957,61 @@ function createMcpProjectionFeature() {
     );
   }
 
+  const { syncManagedFilesForDrone } = createManagedDroneStateSyncService({
+    normalizeDroneIdentity,
+    droneRuntime,
+    syncHostManagedFiles: async (opts) => {
+      await syncSkillLibraryForDrone(opts);
+      await syncMcpServersForDrone(opts);
+      await syncRepoAgentsInstructionsForDrone(opts);
+    },
+    listSkills,
+    mcpServersForProjection,
+    resolveAgentsFile: resolveRepoAgentsInstructionsProjection,
+    buildSkillTargets: buildContainerSkillProjectionTargets,
+    renderSkillPackages: (skills, agent) => renderSkillProjectionPackages(skills, agent),
+    buildMcpTargets: buildContainerMcpProjectionTargets,
+    renderMcpProjection: (agent, servers) => renderMcpProjection(agent, servers),
+    withDroneOpLock,
+    daemonClientForDrone,
+    daemonHealth: droneHealth,
+    managedDroneSync,
+    upgradeDaemon: upgradeDroneDaemonInContainer,
+    waitForDaemonReady: async (client) => {
+      await waitForDroneDaemonReady(client, defaultDaemonReadyTimeoutMs());
+    },
+  });
+
   return {
     bindConfig,
     isManagedChatMcpAvailable,
     resolveManagedChatMcpEnv,
     syncMcpServersForDrone,
+    syncManagedFilesForDrone,
     syncSkillLibraryForDrone,
+  };
+}
+
+async function resolveRepoAgentsInstructionsProjection(opts: {
+  droneId: string;
+  droneEntry: any;
+}): Promise<{ path: string; content: string } | null> {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const droneEntry = opts.droneEntry;
+  if (!droneId || !droneEntry) return null;
+  if (droneRuntime(droneEntry) !== 'container') return null;
+  if (!isRepoAttachedDrone(droneEntry)) return null;
+
+  const regAny: any = await loadRegistryRawSnapshot();
+  const hasDroneOverride = typeof (droneEntry as any)?.agentsMdOverride === 'string';
+  const effectiveContent = hasDroneOverride
+    ? parseDroneAgentsMdOverride((droneEntry as any).agentsMdOverride)
+    : (await resolveCanonicalRepoAgentsConfig(regAny, (droneEntry as any)?.repoPath))
+        .effectiveContent;
+  if (effectiveContent == null || (!hasDroneOverride && !effectiveContent)) return null;
+  return {
+    path: path.posix.join(droneRepoPathInContainer(droneEntry), 'AGENTS.md'),
+    content: effectiveContent,
   };
 }
 
@@ -1966,23 +2025,17 @@ async function syncRepoAgentsInstructionsForDrone(opts: {
   if (droneRuntime(droneEntry) !== 'container') return;
   if (!isRepoAttachedDrone(droneEntry)) return;
 
-  const regAny: any = await loadRegistry();
-  const hasDroneOverride = typeof (droneEntry as any)?.agentsMdOverride === 'string';
-  const effectiveContent = hasDroneOverride
-    ? parseDroneAgentsMdOverride((droneEntry as any).agentsMdOverride)
-    : (await resolveCanonicalRepoAgentsConfig(regAny, (droneEntry as any)?.repoPath))
-        .effectiveContent;
-  if (effectiveContent == null || (!hasDroneOverride && !effectiveContent)) return;
+  const projection = await resolveRepoAgentsInstructionsProjection(opts);
+  if (!projection) return;
 
   const requestedDroneName = String((droneEntry as any)?.name ?? droneId).trim() || droneId;
-  const repoRoot = droneRepoPathInContainer(droneEntry);
-  const targetPath = path.posix.join(repoRoot, 'AGENTS.md');
+  const targetPath = projection.path;
 
   await withLockedDroneContainer({ requestedDroneName, droneEntry }, async ({ containerName }) => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-agents-sync-'));
     try {
       const localPath = path.join(tempRoot, 'AGENTS.md');
-      await fs.writeFile(localPath, effectiveContent, 'utf8');
+      await fs.writeFile(localPath, projection.content, 'utf8');
       await dvmExec(containerName, 'bash', [
         '-lc',
         `mkdir -p ${bashQuote(path.posix.dirname(targetPath))}`,
@@ -2899,8 +2952,10 @@ function createHubRuntimeGraph(
       hubLog('warn', message, meta);
     },
   });
-  const { resolveManagedChatMcpEnv, syncMcpServersForDrone, syncSkillLibraryForDrone } =
-    mcpProjectionFeature;
+  const {
+    resolveManagedChatMcpEnv,
+    syncManagedFilesForDrone,
+  } = mcpProjectionFeature;
 
   const chatSessionRuntime = createChatSessionRuntime({
     applyChatReconciliationInStore,
@@ -3189,10 +3244,8 @@ function createHubRuntimeGraph(
     sleepMs,
     stalePendingPromptState,
     startupPromptToPendingPrompt,
-    syncMcpServersForDrone,
-    syncRepoAgentsInstructionsForDrone,
+    syncManagedFilesForDrone,
     syncSetService,
-    syncSkillLibraryForDrone,
     unsupportedHostCustomAgentError,
     updateTranscriptTurnById,
     upgradeDroneDaemonInContainer,

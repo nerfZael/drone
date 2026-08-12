@@ -515,6 +515,44 @@ function renderJsonMcpServer(agent: McpAgentId, server: McpServerRecord): any {
   };
 }
 
+export type RenderedMcpProjection =
+  | {
+      format: 'toml';
+      managedNames: string[];
+      managedBlock: string;
+    }
+  | {
+      format: 'json';
+      managedNames: string[];
+      rootKey: 'mcpServers' | 'mcp';
+      entries: Record<string, unknown>;
+      schema?: string;
+    };
+
+export function renderMcpProjection(
+  agent: McpAgentId,
+  servers: McpServerRecord[],
+): RenderedMcpProjection {
+  const activeServers = activeServersForAgent(servers, agent);
+  const managedNames = activeServers.map((server) => server.name).sort();
+  if (agent === 'codex') {
+    return {
+      format: 'toml',
+      managedNames,
+      managedBlock: renderCodexMcpBlock(activeServers),
+    };
+  }
+  return {
+    format: 'json',
+    managedNames,
+    rootKey: jsonRootKey(agent),
+    entries: Object.fromEntries(
+      activeServers.map((server) => [server.name, renderJsonMcpServer(agent, server)]),
+    ),
+    ...(agent === 'opencode' ? { schema: 'https://opencode.ai/config.json' } : {}),
+  };
+}
+
 function jsonRootKey(agent: McpAgentId): 'mcpServers' | 'mcp' {
   return agent === 'opencode' ? 'mcp' : 'mcpServers';
 }

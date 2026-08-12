@@ -104,20 +104,16 @@ function createControllerHarness(opts?: {
     setChatAgentConfig: async (opts) => {
       setChatAgentConfigCalls.push(opts);
     },
-    syncRepoAgentsInstructionsForDrone: async (syncOpts) => {
-      syncRepoAgentsCalls.push(syncOpts);
-      await opts?.duringPostCreateSync?.({ droneId: syncOpts.droneId, stage: 'repo-agents' });
-      events.push('sync:repo-agents');
-    },
-    syncSkillLibraryForDrone: async (syncOpts) => {
+    syncManagedFilesForDrone: async (syncOpts) => {
       syncSkillLibraryCalls.push(syncOpts);
       await opts?.duringPostCreateSync?.({ droneId: syncOpts.droneId, stage: 'skills' });
       events.push('sync:skills');
-    },
-    syncMcpServersForDrone: async (syncOpts) => {
       syncMcpServersCalls.push(syncOpts);
       await opts?.duringPostCreateSync?.({ droneId: syncOpts.droneId, stage: 'mcp' });
       events.push('sync:mcp');
+      syncRepoAgentsCalls.push(syncOpts);
+      await opts?.duringPostCreateSync?.({ droneId: syncOpts.droneId, stage: 'repo-agents' });
+      events.push('sync:repo-agents');
     },
     syncSharedPathsToDrone: async (syncOpts) => {
       syncSharedPathsCalls.push(syncOpts);
@@ -317,9 +313,9 @@ describe('drone provisioning controller', () => {
       await waitFor(async () => harness.pendingPromptPumpCalls.length > 0);
 
       expect(observed).toEqual([
+        { stage: 'shared-paths', phase: 'seeding' },
         { stage: 'skills', phase: 'seeding' },
         { stage: 'mcp', phase: 'seeding' },
-        { stage: 'shared-paths', phase: 'seeding' },
         { stage: 'repo-agents', phase: 'seeding' },
       ]);
       const registry: any = await loadRegistry();

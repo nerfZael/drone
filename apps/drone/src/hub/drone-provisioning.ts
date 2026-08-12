@@ -74,9 +74,7 @@ type DroneProvisioningControllerDeps = {
     setApprovalPolicy?: boolean;
     approvalPolicy?: 'ask' | 'auto' | 'none';
   }) => Promise<void>;
-  syncMcpServersForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
-  syncRepoAgentsInstructionsForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
-  syncSkillLibraryForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
+  syncManagedFilesForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncSharedPathsToDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
 };
 
@@ -670,10 +668,8 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       const regAfterCreate: any = await loadRegistry();
       const createdDrone = findDroneEntryByIdentity(regAfterCreate, pendingDroneId)?.entry ?? null;
       if (createdDrone) {
-        await deps.syncSkillLibraryForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
-        await deps.syncMcpServersForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
         await deps.syncSharedPathsToDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
-        await deps.syncRepoAgentsInstructionsForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
+        await deps.syncManagedFilesForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
       }
     } catch (e: any) {
       deps.hubLog('warn', 'post-create sync failed after drone creation', {

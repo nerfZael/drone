@@ -1,3 +1,8 @@
+import type {
+  ManagedDroneSyncPayload,
+  ManagedDroneSyncResult,
+} from '../managed-drone-state';
+
 export type DroneClient = {
   baseUrl: string;
   token: string;
@@ -323,6 +328,23 @@ export async function workspaceBatch(
     '/v1/workspace/batch',
     {
       body: JSON.stringify({ operations }),
+      contentType: 'application/json',
+      timeoutMs: 30_000,
+    },
+    async (response) => (await response.json()) as any,
+  );
+}
+
+export async function managedDroneSync(
+  client: DroneClient,
+  payload: ManagedDroneSyncPayload,
+): Promise<ManagedDroneSyncResult> {
+  return await consumeResponse(
+    client,
+    'PUT',
+    '/v1/managed-state',
+    {
+      body: JSON.stringify(payload),
       contentType: 'application/json',
       timeoutMs: 30_000,
     },

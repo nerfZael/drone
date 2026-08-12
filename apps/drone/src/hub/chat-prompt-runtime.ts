@@ -144,10 +144,8 @@ type ChatPromptRuntimeDependencyName =
   | 'sleepMs'
   | 'stalePendingPromptState'
   | 'startupPromptToPendingPrompt'
-  | 'syncMcpServersForDrone'
-  | 'syncRepoAgentsInstructionsForDrone'
+  | 'syncManagedFilesForDrone'
   | 'syncSetService'
-  | 'syncSkillLibraryForDrone'
   | 'unsupportedHostCustomAgentError'
   | 'updateTranscriptTurnById'
   | 'upgradeDroneDaemonInContainer'
@@ -301,10 +299,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     sleepMs,
     stalePendingPromptState,
     startupPromptToPendingPrompt,
-    syncMcpServersForDrone,
-    syncRepoAgentsInstructionsForDrone,
+    syncManagedFilesForDrone,
     syncSetService,
-    syncSkillLibraryForDrone,
     unsupportedHostCustomAgentError,
     updateTranscriptTurnById,
     upgradeDroneDaemonInContainer,
@@ -647,18 +643,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       try {
         await measurePromptDeliveryPhase(
           opts.timing,
-          'syncSkills',
-          async () => await syncSkillLibraryForDrone({ droneId, droneEntry: dSeed }),
-        );
-        await measurePromptDeliveryPhase(
-          opts.timing,
-          'syncMcpServers',
-          async () => await syncMcpServersForDrone({ droneId, droneEntry: dSeed }),
-        );
-        await measurePromptDeliveryPhase(
-          opts.timing,
-          'syncAgentsInstructions',
-          async () => await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: dSeed }),
+          'syncManagedFiles',
+          async () => await syncManagedFilesForDrone({ droneId, droneEntry: dSeed }),
         );
         opts.mark?.('skillSync');
       } catch (e: any) {
@@ -3250,9 +3236,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     resolvePendingDroneDisplayName,
     runNodeCli,
     setChatAgentConfig,
-    syncMcpServersForDrone,
-    syncRepoAgentsInstructionsForDrone,
-    syncSkillLibraryForDrone,
+    syncManagedFilesForDrone,
     syncSharedPathsToDrone: (opts: any) => syncSetService.applyAllSyncSetsToDrone(opts),
   });
 

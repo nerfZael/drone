@@ -583,6 +583,11 @@ type RenderedSkillPackage = {
   files: Map<string, { content: string; kind: SkillFileKind | 'managed' }>;
 };
 
+export type RenderedSkillProjectionPackage = {
+  slug: string;
+  files: Array<{ path: string; content: string; executable: boolean }>;
+};
+
 function renderSkillPackages(
   skills: SkillRecord[],
   agent: SkillProjectionAgent,
@@ -590,6 +595,20 @@ function renderSkillPackages(
   return skills.map((skill) => ({
     slug: skill.slug,
     files: buildSkillFileMap(skill, agent),
+  }));
+}
+
+export function renderSkillProjectionPackages(
+  skills: SkillRecord[],
+  agent: SkillProjectionAgent,
+): RenderedSkillProjectionPackage[] {
+  return renderSkillPackages(skills, agent).map((pkg) => ({
+    slug: pkg.slug,
+    files: Array.from(pkg.files, ([filePath, file]) => ({
+      path: filePath,
+      content: file.content,
+      executable: file.kind === 'script',
+    })),
   }));
 }
 

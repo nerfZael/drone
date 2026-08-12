@@ -21,6 +21,7 @@ import {
   handleDaemonWorkspaceRequest,
   readLimitedJson,
 } from './daemon-workspace';
+import { handleDaemonManagedStateRequest } from './daemon-managed-state';
 import { selectNextPromptJobId } from './prompt-job-scheduling';
 import {
   CodexPromptRunManager,
@@ -1653,11 +1654,12 @@ async function main() {
           ok: true,
           name: 'drone-daemon',
           time: new Date().toISOString(),
-          capabilities: ['workspace-v1', 'codex-app-server-v1'],
+          capabilities: ['workspace-v1', 'managed-state-v1', 'codex-app-server-v1'],
         });
         return;
       }
 
+      if (await handleDaemonManagedStateRequest({ req, res, method, pathname, dataDir })) return;
       if (await handleDaemonWorkspaceRequest({ req, res, method, pathname, url: u })) return;
 
       if (method === 'POST' && pathname === '/v1/codex/enqueue') {
