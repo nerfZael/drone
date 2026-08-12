@@ -7,11 +7,19 @@ import {
   computeSyncSetSourceSnapshot,
   mirrorLocalSourceToHostTarget,
   readStoredSyncSets,
+  syncSetTargetOverlapsRepository,
   writeStoredSyncSets,
 } from '../src/hub/sync-sets';
 import { withTempDroneDataDir } from './test-helpers';
 
 describe('sync set helpers', () => {
+  test('detects sync targets that can change repository files', () => {
+    expect(syncSetTargetOverlapsRepository('/work/repo', '/work/repo')).toBeTrue();
+    expect(syncSetTargetOverlapsRepository('/work/repo/config', '/work/repo')).toBeTrue();
+    expect(syncSetTargetOverlapsRepository('/work', '/work/repo')).toBeTrue();
+    expect(syncSetTargetOverlapsRepository('/dvm-data/home/.codex', '/work/repo')).toBeFalse();
+  });
+
   test('computeSyncSetSourceSnapshot hashes directory contents and updates when files change', async () => {
     await withTempDroneDataDir('drone-sync-sets-', async (droneDataDir) => {
       const sourcePath = path.join(droneDataDir, 'source');
@@ -62,7 +70,9 @@ describe('sync set helpers', () => {
         updatedAt: '2026-04-10T00:00:00.000Z',
       });
 
-      await expect(computeSyncSetSourceSnapshot(syncSet)).rejects.toThrow('symlinks are not supported');
+      await expect(computeSyncSetSourceSnapshot(syncSet)).rejects.toThrow(
+        'symlinks are not supported',
+      );
     });
   });
 

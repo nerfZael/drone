@@ -1,4 +1,4 @@
-import { DvmApi } from '../api';
+import { DvmApi, type DvmRepoSeedTiming } from '../api';
 
 describe('repoSeed checkout target', () => {
   afterEach(() => {
@@ -25,17 +25,25 @@ describe('repoSeed checkout target', () => {
     });
 
     const baseSha = 'c6df507a1f66b3f579507bc5868aff1c32909d3b';
-    const runLocalSpy = jest.spyOn(api as any, 'runLocal').mockImplementation(async (...rawArgs: unknown[]) => {
-      const [_cmd, args] = rawArgs as [string, string[]];
-      if (args.includes('--is-inside-work-tree')) return 'true\n';
-      if (args.includes('remote') && args.includes('get-url')) return 'git@github.com:Planet-Mojo/StorySpark.git\n';
-      if (args[args.length - 2] === 'rev-parse' && args[args.length - 1] === 'dev') return `${baseSha}\n`;
-      if (args.includes('update-ref')) return '';
-      if (args.includes('bundle') && args.includes('create')) return '';
-      if (args[args.length - 1] === 'remote') return 'origin\n';
-      throw new Error(`Unexpected runLocal call: ${args.join(' ')}`);
-    });
+    const baseTreeSha = '9f4a1c0e5fef77278a9a9fc09f02e3f1a950f98d';
+    const runLocalSpy = jest
+      .spyOn(api as any, 'runLocal')
+      .mockImplementation(async (...rawArgs: unknown[]) => {
+        const [_cmd, args] = rawArgs as [string, string[]];
+        if (args.includes('--is-inside-work-tree')) return 'true\n';
+        if (args.includes('remote') && args.includes('get-url'))
+          return 'git@github.com:Planet-Mojo/StorySpark.git\n';
+        if (args[args.length - 2] === 'rev-parse' && args[args.length - 1] === 'dev')
+          return `${baseSha}\n`;
+        if (args[args.length - 2] === 'rev-parse' && args[args.length - 1] === `${baseSha}^{tree}`)
+          return `${baseTreeSha}\n`;
+        if (args.includes('update-ref')) return '';
+        if (args.includes('bundle') && args.includes('create')) return '';
+        if (args[args.length - 1] === 'remote') return 'origin\n';
+        throw new Error(`Unexpected runLocal call: ${args.join(' ')}`);
+      });
 
+    let timing: DvmRepoSeedTiming | null = null;
     await api.repoSeed({
       containerName: 'demo',
       hostRepoPath: '/repo',
@@ -43,6 +51,24 @@ describe('repoSeed checkout target', () => {
       baseRef: 'dev',
       branch: 'dvm/work',
       clean: true,
+      onTiming: (snapshot) => {
+        timing = snapshot;
+      },
+    });
+
+    expect(timing).toMatchObject({
+      outcome: 'completed',
+      durationMs: expect.any(Number),
+      phases: {
+        inspectRepository: expect.any(Number),
+        createBundle: expect.any(Number),
+        ensureContainer: expect.any(Number),
+        ensureGit: expect.any(Number),
+        prepareBundleDestination: expect.any(Number),
+        copyBundleToContainer: expect.any(Number),
+        cloneAndConfigureRepository: expect.any(Number),
+        cleanupHostArtifacts: expect.any(Number),
+      },
     });
 
     const cloneCall = (execCommand.mock.calls as unknown[][]).find((call) => {
@@ -53,11 +79,7 @@ describe('repoSeed checkout target', () => {
     expect(cloneCall).toBeTruthy();
     expect(cloneCall).toEqual([
       'demo',
-      [
-        'bash',
-        '-lc',
-        expect.stringContaining(`git checkout -b "dvm/work" "${baseSha}"`),
-      ],
+      ['bash', '-lc', expect.stringContaining(`git checkout -b "dvm/work" "${baseSha}"`)],
     ]);
     expect(cloneCall).toEqual([
       'demo',
@@ -102,7 +124,11 @@ describe('repoSeed checkout target', () => {
     expect(bundleArgs[bundleArgs.length - 1]).toMatch(/^refs\/heads\/dvm-seed\/demo-/);
     expect(runLocalSpy).toHaveBeenCalledWith(
       'git',
-      expect.arrayContaining(['update-ref', '-d', expect.stringMatching(/^refs\/heads\/dvm-seed\/demo-/)])
+      expect.arrayContaining([
+        'update-ref',
+        '-d',
+        expect.stringMatching(/^refs\/heads\/dvm-seed\/demo-/),
+      ]),
     );
   });
 });

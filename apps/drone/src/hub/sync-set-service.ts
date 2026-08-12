@@ -8,6 +8,7 @@ import {
   setStoredSyncSetTargetStatus,
   syncSetAppliesToHost,
   syncSetSourceExists,
+  syncSetTargetOverlapsRepository,
   syncSetTargetStatusKeyForHost,
   writeStoredSyncSets,
   type StoredSyncSet,
@@ -31,6 +32,10 @@ type SyncSetTargetOutcome = {
 
 type ApplySyncSetResult = { ok: true } | { ok: false; error: string };
 
+export type ApplyAllSyncSetsToDroneResult = {
+  repositoryFilesMayHaveChanged: boolean;
+};
+
 type CreateSyncSetServiceDeps = {
   loadRegistry: () => Promise<any>;
   updateRegistry: (mutator: (regAny: any) => void | Promise<void>) => Promise<void>;
@@ -44,7 +49,10 @@ type CreateSyncSetServiceDeps = {
   logWarn: (message: string, meta: Record<string, unknown>) => void;
 };
 
-function buildSyncSetDroneNameMap(regAny: any, normalizeDroneIdentity: CreateSyncSetServiceDeps['normalizeDroneIdentity']): Record<string, string> {
+function buildSyncSetDroneNameMap(
+  regAny: any,
+  normalizeDroneIdentity: CreateSyncSetServiceDeps['normalizeDroneIdentity'],
+): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, entry] of Object.entries(regAny?.drones ?? {})) {
     const droneId = normalizeDroneIdentity((entry as any)?.id) || String(key);
@@ -61,7 +69,12 @@ function buildSyncSetDroneNameMap(regAny: any, normalizeDroneIdentity: CreateSyn
 
 export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
   async function workflowStore(): Promise<FleetWorkflowStore | null> {
-    try { return await getFleetWorkflowStore(); } catch (error) { if ((globalThis as any).Bun && getHubDatabase() === null) return null; throw error; }
+    try {
+      return await getFleetWorkflowStore();
+    } catch (error) {
+      if ((globalThis as any).Bun && getHubDatabase() === null) return null;
+      throw error;
+    }
   }
 
   async function ensureWorkflowBackfill(store: FleetWorkflowStore): Promise<void> {
@@ -97,12 +110,24 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
       await store.updateSyncSet<StoredSyncSet>(opts.syncSetId, (existing) => {
         const previousTarget = existing.targetStatus[String(opts.targetId ?? '').trim()] ?? null;
         let next = setStoredSyncSetTargetStatus(existing, opts.targetId, {
-          targetKind: opts.targetKind, state: opts.state,
-          appliedVersionId: opts.state === 'synced' ? opts.appliedVersionId ?? null : previousTarget?.appliedVersionId ?? null,
-          appliedAt: opts.state === 'synced' ? opts.appliedAt ?? null : previousTarget?.appliedAt ?? null,
+          targetKind: opts.targetKind,
+          state: opts.state,
+          appliedVersionId:
+            opts.state === 'synced'
+              ? (opts.appliedVersionId ?? null)
+              : (previousTarget?.appliedVersionId ?? null),
+          appliedAt:
+            opts.state === 'synced'
+              ? (opts.appliedAt ?? null)
+              : (previousTarget?.appliedAt ?? null),
           error: opts.state === 'error' ? String(opts.error ?? '').trim() || 'sync failed' : null,
         });
-        if (opts.state === 'synced') next = { ...next, lastAppliedVersionId: opts.appliedVersionId ?? null, lastAppliedAt: opts.appliedAt ?? null };
+        if (opts.state === 'synced')
+          next = {
+            ...next,
+            lastAppliedVersionId: opts.appliedVersionId ?? null,
+            lastAppliedAt: opts.appliedAt ?? null,
+          };
         return { ...next, updatedAt: deps.nowIso() };
       });
       return;
@@ -118,12 +143,10 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
         state: opts.state,
         appliedVersionId:
           opts.state === 'synced'
-            ? opts.appliedVersionId ?? null
-            : previousTarget?.appliedVersionId ?? null,
+            ? (opts.appliedVersionId ?? null)
+            : (previousTarget?.appliedVersionId ?? null),
         appliedAt:
-          opts.state === 'synced'
-            ? opts.appliedAt ?? null
-            : previousTarget?.appliedAt ?? null,
+          opts.state === 'synced' ? (opts.appliedAt ?? null) : (previousTarget?.appliedAt ?? null),
         error: opts.state === 'error' ? String(opts.error ?? '').trim() || 'sync failed' : null,
       });
       if (opts.state === 'synced') {
@@ -155,15 +178,19 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
           targetPath: opts.syncSet.targetPath,
         });
       } else {
-        const requestedDroneName = String((opts.droneEntry as any)?.name ?? droneId).trim() || droneId;
-        await deps.withLockedDroneContainer({ requestedDroneName, droneEntry: opts.droneEntry }, async ({ containerName }) => {
-          await mirrorLocalSourceToContainerTarget({
-            containerName,
-            sourcePath: opts.snapshot.sourcePath,
-            sourceKind: opts.snapshot.sourceKind,
-            targetPath: opts.syncSet.targetPath,
-          });
-        });
+        const requestedDroneName =
+          String((opts.droneEntry as any)?.name ?? droneId).trim() || droneId;
+        await deps.withLockedDroneContainer(
+          { requestedDroneName, droneEntry: opts.droneEntry },
+          async ({ containerName }) => {
+            await mirrorLocalSourceToContainerTarget({
+              containerName,
+              sourcePath: opts.snapshot.sourcePath,
+              sourceKind: opts.snapshot.sourceKind,
+              targetPath: opts.syncSet.targetPath,
+            });
+          },
+        );
       }
       await recordTargetOutcome({
         syncSetId: opts.syncSet.id,
@@ -223,20 +250,59 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
   return {
     buildViewsFromRegistry,
     storedSyncSets,
+    async syncSetsOverlapRepository(repositoryPathRaw: unknown): Promise<boolean> {
+      const repositoryPath = String(repositoryPathRaw ?? '').trim();
+      if (!repositoryPath) return false;
+      const syncSets = await storedSyncSets();
+      return syncSets.some((syncSet) =>
+        syncSetTargetOverlapsRepository(syncSet.targetPath, repositoryPath),
+      );
+    },
     async createSyncSet(syncSet: StoredSyncSet) {
       const store = await workflowStore();
-      if (store) { await ensureWorkflowBackfill(store); return await store.putSyncSet(syncSet); }
-      await deps.updateRegistry((regAny:any)=>{const rows=readStoredSyncSets(regAny);rows.push(syncSet);writeStoredSyncSets(regAny,rows,syncSet.updatedAt);});
+      if (store) {
+        await ensureWorkflowBackfill(store);
+        return await store.putSyncSet(syncSet);
+      }
+      await deps.updateRegistry((regAny: any) => {
+        const rows = readStoredSyncSets(regAny);
+        rows.push(syncSet);
+        writeStoredSyncSets(regAny, rows, syncSet.updatedAt);
+      });
       return syncSet;
     },
     async updateSyncSet(syncSet: StoredSyncSet) {
       const store = await workflowStore();
-      if (store) { await ensureWorkflowBackfill(store); return await store.putSyncSet(syncSet); }
-      await deps.updateRegistry((regAny:any)=>{const rows=readStoredSyncSets(regAny);const i=findStoredSyncSetIndex(rows,syncSet.id);if(i<0)throw new Error(`unknown sync set: ${syncSet.id}`);rows[i]=syncSet;writeStoredSyncSets(regAny,rows,syncSet.updatedAt);}); return syncSet;
+      if (store) {
+        await ensureWorkflowBackfill(store);
+        return await store.putSyncSet(syncSet);
+      }
+      await deps.updateRegistry((regAny: any) => {
+        const rows = readStoredSyncSets(regAny);
+        const i = findStoredSyncSetIndex(rows, syncSet.id);
+        if (i < 0) throw new Error(`unknown sync set: ${syncSet.id}`);
+        rows[i] = syncSet;
+        writeStoredSyncSets(regAny, rows, syncSet.updatedAt);
+      });
+      return syncSet;
     },
-    async deleteSyncSet(id:string) {
-      const store=await workflowStore();if(store){await ensureWorkflowBackfill(store);return await store.deleteSyncSet(id);}
-      let removed=false;await deps.updateRegistry((regAny:any)=>{const rows=readStoredSyncSets(regAny);const i=findStoredSyncSetIndex(rows,id);if(i>=0){rows.splice(i,1);removed=true;writeStoredSyncSets(regAny,rows,deps.nowIso());}});return removed;
+    async deleteSyncSet(id: string) {
+      const store = await workflowStore();
+      if (store) {
+        await ensureWorkflowBackfill(store);
+        return await store.deleteSyncSet(id);
+      }
+      let removed = false;
+      await deps.updateRegistry((regAny: any) => {
+        const rows = readStoredSyncSets(regAny);
+        const i = findStoredSyncSetIndex(rows, id);
+        if (i >= 0) {
+          rows.splice(i, 1);
+          removed = true;
+          writeStoredSyncSets(regAny, rows, deps.nowIso());
+        }
+      });
+      return removed;
     },
 
     async applySyncSetToAllExistingTargets(syncSetIdRaw: unknown) {
@@ -302,12 +368,25 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
       };
     },
 
-    async applyAllSyncSetsToDrone(opts: { droneId: string; droneEntry: any }) {
+    async applyAllSyncSetsToDrone(opts: {
+      droneId: string;
+      droneEntry: any;
+      repositoryPath?: string;
+    }): Promise<ApplyAllSyncSetsToDroneResult> {
       const droneId = deps.normalizeDroneIdentity(opts.droneId);
-      if (!droneId || !opts.droneEntry) return;
+      if (!droneId || !opts.droneEntry) return { repositoryFilesMayHaveChanged: false };
       const regAny: any = await deps.loadRegistry();
       const syncSets = await storedSyncSets(regAny);
+      const repositoryPath = String(
+        opts.repositoryPath ?? opts.droneEntry?.repo?.dest ?? '',
+      ).trim();
+      let repositoryFilesMayHaveChanged = false;
       for (const syncSet of syncSets) {
+        if (repositoryPath && syncSetTargetOverlapsRepository(syncSet.targetPath, repositoryPath)) {
+          // Treat even a failed application as potentially mutating: file copies
+          // can fail after partially updating their target.
+          repositoryFilesMayHaveChanged = true;
+        }
         try {
           const snapshot = await computeSyncSetSourceSnapshot(syncSet);
           const result = await applyToDroneTarget({
@@ -339,6 +418,7 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
           });
         }
       }
+      return { repositoryFilesMayHaveChanged };
     },
   };
 }

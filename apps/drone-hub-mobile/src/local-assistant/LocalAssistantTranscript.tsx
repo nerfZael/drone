@@ -1179,6 +1179,8 @@ function AgentRunSummary({
   active,
   startedAt,
   completedAt,
+  preRunDurationMs,
+  showTimingDetail = false,
   completedDurationMs,
   toolCallCount,
   expanded,
@@ -1189,6 +1191,8 @@ function AgentRunSummary({
   active: boolean;
   startedAt?: string | number;
   completedAt?: string | number;
+  preRunDurationMs?: number;
+  showTimingDetail?: boolean;
   completedDurationMs?: number;
   toolCallCount: number;
   expanded: boolean;
@@ -1251,11 +1255,18 @@ function AgentRunSummary({
       ? Math.max(0, Number(completedDurationMs))
       : measuredDurationMs;
   const duration = workingDurationLabel(durationMs);
+  const normalizedPreRunDurationMs =
+    !awaitingApproval && Number.isFinite(preRunDurationMs)
+      ? Math.max(0, Number(preRunDurationMs))
+      : 0;
+  const showPreRunDuration = normalizedPreRunDurationMs >= 1_000;
   const callLabel =
     toolCallCount > 0 ? `${toolCallCount} tool ${toolCallCount === 1 ? 'call' : 'calls'}` : '';
   const label = awaitingApproval
     ? 'Approval required'
-    : `${active ? 'Working' : 'Worked'} for ${duration}`;
+    : showPreRunDuration
+      ? `${active ? 'Working for' : 'Completed in'} ${workingDurationLabel(normalizedPreRunDurationMs + durationMs)}`
+      : `${active ? 'Working' : 'Worked'} for ${duration}`;
   const content = (
     <>
       <Text style={[styles.runSummaryLabel, awaitingApproval && styles.runSummaryLabelApproval]}>
@@ -1276,8 +1287,9 @@ function AgentRunSummary({
     </>
   );
 
-  if (!onToggle) return <View style={styles.runSummary}>{content}</View>;
-  return (
+  const summary = !onToggle ? (
+    <View style={styles.runSummary}>{content}</View>
+  ) : (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={expanded ? 'Collapse run details' : 'Expand run details'}
@@ -1287,6 +1299,16 @@ function AgentRunSummary({
     >
       {content}
     </Pressable>
+  );
+  return (
+    <>
+      {summary}
+      {showTimingDetail && showPreRunDuration ? (
+        <Text style={styles.runTimingDetail}>
+          Started in {workingDurationLabel(normalizedPreRunDurationMs)} · agent {duration}
+        </Text>
+      ) : null}
+    </>
   );
 }
 
@@ -1397,6 +1419,14 @@ function TranscriptRun({
   const hasPlan = Boolean(run.plan?.items.length);
   const hasRunDetails = hasActivityDetails || hasPlan;
   const thinking = activityExpanded && showThinking && mobileRunIsThinking(run);
+  const submittedAtMs = timestampMs(messageTimestamp(run.user.message));
+  const startedAtMs = timestampMs(run.startedAt);
+  const preRunDurationMs =
+    Number.isFinite(submittedAtMs) &&
+    Number.isFinite(startedAtMs) &&
+    startedAtMs >= submittedAtMs
+      ? startedAtMs - submittedAtMs
+      : undefined;
   return (
     <View>
       {renderItem(run.user)}
@@ -1405,6 +1435,8 @@ function TranscriptRun({
           active={run.active}
           startedAt={run.startedAt}
           completedAt={run.completedAt}
+          preRunDurationMs={preRunDurationMs}
+          showTimingDetail={hasRunDetails && activityExpanded}
           completedDurationMs={run.durationMs}
           toolCallCount={run.toolCallCount}
           expanded={activityExpanded}
@@ -1426,37 +1458,37 @@ function TranscriptRun({
               hasActivityDetails && hasPlan && styles.runDetailsSideBySide,
             ]}
           >
-            {hasActivityDetails ? (
-              <ScrollView
-                nestedScrollEnabled
-                showsVerticalScrollIndicator
-                style={[styles.activityRail, hasPlan && styles.activityRailSideBySide]}
-                contentContainerStyle={styles.activityRailContent}
-              >
-                {visibleActivityItems.map((item) => (
-                  <View key={item.key} style={styles.activityItem}>
-                    {renderItem(item, awaitingApproval)}
-                  </View>
-                ))}
-                {thinking && !awaitingApproval ? (
-                  <View
-                    accessible
-                    accessibilityLabel="Assistant is thinking"
-                    accessibilityLiveRegion="polite"
-                    accessibilityRole="progressbar"
-                    style={styles.thinkingActivity}
-                  >
-                    <ActivityIndicator accessible={false} color={colors.accent} size={12} />
-                    <Text style={styles.thinkingActivityText}>Thinking…</Text>
-                  </View>
-                ) : null}
-              </ScrollView>
-            ) : null}
-            {hasPlan ? (
-              <View style={[styles.runPlan, hasActivityDetails && styles.runPlanSideBySide]}>
-                <MobileAgentPlanList plan={run.plan} running={run.active} />
-              </View>
-            ) : null}
+              {hasActivityDetails ? (
+                <ScrollView
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator
+                  style={[styles.activityRail, hasPlan && styles.activityRailSideBySide]}
+                  contentContainerStyle={styles.activityRailContent}
+                >
+                  {visibleActivityItems.map((item) => (
+                    <View key={item.key} style={styles.activityItem}>
+                      {renderItem(item, awaitingApproval)}
+                    </View>
+                  ))}
+                  {thinking && !awaitingApproval ? (
+                    <View
+                      accessible
+                      accessibilityLabel="Assistant is thinking"
+                      accessibilityLiveRegion="polite"
+                      accessibilityRole="progressbar"
+                      style={styles.thinkingActivity}
+                    >
+                      <ActivityIndicator accessible={false} color={colors.accent} size={12} />
+                      <Text style={styles.thinkingActivityText}>Thinking…</Text>
+                    </View>
+                  ) : null}
+                </ScrollView>
+              ) : null}
+              {hasPlan ? (
+                <View style={[styles.runPlan, hasActivityDetails && styles.runPlanSideBySide]}>
+                  <MobileAgentPlanList plan={run.plan} running={run.active} />
+                </View>
+              ) : null}
           </View>
         ) : null}
       </View>
@@ -2231,6 +2263,12 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.mutedDim,
     fontSize: 11,
+  },
+  runTimingDetail: {
+    color: colors.mutedDim,
+    fontSize: 10,
+    paddingHorizontal: 10,
+    paddingTop: 7,
   },
   plan: {
     minWidth: 0,

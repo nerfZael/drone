@@ -121,6 +121,15 @@ describe('drone daemon workspace API', () => {
     const unchangedDurationMs = performance.now() - unchangedStartedAt;
 
     expect(first.changed).toBe(true);
+    expect(first.phases).toMatchObject({
+      validatePayload: expect.any(Number),
+      checkExistingState: expect.any(Number),
+      applySkills: expect.any(Number),
+      applyMcp: expect.any(Number),
+      applyAgentsFile: expect.any(Number),
+      captureOutputs: expect.any(Number),
+      persistState: expect.any(Number),
+    });
     expect(await fs.readFile(path.join(skillRoot, 'example', 'SKILL.md'), 'utf8')).toBe(
       '# Example\n',
     );
@@ -131,6 +140,10 @@ describe('drone daemon workspace API', () => {
     });
     expect(await fs.readFile(agentsPath, 'utf8')).toBe('# Managed instructions\n');
     expect(second).toMatchObject({ changed: false, filesWritten: 0 });
+    expect(second.phases).toMatchObject({
+      validatePayload: expect.any(Number),
+      checkExistingState: expect.any(Number),
+    });
     expect(second.durationMs).toBeLessThan(100);
     expect(unchangedDurationMs).toBeLessThan(100);
 

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createDvmApi } from 'dvm';
-import type { DvmCreateContainerOptions } from 'dvm';
+import type { DvmCreateContainerOptions, DvmPreparedRepoSeed, DvmRepoSeedTiming } from 'dvm';
 
 export type RunResult = { code: number; stdout: string; stderr: string };
 
@@ -9,7 +9,7 @@ const dvm = createDvmApi();
 export async function run(
   cmd: string,
   args: string[],
-  opts?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; input?: string | Buffer }
+  opts?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; input?: string | Buffer },
 ): Promise<RunResult> {
   return await new Promise<RunResult>((resolve) => {
     const child = spawn(cmd, args, {
@@ -88,12 +88,14 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<
       (error) => {
         clearTimeout(timer);
         reject(error);
-      }
+      },
     );
   });
 }
 
-export async function dvmPorts(container: string): Promise<Array<{ hostPort: number; containerPort: number }>> {
+export async function dvmPorts(
+  container: string,
+): Promise<Array<{ hostPort: number; containerPort: number }>> {
   return await dvm.getContainerPorts(container);
 }
 
@@ -110,7 +112,7 @@ export async function dvmClone(
     copyPersistenceVolume?: boolean;
     persistVolume?: boolean;
     ports?: Array<{ hostPort: number; containerPort: number; hostIp?: string }>;
-  }
+  },
 ): Promise<void> {
   await dvm.cloneContainer(source, container, opts);
 }
@@ -123,7 +125,7 @@ export async function dvmExec(
   container: string,
   cmd: string,
   args: string[] = [],
-  opts?: { timeoutMs?: number }
+  opts?: { timeoutMs?: number },
 ): Promise<RunResult> {
   return await dvm.exec(container, cmd, args, { timeoutMs: opts?.timeoutMs });
 }
@@ -143,7 +145,7 @@ export async function dvmStart(container: string): Promise<void> {
 export async function dvmRename(
   oldName: string,
   newName: string,
-  opts?: { startMode?: 'preserve' | 'always' | 'never'; migrateVolumeName?: boolean }
+  opts?: { startMode?: 'preserve' | 'always' | 'never'; migrateVolumeName?: boolean },
 ): Promise<void> {
   await dvm.renameContainer(oldName, newName, opts);
 }
@@ -153,12 +155,16 @@ export async function dvmSessionStart(
   session: string,
   cmd: string,
   args: string[] = [],
-  reuse = true
+  reuse = true,
 ): Promise<void> {
   await dvm.sessionStart(container, session, cmd, args, { reuse });
 }
 
-export async function dvmSessionType(container: string, session: string, opts: { text?: string; keys?: string[] }): Promise<void> {
+export async function dvmSessionType(
+  container: string,
+  session: string,
+  opts: { text?: string; keys?: string[] },
+): Promise<void> {
   await dvm.sessionType(container, session, opts);
 }
 
@@ -176,7 +182,11 @@ export async function dvmSessionRead(opts: {
   });
 }
 
-export async function dvmScript(container: string, scriptPath: string, args: string[] = []): Promise<void> {
+export async function dvmScript(
+  container: string,
+  scriptPath: string,
+  args: string[] = [],
+): Promise<void> {
   await dvm.runScript(container, scriptPath, args);
 }
 
@@ -184,18 +194,24 @@ export async function dvmCopyToContainer(
   container: string,
   srcPath: string,
   destPath: string,
-  opts?: { clean?: boolean; timeoutMs?: number }
+  opts?: { clean?: boolean; timeoutMs?: number },
 ): Promise<void> {
-  await withTimeout(dvm.copyToContainer(container, srcPath, destPath, { clean: Boolean(opts?.clean) }), opts?.timeoutMs);
+  await withTimeout(
+    dvm.copyToContainer(container, srcPath, destPath, { clean: Boolean(opts?.clean) }),
+    opts?.timeoutMs,
+  );
 }
 
 export async function dvmCopyFromContainer(
   container: string,
   srcPath: string,
   destPath: string,
-  opts?: { clean?: boolean; timeoutMs?: number }
+  opts?: { clean?: boolean; timeoutMs?: number },
 ): Promise<void> {
-  await withTimeout(dvm.copyFromContainer(container, srcPath, destPath, { clean: Boolean(opts?.clean) }), opts?.timeoutMs);
+  await withTimeout(
+    dvm.copyFromContainer(container, srcPath, destPath, { clean: Boolean(opts?.clean) }),
+    opts?.timeoutMs,
+  );
 }
 
 function parseShaFromOutput(text: string): string | null {
@@ -212,8 +228,9 @@ export async function dvmRepoSeed(opts: {
   branch?: string;
   clean?: boolean;
   timeoutMs?: number;
-}): Promise<void> {
-  await withTimeout(
+  onTiming?: (timing: DvmRepoSeedTiming) => void;
+}): Promise<{ baseSha: string; baseTreeSha: string; destinationPath: string }> {
+  return await withTimeout(
     dvm.repoSeed({
       containerName: opts.container,
       hostRepoPath: opts.hostPath,
@@ -221,9 +238,65 @@ export async function dvmRepoSeed(opts: {
       baseRef: opts.baseRef,
       branch: opts.branch,
       clean: opts.clean,
+      onTiming: opts.onTiming,
     }),
-    opts.timeoutMs
+    opts.timeoutMs,
   );
+}
+
+export async function dvmRepoPrepareSeed(opts: {
+  hostPath: string;
+  dest?: string;
+  baseRef?: string;
+  seedLabel?: string;
+  timeoutMs?: number;
+}): Promise<DvmPreparedRepoSeed> {
+  const preparation = dvm.repoPrepareSeed({
+    hostRepoPath: opts.hostPath,
+    destinationPath: opts.dest,
+    baseRef: opts.baseRef,
+    seedLabel: opts.seedLabel,
+  });
+  try {
+    return await withTimeout(preparation, opts.timeoutMs);
+  } catch (error) {
+    // withTimeout cannot cancel Git. If preparation finishes after the caller
+    // gives up, dispose of the bundle instead of leaking a temp ref/directory.
+    void preparation.then(
+      async (prepared) => await dvm.repoDiscardPreparedSeed(prepared),
+      () => {},
+    );
+    throw error;
+  }
+}
+
+export async function dvmRepoSeedPrepared(opts: {
+  container: string;
+  prepared: DvmPreparedRepoSeed;
+  branch?: string;
+  clean?: boolean;
+  timeoutMs?: number;
+  onTiming?: (timing: DvmRepoSeedTiming) => void;
+}): Promise<{ baseSha: string; baseTreeSha: string; destinationPath: string }> {
+  return await withTimeout(
+    dvm.repoSeedPrepared(
+      {
+        containerName: opts.container,
+        hostRepoPath: opts.prepared.hostRepoPath,
+        destinationPath: opts.prepared.destinationPath,
+        baseRef: opts.prepared.baseSha,
+        branch: opts.branch,
+        clean: opts.clean,
+        onTiming: opts.onTiming,
+      },
+      opts.prepared,
+    ),
+    opts.timeoutMs,
+  );
+}
+
+export async function dvmRepoDiscardPreparedSeed(prepared: DvmPreparedRepoSeed): Promise<void> {
+  await dvm.repoDiscardPreparedSeed(prepared);
 }
 
 export async function dvmRepoExport(opts: {
@@ -247,30 +320,57 @@ export async function dvmRepoExport(opts: {
   return { exportedPath: out.exportedPath };
 }
 
-export async function dvmRepoHeadSha(opts: { container: string; repoPathInContainer?: string }): Promise<string> {
+export async function dvmRepoHeadSha(opts: {
+  container: string;
+  repoPathInContainer?: string;
+}): Promise<string> {
   const repoPath = opts.repoPathInContainer ?? '/work/repo';
-  const script = ['set -euo pipefail', `cd ${JSON.stringify(repoPath)}`, 'git rev-parse HEAD'].join('\n');
+  const script = ['set -euo pipefail', `cd ${JSON.stringify(repoPath)}`, 'git rev-parse HEAD'].join(
+    '\n',
+  );
   const r = await dvmExec(opts.container, 'bash', ['-lc', script]);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `failed to read repo HEAD in ${opts.container}`);
+  if (r.code !== 0)
+    throw new Error(r.stderr || r.stdout || `failed to read repo HEAD in ${opts.container}`);
   const sha = parseShaFromOutput(r.stdout);
-  if (!sha) throw new Error(`failed to parse repo HEAD in ${opts.container}: ${r.stdout || '(empty stdout)'}`);
+  if (!sha)
+    throw new Error(
+      `failed to parse repo HEAD in ${opts.container}: ${r.stdout || '(empty stdout)'}`,
+    );
   return sha;
 }
 
-export async function dvmRepoSetBaseSha(opts: { container: string; repoPathInContainer?: string; baseSha: string }): Promise<void> {
+export async function dvmRepoSetBaseSha(opts: {
+  container: string;
+  repoPathInContainer?: string;
+  baseSha: string;
+}): Promise<void> {
   const repoPath = opts.repoPathInContainer ?? '/work/repo';
-  const baseSha = String(opts.baseSha ?? '').trim().toLowerCase();
-  if (!/^[0-9a-f]{40}$/.test(baseSha)) throw new Error(`invalid base SHA: ${opts.baseSha ?? '(empty)'}`);
-  const script = ['set -euo pipefail', `cd ${JSON.stringify(repoPath)}`, `git config dvm.baseSha ${JSON.stringify(baseSha)}`, 'git config --get dvm.baseSha'].join('\n');
+  const baseSha = String(opts.baseSha ?? '')
+    .trim()
+    .toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(baseSha))
+    throw new Error(`invalid base SHA: ${opts.baseSha ?? '(empty)'}`);
+  const script = [
+    'set -euo pipefail',
+    `cd ${JSON.stringify(repoPath)}`,
+    `git config dvm.baseSha ${JSON.stringify(baseSha)}`,
+    'git config --get dvm.baseSha',
+  ].join('\n');
   const r = await dvmExec(opts.container, 'bash', ['-lc', script]);
-  if (r.code !== 0) throw new Error(r.stderr || r.stdout || `failed to set dvm.baseSha in ${opts.container}`);
+  if (r.code !== 0)
+    throw new Error(r.stderr || r.stdout || `failed to set dvm.baseSha in ${opts.container}`);
   const configured = parseShaFromOutput(r.stdout);
   if (configured !== baseSha) {
-    throw new Error(`dvm.baseSha verification failed in ${opts.container}: expected ${baseSha}, got ${configured ?? '(none)'}`);
+    throw new Error(
+      `dvm.baseSha verification failed in ${opts.container}: expected ${baseSha}, got ${configured ?? '(none)'}`,
+    );
   }
 }
 
-export async function dvmBaseSet(container: string, opts?: { timeoutMs?: number }): Promise<{ baseImage: string }> {
+export async function dvmBaseSet(
+  container: string,
+  opts?: { timeoutMs?: number },
+): Promise<{ baseImage: string }> {
   const name = String(container ?? '').trim();
   if (!name) throw new Error('missing container name');
   const out = await withTimeout(dvm.setBaseImage(name), opts?.timeoutMs);

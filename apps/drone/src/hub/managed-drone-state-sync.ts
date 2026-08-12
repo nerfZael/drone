@@ -2,13 +2,26 @@ import {
   managedDroneStateFingerprint,
   type ManagedDroneDesiredState,
 } from '../managed-drone-state';
-import {
-  DroneApiRequestError,
-  type DroneClient,
-  type DroneDaemonConnection,
-} from '../host/api';
+import { DroneApiRequestError, type DroneClient, type DroneDaemonConnection } from '../host/api';
 
 type SyncOptions = { droneId: string; droneEntry: any };
+
+export type ManagedDroneStateSyncTiming = {
+  droneId: string;
+  runtime: 'container' | 'host';
+  containerName: string | null;
+  outcome: 'completed' | 'failed';
+  durationMs: number;
+  daemonApplyDurationMs: number | null;
+  daemonPhases: Record<string, number> | null;
+  phases: Record<string, number>;
+};
+
+export type ManagedDroneStateSyncResult = {
+  fingerprint: string | null;
+  changed: boolean | null;
+  agentsFileApplied: boolean;
+};
 
 type ManagedDroneStateSyncDependencies = {
   normalizeDroneIdentity: (value: unknown) => string;
@@ -26,7 +39,10 @@ type ManagedDroneStateSyncDependencies = {
     cleanupOnly?: boolean;
     agent: any;
   }>;
-  renderSkillPackages: (skills: any[], agent: any) => ManagedDroneDesiredState['skillTargets'][number]['packages'];
+  renderSkillPackages: (
+    skills: any[],
+    agent: any,
+  ) => ManagedDroneDesiredState['skillTargets'][number]['packages'];
   buildMcpTargets: (droneEntry: any) => Array<{ configPath: string; agent: any }>;
   renderMcpProjection: (
     agent: any,
@@ -35,9 +51,13 @@ type ManagedDroneStateSyncDependencies = {
   withDroneOpLock: <T>(key: string, run: () => Promise<T>) => Promise<T>;
   daemonClientForDrone: (droneEntry: DroneDaemonConnection) => DroneClient;
   daemonHealth: (client: DroneClient) => Promise<{ capabilities?: unknown }>;
-  managedDroneSync: (client: DroneClient, payload: ManagedDroneDesiredState & { fingerprint: string }) => Promise<unknown>;
+  managedDroneSync: (
+    client: DroneClient,
+    payload: ManagedDroneDesiredState & { fingerprint: string },
+  ) => Promise<unknown>;
   upgradeDaemon: (opts: { containerName: string; containerPort: number }) => Promise<void>;
   waitForDaemonReady: (client: DroneClient) => Promise<void>;
+  onTiming?: (timing: ManagedDroneStateSyncTiming) => void;
 };
 
 const REQUIRED_CAPABILITY = 'managed-state-v1';
@@ -58,11 +78,15 @@ export function createManagedDroneStateSyncService(deps: ManagedDroneStateSyncDe
     droneEntry: any,
     client: DroneClient,
     forceProbe = false,
+    measure: <T>(name: string, run: () => Promise<T>) => Promise<T>,
   ): Promise<void> {
     const cacheKey = daemonCapabilityCacheKey(droneId, droneEntry);
     if (!forceProbe && capableDaemons.has(cacheKey)) return;
 
-    const health = await deps.daemonHealth(client);
+    const health = await measure(
+      'probeDaemonCapability',
+      async () => await deps.daemonHealth(client),
+    );
     const capabilities = Array.isArray(health?.capabilities) ? health.capabilities : [];
     if (capabilities.includes(REQUIRED_CAPABILITY)) {
       capableDaemons.add(cacheKey);
@@ -74,9 +98,16 @@ export function createManagedDroneStateSyncService(deps: ManagedDroneStateSyncDe
     if (!containerName || !Number.isFinite(containerPort) || containerPort <= 0) {
       throw new Error(`drone daemon does not support ${REQUIRED_CAPABILITY}`);
     }
-    await deps.upgradeDaemon({ containerName, containerPort: Math.floor(containerPort) });
-    await deps.waitForDaemonReady(client);
-    const upgradedHealth = await deps.daemonHealth(client);
+    await measure(
+      'upgradeDaemon',
+      async () =>
+        await deps.upgradeDaemon({ containerName, containerPort: Math.floor(containerPort) }),
+    );
+    await measure('waitForUpgradedDaemon', async () => await deps.waitForDaemonReady(client));
+    const upgradedHealth = await measure(
+      'verifyUpgradedDaemonCapability',
+      async () => await deps.daemonHealth(client),
+    );
     const upgradedCapabilities = Array.isArray(upgradedHealth?.capabilities)
       ? upgradedHealth.capabilities
       : [];
@@ -86,51 +117,151 @@ export function createManagedDroneStateSyncService(deps: ManagedDroneStateSyncDe
     capableDaemons.add(cacheKey);
   }
 
-  async function syncManagedFilesForDrone(opts: SyncOptions): Promise<void> {
+  async function syncManagedFilesForDrone(opts: SyncOptions): Promise<ManagedDroneStateSyncResult> {
     const droneId = deps.normalizeDroneIdentity(opts.droneId);
     const droneEntry = opts.droneEntry;
-    if (!droneId || !droneEntry) return;
-    if (deps.droneRuntime(droneEntry) === 'host') {
-      await deps.withDroneOpLock(`drone:${droneId}`, async () => {
-        await deps.syncHostManagedFiles({ droneId, droneEntry });
-      });
-      return;
+    if (!droneId || !droneEntry) {
+      return { fingerprint: null, changed: null, agentsFileApplied: false };
     }
-
-    await deps.withDroneOpLock(`drone:${droneId}`, async () => {
-      const [skills, servers, agentsFile] = await Promise.all([
-        deps.listSkills(),
-        deps.mcpServersForProjection({ runtime: 'container', droneId, droneEntry }),
-        deps.resolveAgentsFile({ droneId, droneEntry }),
-      ]);
-      const desiredState: ManagedDroneDesiredState = {
-        version: 1,
-        skillTargets: deps.buildSkillTargets(droneEntry).map((target) => ({
-          rootPath: target.rootPath,
-          ...(target.cleanupOnly ? { cleanupOnly: true } : {}),
-          packages: target.cleanupOnly ? [] : deps.renderSkillPackages(skills, target.agent),
-        })),
-        mcpTargets: deps.buildMcpTargets(droneEntry).map((target) => ({
-          configPath: target.configPath,
-          projection: deps.renderMcpProjection(target.agent, servers),
-        })),
-        ...(agentsFile ? { agentsFile } : {}),
-      };
-      const payload = {
-        ...desiredState,
-        fingerprint: managedDroneStateFingerprint(desiredState),
-      };
-      const client = deps.daemonClientForDrone(droneEntry);
-      await ensureCapability(droneId, droneEntry, client);
+    const runtime = deps.droneRuntime(droneEntry);
+    const containerName =
+      runtime === 'container'
+        ? String(droneEntry?.containerName ?? droneEntry?.name ?? '').trim() || null
+        : null;
+    const startedAt = performance.now();
+    const phases = new Map<string, number>();
+    let outcome: ManagedDroneStateSyncTiming['outcome'] = 'failed';
+    let daemonApplyDurationMs: number | null = null;
+    let daemonPhases: Record<string, number> | null = null;
+    let appliedFingerprint: string | null = null;
+    let appliedChanged: boolean | null = null;
+    let agentsFileApplied = false;
+    const record = (name: string, durationMs: number) => {
+      if (!Number.isFinite(durationMs)) return;
+      const rounded = Math.max(0, Math.round(durationMs * 10) / 10);
+      phases.set(name, Math.round(((phases.get(name) ?? 0) + rounded) * 10) / 10);
+    };
+    const measure = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
+      const phaseStartedAt = performance.now();
       try {
-        await deps.managedDroneSync(client, payload);
-      } catch (error) {
-        if (!(error instanceof DroneApiRequestError) || error.statusCode !== 404) throw error;
-        capableDaemons.delete(daemonCapabilityCacheKey(droneId, droneEntry));
-        await ensureCapability(droneId, droneEntry, client, true);
-        await deps.managedDroneSync(client, payload);
+        return await run();
+      } finally {
+        record(name, performance.now() - phaseStartedAt);
       }
-    });
+    };
+    const lockRequestedAt = performance.now();
+
+    try {
+      await deps.withDroneOpLock(`drone:${droneId}`, async () => {
+        record('droneLockWait', performance.now() - lockRequestedAt);
+        if (runtime === 'host') {
+          await measure(
+            'syncHostManagedFiles',
+            async () => await deps.syncHostManagedFiles({ droneId, droneEntry }),
+          );
+          return;
+        }
+
+        const [skills, servers, agentsFile] = await measure(
+          'loadProjectionInputs',
+          async () =>
+            await Promise.all([
+              deps.listSkills(),
+              deps.mcpServersForProjection({ runtime: 'container', droneId, droneEntry }),
+              deps.resolveAgentsFile({ droneId, droneEntry }),
+            ]),
+        );
+        const payloadStartedAt = performance.now();
+        const desiredState: ManagedDroneDesiredState = {
+          version: 1,
+          skillTargets: deps.buildSkillTargets(droneEntry).map((target) => ({
+            rootPath: target.rootPath,
+            ...(target.cleanupOnly ? { cleanupOnly: true } : {}),
+            packages: target.cleanupOnly ? [] : deps.renderSkillPackages(skills, target.agent),
+          })),
+          mcpTargets: deps.buildMcpTargets(droneEntry).map((target) => ({
+            configPath: target.configPath,
+            projection: deps.renderMcpProjection(target.agent, servers),
+          })),
+          ...(agentsFile ? { agentsFile } : {}),
+        };
+        const payload = {
+          ...desiredState,
+          fingerprint: managedDroneStateFingerprint(desiredState),
+        };
+        agentsFileApplied = Boolean(agentsFile);
+        record('buildPayload', performance.now() - payloadStartedAt);
+        const clientStartedAt = performance.now();
+        const client = deps.daemonClientForDrone(droneEntry);
+        record('resolveDaemonClient', performance.now() - clientStartedAt);
+        await ensureCapability(droneId, droneEntry, client, false, measure);
+        try {
+          const response = await measure(
+            'applyManagedStateRequest',
+            async () => await deps.managedDroneSync(client, payload),
+          );
+          appliedFingerprint =
+            String((response as any)?.fingerprint ?? '').trim() || payload.fingerprint;
+          appliedChanged =
+            typeof (response as any)?.changed === 'boolean' ? (response as any).changed : null;
+          const reportedDuration = Number((response as any)?.durationMs);
+          if (Number.isFinite(reportedDuration) && reportedDuration >= 0) {
+            daemonApplyDurationMs = Math.round(reportedDuration * 10) / 10;
+          }
+          if (
+            (response as any)?.phases &&
+            typeof (response as any).phases === 'object' &&
+            !Array.isArray((response as any).phases)
+          ) {
+            daemonPhases = { ...(response as any).phases };
+          }
+        } catch (error) {
+          if (!(error instanceof DroneApiRequestError) || error.statusCode !== 404) throw error;
+          capableDaemons.delete(daemonCapabilityCacheKey(droneId, droneEntry));
+          await ensureCapability(droneId, droneEntry, client, true, measure);
+          const response = await measure(
+            'retryManagedStateRequest',
+            async () => await deps.managedDroneSync(client, payload),
+          );
+          appliedFingerprint =
+            String((response as any)?.fingerprint ?? '').trim() || payload.fingerprint;
+          appliedChanged =
+            typeof (response as any)?.changed === 'boolean' ? (response as any).changed : null;
+          const reportedDuration = Number((response as any)?.durationMs);
+          if (Number.isFinite(reportedDuration) && reportedDuration >= 0) {
+            daemonApplyDurationMs = Math.round(reportedDuration * 10) / 10;
+          }
+          if (
+            (response as any)?.phases &&
+            typeof (response as any).phases === 'object' &&
+            !Array.isArray((response as any).phases)
+          ) {
+            daemonPhases = { ...(response as any).phases };
+          }
+        }
+      });
+      outcome = 'completed';
+      return {
+        fingerprint: appliedFingerprint,
+        changed: appliedChanged,
+        agentsFileApplied,
+      };
+    } finally {
+      try {
+        deps.onTiming?.({
+          droneId,
+          runtime,
+          containerName,
+          outcome,
+          durationMs: Math.max(0, Math.round((performance.now() - startedAt) * 10) / 10),
+          daemonApplyDurationMs,
+          daemonPhases,
+          phases: Object.fromEntries(phases),
+        });
+      } catch {
+        // Timing observers must not affect synchronization.
+      }
+    }
   }
 
   return { syncManagedFilesForDrone };

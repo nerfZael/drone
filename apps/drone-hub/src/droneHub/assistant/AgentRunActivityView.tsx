@@ -9,7 +9,7 @@ import {
 import type { AgentMessageExtrasProps } from '../chat/AgentMessageExtras';
 import { AgentPlanList } from '../chat/AgentPlanList';
 import type { AgentPlan } from '../types';
-import { AgentRunSummaryLine } from '../chat/WorkingElapsedStatus';
+import { AgentRunSummaryLine, formatWorkingDuration } from '../chat/WorkingElapsedStatus';
 import {
   AssistantMessageRow,
   RepeatedToolActivityRow,
@@ -43,6 +43,7 @@ export function AgentRunActivityView({
   active = false,
   startedAt,
   endedAt,
+  preRunDurationMs,
   at,
   autoExpandFinalMessage = false,
   plan,
@@ -52,6 +53,7 @@ export function AgentRunActivityView({
   active?: boolean;
   startedAt?: string | number | null;
   endedAt?: string | number | null;
+  preRunDurationMs?: number;
   at?: string;
   autoExpandFinalMessage?: boolean;
   plan?: AgentPlan;
@@ -114,6 +116,10 @@ export function AgentRunActivityView({
   }, [active]);
 
   const durationMs = Math.max(0, (active ? now : (parsedEnd ?? parsedStart)) - parsedStart);
+  const normalizedPreRunDurationMs = Number.isFinite(preRunDurationMs)
+    ? Math.max(0, Number(preRunDurationMs))
+    : 0;
+  const showPreRunDuration = normalizedPreRunDurationMs >= 1_000;
   const detail =
     toolCallCount > 0
       ? `${toolCallCount} tool ${toolCallCount === 1 ? 'call' : 'calls'}`
@@ -125,6 +131,7 @@ export function AgentRunActivityView({
         <AgentRunSummaryLine
           active={active}
           durationMs={durationMs}
+          preRunDurationMs={preRunDurationMs}
           at={at}
           detail={detail}
           trailing={hasRunDetails ? <ActivityChevron open={expanded} /> : undefined}
@@ -140,6 +147,16 @@ export function AgentRunActivityView({
             hasActivityDetails && hasPlan ? 'grid grid-cols-2 items-start gap-2' : ''
           }`}
         >
+          {showPreRunDuration ? (
+            <div
+              className={`px-3 py-1 text-[var(--text-10)] text-[var(--muted-dim)] ${
+                hasActivityDetails && hasPlan ? 'col-span-2' : ''
+              }`}
+            >
+              Started in {formatWorkingDuration(normalizedPreRunDurationMs)} · agent{' '}
+              {formatWorkingDuration(durationMs)}
+            </div>
+          ) : null}
           {hasActivityDetails ? (
             <div className="dh-agent-activity-scrollbar max-h-72 min-w-0 overflow-y-auto overscroll-contain border-l border-[var(--border-subtle)] px-3 opacity-[0.82] transition-opacity hover:opacity-100 focus-within:opacity-100">
               <div className="space-y-1">

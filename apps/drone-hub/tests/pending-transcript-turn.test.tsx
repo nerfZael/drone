@@ -160,7 +160,7 @@ describe('external pending transcript turn', () => {
     expect(html).not.toContain('Waiting to create a fresh chat');
   });
 
-  test('counts working time from daemon execution rather than the queued timestamp', () => {
+  test('keeps the live total elapsed after a queued start without showing the split', () => {
     const html = renderToStaticMarkup(
       <PendingTranscriptTurn
         item={pendingPrompt({
@@ -170,8 +170,8 @@ describe('external pending transcript turn', () => {
       />,
     );
 
-    expect(html).toMatch(/Working for 1m \d+s/);
-    expect(html).not.toContain('Working for 1h');
+    expect(html).toMatch(/Working for 1h 0m \d+s/);
+    expect(html).not.toContain('Started in');
   });
 
   test('does not count submission age before the daemon reports an execution start', () => {
@@ -192,6 +192,8 @@ describe('external pending transcript turn', () => {
     const html = renderToStaticMarkup(
       <PendingTranscriptTurn
         item={pendingPrompt({
+          at: new Date(Date.now() - 3_600_000).toISOString(),
+          startedAt: new Date(Date.now() - 65_000).toISOString(),
           agentPlan: {
             source: 'opencode',
             updatedAt: new Date().toISOString(),
@@ -229,6 +231,7 @@ describe('external pending transcript turn', () => {
     expect(html).toContain('data-agent-run-plan="true"');
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('aria-label="Collapse run details"');
+    expect(html).toMatch(/Started in 58m \d+s · agent 1m \d+s/);
     expect(html).toContain('grid grid-cols-2 items-start gap-2');
     expect(html).toContain('border-l border-[var(--border-subtle)] px-3');
     expect(html).toContain('dh-agent-activity-scrollbar');

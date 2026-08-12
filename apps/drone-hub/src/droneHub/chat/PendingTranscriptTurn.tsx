@@ -92,6 +92,14 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   const isStopped = isFailed && isStoppedRunError(item.error);
   const activity = normalizeAgentRunActivity(item.activity);
   const runStartedAt = item.startedAt ?? null;
+  const submittedAtMs = Date.parse(String(item.at ?? ''));
+  const runStartedAtMs = Date.parse(String(runStartedAt ?? ''));
+  const preRunDurationMs =
+    Number.isFinite(submittedAtMs) &&
+    Number.isFinite(runStartedAtMs) &&
+    runStartedAtMs >= submittedAtMs
+      ? runStartedAtMs - submittedAtMs
+      : undefined;
   const actionPresentation = resolveChatQueueActionPresentation(item.action, item.state);
   const failure = agentRunFailurePresentation(stripAnsi(item.error || ''));
   const queueInterruption = normalizePromptQueueInterruption(item.queueInterruption);
@@ -227,6 +235,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           activity={activity}
           active
           startedAt={runStartedAt}
+          preRunDurationMs={preRunDurationMs}
           plan={item.agentPlan}
         />
       ) : null}
@@ -235,6 +244,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           activity={activity}
           startedAt={runStartedAt}
           endedAt={item.updatedAt ?? item.at}
+          preRunDurationMs={preRunDurationMs}
           at={item.updatedAt ?? item.at}
           plan={item.agentPlan}
         />
@@ -293,7 +303,12 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             </div>
           ) : (
             <>
-              {!activity ? <WorkingElapsedStatus startedAt={runStartedAt} /> : null}
+              {!activity ? (
+                <WorkingElapsedStatus
+                  startedAt={runStartedAt}
+                  preRunDurationMs={preRunDurationMs}
+                />
+              ) : null}
               {observability ? (
                 <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-[var(--text-10-5)] leading-[1.45] text-[var(--yellow)]">
                   <div>{observability.message}</div>

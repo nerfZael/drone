@@ -33,6 +33,19 @@ export type StoredSyncSet = {
   targetStatus: Record<string, StoredSyncSetTargetStatus>;
 };
 
+export function syncSetTargetOverlapsRepository(
+  targetPathRaw: unknown,
+  repositoryPathRaw: unknown,
+): boolean {
+  const targetPath = path.posix.resolve('/', String(targetPathRaw ?? '').trim());
+  const repositoryPath = path.posix.resolve('/', String(repositoryPathRaw ?? '').trim());
+  return (
+    targetPath === repositoryPath ||
+    targetPath.startsWith(`${repositoryPath}/`) ||
+    repositoryPath.startsWith(`${targetPath}/`)
+  );
+}
+
 export type SyncSetTargetStatusView = StoredSyncSetTargetStatus & {
   targetId: string;
   targetName: string;
@@ -69,7 +82,12 @@ function sanitizeTimestamp(raw: unknown): string | null {
 }
 
 function parseScope(raw: unknown): SyncSetScope {
-  const type = typeof (raw as any)?.type === 'string' ? String((raw as any).type).trim().toLowerCase() : '';
+  const type =
+    typeof (raw as any)?.type === 'string'
+      ? String((raw as any).type)
+          .trim()
+          .toLowerCase()
+      : '';
   return type === 'all' ? { type: 'all' } : SYNC_SET_SCOPE_ALL;
 }
 
@@ -80,7 +98,9 @@ function parseTargetStatusState(raw: unknown): SyncSetTargetStatusState {
 
 function normalizeStoredTargetStatus(raw: unknown): StoredSyncSetTargetStatus | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const targetKind = String((raw as any)?.targetKind ?? '').trim().toLowerCase();
+  const targetKind = String((raw as any)?.targetKind ?? '')
+    .trim()
+    .toLowerCase();
   if (targetKind !== 'drone' && targetKind !== 'host') return null;
   return {
     targetKind,
@@ -133,7 +153,8 @@ export function parseSyncSetMutationInput(body: any): ParsedSyncSetMutationInput
   const sourceType = parseSyncSetSourceType(body?.sourceType);
   const targetPath = parseSyncSetPath(body?.targetPath);
   const sourcePath = sourceType === 'host-path' ? parseSyncSetPath(body?.sourcePath) : null;
-  const applyToHost = sourceType === 'hub-managed' ? parseSyncSetApplyToHost(body?.applyToHost) : false;
+  const applyToHost =
+    sourceType === 'hub-managed' ? parseSyncSetApplyToHost(body?.applyToHost) : false;
   if (!label) throw new Error('label is required');
   if (!sourceType) throw new Error('sourceType must be hub-managed or host-path');
   if (!targetPath) throw new Error('targetPath must be an absolute path');
@@ -169,7 +190,9 @@ export async function removeHubManagedSyncSetSourceDir(syncSetIdRaw: unknown): P
 }
 
 export function readStoredSyncSets(regAny: any): StoredSyncSet[] {
-  const items = Array.isArray(regAny?.settings?.syncSets?.items) ? regAny.settings.syncSets.items : [];
+  const items = Array.isArray(regAny?.settings?.syncSets?.items)
+    ? regAny.settings.syncSets.items
+    : [];
   const out: StoredSyncSet[] = [];
   for (const raw of items) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
@@ -179,9 +202,7 @@ export function readStoredSyncSets(regAny: any): StoredSyncSet[] {
     const targetPath = parseSyncSetPath((raw as any)?.targetPath);
     if (!id || !label || !sourceType || !targetPath) continue;
     const sourcePath =
-      sourceType === 'host-path'
-        ? parseSyncSetPath((raw as any)?.sourcePath)
-        : null;
+      sourceType === 'host-path' ? parseSyncSetPath((raw as any)?.sourcePath) : null;
     if (sourceType === 'host-path' && !sourcePath) continue;
     out.push({
       id,
@@ -189,7 +210,8 @@ export function readStoredSyncSets(regAny: any): StoredSyncSet[] {
       sourceType,
       sourcePath,
       targetPath,
-      applyToHost: sourceType === 'hub-managed' ? parseSyncSetApplyToHost((raw as any)?.applyToHost) : false,
+      applyToHost:
+        sourceType === 'hub-managed' ? parseSyncSetApplyToHost((raw as any)?.applyToHost) : false,
       scope: parseScope((raw as any)?.scope),
       createdAt: sanitizeTimestamp((raw as any)?.createdAt) ?? new Date(0).toISOString(),
       updatedAt: sanitizeTimestamp((raw as any)?.updatedAt) ?? new Date(0).toISOString(),
@@ -207,7 +229,11 @@ export function findStoredSyncSetIndex(syncSets: StoredSyncSet[], syncSetIdRaw: 
   return syncSets.findIndex((entry) => entry.id === syncSetId);
 }
 
-export function writeStoredSyncSets(regAny: any, syncSets: StoredSyncSet[], updatedAtRaw: unknown): void {
+export function writeStoredSyncSets(
+  regAny: any,
+  syncSets: StoredSyncSet[],
+  updatedAtRaw: unknown,
+): void {
   regAny.settings = regAny.settings ?? {};
   regAny.settings.syncSets = {
     items: syncSets,
@@ -223,13 +249,17 @@ export function syncSetTargetStatusKeyForHost(): string {
   return 'host';
 }
 
-export function resolveSyncSetEffectiveSourcePath(syncSet: Pick<StoredSyncSet, 'id' | 'sourceType' | 'sourcePath'>): string {
+export function resolveSyncSetEffectiveSourcePath(
+  syncSet: Pick<StoredSyncSet, 'id' | 'sourceType' | 'sourcePath'>,
+): string {
   return syncSet.sourceType === 'hub-managed'
     ? hubManagedSyncSetSourcePath(syncSet.id)
     : String(syncSet.sourcePath ?? '').trim();
 }
 
-export async function syncSetSourceExists(syncSet: Pick<StoredSyncSet, 'id' | 'sourceType' | 'sourcePath'>): Promise<boolean> {
+export async function syncSetSourceExists(
+  syncSet: Pick<StoredSyncSet, 'id' | 'sourceType' | 'sourcePath'>,
+): Promise<boolean> {
   const sourcePath = resolveSyncSetEffectiveSourcePath(syncSet);
   if (!sourcePath) return false;
   try {
@@ -240,7 +270,9 @@ export async function syncSetSourceExists(syncSet: Pick<StoredSyncSet, 'id' | 's
   }
 }
 
-export async function ensureSyncSetSourceIsReadable(syncSet: Pick<ParsedSyncSetMutationInput, 'sourceType' | 'sourcePath'>): Promise<void> {
+export async function ensureSyncSetSourceIsReadable(
+  syncSet: Pick<ParsedSyncSetMutationInput, 'sourceType' | 'sourcePath'>,
+): Promise<void> {
   if (syncSet.sourceType !== 'host-path') return;
   const sourcePath = String(syncSet.sourcePath ?? '').trim();
   if (!sourcePath) throw new Error('sourcePath must be an absolute path for host-path sync sets');
@@ -262,7 +294,11 @@ async function updateHashWithFile(hash: crypto.Hash, filePath: string): Promise<
   return buf.length;
 }
 
-async function walkSnapshotNode(hash: crypto.Hash, absolutePath: string, relativePath: string): Promise<{ kind: 'file' | 'directory'; fileCount: number; totalBytes: number }> {
+async function walkSnapshotNode(
+  hash: crypto.Hash,
+  absolutePath: string,
+  relativePath: string,
+): Promise<{ kind: 'file' | 'directory'; fileCount: number; totalBytes: number }> {
   const stat = await fs.lstat(absolutePath);
   if (stat.isSymbolicLink()) {
     throw new Error(`symlinks are not supported in sync-set sources: ${absolutePath}`);
@@ -291,7 +327,9 @@ async function walkSnapshotNode(hash: crypto.Hash, absolutePath: string, relativ
   return { kind: 'directory', fileCount, totalBytes };
 }
 
-export async function computeSyncSetSourceSnapshot(syncSet: Pick<StoredSyncSet, 'id' | 'sourceType' | 'sourcePath'>): Promise<SyncSetSourceSnapshot> {
+export async function computeSyncSetSourceSnapshot(
+  syncSet: Pick<StoredSyncSet, 'id' | 'sourceType' | 'sourcePath'>,
+): Promise<SyncSetSourceSnapshot> {
   const sourcePath = resolveSyncSetEffectiveSourcePath(syncSet);
   if (!sourcePath) throw new Error('sync set source path is missing');
   const resolvedSourcePath = path.resolve(sourcePath);
@@ -306,15 +344,23 @@ export async function computeSyncSetSourceSnapshot(syncSet: Pick<StoredSyncSet, 
   };
 }
 
-export async function mirrorLocalSourceToHostTarget(opts: { sourcePath: string; sourceKind: 'file' | 'directory'; targetPath: string }): Promise<void> {
+export async function mirrorLocalSourceToHostTarget(opts: {
+  sourcePath: string;
+  sourceKind: 'file' | 'directory';
+  targetPath: string;
+}): Promise<void> {
   const sourcePath = path.resolve(opts.sourcePath);
   const targetPath = path.resolve(opts.targetPath);
   const relativeSourceToTarget = path.relative(sourcePath, targetPath);
   const relativeTargetToSource = path.relative(targetPath, sourcePath);
   const overlaps =
     sourcePath === targetPath ||
-    (!!relativeSourceToTarget && !relativeSourceToTarget.startsWith('..') && !path.isAbsolute(relativeSourceToTarget)) ||
-    (!!relativeTargetToSource && !relativeTargetToSource.startsWith('..') && !path.isAbsolute(relativeTargetToSource));
+    (!!relativeSourceToTarget &&
+      !relativeSourceToTarget.startsWith('..') &&
+      !path.isAbsolute(relativeSourceToTarget)) ||
+    (!!relativeTargetToSource &&
+      !relativeTargetToSource.startsWith('..') &&
+      !path.isAbsolute(relativeTargetToSource));
   if (overlaps) {
     throw new Error(`host sync source and target cannot overlap: ${sourcePath} <-> ${targetPath}`);
   }
@@ -346,21 +392,29 @@ export async function mirrorLocalSourceToContainerTarget(opts: {
     'rm -rf -- "$target"',
     ...(opts.sourceKind === 'directory' ? ['mkdir -p "$target"'] : []),
   ].join('\n');
-  const cleanup = await dvmExec(opts.containerName, 'bash', ['-lc', cleanupScript], { timeoutMs: opts.timeoutMs });
+  const cleanup = await dvmExec(opts.containerName, 'bash', ['-lc', cleanupScript], {
+    timeoutMs: opts.timeoutMs,
+  });
   if (cleanup.code !== 0) {
-    throw new Error((cleanup.stderr || cleanup.stdout || 'failed preparing container sync target').trim());
+    throw new Error(
+      (cleanup.stderr || cleanup.stdout || 'failed preparing container sync target').trim(),
+    );
   }
   if (opts.sourceKind === 'directory') {
     const names = await fs.readdir(opts.sourcePath);
     if (names.length === 0) return;
   }
-  await dvmCopyToContainer(opts.containerName, opts.sourcePath, targetPath, { clean: false, timeoutMs: opts.timeoutMs });
+  await dvmCopyToContainer(opts.containerName, opts.sourcePath, targetPath, {
+    clean: false,
+    timeoutMs: opts.timeoutMs,
+  });
 }
 
 export function setStoredSyncSetTargetStatus(
   syncSet: StoredSyncSet,
   targetIdRaw: unknown,
-  patch: Partial<StoredSyncSetTargetStatus> & Pick<StoredSyncSetTargetStatus, 'targetKind' | 'state'>,
+  patch: Partial<StoredSyncSetTargetStatus> &
+    Pick<StoredSyncSetTargetStatus, 'targetKind' | 'state'>,
 ): StoredSyncSet {
   const targetId = String(targetIdRaw ?? '').trim();
   if (!targetId) return syncSet;
@@ -379,17 +433,23 @@ export function setStoredSyncSetTargetStatus(
   };
 }
 
-export function buildSyncSetView(syncSet: StoredSyncSet, opts: {
-  droneNameById?: Record<string, string>;
-  includeHostTargetName?: string;
-  sourceExists?: boolean;
-}): SyncSetView {
+export function buildSyncSetView(
+  syncSet: StoredSyncSet,
+  opts: {
+    droneNameById?: Record<string, string>;
+    includeHostTargetName?: string;
+    sourceExists?: boolean;
+  },
+): SyncSetView {
   const droneNameById = opts.droneNameById ?? {};
   const targetStatus = Object.entries(syncSet.targetStatus)
     .map(([targetId, status]) => ({
       ...status,
       targetId,
-      targetName: targetId === 'host' ? opts.includeHostTargetName ?? 'Host' : droneNameById[targetId] ?? targetId,
+      targetName:
+        targetId === 'host'
+          ? (opts.includeHostTargetName ?? 'Host')
+          : (droneNameById[targetId] ?? targetId),
     }))
     .sort((a, b) => a.targetName.localeCompare(b.targetName));
   const managedSourcePath = hubManagedSyncSetSourcePath(syncSet.id);

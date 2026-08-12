@@ -75,6 +75,37 @@ export type DvmRepoSeedOptions = {
   branch?: string;
   forceBranch?: boolean;
   clean?: boolean;
+  onTiming?: (timing: DvmRepoSeedTiming) => void;
+};
+
+export type DvmRepoSeedPrepareOptions = {
+  hostRepoPath: string;
+  destinationPath?: string;
+  bundlePathInContainer?: string;
+  baseRef?: string;
+  seedLabel?: string;
+};
+
+export type DvmPreparedRepoSeed = {
+  version: 1;
+  hostRepoPath: string;
+  destinationPath: string;
+  bundlePathInContainer: string;
+  baseSha: string;
+  baseTreeSha: string;
+  hostRemoteUrl: string | null;
+  temporaryDirectory: string;
+  bundlePath: string;
+  seedBranch: string;
+  seedRef: string;
+  prepareDurationMs: number;
+  preparePhases: Record<string, number>;
+};
+
+export type DvmRepoSeedTiming = {
+  outcome: 'completed' | 'failed';
+  durationMs: number;
+  phases: Record<string, number>;
 };
 
 export type DvmRepoExportFormat = 'patches' | 'bundle' | 'diff';
@@ -127,8 +158,8 @@ export class DvmApi {
         const suffix = `${stdout}${stderr}`.trim();
         reject(
           new Error(
-            `${cmd} ${args.map((a) => JSON.stringify(a)).join(' ')} failed (exit ${code})${suffix ? `\n\n${suffix}` : ''}`
-          )
+            `${cmd} ${args.map((a) => JSON.stringify(a)).join(' ')} failed (exit ${code})${suffix ? `\n\n${suffix}` : ''}`,
+          ),
         );
       });
     });
@@ -137,7 +168,11 @@ export class DvmApi {
   private async hostBestRemoteUrl(hostRepoPath: string): Promise<string | null> {
     const candidates = ['origin', 'upstream'];
     for (const remote of candidates) {
-      const out = (await this.runLocal('git', ['-C', hostRepoPath, 'remote', 'get-url', remote]).catch(() => '')).trim();
+      const out = (
+        await this.runLocal('git', ['-C', hostRepoPath, 'remote', 'get-url', remote]).catch(
+          () => '',
+        )
+      ).trim();
       if (out) return out;
     }
     const first = (await this.runLocal('git', ['-C', hostRepoPath, 'remote']).catch(() => ''))
@@ -145,7 +180,9 @@ export class DvmApi {
       .map((l) => l.trim())
       .filter(Boolean)[0];
     if (!first) return null;
-    const out = (await this.runLocal('git', ['-C', hostRepoPath, 'remote', 'get-url', first]).catch(() => '')).trim();
+    const out = (
+      await this.runLocal('git', ['-C', hostRepoPath, 'remote', 'get-url', first]).catch(() => '')
+    ).trim();
     return out || null;
   }
 
@@ -156,8 +193,8 @@ export class DvmApi {
     if (!/^[A-Za-z0-9_.-]+$/.test(s)) {
       throw new Error(
         `Invalid session name: ${JSON.stringify(
-          s
-        )}\n\nSession names must match /^[A-Za-z0-9_.-]+$/ (letters, numbers, underscore, dot, dash).`
+          s,
+        )}\n\nSession names must match /^[A-Za-z0-9_.-]+$/ (letters, numbers, underscore, dot, dash).`,
       );
     }
     return s;
@@ -236,7 +273,7 @@ export class DvmApi {
 
   private async buildContainerConfig(
     containerName: string,
-    options: DvmCreateContainerOptions = {}
+    options: DvmCreateContainerOptions = {},
   ): Promise<{ config: ContainerConfig; usingConfiguredBaseImage: boolean }> {
     let config: ContainerConfig;
 
@@ -299,14 +336,24 @@ export class DvmApi {
     return { config, usingConfiguredBaseImage };
   }
 
-  async createContainer(containerName: string, options: DvmCreateContainerOptions = {}): Promise<void> {
-    const { config, usingConfiguredBaseImage } = await this.buildContainerConfig(containerName, options);
+  async createContainer(
+    containerName: string,
+    options: DvmCreateContainerOptions = {},
+  ): Promise<void> {
+    const { config, usingConfiguredBaseImage } = await this.buildContainerConfig(
+      containerName,
+      options,
+    );
     await this.manager.createContainer(config, options.start !== false, {
       skipProvisioning: usingConfiguredBaseImage,
     });
   }
 
-  async cloneContainer(sourceName: string, containerName: string, options: DvmCloneContainerOptions = {}): Promise<void> {
+  async cloneContainer(
+    sourceName: string,
+    containerName: string,
+    options: DvmCloneContainerOptions = {},
+  ): Promise<void> {
     await this.manager.cloneContainer(sourceName, containerName, {
       start: options.start,
       copyPersistenceVolume: options.copyPersistenceVolume,
@@ -320,7 +367,9 @@ export class DvmApi {
     return await this.manager.listDvmContainerNames(options?.all !== false);
   }
 
-  async getContainerPorts(containerName: string): Promise<Array<{ hostPort: number; containerPort: number }>> {
+  async getContainerPorts(
+    containerName: string,
+  ): Promise<Array<{ hostPort: number; containerPort: number }>> {
     const details = await this.manager.docker.getContainerDetails(containerName);
     if (!details) {
       throw new Error(`Container ${containerName} not found`);
@@ -331,9 +380,16 @@ export class DvmApi {
       .filter((p) => Number.isFinite(p.hostPort) && Number.isFinite(p.containerPort));
   }
 
-  async exec(containerName: string, cmd: string, args: string[] = [], options?: { timeoutMs?: number }): Promise<DvmRunResult> {
+  async exec(
+    containerName: string,
+    cmd: string,
+    args: string[] = [],
+    options?: { timeoutMs?: number },
+  ): Promise<DvmRunResult> {
     try {
-      return await this.manager.docker.execCommandDetailed(containerName, [cmd, ...args], { timeoutMs: options?.timeoutMs });
+      return await this.manager.docker.execCommandDetailed(containerName, [cmd, ...args], {
+        timeoutMs: options?.timeoutMs,
+      });
     } catch (error: any) {
       return { code: 1, stdout: '', stderr: error?.message ?? String(error) };
     }
@@ -351,7 +407,11 @@ export class DvmApi {
     await this.manager.startContainer(containerName);
   }
 
-  async renameContainer(oldName: string, newName: string, options?: DvmRenameContainerOptions): Promise<void> {
+  async renameContainer(
+    oldName: string,
+    newName: string,
+    options?: DvmRenameContainerOptions,
+  ): Promise<void> {
     await this.manager.renameContainer(oldName, newName, {
       startMode: options?.startMode ?? 'preserve',
       migrateVolumeName: Boolean(options?.migrateVolumeName),
@@ -368,7 +428,7 @@ export class DvmApi {
     session: string,
     cmd: string,
     args: string[] = [],
-    options: DvmSessionStartOptions = {}
+    options: DvmSessionStartOptions = {},
   ): Promise<void> {
     const sessionName = this.assertSafeSessionName(session);
     const cwd = this.normalizeContainerPath(String(options.cwd || '/'));
@@ -384,9 +444,16 @@ export class DvmApi {
     if (exists) {
       if (options.reuse) return;
       if (options.replace) {
-        await this.manager.docker.execCommand(containerName, ['tmux', 'kill-session', '-t', sessionName]);
+        await this.manager.docker.execCommand(containerName, [
+          'tmux',
+          'kill-session',
+          '-t',
+          sessionName,
+        ]);
       } else {
-        throw new Error(`Session already exists: ${sessionName}\n\nUse reuse=true to keep it, or replace=true to restart it.`);
+        throw new Error(
+          `Session already exists: ${sessionName}\n\nUse reuse=true to keep it, or replace=true to restart it.`,
+        );
       }
     }
 
@@ -423,11 +490,20 @@ export class DvmApi {
     ]);
   }
 
-  async sessionSend(containerName: string, session: string, text: string, options?: { keys?: string[] }): Promise<void> {
+  async sessionSend(
+    containerName: string,
+    session: string,
+    text: string,
+    options?: { keys?: string[] },
+  ): Promise<void> {
     await this.sessionType(containerName, session, { text, keys: options?.keys, enter: true });
   }
 
-  async sessionType(containerName: string, session: string, options: DvmSessionTypeOptions): Promise<void> {
+  async sessionType(
+    containerName: string,
+    session: string,
+    options: DvmSessionTypeOptions,
+  ): Promise<void> {
     const sessionName = this.assertSafeSessionName(session);
     await this.manager.startContainer(containerName);
     await this.manager.ensureTmux(containerName);
@@ -456,7 +532,7 @@ export class DvmApi {
   async sessionRead(
     containerName: string,
     session: string,
-    options: DvmSessionReadOptions = {}
+    options: DvmSessionReadOptions = {},
   ): Promise<{ offsetBytes: number; text: string }> {
     const sessionName = this.assertSafeSessionName(session);
     await this.manager.startContainer(containerName);
@@ -483,7 +559,11 @@ export class DvmApi {
       `log="$base/dvm-sessions/${sessionName}/output.log"`,
       'if [ -f "$log" ]; then wc -c < "$log"; else echo 0; fi',
     ].join('\n');
-    const sizeOut = await this.manager.docker.execCommand(containerName, ['bash', '-lc', sizeScript]);
+    const sizeOut = await this.manager.docker.execCommand(containerName, [
+      'bash',
+      '-lc',
+      sizeScript,
+    ]);
     const fileSizeBytes = Number(sizeOut.trim().split('\n').pop() || '0') || 0;
 
     let textOut = '';
@@ -528,7 +608,7 @@ export class DvmApi {
     containerName: string,
     srcPath: string,
     destPath: string,
-    options: DvmCopyToContainerOptions = {}
+    options: DvmCopyToContainerOptions = {},
   ): Promise<void> {
     const absSrc = path.resolve(String(srcPath));
     const target = this.normalizeContainerPath(String(destPath));
@@ -538,10 +618,18 @@ export class DvmApi {
     await this.manager.docker.execCommand(containerName, ['bash', '-lc', 'true']);
 
     if (options.clean) {
-      await this.manager.docker.execCommand(containerName, ['bash', '-lc', `rm -rf ${JSON.stringify(target)}`]);
+      await this.manager.docker.execCommand(containerName, [
+        'bash',
+        '-lc',
+        `rm -rf ${JSON.stringify(target)}`,
+      ]);
     }
 
-    await this.manager.docker.execCommand(containerName, ['bash', '-lc', `mkdir -p ${JSON.stringify(targetParent)}`]);
+    await this.manager.docker.execCommand(containerName, [
+      'bash',
+      '-lc',
+      `mkdir -p ${JSON.stringify(targetParent)}`,
+    ]);
 
     await this.manager.docker.copyToContainer(containerName, absSrc, target);
   }
@@ -550,7 +638,7 @@ export class DvmApi {
     containerName: string,
     srcPath: string,
     destPath: string,
-    options: DvmCopyFromContainerOptions = {}
+    options: DvmCopyFromContainerOptions = {},
   ): Promise<void> {
     const source = String(srcPath);
     const absDest = path.resolve(String(destPath));
@@ -563,7 +651,7 @@ export class DvmApi {
   private async ensureContainerExistsOrCreate(
     containerName: string,
     createIfMissing: boolean,
-    options?: DvmCreateContainerOptions
+    options?: DvmCreateContainerOptions,
   ): Promise<void> {
     const exists = await this.manager.docker.containerExists(containerName);
     if (exists) {
@@ -572,55 +660,204 @@ export class DvmApi {
     }
 
     if (!createIfMissing) {
-      throw new Error(`Container ${containerName} not found (create it first, or set createIfMissing=true)`);
+      throw new Error(
+        `Container ${containerName} not found (create it first, or set createIfMissing=true)`,
+      );
     }
 
     await this.createContainer(containerName, options);
   }
 
-  async repoSeed(options: DvmRepoSeedOptions): Promise<{ baseSha: string; destinationPath: string }> {
-    let tmpDir: string | null = null;
-    let tmpBundle: string | null = null;
-    let tmpSeedBranch: string | null = null;
-    let tmpSeedRef: string | null = null;
-    let hostRepoPathForCleanup: string | null = null;
+  async repoPrepareSeed(options: DvmRepoSeedPrepareOptions): Promise<DvmPreparedRepoSeed> {
+    const timingStartedAt = performance.now();
+    const timingPhases = new Map<string, number>();
+    const recordTiming = (name: string, startedAt: number) => {
+      const durationMs = Math.max(0, Math.round((performance.now() - startedAt) * 10) / 10);
+      timingPhases.set(name, Math.round(((timingPhases.get(name) ?? 0) + durationMs) * 10) / 10);
+    };
+    const measureTiming = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
+      const startedAt = performance.now();
+      try {
+        return await run();
+      } finally {
+        recordTiming(name, startedAt);
+      }
+    };
+    const hostRepoPath = path.resolve(String(options.hostRepoPath || process.cwd()));
+    const dest = this.normalizeContainerPath(String(options.destinationPath || '/work/repo'));
+    const bundlePathInContainer = this.normalizeContainerPath(
+      String(options.bundlePathInContainer || '/tmp/dvm-repo.bundle'),
+    );
+    const seedLabel = this.safeSlug(
+      String(options.seedLabel || path.basename(hostRepoPath) || 'repo'),
+    );
+    let temporaryDirectory = '';
+    let bundlePath = '';
+    let seedRef = '';
     try {
-      const containerName = String(options.containerName);
-      const hostRepoPath = path.resolve(String(options.hostRepoPath || process.cwd()));
-      hostRepoPathForCleanup = hostRepoPath;
-      const dest = this.normalizeContainerPath(String(options.destinationPath || '/work/repo'));
-      const bundlePathInContainer = this.normalizeContainerPath(String(options.bundlePathInContainer || '/tmp/dvm-repo.bundle'));
+      const { baseSha, baseTreeSha, hostRemoteUrl } = await measureTiming(
+        'inspectRepository',
+        async () => {
+          await this.runLocal('git', ['-C', hostRepoPath, 'rev-parse', '--is-inside-work-tree']);
+          const resolvedBaseSha = (
+            await this.runLocal('git', [
+              '-C',
+              hostRepoPath,
+              'rev-parse',
+              String(options.baseRef || 'HEAD'),
+            ])
+          ).trim();
+          return {
+            baseSha: resolvedBaseSha,
+            baseTreeSha: (
+              await this.runLocal('git', [
+                '-C',
+                hostRepoPath,
+                'rev-parse',
+                `${resolvedBaseSha}^{tree}`,
+              ])
+            ).trim(),
+            hostRemoteUrl: await this.hostBestRemoteUrl(hostRepoPath),
+          };
+        },
+      );
 
-      await this.runLocal('git', ['-C', hostRepoPath, 'rev-parse', '--is-inside-work-tree']);
-      const baseSha = (await this.runLocal('git', ['-C', hostRepoPath, 'rev-parse', String(options.baseRef || 'HEAD')])).trim();
-      const hostRemoteUrl = await this.hostBestRemoteUrl(hostRepoPath);
+      await measureTiming('createBundle', async () => {
+        temporaryDirectory = await fs.promises.mkdtemp(
+          path.join(os.tmpdir(), `dvm-bundle-${seedLabel}-`),
+        );
+        bundlePath = path.join(temporaryDirectory, 'repo.bundle');
+        const seedBranch = `dvm-seed/${seedLabel}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        seedRef = `refs/heads/${seedBranch}`;
+        await this.runLocal('git', ['-C', hostRepoPath, 'update-ref', seedRef, baseSha]);
+        await this.runLocal('git', ['-C', hostRepoPath, 'bundle', 'create', bundlePath, seedRef]);
+      });
 
-      tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `dvm-bundle-${this.safeSlug(containerName)}-`));
-      tmpBundle = path.join(tmpDir, 'repo.bundle');
-      tmpSeedBranch = `dvm-seed/${this.safeSlug(containerName)}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      tmpSeedRef = `refs/heads/${tmpSeedBranch}`;
-      await this.runLocal('git', ['-C', hostRepoPath, 'update-ref', tmpSeedRef, baseSha]);
-      await this.runLocal('git', ['-C', hostRepoPath, 'bundle', 'create', tmpBundle, tmpSeedRef]);
+      return {
+        version: 1,
+        hostRepoPath,
+        destinationPath: dest,
+        bundlePathInContainer,
+        baseSha,
+        baseTreeSha,
+        hostRemoteUrl,
+        temporaryDirectory,
+        bundlePath,
+        seedBranch: seedRef.slice('refs/heads/'.length),
+        seedRef,
+        prepareDurationMs: Math.max(0, Math.round((performance.now() - timingStartedAt) * 10) / 10),
+        preparePhases: Object.fromEntries(timingPhases),
+      };
+    } catch (error) {
+      await this.repoDiscardPreparedSeed({
+        version: 1,
+        hostRepoPath,
+        destinationPath: dest,
+        bundlePathInContainer,
+        baseSha: '',
+        baseTreeSha: '',
+        hostRemoteUrl: null,
+        temporaryDirectory,
+        bundlePath,
+        seedBranch: seedRef.startsWith('refs/heads/') ? seedRef.slice('refs/heads/'.length) : '',
+        seedRef,
+        prepareDurationMs: 0,
+        preparePhases: {},
+      });
+      throw error;
+    }
+  }
 
-      await this.ensureContainerExistsOrCreate(containerName, options.createIfMissing !== false, options.createOptions);
-      await this.manager.ensureGit(containerName);
+  async repoDiscardPreparedSeed(prepared: DvmPreparedRepoSeed): Promise<void> {
+    try {
+      if (prepared.seedRef && prepared.hostRepoPath) {
+        await this.runLocal('git', [
+          '-C',
+          prepared.hostRepoPath,
+          'update-ref',
+          '-d',
+          prepared.seedRef,
+        ]);
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      if (prepared.bundlePath) await fs.promises.rm(prepared.bundlePath, { force: true });
+    } catch {
+      // ignore
+    }
+    try {
+      if (prepared.temporaryDirectory) {
+        await fs.promises.rm(prepared.temporaryDirectory, { recursive: true, force: true });
+      }
+    } catch {
+      // ignore
+    }
+  }
 
-      await this.manager.docker.execCommand(containerName, [
-        'sh',
-        '-lc',
-        `mkdir -p ${JSON.stringify(path.posix.dirname(bundlePathInContainer))}`,
-      ]);
-      await this.manager.docker.copyToContainer(containerName, tmpBundle, bundlePathInContainer);
+  async repoSeedPrepared(
+    options: DvmRepoSeedOptions,
+    prepared: DvmPreparedRepoSeed,
+  ): Promise<{ baseSha: string; baseTreeSha: string; destinationPath: string }> {
+    const timingStartedAt = performance.now();
+    const timingPhases = new Map<string, number>(Object.entries(prepared.preparePhases));
+    let timingOutcome: DvmRepoSeedTiming['outcome'] = 'failed';
+    const recordTiming = (name: string, startedAt: number) => {
+      const durationMs = Math.max(0, Math.round((performance.now() - startedAt) * 10) / 10);
+      timingPhases.set(name, Math.round(((timingPhases.get(name) ?? 0) + durationMs) * 10) / 10);
+    };
+    const measureTiming = async <T>(name: string, run: () => Promise<T>): Promise<T> => {
+      const startedAt = performance.now();
+      try {
+        return await run();
+      } finally {
+        recordTiming(name, startedAt);
+      }
+    };
+    const containerName = String(options.containerName);
+    const dest = prepared.destinationPath;
+    const bundlePathInContainer = prepared.bundlePathInContainer;
+    try {
+      await measureTiming(
+        'ensureContainer',
+        async () =>
+          await this.ensureContainerExistsOrCreate(
+            containerName,
+            options.createIfMissing !== false,
+            options.createOptions,
+          ),
+      );
+      await measureTiming('ensureGit', async () => await this.manager.ensureGit(containerName));
+
+      await measureTiming(
+        'prepareBundleDestination',
+        async () =>
+          await this.manager.docker.execCommand(containerName, [
+            'sh',
+            '-lc',
+            `mkdir -p ${JSON.stringify(path.posix.dirname(bundlePathInContainer))}`,
+          ]),
+      );
+      await measureTiming(
+        'copyBundleToContainer',
+        async () =>
+          await this.manager.docker.copyToContainer(
+            containerName,
+            prepared.bundlePath,
+            bundlePathInContainer,
+          ),
+      );
 
       const branch = options.branch ? String(options.branch) : '';
       const checkoutCmd = branch
-        ? `cd ${JSON.stringify(dest)} && git checkout ${options.forceBranch ? '-B' : '-b'} ${JSON.stringify(branch)} ${JSON.stringify(baseSha)}`
-        : `cd ${JSON.stringify(dest)} && git checkout --detach ${JSON.stringify(baseSha)}`;
-      const remoteCmd = hostRemoteUrl
-        ? `cd ${JSON.stringify(dest)} && git remote set-url origin ${JSON.stringify(hostRemoteUrl)}`
+        ? `cd ${JSON.stringify(dest)} && git checkout ${options.forceBranch ? '-B' : '-b'} ${JSON.stringify(branch)} ${JSON.stringify(prepared.baseSha)}`
+        : `cd ${JSON.stringify(dest)} && git checkout --detach ${JSON.stringify(prepared.baseSha)}`;
+      const remoteCmd = prepared.hostRemoteUrl
+        ? `cd ${JSON.stringify(dest)} && git remote set-url origin ${JSON.stringify(prepared.hostRemoteUrl)}`
         : '';
       const cleanupBundleCmd = `rm -f ${JSON.stringify(bundlePathInContainer)}`;
-      const cleanupSeedBranchCmd = `cd ${JSON.stringify(dest)} && git branch -D ${JSON.stringify(tmpSeedBranch)} >/dev/null 2>&1 || true`;
+      const cleanupSeedBranchCmd = `cd ${JSON.stringify(dest)} && git branch -D ${JSON.stringify(prepared.seedBranch)} >/dev/null 2>&1 || true`;
 
       const cloneScript = [
         'set -euo pipefail',
@@ -629,9 +866,9 @@ export class DvmApi {
           ? `rm -rf ${JSON.stringify(dest)}`
           : `if [ -e ${JSON.stringify(dest)} ]; then echo "Destination exists: ${dest}" >&2; exit 2; fi`,
         `mkdir -p ${JSON.stringify(path.posix.dirname(dest))}`,
-        `git clone --branch ${JSON.stringify(tmpSeedBranch)} ${JSON.stringify(bundlePathInContainer)} ${JSON.stringify(dest)}`,
+        `git clone --branch ${JSON.stringify(prepared.seedBranch)} ${JSON.stringify(bundlePathInContainer)} ${JSON.stringify(dest)}`,
         cleanupBundleCmd,
-        `cd ${JSON.stringify(dest)} && git config dvm.baseSha ${JSON.stringify(baseSha)}`,
+        `cd ${JSON.stringify(dest)} && git config dvm.baseSha ${JSON.stringify(prepared.baseSha)}`,
         remoteCmd,
         checkoutCmd,
         cleanupSeedBranchCmd,
@@ -639,25 +876,46 @@ export class DvmApi {
         .filter(Boolean)
         .join('\n');
 
-      await this.manager.docker.execCommand(containerName, ['bash', '-lc', cloneScript]);
-      return { baseSha, destinationPath: dest };
+      await measureTiming(
+        'cloneAndConfigureRepository',
+        async () =>
+          await this.manager.docker.execCommand(containerName, ['bash', '-lc', cloneScript]),
+      );
+      timingOutcome = 'completed';
+      return {
+        baseSha: prepared.baseSha,
+        baseTreeSha: prepared.baseTreeSha,
+        destinationPath: dest,
+      };
     } finally {
+      const cleanupStartedAt = performance.now();
+      await this.repoDiscardPreparedSeed(prepared);
+      recordTiming('cleanupHostArtifacts', cleanupStartedAt);
       try {
-        if (tmpSeedRef && hostRepoPathForCleanup) await this.runLocal('git', ['-C', hostRepoPathForCleanup, 'update-ref', '-d', tmpSeedRef]);
+        options.onTiming?.({
+          outcome: timingOutcome,
+          durationMs:
+            prepared.prepareDurationMs +
+            Math.max(0, Math.round((performance.now() - timingStartedAt) * 10) / 10),
+          phases: Object.fromEntries(timingPhases),
+        });
       } catch {
-        // ignore
-      }
-      try {
-        if (tmpBundle) await fs.promises.rm(tmpBundle, { force: true });
-      } catch {
-        // ignore
-      }
-      try {
-        if (tmpDir) await fs.promises.rm(tmpDir, { recursive: true, force: true });
-      } catch {
-        // ignore
+        // Timing observers must not affect repository seeding.
       }
     }
+  }
+
+  async repoSeed(
+    options: DvmRepoSeedOptions,
+  ): Promise<{ baseSha: string; baseTreeSha: string; destinationPath: string }> {
+    const prepared = await this.repoPrepareSeed({
+      hostRepoPath: options.hostRepoPath,
+      destinationPath: options.destinationPath,
+      bundlePathInContainer: options.bundlePathInContainer,
+      baseRef: options.baseRef,
+      seedLabel: options.containerName,
+    });
+    return await this.repoSeedPrepared(options, prepared);
   }
 
   async repoExport(options: DvmRepoExportOptions): Promise<{ exportedPath: string; base: string }> {
@@ -668,7 +926,9 @@ export class DvmApi {
 
     const { localOut, base } = await this.repoExportFromContainer({
       containerName: String(options.containerName),
-      repoPathInContainer: this.normalizeContainerPath(String(options.repoPathInContainer || '/work/repo')),
+      repoPathInContainer: this.normalizeContainerPath(
+        String(options.repoPathInContainer || '/work/repo'),
+      ),
       outRoot: path.resolve(String(options.outRoot)),
       format,
       base: options.base ? String(options.base) : undefined,
@@ -705,7 +965,9 @@ export class DvmApi {
       const readBase = await this.manager.docker.execCommand(containerName, [
         'bash',
         '-lc',
-        [`cd ${JSON.stringify(repoPath)}`, `git config --get dvm.baseSha 2>/dev/null || true`].join('\n'),
+        [`cd ${JSON.stringify(repoPath)}`, `git config --get dvm.baseSha 2>/dev/null || true`].join(
+          '\n',
+        ),
       ]);
       base =
         readBase

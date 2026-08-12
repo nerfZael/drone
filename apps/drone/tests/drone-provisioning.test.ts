@@ -23,11 +23,11 @@ function createControllerHarness(opts?: {
   duringRunNodeCli?: (context: { droneId: string; displayName: string }) => Promise<void>;
   duringPostCreateSync?: (context: { droneId: string; stage: string }) => Promise<void>;
   failAttachedPromptStaging?: boolean;
+  reservedPromptIds?: string[];
   runNodeCliResult?: { code: number; stdout: string; stderr: string };
 }) {
   const pendingStateHelpers = createPendingDroneStateHelpers({
-    normalizeChatImageAttachments: (raw: unknown) =>
-      Array.isArray(raw) ? (raw as any[]) : [],
+    normalizeChatImageAttachments: (raw: unknown) => (Array.isArray(raw) ? (raw as any[]) : []),
     normalizeChatName: (raw: any) => String(raw ?? 'default').trim() || 'default',
     nowIso: () => '2026-03-26T12:00:00.000Z',
   });
@@ -44,10 +44,12 @@ function createControllerHarness(opts?: {
   const cancelPendingPromptsCalls: any[] = [];
   const hubLogCalls: any[] = [];
   const events: string[] = [];
+  const provisionedPromptHandoffs: any[] = [];
 
   const controller = createDroneProvisioningController({
     NON_REPO_HOME_CWD: '/dvm-data/home',
-    applyPendingDisplayNameToProvisionedDrone: pendingStateHelpers.applyPendingDisplayNameToProvisionedDrone,
+    applyPendingDisplayNameToProvisionedDrone:
+      pendingStateHelpers.applyPendingDisplayNameToProvisionedDrone,
     cancelPendingPromptsForFailedDrone: async (cancelOpts) => {
       cancelPendingPromptsCalls.push(cancelOpts);
       return 1;
@@ -65,6 +67,10 @@ function createControllerHarness(opts?: {
       }
       return { id: String(enqueueOpts.id ?? 'generated'), pendingState: 'queued' };
     },
+    findReservedStartupPrompt: ({ promptId }) =>
+      opts?.reservedPromptIds?.includes(promptId)
+        ? { prompt: 'reserved prompt', state: 'queued' }
+        : null,
     enqueuePendingPromptPump: (droneId, chatName) => {
       pendingPromptPumpCalls.push({ droneId, chatName });
       events.push(`pump:${droneId}:${chatName}`);
@@ -82,6 +88,7 @@ function createControllerHarness(opts?: {
     normalizePendingStartupPrompts: pendingStateHelpers.normalizePendingStartupPrompts,
     nowIso: () => '2026-03-26T12:00:00.000Z',
     parseSeedAgent: (raw: any) => (raw && typeof raw === 'object' ? raw : null),
+    registerProvisionedPromptHandoff: (handoff) => provisionedPromptHandoffs.push(handoff),
     resolveDroneCliPath: () => '/mock/drone-cli.js',
     resolvePendingDroneDisplayName: pendingStateHelpers.resolvePendingDroneDisplayName,
     runNodeCli: async (args) => {
@@ -136,6 +143,7 @@ function createControllerHarness(opts?: {
     cancelPendingPromptsCalls,
     hubLogCalls,
     events,
+    provisionedPromptHandoffs,
   };
 }
 
@@ -257,6 +265,9 @@ describe('drone provisioning controller', () => {
           harness.syncSharedPathsCalls.length > 0
         );
       });
+      await waitFor(async () =>
+        harness.hubLogCalls.some((call) => call[1] === 'drone provisioning timing'),
+      );
 
       const reg: any = await loadRegistry();
       expect(reg?.pending?.['drone-1']).toBeUndefined();
@@ -270,6 +281,28 @@ describe('drone provisioning controller', () => {
       expect(harness.syncSharedPathsCalls).toHaveLength(1);
       expect(harness.syncRepoAgentsCalls).toHaveLength(1);
       expect(harness.syncSharedPathsCalls).toHaveLength(1);
+      const timingLog = harness.hubLogCalls.find((call) => call[1] === 'drone provisioning timing');
+      expect(timingLog?.[2]).toMatchObject({
+        droneId: 'drone-1',
+        runtime: 'host',
+        outcome: 'completed',
+        durationMs: expect.any(Number),
+        repoSeeded: false,
+        phases: {
+          loadPendingState: expect.any(Number),
+          markCreating: expect.any(Number),
+          createRuntime: expect.any(Number),
+          loadPromotionState: expect.any(Number),
+          promoteDrone: expect.any(Number),
+          seedChatMetadataAfterPromotion: expect.any(Number),
+          transitionPendingState: expect.any(Number),
+          prepareStartupPrompts: expect.any(Number),
+          syncSharedPaths: expect.any(Number),
+          syncManagedFiles: expect.any(Number),
+          clearProvisioningMetadata: expect.any(Number),
+          schedulePromptPumps: expect.any(Number),
+        },
+      });
     });
   });
 
@@ -355,10 +388,7 @@ describe('drone provisioning controller', () => {
 
       await waitFor(async () => {
         const reg: any = await loadRegistry();
-        return (
-          !reg?.pending?.['drone-race'] &&
-          Boolean(reg?.drones?.['drone-race'])
-        );
+        return !reg?.pending?.['drone-race'] && Boolean(reg?.drones?.['drone-race']);
       });
 
       const reg: any = await loadRegistry();
@@ -452,7 +482,9 @@ describe('drone provisioning controller', () => {
       ]);
       expect(harness.pendingPromptPumpCalls).toEqual([{ droneId: 'drone-2', chatName: 'ops' }]);
       expect(harness.events.indexOf('sync:repo-agents')).toBeGreaterThan(-1);
-      expect(harness.events.indexOf('pump:drone-2:ops')).toBeGreaterThan(harness.events.indexOf('sync:repo-agents'));
+      expect(harness.events.indexOf('pump:drone-2:ops')).toBeGreaterThan(
+        harness.events.indexOf('sync:repo-agents'),
+      );
     });
   });
 
@@ -526,8 +558,54 @@ describe('drone provisioning controller', () => {
           submittedAt: '2026-03-26T11:04:00.000Z',
         }),
       ]);
-      expect(harness.pendingPromptPumpCalls).toEqual([{ droneId: 'drone-seed-order', chatName: 'default' }]);
-      expect(harness.events.indexOf('pump:drone-seed-order:default')).toBeGreaterThan(harness.events.indexOf('sync:repo-agents'));
+      expect(harness.pendingPromptPumpCalls).toEqual([
+        { droneId: 'drone-seed-order', chatName: 'default' },
+      ]);
+      expect(harness.events.indexOf('pump:drone-seed-order:default')).toBeGreaterThan(
+        harness.events.indexOf('sync:repo-agents'),
+      );
+    });
+  });
+
+  test('adopts a prompt reserved by the create request without enqueueing it again', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-reserved': {
+            id: 'drone-reserved',
+            name: 'reserved-seed',
+            runtime: 'host',
+            repoPath: '',
+            build: false,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+            seed: {
+              chatName: 'default',
+              promptId: 'reserved-1',
+              submittedAt: '2026-03-26T11:01:00.000Z',
+              prompt: 'reserved prompt',
+            },
+          },
+        };
+      });
+
+      const harness = createControllerHarness({ reservedPromptIds: ['reserved-1'] });
+      harness.controller.enqueueProvisioning('drone-reserved');
+
+      await waitFor(async () => harness.pendingPromptPumpCalls.length > 0);
+
+      expect(harness.enqueuePromptCalls).toHaveLength(0);
+      expect(harness.ensureChatEntryCalls).toEqual([
+        { droneId: 'drone-reserved', chatName: 'default' },
+      ]);
+      expect(harness.pendingPromptPumpCalls).toEqual([
+        { droneId: 'drone-reserved', chatName: 'default' },
+      ]);
+      expect(harness.provisionedPromptHandoffs).toHaveLength(1);
+      const timingLog = harness.hubLogCalls.find((call) => call[1] === 'drone provisioning timing');
+      expect(timingLog?.[2]?.adoptedReservedPromptCount).toBe(1);
     });
   });
 
@@ -687,7 +765,9 @@ describe('drone provisioning controller', () => {
         agent: { kind: 'builtin', id: 'codex' },
         model: 'gpt-5.4',
       });
-      expect(harness.ensureChatEntryCalls).toEqual([{ droneId: 'drone-image-first', chatName: 'default' }]);
+      expect(harness.ensureChatEntryCalls).toEqual([
+        { droneId: 'drone-image-first', chatName: 'default' },
+      ]);
       expect(harness.setChatAgentConfigCalls).toEqual([
         {
           droneId: 'drone-image-first',
@@ -785,5 +865,4 @@ describe('drone provisioning controller', () => {
       ]);
     });
   });
-
 });

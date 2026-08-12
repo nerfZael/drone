@@ -27,6 +27,7 @@ describe('managed drone state sync service', () => {
       releaseFirstRead = resolve;
     });
     const appliedContents: string[] = [];
+    const timingSnapshots: any[] = [];
     let healthCalls = 0;
 
     const service = createManagedDroneStateSyncService({
@@ -68,11 +69,13 @@ describe('managed drone state sync service', () => {
       },
       managedDroneSync: async (_client, payload) => {
         appliedContents.push(payload.skillTargets[0]?.packages[0]?.files[0]?.content ?? '');
+        return { durationMs: 3.4, phases: { persistState: 1.2 } };
       },
       upgradeDaemon: async () => {
         throw new Error('upgrade should not run');
       },
       waitForDaemonReady: async () => {},
+      onTiming: (timing) => timingSnapshots.push(timing),
     });
     const droneEntry = {
       hostPort: 1234,
@@ -90,6 +93,25 @@ describe('managed drone state sync service', () => {
 
     expect(appliedContents).toEqual(['old', 'new']);
     expect(healthCalls).toBe(1);
+    expect(timingSnapshots).toHaveLength(2);
+    expect(timingSnapshots[0]).toMatchObject({
+      droneId: 'test',
+      runtime: 'container',
+      containerName: 'drone-test',
+      outcome: 'completed',
+      durationMs: expect.any(Number),
+      daemonApplyDurationMs: 3.4,
+      daemonPhases: { persistState: 1.2 },
+      phases: {
+        droneLockWait: expect.any(Number),
+        loadProjectionInputs: expect.any(Number),
+        buildPayload: expect.any(Number),
+        resolveDaemonClient: expect.any(Number),
+        probeDaemonCapability: expect.any(Number),
+        applyManagedStateRequest: expect.any(Number),
+      },
+    });
+    expect(timingSnapshots[1]?.phases).not.toHaveProperty('probeDaemonCapability');
   });
 
   test('upgrades and verifies a daemon that lacks the managed-state capability', async () => {

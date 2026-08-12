@@ -1980,6 +1980,7 @@ function createMcpProjectionFeature() {
     waitForDaemonReady: async (client) => {
       await waitForDroneDaemonReady(client, defaultDaemonReadyTimeoutMs());
     },
+    onTiming: (timing) => hubLog('info', 'managed state sync timing', timing),
   });
 
   return {

@@ -56,6 +56,47 @@ export type AssistantArtifactRunFileChangesBaseline = AgentRunFileChangesBaselin
   temporaryGitDir: string;
 };
 
+export function seededDroneRunFileChangesBaseline(input: {
+  droneId: string;
+  label: string;
+  repoRoot?: string;
+  commitOid: string;
+  treeOid: string;
+  baseRef?: string;
+  capturedAt?: string;
+  owner: Omit<AgentRunDiffArtifactOwner, 'droneId'>;
+}): AgentRunFileChangesBaseline | null {
+  const droneId = String(input.droneId ?? '').trim();
+  const commitOid = String(input.commitOid ?? '')
+    .trim()
+    .toLowerCase();
+  const treeOid = String(input.treeOid ?? '')
+    .trim()
+    .toLowerCase();
+  if (!droneId || !/^[0-9a-f]{40}$/.test(commitOid) || !/^[0-9a-f]{40}$/.test(treeOid)) {
+    return null;
+  }
+  const baseRef = String(input.baseRef ?? '').trim();
+  return {
+    version: 1,
+    capturedAt: String(input.capturedAt ?? '').trim() || new Date().toISOString(),
+    targetId: `drone:${droneId}`,
+    droneId,
+    label: String(input.label ?? '').trim() || droneId,
+    repoRoot: String(input.repoRoot ?? '').trim() || '/work/repo',
+    treeOid,
+    headCommitOid: commitOid,
+    ...(baseRef
+      ? {
+          baseRef,
+          baseTreeOid: treeOid,
+          baseCommitOid: commitOid,
+        }
+      : {}),
+    owner: { droneId, ...input.owner },
+  };
+}
+
 function isRepoAttachedDrone(drone: any): boolean {
   if (!drone || typeof drone !== 'object') return false;
   if (typeof drone.repoAttached === 'boolean') return drone.repoAttached;

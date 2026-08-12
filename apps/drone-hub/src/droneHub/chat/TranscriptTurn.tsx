@@ -108,8 +108,16 @@ export const TranscriptTurn = React.memo(
     const promptIso = item.promptAt || item.at;
     const runStartedIso = item.startedAt || promptIso;
     const agentIso = item.completedAt || item.at;
+    const submittedAtMs = Date.parse(String(promptIso ?? ''));
+    const explicitRunStartedAtMs = Date.parse(String(item.startedAt ?? ''));
     const promptStartedAtMs = Date.parse(String(runStartedIso ?? ''));
     const agentCompletedAtMs = Date.parse(String(item.completedAt ?? ''));
+    const preRunDurationMs =
+      Number.isFinite(submittedAtMs) &&
+      Number.isFinite(explicitRunStartedAtMs) &&
+      explicitRunStartedAtMs >= submittedAtMs
+        ? explicitRunStartedAtMs - submittedAtMs
+        : undefined;
     const completedRunDurationMs =
       Number.isFinite(promptStartedAtMs) &&
       Number.isFinite(agentCompletedAtMs) &&
@@ -151,6 +159,7 @@ export const TranscriptTurn = React.memo(
           <AgentRunSummaryLine
             active={false}
             durationMs={completedRunDurationMs}
+            preRunDurationMs={preRunDurationMs}
             at={agentIso}
             detail={
               activityToolCallCount > 0
@@ -165,6 +174,7 @@ export const TranscriptTurn = React.memo(
             activity={activity}
             startedAt={runStartedIso}
             endedAt={agentIso}
+            preRunDurationMs={preRunDurationMs}
             at={agentIso}
             autoExpandFinalMessage={autoExpandAgentMessage}
             plan={item.agentPlan}

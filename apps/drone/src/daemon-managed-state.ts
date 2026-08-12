@@ -317,6 +317,11 @@ async function replaceManagedSkillPackage(
 
 async function applyManagedDroneState(body: ManagedDroneSyncPayload, dataDir: string) {
   const startedAt = performance.now();
+  const phases: Record<string, number> = {};
+  const recordPhase = (name: string, phaseStartedAt: number) => {
+    phases[name] = Math.max(0, Math.round((performance.now() - phaseStartedAt) * 10) / 10);
+  };
+  const validationStartedAt = performance.now();
   requiredRecord(body, 'managed state');
   if (body?.version !== 1) throw new DaemonHttpError(400, 'unsupported managed state version');
   const fingerprint = String(body?.fingerprint ?? '').trim().toLowerCase();
@@ -461,23 +466,28 @@ async function applyManagedDroneState(body: ManagedDroneSyncPayload, dataDir: st
     }
     agentsFile = { path: agentsPath, content: body.agentsFile.content };
   }
+  recordPhase('validatePayload', validationStartedAt);
 
+  const checkExistingStateStartedAt = performance.now();
   const statePath = path.join(path.resolve(dataDir), 'managed-state.json');
   const previousState = await readManagedMetadataOrEmpty(statePath);
-  if (
+  const outputsMatch =
     previousState.fingerprint === fingerprint &&
-    (await managedOutputsMatch(previousState.outputs))
-  ) {
+    (await managedOutputsMatch(previousState.outputs));
+  recordPhase('checkExistingState', checkExistingStateStartedAt);
+  if (outputsMatch) {
     return {
       changed: false,
       fingerprint,
       filesWritten: 0,
       durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+      phases,
     };
   }
 
   const expectations = new Map<string, ProbeExpectation>();
   let filesWritten = 0;
+  const applySkillsStartedAt = performance.now();
   for (const target of skillTargets) {
     const manifestPath = path.join(target.rootPath, MANAGED_SKILLS_MANIFEST);
     const previousManifest = await readManagedMetadataOrEmpty(manifestPath);
@@ -521,7 +531,9 @@ async function applyManagedDroneState(body: ManagedDroneSyncPayload, dataDir: st
       }
     }
   }
+  recordPhase('applySkills', applySkillsStartedAt);
 
+  const applyMcpStartedAt = performance.now();
   for (const target of mcpTargets) {
     const manifestPath = path.join(path.dirname(target.configPath), MANAGED_MCP_MANIFEST);
     const previousManifest = await readManagedMetadataOrEmpty(manifestPath);
@@ -562,13 +574,18 @@ async function applyManagedDroneState(body: ManagedDroneSyncPayload, dataDir: st
     expectations.set(target.configPath, { path: target.configPath, kind: 'file' });
     expectations.set(manifestPath, { path: manifestPath, kind: 'file' });
   }
+  recordPhase('applyMcp', applyMcpStartedAt);
 
+  const applyAgentsFileStartedAt = performance.now();
   if (agentsFile) {
     await writeFileAtomic(agentsFile.path, agentsFile.content);
     filesWritten += 1;
     expectations.set(agentsFile.path, { path: agentsFile.path, kind: 'file' });
   }
+  recordPhase('applyAgentsFile', applyAgentsFileStartedAt);
+  const captureOutputsStartedAt = performance.now();
   const outputs = await captureOutputProbes(expectations.values());
+  recordPhase('captureOutputs', captureOutputsStartedAt);
   const ownership = {
     skillSlugsByRoot: Object.fromEntries(
       skillTargets.map((target) => [
@@ -583,15 +600,18 @@ async function applyManagedDroneState(body: ManagedDroneSyncPayload, dataDir: st
       ]),
     ),
   };
+  const persistStateStartedAt = performance.now();
   await writeFileAtomic(
     statePath,
     `${JSON.stringify({ version: 1, fingerprint, ownership, outputs, appliedAt: new Date().toISOString() }, null, 2)}\n`,
   );
+  recordPhase('persistState', persistStateStartedAt);
   return {
     changed: true,
     fingerprint,
     filesWritten,
     durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+    phases,
   };
 }
 

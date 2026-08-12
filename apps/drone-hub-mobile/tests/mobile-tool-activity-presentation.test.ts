@@ -43,6 +43,13 @@ describe('mobile tool activity presentation', () => {
       'awaitingApproval && entry.group.key === latestRunGroup?.key',
     );
     expect(transcriptSource).toContain('completedDurationMs={run.durationMs}');
+    expect(transcriptSource).toContain('preRunDurationMs={preRunDurationMs}');
+    expect(transcriptSource).toContain('showTimingDetail={hasRunDetails && activityExpanded}');
+    expect(transcriptSource).toContain("active ? 'Working for' : 'Completed in'");
+    expect(transcriptSource).toContain(
+      'Started in {workingDurationLabel(normalizedPreRunDurationMs)} · agent {duration}',
+    );
+    expect(transcriptSource).toContain('style={styles.runTimingDetail}');
     expect(transcriptSource).toContain("'Blocked pending approval.'");
     expect(transcriptSource).toContain("'Context compacted'");
     expect(transcriptSource).toContain('<MobileCompactionRow key={item.key}');

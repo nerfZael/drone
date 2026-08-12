@@ -37,6 +37,7 @@ export type ManagedDroneSyncResult = {
   fingerprint: string;
   filesWritten: number;
   durationMs: number;
+  phases: Record<string, number>;
 };
 
 function canonicalize(value: unknown): unknown {

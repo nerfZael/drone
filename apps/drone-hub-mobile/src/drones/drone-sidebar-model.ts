@@ -806,9 +806,22 @@ export function mobileDroneTurnsToAssistantMessages(
         (!turn.ok && error) ||
         (!activity && (turn.completedAt || turn.agentPlan)))
     ) {
-      const runDetails = turn.agentPlan
-        ? mobileRunDetails({ id: turn.id, plan: turn.agentPlan })
-        : undefined;
+      const hasPreRunTiming = Boolean(
+        turn.promptAt && turn.startedAt && turn.startedAt !== turn.promptAt,
+      );
+      const runDetails =
+        turn.agentPlan || hasPreRunTiming
+          ? mobileRunDetails({
+              id: turn.id,
+              ...(hasPreRunTiming
+                ? {
+                    startedAt: turn.startedAt,
+                    completedAt: turn.completedAt || turn.at,
+                  }
+                : {}),
+              plan: turn.agentPlan,
+            })
+          : undefined;
       messages.push(
         !turn.ok && error
           ? {

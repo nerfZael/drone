@@ -66,7 +66,7 @@ describe('completed external transcript presentation', () => {
     expect(html).not.toContain('bottom-full left-0');
   });
 
-  test('excludes queue delay from completed run duration', () => {
+  test('includes pre-agent time in the total without cluttering the summary', () => {
     const html = renderToStaticMarkup(
       <TranscriptTurn
         item={{
@@ -85,8 +85,8 @@ describe('completed external transcript presentation', () => {
       />,
     );
 
-    expect(html).toContain('Worked for 1m 5s');
-    expect(html).not.toContain('Worked for 1h');
+    expect(html).toContain('Completed in 1h 1m 5s');
+    expect(html).not.toContain('Started in');
   });
 
   test('collapses completed reasoning and tool activity while keeping the final answer visible', () => {
@@ -96,6 +96,7 @@ describe('completed external transcript presentation', () => {
           turn: 2,
           at: '2026-07-20T10:00:00.000Z',
           promptAt: '2026-07-20T10:00:00.000Z',
+          startedAt: '2026-07-20T10:00:01.000Z',
           completedAt: '2026-07-20T10:00:02.000Z',
           prompt: 'Inspect the file.',
           session: 'external-session',
@@ -148,7 +149,9 @@ describe('completed external transcript presentation', () => {
     );
 
     expect(html).toContain('data-agent-run-activity="codex"');
-    expect(html).toContain('Worked for 2s');
+    expect(html).toContain('Completed in 2s');
+    expect(html).toContain('1 tool call');
+    expect(html).not.toContain('Started in');
     expect(html).toContain('1 tool call');
     expect(html).toContain('aria-label="Expand run details"');
     expect(html).toContain('aria-expanded="false"');

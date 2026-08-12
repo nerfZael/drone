@@ -5,6 +5,7 @@ import { RelativeTimeText } from './RelativeTimeText';
 type AgentRunSummaryLineProps = {
   active: boolean;
   durationMs: number;
+  preRunDurationMs?: number;
   label?: string;
   tone?: 'default' | 'approval';
   at?: string;
@@ -28,6 +29,7 @@ export function formatWorkingDuration(durationMs: number): string {
 export function AgentRunSummaryLine({
   active,
   durationMs,
+  preRunDurationMs,
   label,
   tone = 'default',
   at,
@@ -37,7 +39,14 @@ export function AgentRunSummaryLine({
   onToggle,
   toggleLabel = 'tool calls',
 }: AgentRunSummaryLineProps) {
-  const summaryLabel = label ?? `${active ? 'Working' : 'Worked'} for ${formatWorkingDuration(durationMs)}`;
+  const normalizedPreRunDurationMs =
+    Number.isFinite(preRunDurationMs) ? Math.max(0, Number(preRunDurationMs)) : 0;
+  const showPreRunDuration = normalizedPreRunDurationMs >= 1_000;
+  const summaryLabel =
+    label ??
+    (showPreRunDuration
+      ? `${active ? 'Working for' : 'Completed in'} ${formatWorkingDuration(normalizedPreRunDurationMs + durationMs)}`
+      : `${active ? 'Working' : 'Worked'} for ${formatWorkingDuration(durationMs)}`);
   const content = (
     <>
       <span
@@ -79,7 +88,13 @@ export function AgentRunSummaryLine({
   return <div className={className}>{content}</div>;
 }
 
-export function WorkingElapsedStatus({ startedAt }: { startedAt?: string | number | null }) {
+export function WorkingElapsedStatus({
+  startedAt,
+  preRunDurationMs,
+}: {
+  startedAt?: string | number | null;
+  preRunDurationMs?: number;
+}) {
   const fallbackStart = React.useRef(Date.now()).current;
   const parsedStart =
     typeof startedAt === 'number' ? startedAt : Date.parse(String(startedAt ?? ''));
@@ -91,7 +106,13 @@ export function WorkingElapsedStatus({ startedAt }: { startedAt?: string | numbe
     return () => window.clearInterval(timer);
   }, []);
 
-  return <AgentRunSummaryLine active durationMs={now - start} />;
+  return (
+    <AgentRunSummaryLine
+      active
+      durationMs={now - start}
+      preRunDurationMs={preRunDurationMs}
+    />
+  );
 }
 
 export function CreatingNewChatStatus() {

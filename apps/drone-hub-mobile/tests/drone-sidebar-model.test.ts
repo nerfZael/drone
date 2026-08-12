@@ -692,6 +692,30 @@ describe('mobile drone sidebar model', () => {
     ]);
   });
 
+  test('keeps pre-agent timing for completed mobile run summaries', () => {
+    expect(
+      mobileDroneTurnsToAssistantMessages([
+        {
+          id: 'startup-turn',
+          prompt: 'Update README',
+          output: 'Done',
+          promptAt: '2026-07-14T09:59:00.000Z',
+          startedAt: '2026-07-14T10:00:00.000Z',
+          completedAt: '2026-07-14T10:00:26.000Z',
+        },
+      ])[1],
+    ).toMatchObject({
+      role: 'assistant',
+      details: {
+        mobileRun: {
+          id: 'startup-turn',
+          startedAt: '2026-07-14T10:00:00.000Z',
+          completedAt: '2026-07-14T10:00:26.000Z',
+        },
+      },
+    });
+  });
+
   test('carries a completed external-agent plan into the mobile run metadata', () => {
     expect(
       mobileDroneTurnsToAssistantMessages([
