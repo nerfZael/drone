@@ -2,7 +2,6 @@ import React from 'react';
 import {
   MobileContinuousDictationBuffer,
   mobileContinuousDictationText,
-  resolveMobileContinuousDictationStopVoiceAction,
   type MobileContinuousDictationLine,
   type MobileContinuousDictationSnapshot,
 } from './mobile-continuous-dictation';
@@ -72,37 +71,40 @@ export function useMobileContinuousDictation(continuousVoice: MobileContinuousVo
     [startVoice, syncBuffer],
   );
 
-  const stop = React.useCallback(async (options?: { cancelOnError?: boolean }) => {
-    const stoppingTargetKey = bufferRef.current.snapshot().targetKey;
-    const cancelOnError = options?.cancelOnError === true;
-    let finished = false;
-    if (
-      resolveMobileContinuousDictationStopVoiceAction(
-        continuousVoice.status,
-        cancelOnError,
-      ) === 'cancel'
-    ) {
-      await cancelVoice();
-      finished = true;
-    } else {
-      finished = await stopVoice();
-      if (!finished && cancelOnError) {
+  const finishVoice = React.useCallback(
+    async (cancelOnError: boolean) => {
+      const stoppingTargetKey = bufferRef.current.snapshot().targetKey;
+      let finished = false;
+      if (continuousVoice.status === 'error' && cancelOnError) {
         await cancelVoice();
         finished = true;
+      } else {
+        finished = await stopVoice();
+        if (!finished && cancelOnError) {
+          await cancelVoice();
+          finished = true;
+        }
       }
-    }
-    const snapshot = bufferRef.current.snapshot();
-    if (
-      finished &&
-      stoppingTargetKey &&
-      snapshot.targetKey === stoppingTargetKey &&
-      !snapshot.lines.length
-    ) {
-      bufferRef.current.discard(stoppingTargetKey);
-      syncBuffer();
-    }
-    return finished;
-  }, [cancelVoice, continuousVoice.status, stopVoice, syncBuffer]);
+      const snapshot = bufferRef.current.snapshot();
+      if (
+        finished &&
+        stoppingTargetKey &&
+        snapshot.targetKey === stoppingTargetKey &&
+        !snapshot.lines.length
+      ) {
+        bufferRef.current.discard(stoppingTargetKey);
+        syncBuffer();
+      }
+      return finished;
+    },
+    [cancelVoice, continuousVoice.status, stopVoice, syncBuffer],
+  );
+
+  const finish = React.useCallback(async () => await finishVoice(false), [finishVoice]);
+  const finishOrDiscardPending = React.useCallback(
+    async () => await finishVoice(true),
+    [finishVoice],
+  );
 
   const cancel = React.useCallback(async () => {
     discard();
@@ -123,11 +125,12 @@ export function useMobileContinuousDictation(continuousVoice: MobileContinuousVo
       targetKey,
       text: mobileContinuousDictationText(lines),
       start,
-      stop,
+      finish,
+      finishOrDiscardPending,
       cancel,
       discard,
       takeSnapshot,
     }),
-    [cancel, discard, lines, start, stop, takeSnapshot, targetKey],
+    [cancel, discard, finish, finishOrDiscardPending, lines, start, takeSnapshot, targetKey],
   );
 }

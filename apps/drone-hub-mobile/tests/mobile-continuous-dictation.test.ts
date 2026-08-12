@@ -5,7 +5,6 @@ import {
   MobileContinuousDictationBuffer,
   mobileContinuousDictationText,
   resolveMobileContinuousDictationNavigationAction,
-  resolveMobileContinuousDictationStopVoiceAction,
 } from '../src/local-assistant/mobile-continuous-dictation';
 
 describe('mobile continuous dictation', () => {
@@ -69,12 +68,6 @@ describe('mobile continuous dictation', () => {
     ).toEqual({ discardDictation: false, voiceAction: 'stop' });
   });
 
-  test('cancels an errored session for editing but leaves an ordinary stop retriable', () => {
-    expect(resolveMobileContinuousDictationStopVoiceAction('error', true)).toBe('cancel');
-    expect(resolveMobileContinuousDictationStopVoiceAction('error', false)).toBe('stop');
-    expect(resolveMobileContinuousDictationStopVoiceAction('listening', true)).toBe('stop');
-  });
-
   test('preserves stopped text but clears it when a fresh dictation begins', () => {
     const buffer = new MobileContinuousDictationBuffer();
     const firstGeneration = buffer.begin('drone-a:chat-a');
@@ -83,9 +76,7 @@ describe('mobile continuous dictation', () => {
       text: 'Keep this while stopped.',
     });
 
-    expect(mobileContinuousDictationText(buffer.snapshot().lines)).toBe(
-      'Keep this while stopped.',
-    );
+    expect(mobileContinuousDictationText(buffer.snapshot().lines)).toBe('Keep this while stopped.');
     buffer.begin('drone-a:chat-a');
     expect(buffer.snapshot()).toEqual({ targetKey: 'drone-a:chat-a', lines: [] });
   });

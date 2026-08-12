@@ -1,5 +1,3 @@
-import type { MobileContinuousVoiceStatus } from './mobile-continuous-voice-lifecycle';
-
 export type MobileContinuousDictationLine = {
   id: string;
   text: string;
@@ -37,10 +35,7 @@ export function mobileContinuousDictationText(
   return lines.map((line) => line.text).join('\n');
 }
 
-export function mergeMobileDraftWithContinuousDictation(
-  draft: string,
-  dictation: string,
-): string {
+export function mergeMobileDraftWithContinuousDictation(draft: string, dictation: string): string {
   const cleanDictation = dictation.trim();
   if (!cleanDictation) return draft;
   if (!draft.trim()) return cleanDictation;
@@ -58,23 +53,13 @@ export function resolveMobileContinuousDictationNavigationAction(input: {
     return { discardDictation: false, voiceAction: 'none' };
   }
   const discardDictation = input.dictationTargetKey === input.previousTargetKey;
-  if (
-    input.continuousVoiceIdle ||
-    input.continuousVoiceTargetKey !== input.previousTargetKey
-  ) {
+  if (input.continuousVoiceIdle || input.continuousVoiceTargetKey !== input.previousTargetKey) {
     return { discardDictation, voiceAction: 'none' };
   }
   return {
     discardDictation,
     voiceAction: discardDictation ? 'cancel' : 'stop',
   };
-}
-
-export function resolveMobileContinuousDictationStopVoiceAction(
-  status: MobileContinuousVoiceStatus,
-  cancelOnError: boolean,
-): 'cancel' | 'stop' {
-  return status === 'error' && cancelOnError ? 'cancel' : 'stop';
 }
 
 export class MobileContinuousDictationBuffer {
@@ -89,11 +74,7 @@ export class MobileContinuousDictationBuffer {
     return this.generation;
   }
 
-  append(
-    generation: number,
-    targetKey: string,
-    line: MobileContinuousDictationLine,
-  ): boolean {
+  append(generation: number, targetKey: string, line: MobileContinuousDictationLine): boolean {
     if (generation !== this.generation || targetKey !== this.targetKey) return false;
     const next = appendMobileContinuousDictationLine(this.lines, line);
     if (next.length === this.lines.length) return false;
